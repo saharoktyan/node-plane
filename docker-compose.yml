@@ -1,0 +1,24 @@
+version: "3.9"
+
+services:
+  node-plane:
+    image: ${NODE_PLANE_IMAGE_REPO:-node-plane}:${NODE_PLANE_IMAGE_TAG:-local}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: node-plane
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_PLANE_BASE_DIR: /opt/node-plane
+      NODE_PLANE_SOURCE_DIR: /opt/node-plane
+      NODE_PLANE_INSTALL_MODE: portable
+      TZ: UTC
+    volumes:
+      - ./data:/opt/node-plane/data
+      - ./ssh:/root/.ssh
+    working_dir: /opt/node-plane/app
+    command: sh -c "python manage_db.py init && python main.py"
+    init: true
+    stop_grace_period: 30s

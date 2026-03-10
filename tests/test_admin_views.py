@@ -1,0 +1,150 @@
+from __future__ import annotations
+
+import os
+import sys
+import tempfile
+import types
+import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
+
+TESTS_DIR = os.path.dirname(__file__)
+REPO_ROOT = os.path.abspath(os.path.join(TESTS_DIR, ".."))
+APP_ROOT = os.path.join(REPO_ROOT, "app")
+TMPDIR = tempfile.mkdtemp(prefix="node-plane-test-")
+os.environ.setdefault("NODE_PLANE_BASE_DIR", TMPDIR)
+os.environ.setdefault("SQLITE_DB_PATH", os.path.join(TMPDIR, "bot.sqlite3"))
+os.environ.setdefault("SUBS_DB_PATH", os.path.join(TMPDIR, "subs.json"))
+os.environ.setdefault("USERS_DB_PATH", os.path.join(TMPDIR, "users.json"))
+os.environ.setdefault("WG_DB_PATH", os.path.join(TMPDIR, "wg_db.json"))
+if APP_ROOT not in sys.path:
+    sys.path.insert(0, APP_ROOT)
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
+
+
+class InlineKeyboardButton:
+    def __init__(self, text: str, callback_data: str):
+        self.text = text
+        self.callback_data = callback_data
+
+
+class InlineKeyboardMarkup:
+    def __init__(self, inline_keyboard):
+        self.inline_keyboard = inline_keyboard
+
+
+telegram_module = types.ModuleType("telegram")
+telegram_module.Update = object
+telegram_module.InlineKeyboardButton = InlineKeyboardButton
+telegram_module.InlineKeyboardMarkup = InlineKeyboardMarkup
+telegram_error_module = types.ModuleType("telegram.error")
+telegram_error_module.BadRequest = Exception
+telegram_error_module.RetryAfter = Exception
+telegram_ext_module = types.ModuleType("telegram.ext")
+telegram_ext_module.CallbackContext = object
+sys.modules.setdefault("telegram", telegram_module)
+sys.modules["telegram"] = telegram_module
+sys.modules["telegram.error"] = telegram_error_module
+sys.modules["telegram.ext"] = telegram_ext_module
+
+from handlers import admin_server_wizard, user_profile
+from ui import admin_views, user_views
+
+
+class AdminViewsTests(unittest.TestCase):
+    def test_problem_server_card_opens_without_active_server_wizard(self) -> None:
+        update = SimpleNamespace(
+            callback_query=SimpleNamespace(message=SimpleNamespace(chat_id=1, message_id=2)),
+            effective_user=None,
+        )
+        context = SimpleNamespace(user_data={})
+        with patch.object(admin_server_wizard, "guard", return_value=True), patch.object(
+            admin_server_wizard, "answer_cb"
+        ), patch.object(
+            admin_server_wizard, "_render_server_card"
+        ) as render_card:
+            admin_server_wizard.on_server_callback(update, context, "card:spb1")
+        render_card.assert_called_once_with(context, "spb1")
+        self.assertIn("server_wizard", context.user_data)
+
+    def test_render_proto_keyboard_uses_save_label_in_edit_mode(self) -> None:
+        fake_methods = [
+            SimpleNamespace(code="gx", short_label="🇩🇪 Xray", server_key="de"),
+            SimpleNamespace(code="ga", short_label="🇩🇪 AWG", server_key="de"),
+        ]
+        fake_server = SimpleNamespace(flag="🇩🇪", title="Germany")
+        with patch.object(admin_views, "get_access_methods", return_value=fake_methods), patch.object(
+            admin_views, "get_server", return_value=fake_server
+        ):
+            markup = admin_views.render_proto_keyboard(set(), lang="ru", editing=True)
+        self.assertEqual(markup.inline_keyboard[-1][-1].text, "💾 Сохранить")
+        self.assertEqual(markup.inline_keyboard[-1][-1].callback_data, "cfg:proto:done")
+
+    def test_render_protocol_select_text_mentions_save_in_edit_mode(self) -> None:
+        with patch.object(admin_views, "render_protocols_summary", return_value="summary"):
+            text = admin_views.render_protocol_select_text("alice", {"gx"}, editing=True, lang="ru")
+        self.assertIn("Сохранить", text)
+        self.assertNotIn("Далее", text)
+
+    def test_render_getkey_server_menu_does_not_duplicate_methods_in_text(self) -> None:
+        fake_methods = [
+            SimpleNamespace(getkey_payload="xray:de", short_label="🇩🇪 Xray"),
+            SimpleNamespace(getkey_payload="awg:de", short_label="🇩🇪 AWG"),
+        ]
+        fake_server = SimpleNamespace(flag="🇩🇪", title="Germany")
+        with patch.object(user_views, "get_server", return_value=fake_server):
+            text, items = user_views.render_server_menu("de", fake_methods, lang="en")
+        self.assertEqual(text, "🇩🇪 Germany\n\nChoose a connection method.")
+        self.assertEqual(items, [("xray:de", "Xray"), ("awg:de", "AWG")])
+
+    def test_render_getkey_overview_does_not_duplicate_servers_in_text(self) -> None:
+        fake_methods = [
+            SimpleNamespace(server_key="spb", short_label="🇷🇺 AWG"),
+            SimpleNamespace(server_key="spb", short_label="🇷🇺 Xray"),
+        ]
+        fake_server = SimpleNamespace(flag="🇷🇺", title="Saint-Petersburg")
+        with patch.object(user_views, "get_server", return_value=fake_server):
+            text, items = user_views.render_getkey_overview(fake_methods, lang="en")
+        self.assertEqual(text, "🔑 Get Key\n\nChoose a server to connect.")
+        self.assertEqual(items, [("spb", "🇷🇺 Saint-Petersburg · 2 methods")])
+
+    def test_render_problem_servers_uses_server_key_placeholder_without_crashing(self) -> None:
+        fake_server = SimpleNamespace(
+            key="spb1",
+            flag="🇷🇺",
+            title="Saint-Petersburg",
+            enabled=True,
+            bootstrap_state="new",
+            protocol_kinds=["xray"],
+        )
+        with patch.object(user_profile, "_problem_server_keys", return_value=["spb1"]), patch.object(
+            user_profile, "list_servers", return_value=[fake_server]
+        ):
+            text, markup = user_profile._render_problem_servers("en")
+        self.assertIn("Saint-Petersburg (spb1)", text)
+        self.assertEqual(markup.inline_keyboard[0][0].text, "🇷🇺 Saint-Petersburg")
+
+    def test_maintenance_section_includes_full_cleanup(self) -> None:
+        markup = admin_server_wizard._advanced_section_markup("spb1", "maintenance", "en")
+        buttons = [button.text for row in markup.inline_keyboard for button in row]
+        self.assertIn("🧨 Full Cleanup", buttons)
+
+    def test_full_cleanup_menu_shows_ssh_key_option_for_ssh_servers(self) -> None:
+        fake_server = SimpleNamespace(key="spb1", flag="🇷🇺", title="Saint-Petersburg", transport="ssh")
+        markup = admin_server_wizard._full_cleanup_markup(fake_server, "en")
+        buttons = [button.text for row in markup.inline_keyboard for button in row]
+        self.assertIn("Clean up node", buttons)
+        self.assertIn("Clean up node + remove SSH key", buttons)
+
+    def test_admin_settings_menu_includes_delete_everything(self) -> None:
+        from utils.keyboards import kb_admin_settings_menu
+
+        markup = kb_admin_settings_menu(True, True, True, "en")
+        buttons = [button.text for row in markup.inline_keyboard for button in row]
+        self.assertIn("🧨 Delete Everything", buttons)
+        self.assertIn("📨 Access requests: on", buttons)
+
+
+if __name__ == "__main__":
+    unittest.main()
