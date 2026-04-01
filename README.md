@@ -161,6 +161,10 @@ tests/     Unit tests for bot flows and storage/runtime behavior
 
 Installation, environment configuration, updates, and maintenance commands are documented in [INSTALL.md](INSTALL.md).
 
+## License
+
+Apache-2.0. See [LICENSE](LICENSE).
+
 ## Safety
 
 This project changes real system state during admin operations. `Bootstrap`, `Install Docker`, `Sync`, `Reinstall`, and related actions may install packages, write runtime files, manage Docker, and restart services on the nodes you connect.
