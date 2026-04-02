@@ -121,6 +121,15 @@ class AdminViewsTests(unittest.TestCase):
         self.assertIn("*Path*", text)
         self.assertIn("*Next step*", text)
 
+    def test_ssh_key_summary_escapes_markdown_sensitive_path(self) -> None:
+        with patch.object(ssh_keys, "get_public_key", return_value=(True, "ssh-ed25519 AAAA test")), patch.object(
+            ssh_keys, "get_ssh_public_key_path", return_value="/tmp/id_ed25519.pub"
+        ):
+            ok, text = ssh_keys.render_public_key_summary("en")
+        self.assertTrue(ok)
+        self.assertIn("/tmp/id\\_ed25519.pub", text)
+        self.assertIn("`ssh-ed25519 AAAA test`", text)
+
     def test_advanced_menu_places_maintenance_after_protocol_sections(self) -> None:
         markup = admin_server_wizard._advanced_menu_markup("spb1", "en")
         rows = markup.inline_keyboard

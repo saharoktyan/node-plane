@@ -331,7 +331,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "profile.no_username": "Профиль для этого Telegram ID ещё не найден.",
         "profile.name": "Имя: `{name}`",
         "profile.status": "Статус: *{status}*",
-        "profile.identity": "Идентичность",
+        "profile.identity": "Аккаунт",
         "profile.telegram_id": "• Telegram ID: `{value}`",
         "profile.username": "• Username: {value}",
         "profile.access": "Доступ:",

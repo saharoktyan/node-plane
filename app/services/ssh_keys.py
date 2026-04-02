@@ -12,6 +12,17 @@ from i18n import t
 DEFAULT_SSH_KEY_PATH = SSH_KEY or f"{SSH_DIR}/id_ed25519"
 
 
+def _md(value: str) -> str:
+    return (
+        str(value)
+        .replace("\\", "\\\\")
+        .replace("`", "\\`")
+        .replace("*", "\\*")
+        .replace("_", "\\_")
+        .replace("[", "\\[")
+    )
+
+
 def get_ssh_private_key_path() -> str:
     return DEFAULT_SSH_KEY_PATH
 
@@ -94,14 +105,16 @@ def render_public_key_summary(locale: str = "ru") -> Tuple[bool, str]:
     ok, payload = get_public_key()
     if not ok:
         return False, payload
+    public_path = _md(get_ssh_public_key_path())
+    public_key = _md(payload)
     text = (
         f"{t(locale, 'ssh.title')}\n\n"
         f"{t(locale, 'ssh.section_status')}\n"
         f"{t(locale, 'ssh.status_ready')}\n\n"
         f"{t(locale, 'ssh.section_path')}\n"
-        f"{t(locale, 'ssh.public_path', path=get_ssh_public_key_path())}\n\n"
+        f"{t(locale, 'ssh.public_path', path=public_path)}\n\n"
         f"{t(locale, 'ssh.public_key')}\n"
-        f"{payload}\n\n"
+        f"`{public_key}`\n\n"
         f"{t(locale, 'ssh.section_next')}\n"
         f"{t(locale, 'ssh.summary_hint')}"
     )

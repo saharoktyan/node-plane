@@ -52,7 +52,7 @@ SSH_STRICT_HOST_KEY_CHECKING = _env_str("SSH_STRICT_HOST_KEY_CHECKING", "yes")
 SSH_KNOWN_HOSTS_PATH = _env_str("SSH_KNOWN_HOSTS_PATH", f"{SSH_DIR}/known_hosts")
 
 PARSE_MODE = _env_str("PARSE_MODE", "Markdown")
-MENU_TITLE = _env_str("MENU_TITLE", "Access Manager")
+MENU_TITLE = _env_str("MENU_TITLE", "Node Plane")
 CB_MENU = "menu:"
 CB_GETKEY = "getkey:"
 CB_CFG = "cfg:"
