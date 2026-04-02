@@ -50,9 +50,44 @@ sys.modules["telegram.ext"] = telegram_ext_module
 
 from handlers import admin_server_wizard, user_profile
 from ui import admin_views, user_views
+from utils import keyboards
 
 
 class AdminViewsTests(unittest.TestCase):
+    def test_admin_menu_groups_operational_and_system_sections(self) -> None:
+        markup = keyboards.kb_admin_menu(lang="en", updates_label="🆕 Updates")
+        rows = markup.inline_keyboard
+        self.assertEqual([button.callback_data for button in rows[0]], ["menu:admin_status", "menu:admin_requests"])
+        self.assertEqual([button.callback_data for button in rows[1]], ["srv:menu", "cfg:start:edit"])
+        self.assertEqual([button.callback_data for button in rows[2]], ["menu:admin_updates", "menu:admin_settings"])
+        self.assertEqual([button.callback_data for button in rows[3]], ["menu:admin_announce", "menu:sshkey"])
+
+    def test_admin_updates_menu_prioritizes_check_and_update_actions(self) -> None:
+        markup = keyboards.kb_admin_updates_menu(auto_check_enabled=True, update_supported=True, update_running=False, lang="en")
+        rows = markup.inline_keyboard
+        self.assertEqual([button.callback_data for button in rows[0]], ["menu:admin_updates_check", "menu:admin_updates_toggle_auto"])
+        self.assertEqual([button.callback_data for button in rows[1]], ["menu:admin_updates_run"])
+
+    def test_admin_settings_menu_groups_edit_and_toggle_actions(self) -> None:
+        markup = keyboards.kb_admin_settings_menu(notify_enabled=True, telemetry_enabled=False, requests_enabled=True, lang="en")
+        rows = markup.inline_keyboard
+        self.assertEqual([button.callback_data for button in rows[0]], ["menu:admin_settings_bot_title", "menu:admin_settings_access_gate_message"])
+        self.assertEqual([button.callback_data for button in rows[1]], ["menu:admin_settings_toggle_notify", "menu:admin_settings_toggle_requests"])
+        self.assertEqual([button.callback_data for button in rows[2]], ["menu:admin_settings_toggle_telemetry"])
+
+    def test_advanced_menu_places_maintenance_after_protocol_sections(self) -> None:
+        markup = admin_server_wizard._advanced_menu_markup("spb1", "en")
+        rows = markup.inline_keyboard
+        self.assertEqual([button.callback_data for button in rows[0]], ["srv:advsection:general:spb1", "srv:advsection:xray:spb1"])
+        self.assertEqual([button.callback_data for button in rows[1]], ["srv:advsection:awg:spb1", "srv:advsection:maintenance:spb1"])
+
+    def test_maintenance_section_groups_safe_actions_before_sync(self) -> None:
+        markup = admin_server_wizard._advanced_section_markup("spb1", "maintenance", "en")
+        rows = markup.inline_keyboard
+        self.assertEqual([button.callback_data for button in rows[0]], ["srv:action:metrics:spb1", "srv:action:checkports:spb1"])
+        self.assertEqual([button.callback_data for button in rows[1]], ["srv:action:openports:spb1", "srv:action:reconcile:spb1"])
+        self.assertEqual([button.callback_data for button in rows[2]], ["srv:action:syncenv:spb1", "srv:action:syncxray:spb1"])
+
     def test_metrics_result_markup_returns_to_maintenance_screen(self) -> None:
         markup = admin_server_wizard._metrics_result_markup("spb1", "en")
         rows = markup.inline_keyboard
@@ -143,12 +178,12 @@ class AdminViewsTests(unittest.TestCase):
         self.assertIn("Clean up node", buttons)
         self.assertIn("Clean up node + remove SSH key", buttons)
 
-    def test_admin_settings_menu_includes_delete_everything(self) -> None:
+    def test_admin_settings_menu_includes_full_reset(self) -> None:
         from utils.keyboards import kb_admin_settings_menu
 
         markup = kb_admin_settings_menu(True, True, True, "en")
         buttons = [button.text for row in markup.inline_keyboard for button in row]
-        self.assertIn("🧨 Delete Everything", buttons)
+        self.assertIn("🧨 Full Reset", buttons)
         self.assertIn("📨 Access requests: on", buttons)
 
 

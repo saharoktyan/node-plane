@@ -31,19 +31,19 @@ def kb_admin_menu(lang: str = "ru", updates_label: str | None = None) -> InlineK
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton(t(lang, "menu.status"), callback_data=f"{CB_MENU}admin_status"),
-            InlineKeyboardButton(t(lang, "menu.servers"), callback_data=f"{CB_SRV}menu"),
-        ],
-        [
-            InlineKeyboardButton(t(lang, "menu.profiles"), callback_data=f"{CB_CFG}start:edit"),
             InlineKeyboardButton(t(lang, "menu.requests"), callback_data=f"{CB_MENU}admin_requests"),
         ],
         [
+            InlineKeyboardButton(t(lang, "menu.servers"), callback_data=f"{CB_SRV}menu"),
+            InlineKeyboardButton(t(lang, "menu.profiles"), callback_data=f"{CB_CFG}start:edit"),
+        ],
+        [
             InlineKeyboardButton(updates_text, callback_data=f"{CB_MENU}admin_updates"),
-            InlineKeyboardButton(t(lang, "menu.ssh_key"), callback_data=f"{CB_MENU}sshkey"),
+            InlineKeyboardButton(t(lang, "menu.admin_settings"), callback_data=f"{CB_MENU}admin_settings"),
         ],
         [
             InlineKeyboardButton(t(lang, "menu.announcement"), callback_data=f"{CB_MENU}admin_announce"),
-            InlineKeyboardButton(t(lang, "menu.admin_settings"), callback_data=f"{CB_MENU}admin_settings"),
+            InlineKeyboardButton(t(lang, "menu.ssh_key"), callback_data=f"{CB_MENU}sshkey"),
         ],
         [InlineKeyboardButton(t(lang, "menu.back"), callback_data=f"{CB_MENU}main")],
     ])
@@ -189,11 +189,15 @@ def kb_admin_settings_menu(notify_enabled: bool, telemetry_enabled: bool, reques
     telemetry_label = t(lang, "admin.settings.telemetry_on") if telemetry_enabled else t(lang, "admin.settings.telemetry_off")
     requests_label = t(lang, "admin.settings.requests_on") if requests_enabled else t(lang, "admin.settings.requests_off")
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(t(lang, "admin.settings.bot_title"), callback_data=f"{CB_MENU}admin_settings_bot_title")],
-        [InlineKeyboardButton(t(lang, "admin.settings.access_gate_message"), callback_data=f"{CB_MENU}admin_settings_access_gate_message")],
-        [InlineKeyboardButton(label, callback_data=f"{CB_MENU}admin_settings_toggle_notify")],
+        [
+            InlineKeyboardButton(t(lang, "admin.settings.bot_title"), callback_data=f"{CB_MENU}admin_settings_bot_title"),
+            InlineKeyboardButton(t(lang, "admin.settings.access_gate_message"), callback_data=f"{CB_MENU}admin_settings_access_gate_message"),
+        ],
+        [
+            InlineKeyboardButton(label, callback_data=f"{CB_MENU}admin_settings_toggle_notify"),
+            InlineKeyboardButton(requests_label, callback_data=f"{CB_MENU}admin_settings_toggle_requests"),
+        ],
         [InlineKeyboardButton(telemetry_label, callback_data=f"{CB_MENU}admin_settings_toggle_telemetry")],
-        [InlineKeyboardButton(requests_label, callback_data=f"{CB_MENU}admin_settings_toggle_requests")],
         [InlineKeyboardButton(t(lang, "admin.settings.factory_reset"), callback_data=f"{CB_MENU}admin_settings_reset")],
         [InlineKeyboardButton(t(lang, "menu.back"), callback_data=f"{CB_MENU}admin")],
     ])

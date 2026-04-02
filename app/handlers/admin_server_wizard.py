@@ -497,11 +497,11 @@ def _advanced_menu_markup(server_key: str, lang: str) -> InlineKeyboardMarkup:
         [
             [
                 InlineKeyboardButton(t(lang, "admin.wizard.advanced_general"), callback_data=f"{CB_SRV}advsection:general:{server_key}"),
-                InlineKeyboardButton(t(lang, "admin.wizard.advanced_maintenance"), callback_data=f"{CB_SRV}advsection:maintenance:{server_key}"),
+                InlineKeyboardButton(t(lang, "admin.wizard.advanced_xray"), callback_data=f"{CB_SRV}advsection:xray:{server_key}"),
             ],
             [
                 InlineKeyboardButton(t(lang, "admin.wizard.advanced_awg"), callback_data=f"{CB_SRV}advsection:awg:{server_key}"),
-                InlineKeyboardButton(t(lang, "admin.wizard.advanced_xray"), callback_data=f"{CB_SRV}advsection:xray:{server_key}"),
+                InlineKeyboardButton(t(lang, "admin.wizard.advanced_maintenance"), callback_data=f"{CB_SRV}advsection:maintenance:{server_key}"),
             ],
             [InlineKeyboardButton(t(lang, "admin.wizard.back_to_server"), callback_data=f"{CB_SRV}card:{server_key}")],
         ]
@@ -625,10 +625,12 @@ def _advanced_section_markup(server_key: str, section: str, lang: str) -> Inline
             ],
             [
                 InlineKeyboardButton(t(lang, "admin.wizard.open_ports"), callback_data=f"{CB_SRV}action:openports:{server_key}"),
-                InlineKeyboardButton(t(lang, "admin.wizard.sync_env"), callback_data=f"{CB_SRV}action:syncenv:{server_key}"),
+                InlineKeyboardButton(t(lang, "admin.wizard.reconcile"), callback_data=f"{CB_SRV}action:reconcile:{server_key}"),
             ],
-            [InlineKeyboardButton(t(lang, "admin.wizard.sync_xray"), callback_data=f"{CB_SRV}action:syncxray:{server_key}")],
-            [InlineKeyboardButton(t(lang, "admin.wizard.reconcile"), callback_data=f"{CB_SRV}action:reconcile:{server_key}")],
+            [
+                InlineKeyboardButton(t(lang, "admin.wizard.sync_env"), callback_data=f"{CB_SRV}action:syncenv:{server_key}"),
+                InlineKeyboardButton(t(lang, "admin.wizard.sync_xray"), callback_data=f"{CB_SRV}action:syncxray:{server_key}"),
+            ],
             [InlineKeyboardButton(t(lang, "admin.wizard.full_cleanup"), callback_data=f"{CB_SRV}cleanupmenu:{server_key}")],
         ]
     rows.append([InlineKeyboardButton(t(lang, "admin.wizard.back_to_advanced"), callback_data=f"{CB_SRV}advanced:{server_key}")])
