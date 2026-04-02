@@ -202,10 +202,8 @@ def kb_admin_requests_settings_menu(notify_enabled: bool, requests_enabled: bool
     requests_label = t(lang, "admin.settings.requests_on") if requests_enabled else t(lang, "admin.settings.requests_off")
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(t(lang, "admin.settings.access_gate_message"), callback_data=f"{CB_MENU}admin_settings_access_gate_message")],
-        [
-            InlineKeyboardButton(notify_label, callback_data=f"{CB_MENU}admin_settings_toggle_notify"),
-            InlineKeyboardButton(requests_label, callback_data=f"{CB_MENU}admin_settings_toggle_requests"),
-        ],
+        [InlineKeyboardButton(notify_label, callback_data=f"{CB_MENU}admin_settings_toggle_notify")],
+        [InlineKeyboardButton(requests_label, callback_data=f"{CB_MENU}admin_settings_toggle_requests")],
         [InlineKeyboardButton(t(lang, "menu.back"), callback_data=f"{CB_MENU}admin_settings")],
     ])
 

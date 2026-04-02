@@ -1486,6 +1486,7 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
             context,
             (
                 f"{t(lang, 'profile.stats_title')}\n"
+                "\n"
                 f"👤 `{name}`\n"
                 f"{t(lang, 'profile.status', status=status_line)}\n\n"
                 f"{t(lang, 'profile.identity')}\n"
@@ -1526,7 +1527,7 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
             context,
             text[:3900],
             reply_markup=_ssh_key_summary_markup(lang),
-            parse_mode=None,
+            parse_mode=PARSE_MODE,
         )
         return
 
@@ -1546,7 +1547,7 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
             context,
             text[:3900],
             reply_markup=_ssh_key_details_markup(lang),
-            parse_mode=None,
+            parse_mode=PARSE_MODE,
         )
         return
 

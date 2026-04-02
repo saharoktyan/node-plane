@@ -79,8 +79,10 @@ class AdminViewsTests(unittest.TestCase):
         markup = keyboards.kb_admin_requests_settings_menu(notify_enabled=True, requests_enabled=True, lang="en")
         rows = markup.inline_keyboard
         self.assertEqual([button.callback_data for button in rows[0]], ["menu:admin_settings_access_gate_message"])
-        self.assertEqual([button.callback_data for button in rows[1]], ["menu:admin_settings_toggle_notify", "menu:admin_settings_toggle_requests"])
-        self.assertEqual([button.text for button in rows[1]], ["🔔 Requests: on", "📨 Access: on"])
+        self.assertEqual([button.callback_data for button in rows[1]], ["menu:admin_settings_toggle_notify"])
+        self.assertEqual([button.callback_data for button in rows[2]], ["menu:admin_settings_toggle_requests"])
+        self.assertEqual([button.text for button in rows[1]], ["🔔 Request notifications: on"])
+        self.assertEqual([button.text for button in rows[2]], ["📨 Access requests: on"])
 
     def test_request_card_text_uses_readable_sections(self) -> None:
         fake_users = {
@@ -102,6 +104,7 @@ class AdminViewsTests(unittest.TestCase):
         with patch.object(ssh_keys, "get_public_key", return_value=(True, "ssh-ed25519 AAAA test")):
             ok, text = ssh_keys.render_public_key_summary("en")
         self.assertTrue(ok)
+        self.assertIn("🔐 *Bot SSH Key*", text)
         self.assertIn("*Status*", text)
         self.assertIn("*Path*", text)
         self.assertIn("*Next step*", text)
@@ -178,7 +181,7 @@ class AdminViewsTests(unittest.TestCase):
         fake_server = SimpleNamespace(flag="🇷🇺", title="Saint-Petersburg")
         with patch.object(user_views, "get_server", return_value=fake_server):
             text, items = user_views.render_getkey_overview(fake_methods, lang="en")
-        self.assertEqual(text, "🔑 Get Key\n\nChoose a server to connect.")
+        self.assertEqual(text, "🔑 *Get Key*\n\nChoose a server to connect.")
         self.assertEqual(items, [("spb", "🇷🇺 Saint-Petersburg · 2 methods")])
 
     def test_render_problem_servers_uses_server_key_placeholder_without_crashing(self) -> None:
