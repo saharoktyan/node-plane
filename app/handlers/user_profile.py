@@ -387,7 +387,6 @@ def _render_requests_dashboard(ids: List[str], page: int, lang: str) -> tuple[st
             t(lang, "admin.requests.empty"),
             InlineKeyboardMarkup(
                 [
-                    [InlineKeyboardButton(t(lang, "admin.requests.search"), callback_data="menu:admin_requests_search")],
                     [InlineKeyboardButton(t(lang, "menu.back"), callback_data="menu:admin")],
                 ]
             ),
@@ -413,7 +412,7 @@ def _render_requests_dashboard(ids: List[str], page: int, lang: str) -> tuple[st
         if page < pages - 1:
             nav.append(InlineKeyboardButton("➡️", callback_data=f"menu:admin_requests_page:{page+1}"))
         rows.append(nav)
-    if total > 1:
+    if pages > 1:
         rows.append([InlineKeyboardButton(t(lang, "admin.requests.search"), callback_data="menu:admin_requests_search")])
     rows.append([InlineKeyboardButton(t(lang, "menu.back"), callback_data="menu:admin")])
     return t(lang, "admin.requests.title", total=total), InlineKeyboardMarkup(rows)
@@ -642,9 +641,6 @@ def _render_admin_updates_text(lang: str, include_failure_log: bool = True) -> s
     latest_version = str(overview.get("remote_label") or "").strip()
     if latest_version:
         lines.append(t(lang, "admin.updates.latest_version", value=latest_version))
-    last_run_unit = str(overview.get("last_run_unit") or "").strip()
-    if last_run_unit and last_run_status == "running":
-        lines.append(t(lang, "admin.updates.update_unit", value=last_run_unit))
     last_error = str(overview.get("last_error") or "").strip()
     if last_error:
         lines.extend(["", t(lang, "admin.updates.section_error"), t(lang, "admin.updates.error", value=last_error)])

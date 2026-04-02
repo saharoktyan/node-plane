@@ -100,6 +100,18 @@ class AdminViewsTests(unittest.TestCase):
         self.assertIn("*Requester*", text)
         self.assertIn("*Request state*", text)
 
+    def test_requests_dashboard_hides_search_for_single_page(self) -> None:
+        fake_users = {
+            "42": {
+                "username": "alice",
+                "access_request_pending": True,
+            }
+        }
+        with patch.object(user_profile.user_store, "read", return_value=fake_users):
+            _text, markup = user_profile._render_requests_dashboard(["42"], 0, "en")
+        callbacks = [button.callback_data for row in markup.inline_keyboard for button in row]
+        self.assertNotIn("menu:admin_requests_search", callbacks)
+
     def test_ssh_key_summary_uses_readable_sections(self) -> None:
         with patch.object(ssh_keys, "get_public_key", return_value=(True, "ssh-ed25519 AAAA test")):
             ok, text = ssh_keys.render_public_key_summary("en")
