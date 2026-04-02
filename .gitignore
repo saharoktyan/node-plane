@@ -42,3 +42,4 @@ scripts/*.service
 .DS_Store
 Thumbs.db
 kitty-info
+TMP_*.md

@@ -64,10 +64,11 @@ class AdminViewsTests(unittest.TestCase):
         self.assertEqual([button.callback_data for button in rows[3]], ["menu:admin_announce", "menu:sshkey"])
 
     def test_admin_updates_menu_prioritizes_check_and_update_actions(self) -> None:
-        markup = keyboards.kb_admin_updates_menu(auto_check_enabled=True, update_supported=True, update_running=False, lang="en")
+        markup = keyboards.kb_admin_updates_menu(auto_check_enabled=True, update_supported=True, update_running=False, branch="dev", lang="en")
         rows = markup.inline_keyboard
         self.assertEqual([button.callback_data for button in rows[0]], ["menu:admin_updates_check", "menu:admin_updates_toggle_auto"])
-        self.assertEqual([button.callback_data for button in rows[1]], ["menu:admin_updates_run"])
+        self.assertEqual([button.callback_data for button in rows[1]], ["menu:admin_updates_branch", "menu:admin_updates_versions:0"])
+        self.assertEqual([button.callback_data for button in rows[2]], ["menu:admin_updates_run"])
 
     def test_admin_settings_menu_groups_edit_and_toggle_actions(self) -> None:
         markup = keyboards.kb_admin_settings_menu(notify_enabled=True, telemetry_enabled=False, requests_enabled=True, lang="en")
