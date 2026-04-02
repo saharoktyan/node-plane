@@ -53,6 +53,12 @@ from ui import admin_views, user_views
 
 
 class AdminViewsTests(unittest.TestCase):
+    def test_metrics_result_markup_returns_to_maintenance_screen(self) -> None:
+        markup = admin_server_wizard._metrics_result_markup("spb1", "en")
+        rows = markup.inline_keyboard
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0][0].callback_data, "srv:advsection:maintenance:spb1")
+
     def test_problem_server_card_opens_without_active_server_wizard(self) -> None:
         update = SimpleNamespace(
             callback_query=SimpleNamespace(message=SimpleNamespace(chat_id=1, message_id=2)),

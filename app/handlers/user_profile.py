@@ -32,7 +32,7 @@ from services.ssh_keys import render_public_key_guide, render_public_key_summary
 from services.system_reset import run_factory_reset
 from services.profile_state import ensure_telegram_profile, get_allowed_protocols, get_profile, get_profile_access_status, profile_store, user_store, utcnow
 from services.traffic_usage import get_profile_monthly_usage
-from services.updates import check_for_updates, get_updates_overview, schedule_update
+from services.updates import check_for_updates, get_updates_menu_emoji, get_updates_overview, schedule_update
 from services.xray import get_server_link_status
 from ui.user_views import format_server_access
 from utils.keyboards import kb_admin_menu, kb_admin_settings_menu, kb_admin_updates_menu, kb_back_to_admin, kb_language_menu, kb_main_menu, kb_profile_minimal, kb_profile_stats, kb_settings_menu
@@ -59,17 +59,7 @@ def _render_admin_menu_text(lang: str) -> str:
 def _admin_updates_menu_label(lang: str) -> str:
     overview = get_updates_overview()
     base = t(lang, "menu.updates_plain")
-    if str(overview.get("last_run_status") or "") == "running":
-        return f"⏳ {base}"
-    if not overview.get("auto_check_enabled"):
-        return base
-    if str(overview.get("last_run_status") or "") == "failed":
-        return f"⚠️ {base}"
-    if overview.get("update_available"):
-        return f"🆕 {base}"
-    if str(overview.get("last_status") or "") == "up_to_date":
-        return f"🟢 {base}"
-    return f"🆕 {base}"
+    return f"{get_updates_menu_emoji(overview)} {base}"
 
 
 def _admin_menu_markup(lang: str) -> InlineKeyboardMarkup:

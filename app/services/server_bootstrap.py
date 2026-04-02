@@ -2787,7 +2787,12 @@ def show_server_metrics(server_key: str) -> Tuple[int, str]:
     server = get_server(server_key)
     if not server:
         return 1, f"Сервер {server_key} не найден"
-    script = r"""#!/usr/bin/env bash
+    script = _server_metrics_script()
+    return run_server_command(server, script, timeout=60)
+
+
+def _server_metrics_script() -> str:
+    return r"""#!/usr/bin/env bash
 set -euo pipefail
 
 docker_cmd() {
@@ -2810,6 +2815,29 @@ fi
 if [[ -r /proc/loadavg ]]; then
   echo "loadavg: $(cut -d' ' -f1-3 /proc/loadavg)"
 fi
+if [[ -r /proc/stat ]]; then
+  cpu_usage="$(python3 - <<'PY'
+import time
+
+def read():
+    with open("/proc/stat", "r", encoding="utf-8") as fh:
+        parts = fh.readline().split()[1:]
+    values = [int(part) for part in parts[:8]]
+    total = sum(values)
+    idle = values[3] + values[4]
+    return total, idle
+
+t1, i1 = read()
+time.sleep(0.2)
+t2, i2 = read()
+total_delta = max(t2 - t1, 0)
+idle_delta = max(i2 - i1, 0)
+busy = 0.0 if total_delta <= 0 else (100.0 * (total_delta - idle_delta) / total_delta)
+print(f"{busy:.1f}%")
+PY
+)"
+  echo "cpu usage: $cpu_usage"
+fi
 if command -v nproc >/dev/null 2>&1; then
   echo "cpus: $(nproc)"
 fi
@@ -2831,7 +2859,6 @@ else
   echo "docker: unavailable"
 fi
 """
-    return run_server_command(server, script, timeout=60)
 
 
 def bootstrap_server(server_key: str, preserve_config: bool = False) -> Tuple[int, str]:

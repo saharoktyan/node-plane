@@ -24,7 +24,7 @@ from services.awg_profiles import get_awg_servers, remove_awg_profile, remove_aw
 from services.provisioning_state import delete_profile_server_state, reconcile_profile_state, upsert_profile_server_state
 from services.server_registry import list_servers
 from services.profile_state import awg_profile_store, ensure_xray_caps, freeze_profile, is_frozen, profile_store, unfreeze_profile, utcnow
-from services.updates import get_updates_overview
+from services.updates import get_updates_menu_emoji, get_updates_overview
 from ui.admin_views import (
     render_delete_confirm,
     render_edit_menu,
@@ -109,17 +109,7 @@ def _wizard_lang(context: CallbackContext) -> str:
 def _admin_updates_menu_label(lang: str) -> str:
     overview = get_updates_overview()
     base = t(lang, "menu.updates_plain")
-    if not overview.get("auto_check_enabled"):
-        return f"🆕 {base}"
-    if str(overview.get("last_run_status") or "") == "running":
-        return f"⏳ {base}"
-    if str(overview.get("last_run_status") or "") == "failed":
-        return f"⚠️ {base}"
-    if overview.get("update_available"):
-        return f"🆕 {base}"
-    if str(overview.get("last_status") or "") == "up_to_date":
-        return f"🟢 {base}"
-    return f"🆕 {base}"
+    return f"{get_updates_menu_emoji(overview)} {base}"
 
 
 def _wizard_close(context: CallbackContext, text: str | None = None) -> None:

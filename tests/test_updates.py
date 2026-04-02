@@ -124,6 +124,30 @@ class UpdatesTests(unittest.TestCase):
             self.updates.auto_check_job()
         mocked.assert_called_once()
 
+    def test_menu_emoji_is_neutral_when_auto_check_disabled_and_no_known_update(self) -> None:
+        self.app_settings.set_updates_auto_check_enabled(False)
+        emoji = self.updates.get_updates_menu_emoji(
+            {
+                "auto_check_enabled": False,
+                "last_run_status": "never",
+                "last_status": "never",
+                "update_available": False,
+            }
+        )
+        self.assertEqual(emoji, "📦")
+
+    def test_menu_emoji_keeps_new_when_update_is_known_while_auto_check_disabled(self) -> None:
+        self.app_settings.set_updates_auto_check_enabled(False)
+        emoji = self.updates.get_updates_menu_emoji(
+            {
+                "auto_check_enabled": False,
+                "last_run_status": "never",
+                "last_status": "available",
+                "update_available": True,
+            }
+        )
+        self.assertEqual(emoji, "🆕")
+
 
 if __name__ == "__main__":
     unittest.main()

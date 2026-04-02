@@ -263,3 +263,17 @@ def get_updates_overview() -> Dict[str, str | bool]:
         "last_run_log_tail": state.get("last_run_log_tail", ""),
         "last_run_unit": state.get("last_run_unit", ""),
     }
+
+
+def get_updates_menu_emoji(overview: Dict[str, str | bool] | None = None) -> str:
+    overview = overview or get_updates_overview()
+    last_run_status = str(overview.get("last_run_status") or "")
+    if last_run_status == "running":
+        return "⏳"
+    if last_run_status == "failed":
+        return "⚠️"
+    if bool(overview.get("update_available")):
+        return "🆕"
+    if str(overview.get("last_status") or "") == "up_to_date":
+        return "🟢"
+    return "📦"

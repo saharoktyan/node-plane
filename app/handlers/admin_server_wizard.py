@@ -408,6 +408,14 @@ def _probe_result_markup(server_key: str, lang: str) -> InlineKeyboardMarkup:
     )
 
 
+def _metrics_result_markup(server_key: str, lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(t(lang, "admin.wizard.back_to_maintenance"), callback_data=f"{CB_SRV}advsection:maintenance:{server_key}")],
+        ]
+    )
+
+
 def _bootstrap_menu_text(server: RegisteredServer, lang: str) -> str:
     if not is_server_docker_available(server.key):
         state = t(lang, "admin.wizard.bootstrap_menu_state_docker_missing")
@@ -1698,7 +1706,7 @@ def on_server_callback(update: Update, context: CallbackContext, payload: str) -
             stop_progress = _start_progress_animation(context, t(lang, "admin.wizard.server_metrics"))
             rc, out = show_server_metrics(server_key)
             stop_progress()
-            _wizard_edit(context, _action_result_text(t(lang, "admin.wizard.server_metrics"), rc, out, server_key, lang), _server_card_markup(server_key, lang))
+            _wizard_edit(context, _action_result_text(t(lang, "admin.wizard.server_metrics"), rc, out, server_key, lang), _metrics_result_markup(server_key, lang))
             return
         if action == "probe":
             stop_progress = _start_progress_animation(context, t(lang, "admin.wizard.probe"))
