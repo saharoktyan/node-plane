@@ -35,7 +35,7 @@ from services.traffic_usage import get_profile_monthly_usage
 from services.updates import check_for_updates, get_updates_menu_emoji, get_updates_overview, schedule_update
 from services.xray import get_server_link_status
 from ui.user_views import format_server_access
-from utils.keyboards import kb_admin_menu, kb_admin_settings_menu, kb_admin_updates_menu, kb_back_to_admin, kb_language_menu, kb_main_menu, kb_profile_minimal, kb_profile_stats, kb_settings_menu
+from utils.keyboards import kb_admin_menu, kb_admin_requests_settings_menu, kb_admin_settings_menu, kb_admin_updates_menu, kb_back_to_admin, kb_language_menu, kb_main_menu, kb_profile_minimal, kb_profile_stats, kb_settings_menu
 from utils.tg import answer_cb, safe_delete_update_message, safe_edit_by_ids, safe_edit_message
 
 from .user_common import _access_gate_text, _build_start_reply, _has_access, _human_ago, _human_left, _is_admin, _resolve_profile_name, _sub_progress
@@ -438,9 +438,11 @@ def _render_request_card(user_id: str, lang: str) -> tuple[str, Any]:
 
     text = (
         f"{t(lang, 'admin.requests.card_title')}\n\n"
+        f"{t(lang, 'admin.requests.identity')}\n"
         f"• id: `{_md(user_id)}`\n"
         f"• username: {_md(username_text)}\n"
-        f"• name: {_md(full_name)}\n"
+        f"• name: {_md(full_name)}\n\n"
+        f"{t(lang, 'admin.requests.request_meta')}\n"
         f"• {t(lang, 'admin.requests.requested_at')}: `{_md(requested_at)}`\n"
         f"• status: *{status_text}*"
     )
@@ -523,6 +525,10 @@ def _admin_settings_capture_message(update: Update, context: CallbackContext) ->
 
 def _render_admin_settings_text(lang: str) -> str:
     return t(lang, "admin.settings.title")
+
+
+def _render_admin_requests_settings_text(lang: str) -> str:
+    return t(lang, "admin.settings.requests_title")
 
 
 def _render_admin_reset_text(lang: str) -> str:
@@ -617,12 +623,17 @@ def _render_admin_updates_text(lang: str, include_failure_log: bool = True) -> s
     lines = [
         t(lang, "admin.updates.title"),
         "",
-        t(lang, "admin.updates.install_mode", value=t(lang, f"admin.updates.mode_{overview.get('install_mode', 'portable')}")),
-        t(lang, "admin.updates.current_version", value=str(overview.get("current_version") or "—")),
-        t(lang, "admin.updates.source_dir", value=str(overview.get("source_dir") or "—")),
+        t(lang, "admin.updates.section_status"),
         t(lang, "admin.updates.auto_check", value=auto_check_value),
         t(lang, "admin.updates.last_checked", value=last_checked_value),
         t(lang, "admin.updates.last_status", value=_updates_status_label(str(overview.get("last_status") or "never"), lang)),
+        "",
+        t(lang, "admin.updates.section_source"),
+        t(lang, "admin.updates.install_mode", value=t(lang, f"admin.updates.mode_{overview.get('install_mode', 'portable')}")),
+        t(lang, "admin.updates.current_version", value=str(overview.get("current_version") or "—")),
+        t(lang, "admin.updates.source_dir", value=str(overview.get("source_dir") or "—")),
+        "",
+        t(lang, "admin.updates.section_last_run"),
         t(lang, "admin.updates.last_update", value=last_run_value),
     ]
     upstream = str(overview.get("upstream_ref") or "").strip()
@@ -636,7 +647,7 @@ def _render_admin_updates_text(lang: str, include_failure_log: bool = True) -> s
         lines.append(t(lang, "admin.updates.update_unit", value=last_run_unit))
     last_error = str(overview.get("last_error") or "").strip()
     if last_error:
-        lines.append(t(lang, "admin.updates.error", value=last_error))
+        lines.extend(["", t(lang, "admin.updates.section_error"), t(lang, "admin.updates.error", value=last_error)])
     last_run_log_tail = str(overview.get("last_run_log_tail") or "").strip()
     if include_failure_log and last_run_log_tail and last_run_status == "failed":
         lines.extend(
@@ -658,13 +669,14 @@ def admin_menu_text_router(update: Update, context: CallbackContext) -> None:
         title = (update.effective_message.text or "").strip()
         safe_delete_update_message(update, context)
         if not title:
+            back_callback = "menu:admin_settings" if admin_settings_state.get("step") == "bot_title" else "menu:admin_settings_requests"
             if admin_settings_state.get("chat_id") and admin_settings_state.get("message_id"):
                 safe_edit_by_ids(
                     context.bot,
                     int(admin_settings_state["chat_id"]),
                     int(admin_settings_state["message_id"]),
                     t(lang, "admin.settings.bot_title_empty") if admin_settings_state.get("step") == "bot_title" else t(lang, "admin.settings.access_gate_empty"),
-                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, "menu.back"), callback_data="menu:admin_settings")]]),
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, "menu.back"), callback_data=back_callback)]]),
                     parse_mode=PARSE_MODE,
                 )
             _admin_settings_state_clear(context)
@@ -672,22 +684,30 @@ def admin_menu_text_router(update: Update, context: CallbackContext) -> None:
         if admin_settings_state.get("step") == "bot_title":
             set_menu_title(title)
             saved_text = t(lang, "admin.settings.bot_title_saved")
+            reply_text = _render_admin_settings_text(lang)
+            reply_markup = kb_admin_settings_menu(
+                _admin_notify_enabled(update.effective_user.id if update.effective_user else 0),
+                is_global_telemetry_enabled(),
+                are_access_requests_enabled(),
+                lang,
+            )
         else:
             set_access_gate_message(title)
             saved_text = t(lang, "admin.settings.access_gate_saved")
+            reply_text = _render_admin_requests_settings_text(lang)
+            reply_markup = kb_admin_requests_settings_menu(
+                _admin_notify_enabled(update.effective_user.id if update.effective_user else 0),
+                are_access_requests_enabled(),
+                lang,
+            )
         _admin_settings_state_clear(context)
         if admin_settings_state.get("chat_id") and admin_settings_state.get("message_id"):
             safe_edit_by_ids(
                 context.bot,
                 int(admin_settings_state["chat_id"]),
                 int(admin_settings_state["message_id"]),
-                f"{_render_admin_settings_text(lang)}\n\n{saved_text}",
-                reply_markup=kb_admin_settings_menu(
-                    _admin_notify_enabled(update.effective_user.id if update.effective_user else 0),
-                    is_global_telemetry_enabled(),
-                    are_access_requests_enabled(),
-                    lang,
-                ),
+                f"{reply_text}\n\n{saved_text}",
+                reply_markup=reply_markup,
                 parse_mode=PARSE_MODE,
             )
         return
@@ -1013,6 +1033,21 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
         )
         return
 
+    if payload == "admin_settings_requests" and is_admin:
+        _admin_settings_state_clear(context)
+        safe_edit_message(
+            update,
+            context,
+            _render_admin_requests_settings_text(lang),
+            reply_markup=kb_admin_requests_settings_menu(
+                _admin_notify_enabled(user.id if user else 0),
+                are_access_requests_enabled(),
+                lang,
+            ),
+            parse_mode=PARSE_MODE,
+        )
+        return
+
     if payload == "admin_settings_reset" and is_admin:
         _admin_settings_state_set(context, {"active": True, "step": "factory_reset"})
         safe_edit_message(
@@ -1145,8 +1180,8 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
         safe_edit_message(
             update,
             context,
-            f"{t(lang, 'admin.settings.saved')}\n\n{_render_admin_settings_text(lang)}",
-            reply_markup=kb_admin_settings_menu(enabled, is_global_telemetry_enabled(), are_access_requests_enabled(), lang),
+            _render_admin_requests_settings_text(lang),
+            reply_markup=kb_admin_requests_settings_menu(enabled, are_access_requests_enabled(), lang),
             parse_mode=PARSE_MODE,
         )
         return
@@ -1170,7 +1205,7 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
             update,
             context,
             f"{t(lang, 'admin.settings.access_gate_prompt')}\n\n{t(lang, 'admin.settings.current_access_gate', text=_md(get_access_gate_message()))}",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, "menu.back"), callback_data="menu:admin_settings")]]),
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, "menu.back"), callback_data="menu:admin_settings_requests")]]),
             parse_mode=PARSE_MODE,
         )
         return
@@ -1180,7 +1215,7 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
         safe_edit_message(
             update,
             context,
-            f"{t(lang, 'admin.settings.saved')}\n\n{_render_admin_settings_text(lang)}",
+            _render_admin_settings_text(lang),
             reply_markup=kb_admin_settings_menu(_admin_notify_enabled(user.id if user else 0), enabled, are_access_requests_enabled(), lang),
             parse_mode=PARSE_MODE,
         )
@@ -1191,8 +1226,8 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
         safe_edit_message(
             update,
             context,
-            f"{t(lang, 'admin.settings.saved')}\n\n{_render_admin_settings_text(lang)}",
-            reply_markup=kb_admin_settings_menu(_admin_notify_enabled(user.id if user else 0), is_global_telemetry_enabled(), enabled, lang),
+            _render_admin_requests_settings_text(lang),
+            reply_markup=kb_admin_requests_settings_menu(_admin_notify_enabled(user.id if user else 0), enabled, lang),
             parse_mode=PARSE_MODE,
         )
         return

@@ -516,6 +516,7 @@ def _advanced_section_text(server: RegisteredServer, section: str, lang: str) ->
                 "",
                 t(lang, "admin.wizard.advanced_general"),
                 t(lang, "admin.wizard.advanced_general_intro"),
+                "",
                 t(lang, "admin.wizard.advanced_general_title", value=server.title),
                 t(lang, "admin.wizard.advanced_general_flag", value=server.flag),
                 t(lang, "admin.wizard.advanced_general_region", value=server.region),
@@ -534,6 +535,7 @@ def _advanced_section_text(server: RegisteredServer, section: str, lang: str) ->
                 "",
                 t(lang, "admin.wizard.advanced_xray"),
                 t(lang, "admin.wizard.advanced_xray_intro"),
+                "",
                 t(lang, "admin.wizard.field_xray_tcp_port") + f": {server.xray_tcp_port}",
                 t(lang, "admin.wizard.field_xray_xhttp_port") + f": {server.xray_xhttp_port}",
                 t(lang, "admin.wizard.advanced_xray_host_line", value=server.xray_host or "—"),
@@ -548,6 +550,7 @@ def _advanced_section_text(server: RegisteredServer, section: str, lang: str) ->
                 "",
                 t(lang, "admin.wizard.advanced_awg"),
                 t(lang, "admin.wizard.advanced_awg_intro"),
+                "",
                 t(lang, "admin.wizard.field_awg_port") + f": {server.awg_port}",
                 t(lang, "admin.wizard.advanced_awg_host_line", value=server.awg_public_host or "—"),
                 t(lang, "admin.wizard.advanced_awg_iface_line", value=server.awg_iface or "—"),
@@ -562,6 +565,7 @@ def _advanced_section_text(server: RegisteredServer, section: str, lang: str) ->
             "",
             t(lang, "admin.wizard.advanced_maintenance"),
             t(lang, "admin.wizard.advanced_maintenance_intro"),
+            "",
             t(lang, "admin.wizard.advanced_maintenance_note"),
         ]
     )

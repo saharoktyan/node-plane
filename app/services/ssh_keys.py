@@ -81,7 +81,7 @@ def get_public_key(path: str | None = None) -> Tuple[bool, str]:
 def render_public_key_guide(locale: str = "ru") -> Tuple[bool, str]:
     text = (
         f"{t(locale, 'ssh.title')}\n\n"
-        f"{t(locale, 'ssh.quick_steps')}\n"
+        f"{t(locale, 'ssh.quick_steps')}\n\n"
         f"{t(locale, 'ssh.step1')}\n"
         f"{t(locale, 'ssh.step2')}\n"
         f"{t(locale, 'ssh.step3')}\n"
@@ -96,10 +96,13 @@ def render_public_key_summary(locale: str = "ru") -> Tuple[bool, str]:
         return False, payload
     text = (
         f"{t(locale, 'ssh.title')}\n\n"
-        f"{t(locale, 'ssh.status_ready')}\n"
+        f"{t(locale, 'ssh.section_status')}\n"
+        f"{t(locale, 'ssh.status_ready')}\n\n"
+        f"{t(locale, 'ssh.section_path')}\n"
         f"{t(locale, 'ssh.public_path', path=get_ssh_public_key_path())}\n\n"
         f"{t(locale, 'ssh.public_key')}\n"
         f"{payload}\n\n"
+        f"{t(locale, 'ssh.section_next')}\n"
         f"{t(locale, 'ssh.summary_hint')}"
     )
     return True, text

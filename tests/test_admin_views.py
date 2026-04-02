@@ -49,6 +49,7 @@ sys.modules["telegram.error"] = telegram_error_module
 sys.modules["telegram.ext"] = telegram_ext_module
 
 from handlers import admin_server_wizard, user_profile
+from services import ssh_keys
 from ui import admin_views, user_views
 from utils import keyboards
 
@@ -71,9 +72,39 @@ class AdminViewsTests(unittest.TestCase):
     def test_admin_settings_menu_groups_edit_and_toggle_actions(self) -> None:
         markup = keyboards.kb_admin_settings_menu(notify_enabled=True, telemetry_enabled=False, requests_enabled=True, lang="en")
         rows = markup.inline_keyboard
-        self.assertEqual([button.callback_data for button in rows[0]], ["menu:admin_settings_bot_title", "menu:admin_settings_access_gate_message"])
+        self.assertEqual([button.callback_data for button in rows[0]], ["menu:admin_settings_bot_title", "menu:admin_settings_requests"])
+        self.assertEqual([button.callback_data for button in rows[1]], ["menu:admin_settings_toggle_telemetry"])
+
+    def test_admin_requests_settings_menu_groups_access_controls(self) -> None:
+        markup = keyboards.kb_admin_requests_settings_menu(notify_enabled=True, requests_enabled=True, lang="en")
+        rows = markup.inline_keyboard
+        self.assertEqual([button.callback_data for button in rows[0]], ["menu:admin_settings_access_gate_message"])
         self.assertEqual([button.callback_data for button in rows[1]], ["menu:admin_settings_toggle_notify", "menu:admin_settings_toggle_requests"])
-        self.assertEqual([button.callback_data for button in rows[2]], ["menu:admin_settings_toggle_telemetry"])
+        self.assertEqual([button.text for button in rows[1]], ["🔔 Requests: on", "📨 Access: on"])
+
+    def test_request_card_text_uses_readable_sections(self) -> None:
+        fake_users = {
+            "42": {
+                "username": "alice",
+                "first_name": "Alice",
+                "last_name": "Admin",
+                "access_request_pending": True,
+                "access_granted": False,
+                "access_request_sent_at": "2026-04-02T00:00:00Z",
+            }
+        }
+        with patch.object(user_profile.user_store, "read", return_value=fake_users):
+            text, _markup = user_profile._render_request_card("42", "en")
+        self.assertIn("*Requester*", text)
+        self.assertIn("*Request state*", text)
+
+    def test_ssh_key_summary_uses_readable_sections(self) -> None:
+        with patch.object(ssh_keys, "get_public_key", return_value=(True, "ssh-ed25519 AAAA test")):
+            ok, text = ssh_keys.render_public_key_summary("en")
+        self.assertTrue(ok)
+        self.assertIn("*Status*", text)
+        self.assertIn("*Path*", text)
+        self.assertIn("*Next step*", text)
 
     def test_advanced_menu_places_maintenance_after_protocol_sections(self) -> None:
         markup = admin_server_wizard._advanced_menu_markup("spb1", "en")
@@ -184,7 +215,7 @@ class AdminViewsTests(unittest.TestCase):
         markup = kb_admin_settings_menu(True, True, True, "en")
         buttons = [button.text for row in markup.inline_keyboard for button in row]
         self.assertIn("🧨 Full Reset", buttons)
-        self.assertIn("📨 Access requests: on", buttons)
+        self.assertIn("📨 Requests", buttons)
 
 
 if __name__ == "__main__":
