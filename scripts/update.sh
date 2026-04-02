@@ -5,6 +5,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 MODE="${MODE:-auto}"
+TARGET_BRANCH="${NODE_PLANE_UPDATE_BRANCH:-}"
+TARGET_REF=""
 SKIP_PULL=0
 SKIP_DEPS=0
 SKIP_RESTART=0
@@ -22,6 +24,22 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-pull)
       SKIP_PULL=1
+      shift
+      ;;
+    --branch)
+      TARGET_BRANCH="${2:-}"
+      shift 2
+      ;;
+    --branch=*)
+      TARGET_BRANCH="${1#*=}"
+      shift
+      ;;
+    --to)
+      TARGET_REF="${2:-}"
+      shift 2
+      ;;
+    --to=*)
+      TARGET_REF="${1#*=}"
       shift
       ;;
     --skip-deps)
@@ -43,7 +61,7 @@ while [[ $# -gt 0 ]]; do
     -h|--help)
       cat <<'EOF'
 Usage:
-  scripts/update.sh [--mode auto|simple|portable] [--skip-pull] [--skip-deps] [--skip-restart] [--health-timeout 30]
+  scripts/update.sh [--mode auto|simple|portable] [--branch main|dev] [--to <ref>] [--skip-pull] [--skip-deps] [--skip-restart] [--health-timeout 30]
 
 Modes:
   auto      Detect update mode from local environment
@@ -51,6 +69,8 @@ Modes:
   portable  Update the Docker Compose deployment
 
 Flags:
+  --branch           Branch to use as the update source
+  --to               Explicit git ref or tag to install
   --skip-pull        Do not run git pull --ff-only
   --skip-deps        Skip dependency reinstall in portable mode. Not supported in simple mode.
   --skip-restart     Do not restart the service/container after applying changes
@@ -156,17 +176,30 @@ print_version() {
 }
 
 current_git_commit() {
-  if git rev-parse --short HEAD >/dev/null 2>&1; then
-    git rev-parse --short HEAD
+  local ref="${1:-HEAD}"
+  if git rev-parse --short "$ref" >/dev/null 2>&1; then
+    git rev-parse --short "$ref"
   else
     echo "unknown"
   fi
 }
 
+read_version_at_ref() {
+  local ref="${1:-HEAD}"
+  local value
+  value="$(git show "${ref}:VERSION" 2>/dev/null | tr -d '\n' || true)"
+  if [[ -n "$value" ]]; then
+    echo "$value"
+  else
+    read_version
+  fi
+}
+
 release_id_base() {
+  local ref="${1:-HEAD}"
   local semver commit
-  semver="$(read_version)"
-  commit="$(current_git_commit)"
+  semver="$(read_version_at_ref "$ref")"
+  commit="$(current_git_commit "$ref")"
   if [[ "$commit" == "unknown" ]]; then
     echo "${semver}"
   else
@@ -176,8 +209,9 @@ release_id_base() {
 
 unique_release_id() {
   local releases_dir="$1"
+  local ref="${2:-HEAD}"
   local base candidate suffix
-  base="$(release_id_base)"
+  base="$(release_id_base "$ref")"
   candidate="$base"
   suffix=1
   while [[ -e "${releases_dir}/${candidate}" ]]; do
@@ -189,9 +223,10 @@ unique_release_id() {
 
 export_release_tree() {
   local destination="$1"
+  local ref="${2:-HEAD}"
   mkdir -p "$destination"
   if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    git archive HEAD | tar -xf - -C "$destination"
+    git archive "$ref" | tar -xf - -C "$destination"
   else
     tar \
       --exclude='.git' \
@@ -203,7 +238,7 @@ export_release_tree() {
       --exclude='shared' \
       -cf - . | tar -xf - -C "$destination"
   fi
-  printf '%s\n' "$(current_git_commit)" > "${destination}/BUILD_COMMIT"
+  printf '%s\n' "$(current_git_commit "$ref")" > "${destination}/BUILD_COMMIT"
 }
 
 sync_shared_env() {
@@ -214,14 +249,26 @@ sync_shared_env() {
   cp .env "${shared_dir}/.env"
 }
 
-pull_code() {
+fetch_code() {
   if [[ $SKIP_PULL -eq 1 ]]; then
-    echo "Skipping git pull"
+    echo "Skipping git fetch"
     return 0
   fi
   need_cmd git
-  echo "Updating git checkout..."
-  git pull --ff-only
+  echo "Fetching git refs..."
+  git fetch --quiet --tags origin
+}
+
+resolve_target_ref() {
+  if [[ -n "$TARGET_REF" ]]; then
+    echo "$TARGET_REF"
+    return 0
+  fi
+  if [[ -n "$TARGET_BRANCH" ]]; then
+    echo "origin/${TARGET_BRANCH}"
+    return 0
+  fi
+  echo "HEAD"
 }
 
 simple_paths() {
@@ -361,8 +408,10 @@ update_simple() {
   current_link="${_paths[4]}"
 
   local previous_release new_release_name new_release_dir
+  local target_ref
   previous_release="$(readlink -f "$current_link" 2>/dev/null || true)"
-  new_release_name="$(unique_release_id "$releases_dir")"
+  target_ref="$(resolve_target_ref)"
+  new_release_name="$(unique_release_id "$releases_dir" "$target_ref")"
   new_release_dir="${releases_dir}/${new_release_name}"
 
   mkdir -p "$releases_dir" "${shared_dir}/data" "${shared_dir}/ssh"
@@ -370,7 +419,9 @@ update_simple() {
 
   echo "Preparing new release:"
   echo "  ${new_release_dir}"
-  export_release_tree "$new_release_dir"
+  echo "From ref:"
+  echo "  ${target_ref}"
+  export_release_tree "$new_release_dir" "$target_ref"
 
   echo "Installing Python runtime for new release..."
   python3 -m venv "${new_release_dir}/.venv"
@@ -475,8 +526,8 @@ main() {
   detect_mode
   echo "Detected update mode: ${MODE}"
   echo "Current checkout version: $(print_version)"
-  pull_code
-  echo "Updated checkout version: $(print_version)"
+  fetch_code
+  echo "Source checkout version: $(print_version)"
 
   case "$MODE" in
     simple)

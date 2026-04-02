@@ -208,14 +208,32 @@ def kb_admin_requests_settings_menu(notify_enabled: bool, requests_enabled: bool
     ])
 
 
-def kb_admin_updates_menu(auto_check_enabled: bool, update_supported: bool, update_running: bool, lang: str = "ru") -> InlineKeyboardMarkup:
+def kb_admin_updates_menu(auto_check_enabled: bool, update_supported: bool, update_running: bool, branch: str, lang: str = "ru") -> InlineKeyboardMarkup:
     auto_label = t(lang, "admin.updates.auto_check_on") if auto_check_enabled else t(lang, "admin.updates.auto_check_off")
     rows: List[List[InlineKeyboardButton]] = [[
         InlineKeyboardButton(t(lang, "admin.updates.check_now"), callback_data=f"{CB_MENU}admin_updates_check"),
         InlineKeyboardButton(auto_label, callback_data=f"{CB_MENU}admin_updates_toggle_auto"),
     ]]
+    rows.append([
+        InlineKeyboardButton(t(lang, "admin.updates.branch_menu"), callback_data=f"{CB_MENU}admin_updates_branch"),
+        InlineKeyboardButton(t(lang, "admin.updates.versions_menu"), callback_data=f"{CB_MENU}admin_updates_versions:0"),
+    ])
     if update_supported:
-        label = t(lang, "admin.updates.update_running") if update_running else t(lang, "admin.updates.update_now")
+        label = t(lang, "admin.updates.update_running") if update_running else t(lang, "admin.updates.update_latest")
         rows.append([InlineKeyboardButton(label, callback_data=f"{CB_MENU}admin_updates_run")])
     rows.append([InlineKeyboardButton(t(lang, "menu.back"), callback_data=f"{CB_MENU}admin")])
     return InlineKeyboardMarkup(rows)
+
+
+def kb_admin_updates_branch_menu(current_branch: str, lang: str = "ru") -> InlineKeyboardMarkup:
+    main_label = t(lang, "admin.updates.branch_main")
+    dev_label = t(lang, "admin.updates.branch_dev")
+    if current_branch == "main":
+        main_label = f">{main_label}<"
+    elif current_branch == "dev":
+        dev_label = f">{dev_label}<"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(main_label, callback_data=f"{CB_MENU}admin_updates_set_branch:main")],
+        [InlineKeyboardButton(dev_label, callback_data=f"{CB_MENU}admin_updates_set_branch:dev")],
+        [InlineKeyboardButton(t(lang, "menu.back"), callback_data=f"{CB_MENU}admin_updates")],
+    ])
