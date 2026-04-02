@@ -93,7 +93,6 @@ For AWG nodes, Node Plane builds and deploys its own wrapper image during bootst
 ```bash
 git clone git@github.com:seventh7dev/node-plane.git node-plane-src
 cd node-plane-src
-cp .env.example .env
 ./scripts/install.sh --mode simple
 ```
 
@@ -104,7 +103,6 @@ Then follow the full guide in [INSTALL.md](INSTALL.md).
 ```bash
 git clone git@github.com:seventh7dev/node-plane.git node-plane-src
 cd node-plane-src
-cp .env.example .env
 ./scripts/install.sh --mode portable
 ```
 
