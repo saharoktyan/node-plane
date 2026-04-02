@@ -639,9 +639,6 @@ def _render_admin_updates_text(lang: str, include_failure_log: bool = True) -> s
         t(lang, "admin.updates.section_last_run"),
         t(lang, "admin.updates.last_update", value=last_run_value),
     ]
-    upstream = str(overview.get("upstream_ref") or "").strip()
-    if upstream:
-        lines.append(t(lang, "admin.updates.upstream", value=upstream))
     latest_version = str(overview.get("remote_label") or "").strip()
     if latest_version:
         lines.append(t(lang, "admin.updates.latest_version", value=latest_version))
