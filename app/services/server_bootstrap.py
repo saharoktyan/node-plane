@@ -784,18 +784,16 @@ PY
 )"
 
 set +e
-RAW="$(docker_cmd exec -i "$CONTAINER" sh -lc '
-set -u
-XRAY_BIN="$(command -v xray 2>/dev/null || true)"
-if [ -z "$XRAY_BIN" ] && [ -x /usr/local/bin/xray ]; then XRAY_BIN=/usr/local/bin/xray; fi
-if [ -z "$XRAY_BIN" ] && [ -x /usr/bin/xray ]; then XRAY_BIN=/usr/bin/xray; fi
-if [ -z "$XRAY_BIN" ]; then
-  echo "xray binary not found in container" >&2
-  exit 11
-fi
-"$XRAY_BIN" api statsquery --server=127.0.0.1:10085 2>&1
-)")"
+RAW="$(docker_cmd exec -i "$CONTAINER" xray api statsquery --server=127.0.0.1:10085 2>&1)"
 rc=$?
+if [ "$rc" -ne 0 ]; then
+  RAW="$(docker_cmd exec -i "$CONTAINER" /usr/local/bin/xray api statsquery --server=127.0.0.1:10085 2>&1)"
+  rc=$?
+fi
+if [ "$rc" -ne 0 ]; then
+  RAW="$(docker_cmd exec -i "$CONTAINER" /usr/bin/xray api statsquery --server=127.0.0.1:10085 2>&1)"
+  rc=$?
+fi
 set -e
 if [ "$rc" -ne 0 ]; then
   echo "xray telemetry failed: statsquery rc=$rc" >&2
@@ -811,14 +809,34 @@ import os
 import re
 
 text = os.environ.get("XRAY_STATS_RAW", "")
-matches = re.findall(r'name:\\s*"user>>>(.*?)>>>traffic>>>(uplink|downlink)"\\s*value:\\s*([0-9]+)', text, flags=re.S)
 items = {}
-for email, direction, value in matches:
-    rec = items.setdefault(email, {"name": email, "uplink_bytes_total": 0, "downlink_bytes_total": 0})
-    if direction == "uplink":
-        rec["uplink_bytes_total"] = int(value)
-    else:
-        rec["downlink_bytes_total"] = int(value)
+
+try:
+    payload = json.loads(text)
+    for stat in payload.get("stat") or []:
+        name = str(stat.get("name") or "")
+        value = int(stat.get("value") or 0)
+        match = re.fullmatch(r'user>>>(.*?)>>>traffic>>>(uplink|downlink)', name)
+        if not match:
+            continue
+        email, direction = match.groups()
+        rec = items.setdefault(email, {"name": email, "uplink_bytes_total": 0, "downlink_bytes_total": 0})
+        if direction == "uplink":
+            rec["uplink_bytes_total"] = value
+        else:
+            rec["downlink_bytes_total"] = value
+except Exception:
+    matches = re.findall(
+        r'name:\\s*"user>>>(.*?)>>>traffic>>>(uplink|downlink)"\\s*value:\\s*([0-9]+)',
+        text,
+        flags=re.S,
+    )
+    for email, direction, value in matches:
+        rec = items.setdefault(email, {"name": email, "uplink_bytes_total": 0, "downlink_bytes_total": 0})
+        if direction == "uplink":
+            rec["uplink_bytes_total"] = int(value)
+        else:
+            rec["downlink_bytes_total"] = int(value)
 
 print(json.dumps(sorted(items.values(), key=lambda item: item["name"].lower()), ensure_ascii=False))
 PY

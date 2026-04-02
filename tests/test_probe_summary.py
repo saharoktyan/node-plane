@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 import tempfile
 import types
@@ -26,9 +27,13 @@ telegram_module = types.ModuleType("telegram")
 telegram_module.Update = object
 telegram_module.InlineKeyboardButton = object
 telegram_module.InlineKeyboardMarkup = object
+telegram_error_module = types.ModuleType("telegram.error")
+telegram_error_module.BadRequest = Exception
+telegram_error_module.RetryAfter = Exception
 telegram_ext_module = types.ModuleType("telegram.ext")
 telegram_ext_module.CallbackContext = object
 sys.modules.setdefault("telegram", telegram_module)
+sys.modules.setdefault("telegram.error", telegram_error_module)
 sys.modules.setdefault("telegram.ext", telegram_ext_module)
 
 from handlers import admin_server_wizard
@@ -36,6 +41,27 @@ from services import server_bootstrap
 
 
 class ProbeSummaryTests(unittest.TestCase):
+    def test_xray_traffic_script_is_valid_bash(self) -> None:
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".sh", delete=False) as fh:
+            fh.write(server_bootstrap.XRAY_TRAFFIC_SCRIPT)
+            script_path = fh.name
+        self.addCleanup(lambda: os.path.exists(script_path) and os.unlink(script_path))
+        result = subprocess.run(
+            ["bash", "-n", script_path],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_xray_traffic_script_uses_direct_exec_and_json_parser(self) -> None:
+        script = server_bootstrap.XRAY_TRAFFIC_SCRIPT
+        self.assertIn('docker_cmd exec -i "$CONTAINER" xray api statsquery', script)
+        self.assertNotIn('sh -lc', script)
+        self.assertIn("payload = json.loads(text)", script)
+        self.assertIn("re.fullmatch(r'user>>>(.*?)>>>traffic>>>(uplink|downlink)'", script)
+        self.assertIn("except Exception:", script)
+
     def test_single_line_note_flattens_multiline_output(self) -> None:
         note = server_bootstrap._single_line_note("line one\nline two\r\nline three\n")
         self.assertEqual(note, "line one | line two | line three")
