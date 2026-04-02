@@ -49,7 +49,6 @@ Important constraint:
 ```bash
 git clone git@github.com:seventh7dev/node-plane.git node-plane-src
 cd node-plane-src
-cp .env.example .env
 ./scripts/install.sh --mode simple
 ```
 
@@ -127,7 +126,6 @@ In practice, the script already performs these steps and is the preferred path.
 ```bash
 git clone git@github.com:seventh7dev/node-plane.git node-plane-src
 cd node-plane-src
-cp .env.example .env
 ./scripts/install.sh --mode portable
 ```
 
