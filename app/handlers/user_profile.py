@@ -852,6 +852,20 @@ def _human_size(size_bytes: int) -> str:
     return f"{value:.1f} {units[idx]}"
 
 
+def _backup_datetime_label(value: str, lang: str) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return "—"
+    try:
+        parsed = raw[:-1] + "+00:00" if raw.endswith("Z") else raw
+        dt = datetime.fromisoformat(parsed).astimezone(timezone.utc)
+    except Exception:
+        return raw
+    if lang == "ru":
+        return dt.strftime("%d.%m.%Y %H:%M UTC")
+    return dt.strftime("%Y-%m-%d %H:%M UTC")
+
+
 def _backups_run_status_label(status: str, lang: str) -> str:
     normalized = str(status or "").strip().lower()
     mapping = {
@@ -930,7 +944,7 @@ def _render_admin_backups_restore_page(lang: str, page: int) -> tuple[str, Inlin
     rows: List[List[InlineKeyboardButton]] = []
     for item in chunk:
         created_at = str(item.get("created_at") or "")
-        created_label = _human_ago(created_at, lang) if created_at else str(item.get("name") or "")
+        created_label = _backup_datetime_label(created_at, lang) if created_at else str(item.get("name") or "")
         trigger_label = _backup_trigger_label(str(item.get("trigger") or ""), lang)
         token = backup_token(str(item.get("name") or ""))
         rows.append([InlineKeyboardButton(f"{created_label} · {trigger_label}", callback_data=f"menu:admin_backups_pick:{token}")])
@@ -953,7 +967,7 @@ def _render_admin_backups_restore_confirm(lang: str, token: str) -> tuple[str, I
     if not info:
         return _render_admin_backups_restore_page(lang, 0)
     created_at = str(info.get("created_at") or "")
-    created_value = _human_ago(created_at, lang) if created_at else str(info.get("name") or "")
+    created_value = _backup_datetime_label(created_at, lang) if created_at else str(info.get("name") or "")
     lines = [
         t(lang, "admin.backups.restore_confirm_title"),
         "",

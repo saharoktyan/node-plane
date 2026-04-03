@@ -90,6 +90,8 @@ class AdminViewsTests(unittest.TestCase):
         callback = markup.inline_keyboard[0][0].callback_data
         self.assertTrue(callback.startswith("menu:admin_backups_pick:"))
         self.assertLessEqual(len(callback), 64)
+        self.assertIn("2026-04-03 17:13 UTC", markup.inline_keyboard[0][0].text)
+        self.assertNotIn("ago", markup.inline_keyboard[0][0].text)
 
     def test_admin_backups_settings_menu_marks_current_values(self) -> None:
         markup = keyboards.kb_admin_backups_settings_menu(enabled=True, interval_hours=12, keep_count=10, lang="en")
