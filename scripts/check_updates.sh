@@ -46,8 +46,8 @@ emit_error() {
   exit 1
 }
 
-stable_tag_regex='^v[0-9]+\.[0-9]+\.[0-9]+$'
-alpha_tag_regex='^v[0-9]+\.[0-9]+\.[0-9]+-alpha\.[0-9]+$'
+stable_tag_regex='^v?[0-9]+\.[0-9]+\.[0-9]+$'
+alpha_tag_regex='^v?[0-9]+\.[0-9]+\.[0-9]+-alpha\.[0-9]+$'
 
 latest_tag_for_branch() {
   local branch="$1"

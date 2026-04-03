@@ -217,8 +217,8 @@ latest_release_tag_for_branch() {
   local branch="$1"
   local regex
   case "$branch" in
-    main) regex='^v[0-9]+\.[0-9]+\.[0-9]+$' ;;
-    dev) regex='^v[0-9]+\.[0-9]+\.[0-9]+-alpha\.[0-9]+$' ;;
+    main) regex='^v?[0-9]+\.[0-9]+\.[0-9]+$' ;;
+    dev) regex='^v?[0-9]+\.[0-9]+\.[0-9]+-alpha\.[0-9]+$' ;;
     *) echo "Unsupported update branch: $branch" >&2; exit 1 ;;
   esac
   while IFS= read -r tag; do

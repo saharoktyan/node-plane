@@ -43,3 +43,4 @@ scripts/*.service
 Thumbs.db
 kitty-info
 TMP_*.md
+/RELEASE_CHECKLIST.md
