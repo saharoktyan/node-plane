@@ -77,6 +77,20 @@ class AdminViewsTests(unittest.TestCase):
         self.assertEqual([button.callback_data for button in rows[0]], ["menu:admin_backups_create", "menu:admin_backups_restore:0"])
         self.assertEqual([button.callback_data for button in rows[1]], ["menu:admin_backups_settings"])
 
+    def test_backup_restore_page_uses_short_callback_tokens(self) -> None:
+        fake_items = [
+            {
+                "name": "bot-2026-04-03T17-13-08-123456Z.sqlite3",
+                "created_at": "2026-04-03T17:13:08Z",
+                "trigger": "manual",
+            }
+        ]
+        with patch.object(user_profile, "list_backups", return_value=fake_items):
+            _text, markup = user_profile._render_admin_backups_restore_page("en", 0)
+        callback = markup.inline_keyboard[0][0].callback_data
+        self.assertTrue(callback.startswith("menu:admin_backups_pick:"))
+        self.assertLessEqual(len(callback), 64)
+
     def test_admin_backups_settings_menu_marks_current_values(self) -> None:
         markup = keyboards.kb_admin_backups_settings_menu(enabled=True, interval_hours=12, keep_count=10, lang="en")
         rows = markup.inline_keyboard

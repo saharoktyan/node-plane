@@ -104,6 +104,14 @@ class BackupsTests(unittest.TestCase):
         self.assertEqual(restored["status"], "success")
         self.assertEqual(self._count_users(), 1)
 
+    def test_backup_token_resolves_backup_without_long_callback_name(self) -> None:
+        backup = self.backups.create_backup("manual")
+        token = self.backups.backup_token(backup["name"])
+        self.assertLessEqual(len(token), 12)
+        resolved = self.backups.resolve_backup_token(token)
+        self.assertIsNotNone(resolved)
+        self.assertEqual(resolved["name"], backup["name"])
+
     def test_scheduled_backup_respects_enabled_and_due_state(self) -> None:
         self.app_settings.set_backups_enabled(True)
         self.app_settings.set_backups_interval_hours(24)

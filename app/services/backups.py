@@ -63,6 +63,11 @@ def _sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
+def backup_token(name: str) -> str:
+    raw = Path(str(name or "")).name
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:12]
+
+
 def _source_signature() -> tuple[str, int]:
     import sqlite3
 
@@ -248,6 +253,16 @@ def get_backup_info(name: str) -> Dict[str, Any] | None:
         "app_version": meta.get("app_version") or "",
         "note": meta.get("note") or "",
     }
+
+
+def resolve_backup_token(token: str) -> Dict[str, Any] | None:
+    short = str(token or "").strip().lower()
+    if not short:
+        return None
+    for item in list_backups():
+        if backup_token(str(item.get("name") or "")) == short:
+            return item
+    return None
 
 
 def restore_backup(name: str) -> Dict[str, Any]:

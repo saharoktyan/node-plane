@@ -33,7 +33,7 @@ from services.app_settings import (
     set_menu_title,
     should_show_initial_admin_setup,
 )
-from services.backups import create_backup, get_backup_info, get_backups_overview, list_backups, restore_backup
+from services.backups import backup_token, create_backup, get_backup_info, get_backups_overview, list_backups, resolve_backup_token, restore_backup
 from services.provisioning_state import summarize_server_provisioning
 from services.server_bootstrap import get_server_runtime_state, get_servers_needing_runtime_sync, sync_server_runtime
 from services.server_registry import list_servers
@@ -932,7 +932,8 @@ def _render_admin_backups_restore_page(lang: str, page: int) -> tuple[str, Inlin
         created_at = str(item.get("created_at") or "")
         created_label = _human_ago(created_at, lang) if created_at else str(item.get("name") or "")
         trigger_label = _backup_trigger_label(str(item.get("trigger") or ""), lang)
-        rows.append([InlineKeyboardButton(f"{created_label} · {trigger_label}", callback_data=f"menu:admin_backups_pick:{item['name']}")])
+        token = backup_token(str(item.get("name") or ""))
+        rows.append([InlineKeyboardButton(f"{created_label} · {trigger_label}", callback_data=f"menu:admin_backups_pick:{token}")])
     if pages > 1:
         nav: List[InlineKeyboardButton] = []
         if page > 0:
@@ -946,8 +947,9 @@ def _render_admin_backups_restore_page(lang: str, page: int) -> tuple[str, Inlin
     return text, InlineKeyboardMarkup(rows)
 
 
-def _render_admin_backups_restore_confirm(lang: str, name: str) -> tuple[str, InlineKeyboardMarkup]:
-    info = get_backup_info(name)
+def _render_admin_backups_restore_confirm(lang: str, token: str) -> tuple[str, InlineKeyboardMarkup]:
+    resolved = resolve_backup_token(token)
+    info = get_backup_info(str(resolved.get("name") or "")) if resolved else None
     if not info:
         return _render_admin_backups_restore_page(lang, 0)
     created_at = str(info.get("created_at") or "")
@@ -964,7 +966,7 @@ def _render_admin_backups_restore_confirm(lang: str, name: str) -> tuple[str, In
     ]
     markup = InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton(t(lang, "admin.backups.restore_action"), callback_data=f"menu:admin_backups_run_restore:{name}")],
+            [InlineKeyboardButton(t(lang, "admin.backups.restore_action"), callback_data=f"menu:admin_backups_run_restore:{token}")],
             [InlineKeyboardButton(t(lang, "menu.back"), callback_data="menu:admin_backups_restore:0")],
         ]
     )
@@ -1497,13 +1499,14 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
         return
 
     if payload.startswith("admin_backups_pick:") and is_admin:
-        name = payload.split(":", 1)[1]
-        text, markup = _render_admin_backups_restore_confirm(lang, name)
+        token = payload.split(":", 1)[1]
+        text, markup = _render_admin_backups_restore_confirm(lang, token)
         safe_edit_message(update, context, text, reply_markup=markup, parse_mode=PARSE_MODE)
         return
 
     if payload.startswith("admin_backups_run_restore:") and is_admin:
-        name = payload.split(":", 1)[1]
+        token = payload.split(":", 1)[1]
+        resolved = resolve_backup_token(token)
         safe_edit_message(
             update,
             context,
@@ -1511,7 +1514,7 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
             reply_markup=kb_admin_backups_menu(lang),
             parse_mode=PARSE_MODE,
         )
-        result = restore_backup(name)
+        result = restore_backup(str(resolved.get("name") or "")) if resolved else {"status": "failed", "message": "backup not found"}
         if str(result.get("status")) == "success":
             text = f"{_render_admin_backups_text(lang)}\n\n{t(lang, 'admin.backups.restore_done')}"
         else:
