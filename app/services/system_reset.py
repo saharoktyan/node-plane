@@ -8,6 +8,7 @@ from typing import List, Tuple
 from config import INSTALL_MODE, SSH_DIR, SQLITE_DB_PATH
 from db.schema import ensure_schema
 from db.sqlite_db import SQLiteDB
+from services.backups import maybe_create_pre_action_backup
 from services.server_bootstrap import full_cleanup_server
 from services.server_registry import list_servers
 
@@ -74,6 +75,7 @@ def _schedule_portable_container_teardown() -> Tuple[bool, str]:
 
 
 def run_factory_reset(cleanup_nodes: bool = False, stop_local_runtime: bool = False) -> Tuple[int, str]:
+    backup_result = maybe_create_pre_action_backup("pre_reset")
     if cleanup_nodes:
         failures: List[str] = []
         completed: List[str] = []
@@ -102,6 +104,10 @@ def run_factory_reset(cleanup_nodes: bool = False, stop_local_runtime: bool = Fa
     ssh_line = _clear_local_ssh_material()
 
     summary = ["Node Plane state removed.", "• local database state cleared", f"• {ssh_line}"]
+    if backup_result.get("status") == "success":
+        summary.append("• pre-reset backup created")
+    elif backup_result.get("status") == "failed":
+        summary.append(f"• pre-reset backup failed: {backup_result.get('message') or 'unknown error'}")
     if cleanup_nodes:
         summary.append("• managed runtimes cleaned up on registered nodes")
         summary.append("• bot SSH key removal requested for SSH nodes")

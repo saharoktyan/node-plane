@@ -4,6 +4,7 @@ import importlib
 import os
 import sys
 import tempfile
+import types
 import unittest
 
 TESTS_DIR = os.path.dirname(__file__)
@@ -13,6 +14,11 @@ if APP_ROOT not in sys.path:
     sys.path.insert(0, APP_ROOT)
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
+
+telegram_module = types.ModuleType("telegram")
+telegram_module.Update = object
+sys.modules.setdefault("telegram", telegram_module)
+sys.modules["telegram"] = telegram_module
 
 
 class SystemResetTests(unittest.TestCase):

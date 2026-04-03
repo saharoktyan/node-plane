@@ -28,6 +28,16 @@ _UPDATES_LAST_RUN_UNIT_KEY = "updates_last_run_unit"
 _UPDATES_BRANCH_KEY = "updates_branch"
 _UPDATES_LOCAL_VERSION_KEY = "updates_local_version"
 _UPDATES_REMOTE_VERSION_KEY = "updates_remote_version"
+_BACKUPS_ENABLED_KEY = "backups_enabled"
+_BACKUPS_INTERVAL_HOURS_KEY = "backups_interval_hours"
+_BACKUPS_KEEP_COUNT_KEY = "backups_keep_count"
+_BACKUPS_LAST_RUN_AT_KEY = "backups_last_run_at"
+_BACKUPS_LAST_STATUS_KEY = "backups_last_status"
+_BACKUPS_LAST_ERROR_KEY = "backups_last_error"
+_BACKUPS_LAST_SNAPSHOT_PATH_KEY = "backups_last_snapshot_path"
+_BACKUPS_LAST_SNAPSHOT_SHA256_KEY = "backups_last_snapshot_sha256"
+_BACKUPS_LAST_RESTORE_AT_KEY = "backups_last_restore_at"
+_BACKUPS_LAST_RESTORE_STATUS_KEY = "backups_last_restore_status"
 _schema_ready = False
 
 
@@ -240,3 +250,78 @@ def record_update_run_finished(status: str, finished_at: str, log_tail: str = ""
 
 def set_update_run_log_tail(log_tail: str) -> None:
     _meta_set(_UPDATES_LAST_RUN_LOG_TAIL_KEY, log_tail)
+
+
+def is_backups_enabled() -> bool:
+    return _meta_get(_BACKUPS_ENABLED_KEY, "0") == "1"
+
+
+def set_backups_enabled(enabled: bool) -> bool:
+    _meta_set(_BACKUPS_ENABLED_KEY, "1" if enabled else "0")
+    return enabled
+
+
+def get_backups_interval_hours() -> int:
+    raw = _meta_get(_BACKUPS_INTERVAL_HOURS_KEY, "24").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        value = 24
+    return value if value in {6, 12, 24} else 24
+
+
+def set_backups_interval_hours(hours: int) -> int:
+    value = int(hours)
+    if value not in {6, 12, 24}:
+        raise ValueError("Unsupported backups interval")
+    _meta_set(_BACKUPS_INTERVAL_HOURS_KEY, str(value))
+    return value
+
+
+def get_backups_keep_count() -> int:
+    raw = _meta_get(_BACKUPS_KEEP_COUNT_KEY, "10").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        value = 10
+    return value if value in {5, 10, 20} else 10
+
+
+def set_backups_keep_count(count: int) -> int:
+    value = int(count)
+    if value not in {5, 10, 20}:
+        raise ValueError("Unsupported backups keep count")
+    _meta_set(_BACKUPS_KEEP_COUNT_KEY, str(value))
+    return value
+
+
+def record_backup_run(status: str, run_at: str, *, error: str = "", snapshot_path: str = "", snapshot_sha256: str = "") -> None:
+    _meta_set(_BACKUPS_LAST_RUN_AT_KEY, run_at)
+    _meta_set(_BACKUPS_LAST_STATUS_KEY, status)
+    _meta_set(_BACKUPS_LAST_ERROR_KEY, error)
+    if snapshot_path:
+        _meta_set(_BACKUPS_LAST_SNAPSHOT_PATH_KEY, snapshot_path)
+    if snapshot_sha256:
+        _meta_set(_BACKUPS_LAST_SNAPSHOT_SHA256_KEY, snapshot_sha256)
+
+
+def record_backup_restore(status: str, restored_at: str, *, error: str = "") -> None:
+    _meta_set(_BACKUPS_LAST_RESTORE_AT_KEY, restored_at)
+    _meta_set(_BACKUPS_LAST_RESTORE_STATUS_KEY, status)
+    if error:
+        _meta_set(_BACKUPS_LAST_ERROR_KEY, error)
+
+
+def get_backups_state() -> dict[str, str | int | bool]:
+    return {
+        "enabled": is_backups_enabled(),
+        "interval_hours": get_backups_interval_hours(),
+        "keep_count": get_backups_keep_count(),
+        "last_run_at": _meta_get(_BACKUPS_LAST_RUN_AT_KEY, ""),
+        "last_status": _meta_get(_BACKUPS_LAST_STATUS_KEY, "never"),
+        "last_error": _meta_get(_BACKUPS_LAST_ERROR_KEY, ""),
+        "last_snapshot_path": _meta_get(_BACKUPS_LAST_SNAPSHOT_PATH_KEY, ""),
+        "last_snapshot_sha256": _meta_get(_BACKUPS_LAST_SNAPSHOT_SHA256_KEY, ""),
+        "last_restore_at": _meta_get(_BACKUPS_LAST_RESTORE_AT_KEY, ""),
+        "last_restore_status": _meta_get(_BACKUPS_LAST_RESTORE_STATUS_KEY, "never"),
+    }

@@ -4,14 +4,17 @@ import os
 import subprocess
 import logging
 import re
+import threading
 from datetime import datetime, timezone
 from typing import Dict, List
 
 from config import APP_ROOT, APP_SEMVER, APP_VERSION, BASE_DIR, INSTALL_MODE, SOURCE_ROOT
 from services import app_settings
+from services.backups import maybe_create_pre_action_backup
 
 UPDATE_UNIT_PREFIX = "node-plane-update"
 _log = logging.getLogger("updates")
+_update_run_lock = threading.Lock()
 
 
 def _utcnow_iso() -> str:
@@ -320,48 +323,52 @@ def refresh_update_run_state(timeout: int = 20) -> Dict[str, str]:
 
 
 def schedule_update(timeout: int = 30, branch: str | None = None, target_ref: str | None = None) -> Dict[str, str]:
-    state = refresh_update_run_state()
-    if str(state.get("last_run_status") or "") == "running":
-        return {"status": "running", "unit_name": str(state.get("last_run_unit") or "")}
-    if not is_manual_update_supported():
-        app_settings.record_update_run_finished("failed", _utcnow_iso(), "manual updates are only available in simple mode")
-        state = app_settings.get_update_state()
-        return {"status": "failed", "message": str(state.get("last_run_log_tail") or "")}
-    source_root = _effective_source_root()
-    selected_branch = str(branch or app_settings.get_updates_branch()).strip().lower() or "main"
-    started_at = _utcnow_iso()
-    unit_name = f"{UPDATE_UNIT_PREFIX}-{started_at.replace(':', '').replace('-', '').replace('T', '-').replace('Z', '').lower()}"
-    try:
-        cmd = _system_cmd(
-            "systemd-run",
-            "--unit",
-            unit_name,
-            "--collect",
-            "--working-directory",
-            source_root,
-            "--setenv",
-            f"NODE_PLANE_SOURCE_DIR={source_root}",
-            "--setenv",
-            "NODE_PLANE_INSTALL_MODE=simple",
-            f"{source_root}/scripts/update.sh",
-            "--mode",
-            "simple",
-            "--branch",
-            selected_branch,
-        )
-        if target_ref:
-            cmd.extend(["--to", target_ref])
-        proc = _run_cmd(cmd, cwd=source_root, timeout=timeout)
-        output = ((proc.stdout or "").strip() + "\n" + (proc.stderr or "").strip()).strip()
-        if proc.returncode != 0:
-            message = output or f"failed to start update job (exit {proc.returncode})"
-            app_settings.record_update_run_finished("failed", _utcnow_iso(), message)
-            return {"status": "failed", "message": message}
-        app_settings.record_update_run_started(started_at, unit_name)
-        return {"status": "running", "unit_name": unit_name}
-    except Exception as exc:
-        app_settings.record_update_run_finished("failed", _utcnow_iso(), str(exc))
-        return {"status": "failed", "message": str(exc)}
+    with _update_run_lock:
+        state = refresh_update_run_state()
+        if str(state.get("last_run_status") or "") == "running":
+            return {"status": "running", "unit_name": str(state.get("last_run_unit") or "")}
+        if not is_manual_update_supported():
+            app_settings.record_update_run_finished("failed", _utcnow_iso(), "manual updates are only available in simple mode")
+            state = app_settings.get_update_state()
+            return {"status": "failed", "message": str(state.get("last_run_log_tail") or "")}
+        source_root = _effective_source_root()
+        selected_branch = str(branch or app_settings.get_updates_branch()).strip().lower() or "main"
+        started_at = _utcnow_iso()
+        unit_name = f"{UPDATE_UNIT_PREFIX}-{started_at.replace(':', '').replace('-', '').replace('T', '-').replace('Z', '').lower()}"
+        try:
+            backup_result = maybe_create_pre_action_backup("pre_update")
+            cmd = _system_cmd(
+                "systemd-run",
+                "--unit",
+                unit_name,
+                "--collect",
+                "--working-directory",
+                source_root,
+                "--setenv",
+                f"NODE_PLANE_SOURCE_DIR={source_root}",
+                "--setenv",
+                "NODE_PLANE_INSTALL_MODE=simple",
+                f"{source_root}/scripts/update.sh",
+                "--mode",
+                "simple",
+                "--branch",
+                selected_branch,
+            )
+            if target_ref:
+                cmd.extend(["--to", target_ref])
+            proc = _run_cmd(cmd, cwd=source_root, timeout=timeout)
+            output = ((proc.stdout or "").strip() + "\n" + (proc.stderr or "").strip()).strip()
+            if backup_result.get("status") == "failed":
+                output = (f"pre-update backup failed: {backup_result.get('message') or 'unknown error'}\n{output}").strip()
+            if proc.returncode != 0:
+                message = output or f"failed to start update job (exit {proc.returncode})"
+                app_settings.record_update_run_finished("failed", _utcnow_iso(), message)
+                return {"status": "failed", "message": message}
+            app_settings.record_update_run_started(started_at, unit_name)
+            return {"status": "running", "unit_name": unit_name}
+        except Exception as exc:
+            app_settings.record_update_run_finished("failed", _utcnow_iso(), str(exc))
+            return {"status": "failed", "message": str(exc)}
 
 
 def auto_check_job(context: object | None = None) -> None:

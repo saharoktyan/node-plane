@@ -12,12 +12,18 @@ from domain.servers import get_access_methods_for_codes
 from i18n import get_locale_for_update, get_user_locale, set_user_locale, t
 from services.app_settings import (
     are_access_requests_enabled,
+    get_backups_interval_hours,
+    get_backups_keep_count,
     get_access_gate_message,
     get_menu_title,
     get_menu_title_markdown,
     get_updates_branch,
+    is_backups_enabled,
     is_updates_auto_check_enabled,
     is_global_telemetry_enabled,
+    set_backups_enabled,
+    set_backups_interval_hours,
+    set_backups_keep_count,
     set_access_gate_message,
     set_access_requests_enabled,
     set_updates_auto_check_enabled,
@@ -27,6 +33,7 @@ from services.app_settings import (
     set_menu_title,
     should_show_initial_admin_setup,
 )
+from services.backups import create_backup, get_backup_info, get_backups_overview, list_backups, restore_backup
 from services.provisioning_state import summarize_server_provisioning
 from services.server_registry import list_servers
 from services.awg_profiles import list_awg_server_keys
@@ -37,7 +44,7 @@ from services.traffic_usage import get_profile_monthly_usage
 from services.updates import check_for_updates, get_updates_menu_emoji, get_updates_overview, get_version_transition, list_available_versions, schedule_update
 from services.xray import get_server_link_status
 from ui.user_views import format_server_access
-from utils.keyboards import kb_admin_menu, kb_admin_requests_settings_menu, kb_admin_settings_menu, kb_admin_updates_branch_menu, kb_admin_updates_menu, kb_back_to_admin, kb_language_menu, kb_main_menu, kb_profile_minimal, kb_profile_stats, kb_settings_menu
+from utils.keyboards import kb_admin_backups_menu, kb_admin_backups_settings_menu, kb_admin_menu, kb_admin_requests_settings_menu, kb_admin_settings_menu, kb_admin_updates_branch_menu, kb_admin_updates_menu, kb_back_to_admin, kb_language_menu, kb_main_menu, kb_profile_minimal, kb_profile_stats, kb_settings_menu
 from utils.tg import answer_cb, safe_delete_update_message, safe_edit_by_ids, safe_edit_message
 
 from .user_common import _access_gate_text, _build_start_reply, _has_access, _human_ago, _human_left, _is_admin, _resolve_profile_name, _sub_progress
@@ -755,6 +762,137 @@ def _render_admin_updates_version_confirm(lang: str, ref: str) -> tuple[str, Inl
     return "\n".join(lines), InlineKeyboardMarkup(rows)
 
 
+def _human_size(size_bytes: int) -> str:
+    value = float(max(0, int(size_bytes)))
+    units = ["B", "KiB", "MiB", "GiB"]
+    idx = 0
+    while value >= 1024 and idx < len(units) - 1:
+        value /= 1024.0
+        idx += 1
+    if idx == 0:
+        return f"{int(value)} {units[idx]}"
+    return f"{value:.1f} {units[idx]}"
+
+
+def _backups_run_status_label(status: str, lang: str) -> str:
+    normalized = str(status or "").strip().lower()
+    mapping = {
+        "never": "admin.backups.run_never",
+        "success": "admin.backups.run_success",
+        "failed": "admin.backups.run_failed",
+        "skipped_duplicate": "admin.backups.run_skipped_duplicate",
+    }
+    return t(lang, mapping.get(normalized, "admin.backups.run_failed"))
+
+
+def _backups_restore_status_label(status: str, lang: str) -> str:
+    normalized = str(status or "").strip().lower()
+    mapping = {
+        "never": "admin.backups.restore_never",
+        "success": "admin.backups.restore_success",
+        "failed": "admin.backups.restore_failed",
+    }
+    return t(lang, mapping.get(normalized, "admin.backups.restore_failed"))
+
+
+def _backup_trigger_label(trigger: str, lang: str) -> str:
+    normalized = str(trigger or "").strip().lower()
+    key = f"admin.backups.trigger_{normalized.replace('-', '_')}"
+    try:
+        return t(lang, key)
+    except Exception:
+        return t(lang, "admin.backups.trigger_unknown")
+
+
+def _render_admin_backups_text(lang: str) -> str:
+    overview = get_backups_overview()
+    last_run_at = str(overview.get("last_run_at") or "").strip()
+    last_restore_at = str(overview.get("last_restore_at") or "").strip()
+    last_run_value = _backups_run_status_label(str(overview.get("last_status") or "never"), lang)
+    if last_run_at:
+        last_run_value = f"{last_run_value} · {_human_ago(last_run_at, lang)}"
+    last_restore_value = _backups_restore_status_label(str(overview.get("last_restore_status") or "never"), lang)
+    if last_restore_at:
+        last_restore_value = f"{last_restore_value} · {_human_ago(last_restore_at, lang)}"
+    lines = [
+        t(lang, "admin.backups.title"),
+        "",
+        t(lang, "admin.backups.section_status"),
+        t(lang, "admin.backups.status", value=t(lang, "admin.backups.enabled") if overview.get("enabled") else t(lang, "admin.backups.disabled")),
+        t(lang, "admin.backups.interval", value=f"{overview.get('interval_hours', 24)}h"),
+        t(lang, "admin.backups.keep_count", value=str(overview.get("keep_count", 10))),
+        t(lang, "admin.backups.last_run", value=last_run_value),
+        t(lang, "admin.backups.last_status", value=_backups_run_status_label(str(overview.get("last_status") or "never"), lang)),
+        "",
+        t(lang, "admin.backups.section_storage"),
+        t(lang, "admin.backups.total_files", value=str(overview.get("total_backups", 0))),
+        t(lang, "admin.backups.total_size", value=_human_size(int(overview.get("total_size_bytes") or 0))),
+        "",
+        t(lang, "admin.backups.section_restore"),
+        t(lang, "admin.backups.last_restore", value=last_restore_value),
+        t(lang, "admin.backups.last_restore_status", value=_backups_restore_status_label(str(overview.get("last_restore_status") or "never"), lang)),
+    ]
+    last_error = str(overview.get("last_error") or "").strip()
+    if last_error:
+        lines.extend(["", t(lang, "admin.backups.last_error", value=last_error)])
+    return "\n".join(lines)
+
+
+def _render_admin_backups_restore_page(lang: str, page: int) -> tuple[str, InlineKeyboardMarkup]:
+    items = list_backups()
+    if not items:
+        return (
+            f"{t(lang, 'admin.backups.list_title')}\n\n{t(lang, 'admin.backups.list_empty')}",
+            InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, "menu.back"), callback_data="menu:admin_backups")]]),
+        )
+    total = len(items)
+    pages = max(1, (total + LIST_PAGE_SIZE - 1) // LIST_PAGE_SIZE)
+    page = max(0, min(page, pages - 1))
+    chunk = items[page * LIST_PAGE_SIZE : (page + 1) * LIST_PAGE_SIZE]
+    rows: List[List[InlineKeyboardButton]] = []
+    for item in chunk:
+        created_at = str(item.get("created_at") or "")
+        created_label = _human_ago(created_at, lang) if created_at else str(item.get("name") or "")
+        trigger_label = _backup_trigger_label(str(item.get("trigger") or ""), lang)
+        rows.append([InlineKeyboardButton(f"{created_label} · {trigger_label}", callback_data=f"menu:admin_backups_pick:{item['name']}")])
+    if pages > 1:
+        nav: List[InlineKeyboardButton] = []
+        if page > 0:
+            nav.append(InlineKeyboardButton("⬅️", callback_data=f"menu:admin_backups_restore:{page-1}"))
+        nav.append(InlineKeyboardButton(f"{page+1}/{pages}", callback_data=f"menu:admin_backups_restore:{page}"))
+        if page < pages - 1:
+            nav.append(InlineKeyboardButton("➡️", callback_data=f"menu:admin_backups_restore:{page+1}"))
+        rows.append(nav)
+    rows.append([InlineKeyboardButton(t(lang, "menu.back"), callback_data="menu:admin_backups")])
+    text = "\n".join([t(lang, "admin.backups.list_title"), "", t(lang, "admin.backups.list_intro")])
+    return text, InlineKeyboardMarkup(rows)
+
+
+def _render_admin_backups_restore_confirm(lang: str, name: str) -> tuple[str, InlineKeyboardMarkup]:
+    info = get_backup_info(name)
+    if not info:
+        return _render_admin_backups_restore_page(lang, 0)
+    created_at = str(info.get("created_at") or "")
+    created_value = _human_ago(created_at, lang) if created_at else str(info.get("name") or "")
+    lines = [
+        t(lang, "admin.backups.restore_confirm_title"),
+        "",
+        t(lang, "admin.backups.restore_confirm_created", value=created_value),
+        t(lang, "admin.backups.restore_confirm_trigger", value=_backup_trigger_label(str(info.get("trigger") or ""), lang)),
+        t(lang, "admin.backups.restore_confirm_size", value=_human_size(int(info.get("size_bytes") or 0))),
+        t(lang, "admin.backups.restore_confirm_version", value=str(info.get("app_version") or "—")),
+        "",
+        t(lang, "admin.backups.restore_confirm_warning"),
+    ]
+    markup = InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(t(lang, "admin.backups.restore_action"), callback_data=f"menu:admin_backups_run_restore:{name}")],
+            [InlineKeyboardButton(t(lang, "menu.back"), callback_data="menu:admin_backups_restore:0")],
+        ]
+    )
+    return "\n".join(lines), markup
+
+
 def admin_menu_text_router(update: Update, context: CallbackContext) -> None:
     if not _is_admin(update):
         return
@@ -1197,6 +1335,110 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
             reply_markup=_admin_updates_markup(lang),
             parse_mode=PARSE_MODE,
         )
+        return
+
+    if payload == "admin_backups" and is_admin:
+        safe_edit_message(
+            update,
+            context,
+            _render_admin_backups_text(lang),
+            reply_markup=kb_admin_backups_menu(lang),
+            parse_mode=PARSE_MODE,
+        )
+        return
+
+    if payload == "admin_backups_create" and is_admin:
+        safe_edit_message(
+            update,
+            context,
+            t(lang, "admin.backups.creating"),
+            reply_markup=kb_admin_backups_menu(lang),
+            parse_mode=PARSE_MODE,
+        )
+        result = create_backup("manual")
+        text = _render_admin_backups_text(lang)
+        if str(result.get("status")) == "skipped_duplicate":
+            text = f"{text}\n\n{t(lang, 'admin.backups.duplicate_skipped')}"
+        elif str(result.get("status")) == "failed":
+            text = f"{text}\n\n{t(lang, 'admin.backups.last_error', value=str(result.get('message') or 'unknown error'))}"
+        safe_edit_message(update, context, text, reply_markup=kb_admin_backups_menu(lang), parse_mode=PARSE_MODE)
+        return
+
+    if payload == "admin_backups_settings" and is_admin:
+        safe_edit_message(
+            update,
+            context,
+            t(lang, "admin.backups.settings_title"),
+            reply_markup=kb_admin_backups_settings_menu(is_backups_enabled(), get_backups_interval_hours(), get_backups_keep_count(), lang),
+            parse_mode=PARSE_MODE,
+        )
+        return
+
+    if payload == "admin_backups_toggle" and is_admin:
+        enabled = set_backups_enabled(not is_backups_enabled())
+        safe_edit_message(
+            update,
+            context,
+            t(lang, "admin.backups.settings_title"),
+            reply_markup=kb_admin_backups_settings_menu(enabled, get_backups_interval_hours(), get_backups_keep_count(), lang),
+            parse_mode=PARSE_MODE,
+        )
+        return
+
+    if payload.startswith("admin_backups_interval:") and is_admin:
+        raw = payload.split(":", 1)[1]
+        hours = int(raw) if raw.isdigit() else get_backups_interval_hours()
+        set_backups_interval_hours(hours)
+        safe_edit_message(
+            update,
+            context,
+            t(lang, "admin.backups.settings_title"),
+            reply_markup=kb_admin_backups_settings_menu(is_backups_enabled(), get_backups_interval_hours(), get_backups_keep_count(), lang),
+            parse_mode=PARSE_MODE,
+        )
+        return
+
+    if payload.startswith("admin_backups_keep:") and is_admin:
+        raw = payload.split(":", 1)[1]
+        count = int(raw) if raw.isdigit() else get_backups_keep_count()
+        set_backups_keep_count(count)
+        safe_edit_message(
+            update,
+            context,
+            t(lang, "admin.backups.settings_title"),
+            reply_markup=kb_admin_backups_settings_menu(is_backups_enabled(), get_backups_interval_hours(), get_backups_keep_count(), lang),
+            parse_mode=PARSE_MODE,
+        )
+        return
+
+    if payload.startswith("admin_backups_restore:") and is_admin:
+        raw_page = payload.split(":", 1)[1]
+        page = int(raw_page) if raw_page.isdigit() else 0
+        text, markup = _render_admin_backups_restore_page(lang, page)
+        safe_edit_message(update, context, text, reply_markup=markup, parse_mode=PARSE_MODE)
+        return
+
+    if payload.startswith("admin_backups_pick:") and is_admin:
+        name = payload.split(":", 1)[1]
+        text, markup = _render_admin_backups_restore_confirm(lang, name)
+        safe_edit_message(update, context, text, reply_markup=markup, parse_mode=PARSE_MODE)
+        return
+
+    if payload.startswith("admin_backups_run_restore:") and is_admin:
+        name = payload.split(":", 1)[1]
+        safe_edit_message(
+            update,
+            context,
+            t(lang, "admin.backups.restoring"),
+            reply_markup=kb_admin_backups_menu(lang),
+            parse_mode=PARSE_MODE,
+        )
+        result = restore_backup(name)
+        if str(result.get("status")) == "success":
+            text = f"{_render_admin_backups_text(lang)}\n\n{t(lang, 'admin.backups.restore_done')}"
+        else:
+            text = f"{_render_admin_backups_text(lang)}\n\n{t(lang, 'admin.backups.restore_failed_text', value=str(result.get('message') or 'unknown error'))}"
+        safe_edit_message(update, context, text, reply_markup=kb_admin_backups_menu(lang), parse_mode=PARSE_MODE)
         return
 
     if payload == "admin_updates_toggle_auto" and is_admin:
