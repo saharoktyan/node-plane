@@ -15,11 +15,13 @@ from services.app_settings import (
     get_access_gate_message,
     get_menu_title,
     get_menu_title_markdown,
+    get_updates_branch,
     is_updates_auto_check_enabled,
     is_global_telemetry_enabled,
     set_access_gate_message,
     set_access_requests_enabled,
     set_updates_auto_check_enabled,
+    set_updates_branch,
     set_global_telemetry_enabled,
     set_initial_setup_state,
     set_menu_title,
@@ -32,10 +34,10 @@ from services.ssh_keys import render_public_key_guide, render_public_key_summary
 from services.system_reset import run_factory_reset
 from services.profile_state import ensure_telegram_profile, get_allowed_protocols, get_profile, get_profile_access_status, profile_store, user_store, utcnow
 from services.traffic_usage import get_profile_monthly_usage
-from services.updates import check_for_updates, get_updates_menu_emoji, get_updates_overview, schedule_update
+from services.updates import check_for_updates, get_updates_menu_emoji, get_updates_overview, get_version_transition, list_available_versions, schedule_update
 from services.xray import get_server_link_status
 from ui.user_views import format_server_access
-from utils.keyboards import kb_admin_menu, kb_admin_requests_settings_menu, kb_admin_settings_menu, kb_admin_updates_menu, kb_back_to_admin, kb_language_menu, kb_main_menu, kb_profile_minimal, kb_profile_stats, kb_settings_menu
+from utils.keyboards import kb_admin_menu, kb_admin_requests_settings_menu, kb_admin_settings_menu, kb_admin_updates_branch_menu, kb_admin_updates_menu, kb_back_to_admin, kb_language_menu, kb_main_menu, kb_profile_minimal, kb_profile_stats, kb_settings_menu
 from utils.tg import answer_cb, safe_delete_update_message, safe_edit_by_ids, safe_edit_message
 
 from .user_common import _access_gate_text, _build_start_reply, _has_access, _human_ago, _human_left, _is_admin, _resolve_profile_name, _sub_progress
@@ -605,6 +607,7 @@ def _admin_updates_markup(lang: str) -> InlineKeyboardMarkup:
         bool(overview.get("auto_check_enabled")),
         show_update_action,
         update_running,
+        str(overview.get("branch") or get_updates_branch()),
         lang,
     )
 
@@ -623,6 +626,7 @@ def _render_admin_updates_text(lang: str, include_failure_log: bool = True) -> s
         t(lang, "admin.updates.title"),
         "",
         t(lang, "admin.updates.section_status"),
+        t(lang, "admin.updates.branch", value=str(overview.get("branch") or get_updates_branch())),
         t(lang, "admin.updates.auto_check", value=auto_check_value),
         t(lang, "admin.updates.last_checked", value=last_checked_value),
         t(lang, "admin.updates.last_status", value=_updates_status_label(str(overview.get("last_status") or "never"), lang)),
@@ -635,9 +639,6 @@ def _render_admin_updates_text(lang: str, include_failure_log: bool = True) -> s
         t(lang, "admin.updates.section_last_run"),
         t(lang, "admin.updates.last_update", value=last_run_value),
     ]
-    upstream = str(overview.get("upstream_ref") or "").strip()
-    if upstream:
-        lines.append(t(lang, "admin.updates.upstream", value=upstream))
     latest_version = str(overview.get("remote_label") or "").strip()
     if latest_version:
         lines.append(t(lang, "admin.updates.latest_version", value=latest_version))
@@ -654,6 +655,104 @@ def _render_admin_updates_text(lang: str, include_failure_log: bool = True) -> s
             ]
         )
     return "\n".join(lines)
+
+
+def _render_admin_updates_branch_text(lang: str) -> str:
+    branch = get_updates_branch()
+    return "\n".join(
+        [
+            t(lang, "admin.updates.branch_title"),
+            "",
+            t(lang, "admin.updates.branch_current", value=branch),
+            "",
+            t(lang, "admin.updates.branch_intro"),
+            t(lang, "admin.updates.branch_hint_main"),
+            t(lang, "admin.updates.branch_hint_dev"),
+        ]
+    )
+
+
+def _render_admin_updates_versions_page(lang: str, page: int) -> tuple[str, InlineKeyboardMarkup]:
+    branch = get_updates_branch()
+    result = list_available_versions(branch)
+    versions = list(result.get("versions") or [])
+    if not versions:
+        text = f"{t(lang, 'admin.updates.versions_title')}\n\n{t(lang, 'admin.updates.versions_empty', branch=branch)}"
+        return text, InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, "menu.back"), callback_data="menu:admin_updates")]])
+
+    total = len(versions)
+    pages = max(1, (total + LIST_PAGE_SIZE - 1) // LIST_PAGE_SIZE)
+    page = max(0, min(page, pages - 1))
+    chunk = versions[page * LIST_PAGE_SIZE : (page + 1) * LIST_PAGE_SIZE]
+    rows: List[List[InlineKeyboardButton]] = []
+    for item in chunk:
+        action = str(item.get("action") or "blocked")
+        if action == "current":
+            icon = "•"
+        elif action == "upgrade":
+            icon = "↑"
+        elif action == "downgrade":
+            icon = "↓"
+        else:
+            icon = "×"
+        if action == "current":
+            callback = f"menu:admin_updates_versions:{page}"
+        elif action == "upgrade":
+            callback = f"menu:admin_updates_version:{item['ref']}"
+        elif action == "downgrade":
+            callback = f"menu:admin_updates_version:{item['ref']}"
+        else:
+            callback = f"menu:admin_updates_versions:{page}"
+        rows.append([InlineKeyboardButton(f"{icon} {item['version']}", callback_data=callback)])
+    if pages > 1:
+        nav: List[InlineKeyboardButton] = []
+        if page > 0:
+            nav.append(InlineKeyboardButton("⬅️", callback_data=f"menu:admin_updates_versions:{page-1}"))
+        nav.append(InlineKeyboardButton(f"{page+1}/{pages}", callback_data=f"menu:admin_updates_versions:{page}"))
+        if page < pages - 1:
+            nav.append(InlineKeyboardButton("➡️", callback_data=f"menu:admin_updates_versions:{page+1}"))
+        rows.append(nav)
+    rows.append([InlineKeyboardButton(t(lang, "menu.back"), callback_data="menu:admin_updates")])
+    current_version = str(result.get("current_version") or get_updates_overview().get("current_version") or "—")
+    text = "\n".join(
+        [
+            t(lang, "admin.updates.versions_title"),
+            "",
+            t(lang, "admin.updates.versions_intro", branch=branch),
+            t(lang, "admin.updates.version_confirm_current", value=current_version),
+            t(lang, "admin.updates.versions_legend"),
+        ]
+    )
+    return text, InlineKeyboardMarkup(rows)
+
+
+def _render_admin_updates_version_confirm(lang: str, ref: str) -> tuple[str, InlineKeyboardMarkup]:
+    versions = list_available_versions(get_updates_branch()).get("versions") or []
+    item = next((entry for entry in versions if str(entry.get("ref")) == ref), None)
+    if not item:
+        return _render_admin_updates_versions_page(lang, 0)
+    target_version = str(item.get("version") or "")
+    transition = get_version_transition(str(get_updates_overview().get("current_version") or ""), target_version)
+    lines = [
+        t(lang, "admin.updates.version_confirm_title"),
+        "",
+        t(lang, "admin.updates.version_confirm_current", value=str(get_updates_overview().get("current_version") or "—")),
+        t(lang, "admin.updates.version_confirm_target", value=target_version),
+    ]
+    if transition.get("action") in {"upgrade", "downgrade"}:
+        lines.append(t(lang, "admin.updates.version_confirm_action", value=t(lang, f"admin.updates.action_{transition['action']}")))
+    reason = str(transition.get("reason") or "")
+    if reason == "major_upgrade":
+        lines.extend(["", t(lang, "admin.updates.version_confirm_warning_major")])
+    elif reason == "major_downgrade_blocked":
+        lines.extend(["", t(lang, "admin.updates.version_confirm_blocked_major")])
+    elif reason == "pre1_minor_downgrade_blocked":
+        lines.extend(["", t(lang, "admin.updates.version_confirm_blocked_pre1")])
+    rows = []
+    if bool(transition.get("allowed")):
+        rows.append([InlineKeyboardButton(t(lang, "admin.updates.version_install"), callback_data=f"menu:admin_updates_install:{ref}")])
+    rows.append([InlineKeyboardButton(t(lang, "menu.back"), callback_data="menu:admin_updates_versions:0")])
+    return "\n".join(lines), InlineKeyboardMarkup(rows)
 
 
 def admin_menu_text_router(update: Update, context: CallbackContext) -> None:
@@ -1109,7 +1208,7 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
             update,
             context,
             _render_admin_updates_text(lang),
-            reply_markup=kb_admin_updates_menu(enabled, show_update_action, update_running, lang),
+            reply_markup=kb_admin_updates_menu(enabled, show_update_action, update_running, str(overview.get("branch") or get_updates_branch()), lang),
             parse_mode=PARSE_MODE,
         )
         return
@@ -1122,7 +1221,7 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
             reply_markup=_admin_updates_markup(lang),
             parse_mode=PARSE_MODE,
         )
-        check_for_updates()
+        check_for_updates(branch=get_updates_branch())
         safe_edit_message(
             update,
             context,
@@ -1130,6 +1229,42 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
             reply_markup=_admin_updates_markup(lang),
             parse_mode=PARSE_MODE,
         )
+        return
+
+    if payload == "admin_updates_branch" and is_admin:
+        safe_edit_message(
+            update,
+            context,
+            _render_admin_updates_branch_text(lang),
+            reply_markup=kb_admin_updates_branch_menu(get_updates_branch(), lang),
+            parse_mode=PARSE_MODE,
+        )
+        return
+
+    if payload.startswith("admin_updates_set_branch:") and is_admin:
+        branch = payload.split(":", 1)[1].strip().lower()
+        set_updates_branch(branch)
+        check_for_updates(branch=branch)
+        safe_edit_message(
+            update,
+            context,
+            _render_admin_updates_text(lang),
+            reply_markup=_admin_updates_markup(lang),
+            parse_mode=PARSE_MODE,
+        )
+        return
+
+    if payload.startswith("admin_updates_versions:") and is_admin:
+        raw_page = payload.split(":", 1)[1]
+        page = int(raw_page) if raw_page.isdigit() else 0
+        text, markup = _render_admin_updates_versions_page(lang, page)
+        safe_edit_message(update, context, text, reply_markup=markup, parse_mode=PARSE_MODE)
+        return
+
+    if payload.startswith("admin_updates_version:") and is_admin:
+        ref = payload.split(":", 1)[1]
+        text, markup = _render_admin_updates_version_confirm(lang, ref)
+        safe_edit_message(update, context, text, reply_markup=markup, parse_mode=PARSE_MODE)
         return
 
     if payload == "admin_updates_run" and is_admin:
@@ -1153,6 +1288,17 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
             )
             return
         else:
+            versions = list_available_versions(get_updates_branch()).get("versions") or []
+            latest_ref = next((str(item.get("ref")) for item in versions if item.get("action") == "upgrade"), "")
+            if not latest_ref:
+                safe_edit_message(
+                    update,
+                    context,
+                    _render_admin_updates_text(lang),
+                    reply_markup=_admin_updates_markup(lang),
+                    parse_mode=PARSE_MODE,
+                )
+                return
             safe_edit_message(
                 update,
                 context,
@@ -1160,7 +1306,27 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
                 reply_markup=_admin_updates_markup(lang),
                 parse_mode=PARSE_MODE,
             )
-        schedule_update()
+        schedule_update(branch=get_updates_branch(), target_ref=latest_ref)
+        safe_edit_message(
+            update,
+            context,
+            _render_admin_updates_text(lang, include_failure_log=False),
+            reply_markup=_admin_updates_markup(lang),
+            parse_mode=PARSE_MODE,
+        )
+        return
+
+    if payload.startswith("admin_updates_install:") and is_admin:
+        ref = payload.split(":", 1)[1]
+        text, markup = _render_admin_updates_version_confirm(lang, ref)
+        safe_edit_message(
+            update,
+            context,
+            t(lang, "admin.updates.starting"),
+            reply_markup=markup,
+            parse_mode=PARSE_MODE,
+        )
+        schedule_update(branch=get_updates_branch(), target_ref=ref)
         safe_edit_message(
             update,
             context,

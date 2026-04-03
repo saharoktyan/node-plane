@@ -7,6 +7,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 MODE="${MODE:-}"
 NON_INTERACTIVE=0
 AUTO_INSTALL_SYSTEMD=0
+UPDATE_BRANCH="${NODE_PLANE_UPDATE_BRANCH:-}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -22,6 +23,14 @@ while [[ $# -gt 0 ]]; do
       NON_INTERACTIVE=1
       shift
       ;;
+    --branch)
+      UPDATE_BRANCH="${2:-}"
+      shift 2
+      ;;
+    --branch=*)
+      UPDATE_BRANCH="${1#*=}"
+      shift
+      ;;
     --install-systemd)
       AUTO_INSTALL_SYSTEMD=1
       shift
@@ -29,13 +38,14 @@ while [[ $# -gt 0 ]]; do
     -h|--help)
       cat <<'EOF'
 Usage:
-  scripts/install.sh [--mode simple|portable] [--non-interactive] [--install-systemd]
+  scripts/install.sh [--mode simple|portable] [--branch main|dev] [--non-interactive] [--install-systemd]
 
 Modes:
   simple    Host install via venv + systemd. Supports same-host runtime deployment.
   portable  Docker-based bot install. Intended for remote SSH-managed nodes.
 
 Flags:
+  --branch            Default update branch for this installation
   --non-interactive   Fail instead of prompting for missing values
   --install-systemd   In simple mode, install the systemd unit automatically
 EOF
@@ -137,8 +147,34 @@ set_env_value() {
   fi
 }
 
+normalize_update_branch() {
+  local branch="${1:-}"
+  branch="$(printf '%s' "$branch" | tr '[:upper:]' '[:lower:]')"
+  case "$branch" in
+    main|dev)
+      echo "$branch"
+      ;;
+    "")
+      echo "main"
+      ;;
+    *)
+      echo "Unsupported update branch: $branch" >&2
+      exit 1
+      ;;
+  esac
+}
+
 ensure_common_dirs() {
   mkdir -p data ssh scripts
+}
+
+fetch_origin_refs() {
+  need_cmd git
+  if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "The installer source checkout is not a git repository." >&2
+    exit 1
+  fi
+  git fetch --quiet --tags origin
 }
 
 print_repo_location_note() {
@@ -154,25 +190,58 @@ path_is_within() {
 }
 
 current_git_commit() {
-  if command -v git >/dev/null 2>&1 && git rev-parse --short HEAD >/dev/null 2>&1; then
-    git rev-parse --short HEAD
+  local ref="${1:-HEAD}"
+  if command -v git >/dev/null 2>&1 && git rev-parse --short "$ref" >/dev/null 2>&1; then
+    git rev-parse --short "$ref"
   else
     echo "unknown"
   fi
 }
 
 current_semver() {
-  if [[ -f "${REPO_ROOT}/VERSION" ]]; then
+  local ref="${1:-HEAD}"
+  local value
+  if [[ "$ref" == "HEAD" && -f "${REPO_ROOT}/VERSION" ]]; then
     tr -d '\n' < "${REPO_ROOT}/VERSION"
+    return 0
+  fi
+  value="$(git show "${ref}:VERSION" 2>/dev/null | tr -d '\n' || true)"
+  if [[ -n "$value" ]]; then
+    echo "$value"
   else
     echo "0.1.0"
   fi
 }
 
+latest_release_tag_for_branch() {
+  local branch="$1"
+  local regex
+  case "$branch" in
+    main) regex='^v[0-9]+\.[0-9]+\.[0-9]+$' ;;
+    dev) regex='^v[0-9]+\.[0-9]+\.[0-9]+-alpha\.[0-9]+$' ;;
+    *) echo "Unsupported update branch: $branch" >&2; exit 1 ;;
+  esac
+  while IFS= read -r tag; do
+    [[ -z "$tag" ]] && continue
+    if [[ "$tag" =~ $regex ]]; then
+      echo "$tag"
+      return 0
+    fi
+  done < <(git tag --merged "origin/${branch}" --sort=-version:refname)
+  echo "No release tag found for branch '${branch}'." >&2
+  exit 1
+}
+
+resolve_install_ref() {
+  local branch="$1"
+  latest_release_tag_for_branch "$branch"
+}
+
 release_id() {
+  local ref="${1:-HEAD}"
   local semver commit
-  semver="$(current_semver)"
-  commit="$(current_git_commit)"
+  semver="$(current_semver "$ref")"
+  commit="$(current_git_commit "$ref")"
   if [[ "$commit" == "unknown" ]]; then
     echo "${semver}-$(date +%Y%m%d%H%M%S)"
   else
@@ -182,9 +251,10 @@ release_id() {
 
 export_release_tree() {
   local destination="$1"
+  local ref="${2:-HEAD}"
   mkdir -p "$destination"
   if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    git archive HEAD | tar -xf - -C "$destination"
+    git archive "$ref" | tar -xf - -C "$destination"
   else
     tar \
       --exclude='.git' \
@@ -196,7 +266,7 @@ export_release_tree() {
       --exclude='shared' \
       -cf - . | tar -xf - -C "$destination"
   fi
-  printf '%s\n' "$(current_git_commit)" > "${destination}/BUILD_COMMIT"
+  printf '%s\n' "$(current_git_commit "$ref")" > "${destination}/BUILD_COMMIT"
 }
 
 sync_shared_env() {
@@ -227,8 +297,9 @@ choose_mode() {
 configure_env() {
   ensure_env_file
   ensure_common_dirs
+  fetch_origin_refs
 
-  local bot_token admin_ids base_dir app_dir shared_dir source_dir install_mode ssh_key image_repo image_tag
+  local bot_token admin_ids base_dir app_dir shared_dir source_dir install_mode ssh_key image_repo image_tag update_branch
   bot_token="$(read_env_value BOT_TOKEN)"
   admin_ids="$(read_env_value ADMIN_IDS)"
   base_dir="$(read_env_value NODE_PLANE_BASE_DIR)"
@@ -239,6 +310,8 @@ configure_env() {
   ssh_key="$(read_env_value SSH_KEY)"
   image_repo="$(read_env_value NODE_PLANE_IMAGE_REPO)"
   image_tag="$(read_env_value NODE_PLANE_IMAGE_TAG)"
+  update_branch="${UPDATE_BRANCH:-$(read_env_value NODE_PLANE_UPDATE_BRANCH)}"
+  update_branch="$(normalize_update_branch "$update_branch")"
 
   if [[ -z "$bot_token" || "$bot_token" == "replace_me" ]]; then
     bot_token="$(prompt_value "Enter BOT_TOKEN" "")"
@@ -260,6 +333,11 @@ configure_env() {
   if [[ -z "$admin_ids" ]]; then
     echo "ADMIN_IDS is required." >&2
     exit 1
+  fi
+
+  if [[ $NON_INTERACTIVE -eq 0 ]]; then
+    update_branch="$(prompt_value "Enter default update branch (main or dev)" "$update_branch")"
+    update_branch="$(normalize_update_branch "$update_branch")"
   fi
 
   if [[ "$MODE" == "simple" ]]; then
@@ -317,6 +395,7 @@ configure_env() {
     set_env_value NODE_PLANE_SHARED_DIR "$shared_dir"
     set_env_value NODE_PLANE_SOURCE_DIR "$REPO_ROOT"
     set_env_value NODE_PLANE_INSTALL_MODE "$install_mode"
+    set_env_value NODE_PLANE_UPDATE_BRANCH "$update_branch"
   else
     install_mode="portable"
     if [[ -n "$base_dir" && $NON_INTERACTIVE -eq 0 ]]; then
@@ -333,7 +412,7 @@ configure_env() {
       image_repo="ghcr.io/seventh7dev/node-plane"
     fi
     if [[ -z "$image_tag" ]]; then
-      image_tag="$(read_version)"
+      image_tag="$(current_semver "$(resolve_install_ref "$update_branch")")"
     fi
     if [[ $NON_INTERACTIVE -eq 0 ]]; then
       image_repo="$(prompt_value "Enter NODE_PLANE_IMAGE_REPO (default: ghcr.io/seventh7dev/node-plane, or use node-plane for local builds)" "$image_repo")"
@@ -342,6 +421,7 @@ configure_env() {
     set_env_value SSH_KEY "$ssh_key"
     set_env_value NODE_PLANE_SOURCE_DIR "$REPO_ROOT"
     set_env_value NODE_PLANE_INSTALL_MODE "$install_mode"
+    set_env_value NODE_PLANE_UPDATE_BRANCH "$update_branch"
     set_env_value NODE_PLANE_IMAGE_REPO "$image_repo"
     set_env_value NODE_PLANE_IMAGE_TAG "$image_tag"
   fi
@@ -390,7 +470,7 @@ validate_simple_layout() {
 
 run_simple_install() {
   local service_name="node-plane"
-  local base_dir app_dir shared_dir releases_dir current_link new_release_dir release_name
+  local base_dir app_dir shared_dir releases_dir current_link new_release_dir release_name install_ref install_version
   base_dir="$(read_env_value NODE_PLANE_BASE_DIR)"
   app_dir="$(read_env_value NODE_PLANE_APP_DIR)"
   shared_dir="$(read_env_value NODE_PLANE_SHARED_DIR)"
@@ -409,7 +489,9 @@ run_simple_install() {
   fi
   releases_dir="${base_dir}/releases"
   current_link="${base_dir}/current"
-  release_name="$(release_id)"
+  install_ref="$(resolve_install_ref "$(normalize_update_branch "$(read_env_value NODE_PLANE_UPDATE_BRANCH)")")"
+  install_version="$(current_semver "$install_ref")"
+  release_name="$(release_id "$install_ref")"
   new_release_dir="${releases_dir}/${release_name}"
 
   need_cmd python3
@@ -418,7 +500,7 @@ run_simple_install() {
   mkdir -p "${releases_dir}" "${shared_dir}/data" "${shared_dir}/ssh"
   sync_shared_env "$shared_dir"
   rm -rf "$new_release_dir"
-  export_release_tree "$new_release_dir"
+  export_release_tree "$new_release_dir" "$install_ref"
 
   python3 -m venv "${new_release_dir}/.venv"
   "${new_release_dir}/.venv/bin/python" -m pip install --upgrade pip setuptools wheel
@@ -456,6 +538,11 @@ EOF
 
   echo
   echo "Simple mode environment is prepared."
+  echo
+  echo "Installed ref:"
+  echo "  ${install_ref}"
+  echo "Installed version:"
+  echo "  ${install_version}"
   echo
   echo "Install root:"
   echo "  ${base_dir}"

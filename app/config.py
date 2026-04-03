@@ -29,6 +29,7 @@ APP_ROOT = _env_str("NODE_PLANE_APP_DIR", _env_str("NODE_PLANE_BASE_DIR", "/opt/
 SHARED_ROOT = _env_str("NODE_PLANE_SHARED_DIR", APP_ROOT)
 SOURCE_ROOT = _env_str("NODE_PLANE_SOURCE_DIR", APP_ROOT)
 INSTALL_MODE = _env_str("NODE_PLANE_INSTALL_MODE", "")
+UPDATE_BRANCH = _env_str("NODE_PLANE_UPDATE_BRANCH", "main").lower()
 
 # BASE_DIR is kept as an app-root alias for compatibility with the current codebase.
 BASE_DIR = APP_ROOT

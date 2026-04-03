@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from config import MENU_TITLE, SQLITE_DB_PATH
+from config import MENU_TITLE, SQLITE_DB_PATH, UPDATE_BRANCH
 from db.schema import ensure_schema
 from db.sqlite_db import SQLiteDB
 from utils.security import escape_markdown
@@ -25,6 +25,9 @@ _UPDATES_LAST_RUN_FINISHED_AT_KEY = "updates_last_run_finished_at"
 _UPDATES_LAST_RUN_STATUS_KEY = "updates_last_run_status"
 _UPDATES_LAST_RUN_LOG_TAIL_KEY = "updates_last_run_log_tail"
 _UPDATES_LAST_RUN_UNIT_KEY = "updates_last_run_unit"
+_UPDATES_BRANCH_KEY = "updates_branch"
+_UPDATES_LOCAL_VERSION_KEY = "updates_local_version"
+_UPDATES_REMOTE_VERSION_KEY = "updates_remote_version"
 _schema_ready = False
 
 
@@ -175,10 +178,26 @@ def set_updates_auto_check_enabled(enabled: bool) -> bool:
     return enabled
 
 
+def get_updates_branch() -> str:
+    value = _meta_get(_UPDATES_BRANCH_KEY, UPDATE_BRANCH or "main").strip().lower()
+    return value if value in {"main", "dev"} else "main"
+
+
+def set_updates_branch(branch: str) -> str:
+    normalized = str(branch or "").strip().lower()
+    if normalized not in {"main", "dev"}:
+        raise ValueError("Unsupported updates branch")
+    _meta_set(_UPDATES_BRANCH_KEY, normalized)
+    return normalized
+
+
 def record_update_check(result: dict[str, str]) -> None:
     _meta_set(_UPDATES_LAST_CHECKED_AT_KEY, result.get("checked_at", ""))
     _meta_set(_UPDATES_LAST_STATUS_KEY, result.get("status", "error"))
     _meta_set(_UPDATES_UPDATE_AVAILABLE_KEY, "1" if result.get("status") == "available" else "0")
+    _meta_set(_UPDATES_BRANCH_KEY, result.get("branch", get_updates_branch()))
+    _meta_set(_UPDATES_LOCAL_VERSION_KEY, result.get("local_version", ""))
+    _meta_set(_UPDATES_REMOTE_VERSION_KEY, result.get("remote_version", ""))
     _meta_set(_UPDATES_LOCAL_LABEL_KEY, result.get("local_label", ""))
     _meta_set(_UPDATES_REMOTE_LABEL_KEY, result.get("remote_label", ""))
     _meta_set(_UPDATES_UPSTREAM_REF_KEY, result.get("upstream_ref", ""))
@@ -187,9 +206,12 @@ def record_update_check(result: dict[str, str]) -> None:
 
 def get_update_state() -> dict[str, str]:
     return {
+        "branch": get_updates_branch(),
         "last_checked_at": _meta_get(_UPDATES_LAST_CHECKED_AT_KEY, ""),
         "last_status": _meta_get(_UPDATES_LAST_STATUS_KEY, "never"),
         "update_available": _meta_get(_UPDATES_UPDATE_AVAILABLE_KEY, "0"),
+        "local_version": _meta_get(_UPDATES_LOCAL_VERSION_KEY, ""),
+        "remote_version": _meta_get(_UPDATES_REMOTE_VERSION_KEY, ""),
         "local_label": _meta_get(_UPDATES_LOCAL_LABEL_KEY, ""),
         "remote_label": _meta_get(_UPDATES_REMOTE_LABEL_KEY, ""),
         "upstream_ref": _meta_get(_UPDATES_UPSTREAM_REF_KEY, ""),
