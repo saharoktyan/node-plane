@@ -20,6 +20,10 @@ _JSON_OBJECT_AT_END_RE = re.compile(r"(\{[\s\S]*\})\s*$")
 AWG_RUNTIME_CONTAINER = "amnezia-awg"
 
 
+def _shell_join_args(*args: object) -> str:
+    return " ".join(shlex.quote(str(arg)) for arg in args)
+
+
 def _extract_last_json_object(text: str) -> dict:
     match = _JSON_OBJECT_AT_END_RE.search(text or "")
     if not match:
@@ -2744,14 +2748,12 @@ def sync_xray_server_settings(server_key: str) -> Tuple[int, str]:
 
     rc, out = run_server_command(
         server,
-        " ".join(
-            [
-                "/opt/node-plane-runtime/sync-xray.sh",
-                server.xray_config_path,
-                server.public_host,
-                server.xray_flow,
-                "ghcr.io/xtls/xray-core:25.12.8",
-            ]
+        _shell_join_args(
+            "/opt/node-plane-runtime/sync-xray.sh",
+            server.xray_config_path,
+            server.public_host,
+            server.xray_flow,
+            "ghcr.io/xtls/xray-core:25.12.8",
         ),
         timeout=120,
     )
@@ -2930,18 +2932,16 @@ def bootstrap_server(server_key: str, preserve_config: bool = False) -> Tuple[in
         else:
             rc, out = run_server_command(
                 server,
-                " ".join(
-                    [
-                        "/opt/node-plane-runtime/init-xray.sh",
-                        server.xray_config_path,
-                        server.public_host,
-                        sni_host,
-                        str(server.xray_tcp_port),
-                        str(server.xray_xhttp_port),
-                        server.xray_xhttp_path_prefix,
-                        server.xray_flow,
-                        "ghcr.io/xtls/xray-core:25.12.8",
-                    ]
+                _shell_join_args(
+                    "/opt/node-plane-runtime/init-xray.sh",
+                    server.xray_config_path,
+                    server.public_host,
+                    sni_host,
+                    server.xray_tcp_port,
+                    server.xray_xhttp_port,
+                    server.xray_xhttp_path_prefix,
+                    server.xray_flow,
+                    "ghcr.io/xtls/xray-core:25.12.8",
                 ),
                 timeout=180,
             )

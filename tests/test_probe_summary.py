@@ -62,6 +62,20 @@ class ProbeSummaryTests(unittest.TestCase):
         self.assertIn("re.fullmatch(r'user>>>(.*?)>>>traffic>>>(uplink|downlink)'", script)
         self.assertIn("except Exception:", script)
 
+    def test_shell_join_args_quotes_each_argument(self) -> None:
+        rendered = server_bootstrap._shell_join_args(
+            "/opt/node-plane-runtime/init-xray.sh",
+            "/opt/node-plane-runtime/xray/config.json",
+            "example.com",
+            "www.cloudflare.com",
+            443,
+            8443,
+            '/assets"; touch /tmp/pwned; #',
+            "xtls-rprx-vision",
+        )
+        self.assertIn("'/assets\"; touch /tmp/pwned; #'", rendered)
+        self.assertNotIn(' /assets"; touch /tmp/pwned; # ', rendered)
+
     def test_server_metrics_script_includes_cpu_usage(self) -> None:
         script = server_bootstrap._server_metrics_script()
         self.assertIn('echo "loadavg: $(cut -d\' \' -f1-3 /proc/loadavg)"', script)

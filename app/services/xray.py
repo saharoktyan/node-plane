@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import secrets
 import shlex
+import threading
 import uuid as uuid_lib
 from typing import Any, List, Optional, Tuple
 from urllib.parse import quote
@@ -17,6 +18,8 @@ log = logging.getLogger("xray")
 
 _cache: dict[str, dict[str, object]] = {}
 _telemetry_ready: set[str] = set()
+_cache_lock = threading.Lock()
+_telemetry_lock = threading.Lock()
 
 
 def run_local(cmd: str, timeout: int = 60) -> Tuple[int, str]:
@@ -26,7 +29,8 @@ def run_local(cmd: str, timeout: int = 60) -> Tuple[int, str]:
 def _cache_get(server_key: str, ttl: float) -> Optional[Tuple[int, List[str], str]]:
     import time
 
-    item = _cache.get(server_key)
+    with _cache_lock:
+        item = _cache.get(server_key)
     if not item:
         return None
     if time.time() - float(item["ts"]) >= ttl:
@@ -37,7 +41,8 @@ def _cache_get(server_key: str, ttl: float) -> Optional[Tuple[int, List[str], st
 def _cache_set(server_key: str, code: int, names: List[str], raw: str) -> None:
     import time
 
-    _cache[server_key] = {"ts": time.time(), "code": code, "names": list(names), "raw": raw}
+    with _cache_lock:
+        _cache[server_key] = {"ts": time.time(), "code": code, "names": list(names), "raw": raw}
 
 
 def _default_xray_server_key() -> Optional[str]:
@@ -150,8 +155,9 @@ def list_user_records(server_key: Optional[str] = None) -> Tuple[int, List[dict[
 
 
 def ensure_xray_telemetry(server_key: str) -> Tuple[int, str]:
-    if server_key in _telemetry_ready:
-        return 0, "ok"
+    with _telemetry_lock:
+        if server_key in _telemetry_ready:
+            return 0, "ok"
     server = get_server(server_key)
     if not server:
         return 1, f"Server {server_key} not found"
@@ -164,7 +170,8 @@ def ensure_xray_telemetry(server_key: str) -> Tuple[int, str]:
             return code, out
     code, out = run_server_command(server, "/opt/node-plane-runtime/xray-enable-stats.sh", timeout=120)
     if code == 0:
-        _telemetry_ready.add(server_key)
+        with _telemetry_lock:
+            _telemetry_ready.add(server_key)
     return code, out
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Callable, Dict, List
 
 from db.sqlite_db import SQLiteDB
@@ -39,6 +40,17 @@ def _encode_xray_short_id(xray: Dict[str, Any] | None) -> str | None:
             return json.dumps(normalized, ensure_ascii=False, sort_keys=True)
     short_id = str(xray.get("short_id") or "").strip()
     return short_id or None
+
+
+_AWG_VPN_RE = re.compile(r"(vpn://[A-Za-z0-9+/=_-]+)")
+
+
+def _sanitize_awg_config_text(value: Any) -> str:
+    raw = str(value or "")
+    if not raw:
+        return ""
+    m = _AWG_VPN_RE.search(raw)
+    return m.group(1) if m else raw.strip()
 
 
 class SQLiteProfileStateStore:
@@ -494,7 +506,7 @@ class SQLiteAWGStore:
                     (
                         profile_name,
                         str(server_key),
-                        str(server_entry.get("config") or ""),
+                        _sanitize_awg_config_text(server_entry.get("config")),
                         server_entry.get("wg_conf"),
                         server_entry.get("created_at"),
                     ),

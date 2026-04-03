@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import sqlite3
 from typing import Iterable
 
@@ -134,6 +135,28 @@ CREATE TABLE IF NOT EXISTS awg_server_configs (
     FOREIGN KEY (profile_name) REFERENCES profiles(name) ON DELETE CASCADE
 )
 """
+
+
+_AWG_VPN_RE = re.compile(r"(vpn://[A-Za-z0-9+/=_-]+)")
+_AWG_WG_CONF_RE = re.compile(r"(\[Interface\][\s\S]*?\n\[Peer\][\s\S]*?)(?:\n=+|\Z)")
+
+
+def _extract_awg_vpn_key(text: str) -> str:
+    raw = str(text or "")
+    if not raw:
+        return ""
+    m = _AWG_VPN_RE.search(raw)
+    return m.group(1) if m else ""
+
+
+def _extract_awg_wg_conf(text: str) -> str | None:
+    raw = str(text or "")
+    if not raw:
+        return None
+    m = _AWG_WG_CONF_RE.search(raw)
+    if not m:
+        return None
+    return m.group(1).strip().replace("\r\n", "\n").replace("\r", "\n")
 
 
 PROFILE_SERVER_STATE_DDL = """
@@ -367,6 +390,28 @@ def _migrate_awg_table(conn: sqlite3.Connection) -> None:
         _create_awg_table(conn)
         return
     if "server_key" in columns:
+        rows = conn.execute(
+            "SELECT profile_name, server_key, config_text, wg_conf FROM awg_server_configs"
+        ).fetchall()
+        for row in rows:
+            raw_config = str(row["config_text"] or "")
+            raw_wg_conf = str(row["wg_conf"] or "")
+            sanitized_config = _extract_awg_vpn_key(raw_config)
+            sanitized_wg_conf = raw_wg_conf or (_extract_awg_wg_conf(raw_config) or "")
+            if sanitized_config != raw_config or sanitized_wg_conf != raw_wg_conf:
+                conn.execute(
+                    """
+                    UPDATE awg_server_configs
+                    SET config_text = ?, wg_conf = ?
+                    WHERE profile_name = ? AND server_key = ?
+                    """,
+                    (
+                        sanitized_config,
+                        sanitized_wg_conf or None,
+                        row["profile_name"],
+                        row["server_key"],
+                    ),
+                )
         conn.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_awg_server_configs_profile

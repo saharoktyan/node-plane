@@ -13,6 +13,7 @@ from typing import Dict, Tuple
 from config import SSH_KNOWN_HOSTS_PATH, SSH_STRICT_HOST_KEY_CHECKING
 from services.server_registry import RegisteredServer
 from services.ssh_keys import ensure_ssh_keypair
+from utils.security import redact_sensitive_text
 
 
 log = logging.getLogger("server_runtime")
@@ -61,7 +62,7 @@ def run_local_command(cmd: str, timeout: int = 60) -> Tuple[int, str]:
         out = (proc.stdout or "") + (proc.stderr or "")
         log.info("DONE rc=%s sec=%.2f", proc.returncode, time.time() - t0)
         if out.strip():
-            log.debug("OUT: %s", out.strip()[:1500])
+            log.debug("OUT: %s", redact_sensitive_text(out.strip())[:1500])
         return proc.returncode, out.strip()
     except subprocess.TimeoutExpired:
         return 124, "TIMEOUT"

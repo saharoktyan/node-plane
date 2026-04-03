@@ -34,7 +34,7 @@ from services.app_settings import set_initial_setup_state
 from services.server_registry import RegisteredServer, get_server, list_servers, update_server_fields, upsert_server
 from services.xray import get_server_link_status
 from utils.tg import answer_cb, safe_delete_by_id, safe_delete_update_message, safe_edit_by_ids, safe_edit_message
-from utils.security import validate_server_field, validate_server_key
+from utils.security import redact_sensitive_text, validate_server_field, validate_server_key
 
 from .admin_common import guard, kb_back_menu
 
@@ -48,6 +48,10 @@ def _md(value: Any) -> str:
         .replace("_", "\\_")
         .replace("[", "\\[")
     )
+
+
+def _safe_output(value: str, limit: int = 1500) -> str:
+    return redact_sensitive_text(value or "")[:limit]
 
 
 def _wizard_get(context: CallbackContext) -> Optional[Dict[str, Any]]:
@@ -2047,13 +2051,13 @@ def syncnodeenv_cmd(update: Update, context: CallbackContext) -> None:
     code, out = sync_server_node_env(parts[1])
     if code != 0:
         update.effective_message.reply_text(
-            t(lang, "admin.cmd.sync_error", output=out[-1500:]),
+            t(lang, "admin.cmd.sync_error", output=_safe_output(out)),
             parse_mode=PARSE_MODE,
             reply_markup=kb_back_menu(lang),
         )
         return
     update.effective_message.reply_text(
-        t(lang, "admin.cmd.sync_ok", output=out),
+        t(lang, "admin.cmd.sync_ok", output=_safe_output(out, limit=3000)),
         parse_mode=PARSE_MODE,
         reply_markup=kb_back_menu(lang),
     )

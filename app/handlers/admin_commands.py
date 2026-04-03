@@ -16,10 +16,14 @@ from services.traffic_usage import debug_awg_traffic_report, debug_profile_traff
 from services.xray import debug_xray_telemetry_report
 from services import xray as xray_svc
 from services.profile_state import ensure_xray_caps, profile_store
-from utils.security import validate_profile_name, validate_server_field, validate_server_key
+from utils.security import redact_sensitive_text, validate_profile_name, validate_server_field, validate_server_key
 from config import APP_VERSION
 
 from .admin_common import guard, kb_back_menu
+
+
+def _safe_output(value: str, limit: int = 1500) -> str:
+    return redact_sensitive_text(value or "")[:limit]
 
 
 def add_cmd(update: Update, context: CallbackContext) -> None:
@@ -42,7 +46,7 @@ def add_cmd(update: Update, context: CallbackContext) -> None:
     code, out, ensured_uuid, ensured_short_id = xray_svc.ensure_user(name, default_server_key, uuid_value=uuid_val)
     if code != 0 or not ensured_uuid:
         update.effective_message.reply_text(
-            t(lang, "admin.cmd.error", output=out[-1500:]),
+            t(lang, "admin.cmd.error", output=_safe_output(out)),
             parse_mode=PARSE_MODE,
             reply_markup=kb_back_menu(lang),
         )
@@ -54,7 +58,7 @@ def add_cmd(update: Update, context: CallbackContext) -> None:
 
         set_xray_short_id(name, ensured_short_id, server_key=default_server_key)
     update.effective_message.reply_text(
-        t(lang, "admin.cmd.ready_name_uuid", name=name, uuid=ensured_uuid),
+        f"✅ {name}",
         parse_mode=PARSE_MODE,
         reply_markup=kb_back_menu(lang),
     )
@@ -78,7 +82,7 @@ def del_cmd(update: Update, context: CallbackContext) -> None:
         update.effective_message.reply_text(t(lang, "admin.cmd.deleted"), reply_markup=kb_back_menu(lang))
     else:
         update.effective_message.reply_text(
-            t(lang, "admin.cmd.error", output=out[-1500:]),
+            t(lang, "admin.cmd.error", output=_safe_output(out)),
             parse_mode=PARSE_MODE,
             reply_markup=kb_back_menu(lang),
         )
@@ -175,13 +179,13 @@ def probeserver_cmd(update: Update, context: CallbackContext) -> None:
     code, out = probe_server(parts[1])
     if code != 0:
         update.effective_message.reply_text(
-            t(lang, "admin.cmd.probe_error", output=out[-1500:]),
+            t(lang, "admin.cmd.probe_error", output=_safe_output(out)),
             parse_mode=PARSE_MODE,
             reply_markup=kb_back_menu(lang),
         )
         return
     update.effective_message.reply_text(
-        t(lang, "admin.cmd.probe_ok", output=out[-1500:]),
+        t(lang, "admin.cmd.probe_ok", output=_safe_output(out)),
         parse_mode=PARSE_MODE,
         reply_markup=kb_back_menu(lang),
     )
@@ -215,13 +219,13 @@ def bootstrapserver_cmd(update: Update, context: CallbackContext) -> None:
     code, out = bootstrap_server(key)
     if code != 0:
         update.effective_message.reply_text(
-            t(lang, "admin.cmd.bootstrap_error", output=out[-1500:]),
+            t(lang, "admin.cmd.bootstrap_error", output=_safe_output(out)),
             parse_mode=PARSE_MODE,
             reply_markup=kb_back_menu(lang),
         )
         return
     update.effective_message.reply_text(
-        t(lang, "admin.cmd.bootstrap_ok", output=out),
+        t(lang, "admin.cmd.bootstrap_ok", output=_safe_output(out, limit=3000)),
         parse_mode=PARSE_MODE,
         reply_markup=kb_back_menu(lang),
     )
@@ -282,13 +286,13 @@ def syncxrayserver_cmd(update: Update, context: CallbackContext) -> None:
     code, out = sync_xray_server_settings(key)
     if code != 0:
         update.effective_message.reply_text(
-            t(lang, "admin.cmd.sync_xray_error", output=out[-1500:]),
+            t(lang, "admin.cmd.sync_xray_error", output=_safe_output(out)),
             parse_mode=PARSE_MODE,
             reply_markup=kb_back_menu(lang),
         )
         return
     update.effective_message.reply_text(
-        t(lang, "admin.cmd.sync_xray_ok", server=key, output=out[:3000]),
+        t(lang, "admin.cmd.sync_xray_ok", server=key, output=_safe_output(out, limit=3000)),
         parse_mode=PARSE_MODE,
         reply_markup=kb_back_menu(lang),
     )
@@ -304,13 +308,13 @@ def diag_cmd(update: Update, context: CallbackContext) -> None:
         code, out = debug_xray_telemetry_report(server_key)
         if code != 0:
             update.effective_message.reply_text(
-                t(lang, "admin.cmd.xray_diag_error", output=out[-3000:]),
+                t(lang, "admin.cmd.xray_diag_error", output=_safe_output(out, limit=3000)),
                 parse_mode=PARSE_MODE,
                 reply_markup=kb_back_menu(lang),
             )
             return
         update.effective_message.reply_text(
-            t(lang, "admin.cmd.xray_diag_ok", server=server_key, output=out[-3500:]),
+            t(lang, "admin.cmd.xray_diag_ok", server=server_key, output=_safe_output(out, limit=3500)),
             parse_mode=PARSE_MODE,
             reply_markup=kb_back_menu(lang),
         )
@@ -320,13 +324,13 @@ def diag_cmd(update: Update, context: CallbackContext) -> None:
         code, out = debug_awg_traffic_report(server_key)
         if code != 0:
             update.effective_message.reply_text(
-                t(lang, "admin.cmd.awg_diag_error", output=out[-3000:]),
+                t(lang, "admin.cmd.awg_diag_error", output=_safe_output(out, limit=3000)),
                 parse_mode=PARSE_MODE,
                 reply_markup=kb_back_menu(lang),
             )
             return
         update.effective_message.reply_text(
-            t(lang, "admin.cmd.awg_diag_ok", server=server_key, output=out[-3500:]),
+            t(lang, "admin.cmd.awg_diag_ok", server=server_key, output=_safe_output(out, limit=3500)),
             parse_mode=PARSE_MODE,
             reply_markup=kb_back_menu(lang),
         )
@@ -337,13 +341,13 @@ def diag_cmd(update: Update, context: CallbackContext) -> None:
         code, out = debug_profile_traffic_report(profile_name, protocol_kind)
         if code != 0:
             update.effective_message.reply_text(
-                t(lang, "admin.cmd.traffic_diag_error", output=out[-3000:]),
+                t(lang, "admin.cmd.traffic_diag_error", output=_safe_output(out, limit=3000)),
                 parse_mode=PARSE_MODE,
                 reply_markup=kb_back_menu(lang),
             )
             return
         update.effective_message.reply_text(
-            t(lang, "admin.cmd.traffic_diag_ok", name=profile_name, protocol=protocol_kind, output=out[-3500:]),
+            t(lang, "admin.cmd.traffic_diag_ok", name=profile_name, protocol=protocol_kind, output=_safe_output(out, limit=3500)),
             parse_mode=PARSE_MODE,
             reply_markup=kb_back_menu(lang),
         )
@@ -379,13 +383,13 @@ def collecttraffic_cmd(update: Update, context: CallbackContext) -> None:
     code, out = run_collect_traffic_once()
     if code != 0:
         update.effective_message.reply_text(
-            t(lang, "admin.cmd.collect_traffic_error", output=out[-3000:]),
+            t(lang, "admin.cmd.collect_traffic_error", output=_safe_output(out, limit=3000)),
             parse_mode=PARSE_MODE,
             reply_markup=kb_back_menu(lang),
         )
         return
     update.effective_message.reply_text(
-        t(lang, "admin.cmd.collect_traffic_ok", output=out[-3000:]),
+        t(lang, "admin.cmd.collect_traffic_ok", output=_safe_output(out, limit=3000)),
         parse_mode=PARSE_MODE,
         reply_markup=kb_back_menu(lang),
     )
