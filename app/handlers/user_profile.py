@@ -35,6 +35,7 @@ from services.app_settings import (
 )
 from services.backups import create_backup, get_backup_info, get_backups_overview, list_backups, restore_backup
 from services.provisioning_state import summarize_server_provisioning
+from services.server_bootstrap import get_server_runtime_state, get_servers_needing_runtime_sync, sync_server_runtime
 from services.server_registry import list_servers
 from services.awg_profiles import list_awg_server_keys
 from services.ssh_keys import render_public_key_guide, render_public_key_summary
@@ -97,6 +98,7 @@ def _render_admin_setup_markup(lang: str) -> InlineKeyboardMarkup:
 
 def _render_admin_status(lang: str) -> str:
     servers = list_servers(include_disabled=True)
+    runtime_states = {server.key: get_server_runtime_state(server.key) for server in servers if server.bootstrap_state == "bootstrapped"}
     subs = profile_store.read()
     users = user_store.read()
     profile_names = [str(name) for name in subs.keys() if not str(name).startswith("_")] if isinstance(subs, dict) else []
@@ -129,13 +131,23 @@ def _render_admin_status(lang: str) -> str:
         needs_attention = 0
         xray_ready = 0
         awg_ready = 0
+        runtime_drift = 0
         for server in servers:
             prov = summarize_server_provisioning(server.key)
             xray_ok = True
+            runtime_state = str((runtime_states.get(server.key) or {}).get("state") or "")
             if "xray" in server.protocol_kinds:
                 xray_ok = get_server_link_status(server.key)[0]
             awg_ok = ("awg" not in server.protocol_kinds) or server.bootstrap_state == "bootstrapped"
-            if server.bootstrap_state != "bootstrapped" or prov["overall"] in {"failed", "needs_attention"} or not xray_ok or not awg_ok:
+            if runtime_state in {"outdated", "unknown"}:
+                runtime_drift += 1
+            if (
+                server.bootstrap_state != "bootstrapped"
+                or prov["overall"] in {"failed", "needs_attention"}
+                or not xray_ok
+                or not awg_ok
+                or runtime_state in {"outdated", "unknown"}
+            ):
                 needs_attention += 1
             if "xray" in server.protocol_kinds and xray_ok:
                 xray_ready += 1
@@ -144,6 +156,7 @@ def _render_admin_status(lang: str) -> str:
         lines.append(t(lang, "admin.status.bootstrap_ready", icon="•" if ready_servers == len(servers) else "!", ready=ready_servers, total=len(servers)))
         lines.append(t(lang, "admin.status.xray_ready", icon="•" if xray_ready else "!", count=xray_ready))
         lines.append(t(lang, "admin.status.awg_ready", icon="•" if awg_ready else "!", count=awg_ready))
+        lines.append(t(lang, "admin.status.runtime_drift", icon="•" if runtime_drift == 0 else "!", count=runtime_drift))
         lines.append(t(lang, "admin.status.needs_attention", icon="•" if needs_attention == 0 else "!", count=needs_attention))
 
     lines.extend(
@@ -163,6 +176,10 @@ def _render_admin_status(lang: str) -> str:
             continue
         if server.bootstrap_state != "bootstrapped":
             action_items.append(t(lang, "admin.status.action_bootstrap", server=server.key))
+            continue
+        runtime_state = str((runtime_states.get(server.key) or {}).get("state") or "")
+        if runtime_state in {"outdated", "unknown"}:
+            action_items.append(t(lang, "admin.status.action_runtime_sync", server=server.key))
             continue
         xray_ready, reason = get_server_link_status(server.key) if "xray" in server.protocol_kinds else (True, "ok")
         if "xray" in server.protocol_kinds and not xray_ready:
@@ -189,6 +206,9 @@ def _problem_server_keys() -> List[str]:
         if server.bootstrap_state != "bootstrapped":
             keys.append(server.key)
             continue
+        if str(get_server_runtime_state(server.key).get("state") or "") in {"outdated", "unknown"}:
+            keys.append(server.key)
+            continue
         if "xray" in server.protocol_kinds and not get_server_link_status(server.key)[0]:
             keys.append(server.key)
             continue
@@ -196,6 +216,10 @@ def _problem_server_keys() -> List[str]:
         if prov["overall"] in {"failed", "needs_attention"}:
             keys.append(server.key)
     return keys
+
+
+def _runtime_drift_server_keys() -> List[str]:
+    return [server.key for server in get_servers_needing_runtime_sync()]
 
 
 def _render_problem_servers(lang: str) -> tuple[str, InlineKeyboardMarkup]:
@@ -214,8 +238,11 @@ def _render_problem_servers(lang: str) -> tuple[str, InlineKeyboardMarkup]:
             continue
         reason = t(lang, "admin.status.problem_server_reason_bootstrap")
         if server.bootstrap_state == "bootstrapped":
+            runtime_state = str(get_server_runtime_state(server.key).get("state") or "")
             xray_ready, reason_text = get_server_link_status(server.key) if "xray" in server.protocol_kinds else (True, "ok")
-            if "xray" in server.protocol_kinds and not xray_ready:
+            if runtime_state in {"outdated", "unknown"}:
+                reason = t(lang, "admin.status.problem_server_reason_runtime_sync")
+            elif "xray" in server.protocol_kinds and not xray_ready:
                 reason = (
                     t(lang, "admin.status.problem_server_reason_xray_link")
                     if "incomplete" in reason_text
@@ -238,6 +265,55 @@ def _render_problem_servers(lang: str) -> tuple[str, InlineKeyboardMarkup]:
         rows.append([InlineKeyboardButton(f"{server.flag} {server.title}", callback_data=f"{CB_SRV}card:{server.key}")])
     rows.append([InlineKeyboardButton(t(lang, "menu.back"), callback_data="menu:admin_status")])
     return "\n".join(lines), InlineKeyboardMarkup(rows)
+
+
+def _render_runtime_sync_confirm(lang: str) -> tuple[str, InlineKeyboardMarkup]:
+    targets = get_servers_needing_runtime_sync()
+    if not targets:
+        return (
+            t(lang, "admin.status.runtime_sync_empty"),
+            InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, "menu.back"), callback_data="menu:admin_status")]]),
+        )
+    lines = [
+        t(lang, "admin.status.runtime_sync_confirm_title"),
+        "",
+        t(lang, "admin.status.runtime_sync_confirm_intro", count=len(targets)),
+    ]
+    lines.extend([f"• {server.flag} {server.title} ({server.key})" for server in targets[:10]])
+    if len(targets) > 10:
+        lines.append(t(lang, "admin.status.runtime_sync_confirm_more", count=len(targets) - 10))
+    rows = [
+        [InlineKeyboardButton(t(lang, "admin.status.runtime_sync_confirm_action"), callback_data="menu:admin_runtime_sync_run")],
+        [InlineKeyboardButton(t(lang, "menu.back"), callback_data="menu:admin_status")],
+    ]
+    return "\n".join(lines), InlineKeyboardMarkup(rows)
+
+
+def _sync_runtime_drift(lang: str) -> str:
+    targets = get_servers_needing_runtime_sync()
+    if not targets:
+        return t(lang, "admin.status.runtime_sync_empty")
+
+    updated: List[str] = []
+    failed: List[str] = []
+    for server in targets:
+        rc, out = sync_server_runtime(server.key)
+        if rc == 0:
+            updated.append(server.key)
+        else:
+            tail = str(out or "").strip().splitlines()
+            failed.append(f"{server.key}: {tail[-1] if tail else 'unknown error'}")
+
+    lines = [t(lang, "admin.status.runtime_sync_result_title"), ""]
+    lines.append(t(lang, "admin.status.runtime_sync_result_updated", count=len(updated)))
+    lines.append(t(lang, "admin.status.runtime_sync_result_failed", count=len(failed)))
+    if updated:
+        lines.extend(["", t(lang, "admin.status.runtime_sync_result_updated_list")])
+        lines.extend([f"• {key}" for key in updated])
+    if failed:
+        lines.extend(["", t(lang, "admin.status.runtime_sync_result_failed_list")])
+        lines.extend([f"• {item}" for item in failed[:10]])
+    return "\n".join(lines)
 
 
 def _ssh_key_summary_markup(lang: str) -> InlineKeyboardMarkup:
@@ -263,6 +339,8 @@ def _kb_admin_status(lang: str) -> InlineKeyboardMarkup:
         rows.append([InlineKeyboardButton(t(lang, "menu.requests"), callback_data="menu:admin_requests")])
     if _problem_server_keys():
         rows.append([InlineKeyboardButton(t(lang, "admin.status.problem_servers_button"), callback_data="menu:admin_problem_servers")])
+    if _runtime_drift_server_keys():
+        rows.append([InlineKeyboardButton(t(lang, "admin.status.runtime_sync_button"), callback_data="menu:admin_runtime_sync_all")])
     rows.append([InlineKeyboardButton(t(lang, "menu.back"), callback_data="menu:admin")])
     return InlineKeyboardMarkup(rows)
 
@@ -1972,6 +2050,34 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
             context,
             text,
             reply_markup=markup,
+            parse_mode=PARSE_MODE,
+        )
+        return
+
+    if payload == "admin_runtime_sync_all" and is_admin:
+        text, markup = _render_runtime_sync_confirm(lang)
+        safe_edit_message(
+            update,
+            context,
+            text,
+            reply_markup=markup,
+            parse_mode=PARSE_MODE,
+        )
+        return
+
+    if payload == "admin_runtime_sync_run" and is_admin:
+        safe_edit_message(
+            update,
+            context,
+            t(lang, "admin.status.runtime_sync_running"),
+            reply_markup=_kb_admin_status(lang),
+            parse_mode=PARSE_MODE,
+        )
+        safe_edit_message(
+            update,
+            context,
+            _sync_runtime_drift(lang),
+            reply_markup=_kb_admin_status(lang),
             parse_mode=PARSE_MODE,
         )
         return

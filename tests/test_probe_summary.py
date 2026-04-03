@@ -82,6 +82,11 @@ class ProbeSummaryTests(unittest.TestCase):
         self.assertIn('echo "cpu usage: $cpu_usage"', script)
         self.assertIn('time.sleep(0.2)', script)
 
+    def test_runtime_files_include_version_metadata(self) -> None:
+        files = server_bootstrap._runtime_files()
+        self.assertIn("/opt/node-plane-runtime/VERSION", files)
+        self.assertIn("/opt/node-plane-runtime/BUILD_COMMIT", files)
+
     def test_single_line_note_flattens_multiline_output(self) -> None:
         note = server_bootstrap._single_line_note("line one\nline two\r\nline three\n")
         self.assertEqual(note, "line one | line two | line three")

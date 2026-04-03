@@ -156,7 +156,8 @@ class AdminViewsTests(unittest.TestCase):
         rows = markup.inline_keyboard
         self.assertEqual([button.callback_data for button in rows[0]], ["srv:action:metrics:spb1", "srv:action:checkports:spb1"])
         self.assertEqual([button.callback_data for button in rows[1]], ["srv:action:openports:spb1", "srv:action:reconcile:spb1"])
-        self.assertEqual([button.callback_data for button in rows[2]], ["srv:action:syncenv:spb1", "srv:action:syncxray:spb1"])
+        self.assertEqual([button.callback_data for button in rows[2]], ["srv:action:syncruntime:spb1", "srv:action:syncenv:spb1"])
+        self.assertEqual([button.callback_data for button in rows[3]], ["srv:action:syncxray:spb1"])
 
     def test_metrics_result_markup_returns_to_maintenance_screen(self) -> None:
         markup = admin_server_wizard._metrics_result_markup("spb1", "en")
@@ -235,6 +236,38 @@ class AdminViewsTests(unittest.TestCase):
             text, markup = user_profile._render_problem_servers("en")
         self.assertIn("Saint-Petersburg (spb1)", text)
         self.assertEqual(markup.inline_keyboard[0][0].text, "🇷🇺 Saint-Petersburg")
+
+    def test_problem_servers_include_runtime_drift_reason(self) -> None:
+        fake_server = SimpleNamespace(
+            key="spb1",
+            flag="🇷🇺",
+            title="Saint-Petersburg",
+            enabled=True,
+            bootstrap_state="bootstrapped",
+            protocol_kinds=["xray"],
+        )
+        with patch.object(user_profile, "_problem_server_keys", return_value=["spb1"]), patch.object(
+            user_profile, "list_servers", return_value=[fake_server]
+        ), patch.object(
+            user_profile, "get_server_runtime_state", return_value={"state": "unknown"}
+        ):
+            text, _markup = user_profile._render_problem_servers("en")
+        self.assertIn("runtime sync needed", text)
+
+    def test_admin_status_shows_runtime_sync_button_when_drift_exists(self) -> None:
+        with patch.object(user_profile, "_all_pending_request_ids", return_value=[]), patch.object(
+            user_profile, "_problem_server_keys", return_value=[]
+        ), patch.object(user_profile, "_runtime_drift_server_keys", return_value=["spb1"]):
+            markup = user_profile._kb_admin_status("en")
+        callbacks = [button.callback_data for row in markup.inline_keyboard for button in row]
+        self.assertIn("menu:admin_runtime_sync_all", callbacks)
+
+    def test_runtime_sync_confirm_lists_servers_and_action(self) -> None:
+        fake_server = SimpleNamespace(key="spb1", flag="🇷🇺", title="Saint-Petersburg")
+        with patch.object(user_profile, "get_servers_needing_runtime_sync", return_value=[fake_server]):
+            text, markup = user_profile._render_runtime_sync_confirm("en")
+        self.assertIn("Saint-Petersburg (spb1)", text)
+        self.assertEqual(markup.inline_keyboard[0][0].callback_data, "menu:admin_runtime_sync_run")
 
     def test_maintenance_section_includes_full_cleanup(self) -> None:
         markup = admin_server_wizard._advanced_section_markup("spb1", "maintenance", "en")

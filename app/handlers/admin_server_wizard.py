@@ -19,6 +19,7 @@ from services.server_bootstrap import (
     check_server_ports,
     delete_server_runtime,
     full_cleanup_server,
+    get_server_runtime_state,
     install_server_docker,
     is_server_docker_available,
     open_server_ports,
@@ -28,6 +29,7 @@ from services.server_bootstrap import (
     show_server_metrics,
     show_awg_entropy,
     sync_server_node_env,
+    sync_server_runtime,
     sync_xray_server_settings,
 )
 from services.app_settings import set_initial_setup_state
@@ -318,13 +320,15 @@ def _advanced_section_for_field(field: str) -> str:
     return "general"
 
 
-def _server_recommended_actions(server: RegisteredServer, lang: str) -> list[str]:
+def _server_recommended_actions(server: RegisteredServer, lang: str, runtime_state: str = "") -> list[str]:
     items: list[str] = []
     if not server.enabled:
         return items
     if server.bootstrap_state != "bootstrapped":
         items.append(t(lang, "admin.wizard.server_action_bootstrap"))
         return items
+    if runtime_state in {"outdated", "unknown"}:
+        items.append(t(lang, "admin.wizard.server_action_runtime_sync"))
     prov = summarize_server_provisioning(server.key)
     if prov["overall"] in {"failed", "needs_attention"}:
         items.append(t(lang, "admin.wizard.server_action_provisioning"))
@@ -351,14 +355,34 @@ def _format_server_notes(notes: str, lang: str) -> str:
     return _localize_action_output(raw, lang)
 
 
+def _runtime_state_line(server_key: str, lang: str, runtime: dict[str, str] | None = None) -> str:
+    runtime = runtime or get_server_runtime_state(server_key)
+    state = str(runtime.get("state") or "unknown")
+    version = str(runtime.get("version") or "")
+    commit = str(runtime.get("commit") or "")
+    if state == "up_to_date":
+        value = version or commit or "ok"
+        return t(lang, "admin.wizard.server_card_runtime_sync", icon="✅", value=value, status=t(lang, "admin.wizard.runtime_state_current"))
+    if state == "outdated":
+        current = version or commit or "legacy"
+        return t(lang, "admin.wizard.server_card_runtime_sync", icon="⚠️", value=current, status=t(lang, "admin.wizard.runtime_state_outdated"))
+    if state == "unknown":
+        return t(lang, "admin.wizard.server_card_runtime_sync", icon="🛠", value="—", status=t(lang, "admin.wizard.runtime_state_unknown"))
+    if state == "not_bootstrapped":
+        return t(lang, "admin.wizard.server_card_runtime_sync", icon="—", value="—", status=t(lang, "admin.wizard.runtime_state_not_bootstrapped"))
+    return t(lang, "admin.wizard.server_card_runtime_sync", icon="⚠️", value="—", status=t(lang, "admin.wizard.runtime_state_unknown"))
+
+
 def _server_card_text(server: RegisteredServer, lang: str) -> str:
+    runtime = get_server_runtime_state(server.key)
+    runtime_state = str(runtime.get("state") or "")
     server_icon, server_text = _server_status(server, lang)
     xray_icon, xray_text = _xray_status(server, lang)
     awg_icon, awg_text = _awg_status(server, lang)
     overall_icon, overall_text = _server_overall_status(server, lang)
     prov_summary = summarize_server_provisioning(server.key)
     protocols = ", ".join(server.protocol_kinds) or "—"
-    actions = _server_recommended_actions(server, lang)
+    actions = _server_recommended_actions(server, lang, runtime_state)
     lines = [
         f"🖥 {server.flag} {server.title} ({server.key})",
         f"• {overall_icon} {overall_text}",
@@ -370,6 +394,7 @@ def _server_card_text(server: RegisteredServer, lang: str) -> str:
         t(lang, "admin.wizard.server_card_host", value=server.public_host or "—"),
         "",
         t(lang, "admin.wizard.server_card_runtime"),
+        _runtime_state_line(server.key, lang, runtime),
         t(lang, "admin.wizard.server_card_xray", icon=xray_icon, status=xray_text, tcp=server.xray_tcp_port, xhttp=server.xray_xhttp_port),
         t(lang, "admin.wizard.server_card_awg", icon=awg_icon, status=awg_text, port=server.awg_port, iface=server.awg_iface),
         t(
@@ -636,9 +661,10 @@ def _advanced_section_markup(server_key: str, section: str, lang: str) -> Inline
                 InlineKeyboardButton(t(lang, "admin.wizard.reconcile"), callback_data=f"{CB_SRV}action:reconcile:{server_key}"),
             ],
             [
+                InlineKeyboardButton(t(lang, "admin.wizard.sync_runtime"), callback_data=f"{CB_SRV}action:syncruntime:{server_key}"),
                 InlineKeyboardButton(t(lang, "admin.wizard.sync_env"), callback_data=f"{CB_SRV}action:syncenv:{server_key}"),
-                InlineKeyboardButton(t(lang, "admin.wizard.sync_xray"), callback_data=f"{CB_SRV}action:syncxray:{server_key}"),
             ],
+            [InlineKeyboardButton(t(lang, "admin.wizard.sync_xray"), callback_data=f"{CB_SRV}action:syncxray:{server_key}")],
             [InlineKeyboardButton(t(lang, "admin.wizard.full_cleanup"), callback_data=f"{CB_SRV}cleanupmenu:{server_key}")],
         ]
     rows.append([InlineKeyboardButton(t(lang, "admin.wizard.back_to_advanced"), callback_data=f"{CB_SRV}advanced:{server_key}")])
@@ -1747,6 +1773,12 @@ def on_server_callback(update: Update, context: CallbackContext, payload: str) -
             rc, out = sync_server_node_env(server_key)
             stop_progress()
             _wizard_edit(context, _action_result_text(t(lang, "admin.wizard.sync_env"), rc, out, server_key, lang), _server_card_markup(server_key, lang))
+            return
+        if action == "syncruntime":
+            stop_progress = _start_progress_animation(context, t(lang, "admin.wizard.sync_runtime"))
+            rc, out = sync_server_runtime(server_key)
+            stop_progress()
+            _wizard_edit(context, _action_result_text(t(lang, "admin.wizard.sync_runtime"), rc, out, server_key, lang), _server_card_markup(server_key, lang))
             return
         if action == "syncxray":
             stop_progress = _start_progress_animation(context, t(lang, "admin.wizard.sync_xray"))

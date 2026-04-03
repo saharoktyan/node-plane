@@ -5,9 +5,10 @@ import json
 import logging
 import re
 import shlex
-from typing import Tuple
+from typing import Dict, Tuple
 
-from services.server_registry import RegisteredServer, get_server, update_server_fields
+from config import APP_COMMIT, APP_SEMVER
+from services.server_registry import RegisteredServer, get_server, list_servers, update_server_fields
 from services.server_runtime import is_running_in_container, run_server_command, write_server_file, write_server_files
 from services.ssh_keys import get_public_key
 from utils.security import shell_env_assignment
@@ -18,6 +19,8 @@ log = logging.getLogger("server_bootstrap")
 
 _JSON_OBJECT_AT_END_RE = re.compile(r"(\{[\s\S]*\})\s*$")
 AWG_RUNTIME_CONTAINER = "amnezia-awg"
+RUNTIME_VERSION_PATH = "/opt/node-plane-runtime/VERSION"
+RUNTIME_BUILD_COMMIT_PATH = "/opt/node-plane-runtime/BUILD_COMMIT"
 
 
 def _shell_join_args(*args: object) -> str:
@@ -96,6 +99,13 @@ AWG_ALLOWED_IPS=0.0.0.0/0
 AWG_KEEPALIVE=25
 AWG_I1_PRESET=quic
 """
+
+
+def _runtime_metadata_files() -> Dict[str, Tuple[str, str]]:
+    return {
+        RUNTIME_VERSION_PATH: (f"{APP_SEMVER}\n", "0644"),
+        RUNTIME_BUILD_COMMIT_PATH: (f"{APP_COMMIT}\n", "0644"),
+    }
 
 
 XRAY_ADD_SCRIPT = """#!/usr/bin/env bash
@@ -2332,6 +2342,34 @@ def render_server_node_env(server: RegisteredServer) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _runtime_files() -> Dict[str, Tuple[str, str]]:
+    files = {
+        "/etc/node-plane/node.env.example": (NODE_ENV_EXAMPLE, "0644"),
+        "/opt/node-plane-runtime/init-xray.sh": (XRAY_INIT_SCRIPT, "0755"),
+        "/opt/node-plane-runtime/sync-xray.sh": (XRAY_SYNC_SCRIPT, "0755"),
+        "/opt/node-plane-runtime/deploy-xray.sh": (XRAY_DEPLOY_SCRIPT, "0755"),
+        "/opt/node-plane-runtime/xray-enable-stats.sh": (XRAY_ENABLE_STATS_SCRIPT, "0755"),
+        "/opt/node-plane-runtime/xray-add-user.sh": (XRAY_ADD_SCRIPT, "0755"),
+        "/opt/node-plane-runtime/xray-add-user-existing.sh": (XRAY_ADD_EXISTING_SCRIPT, "0755"),
+        "/opt/node-plane-runtime/xray-list-users.sh": (XRAY_LIST_SCRIPT, "0755"),
+        "/opt/node-plane-runtime/xray-list-traffic.sh": (XRAY_TRAFFIC_SCRIPT, "0755"),
+        "/opt/node-plane-runtime/xray-del-user.sh": (XRAY_DEL_SCRIPT, "0755"),
+        "/opt/node-plane-runtime/conf2vpn.py": (AWG_CONF2VPN_PY, "0644"),
+        "/opt/node-plane-runtime/amnezia-config-decoder.py": (AMNEZIA_CONFIG_DECODER_PY, "0644"),
+        "/opt/node-plane-runtime/awg-template.json": (AWG_TEMPLATE_JSON, "0644"),
+        "/opt/node-plane-runtime/awg-add-user.sh": (AWG_ADD_SCRIPT, "0755"),
+        "/opt/node-plane-runtime/awg-del-user.sh": (AWG_DEL_SCRIPT, "0755"),
+        "/opt/node-plane-runtime/show-awg-entropy.sh": (AWG_SHOW_ENTROPY_SCRIPT, "0755"),
+        "/opt/node-plane-runtime/init-awg.sh": (AWG_INIT_SCRIPT, "0755"),
+        "/opt/node-plane-runtime/regenerate-awg-entropy.sh": (AWG_REGENERATE_ENTROPY_SCRIPT, "0755"),
+        "/opt/node-plane-runtime/amnezia-awg/Dockerfile": (AWG_DOCKERFILE, "0644"),
+        "/opt/node-plane-runtime/amnezia-awg/start.sh": (AWG_START_SCRIPT, "0755"),
+        "/opt/node-plane-runtime/deploy-awg.sh": (AWG_DEPLOY_SCRIPT, "0755"),
+    }
+    files.update(_runtime_metadata_files())
+    return files
+
+
 def sync_server_node_env(server_key: str) -> Tuple[int, str]:
     server = get_server(server_key)
     if not server:
@@ -2342,6 +2380,119 @@ def sync_server_node_env(server_key: str) -> Tuple[int, str]:
         return rc, out
     update_server_fields(server.key, notes="node.env synced from bot")
     return 0, "Файл node.env записан в /etc/node-plane/node.env"
+
+
+def _runtime_state_from_values(version: str, commit: str) -> str:
+    version_value = str(version or "").strip()
+    commit_value = str(commit or "").strip()
+    if commit_value and commit_value != "unknown":
+        if APP_COMMIT != "unknown":
+            return "up_to_date" if commit_value == APP_COMMIT else "outdated"
+        if version_value:
+            return "up_to_date" if version_value == APP_SEMVER else "outdated"
+        return "unknown"
+    if version_value:
+        return "up_to_date" if version_value == APP_SEMVER else "outdated"
+    return "unknown"
+
+
+def get_server_runtime_state(server_key: str) -> dict[str, str]:
+    server = get_server(server_key)
+    if not server:
+        return {
+            "state": "missing_server",
+            "version": "",
+            "commit": "",
+            "expected_version": APP_SEMVER,
+            "expected_commit": APP_COMMIT,
+            "message": f"Сервер {server_key} не найден",
+        }
+    if server.bootstrap_state != "bootstrapped":
+        return {
+            "state": "not_bootstrapped",
+            "version": "",
+            "commit": "",
+            "expected_version": APP_SEMVER,
+            "expected_commit": APP_COMMIT,
+            "message": "bootstrap required",
+        }
+
+    script = f"""#!/usr/bin/env bash
+set -euo pipefail
+if [[ -f {shlex.quote(RUNTIME_VERSION_PATH)} ]]; then
+  printf 'version=%s\\n' "$(tr -d '\\r' < {shlex.quote(RUNTIME_VERSION_PATH)} | head -n1)"
+fi
+if [[ -f {shlex.quote(RUNTIME_BUILD_COMMIT_PATH)} ]]; then
+  printf 'commit=%s\\n' "$(tr -d '\\r' < {shlex.quote(RUNTIME_BUILD_COMMIT_PATH)} | head -n1)"
+fi
+"""
+    rc, out = run_server_command(server, script, timeout=30)
+    if rc != 0:
+        return {
+            "state": "unknown",
+            "version": "",
+            "commit": "",
+            "expected_version": APP_SEMVER,
+            "expected_commit": APP_COMMIT,
+            "message": (out or "").strip() or "failed to read runtime metadata",
+        }
+
+    payload: dict[str, str] = {}
+    for raw_line in (out or "").splitlines():
+        line = raw_line.strip()
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        payload[key.strip()] = value.strip()
+    version = str(payload.get("version") or "").strip()
+    commit = str(payload.get("commit") or "").strip()
+    return {
+        "state": _runtime_state_from_values(version, commit),
+        "version": version,
+        "commit": commit,
+        "expected_version": APP_SEMVER,
+        "expected_commit": APP_COMMIT,
+        "message": "",
+    }
+
+
+def get_servers_needing_runtime_sync() -> list[RegisteredServer]:
+    targets: list[RegisteredServer] = []
+    for server in list_servers(include_disabled=False):
+        if server.bootstrap_state != "bootstrapped":
+            continue
+        state = str(get_server_runtime_state(server.key).get("state") or "")
+        if state in {"outdated", "unknown"}:
+            targets.append(server)
+    return targets
+
+
+def sync_server_runtime(server_key: str) -> Tuple[int, str]:
+    server = get_server(server_key)
+    if not server:
+        return 1, f"Сервер {server_key} не найден"
+    if server.bootstrap_state != "bootstrapped":
+        return 1, f"Сервер {server_key} ещё не bootstrap-нут"
+
+    file_rc, file_out = write_server_files(server, _runtime_files(), timeout=180)
+    if file_rc != 0:
+        return file_rc, file_out
+
+    node_env_rc, node_env_out = write_server_file(server, "/etc/node-plane/node.env", render_server_node_env(server), mode="0600")
+    if node_env_rc != 0:
+        return node_env_rc, node_env_out
+
+    messages = [
+        f"Runtime files synced for {server_key}.",
+        "node.env updated.",
+    ]
+    if "xray" in server.protocol_kinds:
+        rc, out = sync_xray_server_settings(server_key)
+        if rc != 0:
+            return rc, f"{messages[0]}\n\nXray sync failed:\n{out}"
+        messages.append("Xray settings synced.")
+    update_server_fields(server.key, notes=f"runtime synced to {APP_SEMVER} · {APP_COMMIT}")
+    return 0, "\n".join(messages)
 
 
 def _check_server_ports(server) -> Tuple[int, str]:
@@ -2889,30 +3040,7 @@ def bootstrap_server(server_key: str, preserve_config: bool = False) -> Tuple[in
         _mark(server, "bootstrap_failed", msg[-1500:])
         return 1, msg
 
-    files = {
-        "/etc/node-plane/node.env.example": (NODE_ENV_EXAMPLE, "0644"),
-        "/opt/node-plane-runtime/init-xray.sh": (XRAY_INIT_SCRIPT, "0755"),
-        "/opt/node-plane-runtime/sync-xray.sh": (XRAY_SYNC_SCRIPT, "0755"),
-        "/opt/node-plane-runtime/deploy-xray.sh": (XRAY_DEPLOY_SCRIPT, "0755"),
-        "/opt/node-plane-runtime/xray-enable-stats.sh": (XRAY_ENABLE_STATS_SCRIPT, "0755"),
-        "/opt/node-plane-runtime/xray-add-user.sh": (XRAY_ADD_SCRIPT, "0755"),
-        "/opt/node-plane-runtime/xray-add-user-existing.sh": (XRAY_ADD_EXISTING_SCRIPT, "0755"),
-        "/opt/node-plane-runtime/xray-list-users.sh": (XRAY_LIST_SCRIPT, "0755"),
-        "/opt/node-plane-runtime/xray-list-traffic.sh": (XRAY_TRAFFIC_SCRIPT, "0755"),
-        "/opt/node-plane-runtime/xray-del-user.sh": (XRAY_DEL_SCRIPT, "0755"),
-        "/opt/node-plane-runtime/conf2vpn.py": (AWG_CONF2VPN_PY, "0644"),
-        "/opt/node-plane-runtime/amnezia-config-decoder.py": (AMNEZIA_CONFIG_DECODER_PY, "0644"),
-        "/opt/node-plane-runtime/awg-template.json": (AWG_TEMPLATE_JSON, "0644"),
-        "/opt/node-plane-runtime/awg-add-user.sh": (AWG_ADD_SCRIPT, "0755"),
-        "/opt/node-plane-runtime/awg-del-user.sh": (AWG_DEL_SCRIPT, "0755"),
-        "/opt/node-plane-runtime/show-awg-entropy.sh": (AWG_SHOW_ENTROPY_SCRIPT, "0755"),
-        "/opt/node-plane-runtime/init-awg.sh": (AWG_INIT_SCRIPT, "0755"),
-        "/opt/node-plane-runtime/regenerate-awg-entropy.sh": (AWG_REGENERATE_ENTROPY_SCRIPT, "0755"),
-        "/opt/node-plane-runtime/amnezia-awg/Dockerfile": (AWG_DOCKERFILE, "0644"),
-        "/opt/node-plane-runtime/amnezia-awg/start.sh": (AWG_START_SCRIPT, "0755"),
-        "/opt/node-plane-runtime/deploy-awg.sh": (AWG_DEPLOY_SCRIPT, "0755"),
-    }
-    file_rc, file_out = write_server_files(server, files, timeout=180)
+    file_rc, file_out = write_server_files(server, _runtime_files(), timeout=180)
     if file_rc != 0:
         _mark(server, "bootstrap_failed", file_out[-1500:])
         return file_rc, file_out
