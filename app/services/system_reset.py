@@ -93,17 +93,25 @@ def _read_env_var_from_shared(key: str) -> str:
     return ""
 
 
-def schedule_full_uninstall() -> Tuple[int, str]:
-    targets = _uninstall_targets()
-    if not targets:
-        return 1, "No safe uninstall paths were resolved."
-
-    prefix = _systemctl_prefix()
-    pid = os.getpid()
+def _managed_local_image_refs() -> List[str]:
     image_repo = _read_env_var_from_shared("NODE_PLANE_IMAGE_REPO") or "node-plane"
     image_tag = _read_env_var_from_shared("NODE_PLANE_IMAGE_TAG") or "local"
-    image_ref = f"{image_repo}:{image_tag}" if image_repo and image_tag else ""
-    script_body = [
+    refs = []
+    if image_repo and image_tag:
+        refs.append(f"{image_repo}:{image_tag}")
+    for ref in (
+        "node-plane-amnezia-awg:0.2.16",
+        "amneziavpn/amneziawg-go:0.2.16",
+        "ghcr.io/xtls/xray-core:25.12.8",
+    ):
+        if ref not in refs:
+            refs.append(ref)
+    return refs
+
+
+def _build_full_uninstall_script(pid: int, targets: List[str]) -> str:
+    prefix = _systemctl_prefix()
+    lines = [
         "#!/usr/bin/env bash",
         "set -eu",
         "sleep 3",
@@ -113,22 +121,37 @@ def schedule_full_uninstall() -> Tuple[int, str]:
         f"{prefix}systemctl daemon-reload >/dev/null 2>&1 || true",
         "docker rm -f node-plane >/dev/null 2>&1 || true",
     ]
-    if image_ref:
-        script_body.append(f"docker rmi -f {_shell_quote(image_ref)} >/dev/null 2>&1 || true")
-    script_body.extend(
+    for image_ref in _managed_local_image_refs():
+        lines.append(f"docker rmi -f {_shell_quote(image_ref)} >/dev/null 2>&1 || true")
+    lines.extend(
         [
-            "docker image prune -f >/dev/null 2>&1 || true",
+            "docker image prune -af >/dev/null 2>&1 || true",
             "docker system prune -f >/dev/null 2>&1 || true",
-        "kill " + str(pid) + " >/dev/null 2>&1 || true",
         ]
     )
     for path in targets:
-        script_body.append(f"rm -rf -- {_shell_quote(path)} >/dev/null 2>&1 || true")
-    script_body.append('rm -f -- "$0" >/dev/null 2>&1 || true')
+        lines.append(f"rm -rf -- {_shell_quote(path)} >/dev/null 2>&1 || true")
+    lines.extend(
+        [
+            "rm -f -- \"$0\" >/dev/null 2>&1 || true",
+            "sleep 1",
+            "kill " + str(pid) + " >/dev/null 2>&1 || true",
+        ]
+    )
+    return "\n".join(lines) + "\n"
+
+
+def schedule_full_uninstall() -> Tuple[int, str]:
+    targets = _uninstall_targets()
+    if not targets:
+        return 1, "No safe uninstall paths were resolved."
+
+    pid = os.getpid()
+    script_body = _build_full_uninstall_script(pid, targets)
     fd, script_path = tempfile.mkstemp(prefix="node-plane-uninstall-", suffix=".sh")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write("\n".join(script_body) + "\n")
+            fh.write(script_body)
         os.chmod(script_path, 0o700)
         subprocess.Popen(
             ["/bin/sh", script_path],

@@ -120,6 +120,19 @@ class SystemResetTests(unittest.TestCase):
         self.assertIn("Node Plane removal scheduled.", out)
         mocked.assert_called_once()
 
+    def test_full_uninstall_script_removes_targets_before_killing_process(self) -> None:
+        script = self.system_reset._build_full_uninstall_script(12345, ["/opt/node-plane", "/opt/node-plane-src"])
+        self.assertIn("rm -rf -- '/opt/node-plane' >/dev/null 2>&1 || true", script)
+        self.assertIn("rm -rf -- '/opt/node-plane-src' >/dev/null 2>&1 || true", script)
+        self.assertLess(script.index("rm -rf -- '/opt/node-plane'"), script.index("kill 12345"))
+        self.assertLess(script.index("rm -rf -- '/opt/node-plane-src'"), script.index("kill 12345"))
+
+    def test_full_uninstall_script_removes_managed_images(self) -> None:
+        script = self.system_reset._build_full_uninstall_script(12345, ["/opt/node-plane"])
+        self.assertIn("docker rmi -f 'node-plane-amnezia-awg:0.2.16' >/dev/null 2>&1 || true", script)
+        self.assertIn("docker rmi -f 'amneziavpn/amneziawg-go:0.2.16' >/dev/null 2>&1 || true", script)
+        self.assertIn("docker image prune -af >/dev/null 2>&1 || true", script)
+
     def test_run_full_remove_with_nodes_runs_node_cleanup_before_uninstall(self) -> None:
         self.server_registry.upsert_server(
             key="nl1",
