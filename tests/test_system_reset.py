@@ -133,6 +133,12 @@ class SystemResetTests(unittest.TestCase):
         self.assertIn("docker rmi -f 'amneziavpn/amneziawg-go:0.2.16' >/dev/null 2>&1 || true", script)
         self.assertIn("docker image prune -af >/dev/null 2>&1 || true", script)
 
+    def test_full_uninstall_script_runs_compose_down_when_compose_file_exists(self) -> None:
+        script = self.system_reset._build_full_uninstall_script(12345, ["/opt/node-plane"])
+        self.assertIn("docker compose -f ", script)
+        self.assertIn(" down -v --remove-orphans >/dev/null 2>&1 || true", script)
+        self.assertLess(script.index("docker compose -f "), script.index("docker rm -f node-plane"))
+
     def test_run_full_remove_with_nodes_runs_node_cleanup_before_uninstall(self) -> None:
         self.server_registry.upsert_server(
             key="nl1",

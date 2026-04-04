@@ -109,6 +109,18 @@ def _managed_local_image_refs() -> List[str]:
     return refs
 
 
+def _compose_file_candidates() -> List[str]:
+    candidates: List[str] = []
+    for root in (str(SOURCE_ROOT or "").strip(), str(BASE_DIR or "").strip()):
+        if not root:
+            continue
+        for name in ("docker-compose.yml", "compose.yml"):
+            path = os.path.abspath(os.path.join(root, name))
+            if path not in candidates:
+                candidates.append(path)
+    return candidates
+
+
 def _build_full_uninstall_script(pid: int, targets: List[str]) -> str:
     prefix = _systemctl_prefix()
     lines = [
@@ -119,8 +131,21 @@ def _build_full_uninstall_script(pid: int, targets: List[str]) -> str:
         f"{prefix}systemctl disable node-plane >/dev/null 2>&1 || true",
         f"{prefix}rm -f /etc/systemd/system/node-plane.service >/dev/null 2>&1 || true",
         f"{prefix}systemctl daemon-reload >/dev/null 2>&1 || true",
-        "docker rm -f node-plane >/dev/null 2>&1 || true",
     ]
+    for compose_file in _compose_file_candidates():
+        lines.extend(
+            [
+                f"if [[ -f {_shell_quote(compose_file)} ]]; then",
+                f"  if docker compose version >/dev/null 2>&1; then docker compose -f {_shell_quote(compose_file)} down -v --remove-orphans >/dev/null 2>&1 || true; fi",
+                f"  if command -v docker-compose >/dev/null 2>&1; then docker-compose -f {_shell_quote(compose_file)} down -v --remove-orphans >/dev/null 2>&1 || true; fi",
+                "fi",
+            ]
+        )
+    lines.extend(
+        [
+        "docker rm -f node-plane >/dev/null 2>&1 || true",
+        ]
+    )
     for image_ref in _managed_local_image_refs():
         lines.append(f"docker rmi -f {_shell_quote(image_ref)} >/dev/null 2>&1 || true")
     lines.extend(
