@@ -69,6 +69,7 @@ class AdminViewsTests(unittest.TestCase):
         self.assertEqual([button.callback_data for button in rows[0]], ["menu:admin_updates_check", "menu:admin_updates_toggle_auto"])
         self.assertEqual([button.callback_data for button in rows[1]], ["menu:admin_updates_branch", "menu:admin_updates_versions:0"])
         self.assertEqual([button.callback_data for button in rows[2]], ["menu:admin_updates_run"])
+        self.assertEqual(rows[-1][0].callback_data, "menu:admin_settings")
 
     def test_admin_updates_menu_shows_runtime_sync_when_drift_exists(self) -> None:
         markup = keyboards.kb_admin_updates_menu(
@@ -87,6 +88,7 @@ class AdminViewsTests(unittest.TestCase):
         rows = markup.inline_keyboard
         self.assertEqual([button.callback_data for button in rows[0]], ["menu:admin_backups_create", "menu:admin_backups_restore:0"])
         self.assertEqual([button.callback_data for button in rows[1]], ["menu:admin_backups_settings"])
+        self.assertEqual(rows[-1][0].callback_data, "menu:admin_settings")
 
     def test_backup_restore_page_uses_short_callback_tokens(self) -> None:
         fake_items = [
@@ -103,6 +105,10 @@ class AdminViewsTests(unittest.TestCase):
         self.assertLessEqual(len(callback), 64)
         self.assertIn("2026-04-03 17:13 UTC", markup.inline_keyboard[0][0].text)
         self.assertNotIn("ago", markup.inline_keyboard[0][0].text)
+
+    def test_ssh_key_summary_returns_to_settings(self) -> None:
+        markup = user_profile._ssh_key_summary_markup("en")
+        self.assertEqual(markup.inline_keyboard[1][0].callback_data, "menu:admin_settings")
 
     def test_admin_backups_settings_menu_marks_current_values(self) -> None:
         markup = keyboards.kb_admin_backups_settings_menu(enabled=True, interval_hours=12, keep_count=10, lang="en")

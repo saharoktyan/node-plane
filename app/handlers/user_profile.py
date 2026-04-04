@@ -328,7 +328,7 @@ def _ssh_key_summary_markup(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton(t(lang, "ssh.details"), callback_data="menu:sshkey_details")],
-            [InlineKeyboardButton(t(lang, "menu.back"), callback_data="menu:admin")],
+            [InlineKeyboardButton(t(lang, "menu.back"), callback_data="menu:admin_settings")],
         ]
     )
 

@@ -256,7 +256,7 @@ def kb_admin_updates_menu(
         rows.append([InlineKeyboardButton(label, callback_data=f"{CB_MENU}admin_updates_run")])
     if runtime_sync_available:
         rows.append([InlineKeyboardButton(t(lang, "admin.status.runtime_sync_button"), callback_data=f"{CB_MENU}admin_updates_runtime_sync")])
-    rows.append([InlineKeyboardButton(t(lang, "menu.back"), callback_data=f"{CB_MENU}admin")])
+    rows.append([InlineKeyboardButton(t(lang, "menu.back"), callback_data=f"{CB_MENU}admin_settings")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -281,7 +281,7 @@ def kb_admin_backups_menu(lang: str = "ru") -> InlineKeyboardMarkup:
             InlineKeyboardButton(t(lang, "admin.backups.restore"), callback_data=f"{CB_MENU}admin_backups_restore:0"),
         ],
         [InlineKeyboardButton(t(lang, "admin.backups.settings"), callback_data=f"{CB_MENU}admin_backups_settings")],
-        [InlineKeyboardButton(t(lang, "menu.back"), callback_data=f"{CB_MENU}admin")],
+        [InlineKeyboardButton(t(lang, "menu.back"), callback_data=f"{CB_MENU}admin_settings")],
     ])
 
 
