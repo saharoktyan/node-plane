@@ -2129,12 +2129,34 @@ def _packages_script() -> str:
     return """#!/usr/bin/env bash
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
+
+apt_wait() {
+  local timeout="${1:-300}"
+  local elapsed=0
+  while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 \
+    || fuser /var/lib/dpkg/lock >/dev/null 2>&1 \
+    || fuser /var/lib/apt/lists/lock >/dev/null 2>&1 \
+    || fuser /var/cache/apt/archives/lock >/dev/null 2>&1; do
+    if (( elapsed >= timeout )); then
+      echo "Timed out waiting for apt/dpkg lock." >&2
+      return 1
+    fi
+    sleep 5
+    elapsed=$((elapsed + 5))
+  done
+}
+
+apt_run() {
+  apt_wait
+  apt-get "$@"
+}
+
 if command -v apt-get >/dev/null 2>&1; then
-  apt-get update
-  apt-get install -y ca-certificates curl jq qrencode wireguard-tools python3 iproute2 iptables
+  apt_run update
+  apt_run install -y ca-certificates curl jq qrencode wireguard-tools python3 iproute2 iptables
   if ! command -v docker >/dev/null 2>&1; then
-    apt-get install -y docker.io
-    apt-cache show docker-compose-plugin >/dev/null 2>&1 && apt-get install -y docker-compose-plugin || true
+    apt_run install -y docker.io
+    apt-cache show docker-compose-plugin >/dev/null 2>&1 && apt_run install -y docker-compose-plugin || true
   fi
 fi
 systemctl enable --now docker >/dev/null 2>&1 || service docker start >/dev/null 2>&1 || true
@@ -2148,17 +2170,38 @@ def _install_docker_script() -> str:
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
+apt_wait() {
+  local timeout="${1:-300}"
+  local elapsed=0
+  while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 \
+    || fuser /var/lib/dpkg/lock >/dev/null 2>&1 \
+    || fuser /var/lib/apt/lists/lock >/dev/null 2>&1 \
+    || fuser /var/cache/apt/archives/lock >/dev/null 2>&1; do
+    if (( elapsed >= timeout )); then
+      echo "Timed out waiting for apt/dpkg lock." >&2
+      return 1
+    fi
+    sleep 5
+    elapsed=$((elapsed + 5))
+  done
+}
+
+apt_run() {
+  apt_wait
+  apt-get "$@"
+}
+
 if ! command -v apt-get >/dev/null 2>&1; then
   echo "На сервере нет apt-get. Автоустановка Docker поддерживается только для Debian/Ubuntu."
   exit 1
 fi
 
 echo "Обновляю индекс пакетов..."
-apt-get update
+apt_run update
 
 echo "Устанавливаю Docker..."
-apt-get install -y docker.io
-apt-cache show docker-compose-plugin >/dev/null 2>&1 && apt-get install -y docker-compose-plugin || true
+apt_run install -y docker.io
+apt-cache show docker-compose-plugin >/dev/null 2>&1 && apt_run install -y docker-compose-plugin || true
 
 echo "Запускаю Docker..."
 systemctl enable --now docker >/dev/null 2>&1 || service docker start >/dev/null 2>&1 || true

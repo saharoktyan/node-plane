@@ -104,6 +104,16 @@ class ProbeSummaryTests(unittest.TestCase):
         self.assertIn('echo "cpu usage: $cpu_usage"', script)
         self.assertIn('time.sleep(0.2)', script)
 
+    def test_bootstrap_package_scripts_wait_for_apt_locks(self) -> None:
+        packages = server_bootstrap._packages_script()
+        docker_install = server_bootstrap._install_docker_script()
+        for script in (packages, docker_install):
+            self.assertIn("apt_wait()", script)
+            self.assertIn("fuser /var/lib/dpkg/lock-frontend", script)
+            self.assertIn("sleep 5", script)
+            self.assertIn('local timeout="${1:-300}"', script)
+            self.assertIn("apt_run()", script)
+
     def test_runtime_files_include_version_metadata(self) -> None:
         files = server_bootstrap._runtime_files()
         self.assertIn("/opt/node-plane-runtime/VERSION", files)
