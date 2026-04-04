@@ -12,7 +12,7 @@ from db.schema import ensure_schema
 from db.sqlite_db import SQLiteDB
 from i18n import get_user_locale, t
 from services import app_settings
-from services.server_registry import RegisteredServer, list_servers
+from services.server_registry import RegisteredServer, get_server, list_servers
 from services.server_runtime import run_server_command
 
 _log = logging.getLogger("alerts")
@@ -260,6 +260,56 @@ fi
 """
 
 
+def _parse_health_output(out: str) -> dict[str, str]:
+    payload: dict[str, str] = {}
+    for raw_line in (out or "").splitlines():
+        line = raw_line.strip()
+        if ":" not in line:
+            continue
+        if line.startswith("service:"):
+            parts = line.split(":", 2)
+            if len(parts) == 3:
+                payload[f"service:{parts[1]}"] = parts[2]
+            continue
+        key, value = line.split(":", 1)
+        payload[key.strip()] = value.strip()
+    return payload
+
+
+def _current_resolved_payload(row: dict[str, Any]) -> dict[str, Any]:
+    server_key = str(row.get("server_key") or "")
+    server = get_server(server_key)
+    fallback = dict(row.get("payload") or {})
+    if not server:
+        return fallback
+    server_name = f"{server.flag} {server.title} ({server.key})"
+    alert_type = str(row.get("alert_type") or "")
+    if alert_type == "node_unreachable":
+        return {"server_name": server_name}
+    rc, out = run_server_command(server, _health_script(server), timeout=_HOST_CHECK_TIMEOUT)
+    if rc != 0:
+        return {"server_name": server_name, **fallback}
+    payload = _parse_health_output(out)
+    if alert_type == "disk_low":
+        return {"server_name": server_name, "free_percent": _int(payload.get("disk_free_percent"), 0)}
+    if alert_type == "ram_high":
+        return {"server_name": server_name, "used_percent": _int(payload.get("mem_used_percent"), 0)}
+    if alert_type == "load_high":
+        return {
+            "server_name": server_name,
+            "load1": f"{_float(payload.get('load1'), 0.0):.2f}",
+            "cpus": max(1, _int(payload.get("cpus"), 1)),
+        }
+    if alert_type == "service_down":
+        service_name = str(fallback.get("service") or "")
+        return {
+            "server_name": server_name,
+            "service": service_name,
+            "status": str(payload.get(f"service:{service_name}") or "running"),
+        }
+    return {"server_name": server_name, **fallback}
+
+
 def _server_alerts(server: RegisteredServer) -> list[AlertRecord]:
     if not server.enabled or server.bootstrap_state != "bootstrapped":
         return []
@@ -274,18 +324,7 @@ def _server_alerts(server: RegisteredServer) -> list[AlertRecord]:
                 payload={"server_name": f"{server.flag} {server.title} ({server.key})", "message": (out or "").strip()[:300]},
             )
         ]
-    payload: dict[str, str] = {}
-    for raw_line in (out or "").splitlines():
-        line = raw_line.strip()
-        if ":" not in line:
-            continue
-        if line.startswith("service:"):
-            parts = line.split(":", 2)
-            if len(parts) == 3:
-                payload[f"service:{parts[1]}"] = parts[2]
-            continue
-        key, value = line.split(":", 1)
-        payload[key.strip()] = value.strip()
+    payload = _parse_health_output(out)
     alerts: list[AlertRecord] = []
     server_name = f"{server.flag} {server.title} ({server.key})"
     free_percent = _int(payload.get("disk_free_percent"), 100)
@@ -401,7 +440,7 @@ def _apply_scan(records: Iterable[AlertRecord], *, bot: object | None = None) ->
                     server_key=str(row.get("server_key") or ""),
                     alert_type=str(row.get("alert_type") or ""),
                     severity=str(row.get("severity") or "warning"),
-                    payload=dict(row.get("payload") or {}),
+                    payload=_current_resolved_payload(row),
                 )
                 _send_alert(bot, record, resolved=True)
             _delete_state(alert_key)

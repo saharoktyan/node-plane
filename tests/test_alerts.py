@@ -4,6 +4,7 @@ import importlib
 import os
 import sys
 import tempfile
+import types
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -16,6 +17,10 @@ if APP_ROOT not in sys.path:
     sys.path.insert(0, APP_ROOT)
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
+
+telegram_module = types.ModuleType("telegram")
+telegram_module.Update = object
+sys.modules.setdefault("telegram", telegram_module)
 
 
 class AlertsTests(unittest.TestCase):
@@ -67,3 +72,17 @@ class AlertsTests(unittest.TestCase):
         with patch.object(self.alerts, "_collect_alerts") as collect:
             self.alerts.alert_monitor_job()
         collect.assert_not_called()
+
+    def test_resolved_disk_alert_uses_current_free_percent(self) -> None:
+        row = {
+            "server_key": "lv1",
+            "alert_type": "disk_low",
+            "payload": {"server_name": "old", "free_percent": 0},
+        }
+        server = SimpleNamespace(key="lv1", title="Latvia #1", flag="🇱🇻", protocol_kinds=tuple())
+        with patch.object(self.alerts, "get_server", return_value=server), patch.object(
+            self.alerts, "run_server_command", return_value=(0, "disk_free_percent:27\ncpus:1\nload1:0.01\n")
+        ):
+            payload = self.alerts._current_resolved_payload(row)
+        self.assertEqual(payload["server_name"], "🇱🇻 Latvia #1 (lv1)")
+        self.assertEqual(payload["free_percent"], 27)
