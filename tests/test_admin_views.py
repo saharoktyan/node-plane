@@ -327,6 +327,11 @@ class AdminViewsTests(unittest.TestCase):
         self.assertNotIn("Access:", text)
         self.assertNotIn("Provisioning:", text)
 
+    def test_render_edit_menu_does_not_offer_reconcile(self) -> None:
+        _text, markup = admin_views.render_edit_menu("alice", {"awg_lv1", "xray_lv1"}, frozen=False, lang="en")
+        callbacks = [button.callback_data for row in markup.inline_keyboard for button in row]
+        self.assertNotIn("cfg:edit:reconcile", callbacks)
+
     def test_render_getkey_server_menu_does_not_duplicate_methods_in_text(self) -> None:
         fake_methods = [
             SimpleNamespace(getkey_payload="xray:de", short_label="🇩🇪 Xray"),

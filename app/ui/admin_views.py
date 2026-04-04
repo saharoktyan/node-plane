@@ -186,7 +186,6 @@ def render_edit_menu(name: str, protocols: Set[str], frozen: bool, lang: str = "
                 [InlineKeyboardButton("🔌 Протоколы" if lang == "ru" else "🔌 Protocols", callback_data=f"{CB_CFG}edit:proto")],
                 [
                     InlineKeyboardButton("🧊 Статус" if lang == "ru" else "🧊 Status", callback_data=f"{CB_CFG}edit:status"),
-                    InlineKeyboardButton("🔄 Сверить" if lang == "ru" else "🔄 Reconcile", callback_data=f"{CB_CFG}edit:reconcile"),
                 ],
                 [
                     InlineKeyboardButton("💾 Сохранить" if lang == "ru" else "💾 Save", callback_data=f"{CB_CFG}edit:save"),
