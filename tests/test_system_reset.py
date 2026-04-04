@@ -114,11 +114,22 @@ class SystemResetTests(unittest.TestCase):
         self.assertIn("bot SSH key removal requested for SSH nodes", out)
 
     def test_schedule_full_uninstall_spawns_detached_cleanup(self) -> None:
-        with patch.object(self.system_reset.subprocess, "Popen") as mocked:
+        with patch.object(self.system_reset.shutil, "which", return_value=None), patch.object(self.system_reset.subprocess, "Popen") as mocked:
             rc, out = self.system_reset.schedule_full_uninstall()
         self.assertEqual(rc, 0)
         self.assertIn("Node Plane removal scheduled.", out)
         mocked.assert_called_once()
+
+    def test_schedule_full_uninstall_prefers_systemd_run(self) -> None:
+        with patch.object(self.system_reset.shutil, "which", return_value="/usr/bin/systemd-run"), patch.object(
+            self.system_reset.subprocess, "run"
+        ) as mocked_run:
+            rc, out = self.system_reset.schedule_full_uninstall()
+        self.assertEqual(rc, 0)
+        self.assertIn("Node Plane removal scheduled.", out)
+        mocked_run.assert_called_once()
+        args = mocked_run.call_args.args[0]
+        self.assertIn("systemd-run", args)
 
     def test_full_uninstall_script_removes_targets_before_killing_process(self) -> None:
         script = self.system_reset._build_full_uninstall_script(12345, ["/opt/node-plane", "/opt/node-plane-src"])

@@ -4,6 +4,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 from typing import List, Tuple
 
 from config import BASE_DIR, INSTALL_MODE, SHARED_ROOT, SOURCE_ROOT, SSH_DIR, SQLITE_DB_PATH
@@ -166,6 +167,27 @@ def _build_full_uninstall_script(pid: int, targets: List[str]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _launch_cleanup_script(script_path: str) -> None:
+    if shutil.which("systemd-run"):
+        unit_name = f"node-plane-uninstall-{int(time.time())}"
+        cmd = ["systemd-run", "--unit", unit_name, "--collect", "--property=Type=oneshot", "/bin/bash", script_path]
+        if os.geteuid() != 0:
+            cmd = ["sudo", "-n", *cmd]
+        subprocess.run(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=True,
+        )
+        return
+    subprocess.Popen(
+        ["/bin/bash", script_path],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+
 def schedule_full_uninstall() -> Tuple[int, str]:
     targets = _uninstall_targets()
     if not targets:
@@ -178,12 +200,7 @@ def schedule_full_uninstall() -> Tuple[int, str]:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(script_body)
         os.chmod(script_path, 0o700)
-        subprocess.Popen(
-            ["/bin/sh", script_path],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
+        _launch_cleanup_script(script_path)
     except Exception as exc:
         try:
             os.remove(script_path)
