@@ -20,7 +20,7 @@ _db = SQLiteDB(SQLITE_DB_PATH)
 _schema_ready = False
 _HOST_CHECK_TIMEOUT = 25
 _MAX_WORKERS = 4
-_CONFIRM_CYCLES = 2
+_CONFIRM_CYCLES = 1
 
 
 @dataclass(frozen=True)

@@ -39,7 +39,7 @@ class AlertsTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.tmpdir.cleanup()
 
-    def test_alert_activates_after_two_scans_and_resolves_after_two_clear_scans(self) -> None:
+    def test_alert_activates_and_resolves_after_single_confirm_cycle(self) -> None:
         bot = SimpleNamespace(messages=[])
 
         def send_message(**kwargs):
@@ -55,15 +55,8 @@ class AlertsTests(unittest.TestCase):
         )
 
         self.alerts._apply_scan([record], bot=bot)
-        self.assertEqual(self.alerts.count_active_alerts(), 0)
-        self.assertEqual(len(bot.messages), 0)
-
-        self.alerts._apply_scan([record], bot=bot)
         self.assertEqual(self.alerts.count_active_alerts(), 1)
         self.assertEqual(len(bot.messages), 1)
-
-        self.alerts._apply_scan([], bot=bot)
-        self.assertEqual(self.alerts.count_active_alerts(), 1)
 
         self.alerts._apply_scan([], bot=bot)
         self.assertEqual(self.alerts.count_active_alerts(), 0)
@@ -74,4 +67,3 @@ class AlertsTests(unittest.TestCase):
         with patch.object(self.alerts, "_collect_alerts") as collect:
             self.alerts.alert_monitor_job()
         collect.assert_not_called()
-
