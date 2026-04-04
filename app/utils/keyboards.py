@@ -211,7 +211,14 @@ def kb_admin_requests_settings_menu(notify_enabled: bool, requests_enabled: bool
     ])
 
 
-def kb_admin_updates_menu(auto_check_enabled: bool, update_supported: bool, update_running: bool, branch: str, lang: str = "ru") -> InlineKeyboardMarkup:
+def kb_admin_updates_menu(
+    auto_check_enabled: bool,
+    update_supported: bool,
+    update_running: bool,
+    branch: str,
+    runtime_sync_available: bool = False,
+    lang: str = "ru",
+) -> InlineKeyboardMarkup:
     auto_label = t(lang, "admin.updates.auto_check_on") if auto_check_enabled else t(lang, "admin.updates.auto_check_off")
     rows: List[List[InlineKeyboardButton]] = [[
         InlineKeyboardButton(t(lang, "admin.updates.check_now"), callback_data=f"{CB_MENU}admin_updates_check"),
@@ -224,6 +231,8 @@ def kb_admin_updates_menu(auto_check_enabled: bool, update_supported: bool, upda
     if update_supported:
         label = t(lang, "admin.updates.update_running") if update_running else t(lang, "admin.updates.update_latest")
         rows.append([InlineKeyboardButton(label, callback_data=f"{CB_MENU}admin_updates_run")])
+    if runtime_sync_available:
+        rows.append([InlineKeyboardButton(t(lang, "admin.status.runtime_sync_button"), callback_data=f"{CB_MENU}admin_updates_runtime_sync")])
     rows.append([InlineKeyboardButton(t(lang, "menu.back"), callback_data=f"{CB_MENU}admin")])
     return InlineKeyboardMarkup(rows)
 

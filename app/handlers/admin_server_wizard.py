@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional, Sequence, Set
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import CallbackContext
 
-from config import CB_MENU, CB_SRV, PARSE_MODE
+from config import APP_COMMIT, APP_SEMVER, CB_MENU, CB_SRV, PARSE_MODE
 from i18n import get_locale_for_update, t
 from services.provisioning_state import (
     reconcile_server_state,
@@ -313,9 +313,9 @@ def _server_dashboard_markup(servers: Sequence[RegisteredServer], lang: str) -> 
 
 
 def _advanced_section_for_field(field: str) -> str:
-    if field in {"xray_host", "xray_sni", "xray_fp"}:
+    if field in {"xray_host", "xray_sni", "xray_fp", "xray_tcp_port", "xray_xhttp_port"}:
         return "xray"
-    if field in {"awg_public_host", "awg_iface", "awg_i1_preset"}:
+    if field in {"awg_public_host", "awg_iface", "awg_i1_preset", "awg_port"}:
         return "awg"
     return "general"
 
@@ -355,22 +355,22 @@ def _format_server_notes(notes: str, lang: str) -> str:
     return _localize_action_output(raw, lang)
 
 
-def _runtime_state_line(server_key: str, lang: str, runtime: dict[str, str] | None = None) -> str:
+def _runtime_state_values(server_key: str, lang: str, runtime: dict[str, str] | None = None) -> tuple[str, str]:
     runtime = runtime or get_server_runtime_state(server_key)
     state = str(runtime.get("state") or "unknown")
     version = str(runtime.get("version") or "")
     commit = str(runtime.get("commit") or "")
     if state == "up_to_date":
         value = version or commit or "ok"
-        return t(lang, "admin.wizard.server_card_runtime_sync", icon="✅", value=value, status=t(lang, "admin.wizard.runtime_state_current"))
+        return value, t(lang, "admin.wizard.server_card_runtime_state", icon="✅", value=t(lang, "admin.wizard.runtime_state_current"))
     if state == "outdated":
         current = version or commit or "legacy"
-        return t(lang, "admin.wizard.server_card_runtime_sync", icon="⚠️", value=current, status=t(lang, "admin.wizard.runtime_state_outdated"))
+        return current, t(lang, "admin.wizard.server_card_runtime_state", icon="⚠️", value=t(lang, "admin.wizard.runtime_state_outdated"))
     if state == "unknown":
-        return t(lang, "admin.wizard.server_card_runtime_sync", icon="🛠", value="—", status=t(lang, "admin.wizard.runtime_state_unknown"))
+        return "—", t(lang, "admin.wizard.server_card_runtime_state", icon="🛠", value=t(lang, "admin.wizard.runtime_state_unknown"))
     if state == "not_bootstrapped":
-        return t(lang, "admin.wizard.server_card_runtime_sync", icon="—", value="—", status=t(lang, "admin.wizard.runtime_state_not_bootstrapped"))
-    return t(lang, "admin.wizard.server_card_runtime_sync", icon="⚠️", value="—", status=t(lang, "admin.wizard.runtime_state_unknown"))
+        return "—", t(lang, "admin.wizard.server_card_runtime_state", icon="—", value=t(lang, "admin.wizard.runtime_state_not_bootstrapped"))
+    return "—", t(lang, "admin.wizard.server_card_runtime_state", icon="⚠️", value=t(lang, "admin.wizard.runtime_state_unknown"))
 
 
 def _server_card_text(server: RegisteredServer, lang: str) -> str:
@@ -383,6 +383,11 @@ def _server_card_text(server: RegisteredServer, lang: str) -> str:
     prov_summary = summarize_server_provisioning(server.key)
     protocols = ", ".join(server.protocol_kinds) or "—"
     actions = _server_recommended_actions(server, lang, runtime_state)
+    runtime_version, runtime_state_line = _runtime_state_values(server.key, lang, runtime)
+    total = int(prov_summary["total"])
+    ready = int(prov_summary["by_status"]["provisioned"])
+    failed = int(prov_summary["by_status"]["failed"])
+    attention = int(prov_summary["by_status"]["needs_attention"])
     lines = [
         f"🖥 {server.flag} {server.title} ({server.key})",
         f"• {overall_icon} {overall_text}",
@@ -394,23 +399,24 @@ def _server_card_text(server: RegisteredServer, lang: str) -> str:
         t(lang, "admin.wizard.server_card_host", value=server.public_host or "—"),
         "",
         t(lang, "admin.wizard.server_card_runtime"),
-        _runtime_state_line(server.key, lang, runtime),
+        t(lang, "admin.wizard.server_card_runtime_version", value=runtime_version),
+        runtime_state_line,
+        "",
+        t(lang, "admin.wizard.server_card_services"),
         t(lang, "admin.wizard.server_card_xray", icon=xray_icon, status=xray_text, tcp=server.xray_tcp_port, xhttp=server.xray_xhttp_port),
         t(lang, "admin.wizard.server_card_awg", icon=awg_icon, status=awg_text, port=server.awg_port, iface=server.awg_iface),
-        t(
-            lang,
-            "admin.wizard.server_card_provisioning_line",
-            ready=int(prov_summary["by_status"]["provisioned"]),
-            total=int(prov_summary["total"]),
-            failed=int(prov_summary["by_status"]["failed"]),
-            attention=int(prov_summary["by_status"]["needs_attention"]),
-        ),
+        "",
+        t(lang, "admin.wizard.server_card_profiles"),
     ]
+    if total <= 0:
+        lines.append(t(lang, "admin.wizard.server_card_profiles_empty"))
+    else:
+        lines.append(t(lang, "admin.wizard.server_card_profiles_ready", ready=ready, total=total))
+        lines.append(t(lang, "admin.wizard.server_card_profiles_failed", count=failed))
+        lines.append(t(lang, "admin.wizard.server_card_profiles_attention", count=attention))
     if actions:
         lines.extend(["", t(lang, "admin.wizard.server_card_actions")])
         lines.extend([f"• {item}" for item in actions[:3]])
-    else:
-        lines.extend(["", t(lang, "admin.wizard.server_card_actions"), f"• {t(lang, 'admin.wizard.server_card_no_actions')}"])
     if server.notes:
         lines.extend(["", t(lang, "admin.wizard.server_card_notes"), _format_server_notes(server.notes, lang)])
     return "\n".join(lines)
@@ -441,6 +447,14 @@ def _metrics_result_markup(server_key: str, lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton(t(lang, "admin.wizard.back_to_maintenance"), callback_data=f"{CB_SRV}advsection:maintenance:{server_key}")],
+        ]
+    )
+
+
+def _awg_entropy_result_markup(server_key: str, lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(t(lang, "admin.wizard.back_to_awg"), callback_data=f"{CB_SRV}advsection:awg:{server_key}")],
         ]
     )
 
@@ -522,19 +536,19 @@ def _advanced_menu_text(server: RegisteredServer, lang: str) -> str:
 
 
 def _advanced_menu_markup(server_key: str, lang: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
+    server = get_server(server_key)
+    rows: list[list[InlineKeyboardButton]] = [
         [
-            [
-                InlineKeyboardButton(t(lang, "admin.wizard.advanced_general"), callback_data=f"{CB_SRV}advsection:general:{server_key}"),
-                InlineKeyboardButton(t(lang, "admin.wizard.advanced_xray"), callback_data=f"{CB_SRV}advsection:xray:{server_key}"),
-            ],
-            [
-                InlineKeyboardButton(t(lang, "admin.wizard.advanced_awg"), callback_data=f"{CB_SRV}advsection:awg:{server_key}"),
-                InlineKeyboardButton(t(lang, "admin.wizard.advanced_maintenance"), callback_data=f"{CB_SRV}advsection:maintenance:{server_key}"),
-            ],
-            [InlineKeyboardButton(t(lang, "admin.wizard.back_to_server"), callback_data=f"{CB_SRV}card:{server_key}")],
+            InlineKeyboardButton(t(lang, "admin.wizard.advanced_general"), callback_data=f"{CB_SRV}advsection:general:{server_key}"),
+            InlineKeyboardButton(t(lang, "admin.wizard.advanced_maintenance"), callback_data=f"{CB_SRV}advsection:maintenance:{server_key}"),
         ]
-    )
+    ]
+    if server and "xray" in server.protocol_kinds:
+        rows.append([InlineKeyboardButton(t(lang, "admin.wizard.advanced_xray"), callback_data=f"{CB_SRV}advsection:xray:{server_key}")])
+    if server and "awg" in server.protocol_kinds:
+        rows.append([InlineKeyboardButton(t(lang, "admin.wizard.advanced_awg"), callback_data=f"{CB_SRV}advsection:awg:{server_key}")])
+    rows.append([InlineKeyboardButton(t(lang, "admin.wizard.back_to_server"), callback_data=f"{CB_SRV}card:{server_key}")])
+    return InlineKeyboardMarkup(rows)
 
 
 def _advanced_section_text(server: RegisteredServer, section: str, lang: str) -> str:
@@ -588,6 +602,60 @@ def _advanced_section_text(server: RegisteredServer, section: str, lang: str) ->
                 t(lang, "admin.wizard.advanced_awg_note"),
             ]
         )
+    if section == "maintenance_ports":
+        return "\n".join(
+            [
+                f"⚙️ {server.flag} {server.title} ({server.key})",
+                "",
+                t(lang, "admin.wizard.maintenance_ports"),
+                t(lang, "admin.wizard.maintenance_ports_intro"),
+                "",
+                t(lang, "admin.wizard.server_ports_hint"),
+            ]
+        )
+    if section == "maintenance_runtime":
+        runtime = get_server_runtime_state(server.key)
+        state = str(runtime.get("state") or "unknown")
+        version = str(runtime.get("version") or "").strip() or "—"
+        commit = str(runtime.get("commit") or "").strip() or "—"
+        state_key = {
+            "up_to_date": "admin.wizard.runtime_state_current",
+            "outdated": "admin.wizard.runtime_state_outdated",
+            "unknown": "admin.wizard.runtime_state_unknown",
+            "not_bootstrapped": "admin.wizard.runtime_state_not_bootstrapped",
+        }.get(state, "admin.wizard.runtime_state_unknown")
+        lines = [
+            f"⚙️ {server.flag} {server.title} ({server.key})",
+            "",
+            t(lang, "admin.wizard.maintenance_runtime"),
+            t(lang, "admin.wizard.maintenance_runtime_intro"),
+            "",
+            t(lang, "admin.wizard.maintenance_runtime_bot_version", value=APP_SEMVER),
+            t(lang, "admin.wizard.maintenance_runtime_bot_commit", value=APP_COMMIT if APP_COMMIT != "unknown" else "—"),
+            t(lang, "admin.wizard.maintenance_runtime_version", value=version),
+            t(lang, "admin.wizard.maintenance_runtime_commit", value=commit),
+            t(lang, "admin.wizard.maintenance_runtime_state", value=t(lang, state_key)),
+        ]
+        if state == "outdated":
+            lines.extend(["", t(lang, "admin.wizard.maintenance_runtime_sync_needed")])
+        elif state == "unknown":
+            lines.extend(["", t(lang, "admin.wizard.maintenance_runtime_legacy")])
+        elif state == "not_bootstrapped":
+            lines.extend(["", t(lang, "admin.wizard.maintenance_runtime_not_bootstrapped")])
+        else:
+            lines.extend(["", t(lang, "admin.wizard.maintenance_runtime_current")])
+        return "\n".join(lines)
+    if section == "maintenance_repair":
+        return "\n".join(
+            [
+                f"⚙️ {server.flag} {server.title} ({server.key})",
+                "",
+                t(lang, "admin.wizard.maintenance_repair"),
+                t(lang, "admin.wizard.maintenance_repair_intro"),
+                "",
+                t(lang, "admin.wizard.maintenance_repair_note"),
+            ]
+        )
     return "\n".join(
         [
             f"⚙️ {server.flag} {server.title} ({server.key})",
@@ -602,6 +670,7 @@ def _advanced_section_text(server: RegisteredServer, section: str, lang: str) ->
 
 def _advanced_section_markup(server_key: str, section: str, lang: str) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]]
+    server = get_server(server_key)
     if section == "general":
         rows = [
             [
@@ -650,21 +719,42 @@ def _advanced_section_markup(server_key: str, section: str, lang: str) -> Inline
                 InlineKeyboardButton(t(lang, "admin.wizard.awg_regen_entropy"), callback_data=f"{CB_SRV}action:awgregen:{server_key}"),
             ],
         ]
+    elif section == "maintenance_ports":
+        rows = [
+            [
+                InlineKeyboardButton(t(lang, "admin.wizard.check_ports"), callback_data=f"{CB_SRV}action:checkports:{server_key}"),
+                InlineKeyboardButton(t(lang, "admin.wizard.open_ports"), callback_data=f"{CB_SRV}action:openports:{server_key}"),
+            ],
+        ]
+        rows.append([InlineKeyboardButton(t(lang, "admin.wizard.back_to_maintenance"), callback_data=f"{CB_SRV}advsection:maintenance:{server_key}")])
+        return InlineKeyboardMarkup(rows)
+    elif section == "maintenance_runtime":
+        runtime = get_server_runtime_state(server_key)
+        state = str(runtime.get("state") or "")
+        rows = []
+        if state in {"outdated", "unknown"}:
+            rows.append([InlineKeyboardButton(t(lang, "admin.wizard.sync_runtime"), callback_data=f"{CB_SRV}action:syncruntime:{server_key}")])
+        rows.append([InlineKeyboardButton(t(lang, "admin.wizard.back_to_maintenance"), callback_data=f"{CB_SRV}advsection:maintenance:{server_key}")])
+        return InlineKeyboardMarkup(rows)
+    elif section == "maintenance_repair":
+        rows = [
+            [InlineKeyboardButton(t(lang, "admin.wizard.sync_server_config"), callback_data=f"{CB_SRV}action:syncenv:{server_key}")],
+        ]
+        if server and "xray" in server.protocol_kinds:
+            rows.append([InlineKeyboardButton(t(lang, "admin.wizard.sync_xray_runtime"), callback_data=f"{CB_SRV}action:syncxray:{server_key}")])
+        rows.append([InlineKeyboardButton(t(lang, "admin.wizard.repair_access_state"), callback_data=f"{CB_SRV}action:reconcile:{server_key}")])
+        rows.append([InlineKeyboardButton(t(lang, "admin.wizard.back_to_maintenance"), callback_data=f"{CB_SRV}advsection:maintenance:{server_key}")])
+        return InlineKeyboardMarkup(rows)
     else:
         rows = [
             [
                 InlineKeyboardButton(t(lang, "admin.wizard.server_metrics"), callback_data=f"{CB_SRV}action:metrics:{server_key}"),
-                InlineKeyboardButton(t(lang, "admin.wizard.check_ports"), callback_data=f"{CB_SRV}action:checkports:{server_key}"),
+                InlineKeyboardButton(t(lang, "admin.wizard.maintenance_ports"), callback_data=f"{CB_SRV}advsection:maintenance_ports:{server_key}"),
             ],
             [
-                InlineKeyboardButton(t(lang, "admin.wizard.open_ports"), callback_data=f"{CB_SRV}action:openports:{server_key}"),
-                InlineKeyboardButton(t(lang, "admin.wizard.reconcile"), callback_data=f"{CB_SRV}action:reconcile:{server_key}"),
+                InlineKeyboardButton(t(lang, "admin.wizard.maintenance_runtime"), callback_data=f"{CB_SRV}advsection:maintenance_runtime:{server_key}"),
+                InlineKeyboardButton(t(lang, "admin.wizard.maintenance_repair"), callback_data=f"{CB_SRV}advsection:maintenance_repair:{server_key}"),
             ],
-            [
-                InlineKeyboardButton(t(lang, "admin.wizard.sync_runtime"), callback_data=f"{CB_SRV}action:syncruntime:{server_key}"),
-                InlineKeyboardButton(t(lang, "admin.wizard.sync_env"), callback_data=f"{CB_SRV}action:syncenv:{server_key}"),
-            ],
-            [InlineKeyboardButton(t(lang, "admin.wizard.sync_xray"), callback_data=f"{CB_SRV}action:syncxray:{server_key}")],
             [InlineKeyboardButton(t(lang, "admin.wizard.full_cleanup"), callback_data=f"{CB_SRV}cleanupmenu:{server_key}")],
         ]
     rows.append([InlineKeyboardButton(t(lang, "admin.wizard.back_to_advanced"), callback_data=f"{CB_SRV}advanced:{server_key}")])
@@ -1790,7 +1880,7 @@ def on_server_callback(update: Update, context: CallbackContext, payload: str) -
             stop_progress = _start_progress_animation(context, t(lang, "admin.wizard.awg_entropy"))
             rc, out = show_awg_entropy(server_key)
             stop_progress()
-            _wizard_edit(context, _action_result_text(t(lang, "admin.wizard.awg_entropy"), rc, out, server_key, lang), _server_card_markup(server_key, lang))
+            _wizard_edit(context, _action_result_text(t(lang, "admin.wizard.awg_entropy"), rc, out, server_key, lang), _awg_entropy_result_markup(server_key, lang))
             return
         if action == "awgregen":
             stop_progress = _start_progress_animation(context, t(lang, "admin.wizard.awg_regen_entropy"))

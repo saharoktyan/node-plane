@@ -71,6 +71,18 @@ class AdminViewsTests(unittest.TestCase):
         self.assertEqual([button.callback_data for button in rows[1]], ["menu:admin_updates_branch", "menu:admin_updates_versions:0"])
         self.assertEqual([button.callback_data for button in rows[2]], ["menu:admin_updates_run"])
 
+    def test_admin_updates_menu_shows_runtime_sync_when_drift_exists(self) -> None:
+        markup = keyboards.kb_admin_updates_menu(
+            auto_check_enabled=True,
+            update_supported=False,
+            update_running=False,
+            branch="dev",
+            runtime_sync_available=True,
+            lang="en",
+        )
+        callbacks = [button.callback_data for row in markup.inline_keyboard for button in row]
+        self.assertIn("menu:admin_updates_runtime_sync", callbacks)
+
     def test_admin_backups_menu_groups_primary_actions(self) -> None:
         markup = keyboards.kb_admin_backups_menu(lang="en")
         rows = markup.inline_keyboard
@@ -162,24 +174,74 @@ class AdminViewsTests(unittest.TestCase):
         self.assertIn("`ssh-ed25519 AAAA test`", text)
 
     def test_advanced_menu_places_maintenance_after_protocol_sections(self) -> None:
-        markup = admin_server_wizard._advanced_menu_markup("spb1", "en")
+        fake_server = SimpleNamespace(protocol_kinds=("xray", "awg"))
+        with patch.object(admin_server_wizard, "get_server", return_value=fake_server):
+            markup = admin_server_wizard._advanced_menu_markup("spb1", "en")
         rows = markup.inline_keyboard
-        self.assertEqual([button.callback_data for button in rows[0]], ["srv:advsection:general:spb1", "srv:advsection:xray:spb1"])
-        self.assertEqual([button.callback_data for button in rows[1]], ["srv:advsection:awg:spb1", "srv:advsection:maintenance:spb1"])
+        self.assertEqual([button.callback_data for button in rows[0]], ["srv:advsection:general:spb1", "srv:advsection:maintenance:spb1"])
+        self.assertEqual([button.callback_data for button in rows[1]], ["srv:advsection:xray:spb1"])
+        self.assertEqual([button.callback_data for button in rows[2]], ["srv:advsection:awg:spb1"])
 
-    def test_maintenance_section_groups_safe_actions_before_sync(self) -> None:
+    def test_advanced_menu_hides_protocol_sections_when_not_selected(self) -> None:
+        fake_server = SimpleNamespace(protocol_kinds=("awg",))
+        with patch.object(admin_server_wizard, "get_server", return_value=fake_server):
+            markup = admin_server_wizard._advanced_menu_markup("spb1", "en")
+        callbacks = [button.callback_data for row in markup.inline_keyboard for button in row]
+        self.assertNotIn("srv:advsection:xray:spb1", callbacks)
+        self.assertIn("srv:advsection:awg:spb1", callbacks)
+
+    def test_maintenance_section_groups_into_submenus(self) -> None:
         markup = admin_server_wizard._advanced_section_markup("spb1", "maintenance", "en")
         rows = markup.inline_keyboard
-        self.assertEqual([button.callback_data for button in rows[0]], ["srv:action:metrics:spb1", "srv:action:checkports:spb1"])
-        self.assertEqual([button.callback_data for button in rows[1]], ["srv:action:openports:spb1", "srv:action:reconcile:spb1"])
-        self.assertEqual([button.callback_data for button in rows[2]], ["srv:action:syncruntime:spb1", "srv:action:syncenv:spb1"])
-        self.assertEqual([button.callback_data for button in rows[3]], ["srv:action:syncxray:spb1"])
+        self.assertEqual([button.callback_data for button in rows[0]], ["srv:action:metrics:spb1", "srv:advsection:maintenance_ports:spb1"])
+        self.assertEqual([button.callback_data for button in rows[1]], ["srv:advsection:maintenance_runtime:spb1", "srv:advsection:maintenance_repair:spb1"])
+
+    def test_maintenance_ports_section_groups_port_actions(self) -> None:
+        markup = admin_server_wizard._advanced_section_markup("spb1", "maintenance_ports", "en")
+        rows = markup.inline_keyboard
+        self.assertEqual([button.callback_data for button in rows[0]], ["srv:action:checkports:spb1", "srv:action:openports:spb1"])
+        self.assertEqual(rows[1][0].callback_data, "srv:advsection:maintenance:spb1")
+
+    def test_maintenance_runtime_section_shows_sync_only_for_drift(self) -> None:
+        with patch.object(admin_server_wizard, "get_server_runtime_state", return_value={"state": "unknown", "version": "", "commit": ""}):
+            markup = admin_server_wizard._advanced_section_markup("spb1", "maintenance_runtime", "en")
+        callbacks = [button.callback_data for row in markup.inline_keyboard for button in row]
+        self.assertIn("srv:action:syncruntime:spb1", callbacks)
+
+    def test_maintenance_runtime_section_hides_sync_when_current(self) -> None:
+        with patch.object(admin_server_wizard, "get_server_runtime_state", return_value={"state": "up_to_date", "version": "0.3.1-alpha.1", "commit": "abc1234"}):
+            markup = admin_server_wizard._advanced_section_markup("spb1", "maintenance_runtime", "en")
+        callbacks = [button.callback_data for row in markup.inline_keyboard for button in row]
+        self.assertNotIn("srv:action:syncruntime:spb1", callbacks)
+        self.assertEqual(callbacks, ["srv:advsection:maintenance:spb1"])
+
+    def test_maintenance_repair_section_hides_xray_action_without_protocol(self) -> None:
+        fake_server = SimpleNamespace(protocol_kinds=("awg",))
+        with patch.object(admin_server_wizard, "get_server", return_value=fake_server):
+            markup = admin_server_wizard._advanced_section_markup("spb1", "maintenance_repair", "en")
+        callbacks = [button.callback_data for row in markup.inline_keyboard for button in row]
+        self.assertIn("srv:action:syncenv:spb1", callbacks)
+        self.assertIn("srv:action:reconcile:spb1", callbacks)
+        self.assertNotIn("srv:action:syncxray:spb1", callbacks)
+
+    def test_maintenance_repair_section_shows_xray_action_with_protocol(self) -> None:
+        fake_server = SimpleNamespace(protocol_kinds=("xray",))
+        with patch.object(admin_server_wizard, "get_server", return_value=fake_server):
+            markup = admin_server_wizard._advanced_section_markup("spb1", "maintenance_repair", "en")
+        callbacks = [button.callback_data for row in markup.inline_keyboard for button in row]
+        self.assertIn("srv:action:syncxray:spb1", callbacks)
 
     def test_metrics_result_markup_returns_to_maintenance_screen(self) -> None:
         markup = admin_server_wizard._metrics_result_markup("spb1", "en")
         rows = markup.inline_keyboard
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0][0].callback_data, "srv:advsection:maintenance:spb1")
+
+    def test_awg_entropy_result_markup_returns_to_awg_screen(self) -> None:
+        markup = admin_server_wizard._awg_entropy_result_markup("spb1", "en")
+        rows = markup.inline_keyboard
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0][0].callback_data, "srv:advsection:awg:spb1")
 
     def test_problem_server_card_opens_without_active_server_wizard(self) -> None:
         update = SimpleNamespace(
@@ -285,10 +347,64 @@ class AdminViewsTests(unittest.TestCase):
         self.assertIn("Saint-Petersburg (spb1)", text)
         self.assertEqual(markup.inline_keyboard[0][0].callback_data, "menu:admin_runtime_sync_run")
 
+    def test_runtime_sync_confirm_can_return_to_updates(self) -> None:
+        fake_server = SimpleNamespace(key="spb1", flag="🇷🇺", title="Saint-Petersburg")
+        with patch.object(user_profile, "get_servers_needing_runtime_sync", return_value=[fake_server]):
+            _text, markup = user_profile._render_runtime_sync_confirm("en", back_callback="menu:admin_updates")
+        self.assertEqual(markup.inline_keyboard[1][0].callback_data, "menu:admin_updates")
+
     def test_maintenance_section_includes_full_cleanup(self) -> None:
         markup = admin_server_wizard._advanced_section_markup("spb1", "maintenance", "en")
         buttons = [button.text for row in markup.inline_keyboard for button in row]
         self.assertIn("🧨 Full Cleanup", buttons)
+
+    def test_maintenance_runtime_text_shows_runtime_state(self) -> None:
+        fake_server = SimpleNamespace(flag="🇷🇺", title="Saint-Petersburg", key="spb1")
+        with patch.object(admin_server_wizard, "get_server_runtime_state", return_value={"state": "unknown", "version": "", "commit": ""}):
+            text = admin_server_wizard._advanced_section_text(fake_server, "maintenance_runtime", "en")
+        self.assertIn("Runtime", text)
+        self.assertIn("state: legacy/unknown", text)
+
+    def test_advanced_section_for_port_fields_routes_back_to_protocol_sections(self) -> None:
+        self.assertEqual(admin_server_wizard._advanced_section_for_field("xray_tcp_port"), "xray")
+        self.assertEqual(admin_server_wizard._advanced_section_for_field("xray_xhttp_port"), "xray")
+        self.assertEqual(admin_server_wizard._advanced_section_for_field("awg_port"), "awg")
+
+    def test_server_card_omits_empty_next_step_section(self) -> None:
+        fake_server = SimpleNamespace(
+            key="spb1",
+            flag="🇷🇺",
+            title="Saint-Petersburg",
+            enabled=True,
+            bootstrap_state="bootstrapped",
+            protocol_kinds=(),
+            transport="ssh",
+            public_host="example.com",
+            xray_tcp_port=443,
+            xray_xhttp_port=8443,
+            awg_port=51820,
+            awg_iface="wg0",
+            notes="",
+        )
+        with patch.object(admin_server_wizard, "get_server_runtime_state", return_value={"state": "up_to_date"}), patch.object(
+            admin_server_wizard, "_server_status", return_value=("✅", "ready")
+        ), patch.object(
+            admin_server_wizard, "_xray_status", return_value=("—", "disabled")
+        ), patch.object(
+            admin_server_wizard, "_awg_status", return_value=("—", "disabled")
+        ), patch.object(
+            admin_server_wizard, "_server_overall_status", return_value=("✅", "ready")
+        ), patch.object(
+            admin_server_wizard, "summarize_server_provisioning",
+            return_value={"overall": "ok", "total": 0, "by_status": {"provisioned": 0, "failed": 0, "needs_attention": 0}},
+        ):
+            text = admin_server_wizard._server_card_text(fake_server, "en")
+        self.assertNotIn("Next step", text)
+        self.assertNotIn("nothing required", text)
+        self.assertIn("Runtime", text)
+        self.assertIn("Services", text)
+        self.assertIn("Profiles", text)
+        self.assertIn("No assigned profiles", text)
 
     def test_full_cleanup_menu_shows_ssh_key_option_for_ssh_servers(self) -> None:
         fake_server = SimpleNamespace(key="spb1", flag="🇷🇺", title="Saint-Petersburg", transport="ssh")

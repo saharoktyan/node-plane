@@ -267,12 +267,12 @@ def _render_problem_servers(lang: str) -> tuple[str, InlineKeyboardMarkup]:
     return "\n".join(lines), InlineKeyboardMarkup(rows)
 
 
-def _render_runtime_sync_confirm(lang: str) -> tuple[str, InlineKeyboardMarkup]:
+def _render_runtime_sync_confirm(lang: str, back_callback: str = "menu:admin_status") -> tuple[str, InlineKeyboardMarkup]:
     targets = get_servers_needing_runtime_sync()
     if not targets:
         return (
             t(lang, "admin.status.runtime_sync_empty"),
-            InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, "menu.back"), callback_data="menu:admin_status")]]),
+            InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, "menu.back"), callback_data=back_callback)]]),
         )
     lines = [
         t(lang, "admin.status.runtime_sync_confirm_title"),
@@ -284,7 +284,7 @@ def _render_runtime_sync_confirm(lang: str) -> tuple[str, InlineKeyboardMarkup]:
         lines.append(t(lang, "admin.status.runtime_sync_confirm_more", count=len(targets) - 10))
     rows = [
         [InlineKeyboardButton(t(lang, "admin.status.runtime_sync_confirm_action"), callback_data="menu:admin_runtime_sync_run")],
-        [InlineKeyboardButton(t(lang, "menu.back"), callback_data="menu:admin_status")],
+        [InlineKeyboardButton(t(lang, "menu.back"), callback_data=back_callback)],
     ]
     return "\n".join(lines), InlineKeyboardMarkup(rows)
 
@@ -693,6 +693,7 @@ def _admin_updates_markup(lang: str) -> InlineKeyboardMarkup:
         show_update_action,
         update_running,
         str(overview.get("branch") or get_updates_branch()),
+        bool(get_servers_needing_runtime_sync()),
         lang,
     )
 
@@ -1545,7 +1546,14 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
             update,
             context,
             _render_admin_updates_text(lang),
-            reply_markup=kb_admin_updates_menu(enabled, show_update_action, update_running, str(overview.get("branch") or get_updates_branch()), lang),
+            reply_markup=kb_admin_updates_menu(
+                enabled,
+                show_update_action,
+                update_running,
+                str(overview.get("branch") or get_updates_branch()),
+                bool(get_servers_needing_runtime_sync()),
+                lang,
+            ),
             parse_mode=PARSE_MODE,
         )
         return
@@ -2073,6 +2081,17 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
 
     if payload == "admin_runtime_sync_all" and is_admin:
         text, markup = _render_runtime_sync_confirm(lang)
+        safe_edit_message(
+            update,
+            context,
+            text,
+            reply_markup=markup,
+            parse_mode=PARSE_MODE,
+        )
+        return
+
+    if payload == "admin_updates_runtime_sync" and is_admin:
+        text, markup = _render_runtime_sync_confirm(lang, back_callback="menu:admin_updates")
         safe_edit_message(
             update,
             context,
