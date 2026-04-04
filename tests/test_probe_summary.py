@@ -41,6 +41,28 @@ from services import server_bootstrap
 
 
 class ProbeSummaryTests(unittest.TestCase):
+    def test_awg_add_script_uses_server_key_prefix_for_display_name(self) -> None:
+        script = server_bootstrap.AWG_ADD_SCRIPT
+        self.assertIn('SERVER_KEY="${SERVER_KEY:-}"', script)
+        self.assertIn('DISPLAY_NAME="$NAME"', script)
+        self.assertIn('DISPLAY_NAME="${SERVER_KEY}-${NAME}"', script)
+        self.assertIn('"$DISPLAY_NAME" "$CLIENT_PUB" "$CLIENT_PSK" "$FREE_IP" >> "$CFG"', script)
+        self.assertIn('"$DISPLAY_NAME"', script)
+
+    def test_render_server_node_env_includes_server_key(self) -> None:
+        server = SimpleNamespace(
+            key="lv1",
+            xray_config_path="/opt/node-plane-runtime/xray/config.json",
+            xray_service_name="xray-lv1",
+            awg_iface="wg0",
+            awg_i1_preset="quic",
+            awg_public_host="1.2.3.4",
+            public_host="1.2.3.4",
+            awg_port=51820,
+        )
+        content = server_bootstrap.render_server_node_env(server)
+        self.assertIn("SERVER_KEY=lv1", content)
+
     def test_xray_traffic_script_is_valid_bash(self) -> None:
         with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".sh", delete=False) as fh:
             fh.write(server_bootstrap.XRAY_TRAFFIC_SCRIPT)

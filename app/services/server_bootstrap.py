@@ -1309,6 +1309,7 @@ I1_PRESET="${AWG_I1_PRESET:-quic}"
 CONF2VPN="${AWG_CONF2VPN:-/opt/node-plane-runtime/conf2vpn.py}"
 AWG_TEMPLATE="${AWG_TEMPLATE:-/opt/node-plane-runtime/awg-template.json}"
 AMNEZIA_DECODER="${AWG_DECODER:-/opt/node-plane-runtime/amnezia-config-decoder.py}"
+SERVER_KEY="${SERVER_KEY:-}"
 NAME="${1:-}"
 
 if [[ -z "$NAME" ]]; then
@@ -1326,6 +1327,10 @@ fi
 if [[ -z "$SERVER_IP" ]]; then
   echo "AWG_SERVER_IP is not configured in /etc/node-plane/node.env" >&2
   exit 1
+fi
+DISPLAY_NAME="$NAME"
+if [[ -n "$SERVER_KEY" ]]; then
+  DISPLAY_NAME="${SERVER_KEY}-${NAME}"
 fi
 if ! docker_cmd ps --format '{{.Names}}' | grep -q "^${CONTAINER}$"; then
   echo "Container ${CONTAINER} not running" >&2
@@ -1428,7 +1433,7 @@ docker_cmd exec -i "$CONTAINER" sh -lc "
 "
 
 printf '\n# %s\n[Peer]\nPublicKey = %s\nPresharedKey = %s\nAllowedIPs = %s/32\n' \
-  "$NAME" "$CLIENT_PUB" "$CLIENT_PSK" "$FREE_IP" >> "$CFG"
+  "$DISPLAY_NAME" "$CLIENT_PUB" "$CLIENT_PSK" "$FREE_IP" >> "$CFG"
 
 TMP_CONF="$(mktemp /tmp/awg-client-XXXX.conf)"
 TMP_JSON="$(mktemp /tmp/awg-amnezia-XXXX.json)"
@@ -1477,7 +1482,7 @@ if [[ -f "$CONF2VPN" && -f "$AWG_TEMPLATE" && -f "$AMNEZIA_DECODER" ]]; then
     "$TMP_JSON" \
     "$AMNEZIA_DECODER" \
     "$CONTAINER" \
-    "$NAME"
+    "$DISPLAY_NAME"
   echo "================================================="
 fi
 
@@ -2336,6 +2341,7 @@ chmod 600 "$AUTH_KEYS" >/dev/null 2>&1 || true
 
 def render_server_node_env(server: RegisteredServer) -> str:
     lines = [
+        shell_env_assignment("SERVER_KEY", server.key),
         shell_env_assignment("XRAY_CONFIG", server.xray_config_path),
         shell_env_assignment("XRAY_CONTAINER_NAME", server.xray_service_name),
         shell_env_assignment("XRAY_DOCKER_DIR", "/opt/node-plane-runtime/xray"),
