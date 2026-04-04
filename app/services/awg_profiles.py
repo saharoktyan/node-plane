@@ -1,6 +1,7 @@
 # app/services/awg_profiles.py
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List, Optional
 
 
@@ -10,10 +11,21 @@ def _awg_store():
     return awg_profile_store
 
 
+_AWG_VPN_RE = re.compile(r"(vpn://[A-Za-z0-9+/=_-]+)")
+
+
+def _sanitize_awg_config(value: Any) -> str:
+    raw = str(value or "")
+    if not raw:
+        return ""
+    m = _AWG_VPN_RE.search(raw)
+    return m.group(1) if m else raw.strip()
+
+
 def _normalize_server_entry(server_key: str, entry: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "server_key": server_key,
-        "config": str(entry.get("config") or ""),
+        "config": _sanitize_awg_config(entry.get("config")),
         "wg_conf": entry.get("wg_conf"),
         "created_at": entry.get("created_at"),
     }

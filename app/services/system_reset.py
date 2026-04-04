@@ -3,13 +3,17 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import tempfile
+import time
 from typing import List, Tuple
 
-from config import INSTALL_MODE, SSH_DIR, SQLITE_DB_PATH
+from config import BASE_DIR, INSTALL_MODE, INSTALL_ROOT, SHARED_ROOT, SOURCE_ROOT, SSH_DIR, SQLITE_DB_PATH
 from db.schema import ensure_schema
 from db.sqlite_db import SQLiteDB
-from services.server_bootstrap import full_cleanup_server
+from services.backups import clear_backup_storage, maybe_create_pre_action_backup
+from services.server_bootstrap import AWG_RUNTIME_CONTAINER, full_cleanup_server
 from services.server_registry import list_servers
+from services.server_runtime import is_running_in_container, run_local_command
 
 
 _db = SQLiteDB(SQLITE_DB_PATH)
@@ -51,6 +55,204 @@ def _clear_local_ssh_material() -> str:
     return "local SSH material removed"
 
 
+def _uninstall_targets() -> List[str]:
+    values = [str(INSTALL_ROOT or "").strip(), str(BASE_DIR or "").strip(), str(SHARED_ROOT or "").strip(), str(SOURCE_ROOT or "").strip()]
+    targets: List[str] = []
+    for path in values:
+        if not path or path in {"/", "/root", "/home"}:
+            continue
+        normalized = os.path.abspath(path)
+        if normalized in {"/", "/root", "/home"}:
+            continue
+        if normalized not in targets:
+            targets.append(normalized)
+    targets.sort(key=len, reverse=True)
+    return targets
+
+
+def _shell_quote(value: str) -> str:
+    return "'" + str(value).replace("'", "'\"'\"'") + "'"
+
+
+def _systemctl_prefix() -> str:
+    return "" if os.geteuid() == 0 else "sudo -n "
+
+
+def _read_env_var_from_shared(key: str) -> str:
+    env_path = os.path.join(SHARED_ROOT, ".env")
+    if not os.path.isfile(env_path):
+        return ""
+    try:
+        with open(env_path, "r", encoding="utf-8") as fh:
+            for raw in fh:
+                line = raw.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                name, value = line.split("=", 1)
+                if name.strip() == key:
+                    return value.strip()
+    except OSError:
+        return ""
+    return ""
+
+
+def _managed_local_image_refs() -> List[str]:
+    image_repo = _read_env_var_from_shared("NODE_PLANE_IMAGE_REPO") or "node-plane"
+    image_tag = _read_env_var_from_shared("NODE_PLANE_IMAGE_TAG") or "local"
+    refs = []
+    if image_repo and image_tag:
+        refs.append(f"{image_repo}:{image_tag}")
+    for ref in (
+        "node-plane-amnezia-awg:0.2.16",
+        "amneziavpn/amneziawg-go:0.2.16",
+        "ghcr.io/xtls/xray-core:25.12.8",
+    ):
+        if ref not in refs:
+            refs.append(ref)
+    return refs
+
+
+def _compose_file_candidates() -> List[str]:
+    candidates: List[str] = []
+    for root in (str(SOURCE_ROOT or "").strip(), str(BASE_DIR or "").strip()):
+        if not root:
+            continue
+        for name in ("docker-compose.yml", "compose.yml"):
+            path = os.path.abspath(os.path.join(root, name))
+            if path not in candidates:
+                candidates.append(path)
+    return candidates
+
+
+def _build_full_uninstall_script(pid: int, targets: List[str]) -> str:
+    prefix = _systemctl_prefix()
+    lines = [
+        "#!/usr/bin/env bash",
+        "set -eu",
+        "sleep 3",
+        f"{prefix}systemctl stop node-plane >/dev/null 2>&1 || true",
+        f"{prefix}systemctl disable node-plane >/dev/null 2>&1 || true",
+        f"{prefix}rm -f /etc/systemd/system/node-plane.service >/dev/null 2>&1 || true",
+        f"{prefix}systemctl daemon-reload >/dev/null 2>&1 || true",
+    ]
+    for compose_file in _compose_file_candidates():
+        lines.extend(
+            [
+                f"if [[ -f {_shell_quote(compose_file)} ]]; then",
+                f"  if docker compose version >/dev/null 2>&1; then docker compose -f {_shell_quote(compose_file)} down -v --remove-orphans >/dev/null 2>&1 || true; fi",
+                f"  if command -v docker-compose >/dev/null 2>&1; then docker-compose -f {_shell_quote(compose_file)} down -v --remove-orphans >/dev/null 2>&1 || true; fi",
+                "fi",
+            ]
+        )
+    lines.extend(
+        [
+        "docker rm -f node-plane >/dev/null 2>&1 || true",
+        ]
+    )
+    for image_ref in _managed_local_image_refs():
+        lines.append(f"docker rmi -f {_shell_quote(image_ref)} >/dev/null 2>&1 || true")
+    lines.extend(
+        [
+            "docker image prune -af >/dev/null 2>&1 || true",
+            "docker system prune -f >/dev/null 2>&1 || true",
+        ]
+    )
+    for path in targets:
+        lines.append(f"rm -rf -- {_shell_quote(path)} >/dev/null 2>&1 || true")
+    lines.extend(
+        [
+            "rm -f -- \"$0\" >/dev/null 2>&1 || true",
+            "sleep 1",
+            "kill " + str(pid) + " >/dev/null 2>&1 || true",
+        ]
+    )
+    return "\n".join(lines) + "\n"
+
+
+def _launch_cleanup_script(script_path: str) -> None:
+    if shutil.which("systemd-run"):
+        unit_name = f"node-plane-uninstall-{int(time.time())}"
+        cmd = ["systemd-run", "--unit", unit_name, "--collect", "--no-block", "--property=Type=oneshot", "/bin/bash", script_path]
+        if os.geteuid() != 0:
+            cmd = ["sudo", "-n", *cmd]
+        subprocess.run(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=True,
+        )
+        return
+    subprocess.Popen(
+        ["/bin/bash", script_path],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+
+def schedule_full_uninstall() -> Tuple[int, str]:
+    targets = _uninstall_targets()
+    if not targets:
+        return 1, "No safe uninstall paths were resolved."
+
+    pid = os.getpid()
+    script_body = _build_full_uninstall_script(pid, targets)
+    fd, script_path = tempfile.mkstemp(prefix="node-plane-uninstall-", suffix=".sh")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(script_body)
+        os.chmod(script_path, 0o700)
+        _launch_cleanup_script(script_path)
+    except Exception as exc:
+        try:
+            os.remove(script_path)
+        except OSError:
+            pass
+        return 1, f"Failed to schedule Node Plane removal: {exc}"
+
+    lines = ["Node Plane removal scheduled.", "", "Targets:"]
+    lines.extend(f"• {path}" for path in targets)
+    lines.extend(
+        [
+            "",
+            "The bot process will stop in a few seconds.",
+            "The local service/container and installation paths will be removed.",
+        ]
+    )
+    return 0, "\n".join(lines)
+
+
+def run_full_remove(cleanup_nodes: bool = False) -> Tuple[int, str]:
+    if cleanup_nodes:
+        failures: List[str] = []
+        completed: List[str] = []
+        for server in list_servers(include_disabled=True):
+            rc, out = full_cleanup_server(
+                server.key,
+                remove_ssh_key=(server.transport == "ssh"),
+            )
+            if rc != 0:
+                failures.append(f"{server.key}: {(out or '').strip()[:400]}")
+            else:
+                completed.append(server.key)
+        if failures:
+            lines = ["Node cleanup failed.", ""]
+            if completed:
+                lines.append("Completed:")
+                lines.extend(f"• {key}" for key in completed)
+                lines.append("")
+            lines.append("Errors:")
+            lines.extend(f"• {item}" for item in failures[:10])
+            lines.append("")
+            lines.append("Node Plane removal was not scheduled.")
+            return 1, "\n".join(lines)
+
+    rc, out = schedule_full_uninstall()
+    if rc != 0 or not cleanup_nodes:
+        return rc, out
+    return 0, out + "\n\n• managed runtimes cleaned up on registered nodes\n• bot SSH key removal requested for SSH nodes"
+
+
 def _schedule_portable_container_teardown() -> Tuple[bool, str]:
     if str(INSTALL_MODE or "").strip().lower() != "portable":
         return False, "portable teardown not requested"
@@ -73,7 +275,45 @@ def _schedule_portable_container_teardown() -> Tuple[bool, str]:
         return False, f"portable control-plane container was not scheduled for teardown: {exc}"
 
 
+def _cleanup_local_managed_runtime() -> Tuple[int, str]:
+    if is_running_in_container():
+        return 0, "local managed runtime cleanup skipped because the bot runs inside a container"
+    script = f"""#!/usr/bin/env bash
+set -euo pipefail
+
+docker_rm() {{
+  local name="$1"
+  docker rm -f "$name" >/dev/null 2>&1 || true
+}}
+
+docker_rmi() {{
+  local image="$1"
+  if [[ -n "$image" ]]; then
+    docker rmi -f "$image" >/dev/null 2>&1 || true
+  fi
+}}
+
+if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+  if [[ -f /etc/node-plane/node.env ]]; then
+    source /etc/node-plane/node.env
+  fi
+  docker_rm "${{XRAY_CONTAINER_NAME:-xray}}"
+  docker_rm "${{AWG_CONTAINER_NAME:-{AWG_RUNTIME_CONTAINER}}}"
+  docker_rmi "${{XRAY_DOCKER_IMAGE:-ghcr.io/xtls/xray-core:25.12.8}}"
+  docker_rmi "${{AWG_DOCKER_IMAGE:-node-plane-amnezia-awg:0.2.16}}"
+  docker_rmi "amneziavpn/amneziawg-go:0.2.16"
+  docker image prune -af >/dev/null 2>&1 || true
+fi
+
+rm -f /etc/node-plane/node.env
+rm -rf /opt/node-plane-runtime
+echo "local managed runtime removed"
+"""
+    return run_local_command(script, timeout=180)
+
+
 def run_factory_reset(cleanup_nodes: bool = False, stop_local_runtime: bool = False) -> Tuple[int, str]:
+    backup_result = maybe_create_pre_action_backup("pre_reset")
     if cleanup_nodes:
         failures: List[str] = []
         completed: List[str] = []
@@ -98,13 +338,25 @@ def run_factory_reset(cleanup_nodes: bool = False, stop_local_runtime: bool = Fa
             lines.append("Local state was not removed.")
             return 1, "\n".join(lines)
 
+    local_runtime_summary = ""
+    if cleanup_nodes:
+        rc, out = _cleanup_local_managed_runtime()
+        local_runtime_summary = (out or "").strip()
+        if rc != 0:
+            return 1, f"Local managed runtime cleanup failed.\n\n{(out or '').strip()[:1200]}"
+
     _wipe_local_state()
     ssh_line = _clear_local_ssh_material()
+    backup_clear_result = clear_backup_storage()
 
-    summary = ["Node Plane state removed.", "• local database state cleared", f"• {ssh_line}"]
+    summary = ["Node Plane state removed.", "• local database state cleared", f"• {ssh_line}", f"• backups removed: {int(backup_clear_result.get('removed') or 0)}"]
+    if backup_result.get("status") == "failed":
+        summary.append(f"• pre-reset backup failed before cleanup: {backup_result.get('message') or 'unknown error'}")
     if cleanup_nodes:
         summary.append("• managed runtimes cleaned up on registered nodes")
         summary.append("• bot SSH key removal requested for SSH nodes")
+        if local_runtime_summary:
+            summary.append(f"• {local_runtime_summary}")
     if stop_local_runtime:
         ok, message = _schedule_portable_container_teardown()
         summary.append(f"• {message}")

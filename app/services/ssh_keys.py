@@ -38,6 +38,8 @@ def ensure_ssh_keypair(path: str | None = None) -> Tuple[bool, str]:
     os.chmod(private_path.parent, 0o700)
 
     if private_path.exists() and public_path.exists():
+        os.chmod(private_path, 0o600)
+        os.chmod(public_path, 0o644)
         return True, ""
 
     if private_path.exists() and not public_path.exists():
@@ -53,6 +55,7 @@ def ensure_ssh_keypair(path: str | None = None) -> Tuple[bool, str]:
         return True, ""
 
     if private_path.exists():
+        os.chmod(private_path, 0o600)
         return True, ""
 
     proc = subprocess.run(
@@ -91,7 +94,7 @@ def get_public_key(path: str | None = None) -> Tuple[bool, str]:
 
 def render_public_key_guide(locale: str = "ru") -> Tuple[bool, str]:
     text = (
-        f"{t(locale, 'ssh.title')}\n\n"
+        f"{t(locale, 'ssh.guide_title')}\n\n"
         f"{t(locale, 'ssh.quick_steps')}\n\n"
         f"{t(locale, 'ssh.step1')}\n"
         f"{t(locale, 'ssh.step2')}\n"

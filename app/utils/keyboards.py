@@ -27,7 +27,6 @@ def kb_main_menu(is_admin: bool, has_access: bool, lang: str = "ru", allow_reque
 
 
 def kb_admin_menu(lang: str = "ru", updates_label: str | None = None) -> InlineKeyboardMarkup:
-    updates_text = updates_label or t(lang, "menu.updates")
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton(t(lang, "menu.status"), callback_data=f"{CB_MENU}admin_status"),
@@ -38,13 +37,9 @@ def kb_admin_menu(lang: str = "ru", updates_label: str | None = None) -> InlineK
             InlineKeyboardButton(t(lang, "menu.profiles"), callback_data=f"{CB_CFG}start:edit"),
         ],
         [
-            InlineKeyboardButton(updates_text, callback_data=f"{CB_MENU}admin_updates"),
-            InlineKeyboardButton(t(lang, "menu.admin_settings"), callback_data=f"{CB_MENU}admin_settings"),
-        ],
-        [
             InlineKeyboardButton(t(lang, "menu.announcement"), callback_data=f"{CB_MENU}admin_announce"),
-            InlineKeyboardButton(t(lang, "menu.ssh_key"), callback_data=f"{CB_MENU}sshkey"),
         ],
+        [InlineKeyboardButton(t(lang, "menu.admin_settings"), callback_data=f"{CB_MENU}admin_settings")],
         [InlineKeyboardButton(t(lang, "menu.back"), callback_data=f"{CB_MENU}main")],
     ])
 
@@ -184,15 +179,30 @@ def kb_settings_menu(telemetry_enabled: bool, telemetry_available: bool, announc
     return InlineKeyboardMarkup(rows)
 
 
-def kb_admin_settings_menu(notify_enabled: bool, telemetry_enabled: bool, requests_enabled: bool, lang: str = "ru") -> InlineKeyboardMarkup:
+def kb_admin_settings_menu(
+    notify_enabled: bool,
+    telemetry_enabled: bool,
+    requests_enabled: bool,
+    lang: str = "ru",
+    updates_label: str | None = None,
+) -> InlineKeyboardMarkup:
+    updates_text = updates_label or t(lang, "menu.updates")
     telemetry_label = t(lang, "admin.settings.telemetry_on") if telemetry_enabled else t(lang, "admin.settings.telemetry_off")
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton(t(lang, "admin.settings.bot_title"), callback_data=f"{CB_MENU}admin_settings_bot_title"),
             InlineKeyboardButton(t(lang, "admin.settings.requests_menu"), callback_data=f"{CB_MENU}admin_settings_requests"),
         ],
-        [InlineKeyboardButton(telemetry_label, callback_data=f"{CB_MENU}admin_settings_toggle_telemetry")],
-        [InlineKeyboardButton(t(lang, "admin.settings.factory_reset"), callback_data=f"{CB_MENU}admin_settings_reset")],
+        [
+            InlineKeyboardButton(t(lang, "admin.settings.alerts_menu"), callback_data=f"{CB_MENU}admin_settings_alerts"),
+            InlineKeyboardButton(telemetry_label, callback_data=f"{CB_MENU}admin_settings_toggle_telemetry"),
+        ],
+        [
+            InlineKeyboardButton(updates_text, callback_data=f"{CB_MENU}admin_updates"),
+            InlineKeyboardButton(t(lang, "menu.backups"), callback_data=f"{CB_MENU}admin_backups"),
+        ],
+        [InlineKeyboardButton(t(lang, "menu.ssh_key"), callback_data=f"{CB_MENU}sshkey")],
+        [InlineKeyboardButton(t(lang, "admin.settings.cleanup_menu"), callback_data=f"{CB_MENU}admin_settings_reset")],
         [InlineKeyboardButton(t(lang, "menu.back"), callback_data=f"{CB_MENU}admin")],
     ])
 
@@ -208,7 +218,37 @@ def kb_admin_requests_settings_menu(notify_enabled: bool, requests_enabled: bool
     ])
 
 
-def kb_admin_updates_menu(auto_check_enabled: bool, update_supported: bool, update_running: bool, branch: str, lang: str = "ru") -> InlineKeyboardMarkup:
+def kb_admin_alerts_settings_menu(enabled: bool, interval_minutes: int, notify_resolved: bool, lang: str = "ru") -> InlineKeyboardMarkup:
+    toggle_label = t(lang, "admin.alerts.toggle_on") if enabled else t(lang, "admin.alerts.toggle_off")
+    resolved_label = t(lang, "admin.alerts.resolved_on") if notify_resolved else t(lang, "admin.alerts.resolved_off")
+    interval_labels = {
+        5: t(lang, "admin.alerts.interval_5"),
+        15: t(lang, "admin.alerts.interval_15"),
+    }
+    interval_buttons = [
+        InlineKeyboardButton(
+            f">{label}<" if value == interval_minutes else label,
+            callback_data=f"{CB_MENU}admin_settings_alerts_interval:{value}",
+        )
+        for value, label in interval_labels.items()
+    ]
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(toggle_label, callback_data=f"{CB_MENU}admin_settings_alerts_toggle")],
+        interval_buttons,
+        [InlineKeyboardButton(resolved_label, callback_data=f"{CB_MENU}admin_settings_alerts_toggle_resolved")],
+        [InlineKeyboardButton(t(lang, "menu.back"), callback_data=f"{CB_MENU}admin_settings")],
+    ])
+
+
+def kb_admin_updates_menu(
+    auto_check_enabled: bool,
+    update_supported: bool,
+    update_running: bool,
+    branch: str,
+    runtime_sync_available: bool = False,
+    release_cleanup_available: bool = False,
+    lang: str = "ru",
+) -> InlineKeyboardMarkup:
     auto_label = t(lang, "admin.updates.auto_check_on") if auto_check_enabled else t(lang, "admin.updates.auto_check_off")
     rows: List[List[InlineKeyboardButton]] = [[
         InlineKeyboardButton(t(lang, "admin.updates.check_now"), callback_data=f"{CB_MENU}admin_updates_check"),
@@ -218,10 +258,14 @@ def kb_admin_updates_menu(auto_check_enabled: bool, update_supported: bool, upda
         InlineKeyboardButton(t(lang, "admin.updates.branch_menu"), callback_data=f"{CB_MENU}admin_updates_branch"),
         InlineKeyboardButton(t(lang, "admin.updates.versions_menu"), callback_data=f"{CB_MENU}admin_updates_versions:0"),
     ])
+    if release_cleanup_available:
+        rows.append([InlineKeyboardButton(t(lang, "admin.updates.release_cleanup_menu"), callback_data=f"{CB_MENU}admin_updates_release_cleanup")])
     if update_supported:
         label = t(lang, "admin.updates.update_running") if update_running else t(lang, "admin.updates.update_latest")
         rows.append([InlineKeyboardButton(label, callback_data=f"{CB_MENU}admin_updates_run")])
-    rows.append([InlineKeyboardButton(t(lang, "menu.back"), callback_data=f"{CB_MENU}admin")])
+    if runtime_sync_available:
+        rows.append([InlineKeyboardButton(t(lang, "admin.status.runtime_sync_button"), callback_data=f"{CB_MENU}admin_updates_runtime_sync")])
+    rows.append([InlineKeyboardButton(t(lang, "menu.back"), callback_data=f"{CB_MENU}admin_settings")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -237,3 +281,49 @@ def kb_admin_updates_branch_menu(current_branch: str, lang: str = "ru") -> Inlin
         [InlineKeyboardButton(dev_label, callback_data=f"{CB_MENU}admin_updates_set_branch:dev")],
         [InlineKeyboardButton(t(lang, "menu.back"), callback_data=f"{CB_MENU}admin_updates")],
     ])
+
+
+def kb_admin_backups_menu(lang: str = "ru") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(t(lang, "admin.backups.create"), callback_data=f"{CB_MENU}admin_backups_create"),
+            InlineKeyboardButton(t(lang, "admin.backups.restore"), callback_data=f"{CB_MENU}admin_backups_restore:0"),
+        ],
+        [InlineKeyboardButton(t(lang, "admin.backups.settings"), callback_data=f"{CB_MENU}admin_backups_settings")],
+        [InlineKeyboardButton(t(lang, "menu.back"), callback_data=f"{CB_MENU}admin_settings")],
+    ])
+
+
+def kb_admin_backups_settings_menu(enabled: bool, interval_hours: int, keep_count: int, lang: str = "ru") -> InlineKeyboardMarkup:
+    toggle_label = t(lang, "admin.backups.toggle_on") if enabled else t(lang, "admin.backups.toggle_off")
+    interval_labels = {
+        6: t(lang, "admin.backups.interval_6"),
+        12: t(lang, "admin.backups.interval_12"),
+        24: t(lang, "admin.backups.interval_24"),
+    }
+    keep_labels = {
+        5: t(lang, "admin.backups.keep_5"),
+        10: t(lang, "admin.backups.keep_10"),
+        20: t(lang, "admin.backups.keep_20"),
+    }
+    rows = [[InlineKeyboardButton(toggle_label, callback_data=f"{CB_MENU}admin_backups_toggle")]]
+    for value, label in interval_labels.items():
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    f">{label}<" if value == interval_hours else label,
+                    callback_data=f"{CB_MENU}admin_backups_interval:{value}",
+                )
+            ]
+        )
+    for value, label in keep_labels.items():
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    f">{label}<" if value == keep_count else label,
+                    callback_data=f"{CB_MENU}admin_backups_keep:{value}",
+                )
+            ]
+        )
+    rows.append([InlineKeyboardButton(t(lang, "menu.back"), callback_data=f"{CB_MENU}admin_backups")])
+    return InlineKeyboardMarkup(rows)

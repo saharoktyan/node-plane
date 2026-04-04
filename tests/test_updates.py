@@ -27,6 +27,10 @@ class UpdatesTests(unittest.TestCase):
         os.environ["NODE_PLANE_SOURCE_DIR"] = "/opt/node-plane-src"
         os.environ["NODE_PLANE_INSTALL_MODE"] = "simple"
         os.environ["SQLITE_DB_PATH"] = os.path.join(base, "bot.sqlite3")
+        with open(os.path.join(base, "VERSION"), "w", encoding="utf-8") as fh:
+            fh.write("0.2.0-alpha.2\n")
+        with open(os.path.join(base, "BUILD_COMMIT"), "w", encoding="utf-8") as fh:
+            fh.write("abc1234\n")
         os.makedirs(os.path.join(base, "scripts"), exist_ok=True)
         with open(os.path.join(base, "scripts", "update.sh"), "w", encoding="utf-8") as fh:
             fh.write("#!/usr/bin/env bash\n")
@@ -51,10 +55,10 @@ class UpdatesTests(unittest.TestCase):
                 "CHECK_UPDATES|available\n"
                 "branch: dev\n"
                 "upstream_ref: origin/main\n"
-                "local_version: 0.1.0\n"
-                "remote_version: 0.1.1\n"
-                "local_label: 0.1.0 · abc1234\n"
-                "remote_label: 0.1.1 · def5678\n"
+                "local_version: 0.2.0-alpha.2\n"
+                "remote_version: 0.2.0-alpha.3\n"
+                "local_label: 0.2.0-alpha.2 · abc1234\n"
+                "remote_label: 0.2.0-alpha.3 · def5678\n"
             ),
             stderr="",
         )
@@ -63,7 +67,7 @@ class UpdatesTests(unittest.TestCase):
         self.assertEqual(result["status"], "available")
         overview = self.updates.get_updates_overview()
         self.assertTrue(overview["update_available"])
-        self.assertEqual(overview["remote_label"], "0.1.1 · def5678")
+        self.assertEqual(overview["remote_label"], "0.2.0-alpha.3 · def5678")
         self.assertEqual(overview["upstream_ref"], "origin/main")
         self.assertEqual(overview["branch"], "dev")
 
@@ -124,6 +128,27 @@ class UpdatesTests(unittest.TestCase):
         self.assertEqual(actions["0.2.0-alpha.2"], "current")
         self.assertEqual(actions["0.2.0-alpha.1"], "downgrade")
         self.assertEqual(actions["0.1.5"], "blocked")
+
+    def test_list_available_versions_uses_installed_app_version_not_source_checkout(self) -> None:
+        proc = SimpleNamespace(
+            returncode=0,
+            stdout=(
+                "LIST_VERSIONS|ok\n"
+                "branch: dev\n"
+                "current_version: 0.2.0-alpha.2\n"
+                "version_item: 0.2.0|v0.2.0|tag\n"
+                "version_item: 0.2.0-alpha.3|v0.2.0-alpha.3|tag\n"
+                "version_item: 0.2.0-alpha.2|v0.2.0-alpha.2|tag\n"
+            ),
+            stderr="",
+        )
+        with patch("services.updates.subprocess.run", return_value=proc):
+            result = self.updates.list_available_versions(branch="dev")
+        actions = {item["version"]: item["action"] for item in result["versions"]}
+        self.assertEqual(result["current_version"], "0.2.0-alpha.2")
+        self.assertEqual(actions["0.2.0-alpha.2"], "current")
+        self.assertEqual(actions["0.2.0-alpha.3"], "upgrade")
+        self.assertEqual(actions["0.2.0"], "upgrade")
 
     def test_get_version_transition_allows_major_upgrade_and_blocks_major_downgrade(self) -> None:
         major_upgrade = self.updates.get_version_transition("0.7.1", "1.0.3")

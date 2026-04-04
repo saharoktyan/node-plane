@@ -10,8 +10,12 @@ SERVER_KEY_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 HOST_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.:-]{0,252}$")
 SAFE_TOKEN_RE = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
 SAFE_PATH_RE = re.compile(r"^/[A-Za-z0-9._/@:+-]{1,255}$")
+XRAY_PATH_PREFIX_RE = re.compile(r"^/[A-Za-z0-9._/-]{0,127}$")
 XRAY_SHORT_ID_RE = re.compile(r"^[a-f0-9]{1,32}$")
 XRAY_PUBLIC_KEY_RE = re.compile(r"^[A-Za-z0-9_-]{16,128}$")
+UUID_RE = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b", re.IGNORECASE)
+VPN_URI_RE = re.compile(r"vpn://[A-Za-z0-9+/=_-]+")
+VLESS_URI_RE = re.compile(r"vless://[^\s`]+")
 
 
 def validate_profile_name(value: str) -> str:
@@ -118,7 +122,12 @@ def validate_server_field(field: str, value: object) -> object:
         if normalized and not XRAY_PUBLIC_KEY_RE.fullmatch(normalized):
             raise ValueError("xray_pbk contains unsupported characters")
         return normalized
-    if field in {"title", "region", "notes", "flag", "xray_xhttp_path_prefix"}:
+    if field in {"xray_xhttp_path_prefix"}:
+        normalized = str(value or "").strip()
+        if not XRAY_PATH_PREFIX_RE.fullmatch(normalized):
+            raise ValueError("xray_xhttp_path_prefix must start with / and contain only letters, digits, ., _, -, /")
+        return normalized
+    if field in {"title", "region", "notes", "flag"}:
         normalized = str(value or "").strip()
         if "\n" in normalized or "\r" in normalized:
             raise ValueError(f"{field} must be a single line")
@@ -139,3 +148,21 @@ def escape_markdown(value: object) -> str:
         .replace("_", "\\_")
         .replace("[", "\\[")
     )
+
+
+def redact_sensitive_text(value: object) -> str:
+    text = str(value or "")
+    if not text:
+        return ""
+
+    patterns = [
+        (VPN_URI_RE, "vpn://[REDACTED]"),
+        (VLESS_URI_RE, "vless://[REDACTED]"),
+        (UUID_RE, "[REDACTED_UUID]"),
+        (re.compile(r'(?i)("?(?:privatekey|publickey|presharedkey|xray_pbk|xray_sid|xray_short_id|uuid)"?\s*[:=]\s*")[^"\n]+(")'), r"\1[REDACTED]\2"),
+        (re.compile(r"(?im)^(\s*(?:PrivateKey|PublicKey|PresharedKey)\s*=\s*).+$"), r"\1[REDACTED]"),
+        (re.compile(r'(?i)([?&](?:pbk|sid)=)[^&#\s]+'), r"\1[REDACTED]"),
+    ]
+    for pattern, repl in patterns:
+        text = pattern.sub(repl, text)
+    return text

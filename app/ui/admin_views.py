@@ -65,6 +65,17 @@ def render_protocols_summary(protocols: Set[str]) -> str:
     return "\n".join(lines)
 
 
+def _profile_provisioning_block(name: str, lang: str = "ru") -> str:
+    state_txt = render_profile_server_state_summary(name, lang)
+    if state_txt == "—":
+        return "—"
+    lines = [line.strip() for line in state_txt.splitlines() if line.strip()]
+    issue_lines = [line for line in lines if not line.startswith("• ")]
+    if not issue_lines:
+        return "• Все методы готовы" if lang == "ru" else "• All methods are ready"
+    return "\n".join(lines)
+
+
 def render_protocol_select_text(name: str, selected: Set[str], editing: bool = False, lang: str = "ru") -> str:
     summary = render_protocols_summary(selected)
     action = "Измени" if (editing and lang == "ru") else "Выбери" if lang == "ru" else "Update" if editing else "Choose"
@@ -160,19 +171,13 @@ def render_profile_dashboard(names: List[str], page: int, lang: str = "ru") -> T
 
 
 def render_edit_menu(name: str, protocols: Set[str], frozen: bool, lang: str = "ru") -> Tuple[str, InlineKeyboardMarkup]:
-    proto_txt = render_protocols_summary(protocols)
-    state_txt = render_profile_server_state_summary(name, lang)
     fr = ("frozen" if frozen else "active") if lang == "en" else ("заморожен" if frozen else "активен")
     title = "✏️ Редактирование" if lang == "ru" else "✏️ Edit"
-    access = "Доступ" if lang == "ru" else "Access"
-    provision = "Применение" if lang == "ru" else "Provisioning"
     status = "Статус" if lang == "ru" else "Status"
     choose = "Что изменить:" if lang == "ru" else "What to edit:"
     return (
         (
             f"{title}: `{name}`\n\n"
-            f"{access}:\n{proto_txt}\n\n"
-            f"{provision}:\n{state_txt}\n\n"
             f"• {status}: *{fr}*\n\n"
             f"{choose}"
         ),
@@ -181,7 +186,6 @@ def render_edit_menu(name: str, protocols: Set[str], frozen: bool, lang: str = "
                 [InlineKeyboardButton("🔌 Протоколы" if lang == "ru" else "🔌 Protocols", callback_data=f"{CB_CFG}edit:proto")],
                 [
                     InlineKeyboardButton("🧊 Статус" if lang == "ru" else "🧊 Status", callback_data=f"{CB_CFG}edit:status"),
-                    InlineKeyboardButton("🔄 Сверить" if lang == "ru" else "🔄 Reconcile", callback_data=f"{CB_CFG}edit:reconcile"),
                 ],
                 [
                     InlineKeyboardButton("💾 Сохранить" if lang == "ru" else "💾 Save", callback_data=f"{CB_CFG}edit:save"),
@@ -247,19 +251,17 @@ def render_delete_confirm(name: str, lang: str = "ru") -> Tuple[str, InlineKeybo
 
 def render_profile_card(name: str, protocols: Set[str], frozen: bool, lang: str = "ru") -> Tuple[str, InlineKeyboardMarkup]:
     proto_txt = render_protocols_summary(protocols)
-    state_txt = render_profile_server_state_summary(name, lang)
+    state_txt = _profile_provisioning_block(name, lang)
     fr = ("frozen" if frozen else "active") if lang == "en" else ("заморожен" if frozen else "активен")
     access = "Доступ" if lang == "ru" else "Access"
     provision = "Применение" if lang == "ru" else "Provisioning"
     status = "Статус" if lang == "ru" else "Status"
-    actions = "Быстрые действия:" if lang == "ru" else "Quick actions:"
     return (
         (
             f"👤 `{name}`\n\n"
             f"{access}:\n{proto_txt}\n\n"
             f"{provision}:\n{state_txt}\n\n"
-            f"• {status}: *{fr}*\n\n"
-            f"{actions}"
+            f"• {status}: *{fr}*"
         ),
         InlineKeyboardMarkup(
             [

@@ -13,6 +13,7 @@ from typing import Dict, Tuple
 from config import SSH_KNOWN_HOSTS_PATH, SSH_STRICT_HOST_KEY_CHECKING
 from services.server_registry import RegisteredServer
 from services.ssh_keys import ensure_ssh_keypair
+from utils.security import redact_sensitive_text
 
 
 log = logging.getLogger("server_runtime")
@@ -61,7 +62,7 @@ def run_local_command(cmd: str, timeout: int = 60) -> Tuple[int, str]:
         out = (proc.stdout or "") + (proc.stderr or "")
         log.info("DONE rc=%s sec=%.2f", proc.returncode, time.time() - t0)
         if out.strip():
-            log.debug("OUT: %s", out.strip()[:1500])
+            log.debug("OUT: %s", redact_sensitive_text(out.strip())[:1500])
         return proc.returncode, out.strip()
     except subprocess.TimeoutExpired:
         return 124, "TIMEOUT"
@@ -80,6 +81,9 @@ def _ssh_command(server: RegisteredServer, command: str) -> str:
         with open(SSH_KNOWN_HOSTS_PATH, "a", encoding="utf-8"):
             pass
         os.chmod(SSH_KNOWN_HOSTS_PATH, 0o600)
+    ok, err = ensure_known_host(server)
+    if not ok:
+        raise ValueError(err)
     opts = [
         "ssh",
         "-o",
@@ -111,6 +115,66 @@ def _ssh_command(server: RegisteredServer, command: str) -> str:
     opts.append(target)
     opts.append(f"bash -lc {shlex.quote(command)}")
     return " ".join(shlex.quote(part) for part in opts)
+
+
+def _ssh_host(server: RegisteredServer) -> str:
+    host = (server.ssh_host or server.ssh_target or "").strip()
+    if "@" in host:
+        host = host.rsplit("@", 1)[1]
+    return host
+
+
+def _known_host_lookups(server: RegisteredServer) -> list[str]:
+    host = _ssh_host(server)
+    if not host:
+        return []
+    if int(server.ssh_port or 22) == 22:
+        return [host]
+    return [f"[{host}]:{int(server.ssh_port or 22)}", host]
+
+
+def _has_known_host_entry(lookup: str) -> bool:
+    if not lookup:
+        return False
+    proc = subprocess.run(
+        ["ssh-keygen", "-F", lookup, "-f", SSH_KNOWN_HOSTS_PATH],
+        capture_output=True,
+        text=True,
+    )
+    return proc.returncode == 0
+
+
+def ensure_known_host(server: RegisteredServer) -> tuple[bool, str]:
+    mode = SSH_STRICT_HOST_KEY_CHECKING.strip().lower()
+    if mode in {"no", "off"}:
+        return True, ""
+    os.makedirs(os.path.dirname(SSH_KNOWN_HOSTS_PATH), mode=0o700, exist_ok=True)
+    if not os.path.exists(SSH_KNOWN_HOSTS_PATH):
+        with open(SSH_KNOWN_HOSTS_PATH, "a", encoding="utf-8"):
+            pass
+        os.chmod(SSH_KNOWN_HOSTS_PATH, 0o600)
+    host = _ssh_host(server)
+    if not host:
+        return False, f"SSH host is not configured for server {server.key}"
+    lookups = _known_host_lookups(server)
+    if any(_has_known_host_entry(item) for item in lookups):
+        return True, ""
+    proc = subprocess.run(
+        ["ssh-keyscan", "-T", "5", "-p", str(server.ssh_port or 22), "-H", host],
+        capture_output=True,
+        text=True,
+    )
+    output = (proc.stdout or "").strip()
+    if proc.returncode != 0 or not output:
+        message = (proc.stderr or proc.stdout or "ssh-keyscan failed").strip()
+        return False, f"Could not fetch SSH host key for {host}:{server.ssh_port or 22}: {message}"
+    with open(SSH_KNOWN_HOSTS_PATH, "a", encoding="utf-8") as fh:
+        fh.write(output + ("\n" if not output.endswith("\n") else ""))
+    try:
+        os.chmod(SSH_KNOWN_HOSTS_PATH, 0o600)
+    except OSError:
+        pass
+    return True, ""
 
 
 def run_server_command(server: RegisteredServer, command: str, timeout: int = 60) -> Tuple[int, str]:

@@ -5,9 +5,10 @@ import json
 import logging
 import re
 import shlex
-from typing import Tuple
+from typing import Dict, Tuple
 
-from services.server_registry import RegisteredServer, get_server, update_server_fields
+from config import APP_COMMIT, APP_SEMVER
+from services.server_registry import RegisteredServer, get_server, list_servers, update_server_fields
 from services.server_runtime import is_running_in_container, run_server_command, write_server_file, write_server_files
 from services.ssh_keys import get_public_key
 from utils.security import shell_env_assignment
@@ -18,6 +19,12 @@ log = logging.getLogger("server_bootstrap")
 
 _JSON_OBJECT_AT_END_RE = re.compile(r"(\{[\s\S]*\})\s*$")
 AWG_RUNTIME_CONTAINER = "amnezia-awg"
+RUNTIME_VERSION_PATH = "/opt/node-plane-runtime/VERSION"
+RUNTIME_BUILD_COMMIT_PATH = "/opt/node-plane-runtime/BUILD_COMMIT"
+
+
+def _shell_join_args(*args: object) -> str:
+    return " ".join(shlex.quote(str(arg)) for arg in args)
 
 
 def _extract_last_json_object(text: str) -> dict:
@@ -92,6 +99,13 @@ AWG_ALLOWED_IPS=0.0.0.0/0
 AWG_KEEPALIVE=25
 AWG_I1_PRESET=quic
 """
+
+
+def _runtime_metadata_files() -> Dict[str, Tuple[str, str]]:
+    return {
+        RUNTIME_VERSION_PATH: (f"{APP_SEMVER}\n", "0644"),
+        RUNTIME_BUILD_COMMIT_PATH: (f"{APP_COMMIT}\n", "0644"),
+    }
 
 
 XRAY_ADD_SCRIPT = """#!/usr/bin/env bash
@@ -1295,6 +1309,7 @@ I1_PRESET="${AWG_I1_PRESET:-quic}"
 CONF2VPN="${AWG_CONF2VPN:-/opt/node-plane-runtime/conf2vpn.py}"
 AWG_TEMPLATE="${AWG_TEMPLATE:-/opt/node-plane-runtime/awg-template.json}"
 AMNEZIA_DECODER="${AWG_DECODER:-/opt/node-plane-runtime/amnezia-config-decoder.py}"
+SERVER_KEY="${SERVER_KEY:-}"
 NAME="${1:-}"
 
 if [[ -z "$NAME" ]]; then
@@ -1312,6 +1327,10 @@ fi
 if [[ -z "$SERVER_IP" ]]; then
   echo "AWG_SERVER_IP is not configured in /etc/node-plane/node.env" >&2
   exit 1
+fi
+DISPLAY_NAME="$NAME"
+if [[ -n "$SERVER_KEY" ]]; then
+  DISPLAY_NAME="${SERVER_KEY}-${NAME}"
 fi
 if ! docker_cmd ps --format '{{.Names}}' | grep -q "^${CONTAINER}$"; then
   echo "Container ${CONTAINER} not running" >&2
@@ -1414,7 +1433,7 @@ docker_cmd exec -i "$CONTAINER" sh -lc "
 "
 
 printf '\n# %s\n[Peer]\nPublicKey = %s\nPresharedKey = %s\nAllowedIPs = %s/32\n' \
-  "$NAME" "$CLIENT_PUB" "$CLIENT_PSK" "$FREE_IP" >> "$CFG"
+  "$DISPLAY_NAME" "$CLIENT_PUB" "$CLIENT_PSK" "$FREE_IP" >> "$CFG"
 
 TMP_CONF="$(mktemp /tmp/awg-client-XXXX.conf)"
 TMP_JSON="$(mktemp /tmp/awg-amnezia-XXXX.json)"
@@ -1463,7 +1482,7 @@ if [[ -f "$CONF2VPN" && -f "$AWG_TEMPLATE" && -f "$AMNEZIA_DECODER" ]]; then
     "$TMP_JSON" \
     "$AMNEZIA_DECODER" \
     "$CONTAINER" \
-    "$NAME"
+    "$DISPLAY_NAME"
   echo "================================================="
 fi
 
@@ -2110,12 +2129,34 @@ def _packages_script() -> str:
     return """#!/usr/bin/env bash
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
+
+apt_wait() {
+  local timeout="${1:-300}"
+  local elapsed=0
+  while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 \
+    || fuser /var/lib/dpkg/lock >/dev/null 2>&1 \
+    || fuser /var/lib/apt/lists/lock >/dev/null 2>&1 \
+    || fuser /var/cache/apt/archives/lock >/dev/null 2>&1; do
+    if (( elapsed >= timeout )); then
+      echo "Timed out waiting for apt/dpkg lock." >&2
+      return 1
+    fi
+    sleep 5
+    elapsed=$((elapsed + 5))
+  done
+}
+
+apt_run() {
+  apt_wait
+  apt-get "$@"
+}
+
 if command -v apt-get >/dev/null 2>&1; then
-  apt-get update
-  apt-get install -y ca-certificates curl jq qrencode wireguard-tools python3 iproute2 iptables
+  apt_run update
+  apt_run install -y ca-certificates curl jq qrencode wireguard-tools python3 iproute2 iptables
   if ! command -v docker >/dev/null 2>&1; then
-    apt-get install -y docker.io
-    apt-cache show docker-compose-plugin >/dev/null 2>&1 && apt-get install -y docker-compose-plugin || true
+    apt_run install -y docker.io
+    apt-cache show docker-compose-plugin >/dev/null 2>&1 && apt_run install -y docker-compose-plugin || true
   fi
 fi
 systemctl enable --now docker >/dev/null 2>&1 || service docker start >/dev/null 2>&1 || true
@@ -2129,17 +2170,38 @@ def _install_docker_script() -> str:
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
+apt_wait() {
+  local timeout="${1:-300}"
+  local elapsed=0
+  while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 \
+    || fuser /var/lib/dpkg/lock >/dev/null 2>&1 \
+    || fuser /var/lib/apt/lists/lock >/dev/null 2>&1 \
+    || fuser /var/cache/apt/archives/lock >/dev/null 2>&1; do
+    if (( elapsed >= timeout )); then
+      echo "Timed out waiting for apt/dpkg lock." >&2
+      return 1
+    fi
+    sleep 5
+    elapsed=$((elapsed + 5))
+  done
+}
+
+apt_run() {
+  apt_wait
+  apt-get "$@"
+}
+
 if ! command -v apt-get >/dev/null 2>&1; then
   echo "На сервере нет apt-get. Автоустановка Docker поддерживается только для Debian/Ubuntu."
   exit 1
 fi
 
 echo "Обновляю индекс пакетов..."
-apt-get update
+apt_run update
 
 echo "Устанавливаю Docker..."
-apt-get install -y docker.io
-apt-cache show docker-compose-plugin >/dev/null 2>&1 && apt-get install -y docker-compose-plugin || true
+apt_run install -y docker.io
+apt-cache show docker-compose-plugin >/dev/null 2>&1 && apt_run install -y docker-compose-plugin || true
 
 echo "Запускаю Docker..."
 systemctl enable --now docker >/dev/null 2>&1 || service docker start >/dev/null 2>&1 || true
@@ -2234,32 +2296,98 @@ def _cleanup_server_runtime(server: RegisteredServer, preserve_config: bool) -> 
     script = f"""#!/usr/bin/env bash
 set -euo pipefail
 
+docker_cmd() {{
+  if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    docker "$@"
+    return $?
+  fi
+  if command -v sudo >/dev/null 2>&1 && sudo -n docker info >/dev/null 2>&1; then
+    sudo -n docker "$@"
+    return $?
+  fi
+  return 1
+}}
+
 docker_rm() {{
   local name="$1"
-  if command -v docker >/dev/null 2>&1; then
-    docker rm -f "$name" >/dev/null 2>&1 || true
+  docker_cmd rm -f "$name" >/dev/null 2>&1 || true
+}}
+
+docker_rmi() {{
+  local image="$1"
+  if [[ -z "$image" ]]; then
     return
   fi
-  if command -v sudo >/dev/null 2>&1 && sudo docker info >/dev/null 2>&1; then
-    sudo docker rm -f "$name" >/dev/null 2>&1 || true
+  docker_cmd rmi -f "$image" >/dev/null 2>&1 || true
+}}
+
+rm_path() {{
+  local target="$1"
+  if rm -rf "$target" >/dev/null 2>&1; then
+    return
+  fi
+  if command -v sudo >/dev/null 2>&1; then
+    sudo -n rm -rf "$target" >/dev/null 2>&1 || true
   fi
 }}
 
 XRAY_CONTAINER="xray"
 AWG_CONTAINER="{AWG_RUNTIME_CONTAINER}"
+XRAY_IMAGE_DEFAULT="ghcr.io/xtls/xray-core:25.12.8"
+AWG_IMAGE_DEFAULT="node-plane-amnezia-awg:0.2.16"
 if [[ -f /etc/node-plane/node.env ]]; then
   source /etc/node-plane/node.env
 fi
 
 docker_rm "${{XRAY_CONTAINER_NAME:-$XRAY_CONTAINER}}"
 docker_rm "${{AWG_CONTAINER_NAME:-$AWG_CONTAINER}}"
+docker_rmi "${{XRAY_DOCKER_IMAGE:-$XRAY_IMAGE_DEFAULT}}"
+docker_rmi "${{AWG_DOCKER_IMAGE:-$AWG_IMAGE_DEFAULT}}"
+docker_rmi "amneziavpn/amneziawg-go:0.2.16"
+docker_cmd image prune -af >/dev/null 2>&1 || true
 
 if [[ "{preserve}" != "1" ]]; then
-  rm -f /etc/node-plane/node.env
-  rm -rf /opt/node-plane-runtime
+  if rm -f /etc/node-plane/node.env >/dev/null 2>&1; then
+    :
+  elif command -v sudo >/dev/null 2>&1; then
+    sudo -n rm -f /etc/node-plane/node.env >/dev/null 2>&1 || true
+  fi
+  rm_path /opt/node-plane-runtime
   echo "Управляемый рантайм удалён вместе с конфигами."
 else
   echo "Управляемый рантайм удалён. Существующие конфиги сохранены."
+fi
+
+leftovers=()
+docker_inspect() {{
+  docker_cmd "$@" >/dev/null 2>&1
+}}
+
+if docker_inspect container inspect "${{XRAY_CONTAINER_NAME:-$XRAY_CONTAINER}}"; then
+  leftovers+=("xray container still present")
+fi
+if docker_inspect container inspect "${{AWG_CONTAINER_NAME:-$AWG_CONTAINER}}"; then
+  leftovers+=("awg container still present")
+fi
+if docker_inspect image inspect "${{XRAY_DOCKER_IMAGE:-$XRAY_IMAGE_DEFAULT}}"; then
+  leftovers+=("xray image still present")
+fi
+if docker_inspect image inspect "${{AWG_DOCKER_IMAGE:-$AWG_IMAGE_DEFAULT}}"; then
+  leftovers+=("awg image still present")
+fi
+if docker_inspect image inspect "amneziavpn/amneziawg-go:0.2.16"; then
+  leftovers+=("amneziavpn/amneziawg-go:0.2.16 still present")
+fi
+if [[ "{preserve}" != "1" && -e /etc/node-plane/node.env ]]; then
+  leftovers+=("/etc/node-plane/node.env still present")
+fi
+if [[ "{preserve}" != "1" && -e /opt/node-plane-runtime ]]; then
+  leftovers+=("/opt/node-plane-runtime still present")
+fi
+
+if (( ${{#leftovers[@]}} > 0 )); then
+  printf '%s\n' "${{leftovers[@]}}"
+  exit 1
 fi
 """
     return run_server_command(server, script, timeout=180)
@@ -2304,6 +2432,7 @@ chmod 600 "$AUTH_KEYS" >/dev/null 2>&1 || true
 
 def render_server_node_env(server: RegisteredServer) -> str:
     lines = [
+        shell_env_assignment("SERVER_KEY", server.key),
         shell_env_assignment("XRAY_CONFIG", server.xray_config_path),
         shell_env_assignment("XRAY_CONTAINER_NAME", server.xray_service_name),
         shell_env_assignment("XRAY_DOCKER_DIR", "/opt/node-plane-runtime/xray"),
@@ -2328,6 +2457,34 @@ def render_server_node_env(server: RegisteredServer) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _runtime_files() -> Dict[str, Tuple[str, str]]:
+    files = {
+        "/etc/node-plane/node.env.example": (NODE_ENV_EXAMPLE, "0644"),
+        "/opt/node-plane-runtime/init-xray.sh": (XRAY_INIT_SCRIPT, "0755"),
+        "/opt/node-plane-runtime/sync-xray.sh": (XRAY_SYNC_SCRIPT, "0755"),
+        "/opt/node-plane-runtime/deploy-xray.sh": (XRAY_DEPLOY_SCRIPT, "0755"),
+        "/opt/node-plane-runtime/xray-enable-stats.sh": (XRAY_ENABLE_STATS_SCRIPT, "0755"),
+        "/opt/node-plane-runtime/xray-add-user.sh": (XRAY_ADD_SCRIPT, "0755"),
+        "/opt/node-plane-runtime/xray-add-user-existing.sh": (XRAY_ADD_EXISTING_SCRIPT, "0755"),
+        "/opt/node-plane-runtime/xray-list-users.sh": (XRAY_LIST_SCRIPT, "0755"),
+        "/opt/node-plane-runtime/xray-list-traffic.sh": (XRAY_TRAFFIC_SCRIPT, "0755"),
+        "/opt/node-plane-runtime/xray-del-user.sh": (XRAY_DEL_SCRIPT, "0755"),
+        "/opt/node-plane-runtime/conf2vpn.py": (AWG_CONF2VPN_PY, "0644"),
+        "/opt/node-plane-runtime/amnezia-config-decoder.py": (AMNEZIA_CONFIG_DECODER_PY, "0644"),
+        "/opt/node-plane-runtime/awg-template.json": (AWG_TEMPLATE_JSON, "0644"),
+        "/opt/node-plane-runtime/awg-add-user.sh": (AWG_ADD_SCRIPT, "0755"),
+        "/opt/node-plane-runtime/awg-del-user.sh": (AWG_DEL_SCRIPT, "0755"),
+        "/opt/node-plane-runtime/show-awg-entropy.sh": (AWG_SHOW_ENTROPY_SCRIPT, "0755"),
+        "/opt/node-plane-runtime/init-awg.sh": (AWG_INIT_SCRIPT, "0755"),
+        "/opt/node-plane-runtime/regenerate-awg-entropy.sh": (AWG_REGENERATE_ENTROPY_SCRIPT, "0755"),
+        "/opt/node-plane-runtime/amnezia-awg/Dockerfile": (AWG_DOCKERFILE, "0644"),
+        "/opt/node-plane-runtime/amnezia-awg/start.sh": (AWG_START_SCRIPT, "0755"),
+        "/opt/node-plane-runtime/deploy-awg.sh": (AWG_DEPLOY_SCRIPT, "0755"),
+    }
+    files.update(_runtime_metadata_files())
+    return files
+
+
 def sync_server_node_env(server_key: str) -> Tuple[int, str]:
     server = get_server(server_key)
     if not server:
@@ -2338,6 +2495,119 @@ def sync_server_node_env(server_key: str) -> Tuple[int, str]:
         return rc, out
     update_server_fields(server.key, notes="node.env synced from bot")
     return 0, "Файл node.env записан в /etc/node-plane/node.env"
+
+
+def _runtime_state_from_values(version: str, commit: str) -> str:
+    version_value = str(version or "").strip()
+    commit_value = str(commit or "").strip()
+    if commit_value and commit_value != "unknown":
+        if APP_COMMIT != "unknown":
+            return "up_to_date" if commit_value == APP_COMMIT else "outdated"
+        if version_value:
+            return "up_to_date" if version_value == APP_SEMVER else "outdated"
+        return "unknown"
+    if version_value:
+        return "up_to_date" if version_value == APP_SEMVER else "outdated"
+    return "unknown"
+
+
+def get_server_runtime_state(server_key: str) -> dict[str, str]:
+    server = get_server(server_key)
+    if not server:
+        return {
+            "state": "missing_server",
+            "version": "",
+            "commit": "",
+            "expected_version": APP_SEMVER,
+            "expected_commit": APP_COMMIT,
+            "message": f"Сервер {server_key} не найден",
+        }
+    if server.bootstrap_state != "bootstrapped":
+        return {
+            "state": "not_bootstrapped",
+            "version": "",
+            "commit": "",
+            "expected_version": APP_SEMVER,
+            "expected_commit": APP_COMMIT,
+            "message": "bootstrap required",
+        }
+
+    script = f"""#!/usr/bin/env bash
+set -euo pipefail
+if [[ -f {shlex.quote(RUNTIME_VERSION_PATH)} ]]; then
+  printf 'version=%s\\n' "$(tr -d '\\r' < {shlex.quote(RUNTIME_VERSION_PATH)} | head -n1)"
+fi
+if [[ -f {shlex.quote(RUNTIME_BUILD_COMMIT_PATH)} ]]; then
+  printf 'commit=%s\\n' "$(tr -d '\\r' < {shlex.quote(RUNTIME_BUILD_COMMIT_PATH)} | head -n1)"
+fi
+"""
+    rc, out = run_server_command(server, script, timeout=30)
+    if rc != 0:
+        return {
+            "state": "unknown",
+            "version": "",
+            "commit": "",
+            "expected_version": APP_SEMVER,
+            "expected_commit": APP_COMMIT,
+            "message": (out or "").strip() or "failed to read runtime metadata",
+        }
+
+    payload: dict[str, str] = {}
+    for raw_line in (out or "").splitlines():
+        line = raw_line.strip()
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        payload[key.strip()] = value.strip()
+    version = str(payload.get("version") or "").strip()
+    commit = str(payload.get("commit") or "").strip()
+    return {
+        "state": _runtime_state_from_values(version, commit),
+        "version": version,
+        "commit": commit,
+        "expected_version": APP_SEMVER,
+        "expected_commit": APP_COMMIT,
+        "message": "",
+    }
+
+
+def get_servers_needing_runtime_sync() -> list[RegisteredServer]:
+    targets: list[RegisteredServer] = []
+    for server in list_servers(include_disabled=False):
+        if server.bootstrap_state != "bootstrapped":
+            continue
+        state = str(get_server_runtime_state(server.key).get("state") or "")
+        if state in {"outdated", "unknown"}:
+            targets.append(server)
+    return targets
+
+
+def sync_server_runtime(server_key: str) -> Tuple[int, str]:
+    server = get_server(server_key)
+    if not server:
+        return 1, f"Сервер {server_key} не найден"
+    if server.bootstrap_state != "bootstrapped":
+        return 1, f"Сервер {server_key} ещё не bootstrap-нут"
+
+    file_rc, file_out = write_server_files(server, _runtime_files(), timeout=180)
+    if file_rc != 0:
+        return file_rc, file_out
+
+    node_env_rc, node_env_out = write_server_file(server, "/etc/node-plane/node.env", render_server_node_env(server), mode="0600")
+    if node_env_rc != 0:
+        return node_env_rc, node_env_out
+
+    messages = [
+        f"Runtime files synced for {server_key}.",
+        "node.env updated.",
+    ]
+    if "xray" in server.protocol_kinds:
+        rc, out = sync_xray_server_settings(server_key)
+        if rc != 0:
+            return rc, f"{messages[0]}\n\nXray sync failed:\n{out}"
+        messages.append("Xray settings synced.")
+    update_server_fields(server.key, notes=f"runtime synced to {APP_SEMVER} · {APP_COMMIT}")
+    return 0, "\n".join(messages)
 
 
 def _check_server_ports(server) -> Tuple[int, str]:
@@ -2744,14 +3014,12 @@ def sync_xray_server_settings(server_key: str) -> Tuple[int, str]:
 
     rc, out = run_server_command(
         server,
-        " ".join(
-            [
-                "/opt/node-plane-runtime/sync-xray.sh",
-                server.xray_config_path,
-                server.public_host,
-                server.xray_flow,
-                "ghcr.io/xtls/xray-core:25.12.8",
-            ]
+        _shell_join_args(
+            "/opt/node-plane-runtime/sync-xray.sh",
+            server.xray_config_path,
+            server.public_host,
+            server.xray_flow,
+            "ghcr.io/xtls/xray-core:25.12.8",
         ),
         timeout=120,
     )
@@ -2887,30 +3155,7 @@ def bootstrap_server(server_key: str, preserve_config: bool = False) -> Tuple[in
         _mark(server, "bootstrap_failed", msg[-1500:])
         return 1, msg
 
-    files = {
-        "/etc/node-plane/node.env.example": (NODE_ENV_EXAMPLE, "0644"),
-        "/opt/node-plane-runtime/init-xray.sh": (XRAY_INIT_SCRIPT, "0755"),
-        "/opt/node-plane-runtime/sync-xray.sh": (XRAY_SYNC_SCRIPT, "0755"),
-        "/opt/node-plane-runtime/deploy-xray.sh": (XRAY_DEPLOY_SCRIPT, "0755"),
-        "/opt/node-plane-runtime/xray-enable-stats.sh": (XRAY_ENABLE_STATS_SCRIPT, "0755"),
-        "/opt/node-plane-runtime/xray-add-user.sh": (XRAY_ADD_SCRIPT, "0755"),
-        "/opt/node-plane-runtime/xray-add-user-existing.sh": (XRAY_ADD_EXISTING_SCRIPT, "0755"),
-        "/opt/node-plane-runtime/xray-list-users.sh": (XRAY_LIST_SCRIPT, "0755"),
-        "/opt/node-plane-runtime/xray-list-traffic.sh": (XRAY_TRAFFIC_SCRIPT, "0755"),
-        "/opt/node-plane-runtime/xray-del-user.sh": (XRAY_DEL_SCRIPT, "0755"),
-        "/opt/node-plane-runtime/conf2vpn.py": (AWG_CONF2VPN_PY, "0644"),
-        "/opt/node-plane-runtime/amnezia-config-decoder.py": (AMNEZIA_CONFIG_DECODER_PY, "0644"),
-        "/opt/node-plane-runtime/awg-template.json": (AWG_TEMPLATE_JSON, "0644"),
-        "/opt/node-plane-runtime/awg-add-user.sh": (AWG_ADD_SCRIPT, "0755"),
-        "/opt/node-plane-runtime/awg-del-user.sh": (AWG_DEL_SCRIPT, "0755"),
-        "/opt/node-plane-runtime/show-awg-entropy.sh": (AWG_SHOW_ENTROPY_SCRIPT, "0755"),
-        "/opt/node-plane-runtime/init-awg.sh": (AWG_INIT_SCRIPT, "0755"),
-        "/opt/node-plane-runtime/regenerate-awg-entropy.sh": (AWG_REGENERATE_ENTROPY_SCRIPT, "0755"),
-        "/opt/node-plane-runtime/amnezia-awg/Dockerfile": (AWG_DOCKERFILE, "0644"),
-        "/opt/node-plane-runtime/amnezia-awg/start.sh": (AWG_START_SCRIPT, "0755"),
-        "/opt/node-plane-runtime/deploy-awg.sh": (AWG_DEPLOY_SCRIPT, "0755"),
-    }
-    file_rc, file_out = write_server_files(server, files, timeout=180)
+    file_rc, file_out = write_server_files(server, _runtime_files(), timeout=180)
     if file_rc != 0:
         _mark(server, "bootstrap_failed", file_out[-1500:])
         return file_rc, file_out
@@ -2930,18 +3175,16 @@ def bootstrap_server(server_key: str, preserve_config: bool = False) -> Tuple[in
         else:
             rc, out = run_server_command(
                 server,
-                " ".join(
-                    [
-                        "/opt/node-plane-runtime/init-xray.sh",
-                        server.xray_config_path,
-                        server.public_host,
-                        sni_host,
-                        str(server.xray_tcp_port),
-                        str(server.xray_xhttp_port),
-                        server.xray_xhttp_path_prefix,
-                        server.xray_flow,
-                        "ghcr.io/xtls/xray-core:25.12.8",
-                    ]
+                _shell_join_args(
+                    "/opt/node-plane-runtime/init-xray.sh",
+                    server.xray_config_path,
+                    server.public_host,
+                    sni_host,
+                    server.xray_tcp_port,
+                    server.xray_xhttp_port,
+                    server.xray_xhttp_path_prefix,
+                    server.xray_flow,
+                    "ghcr.io/xtls/xray-core:25.12.8",
                 ),
                 timeout=180,
             )

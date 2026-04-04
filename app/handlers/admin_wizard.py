@@ -21,7 +21,7 @@ from domain.servers import (
 from services import xray as xray_svc
 from services.awg import _extract_wg_conf, create_awg_user, delete_awg_user
 from services.awg_profiles import get_awg_servers, remove_awg_profile, remove_awg_server, upsert_awg_server
-from services.provisioning_state import delete_profile_server_state, reconcile_profile_state, upsert_profile_server_state
+from services.provisioning_state import delete_profile_server_state, upsert_profile_server_state
 from services.server_registry import list_servers
 from services.profile_state import awg_profile_store, ensure_xray_caps, freeze_profile, is_frozen, profile_store, unfreeze_profile, utcnow
 from services.updates import get_updates_menu_emoji, get_updates_overview
@@ -585,14 +585,6 @@ def on_cfg_callback(update: Update, context: CallbackContext, payload: str) -> N
             w["step"] = "status_menu"
             _wizard_set(context, w)
             _wizard_edit(context, *_render_status_menu(name, frozen=is_frozen(name), lang=lang))
-            return
-        if act == "reconcile":
-            code, out = reconcile_profile_state(name)
-            prefix = t(lang, "admin.wizard.reconcile_state_title")
-            text = f"{prefix}\n\n{out}"
-            if code != 0:
-                text = f"⚠️ {prefix}\n\n{out}"
-            _wizard_edit_plain(context, text, _render_edit_menu(name, w["protocols"], frozen=is_frozen(name), lang=lang)[1])
             return
         if act == "freeze":
             freeze_profile(name)

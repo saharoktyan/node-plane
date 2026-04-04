@@ -8,6 +8,7 @@ MODE="${MODE:-}"
 NON_INTERACTIVE=0
 AUTO_INSTALL_SYSTEMD=0
 UPDATE_BRANCH="${NODE_PLANE_UPDATE_BRANCH:-}"
+FORCE_REINSTALL=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -35,10 +36,14 @@ while [[ $# -gt 0 ]]; do
       AUTO_INSTALL_SYSTEMD=1
       shift
       ;;
+    --force)
+      FORCE_REINSTALL=1
+      shift
+      ;;
     -h|--help)
       cat <<'EOF'
 Usage:
-  scripts/install.sh [--mode simple|portable] [--branch main|dev] [--non-interactive] [--install-systemd]
+  scripts/install.sh [--mode simple|portable] [--branch main|dev] [--non-interactive] [--install-systemd] [--force]
 
 Modes:
   simple    Host install via venv + systemd. Supports same-host runtime deployment.
@@ -48,6 +53,7 @@ Flags:
   --branch            Default update branch for this installation
   --non-interactive   Fail instead of prompting for missing values
   --install-systemd   In simple mode, install the systemd unit automatically
+  --force             Reinstall even if the target release is already active
 EOF
       exit 0
       ;;
@@ -217,8 +223,8 @@ latest_release_tag_for_branch() {
   local branch="$1"
   local regex
   case "$branch" in
-    main) regex='^v[0-9]+\.[0-9]+\.[0-9]+$' ;;
-    dev) regex='^v[0-9]+\.[0-9]+\.[0-9]+-alpha\.[0-9]+$' ;;
+    main) regex='^v?[0-9]+\.[0-9]+\.[0-9]+$' ;;
+    dev) regex='^v?[0-9]+\.[0-9]+\.[0-9]+-alpha\.[0-9]+$' ;;
     *) echo "Unsupported update branch: $branch" >&2; exit 1 ;;
   esac
   while IFS= read -r tag; do
@@ -247,6 +253,33 @@ release_id() {
   else
     echo "${semver}-${commit}"
   fi
+}
+
+read_release_version() {
+  local release_dir="$1"
+  if [[ -f "${release_dir}/VERSION" ]]; then
+    tr -d '\n' < "${release_dir}/VERSION"
+  else
+    echo ""
+  fi
+}
+
+read_release_commit() {
+  local release_dir="$1"
+  if [[ -f "${release_dir}/BUILD_COMMIT" ]]; then
+    tr -d '\n' < "${release_dir}/BUILD_COMMIT"
+  else
+    echo ""
+  fi
+}
+
+release_matches_target() {
+  local release_dir="$1"
+  local target_version="$2"
+  local target_commit="$3"
+  [[ -d "$release_dir" ]] || return 1
+  [[ "$(read_release_version "$release_dir")" == "$target_version" ]] || return 1
+  [[ "$(read_release_commit "$release_dir")" == "$target_commit" ]] || return 1
 }
 
 export_release_tree() {
@@ -470,7 +503,7 @@ validate_simple_layout() {
 
 run_simple_install() {
   local service_name="node-plane"
-  local base_dir app_dir shared_dir releases_dir current_link new_release_dir release_name install_ref install_version
+  local base_dir app_dir shared_dir releases_dir current_link new_release_dir release_name install_ref install_version install_commit reused_release
   base_dir="$(read_env_value NODE_PLANE_BASE_DIR)"
   app_dir="$(read_env_value NODE_PLANE_APP_DIR)"
   shared_dir="$(read_env_value NODE_PLANE_SHARED_DIR)"
@@ -491,24 +524,33 @@ run_simple_install() {
   current_link="${base_dir}/current"
   install_ref="$(resolve_install_ref "$(normalize_update_branch "$(read_env_value NODE_PLANE_UPDATE_BRANCH)")")"
   install_version="$(current_semver "$install_ref")"
+  install_commit="$(current_git_commit "$install_ref")"
   release_name="$(release_id "$install_ref")"
   new_release_dir="${releases_dir}/${release_name}"
+  reused_release=0
 
   need_cmd python3
   ensure_supported_python
 
   mkdir -p "${releases_dir}" "${shared_dir}/data" "${shared_dir}/ssh"
   sync_shared_env "$shared_dir"
-  rm -rf "$new_release_dir"
-  export_release_tree "$new_release_dir" "$install_ref"
+  if [[ $FORCE_REINSTALL -eq 0 ]] && release_matches_target "$current_link" "$install_version" "$install_commit"; then
+    new_release_dir="$(cd "$current_link" && pwd)"
+    reused_release=1
+  elif [[ $FORCE_REINSTALL -eq 0 ]] && release_matches_target "$new_release_dir" "$install_version" "$install_commit"; then
+    reused_release=1
+  else
+    rm -rf "$new_release_dir"
+    export_release_tree "$new_release_dir" "$install_ref"
 
-  python3 -m venv "${new_release_dir}/.venv"
-  "${new_release_dir}/.venv/bin/python" -m pip install --upgrade pip setuptools wheel
-  "${new_release_dir}/.venv/bin/python" -m pip install -r "${new_release_dir}/requirements.txt"
-  NODE_PLANE_BASE_DIR="${base_dir}" \
-  NODE_PLANE_APP_DIR="${new_release_dir}" \
-  NODE_PLANE_SHARED_DIR="${shared_dir}" \
-  "${new_release_dir}/.venv/bin/python" "${new_release_dir}/app/manage_db.py" init
+    python3 -m venv "${new_release_dir}/.venv"
+    "${new_release_dir}/.venv/bin/python" -m pip install --upgrade pip setuptools wheel
+    "${new_release_dir}/.venv/bin/python" -m pip install -r "${new_release_dir}/requirements.txt"
+    NODE_PLANE_BASE_DIR="${base_dir}" \
+    NODE_PLANE_APP_DIR="${new_release_dir}" \
+    NODE_PLANE_SHARED_DIR="${shared_dir}" \
+    "${new_release_dir}/.venv/bin/python" "${new_release_dir}/app/manage_db.py" init
+  fi
 
   ln -sfn "$new_release_dir" "$current_link"
 
@@ -539,6 +581,11 @@ EOF
   echo
   echo "Simple mode environment is prepared."
   echo
+  if [[ $reused_release -eq 1 ]]; then
+    echo "Installer status:"
+    echo "  Target release is already installed; reusing existing files."
+    echo
+  fi
   echo "Installed ref:"
   echo "  ${install_ref}"
   echo "Installed version:"
@@ -602,9 +649,35 @@ install_systemd_unit() {
 
 run_portable_install() {
   need_cmd docker
-  local image_repo image_tag
+  local image_repo image_tag current_container current_image_ref current_repo current_tag
   image_repo="$(read_env_value NODE_PLANE_IMAGE_REPO)"
   image_tag="$(read_env_value NODE_PLANE_IMAGE_TAG)"
+  current_container=""
+  if docker compose version >/dev/null 2>&1; then
+    current_container="$(docker compose ps -q node-plane 2>/dev/null | tail -n 1 || true)"
+  elif command -v docker-compose >/dev/null 2>&1; then
+    current_container="$(docker-compose ps -q node-plane 2>/dev/null | tail -n 1 || true)"
+  fi
+  current_image_ref=""
+  if [[ -n "$current_container" ]]; then
+    current_image_ref="$(docker inspect -f '{{.Config.Image}}' "$current_container" 2>/dev/null || true)"
+  fi
+  current_repo="${current_image_ref%:*}"
+  current_tag="${current_image_ref##*:}"
+  if [[ "$current_image_ref" == "$current_repo" ]]; then
+    current_tag=""
+  fi
+  if [[ $FORCE_REINSTALL -eq 0 ]] \
+    && [[ "${image_repo:-node-plane}" != "node-plane" || "${image_tag:-local}" != "local" ]] \
+    && [[ -n "$current_repo" ]] \
+    && [[ "$current_repo" == "$image_repo" ]] \
+    && [[ "$current_tag" == "$image_tag" ]]; then
+    echo
+    echo "Portable mode install is already on the target image; skipping container redeploy."
+    echo "Configured image:"
+    echo "  ${image_repo}:${image_tag}"
+    return 0
+  fi
   if docker compose version >/dev/null 2>&1; then
     if [[ "${image_repo:-node-plane}" == "node-plane" && "${image_tag:-local}" == "local" ]]; then
       docker compose up -d --build

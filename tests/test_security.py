@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from app.utils.security import (
+    redact_sensitive_text,
     shell_env_assignment,
     validate_profile_name,
     validate_server_field,
@@ -30,6 +31,10 @@ class SecurityValidationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_server_field("xray_config_path", "/tmp/xray config.json")
 
+    def test_validate_server_field_rejects_unsafe_xray_path_prefix(self) -> None:
+        with self.assertRaises(ValueError):
+            validate_server_field("xray_xhttp_path_prefix", '/assets"; touch /tmp/pwned; #')
+
     def test_validate_server_field_rejects_newline_in_notes(self) -> None:
         with self.assertRaises(ValueError):
             validate_server_field("notes", "hello\nworld")
@@ -37,6 +42,22 @@ class SecurityValidationTests(unittest.TestCase):
     def test_shell_env_assignment_quotes_payload(self) -> None:
         rendered = shell_env_assignment("AWG_IFACE", "$(touch /tmp/pwned)")
         self.assertEqual(rendered, "AWG_IFACE='$(touch /tmp/pwned)'")
+
+    def test_redact_sensitive_text_masks_links_keys_and_uuid(self) -> None:
+        text = (
+            "vpn://supersecret\n"
+            "vless://uuid@example.com:443?pbk=pubkey&sid=deadbeef\n"
+            "PrivateKey = hidden\n"
+            '{"uuid":"123e4567-e89b-12d3-a456-426614174000","xray_pbk":"pubkey"}\n'
+        )
+        redacted = redact_sensitive_text(text)
+        self.assertNotIn("supersecret", redacted)
+        self.assertNotIn("hidden", redacted)
+        self.assertNotIn("123e4567-e89b-12d3-a456-426614174000", redacted)
+        self.assertIn("vpn://[REDACTED]", redacted)
+        self.assertIn("vless://[REDACTED]", redacted)
+        self.assertIn("PrivateKey = [REDACTED]", redacted)
+        self.assertIn('"uuid":"[REDACTED]"', redacted)
 
 
 if __name__ == "__main__":

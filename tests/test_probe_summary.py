@@ -41,6 +41,41 @@ from services import server_bootstrap
 
 
 class ProbeSummaryTests(unittest.TestCase):
+    def test_awg_add_script_uses_server_key_prefix_for_display_name(self) -> None:
+        script = server_bootstrap.AWG_ADD_SCRIPT
+        self.assertIn('SERVER_KEY="${SERVER_KEY:-}"', script)
+        self.assertIn('DISPLAY_NAME="$NAME"', script)
+        self.assertIn('DISPLAY_NAME="${SERVER_KEY}-${NAME}"', script)
+        self.assertIn('"$DISPLAY_NAME" "$CLIENT_PUB" "$CLIENT_PSK" "$FREE_IP" >> "$CFG"', script)
+        self.assertIn('"$DISPLAY_NAME"', script)
+
+    def test_render_server_node_env_includes_server_key(self) -> None:
+        server = SimpleNamespace(
+            key="lv1",
+            xray_config_path="/opt/node-plane-runtime/xray/config.json",
+            xray_service_name="xray-lv1",
+            awg_iface="wg0",
+            awg_i1_preset="quic",
+            awg_public_host="1.2.3.4",
+            public_host="1.2.3.4",
+            awg_port=51820,
+        )
+        content = server_bootstrap.render_server_node_env(server)
+        self.assertIn("SERVER_KEY=lv1", content)
+
+    def test_cleanup_server_runtime_removes_awg_base_image(self) -> None:
+        with patch.object(server_bootstrap, "run_server_command", return_value=(0, "ok")) as mocked:
+            server = SimpleNamespace(key="lv1")
+            server_bootstrap._cleanup_server_runtime(server, preserve_config=False)
+        script = mocked.call_args.args[1]
+        self.assertIn("docker_cmd() {", script)
+        self.assertIn('docker_rmi "amneziavpn/amneziawg-go:0.2.16"', script)
+        self.assertIn("docker_cmd image prune -af", script)
+        self.assertIn('docker_inspect image inspect "amneziavpn/amneziawg-go:0.2.16"', script)
+        self.assertIn('leftovers+=("/opt/node-plane-runtime still present")', script)
+        self.assertIn("sudo -n docker info", script)
+        self.assertIn("sudo -n rm -rf", script)
+
     def test_xray_traffic_script_is_valid_bash(self) -> None:
         with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".sh", delete=False) as fh:
             fh.write(server_bootstrap.XRAY_TRAFFIC_SCRIPT)
@@ -62,11 +97,40 @@ class ProbeSummaryTests(unittest.TestCase):
         self.assertIn("re.fullmatch(r'user>>>(.*?)>>>traffic>>>(uplink|downlink)'", script)
         self.assertIn("except Exception:", script)
 
+    def test_shell_join_args_quotes_each_argument(self) -> None:
+        rendered = server_bootstrap._shell_join_args(
+            "/opt/node-plane-runtime/init-xray.sh",
+            "/opt/node-plane-runtime/xray/config.json",
+            "example.com",
+            "www.cloudflare.com",
+            443,
+            8443,
+            '/assets"; touch /tmp/pwned; #',
+            "xtls-rprx-vision",
+        )
+        self.assertIn("'/assets\"; touch /tmp/pwned; #'", rendered)
+        self.assertNotIn(' /assets"; touch /tmp/pwned; # ', rendered)
+
     def test_server_metrics_script_includes_cpu_usage(self) -> None:
         script = server_bootstrap._server_metrics_script()
         self.assertIn('echo "loadavg: $(cut -d\' \' -f1-3 /proc/loadavg)"', script)
         self.assertIn('echo "cpu usage: $cpu_usage"', script)
         self.assertIn('time.sleep(0.2)', script)
+
+    def test_bootstrap_package_scripts_wait_for_apt_locks(self) -> None:
+        packages = server_bootstrap._packages_script()
+        docker_install = server_bootstrap._install_docker_script()
+        for script in (packages, docker_install):
+            self.assertIn("apt_wait()", script)
+            self.assertIn("fuser /var/lib/dpkg/lock-frontend", script)
+            self.assertIn("sleep 5", script)
+            self.assertIn('local timeout="${1:-300}"', script)
+            self.assertIn("apt_run()", script)
+
+    def test_runtime_files_include_version_metadata(self) -> None:
+        files = server_bootstrap._runtime_files()
+        self.assertIn("/opt/node-plane-runtime/VERSION", files)
+        self.assertIn("/opt/node-plane-runtime/BUILD_COMMIT", files)
 
     def test_single_line_note_flattens_multiline_output(self) -> None:
         note = server_bootstrap._single_line_note("line one\nline two\r\nline three\n")

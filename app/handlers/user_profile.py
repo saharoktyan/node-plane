@@ -7,17 +7,30 @@ from typing import Any, Dict, List, Optional
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import CallbackContext
 
-from config import ADMIN_IDS, APP_VERSION, CB_SRV, INSTALL_MODE, LIST_PAGE_SIZE, PARSE_MODE
+from config import ADMIN_IDS, APP_VERSION, CB_SRV, LIST_PAGE_SIZE, PARSE_MODE
 from domain.servers import get_access_methods_for_codes
 from i18n import get_locale_for_update, get_user_locale, set_user_locale, t
 from services.app_settings import (
     are_access_requests_enabled,
+    get_alerts_interval_minutes,
+    get_alerts_state,
+    get_backups_interval_hours,
+    get_backups_keep_count,
     get_access_gate_message,
     get_menu_title,
     get_menu_title_markdown,
     get_updates_branch,
+    is_alerts_enabled,
+    is_alerts_notify_resolved_enabled,
+    is_backups_enabled,
     is_updates_auto_check_enabled,
     is_global_telemetry_enabled,
+    set_alerts_enabled,
+    set_alerts_interval_minutes,
+    set_alerts_notify_resolved_enabled,
+    set_backups_enabled,
+    set_backups_interval_hours,
+    set_backups_keep_count,
     set_access_gate_message,
     set_access_requests_enabled,
     set_updates_auto_check_enabled,
@@ -27,17 +40,21 @@ from services.app_settings import (
     set_menu_title,
     should_show_initial_admin_setup,
 )
+from services.alerts import get_alerts_overview
+from services.backups import backup_token, create_backup, get_backup_info, get_backups_overview, list_backups, resolve_backup_token, restore_backup
 from services.provisioning_state import summarize_server_provisioning
+from services.server_bootstrap import get_server_runtime_state, get_servers_needing_runtime_sync, sync_server_runtime
 from services.server_registry import list_servers
 from services.awg_profiles import list_awg_server_keys
 from services.ssh_keys import render_public_key_guide, render_public_key_summary
-from services.system_reset import run_factory_reset
+from services.system_reset import run_factory_reset, run_full_remove
 from services.profile_state import ensure_telegram_profile, get_allowed_protocols, get_profile, get_profile_access_status, profile_store, user_store, utcnow
+from services.release_cleanup import get_release_cleanup_overview, run_release_cleanup
 from services.traffic_usage import get_profile_monthly_usage
 from services.updates import check_for_updates, get_updates_menu_emoji, get_updates_overview, get_version_transition, list_available_versions, schedule_update
 from services.xray import get_server_link_status
 from ui.user_views import format_server_access
-from utils.keyboards import kb_admin_menu, kb_admin_requests_settings_menu, kb_admin_settings_menu, kb_admin_updates_branch_menu, kb_admin_updates_menu, kb_back_to_admin, kb_language_menu, kb_main_menu, kb_profile_minimal, kb_profile_stats, kb_settings_menu
+from utils.keyboards import kb_admin_alerts_settings_menu, kb_admin_backups_menu, kb_admin_backups_settings_menu, kb_admin_menu, kb_admin_requests_settings_menu, kb_admin_settings_menu, kb_admin_updates_branch_menu, kb_admin_updates_menu, kb_back_to_admin, kb_language_menu, kb_main_menu, kb_profile_minimal, kb_profile_stats, kb_settings_menu
 from utils.tg import answer_cb, safe_delete_update_message, safe_edit_by_ids, safe_edit_message
 
 from .user_common import _access_gate_text, _build_start_reply, _has_access, _human_ago, _human_left, _is_admin, _resolve_profile_name, _sub_progress
@@ -90,6 +107,7 @@ def _render_admin_setup_markup(lang: str) -> InlineKeyboardMarkup:
 
 def _render_admin_status(lang: str) -> str:
     servers = list_servers(include_disabled=True)
+    runtime_states = {server.key: get_server_runtime_state(server.key) for server in servers if server.bootstrap_state == "bootstrapped"}
     subs = profile_store.read()
     users = user_store.read()
     profile_names = [str(name) for name in subs.keys() if not str(name).startswith("_")] if isinstance(subs, dict) else []
@@ -122,13 +140,23 @@ def _render_admin_status(lang: str) -> str:
         needs_attention = 0
         xray_ready = 0
         awg_ready = 0
+        runtime_drift = 0
         for server in servers:
             prov = summarize_server_provisioning(server.key)
             xray_ok = True
+            runtime_state = str((runtime_states.get(server.key) or {}).get("state") or "")
             if "xray" in server.protocol_kinds:
                 xray_ok = get_server_link_status(server.key)[0]
             awg_ok = ("awg" not in server.protocol_kinds) or server.bootstrap_state == "bootstrapped"
-            if server.bootstrap_state != "bootstrapped" or prov["overall"] in {"failed", "needs_attention"} or not xray_ok or not awg_ok:
+            if runtime_state in {"outdated", "unknown"}:
+                runtime_drift += 1
+            if (
+                server.bootstrap_state != "bootstrapped"
+                or prov["overall"] in {"failed", "needs_attention"}
+                or not xray_ok
+                or not awg_ok
+                or runtime_state in {"outdated", "unknown"}
+            ):
                 needs_attention += 1
             if "xray" in server.protocol_kinds and xray_ok:
                 xray_ready += 1
@@ -137,6 +165,7 @@ def _render_admin_status(lang: str) -> str:
         lines.append(t(lang, "admin.status.bootstrap_ready", icon="•" if ready_servers == len(servers) else "!", ready=ready_servers, total=len(servers)))
         lines.append(t(lang, "admin.status.xray_ready", icon="•" if xray_ready else "!", count=xray_ready))
         lines.append(t(lang, "admin.status.awg_ready", icon="•" if awg_ready else "!", count=awg_ready))
+        lines.append(t(lang, "admin.status.runtime_drift", icon="•" if runtime_drift == 0 else "!", count=runtime_drift))
         lines.append(t(lang, "admin.status.needs_attention", icon="•" if needs_attention == 0 else "!", count=needs_attention))
 
     lines.extend(
@@ -156,6 +185,10 @@ def _render_admin_status(lang: str) -> str:
             continue
         if server.bootstrap_state != "bootstrapped":
             action_items.append(t(lang, "admin.status.action_bootstrap", server=server.key))
+            continue
+        runtime_state = str((runtime_states.get(server.key) or {}).get("state") or "")
+        if runtime_state in {"outdated", "unknown"}:
+            action_items.append(t(lang, "admin.status.action_runtime_sync", server=server.key))
             continue
         xray_ready, reason = get_server_link_status(server.key) if "xray" in server.protocol_kinds else (True, "ok")
         if "xray" in server.protocol_kinds and not xray_ready:
@@ -182,6 +215,9 @@ def _problem_server_keys() -> List[str]:
         if server.bootstrap_state != "bootstrapped":
             keys.append(server.key)
             continue
+        if str(get_server_runtime_state(server.key).get("state") or "") in {"outdated", "unknown"}:
+            keys.append(server.key)
+            continue
         if "xray" in server.protocol_kinds and not get_server_link_status(server.key)[0]:
             keys.append(server.key)
             continue
@@ -189,6 +225,10 @@ def _problem_server_keys() -> List[str]:
         if prov["overall"] in {"failed", "needs_attention"}:
             keys.append(server.key)
     return keys
+
+
+def _runtime_drift_server_keys() -> List[str]:
+    return [server.key for server in get_servers_needing_runtime_sync()]
 
 
 def _render_problem_servers(lang: str) -> tuple[str, InlineKeyboardMarkup]:
@@ -207,8 +247,11 @@ def _render_problem_servers(lang: str) -> tuple[str, InlineKeyboardMarkup]:
             continue
         reason = t(lang, "admin.status.problem_server_reason_bootstrap")
         if server.bootstrap_state == "bootstrapped":
+            runtime_state = str(get_server_runtime_state(server.key).get("state") or "")
             xray_ready, reason_text = get_server_link_status(server.key) if "xray" in server.protocol_kinds else (True, "ok")
-            if "xray" in server.protocol_kinds and not xray_ready:
+            if runtime_state in {"outdated", "unknown"}:
+                reason = t(lang, "admin.status.problem_server_reason_runtime_sync")
+            elif "xray" in server.protocol_kinds and not xray_ready:
                 reason = (
                     t(lang, "admin.status.problem_server_reason_xray_link")
                     if "incomplete" in reason_text
@@ -233,11 +276,60 @@ def _render_problem_servers(lang: str) -> tuple[str, InlineKeyboardMarkup]:
     return "\n".join(lines), InlineKeyboardMarkup(rows)
 
 
+def _render_runtime_sync_confirm(lang: str, back_callback: str = "menu:admin_status") -> tuple[str, InlineKeyboardMarkup]:
+    targets = get_servers_needing_runtime_sync()
+    if not targets:
+        return (
+            t(lang, "admin.status.runtime_sync_empty"),
+            InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, "menu.back"), callback_data=back_callback)]]),
+        )
+    lines = [
+        t(lang, "admin.status.runtime_sync_confirm_title"),
+        "",
+        t(lang, "admin.status.runtime_sync_confirm_intro", count=len(targets)),
+    ]
+    lines.extend([f"• {server.flag} {server.title} ({server.key})" for server in targets[:10]])
+    if len(targets) > 10:
+        lines.append(t(lang, "admin.status.runtime_sync_confirm_more", count=len(targets) - 10))
+    rows = [
+        [InlineKeyboardButton(t(lang, "admin.status.runtime_sync_confirm_action"), callback_data="menu:admin_runtime_sync_run")],
+        [InlineKeyboardButton(t(lang, "menu.back"), callback_data=back_callback)],
+    ]
+    return "\n".join(lines), InlineKeyboardMarkup(rows)
+
+
+def _sync_runtime_drift(lang: str) -> str:
+    targets = get_servers_needing_runtime_sync()
+    if not targets:
+        return t(lang, "admin.status.runtime_sync_empty")
+
+    updated: List[str] = []
+    failed: List[str] = []
+    for server in targets:
+        rc, out = sync_server_runtime(server.key)
+        if rc == 0:
+            updated.append(server.key)
+        else:
+            tail = str(out or "").strip().splitlines()
+            failed.append(f"{server.key}: {tail[-1] if tail else 'unknown error'}")
+
+    lines = [t(lang, "admin.status.runtime_sync_result_title"), ""]
+    lines.append(t(lang, "admin.status.runtime_sync_result_updated", count=len(updated)))
+    lines.append(t(lang, "admin.status.runtime_sync_result_failed", count=len(failed)))
+    if updated:
+        lines.extend(["", t(lang, "admin.status.runtime_sync_result_updated_list")])
+        lines.extend([f"• {key}" for key in updated])
+    if failed:
+        lines.extend(["", t(lang, "admin.status.runtime_sync_result_failed_list")])
+        lines.extend([f"• {item}" for item in failed[:10]])
+    return "\n".join(lines)
+
+
 def _ssh_key_summary_markup(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton(t(lang, "ssh.details"), callback_data="menu:sshkey_details")],
-            [InlineKeyboardButton(t(lang, "menu.back"), callback_data="menu:admin")],
+            [InlineKeyboardButton(t(lang, "menu.back"), callback_data="menu:admin_settings")],
         ]
     )
 
@@ -256,6 +348,8 @@ def _kb_admin_status(lang: str) -> InlineKeyboardMarkup:
         rows.append([InlineKeyboardButton(t(lang, "menu.requests"), callback_data="menu:admin_requests")])
     if _problem_server_keys():
         rows.append([InlineKeyboardButton(t(lang, "admin.status.problem_servers_button"), callback_data="menu:admin_problem_servers")])
+    if _runtime_drift_server_keys():
+        rows.append([InlineKeyboardButton(t(lang, "admin.status.runtime_sync_button"), callback_data="menu:admin_runtime_sync_all")])
     rows.append([InlineKeyboardButton(t(lang, "menu.back"), callback_data="menu:admin")])
     return InlineKeyboardMarkup(rows)
 
@@ -532,40 +626,130 @@ def _render_admin_requests_settings_text(lang: str) -> str:
     return t(lang, "admin.settings.requests_title")
 
 
+def _render_admin_alerts_settings_text(lang: str) -> str:
+    overview = get_alerts_overview()
+    last_run = str(overview.get("last_run_at") or "").strip()
+    last_run_value = _human_ago(last_run, lang) if last_run else t(lang, "common.none")
+    status = str(overview.get("last_status") or "never")
+    status_key = {
+        "never": "admin.alerts.status_never",
+        "success": "admin.alerts.status_success",
+        "failed": "admin.alerts.status_failed",
+    }.get(status, "admin.alerts.status_failed")
+    resolved_value = t(lang, "admin.alerts.resolved_enabled") if overview.get("notify_resolved") else t(lang, "admin.alerts.resolved_disabled")
+    enabled_value = t(lang, "admin.alerts.enabled_on") if overview.get("enabled") else t(lang, "admin.alerts.enabled_off")
+    lines = [
+        t(lang, "admin.alerts.title"),
+        "",
+        t(lang, "admin.alerts.enabled_line", value=enabled_value),
+        t(lang, "admin.alerts.interval_line", value=int(overview.get("interval_minutes") or 5)),
+        t(lang, "admin.alerts.resolved_line", value=resolved_value),
+        t(lang, "admin.alerts.active_line", value=int(overview.get("active_count") or 0)),
+        t(lang, "admin.alerts.last_run_line", value=last_run_value),
+        t(lang, "admin.alerts.last_status_line", value=t(lang, status_key)),
+    ]
+    last_error = str(overview.get("last_error") or "").strip()
+    if last_error:
+        lines.extend(["", t(lang, "admin.alerts.last_error_line", value=last_error)])
+    return "\n".join(lines)
+
+
+def _admin_settings_markup(lang: str, user_id: int | None) -> InlineKeyboardMarkup:
+    return kb_admin_settings_menu(
+        _admin_notify_enabled(user_id or 0),
+        is_global_telemetry_enabled(),
+        are_access_requests_enabled(),
+        lang,
+        updates_label=_admin_updates_menu_label(lang),
+    )
+
+
 def _render_admin_reset_text(lang: str) -> str:
     return "\n".join(
         [
-            t(lang, "admin.settings.reset_title"),
+            t(lang, "admin.settings.cleanup_title"),
             "",
-            t(lang, "admin.settings.reset_intro"),
+            t(lang, "admin.settings.cleanup_intro"),
             "",
-            t(lang, "admin.settings.reset_scope"),
+            t(lang, "admin.settings.cleanup_scope"),
         ]
     )
 
 
 def _render_admin_reset_confirm_text(scope: str, lang: str) -> str:
     lines = [
-        t(lang, "admin.settings.reset_confirm_title"),
+        t(lang, "admin.settings.cleanup_confirm_title"),
         "",
-        t(lang, "admin.settings.reset_confirm_local"),
+        t(lang, "admin.settings.cleanup_confirm_local"),
     ]
     if scope in {"nodes", "nodes_ssh"}:
-        lines.extend(["", t(lang, "admin.settings.reset_confirm_nodes")])
+        lines.extend(["", t(lang, "admin.settings.cleanup_confirm_nodes")])
     if scope == "nodes_ssh":
-        lines.extend(["", t(lang, "admin.settings.reset_confirm_portable")])
+        lines.extend(["", t(lang, "admin.settings.cleanup_confirm_portable")])
+    return "\n".join(lines)
+
+
+def _render_admin_reset_phrase_text(scope: str, lang: str, error: str = "") -> str:
+    lines = [
+        _render_admin_reset_confirm_text(scope, lang),
+        "",
+        t(lang, "admin.settings.remove_phrase_prompt", phrase=_md(_full_remove_phrase(lang))),
+    ]
+    if error:
+        lines.extend(["", error])
+    return "\n".join(lines)
+
+
+def _full_remove_phrase(lang: str) -> str:
+    return "Да, сделай так как я сказал" if lang == "ru" else "Yes, do as i said"
+
+
+def _full_remove_phrases() -> set[str]:
+    return {
+        _full_remove_phrase("ru"),
+        _full_remove_phrase("en"),
+    }
+
+
+def _render_admin_remove_text(lang: str, cleanup_nodes: bool = False, error: str = "") -> str:
+    lines = [
+        t(lang, "admin.settings.remove_title_nodes" if cleanup_nodes else "admin.settings.remove_title"),
+        "",
+        t(lang, "admin.settings.remove_intro_nodes" if cleanup_nodes else "admin.settings.remove_intro"),
+        "",
+        t(lang, "admin.settings.remove_scope"),
+    ]
+    if cleanup_nodes:
+        lines.extend(
+            [
+                "",
+                t(lang, "admin.settings.remove_nodes_scope"),
+            ]
+        )
+    lines.extend(
+        [
+            "",
+            t(lang, "admin.settings.remove_phrase_prompt", phrase=_md(_full_remove_phrase(lang))),
+        ]
+    )
+    if error:
+        lines.extend(["", error])
     return "\n".join(lines)
 
 
 def _admin_reset_markup(lang: str) -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton(t(lang, "admin.settings.reset_local_only"), callback_data="menu:admin_settings_reset_scope:local")],
-        [InlineKeyboardButton(t(lang, "admin.settings.reset_with_nodes"), callback_data="menu:admin_settings_reset_scope:nodes")],
+        [InlineKeyboardButton(t(lang, "admin.settings.cleanup_local_only"), callback_data="menu:admin_settings_reset_scope:local")],
+        [InlineKeyboardButton(t(lang, "admin.settings.cleanup_with_nodes"), callback_data="menu:admin_settings_reset_scope:nodes")],
+        [InlineKeyboardButton(t(lang, "admin.settings.full_remove"), callback_data="menu:admin_settings_remove")],
+        [InlineKeyboardButton(t(lang, "admin.settings.full_remove_nodes"), callback_data="menu:admin_settings_remove_nodes")],
     ]
-    if str(INSTALL_MODE or "").strip().lower() == "portable":
-        rows.append([InlineKeyboardButton(t(lang, "admin.settings.reset_with_nodes_ssh"), callback_data="menu:admin_settings_reset_scope:nodes_ssh")])
     rows.append([InlineKeyboardButton(t(lang, "menu.back"), callback_data="menu:admin_settings")])
     return InlineKeyboardMarkup(rows)
+
+
+def _admin_remove_markup(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, "menu.back"), callback_data="menu:admin_settings")]])
 
 
 def _admin_reset_confirm_markup(scope: str, lang: str) -> InlineKeyboardMarkup:
@@ -603,12 +787,15 @@ def _admin_updates_markup(lang: str) -> InlineKeyboardMarkup:
     overview = get_updates_overview()
     update_running = str(overview.get("last_run_status") or "") == "running"
     show_update_action = bool(overview.get("update_supported")) and (bool(overview.get("update_available")) or update_running)
+    cleanup_overview = get_release_cleanup_overview()
     return kb_admin_updates_menu(
-        bool(overview.get("auto_check_enabled")),
-        show_update_action,
-        update_running,
-        str(overview.get("branch") or get_updates_branch()),
-        lang,
+        auto_check_enabled=bool(overview.get("auto_check_enabled")),
+        update_supported=show_update_action,
+        update_running=update_running,
+        branch=str(overview.get("branch") or get_updates_branch()),
+        runtime_sync_available=bool(get_servers_needing_runtime_sync()),
+        release_cleanup_available=bool(cleanup_overview.get("supported")),
+        lang=lang,
     )
 
 
@@ -755,10 +942,274 @@ def _render_admin_updates_version_confirm(lang: str, ref: str) -> tuple[str, Inl
     return "\n".join(lines), InlineKeyboardMarkup(rows)
 
 
+def _render_admin_release_cleanup_text(lang: str, result: dict | None = None) -> str:
+    overview = get_release_cleanup_overview()
+    lines = [
+        t(lang, "admin.updates.release_cleanup_title"),
+        "",
+    ]
+    if not overview.get("supported"):
+        lines.append(t(lang, "admin.updates.release_cleanup_unsupported"))
+        return "\n".join(lines)
+    lines.extend(
+        [
+            t(lang, "admin.updates.release_cleanup_intro", keep=int(overview.get("keep_count") or 2)),
+            "",
+            t(lang, "admin.updates.release_cleanup_total", value=str(overview.get("total_releases") or 0)),
+            t(lang, "admin.updates.release_cleanup_removable", value=str(overview.get("removable_releases") or 0)),
+            t(lang, "admin.updates.release_cleanup_total_size", value=_human_size(int(overview.get("total_size_bytes") or 0))),
+            t(lang, "admin.updates.release_cleanup_removable_size", value=_human_size(int(overview.get("removable_size_bytes") or 0))),
+        ]
+    )
+    current_target = str(overview.get("current_target") or "").strip()
+    if current_target:
+        lines.append(t(lang, "admin.updates.release_cleanup_current", value=current_target))
+    if result:
+        status = str(result.get("status") or "")
+        if status == "success":
+            lines.extend(["", t(lang, "admin.updates.release_cleanup_done", value=str(result.get("removed") or 0))])
+        elif status == "noop":
+            lines.extend(["", t(lang, "admin.updates.release_cleanup_noop")])
+        elif status in {"failed", "unsupported"}:
+            lines.extend(["", t(lang, "admin.updates.release_cleanup_failed", value=str(result.get("message") or "unknown error"))])
+    return "\n".join(lines)
+
+
+def _admin_release_cleanup_markup(lang: str) -> InlineKeyboardMarkup:
+    overview = get_release_cleanup_overview()
+    rows: List[List[InlineKeyboardButton]] = []
+    if overview.get("supported") and int(overview.get("removable_releases") or 0) > 0:
+        rows.append([InlineKeyboardButton(t(lang, "admin.updates.release_cleanup_run"), callback_data="menu:admin_updates_release_cleanup_run")])
+    rows.append([InlineKeyboardButton(t(lang, "menu.back"), callback_data="menu:admin_updates")])
+    return InlineKeyboardMarkup(rows)
+
+
+def _human_size(size_bytes: int) -> str:
+    value = float(max(0, int(size_bytes)))
+    units = ["B", "KiB", "MiB", "GiB"]
+    idx = 0
+    while value >= 1024 and idx < len(units) - 1:
+        value /= 1024.0
+        idx += 1
+    if idx == 0:
+        return f"{int(value)} {units[idx]}"
+    return f"{value:.1f} {units[idx]}"
+
+
+def _backup_datetime_label(value: str, lang: str) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return "—"
+    try:
+        parsed = raw[:-1] + "+00:00" if raw.endswith("Z") else raw
+        dt = datetime.fromisoformat(parsed).astimezone(timezone.utc)
+    except Exception:
+        return raw
+    if lang == "ru":
+        return dt.strftime("%d.%m.%Y %H:%M UTC")
+    return dt.strftime("%Y-%m-%d %H:%M UTC")
+
+
+def _backups_run_status_label(status: str, lang: str) -> str:
+    normalized = str(status or "").strip().lower()
+    mapping = {
+        "never": "admin.backups.run_never",
+        "success": "admin.backups.run_success",
+        "failed": "admin.backups.run_failed",
+        "skipped_duplicate": "admin.backups.run_skipped_duplicate",
+    }
+    return t(lang, mapping.get(normalized, "admin.backups.run_failed"))
+
+
+def _backups_restore_status_label(status: str, lang: str) -> str:
+    normalized = str(status or "").strip().lower()
+    mapping = {
+        "never": "admin.backups.restore_never",
+        "success": "admin.backups.restore_success",
+        "failed": "admin.backups.restore_failed",
+    }
+    return t(lang, mapping.get(normalized, "admin.backups.restore_failed"))
+
+
+def _backup_trigger_label(trigger: str, lang: str) -> str:
+    normalized = str(trigger or "").strip().lower()
+    key = f"admin.backups.trigger_{normalized.replace('-', '_')}"
+    try:
+        return t(lang, key)
+    except Exception:
+        return t(lang, "admin.backups.trigger_unknown")
+
+
+def _render_admin_backups_text(lang: str) -> str:
+    overview = get_backups_overview()
+    last_run_at = str(overview.get("last_run_at") or "").strip()
+    last_restore_at = str(overview.get("last_restore_at") or "").strip()
+    last_run_value = _backups_run_status_label(str(overview.get("last_status") or "never"), lang)
+    if last_run_at:
+        last_run_value = f"{last_run_value} · {_human_ago(last_run_at, lang)}"
+    last_restore_value = _backups_restore_status_label(str(overview.get("last_restore_status") or "never"), lang)
+    if last_restore_at:
+        last_restore_value = f"{last_restore_value} · {_human_ago(last_restore_at, lang)}"
+    lines = [
+        t(lang, "admin.backups.title"),
+        "",
+        t(lang, "admin.backups.section_status"),
+        t(lang, "admin.backups.status", value=t(lang, "admin.backups.enabled") if overview.get("enabled") else t(lang, "admin.backups.disabled")),
+        t(lang, "admin.backups.interval", value=f"{overview.get('interval_hours', 24)}h"),
+        t(lang, "admin.backups.keep_count", value=str(overview.get("keep_count", 10))),
+        t(lang, "admin.backups.last_run", value=last_run_value),
+        t(lang, "admin.backups.last_status", value=_backups_run_status_label(str(overview.get("last_status") or "never"), lang)),
+        "",
+        t(lang, "admin.backups.section_storage"),
+        t(lang, "admin.backups.total_files", value=str(overview.get("total_backups", 0))),
+        t(lang, "admin.backups.total_size", value=_human_size(int(overview.get("total_size_bytes") or 0))),
+        "",
+        t(lang, "admin.backups.section_restore"),
+        t(lang, "admin.backups.last_restore", value=last_restore_value),
+        t(lang, "admin.backups.last_restore_status", value=_backups_restore_status_label(str(overview.get("last_restore_status") or "never"), lang)),
+    ]
+    last_error = str(overview.get("last_error") or "").strip()
+    if last_error:
+        lines.extend(["", t(lang, "admin.backups.last_error", value=last_error)])
+    return "\n".join(lines)
+
+
+def _render_admin_backups_restore_page(lang: str, page: int) -> tuple[str, InlineKeyboardMarkup]:
+    items = list_backups()
+    if not items:
+        return (
+            f"{t(lang, 'admin.backups.list_title')}\n\n{t(lang, 'admin.backups.list_empty')}",
+            InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, "menu.back"), callback_data="menu:admin_backups")]]),
+        )
+    total = len(items)
+    pages = max(1, (total + LIST_PAGE_SIZE - 1) // LIST_PAGE_SIZE)
+    page = max(0, min(page, pages - 1))
+    chunk = items[page * LIST_PAGE_SIZE : (page + 1) * LIST_PAGE_SIZE]
+    rows: List[List[InlineKeyboardButton]] = []
+    for item in chunk:
+        created_at = str(item.get("created_at") or "")
+        created_label = _backup_datetime_label(created_at, lang) if created_at else str(item.get("name") or "")
+        trigger_label = _backup_trigger_label(str(item.get("trigger") or ""), lang)
+        token = backup_token(str(item.get("name") or ""))
+        rows.append([InlineKeyboardButton(f"{created_label} · {trigger_label}", callback_data=f"menu:admin_backups_pick:{token}")])
+    if pages > 1:
+        nav: List[InlineKeyboardButton] = []
+        if page > 0:
+            nav.append(InlineKeyboardButton("⬅️", callback_data=f"menu:admin_backups_restore:{page-1}"))
+        nav.append(InlineKeyboardButton(f"{page+1}/{pages}", callback_data=f"menu:admin_backups_restore:{page}"))
+        if page < pages - 1:
+            nav.append(InlineKeyboardButton("➡️", callback_data=f"menu:admin_backups_restore:{page+1}"))
+        rows.append(nav)
+    rows.append([InlineKeyboardButton(t(lang, "menu.back"), callback_data="menu:admin_backups")])
+    text = "\n".join([t(lang, "admin.backups.list_title"), "", t(lang, "admin.backups.list_intro")])
+    return text, InlineKeyboardMarkup(rows)
+
+
+def _render_admin_backups_restore_confirm(lang: str, token: str) -> tuple[str, InlineKeyboardMarkup]:
+    resolved = resolve_backup_token(token)
+    info = get_backup_info(str(resolved.get("name") or "")) if resolved else None
+    if not info:
+        return _render_admin_backups_restore_page(lang, 0)
+    created_at = str(info.get("created_at") or "")
+    created_value = _backup_datetime_label(created_at, lang) if created_at else str(info.get("name") or "")
+    lines = [
+        t(lang, "admin.backups.restore_confirm_title"),
+        "",
+        t(lang, "admin.backups.restore_confirm_created", value=created_value),
+        t(lang, "admin.backups.restore_confirm_trigger", value=_backup_trigger_label(str(info.get("trigger") or ""), lang)),
+        t(lang, "admin.backups.restore_confirm_size", value=_human_size(int(info.get("size_bytes") or 0))),
+        t(lang, "admin.backups.restore_confirm_version", value=str(info.get("app_version") or "—")),
+        "",
+        t(lang, "admin.backups.restore_confirm_warning"),
+    ]
+    markup = InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(t(lang, "admin.backups.restore_action"), callback_data=f"menu:admin_backups_run_restore:{token}")],
+            [InlineKeyboardButton(t(lang, "menu.back"), callback_data="menu:admin_backups_restore:0")],
+        ]
+    )
+    return "\n".join(lines), markup
+
+
 def admin_menu_text_router(update: Update, context: CallbackContext) -> None:
     if not _is_admin(update):
         return
     admin_settings_state = _admin_settings_state_get(context)
+    if admin_settings_state and admin_settings_state.get("active") and admin_settings_state.get("step") == "full_remove_phrase":
+        lang = get_locale_for_update(update)
+        message_text = (update.effective_message.text or "").strip()
+        safe_delete_update_message(update, context)
+        cleanup_nodes = bool(admin_settings_state.get("remove_cleanup_nodes"))
+        if message_text not in _full_remove_phrases():
+            if admin_settings_state.get("chat_id") and admin_settings_state.get("message_id"):
+                safe_edit_by_ids(
+                    context.bot,
+                    int(admin_settings_state["chat_id"]),
+                    int(admin_settings_state["message_id"]),
+                    _render_admin_remove_text(lang, cleanup_nodes, t(lang, "admin.settings.remove_phrase_mismatch")),
+                    reply_markup=_admin_remove_markup(lang),
+                    parse_mode=PARSE_MODE,
+                )
+            return
+        if admin_settings_state.get("chat_id") and admin_settings_state.get("message_id"):
+                safe_edit_by_ids(
+                    context.bot,
+                    int(admin_settings_state["chat_id"]),
+                    int(admin_settings_state["message_id"]),
+                t(lang, "admin.wizard.work_in_progress", title=t(lang, "admin.settings.remove_title_nodes" if cleanup_nodes else "admin.settings.remove_title"), dots=""),
+                reply_markup=_admin_remove_markup(lang),
+                parse_mode=PARSE_MODE,
+            )
+        rc, out = run_full_remove(cleanup_nodes=cleanup_nodes)
+        _admin_settings_state_clear(context)
+        if admin_settings_state.get("chat_id") and admin_settings_state.get("message_id"):
+            safe_edit_by_ids(
+                context.bot,
+                int(admin_settings_state["chat_id"]),
+                int(admin_settings_state["message_id"]),
+                f"{'✅' if rc == 0 else '⚠️'} {t(lang, 'admin.settings.remove_title_nodes' if cleanup_nodes else 'admin.settings.remove_title')}\n\n{_md(out)}",
+                reply_markup=kb_back_to_admin(lang),
+                parse_mode=PARSE_MODE,
+            )
+        return
+    if admin_settings_state and admin_settings_state.get("active") and admin_settings_state.get("step") == "factory_reset_phrase":
+        lang = get_locale_for_update(update)
+        message_text = (update.effective_message.text or "").strip()
+        safe_delete_update_message(update, context)
+        scope = str(admin_settings_state.get("factory_reset_scope") or "local")
+        cleanup_nodes = scope in {"nodes", "nodes_ssh"}
+        if message_text not in _full_remove_phrases():
+            if admin_settings_state.get("chat_id") and admin_settings_state.get("message_id"):
+                safe_edit_by_ids(
+                    context.bot,
+                    int(admin_settings_state["chat_id"]),
+                    int(admin_settings_state["message_id"]),
+                    _render_admin_reset_phrase_text(scope, lang, t(lang, "admin.settings.remove_phrase_mismatch")),
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, "menu.back"), callback_data="menu:admin_settings_reset")]]),
+                    parse_mode=PARSE_MODE,
+                )
+            return
+        if admin_settings_state.get("chat_id") and admin_settings_state.get("message_id"):
+            safe_edit_by_ids(
+                context.bot,
+                int(admin_settings_state["chat_id"]),
+                int(admin_settings_state["message_id"]),
+                t(lang, "admin.wizard.work_in_progress", title=t(lang, "admin.settings.cleanup_title"), dots=""),
+                reply_markup=kb_back_to_admin(lang),
+                parse_mode=PARSE_MODE,
+            )
+        rc, out = run_factory_reset(cleanup_nodes=cleanup_nodes, stop_local_runtime=(scope == "nodes_ssh"))
+        _admin_settings_state_clear(context)
+        if admin_settings_state.get("chat_id") and admin_settings_state.get("message_id"):
+            safe_edit_by_ids(
+                context.bot,
+                int(admin_settings_state["chat_id"]),
+                int(admin_settings_state["message_id"]),
+                f"{'✅' if rc == 0 else '⚠️'} {t(lang, 'admin.settings.cleanup_title')}\n\n{_md(out)}",
+                reply_markup=kb_back_to_admin(lang),
+                parse_mode=PARSE_MODE,
+            )
+        return
     if admin_settings_state and admin_settings_state.get("active") and admin_settings_state.get("step") in {"bot_title", "access_gate_message"}:
         lang = get_locale_for_update(update)
         title = (update.effective_message.text or "").strip()
@@ -780,12 +1231,7 @@ def admin_menu_text_router(update: Update, context: CallbackContext) -> None:
             set_menu_title(title)
             saved_text = t(lang, "admin.settings.bot_title_saved")
             reply_text = _render_admin_settings_text(lang)
-            reply_markup = kb_admin_settings_menu(
-                _admin_notify_enabled(update.effective_user.id if update.effective_user else 0),
-                is_global_telemetry_enabled(),
-                are_access_requests_enabled(),
-                lang,
-            )
+            reply_markup = _admin_settings_markup(lang, update.effective_user.id if update.effective_user else None)
         else:
             set_access_gate_message(title)
             saved_text = t(lang, "admin.settings.access_gate_saved")
@@ -1118,12 +1564,7 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
             update,
             context,
             _render_admin_settings_text(lang),
-            reply_markup=kb_admin_settings_menu(
-                _admin_notify_enabled(user.id if user else 0),
-                is_global_telemetry_enabled(),
-                are_access_requests_enabled(),
-                lang,
-            ),
+            reply_markup=_admin_settings_markup(lang, user.id if user else None),
             parse_mode=PARSE_MODE,
         )
         return
@@ -1143,6 +1584,22 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
         )
         return
 
+    if payload == "admin_settings_alerts" and is_admin:
+        _admin_settings_state_clear(context)
+        safe_edit_message(
+            update,
+            context,
+            _render_admin_alerts_settings_text(lang),
+            reply_markup=kb_admin_alerts_settings_menu(
+                is_alerts_enabled(),
+                get_alerts_interval_minutes(),
+                is_alerts_notify_resolved_enabled(),
+                lang,
+            ),
+            parse_mode=PARSE_MODE,
+        )
+        return
+
     if payload == "admin_settings_reset" and is_admin:
         _admin_settings_state_set(context, {"active": True, "step": "factory_reset"})
         safe_edit_message(
@@ -1154,37 +1611,41 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
         )
         return
 
-    if payload.startswith("admin_settings_reset_scope:") and is_admin:
-        scope = payload.split(":", 1)[1]
-        state = _admin_settings_state_get(context) or {}
-        state.update({"active": True, "step": "factory_reset_confirm", "factory_reset_scope": scope})
-        _admin_settings_state_set(context, state)
+    if payload == "admin_settings_remove" and is_admin:
+        _admin_settings_capture_message(update, context)
+        _admin_settings_state_set(context, {**(_admin_settings_state_get(context) or {}), "active": True, "step": "full_remove_phrase", "remove_cleanup_nodes": False})
         safe_edit_message(
             update,
             context,
-            _render_admin_reset_confirm_text(scope, lang),
-            reply_markup=_admin_reset_confirm_markup(scope, lang),
+            _render_admin_remove_text(lang, False),
+            reply_markup=_admin_remove_markup(lang),
             parse_mode=PARSE_MODE,
         )
         return
 
-    if payload.startswith("admin_settings_reset_run:") and is_admin:
-        scope = payload.split(":", 1)[1]
-        cleanup_nodes = scope in {"nodes", "nodes_ssh"}
+    if payload == "admin_settings_remove_nodes" and is_admin:
+        _admin_settings_capture_message(update, context)
+        _admin_settings_state_set(context, {**(_admin_settings_state_get(context) or {}), "active": True, "step": "full_remove_phrase", "remove_cleanup_nodes": True})
         safe_edit_message(
             update,
             context,
-            t(lang, "admin.wizard.work_in_progress", title=t(lang, "admin.settings.reset_title"), dots=""),
-            reply_markup=kb_back_to_admin(lang),
+            _render_admin_remove_text(lang, True),
+            reply_markup=_admin_remove_markup(lang),
             parse_mode=PARSE_MODE,
         )
-        rc, out = run_factory_reset(cleanup_nodes=cleanup_nodes, stop_local_runtime=(scope == "nodes_ssh"))
-        _admin_settings_state_clear(context)
+        return
+
+    if payload.startswith("admin_settings_reset_scope:") and is_admin:
+        scope = payload.split(":", 1)[1]
+        _admin_settings_capture_message(update, context)
+        state = _admin_settings_state_get(context) or {}
+        state.update({"active": True, "step": "factory_reset_phrase", "factory_reset_scope": scope})
+        _admin_settings_state_set(context, state)
         safe_edit_message(
             update,
             context,
-            f"{'✅' if rc == 0 else '⚠️'} {t(lang, 'admin.settings.reset_title')}\n\n{_md(out)}",
-            reply_markup=kb_back_to_admin(lang),
+            _render_admin_reset_phrase_text(scope, lang),
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, "menu.back"), callback_data="menu:admin_settings_reset")]]),
             parse_mode=PARSE_MODE,
         )
         return
@@ -1199,6 +1660,111 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
         )
         return
 
+    if payload == "admin_backups" and is_admin:
+        safe_edit_message(
+            update,
+            context,
+            _render_admin_backups_text(lang),
+            reply_markup=kb_admin_backups_menu(lang),
+            parse_mode=PARSE_MODE,
+        )
+        return
+
+    if payload == "admin_backups_create" and is_admin:
+        safe_edit_message(
+            update,
+            context,
+            t(lang, "admin.backups.creating"),
+            reply_markup=kb_admin_backups_menu(lang),
+            parse_mode=PARSE_MODE,
+        )
+        result = create_backup("manual")
+        text = _render_admin_backups_text(lang)
+        if str(result.get("status")) == "skipped_duplicate":
+            text = f"{text}\n\n{t(lang, 'admin.backups.duplicate_skipped')}"
+        elif str(result.get("status")) == "failed":
+            text = f"{text}\n\n{t(lang, 'admin.backups.last_error', value=str(result.get('message') or 'unknown error'))}"
+        safe_edit_message(update, context, text, reply_markup=kb_admin_backups_menu(lang), parse_mode=PARSE_MODE)
+        return
+
+    if payload == "admin_backups_settings" and is_admin:
+        safe_edit_message(
+            update,
+            context,
+            t(lang, "admin.backups.settings_title"),
+            reply_markup=kb_admin_backups_settings_menu(is_backups_enabled(), get_backups_interval_hours(), get_backups_keep_count(), lang),
+            parse_mode=PARSE_MODE,
+        )
+        return
+
+    if payload == "admin_backups_toggle" and is_admin:
+        enabled = set_backups_enabled(not is_backups_enabled())
+        safe_edit_message(
+            update,
+            context,
+            t(lang, "admin.backups.settings_title"),
+            reply_markup=kb_admin_backups_settings_menu(enabled, get_backups_interval_hours(), get_backups_keep_count(), lang),
+            parse_mode=PARSE_MODE,
+        )
+        return
+
+    if payload.startswith("admin_backups_interval:") and is_admin:
+        raw = payload.split(":", 1)[1]
+        hours = int(raw) if raw.isdigit() else get_backups_interval_hours()
+        set_backups_interval_hours(hours)
+        safe_edit_message(
+            update,
+            context,
+            t(lang, "admin.backups.settings_title"),
+            reply_markup=kb_admin_backups_settings_menu(is_backups_enabled(), get_backups_interval_hours(), get_backups_keep_count(), lang),
+            parse_mode=PARSE_MODE,
+        )
+        return
+
+    if payload.startswith("admin_backups_keep:") and is_admin:
+        raw = payload.split(":", 1)[1]
+        count = int(raw) if raw.isdigit() else get_backups_keep_count()
+        set_backups_keep_count(count)
+        safe_edit_message(
+            update,
+            context,
+            t(lang, "admin.backups.settings_title"),
+            reply_markup=kb_admin_backups_settings_menu(is_backups_enabled(), get_backups_interval_hours(), get_backups_keep_count(), lang),
+            parse_mode=PARSE_MODE,
+        )
+        return
+
+    if payload.startswith("admin_backups_restore:") and is_admin:
+        raw_page = payload.split(":", 1)[1]
+        page = int(raw_page) if raw_page.isdigit() else 0
+        text, markup = _render_admin_backups_restore_page(lang, page)
+        safe_edit_message(update, context, text, reply_markup=markup, parse_mode=PARSE_MODE)
+        return
+
+    if payload.startswith("admin_backups_pick:") and is_admin:
+        token = payload.split(":", 1)[1]
+        text, markup = _render_admin_backups_restore_confirm(lang, token)
+        safe_edit_message(update, context, text, reply_markup=markup, parse_mode=PARSE_MODE)
+        return
+
+    if payload.startswith("admin_backups_run_restore:") and is_admin:
+        token = payload.split(":", 1)[1]
+        resolved = resolve_backup_token(token)
+        safe_edit_message(
+            update,
+            context,
+            t(lang, "admin.backups.restoring"),
+            reply_markup=kb_admin_backups_menu(lang),
+            parse_mode=PARSE_MODE,
+        )
+        result = restore_backup(str(resolved.get("name") or "")) if resolved else {"status": "failed", "message": "backup not found"}
+        if str(result.get("status")) == "success":
+            text = f"{_render_admin_backups_text(lang)}\n\n{t(lang, 'admin.backups.restore_done')}"
+        else:
+            text = f"{_render_admin_backups_text(lang)}\n\n{t(lang, 'admin.backups.restore_failed_text', value=str(result.get('message') or 'unknown error'))}"
+        safe_edit_message(update, context, text, reply_markup=kb_admin_backups_menu(lang), parse_mode=PARSE_MODE)
+        return
+
     if payload == "admin_updates_toggle_auto" and is_admin:
         enabled = set_updates_auto_check_enabled(not is_updates_auto_check_enabled())
         overview = get_updates_overview()
@@ -1208,7 +1774,15 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
             update,
             context,
             _render_admin_updates_text(lang),
-            reply_markup=kb_admin_updates_menu(enabled, show_update_action, update_running, str(overview.get("branch") or get_updates_branch()), lang),
+            reply_markup=kb_admin_updates_menu(
+                auto_check_enabled=enabled,
+                update_supported=show_update_action,
+                update_running=update_running,
+                branch=str(overview.get("branch") or get_updates_branch()),
+                runtime_sync_available=bool(get_servers_needing_runtime_sync()),
+                release_cleanup_available=bool(get_release_cleanup_overview().get("supported")),
+                lang=lang,
+            ),
             parse_mode=PARSE_MODE,
         )
         return
@@ -1237,6 +1811,34 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
             context,
             _render_admin_updates_branch_text(lang),
             reply_markup=kb_admin_updates_branch_menu(get_updates_branch(), lang),
+            parse_mode=PARSE_MODE,
+        )
+        return
+
+    if payload == "admin_updates_release_cleanup" and is_admin:
+        safe_edit_message(
+            update,
+            context,
+            _render_admin_release_cleanup_text(lang),
+            reply_markup=_admin_release_cleanup_markup(lang),
+            parse_mode=PARSE_MODE,
+        )
+        return
+
+    if payload == "admin_updates_release_cleanup_run" and is_admin:
+        safe_edit_message(
+            update,
+            context,
+            t(lang, "admin.updates.release_cleanup_running"),
+            reply_markup=_admin_release_cleanup_markup(lang),
+            parse_mode=PARSE_MODE,
+        )
+        result = run_release_cleanup()
+        safe_edit_message(
+            update,
+            context,
+            _render_admin_release_cleanup_text(lang, result=result),
+            reply_markup=_admin_release_cleanup_markup(lang),
             parse_mode=PARSE_MODE,
         )
         return
@@ -1350,7 +1952,7 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
 
     if payload == "admin_settings_bot_title" and is_admin:
         _admin_settings_capture_message(update, context)
-        _admin_settings_state_set(context, {"active": True, "step": "bot_title", **(_admin_settings_state_get(context) or {})})
+        _admin_settings_state_set(context, {**(_admin_settings_state_get(context) or {}), "active": True, "step": "bot_title"})
         safe_edit_message(
             update,
             context,
@@ -1362,7 +1964,7 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
 
     if payload == "admin_settings_access_gate_message" and is_admin:
         _admin_settings_capture_message(update, context)
-        _admin_settings_state_set(context, {"active": True, "step": "access_gate_message", **(_admin_settings_state_get(context) or {})})
+        _admin_settings_state_set(context, {**(_admin_settings_state_get(context) or {}), "active": True, "step": "access_gate_message"})
         safe_edit_message(
             update,
             context,
@@ -1378,7 +1980,57 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
             update,
             context,
             _render_admin_settings_text(lang),
-            reply_markup=kb_admin_settings_menu(_admin_notify_enabled(user.id if user else 0), enabled, are_access_requests_enabled(), lang),
+            reply_markup=_admin_settings_markup(lang, user.id if user else None),
+            parse_mode=PARSE_MODE,
+        )
+        return
+
+    if payload == "admin_settings_alerts_toggle" and is_admin:
+        enabled = set_alerts_enabled(not is_alerts_enabled())
+        safe_edit_message(
+            update,
+            context,
+            _render_admin_alerts_settings_text(lang),
+            reply_markup=kb_admin_alerts_settings_menu(
+                enabled,
+                get_alerts_interval_minutes(),
+                is_alerts_notify_resolved_enabled(),
+                lang,
+            ),
+            parse_mode=PARSE_MODE,
+        )
+        return
+
+    if payload.startswith("admin_settings_alerts_interval:") and is_admin:
+        raw = payload.split(":", 1)[1]
+        minutes = int(raw) if raw.isdigit() else get_alerts_interval_minutes()
+        set_alerts_interval_minutes(minutes)
+        safe_edit_message(
+            update,
+            context,
+            _render_admin_alerts_settings_text(lang),
+            reply_markup=kb_admin_alerts_settings_menu(
+                is_alerts_enabled(),
+                get_alerts_interval_minutes(),
+                is_alerts_notify_resolved_enabled(),
+                lang,
+            ),
+            parse_mode=PARSE_MODE,
+        )
+        return
+
+    if payload == "admin_settings_alerts_toggle_resolved" and is_admin:
+        enabled = set_alerts_notify_resolved_enabled(not is_alerts_notify_resolved_enabled())
+        safe_edit_message(
+            update,
+            context,
+            _render_admin_alerts_settings_text(lang),
+            reply_markup=kb_admin_alerts_settings_menu(
+                is_alerts_enabled(),
+                get_alerts_interval_minutes(),
+                enabled,
+                lang,
+            ),
             parse_mode=PARSE_MODE,
         )
         return
@@ -1709,7 +2361,7 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
             context,
             text[:3900],
             reply_markup=_ssh_key_details_markup(lang),
-            parse_mode=PARSE_MODE,
+            parse_mode=None,
         )
         return
 
@@ -1730,6 +2382,45 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
             context,
             text,
             reply_markup=markup,
+            parse_mode=PARSE_MODE,
+        )
+        return
+
+    if payload == "admin_runtime_sync_all" and is_admin:
+        text, markup = _render_runtime_sync_confirm(lang)
+        safe_edit_message(
+            update,
+            context,
+            text,
+            reply_markup=markup,
+            parse_mode=PARSE_MODE,
+        )
+        return
+
+    if payload == "admin_updates_runtime_sync" and is_admin:
+        text, markup = _render_runtime_sync_confirm(lang, back_callback="menu:admin_updates")
+        safe_edit_message(
+            update,
+            context,
+            text,
+            reply_markup=markup,
+            parse_mode=PARSE_MODE,
+        )
+        return
+
+    if payload == "admin_runtime_sync_run" and is_admin:
+        safe_edit_message(
+            update,
+            context,
+            t(lang, "admin.status.runtime_sync_running"),
+            reply_markup=_kb_admin_status(lang),
+            parse_mode=PARSE_MODE,
+        )
+        safe_edit_message(
+            update,
+            context,
+            _sync_runtime_drift(lang),
+            reply_markup=_kb_admin_status(lang),
             parse_mode=PARSE_MODE,
         )
         return
