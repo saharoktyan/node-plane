@@ -96,6 +96,13 @@ class AdminViewsTests(unittest.TestCase):
         callbacks = [button.callback_data for row in markup.inline_keyboard for button in row]
         self.assertIn("menu:admin_updates_release_cleanup", callbacks)
 
+    def test_admin_updates_markup_keeps_requested_locale(self) -> None:
+        with patch.object(user_profile, "get_updates_overview", return_value={"auto_check_enabled": True, "last_run_status": "never", "update_supported": False, "branch": "dev"}), patch.object(
+            user_profile, "get_servers_needing_runtime_sync", return_value=[]
+        ), patch.object(user_profile, "get_release_cleanup_overview", return_value={"supported": True}):
+            markup = user_profile._admin_updates_markup("en")
+        self.assertEqual(markup.inline_keyboard[0][0].text, "🔎 Check")
+
     def test_admin_backups_menu_groups_primary_actions(self) -> None:
         markup = keyboards.kb_admin_backups_menu(lang="en")
         rows = markup.inline_keyboard

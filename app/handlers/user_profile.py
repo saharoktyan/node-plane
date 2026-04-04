@@ -778,13 +778,13 @@ def _admin_updates_markup(lang: str) -> InlineKeyboardMarkup:
     show_update_action = bool(overview.get("update_supported")) and (bool(overview.get("update_available")) or update_running)
     cleanup_overview = get_release_cleanup_overview()
     return kb_admin_updates_menu(
-        bool(overview.get("auto_check_enabled")),
-        show_update_action,
-        update_running,
-        str(overview.get("branch") or get_updates_branch()),
-        bool(get_servers_needing_runtime_sync()),
-        bool(cleanup_overview.get("supported")),
-        lang,
+        auto_check_enabled=bool(overview.get("auto_check_enabled")),
+        update_supported=show_update_action,
+        update_running=update_running,
+        branch=str(overview.get("branch") or get_updates_branch()),
+        runtime_sync_available=bool(get_servers_needing_runtime_sync()),
+        release_cleanup_available=bool(cleanup_overview.get("supported")),
+        lang=lang,
     )
 
 
@@ -1746,12 +1746,13 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
             context,
             _render_admin_updates_text(lang),
             reply_markup=kb_admin_updates_menu(
-                enabled,
-                show_update_action,
-                update_running,
-                str(overview.get("branch") or get_updates_branch()),
-                bool(get_servers_needing_runtime_sync()),
-                lang,
+                auto_check_enabled=enabled,
+                update_supported=show_update_action,
+                update_running=update_running,
+                branch=str(overview.get("branch") or get_updates_branch()),
+                runtime_sync_available=bool(get_servers_needing_runtime_sync()),
+                release_cleanup_available=bool(get_release_cleanup_overview().get("supported")),
+                lang=lang,
             ),
             parse_mode=PARSE_MODE,
         )
