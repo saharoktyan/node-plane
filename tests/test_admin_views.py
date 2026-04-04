@@ -60,8 +60,8 @@ class AdminViewsTests(unittest.TestCase):
         rows = markup.inline_keyboard
         self.assertEqual([button.callback_data for button in rows[0]], ["menu:admin_status", "menu:admin_requests"])
         self.assertEqual([button.callback_data for button in rows[1]], ["srv:menu", "cfg:start:edit"])
-        self.assertEqual([button.callback_data for button in rows[2]], ["menu:admin_settings"])
-        self.assertEqual([button.callback_data for button in rows[3]], ["menu:admin_announce"])
+        self.assertEqual([button.callback_data for button in rows[2]], ["menu:admin_announce"])
+        self.assertEqual([button.callback_data for button in rows[3]], ["menu:admin_settings"])
 
     def test_admin_updates_menu_prioritizes_check_and_update_actions(self) -> None:
         markup = keyboards.kb_admin_updates_menu(auto_check_enabled=True, update_supported=True, update_running=False, branch="dev", lang="en")

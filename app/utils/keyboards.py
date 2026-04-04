@@ -36,10 +36,10 @@ def kb_admin_menu(lang: str = "ru", updates_label: str | None = None) -> InlineK
             InlineKeyboardButton(t(lang, "menu.servers"), callback_data=f"{CB_SRV}menu"),
             InlineKeyboardButton(t(lang, "menu.profiles"), callback_data=f"{CB_CFG}start:edit"),
         ],
-        [InlineKeyboardButton(t(lang, "menu.admin_settings"), callback_data=f"{CB_MENU}admin_settings")],
         [
             InlineKeyboardButton(t(lang, "menu.announcement"), callback_data=f"{CB_MENU}admin_announce"),
         ],
+        [InlineKeyboardButton(t(lang, "menu.admin_settings"), callback_data=f"{CB_MENU}admin_settings")],
         [InlineKeyboardButton(t(lang, "menu.back"), callback_data=f"{CB_MENU}main")],
     ])
 
