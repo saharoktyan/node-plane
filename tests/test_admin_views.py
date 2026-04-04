@@ -118,12 +118,19 @@ class AdminViewsTests(unittest.TestCase):
         self.assertIn(">📚 Keep 10<", [button.text for button in rows[2]])
 
     def test_admin_settings_menu_groups_edit_and_toggle_actions(self) -> None:
-        markup = keyboards.kb_admin_settings_menu(notify_enabled=True, telemetry_enabled=False, requests_enabled=True, lang="en")
+        markup = keyboards.kb_admin_settings_menu(
+            notify_enabled=True,
+            telemetry_enabled=False,
+            requests_enabled=True,
+            lang="en",
+            updates_label="🟢 Updates",
+        )
         rows = markup.inline_keyboard
         self.assertEqual([button.callback_data for button in rows[0]], ["menu:admin_settings_bot_title", "menu:admin_settings_requests"])
         self.assertEqual([button.callback_data for button in rows[1]], ["menu:admin_settings_alerts", "menu:admin_settings_toggle_telemetry"])
         self.assertEqual([button.callback_data for button in rows[2]], ["menu:admin_updates", "menu:admin_backups"])
         self.assertEqual([button.callback_data for button in rows[3]], ["menu:sshkey"])
+        self.assertEqual(rows[2][0].text, "🟢 Updates")
 
     def test_admin_alerts_settings_menu_groups_core_toggles(self) -> None:
         markup = keyboards.kb_admin_alerts_settings_menu(enabled=True, interval_minutes=15, notify_resolved=False, lang="en")
@@ -177,6 +184,16 @@ class AdminViewsTests(unittest.TestCase):
         self.assertIn("*Status*", text)
         self.assertIn("*Path*", text)
         self.assertIn("*Next step*", text)
+
+    def test_ssh_key_guide_prefers_button_workflow_without_commands(self) -> None:
+        ok, text = ssh_keys.render_public_key_guide("en")
+        self.assertTrue(ok)
+        self.assertIn("Bot SSH Key", text)
+        self.assertIn("Open Servers and choose the target server.", text)
+        self.assertIn("run Probe, then Bootstrap", text)
+        self.assertNotIn("/probeserver", text)
+        self.assertNotIn("/bootstrapserver", text)
+        self.assertNotIn("*", text)
 
     def test_ssh_key_summary_escapes_markdown_sensitive_path(self) -> None:
         with patch.object(ssh_keys, "get_public_key", return_value=(True, "ssh-ed25519 AAAA test")), patch.object(

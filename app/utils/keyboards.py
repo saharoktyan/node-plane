@@ -179,8 +179,14 @@ def kb_settings_menu(telemetry_enabled: bool, telemetry_available: bool, announc
     return InlineKeyboardMarkup(rows)
 
 
-def kb_admin_settings_menu(notify_enabled: bool, telemetry_enabled: bool, requests_enabled: bool, lang: str = "ru") -> InlineKeyboardMarkup:
-    updates_text = t(lang, "menu.updates")
+def kb_admin_settings_menu(
+    notify_enabled: bool,
+    telemetry_enabled: bool,
+    requests_enabled: bool,
+    lang: str = "ru",
+    updates_label: str | None = None,
+) -> InlineKeyboardMarkup:
+    updates_text = updates_label or t(lang, "menu.updates")
     telemetry_label = t(lang, "admin.settings.telemetry_on") if telemetry_enabled else t(lang, "admin.settings.telemetry_off")
     return InlineKeyboardMarkup([
         [

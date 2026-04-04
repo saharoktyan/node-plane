@@ -653,6 +653,16 @@ def _render_admin_alerts_settings_text(lang: str) -> str:
     return "\n".join(lines)
 
 
+def _admin_settings_markup(lang: str, user_id: int | None) -> InlineKeyboardMarkup:
+    return kb_admin_settings_menu(
+        _admin_notify_enabled(user_id or 0),
+        is_global_telemetry_enabled(),
+        are_access_requests_enabled(),
+        lang,
+        updates_label=_admin_updates_menu_label(lang),
+    )
+
+
 def _render_admin_reset_text(lang: str) -> str:
     return "\n".join(
         [
@@ -1049,12 +1059,7 @@ def admin_menu_text_router(update: Update, context: CallbackContext) -> None:
             set_menu_title(title)
             saved_text = t(lang, "admin.settings.bot_title_saved")
             reply_text = _render_admin_settings_text(lang)
-            reply_markup = kb_admin_settings_menu(
-                _admin_notify_enabled(update.effective_user.id if update.effective_user else 0),
-                is_global_telemetry_enabled(),
-                are_access_requests_enabled(),
-                lang,
-            )
+            reply_markup = _admin_settings_markup(lang, update.effective_user.id if update.effective_user else None)
         else:
             set_access_gate_message(title)
             saved_text = t(lang, "admin.settings.access_gate_saved")
@@ -1387,12 +1392,7 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
             update,
             context,
             _render_admin_settings_text(lang),
-            reply_markup=kb_admin_settings_menu(
-                _admin_notify_enabled(user.id if user else 0),
-                is_global_telemetry_enabled(),
-                are_access_requests_enabled(),
-                lang,
-            ),
+            reply_markup=_admin_settings_markup(lang, user.id if user else None),
             parse_mode=PARSE_MODE,
         )
         return
@@ -1775,7 +1775,7 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
             update,
             context,
             _render_admin_settings_text(lang),
-            reply_markup=kb_admin_settings_menu(_admin_notify_enabled(user.id if user else 0), enabled, are_access_requests_enabled(), lang),
+            reply_markup=_admin_settings_markup(lang, user.id if user else None),
             parse_mode=PARSE_MODE,
         )
         return

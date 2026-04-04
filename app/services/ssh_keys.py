@@ -94,7 +94,7 @@ def get_public_key(path: str | None = None) -> Tuple[bool, str]:
 
 def render_public_key_guide(locale: str = "ru") -> Tuple[bool, str]:
     text = (
-        f"{t(locale, 'ssh.title')}\n\n"
+        f"{t(locale, 'ssh.guide_title')}\n\n"
         f"{t(locale, 'ssh.quick_steps')}\n\n"
         f"{t(locale, 'ssh.step1')}\n"
         f"{t(locale, 'ssh.step2')}\n"
