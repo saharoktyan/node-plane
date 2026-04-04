@@ -60,9 +60,8 @@ class AdminViewsTests(unittest.TestCase):
         rows = markup.inline_keyboard
         self.assertEqual([button.callback_data for button in rows[0]], ["menu:admin_status", "menu:admin_requests"])
         self.assertEqual([button.callback_data for button in rows[1]], ["srv:menu", "cfg:start:edit"])
-        self.assertEqual([button.callback_data for button in rows[2]], ["menu:admin_updates", "menu:admin_backups"])
-        self.assertEqual([button.callback_data for button in rows[3]], ["menu:admin_settings"])
-        self.assertEqual([button.callback_data for button in rows[4]], ["menu:admin_announce", "menu:sshkey"])
+        self.assertEqual([button.callback_data for button in rows[2]], ["menu:admin_settings"])
+        self.assertEqual([button.callback_data for button in rows[3]], ["menu:admin_announce"])
 
     def test_admin_updates_menu_prioritizes_check_and_update_actions(self) -> None:
         markup = keyboards.kb_admin_updates_menu(auto_check_enabled=True, update_supported=True, update_running=False, branch="dev", lang="en")
@@ -117,6 +116,8 @@ class AdminViewsTests(unittest.TestCase):
         rows = markup.inline_keyboard
         self.assertEqual([button.callback_data for button in rows[0]], ["menu:admin_settings_bot_title", "menu:admin_settings_requests"])
         self.assertEqual([button.callback_data for button in rows[1]], ["menu:admin_settings_alerts", "menu:admin_settings_toggle_telemetry"])
+        self.assertEqual([button.callback_data for button in rows[2]], ["menu:admin_updates", "menu:admin_backups"])
+        self.assertEqual([button.callback_data for button in rows[3]], ["menu:sshkey"])
 
     def test_admin_alerts_settings_menu_groups_core_toggles(self) -> None:
         markup = keyboards.kb_admin_alerts_settings_menu(enabled=True, interval_minutes=15, notify_resolved=False, lang="en")
@@ -186,8 +187,7 @@ class AdminViewsTests(unittest.TestCase):
             markup = admin_server_wizard._advanced_menu_markup("spb1", "en")
         rows = markup.inline_keyboard
         self.assertEqual([button.callback_data for button in rows[0]], ["srv:advsection:general:spb1", "srv:advsection:maintenance:spb1"])
-        self.assertEqual([button.callback_data for button in rows[1]], ["srv:advsection:xray:spb1"])
-        self.assertEqual([button.callback_data for button in rows[2]], ["srv:advsection:awg:spb1"])
+        self.assertEqual([button.callback_data for button in rows[1]], ["srv:advsection:xray:spb1", "srv:advsection:awg:spb1"])
 
     def test_advanced_menu_hides_protocol_sections_when_not_selected(self) -> None:
         fake_server = SimpleNamespace(protocol_kinds=("awg",))
@@ -196,6 +196,10 @@ class AdminViewsTests(unittest.TestCase):
         callbacks = [button.callback_data for row in markup.inline_keyboard for button in row]
         self.assertNotIn("srv:advsection:xray:spb1", callbacks)
         self.assertIn("srv:advsection:awg:spb1", callbacks)
+
+    def test_maintenance_menu_uses_plain_metrics_label(self) -> None:
+        markup = admin_server_wizard._advanced_section_markup("spb1", "maintenance", "en")
+        self.assertEqual(markup.inline_keyboard[0][0].text, "Metrics")
 
     def test_maintenance_section_groups_into_submenus(self) -> None:
         markup = admin_server_wizard._advanced_section_markup("spb1", "maintenance", "en")

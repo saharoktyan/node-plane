@@ -27,7 +27,6 @@ def kb_main_menu(is_admin: bool, has_access: bool, lang: str = "ru", allow_reque
 
 
 def kb_admin_menu(lang: str = "ru", updates_label: str | None = None) -> InlineKeyboardMarkup:
-    updates_text = updates_label or t(lang, "menu.updates")
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton(t(lang, "menu.status"), callback_data=f"{CB_MENU}admin_status"),
@@ -37,16 +36,9 @@ def kb_admin_menu(lang: str = "ru", updates_label: str | None = None) -> InlineK
             InlineKeyboardButton(t(lang, "menu.servers"), callback_data=f"{CB_SRV}menu"),
             InlineKeyboardButton(t(lang, "menu.profiles"), callback_data=f"{CB_CFG}start:edit"),
         ],
-        [
-            InlineKeyboardButton(updates_text, callback_data=f"{CB_MENU}admin_updates"),
-            InlineKeyboardButton(t(lang, "menu.backups"), callback_data=f"{CB_MENU}admin_backups"),
-        ],
-        [
-            InlineKeyboardButton(t(lang, "menu.admin_settings"), callback_data=f"{CB_MENU}admin_settings"),
-        ],
+        [InlineKeyboardButton(t(lang, "menu.admin_settings"), callback_data=f"{CB_MENU}admin_settings")],
         [
             InlineKeyboardButton(t(lang, "menu.announcement"), callback_data=f"{CB_MENU}admin_announce"),
-            InlineKeyboardButton(t(lang, "menu.ssh_key"), callback_data=f"{CB_MENU}sshkey"),
         ],
         [InlineKeyboardButton(t(lang, "menu.back"), callback_data=f"{CB_MENU}main")],
     ])
@@ -188,6 +180,7 @@ def kb_settings_menu(telemetry_enabled: bool, telemetry_available: bool, announc
 
 
 def kb_admin_settings_menu(notify_enabled: bool, telemetry_enabled: bool, requests_enabled: bool, lang: str = "ru") -> InlineKeyboardMarkup:
+    updates_text = t(lang, "menu.updates")
     telemetry_label = t(lang, "admin.settings.telemetry_on") if telemetry_enabled else t(lang, "admin.settings.telemetry_off")
     return InlineKeyboardMarkup([
         [
@@ -198,6 +191,11 @@ def kb_admin_settings_menu(notify_enabled: bool, telemetry_enabled: bool, reques
             InlineKeyboardButton(t(lang, "admin.settings.alerts_menu"), callback_data=f"{CB_MENU}admin_settings_alerts"),
             InlineKeyboardButton(telemetry_label, callback_data=f"{CB_MENU}admin_settings_toggle_telemetry"),
         ],
+        [
+            InlineKeyboardButton(updates_text, callback_data=f"{CB_MENU}admin_updates"),
+            InlineKeyboardButton(t(lang, "menu.backups"), callback_data=f"{CB_MENU}admin_backups"),
+        ],
+        [InlineKeyboardButton(t(lang, "menu.ssh_key"), callback_data=f"{CB_MENU}sshkey")],
         [InlineKeyboardButton(t(lang, "admin.settings.factory_reset"), callback_data=f"{CB_MENU}admin_settings_reset")],
         [InlineKeyboardButton(t(lang, "menu.back"), callback_data=f"{CB_MENU}admin")],
     ])

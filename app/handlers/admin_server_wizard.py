@@ -545,10 +545,13 @@ def _advanced_menu_markup(server_key: str, lang: str) -> InlineKeyboardMarkup:
             InlineKeyboardButton(t(lang, "admin.wizard.advanced_maintenance"), callback_data=f"{CB_SRV}advsection:maintenance:{server_key}"),
         ]
     ]
+    protocol_row: list[InlineKeyboardButton] = []
     if server and "xray" in server.protocol_kinds:
-        rows.append([InlineKeyboardButton(t(lang, "admin.wizard.advanced_xray"), callback_data=f"{CB_SRV}advsection:xray:{server_key}")])
+        protocol_row.append(InlineKeyboardButton(t(lang, "admin.wizard.advanced_xray"), callback_data=f"{CB_SRV}advsection:xray:{server_key}"))
     if server and "awg" in server.protocol_kinds:
-        rows.append([InlineKeyboardButton(t(lang, "admin.wizard.advanced_awg"), callback_data=f"{CB_SRV}advsection:awg:{server_key}")])
+        protocol_row.append(InlineKeyboardButton(t(lang, "admin.wizard.advanced_awg"), callback_data=f"{CB_SRV}advsection:awg:{server_key}"))
+    if protocol_row:
+        rows.append(protocol_row)
     rows.append([InlineKeyboardButton(t(lang, "admin.wizard.back_to_server"), callback_data=f"{CB_SRV}card:{server_key}")])
     return InlineKeyboardMarkup(rows)
 
