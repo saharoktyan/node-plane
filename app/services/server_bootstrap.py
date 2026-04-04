@@ -2259,14 +2259,32 @@ docker_rm() {{
   fi
 }}
 
+docker_rmi() {{
+  local image="$1"
+  if [[ -z "$image" ]]; then
+    return
+  fi
+  if command -v docker >/dev/null 2>&1; then
+    docker rmi -f "$image" >/dev/null 2>&1 || true
+    return
+  fi
+  if command -v sudo >/dev/null 2>&1 && sudo docker info >/dev/null 2>&1; then
+    sudo docker rmi -f "$image" >/dev/null 2>&1 || true
+  fi
+}}
+
 XRAY_CONTAINER="xray"
 AWG_CONTAINER="{AWG_RUNTIME_CONTAINER}"
+XRAY_IMAGE_DEFAULT="ghcr.io/xtls/xray-core:25.12.8"
+AWG_IMAGE_DEFAULT="node-plane-amnezia-awg:0.2.16"
 if [[ -f /etc/node-plane/node.env ]]; then
   source /etc/node-plane/node.env
 fi
 
 docker_rm "${{XRAY_CONTAINER_NAME:-$XRAY_CONTAINER}}"
 docker_rm "${{AWG_CONTAINER_NAME:-$AWG_CONTAINER}}"
+docker_rmi "${{XRAY_DOCKER_IMAGE:-$XRAY_IMAGE_DEFAULT}}"
+docker_rmi "${{AWG_DOCKER_IMAGE:-$AWG_IMAGE_DEFAULT}}"
 
 if [[ "{preserve}" != "1" ]]; then
   rm -f /etc/node-plane/node.env

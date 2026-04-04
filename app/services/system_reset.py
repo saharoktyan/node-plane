@@ -75,6 +75,24 @@ def _systemctl_prefix() -> str:
     return "" if os.geteuid() == 0 else "sudo -n "
 
 
+def _read_env_var_from_shared(key: str) -> str:
+    env_path = os.path.join(SHARED_ROOT, ".env")
+    if not os.path.isfile(env_path):
+        return ""
+    try:
+        with open(env_path, "r", encoding="utf-8") as fh:
+            for raw in fh:
+                line = raw.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                name, value = line.split("=", 1)
+                if name.strip() == key:
+                    return value.strip()
+    except OSError:
+        return ""
+    return ""
+
+
 def schedule_full_uninstall() -> Tuple[int, str]:
     targets = _uninstall_targets()
     if not targets:
@@ -82,6 +100,9 @@ def schedule_full_uninstall() -> Tuple[int, str]:
 
     prefix = _systemctl_prefix()
     pid = os.getpid()
+    image_repo = _read_env_var_from_shared("NODE_PLANE_IMAGE_REPO") or "node-plane"
+    image_tag = _read_env_var_from_shared("NODE_PLANE_IMAGE_TAG") or "local"
+    image_ref = f"{image_repo}:{image_tag}" if image_repo and image_tag else ""
     script_body = [
         "#!/usr/bin/env bash",
         "set -eu",
@@ -91,8 +112,16 @@ def schedule_full_uninstall() -> Tuple[int, str]:
         f"{prefix}rm -f /etc/systemd/system/node-plane.service >/dev/null 2>&1 || true",
         f"{prefix}systemctl daemon-reload >/dev/null 2>&1 || true",
         "docker rm -f node-plane >/dev/null 2>&1 || true",
-        "kill " + str(pid) + " >/dev/null 2>&1 || true",
     ]
+    if image_ref:
+        script_body.append(f"docker rmi -f {_shell_quote(image_ref)} >/dev/null 2>&1 || true")
+    script_body.extend(
+        [
+            "docker image prune -f >/dev/null 2>&1 || true",
+            "docker system prune -f >/dev/null 2>&1 || true",
+        "kill " + str(pid) + " >/dev/null 2>&1 || true",
+        ]
+    )
     for path in targets:
         script_body.append(f"rm -rf -- {_shell_quote(path)} >/dev/null 2>&1 || true")
     script_body.append('rm -f -- "$0" >/dev/null 2>&1 || true')
@@ -124,6 +153,37 @@ def schedule_full_uninstall() -> Tuple[int, str]:
         ]
     )
     return 0, "\n".join(lines)
+
+
+def run_full_remove(cleanup_nodes: bool = False) -> Tuple[int, str]:
+    if cleanup_nodes:
+        failures: List[str] = []
+        completed: List[str] = []
+        for server in list_servers(include_disabled=True):
+            rc, out = full_cleanup_server(
+                server.key,
+                remove_ssh_key=(server.transport == "ssh"),
+            )
+            if rc != 0:
+                failures.append(f"{server.key}: {(out or '').strip()[:400]}")
+            else:
+                completed.append(server.key)
+        if failures:
+            lines = ["Node cleanup failed.", ""]
+            if completed:
+                lines.append("Completed:")
+                lines.extend(f"• {key}" for key in completed)
+                lines.append("")
+            lines.append("Errors:")
+            lines.extend(f"• {item}" for item in failures[:10])
+            lines.append("")
+            lines.append("Node Plane removal was not scheduled.")
+            return 1, "\n".join(lines)
+
+    rc, out = schedule_full_uninstall()
+    if rc != 0 or not cleanup_nodes:
+        return rc, out
+    return 0, out + "\n\n• managed runtimes cleaned up on registered nodes\n• bot SSH key removal requested for SSH nodes"
 
 
 def _schedule_portable_container_teardown() -> Tuple[bool, str]:

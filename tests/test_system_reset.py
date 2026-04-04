@@ -120,6 +120,33 @@ class SystemResetTests(unittest.TestCase):
         self.assertIn("Node Plane removal scheduled.", out)
         mocked.assert_called_once()
 
+    def test_run_full_remove_with_nodes_runs_node_cleanup_before_uninstall(self) -> None:
+        self.server_registry.upsert_server(
+            key="nl1",
+            region="nl",
+            title="Netherlands",
+            flag="🇳🇱",
+            transport="ssh",
+            protocol_kinds=("xray",),
+            public_host="1.2.3.4",
+            ssh_host="1.2.3.4",
+            ssh_user="root",
+        )
+        calls = []
+
+        def fake_cleanup(server_key: str, remove_ssh_key: bool = False):
+            calls.append((server_key, remove_ssh_key))
+            return 0, "ok"
+
+        with patch.object(self.system_reset, "full_cleanup_server", side_effect=fake_cleanup), patch.object(
+            self.system_reset, "schedule_full_uninstall", return_value=(0, "Node Plane removal scheduled.")
+        ):
+            rc, out = self.system_reset.run_full_remove(cleanup_nodes=True)
+
+        self.assertEqual(rc, 0)
+        self.assertIn(("nl1", True), calls)
+        self.assertIn("managed runtimes cleaned up on registered nodes", out)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import CallbackContext
 
-from config import ADMIN_IDS, APP_VERSION, CB_SRV, INSTALL_MODE, LIST_PAGE_SIZE, PARSE_MODE
+from config import ADMIN_IDS, APP_VERSION, CB_SRV, LIST_PAGE_SIZE, PARSE_MODE
 from domain.servers import get_access_methods_for_codes
 from i18n import get_locale_for_update, get_user_locale, set_user_locale, t
 from services.app_settings import (
@@ -47,7 +47,7 @@ from services.server_bootstrap import get_server_runtime_state, get_servers_need
 from services.server_registry import list_servers
 from services.awg_profiles import list_awg_server_keys
 from services.ssh_keys import render_public_key_guide, render_public_key_summary
-from services.system_reset import run_factory_reset, schedule_full_uninstall
+from services.system_reset import run_factory_reset, run_full_remove
 from services.profile_state import ensure_telegram_profile, get_allowed_protocols, get_profile, get_profile_access_status, profile_store, user_store, utcnow
 from services.traffic_usage import get_profile_monthly_usage
 from services.updates import check_for_updates, get_updates_menu_emoji, get_updates_overview, get_version_transition, list_available_versions, schedule_update
@@ -666,25 +666,25 @@ def _admin_settings_markup(lang: str, user_id: int | None) -> InlineKeyboardMark
 def _render_admin_reset_text(lang: str) -> str:
     return "\n".join(
         [
-            t(lang, "admin.settings.reset_title"),
+            t(lang, "admin.settings.cleanup_title"),
             "",
-            t(lang, "admin.settings.reset_intro"),
+            t(lang, "admin.settings.cleanup_intro"),
             "",
-            t(lang, "admin.settings.reset_scope"),
+            t(lang, "admin.settings.cleanup_scope"),
         ]
     )
 
 
 def _render_admin_reset_confirm_text(scope: str, lang: str) -> str:
     lines = [
-        t(lang, "admin.settings.reset_confirm_title"),
+        t(lang, "admin.settings.cleanup_confirm_title"),
         "",
-        t(lang, "admin.settings.reset_confirm_local"),
+        t(lang, "admin.settings.cleanup_confirm_local"),
     ]
     if scope in {"nodes", "nodes_ssh"}:
-        lines.extend(["", t(lang, "admin.settings.reset_confirm_nodes")])
+        lines.extend(["", t(lang, "admin.settings.cleanup_confirm_nodes")])
     if scope == "nodes_ssh":
-        lines.extend(["", t(lang, "admin.settings.reset_confirm_portable")])
+        lines.extend(["", t(lang, "admin.settings.cleanup_confirm_portable")])
     return "\n".join(lines)
 
 
@@ -692,16 +692,27 @@ def _full_remove_phrase(lang: str) -> str:
     return "Да, сделай так как я сказал" if lang == "ru" else "Yes, do as i said"
 
 
-def _render_admin_remove_text(lang: str, error: str = "") -> str:
+def _render_admin_remove_text(lang: str, cleanup_nodes: bool = False, error: str = "") -> str:
     lines = [
-        t(lang, "admin.settings.remove_title"),
+        t(lang, "admin.settings.remove_title_nodes" if cleanup_nodes else "admin.settings.remove_title"),
         "",
-        t(lang, "admin.settings.remove_intro"),
+        t(lang, "admin.settings.remove_intro_nodes" if cleanup_nodes else "admin.settings.remove_intro"),
         "",
         t(lang, "admin.settings.remove_scope"),
-        "",
-        t(lang, "admin.settings.remove_phrase_prompt", phrase=_md(_full_remove_phrase(lang))),
     ]
+    if cleanup_nodes:
+        lines.extend(
+            [
+                "",
+                t(lang, "admin.settings.remove_nodes_scope"),
+            ]
+        )
+    lines.extend(
+        [
+            "",
+            t(lang, "admin.settings.remove_phrase_prompt", phrase=_md(_full_remove_phrase(lang))),
+        ]
+    )
     if error:
         lines.extend(["", error])
     return "\n".join(lines)
@@ -709,11 +720,11 @@ def _render_admin_remove_text(lang: str, error: str = "") -> str:
 
 def _admin_reset_markup(lang: str) -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton(t(lang, "admin.settings.reset_local_only"), callback_data="menu:admin_settings_reset_scope:local")],
-        [InlineKeyboardButton(t(lang, "admin.settings.reset_with_nodes"), callback_data="menu:admin_settings_reset_scope:nodes")],
+        [InlineKeyboardButton(t(lang, "admin.settings.cleanup_local_only"), callback_data="menu:admin_settings_reset_scope:local")],
+        [InlineKeyboardButton(t(lang, "admin.settings.cleanup_with_nodes"), callback_data="menu:admin_settings_reset_scope:nodes")],
+        [InlineKeyboardButton(t(lang, "admin.settings.full_remove"), callback_data="menu:admin_settings_remove")],
+        [InlineKeyboardButton(t(lang, "admin.settings.full_remove_nodes"), callback_data="menu:admin_settings_remove_nodes")],
     ]
-    if str(INSTALL_MODE or "").strip().lower() == "portable":
-        rows.append([InlineKeyboardButton(t(lang, "admin.settings.reset_with_nodes_ssh"), callback_data="menu:admin_settings_reset_scope:nodes_ssh")])
     rows.append([InlineKeyboardButton(t(lang, "menu.back"), callback_data="menu:admin_settings")])
     return InlineKeyboardMarkup(rows)
 
@@ -1066,34 +1077,35 @@ def admin_menu_text_router(update: Update, context: CallbackContext) -> None:
         message_text = (update.effective_message.text or "").strip()
         expected = _full_remove_phrase(lang)
         safe_delete_update_message(update, context)
+        cleanup_nodes = bool(admin_settings_state.get("remove_cleanup_nodes"))
         if message_text != expected:
             if admin_settings_state.get("chat_id") and admin_settings_state.get("message_id"):
                 safe_edit_by_ids(
                     context.bot,
                     int(admin_settings_state["chat_id"]),
                     int(admin_settings_state["message_id"]),
-                    _render_admin_remove_text(lang, t(lang, "admin.settings.remove_phrase_mismatch")),
+                    _render_admin_remove_text(lang, cleanup_nodes, t(lang, "admin.settings.remove_phrase_mismatch")),
                     reply_markup=_admin_remove_markup(lang),
                     parse_mode=PARSE_MODE,
                 )
             return
         if admin_settings_state.get("chat_id") and admin_settings_state.get("message_id"):
-            safe_edit_by_ids(
-                context.bot,
-                int(admin_settings_state["chat_id"]),
-                int(admin_settings_state["message_id"]),
-                t(lang, "admin.wizard.work_in_progress", title=t(lang, "admin.settings.remove_title"), dots=""),
+                safe_edit_by_ids(
+                    context.bot,
+                    int(admin_settings_state["chat_id"]),
+                    int(admin_settings_state["message_id"]),
+                t(lang, "admin.wizard.work_in_progress", title=t(lang, "admin.settings.remove_title_nodes" if cleanup_nodes else "admin.settings.remove_title"), dots=""),
                 reply_markup=_admin_remove_markup(lang),
                 parse_mode=PARSE_MODE,
             )
-        rc, out = schedule_full_uninstall()
+        rc, out = run_full_remove(cleanup_nodes=cleanup_nodes)
         _admin_settings_state_clear(context)
         if admin_settings_state.get("chat_id") and admin_settings_state.get("message_id"):
             safe_edit_by_ids(
                 context.bot,
                 int(admin_settings_state["chat_id"]),
                 int(admin_settings_state["message_id"]),
-                f"{'✅' if rc == 0 else '⚠️'} {t(lang, 'admin.settings.remove_title')}\n\n{_md(out)}",
+                f"{'✅' if rc == 0 else '⚠️'} {t(lang, 'admin.settings.remove_title_nodes' if cleanup_nodes else 'admin.settings.remove_title')}\n\n{_md(out)}",
                 reply_markup=kb_back_to_admin(lang),
                 parse_mode=PARSE_MODE,
             )
@@ -1501,11 +1513,23 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
 
     if payload == "admin_settings_remove" and is_admin:
         _admin_settings_capture_message(update, context)
-        _admin_settings_state_set(context, {"active": True, "step": "full_remove_phrase", **(_admin_settings_state_get(context) or {})})
+        _admin_settings_state_set(context, {"active": True, "step": "full_remove_phrase", "remove_cleanup_nodes": False, **(_admin_settings_state_get(context) or {})})
         safe_edit_message(
             update,
             context,
-            _render_admin_remove_text(lang),
+            _render_admin_remove_text(lang, False),
+            reply_markup=_admin_remove_markup(lang),
+            parse_mode=PARSE_MODE,
+        )
+        return
+
+    if payload == "admin_settings_remove_nodes" and is_admin:
+        _admin_settings_capture_message(update, context)
+        _admin_settings_state_set(context, {"active": True, "step": "full_remove_phrase", "remove_cleanup_nodes": True, **(_admin_settings_state_get(context) or {})})
+        safe_edit_message(
+            update,
+            context,
+            _render_admin_remove_text(lang, True),
             reply_markup=_admin_remove_markup(lang),
             parse_mode=PARSE_MODE,
         )
@@ -1531,7 +1555,7 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
         safe_edit_message(
             update,
             context,
-            t(lang, "admin.wizard.work_in_progress", title=t(lang, "admin.settings.reset_title"), dots=""),
+            t(lang, "admin.wizard.work_in_progress", title=t(lang, "admin.settings.cleanup_title"), dots=""),
             reply_markup=kb_back_to_admin(lang),
             parse_mode=PARSE_MODE,
         )
@@ -1540,7 +1564,7 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
         safe_edit_message(
             update,
             context,
-            f"{'✅' if rc == 0 else '⚠️'} {t(lang, 'admin.settings.reset_title')}\n\n{_md(out)}",
+            f"{'✅' if rc == 0 else '⚠️'} {t(lang, 'admin.settings.cleanup_title')}\n\n{_md(out)}",
             reply_markup=kb_back_to_admin(lang),
             parse_mode=PARSE_MODE,
         )

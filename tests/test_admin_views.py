@@ -131,7 +131,6 @@ class AdminViewsTests(unittest.TestCase):
         self.assertEqual([button.callback_data for button in rows[2]], ["menu:admin_updates", "menu:admin_backups"])
         self.assertEqual([button.callback_data for button in rows[3]], ["menu:sshkey"])
         self.assertEqual([button.callback_data for button in rows[4]], ["menu:admin_settings_reset"])
-        self.assertEqual([button.callback_data for button in rows[5]], ["menu:admin_settings_remove"])
         self.assertEqual(rows[2][0].text, "🟢 Updates")
 
     def test_admin_alerts_settings_menu_groups_core_toggles(self) -> None:
@@ -500,13 +499,19 @@ class AdminViewsTests(unittest.TestCase):
         self.assertIn("Clean up node", buttons)
         self.assertIn("Clean up node + remove SSH key", buttons)
 
-    def test_admin_settings_menu_includes_full_reset(self) -> None:
+    def test_admin_settings_menu_includes_cleanup_menu(self) -> None:
         from utils.keyboards import kb_admin_settings_menu
 
         markup = kb_admin_settings_menu(True, True, True, "en")
         buttons = [button.text for row in markup.inline_keyboard for button in row]
-        self.assertIn("🧨 Full Reset", buttons)
+        self.assertIn("🧨 Cleanup", buttons)
         self.assertIn("📨 Requests", buttons)
+
+    def test_cleanup_submenu_includes_remove_actions(self) -> None:
+        markup = user_profile._admin_reset_markup("en")
+        callbacks = [button.callback_data for row in markup.inline_keyboard for button in row]
+        self.assertIn("menu:admin_settings_remove", callbacks)
+        self.assertIn("menu:admin_settings_remove_nodes", callbacks)
 
 
 if __name__ == "__main__":
