@@ -2296,15 +2296,21 @@ def _cleanup_server_runtime(server: RegisteredServer, preserve_config: bool) -> 
     script = f"""#!/usr/bin/env bash
 set -euo pipefail
 
+docker_cmd() {{
+  if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    docker "$@"
+    return 0
+  fi
+  if command -v sudo >/dev/null 2>&1 && sudo -n docker info >/dev/null 2>&1; then
+    sudo -n docker "$@"
+    return 0
+  fi
+  return 1
+}}
+
 docker_rm() {{
   local name="$1"
-  if command -v docker >/dev/null 2>&1; then
-    docker rm -f "$name" >/dev/null 2>&1 || true
-    return
-  fi
-  if command -v sudo >/dev/null 2>&1 && sudo docker info >/dev/null 2>&1; then
-    sudo docker rm -f "$name" >/dev/null 2>&1 || true
-  fi
+  docker_cmd rm -f "$name" >/dev/null 2>&1 || true
 }}
 
 docker_rmi() {{
@@ -2312,12 +2318,16 @@ docker_rmi() {{
   if [[ -z "$image" ]]; then
     return
   fi
-  if command -v docker >/dev/null 2>&1; then
-    docker rmi -f "$image" >/dev/null 2>&1 || true
+  docker_cmd rmi -f "$image" >/dev/null 2>&1 || true
+}}
+
+rm_path() {{
+  local target="$1"
+  if rm -rf "$target" >/dev/null 2>&1; then
     return
   fi
-  if command -v sudo >/dev/null 2>&1 && sudo docker info >/dev/null 2>&1; then
-    sudo docker rmi -f "$image" >/dev/null 2>&1 || true
+  if command -v sudo >/dev/null 2>&1; then
+    sudo -n rm -rf "$target" >/dev/null 2>&1 || true
   fi
 }}
 
@@ -2334,18 +2344,50 @@ docker_rm "${{AWG_CONTAINER_NAME:-$AWG_CONTAINER}}"
 docker_rmi "${{XRAY_DOCKER_IMAGE:-$XRAY_IMAGE_DEFAULT}}"
 docker_rmi "${{AWG_DOCKER_IMAGE:-$AWG_IMAGE_DEFAULT}}"
 docker_rmi "amneziavpn/amneziawg-go:0.2.16"
-if command -v docker >/dev/null 2>&1; then
-  docker image prune -af >/dev/null 2>&1 || true
-elif command -v sudo >/dev/null 2>&1 && sudo docker info >/dev/null 2>&1; then
-  sudo docker image prune -af >/dev/null 2>&1 || true
-fi
+docker_cmd image prune -af >/dev/null 2>&1 || true
 
 if [[ "{preserve}" != "1" ]]; then
-  rm -f /etc/node-plane/node.env
-  rm -rf /opt/node-plane-runtime
+  if rm -f /etc/node-plane/node.env >/dev/null 2>&1; then
+    :
+  elif command -v sudo >/dev/null 2>&1; then
+    sudo -n rm -f /etc/node-plane/node.env >/dev/null 2>&1 || true
+  fi
+  rm_path /opt/node-plane-runtime
   echo "Управляемый рантайм удалён вместе с конфигами."
 else
   echo "Управляемый рантайм удалён. Существующие конфиги сохранены."
+fi
+
+leftovers=()
+docker_inspect() {{
+  docker_cmd "$@" >/dev/null 2>&1
+}}
+
+if docker_inspect container inspect "${{XRAY_CONTAINER_NAME:-$XRAY_CONTAINER}}"; then
+  leftovers+=("xray container still present")
+fi
+if docker_inspect container inspect "${{AWG_CONTAINER_NAME:-$AWG_CONTAINER}}"; then
+  leftovers+=("awg container still present")
+fi
+if docker_inspect image inspect "${{XRAY_DOCKER_IMAGE:-$XRAY_IMAGE_DEFAULT}}"; then
+  leftovers+=("xray image still present")
+fi
+if docker_inspect image inspect "${{AWG_DOCKER_IMAGE:-$AWG_IMAGE_DEFAULT}}"; then
+  leftovers+=("awg image still present")
+fi
+if docker_inspect image inspect "amneziavpn/amneziawg-go:0.2.16"; then
+  leftovers+=("amneziavpn/amneziawg-go:0.2.16 still present")
+fi
+if [[ "{preserve}" != "1" && -e /etc/node-plane/node.env ]]; then
+  leftovers+=("/etc/node-plane/node.env still present")
+fi
+if [[ "{preserve}" != "1" && -e /opt/node-plane-runtime ]]; then
+  leftovers+=("/opt/node-plane-runtime still present")
+fi
+
+if (( ${{#leftovers[@]}} > 0 )); then
+  printf '%s\n' "${{leftovers[@]}}"
+  exit 1
 fi
 """
     return run_server_command(server, script, timeout=180)

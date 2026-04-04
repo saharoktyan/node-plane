@@ -68,8 +68,13 @@ class ProbeSummaryTests(unittest.TestCase):
             server = SimpleNamespace(key="lv1")
             server_bootstrap._cleanup_server_runtime(server, preserve_config=False)
         script = mocked.call_args.args[1]
+        self.assertIn("docker_cmd() {", script)
         self.assertIn('docker_rmi "amneziavpn/amneziawg-go:0.2.16"', script)
-        self.assertIn("docker image prune -af", script)
+        self.assertIn("docker_cmd image prune -af", script)
+        self.assertIn('docker_inspect image inspect "amneziavpn/amneziawg-go:0.2.16"', script)
+        self.assertIn('leftovers+=("/opt/node-plane-runtime still present")', script)
+        self.assertIn("sudo -n docker info", script)
+        self.assertIn("sudo -n rm -rf", script)
 
     def test_xray_traffic_script_is_valid_bash(self) -> None:
         with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".sh", delete=False) as fh:
