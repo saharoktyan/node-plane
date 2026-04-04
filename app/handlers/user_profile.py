@@ -689,6 +689,17 @@ def _render_admin_reset_confirm_text(scope: str, lang: str) -> str:
     return "\n".join(lines)
 
 
+def _render_admin_reset_phrase_text(scope: str, lang: str, error: str = "") -> str:
+    lines = [
+        _render_admin_reset_confirm_text(scope, lang),
+        "",
+        t(lang, "admin.settings.remove_phrase_prompt", phrase=_md(_full_remove_phrase(lang))),
+    ]
+    if error:
+        lines.extend(["", error])
+    return "\n".join(lines)
+
+
 def _full_remove_phrase(lang: str) -> str:
     return "Да, сделай так как я сказал" if lang == "ru" else "Yes, do as i said"
 
@@ -1161,6 +1172,44 @@ def admin_menu_text_router(update: Update, context: CallbackContext) -> None:
                 parse_mode=PARSE_MODE,
             )
         return
+    if admin_settings_state and admin_settings_state.get("active") and admin_settings_state.get("step") == "factory_reset_phrase":
+        lang = get_locale_for_update(update)
+        message_text = (update.effective_message.text or "").strip()
+        safe_delete_update_message(update, context)
+        scope = str(admin_settings_state.get("factory_reset_scope") or "local")
+        cleanup_nodes = scope in {"nodes", "nodes_ssh"}
+        if message_text not in _full_remove_phrases():
+            if admin_settings_state.get("chat_id") and admin_settings_state.get("message_id"):
+                safe_edit_by_ids(
+                    context.bot,
+                    int(admin_settings_state["chat_id"]),
+                    int(admin_settings_state["message_id"]),
+                    _render_admin_reset_phrase_text(scope, lang, t(lang, "admin.settings.remove_phrase_mismatch")),
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, "menu.back"), callback_data="menu:admin_settings_reset")]]),
+                    parse_mode=PARSE_MODE,
+                )
+            return
+        if admin_settings_state.get("chat_id") and admin_settings_state.get("message_id"):
+            safe_edit_by_ids(
+                context.bot,
+                int(admin_settings_state["chat_id"]),
+                int(admin_settings_state["message_id"]),
+                t(lang, "admin.wizard.work_in_progress", title=t(lang, "admin.settings.cleanup_title"), dots=""),
+                reply_markup=kb_back_to_admin(lang),
+                parse_mode=PARSE_MODE,
+            )
+        rc, out = run_factory_reset(cleanup_nodes=cleanup_nodes, stop_local_runtime=(scope == "nodes_ssh"))
+        _admin_settings_state_clear(context)
+        if admin_settings_state.get("chat_id") and admin_settings_state.get("message_id"):
+            safe_edit_by_ids(
+                context.bot,
+                int(admin_settings_state["chat_id"]),
+                int(admin_settings_state["message_id"]),
+                f"{'✅' if rc == 0 else '⚠️'} {t(lang, 'admin.settings.cleanup_title')}\n\n{_md(out)}",
+                reply_markup=kb_back_to_admin(lang),
+                parse_mode=PARSE_MODE,
+            )
+        return
     if admin_settings_state and admin_settings_state.get("active") and admin_settings_state.get("step") in {"bot_title", "access_gate_message"}:
         lang = get_locale_for_update(update)
         title = (update.effective_message.text or "").strip()
@@ -1588,35 +1637,15 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
 
     if payload.startswith("admin_settings_reset_scope:") and is_admin:
         scope = payload.split(":", 1)[1]
+        _admin_settings_capture_message(update, context)
         state = _admin_settings_state_get(context) or {}
-        state.update({"active": True, "step": "factory_reset_confirm", "factory_reset_scope": scope})
+        state.update({"active": True, "step": "factory_reset_phrase", "factory_reset_scope": scope})
         _admin_settings_state_set(context, state)
         safe_edit_message(
             update,
             context,
-            _render_admin_reset_confirm_text(scope, lang),
-            reply_markup=_admin_reset_confirm_markup(scope, lang),
-            parse_mode=PARSE_MODE,
-        )
-        return
-
-    if payload.startswith("admin_settings_reset_run:") and is_admin:
-        scope = payload.split(":", 1)[1]
-        cleanup_nodes = scope in {"nodes", "nodes_ssh"}
-        safe_edit_message(
-            update,
-            context,
-            t(lang, "admin.wizard.work_in_progress", title=t(lang, "admin.settings.cleanup_title"), dots=""),
-            reply_markup=kb_back_to_admin(lang),
-            parse_mode=PARSE_MODE,
-        )
-        rc, out = run_factory_reset(cleanup_nodes=cleanup_nodes, stop_local_runtime=(scope == "nodes_ssh"))
-        _admin_settings_state_clear(context)
-        safe_edit_message(
-            update,
-            context,
-            f"{'✅' if rc == 0 else '⚠️'} {t(lang, 'admin.settings.cleanup_title')}\n\n{_md(out)}",
-            reply_markup=kb_back_to_admin(lang),
+            _render_admin_reset_phrase_text(scope, lang),
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, "menu.back"), callback_data="menu:admin_settings_reset")]]),
             parse_mode=PARSE_MODE,
         )
         return

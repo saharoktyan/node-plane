@@ -576,6 +576,49 @@ class AdminViewsTests(unittest.TestCase):
         self.assertEqual(context.user_data["admin_settings"]["step"], "full_remove_phrase")
         self.assertFalse(context.user_data["admin_settings"]["remove_cleanup_nodes"])
 
+    def test_cleanup_callback_sets_factory_reset_phrase_state(self) -> None:
+        update = SimpleNamespace(
+            callback_query=SimpleNamespace(message=SimpleNamespace(chat_id=1, message_id=2)),
+            effective_user=SimpleNamespace(id=1),
+        )
+        context = SimpleNamespace(user_data={"admin_settings": {"active": True, "step": "factory_reset"}})
+        with patch.object(user_profile, "safe_edit_message"), patch.object(
+            user_profile, "_is_admin", return_value=True
+        ), patch.object(user_profile, "get_locale_for_update", return_value="en"):
+            user_profile.on_menu_callback(update, context, "admin_settings_reset_scope:local")
+        self.assertEqual(context.user_data["admin_settings"]["step"], "factory_reset_phrase")
+        self.assertEqual(context.user_data["admin_settings"]["factory_reset_scope"], "local")
+
+    def test_cleanup_confirmation_text_message_runs_factory_reset(self) -> None:
+        update = SimpleNamespace(
+            effective_user=SimpleNamespace(id=1),
+            effective_message=SimpleNamespace(text="Yes, do as i said"),
+        )
+        context = SimpleNamespace(
+            bot=object(),
+            user_data={
+                "admin_settings": {
+                    "active": True,
+                    "step": "factory_reset_phrase",
+                    "factory_reset_scope": "nodes",
+                    "chat_id": 1,
+                    "message_id": 2,
+                }
+            },
+        )
+        with patch.object(user_profile, "_is_admin", return_value=True), patch.object(
+            user_profile, "get_locale_for_update", return_value="en"
+        ), patch.object(
+            user_profile, "safe_delete_update_message"
+        ), patch.object(
+            user_profile, "run_factory_reset", return_value=(0, "done")
+        ) as mocked_reset, patch.object(
+            user_profile, "safe_edit_by_ids"
+        ) as mocked_edit:
+            user_profile.admin_menu_text_router(update, context)
+        mocked_reset.assert_called_once_with(cleanup_nodes=True, stop_local_runtime=False)
+        mocked_edit.assert_called()
+
 
 if __name__ == "__main__":
     unittest.main()
