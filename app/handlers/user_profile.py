@@ -692,6 +692,13 @@ def _full_remove_phrase(lang: str) -> str:
     return "Да, сделай так как я сказал" if lang == "ru" else "Yes, do as i said"
 
 
+def _full_remove_phrases() -> set[str]:
+    return {
+        _full_remove_phrase("ru"),
+        _full_remove_phrase("en"),
+    }
+
+
 def _render_admin_remove_text(lang: str, cleanup_nodes: bool = False, error: str = "") -> str:
     lines = [
         t(lang, "admin.settings.remove_title_nodes" if cleanup_nodes else "admin.settings.remove_title"),
@@ -1075,10 +1082,9 @@ def admin_menu_text_router(update: Update, context: CallbackContext) -> None:
     if admin_settings_state and admin_settings_state.get("active") and admin_settings_state.get("step") == "full_remove_phrase":
         lang = get_locale_for_update(update)
         message_text = (update.effective_message.text or "").strip()
-        expected = _full_remove_phrase(lang)
         safe_delete_update_message(update, context)
         cleanup_nodes = bool(admin_settings_state.get("remove_cleanup_nodes"))
-        if message_text != expected:
+        if message_text not in _full_remove_phrases():
             if admin_settings_state.get("chat_id") and admin_settings_state.get("message_id"):
                 safe_edit_by_ids(
                     context.bot,

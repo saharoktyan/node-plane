@@ -513,6 +513,36 @@ class AdminViewsTests(unittest.TestCase):
         self.assertIn("menu:admin_settings_remove", callbacks)
         self.assertIn("menu:admin_settings_remove_nodes", callbacks)
 
+    def test_remove_confirmation_text_message_runs_full_remove(self) -> None:
+        update = SimpleNamespace(
+            effective_user=SimpleNamespace(id=1),
+            effective_message=SimpleNamespace(text="Yes, do as i said"),
+        )
+        context = SimpleNamespace(
+            bot=object(),
+            user_data={
+                "admin_settings": {
+                    "active": True,
+                    "step": "full_remove_phrase",
+                    "remove_cleanup_nodes": False,
+                    "chat_id": 1,
+                    "message_id": 2,
+                }
+            },
+        )
+        with patch.object(user_profile, "_is_admin", return_value=True), patch.object(
+            user_profile, "get_locale_for_update", return_value="en"
+        ), patch.object(
+            user_profile, "safe_delete_update_message"
+        ), patch.object(
+            user_profile, "run_full_remove", return_value=(0, "scheduled")
+        ) as mocked_remove, patch.object(
+            user_profile, "safe_edit_by_ids"
+        ) as mocked_edit:
+            user_profile.admin_menu_text_router(update, context)
+        mocked_remove.assert_called_once_with(cleanup_nodes=False)
+        mocked_edit.assert_called()
+
 
 if __name__ == "__main__":
     unittest.main()
