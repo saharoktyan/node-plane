@@ -277,6 +277,22 @@ class AdminViewsTests(unittest.TestCase):
         self.assertIn("Сохранить", text)
         self.assertNotIn("Далее", text)
 
+    def test_render_profile_card_compacts_fully_ready_provisioning(self) -> None:
+        with patch.object(admin_views, "render_protocols_summary", return_value="• 🇱🇻 *Latvia*: AWG, Xray"), patch.object(
+            admin_views, "render_profile_server_state_summary",
+            return_value="• 🇱🇻 Latvia / AWG: ready\n• 🇱🇻 Latvia / Xray: ready",
+        ):
+            text, _markup = admin_views.render_profile_card("alice", {"awg_lv1", "xray_lv1"}, frozen=False, lang="en")
+        self.assertIn("Provisioning:\n• All methods are ready", text)
+        self.assertNotIn("Quick actions", text)
+
+    def test_render_edit_menu_does_not_repeat_profile_summary(self) -> None:
+        text, _markup = admin_views.render_edit_menu("alice", {"awg_lv1", "xray_lv1"}, frozen=False, lang="en")
+        self.assertIn("✏️ Edit: `alice`", text)
+        self.assertIn("• Status: *active*", text)
+        self.assertNotIn("Access:", text)
+        self.assertNotIn("Provisioning:", text)
+
     def test_render_getkey_server_menu_does_not_duplicate_methods_in_text(self) -> None:
         fake_methods = [
             SimpleNamespace(getkey_payload="xray:de", short_label="🇩🇪 Xray"),
