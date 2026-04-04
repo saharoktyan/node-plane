@@ -130,6 +130,8 @@ class AdminViewsTests(unittest.TestCase):
         self.assertEqual([button.callback_data for button in rows[1]], ["menu:admin_settings_alerts", "menu:admin_settings_toggle_telemetry"])
         self.assertEqual([button.callback_data for button in rows[2]], ["menu:admin_updates", "menu:admin_backups"])
         self.assertEqual([button.callback_data for button in rows[3]], ["menu:sshkey"])
+        self.assertEqual([button.callback_data for button in rows[4]], ["menu:admin_settings_reset"])
+        self.assertEqual([button.callback_data for button in rows[5]], ["menu:admin_settings_remove"])
         self.assertEqual(rows[2][0].text, "🟢 Updates")
 
     def test_admin_alerts_settings_menu_groups_core_toggles(self) -> None:

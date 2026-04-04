@@ -3,12 +3,13 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import tempfile
 from typing import List, Tuple
 
-from config import INSTALL_MODE, SSH_DIR, SQLITE_DB_PATH
+from config import BASE_DIR, INSTALL_MODE, SHARED_ROOT, SOURCE_ROOT, SSH_DIR, SQLITE_DB_PATH
 from db.schema import ensure_schema
 from db.sqlite_db import SQLiteDB
-from services.backups import maybe_create_pre_action_backup
+from services.backups import clear_backup_storage, maybe_create_pre_action_backup
 from services.server_bootstrap import full_cleanup_server
 from services.server_registry import list_servers
 
@@ -50,6 +51,79 @@ def _clear_local_ssh_material() -> str:
                 continue
     os.makedirs(SSH_DIR, exist_ok=True)
     return "local SSH material removed"
+
+
+def _uninstall_targets() -> List[str]:
+    values = [str(BASE_DIR or "").strip(), str(SHARED_ROOT or "").strip(), str(SOURCE_ROOT or "").strip()]
+    targets: List[str] = []
+    for path in values:
+        if not path or path in {"/", "/root", "/home"}:
+            continue
+        normalized = os.path.abspath(path)
+        if normalized in {"/", "/root", "/home"}:
+            continue
+        if normalized not in targets:
+            targets.append(normalized)
+    return targets
+
+
+def _shell_quote(value: str) -> str:
+    return "'" + str(value).replace("'", "'\"'\"'") + "'"
+
+
+def _systemctl_prefix() -> str:
+    return "" if os.geteuid() == 0 else "sudo -n "
+
+
+def schedule_full_uninstall() -> Tuple[int, str]:
+    targets = _uninstall_targets()
+    if not targets:
+        return 1, "No safe uninstall paths were resolved."
+
+    prefix = _systemctl_prefix()
+    pid = os.getpid()
+    script_body = [
+        "#!/usr/bin/env bash",
+        "set -eu",
+        "sleep 3",
+        f"{prefix}systemctl stop node-plane >/dev/null 2>&1 || true",
+        f"{prefix}systemctl disable node-plane >/dev/null 2>&1 || true",
+        f"{prefix}rm -f /etc/systemd/system/node-plane.service >/dev/null 2>&1 || true",
+        f"{prefix}systemctl daemon-reload >/dev/null 2>&1 || true",
+        "docker rm -f node-plane >/dev/null 2>&1 || true",
+        "kill " + str(pid) + " >/dev/null 2>&1 || true",
+    ]
+    for path in targets:
+        script_body.append(f"rm -rf -- {_shell_quote(path)} >/dev/null 2>&1 || true")
+    script_body.append('rm -f -- "$0" >/dev/null 2>&1 || true')
+    fd, script_path = tempfile.mkstemp(prefix="node-plane-uninstall-", suffix=".sh")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(script_body) + "\n")
+        os.chmod(script_path, 0o700)
+        subprocess.Popen(
+            ["/bin/sh", script_path],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except Exception as exc:
+        try:
+            os.remove(script_path)
+        except OSError:
+            pass
+        return 1, f"Failed to schedule Node Plane removal: {exc}"
+
+    lines = ["Node Plane removal scheduled.", "", "Targets:"]
+    lines.extend(f"• {path}" for path in targets)
+    lines.extend(
+        [
+            "",
+            "The bot process will stop in a few seconds.",
+            "The local service/container and installation paths will be removed.",
+        ]
+    )
+    return 0, "\n".join(lines)
 
 
 def _schedule_portable_container_teardown() -> Tuple[bool, str]:
@@ -102,12 +176,11 @@ def run_factory_reset(cleanup_nodes: bool = False, stop_local_runtime: bool = Fa
 
     _wipe_local_state()
     ssh_line = _clear_local_ssh_material()
+    backup_clear_result = clear_backup_storage()
 
-    summary = ["Node Plane state removed.", "• local database state cleared", f"• {ssh_line}"]
-    if backup_result.get("status") == "success":
-        summary.append("• pre-reset backup created")
-    elif backup_result.get("status") == "failed":
-        summary.append(f"• pre-reset backup failed: {backup_result.get('message') or 'unknown error'}")
+    summary = ["Node Plane state removed.", "• local database state cleared", f"• {ssh_line}", f"• backups removed: {int(backup_clear_result.get('removed') or 0)}"]
+    if backup_result.get("status") == "failed":
+        summary.append(f"• pre-reset backup failed before cleanup: {backup_result.get('message') or 'unknown error'}")
     if cleanup_nodes:
         summary.append("• managed runtimes cleaned up on registered nodes")
         summary.append("• bot SSH key removal requested for SSH nodes")

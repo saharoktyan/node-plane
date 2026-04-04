@@ -6,6 +6,7 @@ import sys
 import tempfile
 import types
 import unittest
+from unittest.mock import patch
 
 TESTS_DIR = os.path.dirname(__file__)
 REPO_ROOT = os.path.abspath(os.path.join(TESTS_DIR, ".."))
@@ -32,12 +33,14 @@ class SystemResetTests(unittest.TestCase):
 
         import config
         import services.app_settings as app_settings
+        import services.backups as backups
         import services.profile_state as profile_state
         import services.server_registry as server_registry
         import services.system_reset as system_reset
 
         self.config = importlib.reload(config)
         self.app_settings = importlib.reload(app_settings)
+        self.backups = importlib.reload(backups)
         self.profile_state = importlib.reload(profile_state)
         self.server_registry = importlib.reload(server_registry)
         self.system_reset = importlib.reload(system_reset)
@@ -49,6 +52,9 @@ class SystemResetTests(unittest.TestCase):
         os.makedirs(self.config.SSH_DIR, exist_ok=True)
         with open(os.path.join(self.config.SSH_DIR, "id_ed25519"), "w", encoding="utf-8") as fh:
             fh.write("secret")
+        backup_dir = self.backups.get_backup_dir()
+        with open(os.path.join(backup_dir, "bot-test.sqlite3"), "w", encoding="utf-8") as fh:
+            fh.write("backup")
 
         self.server_registry.upsert_server(
             key="spb1",
@@ -79,6 +85,7 @@ class SystemResetTests(unittest.TestCase):
         self.assertEqual(self.profile_state.profile_store.read(), {})
         self.assertEqual(self.profile_state.user_store.read(), {})
         self.assertEqual(os.listdir(self.config.SSH_DIR), [])
+        self.assertEqual(os.listdir(backup_dir), [])
         self.assertEqual(self.app_settings.get_menu_title(), self.config.MENU_TITLE)
 
     def test_factory_reset_requests_remote_key_cleanup_for_ssh_nodes(self) -> None:
@@ -105,6 +112,13 @@ class SystemResetTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn(("nl1", True), calls)
         self.assertIn("bot SSH key removal requested for SSH nodes", out)
+
+    def test_schedule_full_uninstall_spawns_detached_cleanup(self) -> None:
+        with patch.object(self.system_reset.subprocess, "Popen") as mocked:
+            rc, out = self.system_reset.schedule_full_uninstall()
+        self.assertEqual(rc, 0)
+        self.assertIn("Node Plane removal scheduled.", out)
+        mocked.assert_called_once()
 
 
 if __name__ == "__main__":

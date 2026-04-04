@@ -203,6 +203,7 @@ def kb_admin_settings_menu(
         ],
         [InlineKeyboardButton(t(lang, "menu.ssh_key"), callback_data=f"{CB_MENU}sshkey")],
         [InlineKeyboardButton(t(lang, "admin.settings.factory_reset"), callback_data=f"{CB_MENU}admin_settings_reset")],
+        [InlineKeyboardButton(t(lang, "admin.settings.full_remove"), callback_data=f"{CB_MENU}admin_settings_remove")],
         [InlineKeyboardButton(t(lang, "menu.back"), callback_data=f"{CB_MENU}admin")],
     ])
 

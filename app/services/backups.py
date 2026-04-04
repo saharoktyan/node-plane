@@ -4,6 +4,7 @@ import hashlib
 import json
 import logging
 import os
+import shutil
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List
@@ -40,6 +41,21 @@ def _parse_iso(value: str) -> datetime | None:
 def get_backup_dir() -> str:
     _BACKUP_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
     return str(_BACKUP_DIR)
+
+
+def clear_backup_storage() -> Dict[str, Any]:
+    get_backup_dir()
+    removed = 0
+    for path in list(_BACKUP_DIR.iterdir()):
+        try:
+            if path.is_dir() and not path.is_symlink():
+                shutil.rmtree(path, ignore_errors=False)
+            else:
+                path.unlink(missing_ok=True)
+            removed += 1
+        except OSError:
+            _log.warning("Failed to remove backup storage entry %s", path, exc_info=True)
+    return {"removed": removed, "path": str(_BACKUP_DIR)}
 
 
 def _snapshot_name(ts: datetime | None = None) -> str:
