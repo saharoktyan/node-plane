@@ -214,6 +214,7 @@ def check_for_updates(timeout: int = 60, branch: str | None = None) -> Dict[str,
     try:
         env = os.environ.copy()
         env["NODE_PLANE_SOURCE_DIR"] = _effective_source_root()
+        env["NODE_PLANE_APP_DIR"] = APP_ROOT
         proc = _run_cmd([_script_path("check_updates.sh"), "--branch", selected_branch], timeout=timeout, env=env)
         output = (proc.stdout or "").strip()
         if proc.stderr:
@@ -237,6 +238,7 @@ def list_available_versions(branch: str | None = None, timeout: int = 60) -> Dic
     try:
         env = os.environ.copy()
         env["NODE_PLANE_SOURCE_DIR"] = _effective_source_root()
+        env["NODE_PLANE_APP_DIR"] = APP_ROOT
         proc = _run_cmd([_script_path("check_updates.sh"), "--branch", selected_branch, "--list"], timeout=timeout, env=env)
         output = (proc.stdout or "").strip()
         if proc.stderr:

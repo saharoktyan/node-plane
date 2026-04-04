@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 SOURCE_DIR="${NODE_PLANE_SOURCE_DIR:-$REPO_ROOT}"
+INSTALLED_APP_DIR="${NODE_PLANE_APP_DIR:-${NODE_PLANE_BASE_DIR:-$REPO_ROOT}}"
 DEFAULT_BRANCH="${NODE_PLANE_UPDATE_BRANCH:-main}"
 BRANCH=""
 LIST_MODE=0
@@ -35,6 +36,20 @@ read_version_file() {
     tr -d '\n' < "$file"
   else
     echo "0.1.0"
+  fi
+}
+
+read_installed_version() {
+  read_version_file "${INSTALLED_APP_DIR}/VERSION"
+}
+
+read_installed_commit() {
+  if [[ -f "${INSTALLED_APP_DIR}/BUILD_COMMIT" ]]; then
+    tr -d '\n' < "${INSTALLED_APP_DIR}/BUILD_COMMIT"
+  elif git -C "${INSTALLED_APP_DIR}" rev-parse --short HEAD >/dev/null 2>&1; then
+    git -C "${INSTALLED_APP_DIR}" rev-parse --short HEAD
+  else
+    echo "unknown"
   fi
 }
 
@@ -102,9 +117,9 @@ fi
 LATEST_TAG="$(latest_tag_for_branch "$BRANCH" || true)"
 UPSTREAM_REF="${LATEST_TAG:-$BRANCH_REF}"
 
-LOCAL_COMMIT="$(git rev-parse --short HEAD)"
+LOCAL_COMMIT="$(read_installed_commit)"
 REMOTE_COMMIT="$(git rev-parse --short "${UPSTREAM_REF}")"
-LOCAL_VERSION="$(read_version_file VERSION)"
+LOCAL_VERSION="$(read_installed_version)"
 REMOTE_VERSION="$(git show "${UPSTREAM_REF}:VERSION" 2>/dev/null | tr -d '\n' || true)"
 if [[ -z "$REMOTE_VERSION" ]]; then
   REMOTE_VERSION="$LOCAL_VERSION"
