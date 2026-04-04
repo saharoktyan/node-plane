@@ -258,28 +258,17 @@ def _awg_status(server: RegisteredServer, lang: str) -> tuple[str, str]:
 
 
 def _server_dashboard_text(servers: Sequence[RegisteredServer], lang: str) -> str:
-    lines = [t(lang, "admin.wizard.server_menu"), ""]
-    for server in servers:
-        status_icon, status_text = _server_overall_status(server, lang)
-        prov_summary = summarize_server_provisioning(server.key)
-        total = int(prov_summary["total"])
-        prov_suffix = ""
-        if total > 0:
-            failed = int(prov_summary["by_status"]["failed"])
-            attention = int(prov_summary["by_status"]["needs_attention"])
-            ready = int(prov_summary["by_status"]["provisioned"])
-            if lang == "ru":
-                prov_suffix = f" | профили {ready}/{total}"
-            else:
-                prov_suffix = f" | profiles {ready}/{total}"
-            if failed > 0:
-                prov_suffix += f" | {'ошибки' if lang == 'ru' else 'failed'} {failed}"
-            elif attention > 0:
-                prov_suffix += f" | {'внимание' if lang == 'ru' else 'attention'} {attention}"
-        lines.append(f"{server.flag} {server.title} ({server.key})")
-        lines.append(f"• {status_icon} {status_text}{prov_suffix}")
-        lines.append("")
-    return "\n".join(line for line in lines).rstrip()
+    total = len(servers)
+    active = sum(1 for server in servers if server.enabled)
+    attention = sum(1 for server in servers if _server_overall_status(server, lang)[0] != "✅")
+    return "\n".join(
+        [
+            t(lang, "admin.wizard.server_menu"),
+            "",
+            t(lang, "admin.wizard.server_menu_summary", active=active, total=total),
+            t(lang, "admin.wizard.server_menu_attention", count=attention),
+        ]
+    )
 
 
 def _server_overall_status(server: RegisteredServer, lang: str) -> tuple[str, str]:
@@ -304,12 +293,25 @@ def _server_overall_status(server: RegisteredServer, lang: str) -> tuple[str, st
 
 def _server_dashboard_markup(servers: Sequence[RegisteredServer], lang: str) -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton(f"{server.flag} {server.title}", callback_data=f"{CB_SRV}card:{server.key}")]
+        [InlineKeyboardButton(_server_dashboard_button_label(server, lang), callback_data=f"{CB_SRV}card:{server.key}")]
         for server in servers
     ]
     rows.append([InlineKeyboardButton(t(lang, "admin.wizard.new_server"), callback_data=f"{CB_SRV}start:create")])
     rows.append([InlineKeyboardButton(t(lang, "menu.back"), callback_data=f"{CB_MENU}admin")])
     return InlineKeyboardMarkup(rows)
+
+
+def _server_dashboard_button_label(server: RegisteredServer, lang: str) -> str:
+    status_icon, _status_text = _server_overall_status(server, lang)
+    prov_summary = summarize_server_provisioning(server.key)
+    total = int(prov_summary["total"])
+    ready = int(prov_summary["by_status"]["provisioned"])
+    if status_icon == "✅":
+        suffix = f" · {ready}/{total}" if total > 0 else " ·"
+        return f"{server.flag} {server.title}{suffix}"
+    if status_icon in {"⚠️", "🛠"}:
+        return f"{server.flag} {server.title} {status_icon}"
+    return f"{server.flag} {server.title} ·"
 
 
 def _advanced_section_for_field(field: str) -> str:

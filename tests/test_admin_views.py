@@ -406,6 +406,36 @@ class AdminViewsTests(unittest.TestCase):
         self.assertIn("Profiles", text)
         self.assertIn("No assigned profiles", text)
 
+    def test_server_dashboard_text_is_summary_only(self) -> None:
+        fake_servers = [
+            SimpleNamespace(key="lv1", flag="🇱🇻", title="Latvia", enabled=True),
+            SimpleNamespace(key="test", flag="🏳️", title="Test Server", enabled=True),
+        ]
+        with patch.object(admin_server_wizard, "_server_overall_status", side_effect=[("✅", "ready"), ("⚠️", "needs attention")]):
+            text = admin_server_wizard._server_dashboard_text(fake_servers, "en")
+        self.assertIn("Active: 2 / Total: 2", text)
+        self.assertIn("Need attention: 1", text)
+        self.assertNotIn("Latvia (lv1)", text)
+        self.assertNotIn("Test Server (test)", text)
+
+    def test_server_dashboard_buttons_use_quiet_ready_marker_and_problem_icons(self) -> None:
+        fake_servers = [
+            SimpleNamespace(key="lv1", flag="🇱🇻", title="Latvia"),
+            SimpleNamespace(key="test", flag="🏳️", title="Test Server"),
+        ]
+        with patch.object(admin_server_wizard, "_server_overall_status", side_effect=[("✅", "ready"), ("⚠️", "needs attention")]), patch.object(
+            admin_server_wizard,
+            "summarize_server_provisioning",
+            side_effect=[
+                {"total": 0, "by_status": {"provisioned": 0, "failed": 0, "needs_attention": 0}},
+                {"total": 4, "by_status": {"provisioned": 4, "failed": 0, "needs_attention": 0}},
+            ],
+        ):
+            markup = admin_server_wizard._server_dashboard_markup(fake_servers, "en")
+        labels = [row[0].text for row in markup.inline_keyboard[:2]]
+        self.assertEqual(labels[0], "🇱🇻 Latvia ·")
+        self.assertEqual(labels[1], "🏳️ Test Server ⚠️")
+
     def test_full_cleanup_menu_shows_ssh_key_option_for_ssh_servers(self) -> None:
         fake_server = SimpleNamespace(key="spb1", flag="🇷🇺", title="Saint-Petersburg", transport="ssh")
         markup = admin_server_wizard._full_cleanup_markup(fake_server, "en")
