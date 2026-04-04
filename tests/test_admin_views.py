@@ -134,8 +134,12 @@ class AdminViewsTests(unittest.TestCase):
         markup = keyboards.kb_admin_backups_settings_menu(enabled=True, interval_hours=12, keep_count=10, lang="en")
         rows = markup.inline_keyboard
         self.assertEqual([button.callback_data for button in rows[0]], ["menu:admin_backups_toggle"])
-        self.assertIn(">⏱ 12 h<", [button.text for button in rows[1]])
-        self.assertIn(">📚 Keep 10<", [button.text for button in rows[2]])
+        self.assertEqual(rows[1][0].text, "⏱ 6 h")
+        self.assertEqual(rows[2][0].text, ">⏱ 12 h<")
+        self.assertEqual(rows[3][0].text, "⏱ 24 h")
+        self.assertEqual(rows[4][0].text, "📚 Keep 5")
+        self.assertEqual(rows[5][0].text, ">📚 Keep 10<")
+        self.assertEqual(rows[6][0].text, "📚 Keep 20")
 
     def test_admin_settings_menu_groups_edit_and_toggle_actions(self) -> None:
         markup = keyboards.kb_admin_settings_menu(

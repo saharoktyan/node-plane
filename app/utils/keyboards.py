@@ -306,23 +306,24 @@ def kb_admin_backups_settings_menu(enabled: bool, interval_hours: int, keep_coun
         10: t(lang, "admin.backups.keep_10"),
         20: t(lang, "admin.backups.keep_20"),
     }
-    interval_buttons = [
-        InlineKeyboardButton(
-            f">{label}<" if value == interval_hours else label,
-            callback_data=f"{CB_MENU}admin_backups_interval:{value}",
+    rows = [[InlineKeyboardButton(toggle_label, callback_data=f"{CB_MENU}admin_backups_toggle")]]
+    for value, label in interval_labels.items():
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    f">{label}<" if value == interval_hours else label,
+                    callback_data=f"{CB_MENU}admin_backups_interval:{value}",
+                )
+            ]
         )
-        for value, label in interval_labels.items()
-    ]
-    keep_buttons = [
-        InlineKeyboardButton(
-            f">{label}<" if value == keep_count else label,
-            callback_data=f"{CB_MENU}admin_backups_keep:{value}",
+    for value, label in keep_labels.items():
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    f">{label}<" if value == keep_count else label,
+                    callback_data=f"{CB_MENU}admin_backups_keep:{value}",
+                )
+            ]
         )
-        for value, label in keep_labels.items()
-    ]
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(toggle_label, callback_data=f"{CB_MENU}admin_backups_toggle")],
-        interval_buttons,
-        keep_buttons,
-        [InlineKeyboardButton(t(lang, "menu.back"), callback_data=f"{CB_MENU}admin_backups")],
-    ])
+    rows.append([InlineKeyboardButton(t(lang, "menu.back"), callback_data=f"{CB_MENU}admin_backups")])
+    return InlineKeyboardMarkup(rows)
