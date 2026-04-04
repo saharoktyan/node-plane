@@ -246,6 +246,7 @@ def kb_admin_updates_menu(
     update_running: bool,
     branch: str,
     runtime_sync_available: bool = False,
+    release_cleanup_available: bool = False,
     lang: str = "ru",
 ) -> InlineKeyboardMarkup:
     auto_label = t(lang, "admin.updates.auto_check_on") if auto_check_enabled else t(lang, "admin.updates.auto_check_off")
@@ -257,6 +258,8 @@ def kb_admin_updates_menu(
         InlineKeyboardButton(t(lang, "admin.updates.branch_menu"), callback_data=f"{CB_MENU}admin_updates_branch"),
         InlineKeyboardButton(t(lang, "admin.updates.versions_menu"), callback_data=f"{CB_MENU}admin_updates_versions:0"),
     ])
+    if release_cleanup_available:
+        rows.append([InlineKeyboardButton(t(lang, "admin.updates.release_cleanup_menu"), callback_data=f"{CB_MENU}admin_updates_release_cleanup")])
     if update_supported:
         label = t(lang, "admin.updates.update_running") if update_running else t(lang, "admin.updates.update_latest")
         rows.append([InlineKeyboardButton(label, callback_data=f"{CB_MENU}admin_updates_run")])

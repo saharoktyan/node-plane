@@ -83,6 +83,19 @@ class AdminViewsTests(unittest.TestCase):
         callbacks = [button.callback_data for row in markup.inline_keyboard for button in row]
         self.assertIn("menu:admin_updates_runtime_sync", callbacks)
 
+    def test_admin_updates_menu_shows_release_cleanup_when_supported(self) -> None:
+        markup = keyboards.kb_admin_updates_menu(
+            auto_check_enabled=True,
+            update_supported=False,
+            update_running=False,
+            branch="dev",
+            runtime_sync_available=False,
+            release_cleanup_available=True,
+            lang="en",
+        )
+        callbacks = [button.callback_data for row in markup.inline_keyboard for button in row]
+        self.assertIn("menu:admin_updates_release_cleanup", callbacks)
+
     def test_admin_backups_menu_groups_primary_actions(self) -> None:
         markup = keyboards.kb_admin_backups_menu(lang="en")
         rows = markup.inline_keyboard

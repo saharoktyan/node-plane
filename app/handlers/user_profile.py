@@ -49,6 +49,7 @@ from services.awg_profiles import list_awg_server_keys
 from services.ssh_keys import render_public_key_guide, render_public_key_summary
 from services.system_reset import run_factory_reset, run_full_remove
 from services.profile_state import ensure_telegram_profile, get_allowed_protocols, get_profile, get_profile_access_status, profile_store, user_store, utcnow
+from services.release_cleanup import get_release_cleanup_overview, run_release_cleanup
 from services.traffic_usage import get_profile_monthly_usage
 from services.updates import check_for_updates, get_updates_menu_emoji, get_updates_overview, get_version_transition, list_available_versions, schedule_update
 from services.xray import get_server_link_status
@@ -775,12 +776,14 @@ def _admin_updates_markup(lang: str) -> InlineKeyboardMarkup:
     overview = get_updates_overview()
     update_running = str(overview.get("last_run_status") or "") == "running"
     show_update_action = bool(overview.get("update_supported")) and (bool(overview.get("update_available")) or update_running)
+    cleanup_overview = get_release_cleanup_overview()
     return kb_admin_updates_menu(
         bool(overview.get("auto_check_enabled")),
         show_update_action,
         update_running,
         str(overview.get("branch") or get_updates_branch()),
         bool(get_servers_needing_runtime_sync()),
+        bool(cleanup_overview.get("supported")),
         lang,
     )
 
@@ -926,6 +929,48 @@ def _render_admin_updates_version_confirm(lang: str, ref: str) -> tuple[str, Inl
         rows.append([InlineKeyboardButton(t(lang, "admin.updates.version_install"), callback_data=f"menu:admin_updates_install:{ref}")])
     rows.append([InlineKeyboardButton(t(lang, "menu.back"), callback_data="menu:admin_updates_versions:0")])
     return "\n".join(lines), InlineKeyboardMarkup(rows)
+
+
+def _render_admin_release_cleanup_text(lang: str, result: dict | None = None) -> str:
+    overview = get_release_cleanup_overview()
+    lines = [
+        t(lang, "admin.updates.release_cleanup_title"),
+        "",
+    ]
+    if not overview.get("supported"):
+        lines.append(t(lang, "admin.updates.release_cleanup_unsupported"))
+        return "\n".join(lines)
+    lines.extend(
+        [
+            t(lang, "admin.updates.release_cleanup_intro", keep=int(overview.get("keep_count") or 2)),
+            "",
+            t(lang, "admin.updates.release_cleanup_total", value=str(overview.get("total_releases") or 0)),
+            t(lang, "admin.updates.release_cleanup_removable", value=str(overview.get("removable_releases") or 0)),
+            t(lang, "admin.updates.release_cleanup_total_size", value=_human_size(int(overview.get("total_size_bytes") or 0))),
+            t(lang, "admin.updates.release_cleanup_removable_size", value=_human_size(int(overview.get("removable_size_bytes") or 0))),
+        ]
+    )
+    current_target = str(overview.get("current_target") or "").strip()
+    if current_target:
+        lines.append(t(lang, "admin.updates.release_cleanup_current", value=current_target))
+    if result:
+        status = str(result.get("status") or "")
+        if status == "success":
+            lines.extend(["", t(lang, "admin.updates.release_cleanup_done", value=str(result.get("removed") or 0))])
+        elif status == "noop":
+            lines.extend(["", t(lang, "admin.updates.release_cleanup_noop")])
+        elif status in {"failed", "unsupported"}:
+            lines.extend(["", t(lang, "admin.updates.release_cleanup_failed", value=str(result.get("message") or "unknown error"))])
+    return "\n".join(lines)
+
+
+def _admin_release_cleanup_markup(lang: str) -> InlineKeyboardMarkup:
+    overview = get_release_cleanup_overview()
+    rows: List[List[InlineKeyboardButton]] = []
+    if overview.get("supported") and int(overview.get("removable_releases") or 0) > 0:
+        rows.append([InlineKeyboardButton(t(lang, "admin.updates.release_cleanup_run"), callback_data="menu:admin_updates_release_cleanup_run")])
+    rows.append([InlineKeyboardButton(t(lang, "menu.back"), callback_data="menu:admin_updates")])
+    return InlineKeyboardMarkup(rows)
 
 
 def _human_size(size_bytes: int) -> str:
@@ -1740,6 +1785,34 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
         )
         return
 
+    if payload == "admin_updates_release_cleanup" and is_admin:
+        safe_edit_message(
+            update,
+            context,
+            _render_admin_release_cleanup_text(lang),
+            reply_markup=_admin_release_cleanup_markup(lang),
+            parse_mode=PARSE_MODE,
+        )
+        return
+
+    if payload == "admin_updates_release_cleanup_run" and is_admin:
+        safe_edit_message(
+            update,
+            context,
+            t(lang, "admin.updates.release_cleanup_running"),
+            reply_markup=_admin_release_cleanup_markup(lang),
+            parse_mode=PARSE_MODE,
+        )
+        result = run_release_cleanup()
+        safe_edit_message(
+            update,
+            context,
+            _render_admin_release_cleanup_text(lang, result=result),
+            reply_markup=_admin_release_cleanup_markup(lang),
+            parse_mode=PARSE_MODE,
+        )
+        return
+
     if payload.startswith("admin_updates_set_branch:") and is_admin:
         branch = payload.split(":", 1)[1].strip().lower()
         set_updates_branch(branch)
@@ -2258,7 +2331,7 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
             context,
             text[:3900],
             reply_markup=_ssh_key_details_markup(lang),
-            parse_mode=PARSE_MODE,
+            parse_mode=None,
         )
         return
 

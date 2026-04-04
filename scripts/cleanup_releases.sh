@@ -39,6 +39,11 @@ done
 
 read_env_value() {
   local key="$1"
+  local env_value="${!key:-}"
+  if [[ -n "$env_value" ]]; then
+    printf '%s\n' "$env_value"
+    return 0
+  fi
   if [[ ! -f "${REPO_ROOT}/.env" ]]; then
     return 0
   fi
