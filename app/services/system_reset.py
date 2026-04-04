@@ -11,8 +11,9 @@ from config import BASE_DIR, INSTALL_MODE, INSTALL_ROOT, SHARED_ROOT, SOURCE_ROO
 from db.schema import ensure_schema
 from db.sqlite_db import SQLiteDB
 from services.backups import clear_backup_storage, maybe_create_pre_action_backup
-from services.server_bootstrap import full_cleanup_server
+from services.server_bootstrap import AWG_RUNTIME_CONTAINER, full_cleanup_server
 from services.server_registry import list_servers
+from services.server_runtime import is_running_in_container, run_local_command
 
 
 _db = SQLiteDB(SQLITE_DB_PATH)
@@ -274,6 +275,43 @@ def _schedule_portable_container_teardown() -> Tuple[bool, str]:
         return False, f"portable control-plane container was not scheduled for teardown: {exc}"
 
 
+def _cleanup_local_managed_runtime() -> Tuple[int, str]:
+    if is_running_in_container():
+        return 0, "local managed runtime cleanup skipped because the bot runs inside a container"
+    script = f"""#!/usr/bin/env bash
+set -euo pipefail
+
+docker_rm() {{
+  local name="$1"
+  docker rm -f "$name" >/dev/null 2>&1 || true
+}}
+
+docker_rmi() {{
+  local image="$1"
+  if [[ -n "$image" ]]; then
+    docker rmi -f "$image" >/dev/null 2>&1 || true
+  fi
+}}
+
+if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+  if [[ -f /etc/node-plane/node.env ]]; then
+    source /etc/node-plane/node.env
+  fi
+  docker_rm "${{XRAY_CONTAINER_NAME:-xray}}"
+  docker_rm "${{AWG_CONTAINER_NAME:-{AWG_RUNTIME_CONTAINER}}}"
+  docker_rmi "${{XRAY_DOCKER_IMAGE:-ghcr.io/xtls/xray-core:25.12.8}}"
+  docker_rmi "${{AWG_DOCKER_IMAGE:-node-plane-amnezia-awg:0.2.16}}"
+  docker_rmi "amneziavpn/amneziawg-go:0.2.16"
+  docker image prune -af >/dev/null 2>&1 || true
+fi
+
+rm -f /etc/node-plane/node.env
+rm -rf /opt/node-plane-runtime
+echo "local managed runtime removed"
+"""
+    return run_local_command(script, timeout=180)
+
+
 def run_factory_reset(cleanup_nodes: bool = False, stop_local_runtime: bool = False) -> Tuple[int, str]:
     backup_result = maybe_create_pre_action_backup("pre_reset")
     if cleanup_nodes:
@@ -300,6 +338,13 @@ def run_factory_reset(cleanup_nodes: bool = False, stop_local_runtime: bool = Fa
             lines.append("Local state was not removed.")
             return 1, "\n".join(lines)
 
+    local_runtime_summary = ""
+    if cleanup_nodes:
+        rc, out = _cleanup_local_managed_runtime()
+        local_runtime_summary = (out or "").strip()
+        if rc != 0:
+            return 1, f"Local managed runtime cleanup failed.\n\n{(out or '').strip()[:1200]}"
+
     _wipe_local_state()
     ssh_line = _clear_local_ssh_material()
     backup_clear_result = clear_backup_storage()
@@ -310,6 +355,8 @@ def run_factory_reset(cleanup_nodes: bool = False, stop_local_runtime: bool = Fa
     if cleanup_nodes:
         summary.append("• managed runtimes cleaned up on registered nodes")
         summary.append("• bot SSH key removal requested for SSH nodes")
+        if local_runtime_summary:
+            summary.append(f"• {local_runtime_summary}")
     if stop_local_runtime:
         ok, message = _schedule_portable_container_teardown()
         summary.append(f"• {message}")

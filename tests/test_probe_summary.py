@@ -63,6 +63,14 @@ class ProbeSummaryTests(unittest.TestCase):
         content = server_bootstrap.render_server_node_env(server)
         self.assertIn("SERVER_KEY=lv1", content)
 
+    def test_cleanup_server_runtime_removes_awg_base_image(self) -> None:
+        with patch.object(server_bootstrap, "run_server_command", return_value=(0, "ok")) as mocked:
+            server = SimpleNamespace(key="lv1")
+            server_bootstrap._cleanup_server_runtime(server, preserve_config=False)
+        script = mocked.call_args.args[1]
+        self.assertIn('docker_rmi "amneziavpn/amneziawg-go:0.2.16"', script)
+        self.assertIn("docker image prune -af", script)
+
     def test_xray_traffic_script_is_valid_bash(self) -> None:
         with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".sh", delete=False) as fh:
             fh.write(server_bootstrap.XRAY_TRAFFIC_SCRIPT)

@@ -113,6 +113,13 @@ class SystemResetTests(unittest.TestCase):
         self.assertIn(("nl1", True), calls)
         self.assertIn("bot SSH key removal requested for SSH nodes", out)
 
+    def test_factory_reset_with_nodes_cleans_local_managed_runtime(self) -> None:
+        with patch.object(self.system_reset, "_cleanup_local_managed_runtime", return_value=(0, "local managed runtime removed")) as mocked:
+            rc, out = self.system_reset.run_factory_reset(cleanup_nodes=True, stop_local_runtime=False)
+        self.assertEqual(rc, 0)
+        mocked.assert_called_once()
+        self.assertIn("local managed runtime removed", out)
+
     def test_schedule_full_uninstall_spawns_detached_cleanup(self) -> None:
         with patch.object(self.system_reset.shutil, "which", return_value=None), patch.object(self.system_reset.subprocess, "Popen") as mocked:
             rc, out = self.system_reset.schedule_full_uninstall()
