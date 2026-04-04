@@ -47,9 +47,15 @@ Important constraint:
 ### Recommended path: install with `install.sh`
 
 ```bash
-git clone git@github.com:seventh7dev/node-plane.git node-plane-src
+git clone https://github.com/seventh7dev/node-plane.git node-plane-src
 cd node-plane-src
 ./scripts/install.sh --mode simple
+```
+
+If you prefer SSH cloning, add a GitHub SSH key to the host first and then use:
+
+```bash
+git clone git@github.com:seventh7dev/node-plane.git node-plane-src
 ```
 
 If you want the installer to place and start the systemd unit automatically:
@@ -124,9 +130,15 @@ In practice, the script already performs these steps and is the preferred path.
 ### Recommended path: install with `install.sh`
 
 ```bash
-git clone git@github.com:seventh7dev/node-plane.git node-plane-src
+git clone https://github.com/seventh7dev/node-plane.git node-plane-src
 cd node-plane-src
 ./scripts/install.sh --mode portable
+```
+
+If you prefer SSH cloning, add a GitHub SSH key to the host first and then use:
+
+```bash
+git clone git@github.com:seventh7dev/node-plane.git node-plane-src
 ```
 
 The script will prompt for missing values and write the portable-mode settings into `.env`.

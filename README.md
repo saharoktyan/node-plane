@@ -91,7 +91,7 @@ For AWG nodes, Node Plane builds and deploys its own wrapper image during bootst
 ### Simple Mode
 
 ```bash
-git clone git@github.com:seventh7dev/node-plane.git node-plane-src
+git clone https://github.com/seventh7dev/node-plane.git node-plane-src
 cd node-plane-src
 ./scripts/install.sh --mode simple
 ```
@@ -101,12 +101,18 @@ Then follow the full guide in [INSTALL.md](INSTALL.md).
 ### Portable Mode
 
 ```bash
-git clone git@github.com:seventh7dev/node-plane.git node-plane-src
+git clone https://github.com/seventh7dev/node-plane.git node-plane-src
 cd node-plane-src
 ./scripts/install.sh --mode portable
 ```
 
 Then follow the full guide in [INSTALL.md](INSTALL.md).
+
+If you prefer SSH for cloning, configure a GitHub SSH key on the host first and then use:
+
+```bash
+git clone git@github.com:seventh7dev/node-plane.git node-plane-src
+```
 
 ## Features
 
