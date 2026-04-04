@@ -170,7 +170,7 @@ def _build_full_uninstall_script(pid: int, targets: List[str]) -> str:
 def _launch_cleanup_script(script_path: str) -> None:
     if shutil.which("systemd-run"):
         unit_name = f"node-plane-uninstall-{int(time.time())}"
-        cmd = ["systemd-run", "--unit", unit_name, "--collect", "--property=Type=oneshot", "/bin/bash", script_path]
+        cmd = ["systemd-run", "--unit", unit_name, "--collect", "--no-block", "--property=Type=oneshot", "/bin/bash", script_path]
         if os.geteuid() != 0:
             cmd = ["sudo", "-n", *cmd]
         subprocess.run(

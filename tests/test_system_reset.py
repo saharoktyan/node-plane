@@ -130,6 +130,7 @@ class SystemResetTests(unittest.TestCase):
         mocked_run.assert_called_once()
         args = mocked_run.call_args.args[0]
         self.assertIn("systemd-run", args)
+        self.assertIn("--no-block", args)
 
     def test_full_uninstall_script_removes_targets_before_killing_process(self) -> None:
         script = self.system_reset._build_full_uninstall_script(12345, ["/opt/node-plane", "/opt/node-plane-src"])
