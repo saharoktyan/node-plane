@@ -10,6 +10,7 @@ from config import BOT_TOKEN, BOT_WORKERS, UPDATE_CHECK_FIRST_DELAY_SECONDS, UPD
 from routers.callback_router import on_callback
 from handlers.user import start_cmd, version_cmd, whoami_cmd, getkey_cmd
 from handlers import admin as admin_handlers
+from services.alerts import alert_monitor_job
 from services.backups import auto_backup_job
 from services.traffic_usage import collect_traffic_job
 from services.updates import auto_check_job
@@ -40,6 +41,7 @@ def main() -> None:
 
     updater.job_queue.run_repeating(collect_traffic_job, interval=3600, first=300, name="collect_traffic_job")
     updater.job_queue.run_repeating(auto_backup_job, interval=900, first=600, name="auto_backup_job")
+    updater.job_queue.run_repeating(alert_monitor_job, interval=60, first=180, name="alert_monitor_job")
     updater.job_queue.run_repeating(
         auto_check_job,
         interval=UPDATE_CHECK_INTERVAL_SECONDS,

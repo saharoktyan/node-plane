@@ -12,15 +12,22 @@ from domain.servers import get_access_methods_for_codes
 from i18n import get_locale_for_update, get_user_locale, set_user_locale, t
 from services.app_settings import (
     are_access_requests_enabled,
+    get_alerts_interval_minutes,
+    get_alerts_state,
     get_backups_interval_hours,
     get_backups_keep_count,
     get_access_gate_message,
     get_menu_title,
     get_menu_title_markdown,
     get_updates_branch,
+    is_alerts_enabled,
+    is_alerts_notify_resolved_enabled,
     is_backups_enabled,
     is_updates_auto_check_enabled,
     is_global_telemetry_enabled,
+    set_alerts_enabled,
+    set_alerts_interval_minutes,
+    set_alerts_notify_resolved_enabled,
     set_backups_enabled,
     set_backups_interval_hours,
     set_backups_keep_count,
@@ -33,6 +40,7 @@ from services.app_settings import (
     set_menu_title,
     should_show_initial_admin_setup,
 )
+from services.alerts import get_alerts_overview
 from services.backups import backup_token, create_backup, get_backup_info, get_backups_overview, list_backups, resolve_backup_token, restore_backup
 from services.provisioning_state import summarize_server_provisioning
 from services.server_bootstrap import get_server_runtime_state, get_servers_needing_runtime_sync, sync_server_runtime
@@ -45,7 +53,7 @@ from services.traffic_usage import get_profile_monthly_usage
 from services.updates import check_for_updates, get_updates_menu_emoji, get_updates_overview, get_version_transition, list_available_versions, schedule_update
 from services.xray import get_server_link_status
 from ui.user_views import format_server_access
-from utils.keyboards import kb_admin_backups_menu, kb_admin_backups_settings_menu, kb_admin_menu, kb_admin_requests_settings_menu, kb_admin_settings_menu, kb_admin_updates_branch_menu, kb_admin_updates_menu, kb_back_to_admin, kb_language_menu, kb_main_menu, kb_profile_minimal, kb_profile_stats, kb_settings_menu
+from utils.keyboards import kb_admin_alerts_settings_menu, kb_admin_backups_menu, kb_admin_backups_settings_menu, kb_admin_menu, kb_admin_requests_settings_menu, kb_admin_settings_menu, kb_admin_updates_branch_menu, kb_admin_updates_menu, kb_back_to_admin, kb_language_menu, kb_main_menu, kb_profile_minimal, kb_profile_stats, kb_settings_menu
 from utils.tg import answer_cb, safe_delete_update_message, safe_edit_by_ids, safe_edit_message
 
 from .user_common import _access_gate_text, _build_start_reply, _has_access, _human_ago, _human_left, _is_admin, _resolve_profile_name, _sub_progress
@@ -615,6 +623,34 @@ def _render_admin_settings_text(lang: str) -> str:
 
 def _render_admin_requests_settings_text(lang: str) -> str:
     return t(lang, "admin.settings.requests_title")
+
+
+def _render_admin_alerts_settings_text(lang: str) -> str:
+    overview = get_alerts_overview()
+    last_run = str(overview.get("last_run_at") or "").strip()
+    last_run_value = _human_ago(last_run, lang) if last_run else t(lang, "common.none")
+    status = str(overview.get("last_status") or "never")
+    status_key = {
+        "never": "admin.alerts.status_never",
+        "success": "admin.alerts.status_success",
+        "failed": "admin.alerts.status_failed",
+    }.get(status, "admin.alerts.status_failed")
+    resolved_value = t(lang, "admin.alerts.resolved_enabled") if overview.get("notify_resolved") else t(lang, "admin.alerts.resolved_disabled")
+    enabled_value = t(lang, "admin.alerts.enabled_on") if overview.get("enabled") else t(lang, "admin.alerts.enabled_off")
+    lines = [
+        t(lang, "admin.alerts.title"),
+        "",
+        t(lang, "admin.alerts.enabled_line", value=enabled_value),
+        t(lang, "admin.alerts.interval_line", value=int(overview.get("interval_minutes") or 5)),
+        t(lang, "admin.alerts.resolved_line", value=resolved_value),
+        t(lang, "admin.alerts.active_line", value=int(overview.get("active_count") or 0)),
+        t(lang, "admin.alerts.last_run_line", value=last_run_value),
+        t(lang, "admin.alerts.last_status_line", value=t(lang, status_key)),
+    ]
+    last_error = str(overview.get("last_error") or "").strip()
+    if last_error:
+        lines.extend(["", t(lang, "admin.alerts.last_error_line", value=last_error)])
+    return "\n".join(lines)
 
 
 def _render_admin_reset_text(lang: str) -> str:
@@ -1376,6 +1412,22 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
         )
         return
 
+    if payload == "admin_settings_alerts" and is_admin:
+        _admin_settings_state_clear(context)
+        safe_edit_message(
+            update,
+            context,
+            _render_admin_alerts_settings_text(lang),
+            reply_markup=kb_admin_alerts_settings_menu(
+                is_alerts_enabled(),
+                get_alerts_interval_minutes(),
+                is_alerts_notify_resolved_enabled(),
+                lang,
+            ),
+            parse_mode=PARSE_MODE,
+        )
+        return
+
     if payload == "admin_settings_reset" and is_admin:
         _admin_settings_state_set(context, {"active": True, "step": "factory_reset"})
         safe_edit_message(
@@ -1724,6 +1776,56 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
             context,
             _render_admin_settings_text(lang),
             reply_markup=kb_admin_settings_menu(_admin_notify_enabled(user.id if user else 0), enabled, are_access_requests_enabled(), lang),
+            parse_mode=PARSE_MODE,
+        )
+        return
+
+    if payload == "admin_settings_alerts_toggle" and is_admin:
+        enabled = set_alerts_enabled(not is_alerts_enabled())
+        safe_edit_message(
+            update,
+            context,
+            _render_admin_alerts_settings_text(lang),
+            reply_markup=kb_admin_alerts_settings_menu(
+                enabled,
+                get_alerts_interval_minutes(),
+                is_alerts_notify_resolved_enabled(),
+                lang,
+            ),
+            parse_mode=PARSE_MODE,
+        )
+        return
+
+    if payload.startswith("admin_settings_alerts_interval:") and is_admin:
+        raw = payload.split(":", 1)[1]
+        minutes = int(raw) if raw.isdigit() else get_alerts_interval_minutes()
+        set_alerts_interval_minutes(minutes)
+        safe_edit_message(
+            update,
+            context,
+            _render_admin_alerts_settings_text(lang),
+            reply_markup=kb_admin_alerts_settings_menu(
+                is_alerts_enabled(),
+                get_alerts_interval_minutes(),
+                is_alerts_notify_resolved_enabled(),
+                lang,
+            ),
+            parse_mode=PARSE_MODE,
+        )
+        return
+
+    if payload == "admin_settings_alerts_toggle_resolved" and is_admin:
+        enabled = set_alerts_notify_resolved_enabled(not is_alerts_notify_resolved_enabled())
+        safe_edit_message(
+            update,
+            context,
+            _render_admin_alerts_settings_text(lang),
+            reply_markup=kb_admin_alerts_settings_menu(
+                is_alerts_enabled(),
+                get_alerts_interval_minutes(),
+                enabled,
+                lang,
+            ),
             parse_mode=PARSE_MODE,
         )
         return

@@ -194,7 +194,10 @@ def kb_admin_settings_menu(notify_enabled: bool, telemetry_enabled: bool, reques
             InlineKeyboardButton(t(lang, "admin.settings.bot_title"), callback_data=f"{CB_MENU}admin_settings_bot_title"),
             InlineKeyboardButton(t(lang, "admin.settings.requests_menu"), callback_data=f"{CB_MENU}admin_settings_requests"),
         ],
-        [InlineKeyboardButton(telemetry_label, callback_data=f"{CB_MENU}admin_settings_toggle_telemetry")],
+        [
+            InlineKeyboardButton(t(lang, "admin.settings.alerts_menu"), callback_data=f"{CB_MENU}admin_settings_alerts"),
+            InlineKeyboardButton(telemetry_label, callback_data=f"{CB_MENU}admin_settings_toggle_telemetry"),
+        ],
         [InlineKeyboardButton(t(lang, "admin.settings.factory_reset"), callback_data=f"{CB_MENU}admin_settings_reset")],
         [InlineKeyboardButton(t(lang, "menu.back"), callback_data=f"{CB_MENU}admin")],
     ])
@@ -207,6 +210,28 @@ def kb_admin_requests_settings_menu(notify_enabled: bool, requests_enabled: bool
         [InlineKeyboardButton(t(lang, "admin.settings.access_gate_message"), callback_data=f"{CB_MENU}admin_settings_access_gate_message")],
         [InlineKeyboardButton(notify_label, callback_data=f"{CB_MENU}admin_settings_toggle_notify")],
         [InlineKeyboardButton(requests_label, callback_data=f"{CB_MENU}admin_settings_toggle_requests")],
+        [InlineKeyboardButton(t(lang, "menu.back"), callback_data=f"{CB_MENU}admin_settings")],
+    ])
+
+
+def kb_admin_alerts_settings_menu(enabled: bool, interval_minutes: int, notify_resolved: bool, lang: str = "ru") -> InlineKeyboardMarkup:
+    toggle_label = t(lang, "admin.alerts.toggle_on") if enabled else t(lang, "admin.alerts.toggle_off")
+    resolved_label = t(lang, "admin.alerts.resolved_on") if notify_resolved else t(lang, "admin.alerts.resolved_off")
+    interval_labels = {
+        5: t(lang, "admin.alerts.interval_5"),
+        15: t(lang, "admin.alerts.interval_15"),
+    }
+    interval_buttons = [
+        InlineKeyboardButton(
+            f">{label}<" if value == interval_minutes else label,
+            callback_data=f"{CB_MENU}admin_settings_alerts_interval:{value}",
+        )
+        for value, label in interval_labels.items()
+    ]
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(toggle_label, callback_data=f"{CB_MENU}admin_settings_alerts_toggle")],
+        interval_buttons,
+        [InlineKeyboardButton(resolved_label, callback_data=f"{CB_MENU}admin_settings_alerts_toggle_resolved")],
         [InlineKeyboardButton(t(lang, "menu.back"), callback_data=f"{CB_MENU}admin_settings")],
     ])
 

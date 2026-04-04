@@ -116,7 +116,14 @@ class AdminViewsTests(unittest.TestCase):
         markup = keyboards.kb_admin_settings_menu(notify_enabled=True, telemetry_enabled=False, requests_enabled=True, lang="en")
         rows = markup.inline_keyboard
         self.assertEqual([button.callback_data for button in rows[0]], ["menu:admin_settings_bot_title", "menu:admin_settings_requests"])
-        self.assertEqual([button.callback_data for button in rows[1]], ["menu:admin_settings_toggle_telemetry"])
+        self.assertEqual([button.callback_data for button in rows[1]], ["menu:admin_settings_alerts", "menu:admin_settings_toggle_telemetry"])
+
+    def test_admin_alerts_settings_menu_groups_core_toggles(self) -> None:
+        markup = keyboards.kb_admin_alerts_settings_menu(enabled=True, interval_minutes=15, notify_resolved=False, lang="en")
+        rows = markup.inline_keyboard
+        self.assertEqual([button.callback_data for button in rows[0]], ["menu:admin_settings_alerts_toggle"])
+        self.assertEqual([button.callback_data for button in rows[1]], ["menu:admin_settings_alerts_interval:5", "menu:admin_settings_alerts_interval:15"])
+        self.assertEqual([button.callback_data for button in rows[2]], ["menu:admin_settings_alerts_toggle_resolved"])
 
     def test_admin_requests_settings_menu_groups_access_controls(self) -> None:
         markup = keyboards.kb_admin_requests_settings_menu(notify_enabled=True, requests_enabled=True, lang="en")

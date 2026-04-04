@@ -38,6 +38,12 @@ _BACKUPS_LAST_SNAPSHOT_PATH_KEY = "backups_last_snapshot_path"
 _BACKUPS_LAST_SNAPSHOT_SHA256_KEY = "backups_last_snapshot_sha256"
 _BACKUPS_LAST_RESTORE_AT_KEY = "backups_last_restore_at"
 _BACKUPS_LAST_RESTORE_STATUS_KEY = "backups_last_restore_status"
+_ALERTS_ENABLED_KEY = "alerts_enabled"
+_ALERTS_INTERVAL_MINUTES_KEY = "alerts_interval_minutes"
+_ALERTS_NOTIFY_RESOLVED_KEY = "alerts_notify_resolved"
+_ALERTS_LAST_RUN_AT_KEY = "alerts_last_run_at"
+_ALERTS_LAST_STATUS_KEY = "alerts_last_status"
+_ALERTS_LAST_ERROR_KEY = "alerts_last_error"
 _schema_ready = False
 
 
@@ -324,4 +330,56 @@ def get_backups_state() -> dict[str, str | int | bool]:
         "last_snapshot_sha256": _meta_get(_BACKUPS_LAST_SNAPSHOT_SHA256_KEY, ""),
         "last_restore_at": _meta_get(_BACKUPS_LAST_RESTORE_AT_KEY, ""),
         "last_restore_status": _meta_get(_BACKUPS_LAST_RESTORE_STATUS_KEY, "never"),
+    }
+
+
+def is_alerts_enabled() -> bool:
+    return _meta_get(_ALERTS_ENABLED_KEY, "0") == "1"
+
+
+def set_alerts_enabled(enabled: bool) -> bool:
+    _meta_set(_ALERTS_ENABLED_KEY, "1" if enabled else "0")
+    return enabled
+
+
+def get_alerts_interval_minutes() -> int:
+    raw = _meta_get(_ALERTS_INTERVAL_MINUTES_KEY, "5").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        value = 5
+    return value if value in {5, 15} else 5
+
+
+def set_alerts_interval_minutes(minutes: int) -> int:
+    value = int(minutes)
+    if value not in {5, 15}:
+        raise ValueError("Unsupported alerts interval")
+    _meta_set(_ALERTS_INTERVAL_MINUTES_KEY, str(value))
+    return value
+
+
+def is_alerts_notify_resolved_enabled() -> bool:
+    return _meta_get(_ALERTS_NOTIFY_RESOLVED_KEY, "1") == "1"
+
+
+def set_alerts_notify_resolved_enabled(enabled: bool) -> bool:
+    _meta_set(_ALERTS_NOTIFY_RESOLVED_KEY, "1" if enabled else "0")
+    return enabled
+
+
+def record_alerts_run(status: str, run_at: str, *, error: str = "") -> None:
+    _meta_set(_ALERTS_LAST_RUN_AT_KEY, run_at)
+    _meta_set(_ALERTS_LAST_STATUS_KEY, status)
+    _meta_set(_ALERTS_LAST_ERROR_KEY, error)
+
+
+def get_alerts_state() -> dict[str, str | int | bool]:
+    return {
+        "enabled": is_alerts_enabled(),
+        "interval_minutes": get_alerts_interval_minutes(),
+        "notify_resolved": is_alerts_notify_resolved_enabled(),
+        "last_run_at": _meta_get(_ALERTS_LAST_RUN_AT_KEY, ""),
+        "last_status": _meta_get(_ALERTS_LAST_STATUS_KEY, "never"),
+        "last_error": _meta_get(_ALERTS_LAST_ERROR_KEY, ""),
     }
