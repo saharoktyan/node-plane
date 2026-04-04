@@ -7,7 +7,7 @@ import tempfile
 import time
 from typing import List, Tuple
 
-from config import BASE_DIR, INSTALL_MODE, SHARED_ROOT, SOURCE_ROOT, SSH_DIR, SQLITE_DB_PATH
+from config import BASE_DIR, INSTALL_MODE, INSTALL_ROOT, SHARED_ROOT, SOURCE_ROOT, SSH_DIR, SQLITE_DB_PATH
 from db.schema import ensure_schema
 from db.sqlite_db import SQLiteDB
 from services.backups import clear_backup_storage, maybe_create_pre_action_backup
@@ -55,7 +55,7 @@ def _clear_local_ssh_material() -> str:
 
 
 def _uninstall_targets() -> List[str]:
-    values = [str(BASE_DIR or "").strip(), str(SHARED_ROOT or "").strip(), str(SOURCE_ROOT or "").strip()]
+    values = [str(INSTALL_ROOT or "").strip(), str(BASE_DIR or "").strip(), str(SHARED_ROOT or "").strip(), str(SOURCE_ROOT or "").strip()]
     targets: List[str] = []
     for path in values:
         if not path or path in {"/", "/root", "/home"}:
@@ -65,6 +65,7 @@ def _uninstall_targets() -> List[str]:
             continue
         if normalized not in targets:
             targets.append(normalized)
+    targets.sort(key=len, reverse=True)
     return targets
 
 

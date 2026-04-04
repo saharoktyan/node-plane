@@ -151,6 +151,9 @@ class SystemResetTests(unittest.TestCase):
         self.assertIn(" down -v --remove-orphans >/dev/null 2>&1 || true", script)
         self.assertLess(script.index("docker compose -f "), script.index("docker rm -f node-plane"))
 
+    def test_uninstall_targets_include_install_root(self) -> None:
+        self.assertIn(os.path.abspath(self.tmpdir.name), self.system_reset._uninstall_targets())
+
     def test_run_full_remove_with_nodes_runs_node_cleanup_before_uninstall(self) -> None:
         self.server_registry.upsert_server(
             key="nl1",
