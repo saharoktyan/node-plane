@@ -543,6 +543,19 @@ class AdminViewsTests(unittest.TestCase):
         mocked_remove.assert_called_once_with(cleanup_nodes=False)
         mocked_edit.assert_called()
 
+    def test_remove_callback_sets_full_remove_state(self) -> None:
+        update = SimpleNamespace(
+            callback_query=SimpleNamespace(message=SimpleNamespace(chat_id=1, message_id=2)),
+            effective_user=SimpleNamespace(id=1),
+        )
+        context = SimpleNamespace(user_data={"admin_settings": {"active": True, "step": "factory_reset"}})
+        with patch.object(user_profile, "safe_edit_message"), patch.object(
+            user_profile, "_is_admin", return_value=True
+        ), patch.object(user_profile, "get_locale_for_update", return_value="en"):
+            user_profile.on_menu_callback(update, context, "admin_settings_remove")
+        self.assertEqual(context.user_data["admin_settings"]["step"], "full_remove_phrase")
+        self.assertFalse(context.user_data["admin_settings"]["remove_cleanup_nodes"])
+
 
 if __name__ == "__main__":
     unittest.main()

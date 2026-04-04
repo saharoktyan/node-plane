@@ -1519,7 +1519,7 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
 
     if payload == "admin_settings_remove" and is_admin:
         _admin_settings_capture_message(update, context)
-        _admin_settings_state_set(context, {"active": True, "step": "full_remove_phrase", "remove_cleanup_nodes": False, **(_admin_settings_state_get(context) or {})})
+        _admin_settings_state_set(context, {**(_admin_settings_state_get(context) or {}), "active": True, "step": "full_remove_phrase", "remove_cleanup_nodes": False})
         safe_edit_message(
             update,
             context,
@@ -1531,7 +1531,7 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
 
     if payload == "admin_settings_remove_nodes" and is_admin:
         _admin_settings_capture_message(update, context)
-        _admin_settings_state_set(context, {"active": True, "step": "full_remove_phrase", "remove_cleanup_nodes": True, **(_admin_settings_state_get(context) or {})})
+        _admin_settings_state_set(context, {**(_admin_settings_state_get(context) or {}), "active": True, "step": "full_remove_phrase", "remove_cleanup_nodes": True})
         safe_edit_message(
             update,
             context,
@@ -1849,7 +1849,7 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
 
     if payload == "admin_settings_bot_title" and is_admin:
         _admin_settings_capture_message(update, context)
-        _admin_settings_state_set(context, {"active": True, "step": "bot_title", **(_admin_settings_state_get(context) or {})})
+        _admin_settings_state_set(context, {**(_admin_settings_state_get(context) or {}), "active": True, "step": "bot_title"})
         safe_edit_message(
             update,
             context,
@@ -1861,7 +1861,7 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
 
     if payload == "admin_settings_access_gate_message" and is_admin:
         _admin_settings_capture_message(update, context)
-        _admin_settings_state_set(context, {"active": True, "step": "access_gate_message", **(_admin_settings_state_get(context) or {})})
+        _admin_settings_state_set(context, {**(_admin_settings_state_get(context) or {}), "active": True, "step": "access_gate_message"})
         safe_edit_message(
             update,
             context,
