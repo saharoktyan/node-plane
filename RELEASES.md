@@ -77,7 +77,7 @@ Examples:
 
 The project version is stored in:
 
-- [VERSION](/home/saharoktyan/projects/node-plane/VERSION)
+- `VERSION`
 
 ## How To Increment Versions
 
@@ -194,6 +194,37 @@ Example:
 4. Create a git tag `vX.Y.Z`.
 5. Deploy production from `main`.
 
+## Tagging Rule
+
+Release tags and `VERSION` must always match.
+
+Examples:
+- tag `v0.3.1-alpha.3` requires `VERSION=0.3.1-alpha.3`
+- tag `v0.4.0` requires `VERSION=0.4.0`
+
+This repository includes a helper:
+
+- `scripts/tag_release.sh`
+
+The helper:
+- validates the tag format
+- checks that `VERSION` matches the tag without the `v` prefix
+- refuses to tag a dirty tracked worktree
+- refuses to overwrite an existing tag
+
+Example:
+
+```bash
+./scripts/tag_release.sh v0.3.1-alpha.3
+```
+
+Recommended release order:
+
+1. Update `VERSION`.
+2. Commit the version bump.
+3. Run `./scripts/tag_release.sh vX.Y.Z[-alpha.N]`.
+4. Push the branch and tag.
+
 ## Recommended Branch Targets
 
 Use this as the default:
@@ -235,4 +266,4 @@ If you want the short version, it is this:
 - `main` uses `x.y.z`
 - `dev` uses `x.y.z-alpha.N`
 - stable releases are tagged as `vX.Y.Z`
-- [VERSION](/home/saharoktyan/projects/node-plane/VERSION) is the source of truth for the app version
+- `VERSION` is the source of truth for the app version
