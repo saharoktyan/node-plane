@@ -4,7 +4,7 @@ import json
 import re
 from typing import Any, Callable, Dict, List
 
-from db.sqlite_db import SQLiteDB
+from db.types import DatabaseBackend
 
 
 def _decode_xray_short_id(value: Any) -> tuple[str, Dict[str, str]]:
@@ -53,8 +53,8 @@ def _sanitize_awg_config_text(value: Any) -> str:
     return m.group(1) if m else raw.strip()
 
 
-class SQLiteProfileStateStore:
-    def __init__(self, db: SQLiteDB) -> None:
+class ProfileStateStore:
+    def __init__(self, db: DatabaseBackend) -> None:
         self.db = db
 
     def _read_conn(self, conn) -> Dict[str, Any]:
@@ -228,13 +228,13 @@ class SQLiteProfileStateStore:
             data = self._read_conn(conn)
             new_data = mutator(data)
             if not isinstance(new_data, dict):
-                raise ValueError("SQLiteProfileStateStore.update mutator must return dict")
+                raise ValueError("ProfileStateStore.update mutator must return dict")
             self._write_conn(conn, new_data)
             return new_data
 
 
-class SQLiteTelegramUsersStore:
-    def __init__(self, db: SQLiteDB) -> None:
+class TelegramUsersStore:
+    def __init__(self, db: DatabaseBackend) -> None:
         self.db = db
 
     def _read_conn(self, conn) -> Dict[str, Any]:
@@ -350,7 +350,7 @@ class SQLiteTelegramUsersStore:
             data = self._read_conn(conn)
             new_data = mutator(data)
             if not isinstance(new_data, dict):
-                raise ValueError("SQLiteTelegramUsersStore.update mutator must return dict")
+                raise ValueError("TelegramUsersStore.update mutator must return dict")
             self._write_conn(conn, new_data)
             return new_data
 
@@ -445,8 +445,8 @@ class SQLiteTelegramUsersStore:
             )
 
 
-class SQLiteAWGStore:
-    def __init__(self, db: SQLiteDB) -> None:
+class AWGStore:
+    def __init__(self, db: DatabaseBackend) -> None:
         self.db = db
 
     def _read_conn(self, conn) -> Dict[str, Any]:
@@ -527,6 +527,9 @@ class SQLiteAWGStore:
             data = self._read_conn(conn)
             new_data = mutator(data)
             if not isinstance(new_data, dict):
-                raise ValueError("SQLiteAWGStore.update mutator must return dict")
+                raise ValueError("AWGStore.update mutator must return dict")
             self._write_conn(conn, new_data)
             return new_data
+
+
+__all__ = ["AWGStore", "ProfileStateStore", "TelegramUsersStore"]

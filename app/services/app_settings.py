@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from config import MENU_TITLE, SQLITE_DB_PATH, UPDATE_BRANCH
-from db.schema import ensure_schema
-from db.sqlite_db import SQLiteDB
+from config import MENU_TITLE, UPDATE_BRANCH
+from db import ensure_schema, get_db
 from utils.security import escape_markdown
 
 
-_db = SQLiteDB(SQLITE_DB_PATH)
+_db = get_db()
 _GLOBAL_TELEMETRY_KEY = "telemetry_enabled_global"
 _BOT_MENU_TITLE_KEY = "bot_menu_title"
 _ACCESS_REQUESTS_ENABLED_KEY = "access_requests_enabled"
@@ -26,6 +25,7 @@ _UPDATES_LAST_RUN_STATUS_KEY = "updates_last_run_status"
 _UPDATES_LAST_RUN_LOG_TAIL_KEY = "updates_last_run_log_tail"
 _UPDATES_LAST_RUN_UNIT_KEY = "updates_last_run_unit"
 _UPDATES_BRANCH_KEY = "updates_branch"
+_UPDATES_DEV_TRACK_KEY = "updates_dev_track"
 _UPDATES_LOCAL_VERSION_KEY = "updates_local_version"
 _UPDATES_REMOTE_VERSION_KEY = "updates_remote_version"
 _BACKUPS_ENABLED_KEY = "backups_enabled"
@@ -45,18 +45,17 @@ _ALERTS_LAST_RUN_AT_KEY = "alerts_last_run_at"
 _ALERTS_LAST_STATUS_KEY = "alerts_last_status"
 _ALERTS_LAST_ERROR_KEY = "alerts_last_error"
 _schema_ready = False
+_META_UPSERT_SQL = """
+INSERT INTO schema_meta(key, value)
+VALUES (?, ?)
+ON CONFLICT(key) DO UPDATE SET value = excluded.value
+"""
 
 
 def _ensure_runtime_schema() -> None:
     global _schema_ready
     if _schema_ready:
-        with _db.connect() as conn:
-            row = conn.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'schema_meta'"
-            ).fetchone()
-        if row:
-            return
-        _schema_ready = False
+        return
     with _db.transaction() as conn:
         ensure_schema(conn)
     _schema_ready = True
@@ -83,7 +82,7 @@ def _meta_set(key: str, value: str) -> str:
     _ensure_runtime_schema()
     normalized = str(value or "")
     with _db.transaction() as conn:
-        conn.execute("INSERT OR REPLACE INTO schema_meta(key, value) VALUES (?, ?)", (key, normalized))
+        conn.execute(_META_UPSERT_SQL, (key, normalized))
     return normalized
 
 
@@ -91,10 +90,7 @@ def set_global_telemetry_enabled(enabled: bool) -> bool:
     _ensure_runtime_schema()
     value = "1" if enabled else "0"
     with _db.transaction() as conn:
-        conn.execute(
-            "INSERT OR REPLACE INTO schema_meta(key, value) VALUES (?, ?)",
-            (_GLOBAL_TELEMETRY_KEY, value),
-        )
+        conn.execute(_META_UPSERT_SQL, (_GLOBAL_TELEMETRY_KEY, value))
     return enabled
 
 
@@ -117,10 +113,7 @@ def set_menu_title(value: str) -> str:
     _ensure_runtime_schema()
     normalized = str(value or "").replace("\r", " ").replace("\n", " ").strip() or MENU_TITLE
     with _db.transaction() as conn:
-        conn.execute(
-            "INSERT OR REPLACE INTO schema_meta(key, value) VALUES (?, ?)",
-            (_BOT_MENU_TITLE_KEY, normalized),
-        )
+        conn.execute(_META_UPSERT_SQL, (_BOT_MENU_TITLE_KEY, normalized))
     return normalized
 
 
@@ -174,10 +167,7 @@ def set_initial_setup_state(state: str) -> str:
         raise ValueError("Unsupported initial setup state")
     _ensure_runtime_schema()
     with _db.transaction() as conn:
-        conn.execute(
-            "INSERT OR REPLACE INTO schema_meta(key, value) VALUES (?, ?)",
-            (_INITIAL_SETUP_STATE_KEY, normalized),
-        )
+        conn.execute(_META_UPSERT_SQL, (_INITIAL_SETUP_STATE_KEY, normalized))
     return normalized
 
 
@@ -207,6 +197,19 @@ def set_updates_branch(branch: str) -> str:
     return normalized
 
 
+def get_updates_dev_track() -> str:
+    value = _meta_get(_UPDATES_DEV_TRACK_KEY, "tag").strip().lower()
+    return value if value in {"tag", "head"} else "tag"
+
+
+def set_updates_dev_track(track: str) -> str:
+    normalized = str(track or "").strip().lower()
+    if normalized not in {"tag", "head"}:
+        raise ValueError("Unsupported updates dev track")
+    _meta_set(_UPDATES_DEV_TRACK_KEY, normalized)
+    return normalized
+
+
 def record_update_check(result: dict[str, str]) -> None:
     _meta_set(_UPDATES_LAST_CHECKED_AT_KEY, result.get("checked_at", ""))
     _meta_set(_UPDATES_LAST_STATUS_KEY, result.get("status", "error"))
@@ -223,6 +226,7 @@ def record_update_check(result: dict[str, str]) -> None:
 def get_update_state() -> dict[str, str]:
     return {
         "branch": get_updates_branch(),
+        "dev_track": get_updates_dev_track(),
         "last_checked_at": _meta_get(_UPDATES_LAST_CHECKED_AT_KEY, ""),
         "last_status": _meta_get(_UPDATES_LAST_STATUS_KEY, "never"),
         "update_available": _meta_get(_UPDATES_UPDATE_AVAILABLE_KEY, "0"),

@@ -4,9 +4,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict
 
-from config import SQLITE_DB_PATH
-from db.schema import ensure_schema
-from db.sqlite_db import SQLiteDB
+from db import ensure_schema, get_db
 from services.app_settings import is_global_telemetry_enabled
 from services.awg import extract_client_public_key, list_awg_peer_transfers
 from domain.servers import get_access_methods_for_codes
@@ -15,7 +13,7 @@ from services.xray import list_xray_user_transfers
 
 
 log = logging.getLogger("traffic_usage")
-_db = SQLiteDB(SQLITE_DB_PATH)
+_db = get_db()
 _schema_ready = False
 
 
@@ -153,7 +151,7 @@ def _collect_xray_server_samples(server_key: str) -> tuple[int, str]:
             SELECT
                 xp.profile_name,
                 xp.uuid,
-                GROUP_CONCAT(pam.access_code) AS access_codes
+                pam.access_code
             FROM xray_profiles xp
             LEFT JOIN profile_access_methods pam ON pam.profile_name = xp.profile_name
             WHERE EXISTS (
@@ -162,19 +160,28 @@ def _collect_xray_server_samples(server_key: str) -> tuple[int, str]:
                 WHERE tu.profile_name = xp.profile_name
                   AND tu.telemetry_enabled = 1
             )
-            GROUP BY xp.profile_name, xp.uuid
-            ORDER BY xp.profile_name
+            ORDER BY xp.profile_name, pam.access_code
             """,
         ).fetchall()
 
+        profiles: dict[str, dict[str, object]] = {}
         for row in rows:
             profile_name = str(row["profile_name"] or "")
-            uuid_val = str(row["uuid"] or "")
-            access_codes = [
-                code.strip()
-                for code in str(row["access_codes"] or "").split(",")
-                if code.strip()
-            ]
+            if not profile_name:
+                continue
+            entry = profiles.setdefault(
+                profile_name,
+                {"uuid": str(row["uuid"] or ""), "access_codes": []},
+            )
+            access_code = str(row["access_code"] or "").strip()
+            if access_code:
+                codes = entry["access_codes"]
+                if isinstance(codes, list) and access_code not in codes:
+                    codes.append(access_code)
+
+        for profile_name, row in sorted(profiles.items()):
+            uuid_val = str(row.get("uuid") or "")
+            access_codes = [str(code) for code in list(row.get("access_codes") or []) if str(code).strip()]
             if not profile_name:
                 continue
             methods = get_access_methods_for_codes(access_codes)

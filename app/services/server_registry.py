@@ -4,9 +4,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Iterable, Optional, Sequence
 
-from config import SQLITE_DB_PATH, SSH_KEY
-from db.schema import ensure_schema
-from db.sqlite_db import SQLiteDB
+from config import SSH_KEY
+from db import ensure_schema, get_db
 from utils.security import validate_server_field, validate_server_key
 
 
@@ -78,7 +77,7 @@ class RegisteredServer:
         return host
 
 
-_db = SQLiteDB(SQLITE_DB_PATH)
+_db = get_db()
 _schema_ready = False
 
 

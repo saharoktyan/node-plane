@@ -9,15 +9,13 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from tests.postgres_test_harness import configure_postgres_test_env
+
 TESTS_DIR = os.path.dirname(__file__)
 REPO_ROOT = os.path.abspath(os.path.join(TESTS_DIR, ".."))
 APP_ROOT = os.path.join(REPO_ROOT, "app")
 TMPDIR = tempfile.mkdtemp(prefix="node-plane-test-")
-os.environ.setdefault("NODE_PLANE_BASE_DIR", TMPDIR)
-os.environ.setdefault("SQLITE_DB_PATH", os.path.join(TMPDIR, "bot.sqlite3"))
-os.environ.setdefault("SUBS_DB_PATH", os.path.join(TMPDIR, "subs.json"))
-os.environ.setdefault("USERS_DB_PATH", os.path.join(TMPDIR, "users.json"))
-os.environ.setdefault("WG_DB_PATH", os.path.join(TMPDIR, "wg_db.json"))
+configure_postgres_test_env(TMPDIR)
 if APP_ROOT not in sys.path:
     sys.path.insert(0, APP_ROOT)
 if REPO_ROOT not in sys.path:

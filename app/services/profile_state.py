@@ -5,32 +5,30 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-from config import SQLITE_DB_PATH
-from db.schema import ensure_schema
-from db.sqlite_db import SQLiteDB
-from db.stores import SQLiteAWGStore, SQLiteProfileStateStore, SQLiteTelegramUsersStore
+from db import ensure_schema, get_db
+from db.stores import AWGStore, ProfileStateStore, TelegramUsersStore
 from domain.servers import get_access_method, get_access_methods_for_kind
 
 logger = logging.getLogger(__name__)
 
-_sqlite_db = SQLiteDB(SQLITE_DB_PATH)
+_db = get_db()
 _runtime_ready = False
 
 
-def _bootstrap_sqlite_runtime() -> None:
+def _bootstrap_runtime() -> None:
     global _runtime_ready
     if _runtime_ready:
         return
-    with _sqlite_db.transaction() as conn:
+    with _db.transaction() as conn:
         ensure_schema(conn)
     _runtime_ready = True
 
 
-_bootstrap_sqlite_runtime()
+_bootstrap_runtime()
 
-profile_store = SQLiteProfileStateStore(_sqlite_db)
-user_store = SQLiteTelegramUsersStore(_sqlite_db)
-awg_profile_store = SQLiteAWGStore(_sqlite_db)
+profile_store = ProfileStateStore(_db)
+user_store = TelegramUsersStore(_db)
+awg_profile_store = AWGStore(_db)
 
 _AWG_VPN_RE = re.compile(r"(vpn://[A-Za-z0-9+/=_-]+)")
 

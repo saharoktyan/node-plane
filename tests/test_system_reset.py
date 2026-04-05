@@ -8,6 +8,8 @@ import types
 import unittest
 from unittest.mock import patch
 
+from tests.postgres_test_harness import configure_postgres_test_env
+
 TESTS_DIR = os.path.dirname(__file__)
 REPO_ROOT = os.path.abspath(os.path.join(TESTS_DIR, ".."))
 APP_ROOT = os.path.join(REPO_ROOT, "app")
@@ -26,7 +28,7 @@ class SystemResetTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmpdir = tempfile.TemporaryDirectory()
         base = self.tmpdir.name
-        os.environ["NODE_PLANE_BASE_DIR"] = base
+        configure_postgres_test_env(base)
         os.environ["NODE_PLANE_APP_DIR"] = base
         os.environ["NODE_PLANE_SHARED_DIR"] = base
         os.environ["SQLITE_DB_PATH"] = os.path.join(base, "bot.sqlite3")
@@ -76,6 +78,33 @@ class SystemResetTests(unittest.TestCase):
         )
         self.profile_state.user_store.upsert_user(1, username="alice", profile_name="alice", access_granted=True)
         self.app_settings.set_menu_title("Test Title")
+        with self.system_reset._db.transaction() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS alert_state (
+                    alert_key TEXT PRIMARY KEY,
+                    server_key TEXT NOT NULL,
+                    alert_type TEXT NOT NULL,
+                    severity TEXT NOT NULL,
+                    payload_json TEXT NOT NULL DEFAULT '{}',
+                    active INTEGER NOT NULL DEFAULT 0,
+                    hit_streak INTEGER NOT NULL DEFAULT 0,
+                    clear_streak INTEGER NOT NULL DEFAULT 0,
+                    first_seen_at TEXT NOT NULL DEFAULT '',
+                    last_seen_at TEXT NOT NULL DEFAULT '',
+                    last_sent_at TEXT NOT NULL DEFAULT ''
+                )
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO alert_state(
+                    alert_key, server_key, alert_type, severity, payload_json,
+                    active, hit_streak, clear_streak, first_seen_at, last_seen_at, last_sent_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                ("spb1:disk_low", "spb1", "disk_low", "warn", "{}", 1, 1, 0, "2026-04-01T00:00:00Z", "2026-04-01T00:00:00Z", ""),
+            )
 
         rc, out = self.system_reset.run_factory_reset(cleanup_nodes=False, stop_local_runtime=False)
 
@@ -87,6 +116,9 @@ class SystemResetTests(unittest.TestCase):
         self.assertEqual(os.listdir(self.config.SSH_DIR), [])
         self.assertEqual(os.listdir(backup_dir), [])
         self.assertEqual(self.app_settings.get_menu_title(), self.config.MENU_TITLE)
+        with self.system_reset._db.connect() as conn:
+            row = conn.execute("SELECT COUNT(*) AS c FROM alert_state").fetchone()
+            self.assertEqual(int(row["c"]), 0)
 
     def test_factory_reset_requests_remote_key_cleanup_for_ssh_nodes(self) -> None:
         self.server_registry.upsert_server(

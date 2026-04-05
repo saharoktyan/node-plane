@@ -3,13 +3,11 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from config import SQLITE_DB_PATH
-from db.schema import ensure_schema
-from db.sqlite_db import SQLiteDB
+from db import ensure_schema, get_db
 from services.server_registry import get_server
 
 
-_db = SQLiteDB(SQLITE_DB_PATH)
+_db = get_db()
 _schema_ready = False
 
 

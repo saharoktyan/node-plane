@@ -3,19 +3,24 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import os
 import shutil
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
-from config import APP_VERSION, SHARED_ROOT, SQLITE_DB_PATH
+from config import APP_VERSION, DB_BACKEND, SHARED_ROOT
+from db import ensure_schema, get_db
+from db.migrate_sqlite_to_postgres import ALERT_STATE_COLUMNS, ALERT_STATE_DDL, TABLE_COLUMNS
 from services import app_settings
 
 _log = logging.getLogger("backups")
 _BACKUP_DIR = Path(SHARED_ROOT) / "backups" / "db"
-_BACKUP_EXT = ".sqlite3"
+_BACKUP_EXT = ".json"
 _META_EXT = ".meta.json"
+
+
+def _postgres_backups_supported() -> bool:
+    return DB_BACKEND == "postgres"
 
 
 def _utcnow() -> datetime:
@@ -84,64 +89,6 @@ def backup_token(name: str) -> str:
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:12]
 
 
-def _source_signature() -> tuple[str, int]:
-    import sqlite3
-
-    h = hashlib.sha256()
-    total_size = 0
-    if os.path.exists(SQLITE_DB_PATH):
-        total_size += os.path.getsize(SQLITE_DB_PATH)
-    if os.path.exists(f"{SQLITE_DB_PATH}-wal"):
-        total_size += os.path.getsize(f"{SQLITE_DB_PATH}-wal")
-    conn = sqlite3.connect(SQLITE_DB_PATH, timeout=5.0)
-    try:
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA busy_timeout = 5000")
-        table_rows = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
-        ).fetchall()
-        for table_row in table_rows:
-            table = str(table_row["name"])
-            h.update(f"table:{table}\n".encode("utf-8"))
-            col_rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
-            columns = [str(item["name"]) for item in col_rows]
-            if not columns:
-                continue
-            order_clause = ", ".join(columns)
-            if table == "schema_meta":
-                sql = f"SELECT * FROM {table} WHERE key NOT LIKE 'backups_%' ORDER BY {order_clause}"
-            else:
-                sql = f"SELECT * FROM {table} ORDER BY {order_clause}"
-            for row in conn.execute(sql).fetchall():
-                payload = {col: row[col] for col in columns}
-                h.update(json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8"))
-                h.update(b"\n")
-    finally:
-        conn.close()
-    return h.hexdigest(), total_size
-
-
-def _copy_sqlite_snapshot(target: Path) -> None:
-    import sqlite3
-
-    target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    source = sqlite3.connect(SQLITE_DB_PATH, timeout=5.0)
-    try:
-        source.execute("PRAGMA busy_timeout = 5000")
-        source.execute("PRAGMA wal_checkpoint(PASSIVE)")
-        dest = sqlite3.connect(str(target))
-        try:
-            source.backup(dest)
-        finally:
-            dest.close()
-    finally:
-        source.close()
-    try:
-        os.chmod(target, 0o600)
-    except OSError:
-        pass
-
-
 def _load_meta(meta_path: Path) -> Dict[str, Any]:
     try:
         data = json.loads(meta_path.read_text(encoding="utf-8"))
@@ -153,15 +100,104 @@ def _load_meta(meta_path: Path) -> Dict[str, Any]:
 def _write_meta(meta_path: Path, payload: Dict[str, Any]) -> None:
     meta_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     try:
-        os.chmod(meta_path, 0o600)
+        meta_path.chmod(0o600)
     except OSError:
         pass
+
+
+def _table_exists(conn, name: str) -> bool:
+    try:
+        conn.execute(f"SELECT 1 FROM {name} WHERE 1 = 0").fetchall()
+        return True
+    except Exception:
+        return False
+
+
+def _backup_tables(conn) -> list[tuple[str, list[str]]]:
+    tables = list(TABLE_COLUMNS)
+    if _table_exists(conn, "alert_state"):
+        tables.append(("alert_state", list(ALERT_STATE_COLUMNS)))
+    return tables
+
+
+def _ordered_select_sql(table: str, columns: list[str]) -> str:
+    selected = ", ".join(columns)
+    order_by = ", ".join(columns)
+    return f"SELECT {selected} FROM {table} ORDER BY {order_by}"
+
+
+def _rows_for_table(conn, table: str, columns: list[str]) -> list[dict[str, Any]]:
+    if table == "schema_meta":
+        rows = conn.execute(
+            "SELECT key, value FROM schema_meta WHERE key NOT LIKE ? ORDER BY key",
+            ("backups_%",),
+        ).fetchall()
+        return [{"key": row["key"], "value": row["value"]} for row in rows]
+    rows = conn.execute(_ordered_select_sql(table, columns)).fetchall()
+    return [{column: row[column] for column in columns} for row in rows]
+
+
+def _build_backup_payload() -> tuple[dict[str, Any], str, int]:
+    db = get_db()
+    with db.connect() as conn:
+        ensure_schema(conn)
+        payload = {
+            "format_version": 1,
+            "backend": "postgres",
+            "tables": {},
+        }
+        for table, columns in _backup_tables(conn):
+            payload["tables"][table] = _rows_for_table(conn, table, columns)
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    return payload, hashlib.sha256(encoded).hexdigest(), len(encoded)
+
+
+def _write_backup_payload(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
+
+
+def _load_backup_payload(path: Path) -> dict[str, Any]:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError("backup payload is invalid")
+    if str(data.get("backend") or "") != "postgres":
+        raise ValueError("backup payload backend is invalid")
+    tables = data.get("tables")
+    if not isinstance(tables, dict):
+        raise ValueError("backup payload tables are invalid")
+    return data
+
+
+def _clear_target_tables(conn, backup_tables: list[str]) -> None:
+    ordered = [table for table, _columns in TABLE_COLUMNS if table in backup_tables]
+    if "alert_state" in backup_tables or _table_exists(conn, "alert_state"):
+        ordered.append("alert_state")
+    for table in reversed(ordered):
+        if _table_exists(conn, table):
+            conn.execute(f"DELETE FROM {table}")
+
+
+def _insert_backup_rows(conn, table: str, columns: list[str], rows: list[dict[str, Any]]) -> None:
+    if not rows:
+        return
+    placeholders = ", ".join("?" for _ in columns)
+    selected = ", ".join(columns)
+    sql = f"INSERT INTO {table}({selected}) VALUES ({placeholders})"
+    for row in rows:
+        conn.execute(sql, tuple(row.get(column) for column in columns))
 
 
 def list_backups() -> List[Dict[str, Any]]:
     get_backup_dir()
     items: List[Dict[str, Any]] = []
     for path in sorted(_BACKUP_DIR.glob(f"*{_BACKUP_EXT}"), reverse=True):
+        if path.name.endswith(_META_EXT):
+            continue
         meta = _load_meta(_meta_path_for_backup(path))
         item = {
             "name": path.name,
@@ -172,6 +208,7 @@ def list_backups() -> List[Dict[str, Any]]:
             "sha256": meta.get("sha256") or "",
             "app_version": meta.get("app_version") or "",
             "note": meta.get("note") or "",
+            "backend": meta.get("backend") or "postgres",
         }
         items.append(item)
     items.sort(key=lambda item: str(item.get("created_at") or item.get("name") or ""), reverse=True)
@@ -197,11 +234,17 @@ def prune_backups(keep_count: int | None = None) -> Dict[str, Any]:
 
 
 def create_backup(trigger: str = "manual", note: str = "") -> Dict[str, Any]:
-    get_backup_dir()
     created_at = _utcnow_iso()
+    if not _postgres_backups_supported():
+        return {
+            "status": "unsupported",
+            "created_at": created_at,
+            "message": "Backups are supported only when DB_BACKEND=postgres",
+        }
+    get_backup_dir()
     backup_path = _backup_path(_snapshot_name())
     try:
-        source_fingerprint, source_size = _source_signature()
+        payload, source_fingerprint, source_size = _build_backup_payload()
         latest = list_backups()
         if latest:
             latest_meta = _load_meta(_meta_path_for_backup(Path(str(latest[0]["path"]))))
@@ -221,33 +264,28 @@ def create_backup(trigger: str = "manual", note: str = "") -> Dict[str, Any]:
                     "path": str(latest[0].get("path") or ""),
                     "sha256": str(latest[0].get("sha256") or ""),
                 }
-        _copy_sqlite_snapshot(backup_path)
+        _write_backup_payload(backup_path, payload)
         sha256 = _sha256_file(backup_path)
-        payload = {
+        meta = {
             "created_at": created_at,
             "trigger": str(trigger or "manual"),
             "note": str(note or ""),
             "sha256": sha256,
             "app_version": APP_VERSION,
-            "db_path": SQLITE_DB_PATH,
+            "backend": "postgres",
             "source_fingerprint": source_fingerprint,
             "source_size": source_size,
         }
-        _write_meta(_meta_path_for_backup(backup_path), payload)
+        _write_meta(_meta_path_for_backup(backup_path), meta)
         prune_backups()
-        app_settings.record_backup_run(
-            "success",
-            created_at,
-            snapshot_path=str(backup_path),
-            snapshot_sha256=sha256,
-        )
+        app_settings.record_backup_run("success", created_at, snapshot_path=str(backup_path), snapshot_sha256=sha256)
         return {
             "status": "success",
             "created_at": created_at,
             "path": str(backup_path),
             "name": backup_path.name,
             "sha256": sha256,
-            "trigger": payload["trigger"],
+            "trigger": meta["trigger"],
         }
     except Exception as exc:
         app_settings.record_backup_run("failed", created_at, error=str(exc))
@@ -268,6 +306,7 @@ def get_backup_info(name: str) -> Dict[str, Any] | None:
         "sha256": meta.get("sha256") or "",
         "app_version": meta.get("app_version") or "",
         "note": meta.get("note") or "",
+        "backend": meta.get("backend") or "postgres",
     }
 
 
@@ -282,29 +321,36 @@ def resolve_backup_token(token: str) -> Dict[str, Any] | None:
 
 
 def restore_backup(name: str) -> Dict[str, Any]:
-    info = get_backup_info(name)
     restored_at = _utcnow_iso()
+    if not _postgres_backups_supported():
+        return {"status": "unsupported", "message": "Restore is supported only when DB_BACKEND=postgres"}
+    info = get_backup_info(name)
     if not info:
         app_settings.record_backup_restore("failed", restored_at, error="backup not found")
         return {"status": "failed", "message": "backup not found"}
     try:
-        import sqlite3
-
         pre_restore = create_backup("pre_restore")
-        source = sqlite3.connect(str(info["path"]), timeout=5.0)
-        try:
-            dest = sqlite3.connect(SQLITE_DB_PATH, timeout=5.0)
-            try:
-                source.backup(dest)
-                dest.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-            finally:
-                dest.close()
-        finally:
-            source.close()
-        try:
-            os.chmod(SQLITE_DB_PATH, 0o600)
-        except OSError:
-            pass
+        payload = _load_backup_payload(Path(str(info["path"])))
+        tables = payload.get("tables") or {}
+        if not isinstance(tables, dict):
+            raise ValueError("backup payload tables are invalid")
+        db = get_db()
+        with db.transaction() as conn:
+            ensure_schema(conn)
+            if "alert_state" in tables and not _table_exists(conn, "alert_state"):
+                conn.execute(ALERT_STATE_DDL)
+            _clear_target_tables(conn, list(tables.keys()))
+            for table, columns in TABLE_COLUMNS:
+                if table in tables:
+                    rows = tables.get(table)
+                    if not isinstance(rows, list):
+                        raise ValueError(f"backup payload for {table} is invalid")
+                    _insert_backup_rows(conn, table, columns, rows)
+            if "alert_state" in tables:
+                rows = tables.get("alert_state")
+                if not isinstance(rows, list):
+                    raise ValueError("backup payload for alert_state is invalid")
+                _insert_backup_rows(conn, "alert_state", list(ALERT_STATE_COLUMNS), rows)
         app_settings.record_backup_restore("success", restored_at)
         return {
             "status": "success",
@@ -338,6 +384,7 @@ def get_backups_overview() -> Dict[str, Any]:
     total_size = sum(int(item.get("size_bytes") or 0) for item in items)
     return {
         **state,
+        "backend": DB_BACKEND,
         "total_backups": len(items),
         "total_size_bytes": total_size,
         "latest_backup": items[0] if items else None,

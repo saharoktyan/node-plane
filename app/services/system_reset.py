@@ -7,22 +7,30 @@ import tempfile
 import time
 from typing import List, Tuple
 
-from config import BASE_DIR, INSTALL_MODE, INSTALL_ROOT, SHARED_ROOT, SOURCE_ROOT, SSH_DIR, SQLITE_DB_PATH
-from db.schema import ensure_schema
-from db.sqlite_db import SQLiteDB
+from config import BASE_DIR, INSTALL_MODE, INSTALL_ROOT, SHARED_ROOT, SOURCE_ROOT, SSH_DIR
+from db import ensure_schema, get_db
 from services.backups import clear_backup_storage, maybe_create_pre_action_backup
 from services.server_bootstrap import AWG_RUNTIME_CONTAINER, full_cleanup_server
 from services.server_registry import list_servers
 from services.server_runtime import is_running_in_container, run_local_command
 
 
-_db = SQLiteDB(SQLITE_DB_PATH)
+_db = get_db()
+
+
+def _table_exists(conn, name: str) -> bool:
+    try:
+        conn.execute(f"SELECT 1 FROM {name} WHERE 1 = 0").fetchall()
+        return True
+    except Exception:
+        return False
 
 
 def _wipe_local_state() -> None:
     with _db.transaction() as conn:
         ensure_schema(conn)
         for table in (
+            "alert_state",
             "profile_server_state",
             "awg_server_configs",
             "xray_transports",
@@ -35,7 +43,8 @@ def _wipe_local_state() -> None:
             "servers",
             "schema_meta",
         ):
-            conn.execute(f"DELETE FROM {table}")
+            if _table_exists(conn, table):
+                conn.execute(f"DELETE FROM {table}")
 
 
 def _clear_local_ssh_material() -> str:

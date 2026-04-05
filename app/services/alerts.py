@@ -7,20 +7,36 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
 
-from config import ADMIN_IDS, SQLITE_DB_PATH
-from db.schema import ensure_schema
-from db.sqlite_db import SQLiteDB
+from config import ADMIN_IDS
+from db import ensure_schema, get_db
 from i18n import get_user_locale, t
 from services import app_settings
 from services.server_registry import RegisteredServer, get_server, list_servers
 from services.server_runtime import run_server_command
 
 _log = logging.getLogger("alerts")
-_db = SQLiteDB(SQLITE_DB_PATH)
+_db = get_db()
 _schema_ready = False
 _HOST_CHECK_TIMEOUT = 25
 _MAX_WORKERS = 4
 _CONFIRM_CYCLES = 1
+_ALERT_STATE_UPSERT_SQL = """
+INSERT INTO alert_state(
+    alert_key, server_key, alert_type, severity, payload_json,
+    active, hit_streak, clear_streak, first_seen_at, last_seen_at, last_sent_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(alert_key) DO UPDATE SET
+    server_key = excluded.server_key,
+    alert_type = excluded.alert_type,
+    severity = excluded.severity,
+    payload_json = excluded.payload_json,
+    active = excluded.active,
+    hit_streak = excluded.hit_streak,
+    clear_streak = excluded.clear_streak,
+    first_seen_at = excluded.first_seen_at,
+    last_seen_at = excluded.last_seen_at,
+    last_sent_at = excluded.last_sent_at
+"""
 
 
 @dataclass(frozen=True)
@@ -35,11 +51,7 @@ class AlertRecord:
 def _ensure_runtime_schema() -> None:
     global _schema_ready
     if _schema_ready:
-        with _db.connect() as conn:
-            row = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='alert_state'").fetchone()
-        if row:
-            return
-        _schema_ready = False
+        return
     with _db.transaction() as conn:
         ensure_schema(conn)
         conn.execute(
@@ -149,12 +161,7 @@ def _upsert_state(item: dict[str, Any]) -> None:
     _ensure_runtime_schema()
     with _db.transaction() as conn:
         conn.execute(
-            """
-            INSERT OR REPLACE INTO alert_state(
-                alert_key, server_key, alert_type, severity, payload_json,
-                active, hit_streak, clear_streak, first_seen_at, last_seen_at, last_sent_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
+            _ALERT_STATE_UPSERT_SQL,
             (
                 item["alert_key"],
                 item["server_key"],

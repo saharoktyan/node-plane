@@ -9,6 +9,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from tests.postgres_test_harness import configure_postgres_test_env
+
 
 TESTS_DIR = os.path.dirname(__file__)
 REPO_ROOT = os.path.abspath(os.path.join(TESTS_DIR, ".."))
@@ -27,7 +29,7 @@ class AlertsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmpdir = tempfile.TemporaryDirectory()
         base = self.tmpdir.name
-        os.environ["NODE_PLANE_BASE_DIR"] = base
+        configure_postgres_test_env(base)
         os.environ["NODE_PLANE_APP_DIR"] = base
         os.environ["NODE_PLANE_SHARED_DIR"] = base
         os.environ["SQLITE_DB_PATH"] = os.path.join(base, "bot.sqlite3")
