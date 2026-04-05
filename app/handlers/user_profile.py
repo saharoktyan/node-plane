@@ -35,6 +35,7 @@ from services.app_settings import (
     set_access_requests_enabled,
     set_updates_auto_check_enabled,
     set_updates_branch,
+    set_updates_dev_track,
     set_global_telemetry_enabled,
     set_initial_setup_state,
     set_menu_title,
@@ -51,7 +52,7 @@ from services.system_reset import run_factory_reset, run_full_remove
 from services.profile_state import ensure_telegram_profile, get_allowed_protocols, get_profile, get_profile_access_status, profile_store, user_store, utcnow
 from services.release_cleanup import get_release_cleanup_overview, run_release_cleanup
 from services.traffic_usage import get_profile_monthly_usage
-from services.updates import check_for_updates, get_updates_menu_emoji, get_updates_overview, get_version_transition, list_available_versions, schedule_update
+from services.updates import check_for_updates, get_updates_menu_emoji, get_updates_overview, list_available_versions, schedule_update
 from services.xray import get_server_link_status
 from ui.user_views import format_server_access
 from utils.keyboards import kb_admin_alerts_settings_menu, kb_admin_backups_menu, kb_admin_backups_settings_menu, kb_admin_menu, kb_admin_requests_settings_menu, kb_admin_settings_menu, kb_admin_updates_branch_menu, kb_admin_updates_menu, kb_back_to_admin, kb_language_menu, kb_main_menu, kb_profile_minimal, kb_profile_stats, kb_settings_menu
@@ -919,12 +920,22 @@ def _render_admin_updates_version_confirm(lang: str, ref: str) -> tuple[str, Inl
     if not item:
         return _render_admin_updates_versions_page(lang, 0)
     target_version = str(item.get("version") or "")
-    transition = get_version_transition(str(get_updates_overview().get("current_version") or ""), target_version)
+    transition = {
+        "action": str(item.get("action") or "blocked"),
+        "allowed": bool(item.get("allowed")),
+        "reason": str(item.get("reason") or ""),
+        "requires_confirm": bool(item.get("requires_confirm")),
+    }
+    target_label = target_version
+    if str(item.get("kind") or "") == "head":
+        commit = str(item.get("commit") or "").strip()
+        if commit:
+            target_label = f"{target_version} · {commit}"
     lines = [
         t(lang, "admin.updates.version_confirm_title"),
         "",
         t(lang, "admin.updates.version_confirm_current", value=str(get_updates_overview().get("current_version") or "—")),
-        t(lang, "admin.updates.version_confirm_target", value=target_version),
+        t(lang, "admin.updates.version_confirm_target", value=target_label),
     ]
     if transition.get("action") in {"upgrade", "downgrade"}:
         lines.append(t(lang, "admin.updates.version_confirm_action", value=t(lang, f"admin.updates.action_{transition['action']}")))
@@ -1891,7 +1902,21 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
             return
         else:
             versions = list_available_versions(get_updates_branch()).get("versions") or []
-            latest_ref = next((str(item.get("ref")) for item in versions if item.get("action") == "upgrade"), "")
+            branch = get_updates_branch()
+            dev_track = str(overview.get("dev_track") or "tag")
+            latest_ref = ""
+            for item in versions:
+                if item.get("action") != "upgrade":
+                    continue
+                if branch == "dev":
+                    kind = str(item.get("kind") or "tag")
+                    if dev_track == "head" and kind != "head":
+                        continue
+                    if dev_track != "head" and kind == "head":
+                        continue
+                latest_ref = str(item.get("ref") or "")
+                if latest_ref:
+                    break
             if not latest_ref:
                 safe_edit_message(
                     update,
@@ -1928,6 +1953,8 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
             reply_markup=markup,
             parse_mode=PARSE_MODE,
         )
+        if get_updates_branch() == "dev":
+            set_updates_dev_track("head" if ref == "origin/dev" else "tag")
         schedule_update(branch=get_updates_branch(), target_ref=ref)
         safe_edit_message(
             update,

@@ -8,15 +8,13 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from tests.postgres_test_harness import configure_postgres_test_env
+
 TESTS_DIR = os.path.dirname(__file__)
 REPO_ROOT = os.path.abspath(os.path.join(TESTS_DIR, ".."))
 APP_ROOT = os.path.join(REPO_ROOT, "app")
 TMPDIR = tempfile.mkdtemp(prefix="node-plane-test-")
-os.environ.setdefault("NODE_PLANE_BASE_DIR", TMPDIR)
-os.environ.setdefault("SQLITE_DB_PATH", os.path.join(TMPDIR, "bot.sqlite3"))
-os.environ.setdefault("SUBS_DB_PATH", os.path.join(TMPDIR, "subs.json"))
-os.environ.setdefault("USERS_DB_PATH", os.path.join(TMPDIR, "users.json"))
-os.environ.setdefault("WG_DB_PATH", os.path.join(TMPDIR, "wg_db.json"))
+configure_postgres_test_env(TMPDIR)
 if APP_ROOT not in sys.path:
     sys.path.insert(0, APP_ROOT)
 if REPO_ROOT not in sys.path:
@@ -103,6 +101,32 @@ class AdminViewsTests(unittest.TestCase):
             markup = user_profile._admin_updates_markup("en")
         self.assertEqual(markup.inline_keyboard[0][0].text, "🔎 Check")
 
+    def test_admin_updates_version_confirm_allows_dev_head_install(self) -> None:
+        with patch.object(
+            user_profile,
+            "list_available_versions",
+            return_value={
+                "versions": [
+                    {
+                        "version": "HEAD",
+                        "ref": "origin/dev",
+                        "kind": "head",
+                        "commit": "def5678",
+                        "action": "upgrade",
+                        "allowed": True,
+                        "reason": "dev_head",
+                        "requires_confirm": False,
+                    }
+                ]
+            },
+        ), patch.object(user_profile, "get_updates_overview", return_value={"current_version": "0.2.0-alpha.2"}), patch.object(
+            user_profile, "get_updates_branch", return_value="dev"
+        ):
+            text, markup = user_profile._render_admin_updates_version_confirm("en", "origin/dev")
+        self.assertIn("HEAD", text)
+        self.assertIn("def5678", text)
+        self.assertEqual(markup.inline_keyboard[0][0].callback_data, "menu:admin_updates_install:origin/dev")
+
     def test_admin_backups_menu_groups_primary_actions(self) -> None:
         markup = keyboards.kb_admin_backups_menu(lang="en")
         rows = markup.inline_keyboard
@@ -113,7 +137,7 @@ class AdminViewsTests(unittest.TestCase):
     def test_backup_restore_page_uses_short_callback_tokens(self) -> None:
         fake_items = [
             {
-                "name": "bot-2026-04-03T17-13-08-123456Z.sqlite3",
+                "name": "bot-2026-04-03T17-13-08-123456Z.json",
                 "created_at": "2026-04-03T17:13:08Z",
                 "trigger": "manual",
             }

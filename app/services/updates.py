@@ -8,7 +8,7 @@ import threading
 from datetime import datetime, timezone
 from typing import Dict, List
 
-from config import APP_ROOT, APP_SEMVER, APP_VERSION, BASE_DIR, INSTALL_MODE, SOURCE_ROOT
+from config import APP_COMMIT, APP_ROOT, APP_SEMVER, APP_VERSION, BASE_DIR, INSTALL_MODE, SOURCE_ROOT
 from services import app_settings
 from services.backups import maybe_create_pre_action_backup
 
@@ -123,8 +123,8 @@ def _parse_versions_output(output: str, returncode: int) -> Dict[str, object]:
         key = key.strip()
         value = value.strip()
         if key == "version_item":
-            version, ref, kind = (value.split("|", 2) + ["", ""])[:3]
-            items.append({"version": version, "ref": ref, "kind": kind or "tag"})
+            version, ref, kind, commit = (value.split("|", 3) + ["", "", "", ""])[:4]
+            items.append({"version": version, "ref": ref, "kind": kind or "tag", "commit": commit})
             continue
         payload[key] = value
     payload["versions"] = items
@@ -138,6 +138,13 @@ def _version_from_label(label: str) -> str:
     if not raw:
         return ""
     return raw.split(" · ", 1)[0].strip()
+
+
+def _commit_from_label(label: str) -> str:
+    raw = str(label or "").strip()
+    if " · " not in raw:
+        return ""
+    return raw.split(" · ", 1)[1].strip()
 
 
 _SEMVER_RE = re.compile(r"^(?P<major>0|[1-9]\d*)\.(?P<minor>0|[1-9]\d*)\.(?P<patch>0|[1-9]\d*)(?:-(?P<pre>[0-9A-Za-z.-]+))?$")
@@ -211,11 +218,12 @@ def get_version_transition(current: str, target: str) -> Dict[str, str | bool]:
 
 def check_for_updates(timeout: int = 60, branch: str | None = None) -> Dict[str, str]:
     selected_branch = str(branch or app_settings.get_updates_branch()).strip().lower() or "main"
+    prefer = "head" if selected_branch == "dev" and app_settings.get_updates_dev_track() == "head" else "tag"
     try:
         env = os.environ.copy()
         env["NODE_PLANE_SOURCE_DIR"] = _effective_source_root()
         env["NODE_PLANE_APP_DIR"] = APP_ROOT
-        proc = _run_cmd([_script_path("check_updates.sh"), "--branch", selected_branch], timeout=timeout, env=env)
+        proc = _run_cmd([_script_path("check_updates.sh"), "--branch", selected_branch, "--prefer", prefer], timeout=timeout, env=env)
         output = (proc.stdout or "").strip()
         if proc.stderr:
             output = f"{output}\n{proc.stderr.strip()}".strip()
@@ -253,19 +261,37 @@ def list_available_versions(branch: str | None = None, timeout: int = 60) -> Dic
     for item in list(result.get("versions") or []):
         version = str(item.get("version") or "")
         ref = str(item.get("ref") or version)
-        transition = get_version_transition(current_version, version)
+        kind = str(item.get("kind") or "tag")
+        commit = str(item.get("commit") or "")
+        if kind == "head" and selected_branch == "dev":
+            is_current_head = bool(APP_COMMIT) and APP_COMMIT != "unknown" and commit == APP_COMMIT
+            transition = {
+                "allowed": not is_current_head,
+                "action": "current" if is_current_head else "upgrade",
+                "reason": "current" if is_current_head else "dev_head",
+                "requires_confirm": False,
+            }
+        else:
+            transition = get_version_transition(current_version, version)
         versions.append(
             {
                 "version": version,
                 "ref": ref,
-                "kind": str(item.get("kind") or "tag"),
+                "kind": kind,
+                "commit": commit,
                 "action": str(transition.get("action") or "blocked"),
                 "allowed": bool(transition.get("allowed")),
                 "reason": str(transition.get("reason") or ""),
                 "requires_confirm": bool(transition.get("requires_confirm")),
             }
         )
-    versions.sort(key=lambda item: _parse_semver(str(item["version"])) or (0, 0, 0, (0, 0), ""), reverse=True)
+    versions.sort(
+        key=lambda item: (
+            1 if str(item.get("kind") or "") == "head" else 0,
+            _parse_semver(str(item["version"])) or (0, 0, 0, (0, 0), ""),
+        ),
+        reverse=True,
+    )
     result["versions"] = versions
     return result
 
@@ -395,16 +421,24 @@ def get_updates_overview() -> Dict[str, str | bool]:
     local_label = state.get("local_label", APP_VERSION)
     remote_label = state.get("remote_label", "")
     remote_version = state.get("remote_version", "") or _version_from_label(str(remote_label))
+    local_commit = _commit_from_label(str(local_label))
+    remote_commit = _commit_from_label(str(remote_label))
+    upstream_ref = str(state.get("upstream_ref", ""))
+    branch = str(state.get("branch", app_settings.get_updates_branch()))
+    dev_track = str(state.get("dev_track", app_settings.get_updates_dev_track()) or "tag")
     if not remote_label:
         remote_label = remote_version or APP_VERSION
     update_available = state.get("update_available", "0") == "1"
     last_status = state.get("last_status", "never")
-    if remote_version and _compare_versions(remote_version, current_version) <= 0:
+    same_or_older_semver = bool(remote_version) and _compare_versions(remote_version, current_version) <= 0
+    tracks_dev_head = branch == "dev" and dev_track == "head" and upstream_ref == "origin/dev"
+    if same_or_older_semver and not (tracks_dev_head and local_commit and remote_commit and local_commit != remote_commit):
         update_available = False
         if last_status == "available":
             last_status = "up_to_date"
     return {
-        "branch": state.get("branch", app_settings.get_updates_branch()),
+        "branch": branch,
+        "dev_track": dev_track,
         "install_mode": detect_install_mode(),
         "current_version": current_version,
         "current_label": APP_VERSION,
@@ -418,13 +452,15 @@ def get_updates_overview() -> Dict[str, str | bool]:
         "remote_version": remote_version,
         "local_label": local_label,
         "remote_label": remote_label,
-        "upstream_ref": state.get("upstream_ref", ""),
+        "upstream_ref": upstream_ref,
         "last_error": state.get("last_error", ""),
         "last_run_started_at": state.get("last_run_started_at", ""),
         "last_run_finished_at": state.get("last_run_finished_at", ""),
         "last_run_status": state.get("last_run_status", "never"),
         "last_run_log_tail": state.get("last_run_log_tail", ""),
         "last_run_unit": state.get("last_run_unit", ""),
+        "local_commit": local_commit,
+        "remote_commit": remote_commit,
     }
 
 

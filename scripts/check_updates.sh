@@ -8,6 +8,7 @@ INSTALLED_APP_DIR="${NODE_PLANE_APP_DIR:-${NODE_PLANE_BASE_DIR:-$REPO_ROOT}}"
 DEFAULT_BRANCH="${NODE_PLANE_UPDATE_BRANCH:-main}"
 BRANCH=""
 LIST_MODE=0
+PREFER="${NODE_PLANE_UPDATES_PREFER:-}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -21,6 +22,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --list)
       LIST_MODE=1
+      shift
+      ;;
+    --prefer)
+      PREFER="${2:-}"
+      shift 2
+      ;;
+    --prefer=*)
+      PREFER="${1#*=}"
       shift
       ;;
     *)
@@ -115,7 +124,11 @@ if ! git rev-parse --verify "${BRANCH_REF}^{commit}" >/dev/null 2>&1; then
 fi
 
 LATEST_TAG="$(latest_tag_for_branch "$BRANCH" || true)"
-UPSTREAM_REF="${LATEST_TAG:-$BRANCH_REF}"
+if [[ "$BRANCH" == "dev" && "$PREFER" == "head" ]]; then
+  UPSTREAM_REF="$BRANCH_REF"
+else
+  UPSTREAM_REF="${LATEST_TAG:-$BRANCH_REF}"
+fi
 
 LOCAL_COMMIT="$(read_installed_commit)"
 REMOTE_COMMIT="$(git rev-parse --short "${UPSTREAM_REF}")"
@@ -139,6 +152,9 @@ if [[ $LIST_MODE -eq 1 ]]; then
   echo "branch: ${BRANCH}"
   echo "source_dir: ${SOURCE_DIR}"
   echo "current_version: ${LOCAL_VERSION}"
+  if [[ "$BRANCH" == "dev" ]]; then
+    echo "version_item: HEAD|${BRANCH_REF}|head|${REMOTE_COMMIT}"
+  fi
   if [[ "$BRANCH" == "main" ]]; then
     tag_regex="$stable_tag_regex"
   else
@@ -147,7 +163,7 @@ if [[ $LIST_MODE -eq 1 ]]; then
   while IFS= read -r tag; do
     [[ -z "$tag" ]] && continue
     if [[ "$tag" =~ $tag_regex ]]; then
-      echo "version_item: ${tag#v}|${tag}|tag"
+      echo "version_item: ${tag#v}|${tag}|tag|$(git rev-parse --short "${tag}")"
     fi
   done < <(git tag --merged "${BRANCH_REF}" --sort=-version:refname)
   exit 0

@@ -8,6 +8,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from tests.postgres_test_harness import configure_postgres_test_env
+
 TESTS_DIR = os.path.dirname(__file__)
 REPO_ROOT = os.path.abspath(os.path.join(TESTS_DIR, ".."))
 APP_ROOT = os.path.join(REPO_ROOT, "app")
@@ -21,7 +23,7 @@ class UpdatesTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmpdir = tempfile.TemporaryDirectory()
         base = self.tmpdir.name
-        os.environ["NODE_PLANE_BASE_DIR"] = base
+        configure_postgres_test_env(base)
         os.environ["NODE_PLANE_APP_DIR"] = base
         os.environ["NODE_PLANE_SHARED_DIR"] = base
         os.environ["NODE_PLANE_SOURCE_DIR"] = "/opt/node-plane-src"
@@ -71,6 +73,21 @@ class UpdatesTests(unittest.TestCase):
         self.assertEqual(overview["upstream_ref"], "origin/main")
         self.assertEqual(overview["branch"], "dev")
 
+    def test_check_for_updates_uses_tag_preference_for_dev_by_default(self) -> None:
+        proc = SimpleNamespace(returncode=0, stdout="CHECK_UPDATES|up_to_date\n", stderr="")
+        with patch("services.updates.subprocess.run", return_value=proc) as mocked:
+            self.updates.check_for_updates(branch="dev")
+        args = mocked.call_args.args[0]
+        self.assertEqual(args[-2:], ["--prefer", "tag"])
+
+    def test_check_for_updates_uses_head_preference_when_dev_track_is_head(self) -> None:
+        self.app_settings.set_updates_dev_track("head")
+        proc = SimpleNamespace(returncode=0, stdout="CHECK_UPDATES|up_to_date\n", stderr="")
+        with patch("services.updates.subprocess.run", return_value=proc) as mocked:
+            self.updates.check_for_updates(branch="dev")
+        args = mocked.call_args.args[0]
+        self.assertEqual(args[-2:], ["--prefer", "head"])
+
     def test_check_for_updates_records_error_state(self) -> None:
         proc = SimpleNamespace(
             returncode=1,
@@ -100,7 +117,10 @@ class UpdatesTests(unittest.TestCase):
 
     def test_schedule_update_records_running_state(self) -> None:
         proc = SimpleNamespace(returncode=0, stdout="Running as unit node-plane-update-1.service.\n", stderr="")
-        with patch("services.updates.subprocess.run", return_value=proc):
+        with patch("services.updates.subprocess.run", return_value=proc), patch(
+            "services.updates.maybe_create_pre_action_backup",
+            return_value={"status": "success"},
+        ), patch("services.updates.is_manual_update_supported", return_value=True):
             result = self.updates.schedule_update(branch="dev", target_ref="v0.2.0-alpha.1")
         self.assertEqual(result["status"], "running")
         state = self.app_settings.get_update_state()
@@ -149,6 +169,61 @@ class UpdatesTests(unittest.TestCase):
         self.assertEqual(actions["0.2.0-alpha.2"], "current")
         self.assertEqual(actions["0.2.0-alpha.3"], "upgrade")
         self.assertEqual(actions["0.2.0"], "upgrade")
+
+    def test_list_available_versions_includes_dev_head_and_marks_it_upgrade_when_commit_differs(self) -> None:
+        proc = SimpleNamespace(
+            returncode=0,
+            stdout=(
+                "LIST_VERSIONS|ok\n"
+                "branch: dev\n"
+                "current_version: 0.2.0-alpha.2\n"
+                "version_item: HEAD|origin/dev|head|def5678\n"
+                "version_item: 0.2.0-alpha.2|v0.2.0-alpha.2|tag|abc1234\n"
+            ),
+            stderr="",
+        )
+        with patch("services.updates.subprocess.run", return_value=proc), patch.object(self.updates, "APP_COMMIT", "abc1234"):
+            result = self.updates.list_available_versions(branch="dev")
+        self.assertEqual(result["versions"][0]["version"], "HEAD")
+        self.assertEqual(result["versions"][0]["ref"], "origin/dev")
+        self.assertEqual(result["versions"][0]["kind"], "head")
+        self.assertEqual(result["versions"][0]["action"], "upgrade")
+        self.assertTrue(result["versions"][0]["allowed"])
+
+    def test_dev_commit_drift_does_not_mark_update_available_when_dev_track_is_tag(self) -> None:
+        self.app_settings.record_update_check(
+            {
+                "checked_at": "2026-04-01T00:00:00Z",
+                "status": "available",
+                "branch": "dev",
+                "upstream_ref": "origin/dev",
+                "local_version": "0.2.0-alpha.2",
+                "remote_version": "0.2.0-alpha.2",
+                "local_label": "0.2.0-alpha.2 · abc1234",
+                "remote_label": "0.2.0-alpha.2 · def5678",
+            }
+        )
+        overview = self.updates.get_updates_overview()
+        self.assertFalse(overview["update_available"])
+        self.assertEqual(overview["last_status"], "up_to_date")
+
+    def test_dev_head_overview_keeps_update_available_when_semver_matches_but_commit_differs(self) -> None:
+        self.app_settings.set_updates_dev_track("head")
+        self.app_settings.record_update_check(
+            {
+                "checked_at": "2026-04-01T00:00:00Z",
+                "status": "available",
+                "branch": "dev",
+                "upstream_ref": "origin/dev",
+                "local_version": "0.2.0-alpha.2",
+                "remote_version": "0.2.0-alpha.2",
+                "local_label": "0.2.0-alpha.2 · abc1234",
+                "remote_label": "0.2.0-alpha.2 · def5678",
+            }
+        )
+        overview = self.updates.get_updates_overview()
+        self.assertTrue(overview["update_available"])
+        self.assertEqual(overview["last_status"], "available")
 
     def test_get_version_transition_allows_major_upgrade_and_blocks_major_downgrade(self) -> None:
         major_upgrade = self.updates.get_version_transition("0.7.1", "1.0.3")
