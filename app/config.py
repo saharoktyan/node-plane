@@ -4,6 +4,34 @@ import os
 import subprocess
 
 
+def _candidate_shared_root() -> str:
+    install_root = os.getenv("NODE_PLANE_BASE_DIR", "/opt/node-plane").strip() or "/opt/node-plane"
+    app_root = os.getenv("NODE_PLANE_APP_DIR", install_root).strip() or install_root
+    return os.getenv("NODE_PLANE_SHARED_DIR", app_root).strip() or app_root
+
+
+def _load_runtime_env_file() -> None:
+    env_path = os.path.join(_candidate_shared_root(), ".env")
+    if not os.path.isfile(env_path):
+        return
+    try:
+        with open(env_path, "r", encoding="utf-8") as fh:
+            for raw_line in fh:
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                key = key.strip()
+                if not key:
+                    continue
+                os.environ.setdefault(key, value.strip())
+    except OSError:
+        return
+
+
+_load_runtime_env_file()
+
+
 def _env_str(name: str, default: str = "") -> str:
     return os.getenv(name, default).strip()
 
@@ -42,6 +70,11 @@ PROFILE_STATE_JSON_PATH = _env_str("PROFILE_STATE_JSON_PATH", _env_str("SUBS_DB_
 TELEGRAM_USERS_JSON_PATH = _env_str("TELEGRAM_USERS_JSON_PATH", _env_str("USERS_DB_PATH", f"{DATA_DIR}/telegram_users.json"))
 AWG_JSON_PATH = _env_str("AWG_JSON_PATH", _env_str("WG_DB_PATH", f"{DATA_DIR}/awg.json"))
 SQLITE_DB_PATH = _env_str("SQLITE_DB_PATH", f"{DATA_DIR}/bot.sqlite3")
+DB_BACKEND = _env_str("DB_BACKEND", "postgres").lower()
+POSTGRES_DSN = _env_str("POSTGRES_DSN")
+
+if DB_BACKEND not in {"sqlite", "postgres"}:
+    raise ValueError(f"Unsupported DB_BACKEND: {DB_BACKEND}")
 
 # Legacy aliases kept only so the one-time JSON migration script can still consume
 # older env files and paths without changes.

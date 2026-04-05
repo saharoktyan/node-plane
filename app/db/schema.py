@@ -4,6 +4,8 @@ import re
 import sqlite3
 from typing import Iterable
 
+from db.postgres_schema import ensure_schema as ensure_postgres_schema
+
 
 BASE_DDL: Iterable[str] = (
     """
@@ -490,7 +492,7 @@ def _migrate_traffic_samples_table(conn: sqlite3.Connection) -> None:
     )
 
 
-def ensure_schema(conn: sqlite3.Connection) -> None:
+def ensure_sqlite_schema(conn: sqlite3.Connection) -> None:
     for ddl in BASE_DDL:
         conn.execute(ddl)
     _migrate_profile_state_table(conn)
@@ -501,8 +503,19 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     _migrate_profile_server_state_table(conn)
     _migrate_traffic_samples_table(conn)
     conn.execute(
-        "INSERT OR REPLACE INTO schema_meta(key, value) VALUES ('schema_version', '5')"
+        """
+        INSERT INTO schema_meta(key, value)
+        VALUES ('schema_version', '5')
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        """
     )
     conn.execute(
         "INSERT OR IGNORE INTO schema_meta(key, value) VALUES ('telemetry_enabled_global', '0')"
     )
+
+
+def ensure_schema(conn) -> None:
+    if getattr(conn, "backend_name", "") == "postgres":
+        ensure_postgres_schema(conn)
+        return
+    ensure_sqlite_schema(conn)

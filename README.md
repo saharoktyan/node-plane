@@ -23,7 +23,7 @@ The recommended way to deploy Node Plane is through the bundled `install.sh` wor
 - supports `Xray Reality (VLESS)` and `AmneziaWG`
 - creates and maintains user profiles with access control
 - delivers connection material to end users through the bot
-- stores control-plane state in SQLite
+- stores control-plane state in PostgreSQL
 - includes diagnostics, telemetry, updates, rollback, and release cleanup
 - supports Russian and English UI
 
@@ -129,7 +129,7 @@ git clone git@github.com:seventh7dev/node-plane.git node-plane-src
 - create named profiles
 - assign one or more access methods to a profile
 - control access approval
-- keep user and profile state in SQLite
+- keep user and profile state in PostgreSQL
 
 ### User Delivery
 
@@ -142,6 +142,7 @@ git clone git@github.com:seventh7dev/node-plane.git node-plane-src
 - telemetry and traffic usage reporting
 - health checks and diagnostics
 - scripted updates with rollback support
+- automatic Docker and PostgreSQL runtime provisioning during install/update
 - release cleanup helpers
 
 ## Operator Experience
@@ -160,7 +161,7 @@ That makes it useful not just as a deploy-once tool, but as an ongoing control p
 ```text
 app/       Bot code, handlers, services, storage, and runtime integration
 scripts/   Install, healthcheck, update, rollback, and release helpers
-tests/     Unit tests for bot flows and storage/runtime behavior
+tests/     Unit tests for bot flows, migration, and runtime behavior
 ```
 
 Installation, environment configuration, updates, and maintenance commands are documented in [INSTALL.md](INSTALL.md).

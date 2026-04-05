@@ -15,7 +15,7 @@ This guide covers installation and operational basics for both supported Node Pl
 - Python `3.11` or `3.12`
 - Telegram bot token
 - your Telegram numeric user id in `ADMIN_IDS`
-- Docker on the bot host if you use `Portable Mode`
+- Docker will be installed automatically on supported Linux hosts when Node Plane needs it for runtime PostgreSQL
 - SSH access to target nodes if you manage remote hosts
 
 ## Choose A Mode
@@ -74,7 +74,10 @@ ADMIN_IDS=123456789
 NODE_PLANE_BASE_DIR=/opt/node-plane
 NODE_PLANE_APP_DIR=/opt/node-plane/current
 NODE_PLANE_SHARED_DIR=/opt/node-plane/shared
+DB_BACKEND=postgres
 ```
+
+`POSTGRES_DSN` is optional for the installer path. If it is empty, `install.sh` will try to install Docker and provision a local PostgreSQL container automatically.
 
 Recommended layout:
 
@@ -115,7 +118,7 @@ You can later add more remote nodes over `ssh` from the same bot.
 
 Use this only if you want to inspect or reproduce what the installer does.
 
-1. Prepare `.env` with `BOT_TOKEN`, `ADMIN_IDS`, and the `NODE_PLANE_*` paths.
+1. Prepare `.env` with `BOT_TOKEN`, `ADMIN_IDS`, and the `NODE_PLANE_*` paths. `POSTGRES_DSN` is optional if you want the script to auto-provision PostgreSQL.
 2. Create the release layout under the install root.
 3. Create a Python virtualenv inside the active release.
 4. Install dependencies from `requirements.txt`.
@@ -151,7 +154,10 @@ ADMIN_IDS=123456789
 SSH_KEY=/root/.ssh/id_ed25519
 NODE_PLANE_IMAGE_REPO=ghcr.io/seventh7dev/node-plane
 NODE_PLANE_IMAGE_TAG=<release-tag>
+DB_BACKEND=postgres
 ```
+
+`Portable Mode` can also leave `POSTGRES_DSN` empty. The installer will populate it automatically for the bundled `postgres` compose service.
 
 ### Start the bot
 
@@ -203,6 +209,8 @@ Key variables:
 - `NODE_PLANE_SHARED_DIR`: shared state path, usually `/opt/node-plane/shared`
 - `NODE_PLANE_SOURCE_DIR`: source checkout path
 - `NODE_PLANE_INSTALL_MODE`: `simple` or `portable`
+- `DB_BACKEND`: should be `postgres` for `0.4`
+- `POSTGRES_DSN`: PostgreSQL DSN used for runtime storage; optional if you let the installer/update path auto-provision PostgreSQL
 - `SSH_KEY`: SSH private key used for remote node management
 - `NODE_PLANE_IMAGE_REPO`: GHCR image repo for `Portable Mode`
 - `NODE_PLANE_IMAGE_TAG`: image tag for `Portable Mode`
@@ -243,6 +251,7 @@ Maintenance:
 - do not place the git checkout inside `NODE_PLANE_BASE_DIR` in `Simple Mode`; the installer expects a separate source checkout and release root
 - do not try to register the current Docker host as a `local` node in `Portable Mode`; use `ssh`
 - do not leave `BOT_TOKEN=replace_me` or `ADMIN_IDS=123456789` in `.env`
+- if `POSTGRES_DSN` is empty, make sure the host allows `install.sh` or `update.sh` to install Docker and start the runtime PostgreSQL container
 - make sure the SSH key in `SSH_KEY` is readable by the process that runs the bot
 - if `Portable Mode` uses GHCR images, confirm that `NODE_PLANE_IMAGE_TAG` actually exists before running updates
 - if first bootstrap fails, rerun `Probe` and fix the reported host issues before retrying `Bootstrap`

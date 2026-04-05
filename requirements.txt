@@ -5,3 +5,4 @@ setuptools==80.9.0
 filelock==3.19.1
 qrcode==8.2
 pillow==11.3.0
+psycopg[binary]==3.2.13

@@ -1,6 +1,22 @@
 version: "3.9"
 
 services:
+  postgres:
+    image: ${NODE_PLANE_POSTGRES_IMAGE:-postgres:16-alpine}
+    container_name: ${NODE_PLANE_POSTGRES_CONTAINER:-node-plane-postgres}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${NODE_PLANE_POSTGRES_DB:-node_plane}
+      POSTGRES_USER: ${NODE_PLANE_POSTGRES_USER:-node_plane}
+      POSTGRES_PASSWORD: ${NODE_PLANE_POSTGRES_PASSWORD:-node_plane}
+    volumes:
+      - ./postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${NODE_PLANE_POSTGRES_USER:-node_plane} -d ${NODE_PLANE_POSTGRES_DB:-node_plane}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
   node-plane:
     image: ${NODE_PLANE_IMAGE_REPO:-node-plane}:${NODE_PLANE_IMAGE_TAG:-local}
     build:
@@ -12,13 +28,20 @@ services:
       - .env
     environment:
       NODE_PLANE_BASE_DIR: /opt/node-plane
+      NODE_PLANE_APP_DIR: /opt/node-plane
+      NODE_PLANE_SHARED_DIR: /opt/node-plane
       NODE_PLANE_SOURCE_DIR: /opt/node-plane
       NODE_PLANE_INSTALL_MODE: portable
       TZ: UTC
     volumes:
       - ./data:/opt/node-plane/data
+      - ./backups:/opt/node-plane/backups
+      - ./ssh:/opt/node-plane/ssh
       - ./ssh:/root/.ssh
     working_dir: /opt/node-plane/app
     command: sh -c "python manage_db.py init && python main.py"
     init: true
     stop_grace_period: 30s
+    depends_on:
+      postgres:
+        condition: service_healthy

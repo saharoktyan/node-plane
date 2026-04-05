@@ -3,6 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+source "${SCRIPT_DIR}/postgres_runtime.sh"
 
 MODE="${MODE:-auto}"
 TARGET_BRANCH="${NODE_PLANE_UPDATE_BRANCH:-}"
@@ -11,6 +12,21 @@ SKIP_PULL=0
 SKIP_DEPS=0
 SKIP_RESTART=0
 HEALTH_TIMEOUT=30
+CURRENT_STEP="startup"
+
+set_step() {
+  CURRENT_STEP="$1"
+}
+
+on_error() {
+  local exit_code="$1"
+  echo >&2
+  echo "Update failed during step: ${CURRENT_STEP}" >&2
+  echo "Failing command: ${BASH_COMMAND}" >&2
+  echo "Exit code: ${exit_code}" >&2
+}
+
+trap 'on_error $?' ERR
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -256,6 +272,7 @@ fetch_code() {
   fi
   need_cmd git
   echo "Fetching git refs..."
+  set_step "fetch git refs"
   git fetch --quiet --tags origin
 }
 
@@ -406,6 +423,8 @@ update_simple() {
   shared_dir="${_paths[2]}"
   releases_dir="${_paths[3]}"
   current_link="${_paths[4]}"
+  local runtime_env_file db_backend postgres_dsn sqlite_db_path
+  runtime_env_file="${shared_dir}/.env"
 
   local previous_release new_release_name new_release_dir
   local target_ref
@@ -417,6 +436,7 @@ update_simple() {
   mkdir -p "$releases_dir" "${shared_dir}/data" "${shared_dir}/ssh"
   sync_shared_env "$shared_dir"
 
+  set_step "export release tree"
   echo "Preparing new release:"
   echo "  ${new_release_dir}"
   echo "From ref:"
@@ -424,15 +444,73 @@ update_simple() {
   export_release_tree "$new_release_dir" "$target_ref"
 
   echo "Installing Python runtime for new release..."
+  set_step "create virtualenv"
   python3 -m venv "${new_release_dir}/.venv"
+  set_step "install python build tooling"
   "${new_release_dir}/.venv/bin/python" -m pip install --upgrade pip setuptools wheel
+  set_step "install python dependencies"
   "${new_release_dir}/.venv/bin/python" -m pip install -r "${new_release_dir}/requirements.txt"
 
   echo "Applying database/schema init..."
+  set_step "load database runtime configuration"
+  db_backend="$(read_env_value DB_BACKEND "$runtime_env_file")"
+  postgres_dsn="$(read_env_value POSTGRES_DSN "$runtime_env_file")"
+  sqlite_db_path="$(read_env_value SQLITE_DB_PATH "$runtime_env_file")"
+  if [[ -z "$db_backend" || "$db_backend" == "sqlite" ]]; then
+    db_backend="postgres"
+  fi
+  if [[ -z "$sqlite_db_path" ]]; then
+    sqlite_db_path="${shared_dir}/data/bot.sqlite3"
+  fi
+  if [[ -z "$postgres_dsn" ]]; then
+    set_step "auto-provision local postgresql runtime"
+    auto_provision_simple_postgres "$runtime_env_file" "$shared_dir" 1
+    postgres_dsn="$(read_env_value POSTGRES_DSN "$runtime_env_file")"
+    if [[ -z "$postgres_dsn" ]]; then
+      echo "POSTGRES_DSN is required for 0.4 runtime updates." >&2
+      exit 1
+    fi
+  fi
+
   NODE_PLANE_BASE_DIR="${base_dir}" \
   NODE_PLANE_APP_DIR="${new_release_dir}" \
   NODE_PLANE_SHARED_DIR="${shared_dir}" \
+  DB_BACKEND="${db_backend}" \
+  POSTGRES_DSN="${postgres_dsn}" \
+  SQLITE_DB_PATH="${sqlite_db_path}" \
   "${new_release_dir}/.venv/bin/python" "${new_release_dir}/app/manage_db.py" init
+
+  if [[ -f "$sqlite_db_path" ]]; then
+    local migrate_output
+    echo "Migrating SQLite data into PostgreSQL..."
+    set_step "migrate sqlite to postgresql"
+    migrate_output="$(
+      NODE_PLANE_BASE_DIR="${base_dir}" \
+      NODE_PLANE_APP_DIR="${new_release_dir}" \
+      NODE_PLANE_SHARED_DIR="${shared_dir}" \
+      DB_BACKEND="${db_backend}" \
+      POSTGRES_DSN="${postgres_dsn}" \
+      SQLITE_DB_PATH="${sqlite_db_path}" \
+      "${new_release_dir}/.venv/bin/python" "${new_release_dir}/app/manage_db.py" migrate-to-postgres --sqlite-path "$sqlite_db_path"
+    )"
+    printf '%s\n' "$migrate_output"
+
+    if printf '%s\n' "$migrate_output" | grep -q '^MIGRATE|success$'; then
+      echo "Verifying PostgreSQL migration..."
+      set_step "verify sqlite to postgresql migration"
+      NODE_PLANE_BASE_DIR="${base_dir}" \
+      NODE_PLANE_APP_DIR="${new_release_dir}" \
+      NODE_PLANE_SHARED_DIR="${shared_dir}" \
+      DB_BACKEND="${db_backend}" \
+      POSTGRES_DSN="${postgres_dsn}" \
+      SQLITE_DB_PATH="${sqlite_db_path}" \
+      "${new_release_dir}/.venv/bin/python" "${new_release_dir}/app/manage_db.py" verify-migration --sqlite-path "$sqlite_db_path"
+    else
+      echo "Skipping PostgreSQL verification because legacy SQLite import was not applied."
+    fi
+  else
+    echo "No SQLite source found at ${sqlite_db_path}; skipping SQLite -> PostgreSQL migration."
+  fi
 
   if [[ $SKIP_RESTART -eq 1 ]]; then
     echo "Skipping service restart"
@@ -442,9 +520,11 @@ update_simple() {
   fi
 
   echo "Switching current release..."
+  set_step "activate new release"
   ln -sfn "$new_release_dir" "$current_link"
 
   echo "Restarting node-plane.service..."
+  set_step "restart node-plane.service"
   sudo systemctl daemon-reload
   if ! sudo systemctl restart node-plane; then
     echo "Service restart failed immediately."
@@ -458,12 +538,18 @@ update_simple() {
   fi
 
   echo "Updated release did not become healthy within ${HEALTH_TIMEOUT}s."
+  set_step "wait for node-plane.service health"
   sudo journalctl -u node-plane -n 50 --no-pager || true
   rollback_simple "$previous_release" "$current_link" "$new_release_dir"
 }
 
 update_portable() {
-  need_cmd docker
+  set_step "ensure docker is installed"
+  install_docker_if_missing
+  set_step "ensure docker compose is installed"
+  install_docker_compose_if_missing
+  set_step "normalize portable database runtime configuration"
+  ensure_portable_postgres_env ".env"
 
   local image_repo image_tag previous_tag new_tag
   image_repo="$(read_env_value NODE_PLANE_IMAGE_REPO)"
@@ -480,6 +566,7 @@ update_portable() {
   if [[ "$image_repo" == "node-plane" && "$image_tag" == "local" ]]; then
     if [[ $SKIP_RESTART -eq 0 ]]; then
       echo "Rebuilding and restarting local Docker Compose deployment..."
+      set_step "docker compose build and restart"
       portable_compose up -d --build
       if wait_for_container "$HEALTH_TIMEOUT"; then
         echo "Portable local-build deployment is healthy."
@@ -499,6 +586,7 @@ update_portable() {
   set_env_value_in_file ".env" "NODE_PLANE_IMAGE_REPO" "$image_repo"
   set_env_value_in_file ".env" "NODE_PLANE_IMAGE_TAG" "$new_tag"
 
+  set_step "pull portable image"
   if ! docker pull "${image_repo}:${new_tag}"; then
     echo "Failed to pull ${image_repo}:${new_tag}" >&2
     set_env_value_in_file ".env" "NODE_PLANE_IMAGE_TAG" "$previous_tag"
@@ -511,6 +599,7 @@ update_portable() {
   fi
 
   echo "Restarting portable Docker Compose deployment..."
+  set_step "restart portable docker compose deployment"
   portable_compose up -d
   if wait_for_container "$HEALTH_TIMEOUT"; then
     echo "Portable registry deployment is healthy."

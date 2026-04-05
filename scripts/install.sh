@@ -3,12 +3,28 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+source "${SCRIPT_DIR}/postgres_runtime.sh"
 
 MODE="${MODE:-}"
 NON_INTERACTIVE=0
 AUTO_INSTALL_SYSTEMD=0
 UPDATE_BRANCH="${NODE_PLANE_UPDATE_BRANCH:-}"
 FORCE_REINSTALL=0
+CURRENT_STEP="startup"
+
+set_step() {
+  CURRENT_STEP="$1"
+}
+
+on_error() {
+  local exit_code="$1"
+  echo >&2
+  echo "Install failed during step: ${CURRENT_STEP}" >&2
+  echo "Failing command: ${BASH_COMMAND}" >&2
+  echo "Exit code: ${exit_code}" >&2
+}
+
+trap 'on_error $?' ERR
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -331,8 +347,10 @@ configure_env() {
   ensure_env_file
   ensure_common_dirs
   fetch_origin_refs
+  set_step "read installer environment"
 
   local bot_token admin_ids base_dir app_dir shared_dir source_dir install_mode ssh_key image_repo image_tag update_branch
+  local db_backend postgres_dsn sqlite_db_path
   bot_token="$(read_env_value BOT_TOKEN)"
   admin_ids="$(read_env_value ADMIN_IDS)"
   base_dir="$(read_env_value NODE_PLANE_BASE_DIR)"
@@ -343,8 +361,19 @@ configure_env() {
   ssh_key="$(read_env_value SSH_KEY)"
   image_repo="$(read_env_value NODE_PLANE_IMAGE_REPO)"
   image_tag="$(read_env_value NODE_PLANE_IMAGE_TAG)"
+  db_backend="$(read_env_value DB_BACKEND)"
+  postgres_dsn="$(read_env_value POSTGRES_DSN)"
+  sqlite_db_path="$(read_env_value SQLITE_DB_PATH)"
   update_branch="${UPDATE_BRANCH:-$(read_env_value NODE_PLANE_UPDATE_BRANCH)}"
   update_branch="$(normalize_update_branch "$update_branch")"
+
+  if [[ -z "$db_backend" || "$db_backend" == "sqlite" ]]; then
+    db_backend="postgres"
+  fi
+  if [[ "$db_backend" != "postgres" ]]; then
+    echo "Unsupported DB_BACKEND for 0.4: ${db_backend}" >&2
+    exit 1
+  fi
 
   if [[ -z "$bot_token" || "$bot_token" == "replace_me" ]]; then
     bot_token="$(prompt_value "Enter BOT_TOKEN" "")"
@@ -429,6 +458,9 @@ configure_env() {
     set_env_value NODE_PLANE_SOURCE_DIR "$REPO_ROOT"
     set_env_value NODE_PLANE_INSTALL_MODE "$install_mode"
     set_env_value NODE_PLANE_UPDATE_BRANCH "$update_branch"
+    if [[ -z "$sqlite_db_path" ]]; then
+      sqlite_db_path="${shared_dir}/data/bot.sqlite3"
+    fi
   else
     install_mode="portable"
     if [[ -n "$base_dir" && $NON_INTERACTIVE -eq 0 ]]; then
@@ -461,6 +493,15 @@ configure_env() {
 
   set_env_value BOT_TOKEN "$bot_token"
   set_env_value ADMIN_IDS "$admin_ids"
+  set_env_value DB_BACKEND "$db_backend"
+  if [[ -n "$sqlite_db_path" ]]; then
+    set_env_value SQLITE_DB_PATH "$sqlite_db_path"
+  fi
+  if [[ "$MODE" == "portable" ]]; then
+    ensure_portable_postgres_env ".env"
+  elif [[ -n "$postgres_dsn" ]]; then
+    set_env_value POSTGRES_DSN "$postgres_dsn"
+  fi
 }
 
 validate_simple_layout() {
@@ -504,6 +545,7 @@ validate_simple_layout() {
 run_simple_install() {
   local service_name="node-plane"
   local base_dir app_dir shared_dir releases_dir current_link new_release_dir release_name install_ref install_version install_commit reused_release
+  local runtime_env_file db_backend postgres_dsn sqlite_db_path
   base_dir="$(read_env_value NODE_PLANE_BASE_DIR)"
   app_dir="$(read_env_value NODE_PLANE_APP_DIR)"
   shared_dir="$(read_env_value NODE_PLANE_SHARED_DIR)"
@@ -530,10 +572,12 @@ run_simple_install() {
   reused_release=0
 
   need_cmd python3
+  set_step "validate python version"
   ensure_supported_python
 
   mkdir -p "${releases_dir}" "${shared_dir}/data" "${shared_dir}/ssh"
   sync_shared_env "$shared_dir"
+  runtime_env_file="${shared_dir}/.env"
   if [[ $FORCE_REINSTALL -eq 0 ]] && release_matches_target "$current_link" "$install_version" "$install_commit"; then
     new_release_dir="$(cd "$current_link" && pwd)"
     reused_release=1
@@ -541,15 +585,72 @@ run_simple_install() {
     reused_release=1
   else
     rm -rf "$new_release_dir"
+    set_step "export release tree"
     export_release_tree "$new_release_dir" "$install_ref"
 
+    set_step "create virtualenv"
     python3 -m venv "${new_release_dir}/.venv"
+    set_step "install python build tooling"
     "${new_release_dir}/.venv/bin/python" -m pip install --upgrade pip setuptools wheel
+    set_step "install python dependencies"
     "${new_release_dir}/.venv/bin/python" -m pip install -r "${new_release_dir}/requirements.txt"
+    set_step "load database runtime configuration"
+    db_backend="$(read_env_value DB_BACKEND "$runtime_env_file")"
+    postgres_dsn="$(read_env_value POSTGRES_DSN "$runtime_env_file")"
+    sqlite_db_path="$(read_env_value SQLITE_DB_PATH "$runtime_env_file")"
+    if [[ -z "$db_backend" || "$db_backend" == "sqlite" ]]; then
+      db_backend="postgres"
+    fi
+    if [[ -z "$sqlite_db_path" ]]; then
+      sqlite_db_path="${shared_dir}/data/bot.sqlite3"
+    fi
+    if [[ -z "$postgres_dsn" ]]; then
+      set_step "auto-provision local postgresql runtime"
+      auto_provision_simple_postgres "$runtime_env_file" "$shared_dir" 1
+      postgres_dsn="$(read_env_value POSTGRES_DSN "$runtime_env_file")"
+      if [[ -z "$postgres_dsn" ]]; then
+        echo "POSTGRES_DSN is required for 0.4 installs." >&2
+        exit 1
+      fi
+    fi
     NODE_PLANE_BASE_DIR="${base_dir}" \
     NODE_PLANE_APP_DIR="${new_release_dir}" \
     NODE_PLANE_SHARED_DIR="${shared_dir}" \
+    DB_BACKEND="${db_backend}" \
+    POSTGRES_DSN="${postgres_dsn}" \
+    SQLITE_DB_PATH="${sqlite_db_path}" \
     "${new_release_dir}/.venv/bin/python" "${new_release_dir}/app/manage_db.py" init
+    if [[ -f "$sqlite_db_path" ]]; then
+      local migrate_output
+      echo "Migrating SQLite data into PostgreSQL..."
+      set_step "migrate sqlite to postgresql"
+      migrate_output="$(
+        NODE_PLANE_BASE_DIR="${base_dir}" \
+        NODE_PLANE_APP_DIR="${new_release_dir}" \
+        NODE_PLANE_SHARED_DIR="${shared_dir}" \
+        DB_BACKEND="${db_backend}" \
+        POSTGRES_DSN="${postgres_dsn}" \
+        SQLITE_DB_PATH="${sqlite_db_path}" \
+        "${new_release_dir}/.venv/bin/python" "${new_release_dir}/app/manage_db.py" migrate-to-postgres --sqlite-path "$sqlite_db_path"
+      )"
+      printf '%s\n' "$migrate_output"
+
+      if printf '%s\n' "$migrate_output" | grep -q '^MIGRATE|success$'; then
+        echo "Verifying PostgreSQL migration..."
+        set_step "verify sqlite to postgresql migration"
+        NODE_PLANE_BASE_DIR="${base_dir}" \
+        NODE_PLANE_APP_DIR="${new_release_dir}" \
+        NODE_PLANE_SHARED_DIR="${shared_dir}" \
+        DB_BACKEND="${db_backend}" \
+        POSTGRES_DSN="${postgres_dsn}" \
+        SQLITE_DB_PATH="${sqlite_db_path}" \
+        "${new_release_dir}/.venv/bin/python" "${new_release_dir}/app/manage_db.py" verify-migration --sqlite-path "$sqlite_db_path"
+      else
+        echo "Skipping PostgreSQL verification because legacy SQLite import was not applied."
+      fi
+    else
+      echo "No SQLite source found at ${sqlite_db_path}; skipping SQLite -> PostgreSQL migration."
+    fi
   fi
 
   ln -sfn "$new_release_dir" "$current_link"
@@ -634,6 +735,7 @@ install_systemd_unit() {
   local unit_path="$1"
   local service_name="node-plane"
   need_cmd sudo
+  set_step "install systemd unit"
   sudo cp "$unit_path" "/etc/systemd/system/${service_name}.service"
   sudo systemctl daemon-reload
   if ! sudo systemctl enable --now "${service_name}"; then
@@ -648,7 +750,10 @@ install_systemd_unit() {
 }
 
 run_portable_install() {
-  need_cmd docker
+  set_step "ensure docker is installed"
+  install_docker_if_missing
+  set_step "ensure docker compose is installed"
+  install_docker_compose_if_missing
   local image_repo image_tag current_container current_image_ref current_repo current_tag
   image_repo="$(read_env_value NODE_PLANE_IMAGE_REPO)"
   image_tag="$(read_env_value NODE_PLANE_IMAGE_TAG)"
@@ -680,15 +785,19 @@ run_portable_install() {
   fi
   if docker compose version >/dev/null 2>&1; then
     if [[ "${image_repo:-node-plane}" == "node-plane" && "${image_tag:-local}" == "local" ]]; then
+      set_step "docker compose build and start"
       docker compose up -d --build
     else
+      set_step "docker compose pull and start"
       docker compose pull
       docker compose up -d
     fi
   elif command -v docker-compose >/dev/null 2>&1; then
     if [[ "${image_repo:-node-plane}" == "node-plane" && "${image_tag:-local}" == "local" ]]; then
+      set_step "docker-compose build and start"
       docker-compose up -d --build
     else
+      set_step "docker-compose pull and start"
       docker-compose pull
       docker-compose up -d
     fi
