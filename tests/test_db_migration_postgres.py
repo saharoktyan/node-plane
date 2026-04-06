@@ -132,6 +132,25 @@ class SQLiteToRealPostgresMigrationTests(unittest.TestCase):
             row = conn.execute("SELECT value FROM schema_meta WHERE key = ?", ("storage_backend",)).fetchone()
             self.assertEqual(str(row["value"]), "postgres")
 
+    def test_migrate_without_alert_state_table_against_real_postgres(self) -> None:
+        sqlite_without_alerts = os.path.join(self.tmpdir.name, "source-no-alerts.sqlite3")
+        source_db = SQLiteDB(sqlite_without_alerts)
+        with source_db.transaction() as conn:
+            ensure_schema(conn)
+            conn.execute(
+                "INSERT INTO profiles(name, created_at, updated_at) VALUES (?, ?, ?)",
+                ("bob", "2026-02-01T00:00:00Z", "2026-02-01T00:00:00Z"),
+            )
+
+        dest_db = PostgresDB(self.test_dsn)
+        result = migrate_sqlite_to_backend(sqlite_without_alerts, dest_db)
+        self.assertEqual(result["status"], "success")
+        self.assertFalse(result["included_alert_state"])
+
+        verify = verify_sqlite_to_backend(sqlite_without_alerts, dest_db)
+        self.assertEqual(verify["status"], "success")
+        self.assertEqual(verify["counts"]["profiles"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

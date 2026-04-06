@@ -171,6 +171,28 @@ def _sqlite_table_exists(conn: sqlite3.Connection, name: str) -> bool:
 
 
 def _generic_table_exists(conn, name: str) -> bool:
+    backend_name = str(getattr(conn, "backend_name", "") or "").lower()
+    if backend_name == "postgres":
+        try:
+            row = conn.execute("SELECT to_regclass(?) AS table_name", (name,)).fetchone()
+            return row is not None and row.get("table_name") is not None
+        except Exception:
+            # Test harnesses may expose the Postgres adapter on top of SQLite.
+            pass
+    if backend_name == "sqlite":
+        row = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+            (name,),
+        ).fetchone()
+        return row is not None
+    try:
+        row = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+            (name,),
+        ).fetchone()
+        return row is not None
+    except Exception:
+        pass
     try:
         conn.execute(f"SELECT 1 FROM {name} WHERE 1 = 0").fetchall()
         return True
