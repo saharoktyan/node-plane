@@ -65,6 +65,7 @@ If you want the installer to place and start the systemd unit automatically:
 ```
 
 The script will prompt for missing values and prepare the release layout for you.
+It also asks which git tag/ref to install, with the default set to the latest release tag for the selected branch.
 
 For a predictable non-interactive setup, configure `.env` first with at least:
 
@@ -74,6 +75,7 @@ ADMIN_IDS=123456789
 NODE_PLANE_BASE_DIR=/opt/node-plane
 NODE_PLANE_APP_DIR=/opt/node-plane/current
 NODE_PLANE_SHARED_DIR=/opt/node-plane/shared
+NODE_PLANE_INSTALL_REF=<release-tag>
 DB_BACKEND=postgres
 ```
 
@@ -145,6 +147,7 @@ git clone git@github.com:seventh7dev/node-plane.git node-plane-src
 ```
 
 The script will prompt for missing values and write the portable-mode settings into `.env`.
+It also suggests the latest release tag for the chosen branch as the default install ref and image tag.
 
 For a predictable non-interactive setup, configure `.env` first with at least:
 
@@ -152,6 +155,7 @@ For a predictable non-interactive setup, configure `.env` first with at least:
 BOT_TOKEN=...
 ADMIN_IDS=123456789
 SSH_KEY=/root/.ssh/id_ed25519
+NODE_PLANE_INSTALL_REF=<release-tag>
 NODE_PLANE_IMAGE_REPO=ghcr.io/seventh7dev/node-plane
 NODE_PLANE_IMAGE_TAG=<release-tag>
 DB_BACKEND=postgres
@@ -209,6 +213,7 @@ Key variables:
 - `NODE_PLANE_SHARED_DIR`: shared state path, usually `/opt/node-plane/shared`
 - `NODE_PLANE_SOURCE_DIR`: source checkout path
 - `NODE_PLANE_INSTALL_MODE`: `simple` or `portable`
+- `NODE_PLANE_INSTALL_REF`: git tag/ref selected by the installer; defaults to the latest release tag for `NODE_PLANE_UPDATE_BRANCH`
 - `DB_BACKEND`: should be `postgres` for `0.4`
 - `POSTGRES_DSN`: PostgreSQL DSN used for runtime storage; optional if you let the installer/update path auto-provision PostgreSQL
 - `SSH_KEY`: SSH private key used for remote node management

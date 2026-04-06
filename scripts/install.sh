@@ -9,6 +9,7 @@ MODE="${MODE:-}"
 NON_INTERACTIVE=0
 AUTO_INSTALL_SYSTEMD=0
 UPDATE_BRANCH="${NODE_PLANE_UPDATE_BRANCH:-}"
+INSTALL_REF="${NODE_PLANE_INSTALL_REF:-}"
 FORCE_REINSTALL=0
 CURRENT_STEP="startup"
 
@@ -48,6 +49,14 @@ while [[ $# -gt 0 ]]; do
       UPDATE_BRANCH="${1#*=}"
       shift
       ;;
+    --ref|--tag)
+      INSTALL_REF="${2:-}"
+      shift 2
+      ;;
+    --ref=*|--tag=*)
+      INSTALL_REF="${1#*=}"
+      shift
+      ;;
     --install-systemd)
       AUTO_INSTALL_SYSTEMD=1
       shift
@@ -59,7 +68,7 @@ while [[ $# -gt 0 ]]; do
     -h|--help)
       cat <<'EOF'
 Usage:
-  scripts/install.sh [--mode simple|portable] [--branch main|dev] [--non-interactive] [--install-systemd] [--force]
+  scripts/install.sh [--mode simple|portable] [--branch main|dev] [--ref <git-ref>] [--non-interactive] [--install-systemd] [--force]
 
 Modes:
   simple    Host install via venv + systemd. Supports same-host runtime deployment.
@@ -67,6 +76,7 @@ Modes:
 
 Flags:
   --branch            Default update branch for this installation
+  --ref, --tag        Git tag/ref to install, defaults to the latest release tag for the selected branch
   --non-interactive   Fail instead of prompting for missing values
   --install-systemd   In simple mode, install the systemd unit automatically
   --force             Reinstall even if the target release is already active
@@ -254,9 +264,33 @@ latest_release_tag_for_branch() {
   exit 1
 }
 
+validate_install_ref() {
+  local branch="$1"
+  local ref="$2"
+
+  if [[ -z "$ref" ]]; then
+    echo "Install ref cannot be empty." >&2
+    exit 1
+  fi
+  if ! git rev-parse --verify "${ref}^{commit}" >/dev/null 2>&1; then
+    echo "Unknown install ref: ${ref}" >&2
+    exit 1
+  fi
+  if ! git merge-base --is-ancestor "${ref}^{commit}" "origin/${branch}" >/dev/null 2>&1; then
+    echo "Install ref '${ref}' is not reachable from origin/${branch}." >&2
+    exit 1
+  fi
+  echo "$ref"
+}
+
 resolve_install_ref() {
   local branch="$1"
-  latest_release_tag_for_branch "$branch"
+  local requested_ref="${2:-}"
+  if [[ -z "$requested_ref" ]]; then
+    latest_release_tag_for_branch "$branch"
+    return 0
+  fi
+  validate_install_ref "$branch" "$requested_ref"
 }
 
 release_id() {
@@ -349,7 +383,7 @@ configure_env() {
   fetch_origin_refs
   set_step "read installer environment"
 
-  local bot_token admin_ids base_dir app_dir shared_dir source_dir install_mode ssh_key image_repo image_tag update_branch
+  local bot_token admin_ids base_dir app_dir shared_dir source_dir install_mode ssh_key image_repo image_tag update_branch install_ref latest_install_ref
   local db_backend postgres_dsn sqlite_db_path
   bot_token="$(read_env_value BOT_TOKEN)"
   admin_ids="$(read_env_value ADMIN_IDS)"
@@ -361,6 +395,7 @@ configure_env() {
   ssh_key="$(read_env_value SSH_KEY)"
   image_repo="$(read_env_value NODE_PLANE_IMAGE_REPO)"
   image_tag="$(read_env_value NODE_PLANE_IMAGE_TAG)"
+  install_ref="${INSTALL_REF:-$(read_env_value NODE_PLANE_INSTALL_REF)}"
   db_backend="$(read_env_value DB_BACKEND)"
   postgres_dsn="$(read_env_value POSTGRES_DSN)"
   sqlite_db_path="$(read_env_value SQLITE_DB_PATH)"
@@ -401,6 +436,14 @@ configure_env() {
     update_branch="$(prompt_value "Enter default update branch (main or dev)" "$update_branch")"
     update_branch="$(normalize_update_branch "$update_branch")"
   fi
+  latest_install_ref="$(latest_release_tag_for_branch "$update_branch")"
+  if [[ -z "$install_ref" ]]; then
+    install_ref="$latest_install_ref"
+  fi
+  if [[ $NON_INTERACTIVE -eq 0 ]]; then
+    install_ref="$(prompt_value "Enter install tag/ref (default: latest tag for ${update_branch})" "$install_ref")"
+  fi
+  install_ref="$(resolve_install_ref "$update_branch" "$install_ref")"
 
   if [[ "$MODE" == "simple" ]]; then
     install_mode="simple"
@@ -458,6 +501,7 @@ configure_env() {
     set_env_value NODE_PLANE_SOURCE_DIR "$REPO_ROOT"
     set_env_value NODE_PLANE_INSTALL_MODE "$install_mode"
     set_env_value NODE_PLANE_UPDATE_BRANCH "$update_branch"
+    set_env_value NODE_PLANE_INSTALL_REF "$install_ref"
     if [[ -z "$sqlite_db_path" ]]; then
       sqlite_db_path="${shared_dir}/data/bot.sqlite3"
     fi
@@ -477,7 +521,7 @@ configure_env() {
       image_repo="ghcr.io/seventh7dev/node-plane"
     fi
     if [[ -z "$image_tag" ]]; then
-      image_tag="$(current_semver "$(resolve_install_ref "$update_branch")")"
+      image_tag="$(current_semver "$install_ref")"
     fi
     if [[ $NON_INTERACTIVE -eq 0 ]]; then
       image_repo="$(prompt_value "Enter NODE_PLANE_IMAGE_REPO (default: ghcr.io/seventh7dev/node-plane, or use node-plane for local builds)" "$image_repo")"
@@ -487,6 +531,7 @@ configure_env() {
     set_env_value NODE_PLANE_SOURCE_DIR "$REPO_ROOT"
     set_env_value NODE_PLANE_INSTALL_MODE "$install_mode"
     set_env_value NODE_PLANE_UPDATE_BRANCH "$update_branch"
+    set_env_value NODE_PLANE_INSTALL_REF "$install_ref"
     set_env_value NODE_PLANE_IMAGE_REPO "$image_repo"
     set_env_value NODE_PLANE_IMAGE_TAG "$image_tag"
   fi
@@ -564,7 +609,11 @@ run_simple_install() {
   fi
   releases_dir="${base_dir}/releases"
   current_link="${base_dir}/current"
-  install_ref="$(resolve_install_ref "$(normalize_update_branch "$(read_env_value NODE_PLANE_UPDATE_BRANCH)")")"
+  install_ref="$(
+    resolve_install_ref \
+      "$(normalize_update_branch "$(read_env_value NODE_PLANE_UPDATE_BRANCH)")" \
+      "$(read_env_value NODE_PLANE_INSTALL_REF)"
+  )"
   install_version="$(current_semver "$install_ref")"
   install_commit="$(current_git_commit "$install_ref")"
   release_name="$(release_id "$install_ref")"
