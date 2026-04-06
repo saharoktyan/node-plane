@@ -190,6 +190,24 @@ class UpdatesTests(unittest.TestCase):
         self.assertEqual(result["versions"][0]["action"], "upgrade")
         self.assertTrue(result["versions"][0]["allowed"])
 
+    def test_list_available_versions_marks_dev_head_current_when_commit_matches(self) -> None:
+        proc = SimpleNamespace(
+            returncode=0,
+            stdout=(
+                "LIST_VERSIONS|ok\n"
+                "branch: dev\n"
+                "current_version: 0.2.0-alpha.2\n"
+                "version_item: HEAD|origin/dev|head|abc1234\n"
+                "version_item: 0.2.0-alpha.2|v0.2.0-alpha.2|tag|abc1234\n"
+            ),
+            stderr="",
+        )
+        with patch("services.updates.subprocess.run", return_value=proc), patch.object(self.updates, "APP_COMMIT", "abc1234"):
+            result = self.updates.list_available_versions(branch="dev")
+        self.assertEqual(result["versions"][0]["version"], "HEAD")
+        self.assertEqual(result["versions"][0]["action"], "current")
+        self.assertFalse(result["versions"][0]["allowed"])
+
     def test_dev_commit_drift_does_not_mark_update_available_when_dev_track_is_tag(self) -> None:
         self.app_settings.record_update_check(
             {

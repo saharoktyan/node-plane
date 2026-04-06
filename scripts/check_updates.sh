@@ -122,6 +122,7 @@ BRANCH_REF="origin/${BRANCH}"
 if ! git rev-parse --verify "${BRANCH_REF}^{commit}" >/dev/null 2>&1; then
   emit_error "branch '${BRANCH}' not found on origin"
 fi
+BRANCH_HEAD_COMMIT="$(git rev-parse --short "${BRANCH_REF}")"
 
 LATEST_TAG="$(latest_tag_for_branch "$BRANCH" || true)"
 if [[ "$BRANCH" == "dev" && "$PREFER" == "head" ]]; then
@@ -153,7 +154,7 @@ if [[ $LIST_MODE -eq 1 ]]; then
   echo "source_dir: ${SOURCE_DIR}"
   echo "current_version: ${LOCAL_VERSION}"
   if [[ "$BRANCH" == "dev" ]]; then
-    echo "version_item: HEAD|${BRANCH_REF}|head|${REMOTE_COMMIT}"
+    echo "version_item: HEAD|${BRANCH_REF}|head|${BRANCH_HEAD_COMMIT}"
   fi
   if [[ "$BRANCH" == "main" ]]; then
     tag_regex="$stable_tag_regex"
