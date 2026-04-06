@@ -256,6 +256,12 @@ load_postgres_runtime_config() {
   fi
 }
 
+dsn_uses_managed_local_postgres() {
+  local dsn="$1"
+  [[ -n "$dsn" ]] || return 1
+  [[ "$dsn" == *"@127.0.0.1:${POSTGRES_RUNTIME_PORT}/${POSTGRES_RUNTIME_DB_NAME}"* ]]
+}
+
 normalize_portable_sqlite_source_path() {
   local runtime_env_file="$1"
   local sqlite_path
@@ -295,10 +301,17 @@ auto_provision_simple_postgres() {
   local runtime_env_file="$1"
   local shared_dir="$2"
   local require_docker="${3:-0}"
+  local existing_dsn=""
+  local managed_local_dsn=0
 
   load_postgres_runtime_config "$runtime_env_file" "$shared_dir"
-  if [[ -n "$POSTGRES_RUNTIME_DSN" ]]; then
-    return 0
+  existing_dsn="$POSTGRES_RUNTIME_DSN"
+  if [[ -n "$existing_dsn" ]]; then
+    if dsn_uses_managed_local_postgres "$existing_dsn"; then
+      managed_local_dsn=1
+    else
+      return 0
+    fi
   fi
 
   if ! docker_is_usable; then
@@ -327,7 +340,10 @@ auto_provision_simple_postgres() {
   env_set "$runtime_env_file" "NODE_PLANE_POSTGRES_IMAGE" "$POSTGRES_RUNTIME_IMAGE"
 
   if docker_run inspect "$POSTGRES_RUNTIME_CONTAINER" >/dev/null 2>&1; then
-    docker_run start "$POSTGRES_RUNTIME_CONTAINER" >/dev/null 2>&1 || true
+    docker_run start "$POSTGRES_RUNTIME_CONTAINER" >/dev/null 2>&1 || {
+      echo "Failed to start existing PostgreSQL container ${POSTGRES_RUNTIME_CONTAINER}." >&2
+      return 1
+    }
   else
     docker_run run -d \
       --name "$POSTGRES_RUNTIME_CONTAINER" \
@@ -353,11 +369,16 @@ auto_provision_simple_postgres() {
   done
   if [[ "$ready" != "1" ]]; then
     echo "Automatic PostgreSQL provisioning failed: container ${POSTGRES_RUNTIME_CONTAINER} did not become ready." >&2
+    docker_run logs --tail 50 "$POSTGRES_RUNTIME_CONTAINER" >&2 || true
     return 1
   fi
 
   POSTGRES_RUNTIME_DSN="postgresql://${POSTGRES_RUNTIME_DB_USER}:${POSTGRES_RUNTIME_DB_PASSWORD}@127.0.0.1:${POSTGRES_RUNTIME_PORT}/${POSTGRES_RUNTIME_DB_NAME}"
   env_set "$runtime_env_file" "POSTGRES_DSN" "$POSTGRES_RUNTIME_DSN"
-  echo "Auto-provisioned local PostgreSQL runtime: ${POSTGRES_RUNTIME_CONTAINER}"
-  echo "PostgreSQL DSN persisted to ${runtime_env_file}"
+  if [[ "$managed_local_dsn" == "1" ]]; then
+    echo "Verified local PostgreSQL runtime: ${POSTGRES_RUNTIME_CONTAINER}"
+  else
+    echo "Auto-provisioned local PostgreSQL runtime: ${POSTGRES_RUNTIME_CONTAINER}"
+    echo "PostgreSQL DSN persisted to ${runtime_env_file}"
+  fi
 }
