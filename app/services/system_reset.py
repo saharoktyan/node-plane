@@ -9,6 +9,7 @@ from typing import List, Tuple
 
 from config import BASE_DIR, INSTALL_MODE, INSTALL_ROOT, SHARED_ROOT, SOURCE_ROOT, SSH_DIR
 from db import ensure_schema, get_db
+from db.migrate_sqlite_to_postgres import _generic_table_exists
 from services.backups import clear_backup_storage, maybe_create_pre_action_backup
 from services.server_bootstrap import AWG_RUNTIME_CONTAINER, full_cleanup_server
 from services.server_registry import list_servers
@@ -19,11 +20,7 @@ _db = get_db()
 
 
 def _table_exists(conn, name: str) -> bool:
-    try:
-        conn.execute(f"SELECT 1 FROM {name} WHERE 1 = 0").fetchall()
-        return True
-    except Exception:
-        return False
+    return _generic_table_exists(conn, name)
 
 
 def _wipe_local_state() -> None:

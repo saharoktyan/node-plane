@@ -10,7 +10,7 @@ from typing import Any, Dict, List
 
 from config import APP_VERSION, DB_BACKEND, SHARED_ROOT
 from db import ensure_schema, get_db
-from db.migrate_sqlite_to_postgres import ALERT_STATE_COLUMNS, ALERT_STATE_DDL, TABLE_COLUMNS
+from db.migrate_sqlite_to_postgres import ALERT_STATE_COLUMNS, ALERT_STATE_DDL, TABLE_COLUMNS, _generic_table_exists
 from services import app_settings
 
 _log = logging.getLogger("backups")
@@ -106,11 +106,7 @@ def _write_meta(meta_path: Path, payload: Dict[str, Any]) -> None:
 
 
 def _table_exists(conn, name: str) -> bool:
-    try:
-        conn.execute(f"SELECT 1 FROM {name} WHERE 1 = 0").fetchall()
-        return True
-    except Exception:
-        return False
+    return _generic_table_exists(conn, name)
 
 
 def _backup_tables(conn) -> list[tuple[str, list[str]]]:
