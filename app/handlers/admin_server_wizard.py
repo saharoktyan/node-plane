@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional, Sequence, Set
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import CallbackContext
 
-from config import APP_COMMIT, APP_SEMVER, CB_MENU, CB_SRV, PARSE_MODE
+from config import APP_COMMIT, APP_SEMVER, CB_MENU, CB_SRV, PARSE_MODE, LIST_PAGE_SIZE
 from i18n import get_locale_for_update, t
 from services.provisioning_state import (
     reconcile_server_state,
@@ -90,6 +90,8 @@ def _wizard_init(sent_message, mode: str) -> Dict[str, Any]:
             "awg_i1_preset": "quic",
         },
         "locale": "ru",
+        "list_page": 0,
+        "search_query": "",
     }
 
 
@@ -255,20 +257,27 @@ def _awg_status(server: RegisteredServer, lang: str) -> tuple[str, str]:
     if "failed" in server.bootstrap_state:
         return "⚠️", t(lang, "admin.wizard.server_status_awg_failed")
     return "🛠", t(lang, "admin.wizard.server_status_bootstrap")
+def _get_filtered_servers(w: Dict[str, Any]) -> List[RegisteredServer]:
+    servers = list_servers(include_disabled=True)
+    q = w.get("search_query", "").lower().strip()
+    if q:
+        servers = [s for s in servers if q in s.key.lower() or q in s.title.lower() or q in s.region.lower()]
+    return servers
 
 
-def _server_dashboard_text(servers: Sequence[RegisteredServer], lang: str) -> str:
+def _server_dashboard_text(servers: Sequence[RegisteredServer], lang: str, search_query: str = "") -> str:
     total = len(servers)
     active = sum(1 for server in servers if server.enabled)
     attention = sum(1 for server in servers if _server_overall_status(server, lang)[0] != "✅")
-    return "\n".join(
-        [
-            t(lang, "admin.wizard.server_menu"),
-            "",
-            t(lang, "admin.wizard.server_menu_summary", active=active, total=total),
-            t(lang, "admin.wizard.server_menu_attention", count=attention),
-        ]
-    )
+    lines = [
+        t(lang, "admin.wizard.server_menu"),
+        "",
+        t(lang, "admin.wizard.server_menu_summary", active=active, total=total),
+        t(lang, "admin.wizard.server_menu_attention", count=attention),
+    ]
+    if search_query:
+        lines.append(f"\n🔍 {t(lang, 'admin.wizard.filter')}: `{_md(search_query)}`")
+    return "\n".join(lines)
 
 
 def _server_overall_status(server: RegisteredServer, lang: str) -> tuple[str, str]:
@@ -291,12 +300,28 @@ def _server_overall_status(server: RegisteredServer, lang: str) -> tuple[str, st
     return "⚠️", t(lang, "admin.wizard.server_status_attention")
 
 
-def _server_dashboard_markup(servers: Sequence[RegisteredServer], lang: str) -> InlineKeyboardMarkup:
+def _server_dashboard_markup(servers: Sequence[RegisteredServer], page: int, lang: str) -> InlineKeyboardMarkup:
+    total = len(servers)
+    pages = max(1, (total + LIST_PAGE_SIZE - 1) // LIST_PAGE_SIZE)
+    page = max(0, min(page, pages - 1))
+    chunk = servers[page * LIST_PAGE_SIZE : (page + 1) * LIST_PAGE_SIZE]
+    has_multiple_pages = pages > 1
+
     rows = [
         [InlineKeyboardButton(_server_dashboard_button_label(server, lang), callback_data=f"{CB_SRV}card:{server.key}")]
-        for server in servers
+        for server in chunk
     ]
+    if has_multiple_pages:
+        nav: list[InlineKeyboardButton] = []
+        if page > 0:
+            nav.append(InlineKeyboardButton("⬅️", callback_data=f"{CB_SRV}listpage:{page-1}"))
+        nav.append(InlineKeyboardButton(f"{page+1}/{pages}", callback_data=f"{CB_SRV}listpage:{page}"))
+        if page < pages - 1:
+            nav.append(InlineKeyboardButton("➡️", callback_data=f"{CB_SRV}listpage:{page+1}"))
+        rows.append(nav)
     rows.append([InlineKeyboardButton(t(lang, "admin.wizard.new_server"), callback_data=f"{CB_SRV}start:create")])
+    if has_multiple_pages or servers:
+        rows.append([InlineKeyboardButton("🔍 " + t(lang, "admin.wizard.search"), callback_data=f"{CB_SRV}search")])
     rows.append([InlineKeyboardButton(t(lang, "menu.back"), callback_data=f"{CB_MENU}admin")])
     return InlineKeyboardMarkup(rows)
 
@@ -1270,7 +1295,7 @@ def serverwizard_cmd(update: Update, context: CallbackContext) -> None:
     w["locale"] = lang
     _wizard_set(context, w)
     servers = list_servers(include_disabled=True)
-    _wizard_edit(context, _server_dashboard_text(servers, lang), _server_dashboard_markup(servers, lang))
+    _wizard_edit(context, _server_dashboard_text(servers, lang), _server_dashboard_markup(servers, w.get("list_page", 0), lang))
     safe_delete_update_message(update, context)
 
 
@@ -1282,6 +1307,17 @@ def server_wizard_text(update: Update, context: CallbackContext) -> None:
     data = w["data"]
     step = w["step"]
     lang = _wizard_lang(context)
+
+    if step == "search":
+        q = text.lower().strip()
+        w["search_query"] = q
+        w["list_page"] = 0
+        w["step"] = "menu"
+        _wizard_set(context, w)
+        servers = _get_filtered_servers(w)
+        _wizard_edit(context, _server_dashboard_text(servers, lang, q), _server_dashboard_markup(servers, 0, lang))
+        safe_delete_update_message(update, context)
+        return
 
     if step == "key":
         value = text.lower().strip()
@@ -1486,21 +1522,35 @@ def on_server_callback(update: Update, context: CallbackContext, payload: str) -
         w = _wizard_init(sent, "menu")
         w["locale"] = lang
         _wizard_set(context, w)
-        servers = list_servers(include_disabled=True)
-        _wizard_edit(context, _server_dashboard_text(servers, lang), _server_dashboard_markup(servers, lang))
+        servers = _get_filtered_servers(w)
+        _wizard_edit(context, _server_dashboard_text(servers, lang, w.get("search_query", "")), _server_dashboard_markup(servers, w.get("list_page", 0), lang))
         return
 
     w = _wizard_get(context)
+    if payload == "list":
+        if not w:
+            sent = update.callback_query.message
+            w = _wizard_init(sent, "menu")
+            w["locale"] = lang
+        w["step"] = "menu"
+        _wizard_set(context, w)
+        servers = _get_filtered_servers(w)
+        page = w.get("list_page", 0)
+        _wizard_edit(context, _server_dashboard_text(servers, lang, w.get("search_query", "")), _server_dashboard_markup(servers, page, lang))
+        return
+
     if payload == "cancel":
         if not w:
             sent = update.callback_query.message
             w = _wizard_init(sent, "menu")
             w["locale"] = lang
-        servers = list_servers(include_disabled=True)
         w["step"] = "menu"
         _wizard_set(context, w)
-        _wizard_edit(context, _server_dashboard_text(servers, lang), _server_dashboard_markup(servers, lang))
+        servers = _get_filtered_servers(w)
+        page = w.get("list_page", 0)
+        _wizard_edit(context, _server_dashboard_text(servers, lang, w.get("search_query", "")), _server_dashboard_markup(servers, page, lang))
         return
+
     if payload in {"start:create", "start:create_local", "start:create_remote"} and not w:
         sent = update.callback_query.message
         w = _wizard_init(sent, "menu")
@@ -1517,17 +1567,6 @@ def on_server_callback(update: Update, context: CallbackContext, payload: str) -
 
     data = w["data"]
     lang = _wizard_lang(context)
-
-    if payload == "list":
-        if not w:
-            sent = update.callback_query.message
-            w = _wizard_init(sent, "menu")
-            w["locale"] = lang
-        servers = list_servers(include_disabled=True)
-        w["step"] = "menu"
-        _wizard_set(context, w)
-        _wizard_edit(context, _server_dashboard_text(servers, lang), _server_dashboard_markup(servers, lang))
-        return
 
     if payload == "next":
         step = str(w.get("step") or "")
@@ -1609,6 +1648,24 @@ def on_server_callback(update: Update, context: CallbackContext, payload: str) -
         _open_advanced_menu(context, payload.split(":", 1)[1])
         return
 
+    if payload == "search":
+        w["step"] = "search"
+        _wizard_set(context, w)
+        _wizard_edit(
+            context,
+            t(lang, "admin.wizard.server_search_prompt"),
+            InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, "admin.wizard.cancel"), callback_data=f"{CB_SRV}list")]])
+        )
+        return
+
+    if payload.startswith("listpage:"):
+        page = int(payload.split(":")[1])
+        w["list_page"] = page
+        _wizard_set(context, w)
+        servers = _get_filtered_servers(w)
+        _wizard_edit(context, _server_dashboard_text(servers, lang, w.get("search_query", "")), _server_dashboard_markup(servers, page, lang))
+        return
+
     if payload.startswith("advsection:"):
         _, section, server_key = payload.split(":", 2)
         _open_advanced_section(context, server_key, section)
@@ -1617,10 +1674,11 @@ def on_server_callback(update: Update, context: CallbackContext, payload: str) -
     if payload == "back":
         if w["mode"] == "create":
             if w["step"] == "key":
-                servers = list_servers(include_disabled=True)
                 w["step"] = "menu"
                 _wizard_set(context, w)
-                _wizard_edit(context, _server_dashboard_text(servers, lang), _server_dashboard_markup(servers, lang))
+                servers = _get_filtered_servers(w)
+                page = w.get("list_page", 0)
+                _wizard_edit(context, _server_dashboard_text(servers, lang, w.get("search_query", "")), _server_dashboard_markup(servers, page, lang))
                 return
             if w["step"] == "title":
                 w["step"] = "key"
@@ -1673,10 +1731,11 @@ def on_server_callback(update: Update, context: CallbackContext, payload: str) -
                 return
         else:
             if w["step"] == "pick":
-                servers = list_servers(include_disabled=True)
                 w["step"] = "menu"
                 _wizard_set(context, w)
-                _wizard_edit(context, _server_dashboard_text(servers, lang), _server_dashboard_markup(servers, lang))
+                servers = _get_filtered_servers(w)
+                page = w.get("list_page", 0)
+                _wizard_edit(context, _server_dashboard_text(servers, lang, w.get("search_query", "")), _server_dashboard_markup(servers, page, lang))
                 return
             if w["step"] == "title":
                 if w.get("edit_single"):
@@ -1684,8 +1743,9 @@ def on_server_callback(update: Update, context: CallbackContext, payload: str) -
                 elif w.get("server_key"):
                     _render_server_card(context, str(w["server_key"]))
                 else:
-                    servers = list_servers(include_disabled=True)
-                    _wizard_edit(context, _server_dashboard_text(servers, lang), _server_dashboard_markup(servers, lang))
+                    page = w.get("list_page", 0)
+                    servers = _get_filtered_servers(w)
+                    _wizard_edit(context, _server_dashboard_text(servers, lang, w.get("search_query", "")), _server_dashboard_markup(servers, page, lang))
                 return
             if w["step"] == "flag":
                 if w.get("edit_single"):

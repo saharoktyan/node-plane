@@ -249,7 +249,7 @@ def render_delete_confirm(name: str, lang: str = "ru") -> Tuple[str, InlineKeybo
     )
 
 
-def render_profile_card(name: str, protocols: Set[str], frozen: bool, lang: str = "ru") -> Tuple[str, InlineKeyboardMarkup]:
+def render_profile_card(name: str, protocols: Set[str], frozen: bool, page: int = 0, lang: str = "ru") -> Tuple[str, InlineKeyboardMarkup]:
     proto_txt = render_protocols_summary(protocols)
     state_txt = _profile_provisioning_block(name, lang)
     fr = ("frozen" if frozen else "active") if lang == "en" else ("заморожен" if frozen else "активен")
@@ -266,7 +266,7 @@ def render_profile_card(name: str, protocols: Set[str], frozen: bool, lang: str 
         InlineKeyboardMarkup(
             [
                 [InlineKeyboardButton("✏️ Редактировать" if lang == "ru" else "✏️ Edit", callback_data=f"{CB_CFG}cardedit:{name}")],
-                [InlineKeyboardButton("⬅️ К профилям" if lang == "ru" else "⬅️ To Profiles", callback_data=f"{CB_CFG}dashboard:0")],
+                [InlineKeyboardButton("⬅️ К профилям" if lang == "ru" else "⬅️ To Profiles", callback_data=f"{CB_CFG}dashboard:{page}")],
             ]
         ),
     )

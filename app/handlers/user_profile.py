@@ -515,7 +515,7 @@ def _render_requests_dashboard(ids: List[str], page: int, lang: str) -> tuple[st
     return t(lang, "admin.requests.title", total=total), InlineKeyboardMarkup(rows)
 
 
-def _render_request_card(user_id: str, lang: str) -> tuple[str, Any]:
+def _render_request_card(user_id: str, lang: str, page: int = 0) -> tuple[str, Any]:
     users = user_store.read()
     rec = users.get(str(user_id)) if isinstance(users, dict) else None
     if not isinstance(rec, dict):
@@ -550,7 +550,7 @@ def _render_request_card(user_id: str, lang: str) -> tuple[str, Any]:
                 InlineKeyboardButton(t(lang, "admin.requests.reject"), callback_data=f"menu:admin_request_reject:{user_id}"),
             ]
         )
-    rows.append([InlineKeyboardButton(t(lang, "admin.requests.to_list"), callback_data="menu:admin_requests")])
+    rows.append([InlineKeyboardButton(t(lang, "admin.requests.to_list"), callback_data=f"menu:admin_requests_page:{page}")])
     return (text, InlineKeyboardMarkup(rows))
 
 
@@ -2105,7 +2105,8 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
         ids = state.get("ids") if isinstance(state.get("ids"), list) else _all_pending_request_ids()
         state.update({"active": True, "step": "card", "ids": ids, "selected_user_id": user_id})
         _request_state_set(context, state)
-        text, markup = _render_request_card(user_id, lang)
+        page = state.get("page", 0)
+        text, markup = _render_request_card(user_id, lang, page=page)
         safe_edit_message(update, context, text, reply_markup=markup, parse_mode=PARSE_MODE)
         return
 
@@ -2117,7 +2118,8 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
             context.bot.send_message(chat_id=req_user_id, text=t(get_user_locale(req_user_id), "admin.requests.notify_approved"))
         except Exception:
             pass
-        text, markup = _render_request_card(str(req_user_id), lang)
+        page = state.get("page", 0) if state else 0
+        text, markup = _render_request_card(str(req_user_id), lang, page=page)
         safe_edit_message(
             update,
             context,
@@ -2139,7 +2141,8 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
             context.bot.send_message(chat_id=req_user_id, text=t(get_user_locale(req_user_id), "admin.requests.notify_rejected"))
         except Exception:
             pass
-        text, markup = _render_request_card(str(req_user_id), lang)
+        page = state.get("page", 0) if state else 0
+        text, markup = _render_request_card(str(req_user_id), lang, page=page)
         safe_edit_message(update, context, f"{t(lang, 'admin.requests.rejected_admin')}\n\n{text}", reply_markup=markup, parse_mode=PARSE_MODE)
         return
 

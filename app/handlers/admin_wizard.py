@@ -552,7 +552,7 @@ def on_cfg_callback(update: Update, context: CallbackContext, payload: str) -> N
         name = payload.split(":", 1)[1]
         if not _load_profile_into_wizard(context, name):
             return
-        _wizard_edit(context, *_render_profile_card(name, w["protocols"], frozen=is_frozen(name), lang=lang))
+        _wizard_edit(context, *_render_profile_card(name, w["protocols"], frozen=is_frozen(name), page=w.get("pick_page", 0), lang=lang))
         return
 
     if payload.startswith("cardedit:"):

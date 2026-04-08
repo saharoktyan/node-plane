@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import concurrent.futures
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict
@@ -229,17 +230,30 @@ def collect_awg_traffic_samples() -> tuple[int, str]:
         return 0, "telemetry disabled globally"
     blocks: list[str] = []
     errors = 0
-    for server in list_servers():
-        if "awg" not in server.protocol_kinds:
-            continue
-        if server.bootstrap_state != "bootstrapped":
-            continue
-        code, out = _collect_awg_server_samples(server.key)
-        blocks.append(out)
-        if code != 0:
-            errors += 1
-            log.warning("AWG traffic sampling failed for %s: %s", server.key, out)
-    return (1 if errors else 0), "\n\n".join(blocks) if blocks else "no awg servers to sample"
+    target_servers = [
+        s for s in list_servers() 
+        if "awg" in s.protocol_kinds and s.bootstrap_state == "bootstrapped"
+    ]
+    if not target_servers:
+        return 0, "no awg servers to sample"
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {executor.submit(_collect_awg_server_samples, s.key): s.key for s in target_servers}
+        for future in concurrent.futures.as_completed(futures):
+            server_key = futures[future]
+            try:
+                code, out = future.result()
+                blocks.append(out)
+                if code != 0:
+                    errors += 1
+                    log.warning("AWG traffic sampling failed for %s: %s", server_key, out)
+            except Exception as e:
+                errors += 1
+                out = f"server={server_key}\nerror={e}"
+                blocks.append(out)
+                log.warning("AWG traffic sampling crashed for %s: %s", server_key, e)
+
+    return (1 if errors else 0), "\n\n".join(blocks)
 
 
 def collect_xray_traffic_samples() -> tuple[int, str]:
@@ -247,17 +261,30 @@ def collect_xray_traffic_samples() -> tuple[int, str]:
         return 0, "telemetry disabled globally"
     blocks: list[str] = []
     errors = 0
-    for server in list_servers():
-        if "xray" not in server.protocol_kinds:
-            continue
-        if server.bootstrap_state != "bootstrapped":
-            continue
-        code, out = _collect_xray_server_samples(server.key)
-        blocks.append(out)
-        if code != 0:
-            errors += 1
-            log.warning("Xray traffic sampling failed for %s: %s", server.key, out)
-    return (1 if errors else 0), "\n\n".join(blocks) if blocks else "no xray servers to sample"
+    target_servers = [
+        s for s in list_servers() 
+        if "xray" in s.protocol_kinds and s.bootstrap_state == "bootstrapped"
+    ]
+    if not target_servers:
+        return 0, "no xray servers to sample"
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {executor.submit(_collect_xray_server_samples, s.key): s.key for s in target_servers}
+        for future in concurrent.futures.as_completed(futures):
+            server_key = futures[future]
+            try:
+                code, out = future.result()
+                blocks.append(out)
+                if code != 0:
+                    errors += 1
+                    log.warning("Xray traffic sampling failed for %s: %s", server_key, out)
+            except Exception as e:
+                errors += 1
+                out = f"server={server_key}\nerror={e}"
+                blocks.append(out)
+                log.warning("Xray traffic sampling crashed for %s: %s", server_key, e)
+
+    return (1 if errors else 0), "\n\n".join(blocks)
 
 
 def run_collect_traffic_once() -> tuple[int, str]:
@@ -356,22 +383,12 @@ def debug_profile_traffic_report(profile_name: str, protocol_kind: str = "awg") 
         return 1, f"Unsupported protocol_kind: {protocol_kind}"
 
     month_start = _month_start_iso()
-    with _db.connect() as conn:
-        rows = conn.execute(
-            """
-            SELECT server_key, remote_id, rx_bytes_total, tx_bytes_total, sampled_at
-            FROM traffic_samples
-            WHERE profile_name = ? AND protocol_kind = ? AND sampled_at >= ?
-            ORDER BY server_key, remote_id, sampled_at
-            """,
-            (profile_name, protocol, month_start),
-        ).fetchall()
+    rows = _get_profile_monthly_usage_rows(profile_name, protocol, month_start)
 
     totals = get_profile_monthly_usage(profile_name, protocol)
     lines = [
         f"Traffic samples debug: profile={profile_name}, protocol={protocol}",
         f"month_start={month_start}",
-        f"sample_rows={len(rows)}",
         f"peers={int(totals['peers'])}",
         f"rx_bytes={int(totals['rx_bytes'])}",
         f"tx_bytes={int(totals['tx_bytes'])}",
@@ -380,26 +397,86 @@ def debug_profile_traffic_report(profile_name: str, protocol_kind: str = "awg") 
     if not rows:
         return 0, "\n".join(lines + ["", "samples=none"])
 
-    groups: Dict[tuple[str, str], list[Dict[str, Any]]] = {}
-    for row in rows:
-        key = (str(row["server_key"]), str(row["remote_id"]))
-        groups.setdefault(key, []).append(dict(row))
-
     lines.append("")
     lines.append("per_peer:")
-    for (server_key, remote_id), samples in groups.items():
-        first = samples[0]
-        last = samples[-1]
-        rx_delta = max(0, int(last["rx_bytes_total"]) - int(first["rx_bytes_total"]))
-        tx_delta = max(0, int(last["tx_bytes_total"]) - int(first["tx_bytes_total"]))
+    for row in rows:
+        server_key = str(row["server_key"])
+        remote_id = str(row["remote_id"])
+        samples_count = int(row.get("sample_count") or 0)
+        first_sample = str(row.get("first_sample") or "")
+        last_sample = str(row.get("last_sample") or "")
+        rx_first = int(row.get("rx_first") or 0)
+        rx_last = int(row.get("rx_last") or 0)
+        tx_first = int(row.get("tx_first") or 0)
+        tx_last = int(row.get("tx_last") or 0)
+
+        rx_delta = max(0, rx_last - rx_first)
+        tx_delta = max(0, tx_last - tx_first)
+
         lines.append(
-            f"- server={server_key}, remote_id={remote_id}, samples={len(samples)}, "
-            f"first={first['sampled_at']}, last={last['sampled_at']}, "
-            f"rx_first={int(first['rx_bytes_total'])}, rx_last={int(last['rx_bytes_total'])}, "
-            f"tx_first={int(first['tx_bytes_total'])}, tx_last={int(last['tx_bytes_total'])}, "
+            f"- server={server_key}, remote_id={remote_id}, samples={samples_count}, "
+            f"first={first_sample}, last={last_sample}, "
+            f"rx_first={rx_first}, rx_last={rx_last}, "
+            f"tx_first={tx_first}, tx_last={tx_last}, "
             f"rx_delta={rx_delta}, tx_delta={tx_delta}"
         )
     return 0, "\n".join(lines)
+
+
+def _get_profile_monthly_usage_rows(profile_name: str, protocol_kind: str, month_start: str) -> list[Dict[str, Any]]:
+    with _db.connect() as conn:
+        rows = conn.execute(
+            """
+            WITH scoped AS (
+                SELECT
+                    rowid,
+                    server_key,
+                    remote_id,
+                    rx_bytes_total,
+                    tx_bytes_total,
+                    sampled_at
+                FROM traffic_samples
+                WHERE profile_name = ? AND protocol_kind = ? AND sampled_at >= ?
+            ),
+            ranked AS (
+                SELECT
+                    server_key,
+                    remote_id,
+                    rx_bytes_total,
+                    tx_bytes_total,
+                    sampled_at,
+                    COUNT(*) OVER (PARTITION BY server_key, remote_id) AS sample_count,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY server_key, remote_id
+                        ORDER BY sampled_at ASC, rowid ASC
+                    ) AS rn_first,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY server_key, remote_id
+                        ORDER BY sampled_at DESC, rowid DESC
+                    ) AS rn_last
+                FROM scoped
+            )
+            SELECT
+                first.server_key,
+                first.remote_id,
+                first.sample_count,
+                first.sampled_at AS first_sample,
+                last.sampled_at AS last_sample,
+                first.rx_bytes_total AS rx_first,
+                last.rx_bytes_total AS rx_last,
+                first.tx_bytes_total AS tx_first,
+                last.tx_bytes_total AS tx_last
+            FROM ranked first
+            JOIN ranked last
+              ON last.server_key = first.server_key
+             AND last.remote_id = first.remote_id
+            WHERE first.rn_first = 1
+              AND last.rn_last = 1
+            ORDER BY first.server_key, first.remote_id
+            """,
+            (profile_name, protocol_kind, month_start),
+        ).fetchall()
+    return [dict(row) for row in rows]
 
 
 def get_profile_monthly_usage(profile_name: str, protocol_kind: str = "awg") -> Dict[str, int]:
@@ -407,35 +484,22 @@ def get_profile_monthly_usage(profile_name: str, protocol_kind: str = "awg") -> 
     if not is_global_telemetry_enabled():
         return {"rx_bytes": 0, "tx_bytes": 0, "total_bytes": 0, "samples": 0, "peers": 0}
     month_start = _month_start_iso()
-    with _db.connect() as conn:
-        rows = conn.execute(
-            """
-            SELECT server_key, remote_id, rx_bytes_total, tx_bytes_total, sampled_at
-            FROM traffic_samples
-            WHERE profile_name = ? AND protocol_kind = ? AND sampled_at >= ?
-            ORDER BY server_key, remote_id, sampled_at
-            """,
-            (profile_name, protocol_kind, month_start),
-        ).fetchall()
+    rows = _get_profile_monthly_usage_rows(profile_name, protocol_kind, month_start)
 
-    totals = {"rx_bytes": 0, "tx_bytes": 0, "total_bytes": 0, "samples": 0, "peers": 0}
-    groups: Dict[tuple[str, str], list[Dict[str, Any]]] = {}
+    totals = {"rx_bytes": 0, "tx_bytes": 0, "total_bytes": 0, "samples": 0, "peers": len(rows)}
+
     for row in rows:
-        key = (str(row["server_key"]), str(row["remote_id"]))
-        groups.setdefault(key, []).append(dict(row))
+        rx_first = int(row.get("rx_first") or 0)
+        rx_last = int(row.get("rx_last") or 0)
+        tx_first = int(row.get("tx_first") or 0)
+        tx_last = int(row.get("tx_last") or 0)
 
-    totals["samples"] = len(rows)
-    totals["peers"] = len(groups)
+        rx_delta = max(0, rx_last - rx_first)
+        tx_delta = max(0, tx_last - tx_first)
 
-    for samples in groups.values():
-        if not samples:
-            continue
-        first = samples[0]
-        last = samples[-1]
-        rx_delta = max(0, int(last["rx_bytes_total"]) - int(first["rx_bytes_total"]))
-        tx_delta = max(0, int(last["tx_bytes_total"]) - int(first["tx_bytes_total"]))
         totals["rx_bytes"] += rx_delta
         totals["tx_bytes"] += tx_delta
+        totals["samples"] += int(row.get("sample_count") or 0)
 
     totals["total_bytes"] = totals["rx_bytes"] + totals["tx_bytes"]
     return totals

@@ -9,7 +9,12 @@ from config import POSTGRES_DSN
 def _translate_query(query: str, params: object | None) -> str:
     if params is None:
         return query
-    return query.replace("?", "%s")
+    
+    parts = query.split("'")
+    for i in range(0, len(parts), 2):
+        parts[i] = parts[i].replace("?", "%s")
+        
+    return "'".join(parts)
 
 
 class PostgresResult:

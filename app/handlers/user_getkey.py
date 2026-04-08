@@ -134,7 +134,7 @@ def _render_xray_main_screen(name: str, method: AccessMethod, transport: str, la
         link = xray_svc.build_vless_link_transport(name, uuid_val, transport, method.server_key)
     except ValueError as exc:
         return t(lang, "getkey.xray_not_ready", error=exc), kb_xray_transport(method.getkey_payload, _server_back_payload(method.server_key), lang)
-    return _xray_help_text(method, transport, link, lang), kb_xray_key_actions(method.getkey_payload, transport, _server_back_payload(method.server_key), lang)
+    return _xray_help_text(method, transport, link, lang), kb_xray_key_actions(method.getkey_payload, transport, method.getkey_payload, lang)
 
 
 def on_getkey_callback(update: Update, context: CallbackContext, payload: str) -> None:
@@ -286,7 +286,7 @@ def on_getkey_callback(update: Update, context: CallbackContext, payload: str) -
             update,
             context,
             _xray_help_text(method, transport, link, lang),
-            reply_markup=kb_xray_key_actions(method_payload, transport, _server_back_payload(method.server_key), lang),
+            reply_markup=kb_xray_key_actions(method_payload, transport, method_payload, lang),
             parse_mode=PARSE_MODE,
         )
         return
