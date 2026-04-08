@@ -639,3 +639,20 @@ The next concrete artifact should be:
 3. a temporary in-process implementation backed by existing Python services.
 
 That gives a clean seam for introducing the Rust driver without rewriting the whole bot in one step.
+
+## Current Scaffold Status
+
+The repository now contains:
+
+1. `proto/driver/v1/*.proto`
+2. `app/services/node_driver_client.py`
+3. `app/services/node_driver_inprocess.py`
+4. `app/services/node_driver_grpc.py`
+5. backend selection in `app/services/node_driver.py`
+6. `scripts/gen_driver_proto.sh` for Python stub generation
+
+At the moment:
+
+- `inprocess` is the working backend;
+- `grpc` is a scaffold backend selected through config;
+- generated Python gRPC bindings are still expected to be produced from the proto files before the gRPC backend can be wired end-to-end.

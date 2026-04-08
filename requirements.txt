@@ -6,3 +6,5 @@ filelock==3.19.1
 qrcode==8.2
 pillow==11.3.0
 psycopg[binary]==3.2.13
+grpcio==1.74.0
+protobuf==5.29.5

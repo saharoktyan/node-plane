@@ -1,1 +1,2 @@
 pytest==8.4.2
+grpcio-tools==1.74.0
