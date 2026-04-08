@@ -27,9 +27,6 @@ from services.server_bootstrap import (
     reinstall_server,
     show_server_metrics,
     show_awg_entropy,
-    sync_server_node_env,
-    sync_server_runtime,
-    sync_xray_server_settings,
 )
 from services.app_settings import set_initial_setup_state
 from services.server_registry import RegisteredServer, get_server, list_servers, update_server_fields, upsert_server
@@ -1924,20 +1921,26 @@ def on_server_callback(update: Update, context: CallbackContext, payload: str) -
             return
         if action == "syncenv":
             stop_progress = _start_progress_animation(context, t(lang, "admin.wizard.sync_env"))
-            rc, out = sync_server_node_env(server_key)
+            operation = get_node_driver().sync_node_env(server_key)
             stop_progress()
+            rc = 0 if operation.status == "SUCCEEDED" else 1
+            out = operation.progress_message
             _wizard_edit(context, _action_result_text(t(lang, "admin.wizard.sync_env"), rc, out, server_key, lang), _server_card_markup(server_key, lang))
             return
         if action == "syncruntime":
             stop_progress = _start_progress_animation(context, t(lang, "admin.wizard.sync_runtime"))
-            rc, out = sync_server_runtime(server_key)
+            operation = get_node_driver().sync_runtime(server_key)
             stop_progress()
+            rc = 0 if operation.status == "SUCCEEDED" else 1
+            out = operation.progress_message
             _wizard_edit(context, _action_result_text(t(lang, "admin.wizard.sync_runtime"), rc, out, server_key, lang), _server_card_markup(server_key, lang))
             return
         if action == "syncxray":
             stop_progress = _start_progress_animation(context, t(lang, "admin.wizard.sync_xray"))
-            rc, out = sync_xray_server_settings(server_key)
+            operation = get_node_driver().sync_xray(server_key)
             stop_progress()
+            rc = 0 if operation.status == "SUCCEEDED" else 1
+            out = operation.progress_message
             _wizard_edit(context, _action_result_text(t(lang, "admin.wizard.sync_xray"), rc, out, server_key, lang), _server_card_markup(server_key, lang))
             return
         if action == "awgentropy":
@@ -2236,7 +2239,9 @@ def syncnodeenv_cmd(update: Update, context: CallbackContext) -> None:
     if len(parts) != 2:
         update.effective_message.reply_text(t(lang, "admin.cmd.usage_syncnodeenv"))
         return
-    code, out = sync_server_node_env(parts[1])
+    operation = get_node_driver().sync_node_env(parts[1])
+    code = 0 if operation.status == "SUCCEEDED" else 1
+    out = operation.progress_message
     if code != 0:
         update.effective_message.reply_text(
             t(lang, "admin.cmd.sync_error", output=_safe_output(out)),

@@ -45,7 +45,7 @@ from services.alerts import get_alerts_overview
 from services.backups import backup_token, create_backup, get_backup_info, get_backups_overview, list_backups, resolve_backup_token, restore_backup
 from services.node_driver import get_node_driver
 from services.provisioning_state import summarize_server_provisioning
-from services.server_bootstrap import get_server_runtime_state, get_servers_needing_runtime_sync, sync_server_runtime
+from services.server_bootstrap import get_server_runtime_state, get_servers_needing_runtime_sync
 from services.server_registry import list_servers
 from services.awg_profiles import list_awg_server_keys
 from services.ssh_keys import render_public_key_guide, render_public_key_summary
@@ -300,6 +300,7 @@ def _render_runtime_sync_confirm(lang: str, back_callback: str = "menu:admin_sta
 
 
 def _sync_runtime_drift(lang: str) -> str:
+    driver = get_node_driver()
     targets = get_servers_needing_runtime_sync()
     if not targets:
         return t(lang, "admin.status.runtime_sync_empty")
@@ -307,7 +308,9 @@ def _sync_runtime_drift(lang: str) -> str:
     updated: List[str] = []
     failed: List[str] = []
     for server in targets:
-        rc, out = sync_server_runtime(server.key)
+        operation = driver.sync_runtime(server.key)
+        rc = 0 if operation.status == "SUCCEEDED" else 1
+        out = operation.progress_message
         if rc == 0:
             updated.append(server.key)
         else:

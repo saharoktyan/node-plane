@@ -82,6 +82,48 @@ class InProcessNodeDriverClient(NodeDriverClient):
 
         return [_node_from_server(server) for server in list_servers(include_disabled=include_disabled)]
 
+    def sync_node_env(self, node_key: str) -> DriverOperation:
+        from services.server_bootstrap import sync_server_node_env
+
+        code, out = sync_server_node_env(node_key)
+        if code != 0:
+            return _operation(
+                "sync_node_env",
+                node_key=node_key,
+                status="FAILED",
+                message=out,
+                error=DriverError(code="sync_node_env_failed", summary=f"Node env sync failed for {node_key}", detail=out),
+            )
+        return _operation("sync_node_env", node_key=node_key, status="SUCCEEDED", message=out)
+
+    def sync_runtime(self, node_key: str) -> DriverOperation:
+        from services.server_bootstrap import sync_server_runtime
+
+        code, out = sync_server_runtime(node_key)
+        if code != 0:
+            return _operation(
+                "sync_runtime",
+                node_key=node_key,
+                status="FAILED",
+                message=out,
+                error=DriverError(code="sync_runtime_failed", summary=f"Runtime sync failed for {node_key}", detail=out),
+            )
+        return _operation("sync_runtime", node_key=node_key, status="SUCCEEDED", message=out)
+
+    def sync_xray(self, node_key: str) -> DriverOperation:
+        from services.server_bootstrap import sync_xray_server_settings
+
+        code, out = sync_xray_server_settings(node_key)
+        if code != 0:
+            return _operation(
+                "sync_xray",
+                node_key=node_key,
+                status="FAILED",
+                message=out,
+                error=DriverError(code="sync_xray_failed", summary=f"Xray sync failed for {node_key}", detail=out),
+            )
+        return _operation("sync_xray", node_key=node_key, status="SUCCEEDED", message=out)
+
     def reconcile_node(self, node_key: str) -> DriverOperation:
         from services.provisioning_state import reconcile_server_state
 
