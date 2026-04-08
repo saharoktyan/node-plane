@@ -14,7 +14,6 @@ from services.provisioning_state import (
     summarize_server_provisioning,
 )
 from services.server_bootstrap import (
-    get_server_runtime_state,
     is_server_docker_available,
     regenerate_awg_entropy,
     show_server_metrics,
@@ -371,7 +370,13 @@ def _format_server_notes(notes: str, lang: str) -> str:
 
 
 def _runtime_state_values(server_key: str, lang: str, runtime: dict[str, str] | None = None) -> tuple[str, str]:
-    runtime = runtime or get_server_runtime_state(server_key)
+    if runtime is None:
+        status = get_node_driver().get_runtime_status(server_key)
+        runtime = {
+            "state": status.state,
+            "version": status.version,
+            "commit": status.commit,
+        }
     state = str(runtime.get("state") or "unknown")
     version = str(runtime.get("version") or "")
     commit = str(runtime.get("commit") or "")
@@ -389,8 +394,13 @@ def _runtime_state_values(server_key: str, lang: str, runtime: dict[str, str] | 
 
 
 def _server_card_text(server: RegisteredServer, lang: str) -> str:
-    runtime = get_server_runtime_state(server.key)
-    runtime_state = str(runtime.get("state") or "")
+    runtime_status = get_node_driver().get_runtime_status(server.key)
+    runtime = {
+        "state": runtime_status.state,
+        "version": runtime_status.version,
+        "commit": runtime_status.commit,
+    }
+    runtime_state = str(runtime_status.state or "")
     server_icon, server_text = _server_status(server, lang)
     xray_icon, xray_text = _xray_status(server, lang)
     awg_icon, awg_text = _awg_status(server, lang)
@@ -632,10 +642,10 @@ def _advanced_section_text(server: RegisteredServer, section: str, lang: str) ->
             ]
         )
     if section == "maintenance_runtime":
-        runtime = get_server_runtime_state(server.key)
-        state = str(runtime.get("state") or "unknown")
-        version = str(runtime.get("version") or "").strip() or "—"
-        commit = str(runtime.get("commit") or "").strip() or "—"
+        runtime = get_node_driver().get_runtime_status(server.key)
+        state = str(runtime.state or "unknown")
+        version = str(runtime.version or "").strip() or "—"
+        commit = str(runtime.commit or "").strip() or "—"
         state_key = {
             "up_to_date": "admin.wizard.runtime_state_current",
             "outdated": "admin.wizard.runtime_state_outdated",
@@ -747,8 +757,8 @@ def _advanced_section_markup(server_key: str, section: str, lang: str) -> Inline
         rows.append([InlineKeyboardButton(t(lang, "admin.wizard.back_to_maintenance"), callback_data=f"{CB_SRV}advsection:maintenance:{server_key}")])
         return InlineKeyboardMarkup(rows)
     elif section == "maintenance_runtime":
-        runtime = get_server_runtime_state(server_key)
-        state = str(runtime.get("state") or "")
+        runtime = get_node_driver().get_runtime_status(server_key)
+        state = str(runtime.state or "")
         rows = []
         if state in {"outdated", "unknown"}:
             rows.append([InlineKeyboardButton(t(lang, "admin.wizard.sync_runtime"), callback_data=f"{CB_SRV}action:syncruntime:{server_key}")])

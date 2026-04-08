@@ -45,7 +45,6 @@ from services.alerts import get_alerts_overview
 from services.backups import backup_token, create_backup, get_backup_info, get_backups_overview, list_backups, resolve_backup_token, restore_backup
 from services.node_driver import get_node_driver
 from services.provisioning_state import summarize_server_provisioning
-from services.server_bootstrap import get_server_runtime_state, get_servers_needing_runtime_sync
 from services.server_registry import list_servers
 from services.awg_profiles import list_awg_server_keys
 from services.ssh_keys import render_public_key_guide, render_public_key_summary
@@ -107,8 +106,13 @@ def _render_admin_setup_markup(lang: str) -> InlineKeyboardMarkup:
 
 
 def _render_admin_status(lang: str) -> str:
+    driver = get_node_driver()
     servers = list_servers(include_disabled=True)
-    runtime_states = {server.key: get_server_runtime_state(server.key) for server in servers if server.bootstrap_state == "bootstrapped"}
+    runtime_states = {
+        server.key: {"state": driver.get_runtime_status(server.key).state}
+        for server in servers
+        if server.bootstrap_state == "bootstrapped"
+    }
     subs = profile_store.read()
     users = user_store.read()
     profile_names = [str(name) for name in subs.keys() if not str(name).startswith("_")] if isinstance(subs, dict) else []
@@ -216,7 +220,7 @@ def _problem_server_keys() -> List[str]:
         if server.bootstrap_state != "bootstrapped":
             keys.append(server.key)
             continue
-        if str(get_server_runtime_state(server.key).get("state") or "") in {"outdated", "unknown"}:
+        if get_node_driver().get_runtime_status(server.key).state in {"outdated", "unknown"}:
             keys.append(server.key)
             continue
         if "xray" in server.protocol_kinds and not get_server_link_status(server.key)[0]:
@@ -229,7 +233,7 @@ def _problem_server_keys() -> List[str]:
 
 
 def _runtime_drift_server_keys() -> List[str]:
-    return [server.key for server in get_servers_needing_runtime_sync()]
+    return [node.node_key for node in get_node_driver().list_nodes_needing_runtime_sync()]
 
 
 def _render_problem_servers(lang: str) -> tuple[str, InlineKeyboardMarkup]:
@@ -248,7 +252,7 @@ def _render_problem_servers(lang: str) -> tuple[str, InlineKeyboardMarkup]:
             continue
         reason = t(lang, "admin.status.problem_server_reason_bootstrap")
         if server.bootstrap_state == "bootstrapped":
-            runtime_state = str(get_server_runtime_state(server.key).get("state") or "")
+            runtime_state = get_node_driver().get_runtime_status(server.key).state
             xray_ready, reason_text = get_server_link_status(server.key) if "xray" in server.protocol_kinds else (True, "ok")
             if runtime_state in {"outdated", "unknown"}:
                 reason = t(lang, "admin.status.problem_server_reason_runtime_sync")
@@ -278,7 +282,7 @@ def _render_problem_servers(lang: str) -> tuple[str, InlineKeyboardMarkup]:
 
 
 def _render_runtime_sync_confirm(lang: str, back_callback: str = "menu:admin_status") -> tuple[str, InlineKeyboardMarkup]:
-    targets = get_servers_needing_runtime_sync()
+    targets = get_node_driver().list_nodes_needing_runtime_sync()
     if not targets:
         return (
             t(lang, "admin.status.runtime_sync_empty"),
@@ -289,7 +293,7 @@ def _render_runtime_sync_confirm(lang: str, back_callback: str = "menu:admin_sta
         "",
         t(lang, "admin.status.runtime_sync_confirm_intro", count=len(targets)),
     ]
-    lines.extend([f"• {server.flag} {server.title} ({server.key})" for server in targets[:10]])
+    lines.extend([f"• {node.flag} {node.title} ({node.node_key})" for node in targets[:10]])
     if len(targets) > 10:
         lines.append(t(lang, "admin.status.runtime_sync_confirm_more", count=len(targets) - 10))
     rows = [
@@ -301,21 +305,21 @@ def _render_runtime_sync_confirm(lang: str, back_callback: str = "menu:admin_sta
 
 def _sync_runtime_drift(lang: str) -> str:
     driver = get_node_driver()
-    targets = get_servers_needing_runtime_sync()
+    targets = driver.list_nodes_needing_runtime_sync()
     if not targets:
         return t(lang, "admin.status.runtime_sync_empty")
 
     updated: List[str] = []
     failed: List[str] = []
-    for server in targets:
-        operation = driver.sync_runtime(server.key)
+    for node in targets:
+        operation = driver.sync_runtime(node.node_key)
         rc = 0 if operation.status == "SUCCEEDED" else 1
         out = operation.progress_message
         if rc == 0:
-            updated.append(server.key)
+            updated.append(node.node_key)
         else:
             tail = str(out or "").strip().splitlines()
-            failed.append(f"{server.key}: {tail[-1] if tail else 'unknown error'}")
+            failed.append(f"{node.node_key}: {tail[-1] if tail else 'unknown error'}")
 
     lines = [t(lang, "admin.status.runtime_sync_result_title"), ""]
     lines.append(t(lang, "admin.status.runtime_sync_result_updated", count=len(updated)))
@@ -797,7 +801,7 @@ def _admin_updates_markup(lang: str) -> InlineKeyboardMarkup:
         update_supported=show_update_action,
         update_running=update_running,
         branch=str(overview.get("branch") or get_updates_branch()),
-        runtime_sync_available=bool(get_servers_needing_runtime_sync()),
+        runtime_sync_available=bool(get_node_driver().list_nodes_needing_runtime_sync()),
         release_cleanup_available=bool(cleanup_overview.get("supported")),
         lang=lang,
     )
@@ -1793,7 +1797,7 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
                 update_supported=show_update_action,
                 update_running=update_running,
                 branch=str(overview.get("branch") or get_updates_branch()),
-                runtime_sync_available=bool(get_servers_needing_runtime_sync()),
+                runtime_sync_available=bool(get_node_driver().list_nodes_needing_runtime_sync()),
                 release_cleanup_available=bool(get_release_cleanup_overview().get("supported")),
                 lang=lang,
             ),

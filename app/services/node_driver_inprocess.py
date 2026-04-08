@@ -13,6 +13,7 @@ from services.node_driver_client import (
     DriverOperation,
     DriverProfileUsage,
     DriverRemoteProfileRecord,
+    DriverRuntimeStatus,
     NodeDriverClient,
 )
 
@@ -55,6 +56,7 @@ def _node_from_server(server: RegisteredServer) -> DriverNode:
         version="",
         state=server.bootstrap_state,
         title=server.title,
+        flag=server.flag,
         region=server.region,
         public_host=server.public_host,
         capabilities=DriverNodeCapabilities(
@@ -81,6 +83,24 @@ class InProcessNodeDriverClient(NodeDriverClient):
         from services.server_registry import list_servers
 
         return [_node_from_server(server) for server in list_servers(include_disabled=include_disabled)]
+
+    def get_runtime_status(self, node_key: str) -> DriverRuntimeStatus:
+        from services.server_bootstrap import get_server_runtime_state
+
+        status = get_server_runtime_state(node_key)
+        return DriverRuntimeStatus(
+            state=str(status.get("state") or ""),
+            version=str(status.get("version") or ""),
+            commit=str(status.get("commit") or ""),
+            expected_version=str(status.get("expected_version") or ""),
+            expected_commit=str(status.get("expected_commit") or ""),
+            message=str(status.get("message") or ""),
+        )
+
+    def list_nodes_needing_runtime_sync(self) -> list[DriverNode]:
+        from services.server_bootstrap import get_servers_needing_runtime_sync
+
+        return [_node_from_server(server) for server in get_servers_needing_runtime_sync()]
 
     def sync_node_env(self, node_key: str) -> DriverOperation:
         from services.server_bootstrap import sync_server_node_env

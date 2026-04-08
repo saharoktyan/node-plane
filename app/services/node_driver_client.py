@@ -34,11 +34,22 @@ class DriverNode:
     version: str
     state: str
     title: str
+    flag: str
     region: str
     public_host: str
     capabilities: DriverNodeCapabilities
     health: DriverNodeHealth
     metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class DriverRuntimeStatus:
+    state: str
+    version: str
+    commit: str
+    expected_version: str
+    expected_commit: str
+    message: str
 
 
 @dataclass(frozen=True)
@@ -80,6 +91,12 @@ class NodeDriverClient(Protocol):
         ...
 
     def list_nodes(self, include_disabled: bool = False) -> list[DriverNode]:
+        ...
+
+    def get_runtime_status(self, node_key: str) -> DriverRuntimeStatus:
+        ...
+
+    def list_nodes_needing_runtime_sync(self) -> list[DriverNode]:
         ...
 
     def sync_node_env(self, node_key: str) -> DriverOperation:
