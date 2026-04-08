@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package nodeplane.driver.v1;
+
+import "driver/v1/types.proto";
+
+service NodeService {
+  rpc GetNode(GetNodeRequest) returns (Node);
+  rpc ListNodes(ListNodesRequest) returns (ListNodesResponse);
+  rpc GetNodeDiagnostics(GetNodeDiagnosticsRequest) returns (GetNodeDiagnosticsResponse);
+  rpc WatchNodeHealth(WatchNodeHealthRequest) returns (stream NodeHealthEvent);
+  rpc SyncNodeEnv(SyncNodeEnvRequest) returns (StartOperationResponse);
+}
+
+message GetNodeRequest {
+  string node_key = 1;
+}
+
+message ListNodesRequest {
+  bool include_disabled = 1;
+}
+
+message ListNodesResponse {
+  repeated Node items = 1;
+}
+
+message GetNodeDiagnosticsRequest {
+  string node_key = 1;
+}
+
+message GetNodeDiagnosticsResponse {
+  string node_key = 1;
+  string summary = 2;
+  repeated DiagnosticItem items = 3;
+}
+
+message WatchNodeHealthRequest {
+  repeated string node_keys = 1;
+}
+
+message NodeHealthEvent {
+  string node_key = 1;
+  NodeHealth health = 2;
+}
+
+message SyncNodeEnvRequest {
+  string node_key = 1;
+}

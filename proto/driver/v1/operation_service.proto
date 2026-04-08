@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+package nodeplane.driver.v1;
+
+import "driver/v1/types.proto";
+
+service OperationService {
+  rpc GetOperation(GetOperationRequest) returns (Operation);
+  rpc WatchOperation(WatchOperationRequest) returns (stream OperationEvent);
+  rpc ListOperations(ListOperationsRequest) returns (ListOperationsResponse);
+}
+
+message GetOperationRequest {
+  string operation_id = 1;
+}
+
+message WatchOperationRequest {
+  string operation_id = 1;
+}
+
+message ListOperationsRequest {
+  string node_key = 1;
+  string profile_name = 2;
+  string status = 3;
+  uint32 limit = 4;
+}
+
+message ListOperationsResponse {
+  repeated Operation items = 1;
+}

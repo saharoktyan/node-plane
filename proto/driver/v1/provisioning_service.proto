@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+package nodeplane.driver.v1;
+
+import "driver/v1/types.proto";
+
+service ProvisioningService {
+  rpc EnsureProfileOnNode(EnsureProfileOnNodeRequest) returns (StartOperationResponse);
+  rpc DeleteProfileFromNode(DeleteProfileFromNodeRequest) returns (StartOperationResponse);
+  rpc ReconcileNode(ReconcileNodeRequest) returns (StartOperationResponse);
+  rpc ReconcileProfile(ReconcileProfileRequest) returns (StartOperationResponse);
+  rpc ListRemoteProfiles(ListRemoteProfilesRequest) returns (ListRemoteProfilesResponse);
+}
+
+message EnsureProfileOnNodeRequest {
+  string node_key = 1;
+  ProfileSpec profile = 2;
+}
+
+message DeleteProfileFromNodeRequest {
+  string node_key = 1;
+  string profile_name = 2;
+  repeated string protocol_kinds = 3;
+}
+
+message ReconcileNodeRequest {
+  string node_key = 1;
+}
+
+message ReconcileProfileRequest {
+  string profile_name = 1;
+}
+
+message ListRemoteProfilesRequest {
+  string node_key = 1;
+  string protocol_kind = 2;
+}
+
+message ListRemoteProfilesResponse {
+  repeated RemoteProfileRecord items = 1;
+}

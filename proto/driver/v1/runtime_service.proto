@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package nodeplane.driver.v1;
+
+import "driver/v1/types.proto";
+
+service RuntimeService {
+  rpc BootstrapNode(BootstrapNodeRequest) returns (StartOperationResponse);
+  rpc FullCleanupNode(FullCleanupNodeRequest) returns (StartOperationResponse);
+  rpc GetRuntimeStatus(GetRuntimeStatusRequest) returns (GetRuntimeStatusResponse);
+}
+
+message BootstrapNodeRequest {
+  string node_key = 1;
+}
+
+message FullCleanupNodeRequest {
+  string node_key = 1;
+}
+
+message GetRuntimeStatusRequest {
+  string node_key = 1;
+}
+
+message GetRuntimeStatusResponse {
+  string node_key = 1;
+  repeated RuntimeServiceStatus services = 2;
+}

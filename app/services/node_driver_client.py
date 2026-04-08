@@ -1,0 +1,95 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, Optional, Protocol
+
+
+@dataclass(frozen=True)
+class DriverError:
+    code: str
+    summary: str
+    detail: str = ""
+    retryable: bool = False
+
+
+@dataclass(frozen=True)
+class DriverNodeCapabilities:
+    supports_awg: bool
+    supports_xray: bool
+    supports_telemetry: bool
+    supports_bootstrap: bool
+
+
+@dataclass(frozen=True)
+class DriverNodeHealth:
+    connectivity: str
+    last_seen_at: str = ""
+    summary: str = ""
+
+
+@dataclass(frozen=True)
+class DriverNode:
+    node_key: str
+    transport: str
+    version: str
+    state: str
+    title: str
+    region: str
+    public_host: str
+    capabilities: DriverNodeCapabilities
+    health: DriverNodeHealth
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class DriverRemoteProfileRecord:
+    profile_name: str
+    protocol_kind: str
+    remote_id: str
+    status: str
+    node_key: str
+
+
+@dataclass(frozen=True)
+class DriverProfileUsage:
+    profile_name: str
+    protocol_kind: str
+    rx_bytes: int
+    tx_bytes: int
+    total_bytes: int
+    samples: int
+    peers: int
+
+
+@dataclass(frozen=True)
+class DriverOperation:
+    operation_id: str
+    kind: str
+    status: str
+    node_key: str = ""
+    profile_name: str = ""
+    started_at: str = ""
+    updated_at: str = ""
+    finished_at: str = ""
+    progress_message: str = ""
+    error: Optional[DriverError] = None
+
+
+class NodeDriverClient(Protocol):
+    def get_node(self, node_key: str) -> Optional[DriverNode]:
+        ...
+
+    def list_nodes(self, include_disabled: bool = False) -> list[DriverNode]:
+        ...
+
+    def reconcile_node(self, node_key: str) -> DriverOperation:
+        ...
+
+    def reconcile_profile(self, profile_name: str) -> DriverOperation:
+        ...
+
+    def get_profile_usage(self, profile_name: str, protocol_kind: str = "awg") -> DriverProfileUsage:
+        ...
+
+    def list_remote_profiles(self, node_key: str, protocol_kind: Optional[str] = None) -> list[DriverRemoteProfileRecord]:
+        ...
