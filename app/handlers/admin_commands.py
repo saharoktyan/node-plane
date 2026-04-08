@@ -10,7 +10,6 @@ from config import PARSE_MODE
 from i18n import get_locale_for_update, t
 from services.app_settings import set_initial_setup_state
 from services.node_driver import get_node_driver
-from services.server_bootstrap import bootstrap_server, probe_server
 from services.server_registry import list_servers, update_server_fields, upsert_server
 from services.ssh_keys import render_public_key_guide
 from services.traffic_usage import debug_awg_traffic_report, debug_profile_traffic_report, run_collect_traffic_once
@@ -177,7 +176,9 @@ def probeserver_cmd(update: Update, context: CallbackContext) -> None:
     if len(parts) != 2:
         update.effective_message.reply_text(t(lang, "admin.cmd.usage_probeserver"))
         return
-    code, out = probe_server(parts[1])
+    operation = get_node_driver().probe_node(parts[1])
+    code = 0 if operation.status == "SUCCEEDED" else 1
+    out = operation.progress_message
     if code != 0:
         update.effective_message.reply_text(
             t(lang, "admin.cmd.probe_error", output=_safe_output(out)),
@@ -217,7 +218,9 @@ def bootstrapserver_cmd(update: Update, context: CallbackContext) -> None:
         return
     key = parts[1]
     update.effective_message.reply_text(t(lang, "admin.cmd.bootstrap_running", server=key), parse_mode=PARSE_MODE)
-    code, out = bootstrap_server(key)
+    operation = get_node_driver().bootstrap_node(key)
+    code = 0 if operation.status == "SUCCEEDED" else 1
+    out = operation.progress_message
     if code != 0:
         update.effective_message.reply_text(
             t(lang, "admin.cmd.bootstrap_error", output=_safe_output(out)),

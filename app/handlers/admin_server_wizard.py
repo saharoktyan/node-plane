@@ -14,17 +14,9 @@ from services.provisioning_state import (
     summarize_server_provisioning,
 )
 from services.server_bootstrap import (
-    bootstrap_server,
-    check_server_ports,
-    delete_server_runtime,
-    full_cleanup_server,
     get_server_runtime_state,
-    install_server_docker,
     is_server_docker_available,
-    open_server_ports,
-    probe_server,
     regenerate_awg_entropy,
-    reinstall_server,
     show_server_metrics,
     show_awg_entropy,
 )
@@ -1856,8 +1848,10 @@ def on_server_callback(update: Update, context: CallbackContext, payload: str) -
     if payload.startswith("cleanuprun:"):
         _, mode, server_key = payload.split(":", 2)
         stop_progress = _start_progress_animation(context, t(lang, "admin.wizard.full_cleanup"))
-        rc, out = full_cleanup_server(server_key, remove_ssh_key=(mode == "runtime_ssh"))
+        operation = get_node_driver().full_cleanup_node(server_key, remove_ssh_key=(mode == "runtime_ssh"))
         stop_progress()
+        rc = 0 if operation.status == "SUCCEEDED" else 1
+        out = operation.progress_message
         _wizard_edit(context, _action_result_text(t(lang, "admin.wizard.full_cleanup"), rc, out, server_key, lang), _server_card_markup(server_key, lang))
         return
 
@@ -1871,18 +1865,24 @@ def on_server_callback(update: Update, context: CallbackContext, payload: str) -
         }.get(action, t(lang, "admin.wizard.work"))
         stop_progress = _start_progress_animation(context, action_title)
         if action == "bootstrap":
-            rc, out = bootstrap_server(server_key, preserve_config=preserve_config)
+            operation = get_node_driver().bootstrap_node(server_key, preserve_config=preserve_config)
             stop_progress()
+            rc = 0 if operation.status == "SUCCEEDED" else 1
+            out = operation.progress_message
             _wizard_edit(context, _action_result_text(t(lang, "admin.wizard.bootstrap"), rc, out, server_key, lang), _server_card_markup(server_key, lang))
             return
         if action == "reinstall":
-            rc, out = reinstall_server(server_key, preserve_config=preserve_config)
+            operation = get_node_driver().reinstall_node(server_key, preserve_config=preserve_config)
             stop_progress()
+            rc = 0 if operation.status == "SUCCEEDED" else 1
+            out = operation.progress_message
             _wizard_edit(context, _action_result_text(t(lang, "admin.wizard.reinstall"), rc, out, server_key, lang), _server_card_markup(server_key, lang))
             return
         if action == "delete":
-            rc, out = delete_server_runtime(server_key, preserve_config=preserve_config)
+            operation = get_node_driver().delete_runtime(server_key, preserve_config=preserve_config)
             stop_progress()
+            rc = 0 if operation.status == "SUCCEEDED" else 1
+            out = operation.progress_message
             _wizard_edit(context, _action_result_text(t(lang, "admin.wizard.delete_runtime"), rc, out, server_key, lang), _server_card_markup(server_key, lang))
             return
         stop_progress()
@@ -1897,26 +1897,34 @@ def on_server_callback(update: Update, context: CallbackContext, payload: str) -
             return
         if action == "probe":
             stop_progress = _start_progress_animation(context, t(lang, "admin.wizard.probe"))
-            rc, out = probe_server(server_key)
+            operation = get_node_driver().probe_node(server_key)
             stop_progress()
+            rc = 0 if operation.status == "SUCCEEDED" else 1
+            out = operation.progress_message
             _wizard_edit(context, _action_result_text(t(lang, "admin.wizard.probe"), rc, out, server_key, lang), _probe_result_markup(server_key, lang))
             return
         if action == "checkports":
             stop_progress = _start_progress_animation(context, t(lang, "admin.wizard.check_ports"))
-            rc, out = check_server_ports(server_key)
+            operation = get_node_driver().check_ports(server_key)
             stop_progress()
+            rc = 0 if operation.status == "SUCCEEDED" else 1
+            out = operation.progress_message
             _wizard_edit(context, _action_result_text(t(lang, "admin.wizard.check_ports"), rc, out, server_key, lang), _server_card_markup(server_key, lang))
             return
         if action == "openports":
             stop_progress = _start_progress_animation(context, t(lang, "admin.wizard.open_ports"))
-            rc, out = open_server_ports(server_key)
+            operation = get_node_driver().open_ports(server_key)
             stop_progress()
+            rc = 0 if operation.status == "SUCCEEDED" else 1
+            out = operation.progress_message
             _wizard_edit(context, _action_result_text(t(lang, "admin.wizard.open_ports"), rc, out, server_key, lang), _server_card_markup(server_key, lang))
             return
         if action == "installdocker":
             stop_progress = _start_progress_animation(context, t(lang, "admin.wizard.install_docker"))
-            rc, out = install_server_docker(server_key)
+            operation = get_node_driver().install_docker(server_key)
             stop_progress()
+            rc = 0 if operation.status == "SUCCEEDED" else 1
+            out = operation.progress_message
             _wizard_edit(context, _action_result_text(t(lang, "admin.wizard.install_docker"), rc, out, server_key, lang), _server_card_markup(server_key, lang))
             return
         if action == "syncenv":
