@@ -43,6 +43,7 @@ from services.app_settings import (
 )
 from services.alerts import get_alerts_overview
 from services.backups import backup_token, create_backup, get_backup_info, get_backups_overview, list_backups, resolve_backup_token, restore_backup
+from services.node_driver import get_node_driver
 from services.provisioning_state import summarize_server_provisioning
 from services.server_bootstrap import get_server_runtime_state, get_servers_needing_runtime_sync, sync_server_runtime
 from services.server_registry import list_servers
@@ -51,7 +52,6 @@ from services.ssh_keys import render_public_key_guide, render_public_key_summary
 from services.system_reset import run_factory_reset, run_full_remove
 from services.profile_state import ensure_telegram_profile, get_allowed_protocols, get_profile, get_profile_access_status, profile_store, user_store, utcnow
 from services.release_cleanup import get_release_cleanup_overview, run_release_cleanup
-from services.traffic_usage import get_profile_monthly_usage
 from services.updates import check_for_updates, get_updates_menu_emoji, get_updates_overview, list_available_versions, schedule_update
 from services.xray import get_server_link_status
 from ui.user_views import format_server_access
@@ -2313,10 +2313,11 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
         traffic_block = ""
         if is_global_telemetry_enabled():
             if _user_telemetry_enabled(user.id):
-                awg_usage = get_profile_monthly_usage(name, "awg")
-                xray_usage = get_profile_monthly_usage(name, "xray")
-                awg_usage_txt = _format_bytes(int(awg_usage["total_bytes"]))
-                xray_usage_txt = _format_bytes(int(xray_usage["total_bytes"]))
+                driver = get_node_driver()
+                awg_usage = driver.get_profile_usage(name, "awg")
+                xray_usage = driver.get_profile_usage(name, "xray")
+                awg_usage_txt = _format_bytes(int(awg_usage.total_bytes))
+                xray_usage_txt = _format_bytes(int(xray_usage.total_bytes))
                 telemetry_line = (
                     f"{t(lang, 'profile.awg_traffic', value=awg_usage_txt)}\n"
                     f"{t(lang, 'profile.xray_traffic', value=xray_usage_txt)}"

@@ -68,18 +68,6 @@ def _node_from_server(server: RegisteredServer) -> DriverNode:
     )
 
 
-def _parse_awg_profile_names(config_text: str) -> set[str]:
-    names: set[str] = set()
-    for raw_line in config_text.splitlines():
-        line = raw_line.strip()
-        if not line.startswith("#"):
-            continue
-        name = line.lstrip("#").strip()
-        if name:
-            names.add(name)
-    return names
-
-
 class InProcessNodeDriverClient(NodeDriverClient):
     def get_node(self, node_key: str) -> Optional[DriverNode]:
         from services.server_registry import get_server
@@ -137,9 +125,8 @@ class InProcessNodeDriverClient(NodeDriverClient):
         )
 
     def list_remote_profiles(self, node_key: str, protocol_kind: Optional[str] = None) -> list[DriverRemoteProfileRecord]:
+        from services.node_driver_remote import list_remote_awg_profiles, list_remote_xray_profiles
         from services.server_registry import get_server
-        from services.server_runtime import run_server_command
-        from services.xray import list_user_records
 
         server = get_server(node_key)
         if not server:
@@ -150,7 +137,7 @@ class InProcessNodeDriverClient(NodeDriverClient):
 
         for kind in kinds:
             if kind == "xray":
-                code, records, out = list_user_records(node_key)
+                code, records, out = list_remote_xray_profiles(node_key)
                 if code != 0:
                     raise RuntimeError(out)
                 items.extend(
@@ -165,7 +152,7 @@ class InProcessNodeDriverClient(NodeDriverClient):
                     if record.get("name")
                 )
             elif kind == "awg":
-                code, out = run_server_command(server, f"cat {server.awg_config_path}", timeout=60)
+                code, names, out = list_remote_awg_profiles(node_key)
                 if code != 0:
                     raise RuntimeError(out)
                 items.extend(
@@ -176,7 +163,7 @@ class InProcessNodeDriverClient(NodeDriverClient):
                         status="observed",
                         node_key=node_key,
                     )
-                    for name in sorted(_parse_awg_profile_names(out))
+                    for name in sorted(names)
                 )
 
         return items

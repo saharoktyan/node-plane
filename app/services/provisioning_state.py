@@ -217,10 +217,10 @@ def render_server_provisioning_summary(server_key: str, lang: str = "ru") -> str
 
 def reconcile_xray_server_state(server_key: str) -> tuple[int, str]:
     from domain.servers import get_access_methods_for_codes
+    from services.node_driver_remote import list_remote_xray_profiles
     from services.profile_state import profile_store
-    from services.xray import list_user_records
 
-    code, records, raw = list_user_records(server_key)
+    code, records, raw = list_remote_xray_profiles(server_key)
     if code != 0:
         return code, raw
 
@@ -286,33 +286,14 @@ def reconcile_xray_server_state(server_key: str) -> tuple[int, str]:
         lines.append("remote extra profiles: " + ", ".join(extra_remote[:20]))
     return 0, "\n".join(lines)
 
-
-def _parse_awg_profile_names(config_text: str) -> set[str]:
-    names: set[str] = set()
-    for raw_line in config_text.splitlines():
-        line = raw_line.strip()
-        if not line.startswith("#"):
-            continue
-        name = line.lstrip("#").strip()
-        if name:
-            names.add(name)
-    return names
-
-
 def reconcile_awg_server_state(server_key: str) -> tuple[int, str]:
     from domain.servers import get_access_methods_for_codes
+    from services.node_driver_remote import list_remote_awg_profiles
     from services.profile_state import profile_store
-    from services.server_runtime import run_server_command
 
-    server = get_server(server_key)
-    if not server:
-        return 1, f"Server {server_key} not found"
-
-    code, raw = run_server_command(server, f"cat {server.awg_config_path}", timeout=60)
+    code, remote_names, raw = list_remote_awg_profiles(server_key)
     if code != 0:
         return code, raw
-
-    remote_names = _parse_awg_profile_names(raw)
     subs = profile_store.read()
     desired_names: set[str] = set()
     ready = 0

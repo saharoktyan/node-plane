@@ -8,9 +8,8 @@ from telegram.ext import CallbackContext
 
 from config import APP_COMMIT, APP_SEMVER, CB_MENU, CB_SRV, PARSE_MODE, LIST_PAGE_SIZE
 from i18n import get_locale_for_update, t
+from services.node_driver import get_node_driver
 from services.provisioning_state import (
-    reconcile_server_state,
-    reconcile_xray_server_state,
     render_server_provisioning_summary,
     summarize_server_provisioning,
 )
@@ -1955,8 +1954,10 @@ def on_server_callback(update: Update, context: CallbackContext, payload: str) -
             return
         if action == "reconcile":
             stop_progress = _start_progress_animation(context, t(lang, "admin.wizard.reconcile"))
-            rc, out = reconcile_xray_server_state(server_key)
+            operation = get_node_driver().reconcile_node(server_key)
             stop_progress()
+            rc = 0 if operation.status == "SUCCEEDED" else 1
+            out = operation.progress_message
             _wizard_edit(context, _action_result_text(t(lang, "admin.wizard.reconcile"), rc, out, server_key, lang), _server_card_markup(server_key, lang))
             return
 
