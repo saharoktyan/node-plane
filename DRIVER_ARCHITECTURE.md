@@ -42,6 +42,8 @@ At the moment the repository already contains:
 - generated Python gRPC stubs in `app/driver/v1`;
 - Python `NodeDriverClient` with `inprocess` and `grpc` backends;
 - a Rust gRPC server skeleton in `rust/node-driver`.
+- a node-agent architecture draft in `NODE_AGENT_ARCHITECTURE.md`;
+- a node-agent crate scaffold in `rust/node-agent`.
 
 ## Target Split
 
@@ -261,6 +263,20 @@ Current limitations:
 - no persistence for operations;
 - no streaming events yet beyond empty stream placeholders;
 - compile-check may require external crate fetch on first build.
+
+## Node Agent Direction
+
+The next major step is a node-local Rust agent.
+
+Why this is needed:
+
+- central driver should not keep raw SSH as its long-term execution path;
+- runtime facts and telemetry are easier to read locally on the node;
+- retries and local command execution become more reliable when they are
+  node-local;
+- central driver can become an orchestrator instead of a shell runner.
+
+The node-agent direction is documented in `NODE_AGENT_ARCHITECTURE.md`.
 
 ## Operation Model
 
