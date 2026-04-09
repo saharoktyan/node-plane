@@ -1,7 +1,11 @@
 use std::collections::HashMap;
+use std::env;
+use std::fs;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
+use chrono::{Datelike, Utc};
+use tokio_postgres::{NoTls, Row};
 use tonic::{Request, Response, Status, transport::Server};
 use uuid::Uuid;
 
@@ -18,16 +22,16 @@ use driver::v1::runtime_service_server::{RuntimeService, RuntimeServiceServer};
 use driver::v1::telemetry_service_server::{TelemetryService, TelemetryServiceServer};
 use driver::v1::{
     BootstrapNodeRequest, CheckPortsRequest, DeleteProfileFromNodeRequest, DeleteRuntimeRequest,
-    FullCleanupNodeRequest, GetNodeDiagnosticsRequest, GetNodeRequest, GetOperationRequest,
-    GetProfileUsageRequest, GetProfileUsageResponse, GetRuntimeStatusRequest,
+    FullCleanupNodeRequest, GetNodeDiagnosticsRequest, GetNodeDiagnosticsResponse, GetNodeRequest,
+    GetOperationRequest, GetProfileUsageRequest, GetProfileUsageResponse, GetRuntimeStatusRequest,
     GetRuntimeStatusResponse, InstallDockerRequest, ListNodesNeedingRuntimeSyncRequest,
     ListNodesNeedingRuntimeSyncResponse, ListNodesRequest, ListNodesResponse,
     ListOperationsRequest, ListOperationsResponse, ListRemoteProfilesRequest,
     ListRemoteProfilesResponse, Node, NodeCapabilities, NodeHealth, NodeHealthEvent,
-    OpenPortsRequest, Operation, ProbeNodeRequest, ProfileUsage, ReconcileNodeRequest,
-    ReconcileProfileRequest, ReinstallNodeRequest, RuntimeStatus, ServiceStatus,
-    StartOperationResponse, SyncNodeEnvRequest, SyncRuntimeRequest, SyncXrayRequest,
-    WatchNodeHealthRequest, WatchOperationRequest,
+    OpenPortsRequest, Operation, OperationEvent, ProbeNodeRequest, ProfileUsage,
+    ReconcileNodeRequest, ReconcileProfileRequest, ReinstallNodeRequest, RemoteProfileRecord,
+    RuntimeStatus, ServiceStatus, StartOperationResponse, SyncNodeEnvRequest, SyncRuntimeRequest,
+    SyncXrayRequest, WatchNodeHealthRequest, WatchOperationRequest,
 };
 
 #[derive(Clone, Default)]
@@ -95,51 +99,469 @@ impl DriverState {
 }
 
 #[derive(Clone)]
-struct NodeApi {
+struct DriverContext {
     state: DriverState,
+    postgres_dsn: Option<String>,
+    app_semver: String,
+    app_commit: String,
+}
+
+impl DriverContext {
+    fn from_env() -> Self {
+        Self::load_runtime_env_file();
+        let postgres_dsn = env::var("POSTGRES_DSN")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .or_else(Self::derived_postgres_dsn);
+        Self {
+            state: DriverState::default(),
+            postgres_dsn,
+            app_semver: env::var("APP_SEMVER")
+                .ok()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| "0.1.0".to_string()),
+            app_commit: env::var("APP_COMMIT")
+                .ok()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| "unknown".to_string()),
+        }
+    }
+
+    fn candidate_shared_root() -> String {
+        let install_root = env::var("NODE_PLANE_BASE_DIR")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "/opt/node-plane".to_string());
+        let app_root = env::var("NODE_PLANE_APP_DIR")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| install_root.clone());
+        env::var("NODE_PLANE_SHARED_DIR")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .unwrap_or(app_root)
+    }
+
+    fn load_runtime_env_file() {
+        let env_path = format!("{}/.env", Self::candidate_shared_root());
+        let Ok(content) = fs::read_to_string(&env_path) else {
+            return;
+        };
+        for raw_line in content.lines() {
+            let line = raw_line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let Some((key, value)) = line.split_once('=') else {
+                continue;
+            };
+            let key = key.trim();
+            if key.is_empty() || env::var_os(key).is_some() {
+                continue;
+            }
+            let value = value.trim();
+            // SAFETY: this process updates env only during startup before worker tasks are spawned.
+            unsafe { env::set_var(key, value) };
+        }
+    }
+
+    fn derived_postgres_dsn() -> Option<String> {
+        let db_name = env::var("NODE_PLANE_POSTGRES_DB")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "node_plane".to_string());
+        let db_user = env::var("NODE_PLANE_POSTGRES_USER")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "node_plane".to_string());
+        let db_password = env::var("NODE_PLANE_POSTGRES_PASSWORD")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "node_plane".to_string());
+        let port = env::var("NODE_PLANE_POSTGRES_PORT")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "55432".to_string());
+        Some(format!(
+            "postgresql://{db_user}:{db_password}@127.0.0.1:{port}/{db_name}"
+        ))
+    }
+
+    async fn db_client(&self) -> Result<tokio_postgres::Client, Status> {
+        let dsn = self
+            .postgres_dsn
+            .as_deref()
+            .ok_or_else(|| Status::failed_precondition("PostgreSQL DSN is not configured"))?;
+        let (client, connection) = tokio_postgres::connect(dsn, NoTls)
+            .await
+            .map_err(|err| Status::unavailable(format!("failed to connect to postgres: {err}")))?;
+        tokio::spawn(async move {
+            if let Err(err) = connection.await {
+                eprintln!("postgres connection error: {err}");
+            }
+        });
+        Ok(client)
+    }
+
+    fn runtime_state_from_values(&self, version: &str, commit: &str) -> String {
+        let version_value = version.trim();
+        let commit_value = commit.trim();
+        if !commit_value.is_empty() && commit_value != "unknown" {
+            if self.app_commit != "unknown" {
+                return if commit_value == self.app_commit {
+                    "up_to_date".to_string()
+                } else {
+                    "outdated".to_string()
+                };
+            }
+            if !version_value.is_empty() {
+                return if version_value == self.app_semver {
+                    "up_to_date".to_string()
+                } else {
+                    "outdated".to_string()
+                };
+            }
+            return "unknown".to_string();
+        }
+        if !version_value.is_empty() {
+            return if version_value == self.app_semver {
+                "up_to_date".to_string()
+            } else {
+                "outdated".to_string()
+            };
+        }
+        "unknown".to_string()
+    }
+
+    fn parse_protocol_kinds(&self, value: &str) -> Vec<String> {
+        value
+            .split(',')
+            .map(|item| item.trim().to_lowercase())
+            .filter(|item| item == "awg" || item == "xray")
+            .collect()
+    }
+
+    fn node_from_row(&self, row: &Row) -> Node {
+        let protocol_kinds = self.parse_protocol_kinds(
+            row.try_get::<_, Option<String>>("protocol_kinds")
+                .ok()
+                .flatten()
+                .unwrap_or_default()
+                .as_str(),
+        );
+        let enabled = row.try_get::<_, bool>("enabled").unwrap_or(true);
+        let bootstrap_state = row
+            .try_get::<_, Option<String>>("bootstrap_state")
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| "new".to_string());
+        let connectivity = if !enabled {
+            "disabled".to_string()
+        } else if bootstrap_state == "bootstrapped" {
+            "ready".to_string()
+        } else {
+            "degraded".to_string()
+        };
+        let summary = if !enabled {
+            "server disabled in registry".to_string()
+        } else if bootstrap_state == "bootstrapped" {
+            "bootstrapped".to_string()
+        } else {
+            bootstrap_state.clone()
+        };
+
+        Node {
+            node_key: row
+                .try_get::<_, Option<String>>("key")
+                .ok()
+                .flatten()
+                .unwrap_or_default(),
+            transport: row
+                .try_get::<_, Option<String>>("transport")
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| "ssh".to_string()),
+            version: String::new(),
+            state: bootstrap_state,
+            title: row
+                .try_get::<_, Option<String>>("title")
+                .ok()
+                .flatten()
+                .unwrap_or_default(),
+            flag: row
+                .try_get::<_, Option<String>>("flag")
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| "🏳️".to_string()),
+            region: row
+                .try_get::<_, Option<String>>("region")
+                .ok()
+                .flatten()
+                .unwrap_or_default(),
+            public_host: row
+                .try_get::<_, Option<String>>("public_host")
+                .ok()
+                .flatten()
+                .unwrap_or_default(),
+            capabilities: Some(NodeCapabilities {
+                supports_awg: protocol_kinds.iter().any(|item| item == "awg"),
+                supports_xray: protocol_kinds.iter().any(|item| item == "xray"),
+                supports_telemetry: true,
+                supports_bootstrap: true,
+            }),
+            health: Some(NodeHealth {
+                connectivity,
+                last_seen_at: row
+                    .try_get::<_, Option<String>>("updated_at")
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default(),
+                summary,
+            }),
+        }
+    }
+
+    fn parse_runtime_note(&self, note: &str) -> Option<(String, String)> {
+        let prefix = "runtime synced to ";
+        let trimmed = note.trim();
+        let payload = trimmed.strip_prefix(prefix)?;
+        let (version, commit) = payload.split_once("·")?;
+        let version = version.trim().to_string();
+        let commit = commit.trim().to_string();
+        if version.is_empty() && commit.is_empty() {
+            None
+        } else {
+            Some((version, commit))
+        }
+    }
+
+    fn runtime_status_from_row(&self, row: &Row) -> RuntimeStatus {
+        let node_key = row
+            .try_get::<_, Option<String>>("key")
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        let bootstrap_state = row
+            .try_get::<_, Option<String>>("bootstrap_state")
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| "new".to_string());
+        let note = row
+            .try_get::<_, Option<String>>("notes")
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+
+        if bootstrap_state != "bootstrapped" {
+            return RuntimeStatus {
+                node_key,
+                state: "not_bootstrapped".to_string(),
+                version: String::new(),
+                commit: String::new(),
+                expected_version: self.app_semver.clone(),
+                expected_commit: self.app_commit.clone(),
+                message: "bootstrap required".to_string(),
+            };
+        }
+
+        if let Some((version, commit)) = self.parse_runtime_note(&note) {
+            return RuntimeStatus {
+                node_key,
+                state: self.runtime_state_from_values(&version, &commit),
+                version,
+                commit,
+                expected_version: self.app_semver.clone(),
+                expected_commit: self.app_commit.clone(),
+                message: "derived from last sync note; remote runtime metadata is not reported yet"
+                    .to_string(),
+            };
+        }
+
+        RuntimeStatus {
+            node_key,
+            state: "unknown".to_string(),
+            version: String::new(),
+            commit: String::new(),
+            expected_version: self.app_semver.clone(),
+            expected_commit: self.app_commit.clone(),
+            message: if note.trim().is_empty() {
+                "runtime metadata is not reported by the driver yet".to_string()
+            } else {
+                note
+            },
+        }
+    }
+
+    async fn fetch_server_row(&self, node_key: &str) -> Result<Option<Row>, Status> {
+        let client = self.db_client().await?;
+        client
+            .query_opt("SELECT * FROM servers WHERE key = $1", &[&node_key])
+            .await
+            .map_err(|err| Status::internal(format!("failed to query servers: {err}")))
+    }
+
+    async fn list_server_rows(&self, include_disabled: bool) -> Result<Vec<Row>, Status> {
+        let client = self.db_client().await?;
+        let sql = if include_disabled {
+            "SELECT * FROM servers ORDER BY title, key"
+        } else {
+            "SELECT * FROM servers WHERE enabled = TRUE ORDER BY title, key"
+        };
+        client
+            .query(sql, &[])
+            .await
+            .map_err(|err| Status::internal(format!("failed to list servers: {err}")))
+    }
+
+    async fn profile_usage_rows(
+        &self,
+        profile_name: &str,
+        protocol_kind: &str,
+    ) -> Result<Vec<Row>, Status> {
+        let client = self.db_client().await?;
+        let now = Utc::now();
+        let month_start = format!("{:04}-{:02}-01T00:00:00+00:00", now.year(), now.month());
+        client
+            .query(
+                "
+                WITH scoped AS (
+                    SELECT
+                        server_key,
+                        remote_id,
+                        rx_bytes_total,
+                        tx_bytes_total,
+                        sampled_at,
+                        ctid
+                    FROM traffic_samples
+                    WHERE profile_name = $1
+                      AND protocol_kind = $2
+                      AND sampled_at >= $3
+                ),
+                ranked AS (
+                    SELECT
+                        server_key,
+                        remote_id,
+                        rx_bytes_total,
+                        tx_bytes_total,
+                        sampled_at,
+                        COUNT(*) OVER (PARTITION BY server_key, remote_id) AS sample_count,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY server_key, remote_id
+                            ORDER BY sampled_at ASC, ctid ASC
+                        ) AS rn_first,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY server_key, remote_id
+                            ORDER BY sampled_at DESC, ctid DESC
+                        ) AS rn_last
+                    FROM scoped
+                )
+                SELECT
+                    first.server_key,
+                    first.remote_id,
+                    first.sample_count,
+                    first.rx_bytes_total AS rx_first,
+                    last.rx_bytes_total AS rx_last,
+                    first.tx_bytes_total AS tx_first,
+                    last.tx_bytes_total AS tx_last
+                FROM ranked first
+                JOIN ranked last
+                  ON last.server_key = first.server_key
+                 AND last.remote_id = first.remote_id
+                WHERE first.rn_first = 1
+                  AND last.rn_last = 1
+                ORDER BY first.server_key, first.remote_id
+                ",
+                &[&profile_name, &protocol_kind, &month_start],
+            )
+            .await
+            .map_err(|err| Status::internal(format!("failed to query traffic usage: {err}")))
+    }
+
+    async fn observed_remote_profiles(
+        &self,
+        node_key: &str,
+        protocol_kind: &str,
+    ) -> Result<Vec<Row>, Status> {
+        let client = self.db_client().await?;
+        if protocol_kind.is_empty() {
+            client
+                .query(
+                    "
+                    SELECT profile_name, protocol_kind, remote_id, status
+                    FROM profile_server_state
+                    WHERE server_key = $1
+                    ORDER BY profile_name, protocol_kind
+                    ",
+                    &[&node_key],
+                )
+                .await
+                .map_err(|err| {
+                    Status::internal(format!("failed to query profile_server_state: {err}"))
+                })
+        } else {
+            client
+                .query(
+                    "
+                    SELECT profile_name, protocol_kind, remote_id, status
+                    FROM profile_server_state
+                    WHERE server_key = $1
+                      AND protocol_kind = $2
+                    ORDER BY profile_name, protocol_kind
+                    ",
+                    &[&node_key, &protocol_kind],
+                )
+                .await
+                .map_err(|err| {
+                    Status::internal(format!("failed to query profile_server_state: {err}"))
+                })
+        }
+    }
+}
+
+#[derive(Clone)]
+struct NodeApi {
+    ctx: DriverContext,
 }
 
 #[derive(Clone)]
 struct ProvisioningApi {
-    state: DriverState,
+    ctx: DriverContext,
 }
 
 #[derive(Clone)]
 struct RuntimeApi {
-    state: DriverState,
+    ctx: DriverContext,
 }
 
 #[derive(Clone)]
 struct TelemetryApi {
-    state: DriverState,
+    ctx: DriverContext,
 }
 
 #[derive(Clone)]
 struct OperationApi {
-    state: DriverState,
+    ctx: DriverContext,
 }
 
-fn empty_node(node_key: &str) -> Node {
-    Node {
+fn missing_runtime_status(node_key: &str, app_semver: &str, app_commit: &str) -> RuntimeStatus {
+    RuntimeStatus {
         node_key: node_key.to_string(),
-        transport: String::new(),
+        state: "missing_server".to_string(),
         version: String::new(),
-        state: "unknown".to_string(),
-        title: String::new(),
-        flag: String::new(),
-        region: String::new(),
-        public_host: String::new(),
-        capabilities: Some(NodeCapabilities {
-            supports_awg: true,
-            supports_xray: true,
-            supports_telemetry: true,
-            supports_bootstrap: true,
-        }),
-        health: Some(NodeHealth {
-            connectivity: "unknown".to_string(),
-            last_seen_at: String::new(),
-            summary: "skeleton driver".to_string(),
-        }),
+        commit: String::new(),
+        expected_version: app_semver.to_string(),
+        expected_commit: app_commit.to_string(),
+        message: format!("server {node_key} not found"),
     }
 }
 
@@ -150,24 +572,46 @@ impl NodeService for NodeApi {
         if req.node_key.trim().is_empty() {
             return Err(Status::invalid_argument("node_key is required"));
         }
-        Ok(Response::new(empty_node(&req.node_key)))
+        match self.ctx.fetch_server_row(&req.node_key).await? {
+            Some(row) => Ok(Response::new(self.ctx.node_from_row(&row))),
+            None => Err(Status::not_found("node not found")),
+        }
     }
 
     async fn list_nodes(
         &self,
-        _request: Request<ListNodesRequest>,
+        request: Request<ListNodesRequest>,
     ) -> Result<Response<ListNodesResponse>, Status> {
-        Ok(Response::new(ListNodesResponse { items: Vec::new() }))
+        let req = request.into_inner();
+        let rows = self.ctx.list_server_rows(req.include_disabled).await?;
+        Ok(Response::new(ListNodesResponse {
+            items: rows.iter().map(|row| self.ctx.node_from_row(row)).collect(),
+        }))
     }
 
     async fn get_node_diagnostics(
         &self,
         request: Request<GetNodeDiagnosticsRequest>,
-    ) -> Result<Response<driver::v1::GetNodeDiagnosticsResponse>, Status> {
+    ) -> Result<Response<GetNodeDiagnosticsResponse>, Status> {
         let req = request.into_inner();
-        Ok(Response::new(driver::v1::GetNodeDiagnosticsResponse {
+        let summary = match self.ctx.fetch_server_row(&req.node_key).await? {
+            Some(row) => {
+                let note = row
+                    .try_get::<_, Option<String>>("notes")
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default();
+                if note.trim().is_empty() {
+                    "diagnostics are not implemented yet".to_string()
+                } else {
+                    format!("latest server note: {note}")
+                }
+            }
+            None => "server not found".to_string(),
+        };
+        Ok(Response::new(GetNodeDiagnosticsResponse {
             node_key: req.node_key,
-            summary: "diagnostics not implemented yet".to_string(),
+            summary,
             items: Vec::new(),
         }))
     }
@@ -190,7 +634,7 @@ impl NodeService for NodeApi {
         request: Request<SyncNodeEnvRequest>,
     ) -> Result<Response<StartOperationResponse>, Status> {
         let req = request.into_inner();
-        Ok(Response::new(self.state.start_operation(
+        Ok(Response::new(self.ctx.state.start_operation(
             "sync_node_env",
             &req.node_key,
             "",
@@ -203,7 +647,7 @@ impl NodeService for NodeApi {
         request: Request<ProbeNodeRequest>,
     ) -> Result<Response<StartOperationResponse>, Status> {
         let req = request.into_inner();
-        Ok(Response::new(self.state.start_operation(
+        Ok(Response::new(self.ctx.state.start_operation(
             "probe_node",
             &req.node_key,
             "",
@@ -216,7 +660,7 @@ impl NodeService for NodeApi {
         request: Request<CheckPortsRequest>,
     ) -> Result<Response<StartOperationResponse>, Status> {
         let req = request.into_inner();
-        Ok(Response::new(self.state.start_operation(
+        Ok(Response::new(self.ctx.state.start_operation(
             "check_ports",
             &req.node_key,
             "",
@@ -229,7 +673,7 @@ impl NodeService for NodeApi {
         request: Request<OpenPortsRequest>,
     ) -> Result<Response<StartOperationResponse>, Status> {
         let req = request.into_inner();
-        Ok(Response::new(self.state.start_operation(
+        Ok(Response::new(self.ctx.state.start_operation(
             "open_ports",
             &req.node_key,
             "",
@@ -242,7 +686,7 @@ impl NodeService for NodeApi {
         request: Request<InstallDockerRequest>,
     ) -> Result<Response<StartOperationResponse>, Status> {
         let req = request.into_inner();
-        Ok(Response::new(self.state.start_operation(
+        Ok(Response::new(self.ctx.state.start_operation(
             "install_docker",
             &req.node_key,
             "",
@@ -258,8 +702,11 @@ impl ProvisioningService for ProvisioningApi {
         request: Request<driver::v1::EnsureProfileOnNodeRequest>,
     ) -> Result<Response<StartOperationResponse>, Status> {
         let req = request.into_inner();
-        let profile_name = req.profile.map(|p| p.profile_name).unwrap_or_default();
-        Ok(Response::new(self.state.start_operation(
+        let profile_name = req
+            .profile
+            .map(|profile| profile.profile_name)
+            .unwrap_or_default();
+        Ok(Response::new(self.ctx.state.start_operation(
             "ensure_profile_on_node",
             &req.node_key,
             &profile_name,
@@ -272,7 +719,7 @@ impl ProvisioningService for ProvisioningApi {
         request: Request<DeleteProfileFromNodeRequest>,
     ) -> Result<Response<StartOperationResponse>, Status> {
         let req = request.into_inner();
-        Ok(Response::new(self.state.start_operation(
+        Ok(Response::new(self.ctx.state.start_operation(
             "delete_profile_from_node",
             &req.node_key,
             &req.profile_name,
@@ -285,7 +732,7 @@ impl ProvisioningService for ProvisioningApi {
         request: Request<ReconcileNodeRequest>,
     ) -> Result<Response<StartOperationResponse>, Status> {
         let req = request.into_inner();
-        Ok(Response::new(self.state.start_operation(
+        Ok(Response::new(self.ctx.state.start_operation(
             "reconcile_node",
             &req.node_key,
             "",
@@ -298,7 +745,7 @@ impl ProvisioningService for ProvisioningApi {
         request: Request<ReconcileProfileRequest>,
     ) -> Result<Response<StartOperationResponse>, Status> {
         let req = request.into_inner();
-        Ok(Response::new(self.state.start_operation(
+        Ok(Response::new(self.ctx.state.start_operation(
             "reconcile_profile",
             "",
             &req.profile_name,
@@ -311,10 +758,36 @@ impl ProvisioningService for ProvisioningApi {
         request: Request<ListRemoteProfilesRequest>,
     ) -> Result<Response<ListRemoteProfilesResponse>, Status> {
         let req = request.into_inner();
-        let _ = req;
-        Ok(Response::new(ListRemoteProfilesResponse {
-            items: Vec::new(),
-        }))
+        let rows = self
+            .ctx
+            .observed_remote_profiles(&req.node_key, req.protocol_kind.trim())
+            .await?;
+        let items = rows
+            .into_iter()
+            .map(|row| RemoteProfileRecord {
+                profile_name: row
+                    .try_get::<_, Option<String>>("profile_name")
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default(),
+                protocol_kind: row
+                    .try_get::<_, Option<String>>("protocol_kind")
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default(),
+                remote_id: row
+                    .try_get::<_, Option<String>>("remote_id")
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default(),
+                status: row
+                    .try_get::<_, Option<String>>("status")
+                    .ok()
+                    .flatten()
+                    .unwrap_or_else(|| "unknown".to_string()),
+            })
+            .collect();
+        Ok(Response::new(ListRemoteProfilesResponse { items }))
     }
 }
 
@@ -325,7 +798,7 @@ impl RuntimeService for RuntimeApi {
         request: Request<BootstrapNodeRequest>,
     ) -> Result<Response<StartOperationResponse>, Status> {
         let req = request.into_inner();
-        Ok(Response::new(self.state.start_operation(
+        Ok(Response::new(self.ctx.state.start_operation(
             "bootstrap_node",
             &req.node_key,
             "",
@@ -338,7 +811,7 @@ impl RuntimeService for RuntimeApi {
         request: Request<ReinstallNodeRequest>,
     ) -> Result<Response<StartOperationResponse>, Status> {
         let req = request.into_inner();
-        Ok(Response::new(self.state.start_operation(
+        Ok(Response::new(self.ctx.state.start_operation(
             "reinstall_node",
             &req.node_key,
             "",
@@ -351,7 +824,7 @@ impl RuntimeService for RuntimeApi {
         request: Request<DeleteRuntimeRequest>,
     ) -> Result<Response<StartOperationResponse>, Status> {
         let req = request.into_inner();
-        Ok(Response::new(self.state.start_operation(
+        Ok(Response::new(self.ctx.state.start_operation(
             "delete_runtime",
             &req.node_key,
             "",
@@ -364,7 +837,7 @@ impl RuntimeService for RuntimeApi {
         request: Request<FullCleanupNodeRequest>,
     ) -> Result<Response<StartOperationResponse>, Status> {
         let req = request.into_inner();
-        Ok(Response::new(self.state.start_operation(
+        Ok(Response::new(self.ctx.state.start_operation(
             "full_cleanup_node",
             &req.node_key,
             "",
@@ -377,7 +850,7 @@ impl RuntimeService for RuntimeApi {
         request: Request<SyncRuntimeRequest>,
     ) -> Result<Response<StartOperationResponse>, Status> {
         let req = request.into_inner();
-        Ok(Response::new(self.state.start_operation(
+        Ok(Response::new(self.ctx.state.start_operation(
             "sync_runtime",
             &req.node_key,
             "",
@@ -390,7 +863,7 @@ impl RuntimeService for RuntimeApi {
         request: Request<SyncXrayRequest>,
     ) -> Result<Response<StartOperationResponse>, Status> {
         let req = request.into_inner();
-        Ok(Response::new(self.state.start_operation(
+        Ok(Response::new(self.ctx.state.start_operation(
             "sync_xray",
             &req.node_key,
             "",
@@ -403,20 +876,18 @@ impl RuntimeService for RuntimeApi {
         request: Request<GetRuntimeStatusRequest>,
     ) -> Result<Response<GetRuntimeStatusResponse>, Status> {
         let req = request.into_inner();
+        let runtime = match self.ctx.fetch_server_row(&req.node_key).await? {
+            Some(row) => self.ctx.runtime_status_from_row(&row),
+            None => {
+                missing_runtime_status(&req.node_key, &self.ctx.app_semver, &self.ctx.app_commit)
+            }
+        };
         Ok(Response::new(GetRuntimeStatusResponse {
-            runtime: Some(RuntimeStatus {
-                node_key: req.node_key,
-                state: "unknown".to_string(),
-                version: String::new(),
-                commit: String::new(),
-                expected_version: String::new(),
-                expected_commit: String::new(),
-                message: "runtime status not implemented yet".to_string(),
-            }),
+            runtime: Some(runtime),
             services: vec![ServiceStatus {
                 service_name: "node-driver".to_string(),
                 state: "running".to_string(),
-                summary: "skeleton service".to_string(),
+                summary: "postgres-backed read model, execution path still skeleton".to_string(),
             }],
         }))
     }
@@ -425,9 +896,15 @@ impl RuntimeService for RuntimeApi {
         &self,
         _request: Request<ListNodesNeedingRuntimeSyncRequest>,
     ) -> Result<Response<ListNodesNeedingRuntimeSyncResponse>, Status> {
-        Ok(Response::new(ListNodesNeedingRuntimeSyncResponse {
-            items: Vec::new(),
-        }))
+        let rows = self.ctx.list_server_rows(false).await?;
+        let mut items = Vec::new();
+        for row in rows {
+            let runtime = self.ctx.runtime_status_from_row(&row);
+            if matches!(runtime.state.as_str(), "outdated" | "unknown") {
+                items.push(self.ctx.node_from_row(&row));
+            }
+        }
+        Ok(Response::new(ListNodesNeedingRuntimeSyncResponse { items }))
     }
 }
 
@@ -439,7 +916,7 @@ impl TelemetryService for TelemetryApi {
     ) -> Result<Response<StartOperationResponse>, Status> {
         let req = request.into_inner();
         let node_key = req.node_keys.first().cloned().unwrap_or_default();
-        Ok(Response::new(self.state.start_operation(
+        Ok(Response::new(self.ctx.state.start_operation(
             "collect_traffic_snapshot",
             &node_key,
             "",
@@ -452,15 +929,36 @@ impl TelemetryService for TelemetryApi {
         request: Request<GetProfileUsageRequest>,
     ) -> Result<Response<GetProfileUsageResponse>, Status> {
         let req = request.into_inner();
+        let rows = self
+            .ctx
+            .profile_usage_rows(&req.profile_name, &req.protocol_kind)
+            .await?;
+
+        let mut rx_total: u64 = 0;
+        let mut tx_total: u64 = 0;
+        let mut samples: u32 = 0;
+        let peers = rows.len() as u32;
+
+        for row in rows {
+            let sample_count = row.try_get::<_, i64>("sample_count").unwrap_or(0);
+            let rx_first = row.try_get::<_, i64>("rx_first").unwrap_or(0);
+            let rx_last = row.try_get::<_, i64>("rx_last").unwrap_or(0);
+            let tx_first = row.try_get::<_, i64>("tx_first").unwrap_or(0);
+            let tx_last = row.try_get::<_, i64>("tx_last").unwrap_or(0);
+            rx_total += rx_last.saturating_sub(rx_first).max(0) as u64;
+            tx_total += tx_last.saturating_sub(tx_first).max(0) as u64;
+            samples = samples.saturating_add(sample_count.max(0) as u32);
+        }
+
         Ok(Response::new(GetProfileUsageResponse {
             usage: Some(ProfileUsage {
                 profile_name: req.profile_name,
                 protocol_kind: req.protocol_kind,
-                rx_bytes: 0,
-                tx_bytes: 0,
-                total_bytes: 0,
-                samples: 0,
-                peers: 0,
+                rx_bytes: rx_total,
+                tx_bytes: tx_total,
+                total_bytes: rx_total.saturating_add(tx_total),
+                samples,
+                peers,
             }),
         }))
     }
@@ -473,14 +971,14 @@ impl OperationService for OperationApi {
         request: Request<GetOperationRequest>,
     ) -> Result<Response<Operation>, Status> {
         let req = request.into_inner();
-        match self.state.get_operation(&req.operation_id) {
+        match self.ctx.state.get_operation(&req.operation_id) {
             Some(op) => Ok(Response::new(op)),
             None => Err(Status::not_found("operation not found")),
         }
     }
 
     type WatchOperationStream =
-        tokio_stream::wrappers::ReceiverStream<Result<driver::v1::OperationEvent, Status>>;
+        tokio_stream::wrappers::ReceiverStream<Result<OperationEvent, Status>>;
 
     async fn watch_operation(
         &self,
@@ -497,33 +995,28 @@ impl OperationService for OperationApi {
         request: Request<ListOperationsRequest>,
     ) -> Result<Response<ListOperationsResponse>, Status> {
         let req = request.into_inner();
-        let items =
-            self.state
-                .list_operations(&req.node_key, &req.profile_name, &req.status, req.limit);
+        let items = self.ctx.state.list_operations(
+            &req.node_key,
+            &req.profile_name,
+            &req.status,
+            req.limit,
+        );
         Ok(Response::new(ListOperationsResponse { items }))
     }
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let addr: SocketAddr = std::env::var("NODE_DRIVER_LISTEN_ADDR")
+    let addr: SocketAddr = env::var("NODE_DRIVER_LISTEN_ADDR")
         .unwrap_or_else(|_| "127.0.0.1:50051".to_string())
         .parse()?;
 
-    let state = DriverState::default();
-    let node_api = NodeApi {
-        state: state.clone(),
-    };
-    let provisioning_api = ProvisioningApi {
-        state: state.clone(),
-    };
-    let runtime_api = RuntimeApi {
-        state: state.clone(),
-    };
-    let telemetry_api = TelemetryApi {
-        state: state.clone(),
-    };
-    let operation_api = OperationApi { state };
+    let ctx = DriverContext::from_env();
+    let node_api = NodeApi { ctx: ctx.clone() };
+    let provisioning_api = ProvisioningApi { ctx: ctx.clone() };
+    let runtime_api = RuntimeApi { ctx: ctx.clone() };
+    let telemetry_api = TelemetryApi { ctx: ctx.clone() };
+    let operation_api = OperationApi { ctx };
 
     println!("node-plane-driver listening on {}", addr);
 
