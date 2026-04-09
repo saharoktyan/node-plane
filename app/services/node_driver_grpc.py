@@ -58,17 +58,17 @@ class GrpcNodeDriverClient(NodeDriverClient):
 
     def _load_stubs(self) -> None:
         try:
-            self._types_pb2 = import_module("generated.driver.v1.types_pb2")
-            self._node_pb2 = import_module("generated.driver.v1.node_service_pb2")
-            self._node_pb2_grpc = import_module("generated.driver.v1.node_service_pb2_grpc")
-            self._provisioning_pb2 = import_module("generated.driver.v1.provisioning_service_pb2")
-            self._provisioning_pb2_grpc = import_module("generated.driver.v1.provisioning_service_pb2_grpc")
-            self._runtime_pb2 = import_module("generated.driver.v1.runtime_service_pb2")
-            self._runtime_pb2_grpc = import_module("generated.driver.v1.runtime_service_pb2_grpc")
-            self._telemetry_pb2 = import_module("generated.driver.v1.telemetry_service_pb2")
-            self._telemetry_pb2_grpc = import_module("generated.driver.v1.telemetry_service_pb2_grpc")
-            self._operation_pb2 = import_module("generated.driver.v1.operation_service_pb2")
-            self._operation_pb2_grpc = import_module("generated.driver.v1.operation_service_pb2_grpc")
+            self._types_pb2 = import_module("driver.v1.types_pb2")
+            self._node_pb2 = import_module("driver.v1.node_service_pb2")
+            self._node_pb2_grpc = import_module("driver.v1.node_service_pb2_grpc")
+            self._provisioning_pb2 = import_module("driver.v1.provisioning_service_pb2")
+            self._provisioning_pb2_grpc = import_module("driver.v1.provisioning_service_pb2_grpc")
+            self._runtime_pb2 = import_module("driver.v1.runtime_service_pb2")
+            self._runtime_pb2_grpc = import_module("driver.v1.runtime_service_pb2_grpc")
+            self._telemetry_pb2 = import_module("driver.v1.telemetry_service_pb2")
+            self._telemetry_pb2_grpc = import_module("driver.v1.telemetry_service_pb2_grpc")
+            self._operation_pb2 = import_module("driver.v1.operation_service_pb2")
+            self._operation_pb2_grpc = import_module("driver.v1.operation_service_pb2_grpc")
         except ModuleNotFoundError as exc:
             raise RuntimeError(
                 "Generated protobuf modules are missing. "
@@ -81,6 +81,13 @@ class GrpcNodeDriverClient(NodeDriverClient):
         self._telemetry_stub = self._telemetry_pb2_grpc.TelemetryServiceStub(self._channel)
         self._operation_stub = self._operation_pb2_grpc.OperationServiceStub(self._channel)
         self._stubs_ready = True
+
+    def _rpc_error_text(self, exc: Exception) -> str:
+        code_fn = getattr(exc, "code", None)
+        details_fn = getattr(exc, "details", None)
+        code = str(code_fn()) if callable(code_fn) else exc.__class__.__name__
+        details = str(details_fn()) if callable(details_fn) else str(exc)
+        return f"{code}: {details}".strip()
 
     def _operation_from_pb(self, operation) -> DriverOperation:
         error = None
@@ -113,6 +120,21 @@ class GrpcNodeDriverClient(NodeDriverClient):
             profile_name=profile_name,
         )
 
+    def _failed_operation(self, kind: str, exc: Exception, *, node_key: str = "", profile_name: str = "") -> DriverOperation:
+        detail = self._rpc_error_text(exc)
+        return DriverOperation(
+            operation_id="",
+            kind=kind,
+            status="FAILED",
+            node_key=node_key,
+            profile_name=profile_name,
+            progress_message=detail,
+            error=DriverError(code="grpc_error", summary=f"{kind} RPC failed", detail=detail, retryable=True),
+        )
+
+    def _query_error(self, kind: str, exc: Exception) -> RuntimeError:
+        return RuntimeError(f"{kind} RPC failed: {self._rpc_error_text(exc)}")
+
     def _node_from_pb(self, item) -> DriverNode:
         caps = getattr(item, "capabilities", None)
         health = getattr(item, "health", None)
@@ -141,28 +163,37 @@ class GrpcNodeDriverClient(NodeDriverClient):
 
     def get_node(self, node_key: str) -> Optional[DriverNode]:
         self._ensure_client()
-        response = self._node_stub.GetNode(
-            self._node_pb2.GetNodeRequest(node_key=node_key),
-            timeout=self.timeout_seconds,
-        )
+        try:
+            response = self._node_stub.GetNode(
+                self._node_pb2.GetNodeRequest(node_key=node_key),
+                timeout=self.timeout_seconds,
+            )
+        except Exception as exc:
+            raise self._query_error("get_node", exc) from exc
         if not getattr(response, "node_key", ""):
             return None
         return self._node_from_pb(response)
 
     def list_nodes(self, include_disabled: bool = False) -> list[DriverNode]:
         self._ensure_client()
-        response = self._node_stub.ListNodes(
-            self._node_pb2.ListNodesRequest(include_disabled=include_disabled),
-            timeout=self.timeout_seconds,
-        )
+        try:
+            response = self._node_stub.ListNodes(
+                self._node_pb2.ListNodesRequest(include_disabled=include_disabled),
+                timeout=self.timeout_seconds,
+            )
+        except Exception as exc:
+            raise self._query_error("list_nodes", exc) from exc
         return [self._node_from_pb(item) for item in getattr(response, "items", [])]
 
     def get_runtime_status(self, node_key: str) -> DriverRuntimeStatus:
         self._ensure_client()
-        response = self._runtime_stub.GetRuntimeStatus(
-            self._runtime_pb2.GetRuntimeStatusRequest(node_key=node_key),
-            timeout=self.timeout_seconds,
-        )
+        try:
+            response = self._runtime_stub.GetRuntimeStatus(
+                self._runtime_pb2.GetRuntimeStatusRequest(node_key=node_key),
+                timeout=self.timeout_seconds,
+            )
+        except Exception as exc:
+            raise self._query_error("get_runtime_status", exc) from exc
         runtime = getattr(response, "runtime", None)
         if runtime is None:
             return DriverRuntimeStatus(
@@ -184,126 +215,171 @@ class GrpcNodeDriverClient(NodeDriverClient):
 
     def list_nodes_needing_runtime_sync(self) -> list[DriverNode]:
         self._ensure_client()
-        response = self._runtime_stub.ListNodesNeedingRuntimeSync(
-            self._runtime_pb2.ListNodesNeedingRuntimeSyncRequest(),
-            timeout=self.timeout_seconds,
-        )
+        try:
+            response = self._runtime_stub.ListNodesNeedingRuntimeSync(
+                self._runtime_pb2.ListNodesNeedingRuntimeSyncRequest(),
+                timeout=self.timeout_seconds,
+            )
+        except Exception as exc:
+            raise self._query_error("list_nodes_needing_runtime_sync", exc) from exc
         return [self._node_from_pb(item) for item in getattr(response, "items", [])]
 
     def sync_node_env(self, node_key: str) -> DriverOperation:
         self._ensure_client()
-        response = self._node_stub.SyncNodeEnv(
-            self._node_pb2.SyncNodeEnvRequest(node_key=node_key),
-            timeout=self.timeout_seconds,
-        )
+        try:
+            response = self._node_stub.SyncNodeEnv(
+                self._node_pb2.SyncNodeEnvRequest(node_key=node_key),
+                timeout=self.timeout_seconds,
+            )
+        except Exception as exc:
+            return self._failed_operation("sync_node_env", exc, node_key=node_key)
         return self._start_operation("sync_node_env", response, node_key=node_key)
 
     def sync_runtime(self, node_key: str) -> DriverOperation:
         self._ensure_client()
-        response = self._runtime_stub.SyncRuntime(
-            self._runtime_pb2.SyncRuntimeRequest(node_key=node_key),
-            timeout=self.timeout_seconds,
-        )
+        try:
+            response = self._runtime_stub.SyncRuntime(
+                self._runtime_pb2.SyncRuntimeRequest(node_key=node_key),
+                timeout=self.timeout_seconds,
+            )
+        except Exception as exc:
+            return self._failed_operation("sync_runtime", exc, node_key=node_key)
         return self._start_operation("sync_runtime", response, node_key=node_key)
 
     def sync_xray(self, node_key: str) -> DriverOperation:
         self._ensure_client()
-        response = self._runtime_stub.SyncXray(
-            self._runtime_pb2.SyncXrayRequest(node_key=node_key),
-            timeout=self.timeout_seconds,
-        )
+        try:
+            response = self._runtime_stub.SyncXray(
+                self._runtime_pb2.SyncXrayRequest(node_key=node_key),
+                timeout=self.timeout_seconds,
+            )
+        except Exception as exc:
+            return self._failed_operation("sync_xray", exc, node_key=node_key)
         return self._start_operation("sync_xray", response, node_key=node_key)
 
     def probe_node(self, node_key: str) -> DriverOperation:
         self._ensure_client()
-        response = self._node_stub.ProbeNode(
-            self._node_pb2.ProbeNodeRequest(node_key=node_key),
-            timeout=self.timeout_seconds,
-        )
+        try:
+            response = self._node_stub.ProbeNode(
+                self._node_pb2.ProbeNodeRequest(node_key=node_key),
+                timeout=self.timeout_seconds,
+            )
+        except Exception as exc:
+            return self._failed_operation("probe_node", exc, node_key=node_key)
         return self._start_operation("probe_node", response, node_key=node_key)
 
     def check_ports(self, node_key: str) -> DriverOperation:
         self._ensure_client()
-        response = self._node_stub.CheckPorts(
-            self._node_pb2.CheckPortsRequest(node_key=node_key),
-            timeout=self.timeout_seconds,
-        )
+        try:
+            response = self._node_stub.CheckPorts(
+                self._node_pb2.CheckPortsRequest(node_key=node_key),
+                timeout=self.timeout_seconds,
+            )
+        except Exception as exc:
+            return self._failed_operation("check_ports", exc, node_key=node_key)
         return self._start_operation("check_ports", response, node_key=node_key)
 
     def open_ports(self, node_key: str) -> DriverOperation:
         self._ensure_client()
-        response = self._node_stub.OpenPorts(
-            self._node_pb2.OpenPortsRequest(node_key=node_key),
-            timeout=self.timeout_seconds,
-        )
+        try:
+            response = self._node_stub.OpenPorts(
+                self._node_pb2.OpenPortsRequest(node_key=node_key),
+                timeout=self.timeout_seconds,
+            )
+        except Exception as exc:
+            return self._failed_operation("open_ports", exc, node_key=node_key)
         return self._start_operation("open_ports", response, node_key=node_key)
 
     def install_docker(self, node_key: str) -> DriverOperation:
         self._ensure_client()
-        response = self._node_stub.InstallDocker(
-            self._node_pb2.InstallDockerRequest(node_key=node_key),
-            timeout=self.timeout_seconds,
-        )
+        try:
+            response = self._node_stub.InstallDocker(
+                self._node_pb2.InstallDockerRequest(node_key=node_key),
+                timeout=self.timeout_seconds,
+            )
+        except Exception as exc:
+            return self._failed_operation("install_docker", exc, node_key=node_key)
         return self._start_operation("install_docker", response, node_key=node_key)
 
     def bootstrap_node(self, node_key: str, preserve_config: bool = False) -> DriverOperation:
         self._ensure_client()
-        response = self._runtime_stub.BootstrapNode(
-            self._runtime_pb2.BootstrapNodeRequest(node_key=node_key, preserve_config=preserve_config),
-            timeout=self.timeout_seconds,
-        )
+        try:
+            response = self._runtime_stub.BootstrapNode(
+                self._runtime_pb2.BootstrapNodeRequest(node_key=node_key, preserve_config=preserve_config),
+                timeout=self.timeout_seconds,
+            )
+        except Exception as exc:
+            return self._failed_operation("bootstrap_node", exc, node_key=node_key)
         return self._start_operation("bootstrap_node", response, node_key=node_key)
 
     def reinstall_node(self, node_key: str, preserve_config: bool = False) -> DriverOperation:
         self._ensure_client()
-        response = self._runtime_stub.ReinstallNode(
-            self._runtime_pb2.ReinstallNodeRequest(node_key=node_key, preserve_config=preserve_config),
-            timeout=self.timeout_seconds,
-        )
+        try:
+            response = self._runtime_stub.ReinstallNode(
+                self._runtime_pb2.ReinstallNodeRequest(node_key=node_key, preserve_config=preserve_config),
+                timeout=self.timeout_seconds,
+            )
+        except Exception as exc:
+            return self._failed_operation("reinstall_node", exc, node_key=node_key)
         return self._start_operation("reinstall_node", response, node_key=node_key)
 
     def delete_runtime(self, node_key: str, preserve_config: bool = False) -> DriverOperation:
         self._ensure_client()
-        response = self._runtime_stub.DeleteRuntime(
-            self._runtime_pb2.DeleteRuntimeRequest(node_key=node_key, preserve_config=preserve_config),
-            timeout=self.timeout_seconds,
-        )
+        try:
+            response = self._runtime_stub.DeleteRuntime(
+                self._runtime_pb2.DeleteRuntimeRequest(node_key=node_key, preserve_config=preserve_config),
+                timeout=self.timeout_seconds,
+            )
+        except Exception as exc:
+            return self._failed_operation("delete_runtime", exc, node_key=node_key)
         return self._start_operation("delete_runtime", response, node_key=node_key)
 
     def full_cleanup_node(self, node_key: str, remove_ssh_key: bool = False) -> DriverOperation:
         self._ensure_client()
-        response = self._runtime_stub.FullCleanupNode(
-            self._runtime_pb2.FullCleanupNodeRequest(node_key=node_key, remove_ssh_key=remove_ssh_key),
-            timeout=self.timeout_seconds,
-        )
+        try:
+            response = self._runtime_stub.FullCleanupNode(
+                self._runtime_pb2.FullCleanupNodeRequest(node_key=node_key, remove_ssh_key=remove_ssh_key),
+                timeout=self.timeout_seconds,
+            )
+        except Exception as exc:
+            return self._failed_operation("full_cleanup_node", exc, node_key=node_key)
         return self._start_operation("full_cleanup_node", response, node_key=node_key)
 
     def reconcile_node(self, node_key: str) -> DriverOperation:
         self._ensure_client()
-        response = self._provisioning_stub.ReconcileNode(
-            self._provisioning_pb2.ReconcileNodeRequest(node_key=node_key),
-            timeout=self.timeout_seconds,
-        )
+        try:
+            response = self._provisioning_stub.ReconcileNode(
+                self._provisioning_pb2.ReconcileNodeRequest(node_key=node_key),
+                timeout=self.timeout_seconds,
+            )
+        except Exception as exc:
+            return self._failed_operation("reconcile_node", exc, node_key=node_key)
         return self._start_operation("reconcile_node", response, node_key=node_key)
 
     def reconcile_profile(self, profile_name: str) -> DriverOperation:
         self._ensure_client()
-        response = self._provisioning_stub.ReconcileProfile(
-            self._provisioning_pb2.ReconcileProfileRequest(profile_name=profile_name),
-            timeout=self.timeout_seconds,
-        )
+        try:
+            response = self._provisioning_stub.ReconcileProfile(
+                self._provisioning_pb2.ReconcileProfileRequest(profile_name=profile_name),
+                timeout=self.timeout_seconds,
+            )
+        except Exception as exc:
+            return self._failed_operation("reconcile_profile", exc, profile_name=profile_name)
         return self._start_operation("reconcile_profile", response, profile_name=profile_name)
 
     def get_profile_usage(self, profile_name: str, protocol_kind: str = "awg") -> DriverProfileUsage:
         self._ensure_client()
-        response = self._telemetry_stub.GetProfileUsage(
-            self._telemetry_pb2.GetProfileUsageRequest(
-                profile_name=profile_name,
-                protocol_kind=protocol_kind,
-                period="month",
-            ),
-            timeout=self.timeout_seconds,
-        )
+        try:
+            response = self._telemetry_stub.GetProfileUsage(
+                self._telemetry_pb2.GetProfileUsageRequest(
+                    profile_name=profile_name,
+                    protocol_kind=protocol_kind,
+                    period="month",
+                ),
+                timeout=self.timeout_seconds,
+            )
+        except Exception as exc:
+            raise self._query_error("get_profile_usage", exc) from exc
         usage = getattr(response, "usage", None)
         if usage is None:
             raise RuntimeError("GetProfileUsage returned no usage payload")
@@ -319,13 +395,16 @@ class GrpcNodeDriverClient(NodeDriverClient):
 
     def list_remote_profiles(self, node_key: str, protocol_kind: Optional[str] = None) -> list[DriverRemoteProfileRecord]:
         self._ensure_client()
-        response = self._provisioning_stub.ListRemoteProfiles(
-            self._provisioning_pb2.ListRemoteProfilesRequest(
-                node_key=node_key,
-                protocol_kind=str(protocol_kind or ""),
-            ),
-            timeout=self.timeout_seconds,
-        )
+        try:
+            response = self._provisioning_stub.ListRemoteProfiles(
+                self._provisioning_pb2.ListRemoteProfilesRequest(
+                    node_key=node_key,
+                    protocol_kind=str(protocol_kind or ""),
+                ),
+                timeout=self.timeout_seconds,
+            )
+        except Exception as exc:
+            raise self._query_error("list_remote_profiles", exc) from exc
         return [
             DriverRemoteProfileRecord(
                 profile_name=str(getattr(item, "profile_name", "")),

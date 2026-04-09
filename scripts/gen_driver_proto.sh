@@ -6,18 +6,26 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 cd "$REPO_ROOT"
 
-if ! python3 -c 'import grpc_tools.protoc' >/dev/null 2>&1; then
+PYTHON_BIN="${PYTHON_BIN:-}"
+if [[ -z "$PYTHON_BIN" ]]; then
+  if [[ -x "$REPO_ROOT/.venv/bin/python" ]]; then
+    PYTHON_BIN="$REPO_ROOT/.venv/bin/python"
+  else
+    PYTHON_BIN="python3"
+  fi
+fi
+
+if ! "$PYTHON_BIN" -c 'import grpc_tools.protoc' >/dev/null 2>&1; then
   echo "grpcio-tools is not installed. Install requirements-dev.txt first." >&2
   exit 1
 fi
 
-mkdir -p app/generated
-mkdir -p app/generated/driver/v1
+mkdir -p app/driver/v1
 
-python3 -m grpc_tools.protoc \
+"$PYTHON_BIN" -m grpc_tools.protoc \
   -I proto \
-  --python_out=app/generated \
-  --grpc_python_out=app/generated \
+  --python_out=app \
+  --grpc_python_out=app \
   proto/driver/v1/types.proto \
   proto/driver/v1/node_service.proto \
   proto/driver/v1/provisioning_service.proto \
@@ -25,8 +33,7 @@ python3 -m grpc_tools.protoc \
   proto/driver/v1/telemetry_service.proto \
   proto/driver/v1/operation_service.proto
 
-touch app/generated/__init__.py
-touch app/generated/driver/__init__.py
-touch app/generated/driver/v1/__init__.py
+touch app/driver/__init__.py
+touch app/driver/v1/__init__.py
 
-echo "Generated Python gRPC stubs under app/generated"
+echo "Generated Python gRPC stubs under app/driver"
