@@ -656,3 +656,29 @@ At the moment:
 - `inprocess` is the working backend;
 - `grpc` is a scaffold backend selected through config;
 - generated Python gRPC bindings are still expected to be produced from the proto files before the gRPC backend can be wired end-to-end.
+
+### Known Proto Gaps
+
+The current proto surface already covers these areas reasonably well:
+
+- `BootstrapNode`
+- `FullCleanupNode`
+- `ReconcileNode`
+- `ReconcileProfile`
+- `ListRemoteProfiles`
+- `GetProfileUsage`
+- `SyncNodeEnv`
+
+The current proto surface does not yet have explicit RPCs for:
+
+- runtime sync;
+- xray-only sync;
+- probe;
+- check/open ports;
+- Docker installation;
+- reinstall;
+- delete runtime;
+- runtime-drift listing;
+- rich node list/status mapping for handler-facing views.
+
+Those RPCs should be added before switching the bot from `inprocess` to `grpc` for the corresponding flows.

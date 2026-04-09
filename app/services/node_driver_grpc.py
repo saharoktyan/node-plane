@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from importlib import import_module
 from typing import Optional
 
 from config import NODE_DRIVER_GRPC_TARGET, NODE_DRIVER_GRPC_TIMEOUT_SECONDS
 from services.node_driver_client import (
+    DriverError,
     DriverNode,
     DriverOperation,
     DriverProfileUsage,
@@ -20,6 +22,22 @@ class GrpcNodeDriverClient(NodeDriverClient):
         self._grpc = None
         self._channel = None
         self._stubs_ready = False
+        self._types_pb2 = None
+        self._node_pb2 = None
+        self._node_pb2_grpc = None
+        self._provisioning_pb2 = None
+        self._provisioning_pb2_grpc = None
+        self._runtime_pb2 = None
+        self._runtime_pb2_grpc = None
+        self._telemetry_pb2 = None
+        self._telemetry_pb2_grpc = None
+        self._operation_pb2 = None
+        self._operation_pb2_grpc = None
+        self._node_stub = None
+        self._provisioning_stub = None
+        self._runtime_stub = None
+        self._telemetry_stub = None
+        self._operation_stub = None
 
     def _ensure_client(self) -> None:
         if self._grpc is None:
@@ -34,83 +52,242 @@ class GrpcNodeDriverClient(NodeDriverClient):
         if self._channel is None:
             self._channel = self._grpc.insecure_channel(self.target)
         if not self._stubs_ready:
-            raise NotImplementedError(
-                "GrpcNodeDriverClient is a scaffold. "
-                "Generate Python stubs from proto/driver/v1 and wire RPC mappings before enabling NODE_DRIVER_BACKEND=grpc."
+            self._load_stubs()
+
+    def _load_stubs(self) -> None:
+        try:
+            self._types_pb2 = import_module("generated.driver.v1.types_pb2")
+            self._node_pb2 = import_module("generated.driver.v1.node_service_pb2")
+            self._node_pb2_grpc = import_module("generated.driver.v1.node_service_pb2_grpc")
+            self._provisioning_pb2 = import_module("generated.driver.v1.provisioning_service_pb2")
+            self._provisioning_pb2_grpc = import_module("generated.driver.v1.provisioning_service_pb2_grpc")
+            self._runtime_pb2 = import_module("generated.driver.v1.runtime_service_pb2")
+            self._runtime_pb2_grpc = import_module("generated.driver.v1.runtime_service_pb2_grpc")
+            self._telemetry_pb2 = import_module("generated.driver.v1.telemetry_service_pb2")
+            self._telemetry_pb2_grpc = import_module("generated.driver.v1.telemetry_service_pb2_grpc")
+            self._operation_pb2 = import_module("generated.driver.v1.operation_service_pb2")
+            self._operation_pb2_grpc = import_module("generated.driver.v1.operation_service_pb2_grpc")
+        except ModuleNotFoundError as exc:
+            raise RuntimeError(
+                "Generated protobuf modules are missing. "
+                "Run scripts/gen_driver_proto.sh after installing requirements-dev.txt."
+            ) from exc
+
+        self._node_stub = self._node_pb2_grpc.NodeServiceStub(self._channel)
+        self._provisioning_stub = self._provisioning_pb2_grpc.ProvisioningServiceStub(self._channel)
+        self._runtime_stub = self._runtime_pb2_grpc.RuntimeServiceStub(self._channel)
+        self._telemetry_stub = self._telemetry_pb2_grpc.TelemetryServiceStub(self._channel)
+        self._operation_stub = self._operation_pb2_grpc.OperationServiceStub(self._channel)
+        self._stubs_ready = True
+
+    def _operation_from_pb(self, operation) -> DriverOperation:
+        error = None
+        if getattr(operation, "error", None) and getattr(operation.error, "code", ""):
+            error = DriverError(
+                code=str(operation.error.code),
+                summary=str(operation.error.summary),
+                detail=str(operation.error.detail),
+                retryable=bool(operation.error.retryable),
             )
+        return DriverOperation(
+            operation_id=str(getattr(operation, "operation_id", "")),
+            kind=str(getattr(operation, "kind", "")),
+            status=str(getattr(operation, "status", "")),
+            node_key=str(getattr(operation, "node_key", "")),
+            profile_name=str(getattr(operation, "profile_name", "")),
+            started_at=str(getattr(operation, "started_at", "")),
+            updated_at=str(getattr(operation, "updated_at", "")),
+            finished_at=str(getattr(operation, "finished_at", "")),
+            progress_message=str(getattr(operation, "progress_message", "")),
+            error=error,
+        )
+
+    def _start_operation(self, kind: str, response, *, node_key: str = "", profile_name: str = "") -> DriverOperation:
+        return DriverOperation(
+            operation_id=str(getattr(response, "operation_id", "")),
+            kind=kind,
+            status="PENDING",
+            node_key=node_key,
+            profile_name=profile_name,
+        )
 
     def get_node(self, node_key: str) -> Optional[DriverNode]:
         self._ensure_client()
-        raise AssertionError("unreachable")
+        raise NotImplementedError("Node mapping is not wired yet for GrpcNodeDriverClient.")
 
     def list_nodes(self, include_disabled: bool = False) -> list[DriverNode]:
         self._ensure_client()
-        raise AssertionError("unreachable")
+        raise NotImplementedError("Node list mapping is not wired yet for GrpcNodeDriverClient.")
 
     def get_runtime_status(self, node_key: str) -> DriverRuntimeStatus:
         self._ensure_client()
-        raise AssertionError("unreachable")
+        response = self._runtime_stub.GetRuntimeStatus(
+            self._runtime_pb2.GetRuntimeStatusRequest(node_key=node_key),
+            timeout=self.timeout_seconds,
+        )
+        services = list(getattr(response, "services", []))
+        if not services:
+            return DriverRuntimeStatus(
+                state="unknown",
+                version="",
+                commit="",
+                expected_version="",
+                expected_commit="",
+                message="runtime service returned no status items",
+            )
+        primary = services[0]
+        return DriverRuntimeStatus(
+            state=str(getattr(primary, "state", "")),
+            version="",
+            commit="",
+            expected_version="",
+            expected_commit="",
+            message=str(getattr(primary, "summary", "")),
+        )
 
     def list_nodes_needing_runtime_sync(self) -> list[DriverNode]:
         self._ensure_client()
-        raise AssertionError("unreachable")
+        raise NotImplementedError("Runtime sync node listing is not wired yet for GrpcNodeDriverClient.")
 
     def sync_node_env(self, node_key: str) -> DriverOperation:
         self._ensure_client()
-        raise AssertionError("unreachable")
+        response = self._node_stub.SyncNodeEnv(
+            self._node_pb2.SyncNodeEnvRequest(node_key=node_key),
+            timeout=self.timeout_seconds,
+        )
+        return self._start_operation("sync_node_env", response, node_key=node_key)
 
     def sync_runtime(self, node_key: str) -> DriverOperation:
         self._ensure_client()
-        raise AssertionError("unreachable")
+        response = self._runtime_stub.GetRuntimeStatus(
+            self._runtime_pb2.GetRuntimeStatusRequest(node_key=node_key),
+            timeout=self.timeout_seconds,
+        )
+        raise NotImplementedError(
+            "sync_runtime RPC is not in the current proto surface. "
+            "Add it to runtime_service.proto before enabling gRPC runtime sync."
+        )
 
     def sync_xray(self, node_key: str) -> DriverOperation:
         self._ensure_client()
-        raise AssertionError("unreachable")
+        raise NotImplementedError(
+            "sync_xray RPC is not in the current proto surface. "
+            "Add it to runtime_service.proto or node_service.proto before enabling gRPC xray sync."
+        )
 
     def probe_node(self, node_key: str) -> DriverOperation:
         self._ensure_client()
-        raise AssertionError("unreachable")
+        raise NotImplementedError(
+            "probe_node RPC is not in the current proto surface. "
+            "Add a diagnostics/probe RPC before enabling gRPC probe."
+        )
 
     def check_ports(self, node_key: str) -> DriverOperation:
         self._ensure_client()
-        raise AssertionError("unreachable")
+        raise NotImplementedError(
+            "check_ports RPC is not in the current proto surface. "
+            "Add a runtime/network RPC before enabling gRPC port checks."
+        )
 
     def open_ports(self, node_key: str) -> DriverOperation:
         self._ensure_client()
-        raise AssertionError("unreachable")
+        raise NotImplementedError(
+            "open_ports RPC is not in the current proto surface. "
+            "Add a runtime/network RPC before enabling gRPC firewall changes."
+        )
 
     def install_docker(self, node_key: str) -> DriverOperation:
         self._ensure_client()
-        raise AssertionError("unreachable")
+        raise NotImplementedError(
+            "install_docker RPC is not in the current proto surface. "
+            "Add a runtime/bootstrap RPC before enabling gRPC Docker install."
+        )
 
     def bootstrap_node(self, node_key: str, preserve_config: bool = False) -> DriverOperation:
         self._ensure_client()
-        raise AssertionError("unreachable")
+        response = self._runtime_stub.BootstrapNode(
+            self._runtime_pb2.BootstrapNodeRequest(node_key=node_key),
+            timeout=self.timeout_seconds,
+        )
+        return self._start_operation("bootstrap_node", response, node_key=node_key)
 
     def reinstall_node(self, node_key: str, preserve_config: bool = False) -> DriverOperation:
         self._ensure_client()
-        raise AssertionError("unreachable")
+        raise NotImplementedError(
+            "reinstall_node RPC is not in the current proto surface. "
+            "Add an explicit reinstall RPC before enabling gRPC reinstall."
+        )
 
     def delete_runtime(self, node_key: str, preserve_config: bool = False) -> DriverOperation:
         self._ensure_client()
-        raise AssertionError("unreachable")
+        raise NotImplementedError(
+            "delete_runtime RPC is not in the current proto surface. "
+            "Add an explicit delete-runtime RPC before enabling gRPC runtime deletion."
+        )
 
     def full_cleanup_node(self, node_key: str, remove_ssh_key: bool = False) -> DriverOperation:
         self._ensure_client()
-        raise AssertionError("unreachable")
+        response = self._runtime_stub.FullCleanupNode(
+            self._runtime_pb2.FullCleanupNodeRequest(node_key=node_key),
+            timeout=self.timeout_seconds,
+        )
+        return self._start_operation("full_cleanup_node", response, node_key=node_key)
 
     def reconcile_node(self, node_key: str) -> DriverOperation:
         self._ensure_client()
-        raise AssertionError("unreachable")
+        response = self._provisioning_stub.ReconcileNode(
+            self._provisioning_pb2.ReconcileNodeRequest(node_key=node_key),
+            timeout=self.timeout_seconds,
+        )
+        return self._start_operation("reconcile_node", response, node_key=node_key)
 
     def reconcile_profile(self, profile_name: str) -> DriverOperation:
         self._ensure_client()
-        raise AssertionError("unreachable")
+        response = self._provisioning_stub.ReconcileProfile(
+            self._provisioning_pb2.ReconcileProfileRequest(profile_name=profile_name),
+            timeout=self.timeout_seconds,
+        )
+        return self._start_operation("reconcile_profile", response, profile_name=profile_name)
 
     def get_profile_usage(self, profile_name: str, protocol_kind: str = "awg") -> DriverProfileUsage:
         self._ensure_client()
-        raise AssertionError("unreachable")
+        response = self._telemetry_stub.GetProfileUsage(
+            self._telemetry_pb2.GetProfileUsageRequest(
+                profile_name=profile_name,
+                protocol_kind=protocol_kind,
+                period="month",
+            ),
+            timeout=self.timeout_seconds,
+        )
+        usage = getattr(response, "usage", None)
+        if usage is None:
+            raise RuntimeError("GetProfileUsage returned no usage payload")
+        return DriverProfileUsage(
+            profile_name=str(getattr(usage, "profile_name", profile_name)),
+            protocol_kind=str(getattr(usage, "protocol_kind", protocol_kind)),
+            rx_bytes=int(getattr(usage, "rx_bytes", 0)),
+            tx_bytes=int(getattr(usage, "tx_bytes", 0)),
+            total_bytes=int(getattr(usage, "total_bytes", 0)),
+            samples=int(getattr(usage, "samples", 0)),
+            peers=int(getattr(usage, "peers", 0)),
+        )
 
     def list_remote_profiles(self, node_key: str, protocol_kind: Optional[str] = None) -> list[DriverRemoteProfileRecord]:
         self._ensure_client()
-        raise AssertionError("unreachable")
+        response = self._provisioning_stub.ListRemoteProfiles(
+            self._provisioning_pb2.ListRemoteProfilesRequest(
+                node_key=node_key,
+                protocol_kind=str(protocol_kind or ""),
+            ),
+            timeout=self.timeout_seconds,
+        )
+        return [
+            DriverRemoteProfileRecord(
+                profile_name=str(getattr(item, "profile_name", "")),
+                protocol_kind=str(getattr(item, "protocol_kind", "")),
+                remote_id=str(getattr(item, "remote_id", "")),
+                status=str(getattr(item, "status", "")),
+                node_key=node_key,
+            )
+            for item in getattr(response, "items", [])
+        ]

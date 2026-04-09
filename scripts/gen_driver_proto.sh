@@ -12,6 +12,7 @@ if ! python3 -c 'import grpc_tools.protoc' >/dev/null 2>&1; then
 fi
 
 mkdir -p app/generated
+mkdir -p app/generated/driver/v1
 
 python3 -m grpc_tools.protoc \
   -I proto \
@@ -25,5 +26,7 @@ python3 -m grpc_tools.protoc \
   proto/driver/v1/operation_service.proto
 
 touch app/generated/__init__.py
+touch app/generated/driver/__init__.py
+touch app/generated/driver/v1/__init__.py
 
 echo "Generated Python gRPC stubs under app/generated"
