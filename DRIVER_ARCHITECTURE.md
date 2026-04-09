@@ -36,6 +36,13 @@ Examples of the current execution layer inside Python:
 
 This makes the bot process carry both control-plane and data-plane responsibilities.
 
+At the moment the repository already contains:
+
+- protobuf contracts in `proto/driver/v1`;
+- generated Python gRPC stubs in `app/driver/v1`;
+- Python `NodeDriverClient` with `inprocess` and `grpc` backends;
+- a Rust gRPC server skeleton in `rust/node-driver`.
+
 ## Target Split
 
 ### Python Bot Responsibilities
@@ -218,14 +225,42 @@ Typical methods:
 
 Purpose:
 
-- traffic and health reporting.
+- traffic snapshots;
+- remote usage reads;
+- health-oriented telemetry collection.
 
 Typical methods:
 
 - `CollectTrafficSnapshot`
 - `GetProfileUsage`
-- `GetNodeTelemetry`
-- `WatchOperationEvents`
+
+### 5. OperationService
+
+Purpose:
+
+- observe progress for long-running work;
+- fetch operation state by `operation_id`;
+- list recent operations for diagnostics or admin UI.
+
+## Current Rust Skeleton
+
+The Rust crate at `rust/node-driver` currently provides:
+
+- a `tonic` server scaffold for all declared services;
+- in-memory operation tracking;
+- placeholder read responses;
+- queued `StartOperationResponse` objects for mutating RPCs.
+
+That is enough to stabilize the transport contract and start end-to-end local
+testing with the Python `grpc` backend before real node execution is moved out
+of Python.
+
+Current limitations:
+
+- no real node connectivity yet;
+- no persistence for operations;
+- no streaming events yet beyond empty stream placeholders;
+- compile-check may require external crate fetch on first build.
 
 ## Operation Model
 
