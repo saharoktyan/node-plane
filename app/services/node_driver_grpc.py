@@ -7,6 +7,8 @@ from config import NODE_DRIVER_GRPC_TARGET, NODE_DRIVER_GRPC_TIMEOUT_SECONDS
 from services.node_driver_client import (
     DriverError,
     DriverNode,
+    DriverNodeCapabilities,
+    DriverNodeHealth,
     DriverOperation,
     DriverProfileUsage,
     DriverRemoteProfileRecord,
@@ -111,13 +113,49 @@ class GrpcNodeDriverClient(NodeDriverClient):
             profile_name=profile_name,
         )
 
+    def _node_from_pb(self, item) -> DriverNode:
+        caps = getattr(item, "capabilities", None)
+        health = getattr(item, "health", None)
+        return DriverNode(
+            node_key=str(getattr(item, "node_key", "")),
+            transport=str(getattr(item, "transport", "")),
+            version=str(getattr(item, "version", "")),
+            state=str(getattr(item, "state", "")),
+            title=str(getattr(item, "title", "")),
+            flag=str(getattr(item, "flag", "")),
+            region=str(getattr(item, "region", "")),
+            public_host=str(getattr(item, "public_host", "")),
+            capabilities=DriverNodeCapabilities(
+                supports_awg=bool(getattr(caps, "supports_awg", False)),
+                supports_xray=bool(getattr(caps, "supports_xray", False)),
+                supports_telemetry=bool(getattr(caps, "supports_telemetry", False)),
+                supports_bootstrap=bool(getattr(caps, "supports_bootstrap", False)),
+            ),
+            health=DriverNodeHealth(
+                connectivity=str(getattr(health, "connectivity", "")),
+                last_seen_at=str(getattr(health, "last_seen_at", "")),
+                summary=str(getattr(health, "summary", "")),
+            ),
+            metadata={},
+        )
+
     def get_node(self, node_key: str) -> Optional[DriverNode]:
         self._ensure_client()
-        raise NotImplementedError("Node mapping is not wired yet for GrpcNodeDriverClient.")
+        response = self._node_stub.GetNode(
+            self._node_pb2.GetNodeRequest(node_key=node_key),
+            timeout=self.timeout_seconds,
+        )
+        if not getattr(response, "node_key", ""):
+            return None
+        return self._node_from_pb(response)
 
     def list_nodes(self, include_disabled: bool = False) -> list[DriverNode]:
         self._ensure_client()
-        raise NotImplementedError("Node list mapping is not wired yet for GrpcNodeDriverClient.")
+        response = self._node_stub.ListNodes(
+            self._node_pb2.ListNodesRequest(include_disabled=include_disabled),
+            timeout=self.timeout_seconds,
+        )
+        return [self._node_from_pb(item) for item in getattr(response, "items", [])]
 
     def get_runtime_status(self, node_key: str) -> DriverRuntimeStatus:
         self._ensure_client()
@@ -125,29 +163,32 @@ class GrpcNodeDriverClient(NodeDriverClient):
             self._runtime_pb2.GetRuntimeStatusRequest(node_key=node_key),
             timeout=self.timeout_seconds,
         )
-        services = list(getattr(response, "services", []))
-        if not services:
+        runtime = getattr(response, "runtime", None)
+        if runtime is None:
             return DriverRuntimeStatus(
                 state="unknown",
                 version="",
                 commit="",
                 expected_version="",
                 expected_commit="",
-                message="runtime service returned no status items",
+                message="runtime service returned no runtime payload",
             )
-        primary = services[0]
         return DriverRuntimeStatus(
-            state=str(getattr(primary, "state", "")),
-            version="",
-            commit="",
-            expected_version="",
-            expected_commit="",
-            message=str(getattr(primary, "summary", "")),
+            state=str(getattr(runtime, "state", "")),
+            version=str(getattr(runtime, "version", "")),
+            commit=str(getattr(runtime, "commit", "")),
+            expected_version=str(getattr(runtime, "expected_version", "")),
+            expected_commit=str(getattr(runtime, "expected_commit", "")),
+            message=str(getattr(runtime, "message", "")),
         )
 
     def list_nodes_needing_runtime_sync(self) -> list[DriverNode]:
         self._ensure_client()
-        raise NotImplementedError("Runtime sync node listing is not wired yet for GrpcNodeDriverClient.")
+        response = self._runtime_stub.ListNodesNeedingRuntimeSync(
+            self._runtime_pb2.ListNodesNeedingRuntimeSyncRequest(),
+            timeout=self.timeout_seconds,
+        )
+        return [self._node_from_pb(item) for item in getattr(response, "items", [])]
 
     def sync_node_env(self, node_key: str) -> DriverOperation:
         self._ensure_client()
@@ -159,76 +200,80 @@ class GrpcNodeDriverClient(NodeDriverClient):
 
     def sync_runtime(self, node_key: str) -> DriverOperation:
         self._ensure_client()
-        response = self._runtime_stub.GetRuntimeStatus(
-            self._runtime_pb2.GetRuntimeStatusRequest(node_key=node_key),
+        response = self._runtime_stub.SyncRuntime(
+            self._runtime_pb2.SyncRuntimeRequest(node_key=node_key),
             timeout=self.timeout_seconds,
         )
-        raise NotImplementedError(
-            "sync_runtime RPC is not in the current proto surface. "
-            "Add it to runtime_service.proto before enabling gRPC runtime sync."
-        )
+        return self._start_operation("sync_runtime", response, node_key=node_key)
 
     def sync_xray(self, node_key: str) -> DriverOperation:
         self._ensure_client()
-        raise NotImplementedError(
-            "sync_xray RPC is not in the current proto surface. "
-            "Add it to runtime_service.proto or node_service.proto before enabling gRPC xray sync."
+        response = self._runtime_stub.SyncXray(
+            self._runtime_pb2.SyncXrayRequest(node_key=node_key),
+            timeout=self.timeout_seconds,
         )
+        return self._start_operation("sync_xray", response, node_key=node_key)
 
     def probe_node(self, node_key: str) -> DriverOperation:
         self._ensure_client()
-        raise NotImplementedError(
-            "probe_node RPC is not in the current proto surface. "
-            "Add a diagnostics/probe RPC before enabling gRPC probe."
+        response = self._node_stub.ProbeNode(
+            self._node_pb2.ProbeNodeRequest(node_key=node_key),
+            timeout=self.timeout_seconds,
         )
+        return self._start_operation("probe_node", response, node_key=node_key)
 
     def check_ports(self, node_key: str) -> DriverOperation:
         self._ensure_client()
-        raise NotImplementedError(
-            "check_ports RPC is not in the current proto surface. "
-            "Add a runtime/network RPC before enabling gRPC port checks."
+        response = self._node_stub.CheckPorts(
+            self._node_pb2.CheckPortsRequest(node_key=node_key),
+            timeout=self.timeout_seconds,
         )
+        return self._start_operation("check_ports", response, node_key=node_key)
 
     def open_ports(self, node_key: str) -> DriverOperation:
         self._ensure_client()
-        raise NotImplementedError(
-            "open_ports RPC is not in the current proto surface. "
-            "Add a runtime/network RPC before enabling gRPC firewall changes."
+        response = self._node_stub.OpenPorts(
+            self._node_pb2.OpenPortsRequest(node_key=node_key),
+            timeout=self.timeout_seconds,
         )
+        return self._start_operation("open_ports", response, node_key=node_key)
 
     def install_docker(self, node_key: str) -> DriverOperation:
         self._ensure_client()
-        raise NotImplementedError(
-            "install_docker RPC is not in the current proto surface. "
-            "Add a runtime/bootstrap RPC before enabling gRPC Docker install."
+        response = self._node_stub.InstallDocker(
+            self._node_pb2.InstallDockerRequest(node_key=node_key),
+            timeout=self.timeout_seconds,
         )
+        return self._start_operation("install_docker", response, node_key=node_key)
 
     def bootstrap_node(self, node_key: str, preserve_config: bool = False) -> DriverOperation:
         self._ensure_client()
         response = self._runtime_stub.BootstrapNode(
-            self._runtime_pb2.BootstrapNodeRequest(node_key=node_key),
+            self._runtime_pb2.BootstrapNodeRequest(node_key=node_key, preserve_config=preserve_config),
             timeout=self.timeout_seconds,
         )
         return self._start_operation("bootstrap_node", response, node_key=node_key)
 
     def reinstall_node(self, node_key: str, preserve_config: bool = False) -> DriverOperation:
         self._ensure_client()
-        raise NotImplementedError(
-            "reinstall_node RPC is not in the current proto surface. "
-            "Add an explicit reinstall RPC before enabling gRPC reinstall."
+        response = self._runtime_stub.ReinstallNode(
+            self._runtime_pb2.ReinstallNodeRequest(node_key=node_key, preserve_config=preserve_config),
+            timeout=self.timeout_seconds,
         )
+        return self._start_operation("reinstall_node", response, node_key=node_key)
 
     def delete_runtime(self, node_key: str, preserve_config: bool = False) -> DriverOperation:
         self._ensure_client()
-        raise NotImplementedError(
-            "delete_runtime RPC is not in the current proto surface. "
-            "Add an explicit delete-runtime RPC before enabling gRPC runtime deletion."
+        response = self._runtime_stub.DeleteRuntime(
+            self._runtime_pb2.DeleteRuntimeRequest(node_key=node_key, preserve_config=preserve_config),
+            timeout=self.timeout_seconds,
         )
+        return self._start_operation("delete_runtime", response, node_key=node_key)
 
     def full_cleanup_node(self, node_key: str, remove_ssh_key: bool = False) -> DriverOperation:
         self._ensure_client()
         response = self._runtime_stub.FullCleanupNode(
-            self._runtime_pb2.FullCleanupNodeRequest(node_key=node_key),
+            self._runtime_pb2.FullCleanupNodeRequest(node_key=node_key, remove_ssh_key=remove_ssh_key),
             timeout=self.timeout_seconds,
         )
         return self._start_operation("full_cleanup_node", response, node_key=node_key)

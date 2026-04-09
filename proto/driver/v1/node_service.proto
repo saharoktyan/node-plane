@@ -10,6 +10,10 @@ service NodeService {
   rpc GetNodeDiagnostics(GetNodeDiagnosticsRequest) returns (GetNodeDiagnosticsResponse);
   rpc WatchNodeHealth(WatchNodeHealthRequest) returns (stream NodeHealthEvent);
   rpc SyncNodeEnv(SyncNodeEnvRequest) returns (StartOperationResponse);
+  rpc ProbeNode(ProbeNodeRequest) returns (StartOperationResponse);
+  rpc CheckPorts(CheckPortsRequest) returns (StartOperationResponse);
+  rpc OpenPorts(OpenPortsRequest) returns (StartOperationResponse);
+  rpc InstallDocker(InstallDockerRequest) returns (StartOperationResponse);
 }
 
 message GetNodeRequest {
@@ -44,5 +48,21 @@ message NodeHealthEvent {
 }
 
 message SyncNodeEnvRequest {
+  string node_key = 1;
+}
+
+message ProbeNodeRequest {
+  string node_key = 1;
+}
+
+message CheckPortsRequest {
+  string node_key = 1;
+}
+
+message OpenPortsRequest {
+  string node_key = 1;
+}
+
+message InstallDockerRequest {
   string node_key = 1;
 }

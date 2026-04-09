@@ -6,15 +6,40 @@ import "driver/v1/types.proto";
 
 service RuntimeService {
   rpc BootstrapNode(BootstrapNodeRequest) returns (StartOperationResponse);
+  rpc ReinstallNode(ReinstallNodeRequest) returns (StartOperationResponse);
+  rpc DeleteRuntime(DeleteRuntimeRequest) returns (StartOperationResponse);
   rpc FullCleanupNode(FullCleanupNodeRequest) returns (StartOperationResponse);
+  rpc SyncRuntime(SyncRuntimeRequest) returns (StartOperationResponse);
+  rpc SyncXray(SyncXrayRequest) returns (StartOperationResponse);
   rpc GetRuntimeStatus(GetRuntimeStatusRequest) returns (GetRuntimeStatusResponse);
+  rpc ListNodesNeedingRuntimeSync(ListNodesNeedingRuntimeSyncRequest) returns (ListNodesNeedingRuntimeSyncResponse);
 }
 
 message BootstrapNodeRequest {
   string node_key = 1;
+  bool preserve_config = 2;
+}
+
+message ReinstallNodeRequest {
+  string node_key = 1;
+  bool preserve_config = 2;
+}
+
+message DeleteRuntimeRequest {
+  string node_key = 1;
+  bool preserve_config = 2;
 }
 
 message FullCleanupNodeRequest {
+  string node_key = 1;
+  bool remove_ssh_key = 2;
+}
+
+message SyncRuntimeRequest {
+  string node_key = 1;
+}
+
+message SyncXrayRequest {
   string node_key = 1;
 }
 
@@ -23,6 +48,12 @@ message GetRuntimeStatusRequest {
 }
 
 message GetRuntimeStatusResponse {
-  string node_key = 1;
-  repeated RuntimeServiceStatus services = 2;
+  RuntimeStatus runtime = 1;
+  repeated ServiceStatus services = 2;
+}
+
+message ListNodesNeedingRuntimeSyncRequest {}
+
+message ListNodesNeedingRuntimeSyncResponse {
+  repeated Node items = 1;
 }

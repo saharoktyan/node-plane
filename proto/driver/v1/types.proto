@@ -32,10 +32,11 @@ message Node {
   string version = 3;
   string state = 4;
   string title = 5;
-  string region = 6;
-  string public_host = 7;
-  NodeCapabilities capabilities = 8;
-  NodeHealth health = 9;
+  string flag = 6;
+  string region = 7;
+  string public_host = 8;
+  NodeCapabilities capabilities = 9;
+  NodeHealth health = 10;
 }
 
 message ProfileSpec {
@@ -80,7 +81,17 @@ message DiagnosticItem {
   string detail = 4;
 }
 
-message RuntimeServiceStatus {
+message RuntimeStatus {
+  string node_key = 1;
+  string state = 2;
+  string version = 3;
+  string commit = 4;
+  string expected_version = 5;
+  string expected_commit = 6;
+  string message = 7;
+}
+
+message ServiceStatus {
   string service_name = 1;
   string state = 2;
   string summary = 3;

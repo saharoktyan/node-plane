@@ -662,23 +662,27 @@ At the moment:
 The current proto surface already covers these areas reasonably well:
 
 - `BootstrapNode`
+- `ReinstallNode`
+- `DeleteRuntime`
 - `FullCleanupNode`
+- `SyncRuntime`
+- `SyncXray`
 - `ReconcileNode`
 - `ReconcileProfile`
 - `ListRemoteProfiles`
 - `GetProfileUsage`
 - `SyncNodeEnv`
+- `ProbeNode`
+- `CheckPorts`
+- `OpenPorts`
+- `InstallDocker`
+- `GetRuntimeStatus`
+- `ListNodesNeedingRuntimeSync`
 
 The current proto surface does not yet have explicit RPCs for:
 
-- runtime sync;
-- xray-only sync;
-- probe;
-- check/open ports;
-- Docker installation;
-- reinstall;
-- delete runtime;
-- runtime-drift listing;
-- rich node list/status mapping for handler-facing views.
+- operation-result retrieval patterns for actions that currently return only `operation_id`;
+- richer runtime/service detail mapping for handler-facing cards and dashboards;
+- streamed progress/status adoption in the Python bot for long-running actions.
 
 Those RPCs should be added before switching the bot from `inprocess` to `grpc` for the corresponding flows.
