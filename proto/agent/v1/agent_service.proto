@@ -10,6 +10,7 @@ service NodeAgentService {
   rpc ListRemoteProfiles(ListRemoteProfilesRequest) returns (ListRemoteProfilesResponse);
   rpc RunDiagnostics(RunDiagnosticsRequest) returns (RunDiagnosticsResponse);
   rpc CheckPorts(CheckPortsRequest) returns (CheckPortsResponse);
+  rpc SyncNodeEnv(SyncNodeEnvRequest) returns (SyncNodeEnvResponse);
 }
 
 message ListRemoteProfilesRequest {
@@ -34,4 +35,13 @@ message CheckPortsRequest {
 message CheckPortsResponse {
   string summary = 1;
   repeated PortStatus items = 2;
+}
+
+message SyncNodeEnvRequest {
+  string content = 1;
+}
+
+message SyncNodeEnvResponse {
+  string summary = 1;
+  string path = 2;
 }

@@ -4,7 +4,7 @@ use crate::agent::v1::node_agent_service_client::NodeAgentServiceClient;
 use crate::agent::v1::{
     AgentEmpty, CheckPortsRequest, CheckPortsResponse, ListRemoteProfilesRequest, LocalHealth,
     PortCheckSpec, RemoteProfileRecord, RunDiagnosticsRequest, RunDiagnosticsResponse,
-    RuntimeFacts,
+    RuntimeFacts, SyncNodeEnvRequest, SyncNodeEnvResponse,
 };
 
 pub struct AgentTransport {
@@ -69,6 +69,21 @@ impl AgentTransport {
             tonic::Status::unavailable(format!("failed to connect to node agent: {err}"))
         })?;
         let response = client.check_ports(CheckPortsRequest { items }).await?;
+        Ok(response.into_inner())
+    }
+
+    pub async fn sync_node_env(
+        &self,
+        content: &str,
+    ) -> Result<SyncNodeEnvResponse, tonic::Status> {
+        let mut client = self.client().await.map_err(|err| {
+            tonic::Status::unavailable(format!("failed to connect to node agent: {err}"))
+        })?;
+        let response = client
+            .sync_node_env(SyncNodeEnvRequest {
+                content: content.to_string(),
+            })
+            .await?;
         Ok(response.into_inner())
     }
 }

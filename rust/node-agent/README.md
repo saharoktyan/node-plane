@@ -9,6 +9,7 @@ Current scope:
 - reports runtime facts and local health;
 - lists AWG/Xray remote profiles from local files;
 - checks node-local port availability for requested runtime ports;
+- writes `node.env` from central-driver payloads;
 - runs a heartbeat loop.
 
 This crate is still a scaffold, but it is now usable as a local read-only
@@ -26,6 +27,7 @@ Optional environment variables:
 - `NODE_AGENT_NODE_KEY`
 - `NODE_AGENT_LISTEN_ADDR`
 - `NODE_AGENT_HEARTBEAT_SECONDS`
+- `NODE_AGENT_CONFIG_PATH`
 
 Default config path:
 
@@ -38,3 +40,4 @@ Current RPC surface:
 - `ListRemoteProfiles`
 - `RunDiagnostics`
 - `CheckPorts`
+- `SyncNodeEnv`

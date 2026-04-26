@@ -454,6 +454,114 @@ impl DriverContext {
         ]
     }
 
+    fn row_string(&self, row: &Row, field: &str, default: &str) -> String {
+        row.try_get::<_, Option<String>>(field)
+            .ok()
+            .flatten()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| default.to_string())
+    }
+
+    fn row_i32(&self, row: &Row, field: &str, default: i32) -> i32 {
+        row.try_get::<_, Option<i32>>(field)
+            .ok()
+            .flatten()
+            .unwrap_or(default)
+    }
+
+    fn shell_quote(&self, value: &str) -> String {
+        if value.is_empty() {
+            return "''".to_string();
+        }
+        format!("'{}'", value.replace('\'', "'\"'\"'"))
+    }
+
+    fn shell_env_assignment(&self, name: &str, value: impl ToString) -> String {
+        format!("{name}={}", self.shell_quote(value.to_string().as_str()))
+    }
+
+    fn render_node_env_from_row(&self, row: &Row) -> String {
+        let ssh_host = row
+            .try_get::<_, Option<String>>("ssh_host")
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        let public_host = self.row_string(row, "public_host", ssh_host.as_str());
+        let awg_iface = self.row_string(row, "awg_iface", "wg0");
+        let awg_public_host = self.row_string(row, "awg_public_host", public_host.as_str());
+        let lines = vec![
+            self.shell_env_assignment("SERVER_KEY", self.row_string(row, "key", "").as_str()),
+            self.shell_env_assignment(
+                "XRAY_CONFIG",
+                self.row_string(
+                    row,
+                    "xray_config_path",
+                    "/opt/node-plane-runtime/xray/config.json",
+                )
+                .as_str(),
+            ),
+            self.shell_env_assignment(
+                "XRAY_CONTAINER_NAME",
+                self.row_string(row, "xray_service_name", "xray").as_str(),
+            ),
+            self.shell_env_assignment("XRAY_DOCKER_DIR", "/opt/node-plane-runtime/xray"),
+            self.shell_env_assignment("XRAY_DOCKER_IMAGE", "ghcr.io/xtls/xray-core:25.12.8"),
+            self.shell_env_assignment("XRAY_INBOUND_TCP_TAG", "reality-tcp"),
+            self.shell_env_assignment("XRAY_INBOUND_XHTTP_TAG", "reality-xhttp"),
+            self.shell_env_assignment("AWG_CONTAINER_NAME", "amnezia-awg"),
+            self.shell_env_assignment("AWG_DOCKER_DIR", "/opt/node-plane-runtime/amnezia-awg"),
+            self.shell_env_assignment("AWG_DOCKER_IMAGE", "node-plane-amnezia-awg:0.2.16"),
+            self.shell_env_assignment("AWG_IFACE", awg_iface.as_str()),
+            self.shell_env_assignment(
+                "AWG_CONFIG",
+                format!("/opt/node-plane-runtime/amnezia-awg/data/{awg_iface}.conf"),
+            ),
+            self.shell_env_assignment("AWG_SERVER_ADDRESS", "10.8.1.0/24"),
+            self.shell_env_assignment("AWG_NETWORK", "10.8.1.0/24"),
+            self.shell_env_assignment("AWG_DNS", "1.1.1.1"),
+            self.shell_env_assignment("AWG_MTU", "1280"),
+            self.shell_env_assignment("AWG_ALLOWED_IPS", "0.0.0.0/0"),
+            self.shell_env_assignment("AWG_KEEPALIVE", "25"),
+            self.shell_env_assignment(
+                "AWG_I1_PRESET",
+                self.row_string(row, "awg_i1_preset", "quic").as_str(),
+            ),
+            self.shell_env_assignment("AWG_SERVER_IP", awg_public_host.as_str()),
+            self.shell_env_assignment("AWG_SERVER_PORT", self.row_i32(row, "awg_port", 51820)),
+        ];
+        format!("{}\n", lines.join("\n"))
+    }
+
+    fn render_default_node_env(&self, node_key: &str) -> String {
+        let lines = vec![
+            self.shell_env_assignment("SERVER_KEY", node_key),
+            self.shell_env_assignment("XRAY_CONFIG", "/opt/node-plane-runtime/xray/config.json"),
+            self.shell_env_assignment("XRAY_CONTAINER_NAME", "xray"),
+            self.shell_env_assignment("XRAY_DOCKER_DIR", "/opt/node-plane-runtime/xray"),
+            self.shell_env_assignment("XRAY_DOCKER_IMAGE", "ghcr.io/xtls/xray-core:25.12.8"),
+            self.shell_env_assignment("XRAY_INBOUND_TCP_TAG", "reality-tcp"),
+            self.shell_env_assignment("XRAY_INBOUND_XHTTP_TAG", "reality-xhttp"),
+            self.shell_env_assignment("AWG_CONTAINER_NAME", "amnezia-awg"),
+            self.shell_env_assignment("AWG_DOCKER_DIR", "/opt/node-plane-runtime/amnezia-awg"),
+            self.shell_env_assignment("AWG_DOCKER_IMAGE", "node-plane-amnezia-awg:0.2.16"),
+            self.shell_env_assignment("AWG_IFACE", "wg0"),
+            self.shell_env_assignment(
+                "AWG_CONFIG",
+                "/opt/node-plane-runtime/amnezia-awg/data/wg0.conf",
+            ),
+            self.shell_env_assignment("AWG_SERVER_ADDRESS", "10.8.1.0/24"),
+            self.shell_env_assignment("AWG_NETWORK", "10.8.1.0/24"),
+            self.shell_env_assignment("AWG_DNS", "1.1.1.1"),
+            self.shell_env_assignment("AWG_MTU", "1280"),
+            self.shell_env_assignment("AWG_ALLOWED_IPS", "0.0.0.0/0"),
+            self.shell_env_assignment("AWG_KEEPALIVE", "25"),
+            self.shell_env_assignment("AWG_I1_PRESET", "quic"),
+            self.shell_env_assignment("AWG_SERVER_IP", ""),
+            self.shell_env_assignment("AWG_SERVER_PORT", 51820),
+        ];
+        format!("{}\n", lines.join("\n"))
+    }
+
     fn runtime_status_from_row(&self, row: &Row) -> RuntimeStatus {
         let node_key = row
             .try_get::<_, Option<String>>("key")
@@ -786,6 +894,29 @@ impl NodeService for NodeApi {
         request: Request<SyncNodeEnvRequest>,
     ) -> Result<Response<StartOperationResponse>, Status> {
         let req = request.into_inner();
+        if let Some(target) = self.ctx.agent_target(&req.node_key) {
+            let content = match self.ctx.fetch_server_row(&req.node_key).await {
+                Ok(Some(row)) => self.ctx.render_node_env_from_row(&row),
+                _ => self.ctx.render_default_node_env(&req.node_key),
+            };
+            let transport = agent_transport::AgentTransport::new(target);
+            let summary = match transport.sync_node_env(content.as_str()).await {
+                Ok(result) => result.summary,
+                Err(err) => format!("agent node env sync failed: {err}"),
+            };
+            let status = if summary.starts_with("agent node env sync failed:") {
+                "FAILED"
+            } else {
+                "SUCCEEDED"
+            };
+            return Ok(Response::new(self.ctx.state.finish_operation(
+                "sync_node_env",
+                &req.node_key,
+                "",
+                status,
+                &summary,
+            )));
+        }
         Ok(Response::new(self.ctx.state.start_operation(
             "sync_node_env",
             &req.node_key,

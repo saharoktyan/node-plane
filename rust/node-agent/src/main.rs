@@ -2,6 +2,7 @@ use std::env;
 use std::fs;
 use std::net::TcpListener;
 use std::net::SocketAddr;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -21,7 +22,8 @@ use agent::v1::node_agent_service_server::{NodeAgentService, NodeAgentServiceSer
 use agent::v1::{
     AgentEmpty, CheckPortsRequest, CheckPortsResponse, DiagnosticItem, ListRemoteProfilesRequest,
     ListRemoteProfilesResponse, LocalHealth, PortStatus, RemoteProfileRecord,
-    RunDiagnosticsRequest, RunDiagnosticsResponse, RuntimeFacts,
+    RunDiagnosticsRequest, RunDiagnosticsResponse, RuntimeFacts, SyncNodeEnvRequest,
+    SyncNodeEnvResponse,
 };
 
 #[derive(Debug, Clone, Deserialize)]
@@ -32,6 +34,7 @@ struct AgentConfig {
     runtime_root: String,
     state_dir: String,
     log_dir: String,
+    node_env_path: String,
     xray_config_path: String,
     awg_config_path: String,
 }
@@ -58,6 +61,7 @@ impl Default for AgentConfig {
             runtime_root,
             state_dir: "/var/lib/node-plane-agent".to_string(),
             log_dir: "/var/log/node-plane-agent".to_string(),
+            node_env_path: "/etc/node-plane/node.env".to_string(),
             xray_config_path,
             awg_config_path,
         }
@@ -332,6 +336,23 @@ impl AgentState {
         let summary = format!("checked={} free={} busy={} invalid={invalid}", items.len(), free, busy);
         CheckPortsResponse { summary, items }
     }
+
+    fn sync_node_env(&self, content: &str) -> Result<SyncNodeEnvResponse, Status> {
+        let path = Path::new(&self.config.node_env_path);
+        let Some(parent) = path.parent() else {
+            return Err(Status::internal("node env path has no parent directory"));
+        };
+        fs::create_dir_all(parent)
+            .map_err(|err| Status::internal(format!("failed to create node env directory: {err}")))?;
+        fs::write(path, content)
+            .map_err(|err| Status::internal(format!("failed to write node env: {err}")))?;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+            .map_err(|err| Status::internal(format!("failed to set node env permissions: {err}")))?;
+        Ok(SyncNodeEnvResponse {
+            summary: format!("node.env written to {}", self.config.node_env_path),
+            path: self.config.node_env_path.clone(),
+        })
+    }
 }
 
 #[derive(Clone)]
@@ -383,6 +404,15 @@ impl NodeAgentService for NodeAgentApi {
     ) -> Result<Response<CheckPortsResponse>, Status> {
         Ok(Response::new(self.state.check_ports(request.into_inner())))
     }
+
+    async fn sync_node_env(
+        &self,
+        request: Request<SyncNodeEnvRequest>,
+    ) -> Result<Response<SyncNodeEnvResponse>, Status> {
+        Ok(Response::new(
+            self.state.sync_node_env(request.into_inner().content.as_str())?,
+        ))
+    }
 }
 
 fn print_startup(config: &AgentConfig) {
@@ -392,6 +422,7 @@ fn print_startup(config: &AgentConfig) {
     println!("runtime_root={}", config.runtime_root);
     println!("state_dir={}", config.state_dir);
     println!("log_dir={}", config.log_dir);
+    println!("node_env_path={}", config.node_env_path);
     println!("xray_config_path={}", config.xray_config_path);
     println!("awg_config_path={}", config.awg_config_path);
     println!("heartbeat_seconds={}", config.heartbeat_seconds);
