@@ -153,6 +153,20 @@ struct RuntimeAssetManifestEntry {
     mode: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+struct XraySyncGenerated {
+    xray_host: String,
+    xray_sni: String,
+    xray_pbk: String,
+    xray_sid: String,
+    xray_short_id: String,
+    xray_fp: String,
+    xray_flow: String,
+    xray_tcp_port: i32,
+    xray_xhttp_port: i32,
+    xray_xhttp_path_prefix: String,
+}
+
 impl DriverContext {
     fn runtime_assets_dir(&self) -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -812,6 +826,50 @@ impl DriverContext {
                 })
         }
     }
+
+    async fn update_xray_server_fields(
+        &self,
+        node_key: &str,
+        generated: &XraySyncGenerated,
+    ) -> Result<(), Status> {
+        let client = self.db_client().await?;
+        client
+            .execute(
+                "
+                UPDATE servers
+                SET
+                    xray_host = $1,
+                    xray_sni = $2,
+                    xray_pbk = $3,
+                    xray_sid = $4,
+                    xray_short_id = $5,
+                    xray_fp = $6,
+                    xray_flow = $7,
+                    xray_tcp_port = $8,
+                    xray_xhttp_port = $9,
+                    xray_xhttp_path_prefix = $10,
+                    updated_at = $11
+                WHERE key = $12
+                ",
+                &[
+                    &generated.xray_host,
+                    &generated.xray_sni,
+                    &generated.xray_pbk,
+                    &generated.xray_sid,
+                    &generated.xray_short_id,
+                    &generated.xray_fp,
+                    &generated.xray_flow,
+                    &generated.xray_tcp_port,
+                    &generated.xray_xhttp_port,
+                    &generated.xray_xhttp_path_prefix,
+                    &Utc::now().to_rfc3339(),
+                    &node_key,
+                ],
+            )
+            .await
+            .map_err(|err| Status::internal(format!("failed to update xray server fields: {err}")))?;
+        Ok(())
+    }
 }
 
 #[derive(Clone)]
@@ -1393,6 +1451,88 @@ impl RuntimeService for RuntimeApi {
         request: Request<SyncXrayRequest>,
     ) -> Result<Response<StartOperationResponse>, Status> {
         let req = request.into_inner();
+        if let Some(target) = self.ctx.agent_target(&req.node_key) {
+            let row = match self.ctx.fetch_server_row(&req.node_key).await {
+                Ok(Some(row)) => row,
+                Ok(None) => {
+                    return Ok(Response::new(self.ctx.state.finish_operation(
+                        "sync_xray",
+                        &req.node_key,
+                        "",
+                        "FAILED",
+                        "server not found",
+                    )));
+                }
+                Err(err) => {
+                    return Ok(Response::new(self.ctx.state.finish_operation(
+                        "sync_xray",
+                        &req.node_key,
+                        "",
+                        "FAILED",
+                        &format!("failed to load server registry row: {err}"),
+                    )));
+                }
+            };
+            let protocol_kinds = self.ctx.parse_protocol_kinds(
+                row.try_get::<_, Option<String>>("protocol_kinds")
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default()
+                    .as_str(),
+            );
+            if !protocol_kinds.iter().any(|item| item == "xray") {
+                return Ok(Response::new(self.ctx.state.finish_operation(
+                    "sync_xray",
+                    &req.node_key,
+                    "",
+                    "FAILED",
+                    "xray is not enabled on this server",
+                )));
+            }
+            let config_path = self.ctx.row_string(
+                &row,
+                "xray_config_path",
+                "/opt/node-plane-runtime/xray/config.json",
+            );
+            let public_host = self.ctx.row_string(&row, "public_host", "");
+            let flow = self
+                .ctx
+                .row_string(&row, "xray_flow", "xtls-rprx-vision");
+            let image = "ghcr.io/xtls/xray-core:25.12.8";
+            let transport = agent_transport::AgentTransport::new(target);
+            let summary = match transport
+                .sync_xray(&config_path, &public_host, &flow, image)
+                .await
+            {
+                Ok(result) => match serde_json::from_str::<XraySyncGenerated>(&result.generated_json)
+                {
+                    Ok(generated) => {
+                        match self
+                            .ctx
+                            .update_xray_server_fields(&req.node_key, &generated)
+                            .await
+                        {
+                            Ok(()) => result.generated_json,
+                            Err(err) => format!("failed to persist xray settings: {err}"),
+                        }
+                    }
+                    Err(err) => format!("agent xray sync returned invalid json: {err}"),
+                },
+                Err(err) => format!("agent xray sync failed: {err}"),
+            };
+            let status = if summary.trim_start().starts_with('{') {
+                "SUCCEEDED"
+            } else {
+                "FAILED"
+            };
+            return Ok(Response::new(self.ctx.state.finish_operation(
+                "sync_xray",
+                &req.node_key,
+                "",
+                status,
+                &summary,
+            )));
+        }
         Ok(Response::new(self.ctx.state.start_operation(
             "sync_xray",
             &req.node_key,

@@ -13,6 +13,7 @@ service NodeAgentService {
   rpc SyncNodeEnv(SyncNodeEnvRequest) returns (SyncNodeEnvResponse);
   rpc OpenPorts(OpenPortsRequest) returns (OpenPortsResponse);
   rpc SyncRuntimeFiles(SyncRuntimeFilesRequest) returns (SyncRuntimeFilesResponse);
+  rpc SyncXray(SyncXrayRequest) returns (SyncXrayResponse);
 }
 
 message ListRemoteProfilesRequest {
@@ -64,4 +65,16 @@ message SyncRuntimeFilesRequest {
 message SyncRuntimeFilesResponse {
   string summary = 1;
   uint32 written_files = 2;
+}
+
+message SyncXrayRequest {
+  string config_path = 1;
+  string public_host = 2;
+  string flow = 3;
+  string image = 4;
+}
+
+message SyncXrayResponse {
+  string summary = 1;
+  string generated_json = 2;
 }

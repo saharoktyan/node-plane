@@ -13,6 +13,7 @@ Current scope:
 - can attempt `OpenPorts` through a node agent and surface host-local firewall failures directly;
 - can render and push `node.env` to a node agent without SSH;
 - can sync the shared runtime bundle from `runtime_assets/manifest.json` through a node agent;
+- can run `SyncXray` through a node agent and persist generated `xray_*` settings back into the central registry when PostgreSQL is available;
 - creates in-memory `Operation` records for mutating RPCs.
 
 Runtime bundle source of truth:

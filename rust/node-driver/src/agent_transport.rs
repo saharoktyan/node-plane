@@ -6,7 +6,7 @@ use crate::agent::v1::{
     OpenPortsRequest, OpenPortsResponse, PortCheckSpec, RemoteProfileRecord,
     RunDiagnosticsRequest, RunDiagnosticsResponse, RuntimeFacts, RuntimeFileSpec,
     SyncNodeEnvRequest, SyncNodeEnvResponse, SyncRuntimeFilesRequest,
-    SyncRuntimeFilesResponse,
+    SyncRuntimeFilesResponse, SyncXrayRequest, SyncXrayResponse,
 };
 
 pub struct AgentTransport {
@@ -109,6 +109,27 @@ impl AgentTransport {
         })?;
         let response = client
             .sync_runtime_files(SyncRuntimeFilesRequest { files })
+            .await?;
+        Ok(response.into_inner())
+    }
+
+    pub async fn sync_xray(
+        &self,
+        config_path: &str,
+        public_host: &str,
+        flow: &str,
+        image: &str,
+    ) -> Result<SyncXrayResponse, tonic::Status> {
+        let mut client = self.client().await.map_err(|err| {
+            tonic::Status::unavailable(format!("failed to connect to node agent: {err}"))
+        })?;
+        let response = client
+            .sync_xray(SyncXrayRequest {
+                config_path: config_path.to_string(),
+                public_host: public_host.to_string(),
+                flow: flow.to_string(),
+                image: image.to_string(),
+            })
             .await?;
         Ok(response.into_inner())
     }

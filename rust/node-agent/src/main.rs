@@ -25,7 +25,7 @@ use agent::v1::{
     ListRemoteProfilesResponse, LocalHealth, PortStatus, RemoteProfileRecord,
     RunDiagnosticsRequest, RunDiagnosticsResponse, RuntimeFacts, SyncNodeEnvRequest,
     SyncNodeEnvResponse, OpenPortsRequest, OpenPortsResponse, RuntimeFileSpec,
-    SyncRuntimeFilesRequest, SyncRuntimeFilesResponse,
+    SyncRuntimeFilesRequest, SyncRuntimeFilesResponse, SyncXrayRequest, SyncXrayResponse,
 };
 
 #[derive(Debug, Clone, Deserialize)]
@@ -407,6 +407,32 @@ impl AgentState {
         })
     }
 
+    fn sync_xray(&self, request: SyncXrayRequest) -> Result<SyncXrayResponse, Status> {
+        let script_path = self.resolve_runtime_path("/opt/node-plane-runtime/sync-xray.sh");
+        let config_path = self.resolve_runtime_path(&request.config_path);
+        let output = Command::new(&script_path)
+            .arg(&config_path)
+            .arg(request.public_host)
+            .arg(request.flow)
+            .arg(request.image)
+            .output()
+            .map_err(|err| Status::internal(format!("failed to execute sync-xray.sh: {err}")))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            let detail = if !stderr.is_empty() { stderr } else { stdout };
+            return Err(Status::failed_precondition(format!(
+                "sync-xray.sh failed: {}",
+                if detail.is_empty() { "unknown error".to_string() } else { detail }
+            )));
+        }
+        let generated_json = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        Ok(SyncXrayResponse {
+            summary: "xray settings synced".to_string(),
+            generated_json,
+        })
+    }
+
     fn open_ports(&self, request: OpenPortsRequest) -> Result<OpenPortsResponse, Status> {
         let ufw_check = Command::new("ufw").arg("status").output();
         if ufw_check.is_err() {
@@ -534,6 +560,13 @@ impl NodeAgentService for NodeAgentApi {
         Ok(Response::new(
             self.state.sync_runtime_files(request.into_inner())?,
         ))
+    }
+
+    async fn sync_xray(
+        &self,
+        request: Request<SyncXrayRequest>,
+    ) -> Result<Response<SyncXrayResponse>, Status> {
+        Ok(Response::new(self.state.sync_xray(request.into_inner())?))
     }
 }
 

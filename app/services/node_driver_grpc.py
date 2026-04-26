@@ -265,7 +265,12 @@ class GrpcNodeDriverClient(NodeDriverClient):
             )
         except Exception as exc:
             return self._failed_operation("sync_xray", exc, node_key=node_key)
-        return self._start_operation("sync_xray", response, node_key=node_key)
+        operation = self._start_operation("sync_xray", response, node_key=node_key)
+        if operation.operation_id:
+            fetched = self.get_operation(operation.operation_id)
+            if fetched is not None:
+                return fetched
+        return operation
 
     def probe_node(self, node_key: str) -> DriverOperation:
         self._ensure_client()
