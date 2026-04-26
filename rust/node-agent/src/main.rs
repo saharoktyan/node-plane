@@ -1,5 +1,6 @@
 use std::env;
 use std::fs;
+use std::net::TcpListener;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -18,8 +19,9 @@ pub mod agent {
 
 use agent::v1::node_agent_service_server::{NodeAgentService, NodeAgentServiceServer};
 use agent::v1::{
-    AgentEmpty, DiagnosticItem, ListRemoteProfilesRequest, ListRemoteProfilesResponse, LocalHealth,
-    RemoteProfileRecord, RunDiagnosticsRequest, RunDiagnosticsResponse, RuntimeFacts,
+    AgentEmpty, CheckPortsRequest, CheckPortsResponse, DiagnosticItem, ListRemoteProfilesRequest,
+    ListRemoteProfilesResponse, LocalHealth, PortStatus, RemoteProfileRecord,
+    RunDiagnosticsRequest, RunDiagnosticsResponse, RuntimeFacts,
 };
 
 #[derive(Debug, Clone, Deserialize)]
@@ -285,6 +287,51 @@ impl AgentState {
         );
         RunDiagnosticsResponse { summary, items }
     }
+
+    fn check_ports(&self, request: CheckPortsRequest) -> CheckPortsResponse {
+        let mut items = Vec::new();
+        for spec in request.items {
+            let port = spec.port;
+            let kind = spec.kind.trim().to_string();
+            if port == 0 || port > u16::MAX as u32 {
+                items.push(PortStatus {
+                    kind,
+                    port,
+                    status: "invalid".to_string(),
+                    summary: "invalid port".to_string(),
+                    detail: String::new(),
+                });
+                continue;
+            }
+            let bind_addr = format!("0.0.0.0:{port}");
+            match TcpListener::bind(&bind_addr) {
+                Ok(listener) => {
+                    drop(listener);
+                    items.push(PortStatus {
+                        kind,
+                        port,
+                        status: "free".to_string(),
+                        summary: format!("port {port} is free"),
+                        detail: String::new(),
+                    });
+                }
+                Err(err) => {
+                    items.push(PortStatus {
+                        kind,
+                        port,
+                        status: "busy".to_string(),
+                        summary: format!("port {port} is not available"),
+                        detail: err.to_string(),
+                    });
+                }
+            }
+        }
+        let busy = items.iter().filter(|item| item.status == "busy").count();
+        let invalid = items.iter().filter(|item| item.status == "invalid").count();
+        let free = items.iter().filter(|item| item.status == "free").count();
+        let summary = format!("checked={} free={} busy={} invalid={invalid}", items.len(), free, busy);
+        CheckPortsResponse { summary, items }
+    }
 }
 
 #[derive(Clone)]
@@ -328,6 +375,13 @@ impl NodeAgentService for NodeAgentApi {
         _request: Request<RunDiagnosticsRequest>,
     ) -> Result<Response<RunDiagnosticsResponse>, Status> {
         Ok(Response::new(self.state.diagnostics()))
+    }
+
+    async fn check_ports(
+        &self,
+        request: Request<CheckPortsRequest>,
+    ) -> Result<Response<CheckPortsResponse>, Status> {
+        Ok(Response::new(self.state.check_ports(request.into_inner())))
     }
 }
 

@@ -28,6 +28,19 @@ message DiagnosticItem {
   string detail = 4;
 }
 
+message PortCheckSpec {
+  string kind = 1;
+  uint32 port = 2;
+}
+
+message PortStatus {
+  string kind = 1;
+  uint32 port = 2;
+  string status = 3;
+  string summary = 4;
+  string detail = 5;
+}
+
 message RemoteProfileRecord {
   string profile_name = 1;
   string protocol_kind = 2;

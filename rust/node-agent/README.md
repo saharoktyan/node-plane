@@ -8,6 +8,7 @@ Current scope:
 - exposes a small gRPC surface;
 - reports runtime facts and local health;
 - lists AWG/Xray remote profiles from local files;
+- checks node-local port availability for requested runtime ports;
 - runs a heartbeat loop.
 
 This crate is still a scaffold, but it is now usable as a local read-only
@@ -36,3 +37,4 @@ Current RPC surface:
 - `GetNodeHealth`
 - `ListRemoteProfiles`
 - `RunDiagnostics`
+- `CheckPorts`

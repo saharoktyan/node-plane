@@ -23,6 +23,7 @@ pub mod driver {
     }
 }
 
+use agent::v1::PortCheckSpec;
 use driver::v1::node_service_server::{NodeService, NodeServiceServer};
 use driver::v1::operation_service_server::{OperationService, OperationServiceServer};
 use driver::v1::provisioning_service_server::{ProvisioningService, ProvisioningServiceServer};
@@ -414,6 +415,45 @@ impl DriverContext {
         }
     }
 
+    fn port_check_specs_from_row(&self, row: &Row) -> Vec<PortCheckSpec> {
+        let mut items = Vec::new();
+        for (kind, field) in [
+            ("xray_tcp", "xray_tcp_port"),
+            ("xray_xhttp", "xray_xhttp_port"),
+            ("awg", "awg_port"),
+        ] {
+            let port = row
+                .try_get::<_, Option<i32>>(field)
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            if port > 0 {
+                items.push(PortCheckSpec {
+                    kind: kind.to_string(),
+                    port: port as u32,
+                });
+            }
+        }
+        items
+    }
+
+    fn default_port_check_specs(&self) -> Vec<PortCheckSpec> {
+        vec![
+            PortCheckSpec {
+                kind: "xray_tcp".to_string(),
+                port: 443,
+            },
+            PortCheckSpec {
+                kind: "xray_xhttp".to_string(),
+                port: 8443,
+            },
+            PortCheckSpec {
+                kind: "awg".to_string(),
+                port: 51820,
+            },
+        ]
+    }
+
     fn runtime_status_from_row(&self, row: &Row) -> RuntimeStatus {
         let node_key = row
             .try_get::<_, Option<String>>("key")
@@ -801,6 +841,48 @@ impl NodeService for NodeApi {
         request: Request<CheckPortsRequest>,
     ) -> Result<Response<StartOperationResponse>, Status> {
         let req = request.into_inner();
+        if let Some(target) = self.ctx.agent_target(&req.node_key) {
+            let specs = match self.ctx.fetch_server_row(&req.node_key).await {
+                Ok(Some(row)) => self.ctx.port_check_specs_from_row(&row),
+                _ => self.ctx.default_port_check_specs(),
+            };
+            let transport = agent_transport::AgentTransport::new(target);
+            let response = transport.check_ports(specs).await;
+            let summary = match response {
+                Ok(result) => {
+                    let busy: Vec<String> = result
+                        .items
+                        .iter()
+                        .filter(|item| item.status == "busy")
+                        .map(|item| format!("{}={}", item.kind, item.port))
+                        .collect();
+                    if busy.is_empty() {
+                        format!("agent port check ok\n{}", result.summary)
+                    } else {
+                        format!(
+                            "agent port check found busy ports\n{}\nbusy={}",
+                            result.summary,
+                            busy.join(", ")
+                        )
+                    }
+                }
+                Err(err) => format!("agent port check failed: {err}"),
+            };
+            let status = if summary.starts_with("agent port check failed:")
+                || summary.starts_with("agent port check found busy ports")
+            {
+                "FAILED"
+            } else {
+                "SUCCEEDED"
+            };
+            return Ok(Response::new(self.ctx.state.finish_operation(
+                "check_ports",
+                &req.node_key,
+                "",
+                status,
+                &summary,
+            )));
+        }
         Ok(Response::new(self.ctx.state.start_operation(
             "check_ports",
             &req.node_key,

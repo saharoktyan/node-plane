@@ -9,6 +9,7 @@ service NodeAgentService {
   rpc GetNodeHealth(AgentEmpty) returns (LocalHealth);
   rpc ListRemoteProfiles(ListRemoteProfilesRequest) returns (ListRemoteProfilesResponse);
   rpc RunDiagnostics(RunDiagnosticsRequest) returns (RunDiagnosticsResponse);
+  rpc CheckPorts(CheckPortsRequest) returns (CheckPortsResponse);
 }
 
 message ListRemoteProfilesRequest {
@@ -24,4 +25,13 @@ message RunDiagnosticsRequest {}
 message RunDiagnosticsResponse {
   string summary = 1;
   repeated DiagnosticItem items = 2;
+}
+
+message CheckPortsRequest {
+  repeated PortCheckSpec items = 1;
+}
+
+message CheckPortsResponse {
+  string summary = 1;
+  repeated PortStatus items = 2;
 }

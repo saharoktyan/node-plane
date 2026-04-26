@@ -9,6 +9,7 @@ Current scope:
 - exposes all current `NodeDriverClient` RPC surfaces;
 - serves node/read RPCs from PostgreSQL-backed state where possible;
 - can read runtime facts and remote profiles from a node agent when configured;
+- can complete `ProbeNode` and `CheckPorts` immediately through a node agent;
 - creates in-memory `Operation` records for mutating RPCs.
 
 This crate is intentionally a thin scaffold. It is not meant to own real node
