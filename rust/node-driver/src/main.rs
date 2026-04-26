@@ -364,6 +364,14 @@ impl DriverContext {
         }
     }
 
+    fn apply_agent_health(&self, node: &mut Node, health: agent::v1::LocalHealth) {
+        node.health = Some(NodeHealth {
+            connectivity: health.state,
+            last_seen_at: health.last_seen_at,
+            summary: health.summary,
+        });
+    }
+
     fn parse_runtime_note(&self, note: &str) -> Option<(String, String)> {
         let prefix = "runtime synced to ";
         let trimmed = note.trim();
@@ -606,7 +614,16 @@ impl NodeService for NodeApi {
             return Err(Status::invalid_argument("node_key is required"));
         }
         match self.ctx.fetch_server_row(&req.node_key).await? {
-            Some(row) => Ok(Response::new(self.ctx.node_from_row(&row))),
+            Some(row) => {
+                let mut node = self.ctx.node_from_row(&row);
+                if let Some(target) = self.ctx.agent_target(&req.node_key) {
+                    let transport = agent_transport::AgentTransport::new(target);
+                    if let Ok(health) = transport.get_node_health().await {
+                        self.ctx.apply_agent_health(&mut node, health);
+                    }
+                }
+                Ok(Response::new(node))
+            }
             None => Err(Status::not_found("node not found")),
         }
     }
@@ -617,9 +634,23 @@ impl NodeService for NodeApi {
     ) -> Result<Response<ListNodesResponse>, Status> {
         let req = request.into_inner();
         let rows = self.ctx.list_server_rows(req.include_disabled).await?;
-        Ok(Response::new(ListNodesResponse {
-            items: rows.iter().map(|row| self.ctx.node_from_row(row)).collect(),
-        }))
+        let mut items = Vec::with_capacity(rows.len());
+        for row in rows {
+            let node_key = row
+                .try_get::<_, Option<String>>("key")
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            let mut node = self.ctx.node_from_row(&row);
+            if let Some(target) = self.ctx.agent_target(&node_key) {
+                let transport = agent_transport::AgentTransport::new(target);
+                if let Ok(health) = transport.get_node_health().await {
+                    self.ctx.apply_agent_health(&mut node, health);
+                }
+            }
+            items.push(node);
+        }
+        Ok(Response::new(ListNodesResponse { items }))
     }
 
     async fn get_node_diagnostics(
@@ -1001,9 +1032,39 @@ impl RuntimeService for RuntimeApi {
         let rows = self.ctx.list_server_rows(false).await?;
         let mut items = Vec::new();
         for row in rows {
-            let runtime = self.ctx.runtime_status_from_row(&row);
+            let node_key = row
+                .try_get::<_, Option<String>>("key")
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            let runtime = if let Some(target) = self.ctx.agent_target(&node_key) {
+                let transport = agent_transport::AgentTransport::new(target);
+                match transport.get_runtime_facts().await {
+                    Ok(facts) => RuntimeStatus {
+                        node_key: facts.node_key,
+                        state: self
+                            .ctx
+                            .runtime_state_from_values(&facts.version, &facts.commit),
+                        version: facts.version,
+                        commit: facts.commit,
+                        expected_version: self.ctx.app_semver.clone(),
+                        expected_commit: self.ctx.app_commit.clone(),
+                        message: "reported by node agent".to_string(),
+                    },
+                    Err(_) => self.ctx.runtime_status_from_row(&row),
+                }
+            } else {
+                self.ctx.runtime_status_from_row(&row)
+            };
             if matches!(runtime.state.as_str(), "outdated" | "unknown") {
-                items.push(self.ctx.node_from_row(&row));
+                let mut node = self.ctx.node_from_row(&row);
+                if let Some(target) = self.ctx.agent_target(&node_key) {
+                    let transport = agent_transport::AgentTransport::new(target);
+                    if let Ok(health) = transport.get_node_health().await {
+                        self.ctx.apply_agent_health(&mut node, health);
+                    }
+                }
+                items.push(node);
             }
         }
         Ok(Response::new(ListNodesNeedingRuntimeSyncResponse { items }))

@@ -2,7 +2,7 @@ use tonic::transport::Channel;
 
 use crate::agent::v1::node_agent_service_client::NodeAgentServiceClient;
 use crate::agent::v1::{
-    AgentEmpty, ListRemoteProfilesRequest, RemoteProfileRecord, RunDiagnosticsRequest,
+    AgentEmpty, ListRemoteProfilesRequest, LocalHealth, RemoteProfileRecord, RunDiagnosticsRequest,
     RunDiagnosticsResponse, RuntimeFacts,
 };
 
@@ -26,6 +26,14 @@ impl AgentTransport {
             tonic::Status::unavailable(format!("failed to connect to node agent: {err}"))
         })?;
         let response = client.get_runtime_facts(AgentEmpty {}).await?;
+        Ok(response.into_inner())
+    }
+
+    pub async fn get_node_health(&self) -> Result<LocalHealth, tonic::Status> {
+        let mut client = self.client().await.map_err(|err| {
+            tonic::Status::unavailable(format!("failed to connect to node agent: {err}"))
+        })?;
+        let response = client.get_node_health(AgentEmpty {}).await?;
         Ok(response.into_inner())
     }
 
