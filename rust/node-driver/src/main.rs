@@ -1027,6 +1027,45 @@ impl NodeService for NodeApi {
         request: Request<OpenPortsRequest>,
     ) -> Result<Response<StartOperationResponse>, Status> {
         let req = request.into_inner();
+        if let Some(target) = self.ctx.agent_target(&req.node_key) {
+            let specs = match self.ctx.fetch_server_row(&req.node_key).await {
+                Ok(Some(row)) => self.ctx.port_check_specs_from_row(&row),
+                _ => self.ctx.default_port_check_specs(),
+            };
+            let transport = agent_transport::AgentTransport::new(target);
+            let summary = match transport.open_ports(specs).await {
+                Ok(result) => {
+                    let failed: Vec<String> = result
+                        .items
+                        .iter()
+                        .filter(|item| item.status == "failed")
+                        .map(|item| format!("{}={}: {}", item.kind, item.port, item.detail))
+                        .collect();
+                    if failed.is_empty() {
+                        format!("agent open ports ok\n{}", result.summary)
+                    } else {
+                        format!(
+                            "agent open ports failed for some rules\n{}\nerrors={}",
+                            result.summary,
+                            failed.join(" | ")
+                        )
+                    }
+                }
+                Err(err) => format!("agent open ports failed: {err}"),
+            };
+            let status = if summary.starts_with("agent open ports ok\n") {
+                "SUCCEEDED"
+            } else {
+                "FAILED"
+            };
+            return Ok(Response::new(self.ctx.state.finish_operation(
+                "open_ports",
+                &req.node_key,
+                "",
+                status,
+                &summary,
+            )));
+        }
         Ok(Response::new(self.ctx.state.start_operation(
             "open_ports",
             &req.node_key,

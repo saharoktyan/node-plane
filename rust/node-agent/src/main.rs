@@ -4,6 +4,7 @@ use std::net::TcpListener;
 use std::net::SocketAddr;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -23,7 +24,7 @@ use agent::v1::{
     AgentEmpty, CheckPortsRequest, CheckPortsResponse, DiagnosticItem, ListRemoteProfilesRequest,
     ListRemoteProfilesResponse, LocalHealth, PortStatus, RemoteProfileRecord,
     RunDiagnosticsRequest, RunDiagnosticsResponse, RuntimeFacts, SyncNodeEnvRequest,
-    SyncNodeEnvResponse,
+    SyncNodeEnvResponse, OpenPortsRequest, OpenPortsResponse,
 };
 
 #[derive(Debug, Clone, Deserialize)]
@@ -353,6 +354,59 @@ impl AgentState {
             path: self.config.node_env_path.clone(),
         })
     }
+
+    fn open_ports(&self, request: OpenPortsRequest) -> Result<OpenPortsResponse, Status> {
+        let ufw_check = Command::new("ufw").arg("status").output();
+        if ufw_check.is_err() {
+            return Err(Status::failed_precondition(
+                "ufw is not installed or not available in PATH",
+            ));
+        }
+
+        let mut items = Vec::new();
+        let mut failed = 0usize;
+        for spec in request.items {
+            let port = spec.port;
+            let kind = spec.kind.trim().to_string();
+            let proto = if kind == "awg" { "udp" } else { "tcp" };
+            let rule = format!("{port}/{proto}");
+            match Command::new("ufw").arg("allow").arg(&rule).output() {
+                Ok(output) if output.status.success() => items.push(PortStatus {
+                    kind,
+                    port,
+                    status: "opened".to_string(),
+                    summary: format!("opened {rule}"),
+                    detail: String::new(),
+                }),
+                Ok(output) => {
+                    failed += 1;
+                    let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                    items.push(PortStatus {
+                        kind,
+                        port,
+                        status: "failed".to_string(),
+                        summary: format!("failed to open {rule}"),
+                        detail,
+                    });
+                }
+                Err(err) => {
+                    failed += 1;
+                    items.push(PortStatus {
+                        kind,
+                        port,
+                        status: "failed".to_string(),
+                        summary: format!("failed to open {rule}"),
+                        detail: err.to_string(),
+                    });
+                }
+            }
+        }
+
+        let _ = Command::new("ufw").arg("reload").output();
+        let opened = items.iter().filter(|item| item.status == "opened").count();
+        let summary = format!("requested={} opened={} failed={failed}", items.len(), opened);
+        Ok(OpenPortsResponse { summary, items })
+    }
 }
 
 #[derive(Clone)]
@@ -412,6 +466,13 @@ impl NodeAgentService for NodeAgentApi {
         Ok(Response::new(
             self.state.sync_node_env(request.into_inner().content.as_str())?,
         ))
+    }
+
+    async fn open_ports(
+        &self,
+        request: Request<OpenPortsRequest>,
+    ) -> Result<Response<OpenPortsResponse>, Status> {
+        Ok(Response::new(self.state.open_ports(request.into_inner())?))
     }
 }
 

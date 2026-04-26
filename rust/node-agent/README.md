@@ -9,6 +9,7 @@ Current scope:
 - reports runtime facts and local health;
 - lists AWG/Xray remote profiles from local files;
 - checks node-local port availability for requested runtime ports;
+- opens firewall rules for requested runtime ports via `ufw`;
 - writes `node.env` from central-driver payloads;
 - runs a heartbeat loop.
 
@@ -40,4 +41,5 @@ Current RPC surface:
 - `ListRemoteProfiles`
 - `RunDiagnostics`
 - `CheckPorts`
+- `OpenPorts`
 - `SyncNodeEnv`
