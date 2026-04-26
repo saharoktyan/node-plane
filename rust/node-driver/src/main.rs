@@ -48,6 +48,15 @@ struct DriverState {
 }
 
 impl DriverState {
+    fn put_operation(&self, operation: Operation) -> StartOperationResponse {
+        let operation_id = operation.operation_id.clone();
+        self.operations
+            .lock()
+            .expect("operations lock poisoned")
+            .insert(operation_id.clone(), operation);
+        StartOperationResponse { operation_id }
+    }
+
     fn start_operation(
         &self,
         kind: &str,
@@ -68,11 +77,30 @@ impl DriverState {
             progress_message: message.to_string(),
             error: None,
         };
-        self.operations
-            .lock()
-            .expect("operations lock poisoned")
-            .insert(operation_id.clone(), op);
-        StartOperationResponse { operation_id }
+        self.put_operation(op)
+    }
+
+    fn finish_operation(
+        &self,
+        kind: &str,
+        node_key: &str,
+        profile_name: &str,
+        status: &str,
+        message: &str,
+    ) -> StartOperationResponse {
+        let timestamp = Utc::now().to_rfc3339();
+        self.put_operation(Operation {
+            operation_id: Uuid::new_v4().to_string(),
+            kind: kind.to_string(),
+            status: status.to_string(),
+            node_key: node_key.to_string(),
+            profile_name: profile_name.to_string(),
+            started_at: timestamp.clone(),
+            updated_at: timestamp.clone(),
+            finished_at: timestamp,
+            progress_message: message.to_string(),
+            error: None,
+        })
     }
 
     fn get_operation(&self, operation_id: &str) -> Option<Operation> {
@@ -731,6 +759,35 @@ impl NodeService for NodeApi {
         request: Request<ProbeNodeRequest>,
     ) -> Result<Response<StartOperationResponse>, Status> {
         let req = request.into_inner();
+        if let Some(target) = self.ctx.agent_target(&req.node_key) {
+            let transport = agent_transport::AgentTransport::new(target);
+            let summary = match (
+                transport.get_node_health().await,
+                transport.run_diagnostics().await,
+            ) {
+                (Ok(health), Ok(diagnostics)) => format!(
+                    "agent probe ok\nhealth={} ({})\n{}",
+                    health.state, health.summary, diagnostics.summary
+                ),
+                (Ok(health), Err(err)) => format!(
+                    "agent health ok\nhealth={} ({})\ndiagnostics_error={}",
+                    health.state, health.summary, err
+                ),
+                (Err(err), _) => format!("agent probe failed: {err}"),
+            };
+            let status = if summary.starts_with("agent probe failed:") {
+                "FAILED"
+            } else {
+                "SUCCEEDED"
+            };
+            return Ok(Response::new(self.ctx.state.finish_operation(
+                "probe_node",
+                &req.node_key,
+                "",
+                status,
+                &summary,
+            )));
+        }
         Ok(Response::new(self.ctx.state.start_operation(
             "probe_node",
             &req.node_key,
