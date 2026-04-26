@@ -117,7 +117,7 @@ underlying transport is SSH or agent RPC.
 
 ## Immediate Next Steps
 
-1. Create the `rust/node-agent` crate.
-2. Define the agent config and runtime directories.
-3. Implement a placeholder heartbeat loop and runtime-facts collector.
-4. Add a central-driver transport abstraction that can later target either SSH or the agent.
+1. Add central-driver fallback rules for `agent` vs `ssh`.
+2. Expand the agent RPC surface from read-only operations to mutating runtime actions.
+3. Add authenticated transport and node registration flow.
+4. Move central reconcile logic onto agent-backed observations.

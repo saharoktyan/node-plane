@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package nodeplane.agent.v1;
+
+import "agent/v1/types.proto";
+
+service NodeAgentService {
+  rpc GetRuntimeFacts(AgentEmpty) returns (RuntimeFacts);
+  rpc GetNodeHealth(AgentEmpty) returns (LocalHealth);
+  rpc ListRemoteProfiles(ListRemoteProfilesRequest) returns (ListRemoteProfilesResponse);
+  rpc RunDiagnostics(RunDiagnosticsRequest) returns (RunDiagnosticsResponse);
+}
+
+message ListRemoteProfilesRequest {
+  string protocol_kind = 1;
+}
+
+message ListRemoteProfilesResponse {
+  repeated RemoteProfileRecord items = 1;
+}
+
+message RunDiagnosticsRequest {}
+
+message RunDiagnosticsResponse {
+  string summary = 1;
+  repeated DiagnosticItem items = 2;
+}

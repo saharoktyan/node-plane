@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package nodeplane.agent.v1;
+
+message AgentEmpty {}
+
+message RuntimeFacts {
+  string node_key = 1;
+  string version = 2;
+  string commit = 3;
+  string runtime_root = 4;
+  string xray_config_path = 5;
+  string awg_config_path = 6;
+  bool xray_config_present = 7;
+  bool awg_config_present = 8;
+}
+
+message LocalHealth {
+  string state = 1;
+  string summary = 2;
+  string last_seen_at = 3;
+}
+
+message DiagnosticItem {
+  string kind = 1;
+  string status = 2;
+  string summary = 3;
+  string detail = 4;
+}
+
+message RemoteProfileRecord {
+  string profile_name = 1;
+  string protocol_kind = 2;
+  string remote_id = 3;
+  string status = 4;
+}

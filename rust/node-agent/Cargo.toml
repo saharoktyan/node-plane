@@ -3,8 +3,15 @@ name = "node-plane-agent"
 version = "0.1.0"
 edition = "2024"
 
+[build-dependencies]
+tonic-build = "0.12"
+
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+prost = "0.13"
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "signal", "time"] }
+tokio-stream = "0.1"
 toml = "0.8"
+tonic = { version = "0.12", features = ["transport"] }

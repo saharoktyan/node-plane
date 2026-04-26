@@ -9,6 +9,14 @@ use tokio_postgres::{NoTls, Row};
 use tonic::{Request, Response, Status, transport::Server};
 use uuid::Uuid;
 
+mod agent_transport;
+
+pub mod agent {
+    pub mod v1 {
+        tonic::include_proto!("nodeplane.agent.v1");
+    }
+}
+
 pub mod driver {
     pub mod v1 {
         tonic::include_proto!("nodeplane.driver.v1");
@@ -104,6 +112,7 @@ struct DriverContext {
     postgres_dsn: Option<String>,
     app_semver: String,
     app_commit: String,
+    agent_targets: HashMap<String, String>,
 }
 
 impl DriverContext {
@@ -127,7 +136,27 @@ impl DriverContext {
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty())
                 .unwrap_or_else(|| "unknown".to_string()),
+            agent_targets: Self::parse_agent_targets(),
         }
+    }
+
+    fn parse_agent_targets() -> HashMap<String, String> {
+        env::var("NODE_AGENT_TARGETS")
+            .ok()
+            .unwrap_or_default()
+            .split(',')
+            .filter_map(|item| {
+                let trimmed = item.trim();
+                let (node_key, target) = trimmed.split_once('=')?;
+                let node_key = node_key.trim();
+                let target = target.trim();
+                if node_key.is_empty() || target.is_empty() {
+                    None
+                } else {
+                    Some((node_key.to_string(), target.to_string()))
+                }
+            })
+            .collect()
     }
 
     fn candidate_shared_root() -> String {
@@ -211,6 +240,10 @@ impl DriverContext {
             }
         });
         Ok(client)
+    }
+
+    fn agent_target(&self, node_key: &str) -> Option<&str> {
+        self.agent_targets.get(node_key).map(String::as_str)
     }
 
     fn runtime_state_from_values(&self, version: &str, commit: &str) -> String {
@@ -594,6 +627,26 @@ impl NodeService for NodeApi {
         request: Request<GetNodeDiagnosticsRequest>,
     ) -> Result<Response<GetNodeDiagnosticsResponse>, Status> {
         let req = request.into_inner();
+        if let Some(target) = self.ctx.agent_target(&req.node_key) {
+            let transport = agent_transport::AgentTransport::new(target);
+            if let Ok(agent_response) = transport.run_diagnostics().await {
+                let items = agent_response
+                    .items
+                    .into_iter()
+                    .map(|item| driver::v1::DiagnosticItem {
+                        kind: item.kind,
+                        status: item.status,
+                        summary: item.summary,
+                        detail: item.detail,
+                    })
+                    .collect();
+                return Ok(Response::new(GetNodeDiagnosticsResponse {
+                    node_key: req.node_key,
+                    summary: agent_response.summary,
+                    items,
+                }));
+            }
+        }
         let summary = match self.ctx.fetch_server_row(&req.node_key).await? {
             Some(row) => {
                 let note = row
@@ -758,6 +811,24 @@ impl ProvisioningService for ProvisioningApi {
         request: Request<ListRemoteProfilesRequest>,
     ) -> Result<Response<ListRemoteProfilesResponse>, Status> {
         let req = request.into_inner();
+        if let Some(target) = self.ctx.agent_target(&req.node_key) {
+            let transport = agent_transport::AgentTransport::new(target);
+            if let Ok(items) = transport
+                .list_remote_profiles(req.protocol_kind.trim())
+                .await
+            {
+                let items = items
+                    .into_iter()
+                    .map(|item| RemoteProfileRecord {
+                        profile_name: item.profile_name,
+                        protocol_kind: item.protocol_kind,
+                        remote_id: item.remote_id,
+                        status: item.status,
+                    })
+                    .collect();
+                return Ok(Response::new(ListRemoteProfilesResponse { items }));
+            }
+        }
         let rows = self
             .ctx
             .observed_remote_profiles(&req.node_key, req.protocol_kind.trim())
@@ -876,10 +947,37 @@ impl RuntimeService for RuntimeApi {
         request: Request<GetRuntimeStatusRequest>,
     ) -> Result<Response<GetRuntimeStatusResponse>, Status> {
         let req = request.into_inner();
-        let runtime = match self.ctx.fetch_server_row(&req.node_key).await? {
-            Some(row) => self.ctx.runtime_status_from_row(&row),
-            None => {
-                missing_runtime_status(&req.node_key, &self.ctx.app_semver, &self.ctx.app_commit)
+        let runtime = if let Some(target) = self.ctx.agent_target(&req.node_key) {
+            let transport = agent_transport::AgentTransport::new(target);
+            match transport.get_runtime_facts().await {
+                Ok(facts) => RuntimeStatus {
+                    node_key: facts.node_key,
+                    state: self
+                        .ctx
+                        .runtime_state_from_values(&facts.version, &facts.commit),
+                    version: facts.version,
+                    commit: facts.commit,
+                    expected_version: self.ctx.app_semver.clone(),
+                    expected_commit: self.ctx.app_commit.clone(),
+                    message: "reported by node agent".to_string(),
+                },
+                Err(_) => match self.ctx.fetch_server_row(&req.node_key).await? {
+                    Some(row) => self.ctx.runtime_status_from_row(&row),
+                    None => missing_runtime_status(
+                        &req.node_key,
+                        &self.ctx.app_semver,
+                        &self.ctx.app_commit,
+                    ),
+                },
+            }
+        } else {
+            match self.ctx.fetch_server_row(&req.node_key).await? {
+                Some(row) => self.ctx.runtime_status_from_row(&row),
+                None => missing_runtime_status(
+                    &req.node_key,
+                    &self.ctx.app_semver,
+                    &self.ctx.app_commit,
+                ),
             }
         };
         Ok(Response::new(GetRuntimeStatusResponse {
@@ -887,7 +985,11 @@ impl RuntimeService for RuntimeApi {
             services: vec![ServiceStatus {
                 service_name: "node-driver".to_string(),
                 state: "running".to_string(),
-                summary: "postgres-backed read model, execution path still skeleton".to_string(),
+                summary: if self.ctx.agent_target(&req.node_key).is_some() {
+                    "agent transport enabled for this node".to_string()
+                } else {
+                    "postgres-backed read model, execution path still skeleton".to_string()
+                },
             }],
         }))
     }

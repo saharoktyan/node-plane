@@ -5,12 +5,13 @@ Rust skeleton for the future node-local agent.
 Current scope:
 
 - loads node-local config;
-- prints startup metadata;
-- runs a heartbeat loop;
-- is ready to receive transport and executor modules later.
+- exposes a small gRPC surface;
+- reports runtime facts and local health;
+- lists AWG/Xray remote profiles from local files;
+- runs a heartbeat loop.
 
-This crate does not expose RPC yet. It exists to lock down the node-side
-responsibility boundary before central-driver transport work begins.
+This crate is still a scaffold, but it is now usable as a local read-only
+agent for central-driver transport tests.
 
 ## Run
 
@@ -28,3 +29,10 @@ Optional environment variables:
 Default config path:
 
 - `/etc/node-plane/agent.toml`
+
+Current RPC surface:
+
+- `GetRuntimeFacts`
+- `GetNodeHealth`
+- `ListRemoteProfiles`
+- `RunDiagnostics`
