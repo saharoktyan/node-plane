@@ -1,0 +1,107 @@
+[
+  {
+    "target_path": "/etc/node-plane/node.env.example",
+    "asset_path": "node.env.example",
+    "mode": "0644"
+  },
+  {
+    "target_path": "/opt/node-plane-runtime/init-xray.sh",
+    "asset_path": "init-xray.sh",
+    "mode": "0755"
+  },
+  {
+    "target_path": "/opt/node-plane-runtime/sync-xray.sh",
+    "asset_path": "sync-xray.sh",
+    "mode": "0755"
+  },
+  {
+    "target_path": "/opt/node-plane-runtime/deploy-xray.sh",
+    "asset_path": "deploy-xray.sh",
+    "mode": "0755"
+  },
+  {
+    "target_path": "/opt/node-plane-runtime/xray-enable-stats.sh",
+    "asset_path": "xray-enable-stats.sh",
+    "mode": "0755"
+  },
+  {
+    "target_path": "/opt/node-plane-runtime/xray-add-user.sh",
+    "asset_path": "xray-add-user.sh",
+    "mode": "0755"
+  },
+  {
+    "target_path": "/opt/node-plane-runtime/xray-add-user-existing.sh",
+    "asset_path": "xray-add-user-existing.sh",
+    "mode": "0755"
+  },
+  {
+    "target_path": "/opt/node-plane-runtime/xray-list-users.sh",
+    "asset_path": "xray-list-users.sh",
+    "mode": "0755"
+  },
+  {
+    "target_path": "/opt/node-plane-runtime/xray-list-traffic.sh",
+    "asset_path": "xray-list-traffic.sh",
+    "mode": "0755"
+  },
+  {
+    "target_path": "/opt/node-plane-runtime/xray-del-user.sh",
+    "asset_path": "xray-del-user.sh",
+    "mode": "0755"
+  },
+  {
+    "target_path": "/opt/node-plane-runtime/conf2vpn.py",
+    "asset_path": "conf2vpn.py",
+    "mode": "0644"
+  },
+  {
+    "target_path": "/opt/node-plane-runtime/amnezia-config-decoder.py",
+    "asset_path": "amnezia-config-decoder.py",
+    "mode": "0644"
+  },
+  {
+    "target_path": "/opt/node-plane-runtime/awg-template.json",
+    "asset_path": "awg-template.json",
+    "mode": "0644"
+  },
+  {
+    "target_path": "/opt/node-plane-runtime/awg-add-user.sh",
+    "asset_path": "awg-add-user.sh",
+    "mode": "0755"
+  },
+  {
+    "target_path": "/opt/node-plane-runtime/awg-del-user.sh",
+    "asset_path": "awg-del-user.sh",
+    "mode": "0755"
+  },
+  {
+    "target_path": "/opt/node-plane-runtime/show-awg-entropy.sh",
+    "asset_path": "show-awg-entropy.sh",
+    "mode": "0755"
+  },
+  {
+    "target_path": "/opt/node-plane-runtime/init-awg.sh",
+    "asset_path": "init-awg.sh",
+    "mode": "0755"
+  },
+  {
+    "target_path": "/opt/node-plane-runtime/regenerate-awg-entropy.sh",
+    "asset_path": "regenerate-awg-entropy.sh",
+    "mode": "0755"
+  },
+  {
+    "target_path": "/opt/node-plane-runtime/amnezia-awg/Dockerfile",
+    "asset_path": "amnezia-awg/Dockerfile",
+    "mode": "0644"
+  },
+  {
+    "target_path": "/opt/node-plane-runtime/amnezia-awg/start.sh",
+    "asset_path": "amnezia-awg/start.sh",
+    "mode": "0755"
+  },
+  {
+    "target_path": "/opt/node-plane-runtime/deploy-awg.sh",
+    "asset_path": "deploy-awg.sh",
+    "mode": "0755"
+  }
+]

@@ -11,6 +11,7 @@ Current scope:
 - checks node-local port availability for requested runtime ports;
 - opens firewall rules for requested runtime ports via `ufw`;
 - writes `node.env` from central-driver payloads;
+- writes arbitrary runtime file bundles from central-driver payloads;
 - runs a heartbeat loop.
 
 This crate is still a scaffold, but it is now usable as a local read-only
@@ -43,3 +44,4 @@ Current RPC surface:
 - `CheckPorts`
 - `OpenPorts`
 - `SyncNodeEnv`
+- `SyncRuntimeFiles`

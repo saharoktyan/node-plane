@@ -2,9 +2,11 @@ use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::net::SocketAddr;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use chrono::{Datelike, Utc};
+use serde::Deserialize;
 use tokio_postgres::{NoTls, Row};
 use tonic::{Request, Response, Status, transport::Server};
 use uuid::Uuid;
@@ -23,7 +25,7 @@ pub mod driver {
     }
 }
 
-use agent::v1::PortCheckSpec;
+use agent::v1::{PortCheckSpec, RuntimeFileSpec};
 use driver::v1::node_service_server::{NodeService, NodeServiceServer};
 use driver::v1::operation_service_server::{OperationService, OperationServiceServer};
 use driver::v1::provisioning_service_server::{ProvisioningService, ProvisioningServiceServer};
@@ -144,7 +146,31 @@ struct DriverContext {
     agent_targets: HashMap<String, String>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+struct RuntimeAssetManifestEntry {
+    target_path: String,
+    asset_path: String,
+    mode: String,
+}
+
 impl DriverContext {
+    fn runtime_assets_dir(&self) -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .join("runtime_assets")
+    }
+
+    fn runtime_manifest_path(&self) -> PathBuf {
+        self.runtime_assets_dir().join("manifest.json")
+    }
+
+    fn load_runtime_manifest(&self) -> Result<Vec<RuntimeAssetManifestEntry>, Status> {
+        let raw = fs::read_to_string(self.runtime_manifest_path())
+            .map_err(|err| Status::internal(format!("failed to read runtime manifest: {err}")))?;
+        serde_json::from_str::<Vec<RuntimeAssetManifestEntry>>(&raw)
+            .map_err(|err| Status::internal(format!("failed to parse runtime manifest: {err}")))
+    }
+
     fn from_env() -> Self {
         Self::load_runtime_env_file();
         let postgres_dsn = env::var("POSTGRES_DSN")
@@ -560,6 +586,49 @@ impl DriverContext {
             self.shell_env_assignment("AWG_SERVER_PORT", 51820),
         ];
         format!("{}\n", lines.join("\n"))
+    }
+
+    fn runtime_file_bundle(
+        &self,
+        row: Option<&Row>,
+        node_key: &str,
+    ) -> Result<Vec<RuntimeFileSpec>, Status> {
+        let manifest = self.load_runtime_manifest()?;
+        let assets_dir = self.runtime_assets_dir();
+        let mut files = Vec::new();
+        for entry in manifest {
+            let content = fs::read_to_string(assets_dir.join(&entry.asset_path)).map_err(|err| {
+                Status::internal(format!(
+                    "failed to read runtime asset {}: {err}",
+                    entry.asset_path
+                ))
+            })?;
+            files.push(RuntimeFileSpec {
+                path: entry.target_path,
+                content,
+                mode: entry.mode,
+            });
+        }
+        files.push(RuntimeFileSpec {
+            path: "/opt/node-plane-runtime/VERSION".to_string(),
+            content: format!("{}\n", self.app_semver),
+            mode: "0644".to_string(),
+        });
+        files.push(RuntimeFileSpec {
+            path: "/opt/node-plane-runtime/BUILD_COMMIT".to_string(),
+            content: format!("{}\n", self.app_commit),
+            mode: "0644".to_string(),
+        });
+        let node_env = match row {
+            Some(value) => self.render_node_env_from_row(value),
+            None => self.render_default_node_env(node_key),
+        };
+        files.push(RuntimeFileSpec {
+            path: "/etc/node-plane/node.env".to_string(),
+            content: node_env,
+            mode: "0600".to_string(),
+        });
+        Ok(files)
     }
 
     fn runtime_status_from_row(&self, row: &Row) -> RuntimeStatus {
@@ -1261,6 +1330,56 @@ impl RuntimeService for RuntimeApi {
         request: Request<SyncRuntimeRequest>,
     ) -> Result<Response<StartOperationResponse>, Status> {
         let req = request.into_inner();
+        if let Some(target) = self.ctx.agent_target(&req.node_key) {
+            let row = match self.ctx.fetch_server_row(&req.node_key).await {
+                Ok(Some(row)) => Some(row),
+                _ => None,
+            };
+            let files = self
+                .ctx
+                .runtime_file_bundle(row.as_ref(), &req.node_key)?;
+            let has_xray = row
+                .as_ref()
+                .map(|value| {
+                    self.ctx
+                        .parse_protocol_kinds(
+                            value.try_get::<_, Option<String>>("protocol_kinds")
+                                .ok()
+                                .flatten()
+                                .unwrap_or_default()
+                                .as_str(),
+                        )
+                        .iter()
+                        .any(|item| item == "xray")
+                })
+                .unwrap_or(false);
+            let transport = agent_transport::AgentTransport::new(target);
+            let summary = match transport.sync_runtime_files(files).await {
+                Ok(result) => {
+                    if has_xray {
+                        format!(
+                            "runtime bundle synced via agent\n{}\nXray settings still require a separate Sync Xray step",
+                            result.summary
+                        )
+                    } else {
+                        format!("runtime bundle synced via agent\n{}", result.summary)
+                    }
+                }
+                Err(err) => format!("agent runtime sync failed: {err}"),
+            };
+            let status = if summary.starts_with("runtime bundle synced via agent\n") {
+                "SUCCEEDED"
+            } else {
+                "FAILED"
+            };
+            return Ok(Response::new(self.ctx.state.finish_operation(
+                "sync_runtime",
+                &req.node_key,
+                "",
+                status,
+                &summary,
+            )));
+        }
         Ok(Response::new(self.ctx.state.start_operation(
             "sync_runtime",
             &req.node_key,

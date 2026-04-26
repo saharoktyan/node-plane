@@ -12,7 +12,13 @@ Current scope:
 - can complete `ProbeNode` and `CheckPorts` immediately through a node agent;
 - can attempt `OpenPorts` through a node agent and surface host-local firewall failures directly;
 - can render and push `node.env` to a node agent without SSH;
+- can sync the shared runtime bundle from `runtime_assets/manifest.json` through a node agent;
 - creates in-memory `Operation` records for mutating RPCs.
+
+Runtime bundle source of truth:
+
+- `runtime_assets/`
+- `runtime_assets/manifest.json`
 
 This crate is intentionally a thin scaffold. It is not meant to own real node
 execution yet.

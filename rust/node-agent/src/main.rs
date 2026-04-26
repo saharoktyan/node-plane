@@ -24,7 +24,8 @@ use agent::v1::{
     AgentEmpty, CheckPortsRequest, CheckPortsResponse, DiagnosticItem, ListRemoteProfilesRequest,
     ListRemoteProfilesResponse, LocalHealth, PortStatus, RemoteProfileRecord,
     RunDiagnosticsRequest, RunDiagnosticsResponse, RuntimeFacts, SyncNodeEnvRequest,
-    SyncNodeEnvResponse, OpenPortsRequest, OpenPortsResponse,
+    SyncNodeEnvResponse, OpenPortsRequest, OpenPortsResponse, RuntimeFileSpec,
+    SyncRuntimeFilesRequest, SyncRuntimeFilesResponse,
 };
 
 #[derive(Debug, Clone, Deserialize)]
@@ -355,6 +356,57 @@ impl AgentState {
         })
     }
 
+    fn write_runtime_file(&self, spec: &RuntimeFileSpec) -> Result<(), Status> {
+        let resolved = self.resolve_runtime_path(&spec.path);
+        let path = Path::new(&resolved);
+        let Some(parent) = path.parent() else {
+            return Err(Status::internal("runtime file path has no parent directory"));
+        };
+        fs::create_dir_all(parent)
+            .map_err(|err| Status::internal(format!("failed to create runtime directory: {err}")))?;
+        fs::write(path, &spec.content)
+            .map_err(|err| Status::internal(format!("failed to write runtime file {}: {err}", resolved)))?;
+        let mode = u32::from_str_radix(spec.mode.trim(), 8).unwrap_or(0o644);
+        fs::set_permissions(path, fs::Permissions::from_mode(mode))
+            .map_err(|err| Status::internal(format!("failed to set permissions on {}: {err}", resolved)))?;
+        Ok(())
+    }
+
+    fn resolve_runtime_path(&self, path: &str) -> String {
+        if path == "/etc/node-plane/node.env" {
+            return self.config.node_env_path.clone();
+        }
+        if path == "/etc/node-plane/node.env.example" {
+            return format!("{}.example", self.config.node_env_path);
+        }
+        if let Some(suffix) = path.strip_prefix("/opt/node-plane-runtime/") {
+            return format!(
+                "{}/{}",
+                self.config.runtime_root.trim_end_matches('/'),
+                suffix
+            );
+        }
+        if path == "/opt/node-plane-runtime" {
+            return self.config.runtime_root.clone();
+        }
+        path.to_string()
+    }
+
+    fn sync_runtime_files(
+        &self,
+        request: SyncRuntimeFilesRequest,
+    ) -> Result<SyncRuntimeFilesResponse, Status> {
+        let mut written_files = 0u32;
+        for spec in request.files {
+            self.write_runtime_file(&spec)?;
+            written_files += 1;
+        }
+        Ok(SyncRuntimeFilesResponse {
+            summary: format!("runtime files written: {written_files}"),
+            written_files,
+        })
+    }
+
     fn open_ports(&self, request: OpenPortsRequest) -> Result<OpenPortsResponse, Status> {
         let ufw_check = Command::new("ufw").arg("status").output();
         if ufw_check.is_err() {
@@ -473,6 +525,15 @@ impl NodeAgentService for NodeAgentApi {
         request: Request<OpenPortsRequest>,
     ) -> Result<Response<OpenPortsResponse>, Status> {
         Ok(Response::new(self.state.open_ports(request.into_inner())?))
+    }
+
+    async fn sync_runtime_files(
+        &self,
+        request: Request<SyncRuntimeFilesRequest>,
+    ) -> Result<Response<SyncRuntimeFilesResponse>, Status> {
+        Ok(Response::new(
+            self.state.sync_runtime_files(request.into_inner())?,
+        ))
     }
 }
 

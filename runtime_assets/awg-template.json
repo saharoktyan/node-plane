@@ -1,0 +1,36 @@
+{
+  "containers": [
+    {
+      "awg": {
+        "H1": "",
+        "H2": "",
+        "H3": "",
+        "H4": "",
+        "I1": "",
+        "I2": "",
+        "I3": "",
+        "I4": "",
+        "I5": "",
+        "Jc": "",
+        "Jmax": "",
+        "Jmin": "",
+        "S1": "",
+        "S2": "",
+        "S3": "",
+        "S4": "",
+        "last_config": "",
+        "port": "",
+        "protocol_version": "2",
+        "subnet_address": "10.8.1.0",
+        "transport_proto": "udp"
+      },
+      "container": "amnezia-awg"
+    }
+  ],
+  "defaultContainer": "amnezia-awg",
+  "description": "awg",
+  "dns1": "1.1.1.1",
+  "dns2": "1.0.0.1",
+  "hostName": "",
+  "nameOverriddenByUser": true
+}
