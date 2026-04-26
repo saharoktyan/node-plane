@@ -266,7 +266,12 @@ class GrpcNodeDriverClient(NodeDriverClient):
             )
         except Exception as exc:
             return self._failed_operation("probe_node", exc, node_key=node_key)
-        return self._start_operation("probe_node", response, node_key=node_key)
+        operation = self._start_operation("probe_node", response, node_key=node_key)
+        if operation.operation_id:
+            fetched = self.get_operation(operation.operation_id)
+            if fetched is not None:
+                return fetched
+        return operation
 
     def check_ports(self, node_key: str) -> DriverOperation:
         self._ensure_client()
@@ -366,6 +371,47 @@ class GrpcNodeDriverClient(NodeDriverClient):
         except Exception as exc:
             return self._failed_operation("reconcile_profile", exc, profile_name=profile_name)
         return self._start_operation("reconcile_profile", response, profile_name=profile_name)
+
+    def get_operation(self, operation_id: str) -> Optional[DriverOperation]:
+        self._ensure_client()
+        try:
+            response = self._operation_stub.GetOperation(
+                self._operation_pb2.GetOperationRequest(operation_id=operation_id),
+                timeout=self.timeout_seconds,
+            )
+        except Exception as exc:
+            code_fn = getattr(exc, "code", None)
+            if callable(code_fn):
+                try:
+                    if str(code_fn()) == "StatusCode.NOT_FOUND":
+                        return None
+                except Exception:
+                    pass
+            raise self._query_error("get_operation", exc) from exc
+        return self._operation_from_pb(response)
+
+    def list_operations(
+        self,
+        *,
+        node_key: str = "",
+        profile_name: str = "",
+        status: str = "",
+        limit: int = 20,
+    ) -> list[DriverOperation]:
+        self._ensure_client()
+        try:
+            response = self._operation_stub.ListOperations(
+                self._operation_pb2.ListOperationsRequest(
+                    node_key=node_key,
+                    profile_name=profile_name,
+                    status=status,
+                    limit=max(1, int(limit)),
+                ),
+                timeout=self.timeout_seconds,
+            )
+        except Exception as exc:
+            raise self._query_error("list_operations", exc) from exc
+        return [self._operation_from_pb(item) for item in getattr(response, "items", [])]
 
     def get_profile_usage(self, profile_name: str, protocol_kind: str = "awg") -> DriverProfileUsage:
         self._ensure_client()

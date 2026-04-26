@@ -284,6 +284,19 @@ class InProcessNodeDriverClient(NodeDriverClient):
             )
         return _operation("reconcile_profile", profile_name=profile_name, status="SUCCEEDED", message=out)
 
+    def get_operation(self, operation_id: str) -> Optional[DriverOperation]:
+        return None
+
+    def list_operations(
+        self,
+        *,
+        node_key: str = "",
+        profile_name: str = "",
+        status: str = "",
+        limit: int = 20,
+    ) -> list[DriverOperation]:
+        return []
+
     def get_profile_usage(self, profile_name: str, protocol_kind: str = "awg") -> DriverProfileUsage:
         from services.traffic_usage import get_profile_monthly_usage
 

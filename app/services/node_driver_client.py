@@ -138,6 +138,19 @@ class NodeDriverClient(Protocol):
     def reconcile_profile(self, profile_name: str) -> DriverOperation:
         ...
 
+    def get_operation(self, operation_id: str) -> Optional[DriverOperation]:
+        ...
+
+    def list_operations(
+        self,
+        *,
+        node_key: str = "",
+        profile_name: str = "",
+        status: str = "",
+        limit: int = 20,
+    ) -> list[DriverOperation]:
+        ...
+
     def get_profile_usage(self, profile_name: str, protocol_kind: str = "awg") -> DriverProfileUsage:
         ...
 
