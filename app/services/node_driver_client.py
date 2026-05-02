@@ -132,6 +132,21 @@ class NodeDriverClient(Protocol):
     def full_cleanup_node(self, node_key: str, remove_ssh_key: bool = False) -> DriverOperation:
         ...
 
+    def ensure_profile_on_node(
+        self,
+        node_key: str,
+        profile_name: str,
+        protocol_kinds: list[str],
+        *,
+        xray_uuid: str = "",
+        xray_short_id: str = "",
+        awg_peer_name: str = "",
+    ) -> DriverOperation:
+        ...
+
+    def delete_profile_from_node(self, node_key: str, profile_name: str, protocol_kinds: list[str]) -> DriverOperation:
+        ...
+
     def reconcile_node(self, node_key: str) -> DriverOperation:
         ...
 

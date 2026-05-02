@@ -256,6 +256,85 @@ class InProcessNodeDriverClient(NodeDriverClient):
             )
         return _operation("full_cleanup_node", node_key=node_key, status="SUCCEEDED", message=out)
 
+    def ensure_profile_on_node(
+        self,
+        node_key: str,
+        profile_name: str,
+        protocol_kinds: list[str],
+        *,
+        xray_uuid: str = "",
+        xray_short_id: str = "",
+        awg_peer_name: str = "",
+    ) -> DriverOperation:
+        from services import awg as awg_svc
+        from services import xray as xray_svc
+        from services.provisioning_state import upsert_profile_server_state
+
+        lines: list[str] = []
+        failed = False
+        if "xray" in protocol_kinds:
+            code, out, ensured_uuid, _ensured_short_id = xray_svc.ensure_user(
+                profile_name,
+                node_key,
+                uuid_value=xray_uuid or None,
+            )
+            if code == 0:
+                upsert_profile_server_state(profile_name, node_key, "xray", status="provisioned", remote_id=ensured_uuid or xray_uuid, last_error=None)
+            else:
+                failed = True
+                upsert_profile_server_state(profile_name, node_key, "xray", status="failed", remote_id=xray_uuid or None, last_error=out)
+            lines.append(f"xray: {out}")
+        if "awg" in protocol_kinds:
+            code, _conf, out = awg_svc.create_awg_user(node_key, awg_peer_name or profile_name)
+            if code == 0:
+                upsert_profile_server_state(profile_name, node_key, "awg", status="provisioned", last_error=None)
+            else:
+                failed = True
+                upsert_profile_server_state(profile_name, node_key, "awg", status="failed", last_error=out)
+            lines.append(f"awg: {out}")
+        if not lines:
+            failed = True
+            lines.append("no supported protocol kinds requested")
+        return _operation(
+            "ensure_profile_on_node",
+            node_key=node_key,
+            profile_name=profile_name,
+            status="FAILED" if failed else "SUCCEEDED",
+            message="\n".join(lines),
+        )
+
+    def delete_profile_from_node(self, node_key: str, profile_name: str, protocol_kinds: list[str]) -> DriverOperation:
+        from services import awg as awg_svc
+        from services import xray as xray_svc
+        from services.provisioning_state import delete_profile_server_state
+
+        lines: list[str] = []
+        failed = False
+        if "xray" in protocol_kinds:
+            code, out = xray_svc.delete_user(profile_name, node_key)
+            if code == 0:
+                delete_profile_server_state(profile_name, node_key, "xray")
+            else:
+                failed = True
+            lines.append(f"xray: {out}")
+        if "awg" in protocol_kinds:
+            code, out = awg_svc.delete_awg_user(node_key, profile_name)
+            if code == 0:
+                delete_profile_server_state(profile_name, node_key, "awg")
+            else:
+                failed = True
+            lines.append(f"awg: {out}")
+        if not lines:
+            failed = True
+            lines.append("no supported protocol kinds requested")
+        return _operation(
+            "delete_profile_from_node",
+            node_key=node_key,
+            profile_name=profile_name,
+            status="FAILED" if failed else "SUCCEEDED",
+            message="\n".join(lines),
+        )
+
     def reconcile_node(self, node_key: str) -> DriverOperation:
         from services.provisioning_state import reconcile_server_state
 

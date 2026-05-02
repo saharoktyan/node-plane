@@ -400,6 +400,57 @@ class GrpcNodeDriverClient(NodeDriverClient):
                 return fetched
         return operation
 
+    def ensure_profile_on_node(
+        self,
+        node_key: str,
+        profile_name: str,
+        protocol_kinds: list[str],
+        *,
+        xray_uuid: str = "",
+        xray_short_id: str = "",
+        awg_peer_name: str = "",
+    ) -> DriverOperation:
+        self._ensure_client()
+        profile = self._types_pb2.ProfileSpec(
+            profile_name=profile_name,
+            protocol_kinds=protocol_kinds,
+            awg=self._types_pb2.AwgSpec(profile_name=profile_name, peer_name=awg_peer_name or profile_name),
+            xray=self._types_pb2.XraySpec(profile_name=profile_name, uuid=xray_uuid, short_id=xray_short_id),
+        )
+        try:
+            response = self._provisioning_stub.EnsureProfileOnNode(
+                self._provisioning_pb2.EnsureProfileOnNodeRequest(node_key=node_key, profile=profile),
+                timeout=self.timeout_seconds,
+            )
+        except Exception as exc:
+            return self._failed_operation("ensure_profile_on_node", exc, node_key=node_key, profile_name=profile_name)
+        operation = self._start_operation("ensure_profile_on_node", response, node_key=node_key, profile_name=profile_name)
+        if operation.operation_id:
+            fetched = self.get_operation(operation.operation_id)
+            if fetched is not None:
+                return fetched
+        return operation
+
+    def delete_profile_from_node(self, node_key: str, profile_name: str, protocol_kinds: list[str]) -> DriverOperation:
+        self._ensure_client()
+        try:
+            response = self._provisioning_stub.DeleteProfileFromNode(
+                self._provisioning_pb2.DeleteProfileFromNodeRequest(
+                    node_key=node_key,
+                    profile_name=profile_name,
+                    protocol_kinds=protocol_kinds,
+                ),
+                timeout=self.timeout_seconds,
+            )
+        except Exception as exc:
+            return self._failed_operation("delete_profile_from_node", exc, node_key=node_key, profile_name=profile_name)
+        operation = self._start_operation("delete_profile_from_node", response, node_key=node_key, profile_name=profile_name)
+        if operation.operation_id:
+            fetched = self.get_operation(operation.operation_id)
+            if fetched is not None:
+                return fetched
+        return operation
+
     def reconcile_node(self, node_key: str) -> DriverOperation:
         self._ensure_client()
         try:

@@ -21,8 +21,9 @@ pub mod agent {
 
 use agent::v1::node_agent_service_server::{NodeAgentService, NodeAgentServiceServer};
 use agent::v1::{
-    AgentEmpty, CheckPortsRequest, CheckPortsResponse, DeleteRuntimeRequest, DeleteRuntimeResponse,
-    DiagnosticItem, InitXrayRequest, InitXrayResponse, InstallDockerRequest,
+    AddAwgUserRequest, AddXrayUserRequest, AgentEmpty, CheckPortsRequest, CheckPortsResponse,
+    DeleteProfileRequest, DeleteRuntimeRequest, DeleteRuntimeResponse, DiagnosticItem,
+    InitXrayRequest, InitXrayResponse, InstallDockerRequest,
     InstallDockerResponse, ListRemoteProfilesRequest, ListRemoteProfilesResponse, LocalHealth,
     OpenPortsRequest, OpenPortsResponse, PathExistsRequest, PathExistsResponse, PortStatus,
     RemoteProfileRecord, RemoveAuthorizedKeyRequest, RemoveAuthorizedKeyResponse,
@@ -605,6 +606,48 @@ impl AgentState {
         })
     }
 
+    fn add_xray_user(&self, request: AddXrayUserRequest) -> Result<RuntimeCommandResponse, Status> {
+        if request.profile_name.trim().is_empty() || request.uuid.trim().is_empty() {
+            return Err(Status::invalid_argument("profile_name and uuid are required"));
+        }
+        let mut args = vec![request.profile_name, request.uuid];
+        if !request.short_id.trim().is_empty() {
+            args.push(request.short_id);
+        }
+        let summary = self.run_runtime_command("xray-add-user-existing.sh", &args)?;
+        Ok(RuntimeCommandResponse { summary })
+    }
+
+    fn delete_xray_user(
+        &self,
+        request: DeleteProfileRequest,
+    ) -> Result<RuntimeCommandResponse, Status> {
+        if request.profile_name.trim().is_empty() {
+            return Err(Status::invalid_argument("profile_name is required"));
+        }
+        let summary = self.run_runtime_command("xray-del-user.sh", &[request.profile_name])?;
+        Ok(RuntimeCommandResponse { summary })
+    }
+
+    fn add_awg_user(&self, request: AddAwgUserRequest) -> Result<RuntimeCommandResponse, Status> {
+        if request.profile_name.trim().is_empty() {
+            return Err(Status::invalid_argument("profile_name is required"));
+        }
+        let summary = self.run_runtime_command("awg-add-user.sh", &[request.profile_name])?;
+        Ok(RuntimeCommandResponse { summary })
+    }
+
+    fn delete_awg_user(
+        &self,
+        request: DeleteProfileRequest,
+    ) -> Result<RuntimeCommandResponse, Status> {
+        if request.profile_name.trim().is_empty() {
+            return Err(Status::invalid_argument("profile_name is required"));
+        }
+        let summary = self.run_runtime_command("awg-del-user.sh", &[request.profile_name])?;
+        Ok(RuntimeCommandResponse { summary })
+    }
+
     fn install_docker(&self) -> Result<InstallDockerResponse, Status> {
         let output = Command::new("bash")
             .arg("-c")
@@ -932,6 +975,34 @@ impl NodeAgentService for NodeAgentApi {
             self.state
                 .remove_authorized_key(&request.into_inner().public_key)?,
         ))
+    }
+
+    async fn add_xray_user(
+        &self,
+        request: Request<AddXrayUserRequest>,
+    ) -> Result<Response<RuntimeCommandResponse>, Status> {
+        Ok(Response::new(self.state.add_xray_user(request.into_inner())?))
+    }
+
+    async fn delete_xray_user(
+        &self,
+        request: Request<DeleteProfileRequest>,
+    ) -> Result<Response<RuntimeCommandResponse>, Status> {
+        Ok(Response::new(self.state.delete_xray_user(request.into_inner())?))
+    }
+
+    async fn add_awg_user(
+        &self,
+        request: Request<AddAwgUserRequest>,
+    ) -> Result<Response<RuntimeCommandResponse>, Status> {
+        Ok(Response::new(self.state.add_awg_user(request.into_inner())?))
+    }
+
+    async fn delete_awg_user(
+        &self,
+        request: Request<DeleteProfileRequest>,
+    ) -> Result<Response<RuntimeCommandResponse>, Status> {
+        Ok(Response::new(self.state.delete_awg_user(request.into_inner())?))
     }
 }
 

@@ -39,10 +39,10 @@ use driver::v1::{
     ListNodesNeedingRuntimeSyncResponse, ListNodesRequest, ListNodesResponse,
     ListOperationsRequest, ListOperationsResponse, ListRemoteProfilesRequest,
     ListRemoteProfilesResponse, Node, NodeCapabilities, NodeHealth, NodeHealthEvent,
-    OpenPortsRequest, Operation, OperationEvent, ProbeNodeRequest, ProfileUsage,
+    OpenPortsRequest, Operation, OperationEvent, ProbeNodeRequest, ProfileSpec, ProfileUsage,
     ReconcileNodeRequest, ReconcileProfileRequest, ReinstallNodeRequest, RemoteProfileRecord,
-    RuntimeStatus, ServiceStatus, StartOperationResponse, SyncNodeEnvRequest, SyncRuntimeRequest,
-    SyncXrayRequest, WatchNodeHealthRequest, WatchOperationRequest,
+    RuntimeStatus, ServiceStatus, StartOperationResponse, SyncNodeEnvRequest,
+    SyncRuntimeRequest, SyncXrayRequest, WatchNodeHealthRequest, WatchOperationRequest,
 };
 
 #[derive(Clone, Default)]
@@ -928,6 +928,68 @@ impl DriverContext {
         Ok(())
     }
 
+    async fn upsert_profile_server_state(
+        &self,
+        profile_name: &str,
+        node_key: &str,
+        protocol_kind: &str,
+        status: &str,
+        remote_id: &str,
+        last_error: &str,
+    ) -> Result<(), Status> {
+        let client = self.db_client().await?;
+        let now = Utc::now().to_rfc3339();
+        client
+            .execute(
+                "
+                INSERT INTO profile_server_state(
+                    profile_name, server_key, protocol_kind, desired_enabled, status,
+                    remote_id, last_error, created_at, updated_at
+                ) VALUES ($1, $2, $3, TRUE, $4, $5, $6, $7, $7)
+                ON CONFLICT(profile_name, server_key, protocol_kind) DO UPDATE SET
+                    desired_enabled = excluded.desired_enabled,
+                    status = excluded.status,
+                    remote_id = excluded.remote_id,
+                    last_error = excluded.last_error,
+                    updated_at = excluded.updated_at
+                ",
+                &[
+                    &profile_name,
+                    &node_key,
+                    &protocol_kind,
+                    &status,
+                    &remote_id,
+                    &last_error,
+                    &now,
+                ],
+            )
+            .await
+            .map_err(|err| Status::internal(format!("failed to upsert profile server state: {err}")))?;
+        Ok(())
+    }
+
+    async fn delete_profile_server_state(
+        &self,
+        profile_name: &str,
+        node_key: &str,
+        protocol_kind: &str,
+    ) -> Result<(), Status> {
+        let client = self.db_client().await?;
+        client
+            .execute(
+                "
+                DELETE FROM profile_server_state
+                WHERE profile_name = $1
+                  AND server_key = $2
+                  AND protocol_kind = $3
+                ",
+                &[&profile_name, &node_key, &protocol_kind],
+            )
+            .await
+            .map_err(|err| Status::internal(format!("failed to delete profile server state: {err}")))?;
+        Ok(())
+    }
+
     async fn mark_runtime_deleted(
         &self,
         node_key: &str,
@@ -1375,10 +1437,122 @@ impl ProvisioningService for ProvisioningApi {
         request: Request<driver::v1::EnsureProfileOnNodeRequest>,
     ) -> Result<Response<StartOperationResponse>, Status> {
         let req = request.into_inner();
-        let profile_name = req
-            .profile
-            .map(|profile| profile.profile_name)
-            .unwrap_or_default();
+        let profile = req.profile.unwrap_or_else(|| ProfileSpec {
+            profile_name: String::new(),
+            protocol_kinds: Vec::new(),
+            awg: None,
+            xray: None,
+        });
+        let profile_name = profile.profile_name.trim().to_string();
+        if let Some(target) = self.ctx.agent_target(&req.node_key) {
+            let transport = agent_transport::AgentTransport::new(target);
+            let mut lines = Vec::new();
+            let mut failed = false;
+            for protocol in profile.protocol_kinds.iter().map(|value| value.trim().to_lowercase()) {
+                if protocol == "xray" {
+                    let uuid = profile
+                        .xray
+                        .as_ref()
+                        .map(|spec| spec.uuid.trim().to_string())
+                        .unwrap_or_default();
+                    let short_id = profile
+                        .xray
+                        .as_ref()
+                        .map(|spec| spec.short_id.trim().to_string())
+                        .unwrap_or_default();
+                    match transport.add_xray_user(&profile_name, &uuid, &short_id).await {
+                        Ok(result) => {
+                            lines.push(format!("xray: {}", result.summary));
+                            if let Err(err) = self
+                                .ctx
+                                .upsert_profile_server_state(
+                                    &profile_name,
+                                    &req.node_key,
+                                    "xray",
+                                    "provisioned",
+                                    &uuid,
+                                    "",
+                                )
+                                .await
+                            {
+                                failed = true;
+                                lines.push(format!("xray state update failed: {err}"));
+                            }
+                        }
+                        Err(err) => {
+                            failed = true;
+                            let message = format!("{err}");
+                            lines.push(format!("xray: {message}"));
+                            if let Err(state_err) = self
+                                .ctx
+                                .upsert_profile_server_state(
+                                    &profile_name,
+                                    &req.node_key,
+                                    "xray",
+                                    "failed",
+                                    &uuid,
+                                    &message,
+                                )
+                                .await
+                            {
+                                lines.push(format!("xray state update failed: {state_err}"));
+                            }
+                        }
+                    }
+                } else if protocol == "awg" {
+                    match transport.add_awg_user(&profile_name).await {
+                        Ok(result) => {
+                            lines.push(format!("awg: {}", result.summary));
+                            if let Err(err) = self
+                                .ctx
+                                .upsert_profile_server_state(
+                                    &profile_name,
+                                    &req.node_key,
+                                    "awg",
+                                    "provisioned",
+                                    "",
+                                    "",
+                                )
+                                .await
+                            {
+                                failed = true;
+                                lines.push(format!("awg state update failed: {err}"));
+                            }
+                        }
+                        Err(err) => {
+                            failed = true;
+                            let message = format!("{err}");
+                            lines.push(format!("awg: {message}"));
+                            if let Err(state_err) = self
+                                .ctx
+                                .upsert_profile_server_state(
+                                    &profile_name,
+                                    &req.node_key,
+                                    "awg",
+                                    "failed",
+                                    "",
+                                    &message,
+                                )
+                                .await
+                            {
+                                lines.push(format!("awg state update failed: {state_err}"));
+                            }
+                        }
+                    }
+                }
+            }
+            if lines.is_empty() {
+                lines.push("no supported protocol kinds requested".to_string());
+                failed = true;
+            }
+            return Ok(Response::new(self.ctx.state.finish_operation(
+                "ensure_profile_on_node",
+                &req.node_key,
+                &profile_name,
+                if failed { "FAILED" } else { "SUCCEEDED" },
+                &lines.join("\n"),
+            )));
+        }
         Ok(Response::new(self.ctx.state.start_operation(
             "ensure_profile_on_node",
             &req.node_key,
@@ -1392,6 +1566,61 @@ impl ProvisioningService for ProvisioningApi {
         request: Request<DeleteProfileFromNodeRequest>,
     ) -> Result<Response<StartOperationResponse>, Status> {
         let req = request.into_inner();
+        if let Some(target) = self.ctx.agent_target(&req.node_key) {
+            let transport = agent_transport::AgentTransport::new(target);
+            let mut lines = Vec::new();
+            let mut failed = false;
+            for protocol in req.protocol_kinds.iter().map(|value| value.trim().to_lowercase()) {
+                if protocol == "xray" {
+                    match transport.delete_xray_user(&req.profile_name).await {
+                        Ok(result) => {
+                            lines.push(format!("xray: {}", result.summary));
+                            if let Err(err) = self
+                                .ctx
+                                .delete_profile_server_state(&req.profile_name, &req.node_key, "xray")
+                                .await
+                            {
+                                failed = true;
+                                lines.push(format!("xray state delete failed: {err}"));
+                            }
+                        }
+                        Err(err) => {
+                            failed = true;
+                            lines.push(format!("xray: {err}"));
+                        }
+                    }
+                } else if protocol == "awg" {
+                    match transport.delete_awg_user(&req.profile_name).await {
+                        Ok(result) => {
+                            lines.push(format!("awg: {}", result.summary));
+                            if let Err(err) = self
+                                .ctx
+                                .delete_profile_server_state(&req.profile_name, &req.node_key, "awg")
+                                .await
+                            {
+                                failed = true;
+                                lines.push(format!("awg state delete failed: {err}"));
+                            }
+                        }
+                        Err(err) => {
+                            failed = true;
+                            lines.push(format!("awg: {err}"));
+                        }
+                    }
+                }
+            }
+            if lines.is_empty() {
+                lines.push("no supported protocol kinds requested".to_string());
+                failed = true;
+            }
+            return Ok(Response::new(self.ctx.state.finish_operation(
+                "delete_profile_from_node",
+                &req.node_key,
+                &req.profile_name,
+                if failed { "FAILED" } else { "SUCCEEDED" },
+                &lines.join("\n"),
+            )));
+        }
         Ok(Response::new(self.ctx.state.start_operation(
             "delete_profile_from_node",
             &req.node_key,

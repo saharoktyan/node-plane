@@ -17,6 +17,7 @@ Current scope:
 - installs Docker on Debian/Ubuntu hosts when requested by the central driver;
 - deletes managed runtime containers/images and optionally removes runtime config;
 - removes a requested public key from the local `authorized_keys`;
+- creates and deletes Xray/AWG profile runtime entries through local helper scripts;
 - runs a heartbeat loop.
 
 This crate is still a scaffold, but it is now usable as a local read-only
@@ -59,3 +60,7 @@ Current RPC surface:
 - `DeployAwg`
 - `PathExists`
 - `RemoveAuthorizedKey`
+- `AddXrayUser`
+- `DeleteXrayUser`
+- `AddAwgUser`
+- `DeleteAwgUser`

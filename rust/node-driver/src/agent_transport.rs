@@ -2,10 +2,11 @@ use tonic::transport::Channel;
 
 use crate::agent::v1::node_agent_service_client::NodeAgentServiceClient;
 use crate::agent::v1::{
-    AgentEmpty, CheckPortsRequest, CheckPortsResponse, DeleteRuntimeRequest, DeleteRuntimeResponse,
-    InitXrayRequest, InitXrayResponse, InstallDockerRequest, InstallDockerResponse,
-    ListRemoteProfilesRequest, LocalHealth, OpenPortsRequest, OpenPortsResponse, PortCheckSpec,
-    PathExistsRequest, RemoteProfileRecord, RemoveAuthorizedKeyRequest,
+    AddAwgUserRequest, AddXrayUserRequest, AgentEmpty, CheckPortsRequest, CheckPortsResponse,
+    DeleteProfileRequest, DeleteRuntimeRequest, DeleteRuntimeResponse, InitXrayRequest,
+    InitXrayResponse, InstallDockerRequest, InstallDockerResponse, ListRemoteProfilesRequest,
+    LocalHealth, OpenPortsRequest, OpenPortsResponse, PortCheckSpec, PathExistsRequest,
+    RemoteProfileRecord, RemoveAuthorizedKeyRequest,
     RemoveAuthorizedKeyResponse, RunDiagnosticsRequest, RunDiagnosticsResponse,
     RuntimeCommandResponse, RuntimeFacts, RuntimeFileSpec, SyncNodeEnvRequest, SyncNodeEnvResponse,
     SyncRuntimeFilesRequest, SyncRuntimeFilesResponse, SyncXrayRequest, SyncXrayResponse,
@@ -232,6 +233,70 @@ impl AgentTransport {
         let response = client
             .remove_authorized_key(RemoveAuthorizedKeyRequest {
                 public_key: public_key.to_string(),
+            })
+            .await?;
+        Ok(response.into_inner())
+    }
+
+    pub async fn add_xray_user(
+        &self,
+        profile_name: &str,
+        uuid: &str,
+        short_id: &str,
+    ) -> Result<RuntimeCommandResponse, tonic::Status> {
+        let mut client = self.client().await.map_err(|err| {
+            tonic::Status::unavailable(format!("failed to connect to node agent: {err}"))
+        })?;
+        let response = client
+            .add_xray_user(AddXrayUserRequest {
+                profile_name: profile_name.to_string(),
+                uuid: uuid.to_string(),
+                short_id: short_id.to_string(),
+            })
+            .await?;
+        Ok(response.into_inner())
+    }
+
+    pub async fn delete_xray_user(
+        &self,
+        profile_name: &str,
+    ) -> Result<RuntimeCommandResponse, tonic::Status> {
+        let mut client = self.client().await.map_err(|err| {
+            tonic::Status::unavailable(format!("failed to connect to node agent: {err}"))
+        })?;
+        let response = client
+            .delete_xray_user(DeleteProfileRequest {
+                profile_name: profile_name.to_string(),
+            })
+            .await?;
+        Ok(response.into_inner())
+    }
+
+    pub async fn add_awg_user(
+        &self,
+        profile_name: &str,
+    ) -> Result<RuntimeCommandResponse, tonic::Status> {
+        let mut client = self.client().await.map_err(|err| {
+            tonic::Status::unavailable(format!("failed to connect to node agent: {err}"))
+        })?;
+        let response = client
+            .add_awg_user(AddAwgUserRequest {
+                profile_name: profile_name.to_string(),
+            })
+            .await?;
+        Ok(response.into_inner())
+    }
+
+    pub async fn delete_awg_user(
+        &self,
+        profile_name: &str,
+    ) -> Result<RuntimeCommandResponse, tonic::Status> {
+        let mut client = self.client().await.map_err(|err| {
+            tonic::Status::unavailable(format!("failed to connect to node agent: {err}"))
+        })?;
+        let response = client
+            .delete_awg_user(DeleteProfileRequest {
+                profile_name: profile_name.to_string(),
             })
             .await?;
         Ok(response.into_inner())

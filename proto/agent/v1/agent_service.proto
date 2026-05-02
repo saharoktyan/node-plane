@@ -22,6 +22,10 @@ service NodeAgentService {
   rpc DeployAwg(AgentEmpty) returns (RuntimeCommandResponse);
   rpc PathExists(PathExistsRequest) returns (PathExistsResponse);
   rpc RemoveAuthorizedKey(RemoveAuthorizedKeyRequest) returns (RemoveAuthorizedKeyResponse);
+  rpc AddXrayUser(AddXrayUserRequest) returns (RuntimeCommandResponse);
+  rpc DeleteXrayUser(DeleteProfileRequest) returns (RuntimeCommandResponse);
+  rpc AddAwgUser(AddAwgUserRequest) returns (RuntimeCommandResponse);
+  rpc DeleteAwgUser(DeleteProfileRequest) returns (RuntimeCommandResponse);
 }
 
 message ListRemoteProfilesRequest {
@@ -136,4 +140,18 @@ message RemoveAuthorizedKeyRequest {
 message RemoveAuthorizedKeyResponse {
   string summary = 1;
   bool removed = 2;
+}
+
+message AddXrayUserRequest {
+  string profile_name = 1;
+  string uuid = 2;
+  string short_id = 3;
+}
+
+message AddAwgUserRequest {
+  string profile_name = 1;
+}
+
+message DeleteProfileRequest {
+  string profile_name = 1;
 }
