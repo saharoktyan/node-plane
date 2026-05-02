@@ -246,6 +246,7 @@ Driver/agent rollout (for grpc driver mode):
 
 ```bash
 ./scripts/setup_driver_agents.sh
+./scripts/setup_driver_agents.sh --dry-run
 ```
 
 - `update.sh --mode simple` now runs `setup_driver_agents.sh` automatically by default (`NODE_PLANE_AUTO_SETUP_DRIVER_AGENTS=1`).
@@ -262,6 +263,9 @@ Driver/agent rollout (for grpc driver mode):
   - `NODE_PLANE_AGENT_ASSET_NAME`
   - `NODE_PLANE_DRIVER_BIN_URL`
   - `NODE_PLANE_AGENT_BIN_URL`
+- Safe preflight without host changes:
+  - `./scripts/setup_driver_agents.sh --dry-run`
+  - validates release URL reachability (or build fallback path) and SSH connectivity to target nodes
 
 Maintenance:
 

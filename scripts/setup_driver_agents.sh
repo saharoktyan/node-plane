@@ -14,6 +14,7 @@ fi
 SKIP_DRIVER=0
 SKIP_AGENTS=0
 STRICT_MODE=0
+DRY_RUN=0
 AGENT_PORT="${NODE_AGENT_PORT:-50061}"
 BIN_SOURCE="${NODE_PLANE_BIN_SOURCE:-auto}" # auto|release|build
 GITHUB_REPO="${NODE_PLANE_GITHUB_REPO:-seventh7dev/node-plane}"
@@ -87,6 +88,20 @@ download_to_file() {
   return 1
 }
 
+check_url_access() {
+  local url="$1"
+  if has_cmd curl; then
+    curl -fsSI "$url" >/dev/null
+    return 0
+  fi
+  if has_cmd wget; then
+    wget -q --spider "$url"
+    return 0
+  fi
+  echo "Neither curl nor wget is available for URL checks." >&2
+  return 1
+}
+
 detect_release_ref() {
   if [[ -n "$RELEASE_REF" ]]; then
     echo "$RELEASE_REF"
@@ -138,6 +153,10 @@ while [[ $# -gt 0 ]]; do
       STRICT_MODE=1
       shift
       ;;
+    --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
     --agent-port)
       AGENT_PORT="${2:-}"
       shift 2
@@ -157,7 +176,7 @@ while [[ $# -gt 0 ]]; do
     -h|--help)
       cat <<'EOF'
 Usage:
-  scripts/setup_driver_agents.sh [--skip-driver] [--skip-agents] [--agent-port 50061] [--strict] [--bin-source auto|release|build]
+  scripts/setup_driver_agents.sh [--skip-driver] [--skip-agents] [--agent-port 50061] [--strict] [--dry-run] [--bin-source auto|release|build]
 
 Purpose:
   - Install local node-plane-driver as a systemd service.
@@ -168,6 +187,10 @@ Binary source modes:
   auto     Try GitHub release binaries first; fallback to local cargo build.
   release  Use GitHub release binaries only.
   build    Use local cargo build only.
+
+Dry run:
+  --dry-run validates binary source resolution and SSH reachability only.
+  It does not install binaries, write systemd units, or restart services.
 
 Key env overrides:
   NODE_PLANE_BIN_SOURCE             auto|release|build (default: auto)
@@ -274,6 +297,32 @@ resolve_binaries() {
   [[ -x "$agent_bin_path" ]] || { echo "Agent binary is not executable: $agent_bin_path" >&2; exit 1; }
 }
 
+resolve_binaries_dry_run() {
+  local driver_url="${DRIVER_BIN_URL:-$(asset_url "$DRIVER_ASSET_NAME")}"
+  local agent_url="${AGENT_BIN_URL:-$(asset_url "$AGENT_ASSET_NAME")}"
+  case "$BIN_SOURCE" in
+    release)
+      set_step "dry-run check release binary urls"
+      check_url_access "$driver_url"
+      check_url_access "$agent_url"
+      echo "Dry-run: release binary URLs are reachable."
+      ;;
+    build)
+      need_cmd cargo
+      echo "Dry-run: local cargo build mode is available."
+      ;;
+    auto)
+      set_step "dry-run check release binary urls"
+      if check_url_access "$driver_url" && check_url_access "$agent_url"; then
+        echo "Dry-run: release binary URLs are reachable (auto mode)."
+      else
+        echo "Dry-run: release binary URLs are not reachable, auto mode would fallback to local build."
+        need_cmd cargo
+      fi
+      ;;
+  esac
+}
+
 install_local_driver() {
   set_step "install local node-plane-driver binary"
   sudo install -m 0755 "$driver_bin_path" /usr/local/bin/node-plane-driver
@@ -366,6 +415,16 @@ deploy_agents() {
       ssh_opts+=("-i" "${SSH_KEY}")
     fi
 
+    if [[ $DRY_RUN -eq 1 ]]; then
+      if ! ssh "${ssh_opts[@]}" "$target" 'echo "node-plane-agent dry-run ok" >/dev/null'; then
+        echo "Dry-run SSH check failed for ${server_key}" >&2
+        failed=$((failed + 1))
+      else
+        echo "Dry-run SSH check passed for ${server_key}"
+      fi
+      continue
+    fi
+
     if ! scp "${ssh_opts[@]}" "$agent_bin_path" "${target}:/tmp/node-plane-agent"; then
       echo "Failed to copy agent binary to ${server_key}" >&2
       failed=$((failed + 1))
@@ -419,11 +478,15 @@ EOF
   if [[ ${#mappings[@]} -gt 0 ]]; then
     local mapping_csv
     mapping_csv="$(IFS=,; echo "${mappings[*]}")"
-    set_step "write driver/agent env configuration"
-    set_env_value "$ENV_FILE" "NODE_DRIVER_BACKEND" "grpc"
-    set_env_value "$ENV_FILE" "NODE_DRIVER_GRPC_TARGET" "127.0.0.1:50051"
-    set_env_value "$ENV_FILE" "NODE_AGENT_TARGETS" "$mapping_csv"
-    echo "Configured NODE_AGENT_TARGETS in ${ENV_FILE}: ${mapping_csv}"
+    if [[ $DRY_RUN -eq 1 ]]; then
+      echo "Dry-run mapping preview: ${mapping_csv}"
+    else
+      set_step "write driver/agent env configuration"
+      set_env_value "$ENV_FILE" "NODE_DRIVER_BACKEND" "grpc"
+      set_env_value "$ENV_FILE" "NODE_DRIVER_GRPC_TARGET" "127.0.0.1:50051"
+      set_env_value "$ENV_FILE" "NODE_AGENT_TARGETS" "$mapping_csv"
+      echo "Configured NODE_AGENT_TARGETS in ${ENV_FILE}: ${mapping_csv}"
+    fi
   fi
 
   if [[ $failed -gt 0 ]]; then
@@ -435,19 +498,27 @@ EOF
   fi
 }
 
-resolve_binaries
+if [[ $DRY_RUN -eq 1 ]]; then
+  resolve_binaries_dry_run
+else
+  resolve_binaries
+fi
 
-if [[ $SKIP_DRIVER -eq 0 ]]; then
+if [[ $SKIP_DRIVER -eq 0 && $DRY_RUN -eq 0 ]]; then
   install_local_driver
 fi
 if [[ $SKIP_AGENTS -eq 0 ]]; then
   deploy_agents
 fi
 
-if [[ $SKIP_DRIVER -eq 0 ]]; then
+if [[ $SKIP_DRIVER -eq 0 && $DRY_RUN -eq 0 ]]; then
   set_step "restart node-plane-driver with updated env"
   sudo systemctl restart node-plane-driver || true
 fi
 
 echo
-echo "Driver/agent setup finished."
+if [[ $DRY_RUN -eq 1 ]]; then
+  echo "Driver/agent dry-run finished."
+else
+  echo "Driver/agent setup finished."
+fi
