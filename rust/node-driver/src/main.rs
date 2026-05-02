@@ -1680,6 +1680,82 @@ impl RuntimeService for RuntimeApi {
         request: Request<ReinstallNodeRequest>,
     ) -> Result<Response<StartOperationResponse>, Status> {
         let req = request.into_inner();
+        if let Some(target) = self.ctx.agent_target(&req.node_key) {
+            if !req.preserve_config {
+                let transport = agent_transport::AgentTransport::new(target);
+                let cleanup_summary = match transport.delete_runtime(false).await {
+                    Ok(result) => match self.ctx.mark_runtime_deleted(&req.node_key, false).await {
+                        Ok(()) => result.summary,
+                        Err(err) => {
+                            return Ok(Response::new(self.ctx.state.finish_operation(
+                                "reinstall_node",
+                                &req.node_key,
+                                "",
+                                "FAILED",
+                                &format!(
+                                    "runtime deleted on agent but central registry update failed: {err}"
+                                ),
+                            )));
+                        }
+                    },
+                    Err(err) => {
+                        return Ok(Response::new(self.ctx.state.finish_operation(
+                            "reinstall_node",
+                            &req.node_key,
+                            "",
+                            "FAILED",
+                            &format!("agent runtime delete failed before reinstall: {err}"),
+                        )));
+                    }
+                };
+                let bootstrap_response = self
+                    .bootstrap_node(Request::new(BootstrapNodeRequest {
+                        node_key: req.node_key.clone(),
+                        preserve_config: false,
+                    }))
+                    .await?
+                    .into_inner();
+                let bootstrap_operation = self.ctx.state.get_operation(&bootstrap_response.operation_id);
+                if let Some(op) = bootstrap_operation {
+                    let status = op.status;
+                    let message = format!("Clean reinstall.\n{cleanup_summary}\n\n{}", op.progress_message);
+                    return Ok(Response::new(self.ctx.state.finish_operation(
+                        "reinstall_node",
+                        &req.node_key,
+                        "",
+                        &status,
+                        &message,
+                    )));
+                }
+            } else {
+                let bootstrap_response = self
+                    .bootstrap_node(Request::new(BootstrapNodeRequest {
+                        node_key: req.node_key.clone(),
+                        preserve_config: true,
+                    }))
+                    .await?
+                    .into_inner();
+                let bootstrap_operation = self.ctx.state.get_operation(&bootstrap_response.operation_id);
+                if let Some(op) = bootstrap_operation {
+                    let status = op.status;
+                    let message = format!("Reinstall with existing config preserved.\n{}", op.progress_message);
+                    return Ok(Response::new(self.ctx.state.finish_operation(
+                        "reinstall_node",
+                        &req.node_key,
+                        "",
+                        &status,
+                        &message,
+                    )));
+                }
+            }
+            return Ok(Response::new(self.ctx.state.finish_operation(
+                "reinstall_node",
+                &req.node_key,
+                "",
+                "FAILED",
+                "bootstrap operation result was not found",
+            )));
+        }
         Ok(Response::new(self.ctx.state.start_operation(
             "reinstall_node",
             &req.node_key,
