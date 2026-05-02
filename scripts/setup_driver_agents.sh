@@ -1,0 +1,453 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+APP_ROOT="${NODE_PLANE_APP_DIR:-$REPO_ROOT}"
+SHARED_ROOT="${NODE_PLANE_SHARED_DIR:-$APP_ROOT}"
+ENV_FILE="${SHARED_ROOT}/.env"
+if [[ ! -f "$ENV_FILE" && -f "${REPO_ROOT}/.env" ]]; then
+  ENV_FILE="${REPO_ROOT}/.env"
+fi
+
+SKIP_DRIVER=0
+SKIP_AGENTS=0
+STRICT_MODE=0
+AGENT_PORT="${NODE_AGENT_PORT:-50061}"
+BIN_SOURCE="${NODE_PLANE_BIN_SOURCE:-auto}" # auto|release|build
+GITHUB_REPO="${NODE_PLANE_GITHUB_REPO:-seventh7dev/node-plane}"
+RELEASE_REF="${NODE_PLANE_BINARY_RELEASE:-}"
+DRIVER_ASSET_NAME="${NODE_PLANE_DRIVER_ASSET_NAME:-node-plane-driver-linux-amd64}"
+AGENT_ASSET_NAME="${NODE_PLANE_AGENT_ASSET_NAME:-node-plane-agent-linux-amd64}"
+DRIVER_BIN_URL="${NODE_PLANE_DRIVER_BIN_URL:-}"
+AGENT_BIN_URL="${NODE_PLANE_AGENT_BIN_URL:-}"
+CURRENT_STEP="startup"
+
+set_step() {
+  CURRENT_STEP="$1"
+}
+
+on_error() {
+  local exit_code="$1"
+  echo >&2
+  echo "Driver/agent setup failed during step: ${CURRENT_STEP}" >&2
+  echo "Failing command: ${BASH_COMMAND}" >&2
+  echo "Exit code: ${exit_code}" >&2
+}
+
+trap 'on_error $?' ERR
+
+need_cmd() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "Missing required command: $1" >&2
+    exit 1
+  fi
+}
+
+has_cmd() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+read_env_value() {
+  local key="$1"
+  local file="$2"
+  if [[ ! -f "$file" ]]; then
+    return 0
+  fi
+  sed -n "s/^${key}=//p" "$file" | tail -n 1
+}
+
+set_env_value() {
+  local file="$1"
+  local key="$2"
+  local value="$3"
+  if [[ ! -f "$file" ]]; then
+    touch "$file"
+  fi
+  if grep -q "^${key}=" "$file"; then
+    sed -i "s|^${key}=.*$|${key}=${value}|" "$file"
+  else
+    printf '%s=%s\n' "$key" "$value" >> "$file"
+  fi
+}
+
+download_to_file() {
+  local url="$1"
+  local out="$2"
+  if has_cmd curl; then
+    curl -fsSL "$url" -o "$out"
+    return 0
+  fi
+  if has_cmd wget; then
+    wget -qO "$out" "$url"
+    return 0
+  fi
+  echo "Neither curl nor wget is available for downloading binaries." >&2
+  return 1
+}
+
+detect_release_ref() {
+  if [[ -n "$RELEASE_REF" ]]; then
+    echo "$RELEASE_REF"
+    return 0
+  fi
+  if [[ -f "${APP_ROOT}/VERSION" ]]; then
+    local semver
+    semver="$(tr -d '\n' < "${APP_ROOT}/VERSION")"
+    if [[ -n "$semver" ]]; then
+      echo "v${semver}"
+      return 0
+    fi
+  fi
+  echo "latest"
+}
+
+asset_url() {
+  local asset_name="$1"
+  local ref
+  ref="$(detect_release_ref)"
+  if [[ "$ref" == "latest" ]]; then
+    echo "https://github.com/${GITHUB_REPO}/releases/latest/download/${asset_name}"
+  else
+    echo "https://github.com/${GITHUB_REPO}/releases/download/${ref}/${asset_name}"
+  fi
+}
+
+ensure_bin_source_mode() {
+  case "$BIN_SOURCE" in
+    auto|release|build) ;;
+    *)
+      echo "Unsupported NODE_PLANE_BIN_SOURCE value: $BIN_SOURCE" >&2
+      exit 1
+      ;;
+  esac
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --skip-driver)
+      SKIP_DRIVER=1
+      shift
+      ;;
+    --skip-agents)
+      SKIP_AGENTS=1
+      shift
+      ;;
+    --strict)
+      STRICT_MODE=1
+      shift
+      ;;
+    --agent-port)
+      AGENT_PORT="${2:-}"
+      shift 2
+      ;;
+    --agent-port=*)
+      AGENT_PORT="${1#*=}"
+      shift
+      ;;
+    --bin-source)
+      BIN_SOURCE="${2:-}"
+      shift 2
+      ;;
+    --bin-source=*)
+      BIN_SOURCE="${1#*=}"
+      shift
+      ;;
+    -h|--help)
+      cat <<'EOF'
+Usage:
+  scripts/setup_driver_agents.sh [--skip-driver] [--skip-agents] [--agent-port 50061] [--strict] [--bin-source auto|release|build]
+
+Purpose:
+  - Install local node-plane-driver as a systemd service.
+  - Deploy node-plane-agent binary to SSH-managed nodes from the server registry.
+  - Write NODE_AGENT_TARGETS and switch bot to grpc driver backend in the shared .env.
+
+Binary source modes:
+  auto     Try GitHub release binaries first; fallback to local cargo build.
+  release  Use GitHub release binaries only.
+  build    Use local cargo build only.
+
+Key env overrides:
+  NODE_PLANE_BIN_SOURCE             auto|release|build (default: auto)
+  NODE_PLANE_GITHUB_REPO            owner/repo (default: seventh7dev/node-plane)
+  NODE_PLANE_BINARY_RELEASE         release tag (default: v<VERSION> from app root)
+  NODE_PLANE_DRIVER_ASSET_NAME      driver asset filename
+  NODE_PLANE_AGENT_ASSET_NAME       agent asset filename
+  NODE_PLANE_DRIVER_BIN_URL         explicit driver binary URL
+  NODE_PLANE_AGENT_BIN_URL          explicit agent binary URL
+EOF
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      exit 1
+      ;;
+  esac
+done
+
+ensure_bin_source_mode
+
+if [[ ! "$AGENT_PORT" =~ ^[0-9]+$ ]]; then
+  echo "Invalid --agent-port: $AGENT_PORT" >&2
+  exit 1
+fi
+
+need_cmd python3
+need_cmd ssh
+need_cmd scp
+need_cmd sudo
+
+if [[ -f "$ENV_FILE" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+  set +a
+fi
+
+APP_ROOT="$(cd "$APP_ROOT" && pwd)"
+if [[ ! -d "${APP_ROOT}/rust/node-driver" || ! -d "${APP_ROOT}/rust/node-agent" ]]; then
+  echo "Rust driver/agent sources are not present under APP_ROOT=${APP_ROOT}" >&2
+  exit 1
+fi
+
+echo "Using APP_ROOT=${APP_ROOT}"
+echo "Using ENV_FILE=${ENV_FILE}"
+echo "Binary source mode: ${BIN_SOURCE}"
+
+WORK_DIR="$(mktemp -d)"
+cleanup_workdir() {
+  rm -rf "$WORK_DIR"
+}
+trap cleanup_workdir EXIT
+
+driver_bin_path=""
+agent_bin_path=""
+
+download_release_binaries() {
+  local driver_url="${DRIVER_BIN_URL:-$(asset_url "$DRIVER_ASSET_NAME")}"
+  local agent_url="${AGENT_BIN_URL:-$(asset_url "$AGENT_ASSET_NAME")}"
+  local driver_out="${WORK_DIR}/node-plane-driver"
+  local agent_out="${WORK_DIR}/node-plane-agent"
+
+  set_step "download driver binary"
+  download_to_file "$driver_url" "$driver_out"
+  chmod +x "$driver_out"
+
+  set_step "download agent binary"
+  download_to_file "$agent_url" "$agent_out"
+  chmod +x "$agent_out"
+
+  driver_bin_path="$driver_out"
+  agent_bin_path="$agent_out"
+}
+
+build_local_binaries() {
+  need_cmd cargo
+  set_step "build node-driver binary"
+  (cd "${APP_ROOT}/rust/node-driver" && cargo build --release)
+  set_step "build node-agent binary"
+  (cd "${APP_ROOT}/rust/node-agent" && cargo build --release)
+  driver_bin_path="${APP_ROOT}/rust/node-driver/target/release/node-plane-driver"
+  agent_bin_path="${APP_ROOT}/rust/node-agent/target/release/node-plane-agent"
+}
+
+resolve_binaries() {
+  case "$BIN_SOURCE" in
+    release)
+      download_release_binaries
+      ;;
+    build)
+      build_local_binaries
+      ;;
+    auto)
+      if download_release_binaries; then
+        echo "Using release binaries from GitHub."
+      else
+        echo "Release download failed; falling back to local cargo build."
+        build_local_binaries
+      fi
+      ;;
+  esac
+  [[ -x "$driver_bin_path" ]] || { echo "Driver binary is not executable: $driver_bin_path" >&2; exit 1; }
+  [[ -x "$agent_bin_path" ]] || { echo "Agent binary is not executable: $agent_bin_path" >&2; exit 1; }
+}
+
+install_local_driver() {
+  set_step "install local node-plane-driver binary"
+  sudo install -m 0755 "$driver_bin_path" /usr/local/bin/node-plane-driver
+
+  local unit_tmp
+  unit_tmp="$(mktemp)"
+  cat > "$unit_tmp" <<EOF
+[Unit]
+Description=Node Plane Driver
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=${APP_ROOT}
+Environment=NODE_PLANE_BASE_DIR=${NODE_PLANE_BASE_DIR:-/opt/node-plane}
+Environment=NODE_PLANE_APP_DIR=${APP_ROOT}
+Environment=NODE_PLANE_SHARED_DIR=${NODE_PLANE_SHARED_DIR:-${SHARED_ROOT}}
+EnvironmentFile=${ENV_FILE}
+ExecStart=/usr/local/bin/node-plane-driver
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  set_step "install node-plane-driver systemd unit"
+  sudo install -m 0644 "$unit_tmp" /etc/systemd/system/node-plane-driver.service
+  rm -f "$unit_tmp"
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now node-plane-driver
+  sudo systemctl restart node-plane-driver
+  sudo systemctl status node-plane-driver --no-pager || true
+}
+
+list_remote_servers_tsv() {
+  PYTHONPATH="${APP_ROOT}/app" NODE_PLANE_APP_DIR="${APP_ROOT}" python3 - <<'PY'
+from services.server_registry import list_servers
+
+for srv in list_servers(include_disabled=False):
+    if srv.transport == "local":
+        continue
+    if not srv.ssh_target:
+        continue
+    ssh_host = (srv.ssh_host or "").strip()
+    ssh_user = (srv.ssh_user or "").strip()
+    ssh_key = (srv.ssh_key_path or "").strip()
+    public_host = (srv.public_host or ssh_host or "").strip()
+    if not ssh_host:
+        continue
+    print("\t".join([
+        srv.key,
+        ssh_host,
+        str(srv.ssh_port or 22),
+        ssh_user,
+        ssh_key,
+        public_host,
+    ]))
+PY
+}
+
+deploy_agents() {
+  local lines
+  lines="$(list_remote_servers_tsv || true)"
+  if [[ -z "$lines" ]]; then
+    echo "No SSH-managed enabled servers found; skipping node-agent deploy."
+    return 0
+  fi
+
+  local failed=0
+  local mappings=()
+  while IFS=$'\t' read -r server_key ssh_host ssh_port ssh_user ssh_key public_host; do
+    [[ -z "$server_key" ]] && continue
+    local target_host="$ssh_host"
+    local target="${ssh_user:+${ssh_user}@}${target_host}"
+    local reach_host="${public_host:-$ssh_host}"
+    mappings+=("${server_key}=${reach_host}:${AGENT_PORT}")
+
+    echo
+    echo "Deploying node-agent to ${server_key} (${target}:${ssh_port})..."
+
+    local -a ssh_opts=("-p" "$ssh_port" "-o" "BatchMode=yes" "-o" "StrictHostKeyChecking=${SSH_STRICT_HOST_KEY_CHECKING:-accept-new}")
+    if [[ -n "${SSH_KNOWN_HOSTS_PATH:-}" ]]; then
+      ssh_opts+=("-o" "UserKnownHostsFile=${SSH_KNOWN_HOSTS_PATH}")
+    fi
+    if [[ -n "$ssh_key" ]]; then
+      ssh_opts+=("-i" "$ssh_key")
+    elif [[ -n "${SSH_KEY:-}" ]]; then
+      ssh_opts+=("-i" "${SSH_KEY}")
+    fi
+
+    if ! scp "${ssh_opts[@]}" "$agent_bin_path" "${target}:/tmp/node-plane-agent"; then
+      echo "Failed to copy agent binary to ${server_key}" >&2
+      failed=$((failed + 1))
+      continue
+    fi
+
+    local remote_script
+    remote_script="$(mktemp)"
+    cat > "$remote_script" <<EOF
+set -euo pipefail
+sudo install -m 0755 /tmp/node-plane-agent /usr/local/bin/node-plane-agent
+sudo rm -f /tmp/node-plane-agent
+sudo mkdir -p /etc/node-plane
+sudo tee /etc/node-plane/agent.toml >/dev/null <<'AGENTCFG'
+node_key = "${server_key}"
+listen_addr = "0.0.0.0:${AGENT_PORT}"
+AGENTCFG
+sudo tee /etc/systemd/system/node-plane-agent.service >/dev/null <<'UNIT'
+[Unit]
+Description=Node Plane Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=NODE_AGENT_CONFIG_PATH=/etc/node-plane/agent.toml
+Environment=NODE_AGENT_NODE_KEY=${server_key}
+Environment=NODE_AGENT_LISTEN_ADDR=0.0.0.0:${AGENT_PORT}
+ExecStart=/usr/local/bin/node-plane-agent
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+sudo systemctl daemon-reload
+sudo systemctl enable --now node-plane-agent
+sudo systemctl restart node-plane-agent
+sudo systemctl is-active --quiet node-plane-agent
+EOF
+    if ! ssh "${ssh_opts[@]}" "$target" 'bash -s' < "$remote_script"; then
+      echo "Failed to install/start node-agent on ${server_key}" >&2
+      failed=$((failed + 1))
+      rm -f "$remote_script"
+      continue
+    fi
+    rm -f "$remote_script"
+    echo "node-agent is active on ${server_key}"
+  done <<< "$lines"
+
+  if [[ ${#mappings[@]} -gt 0 ]]; then
+    local mapping_csv
+    mapping_csv="$(IFS=,; echo "${mappings[*]}")"
+    set_step "write driver/agent env configuration"
+    set_env_value "$ENV_FILE" "NODE_DRIVER_BACKEND" "grpc"
+    set_env_value "$ENV_FILE" "NODE_DRIVER_GRPC_TARGET" "127.0.0.1:50051"
+    set_env_value "$ENV_FILE" "NODE_AGENT_TARGETS" "$mapping_csv"
+    echo "Configured NODE_AGENT_TARGETS in ${ENV_FILE}: ${mapping_csv}"
+  fi
+
+  if [[ $failed -gt 0 ]]; then
+    if [[ $STRICT_MODE -eq 1 ]]; then
+      echo "node-agent deploy failures: ${failed}" >&2
+      return 1
+    fi
+    echo "node-agent deploy completed with ${failed} failures (best-effort mode)."
+  fi
+}
+
+resolve_binaries
+
+if [[ $SKIP_DRIVER -eq 0 ]]; then
+  install_local_driver
+fi
+if [[ $SKIP_AGENTS -eq 0 ]]; then
+  deploy_agents
+fi
+
+if [[ $SKIP_DRIVER -eq 0 ]]; then
+  set_step "restart node-plane-driver with updated env"
+  sudo systemctl restart node-plane-driver || true
+fi
+
+echo
+echo "Driver/agent setup finished."

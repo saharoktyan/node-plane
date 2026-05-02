@@ -12,6 +12,7 @@ UPDATE_BRANCH="${NODE_PLANE_UPDATE_BRANCH:-}"
 INSTALL_REF="${NODE_PLANE_INSTALL_REF:-}"
 FORCE_REINSTALL=0
 CURRENT_STEP="startup"
+AUTO_SETUP_DRIVER_AGENTS_ON_INSTALL="${NODE_PLANE_AUTO_SETUP_DRIVER_AGENTS_ON_INSTALL:-0}"
 
 set_step() {
   CURRENT_STEP="$1"
@@ -781,6 +782,14 @@ EOF
     read -r -p "Install the systemd unit to /etc/systemd/system/${service_name}.service now? [y/N]: " answer
     if [[ "${answer:-}" =~ ^[Yy]$ ]]; then
       install_systemd_unit "$unit_path"
+    fi
+  fi
+
+  if [[ "$AUTO_SETUP_DRIVER_AGENTS_ON_INSTALL" == "1" ]]; then
+    echo
+    echo "Running post-install driver/agent setup (best-effort)..."
+    if ! "${REPO_ROOT}/scripts/setup_driver_agents.sh"; then
+      echo "Driver/agent setup reported issues. Continuing because best-effort is enabled." >&2
     fi
   fi
 

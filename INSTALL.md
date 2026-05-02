@@ -242,6 +242,27 @@ Update an existing deployment:
 ./scripts/update.sh --mode portable
 ```
 
+Driver/agent rollout (for grpc driver mode):
+
+```bash
+./scripts/setup_driver_agents.sh
+```
+
+- `update.sh --mode simple` now runs `setup_driver_agents.sh` automatically by default (`NODE_PLANE_AUTO_SETUP_DRIVER_AGENTS=1`).
+- To disable automatic rollout during update, set `NODE_PLANE_AUTO_SETUP_DRIVER_AGENTS=0`.
+- Optional post-install auto rollout can be enabled with `NODE_PLANE_AUTO_SETUP_DRIVER_AGENTS_ON_INSTALL=1`.
+- Binary source policy for driver/agent rollout:
+  - `NODE_PLANE_BIN_SOURCE=auto` (default): try GitHub release binaries first, fallback to local build.
+  - `NODE_PLANE_BIN_SOURCE=release`: only download release binaries (Rust toolchain not required).
+  - `NODE_PLANE_BIN_SOURCE=build`: only local `cargo build --release`.
+- Release asset source can be tuned with:
+  - `NODE_PLANE_GITHUB_REPO`
+  - `NODE_PLANE_BINARY_RELEASE`
+  - `NODE_PLANE_DRIVER_ASSET_NAME`
+  - `NODE_PLANE_AGENT_ASSET_NAME`
+  - `NODE_PLANE_DRIVER_BIN_URL`
+  - `NODE_PLANE_AGENT_BIN_URL`
+
 Maintenance:
 
 ```bash

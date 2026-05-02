@@ -13,6 +13,7 @@ SKIP_DEPS=0
 SKIP_RESTART=0
 HEALTH_TIMEOUT=30
 CURRENT_STEP="startup"
+AUTO_SETUP_DRIVER_AGENTS="${NODE_PLANE_AUTO_SETUP_DRIVER_AGENTS:-1}"
 
 set_step() {
   CURRENT_STEP="$1"
@@ -621,6 +622,13 @@ main() {
   case "$MODE" in
     simple)
       update_simple
+      if [[ "$AUTO_SETUP_DRIVER_AGENTS" == "1" ]]; then
+        echo
+        echo "Running post-update driver/agent setup (best-effort)..."
+        if ! "${REPO_ROOT}/scripts/setup_driver_agents.sh"; then
+          echo "Driver/agent setup reported issues. Continuing because best-effort is enabled." >&2
+        fi
+      fi
       ;;
     portable)
       update_portable
