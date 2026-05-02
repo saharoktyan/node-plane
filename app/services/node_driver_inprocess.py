@@ -363,31 +363,19 @@ class InProcessNodeDriverClient(NodeDriverClient):
         )
 
     def reconcile_node(self, node_key: str) -> DriverOperation:
-        from services.provisioning_state import reconcile_server_state
+        from services.reconcile_state import reconcile_server_state
 
         code, out = reconcile_server_state(node_key)
         if code != 0:
-            return _operation(
-                "reconcile_node",
-                node_key=node_key,
-                status="FAILED",
-                message=out,
-                error=DriverError(code="reconcile_failed", summary=f"Node reconcile failed for {node_key}", detail=out),
-            )
+            return _operation("reconcile_node", node_key=node_key, status="FAILED", message=out)
         return _operation("reconcile_node", node_key=node_key, status="SUCCEEDED", message=out)
 
     def reconcile_profile(self, profile_name: str) -> DriverOperation:
-        from services.provisioning_state import reconcile_profile_state
+        from services.reconcile_state import reconcile_profile_state
 
         code, out = reconcile_profile_state(profile_name)
         if code != 0:
-            return _operation(
-                "reconcile_profile",
-                profile_name=profile_name,
-                status="FAILED",
-                message=out,
-                error=DriverError(code="reconcile_failed", summary=f"Profile reconcile failed for {profile_name}", detail=out),
-            )
+            return _operation("reconcile_profile", profile_name=profile_name, status="FAILED", message=out)
         return _operation("reconcile_profile", profile_name=profile_name, status="SUCCEEDED", message=out)
 
     def get_operation(self, operation_id: str) -> Optional[DriverOperation]:

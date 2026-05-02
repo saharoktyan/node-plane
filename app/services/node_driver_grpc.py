@@ -461,7 +461,12 @@ class GrpcNodeDriverClient(NodeDriverClient):
             )
         except Exception as exc:
             return self._failed_operation("reconcile_node", exc, node_key=node_key)
-        return self._start_operation("reconcile_node", response, node_key=node_key)
+        operation = self._start_operation("reconcile_node", response, node_key=node_key)
+        if operation.operation_id:
+            fetched = self.get_operation(operation.operation_id)
+            if fetched is not None:
+                return fetched
+        return operation
 
     def reconcile_profile(self, profile_name: str) -> DriverOperation:
         self._ensure_client()
@@ -472,7 +477,12 @@ class GrpcNodeDriverClient(NodeDriverClient):
             )
         except Exception as exc:
             return self._failed_operation("reconcile_profile", exc, profile_name=profile_name)
-        return self._start_operation("reconcile_profile", response, profile_name=profile_name)
+        operation = self._start_operation("reconcile_profile", response, profile_name=profile_name)
+        if operation.operation_id:
+            fetched = self.get_operation(operation.operation_id)
+            if fetched is not None:
+                return fetched
+        return operation
 
     def get_operation(self, operation_id: str) -> Optional[DriverOperation]:
         self._ensure_client()

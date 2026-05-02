@@ -19,8 +19,8 @@ if APP_ROOT not in sys.path:
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from services import provisioning_state
 from services.node_driver_client import DriverRemoteProfileRecord
+from services import reconcile_state
 
 
 class ProvisioningReconcileDriverTests(unittest.TestCase):
@@ -46,9 +46,9 @@ class ProvisioningReconcileDriverTests(unittest.TestCase):
             "domain.servers.get_access_methods_for_codes",
             return_value=[SimpleNamespace(protocol_kind="xray", server_key="de")],
         ), patch.object(
-            provisioning_state, "list_server_provisioning_states", return_value=[]
+            reconcile_state, "list_server_provisioning_states", return_value=[]
         ), patch.object(
-            provisioning_state, "upsert_profile_server_state", side_effect=lambda *args, **kwargs: upserts.append(
+            reconcile_state, "upsert_profile_server_state", side_effect=lambda *args, **kwargs: upserts.append(
                 (
                     str(args[0]),
                     str(args[1]),
@@ -59,7 +59,7 @@ class ProvisioningReconcileDriverTests(unittest.TestCase):
                 )
             )
         ):
-            code, out = provisioning_state.reconcile_xray_server_state("de")
+            code, out = reconcile_state.reconcile_xray_server_state("de")
 
         self.assertEqual(code, 0)
         self.assertIn("ready: 1", out)
@@ -77,9 +77,9 @@ class ProvisioningReconcileDriverTests(unittest.TestCase):
             "domain.servers.get_access_methods_for_codes",
             return_value=[SimpleNamespace(protocol_kind="xray", server_key="de")],
         ), patch.object(
-            provisioning_state, "list_server_provisioning_states", return_value=[]
+            reconcile_state, "list_server_provisioning_states", return_value=[]
         ), patch.object(
-            provisioning_state, "upsert_profile_server_state", side_effect=lambda *args, **kwargs: upserts.append(
+            reconcile_state, "upsert_profile_server_state", side_effect=lambda *args, **kwargs: upserts.append(
                 (
                     str(args[0]),
                     str(args[1]),
@@ -90,7 +90,7 @@ class ProvisioningReconcileDriverTests(unittest.TestCase):
                 )
             )
         ):
-            code, out = provisioning_state.reconcile_xray_server_state("de")
+            code, out = reconcile_state.reconcile_xray_server_state("de")
 
         self.assertEqual(code, 0)
         self.assertIn("failed: 1", out)
@@ -118,9 +118,9 @@ class ProvisioningReconcileDriverTests(unittest.TestCase):
             "domain.servers.get_access_methods_for_codes",
             return_value=[SimpleNamespace(protocol_kind="awg", server_key="de")],
         ), patch.object(
-            provisioning_state, "list_server_provisioning_states", return_value=[]
+            reconcile_state, "list_server_provisioning_states", return_value=[]
         ), patch.object(
-            provisioning_state, "upsert_profile_server_state", side_effect=lambda *args, **kwargs: upserts.append(
+            reconcile_state, "upsert_profile_server_state", side_effect=lambda *args, **kwargs: upserts.append(
                 (
                     str(args[0]),
                     str(args[1]),
@@ -131,7 +131,7 @@ class ProvisioningReconcileDriverTests(unittest.TestCase):
                 )
             )
         ):
-            code, out = provisioning_state.reconcile_awg_server_state("de")
+            code, out = reconcile_state.reconcile_awg_server_state("de")
 
         self.assertEqual(code, 0)
         self.assertIn("ready: 1", out)
