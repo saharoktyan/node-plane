@@ -25,8 +25,8 @@ use agent::v1::{
     DiagnosticItem, InitXrayRequest, InitXrayResponse, InstallDockerRequest,
     InstallDockerResponse, ListRemoteProfilesRequest, ListRemoteProfilesResponse, LocalHealth,
     OpenPortsRequest, OpenPortsResponse, PathExistsRequest, PathExistsResponse, PortStatus,
-    RemoteProfileRecord, RunDiagnosticsRequest, RunDiagnosticsResponse, RuntimeCommandResponse,
-    RuntimeFacts, RuntimeFileSpec,
+    RemoteProfileRecord, RemoveAuthorizedKeyRequest, RemoveAuthorizedKeyResponse,
+    RunDiagnosticsRequest, RunDiagnosticsResponse, RuntimeCommandResponse, RuntimeFacts, RuntimeFileSpec,
     SyncNodeEnvRequest, SyncNodeEnvResponse, SyncRuntimeFilesRequest, SyncRuntimeFilesResponse,
     SyncXrayRequest, SyncXrayResponse,
 };
@@ -557,6 +557,54 @@ impl AgentState {
         }
     }
 
+    fn authorized_keys_path(&self) -> Result<PathBuf, Status> {
+        let home = env::var("HOME")
+            .map_err(|_| Status::failed_precondition("HOME is not set for node agent"))?;
+        Ok(Path::new(&home).join(".ssh").join("authorized_keys"))
+    }
+
+    fn remove_authorized_key(
+        &self,
+        public_key: &str,
+    ) -> Result<RemoveAuthorizedKeyResponse, Status> {
+        let key = public_key.trim();
+        if key.is_empty() {
+            return Err(Status::invalid_argument("public_key is required"));
+        }
+        let path = self.authorized_keys_path()?;
+        if !path.is_file() {
+            return Ok(RemoveAuthorizedKeyResponse {
+                summary: "authorized_keys not present".to_string(),
+                removed: false,
+            });
+        }
+        let raw = fs::read_to_string(&path)
+            .map_err(|err| Status::internal(format!("failed to read authorized_keys: {err}")))?;
+        let lines: Vec<&str> = raw.lines().collect();
+        let kept: Vec<&str> = lines
+            .iter()
+            .copied()
+            .filter(|line| line.trim() != key)
+            .collect();
+        if kept.len() == lines.len() {
+            return Ok(RemoveAuthorizedKeyResponse {
+                summary: "bot ssh key not present".to_string(),
+                removed: false,
+            });
+        }
+        let mut next = kept.join("\n");
+        if !next.is_empty() {
+            next.push('\n');
+        }
+        fs::write(&path, next)
+            .map_err(|err| Status::internal(format!("failed to write authorized_keys: {err}")))?;
+        let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+        Ok(RemoveAuthorizedKeyResponse {
+            summary: "bot ssh key removed".to_string(),
+            removed: true,
+        })
+    }
+
     fn install_docker(&self) -> Result<InstallDockerResponse, Status> {
         let output = Command::new("bash")
             .arg("-c")
@@ -874,6 +922,16 @@ impl NodeAgentService for NodeAgentApi {
         request: Request<PathExistsRequest>,
     ) -> Result<Response<PathExistsResponse>, Status> {
         Ok(Response::new(self.state.path_exists(&request.into_inner().path)))
+    }
+
+    async fn remove_authorized_key(
+        &self,
+        request: Request<RemoveAuthorizedKeyRequest>,
+    ) -> Result<Response<RemoveAuthorizedKeyResponse>, Status> {
+        Ok(Response::new(
+            self.state
+                .remove_authorized_key(&request.into_inner().public_key)?,
+        ))
     }
 }
 

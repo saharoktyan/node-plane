@@ -228,6 +228,63 @@ impl DriverContext {
             .collect()
     }
 
+    fn bot_public_key(&self) -> Result<String, Status> {
+        if let Ok(value) = env::var("NODE_PLANE_SSH_PUBLIC_KEY") {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                return Ok(trimmed.to_string());
+            }
+        }
+        let private_key_path = env::var("SSH_KEY")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .or_else(|| {
+                env::var("NODE_PLANE_SSH_KEY")
+                    .ok()
+                    .map(|value| value.trim().to_string())
+                    .filter(|value| !value.is_empty())
+            })
+            .unwrap_or_else(|| {
+                let ssh_dir = env::var("SSH_DIR")
+                    .or_else(|_| env::var("NODE_PLANE_SSH_DIR"))
+                    .ok()
+                    .map(|value| value.trim().to_string())
+                    .filter(|value| !value.is_empty())
+                    .unwrap_or_else(|| "/opt/node-plane/ssh".to_string());
+                format!("{ssh_dir}/id_ed25519")
+            });
+        let public_key_path = format!("{private_key_path}.pub");
+        fs::read_to_string(&public_key_path)
+            .map(|value| value.trim().to_string())
+            .map_err(|err| {
+                Status::failed_precondition(format!(
+                    "failed to read bot public key from {public_key_path}: {err}"
+                ))
+            })
+    }
+
+    async fn mark_full_cleanup(
+        &self,
+        node_key: &str,
+        notes: &str,
+    ) -> Result<(), Status> {
+        let client = self.db_client().await?;
+        client
+            .execute(
+                "
+                UPDATE servers
+                SET notes = $1,
+                    updated_at = $2
+                WHERE key = $3
+                ",
+                &[&notes, &Utc::now().to_rfc3339(), &node_key],
+            )
+            .await
+            .map_err(|err| Status::internal(format!("failed to mark full cleanup: {err}")))?;
+        Ok(())
+    }
+
     fn candidate_shared_root() -> String {
         let install_root = env::var("NODE_PLANE_BASE_DIR")
             .ok()
@@ -1808,6 +1865,79 @@ impl RuntimeService for RuntimeApi {
         request: Request<FullCleanupNodeRequest>,
     ) -> Result<Response<StartOperationResponse>, Status> {
         let req = request.into_inner();
+        if let Some(target) = self.ctx.agent_target(&req.node_key) {
+            let transport = agent_transport::AgentTransport::new(target);
+            let cleanup_summary = match transport.delete_runtime(false).await {
+                Ok(result) => match self.ctx.mark_runtime_deleted(&req.node_key, false).await {
+                    Ok(()) => result.summary,
+                    Err(err) => {
+                        return Ok(Response::new(self.ctx.state.finish_operation(
+                            "full_cleanup_node",
+                            &req.node_key,
+                            "",
+                            "FAILED",
+                            &format!(
+                                "runtime deleted on agent but central registry update failed: {err}"
+                            ),
+                        )));
+                    }
+                },
+                Err(err) => {
+                    return Ok(Response::new(self.ctx.state.finish_operation(
+                        "full_cleanup_node",
+                        &req.node_key,
+                        "",
+                        "FAILED",
+                        &format!("agent runtime delete failed: {err}"),
+                    )));
+                }
+            };
+
+            let mut lines = vec![cleanup_summary];
+            let mut notes = vec!["full cleanup completed".to_string()];
+            if req.remove_ssh_key {
+                match self.ctx.bot_public_key() {
+                    Ok(public_key) => match transport.remove_authorized_key(&public_key).await {
+                        Ok(result) => {
+                            if !result.summary.trim().is_empty() {
+                                lines.push(result.summary);
+                            }
+                            if result.removed {
+                                notes.push("ssh key removed".to_string());
+                            } else {
+                                notes.push("ssh key absent".to_string());
+                            }
+                        }
+                        Err(err) => {
+                            lines.push(format!("SSH key removal failed: {err}"));
+                            notes.push("ssh key removal failed".to_string());
+                        }
+                    },
+                    Err(err) => {
+                        lines.push(format!("SSH key removal failed: {err}"));
+                        notes.push("ssh key removal failed".to_string());
+                    }
+                }
+            }
+            let notes_text = notes.join("; ");
+            if let Err(err) = self.ctx.mark_full_cleanup(&req.node_key, &notes_text).await {
+                lines.push(format!("central registry notes update failed: {err}"));
+                return Ok(Response::new(self.ctx.state.finish_operation(
+                    "full_cleanup_node",
+                    &req.node_key,
+                    "",
+                    "FAILED",
+                    &lines.join("\n"),
+                )));
+            }
+            return Ok(Response::new(self.ctx.state.finish_operation(
+                "full_cleanup_node",
+                &req.node_key,
+                "",
+                "SUCCEEDED",
+                &lines.join("\n"),
+            )));
+        }
         Ok(Response::new(self.ctx.state.start_operation(
             "full_cleanup_node",
             &req.node_key,

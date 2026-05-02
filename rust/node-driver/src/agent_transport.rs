@@ -5,7 +5,8 @@ use crate::agent::v1::{
     AgentEmpty, CheckPortsRequest, CheckPortsResponse, DeleteRuntimeRequest, DeleteRuntimeResponse,
     InitXrayRequest, InitXrayResponse, InstallDockerRequest, InstallDockerResponse,
     ListRemoteProfilesRequest, LocalHealth, OpenPortsRequest, OpenPortsResponse, PortCheckSpec,
-    PathExistsRequest, RemoteProfileRecord, RunDiagnosticsRequest, RunDiagnosticsResponse,
+    PathExistsRequest, RemoteProfileRecord, RemoveAuthorizedKeyRequest,
+    RemoveAuthorizedKeyResponse, RunDiagnosticsRequest, RunDiagnosticsResponse,
     RuntimeCommandResponse, RuntimeFacts, RuntimeFileSpec, SyncNodeEnvRequest, SyncNodeEnvResponse,
     SyncRuntimeFilesRequest, SyncRuntimeFilesResponse, SyncXrayRequest, SyncXrayResponse,
 };
@@ -219,5 +220,20 @@ impl AgentTransport {
             })
             .await?;
         Ok(response.into_inner().exists)
+    }
+
+    pub async fn remove_authorized_key(
+        &self,
+        public_key: &str,
+    ) -> Result<RemoveAuthorizedKeyResponse, tonic::Status> {
+        let mut client = self.client().await.map_err(|err| {
+            tonic::Status::unavailable(format!("failed to connect to node agent: {err}"))
+        })?;
+        let response = client
+            .remove_authorized_key(RemoveAuthorizedKeyRequest {
+                public_key: public_key.to_string(),
+            })
+            .await?;
+        Ok(response.into_inner())
     }
 }

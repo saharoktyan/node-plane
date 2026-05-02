@@ -18,6 +18,7 @@ Current scope:
 - can run `DeleteRuntime` through a node agent and update central runtime state when PostgreSQL is available;
 - can orchestrate `BootstrapNode` through a node agent, including port checks, Docker install, runtime bundle sync, protocol init/deploy, and central registry updates;
 - can orchestrate `ReinstallNode` by composing agent-backed runtime deletion and bootstrap flows;
+- can orchestrate `FullCleanupNode`, including optional authorized key removal through the node agent;
 - creates in-memory `Operation` records for mutating RPCs.
 
 Runtime bundle source of truth:
