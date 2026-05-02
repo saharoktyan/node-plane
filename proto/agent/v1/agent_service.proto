@@ -123,6 +123,7 @@ message InitXrayResponse {
 
 message RuntimeCommandResponse {
   string summary = 1;
+  string payload_json = 2;
 }
 
 message PathExistsRequest {

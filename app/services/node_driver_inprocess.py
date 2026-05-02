@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Optional
@@ -25,7 +26,16 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def _operation(kind: str, *, node_key: str = "", profile_name: str = "", status: str, message: str, error: DriverError | None = None) -> DriverOperation:
+def _operation(
+    kind: str,
+    *,
+    node_key: str = "",
+    profile_name: str = "",
+    status: str,
+    message: str,
+    result_json: str = "",
+    error: DriverError | None = None,
+) -> DriverOperation:
     now = _now_iso()
     return DriverOperation(
         operation_id=str(uuid4()),
@@ -37,6 +47,7 @@ def _operation(kind: str, *, node_key: str = "", profile_name: str = "", status:
         updated_at=now,
         finished_at=now,
         progress_message=message,
+        result_json=result_json,
         error=error,
     )
 
@@ -272,11 +283,13 @@ class InProcessNodeDriverClient(NodeDriverClient):
 
         lines: list[str] = []
         failed = False
+        awg_result_json = ""
         if "xray" in protocol_kinds:
-            code, out, ensured_uuid, _ensured_short_id = xray_svc.ensure_user(
+            code, out, ensured_uuid, ensured_short_id = xray_svc.ensure_user(
                 profile_name,
                 node_key,
                 uuid_value=xray_uuid or None,
+                short_id_value=xray_short_id or None,
             )
             if code == 0:
                 upsert_profile_server_state(profile_name, node_key, "xray", status="provisioned", remote_id=ensured_uuid or xray_uuid, last_error=None)
@@ -284,23 +297,37 @@ class InProcessNodeDriverClient(NodeDriverClient):
                 failed = True
                 upsert_profile_server_state(profile_name, node_key, "xray", status="failed", remote_id=xray_uuid or None, last_error=out)
             lines.append(f"xray: {out}")
+            if ensured_short_id:
+                lines.append(f"xray_short_id: {ensured_short_id}")
         if "awg" in protocol_kinds:
-            code, _conf, out = awg_svc.create_awg_user(node_key, awg_peer_name or profile_name)
+            code, conf, out = awg_svc.create_awg_user(node_key, awg_peer_name or profile_name)
+            lines.append(f"awg: {out}")
             if code == 0:
                 upsert_profile_server_state(profile_name, node_key, "awg", status="provisioned", last_error=None)
+                payload = json.dumps(
+                    {
+                        "vpn_uri": str(conf or "").strip(),
+                        "wg_conf": str(out[out.find("[Interface]") :].strip()) if "[Interface]" in out else "",
+                    },
+                    ensure_ascii=True,
+                )
+                lines.append(f"awg_payload_json: {payload}")
+                awg_result_json = payload
             else:
                 failed = True
                 upsert_profile_server_state(profile_name, node_key, "awg", status="failed", last_error=out)
-            lines.append(f"awg: {out}")
+                awg_result_json = ""
         if not lines:
             failed = True
             lines.append("no supported protocol kinds requested")
+            awg_result_json = ""
         return _operation(
             "ensure_profile_on_node",
             node_key=node_key,
             profile_name=profile_name,
             status="FAILED" if failed else "SUCCEEDED",
             message="\n".join(lines),
+            result_json=awg_result_json if not failed else "",
         )
 
     def delete_profile_from_node(self, node_key: str, profile_name: str, protocol_kinds: list[str]) -> DriverOperation:

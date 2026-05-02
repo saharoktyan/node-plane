@@ -1,7 +1,9 @@
 # app/handlers/admin_wizard.py
 from __future__ import annotations
 
+import json
 import logging
+import re
 import threading
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -19,7 +21,7 @@ from domain.servers import (
     get_protocol_label,
 )
 from services import xray as xray_svc
-from services.awg import _extract_wg_conf, create_awg_user, delete_awg_user
+from services.awg import _extract_wg_conf
 from services.awg_profiles import get_awg_servers, remove_awg_profile, remove_awg_server, upsert_awg_server
 from services.node_driver import get_node_driver
 from services.provisioning_state import delete_profile_server_state, upsert_profile_server_state
@@ -57,9 +59,64 @@ _render_profile_dashboard = render_profile_dashboard
 _render_profile_card = render_profile_card
 _render_status_menu = render_status_menu
 
+_AWG_VPN_RE = re.compile(r"(vpn://[A-Za-z0-9+/=_-]+)")
+
 
 def _op_ok(operation) -> bool:
     return bool(operation and str(getattr(operation, "status", "")).upper() == "SUCCEEDED")
+
+def _extract_awg_vpn_from_operation(operation) -> str:
+    result_json = str(getattr(operation, "result_json", "") or "").strip()
+    if result_json:
+        try:
+            data = json.loads(result_json)
+        except Exception:
+            data = {}
+        vpn_uri = str((data or {}).get("vpn_uri") or "").strip()
+        if vpn_uri.startswith("vpn://"):
+            return vpn_uri
+    message = str(getattr(operation, "progress_message", "") or "")
+    for line in message.splitlines():
+        if not line.startswith("awg_payload_json:"):
+            continue
+        raw = line.split(":", 1)[1].strip()
+        if not raw:
+            continue
+        try:
+            data = json.loads(raw)
+        except Exception:
+            continue
+        vpn_uri = str((data or {}).get("vpn_uri") or "").strip()
+        if vpn_uri.startswith("vpn://"):
+            return vpn_uri
+    match = _AWG_VPN_RE.search(message)
+    return match.group(1) if match else ""
+
+def _extract_awg_wg_conf_from_operation(operation) -> str:
+    result_json = str(getattr(operation, "result_json", "") or "").strip()
+    if result_json:
+        try:
+            data = json.loads(result_json)
+        except Exception:
+            data = {}
+        wg_conf = str((data or {}).get("wg_conf") or "").strip()
+        if wg_conf:
+            return wg_conf
+    message = str(getattr(operation, "progress_message", "") or "")
+    for line in message.splitlines():
+        if not line.startswith("awg_payload_json:"):
+            continue
+        raw = line.split(":", 1)[1].strip()
+        if not raw:
+            continue
+        try:
+            data = json.loads(raw)
+        except Exception:
+            continue
+        wg_conf = str((data or {}).get("wg_conf") or "").strip()
+        if wg_conf:
+            return wg_conf
+    return _extract_wg_conf(message)
 
 
 def _wizard_get(context: CallbackContext) -> Optional[Dict[str, Any]]:
@@ -638,14 +695,14 @@ def _delete_profile_everywhere(context: CallbackContext) -> None:
 
     awg_servers = get_awg_servers(name)
     for server_key in sorted(awg_servers.keys()):
-        code2, _out2 = delete_awg_user(server_key, name)
-        if code2 == 0:
+        operation = get_node_driver().delete_profile_from_node(server_key, name, ["awg"])
+        if _op_ok(operation):
             done.append(
                 f"AWG {server_key}: "
                 + ("удалено" if lang == "ru" else "deleted")
             )
         else:
-            errors.append(f"AWG {server_key}: rc={code2}")
+            errors.append(f"AWG {server_key}: {operation.progress_message or operation.status}")
     remove_awg_profile(name)
 
     subs = profile_store.read()
@@ -749,22 +806,29 @@ def _finish_create(context: CallbackContext) -> None:
 
     awg_methods = [method for method in get_access_methods_for_codes(protocols) if method.protocol_kind == "awg"]
     for awg_method in awg_methods:
-        code, cfg, raw = create_awg_user(awg_method.server_key, name)
-        if code != 0 or not (cfg or "").strip():
+        operation = get_node_driver().ensure_profile_on_node(
+            awg_method.server_key,
+            name,
+            ["awg"],
+            awg_peer_name=name,
+        )
+        cfg = _extract_awg_vpn_from_operation(operation)
+        raw = str(getattr(operation, "progress_message", "") or "")
+        if not _op_ok(operation) or not cfg:
             upsert_profile_server_state(
                 name,
                 awg_method.server_key,
                 "awg",
                 status="failed",
-                last_error=(raw or "")[-500:] or f"rc={code}",
+                last_error=(raw or "")[-500:] or (operation.status or "ensure failed"),
             )
-            errors.append(f"{awg_method.label}: rc={code}\n{(raw or '')[-500:]}")
+            errors.append(f"{awg_method.label}: {(raw or operation.status or 'ensure failed')[-500:]}")
             continue
         upsert_awg_server(
             name=name,
             server_key=awg_method.server_key,
             config=cfg,
-            wg_conf=_extract_wg_conf(cfg),
+            wg_conf=_extract_awg_wg_conf_from_operation(operation),
             created_at=utcnow().isoformat(timespec="minutes"),
         )
         upsert_profile_server_state(name, awg_method.server_key, "awg", status="provisioned", last_error=None)
@@ -896,36 +960,43 @@ def _save_edit(context: CallbackContext) -> None:
     for method in selected_awg_methods:
         if method.server_key in existing_server_keys:
             continue
-        code, cfg, raw = create_awg_user(method.server_key, name)
-        if code != 0 or not (cfg or "").strip():
+        operation = get_node_driver().ensure_profile_on_node(
+            method.server_key,
+            name,
+            ["awg"],
+            awg_peer_name=name,
+        )
+        cfg = _extract_awg_vpn_from_operation(operation)
+        raw = str(getattr(operation, "progress_message", "") or "")
+        if not _op_ok(operation) or not cfg:
             upsert_profile_server_state(
                 name,
                 method.server_key,
                 "awg",
                 status="failed",
-                last_error=(raw or "")[-500:] or f"rc={code}",
+                last_error=(raw or "")[-500:] or (operation.status or "ensure failed"),
             )
-            errors.append(f"{method.label}: rc={code}\n{(raw or '')[-500:]}")
+            errors.append(f"{method.label}: {(raw or operation.status or 'ensure failed')[-500:]}")
             continue
         upsert_awg_server(
             name=name,
             server_key=method.server_key,
             config=cfg,
-            wg_conf=_extract_wg_conf(cfg),
+            wg_conf=_extract_awg_wg_conf_from_operation(operation),
             created_at=utcnow().isoformat(timespec="minutes"),
         )
         upsert_profile_server_state(name, method.server_key, "awg", status="provisioned", last_error=None)
         messages.append(f"{method.label}: {t(lang, 'admin.wizard.created_line')}")
 
     for server_key in sorted(existing_server_keys - selected_server_keys):
-        code, _out = delete_awg_user(server_key, name)
-        if code != 0:
+        operation = get_node_driver().delete_profile_from_node(server_key, name, ["awg"])
+        if not _op_ok(operation):
             upsert_profile_server_state(
                 name,
                 server_key,
                 "awg",
                 status="failed",
-                last_error="delete failed",
+                last_error=(operation.progress_message or operation.status or "delete failed")[-500:],
             )
             errors.append(f"AWG {server_key}: {t(lang, 'admin.wizard.delete_failed_line')}")
             continue

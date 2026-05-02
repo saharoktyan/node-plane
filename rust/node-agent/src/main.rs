@@ -158,6 +158,30 @@ struct AgentState {
 }
 
 impl AgentState {
+    fn extract_awg_payload_json(summary: &str) -> String {
+        let mut vpn_uri = String::new();
+        if let Some(idx) = summary.find("vpn://") {
+            let tail = &summary[idx..];
+            let end = tail
+                .find(|ch: char| ch.is_whitespace())
+                .unwrap_or(tail.len());
+            vpn_uri = tail[..end].trim().to_string();
+        }
+        let wg_conf = if let Some(idx) = summary.find("[Interface]") {
+            summary[idx..].trim().to_string()
+        } else {
+            String::new()
+        };
+        if vpn_uri.is_empty() && wg_conf.is_empty() {
+            return String::new();
+        }
+        serde_json::json!({
+            "vpn_uri": vpn_uri,
+            "wg_conf": wg_conf,
+        })
+        .to_string()
+    }
+
     fn new(config: AgentConfig) -> Self {
         Self {
             config,
@@ -539,17 +563,26 @@ impl AgentState {
 
     fn deploy_xray(&self) -> Result<RuntimeCommandResponse, Status> {
         let summary = self.run_runtime_command("deploy-xray.sh", &[])?;
-        Ok(RuntimeCommandResponse { summary })
+        Ok(RuntimeCommandResponse {
+            summary,
+            payload_json: String::new(),
+        })
     }
 
     fn init_awg(&self) -> Result<RuntimeCommandResponse, Status> {
         let summary = self.run_runtime_command("init-awg.sh", &[])?;
-        Ok(RuntimeCommandResponse { summary })
+        Ok(RuntimeCommandResponse {
+            summary,
+            payload_json: String::new(),
+        })
     }
 
     fn deploy_awg(&self) -> Result<RuntimeCommandResponse, Status> {
         let summary = self.run_runtime_command("deploy-awg.sh", &[])?;
-        Ok(RuntimeCommandResponse { summary })
+        Ok(RuntimeCommandResponse {
+            summary,
+            payload_json: String::new(),
+        })
     }
 
     fn path_exists(&self, path: &str) -> PathExistsResponse {
@@ -615,7 +648,10 @@ impl AgentState {
             args.push(request.short_id);
         }
         let summary = self.run_runtime_command("xray-add-user-existing.sh", &args)?;
-        Ok(RuntimeCommandResponse { summary })
+        Ok(RuntimeCommandResponse {
+            summary,
+            payload_json: String::new(),
+        })
     }
 
     fn delete_xray_user(
@@ -626,7 +662,10 @@ impl AgentState {
             return Err(Status::invalid_argument("profile_name is required"));
         }
         let summary = self.run_runtime_command("xray-del-user.sh", &[request.profile_name])?;
-        Ok(RuntimeCommandResponse { summary })
+        Ok(RuntimeCommandResponse {
+            summary,
+            payload_json: String::new(),
+        })
     }
 
     fn add_awg_user(&self, request: AddAwgUserRequest) -> Result<RuntimeCommandResponse, Status> {
@@ -634,7 +673,10 @@ impl AgentState {
             return Err(Status::invalid_argument("profile_name is required"));
         }
         let summary = self.run_runtime_command("awg-add-user.sh", &[request.profile_name])?;
-        Ok(RuntimeCommandResponse { summary })
+        Ok(RuntimeCommandResponse {
+            payload_json: Self::extract_awg_payload_json(summary.as_str()),
+            summary,
+        })
     }
 
     fn delete_awg_user(
@@ -645,7 +687,10 @@ impl AgentState {
             return Err(Status::invalid_argument("profile_name is required"));
         }
         let summary = self.run_runtime_command("awg-del-user.sh", &[request.profile_name])?;
-        Ok(RuntimeCommandResponse { summary })
+        Ok(RuntimeCommandResponse {
+            summary,
+            payload_json: String::new(),
+        })
     }
 
     fn install_docker(&self) -> Result<InstallDockerResponse, Status> {

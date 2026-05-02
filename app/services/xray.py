@@ -258,9 +258,14 @@ def get_uuid_by_name(name: str, server_key: Optional[str] = None) -> Optional[st
     return None
 
 
-def ensure_user(name: str, server_key: str, uuid_value: Optional[str] = None) -> Tuple[int, str, Optional[str], Optional[str]]:
+def ensure_user(
+    name: str,
+    server_key: str,
+    uuid_value: Optional[str] = None,
+    short_id_value: Optional[str] = None,
+) -> Tuple[int, str, Optional[str], Optional[str]]:
     uuid_value = uuid_value or get_uuid_local(name) or str(uuid_lib.uuid4())
-    short_id = get_short_id_local(name, server_key) or generate_short_id()
+    short_id = short_id_value or get_short_id_local(name, server_key) or generate_short_id()
     code, out = add_user(name, server_key=server_key, uuid_value=uuid_value, short_id=short_id)
     if code != 0:
         lower_out = (out or "").lower()

@@ -79,6 +79,7 @@ impl DriverState {
             finished_at: String::new(),
             progress_message: message.to_string(),
             error: None,
+            result_json: String::new(),
         };
         self.put_operation(op)
     }
@@ -90,6 +91,18 @@ impl DriverState {
         profile_name: &str,
         status: &str,
         message: &str,
+    ) -> StartOperationResponse {
+        self.finish_operation_with_result(kind, node_key, profile_name, status, message, "")
+    }
+
+    fn finish_operation_with_result(
+        &self,
+        kind: &str,
+        node_key: &str,
+        profile_name: &str,
+        status: &str,
+        message: &str,
+        result_json: &str,
     ) -> StartOperationResponse {
         let timestamp = Utc::now().to_rfc3339();
         self.put_operation(Operation {
@@ -103,6 +116,7 @@ impl DriverState {
             finished_at: timestamp,
             progress_message: message.to_string(),
             error: None,
+            result_json: result_json.to_string(),
         })
     }
 
@@ -1765,6 +1779,7 @@ impl ProvisioningService for ProvisioningApi {
             let transport = agent_transport::AgentTransport::new(target);
             let mut lines = Vec::new();
             let mut failed = false;
+            let mut result_json = String::new();
             for protocol in profile.protocol_kinds.iter().map(|value| value.trim().to_lowercase()) {
                 if protocol == "xray" {
                     let uuid = profile
@@ -1820,6 +1835,10 @@ impl ProvisioningService for ProvisioningApi {
                     match transport.add_awg_user(&profile_name).await {
                         Ok(result) => {
                             lines.push(format!("awg: {}", result.summary));
+                            if !result.payload_json.trim().is_empty() {
+                                lines.push(format!("awg_payload_json: {}", result.payload_json.trim()));
+                                result_json = result.payload_json.trim().to_string();
+                            }
                             if let Err(err) = self
                                 .ctx
                                 .upsert_profile_server_state(
@@ -1862,12 +1881,13 @@ impl ProvisioningService for ProvisioningApi {
                 lines.push("no supported protocol kinds requested".to_string());
                 failed = true;
             }
-            return Ok(Response::new(self.ctx.state.finish_operation(
+            return Ok(Response::new(self.ctx.state.finish_operation_with_result(
                 "ensure_profile_on_node",
                 &req.node_key,
                 &profile_name,
                 if failed { "FAILED" } else { "SUCCEEDED" },
                 &lines.join("\n"),
+                &result_json,
             )));
         }
         Ok(Response::new(self.ctx.state.start_operation(

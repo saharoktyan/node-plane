@@ -217,14 +217,19 @@ def render_server_provisioning_summary(server_key: str, lang: str = "ru") -> str
 
 def reconcile_xray_server_state(server_key: str) -> tuple[int, str]:
     from domain.servers import get_access_methods_for_codes
-    from services.node_driver_remote import list_remote_xray_profiles
+    from services.node_driver import get_node_driver
     from services.profile_state import profile_store
 
-    code, records, raw = list_remote_xray_profiles(server_key)
-    if code != 0:
-        return code, raw
+    try:
+        remote_items = get_node_driver().list_remote_profiles(server_key, "xray")
+    except Exception as exc:
+        return 1, str(exc)
 
-    remote_by_name = {str(item.get("name")): item for item in records if item.get("name")}
+    remote_by_name = {
+        str(item.profile_name): {"name": item.profile_name, "uuid": item.remote_id}
+        for item in remote_items
+        if str(item.profile_name).strip()
+    }
     subs = profile_store.read()
     desired_names: set[str] = set()
     ready = 0
@@ -288,12 +293,14 @@ def reconcile_xray_server_state(server_key: str) -> tuple[int, str]:
 
 def reconcile_awg_server_state(server_key: str) -> tuple[int, str]:
     from domain.servers import get_access_methods_for_codes
-    from services.node_driver_remote import list_remote_awg_profiles
+    from services.node_driver import get_node_driver
     from services.profile_state import profile_store
 
-    code, remote_names, raw = list_remote_awg_profiles(server_key)
-    if code != 0:
-        return code, raw
+    try:
+        remote_items = get_node_driver().list_remote_profiles(server_key, "awg")
+    except Exception as exc:
+        return 1, str(exc)
+    remote_names = {str(item.profile_name) for item in remote_items if str(item.profile_name).strip()}
     subs = profile_store.read()
     desired_names: set[str] = set()
     ready = 0

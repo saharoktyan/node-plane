@@ -108,6 +108,7 @@ class GrpcNodeDriverClient(NodeDriverClient):
             updated_at=str(getattr(operation, "updated_at", "")),
             finished_at=str(getattr(operation, "finished_at", "")),
             progress_message=str(getattr(operation, "progress_message", "")),
+            result_json=str(getattr(operation, "result_json", "")),
             error=error,
         )
 

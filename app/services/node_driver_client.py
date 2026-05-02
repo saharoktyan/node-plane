@@ -83,6 +83,7 @@ class DriverOperation:
     updated_at: str = ""
     finished_at: str = ""
     progress_message: str = ""
+    result_json: str = ""
     error: Optional[DriverError] = None
 
 
