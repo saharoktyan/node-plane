@@ -2,9 +2,9 @@ use tonic::transport::Channel;
 
 use crate::agent::v1::node_agent_service_client::NodeAgentServiceClient;
 use crate::agent::v1::{
-    AgentEmpty, CheckPortsRequest, CheckPortsResponse, InstallDockerRequest,
-    InstallDockerResponse, ListRemoteProfilesRequest, LocalHealth, OpenPortsRequest,
-    OpenPortsResponse, PortCheckSpec, RemoteProfileRecord,
+    AgentEmpty, CheckPortsRequest, CheckPortsResponse, DeleteRuntimeRequest, DeleteRuntimeResponse,
+    InstallDockerRequest, InstallDockerResponse, ListRemoteProfilesRequest, LocalHealth,
+    OpenPortsRequest, OpenPortsResponse, PortCheckSpec, RemoteProfileRecord,
     RunDiagnosticsRequest, RunDiagnosticsResponse, RuntimeFacts, RuntimeFileSpec,
     SyncNodeEnvRequest, SyncNodeEnvResponse, SyncRuntimeFilesRequest,
     SyncRuntimeFilesResponse, SyncXrayRequest, SyncXrayResponse,
@@ -140,6 +140,19 @@ impl AgentTransport {
             tonic::Status::unavailable(format!("failed to connect to node agent: {err}"))
         })?;
         let response = client.install_docker(InstallDockerRequest {}).await?;
+        Ok(response.into_inner())
+    }
+
+    pub async fn delete_runtime(
+        &self,
+        preserve_config: bool,
+    ) -> Result<DeleteRuntimeResponse, tonic::Status> {
+        let mut client = self.client().await.map_err(|err| {
+            tonic::Status::unavailable(format!("failed to connect to node agent: {err}"))
+        })?;
+        let response = client
+            .delete_runtime(DeleteRuntimeRequest { preserve_config })
+            .await?;
         Ok(response.into_inner())
     }
 }

@@ -870,6 +870,60 @@ impl DriverContext {
             .map_err(|err| Status::internal(format!("failed to update xray server fields: {err}")))?;
         Ok(())
     }
+
+    async fn mark_runtime_deleted(
+        &self,
+        node_key: &str,
+        preserve_config: bool,
+    ) -> Result<(), Status> {
+        let client = self.db_client().await?;
+        let bootstrap_state = if preserve_config { "edited" } else { "new" };
+        let notes = if preserve_config {
+            "runtime removed; config preserved"
+        } else {
+            "runtime removed; config wiped"
+        };
+        if preserve_config {
+            client
+                .execute(
+                    "
+                    UPDATE servers
+                    SET bootstrap_state = $1,
+                        notes = $2,
+                        updated_at = $3
+                    WHERE key = $4
+                    ",
+                    &[&bootstrap_state, &notes, &Utc::now().to_rfc3339(), &node_key],
+                )
+                .await
+                .map_err(|err| Status::internal(format!("failed to mark runtime deleted: {err}")))?;
+        } else {
+            let empty = "";
+            client
+                .execute(
+                    "
+                    UPDATE servers
+                    SET bootstrap_state = $1,
+                        notes = $2,
+                        xray_pbk = $3,
+                        xray_short_id = $4,
+                        updated_at = $5
+                    WHERE key = $6
+                    ",
+                    &[
+                        &bootstrap_state,
+                        &notes,
+                        &empty,
+                        &empty,
+                        &Utc::now().to_rfc3339(),
+                        &node_key,
+                    ],
+                )
+                .await
+                .map_err(|err| Status::internal(format!("failed to mark runtime deleted: {err}")))?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone)]
@@ -1381,6 +1435,32 @@ impl RuntimeService for RuntimeApi {
         request: Request<DeleteRuntimeRequest>,
     ) -> Result<Response<StartOperationResponse>, Status> {
         let req = request.into_inner();
+        if let Some(target) = self.ctx.agent_target(&req.node_key) {
+            let transport = agent_transport::AgentTransport::new(target);
+            let summary = match transport.delete_runtime(req.preserve_config).await {
+                Ok(result) => match self
+                    .ctx
+                    .mark_runtime_deleted(&req.node_key, req.preserve_config)
+                    .await
+                {
+                    Ok(()) => result.summary,
+                    Err(err) => format!("runtime deleted on agent but central registry update failed: {err}"),
+                },
+                Err(err) => format!("agent runtime delete failed: {err}"),
+            };
+            let status = if summary.starts_with("managed runtime removed") {
+                "SUCCEEDED"
+            } else {
+                "FAILED"
+            };
+            return Ok(Response::new(self.ctx.state.finish_operation(
+                "delete_runtime",
+                &req.node_key,
+                "",
+                status,
+                &summary,
+            )));
+        }
         Ok(Response::new(self.ctx.state.start_operation(
             "delete_runtime",
             &req.node_key,

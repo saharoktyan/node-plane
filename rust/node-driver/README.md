@@ -15,6 +15,7 @@ Current scope:
 - can sync the shared runtime bundle from `runtime_assets/manifest.json` through a node agent;
 - can run `SyncXray` through a node agent and persist generated `xray_*` settings back into the central registry when PostgreSQL is available;
 - can run `InstallDocker` through a node agent and return the completed operation to Python;
+- can run `DeleteRuntime` through a node agent and update central runtime state when PostgreSQL is available;
 - creates in-memory `Operation` records for mutating RPCs.
 
 Runtime bundle source of truth:

@@ -14,6 +14,7 @@ Current scope:
 - writes arbitrary runtime file bundles from central-driver payloads;
 - runs local `sync-xray.sh` and returns generated Xray settings;
 - installs Docker on Debian/Ubuntu hosts when requested by the central driver;
+- deletes managed runtime containers/images and optionally removes runtime config;
 - runs a heartbeat loop.
 
 This crate is still a scaffold, but it is now usable as a local read-only
@@ -49,3 +50,4 @@ Current RPC surface:
 - `SyncRuntimeFiles`
 - `SyncXray`
 - `InstallDocker`
+- `DeleteRuntime`

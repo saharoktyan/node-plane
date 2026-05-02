@@ -15,6 +15,7 @@ service NodeAgentService {
   rpc SyncRuntimeFiles(SyncRuntimeFilesRequest) returns (SyncRuntimeFilesResponse);
   rpc SyncXray(SyncXrayRequest) returns (SyncXrayResponse);
   rpc InstallDocker(InstallDockerRequest) returns (InstallDockerResponse);
+  rpc DeleteRuntime(DeleteRuntimeRequest) returns (DeleteRuntimeResponse);
 }
 
 message ListRemoteProfilesRequest {
@@ -83,5 +84,13 @@ message SyncXrayResponse {
 message InstallDockerRequest {}
 
 message InstallDockerResponse {
+  string summary = 1;
+}
+
+message DeleteRuntimeRequest {
+  bool preserve_config = 1;
+}
+
+message DeleteRuntimeResponse {
   string summary = 1;
 }

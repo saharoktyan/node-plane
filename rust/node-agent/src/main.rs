@@ -21,12 +21,12 @@ pub mod agent {
 
 use agent::v1::node_agent_service_server::{NodeAgentService, NodeAgentServiceServer};
 use agent::v1::{
-    AgentEmpty, CheckPortsRequest, CheckPortsResponse, DiagnosticItem, InstallDockerRequest,
-    InstallDockerResponse, ListRemoteProfilesRequest, ListRemoteProfilesResponse, LocalHealth,
-    OpenPortsRequest, OpenPortsResponse, PortStatus, RemoteProfileRecord, RunDiagnosticsRequest,
-    RunDiagnosticsResponse, RuntimeFacts, RuntimeFileSpec, SyncNodeEnvRequest,
-    SyncNodeEnvResponse, SyncRuntimeFilesRequest, SyncRuntimeFilesResponse, SyncXrayRequest,
-    SyncXrayResponse,
+    AgentEmpty, CheckPortsRequest, CheckPortsResponse, DeleteRuntimeRequest, DeleteRuntimeResponse,
+    DiagnosticItem, InstallDockerRequest, InstallDockerResponse, ListRemoteProfilesRequest,
+    ListRemoteProfilesResponse, LocalHealth, OpenPortsRequest, OpenPortsResponse, PortStatus,
+    RemoteProfileRecord, RunDiagnosticsRequest, RunDiagnosticsResponse, RuntimeFacts,
+    RuntimeFileSpec, SyncNodeEnvRequest, SyncNodeEnvResponse, SyncRuntimeFilesRequest,
+    SyncRuntimeFilesResponse, SyncXrayRequest, SyncXrayResponse,
 };
 
 const INSTALL_DOCKER_SCRIPT: &str = r#"set -euo pipefail
@@ -520,6 +520,113 @@ impl AgentState {
         }))
     }
 
+    fn node_env_value(&self, key: &str, default: &str) -> String {
+        let Ok(raw) = fs::read_to_string(&self.config.node_env_path) else {
+            return default.to_string();
+        };
+        for line in raw.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+            let Some((name, value)) = trimmed.split_once('=') else {
+                continue;
+            };
+            if name.trim() != key {
+                continue;
+            }
+            return value
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'')
+                .to_string();
+        }
+        default.to_string()
+    }
+
+    fn docker_available(&self) -> bool {
+        Command::new("docker")
+            .arg("info")
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false)
+    }
+
+    fn docker_best_effort(&self, args: &[&str]) {
+        let _ = Command::new("docker").args(args).output();
+    }
+
+    fn docker_inspect_exists(&self, args: &[&str]) -> bool {
+        Command::new("docker")
+            .args(args)
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false)
+    }
+
+    fn delete_runtime(&self, preserve_config: bool) -> Result<DeleteRuntimeResponse, Status> {
+        let xray_container = self.node_env_value("XRAY_CONTAINER_NAME", "xray");
+        let awg_container = self.node_env_value("AWG_CONTAINER_NAME", "amnezia-awg");
+        let xray_image = self.node_env_value("XRAY_DOCKER_IMAGE", "ghcr.io/xtls/xray-core:25.12.8");
+        let awg_image = self.node_env_value("AWG_DOCKER_IMAGE", "node-plane-amnezia-awg:0.2.16");
+
+        if self.docker_available() {
+            self.docker_best_effort(&["rm", "-f", &xray_container]);
+            self.docker_best_effort(&["rm", "-f", &awg_container]);
+            self.docker_best_effort(&["rmi", "-f", &xray_image]);
+            self.docker_best_effort(&["rmi", "-f", &awg_image]);
+            self.docker_best_effort(&["rmi", "-f", "amneziavpn/amneziawg-go:0.2.16"]);
+            self.docker_best_effort(&["image", "prune", "-af"]);
+        }
+
+        if !preserve_config {
+            let _ = fs::remove_file(&self.config.node_env_path);
+            let _ = fs::remove_file(format!("{}.example", self.config.node_env_path));
+            if Path::new(&self.config.runtime_root).exists() {
+                fs::remove_dir_all(&self.config.runtime_root).map_err(|err| {
+                    Status::internal(format!("failed to remove runtime root: {err}"))
+                })?;
+            }
+        }
+
+        let mut leftovers = Vec::new();
+        if self.docker_available() {
+            if self.docker_inspect_exists(&["container", "inspect", &xray_container]) {
+                leftovers.push("xray container still present".to_string());
+            }
+            if self.docker_inspect_exists(&["container", "inspect", &awg_container]) {
+                leftovers.push("awg container still present".to_string());
+            }
+            if self.docker_inspect_exists(&["image", "inspect", &xray_image]) {
+                leftovers.push("xray image still present".to_string());
+            }
+            if self.docker_inspect_exists(&["image", "inspect", &awg_image]) {
+                leftovers.push("awg image still present".to_string());
+            }
+            if self.docker_inspect_exists(&["image", "inspect", "amneziavpn/amneziawg-go:0.2.16"]) {
+                leftovers.push("amneziavpn/amneziawg-go:0.2.16 still present".to_string());
+            }
+        }
+        if !preserve_config && Path::new(&self.config.node_env_path).exists() {
+            leftovers.push("node.env still present".to_string());
+        }
+        if !preserve_config && Path::new(&self.config.runtime_root).exists() {
+            leftovers.push("runtime root still present".to_string());
+        }
+        if !leftovers.is_empty() {
+            return Err(Status::failed_precondition(leftovers.join("\n")));
+        }
+
+        let summary = if preserve_config {
+            "managed runtime removed; existing config preserved"
+        } else {
+            "managed runtime removed with configs"
+        };
+        Ok(DeleteRuntimeResponse {
+            summary: summary.to_string(),
+        })
+    }
+
     fn open_ports(&self, request: OpenPortsRequest) -> Result<OpenPortsResponse, Status> {
         let ufw_check = Command::new("ufw").arg("status").output();
         if ufw_check.is_err() {
@@ -661,6 +768,15 @@ impl NodeAgentService for NodeAgentApi {
         _request: Request<InstallDockerRequest>,
     ) -> Result<Response<InstallDockerResponse>, Status> {
         Ok(Response::new(self.state.install_docker()?))
+    }
+
+    async fn delete_runtime(
+        &self,
+        request: Request<DeleteRuntimeRequest>,
+    ) -> Result<Response<DeleteRuntimeResponse>, Status> {
+        Ok(Response::new(
+            self.state.delete_runtime(request.into_inner().preserve_config)?,
+        ))
     }
 }
 
