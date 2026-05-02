@@ -924,6 +924,29 @@ impl DriverContext {
         }
         Ok(())
     }
+
+    async fn mark_bootstrap_state(
+        &self,
+        node_key: &str,
+        state: &str,
+        notes: &str,
+    ) -> Result<(), Status> {
+        let client = self.db_client().await?;
+        client
+            .execute(
+                "
+                UPDATE servers
+                SET bootstrap_state = $1,
+                    notes = $2,
+                    updated_at = $3
+                WHERE key = $4
+                ",
+                &[&state, &notes, &Utc::now().to_rfc3339(), &node_key],
+            )
+            .await
+            .map_err(|err| Status::internal(format!("failed to update bootstrap state: {err}")))?;
+        Ok(())
+    }
 }
 
 #[derive(Clone)]
@@ -1409,6 +1432,241 @@ impl RuntimeService for RuntimeApi {
         request: Request<BootstrapNodeRequest>,
     ) -> Result<Response<StartOperationResponse>, Status> {
         let req = request.into_inner();
+        if let Some(target) = self.ctx.agent_target(&req.node_key) {
+            let row = match self.ctx.fetch_server_row(&req.node_key).await {
+                Ok(Some(row)) => row,
+                Ok(None) => {
+                    return Ok(Response::new(self.ctx.state.finish_operation(
+                        "bootstrap_node",
+                        &req.node_key,
+                        "",
+                        "FAILED",
+                        "server not found",
+                    )));
+                }
+                Err(err) => {
+                    return Ok(Response::new(self.ctx.state.finish_operation(
+                        "bootstrap_node",
+                        &req.node_key,
+                        "",
+                        "FAILED",
+                        &format!("failed to load server registry row: {err}"),
+                    )));
+                }
+            };
+            let transport = agent_transport::AgentTransport::new(target);
+            let protocol_kinds = self.ctx.parse_protocol_kinds(
+                row.try_get::<_, Option<String>>("protocol_kinds")
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default()
+                    .as_str(),
+            );
+            let mut completed_parts = vec!["Base packages and helper scripts installed".to_string()];
+
+            let port_result = transport
+                .check_ports(self.ctx.port_check_specs_from_row(&row))
+                .await;
+            match port_result {
+                Ok(result) => {
+                    if result.items.iter().any(|item| item.status == "busy" || item.status == "invalid") {
+                        let message = format!("port check failed before bootstrap\n{}", result.summary);
+                        let _ = self.ctx.mark_bootstrap_state(&req.node_key, "bootstrap_failed", &message).await;
+                        return Ok(Response::new(self.ctx.state.finish_operation(
+                            "bootstrap_node",
+                            &req.node_key,
+                            "",
+                            "FAILED",
+                            &message,
+                        )));
+                    }
+                }
+                Err(err) => {
+                    let message = format!("agent port check failed: {err}");
+                    let _ = self.ctx.mark_bootstrap_state(&req.node_key, "bootstrap_failed", &message).await;
+                    return Ok(Response::new(self.ctx.state.finish_operation(
+                        "bootstrap_node",
+                        &req.node_key,
+                        "",
+                        "FAILED",
+                        &message,
+                    )));
+                }
+            }
+
+            if let Err(err) = transport.install_docker().await {
+                let message = format!("agent docker install failed: {err}");
+                let _ = self.ctx.mark_bootstrap_state(&req.node_key, "bootstrap_failed", &message).await;
+                return Ok(Response::new(self.ctx.state.finish_operation(
+                    "bootstrap_node",
+                    &req.node_key,
+                    "",
+                    "FAILED",
+                    &message,
+                )));
+            }
+
+            let files = self.ctx.runtime_file_bundle(Some(&row), &req.node_key)?;
+            if let Err(err) = transport.sync_runtime_files(files).await {
+                let message = format!("agent runtime bundle sync failed: {err}");
+                let _ = self.ctx.mark_bootstrap_state(&req.node_key, "bootstrap_failed", &message).await;
+                return Ok(Response::new(self.ctx.state.finish_operation(
+                    "bootstrap_node",
+                    &req.node_key,
+                    "",
+                    "FAILED",
+                    &message,
+                )));
+            }
+
+            if protocol_kinds.iter().any(|item| item == "xray") {
+                let config_path = self.ctx.row_string(
+                    &row,
+                    "xray_config_path",
+                    "/opt/node-plane-runtime/xray/config.json",
+                );
+                let public_host = self.ctx.row_string(&row, "public_host", "");
+                let sni_host = self.ctx.row_string(&row, "xray_sni", "www.cloudflare.com");
+                let flow = self
+                    .ctx
+                    .row_string(&row, "xray_flow", "xtls-rprx-vision");
+                let path_prefix = self.ctx.row_string(&row, "xray_xhttp_path_prefix", "/assets");
+                let tcp_port = self.ctx.row_i32(&row, "xray_tcp_port", 443).max(1) as u32;
+                let xhttp_port = self.ctx.row_i32(&row, "xray_xhttp_port", 8443).max(1) as u32;
+                let preserve_xray_config = req.preserve_config
+                    && transport.path_exists(&config_path).await.unwrap_or(false);
+                if !preserve_xray_config {
+                    match transport
+                        .init_xray(
+                            &config_path,
+                            &public_host,
+                            &sni_host,
+                            tcp_port,
+                            xhttp_port,
+                            &path_prefix,
+                            &flow,
+                            "ghcr.io/xtls/xray-core:25.12.8",
+                        )
+                        .await
+                    {
+                        Ok(result) => match serde_json::from_str::<XraySyncGenerated>(&result.generated_json) {
+                            Ok(generated) => {
+                                if let Err(err) = self.ctx.update_xray_server_fields(&req.node_key, &generated).await {
+                                    let message = format!("failed to persist generated xray settings: {err}");
+                                    let _ = self.ctx.mark_bootstrap_state(&req.node_key, "bootstrap_failed", &message).await;
+                                    return Ok(Response::new(self.ctx.state.finish_operation(
+                                        "bootstrap_node",
+                                        &req.node_key,
+                                        "",
+                                        "FAILED",
+                                        &message,
+                                    )));
+                                }
+                            }
+                            Err(err) => {
+                                let message = format!("agent init xray returned invalid json: {err}");
+                                let _ = self.ctx.mark_bootstrap_state(&req.node_key, "bootstrap_failed", &message).await;
+                                return Ok(Response::new(self.ctx.state.finish_operation(
+                                    "bootstrap_node",
+                                    &req.node_key,
+                                    "",
+                                    "FAILED",
+                                    &message,
+                                )));
+                            }
+                        },
+                        Err(err) => {
+                            let message = format!("agent init xray failed: {err}");
+                            let _ = self.ctx.mark_bootstrap_state(&req.node_key, "bootstrap_failed", &message).await;
+                            return Ok(Response::new(self.ctx.state.finish_operation(
+                                "bootstrap_node",
+                                &req.node_key,
+                                "",
+                                "FAILED",
+                                &message,
+                            )));
+                        }
+                    }
+                    completed_parts.push("Xray settings generated".to_string());
+                } else {
+                    completed_parts.push("Xray config preserved".to_string());
+                }
+                if let Err(err) = transport.deploy_xray().await {
+                    let message = format!("agent deploy xray failed: {err}");
+                    let _ = self.ctx.mark_bootstrap_state(&req.node_key, "bootstrap_failed", &message).await;
+                    return Ok(Response::new(self.ctx.state.finish_operation(
+                        "bootstrap_node",
+                        &req.node_key,
+                        "",
+                        "FAILED",
+                        &message,
+                    )));
+                }
+                completed_parts.push("Xray runtime deployed".to_string());
+            }
+
+            if protocol_kinds.iter().any(|item| item == "awg") {
+                let awg_config_path = self.ctx.row_string(
+                    &row,
+                    "awg_config_path",
+                    "/opt/node-plane-runtime/amnezia-awg/data/wg0.conf",
+                );
+                let preserve_awg_config = req.preserve_config
+                    && transport.path_exists(&awg_config_path).await.unwrap_or(false);
+                if !preserve_awg_config {
+                    if let Err(err) = transport.init_awg().await {
+                        let message = format!("agent init awg failed: {err}");
+                        let _ = self.ctx.mark_bootstrap_state(&req.node_key, "bootstrap_failed", &message).await;
+                        return Ok(Response::new(self.ctx.state.finish_operation(
+                            "bootstrap_node",
+                            &req.node_key,
+                            "",
+                            "FAILED",
+                            &message,
+                        )));
+                    }
+                }
+                if let Err(err) = transport.deploy_awg().await {
+                    let message = format!("agent deploy awg failed: {err}");
+                    let _ = self.ctx.mark_bootstrap_state(&req.node_key, "bootstrap_failed", &message).await;
+                    return Ok(Response::new(self.ctx.state.finish_operation(
+                        "bootstrap_node",
+                        &req.node_key,
+                        "",
+                        "FAILED",
+                        &message,
+                    )));
+                }
+                completed_parts.push("AWG runtime deployed".to_string());
+            }
+
+            let summary = format!("Bootstrap completed. {}.", completed_parts.join(". "));
+            match self
+                .ctx
+                .mark_bootstrap_state(&req.node_key, "bootstrapped", &summary)
+                .await
+            {
+                Ok(()) => {
+                    return Ok(Response::new(self.ctx.state.finish_operation(
+                        "bootstrap_node",
+                        &req.node_key,
+                        "",
+                        "SUCCEEDED",
+                        &summary,
+                    )));
+                }
+                Err(err) => {
+                    let message = format!("bootstrap completed on agent but registry update failed: {err}");
+                    return Ok(Response::new(self.ctx.state.finish_operation(
+                        "bootstrap_node",
+                        &req.node_key,
+                        "",
+                        "FAILED",
+                        &message,
+                    )));
+                }
+            }
+        }
         Ok(Response::new(self.ctx.state.start_operation(
             "bootstrap_node",
             &req.node_key,

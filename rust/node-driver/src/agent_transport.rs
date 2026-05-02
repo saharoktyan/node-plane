@@ -3,11 +3,11 @@ use tonic::transport::Channel;
 use crate::agent::v1::node_agent_service_client::NodeAgentServiceClient;
 use crate::agent::v1::{
     AgentEmpty, CheckPortsRequest, CheckPortsResponse, DeleteRuntimeRequest, DeleteRuntimeResponse,
-    InstallDockerRequest, InstallDockerResponse, ListRemoteProfilesRequest, LocalHealth,
-    OpenPortsRequest, OpenPortsResponse, PortCheckSpec, RemoteProfileRecord,
-    RunDiagnosticsRequest, RunDiagnosticsResponse, RuntimeFacts, RuntimeFileSpec,
-    SyncNodeEnvRequest, SyncNodeEnvResponse, SyncRuntimeFilesRequest,
-    SyncRuntimeFilesResponse, SyncXrayRequest, SyncXrayResponse,
+    InitXrayRequest, InitXrayResponse, InstallDockerRequest, InstallDockerResponse,
+    ListRemoteProfilesRequest, LocalHealth, OpenPortsRequest, OpenPortsResponse, PortCheckSpec,
+    PathExistsRequest, RemoteProfileRecord, RunDiagnosticsRequest, RunDiagnosticsResponse,
+    RuntimeCommandResponse, RuntimeFacts, RuntimeFileSpec, SyncNodeEnvRequest, SyncNodeEnvResponse,
+    SyncRuntimeFilesRequest, SyncRuntimeFilesResponse, SyncXrayRequest, SyncXrayResponse,
 };
 
 pub struct AgentTransport {
@@ -154,5 +154,70 @@ impl AgentTransport {
             .delete_runtime(DeleteRuntimeRequest { preserve_config })
             .await?;
         Ok(response.into_inner())
+    }
+
+    pub async fn init_xray(
+        &self,
+        config_path: &str,
+        public_host: &str,
+        sni_host: &str,
+        tcp_port: u32,
+        xhttp_port: u32,
+        xhttp_path_prefix: &str,
+        flow: &str,
+        image: &str,
+    ) -> Result<InitXrayResponse, tonic::Status> {
+        let mut client = self.client().await.map_err(|err| {
+            tonic::Status::unavailable(format!("failed to connect to node agent: {err}"))
+        })?;
+        let response = client
+            .init_xray(InitXrayRequest {
+                config_path: config_path.to_string(),
+                public_host: public_host.to_string(),
+                sni_host: sni_host.to_string(),
+                tcp_port,
+                xhttp_port,
+                xhttp_path_prefix: xhttp_path_prefix.to_string(),
+                flow: flow.to_string(),
+                image: image.to_string(),
+            })
+            .await?;
+        Ok(response.into_inner())
+    }
+
+    pub async fn deploy_xray(&self) -> Result<RuntimeCommandResponse, tonic::Status> {
+        let mut client = self.client().await.map_err(|err| {
+            tonic::Status::unavailable(format!("failed to connect to node agent: {err}"))
+        })?;
+        let response = client.deploy_xray(AgentEmpty {}).await?;
+        Ok(response.into_inner())
+    }
+
+    pub async fn init_awg(&self) -> Result<RuntimeCommandResponse, tonic::Status> {
+        let mut client = self.client().await.map_err(|err| {
+            tonic::Status::unavailable(format!("failed to connect to node agent: {err}"))
+        })?;
+        let response = client.init_awg(AgentEmpty {}).await?;
+        Ok(response.into_inner())
+    }
+
+    pub async fn deploy_awg(&self) -> Result<RuntimeCommandResponse, tonic::Status> {
+        let mut client = self.client().await.map_err(|err| {
+            tonic::Status::unavailable(format!("failed to connect to node agent: {err}"))
+        })?;
+        let response = client.deploy_awg(AgentEmpty {}).await?;
+        Ok(response.into_inner())
+    }
+
+    pub async fn path_exists(&self, path: &str) -> Result<bool, tonic::Status> {
+        let mut client = self.client().await.map_err(|err| {
+            tonic::Status::unavailable(format!("failed to connect to node agent: {err}"))
+        })?;
+        let response = client
+            .path_exists(PathExistsRequest {
+                path: path.to_string(),
+            })
+            .await?;
+        Ok(response.into_inner().exists)
     }
 }

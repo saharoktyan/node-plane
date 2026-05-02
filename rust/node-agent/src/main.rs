@@ -22,11 +22,13 @@ pub mod agent {
 use agent::v1::node_agent_service_server::{NodeAgentService, NodeAgentServiceServer};
 use agent::v1::{
     AgentEmpty, CheckPortsRequest, CheckPortsResponse, DeleteRuntimeRequest, DeleteRuntimeResponse,
-    DiagnosticItem, InstallDockerRequest, InstallDockerResponse, ListRemoteProfilesRequest,
-    ListRemoteProfilesResponse, LocalHealth, OpenPortsRequest, OpenPortsResponse, PortStatus,
-    RemoteProfileRecord, RunDiagnosticsRequest, RunDiagnosticsResponse, RuntimeFacts,
-    RuntimeFileSpec, SyncNodeEnvRequest, SyncNodeEnvResponse, SyncRuntimeFilesRequest,
-    SyncRuntimeFilesResponse, SyncXrayRequest, SyncXrayResponse,
+    DiagnosticItem, InitXrayRequest, InitXrayResponse, InstallDockerRequest,
+    InstallDockerResponse, ListRemoteProfilesRequest, ListRemoteProfilesResponse, LocalHealth,
+    OpenPortsRequest, OpenPortsResponse, PathExistsRequest, PathExistsResponse, PortStatus,
+    RemoteProfileRecord, RunDiagnosticsRequest, RunDiagnosticsResponse, RuntimeCommandResponse,
+    RuntimeFacts, RuntimeFileSpec,
+    SyncNodeEnvRequest, SyncNodeEnvResponse, SyncRuntimeFilesRequest, SyncRuntimeFilesResponse,
+    SyncXrayRequest, SyncXrayResponse,
 };
 
 const INSTALL_DOCKER_SCRIPT: &str = r#"set -euo pipefail
@@ -495,6 +497,66 @@ impl AgentState {
         })
     }
 
+    fn run_runtime_command(&self, script_name: &str, args: &[String]) -> Result<String, Status> {
+        let script_path = self.resolve_runtime_path(&format!("/opt/node-plane-runtime/{script_name}"));
+        let output = Command::new(&script_path)
+            .args(args)
+            .output()
+            .map_err(|err| Status::internal(format!("failed to execute {script_name}: {err}")))?;
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        if output.status.success() {
+            return Ok(stdout);
+        }
+        let detail = if stderr.is_empty() { stdout } else { stderr };
+        Err(Status::failed_precondition(format!(
+            "{script_name} failed: {}",
+            if detail.is_empty() { "unknown error".to_string() } else { detail }
+        )))
+    }
+
+    fn init_xray(&self, request: InitXrayRequest) -> Result<InitXrayResponse, Status> {
+        let config_path = self.resolve_runtime_path(&request.config_path);
+        let output = self.run_runtime_command(
+            "init-xray.sh",
+            &[
+                config_path,
+                request.public_host,
+                request.sni_host,
+                request.tcp_port.to_string(),
+                request.xhttp_port.to_string(),
+                request.xhttp_path_prefix,
+                request.flow,
+                request.image,
+            ],
+        )?;
+        Ok(InitXrayResponse {
+            summary: "xray initialized".to_string(),
+            generated_json: output,
+        })
+    }
+
+    fn deploy_xray(&self) -> Result<RuntimeCommandResponse, Status> {
+        let summary = self.run_runtime_command("deploy-xray.sh", &[])?;
+        Ok(RuntimeCommandResponse { summary })
+    }
+
+    fn init_awg(&self) -> Result<RuntimeCommandResponse, Status> {
+        let summary = self.run_runtime_command("init-awg.sh", &[])?;
+        Ok(RuntimeCommandResponse { summary })
+    }
+
+    fn deploy_awg(&self) -> Result<RuntimeCommandResponse, Status> {
+        let summary = self.run_runtime_command("deploy-awg.sh", &[])?;
+        Ok(RuntimeCommandResponse { summary })
+    }
+
+    fn path_exists(&self, path: &str) -> PathExistsResponse {
+        PathExistsResponse {
+            exists: Path::new(&self.resolve_runtime_path(path)).exists(),
+        }
+    }
+
     fn install_docker(&self) -> Result<InstallDockerResponse, Status> {
         let output = Command::new("bash")
             .arg("-c")
@@ -777,6 +839,41 @@ impl NodeAgentService for NodeAgentApi {
         Ok(Response::new(
             self.state.delete_runtime(request.into_inner().preserve_config)?,
         ))
+    }
+
+    async fn init_xray(
+        &self,
+        request: Request<InitXrayRequest>,
+    ) -> Result<Response<InitXrayResponse>, Status> {
+        Ok(Response::new(self.state.init_xray(request.into_inner())?))
+    }
+
+    async fn deploy_xray(
+        &self,
+        _request: Request<AgentEmpty>,
+    ) -> Result<Response<RuntimeCommandResponse>, Status> {
+        Ok(Response::new(self.state.deploy_xray()?))
+    }
+
+    async fn init_awg(
+        &self,
+        _request: Request<AgentEmpty>,
+    ) -> Result<Response<RuntimeCommandResponse>, Status> {
+        Ok(Response::new(self.state.init_awg()?))
+    }
+
+    async fn deploy_awg(
+        &self,
+        _request: Request<AgentEmpty>,
+    ) -> Result<Response<RuntimeCommandResponse>, Status> {
+        Ok(Response::new(self.state.deploy_awg()?))
+    }
+
+    async fn path_exists(
+        &self,
+        request: Request<PathExistsRequest>,
+    ) -> Result<Response<PathExistsResponse>, Status> {
+        Ok(Response::new(self.state.path_exists(&request.into_inner().path)))
     }
 }
 

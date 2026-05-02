@@ -16,6 +16,11 @@ service NodeAgentService {
   rpc SyncXray(SyncXrayRequest) returns (SyncXrayResponse);
   rpc InstallDocker(InstallDockerRequest) returns (InstallDockerResponse);
   rpc DeleteRuntime(DeleteRuntimeRequest) returns (DeleteRuntimeResponse);
+  rpc InitXray(InitXrayRequest) returns (InitXrayResponse);
+  rpc DeployXray(AgentEmpty) returns (RuntimeCommandResponse);
+  rpc InitAwg(AgentEmpty) returns (RuntimeCommandResponse);
+  rpc DeployAwg(AgentEmpty) returns (RuntimeCommandResponse);
+  rpc PathExists(PathExistsRequest) returns (PathExistsResponse);
 }
 
 message ListRemoteProfilesRequest {
@@ -93,4 +98,32 @@ message DeleteRuntimeRequest {
 
 message DeleteRuntimeResponse {
   string summary = 1;
+}
+
+message InitXrayRequest {
+  string config_path = 1;
+  string public_host = 2;
+  string sni_host = 3;
+  uint32 tcp_port = 4;
+  uint32 xhttp_port = 5;
+  string xhttp_path_prefix = 6;
+  string flow = 7;
+  string image = 8;
+}
+
+message InitXrayResponse {
+  string summary = 1;
+  string generated_json = 2;
+}
+
+message RuntimeCommandResponse {
+  string summary = 1;
+}
+
+message PathExistsRequest {
+  string path = 1;
+}
+
+message PathExistsResponse {
+  bool exists = 1;
 }

@@ -13,6 +13,7 @@ Current scope:
 - writes `node.env` from central-driver payloads;
 - writes arbitrary runtime file bundles from central-driver payloads;
 - runs local `sync-xray.sh` and returns generated Xray settings;
+- runs local Xray/AWG init and deploy scripts for bootstrap orchestration;
 - installs Docker on Debian/Ubuntu hosts when requested by the central driver;
 - deletes managed runtime containers/images and optionally removes runtime config;
 - runs a heartbeat loop.
@@ -51,3 +52,8 @@ Current RPC surface:
 - `SyncXray`
 - `InstallDocker`
 - `DeleteRuntime`
+- `InitXray`
+- `DeployXray`
+- `InitAwg`
+- `DeployAwg`
+- `PathExists`
