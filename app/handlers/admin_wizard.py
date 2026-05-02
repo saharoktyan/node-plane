@@ -21,6 +21,7 @@ from domain.servers import (
 from services import xray as xray_svc
 from services.awg import _extract_wg_conf, create_awg_user, delete_awg_user
 from services.awg_profiles import get_awg_servers, remove_awg_profile, remove_awg_server, upsert_awg_server
+from services.node_driver import get_node_driver
 from services.provisioning_state import delete_profile_server_state, upsert_profile_server_state
 from services.server_registry import list_servers
 from services.profile_state import awg_profile_store, ensure_xray_caps, freeze_profile, is_frozen, profile_store, unfreeze_profile, utcnow
@@ -55,6 +56,10 @@ _render_delete_confirm = render_delete_confirm
 _render_profile_dashboard = render_profile_dashboard
 _render_profile_card = render_profile_card
 _render_status_menu = render_status_menu
+
+
+def _op_ok(operation) -> bool:
+    return bool(operation and str(getattr(operation, "status", "")).upper() == "SUCCEEDED")
 
 
 def _wizard_get(context: CallbackContext) -> Optional[Dict[str, Any]]:
@@ -622,14 +627,14 @@ def _delete_profile_everywhere(context: CallbackContext) -> None:
     for server in list_servers():
         if "xray" not in server.protocol_kinds:
             continue
-        code, _out = xray_svc.delete_user(name, server.key)
-        if code == 0:
+        operation = get_node_driver().delete_profile_from_node(server.key, name, ["xray"])
+        if _op_ok(operation):
             done.append(
                 f"Xray {server.key}: "
                 + ("удалено" if lang == "ru" else "deleted")
             )
         else:
-            errors.append(f"Xray {server.key}: rc={code}")
+            errors.append(f"Xray {server.key}: {operation.progress_message or operation.status}")
 
     awg_servers = get_awg_servers(name)
     for server_key in sorted(awg_servers.keys()):
@@ -692,22 +697,27 @@ def _finish_create(context: CallbackContext) -> None:
     existing_xray = rec.get("xray") if isinstance(rec.get("xray"), dict) else {}
     server_short_ids = dict(existing_xray.get("server_short_ids") or {}) if isinstance(existing_xray, dict) else {}
     for method in xray_methods:
-        code, out, ensured_uuid, ensured_short_id = xray_svc.ensure_user(name, method.server_key, uuid_value=uuid_val)
-        if code != 0 or not ensured_uuid:
-            xray_state_updates.append(("failed", method.server_key, uuid_val, (out or "")[-500:] or "create failed"))
-            errors.append(f"{method.label}: {t(lang, 'admin.wizard.create_error_line')}\n{(out or '')[-500:]}")
+        operation = get_node_driver().ensure_profile_on_node(
+            method.server_key,
+            name,
+            ["xray"],
+            xray_uuid=uuid_val or "",
+            xray_short_id=xray_short_id or "",
+        )
+        ensured_uuid = uuid_val
+        ensured_short_id = xray_short_id
+        if not _op_ok(operation):
+            details = (operation.progress_message or operation.status or "")[-500:]
+            xray_state_updates.append(("failed", method.server_key, uuid_val, details or "create failed"))
+            errors.append(f"{method.label}: {t(lang, 'admin.wizard.create_error_line')}\n{details}")
             continue
-        uuid_val = ensured_uuid
+        if ensured_uuid:
+            uuid_val = ensured_uuid
         if ensured_short_id:
             xray_short_id = ensured_short_id
             server_short_ids[method.server_key] = ensured_short_id
-        ready, reason = xray_svc.get_server_link_status(method.server_key)
-        if ready:
-            xray_state_updates.append(("provisioned", method.server_key, ensured_uuid, None))
-            msgs.append(f"{method.label}: {t(lang, 'admin.wizard.synced_line')}")
-        else:
-            xray_state_updates.append(("needs_attention", method.server_key, ensured_uuid, reason))
-            errors.append(f"{method.label}: {t(lang, 'admin.wizard.link_not_ready_line')}\n{reason}")
+        xray_state_updates.append(("provisioned", method.server_key, ensured_uuid, None))
+        msgs.append(f"{method.label}: {t(lang, 'admin.wizard.synced_line')}")
     if uuid_val:
         ensure_xray_caps(name, uuid_val)
 
@@ -811,43 +821,40 @@ def _save_edit(context: CallbackContext) -> None:
     existing_xray = rec.get("xray") if isinstance(rec.get("xray"), dict) else {}
     server_short_ids = dict(existing_xray.get("server_short_ids") or {}) if isinstance(existing_xray, dict) else {}
     for method in selected_xray_methods:
-        code, out, ensured_uuid, ensured_short_id = xray_svc.ensure_user(name, method.server_key, uuid_value=uuid_val)
-        if code != 0 or not ensured_uuid:
+        operation = get_node_driver().ensure_profile_on_node(
+            method.server_key,
+            name,
+            ["xray"],
+            xray_uuid=uuid_val or "",
+            xray_short_id=xray_short_id or "",
+        )
+        ensured_uuid = uuid_val
+        ensured_short_id = xray_short_id
+        if not _op_ok(operation) or not ensured_uuid:
+            details = (operation.progress_message or operation.status or "")[-500:]
             upsert_profile_server_state(
                 name,
                 method.server_key,
                 "xray",
                 status="failed",
                 remote_id=uuid_val,
-                last_error=(out or "")[-500:] or "sync failed",
+                last_error=details or "sync failed",
             )
-            errors.append(f"{method.label}: {t(lang, 'admin.wizard.sync_failed_line')}\n{(out or '')[-500:]}")
+            errors.append(f"{method.label}: {t(lang, 'admin.wizard.sync_failed_line')}\n{details}")
             continue
         uuid_val = ensured_uuid
         if ensured_short_id:
             xray_short_id = ensured_short_id
             server_short_ids[method.server_key] = ensured_short_id
-        ready, reason = xray_svc.get_server_link_status(method.server_key)
-        if ready:
-            upsert_profile_server_state(
-                name,
-                method.server_key,
-                "xray",
-                status="provisioned",
-                remote_id=ensured_uuid,
-                last_error=None,
-            )
-            messages.append(f"{method.label}: {t(lang, 'admin.wizard.synced_line')}")
-        else:
-            upsert_profile_server_state(
-                name,
-                method.server_key,
-                "xray",
-                status="needs_attention",
-                remote_id=ensured_uuid,
-                last_error=reason,
-            )
-            errors.append(f"{method.label}: {t(lang, 'admin.wizard.link_not_ready_line')}\n{reason}")
+        upsert_profile_server_state(
+            name,
+            method.server_key,
+            "xray",
+            status="provisioned",
+            remote_id=ensured_uuid,
+            last_error=None,
+        )
+        messages.append(f"{method.label}: {t(lang, 'admin.wizard.synced_line')}")
 
     if uuid_val:
         for removed_server_key in existing_xray_server_keys - selected_xray_server_keys:
@@ -863,15 +870,15 @@ def _save_edit(context: CallbackContext) -> None:
         ensure_xray_caps(name, uuid_val)
 
     for server_key in sorted(existing_xray_server_keys - selected_xray_server_keys):
-        code, _out = xray_svc.delete_user(name, server_key)
-        if code != 0:
+        operation = get_node_driver().delete_profile_from_node(server_key, name, ["xray"])
+        if not _op_ok(operation):
             upsert_profile_server_state(
                 name,
                 server_key,
                 "xray",
                 status="failed",
                 remote_id=uuid_val,
-                last_error="delete failed",
+                last_error=(operation.progress_message or operation.status or "delete failed")[-500:],
             )
             errors.append(f"Xray {server_key}: {t(lang, 'admin.wizard.delete_failed_line')}")
         else:

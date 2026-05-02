@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
 use std::net::SocketAddr;
@@ -1078,6 +1078,323 @@ struct ProvisioningApi {
     ctx: DriverContext,
 }
 
+impl ProvisioningApi {
+    fn access_codes_for_protocol(node_key: &str, protocol_kind: &str) -> Vec<String> {
+        let node_key = node_key.trim();
+        match protocol_kind {
+            "xray" => {
+                if node_key == "de" {
+                    vec!["gx".to_string(), "xray_de".to_string()]
+                } else {
+                    vec![format!("xray_{node_key}")]
+                }
+            }
+            "awg" => {
+                if node_key == "de" {
+                    vec!["ga".to_string(), "awg_de".to_string()]
+                } else if node_key == "lv" {
+                    vec!["la".to_string(), "awg_lv".to_string()]
+                } else {
+                    vec![format!("awg_{node_key}")]
+                }
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    fn matches_access_code(node_key: &str, protocol_kind: &str, access_code: &str) -> bool {
+        let normalized = access_code.trim().to_lowercase();
+        Self::access_codes_for_protocol(node_key, protocol_kind)
+            .iter()
+            .any(|code| code == &normalized)
+    }
+
+    async fn desired_xray_profiles_for_node(
+        &self,
+        node_key: &str,
+    ) -> Result<Vec<(String, String)>, Status> {
+        let client = self.ctx.db_client().await?;
+        let rows = client
+            .query(
+                "
+                SELECT p.name, pam.access_code, xp.uuid
+                FROM profiles p
+                JOIN profile_access_methods pam
+                  ON pam.profile_name = p.name
+                LEFT JOIN xray_profiles xp
+                  ON xp.profile_name = p.name
+                ORDER BY p.name
+                ",
+                &[],
+            )
+            .await
+            .map_err(|err| Status::internal(format!("failed to query desired xray profiles: {err}")))?;
+
+        let mut seen = HashSet::new();
+        let mut out = Vec::new();
+        for row in rows {
+            let name = row
+                .try_get::<_, Option<String>>("name")
+                .ok()
+                .flatten()
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            let access_code = row
+                .try_get::<_, Option<String>>("access_code")
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            let uuid = row
+                .try_get::<_, Option<String>>("uuid")
+                .ok()
+                .flatten()
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            if name.is_empty() || !Self::matches_access_code(node_key, "xray", &access_code) {
+                continue;
+            }
+            if seen.insert(name.clone()) {
+                out.push((name, uuid));
+            }
+        }
+        Ok(out)
+    }
+
+    async fn desired_awg_profiles_for_node(&self, node_key: &str) -> Result<Vec<String>, Status> {
+        let client = self.ctx.db_client().await?;
+        let rows = client
+            .query(
+                "
+                SELECT p.name, pam.access_code
+                FROM profiles p
+                JOIN profile_access_methods pam
+                  ON pam.profile_name = p.name
+                ORDER BY p.name
+                ",
+                &[],
+            )
+            .await
+            .map_err(|err| Status::internal(format!("failed to query desired awg profiles: {err}")))?;
+
+        let mut seen = HashSet::new();
+        let mut out = Vec::new();
+        for row in rows {
+            let name = row
+                .try_get::<_, Option<String>>("name")
+                .ok()
+                .flatten()
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            let access_code = row
+                .try_get::<_, Option<String>>("access_code")
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            if name.is_empty() || !Self::matches_access_code(node_key, "awg", &access_code) {
+                continue;
+            }
+            if seen.insert(name.clone()) {
+                out.push(name);
+            }
+        }
+        Ok(out)
+    }
+
+    async fn reconcile_xray_on_node(&self, node_key: &str, target: &str) -> Result<(i32, String), Status> {
+        let transport = agent_transport::AgentTransport::new(target);
+        let remote_records = transport
+            .list_remote_profiles("xray")
+            .await
+            .map_err(|err| Status::unavailable(format!("failed to list remote xray profiles: {err}")))?;
+        let desired = self.desired_xray_profiles_for_node(node_key).await?;
+
+        let remote_by_name: HashMap<String, String> = remote_records
+            .into_iter()
+            .filter_map(|item| {
+                let name = item.profile_name.trim().to_string();
+                if name.is_empty() {
+                    None
+                } else {
+                    Some((name, item.remote_id.trim().to_string()))
+                }
+            })
+            .collect();
+
+        let mut desired_names = HashSet::new();
+        let mut ready = 0;
+        let mut attention = 0;
+        let mut failed = 0;
+
+        for (profile_name, uuid) in desired {
+            desired_names.insert(profile_name.clone());
+            if uuid.is_empty() {
+                self.ctx
+                    .upsert_profile_server_state(
+                        &profile_name,
+                        node_key,
+                        "xray",
+                        "failed",
+                        "",
+                        "uuid missing in database",
+                    )
+                    .await?;
+                failed += 1;
+                continue;
+            }
+
+            let Some(remote_uuid) = remote_by_name.get(&profile_name) else {
+                self.ctx
+                    .upsert_profile_server_state(
+                        &profile_name,
+                        node_key,
+                        "xray",
+                        "failed",
+                        &uuid,
+                        "missing on server",
+                    )
+                    .await?;
+                failed += 1;
+                continue;
+            };
+
+            if !remote_uuid.is_empty() && remote_uuid != &uuid {
+                self.ctx
+                    .upsert_profile_server_state(
+                        &profile_name,
+                        node_key,
+                        "xray",
+                        "needs_attention",
+                        remote_uuid,
+                        &format!("uuid mismatch: db={uuid} remote={remote_uuid}"),
+                    )
+                    .await?;
+                attention += 1;
+                continue;
+            }
+
+            self.ctx
+                .upsert_profile_server_state(&profile_name, node_key, "xray", "provisioned", &uuid, "")
+                .await?;
+            ready += 1;
+        }
+
+        let existing_rows = self.ctx.observed_remote_profiles(node_key, "xray").await?;
+        for row in existing_rows {
+            let profile_name = row
+                .try_get::<_, Option<String>>("profile_name")
+                .ok()
+                .flatten()
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            if !profile_name.is_empty() && !desired_names.contains(&profile_name) {
+                self.ctx
+                    .delete_profile_server_state(&profile_name, node_key, "xray")
+                    .await?;
+            }
+        }
+
+        let mut extra_remote: Vec<String> = remote_by_name
+            .keys()
+            .filter(|name| !desired_names.contains(*name))
+            .cloned()
+            .collect();
+        extra_remote.sort();
+        let mut lines = vec![
+            format!("server: {node_key}"),
+            format!("ready: {ready}"),
+            format!("attention: {attention}"),
+            format!("failed: {failed}"),
+            format!("remote_only: {}", extra_remote.len()),
+        ];
+        if !extra_remote.is_empty() {
+            lines.push(format!(
+                "remote extra profiles: {}",
+                extra_remote.into_iter().take(20).collect::<Vec<String>>().join(", ")
+            ));
+        }
+        Ok((0, lines.join("\n")))
+    }
+
+    async fn reconcile_awg_on_node(&self, node_key: &str, target: &str) -> Result<(i32, String), Status> {
+        let transport = agent_transport::AgentTransport::new(target);
+        let remote_records = transport
+            .list_remote_profiles("awg")
+            .await
+            .map_err(|err| Status::unavailable(format!("failed to list remote awg profiles: {err}")))?;
+        let desired = self.desired_awg_profiles_for_node(node_key).await?;
+        let remote_names: HashSet<String> = remote_records
+            .into_iter()
+            .map(|item| item.profile_name.trim().to_string())
+            .filter(|name| !name.is_empty())
+            .collect();
+
+        let mut desired_names = HashSet::new();
+        let mut ready = 0;
+        let mut failed = 0;
+
+        for profile_name in desired {
+            desired_names.insert(profile_name.clone());
+            if remote_names.contains(&profile_name) {
+                self.ctx
+                    .upsert_profile_server_state(&profile_name, node_key, "awg", "provisioned", "", "")
+                    .await?;
+                ready += 1;
+            } else {
+                self.ctx
+                    .upsert_profile_server_state(
+                        &profile_name,
+                        node_key,
+                        "awg",
+                        "failed",
+                        "",
+                        "missing in awg config",
+                    )
+                    .await?;
+                failed += 1;
+            }
+        }
+
+        let existing_rows = self.ctx.observed_remote_profiles(node_key, "awg").await?;
+        for row in existing_rows {
+            let profile_name = row
+                .try_get::<_, Option<String>>("profile_name")
+                .ok()
+                .flatten()
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            if !profile_name.is_empty() && !desired_names.contains(&profile_name) {
+                self.ctx
+                    .delete_profile_server_state(&profile_name, node_key, "awg")
+                    .await?;
+            }
+        }
+
+        let mut extra_remote: Vec<String> = remote_names
+            .into_iter()
+            .filter(|name| !desired_names.contains(name))
+            .collect();
+        extra_remote.sort();
+        let mut lines = vec![
+            format!("server: {node_key}"),
+            format!("ready: {ready}"),
+            format!("failed: {failed}"),
+            format!("remote_only: {}", extra_remote.len()),
+        ];
+        if !extra_remote.is_empty() {
+            lines.push(format!(
+                "remote extra profiles: {}",
+                extra_remote.into_iter().take(20).collect::<Vec<String>>().join(", ")
+            ));
+        }
+        Ok((0, lines.join("\n")))
+    }
+}
+
 #[derive(Clone)]
 struct RuntimeApi {
     ctx: DriverContext,
@@ -1634,11 +1951,71 @@ impl ProvisioningService for ProvisioningApi {
         request: Request<ReconcileNodeRequest>,
     ) -> Result<Response<StartOperationResponse>, Status> {
         let req = request.into_inner();
-        Ok(Response::new(self.ctx.state.start_operation(
+        let node_key = req.node_key.trim().to_string();
+        if node_key.is_empty() {
+            return Err(Status::invalid_argument("node_key is required"));
+        }
+        let Some(row) = self.ctx.fetch_server_row(&node_key).await? else {
+            return Ok(Response::new(self.ctx.state.finish_operation(
+                "reconcile_node",
+                &node_key,
+                "",
+                "FAILED",
+                &format!("Server {node_key} not found"),
+            )));
+        };
+        let protocol_kinds = self.ctx.parse_protocol_kinds(
+            row.try_get::<_, Option<String>>("protocol_kinds")
+                .ok()
+                .flatten()
+                .unwrap_or_default()
+                .as_str(),
+        );
+        if protocol_kinds.is_empty() {
+            return Ok(Response::new(self.ctx.state.finish_operation(
+                "reconcile_node",
+                &node_key,
+                "",
+                "SUCCEEDED",
+                &format!("server: {node_key}\nno managed protocols"),
+            )));
+        }
+        let Some(target) = self.ctx.agent_target(&node_key) else {
+            return Ok(Response::new(self.ctx.state.finish_operation(
+                "reconcile_node",
+                &node_key,
+                "",
+                "FAILED",
+                "no node-agent target configured",
+            )));
+        };
+
+        let mut overall_code = 0;
+        let mut parts: Vec<String> = Vec::new();
+        if protocol_kinds.iter().any(|item| item == "xray") {
+            let (code, out) = self.reconcile_xray_on_node(&node_key, target).await?;
+            overall_code = overall_code.max(code);
+            parts.push("[xray]".to_string());
+            parts.push(out.trim().to_string());
+        }
+        if protocol_kinds.iter().any(|item| item == "awg") {
+            let (code, out) = self.reconcile_awg_on_node(&node_key, target).await?;
+            overall_code = overall_code.max(code);
+            parts.push("[awg]".to_string());
+            parts.push(out.trim().to_string());
+        }
+        let status = if overall_code == 0 { "SUCCEEDED" } else { "FAILED" };
+        let message = if parts.is_empty() {
+            format!("server: {node_key}\nno managed protocols")
+        } else {
+            parts.join("\n\n")
+        };
+        Ok(Response::new(self.ctx.state.finish_operation(
             "reconcile_node",
-            &req.node_key,
+            &node_key,
             "",
-            "reconcile_node queued by skeleton driver",
+            status,
+            &message,
         )))
     }
 
@@ -1647,11 +2024,113 @@ impl ProvisioningService for ProvisioningApi {
         request: Request<ReconcileProfileRequest>,
     ) -> Result<Response<StartOperationResponse>, Status> {
         let req = request.into_inner();
-        Ok(Response::new(self.ctx.state.start_operation(
+        let profile_name = req.profile_name.trim().to_string();
+        if profile_name.is_empty() {
+            return Err(Status::invalid_argument("profile_name is required"));
+        }
+        let client = self.ctx.db_client().await?;
+        let exists = client
+            .query_opt("SELECT name FROM profiles WHERE name = $1", &[&profile_name])
+            .await
+            .map_err(|err| Status::internal(format!("failed to query profile: {err}")))?;
+        if exists.is_none() {
+            return Ok(Response::new(self.ctx.state.finish_operation(
+                "reconcile_profile",
+                "",
+                &profile_name,
+                "FAILED",
+                &format!("profile {profile_name} not found"),
+            )));
+        }
+
+        let profile_codes_rows = client
+            .query(
+                "SELECT access_code FROM profile_access_methods WHERE profile_name = $1 ORDER BY access_code",
+                &[&profile_name],
+            )
+            .await
+            .map_err(|err| Status::internal(format!("failed to query profile access methods: {err}")))?;
+        let profile_codes: Vec<String> = profile_codes_rows
+            .into_iter()
+            .filter_map(|row| {
+                row.try_get::<_, Option<String>>("access_code")
+                    .ok()
+                    .flatten()
+                    .map(|value| value.trim().to_lowercase())
+                    .filter(|value| !value.is_empty())
+            })
+            .collect();
+
+        let servers = self.ctx.list_server_rows(false).await?;
+        let mut target_node_keys = HashSet::new();
+        for row in servers {
+            let node_key = row
+                .try_get::<_, Option<String>>("key")
+                .ok()
+                .flatten()
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            if node_key.is_empty() {
+                continue;
+            }
+            let protocol_kinds = self.ctx.parse_protocol_kinds(
+                row.try_get::<_, Option<String>>("protocol_kinds")
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default()
+                    .as_str(),
+            );
+            let wants_xray = protocol_kinds.iter().any(|item| item == "xray")
+                && profile_codes
+                    .iter()
+                    .any(|code| Self::matches_access_code(&node_key, "xray", code));
+            let wants_awg = protocol_kinds.iter().any(|item| item == "awg")
+                && profile_codes
+                    .iter()
+                    .any(|code| Self::matches_access_code(&node_key, "awg", code));
+            if wants_xray || wants_awg {
+                target_node_keys.insert(node_key);
+            }
+        }
+        if target_node_keys.is_empty() {
+            return Ok(Response::new(self.ctx.state.finish_operation(
+                "reconcile_profile",
+                "",
+                &profile_name,
+                "SUCCEEDED",
+                &format!("profile: {profile_name}\nno managed protocols"),
+            )));
+        }
+
+        let mut node_keys: Vec<String> = target_node_keys.into_iter().collect();
+        node_keys.sort();
+        let mut overall_failed = false;
+        let mut blocks = vec![format!("profile: {profile_name}")];
+        for node_key in node_keys {
+            let node_result = self
+                .reconcile_node(Request::new(ReconcileNodeRequest {
+                    node_key: node_key.clone(),
+                }))
+                .await?;
+            let operation_id = node_result.into_inner().operation_id;
+            let operation = self
+                .ctx
+                .state
+                .get_operation(operation_id.as_str())
+                .ok_or_else(|| Status::internal("reconcile_node operation not found"))?;
+            if operation.status != "SUCCEEDED" {
+                overall_failed = true;
+            }
+            blocks.push(format!("[{node_key}]\n{}", operation.progress_message.trim()));
+        }
+
+        Ok(Response::new(self.ctx.state.finish_operation(
             "reconcile_profile",
             "",
-            &req.profile_name,
-            "reconcile_profile queued by skeleton driver",
+            &profile_name,
+            if overall_failed { "FAILED" } else { "SUCCEEDED" },
+            &blocks.join("\n\n"),
         )))
     }
 

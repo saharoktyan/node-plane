@@ -10,11 +10,11 @@ from config import PARSE_MODE
 from i18n import get_locale_for_update, t
 from services.app_settings import set_initial_setup_state
 from services.node_driver import get_node_driver
+from services.provisioning_state import delete_profile_server_state, upsert_profile_server_state
 from services.server_registry import list_servers, update_server_fields, upsert_server
 from services.ssh_keys import render_public_key_guide
 from services.traffic_usage import debug_awg_traffic_report, debug_profile_traffic_report, run_collect_traffic_once
 from services.xray import debug_xray_telemetry_report
-from services import xray as xray_svc
 from services.profile_state import ensure_xray_caps, profile_store
 from utils.security import redact_sensitive_text, validate_profile_name, validate_server_field, validate_server_key
 from config import APP_VERSION
@@ -43,8 +43,21 @@ def add_cmd(update: Update, context: CallbackContext) -> None:
 
     update.effective_message.reply_text(t(lang, "admin.cmd.add_creating", name=name))
     default_server_key = next((server.key for server in list_servers() if server.enabled and "xray" in server.protocol_kinds), "")
-    code, out, ensured_uuid, ensured_short_id = xray_svc.ensure_user(name, default_server_key, uuid_value=uuid_val)
-    if code != 0 or not ensured_uuid:
+    if not default_server_key:
+        update.effective_message.reply_text(
+            t(lang, "admin.cmd.error", output=_safe_output("no enabled xray server configured")),
+            parse_mode=PARSE_MODE,
+            reply_markup=kb_back_menu(lang),
+        )
+        return
+    operation = get_node_driver().ensure_profile_on_node(
+        default_server_key,
+        name,
+        ["xray"],
+        xray_uuid=uuid_val,
+    )
+    if operation.status != "SUCCEEDED":
+        out = operation.progress_message or operation.status
         update.effective_message.reply_text(
             t(lang, "admin.cmd.error", output=_safe_output(out)),
             parse_mode=PARSE_MODE,
@@ -52,11 +65,8 @@ def add_cmd(update: Update, context: CallbackContext) -> None:
         )
         return
 
-    ensure_xray_caps(name, ensured_uuid)
-    if ensured_short_id:
-        from services.profile_state import set_xray_short_id
-
-        set_xray_short_id(name, ensured_short_id, server_key=default_server_key)
+    ensure_xray_caps(name, uuid_val)
+    upsert_profile_server_state(name, default_server_key, "xray", status="provisioned", remote_id=uuid_val, last_error=None)
     update.effective_message.reply_text(
         f"✅ {name}",
         parse_mode=PARSE_MODE,
@@ -77,12 +87,28 @@ def del_cmd(update: Update, context: CallbackContext) -> None:
     except ValueError as exc:
         update.effective_message.reply_text(str(exc), reply_markup=kb_back_menu(lang))
         return
-    code, out = xray_svc.delete_user(name)
-    if code == 0:
+    failed = []
+    deleted = []
+    for server in list_servers():
+        if not server.enabled or "xray" not in server.protocol_kinds:
+            continue
+        operation = get_node_driver().delete_profile_from_node(server.key, name, ["xray"])
+        if operation.status == "SUCCEEDED":
+            delete_profile_server_state(name, server.key, "xray")
+            deleted.append(server.key)
+        else:
+            failed.append(f"{server.key}: {_safe_output(operation.progress_message or operation.status)}")
+    if failed:
+        update.effective_message.reply_text(
+            t(lang, "admin.cmd.error", output=_safe_output("\n".join(failed))),
+            parse_mode=PARSE_MODE,
+            reply_markup=kb_back_menu(lang),
+        )
+    elif deleted:
         update.effective_message.reply_text(t(lang, "admin.cmd.deleted"), reply_markup=kb_back_menu(lang))
     else:
         update.effective_message.reply_text(
-            t(lang, "admin.cmd.error", output=_safe_output(out)),
+            t(lang, "admin.cmd.error", output=_safe_output("no xray servers configured")),
             parse_mode=PARSE_MODE,
             reply_markup=kb_back_menu(lang),
         )
