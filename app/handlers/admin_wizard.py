@@ -76,19 +76,6 @@ def _extract_awg_vpn_from_operation(operation) -> str:
         if vpn_uri.startswith("vpn://"):
             return vpn_uri
     message = str(getattr(operation, "progress_message", "") or "")
-    for line in message.splitlines():
-        if not line.startswith("awg_payload_json:"):
-            continue
-        raw = line.split(":", 1)[1].strip()
-        if not raw:
-            continue
-        try:
-            data = json.loads(raw)
-        except Exception:
-            continue
-        vpn_uri = str((data or {}).get("vpn_uri") or "").strip()
-        if vpn_uri.startswith("vpn://"):
-            return vpn_uri
     match = _AWG_VPN_RE.search(message)
     return match.group(1) if match else ""
 
@@ -103,19 +90,6 @@ def _extract_awg_wg_conf_from_operation(operation) -> str:
         if wg_conf:
             return wg_conf
     message = str(getattr(operation, "progress_message", "") or "")
-    for line in message.splitlines():
-        if not line.startswith("awg_payload_json:"):
-            continue
-        raw = line.split(":", 1)[1].strip()
-        if not raw:
-            continue
-        try:
-            data = json.loads(raw)
-        except Exception:
-            continue
-        wg_conf = str((data or {}).get("wg_conf") or "").strip()
-        if wg_conf:
-            return wg_conf
     return _extract_wg_conf(message)
 
 

@@ -1836,7 +1836,6 @@ impl ProvisioningService for ProvisioningApi {
                         Ok(result) => {
                             lines.push(format!("awg: {}", result.summary));
                             if !result.payload_json.trim().is_empty() {
-                                lines.push(format!("awg_payload_json: {}", result.payload_json.trim()));
                                 result_json = result.payload_json.trim().to_string();
                             }
                             if let Err(err) = self

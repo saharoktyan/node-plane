@@ -311,7 +311,6 @@ class InProcessNodeDriverClient(NodeDriverClient):
                     },
                     ensure_ascii=True,
                 )
-                lines.append(f"awg_payload_json: {payload}")
                 awg_result_json = payload
             else:
                 failed = True
