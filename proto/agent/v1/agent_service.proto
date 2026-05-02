@@ -14,6 +14,7 @@ service NodeAgentService {
   rpc OpenPorts(OpenPortsRequest) returns (OpenPortsResponse);
   rpc SyncRuntimeFiles(SyncRuntimeFilesRequest) returns (SyncRuntimeFilesResponse);
   rpc SyncXray(SyncXrayRequest) returns (SyncXrayResponse);
+  rpc InstallDocker(InstallDockerRequest) returns (InstallDockerResponse);
 }
 
 message ListRemoteProfilesRequest {
@@ -77,4 +78,10 @@ message SyncXrayRequest {
 message SyncXrayResponse {
   string summary = 1;
   string generated_json = 2;
+}
+
+message InstallDockerRequest {}
+
+message InstallDockerResponse {
+  string summary = 1;
 }

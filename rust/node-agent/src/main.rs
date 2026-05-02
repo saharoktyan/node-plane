@@ -21,12 +21,74 @@ pub mod agent {
 
 use agent::v1::node_agent_service_server::{NodeAgentService, NodeAgentServiceServer};
 use agent::v1::{
-    AgentEmpty, CheckPortsRequest, CheckPortsResponse, DiagnosticItem, ListRemoteProfilesRequest,
-    ListRemoteProfilesResponse, LocalHealth, PortStatus, RemoteProfileRecord,
-    RunDiagnosticsRequest, RunDiagnosticsResponse, RuntimeFacts, SyncNodeEnvRequest,
-    SyncNodeEnvResponse, OpenPortsRequest, OpenPortsResponse, RuntimeFileSpec,
-    SyncRuntimeFilesRequest, SyncRuntimeFilesResponse, SyncXrayRequest, SyncXrayResponse,
+    AgentEmpty, CheckPortsRequest, CheckPortsResponse, DiagnosticItem, InstallDockerRequest,
+    InstallDockerResponse, ListRemoteProfilesRequest, ListRemoteProfilesResponse, LocalHealth,
+    OpenPortsRequest, OpenPortsResponse, PortStatus, RemoteProfileRecord, RunDiagnosticsRequest,
+    RunDiagnosticsResponse, RuntimeFacts, RuntimeFileSpec, SyncNodeEnvRequest,
+    SyncNodeEnvResponse, SyncRuntimeFilesRequest, SyncRuntimeFilesResponse, SyncXrayRequest,
+    SyncXrayResponse,
 };
+
+const INSTALL_DOCKER_SCRIPT: &str = r#"set -euo pipefail
+export DEBIAN_FRONTEND=noninteractive
+
+apt_wait() {
+  local timeout="${1:-300}"
+  local elapsed=0
+  while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 \
+    || fuser /var/lib/dpkg/lock >/dev/null 2>&1 \
+    || fuser /var/lib/apt/lists/lock >/dev/null 2>&1 \
+    || fuser /var/cache/apt/archives/lock >/dev/null 2>&1; do
+    if (( elapsed >= timeout )); then
+      echo "Timed out waiting for apt/dpkg lock." >&2
+      return 1
+    fi
+    sleep 5
+    elapsed=$((elapsed + 5))
+  done
+}
+
+apt_run() {
+  apt_wait
+  apt-get "$@"
+}
+
+if ! command -v apt-get >/dev/null 2>&1; then
+  echo "apt-get is not available. Automatic Docker install is supported only on Debian/Ubuntu." >&2
+  exit 1
+fi
+
+if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+  echo "DOCKER_INSTALL_STATUS|ok|available"
+  exit 0
+fi
+if command -v sudo >/dev/null 2>&1 && sudo docker info >/dev/null 2>&1; then
+  echo "DOCKER_INSTALL_STATUS|ok|available_via_sudo"
+  exit 0
+fi
+
+echo "Updating package index..."
+apt_run update
+
+echo "Installing Docker..."
+apt_run install -y docker.io
+apt-cache show docker-compose-plugin >/dev/null 2>&1 && apt_run install -y docker-compose-plugin || true
+
+echo "Starting Docker..."
+systemctl enable --now docker >/dev/null 2>&1 || service docker start >/dev/null 2>&1 || true
+
+if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+  echo "DOCKER_INSTALL_STATUS|ok|available"
+  exit 0
+fi
+if command -v sudo >/dev/null 2>&1 && sudo docker info >/dev/null 2>&1; then
+  echo "DOCKER_INSTALL_STATUS|ok|available_via_sudo"
+  exit 0
+fi
+
+echo "DOCKER_INSTALL_STATUS|error|unavailable"
+exit 1
+"#;
 
 #[derive(Debug, Clone, Deserialize)]
 struct AgentConfig {
@@ -433,6 +495,31 @@ impl AgentState {
         })
     }
 
+    fn install_docker(&self) -> Result<InstallDockerResponse, Status> {
+        let output = Command::new("bash")
+            .arg("-c")
+            .arg(INSTALL_DOCKER_SCRIPT)
+            .output()
+            .map_err(|err| Status::internal(format!("failed to execute docker install script: {err}")))?;
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let summary = if stderr.is_empty() {
+            stdout
+        } else if stdout.is_empty() {
+            stderr
+        } else {
+            format!("{stdout}\n{stderr}")
+        };
+        if output.status.success() {
+            return Ok(InstallDockerResponse { summary });
+        }
+        Err(Status::failed_precondition(if summary.is_empty() {
+            "docker install failed".to_string()
+        } else {
+            summary
+        }))
+    }
+
     fn open_ports(&self, request: OpenPortsRequest) -> Result<OpenPortsResponse, Status> {
         let ufw_check = Command::new("ufw").arg("status").output();
         if ufw_check.is_err() {
@@ -567,6 +654,13 @@ impl NodeAgentService for NodeAgentApi {
         request: Request<SyncXrayRequest>,
     ) -> Result<Response<SyncXrayResponse>, Status> {
         Ok(Response::new(self.state.sync_xray(request.into_inner())?))
+    }
+
+    async fn install_docker(
+        &self,
+        _request: Request<InstallDockerRequest>,
+    ) -> Result<Response<InstallDockerResponse>, Status> {
+        Ok(Response::new(self.state.install_docker()?))
     }
 }
 

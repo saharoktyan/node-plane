@@ -2,8 +2,9 @@ use tonic::transport::Channel;
 
 use crate::agent::v1::node_agent_service_client::NodeAgentServiceClient;
 use crate::agent::v1::{
-    AgentEmpty, CheckPortsRequest, CheckPortsResponse, ListRemoteProfilesRequest, LocalHealth,
-    OpenPortsRequest, OpenPortsResponse, PortCheckSpec, RemoteProfileRecord,
+    AgentEmpty, CheckPortsRequest, CheckPortsResponse, InstallDockerRequest,
+    InstallDockerResponse, ListRemoteProfilesRequest, LocalHealth, OpenPortsRequest,
+    OpenPortsResponse, PortCheckSpec, RemoteProfileRecord,
     RunDiagnosticsRequest, RunDiagnosticsResponse, RuntimeFacts, RuntimeFileSpec,
     SyncNodeEnvRequest, SyncNodeEnvResponse, SyncRuntimeFilesRequest,
     SyncRuntimeFilesResponse, SyncXrayRequest, SyncXrayResponse,
@@ -131,6 +132,14 @@ impl AgentTransport {
                 image: image.to_string(),
             })
             .await?;
+        Ok(response.into_inner())
+    }
+
+    pub async fn install_docker(&self) -> Result<InstallDockerResponse, tonic::Status> {
+        let mut client = self.client().await.map_err(|err| {
+            tonic::Status::unavailable(format!("failed to connect to node agent: {err}"))
+        })?;
+        let response = client.install_docker(InstallDockerRequest {}).await?;
         Ok(response.into_inner())
     }
 }

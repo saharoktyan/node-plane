@@ -1206,6 +1206,25 @@ impl NodeService for NodeApi {
         request: Request<InstallDockerRequest>,
     ) -> Result<Response<StartOperationResponse>, Status> {
         let req = request.into_inner();
+        if let Some(target) = self.ctx.agent_target(&req.node_key) {
+            let transport = agent_transport::AgentTransport::new(target);
+            let summary = match transport.install_docker().await {
+                Ok(result) => result.summary,
+                Err(err) => format!("agent docker install failed: {err}"),
+            };
+            let status = if summary.starts_with("agent docker install failed:") {
+                "FAILED"
+            } else {
+                "SUCCEEDED"
+            };
+            return Ok(Response::new(self.ctx.state.finish_operation(
+                "install_docker",
+                &req.node_key,
+                "",
+                status,
+                &summary,
+            )));
+        }
         Ok(Response::new(self.ctx.state.start_operation(
             "install_docker",
             &req.node_key,

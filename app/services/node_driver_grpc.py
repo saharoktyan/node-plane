@@ -329,7 +329,12 @@ class GrpcNodeDriverClient(NodeDriverClient):
             )
         except Exception as exc:
             return self._failed_operation("install_docker", exc, node_key=node_key)
-        return self._start_operation("install_docker", response, node_key=node_key)
+        operation = self._start_operation("install_docker", response, node_key=node_key)
+        if operation.operation_id:
+            fetched = self.get_operation(operation.operation_id)
+            if fetched is not None:
+                return fetched
+        return operation
 
     def bootstrap_node(self, node_key: str, preserve_config: bool = False) -> DriverOperation:
         self._ensure_client()

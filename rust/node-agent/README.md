@@ -13,6 +13,7 @@ Current scope:
 - writes `node.env` from central-driver payloads;
 - writes arbitrary runtime file bundles from central-driver payloads;
 - runs local `sync-xray.sh` and returns generated Xray settings;
+- installs Docker on Debian/Ubuntu hosts when requested by the central driver;
 - runs a heartbeat loop.
 
 This crate is still a scaffold, but it is now usable as a local read-only
@@ -47,3 +48,4 @@ Current RPC surface:
 - `SyncNodeEnv`
 - `SyncRuntimeFiles`
 - `SyncXray`
+- `InstallDocker`
