@@ -118,13 +118,7 @@ class InProcessNodeDriverClient(NodeDriverClient):
 
         code, out = sync_server_node_env(node_key)
         if code != 0:
-            return _operation(
-                "sync_node_env",
-                node_key=node_key,
-                status="FAILED",
-                message=out,
-                error=DriverError(code="sync_node_env_failed", summary=f"Node env sync failed for {node_key}", detail=out),
-            )
+            return _operation("sync_node_env", node_key=node_key, status="FAILED", message=out)
         return _operation("sync_node_env", node_key=node_key, status="SUCCEEDED", message=out)
 
     def sync_runtime(self, node_key: str) -> DriverOperation:
@@ -132,13 +126,7 @@ class InProcessNodeDriverClient(NodeDriverClient):
 
         code, out = sync_server_runtime(node_key)
         if code != 0:
-            return _operation(
-                "sync_runtime",
-                node_key=node_key,
-                status="FAILED",
-                message=out,
-                error=DriverError(code="sync_runtime_failed", summary=f"Runtime sync failed for {node_key}", detail=out),
-            )
+            return _operation("sync_runtime", node_key=node_key, status="FAILED", message=out)
         return _operation("sync_runtime", node_key=node_key, status="SUCCEEDED", message=out)
 
     def sync_xray(self, node_key: str) -> DriverOperation:
@@ -146,13 +134,7 @@ class InProcessNodeDriverClient(NodeDriverClient):
 
         code, out = sync_xray_server_settings(node_key)
         if code != 0:
-            return _operation(
-                "sync_xray",
-                node_key=node_key,
-                status="FAILED",
-                message=out,
-                error=DriverError(code="sync_xray_failed", summary=f"Xray sync failed for {node_key}", detail=out),
-            )
+            return _operation("sync_xray", node_key=node_key, status="FAILED", message=out)
         return _operation("sync_xray", node_key=node_key, status="SUCCEEDED", message=out)
 
     def probe_node(self, node_key: str) -> DriverOperation:
@@ -160,13 +142,7 @@ class InProcessNodeDriverClient(NodeDriverClient):
 
         code, out = probe_server(node_key)
         if code != 0:
-            return _operation(
-                "probe_node",
-                node_key=node_key,
-                status="FAILED",
-                message=out,
-                error=DriverError(code="probe_node_failed", summary=f"Probe failed for {node_key}", detail=out),
-            )
+            return _operation("probe_node", node_key=node_key, status="FAILED", message=out)
         return _operation("probe_node", node_key=node_key, status="SUCCEEDED", message=out)
 
     def check_ports(self, node_key: str) -> DriverOperation:
@@ -174,13 +150,7 @@ class InProcessNodeDriverClient(NodeDriverClient):
 
         code, out = check_server_ports(node_key)
         if code != 0:
-            return _operation(
-                "check_ports",
-                node_key=node_key,
-                status="FAILED",
-                message=out,
-                error=DriverError(code="check_ports_failed", summary=f"Port check failed for {node_key}", detail=out),
-            )
+            return _operation("check_ports", node_key=node_key, status="FAILED", message=out)
         return _operation("check_ports", node_key=node_key, status="SUCCEEDED", message=out)
 
     def open_ports(self, node_key: str) -> DriverOperation:
@@ -188,13 +158,7 @@ class InProcessNodeDriverClient(NodeDriverClient):
 
         code, out = open_server_ports(node_key)
         if code != 0:
-            return _operation(
-                "open_ports",
-                node_key=node_key,
-                status="FAILED",
-                message=out,
-                error=DriverError(code="open_ports_failed", summary=f"Open ports failed for {node_key}", detail=out),
-            )
+            return _operation("open_ports", node_key=node_key, status="FAILED", message=out)
         return _operation("open_ports", node_key=node_key, status="SUCCEEDED", message=out)
 
     def install_docker(self, node_key: str) -> DriverOperation:
@@ -202,13 +166,7 @@ class InProcessNodeDriverClient(NodeDriverClient):
 
         code, out = install_server_docker(node_key)
         if code != 0:
-            return _operation(
-                "install_docker",
-                node_key=node_key,
-                status="FAILED",
-                message=out,
-                error=DriverError(code="install_docker_failed", summary=f"Docker install failed for {node_key}", detail=out),
-            )
+            return _operation("install_docker", node_key=node_key, status="FAILED", message=out)
         return _operation("install_docker", node_key=node_key, status="SUCCEEDED", message=out)
 
     def bootstrap_node(self, node_key: str, preserve_config: bool = False) -> DriverOperation:
@@ -216,13 +174,7 @@ class InProcessNodeDriverClient(NodeDriverClient):
 
         code, out = bootstrap_server(node_key, preserve_config=preserve_config)
         if code != 0:
-            return _operation(
-                "bootstrap_node",
-                node_key=node_key,
-                status="FAILED",
-                message=out,
-                error=DriverError(code="bootstrap_node_failed", summary=f"Bootstrap failed for {node_key}", detail=out),
-            )
+            return _operation("bootstrap_node", node_key=node_key, status="FAILED", message=out)
         return _operation("bootstrap_node", node_key=node_key, status="SUCCEEDED", message=out)
 
     def reinstall_node(self, node_key: str, preserve_config: bool = False) -> DriverOperation:
@@ -230,13 +182,7 @@ class InProcessNodeDriverClient(NodeDriverClient):
 
         code, out = reinstall_server(node_key, preserve_config=preserve_config)
         if code != 0:
-            return _operation(
-                "reinstall_node",
-                node_key=node_key,
-                status="FAILED",
-                message=out,
-                error=DriverError(code="reinstall_node_failed", summary=f"Reinstall failed for {node_key}", detail=out),
-            )
+            return _operation("reinstall_node", node_key=node_key, status="FAILED", message=out)
         return _operation("reinstall_node", node_key=node_key, status="SUCCEEDED", message=out)
 
     def delete_runtime(self, node_key: str, preserve_config: bool = False) -> DriverOperation:
@@ -244,13 +190,7 @@ class InProcessNodeDriverClient(NodeDriverClient):
 
         code, out = delete_server_runtime(node_key, preserve_config=preserve_config)
         if code != 0:
-            return _operation(
-                "delete_runtime",
-                node_key=node_key,
-                status="FAILED",
-                message=out,
-                error=DriverError(code="delete_runtime_failed", summary=f"Delete runtime failed for {node_key}", detail=out),
-            )
+            return _operation("delete_runtime", node_key=node_key, status="FAILED", message=out)
         return _operation("delete_runtime", node_key=node_key, status="SUCCEEDED", message=out)
 
     def full_cleanup_node(self, node_key: str, remove_ssh_key: bool = False) -> DriverOperation:
@@ -258,13 +198,7 @@ class InProcessNodeDriverClient(NodeDriverClient):
 
         code, out = full_cleanup_server(node_key, remove_ssh_key=remove_ssh_key)
         if code != 0:
-            return _operation(
-                "full_cleanup_node",
-                node_key=node_key,
-                status="FAILED",
-                message=out,
-                error=DriverError(code="full_cleanup_node_failed", summary=f"Full cleanup failed for {node_key}", detail=out),
-            )
+            return _operation("full_cleanup_node", node_key=node_key, status="FAILED", message=out)
         return _operation("full_cleanup_node", node_key=node_key, status="SUCCEEDED", message=out)
 
     def ensure_profile_on_node(
