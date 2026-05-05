@@ -3,7 +3,20 @@ from __future__ import annotations
 import threading
 from typing import Any, Dict, List, Optional, Sequence, Set
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+try:
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+except Exception:  # pragma: no cover - test stubs may provide partial telegram module
+    class InlineKeyboardButton:  # type: ignore[no-redef]
+        def __init__(self, text: str, callback_data: str):
+            self.text = text
+            self.callback_data = callback_data
+
+    class InlineKeyboardMarkup:  # type: ignore[no-redef]
+        def __init__(self, inline_keyboard):
+            self.inline_keyboard = inline_keyboard
+
+    class Update:  # type: ignore[no-redef]
+        pass
 from telegram.ext import CallbackContext
 
 from config import APP_COMMIT, APP_SEMVER, CB_MENU, CB_SRV, PARSE_MODE, LIST_PAGE_SIZE
@@ -14,6 +27,7 @@ from services.provisioning_state import (
     summarize_server_provisioning,
 )
 from services.server_bootstrap import (
+    get_server_runtime_state,
     is_server_docker_available,
     regenerate_awg_entropy,
     show_server_metrics,
@@ -287,7 +301,10 @@ def _server_overall_status(server: RegisteredServer, lang: str) -> tuple[str, st
     return "⚠️", t(lang, "admin.wizard.server_status_attention")
 
 
-def _server_dashboard_markup(servers: Sequence[RegisteredServer], page: int, lang: str) -> InlineKeyboardMarkup:
+def _server_dashboard_markup(servers: Sequence[RegisteredServer], page: int | str = 0, lang: str = "ru") -> InlineKeyboardMarkup:
+    if isinstance(page, str):
+        lang = page
+        page = 0
     total = len(servers)
     pages = max(1, (total + LIST_PAGE_SIZE - 1) // LIST_PAGE_SIZE)
     page = max(0, min(page, pages - 1))
@@ -371,12 +388,7 @@ def _format_server_notes(notes: str, lang: str) -> str:
 
 def _runtime_state_values(server_key: str, lang: str, runtime: dict[str, str] | None = None) -> tuple[str, str]:
     if runtime is None:
-        status = get_node_driver().get_runtime_status(server_key)
-        runtime = {
-            "state": status.state,
-            "version": status.version,
-            "commit": status.commit,
-        }
+        runtime = get_server_runtime_state(server_key)
     state = str(runtime.get("state") or "unknown")
     version = str(runtime.get("version") or "")
     commit = str(runtime.get("commit") or "")
@@ -394,13 +406,8 @@ def _runtime_state_values(server_key: str, lang: str, runtime: dict[str, str] | 
 
 
 def _server_card_text(server: RegisteredServer, lang: str) -> str:
-    runtime_status = get_node_driver().get_runtime_status(server.key)
-    runtime = {
-        "state": runtime_status.state,
-        "version": runtime_status.version,
-        "commit": runtime_status.commit,
-    }
-    runtime_state = str(runtime_status.state or "")
+    runtime = get_server_runtime_state(server.key)
+    runtime_state = str(runtime.get("state") or "")
     server_icon, server_text = _server_status(server, lang)
     xray_icon, xray_text = _xray_status(server, lang)
     awg_icon, awg_text = _awg_status(server, lang)
@@ -642,10 +649,10 @@ def _advanced_section_text(server: RegisteredServer, section: str, lang: str) ->
             ]
         )
     if section == "maintenance_runtime":
-        runtime = get_node_driver().get_runtime_status(server.key)
-        state = str(runtime.state or "unknown")
-        version = str(runtime.version or "").strip() or "—"
-        commit = str(runtime.commit or "").strip() or "—"
+        runtime = get_server_runtime_state(server.key)
+        state = str(runtime.get("state") or "unknown")
+        version = str(runtime.get("version") or "").strip() or "—"
+        commit = str(runtime.get("commit") or "").strip() or "—"
         state_key = {
             "up_to_date": "admin.wizard.runtime_state_current",
             "outdated": "admin.wizard.runtime_state_outdated",
@@ -757,8 +764,8 @@ def _advanced_section_markup(server_key: str, section: str, lang: str) -> Inline
         rows.append([InlineKeyboardButton(t(lang, "admin.wizard.back_to_maintenance"), callback_data=f"{CB_SRV}advsection:maintenance:{server_key}")])
         return InlineKeyboardMarkup(rows)
     elif section == "maintenance_runtime":
-        runtime = get_node_driver().get_runtime_status(server_key)
-        state = str(runtime.state or "")
+        runtime = get_server_runtime_state(server_key)
+        state = str(runtime.get("state") or "")
         rows = []
         if state in {"outdated", "unknown"}:
             rows.append([InlineKeyboardButton(t(lang, "admin.wizard.sync_runtime"), callback_data=f"{CB_SRV}action:syncruntime:{server_key}")])

@@ -3,7 +3,30 @@ from __future__ import annotations
 
 from typing import List, Optional, Sequence, Tuple
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+try:
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+except Exception:  # pragma: no cover - test stubs may provide partial telegram module
+    class InlineKeyboardButton:  # type: ignore[no-redef]
+        def __init__(self, text: str, callback_data: str):
+            self.text = text
+            self.callback_data = callback_data
+
+    class InlineKeyboardMarkup:  # type: ignore[no-redef]
+        def __init__(self, inline_keyboard):
+            self.inline_keyboard = inline_keyboard
+
+
+if InlineKeyboardButton is object:  # pragma: no cover - compatibility with minimal unit-test stubs
+    class InlineKeyboardButton:  # type: ignore[no-redef]
+        def __init__(self, text: str, callback_data: str):
+            self.text = text
+            self.callback_data = callback_data
+
+
+if InlineKeyboardMarkup is object:  # pragma: no cover - compatibility with minimal unit-test stubs
+    class InlineKeyboardMarkup:  # type: ignore[no-redef]
+        def __init__(self, inline_keyboard):
+            self.inline_keyboard = inline_keyboard
 
 from config import CB_GETKEY, CB_MENU, CB_CFG, CB_SRV
 from domain.servers import get_access_methods_for_kind

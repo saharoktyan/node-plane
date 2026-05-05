@@ -1461,7 +1461,10 @@ def detect_locale(update: Update | None) -> str:
 def get_user_locale(user_id: int | None, fallback: str | None = None) -> str:
     if user_id is None:
         return normalize_locale(fallback)
-    db = user_store.read()
+    try:
+        db = user_store.read()
+    except Exception:
+        return normalize_locale(fallback)
     rec = db.get(str(user_id)) if isinstance(db, dict) else None
     if isinstance(rec, dict):
         return normalize_locale(rec.get("locale") or fallback)
@@ -1475,5 +1478,8 @@ def get_locale_for_update(update: Update | None) -> str:
 
 def set_user_locale(user_id: int, locale: str) -> str:
     normalized = normalize_locale(locale)
-    user_store.upsert_user(user_id, locale=normalized, locale_explicitly_selected=True)
+    try:
+        user_store.upsert_user(user_id, locale=normalized, locale_explicitly_selected=True)
+    except Exception:
+        pass
     return normalized

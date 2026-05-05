@@ -4,7 +4,20 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+try:
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+except Exception:  # pragma: no cover - test stubs may provide partial telegram module
+    class InlineKeyboardButton:  # type: ignore[no-redef]
+        def __init__(self, text: str, callback_data: str):
+            self.text = text
+            self.callback_data = callback_data
+
+    class InlineKeyboardMarkup:  # type: ignore[no-redef]
+        def __init__(self, inline_keyboard):
+            self.inline_keyboard = inline_keyboard
+
+    class Update:  # type: ignore[no-redef]
+        pass
 from telegram.ext import CallbackContext
 
 from config import ADMIN_IDS, APP_VERSION, CB_SRV, LIST_PAGE_SIZE, PARSE_MODE
@@ -45,6 +58,7 @@ from services.alerts import get_alerts_overview
 from services.backups import backup_token, create_backup, get_backup_info, get_backups_overview, list_backups, resolve_backup_token, restore_backup
 from services.node_driver import get_node_driver
 from services.provisioning_state import summarize_server_provisioning
+from services.server_bootstrap import get_server_runtime_state, get_servers_needing_runtime_sync
 from services.server_registry import list_servers
 from services.awg_profiles import list_awg_server_keys
 from services.ssh_keys import render_public_key_guide, render_public_key_summary
@@ -241,7 +255,7 @@ def _problem_server_keys() -> List[str]:
 
 
 def _runtime_drift_server_keys() -> List[str]:
-    return [node.node_key for node in get_node_driver().list_nodes_needing_runtime_sync()]
+    return [server.key for server in get_servers_needing_runtime_sync()]
 
 
 def _render_problem_servers(lang: str) -> tuple[str, InlineKeyboardMarkup]:
@@ -260,7 +274,7 @@ def _render_problem_servers(lang: str) -> tuple[str, InlineKeyboardMarkup]:
             continue
         reason = t(lang, "admin.status.problem_server_reason_bootstrap")
         if server.bootstrap_state == "bootstrapped":
-            runtime_state = get_node_driver().get_runtime_status(server.key).state
+            runtime_state = str(get_server_runtime_state(server.key).get("state") or "")
             xray_ready, reason_text = get_server_link_status(server.key) if "xray" in server.protocol_kinds else (True, "ok")
             if runtime_state in {"outdated", "unknown"}:
                 reason = t(lang, "admin.status.problem_server_reason_runtime_sync")
@@ -290,7 +304,7 @@ def _render_problem_servers(lang: str) -> tuple[str, InlineKeyboardMarkup]:
 
 
 def _render_runtime_sync_confirm(lang: str, back_callback: str = "menu:admin_status") -> tuple[str, InlineKeyboardMarkup]:
-    targets = get_node_driver().list_nodes_needing_runtime_sync()
+    targets = get_servers_needing_runtime_sync()
     if not targets:
         return (
             t(lang, "admin.status.runtime_sync_empty"),
@@ -301,7 +315,7 @@ def _render_runtime_sync_confirm(lang: str, back_callback: str = "menu:admin_sta
         "",
         t(lang, "admin.status.runtime_sync_confirm_intro", count=len(targets)),
     ]
-    lines.extend([f"• {node.flag} {node.title} ({node.node_key})" for node in targets[:10]])
+    lines.extend([f"• {node.flag} {node.title} ({node.key})" for node in targets[:10]])
     if len(targets) > 10:
         lines.append(t(lang, "admin.status.runtime_sync_confirm_more", count=len(targets) - 10))
     rows = [
@@ -812,7 +826,7 @@ def _admin_updates_markup(lang: str) -> InlineKeyboardMarkup:
         branch=str(overview.get("branch") or get_updates_branch()),
         driver_agents_setup_supported=bool(driver_agents_setup.get("supported")),
         driver_agents_setup_running=str(driver_agents_setup.get("last_run_status") or "") == "running",
-        runtime_sync_available=bool(get_node_driver().list_nodes_needing_runtime_sync()),
+        runtime_sync_available=bool(get_servers_needing_runtime_sync()),
         release_cleanup_available=bool(cleanup_overview.get("supported")),
         lang=lang,
     )
@@ -1832,7 +1846,7 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
                 branch=str(overview.get("branch") or get_updates_branch()),
                 driver_agents_setup_supported=bool(get_driver_agents_setup_overview().get("supported")),
                 driver_agents_setup_running=str(get_driver_agents_setup_overview().get("last_run_status") or "") == "running",
-                runtime_sync_available=bool(get_node_driver().list_nodes_needing_runtime_sync()),
+                runtime_sync_available=bool(get_servers_needing_runtime_sync()),
                 release_cleanup_available=bool(get_release_cleanup_overview().get("supported")),
                 lang=lang,
             ),

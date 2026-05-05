@@ -59,8 +59,6 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value
 
 def _ensure_runtime_schema() -> None:
     global _schema_ready
-    if _schema_ready:
-        return
     with _db.transaction() as conn:
         ensure_schema(conn)
     _schema_ready = True
