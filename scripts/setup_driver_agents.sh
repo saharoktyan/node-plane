@@ -269,6 +269,11 @@ if [[ ! -d "${APP_ROOT}/rust/node-driver" || ! -d "${APP_ROOT}/rust/node-agent" 
   exit 1
 fi
 
+PYTHON_BIN="python3"
+if [[ -x "${APP_ROOT}/.venv/bin/python" ]]; then
+  PYTHON_BIN="${APP_ROOT}/.venv/bin/python"
+fi
+
 echo "Using APP_ROOT=${APP_ROOT}"
 echo "Using ENV_FILE=${ENV_FILE}"
 echo "Binary source mode: ${BIN_SOURCE}"
@@ -417,7 +422,7 @@ EOF
 }
 
 list_remote_servers_tsv() {
-  PYTHONPATH="${APP_ROOT}/app" NODE_PLANE_APP_DIR="${APP_ROOT}" NODE_PLANE_SHARED_DIR="${SHARED_ROOT}" python3 - <<'PY'
+  PYTHONPATH="${APP_ROOT}/app" NODE_PLANE_APP_DIR="${APP_ROOT}" NODE_PLANE_SHARED_DIR="${SHARED_ROOT}" "$PYTHON_BIN" - <<'PY'
 from services.server_registry import list_servers
 
 for srv in list_servers(include_disabled=False):
@@ -444,7 +449,14 @@ PY
 
 deploy_agents() {
   local lines
-  lines="$(list_remote_servers_tsv || true)"
+  if ! lines="$(list_remote_servers_tsv)"; then
+    echo "Failed to query server registry from APP_ROOT=${APP_ROOT} using ${PYTHON_BIN}" >&2
+    if [[ $STRICT_MODE -eq 1 ]]; then
+      return 1
+    fi
+    echo "Skipping node-agent deploy (best-effort mode)." >&2
+    return 0
+  fi
   if [[ -z "$lines" ]]; then
     echo "No SSH-managed enabled servers found; skipping node-agent deploy."
     return 0
