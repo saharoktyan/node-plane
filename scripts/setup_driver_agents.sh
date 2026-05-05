@@ -526,15 +526,19 @@ deploy_agents() {
     echo
     echo "Deploying node-agent to ${server_key} (${target}:${ssh_port})..."
 
-    local -a ssh_opts=("-p" "$ssh_port" "-o" "BatchMode=yes" "-o" "StrictHostKeyChecking=${SSH_STRICT_HOST_KEY_CHECKING:-accept-new}")
+    local -a common_ssh_opts=("-o" "BatchMode=yes" "-o" "StrictHostKeyChecking=${SSH_STRICT_HOST_KEY_CHECKING:-accept-new}")
     if [[ -n "${SSH_KNOWN_HOSTS_PATH:-}" ]]; then
-      ssh_opts+=("-o" "UserKnownHostsFile=${SSH_KNOWN_HOSTS_PATH}")
+      common_ssh_opts+=("-o" "UserKnownHostsFile=${SSH_KNOWN_HOSTS_PATH}")
     fi
     if [[ -n "$target_key" ]]; then
-      ssh_opts+=("-i" "$target_key")
+      common_ssh_opts+=("-i" "$target_key")
     elif [[ -n "${SSH_KEY:-}" ]]; then
-      ssh_opts+=("-i" "${SSH_KEY}")
+      common_ssh_opts+=("-i" "${SSH_KEY}")
     fi
+
+    # Note: ssh uses -p for port, scp uses -P.
+    local -a ssh_opts=("-p" "$ssh_port" "${common_ssh_opts[@]}")
+    local -a scp_opts=("-P" "$ssh_port" "${common_ssh_opts[@]}")
 
     if [[ $DRY_RUN -eq 1 ]]; then
       if ! ssh "${ssh_opts[@]}" "$target" 'echo "node-plane-agent dry-run ok" >/dev/null'; then
@@ -562,7 +566,7 @@ deploy_agents() {
       continue
     fi
 
-    if ! scp "${ssh_opts[@]}" "$agent_bin_path" "${target}:/tmp/node-plane-agent"; then
+    if ! scp "${scp_opts[@]}" "$agent_bin_path" "${target}:/tmp/node-plane-agent"; then
       echo "Failed to copy agent binary to ${server_key}" >&2
       failed=$((failed + 1))
       continue
