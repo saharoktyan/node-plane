@@ -495,8 +495,28 @@ deploy_agents() {
   while IFS=$'\t' read -r server_key ssh_host ssh_port ssh_user ssh_key public_host; do
     [[ -z "$server_key" ]] && continue
     local target_host="$ssh_host"
-    local target="${ssh_user:+${ssh_user}@}${target_host}"
-    local reach_host="${public_host:-$ssh_host}"
+    local target_user="$ssh_user"
+    local target_key="$ssh_key"
+
+    # Backward-compat normalization for older/dirty registry rows.
+    # - If ssh_host already contains user@host, split it.
+    # - If ssh_user accidentally contains a key path, treat it as ssh_key.
+    if [[ "$target_host" == *"@"* ]]; then
+      if [[ -z "$target_user" ]]; then
+        target_user="${target_host%@*}"
+      fi
+      target_host="${target_host##*@}"
+    fi
+    if [[ -z "$target_key" && "$target_user" == /* ]]; then
+      target_key="$target_user"
+      target_user=""
+    fi
+
+    local target="${target_user:+${target_user}@}${target_host}"
+    local reach_host="${public_host:-$target_host}"
+    if [[ "$reach_host" == *"@"* ]]; then
+      reach_host="${reach_host##*@}"
+    fi
     mappings+=("${server_key}=${reach_host}:${AGENT_PORT}")
 
     echo
@@ -506,8 +526,8 @@ deploy_agents() {
     if [[ -n "${SSH_KNOWN_HOSTS_PATH:-}" ]]; then
       ssh_opts+=("-o" "UserKnownHostsFile=${SSH_KNOWN_HOSTS_PATH}")
     fi
-    if [[ -n "$ssh_key" ]]; then
-      ssh_opts+=("-i" "$ssh_key")
+    if [[ -n "$target_key" ]]; then
+      ssh_opts+=("-i" "$target_key")
     elif [[ -n "${SSH_KEY:-}" ]]; then
       ssh_opts+=("-i" "${SSH_KEY}")
     fi
@@ -588,6 +608,11 @@ EOF
     echo "node-agent is active on ${server_key}"
   done <<< "$lines"
 
+  if [[ $STRICT_MODE -eq 1 && $failed -gt 0 ]]; then
+    echo "node-agent deploy failures: ${failed}" >&2
+    return 1
+  fi
+
   if [[ ${#mappings[@]} -gt 0 ]]; then
     local mapping_csv
     mapping_csv="$(IFS=,; echo "${mappings[*]}")"
@@ -604,7 +629,6 @@ EOF
 
   if [[ $failed -gt 0 ]]; then
     if [[ $STRICT_MODE -eq 1 ]]; then
-      echo "node-agent deploy failures: ${failed}" >&2
       return 1
     fi
     echo "node-agent deploy completed with ${failed} failures (best-effort mode)."
