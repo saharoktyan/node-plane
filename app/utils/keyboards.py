@@ -245,6 +245,8 @@ def kb_admin_updates_menu(
     update_supported: bool,
     update_running: bool,
     branch: str,
+    driver_agents_setup_supported: bool = False,
+    driver_agents_setup_running: bool = False,
     runtime_sync_available: bool = False,
     release_cleanup_available: bool = False,
     lang: str = "ru",
@@ -263,6 +265,9 @@ def kb_admin_updates_menu(
     if update_supported:
         label = t(lang, "admin.updates.update_running") if update_running else t(lang, "admin.updates.update_latest")
         rows.append([InlineKeyboardButton(label, callback_data=f"{CB_MENU}admin_updates_run")])
+    if driver_agents_setup_supported:
+        setup_label = t(lang, "admin.updates.driver_agents_setup_running") if driver_agents_setup_running else t(lang, "admin.updates.driver_agents_setup_run")
+        rows.append([InlineKeyboardButton(setup_label, callback_data=f"{CB_MENU}admin_updates_driver_agents_setup")])
     if runtime_sync_available:
         rows.append([InlineKeyboardButton(t(lang, "admin.status.runtime_sync_button"), callback_data=f"{CB_MENU}admin_updates_runtime_sync")])
     rows.append([InlineKeyboardButton(t(lang, "menu.back"), callback_data=f"{CB_MENU}admin_settings")])

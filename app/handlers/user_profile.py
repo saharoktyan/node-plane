@@ -51,7 +51,15 @@ from services.ssh_keys import render_public_key_guide, render_public_key_summary
 from services.system_reset import run_factory_reset, run_full_remove
 from services.profile_state import ensure_telegram_profile, get_allowed_protocols, get_profile, get_profile_access_status, profile_store, user_store, utcnow
 from services.release_cleanup import get_release_cleanup_overview, run_release_cleanup
-from services.updates import check_for_updates, get_updates_menu_emoji, get_updates_overview, list_available_versions, schedule_update
+from services.updates import (
+    check_for_updates,
+    get_driver_agents_setup_overview,
+    get_updates_menu_emoji,
+    get_updates_overview,
+    list_available_versions,
+    schedule_driver_agents_setup,
+    schedule_update,
+)
 from services.xray import get_server_link_status
 from ui.user_views import format_server_access
 from utils.keyboards import kb_admin_alerts_settings_menu, kb_admin_backups_menu, kb_admin_backups_settings_menu, kb_admin_menu, kb_admin_requests_settings_menu, kb_admin_settings_menu, kb_admin_updates_branch_menu, kb_admin_updates_menu, kb_back_to_admin, kb_language_menu, kb_main_menu, kb_profile_minimal, kb_profile_stats, kb_settings_menu
@@ -795,12 +803,15 @@ def _admin_updates_markup(lang: str) -> InlineKeyboardMarkup:
     overview = get_updates_overview()
     update_running = str(overview.get("last_run_status") or "") == "running"
     show_update_action = bool(overview.get("update_supported")) and (bool(overview.get("update_available")) or update_running)
+    driver_agents_setup = get_driver_agents_setup_overview()
     cleanup_overview = get_release_cleanup_overview()
     return kb_admin_updates_menu(
         auto_check_enabled=bool(overview.get("auto_check_enabled")),
         update_supported=show_update_action,
         update_running=update_running,
         branch=str(overview.get("branch") or get_updates_branch()),
+        driver_agents_setup_supported=bool(driver_agents_setup.get("supported")),
+        driver_agents_setup_running=str(driver_agents_setup.get("last_run_status") or "") == "running",
         runtime_sync_available=bool(get_node_driver().list_nodes_needing_runtime_sync()),
         release_cleanup_available=bool(cleanup_overview.get("supported")),
         lang=lang,
@@ -809,6 +820,7 @@ def _admin_updates_markup(lang: str) -> InlineKeyboardMarkup:
 
 def _render_admin_updates_text(lang: str, include_failure_log: bool = True) -> str:
     overview = get_updates_overview()
+    driver_agents_setup = get_driver_agents_setup_overview()
     last_checked = str(overview.get("last_checked_at") or "").strip()
     last_checked_value = _human_ago(last_checked, lang) if last_checked else t(lang, "common.none")
     auto_check_value = t(lang, "admin.updates.auto_check_enabled") if overview.get("auto_check_enabled") else t(lang, "admin.updates.auto_check_disabled")
@@ -847,6 +859,27 @@ def _render_admin_updates_text(lang: str, include_failure_log: bool = True) -> s
                 "",
                 t(lang, "admin.updates.last_update_log"),
                 _md(last_run_log_tail),
+            ]
+        )
+    setup_last_run_status = str(driver_agents_setup.get("last_run_status") or "never")
+    setup_last_run_at = str(driver_agents_setup.get("last_run_finished_at") or driver_agents_setup.get("last_run_started_at") or "").strip()
+    setup_last_run_value = _updates_run_status_label(setup_last_run_status, lang)
+    if setup_last_run_at:
+        setup_last_run_value = f"{setup_last_run_value} · {_human_ago(setup_last_run_at, lang)}"
+    lines.extend(
+        [
+            "",
+            t(lang, "admin.updates.section_driver_agents"),
+            t(lang, "admin.updates.driver_agents_setup_supported", value=t(lang, "common.yes") if driver_agents_setup.get("supported") else t(lang, "common.no")),
+            t(lang, "admin.updates.driver_agents_setup_last_run", value=setup_last_run_value),
+        ]
+    )
+    setup_log_tail = str(driver_agents_setup.get("last_run_log_tail") or "").strip()
+    if include_failure_log and setup_log_tail and setup_last_run_status == "failed":
+        lines.extend(
+            [
+                t(lang, "admin.updates.driver_agents_setup_log"),
+                _md(setup_log_tail),
             ]
         )
     return "\n".join(lines)
@@ -1797,10 +1830,32 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
                 update_supported=show_update_action,
                 update_running=update_running,
                 branch=str(overview.get("branch") or get_updates_branch()),
+                driver_agents_setup_supported=bool(get_driver_agents_setup_overview().get("supported")),
+                driver_agents_setup_running=str(get_driver_agents_setup_overview().get("last_run_status") or "") == "running",
                 runtime_sync_available=bool(get_node_driver().list_nodes_needing_runtime_sync()),
                 release_cleanup_available=bool(get_release_cleanup_overview().get("supported")),
                 lang=lang,
             ),
+            parse_mode=PARSE_MODE,
+        )
+        return
+
+    if payload == "admin_updates_driver_agents_setup" and is_admin:
+        setup_overview = get_driver_agents_setup_overview()
+        if str(setup_overview.get("last_run_status") or "") != "running":
+            safe_edit_message(
+                update,
+                context,
+                t(lang, "admin.updates.driver_agents_setup_starting"),
+                reply_markup=_admin_updates_markup(lang),
+                parse_mode=PARSE_MODE,
+            )
+            schedule_driver_agents_setup()
+        safe_edit_message(
+            update,
+            context,
+            _render_admin_updates_text(lang, include_failure_log=False),
+            reply_markup=_admin_updates_markup(lang),
             parse_mode=PARSE_MODE,
         )
         return

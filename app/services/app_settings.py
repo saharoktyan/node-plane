@@ -24,6 +24,11 @@ _UPDATES_LAST_RUN_FINISHED_AT_KEY = "updates_last_run_finished_at"
 _UPDATES_LAST_RUN_STATUS_KEY = "updates_last_run_status"
 _UPDATES_LAST_RUN_LOG_TAIL_KEY = "updates_last_run_log_tail"
 _UPDATES_LAST_RUN_UNIT_KEY = "updates_last_run_unit"
+_DRIVER_AGENTS_LAST_RUN_STARTED_AT_KEY = "driver_agents_last_run_started_at"
+_DRIVER_AGENTS_LAST_RUN_FINISHED_AT_KEY = "driver_agents_last_run_finished_at"
+_DRIVER_AGENTS_LAST_RUN_STATUS_KEY = "driver_agents_last_run_status"
+_DRIVER_AGENTS_LAST_RUN_LOG_TAIL_KEY = "driver_agents_last_run_log_tail"
+_DRIVER_AGENTS_LAST_RUN_UNIT_KEY = "driver_agents_last_run_unit"
 _UPDATES_BRANCH_KEY = "updates_branch"
 _UPDATES_DEV_TRACK_KEY = "updates_dev_track"
 _UPDATES_LOCAL_VERSION_KEY = "updates_local_version"
@@ -260,6 +265,34 @@ def record_update_run_finished(status: str, finished_at: str, log_tail: str = ""
 
 def set_update_run_log_tail(log_tail: str) -> None:
     _meta_set(_UPDATES_LAST_RUN_LOG_TAIL_KEY, log_tail)
+
+
+def get_driver_agents_state() -> dict[str, str]:
+    return {
+        "last_run_started_at": _meta_get(_DRIVER_AGENTS_LAST_RUN_STARTED_AT_KEY, ""),
+        "last_run_finished_at": _meta_get(_DRIVER_AGENTS_LAST_RUN_FINISHED_AT_KEY, ""),
+        "last_run_status": _meta_get(_DRIVER_AGENTS_LAST_RUN_STATUS_KEY, "never"),
+        "last_run_log_tail": _meta_get(_DRIVER_AGENTS_LAST_RUN_LOG_TAIL_KEY, ""),
+        "last_run_unit": _meta_get(_DRIVER_AGENTS_LAST_RUN_UNIT_KEY, ""),
+    }
+
+
+def record_driver_agents_run_started(started_at: str, unit_name: str) -> None:
+    _meta_set(_DRIVER_AGENTS_LAST_RUN_STARTED_AT_KEY, started_at)
+    _meta_set(_DRIVER_AGENTS_LAST_RUN_FINISHED_AT_KEY, "")
+    _meta_set(_DRIVER_AGENTS_LAST_RUN_STATUS_KEY, "running")
+    _meta_set(_DRIVER_AGENTS_LAST_RUN_LOG_TAIL_KEY, "")
+    _meta_set(_DRIVER_AGENTS_LAST_RUN_UNIT_KEY, unit_name)
+
+
+def record_driver_agents_run_finished(status: str, finished_at: str, log_tail: str = "") -> None:
+    _meta_set(_DRIVER_AGENTS_LAST_RUN_FINISHED_AT_KEY, finished_at)
+    _meta_set(_DRIVER_AGENTS_LAST_RUN_STATUS_KEY, status)
+    _meta_set(_DRIVER_AGENTS_LAST_RUN_LOG_TAIL_KEY, log_tail)
+
+
+def set_driver_agents_run_log_tail(log_tail: str) -> None:
+    _meta_set(_DRIVER_AGENTS_LAST_RUN_LOG_TAIL_KEY, log_tail)
 
 
 def is_backups_enabled() -> bool:
