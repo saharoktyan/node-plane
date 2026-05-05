@@ -598,6 +598,23 @@ validate_simple_layout() {
   echo "Simple mode layout looks valid."
 }
 
+ensure_release_python_runtime() {
+  local release_dir="$1"
+  local python_bin="${release_dir}/.venv/bin/python"
+
+  if [[ ! -x "$python_bin" ]]; then
+    set_step "create virtualenv"
+    python3 -m venv "${release_dir}/.venv"
+  fi
+
+  # Keep this idempotent: upgrade tooling and reinstall runtime deps so reused
+  # releases cannot keep a partially provisioned virtualenv.
+  set_step "install python build tooling"
+  "$python_bin" -m pip install --upgrade pip setuptools wheel
+  set_step "install python dependencies"
+  "$python_bin" -m pip install -r "${release_dir}/requirements.txt"
+}
+
 run_simple_install() {
   local service_name="node-plane"
   local base_dir app_dir shared_dir releases_dir current_link new_release_dir release_name install_ref install_version install_commit reused_release
@@ -652,12 +669,6 @@ run_simple_install() {
     set_step "export release tree"
     export_release_tree "$new_release_dir" "$install_ref"
 
-    set_step "create virtualenv"
-    python3 -m venv "${new_release_dir}/.venv"
-    set_step "install python build tooling"
-    "${new_release_dir}/.venv/bin/python" -m pip install --upgrade pip setuptools wheel
-    set_step "install python dependencies"
-    "${new_release_dir}/.venv/bin/python" -m pip install -r "${new_release_dir}/requirements.txt"
     set_step "load database runtime configuration"
     sqlite_db_path="$(read_env_value SQLITE_DB_PATH "$runtime_env_file")"
     if [[ -z "$sqlite_db_path" ]]; then
@@ -725,6 +736,8 @@ run_simple_install() {
       "${new_release_dir}/.venv/bin/python" "${new_release_dir}/app/manage_db.py" init
     fi
   fi
+
+  ensure_release_python_runtime "$new_release_dir"
 
   ln -sfn "$new_release_dir" "$current_link"
 
