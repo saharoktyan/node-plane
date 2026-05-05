@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import subprocess
 import threading
 from typing import Any, Dict, List, Optional, Sequence, Set
 
@@ -19,7 +21,7 @@ except Exception:  # pragma: no cover - test stubs may provide partial telegram 
         pass
 from telegram.ext import CallbackContext
 
-from config import APP_COMMIT, APP_SEMVER, CB_MENU, CB_SRV, PARSE_MODE, LIST_PAGE_SIZE
+from config import APP_COMMIT, APP_ROOT, APP_SEMVER, CB_MENU, CB_SRV, LIST_PAGE_SIZE, PARSE_MODE, SHARED_ROOT
 from i18n import get_locale_for_update, t
 from services.node_driver import get_node_driver
 from services.provisioning_state import (
@@ -1133,6 +1135,32 @@ def _action_result_text(title: str, rc: int, out: str, back_key: str, lang: str)
     return f"{status} {title}\n\n{body}\n\n{t(lang, 'admin.wizard.server_label')}: {back_key}"
 
 
+def _ensure_driver_agent_rollout_for_ssh(server_key: str) -> tuple[int, str]:
+    server = get_server(server_key)
+    if not server or server.transport != "ssh":
+        return 0, ""
+    script_path = f"{APP_ROOT}/scripts/setup_driver_agents.sh"
+    if not os.path.isfile(script_path):
+        return 1, f"missing rollout script: {script_path}"
+    env = os.environ.copy()
+    env["NODE_PLANE_APP_DIR"] = APP_ROOT
+    env["NODE_PLANE_SHARED_DIR"] = SHARED_ROOT
+    env.setdefault("NODE_PLANE_BIN_SOURCE", "release")
+    try:
+        proc = subprocess.run(
+            [script_path, "--strict"],
+            cwd=APP_ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=900,
+        )
+    except Exception as exc:
+        return 1, f"driver/agent rollout failed to start: {exc}"
+    output = ((proc.stdout or "").strip() + "\n" + (proc.stderr or "").strip()).strip()
+    return proc.returncode, output or f"exit={proc.returncode}"
+
+
 def _summary_text(data: Dict[str, Any], editing: bool = False, lang: str = "ru") -> str:
     protocols = ", ".join(sorted(data["protocol_kinds"])) or "—"
     target = data["target"] or "—"
@@ -1886,6 +1914,12 @@ def on_server_callback(update: Update, context: CallbackContext, payload: str) -
             stop_progress()
             rc = 0 if operation.status == "SUCCEEDED" else 1
             out = operation.progress_message
+            if rc == 0:
+                rollout_rc, rollout_out = _ensure_driver_agent_rollout_for_ssh(server_key)
+                if rollout_out:
+                    out = f"{out}\n\nDriver/agent rollout:\n{rollout_out}".strip()
+                if rollout_rc != 0:
+                    rc = 1
             _wizard_edit(context, _action_result_text(t(lang, "admin.wizard.bootstrap"), rc, out, server_key, lang), _server_card_markup(server_key, lang))
             return
         if action == "reinstall":
@@ -1893,6 +1927,12 @@ def on_server_callback(update: Update, context: CallbackContext, payload: str) -
             stop_progress()
             rc = 0 if operation.status == "SUCCEEDED" else 1
             out = operation.progress_message
+            if rc == 0:
+                rollout_rc, rollout_out = _ensure_driver_agent_rollout_for_ssh(server_key)
+                if rollout_out:
+                    out = f"{out}\n\nDriver/agent rollout:\n{rollout_out}".strip()
+                if rollout_rc != 0:
+                    rc = 1
             _wizard_edit(context, _action_result_text(t(lang, "admin.wizard.reinstall"), rc, out, server_key, lang), _server_card_markup(server_key, lang))
             return
         if action == "delete":
