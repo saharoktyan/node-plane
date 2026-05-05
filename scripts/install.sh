@@ -136,6 +136,36 @@ ensure_supported_python() {
   exit 1
 }
 
+print_python_runtime_help() {
+  cat >&2 <<'EOF'
+Python runtime is incomplete for Node Plane simple mode.
+Required: python3 with working venv + pip.
+
+Debian/Ubuntu:
+  apt-get update
+  apt-get install -y python3 python3-venv python3-pip
+
+RHEL/Fedora:
+  dnf install -y python3 python3-pip
+
+Then rerun scripts/install.sh.
+EOF
+}
+
+ensure_venv_python_has_pip() {
+  local python_bin="$1"
+  if "$python_bin" -m pip --version >/dev/null 2>&1; then
+    return 0
+  fi
+  set_step "bootstrap pip in virtualenv"
+  if "$python_bin" -m ensurepip --upgrade >/dev/null 2>&1; then
+    return 0
+  fi
+  echo "Virtualenv python has no pip: ${python_bin}" >&2
+  print_python_runtime_help
+  exit 1
+}
+
 prompt_value() {
   local prompt="$1"
   local current_value="$2"
@@ -606,6 +636,8 @@ ensure_release_python_runtime() {
     set_step "create virtualenv"
     python3 -m venv "${release_dir}/.venv"
   fi
+
+  ensure_venv_python_has_pip "$python_bin"
 
   # Keep this idempotent: upgrade tooling and reinstall runtime deps so reused
   # releases cannot keep a partially provisioned virtualenv.
