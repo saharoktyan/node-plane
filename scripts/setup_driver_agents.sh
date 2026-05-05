@@ -24,6 +24,9 @@ AGENT_ASSET_NAME="${NODE_PLANE_AGENT_ASSET_NAME:-node-plane-agent-linux-amd64}"
 DRIVER_BIN_URL="${NODE_PLANE_DRIVER_BIN_URL:-}"
 AGENT_BIN_URL="${NODE_PLANE_AGENT_BIN_URL:-}"
 CURRENT_STEP="startup"
+DRIVER_BIN_CHANGED=0
+DRIVER_UNIT_CHANGED=0
+ENV_CHANGED=0
 
 set_step() {
   CURRENT_STEP="$1"
@@ -71,6 +74,24 @@ set_env_value() {
   else
     printf '%s=%s\n' "$key" "$value" >> "$file"
   fi
+}
+
+set_env_value_if_changed() {
+  local file="$1"
+  local key="$2"
+  local value="$3"
+  local current
+  current="$(read_env_value "$key" "$file")"
+  if [[ "$current" == "$value" ]]; then
+    return 1
+  fi
+  set_env_value "$file" "$key" "$value"
+  return 0
+}
+
+sha256_of_file() {
+  local path="$1"
+  sha256sum "$path" | awk '{print $1}'
 }
 
 download_to_file() {
@@ -324,8 +345,21 @@ resolve_binaries_dry_run() {
 }
 
 install_local_driver() {
-  set_step "install local node-plane-driver binary"
-  sudo install -m 0755 "$driver_bin_path" /usr/local/bin/node-plane-driver
+  local new_sum current_sum unit_target
+  new_sum="$(sha256_of_file "$driver_bin_path")"
+  current_sum=""
+  unit_target="/etc/systemd/system/node-plane-driver.service"
+  if sudo test -x /usr/local/bin/node-plane-driver; then
+    current_sum="$(sudo sha256sum /usr/local/bin/node-plane-driver | awk '{print $1}')"
+  fi
+  if [[ "$new_sum" != "$current_sum" ]]; then
+    set_step "install local node-plane-driver binary"
+    sudo install -m 0755 "$driver_bin_path" /usr/local/bin/node-plane-driver
+    DRIVER_BIN_CHANGED=1
+    echo "Updated node-plane-driver binary."
+  else
+    echo "node-plane-driver binary is up to date; skipping reinstall."
+  fi
 
   local unit_tmp
   unit_tmp="$(mktemp)"
@@ -351,11 +385,21 @@ WantedBy=multi-user.target
 EOF
 
   set_step "install node-plane-driver systemd unit"
-  sudo install -m 0644 "$unit_tmp" /etc/systemd/system/node-plane-driver.service
+  if sudo test -f "$unit_target" && sudo cmp -s "$unit_tmp" "$unit_target"; then
+    echo "node-plane-driver.service is up to date."
+  else
+    sudo install -m 0644 "$unit_tmp" "$unit_target"
+    DRIVER_UNIT_CHANGED=1
+    echo "Updated node-plane-driver.service unit."
+  fi
   rm -f "$unit_tmp"
-  sudo systemctl daemon-reload
+  if [[ $DRIVER_UNIT_CHANGED -eq 1 ]]; then
+    sudo systemctl daemon-reload
+  fi
   sudo systemctl enable --now node-plane-driver
-  sudo systemctl restart node-plane-driver
+  if [[ $DRIVER_BIN_CHANGED -eq 1 || $DRIVER_UNIT_CHANGED -eq 1 ]]; then
+    sudo systemctl restart node-plane-driver
+  fi
   sudo systemctl status node-plane-driver --no-pager || true
 }
 
@@ -395,6 +439,8 @@ deploy_agents() {
 
   local failed=0
   local mappings=()
+  local local_agent_sum
+  local_agent_sum="$(sha256_of_file "$agent_bin_path")"
   while IFS=$'\t' read -r server_key ssh_host ssh_port ssh_user ssh_key public_host; do
     [[ -z "$server_key" ]] && continue
     local target_host="$ssh_host"
@@ -422,6 +468,22 @@ deploy_agents() {
       else
         echo "Dry-run SSH check passed for ${server_key}"
       fi
+      continue
+    fi
+
+    local remote_sum=""
+    remote_sum="$(ssh "${ssh_opts[@]}" "$target" 'if [ -x /usr/local/bin/node-plane-agent ]; then sha256sum /usr/local/bin/node-plane-agent | awk "{print \$1}"; fi' 2>/dev/null || true)"
+    if [[ "$remote_sum" == "$local_agent_sum" ]]; then
+      if ssh "${ssh_opts[@]}" "$target" 'sudo systemctl is-active --quiet node-plane-agent' >/dev/null 2>&1; then
+        echo "node-agent is up to date and active on ${server_key}; skipping reinstall."
+        continue
+      fi
+      if ssh "${ssh_opts[@]}" "$target" 'sudo systemctl restart node-plane-agent && sudo systemctl is-active --quiet node-plane-agent' >/dev/null 2>&1; then
+        echo "node-agent binary unchanged; service restarted on ${server_key}."
+        continue
+      fi
+      echo "node-agent service restart failed on ${server_key}" >&2
+      failed=$((failed + 1))
       continue
     fi
 
@@ -482,9 +544,9 @@ EOF
       echo "Dry-run mapping preview: ${mapping_csv}"
     else
       set_step "write driver/agent env configuration"
-      set_env_value "$ENV_FILE" "NODE_DRIVER_BACKEND" "grpc"
-      set_env_value "$ENV_FILE" "NODE_DRIVER_GRPC_TARGET" "127.0.0.1:50051"
-      set_env_value "$ENV_FILE" "NODE_AGENT_TARGETS" "$mapping_csv"
+      if set_env_value_if_changed "$ENV_FILE" "NODE_DRIVER_BACKEND" "grpc"; then ENV_CHANGED=1; fi
+      if set_env_value_if_changed "$ENV_FILE" "NODE_DRIVER_GRPC_TARGET" "127.0.0.1:50051"; then ENV_CHANGED=1; fi
+      if set_env_value_if_changed "$ENV_FILE" "NODE_AGENT_TARGETS" "$mapping_csv"; then ENV_CHANGED=1; fi
       echo "Configured NODE_AGENT_TARGETS in ${ENV_FILE}: ${mapping_csv}"
     fi
   fi
@@ -513,7 +575,11 @@ fi
 
 if [[ $SKIP_DRIVER -eq 0 && $DRY_RUN -eq 0 ]]; then
   set_step "restart node-plane-driver with updated env"
-  sudo systemctl restart node-plane-driver || true
+  if [[ $DRIVER_BIN_CHANGED -eq 1 || $DRIVER_UNIT_CHANGED -eq 1 || $ENV_CHANGED -eq 1 ]]; then
+    sudo systemctl restart node-plane-driver || true
+  else
+    echo "No local driver/env changes detected; skipping final node-plane-driver restart."
+  fi
 fi
 
 echo
