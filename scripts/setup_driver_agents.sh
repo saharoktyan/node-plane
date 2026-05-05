@@ -5,8 +5,21 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 APP_ROOT="${NODE_PLANE_APP_DIR:-$REPO_ROOT}"
-SHARED_ROOT="${NODE_PLANE_SHARED_DIR:-$APP_ROOT}"
+BASE_ROOT="${NODE_PLANE_BASE_DIR:-}"
+SHARED_ROOT="${NODE_PLANE_SHARED_DIR:-}"
+if [[ -z "$SHARED_ROOT" ]]; then
+  if [[ -n "$BASE_ROOT" ]]; then
+    SHARED_ROOT="${BASE_ROOT}/shared"
+  elif [[ "$APP_ROOT" == */current ]]; then
+    SHARED_ROOT="${APP_ROOT%/current}/shared"
+  else
+    SHARED_ROOT="${APP_ROOT}/shared"
+  fi
+fi
 ENV_FILE="${SHARED_ROOT}/.env"
+if [[ ! -f "$ENV_FILE" && -f "${APP_ROOT}/.env" ]]; then
+  ENV_FILE="${APP_ROOT}/.env"
+fi
 if [[ ! -f "$ENV_FILE" && -f "${REPO_ROOT}/.env" ]]; then
   ENV_FILE="${REPO_ROOT}/.env"
 fi
@@ -112,7 +125,7 @@ download_to_file() {
 check_url_access() {
   local url="$1"
   if has_cmd curl; then
-    curl -fsSI "$url" >/dev/null
+    curl -fsSLI "$url" >/dev/null
     return 0
   fi
   if has_cmd wget; then
@@ -276,12 +289,12 @@ download_release_binaries() {
   local agent_out="${WORK_DIR}/node-plane-agent"
 
   set_step "download driver binary"
-  download_to_file "$driver_url" "$driver_out"
-  chmod +x "$driver_out"
+  download_to_file "$driver_url" "$driver_out" || return 1
+  chmod +x "$driver_out" || return 1
 
   set_step "download agent binary"
-  download_to_file "$agent_url" "$agent_out"
-  chmod +x "$agent_out"
+  download_to_file "$agent_url" "$agent_out" || return 1
+  chmod +x "$agent_out" || return 1
 
   driver_bin_path="$driver_out"
   agent_bin_path="$agent_out"
@@ -404,7 +417,7 @@ EOF
 }
 
 list_remote_servers_tsv() {
-  PYTHONPATH="${APP_ROOT}/app" NODE_PLANE_APP_DIR="${APP_ROOT}" python3 - <<'PY'
+  PYTHONPATH="${APP_ROOT}/app" NODE_PLANE_APP_DIR="${APP_ROOT}" NODE_PLANE_SHARED_DIR="${SHARED_ROOT}" python3 - <<'PY'
 from services.server_registry import list_servers
 
 for srv in list_servers(include_disabled=False):
