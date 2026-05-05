@@ -194,20 +194,32 @@ ensure_env_file() {
 
 read_env_value() {
   local key="$1"
-  if [[ ! -f .env ]]; then
+  local file="${2:-.env}"
+  if [[ ! -f "$file" ]]; then
     return 0
   fi
-  sed -n "s/^${key}=//p" .env | tail -n 1
+  sed -n "s/^${key}=//p" "$file" | tail -n 1
 }
 
 set_env_value() {
   local key="$1"
   local value="$2"
-  if grep -q "^${key}=" .env; then
-    sed -i "s|^${key}=.*$|${key}=${value}|" .env
-  else
-    printf '%s=%s\n' "$key" "$value" >> .env
+  local file="${3:-.env}"
+  if [[ ! -f "$file" ]]; then
+    touch "$file"
   fi
+  if grep -q "^${key}=" "$file"; then
+    sed -i "s|^${key}=.*$|${key}=${value}|" "$file"
+  else
+    printf '%s=%s\n' "$key" "$value" >> "$file"
+  fi
+}
+
+set_env_value_in_file() {
+  local file="$1"
+  local key="$2"
+  local value="$3"
+  set_env_value "$key" "$value" "$file"
 }
 
 normalize_update_branch() {
