@@ -376,6 +376,23 @@ auto_provision_simple_postgres() {
     }
   fi
 
+  # Keep DB role password aligned with runtime config to avoid endless restarts
+  # when .env password and in-DB password drift after failed/retried installs.
+  local escaped_role_password
+  escaped_role_password="${POSTGRES_RUNTIME_DB_PASSWORD//\'/\'\'}"
+  if docker_run exec \
+    -e PGPASSWORD="$POSTGRES_RUNTIME_DB_PASSWORD" \
+    "$POSTGRES_RUNTIME_CONTAINER" \
+    psql -h 127.0.0.1 -U "$POSTGRES_RUNTIME_DB_USER" -d "$POSTGRES_RUNTIME_DB_NAME" -c "SELECT 1;" >/dev/null 2>&1; then
+    :
+  else
+    docker_run exec \
+      -e PGPASSWORD="$POSTGRES_RUNTIME_DB_PASSWORD" \
+      "$POSTGRES_RUNTIME_CONTAINER" \
+      psql -h 127.0.0.1 -U postgres -d postgres \
+      -c "ALTER ROLE ${POSTGRES_RUNTIME_DB_USER} WITH PASSWORD '${escaped_role_password}';" >/dev/null 2>&1 || true
+  fi
+
   local ready=0
   for _ in $(seq 1 30); do
     if docker_run exec "$POSTGRES_RUNTIME_CONTAINER" pg_isready -U "$POSTGRES_RUNTIME_DB_USER" -d "$POSTGRES_RUNTIME_DB_NAME" >/dev/null 2>&1; then
