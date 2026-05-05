@@ -340,6 +340,23 @@ auto_provision_simple_postgres() {
   env_set "$runtime_env_file" "NODE_PLANE_POSTGRES_IMAGE" "$POSTGRES_RUNTIME_IMAGE"
 
   if docker_run inspect "$POSTGRES_RUNTIME_CONTAINER" >/dev/null 2>&1; then
+    local container_env container_password container_user container_db
+    container_env="$(docker_run inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$POSTGRES_RUNTIME_CONTAINER" 2>/dev/null || true)"
+    container_password="$(printf '%s\n' "$container_env" | awk -F= '/^POSTGRES_PASSWORD=/{print substr($0, index($0,$2)); exit}')"
+    container_user="$(printf '%s\n' "$container_env" | awk -F= '/^POSTGRES_USER=/{print substr($0, index($0,$2)); exit}')"
+    container_db="$(printf '%s\n' "$container_env" | awk -F= '/^POSTGRES_DB=/{print substr($0, index($0,$2)); exit}')"
+    if [[ -n "$container_password" ]]; then
+      POSTGRES_RUNTIME_DB_PASSWORD="$container_password"
+      env_set "$runtime_env_file" "NODE_PLANE_POSTGRES_PASSWORD" "$POSTGRES_RUNTIME_DB_PASSWORD"
+    fi
+    if [[ -n "$container_user" ]]; then
+      POSTGRES_RUNTIME_DB_USER="$container_user"
+      env_set "$runtime_env_file" "NODE_PLANE_POSTGRES_USER" "$POSTGRES_RUNTIME_DB_USER"
+    fi
+    if [[ -n "$container_db" ]]; then
+      POSTGRES_RUNTIME_DB_NAME="$container_db"
+      env_set "$runtime_env_file" "NODE_PLANE_POSTGRES_DB" "$POSTGRES_RUNTIME_DB_NAME"
+    fi
     docker_run start "$POSTGRES_RUNTIME_CONTAINER" >/dev/null 2>&1 || {
       echo "Failed to start existing PostgreSQL container ${POSTGRES_RUNTIME_CONTAINER}." >&2
       return 1

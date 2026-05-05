@@ -686,7 +686,7 @@ run_simple_install() {
     if [[ -z "$db_backend" || "$db_backend" == "sqlite" ]]; then
       db_backend="postgres"
     fi
-    if [[ -z "$postgres_dsn" ]]; then
+    if [[ "$db_backend" == "postgres" ]]; then
       set_step "auto-provision local postgresql runtime"
       auto_provision_simple_postgres "$runtime_env_file" "$shared_dir" 1
       postgres_dsn="$(read_env_value POSTGRES_DSN "$runtime_env_file")"

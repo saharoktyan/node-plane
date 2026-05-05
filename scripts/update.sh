@@ -463,7 +463,7 @@ update_simple() {
   if [[ -z "$sqlite_db_path" ]]; then
     sqlite_db_path="${shared_dir}/data/bot.sqlite3"
   fi
-  if [[ -z "$postgres_dsn" ]]; then
+  if [[ "$db_backend" == "postgres" ]]; then
     set_step "auto-provision local postgresql runtime"
     auto_provision_simple_postgres "$runtime_env_file" "$shared_dir" 1
     postgres_dsn="$(read_env_value POSTGRES_DSN "$runtime_env_file")"
@@ -531,7 +531,7 @@ update_simple() {
   if [[ -z "$db_backend" || "$db_backend" == "sqlite" ]]; then
     db_backend="postgres"
   fi
-  if [[ "$db_backend" == "postgres" && -z "$postgres_dsn" ]]; then
+  if [[ "$db_backend" == "postgres" ]]; then
     set_step "fallback auto-provision local postgresql runtime"
     auto_provision_simple_postgres "$runtime_env_file" "$shared_dir" 1
     postgres_dsn="$(read_env_value POSTGRES_DSN "$runtime_env_file")"
