@@ -739,6 +739,38 @@ run_simple_install() {
 
   ensure_release_python_runtime "$new_release_dir"
 
+  # DB runtime init must run even when we reuse an existing release tree.
+  # Otherwise a previous partial install can leave DB_BACKEND=postgres without
+  # POSTGRES_DSN and the service will fail at import-time.
+  set_step "load database runtime configuration"
+  sqlite_db_path="$(read_env_value SQLITE_DB_PATH "$runtime_env_file")"
+  if [[ -z "$sqlite_db_path" ]]; then
+    sqlite_db_path="${shared_dir}/data/bot.sqlite3"
+  fi
+  if [[ $supports_postgres_migration -eq 1 ]]; then
+    db_backend="$(read_env_value DB_BACKEND "$runtime_env_file")"
+    postgres_dsn="$(read_env_value POSTGRES_DSN "$runtime_env_file")"
+    if [[ -z "$db_backend" || "$db_backend" == "sqlite" ]]; then
+      db_backend="postgres"
+    fi
+    if [[ -z "$postgres_dsn" ]]; then
+      set_step "auto-provision local postgresql runtime"
+      auto_provision_simple_postgres "$runtime_env_file" "$shared_dir" 1
+      postgres_dsn="$(read_env_value POSTGRES_DSN "$runtime_env_file")"
+      if [[ -z "$postgres_dsn" ]]; then
+        echo "POSTGRES_DSN is required for 0.4 installs." >&2
+        exit 1
+      fi
+    fi
+    NODE_PLANE_BASE_DIR="${base_dir}" \
+    NODE_PLANE_APP_DIR="${new_release_dir}" \
+    NODE_PLANE_SHARED_DIR="${shared_dir}" \
+    DB_BACKEND="${db_backend}" \
+    POSTGRES_DSN="${postgres_dsn}" \
+    SQLITE_DB_PATH="${sqlite_db_path}" \
+    "${new_release_dir}/.venv/bin/python" "${new_release_dir}/app/manage_db.py" init
+  fi
+
   ln -sfn "$new_release_dir" "$current_link"
 
   validate_simple_layout "$current_link" "$shared_dir"
