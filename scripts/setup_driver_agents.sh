@@ -32,8 +32,8 @@ AGENT_PORT="${NODE_AGENT_PORT:-50061}"
 BIN_SOURCE="${NODE_PLANE_BIN_SOURCE:-auto}" # auto|release|build
 GITHUB_REPO="${NODE_PLANE_GITHUB_REPO:-seventh7dev/node-plane}"
 RELEASE_REF="${NODE_PLANE_BINARY_RELEASE:-}"
-DRIVER_ASSET_NAME="${NODE_PLANE_DRIVER_ASSET_NAME:-node-plane-driver-linux-amd64}"
-AGENT_ASSET_NAME="${NODE_PLANE_AGENT_ASSET_NAME:-node-plane-agent-linux-amd64}"
+DRIVER_ASSET_NAME="${NODE_PLANE_DRIVER_ASSET_NAME:-node-plane-driver-linux-amd64.tar.gz}"
+AGENT_ASSET_NAME="${NODE_PLANE_AGENT_ASSET_NAME:-node-plane-agent-linux-amd64.tar.gz}"
 DRIVER_BIN_URL="${NODE_PLANE_DRIVER_BIN_URL:-}"
 AGENT_BIN_URL="${NODE_PLANE_AGENT_BIN_URL:-}"
 CURRENT_STEP="startup"
@@ -292,13 +292,39 @@ download_release_binaries() {
   local agent_url="${AGENT_BIN_URL:-$(asset_url "$AGENT_ASSET_NAME")}"
   local driver_out="${WORK_DIR}/node-plane-driver"
   local agent_out="${WORK_DIR}/node-plane-agent"
+  local driver_archive="${WORK_DIR}/driver.asset"
+  local agent_archive="${WORK_DIR}/agent.asset"
 
   set_step "download driver binary"
-  download_to_file "$driver_url" "$driver_out" || return 1
+  download_to_file "$driver_url" "$driver_archive" || return 1
+  if tar -tzf "$driver_archive" >/dev/null 2>&1; then
+    tar -xzf "$driver_archive" -C "$WORK_DIR" || return 1
+    if [[ -x "${WORK_DIR}/node-plane-driver-linux-amd64" ]]; then
+      mv "${WORK_DIR}/node-plane-driver-linux-amd64" "$driver_out"
+    elif [[ -x "${WORK_DIR}/node-plane-driver" ]]; then
+      mv "${WORK_DIR}/node-plane-driver" "$driver_out"
+    else
+      return 1
+    fi
+  else
+    mv "$driver_archive" "$driver_out"
+  fi
   chmod +x "$driver_out" || return 1
 
   set_step "download agent binary"
-  download_to_file "$agent_url" "$agent_out" || return 1
+  download_to_file "$agent_url" "$agent_archive" || return 1
+  if tar -tzf "$agent_archive" >/dev/null 2>&1; then
+    tar -xzf "$agent_archive" -C "$WORK_DIR" || return 1
+    if [[ -x "${WORK_DIR}/node-plane-agent-linux-amd64" ]]; then
+      mv "${WORK_DIR}/node-plane-agent-linux-amd64" "$agent_out"
+    elif [[ -x "${WORK_DIR}/node-plane-agent" ]]; then
+      mv "${WORK_DIR}/node-plane-agent" "$agent_out"
+    else
+      return 1
+    fi
+  else
+    mv "$agent_archive" "$agent_out"
+  fi
   chmod +x "$agent_out" || return 1
 
   driver_bin_path="$driver_out"
