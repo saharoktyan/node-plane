@@ -507,8 +507,12 @@ deploy_agents() {
       fi
       target_host="${target_host##*@}"
     fi
-    if [[ -z "$target_key" && "$target_user" == /* ]]; then
-      target_key="$target_user"
+    # Treat path-like/key-like ssh_user as a misplaced key path and never as login.
+    # Accept absolute/relative/tilde paths and common key filename patterns.
+    if [[ "$target_user" == /* ]] || [[ "$target_user" == ~/* ]] || [[ "$target_user" == */* ]] || [[ "$target_user" == *".ssh"* ]] || [[ "$target_user" == id_* ]] || [[ "$target_user" == *.pem ]] || [[ "$target_user" == *.key ]]; then
+      if [[ -z "$target_key" ]]; then
+        target_key="$target_user"
+      fi
       target_user=""
     fi
 
