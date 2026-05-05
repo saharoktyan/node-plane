@@ -29,12 +29,18 @@ env_set() {
     set_env_value_in_file "$file" "$key" "$value"
     return 0
   fi
-  if declare -F set_env_value >/dev/null 2>&1; then
-    set_env_value "$key" "$value"
-    return 0
+  if [[ -z "$file" ]]; then
+    echo "env_set requires a target env file path" >&2
+    return 1
   fi
-  echo "No env writer function is available for ${file}" >&2
-  return 1
+  mkdir -p "$(dirname "$file")"
+  touch "$file"
+  if grep -q "^${key}=" "$file"; then
+    sed -i "s|^${key}=.*$|${key}=${value}|" "$file"
+  else
+    printf '%s=%s\n' "$key" "$value" >> "$file"
+  fi
+  return 0
 }
 
 install_packages_if_needed() {
