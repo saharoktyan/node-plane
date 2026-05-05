@@ -144,6 +144,15 @@ if [[ $CREATE_TAG -eq 1 ]]; then
   fi
 fi
 
+if [[ $PUBLISH_RELEASE -eq 1 ]]; then
+  need_cmd gh
+  if ! gh auth status >/dev/null 2>&1; then
+    echo "GitHub CLI is installed but not authenticated." >&2
+    echo "Run: gh auth login" >&2
+    exit 1
+  fi
+fi
+
 run_preflight_checks() {
   set_step "python tests"
   python3 -m unittest discover -s tests
@@ -210,7 +219,6 @@ publish_github_release() {
   local out_dir="$1"
   local tag="$2"
   local release_dir="${out_dir}/${tag}"
-  need_cmd gh
   if [[ ! -d "$release_dir" ]]; then
     echo "Artifacts dir not found for publish: $release_dir" >&2
     exit 1
