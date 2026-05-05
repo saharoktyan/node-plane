@@ -668,73 +668,6 @@ run_simple_install() {
     rm -rf "$new_release_dir"
     set_step "export release tree"
     export_release_tree "$new_release_dir" "$install_ref"
-
-    set_step "load database runtime configuration"
-    sqlite_db_path="$(read_env_value SQLITE_DB_PATH "$runtime_env_file")"
-    if [[ -z "$sqlite_db_path" ]]; then
-      sqlite_db_path="${shared_dir}/data/bot.sqlite3"
-    fi
-    if [[ $supports_postgres_migration -eq 1 ]]; then
-      db_backend="$(read_env_value DB_BACKEND "$runtime_env_file")"
-      postgres_dsn="$(read_env_value POSTGRES_DSN "$runtime_env_file")"
-      if [[ -z "$db_backend" || "$db_backend" == "sqlite" ]]; then
-        db_backend="postgres"
-      fi
-      if [[ -z "$postgres_dsn" ]]; then
-        set_step "auto-provision local postgresql runtime"
-        auto_provision_simple_postgres "$runtime_env_file" "$shared_dir" 1
-        postgres_dsn="$(read_env_value POSTGRES_DSN "$runtime_env_file")"
-        if [[ -z "$postgres_dsn" ]]; then
-          echo "POSTGRES_DSN is required for 0.4 installs." >&2
-          exit 1
-        fi
-      fi
-      NODE_PLANE_BASE_DIR="${base_dir}" \
-      NODE_PLANE_APP_DIR="${new_release_dir}" \
-      NODE_PLANE_SHARED_DIR="${shared_dir}" \
-      DB_BACKEND="${db_backend}" \
-      POSTGRES_DSN="${postgres_dsn}" \
-      SQLITE_DB_PATH="${sqlite_db_path}" \
-      "${new_release_dir}/.venv/bin/python" "${new_release_dir}/app/manage_db.py" init
-      if [[ -f "$sqlite_db_path" ]]; then
-        local migrate_output
-        echo "Migrating SQLite data into PostgreSQL..."
-        set_step "migrate sqlite to postgresql"
-        migrate_output="$(
-          NODE_PLANE_BASE_DIR="${base_dir}" \
-          NODE_PLANE_APP_DIR="${new_release_dir}" \
-          NODE_PLANE_SHARED_DIR="${shared_dir}" \
-          DB_BACKEND="${db_backend}" \
-          POSTGRES_DSN="${postgres_dsn}" \
-          SQLITE_DB_PATH="${sqlite_db_path}" \
-          "${new_release_dir}/.venv/bin/python" "${new_release_dir}/app/manage_db.py" migrate-to-postgres --sqlite-path "$sqlite_db_path"
-        )"
-        printf '%s\n' "$migrate_output"
-
-        if printf '%s\n' "$migrate_output" | grep -q '^MIGRATE|success$'; then
-          echo "Verifying PostgreSQL migration..."
-          set_step "verify sqlite to postgresql migration"
-          NODE_PLANE_BASE_DIR="${base_dir}" \
-          NODE_PLANE_APP_DIR="${new_release_dir}" \
-          NODE_PLANE_SHARED_DIR="${shared_dir}" \
-          DB_BACKEND="${db_backend}" \
-          POSTGRES_DSN="${postgres_dsn}" \
-          SQLITE_DB_PATH="${sqlite_db_path}" \
-          "${new_release_dir}/.venv/bin/python" "${new_release_dir}/app/manage_db.py" verify-migration --sqlite-path "$sqlite_db_path"
-        else
-          echo "Skipping PostgreSQL verification because legacy SQLite import was not applied."
-        fi
-      else
-        echo "No SQLite source found at ${sqlite_db_path}; skipping SQLite -> PostgreSQL migration."
-      fi
-    else
-      echo "Selected ref ${install_ref} uses the legacy SQLite runtime; skipping PostgreSQL provisioning and migration."
-      NODE_PLANE_BASE_DIR="${base_dir}" \
-      NODE_PLANE_APP_DIR="${new_release_dir}" \
-      NODE_PLANE_SHARED_DIR="${shared_dir}" \
-      SQLITE_DB_PATH="${sqlite_db_path}" \
-      "${new_release_dir}/.venv/bin/python" "${new_release_dir}/app/manage_db.py" init
-    fi
   fi
 
   ensure_release_python_runtime "$new_release_dir"
@@ -767,6 +700,47 @@ run_simple_install() {
     NODE_PLANE_SHARED_DIR="${shared_dir}" \
     DB_BACKEND="${db_backend}" \
     POSTGRES_DSN="${postgres_dsn}" \
+    SQLITE_DB_PATH="${sqlite_db_path}" \
+    "${new_release_dir}/.venv/bin/python" "${new_release_dir}/app/manage_db.py" init
+    if [[ $reused_release -eq 0 ]]; then
+      if [[ -f "$sqlite_db_path" ]]; then
+        local migrate_output
+        echo "Migrating SQLite data into PostgreSQL..."
+        set_step "migrate sqlite to postgresql"
+        migrate_output="$(
+          NODE_PLANE_BASE_DIR="${base_dir}" \
+          NODE_PLANE_APP_DIR="${new_release_dir}" \
+          NODE_PLANE_SHARED_DIR="${shared_dir}" \
+          DB_BACKEND="${db_backend}" \
+          POSTGRES_DSN="${postgres_dsn}" \
+          SQLITE_DB_PATH="${sqlite_db_path}" \
+          "${new_release_dir}/.venv/bin/python" "${new_release_dir}/app/manage_db.py" migrate-to-postgres --sqlite-path "$sqlite_db_path"
+        )"
+        printf '%s\n' "$migrate_output"
+        if printf '%s\n' "$migrate_output" | grep -q '^MIGRATE|success$'; then
+          echo "Verifying PostgreSQL migration..."
+          set_step "verify sqlite to postgresql migration"
+          NODE_PLANE_BASE_DIR="${base_dir}" \
+          NODE_PLANE_APP_DIR="${new_release_dir}" \
+          NODE_PLANE_SHARED_DIR="${shared_dir}" \
+          DB_BACKEND="${db_backend}" \
+          POSTGRES_DSN="${postgres_dsn}" \
+          SQLITE_DB_PATH="${sqlite_db_path}" \
+          "${new_release_dir}/.venv/bin/python" "${new_release_dir}/app/manage_db.py" verify-migration --sqlite-path "$sqlite_db_path"
+        else
+          echo "Skipping PostgreSQL verification because legacy SQLite import was not applied."
+        fi
+      else
+        echo "No SQLite source found at ${sqlite_db_path}; skipping SQLite -> PostgreSQL migration."
+      fi
+    fi
+  else
+    if [[ $reused_release -eq 0 ]]; then
+      echo "Selected ref ${install_ref} uses the legacy SQLite runtime; skipping PostgreSQL provisioning and migration."
+    fi
+    NODE_PLANE_BASE_DIR="${base_dir}" \
+    NODE_PLANE_APP_DIR="${new_release_dir}" \
+    NODE_PLANE_SHARED_DIR="${shared_dir}" \
     SQLITE_DB_PATH="${sqlite_db_path}" \
     "${new_release_dir}/.venv/bin/python" "${new_release_dir}/app/manage_db.py" init
   fi

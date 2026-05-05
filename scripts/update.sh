@@ -524,6 +524,30 @@ update_simple() {
   set_step "activate new release"
   ln -sfn "$new_release_dir" "$current_link"
 
+  # Fallback: if shared env still has DB_BACKEND=postgres without POSTGRES_DSN,
+  # auto-provision PostgreSQL runtime before service restart.
+  db_backend="$(read_env_value DB_BACKEND "$runtime_env_file")"
+  postgres_dsn="$(read_env_value POSTGRES_DSN "$runtime_env_file")"
+  if [[ -z "$db_backend" || "$db_backend" == "sqlite" ]]; then
+    db_backend="postgres"
+  fi
+  if [[ "$db_backend" == "postgres" && -z "$postgres_dsn" ]]; then
+    set_step "fallback auto-provision local postgresql runtime"
+    auto_provision_simple_postgres "$runtime_env_file" "$shared_dir" 1
+    postgres_dsn="$(read_env_value POSTGRES_DSN "$runtime_env_file")"
+    if [[ -z "$postgres_dsn" ]]; then
+      echo "POSTGRES_DSN is required for 0.4 runtime updates." >&2
+      exit 1
+    fi
+    NODE_PLANE_BASE_DIR="${base_dir}" \
+    NODE_PLANE_APP_DIR="${new_release_dir}" \
+    NODE_PLANE_SHARED_DIR="${shared_dir}" \
+    DB_BACKEND="${db_backend}" \
+    POSTGRES_DSN="${postgres_dsn}" \
+    SQLITE_DB_PATH="${sqlite_db_path}" \
+    "${new_release_dir}/.venv/bin/python" "${new_release_dir}/app/manage_db.py" init
+  fi
+
   echo "Restarting node-plane.service..."
   set_step "restart node-plane.service"
   sudo systemctl daemon-reload
