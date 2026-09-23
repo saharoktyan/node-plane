@@ -3,15 +3,19 @@ use std::env;
 use std::fs;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
 
 use chrono::{Datelike, Utc};
 use serde::Deserialize;
 use tokio_postgres::{NoTls, Row};
 use tonic::{Request, Response, Status, transport::Server};
-use uuid::Uuid;
 
 mod agent_transport;
+mod operations;
+
+use operations::DriverState;
+
+#[cfg(test)]
+mod tests;
 
 pub mod agent {
     pub mod v1 {
@@ -41,115 +45,9 @@ use driver::v1::{
     ListRemoteProfilesResponse, Node, NodeCapabilities, NodeHealth, NodeHealthEvent,
     OpenPortsRequest, Operation, OperationEvent, ProbeNodeRequest, ProfileSpec, ProfileUsage,
     ReconcileNodeRequest, ReconcileProfileRequest, ReinstallNodeRequest, RemoteProfileRecord,
-    RuntimeStatus, ServiceStatus, StartOperationResponse, SyncNodeEnvRequest,
-    SyncRuntimeRequest, SyncXrayRequest, WatchNodeHealthRequest, WatchOperationRequest,
+    RuntimeStatus, ServiceStatus, StartOperationResponse, SyncNodeEnvRequest, SyncRuntimeRequest,
+    SyncXrayRequest, WatchNodeHealthRequest, WatchOperationRequest,
 };
-
-#[derive(Clone, Default)]
-struct DriverState {
-    operations: Arc<Mutex<HashMap<String, Operation>>>,
-}
-
-impl DriverState {
-    fn put_operation(&self, operation: Operation) -> StartOperationResponse {
-        let operation_id = operation.operation_id.clone();
-        self.operations
-            .lock()
-            .expect("operations lock poisoned")
-            .insert(operation_id.clone(), operation);
-        StartOperationResponse { operation_id }
-    }
-
-    fn start_operation(
-        &self,
-        kind: &str,
-        node_key: &str,
-        profile_name: &str,
-        message: &str,
-    ) -> StartOperationResponse {
-        let operation_id = Uuid::new_v4().to_string();
-        let op = Operation {
-            operation_id: operation_id.clone(),
-            kind: kind.to_string(),
-            status: "PENDING".to_string(),
-            node_key: node_key.to_string(),
-            profile_name: profile_name.to_string(),
-            started_at: String::new(),
-            updated_at: String::new(),
-            finished_at: String::new(),
-            progress_message: message.to_string(),
-            error: None,
-            result_json: String::new(),
-        };
-        self.put_operation(op)
-    }
-
-    fn finish_operation(
-        &self,
-        kind: &str,
-        node_key: &str,
-        profile_name: &str,
-        status: &str,
-        message: &str,
-    ) -> StartOperationResponse {
-        self.finish_operation_with_result(kind, node_key, profile_name, status, message, "")
-    }
-
-    fn finish_operation_with_result(
-        &self,
-        kind: &str,
-        node_key: &str,
-        profile_name: &str,
-        status: &str,
-        message: &str,
-        result_json: &str,
-    ) -> StartOperationResponse {
-        let timestamp = Utc::now().to_rfc3339();
-        self.put_operation(Operation {
-            operation_id: Uuid::new_v4().to_string(),
-            kind: kind.to_string(),
-            status: status.to_string(),
-            node_key: node_key.to_string(),
-            profile_name: profile_name.to_string(),
-            started_at: timestamp.clone(),
-            updated_at: timestamp.clone(),
-            finished_at: timestamp,
-            progress_message: message.to_string(),
-            error: None,
-            result_json: result_json.to_string(),
-        })
-    }
-
-    fn get_operation(&self, operation_id: &str) -> Option<Operation> {
-        self.operations
-            .lock()
-            .expect("operations lock poisoned")
-            .get(operation_id)
-            .cloned()
-    }
-
-    fn list_operations(
-        &self,
-        node_key: &str,
-        profile_name: &str,
-        status: &str,
-        limit: u32,
-    ) -> Vec<Operation> {
-        let mut items: Vec<Operation> = self
-            .operations
-            .lock()
-            .expect("operations lock poisoned")
-            .values()
-            .filter(|op| node_key.is_empty() || op.node_key == node_key)
-            .filter(|op| profile_name.is_empty() || op.profile_name == profile_name)
-            .filter(|op| status.is_empty() || op.status == status)
-            .cloned()
-            .collect();
-        items.sort_by(|a, b| a.operation_id.cmp(&b.operation_id));
-        items.truncate(limit.max(1) as usize);
-        items
-    }
-}
 
 #[derive(Clone)]
 struct DriverContext {
@@ -199,15 +97,23 @@ impl DriverContext {
             .map_err(|err| Status::internal(format!("failed to parse runtime manifest: {err}")))
     }
 
-    fn from_env() -> Self {
+    fn from_env() -> std::io::Result<Self> {
         Self::load_runtime_env_file();
+        let operations_path = env::var("NODE_DRIVER_OPERATIONS_PATH")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                PathBuf::from(Self::candidate_shared_root()).join("data/node-driver-operations.bin")
+            });
         let postgres_dsn = env::var("POSTGRES_DSN")
             .ok()
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty())
             .or_else(Self::derived_postgres_dsn);
-        Self {
-            state: DriverState::default(),
+        Ok(Self {
+            state: DriverState::open(operations_path)?,
             postgres_dsn,
             app_semver: env::var("APP_SEMVER")
                 .ok()
@@ -220,7 +126,7 @@ impl DriverContext {
                 .filter(|value| !value.is_empty())
                 .unwrap_or_else(|| "unknown".to_string()),
             agent_targets: Self::parse_agent_targets(),
-        }
+        })
     }
 
     fn parse_agent_targets() -> HashMap<String, String> {
@@ -278,11 +184,7 @@ impl DriverContext {
             })
     }
 
-    async fn mark_full_cleanup(
-        &self,
-        node_key: &str,
-        notes: &str,
-    ) -> Result<(), Status> {
+    async fn mark_full_cleanup(&self, node_key: &str, notes: &str) -> Result<(), Status> {
         let client = self.db_client().await?;
         client
             .execute(
@@ -682,12 +584,13 @@ impl DriverContext {
         let assets_dir = self.runtime_assets_dir();
         let mut files = Vec::new();
         for entry in manifest {
-            let content = fs::read_to_string(assets_dir.join(&entry.asset_path)).map_err(|err| {
-                Status::internal(format!(
-                    "failed to read runtime asset {}: {err}",
-                    entry.asset_path
-                ))
-            })?;
+            let content =
+                fs::read_to_string(assets_dir.join(&entry.asset_path)).map_err(|err| {
+                    Status::internal(format!(
+                        "failed to read runtime asset {}: {err}",
+                        entry.asset_path
+                    ))
+                })?;
             files.push(RuntimeFileSpec {
                 path: entry.target_path,
                 content,
@@ -938,7 +841,9 @@ impl DriverContext {
                 ],
             )
             .await
-            .map_err(|err| Status::internal(format!("failed to update xray server fields: {err}")))?;
+            .map_err(|err| {
+                Status::internal(format!("failed to update xray server fields: {err}"))
+            })?;
         Ok(())
     }
 
@@ -978,7 +883,9 @@ impl DriverContext {
                 ],
             )
             .await
-            .map_err(|err| Status::internal(format!("failed to upsert profile server state: {err}")))?;
+            .map_err(|err| {
+                Status::internal(format!("failed to upsert profile server state: {err}"))
+            })?;
         Ok(())
     }
 
@@ -1000,7 +907,9 @@ impl DriverContext {
                 &[&profile_name, &node_key, &protocol_kind],
             )
             .await
-            .map_err(|err| Status::internal(format!("failed to delete profile server state: {err}")))?;
+            .map_err(|err| {
+                Status::internal(format!("failed to delete profile server state: {err}"))
+            })?;
         Ok(())
     }
 
@@ -1026,10 +935,17 @@ impl DriverContext {
                         updated_at = $3
                     WHERE key = $4
                     ",
-                    &[&bootstrap_state, &notes, &Utc::now().to_rfc3339(), &node_key],
+                    &[
+                        &bootstrap_state,
+                        &notes,
+                        &Utc::now().to_rfc3339(),
+                        &node_key,
+                    ],
                 )
                 .await
-                .map_err(|err| Status::internal(format!("failed to mark runtime deleted: {err}")))?;
+                .map_err(|err| {
+                    Status::internal(format!("failed to mark runtime deleted: {err}"))
+                })?;
         } else {
             let empty = "";
             client
@@ -1053,7 +969,9 @@ impl DriverContext {
                     ],
                 )
                 .await
-                .map_err(|err| Status::internal(format!("failed to mark runtime deleted: {err}")))?;
+                .map_err(|err| {
+                    Status::internal(format!("failed to mark runtime deleted: {err}"))
+                })?;
         }
         Ok(())
     }
@@ -1142,7 +1060,9 @@ impl ProvisioningApi {
                 &[],
             )
             .await
-            .map_err(|err| Status::internal(format!("failed to query desired xray profiles: {err}")))?;
+            .map_err(|err| {
+                Status::internal(format!("failed to query desired xray profiles: {err}"))
+            })?;
 
         let mut seen = HashSet::new();
         let mut out = Vec::new();
@@ -1190,7 +1110,9 @@ impl ProvisioningApi {
                 &[],
             )
             .await
-            .map_err(|err| Status::internal(format!("failed to query desired awg profiles: {err}")))?;
+            .map_err(|err| {
+                Status::internal(format!("failed to query desired awg profiles: {err}"))
+            })?;
 
         let mut seen = HashSet::new();
         let mut out = Vec::new();
@@ -1217,12 +1139,18 @@ impl ProvisioningApi {
         Ok(out)
     }
 
-    async fn reconcile_xray_on_node(&self, node_key: &str, target: &str) -> Result<(i32, String), Status> {
+    async fn reconcile_xray_on_node(
+        &self,
+        node_key: &str,
+        target: &str,
+    ) -> Result<(i32, String), Status> {
         let transport = agent_transport::AgentTransport::new(target);
         let remote_records = transport
             .list_remote_profiles("xray")
             .await
-            .map_err(|err| Status::unavailable(format!("failed to list remote xray profiles: {err}")))?;
+            .map_err(|err| {
+                Status::unavailable(format!("failed to list remote xray profiles: {err}"))
+            })?;
         let desired = self.desired_xray_profiles_for_node(node_key).await?;
 
         let remote_by_name: HashMap<String, String> = remote_records
@@ -1290,7 +1218,14 @@ impl ProvisioningApi {
             }
 
             self.ctx
-                .upsert_profile_server_state(&profile_name, node_key, "xray", "provisioned", &uuid, "")
+                .upsert_profile_server_state(
+                    &profile_name,
+                    node_key,
+                    "xray",
+                    "provisioned",
+                    &uuid,
+                    "",
+                )
                 .await?;
             ready += 1;
         }
@@ -1327,18 +1262,25 @@ impl ProvisioningApi {
         if !extra_remote.is_empty() {
             lines.push(format!(
                 "remote extra profiles: {}",
-                extra_remote.into_iter().take(20).collect::<Vec<String>>().join(", ")
+                extra_remote
+                    .into_iter()
+                    .take(20)
+                    .collect::<Vec<String>>()
+                    .join(", ")
             ));
         }
         Ok((0, lines.join("\n")))
     }
 
-    async fn reconcile_awg_on_node(&self, node_key: &str, target: &str) -> Result<(i32, String), Status> {
+    async fn reconcile_awg_on_node(
+        &self,
+        node_key: &str,
+        target: &str,
+    ) -> Result<(i32, String), Status> {
         let transport = agent_transport::AgentTransport::new(target);
-        let remote_records = transport
-            .list_remote_profiles("awg")
-            .await
-            .map_err(|err| Status::unavailable(format!("failed to list remote awg profiles: {err}")))?;
+        let remote_records = transport.list_remote_profiles("awg").await.map_err(|err| {
+            Status::unavailable(format!("failed to list remote awg profiles: {err}"))
+        })?;
         let desired = self.desired_awg_profiles_for_node(node_key).await?;
         let remote_names: HashSet<String> = remote_records
             .into_iter()
@@ -1354,7 +1296,14 @@ impl ProvisioningApi {
             desired_names.insert(profile_name.clone());
             if remote_names.contains(&profile_name) {
                 self.ctx
-                    .upsert_profile_server_state(&profile_name, node_key, "awg", "provisioned", "", "")
+                    .upsert_profile_server_state(
+                        &profile_name,
+                        node_key,
+                        "awg",
+                        "provisioned",
+                        "",
+                        "",
+                    )
                     .await?;
                 ready += 1;
             } else {
@@ -1402,7 +1351,11 @@ impl ProvisioningApi {
         if !extra_remote.is_empty() {
             lines.push(format!(
                 "remote extra profiles: {}",
-                extra_remote.into_iter().take(20).collect::<Vec<String>>().join(", ")
+                extra_remote
+                    .into_iter()
+                    .take(20)
+                    .collect::<Vec<String>>()
+                    .join(", ")
             ));
         }
         Ok((0, lines.join("\n")))
@@ -1537,10 +1490,9 @@ impl NodeService for NodeApi {
         &self,
         _request: Request<WatchNodeHealthRequest>,
     ) -> Result<Response<Self::WatchNodeHealthStream>, Status> {
-        let (_tx, rx) = tokio::sync::mpsc::channel(1);
-        Ok(Response::new(tokio_stream::wrappers::ReceiverStream::new(
-            rx,
-        )))
+        Err(Status::unimplemented(
+            "node health streaming is not implemented",
+        ))
     }
 
     async fn sync_node_env(
@@ -1549,6 +1501,10 @@ impl NodeService for NodeApi {
     ) -> Result<Response<StartOperationResponse>, Status> {
         let req = request.into_inner();
         if let Some(target) = self.ctx.agent_target(&req.node_key) {
+            let operation = self
+                .ctx
+                .state
+                .begin_operation("sync_node_env", &req.node_key, "")?;
             let content = match self.ctx.fetch_server_row(&req.node_key).await {
                 Ok(Some(row)) => self.ctx.render_node_env_from_row(&row),
                 _ => self.ctx.render_default_node_env(&req.node_key),
@@ -1563,20 +1519,13 @@ impl NodeService for NodeApi {
             } else {
                 "SUCCEEDED"
             };
-            return Ok(Response::new(self.ctx.state.finish_operation(
-                "sync_node_env",
-                &req.node_key,
-                "",
-                status,
-                &summary,
-            )));
+            return Ok(Response::new(operation.finish(status, &summary)?));
         }
-        Ok(Response::new(self.ctx.state.start_operation(
+        Ok(Response::new(self.ctx.state.missing_agent_operation(
             "sync_node_env",
             &req.node_key,
             "",
-            "sync_node_env queued by skeleton driver",
-        )))
+        )?))
     }
 
     async fn probe_node(
@@ -1585,6 +1534,10 @@ impl NodeService for NodeApi {
     ) -> Result<Response<StartOperationResponse>, Status> {
         let req = request.into_inner();
         if let Some(target) = self.ctx.agent_target(&req.node_key) {
+            let operation = self
+                .ctx
+                .state
+                .begin_operation("probe_node", &req.node_key, "")?;
             let transport = agent_transport::AgentTransport::new(target);
             let summary = match (
                 transport.get_node_health().await,
@@ -1605,20 +1558,13 @@ impl NodeService for NodeApi {
             } else {
                 "SUCCEEDED"
             };
-            return Ok(Response::new(self.ctx.state.finish_operation(
-                "probe_node",
-                &req.node_key,
-                "",
-                status,
-                &summary,
-            )));
+            return Ok(Response::new(operation.finish(status, &summary)?));
         }
-        Ok(Response::new(self.ctx.state.start_operation(
+        Ok(Response::new(self.ctx.state.missing_agent_operation(
             "probe_node",
             &req.node_key,
             "",
-            "probe_node queued by skeleton driver",
-        )))
+        )?))
     }
 
     async fn check_ports(
@@ -1627,6 +1573,10 @@ impl NodeService for NodeApi {
     ) -> Result<Response<StartOperationResponse>, Status> {
         let req = request.into_inner();
         if let Some(target) = self.ctx.agent_target(&req.node_key) {
+            let operation = self
+                .ctx
+                .state
+                .begin_operation("check_ports", &req.node_key, "")?;
             let specs = match self.ctx.fetch_server_row(&req.node_key).await {
                 Ok(Some(row)) => self.ctx.port_check_specs_from_row(&row),
                 _ => self.ctx.default_port_check_specs(),
@@ -1660,20 +1610,13 @@ impl NodeService for NodeApi {
             } else {
                 "SUCCEEDED"
             };
-            return Ok(Response::new(self.ctx.state.finish_operation(
-                "check_ports",
-                &req.node_key,
-                "",
-                status,
-                &summary,
-            )));
+            return Ok(Response::new(operation.finish(status, &summary)?));
         }
-        Ok(Response::new(self.ctx.state.start_operation(
+        Ok(Response::new(self.ctx.state.missing_agent_operation(
             "check_ports",
             &req.node_key,
             "",
-            "check_ports queued by skeleton driver",
-        )))
+        )?))
     }
 
     async fn open_ports(
@@ -1682,6 +1625,10 @@ impl NodeService for NodeApi {
     ) -> Result<Response<StartOperationResponse>, Status> {
         let req = request.into_inner();
         if let Some(target) = self.ctx.agent_target(&req.node_key) {
+            let operation = self
+                .ctx
+                .state
+                .begin_operation("open_ports", &req.node_key, "")?;
             let specs = match self.ctx.fetch_server_row(&req.node_key).await {
                 Ok(Some(row)) => self.ctx.port_check_specs_from_row(&row),
                 _ => self.ctx.default_port_check_specs(),
@@ -1712,20 +1659,13 @@ impl NodeService for NodeApi {
             } else {
                 "FAILED"
             };
-            return Ok(Response::new(self.ctx.state.finish_operation(
-                "open_ports",
-                &req.node_key,
-                "",
-                status,
-                &summary,
-            )));
+            return Ok(Response::new(operation.finish(status, &summary)?));
         }
-        Ok(Response::new(self.ctx.state.start_operation(
+        Ok(Response::new(self.ctx.state.missing_agent_operation(
             "open_ports",
             &req.node_key,
             "",
-            "open_ports queued by skeleton driver",
-        )))
+        )?))
     }
 
     async fn install_docker(
@@ -1734,6 +1674,10 @@ impl NodeService for NodeApi {
     ) -> Result<Response<StartOperationResponse>, Status> {
         let req = request.into_inner();
         if let Some(target) = self.ctx.agent_target(&req.node_key) {
+            let operation = self
+                .ctx
+                .state
+                .begin_operation("install_docker", &req.node_key, "")?;
             let transport = agent_transport::AgentTransport::new(target);
             let summary = match transport.install_docker().await {
                 Ok(result) => result.summary,
@@ -1744,20 +1688,13 @@ impl NodeService for NodeApi {
             } else {
                 "SUCCEEDED"
             };
-            return Ok(Response::new(self.ctx.state.finish_operation(
-                "install_docker",
-                &req.node_key,
-                "",
-                status,
-                &summary,
-            )));
+            return Ok(Response::new(operation.finish(status, &summary)?));
         }
-        Ok(Response::new(self.ctx.state.start_operation(
+        Ok(Response::new(self.ctx.state.missing_agent_operation(
             "install_docker",
             &req.node_key,
             "",
-            "install_docker queued by skeleton driver",
-        )))
+        )?))
     }
 }
 
@@ -1780,7 +1717,11 @@ impl ProvisioningService for ProvisioningApi {
             let mut lines = Vec::new();
             let mut failed = false;
             let mut result_json = String::new();
-            for protocol in profile.protocol_kinds.iter().map(|value| value.trim().to_lowercase()) {
+            for protocol in profile
+                .protocol_kinds
+                .iter()
+                .map(|value| value.trim().to_lowercase())
+            {
                 if protocol == "xray" {
                     let uuid = profile
                         .xray
@@ -1792,7 +1733,10 @@ impl ProvisioningService for ProvisioningApi {
                         .as_ref()
                         .map(|spec| spec.short_id.trim().to_string())
                         .unwrap_or_default();
-                    match transport.add_xray_user(&profile_name, &uuid, &short_id).await {
+                    match transport
+                        .add_xray_user(&profile_name, &uuid, &short_id)
+                        .await
+                    {
                         Ok(result) => {
                             lines.push(format!("xray: {}", result.summary));
                             if let Err(err) = self
@@ -1887,14 +1831,13 @@ impl ProvisioningService for ProvisioningApi {
                 if failed { "FAILED" } else { "SUCCEEDED" },
                 &lines.join("\n"),
                 &result_json,
-            )));
+            )?));
         }
-        Ok(Response::new(self.ctx.state.start_operation(
+        Ok(Response::new(self.ctx.state.missing_agent_operation(
             "ensure_profile_on_node",
             &req.node_key,
             &profile_name,
-            "ensure_profile_on_node queued by skeleton driver",
-        )))
+        )?))
     }
 
     async fn delete_profile_from_node(
@@ -1906,14 +1849,22 @@ impl ProvisioningService for ProvisioningApi {
             let transport = agent_transport::AgentTransport::new(target);
             let mut lines = Vec::new();
             let mut failed = false;
-            for protocol in req.protocol_kinds.iter().map(|value| value.trim().to_lowercase()) {
+            for protocol in req
+                .protocol_kinds
+                .iter()
+                .map(|value| value.trim().to_lowercase())
+            {
                 if protocol == "xray" {
                     match transport.delete_xray_user(&req.profile_name).await {
                         Ok(result) => {
                             lines.push(format!("xray: {}", result.summary));
                             if let Err(err) = self
                                 .ctx
-                                .delete_profile_server_state(&req.profile_name, &req.node_key, "xray")
+                                .delete_profile_server_state(
+                                    &req.profile_name,
+                                    &req.node_key,
+                                    "xray",
+                                )
                                 .await
                             {
                                 failed = true;
@@ -1931,7 +1882,11 @@ impl ProvisioningService for ProvisioningApi {
                             lines.push(format!("awg: {}", result.summary));
                             if let Err(err) = self
                                 .ctx
-                                .delete_profile_server_state(&req.profile_name, &req.node_key, "awg")
+                                .delete_profile_server_state(
+                                    &req.profile_name,
+                                    &req.node_key,
+                                    "awg",
+                                )
                                 .await
                             {
                                 failed = true;
@@ -1955,14 +1910,13 @@ impl ProvisioningService for ProvisioningApi {
                 &req.profile_name,
                 if failed { "FAILED" } else { "SUCCEEDED" },
                 &lines.join("\n"),
-            )));
+            )?));
         }
-        Ok(Response::new(self.ctx.state.start_operation(
+        Ok(Response::new(self.ctx.state.missing_agent_operation(
             "delete_profile_from_node",
             &req.node_key,
             &req.profile_name,
-            "delete_profile_from_node queued by skeleton driver",
-        )))
+        )?))
     }
 
     async fn reconcile_node(
@@ -1981,7 +1935,7 @@ impl ProvisioningService for ProvisioningApi {
                 "",
                 "FAILED",
                 &format!("Server {node_key} not found"),
-            )));
+            )?));
         };
         let protocol_kinds = self.ctx.parse_protocol_kinds(
             row.try_get::<_, Option<String>>("protocol_kinds")
@@ -1997,7 +1951,7 @@ impl ProvisioningService for ProvisioningApi {
                 "",
                 "SUCCEEDED",
                 &format!("server: {node_key}\nno managed protocols"),
-            )));
+            )?));
         }
         let Some(target) = self.ctx.agent_target(&node_key) else {
             return Ok(Response::new(self.ctx.state.finish_operation(
@@ -2006,7 +1960,7 @@ impl ProvisioningService for ProvisioningApi {
                 "",
                 "FAILED",
                 "no node-agent target configured",
-            )));
+            )?));
         };
 
         let mut overall_code = 0;
@@ -2023,7 +1977,11 @@ impl ProvisioningService for ProvisioningApi {
             parts.push("[awg]".to_string());
             parts.push(out.trim().to_string());
         }
-        let status = if overall_code == 0 { "SUCCEEDED" } else { "FAILED" };
+        let status = if overall_code == 0 {
+            "SUCCEEDED"
+        } else {
+            "FAILED"
+        };
         let message = if parts.is_empty() {
             format!("server: {node_key}\nno managed protocols")
         } else {
@@ -2035,7 +1993,7 @@ impl ProvisioningService for ProvisioningApi {
             "",
             status,
             &message,
-        )))
+        )?))
     }
 
     async fn reconcile_profile(
@@ -2049,7 +2007,10 @@ impl ProvisioningService for ProvisioningApi {
         }
         let client = self.ctx.db_client().await?;
         let exists = client
-            .query_opt("SELECT name FROM profiles WHERE name = $1", &[&profile_name])
+            .query_opt(
+                "SELECT name FROM profiles WHERE name = $1",
+                &[&profile_name],
+            )
             .await
             .map_err(|err| Status::internal(format!("failed to query profile: {err}")))?;
         if exists.is_none() {
@@ -2059,7 +2020,7 @@ impl ProvisioningService for ProvisioningApi {
                 &profile_name,
                 "FAILED",
                 &format!("profile {profile_name} not found"),
-            )));
+            )?));
         }
 
         let profile_codes_rows = client
@@ -2119,7 +2080,7 @@ impl ProvisioningService for ProvisioningApi {
                 &profile_name,
                 "SUCCEEDED",
                 &format!("profile: {profile_name}\nno managed protocols"),
-            )));
+            )?));
         }
 
         let mut node_keys: Vec<String> = target_node_keys.into_iter().collect();
@@ -2141,16 +2102,23 @@ impl ProvisioningService for ProvisioningApi {
             if operation.status != "SUCCEEDED" {
                 overall_failed = true;
             }
-            blocks.push(format!("[{node_key}]\n{}", operation.progress_message.trim()));
+            blocks.push(format!(
+                "[{node_key}]\n{}",
+                operation.progress_message.trim()
+            ));
         }
 
         Ok(Response::new(self.ctx.state.finish_operation(
             "reconcile_profile",
             "",
             &profile_name,
-            if overall_failed { "FAILED" } else { "SUCCEEDED" },
+            if overall_failed {
+                "FAILED"
+            } else {
+                "SUCCEEDED"
+            },
             &blocks.join("\n\n"),
-        )))
+        )?))
     }
 
     async fn list_remote_profiles(
@@ -2226,7 +2194,7 @@ impl RuntimeService for RuntimeApi {
                         "",
                         "FAILED",
                         "server not found",
-                    )));
+                    )?));
                 }
                 Err(err) => {
                     return Ok(Response::new(self.ctx.state.finish_operation(
@@ -2235,7 +2203,7 @@ impl RuntimeService for RuntimeApi {
                         "",
                         "FAILED",
                         &format!("failed to load server registry row: {err}"),
-                    )));
+                    )?));
                 }
             };
             let transport = agent_transport::AgentTransport::new(target);
@@ -2246,61 +2214,79 @@ impl RuntimeService for RuntimeApi {
                     .unwrap_or_default()
                     .as_str(),
             );
-            let mut completed_parts = vec!["Base packages and helper scripts installed".to_string()];
+            let mut completed_parts =
+                vec!["Base packages and helper scripts installed".to_string()];
 
             let port_result = transport
                 .check_ports(self.ctx.port_check_specs_from_row(&row))
                 .await;
             match port_result {
                 Ok(result) => {
-                    if result.items.iter().any(|item| item.status == "busy" || item.status == "invalid") {
-                        let message = format!("port check failed before bootstrap\n{}", result.summary);
-                        let _ = self.ctx.mark_bootstrap_state(&req.node_key, "bootstrap_failed", &message).await;
+                    if result
+                        .items
+                        .iter()
+                        .any(|item| item.status == "busy" || item.status == "invalid")
+                    {
+                        let message =
+                            format!("port check failed before bootstrap\n{}", result.summary);
+                        let _ = self
+                            .ctx
+                            .mark_bootstrap_state(&req.node_key, "bootstrap_failed", &message)
+                            .await;
                         return Ok(Response::new(self.ctx.state.finish_operation(
                             "bootstrap_node",
                             &req.node_key,
                             "",
                             "FAILED",
                             &message,
-                        )));
+                        )?));
                     }
                 }
                 Err(err) => {
                     let message = format!("agent port check failed: {err}");
-                    let _ = self.ctx.mark_bootstrap_state(&req.node_key, "bootstrap_failed", &message).await;
+                    let _ = self
+                        .ctx
+                        .mark_bootstrap_state(&req.node_key, "bootstrap_failed", &message)
+                        .await;
                     return Ok(Response::new(self.ctx.state.finish_operation(
                         "bootstrap_node",
                         &req.node_key,
                         "",
                         "FAILED",
                         &message,
-                    )));
+                    )?));
                 }
             }
 
             if let Err(err) = transport.install_docker().await {
                 let message = format!("agent docker install failed: {err}");
-                let _ = self.ctx.mark_bootstrap_state(&req.node_key, "bootstrap_failed", &message).await;
+                let _ = self
+                    .ctx
+                    .mark_bootstrap_state(&req.node_key, "bootstrap_failed", &message)
+                    .await;
                 return Ok(Response::new(self.ctx.state.finish_operation(
                     "bootstrap_node",
                     &req.node_key,
                     "",
                     "FAILED",
                     &message,
-                )));
+                )?));
             }
 
             let files = self.ctx.runtime_file_bundle(Some(&row), &req.node_key)?;
             if let Err(err) = transport.sync_runtime_files(files).await {
                 let message = format!("agent runtime bundle sync failed: {err}");
-                let _ = self.ctx.mark_bootstrap_state(&req.node_key, "bootstrap_failed", &message).await;
+                let _ = self
+                    .ctx
+                    .mark_bootstrap_state(&req.node_key, "bootstrap_failed", &message)
+                    .await;
                 return Ok(Response::new(self.ctx.state.finish_operation(
                     "bootstrap_node",
                     &req.node_key,
                     "",
                     "FAILED",
                     &message,
-                )));
+                )?));
             }
 
             if protocol_kinds.iter().any(|item| item == "xray") {
@@ -2311,10 +2297,10 @@ impl RuntimeService for RuntimeApi {
                 );
                 let public_host = self.ctx.row_string(&row, "public_host", "");
                 let sni_host = self.ctx.row_string(&row, "xray_sni", "www.cloudflare.com");
-                let flow = self
+                let flow = self.ctx.row_string(&row, "xray_flow", "xtls-rprx-vision");
+                let path_prefix = self
                     .ctx
-                    .row_string(&row, "xray_flow", "xtls-rprx-vision");
-                let path_prefix = self.ctx.row_string(&row, "xray_xhttp_path_prefix", "/assets");
+                    .row_string(&row, "xray_xhttp_path_prefix", "/assets");
                 let tcp_port = self.ctx.row_i32(&row, "xray_tcp_port", 443).max(1) as u32;
                 let xhttp_port = self.ctx.row_i32(&row, "xray_xhttp_port", 8443).max(1) as u32;
                 let preserve_xray_config = req.preserve_config
@@ -2333,42 +2319,71 @@ impl RuntimeService for RuntimeApi {
                         )
                         .await
                     {
-                        Ok(result) => match serde_json::from_str::<XraySyncGenerated>(&result.generated_json) {
-                            Ok(generated) => {
-                                if let Err(err) = self.ctx.update_xray_server_fields(&req.node_key, &generated).await {
-                                    let message = format!("failed to persist generated xray settings: {err}");
-                                    let _ = self.ctx.mark_bootstrap_state(&req.node_key, "bootstrap_failed", &message).await;
+                        Ok(result) => {
+                            match serde_json::from_str::<XraySyncGenerated>(&result.generated_json)
+                            {
+                                Ok(generated) => {
+                                    if let Err(err) = self
+                                        .ctx
+                                        .update_xray_server_fields(&req.node_key, &generated)
+                                        .await
+                                    {
+                                        let message = format!(
+                                            "failed to persist generated xray settings: {err}"
+                                        );
+                                        let _ = self
+                                            .ctx
+                                            .mark_bootstrap_state(
+                                                &req.node_key,
+                                                "bootstrap_failed",
+                                                &message,
+                                            )
+                                            .await;
+                                        return Ok(Response::new(
+                                            self.ctx.state.finish_operation(
+                                                "bootstrap_node",
+                                                &req.node_key,
+                                                "",
+                                                "FAILED",
+                                                &message,
+                                            )?,
+                                        ));
+                                    }
+                                }
+                                Err(err) => {
+                                    let message =
+                                        format!("agent init xray returned invalid json: {err}");
+                                    let _ = self
+                                        .ctx
+                                        .mark_bootstrap_state(
+                                            &req.node_key,
+                                            "bootstrap_failed",
+                                            &message,
+                                        )
+                                        .await;
                                     return Ok(Response::new(self.ctx.state.finish_operation(
                                         "bootstrap_node",
                                         &req.node_key,
                                         "",
                                         "FAILED",
                                         &message,
-                                    )));
+                                    )?));
                                 }
                             }
-                            Err(err) => {
-                                let message = format!("agent init xray returned invalid json: {err}");
-                                let _ = self.ctx.mark_bootstrap_state(&req.node_key, "bootstrap_failed", &message).await;
-                                return Ok(Response::new(self.ctx.state.finish_operation(
-                                    "bootstrap_node",
-                                    &req.node_key,
-                                    "",
-                                    "FAILED",
-                                    &message,
-                                )));
-                            }
-                        },
+                        }
                         Err(err) => {
                             let message = format!("agent init xray failed: {err}");
-                            let _ = self.ctx.mark_bootstrap_state(&req.node_key, "bootstrap_failed", &message).await;
+                            let _ = self
+                                .ctx
+                                .mark_bootstrap_state(&req.node_key, "bootstrap_failed", &message)
+                                .await;
                             return Ok(Response::new(self.ctx.state.finish_operation(
                                 "bootstrap_node",
                                 &req.node_key,
                                 "",
                                 "FAILED",
                                 &message,
-                            )));
+                            )?));
                         }
                     }
                     completed_parts.push("Xray settings generated".to_string());
@@ -2377,14 +2392,17 @@ impl RuntimeService for RuntimeApi {
                 }
                 if let Err(err) = transport.deploy_xray().await {
                     let message = format!("agent deploy xray failed: {err}");
-                    let _ = self.ctx.mark_bootstrap_state(&req.node_key, "bootstrap_failed", &message).await;
+                    let _ = self
+                        .ctx
+                        .mark_bootstrap_state(&req.node_key, "bootstrap_failed", &message)
+                        .await;
                     return Ok(Response::new(self.ctx.state.finish_operation(
                         "bootstrap_node",
                         &req.node_key,
                         "",
                         "FAILED",
                         &message,
-                    )));
+                    )?));
                 }
                 completed_parts.push("Xray runtime deployed".to_string());
             }
@@ -2396,30 +2414,39 @@ impl RuntimeService for RuntimeApi {
                     "/opt/node-plane-runtime/amnezia-awg/data/wg0.conf",
                 );
                 let preserve_awg_config = req.preserve_config
-                    && transport.path_exists(&awg_config_path).await.unwrap_or(false);
+                    && transport
+                        .path_exists(&awg_config_path)
+                        .await
+                        .unwrap_or(false);
                 if !preserve_awg_config {
                     if let Err(err) = transport.init_awg().await {
                         let message = format!("agent init awg failed: {err}");
-                        let _ = self.ctx.mark_bootstrap_state(&req.node_key, "bootstrap_failed", &message).await;
+                        let _ = self
+                            .ctx
+                            .mark_bootstrap_state(&req.node_key, "bootstrap_failed", &message)
+                            .await;
                         return Ok(Response::new(self.ctx.state.finish_operation(
                             "bootstrap_node",
                             &req.node_key,
                             "",
                             "FAILED",
                             &message,
-                        )));
+                        )?));
                     }
                 }
                 if let Err(err) = transport.deploy_awg().await {
                     let message = format!("agent deploy awg failed: {err}");
-                    let _ = self.ctx.mark_bootstrap_state(&req.node_key, "bootstrap_failed", &message).await;
+                    let _ = self
+                        .ctx
+                        .mark_bootstrap_state(&req.node_key, "bootstrap_failed", &message)
+                        .await;
                     return Ok(Response::new(self.ctx.state.finish_operation(
                         "bootstrap_node",
                         &req.node_key,
                         "",
                         "FAILED",
                         &message,
-                    )));
+                    )?));
                 }
                 completed_parts.push("AWG runtime deployed".to_string());
             }
@@ -2437,26 +2464,26 @@ impl RuntimeService for RuntimeApi {
                         "",
                         "SUCCEEDED",
                         &summary,
-                    )));
+                    )?));
                 }
                 Err(err) => {
-                    let message = format!("bootstrap completed on agent but registry update failed: {err}");
+                    let message =
+                        format!("bootstrap completed on agent but registry update failed: {err}");
                     return Ok(Response::new(self.ctx.state.finish_operation(
                         "bootstrap_node",
                         &req.node_key,
                         "",
                         "FAILED",
                         &message,
-                    )));
+                    )?));
                 }
             }
         }
-        Ok(Response::new(self.ctx.state.start_operation(
+        Ok(Response::new(self.ctx.state.missing_agent_operation(
             "bootstrap_node",
             &req.node_key,
             "",
-            "bootstrap_node queued by skeleton driver",
-        )))
+        )?))
     }
 
     async fn reinstall_node(
@@ -2479,7 +2506,7 @@ impl RuntimeService for RuntimeApi {
                                 &format!(
                                     "runtime deleted on agent but central registry update failed: {err}"
                                 ),
-                            )));
+                            )?));
                         }
                     },
                     Err(err) => {
@@ -2489,7 +2516,7 @@ impl RuntimeService for RuntimeApi {
                             "",
                             "FAILED",
                             &format!("agent runtime delete failed before reinstall: {err}"),
-                        )));
+                        )?));
                     }
                 };
                 let bootstrap_response = self
@@ -2499,17 +2526,23 @@ impl RuntimeService for RuntimeApi {
                     }))
                     .await?
                     .into_inner();
-                let bootstrap_operation = self.ctx.state.get_operation(&bootstrap_response.operation_id);
+                let bootstrap_operation = self
+                    .ctx
+                    .state
+                    .get_operation(&bootstrap_response.operation_id);
                 if let Some(op) = bootstrap_operation {
                     let status = op.status;
-                    let message = format!("Clean reinstall.\n{cleanup_summary}\n\n{}", op.progress_message);
+                    let message = format!(
+                        "Clean reinstall.\n{cleanup_summary}\n\n{}",
+                        op.progress_message
+                    );
                     return Ok(Response::new(self.ctx.state.finish_operation(
                         "reinstall_node",
                         &req.node_key,
                         "",
                         &status,
                         &message,
-                    )));
+                    )?));
                 }
             } else {
                 let bootstrap_response = self
@@ -2519,17 +2552,23 @@ impl RuntimeService for RuntimeApi {
                     }))
                     .await?
                     .into_inner();
-                let bootstrap_operation = self.ctx.state.get_operation(&bootstrap_response.operation_id);
+                let bootstrap_operation = self
+                    .ctx
+                    .state
+                    .get_operation(&bootstrap_response.operation_id);
                 if let Some(op) = bootstrap_operation {
                     let status = op.status;
-                    let message = format!("Reinstall with existing config preserved.\n{}", op.progress_message);
+                    let message = format!(
+                        "Reinstall with existing config preserved.\n{}",
+                        op.progress_message
+                    );
                     return Ok(Response::new(self.ctx.state.finish_operation(
                         "reinstall_node",
                         &req.node_key,
                         "",
                         &status,
                         &message,
-                    )));
+                    )?));
                 }
             }
             return Ok(Response::new(self.ctx.state.finish_operation(
@@ -2538,14 +2577,13 @@ impl RuntimeService for RuntimeApi {
                 "",
                 "FAILED",
                 "bootstrap operation result was not found",
-            )));
+            )?));
         }
-        Ok(Response::new(self.ctx.state.start_operation(
+        Ok(Response::new(self.ctx.state.missing_agent_operation(
             "reinstall_node",
             &req.node_key,
             "",
-            "reinstall_node queued by skeleton driver",
-        )))
+        )?))
     }
 
     async fn delete_runtime(
@@ -2562,7 +2600,9 @@ impl RuntimeService for RuntimeApi {
                     .await
                 {
                     Ok(()) => result.summary,
-                    Err(err) => format!("runtime deleted on agent but central registry update failed: {err}"),
+                    Err(err) => format!(
+                        "runtime deleted on agent but central registry update failed: {err}"
+                    ),
                 },
                 Err(err) => format!("agent runtime delete failed: {err}"),
             };
@@ -2577,14 +2617,13 @@ impl RuntimeService for RuntimeApi {
                 "",
                 status,
                 &summary,
-            )));
+            )?));
         }
-        Ok(Response::new(self.ctx.state.start_operation(
+        Ok(Response::new(self.ctx.state.missing_agent_operation(
             "delete_runtime",
             &req.node_key,
             "",
-            "delete_runtime queued by skeleton driver",
-        )))
+        )?))
     }
 
     async fn full_cleanup_node(
@@ -2606,7 +2645,7 @@ impl RuntimeService for RuntimeApi {
                             &format!(
                                 "runtime deleted on agent but central registry update failed: {err}"
                             ),
-                        )));
+                        )?));
                     }
                 },
                 Err(err) => {
@@ -2616,7 +2655,7 @@ impl RuntimeService for RuntimeApi {
                         "",
                         "FAILED",
                         &format!("agent runtime delete failed: {err}"),
-                    )));
+                    )?));
                 }
             };
 
@@ -2655,7 +2694,7 @@ impl RuntimeService for RuntimeApi {
                     "",
                     "FAILED",
                     &lines.join("\n"),
-                )));
+                )?));
             }
             return Ok(Response::new(self.ctx.state.finish_operation(
                 "full_cleanup_node",
@@ -2663,14 +2702,13 @@ impl RuntimeService for RuntimeApi {
                 "",
                 "SUCCEEDED",
                 &lines.join("\n"),
-            )));
+            )?));
         }
-        Ok(Response::new(self.ctx.state.start_operation(
+        Ok(Response::new(self.ctx.state.missing_agent_operation(
             "full_cleanup_node",
             &req.node_key,
             "",
-            "full_cleanup_node queued by skeleton driver",
-        )))
+        )?))
     }
 
     async fn sync_runtime(
@@ -2683,15 +2721,14 @@ impl RuntimeService for RuntimeApi {
                 Ok(Some(row)) => Some(row),
                 _ => None,
             };
-            let files = self
-                .ctx
-                .runtime_file_bundle(row.as_ref(), &req.node_key)?;
+            let files = self.ctx.runtime_file_bundle(row.as_ref(), &req.node_key)?;
             let has_xray = row
                 .as_ref()
                 .map(|value| {
                     self.ctx
                         .parse_protocol_kinds(
-                            value.try_get::<_, Option<String>>("protocol_kinds")
+                            value
+                                .try_get::<_, Option<String>>("protocol_kinds")
                                 .ok()
                                 .flatten()
                                 .unwrap_or_default()
@@ -2726,14 +2763,13 @@ impl RuntimeService for RuntimeApi {
                 "",
                 status,
                 &summary,
-            )));
+            )?));
         }
-        Ok(Response::new(self.ctx.state.start_operation(
+        Ok(Response::new(self.ctx.state.missing_agent_operation(
             "sync_runtime",
             &req.node_key,
             "",
-            "sync_runtime queued by skeleton driver",
-        )))
+        )?))
     }
 
     async fn sync_xray(
@@ -2751,7 +2787,7 @@ impl RuntimeService for RuntimeApi {
                         "",
                         "FAILED",
                         "server not found",
-                    )));
+                    )?));
                 }
                 Err(err) => {
                     return Ok(Response::new(self.ctx.state.finish_operation(
@@ -2760,7 +2796,7 @@ impl RuntimeService for RuntimeApi {
                         "",
                         "FAILED",
                         &format!("failed to load server registry row: {err}"),
-                    )));
+                    )?));
                 }
             };
             let protocol_kinds = self.ctx.parse_protocol_kinds(
@@ -2777,7 +2813,7 @@ impl RuntimeService for RuntimeApi {
                     "",
                     "FAILED",
                     "xray is not enabled on this server",
-                )));
+                )?));
             }
             let config_path = self.ctx.row_string(
                 &row,
@@ -2785,29 +2821,28 @@ impl RuntimeService for RuntimeApi {
                 "/opt/node-plane-runtime/xray/config.json",
             );
             let public_host = self.ctx.row_string(&row, "public_host", "");
-            let flow = self
-                .ctx
-                .row_string(&row, "xray_flow", "xtls-rprx-vision");
+            let flow = self.ctx.row_string(&row, "xray_flow", "xtls-rprx-vision");
             let image = "ghcr.io/xtls/xray-core:25.12.8";
             let transport = agent_transport::AgentTransport::new(target);
             let summary = match transport
                 .sync_xray(&config_path, &public_host, &flow, image)
                 .await
             {
-                Ok(result) => match serde_json::from_str::<XraySyncGenerated>(&result.generated_json)
-                {
-                    Ok(generated) => {
-                        match self
-                            .ctx
-                            .update_xray_server_fields(&req.node_key, &generated)
-                            .await
-                        {
-                            Ok(()) => result.generated_json,
-                            Err(err) => format!("failed to persist xray settings: {err}"),
+                Ok(result) => {
+                    match serde_json::from_str::<XraySyncGenerated>(&result.generated_json) {
+                        Ok(generated) => {
+                            match self
+                                .ctx
+                                .update_xray_server_fields(&req.node_key, &generated)
+                                .await
+                            {
+                                Ok(()) => result.generated_json,
+                                Err(err) => format!("failed to persist xray settings: {err}"),
+                            }
                         }
+                        Err(err) => format!("agent xray sync returned invalid json: {err}"),
                     }
-                    Err(err) => format!("agent xray sync returned invalid json: {err}"),
-                },
+                }
                 Err(err) => format!("agent xray sync failed: {err}"),
             };
             let status = if summary.trim_start().starts_with('{') {
@@ -2821,14 +2856,13 @@ impl RuntimeService for RuntimeApi {
                 "",
                 status,
                 &summary,
-            )));
+            )?));
         }
-        Ok(Response::new(self.ctx.state.start_operation(
+        Ok(Response::new(self.ctx.state.missing_agent_operation(
             "sync_xray",
             &req.node_key,
             "",
-            "sync_xray queued by skeleton driver",
-        )))
+        )?))
     }
 
     async fn get_runtime_status(
@@ -2933,16 +2967,11 @@ impl RuntimeService for RuntimeApi {
 impl TelemetryService for TelemetryApi {
     async fn collect_traffic_snapshot(
         &self,
-        request: Request<driver::v1::CollectTrafficSnapshotRequest>,
+        _request: Request<driver::v1::CollectTrafficSnapshotRequest>,
     ) -> Result<Response<StartOperationResponse>, Status> {
-        let req = request.into_inner();
-        let node_key = req.node_keys.first().cloned().unwrap_or_default();
-        Ok(Response::new(self.ctx.state.start_operation(
-            "collect_traffic_snapshot",
-            &node_key,
-            "",
-            "collect_traffic_snapshot queued by skeleton driver",
-        )))
+        Err(Status::unimplemented(
+            "traffic collection is not implemented by the driver",
+        ))
     }
 
     async fn get_profile_usage(
@@ -3003,9 +3032,30 @@ impl OperationService for OperationApi {
 
     async fn watch_operation(
         &self,
-        _request: Request<WatchOperationRequest>,
+        request: Request<WatchOperationRequest>,
     ) -> Result<Response<Self::WatchOperationStream>, Status> {
-        let (_tx, rx) = tokio::sync::mpsc::channel(1);
+        let operation = self
+            .ctx
+            .state
+            .get_operation(&request.into_inner().operation_id)
+            .ok_or_else(|| Status::not_found("operation not found"))?;
+        // Current execution is synchronous: publish the recorded terminal result.
+        // Do not imply that a background executor exists for unfinished operations.
+        if !matches!(
+            operation.status.as_str(),
+            "SUCCEEDED" | "FAILED" | "CANCELLED"
+        ) {
+            return Err(Status::unimplemented(
+                "live operation progress is not implemented",
+            ));
+        }
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
+        tx.send(Ok(OperationEvent {
+            operation: Some(operation),
+            log_line: String::new(),
+        }))
+        .await
+        .map_err(|_| Status::internal("operation stream closed"))?;
         Ok(Response::new(tokio_stream::wrappers::ReceiverStream::new(
             rx,
         )))
@@ -3032,7 +3082,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(|_| "127.0.0.1:50051".to_string())
         .parse()?;
 
-    let ctx = DriverContext::from_env();
+    let ctx = DriverContext::from_env()?;
     let node_api = NodeApi { ctx: ctx.clone() };
     let provisioning_api = ProvisioningApi { ctx: ctx.clone() };
     let runtime_api = RuntimeApi { ctx: ctx.clone() };

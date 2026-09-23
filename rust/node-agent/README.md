@@ -1,6 +1,6 @@
 # node-plane-agent
 
-Rust skeleton for the future node-local agent.
+Rust node-local executor for runtime and host operations.
 
 Current scope:
 
@@ -20,8 +20,8 @@ Current scope:
 - creates and deletes Xray/AWG profile runtime entries through local helper scripts;
 - runs a heartbeat loop.
 
-This crate is still a scaffold, but it is now usable as a local read-only
-agent for central-driver transport tests.
+The agent runs privileged local runtime actions requested by the central
+driver. Protect node access and keep its gRPC port restricted to the controller.
 
 ## Run
 
@@ -29,17 +29,24 @@ agent for central-driver transport tests.
 scripts/run_node_agent.sh
 ```
 
+The agent requires a TLS server certificate, private key and client CA
+certificate. It rejects connections without a client certificate issued by the
+configured CA. The rollout script installs these files under
+`/etc/node-plane/tls/`; startup fails when any required file is missing.
+
 Optional environment variables:
 
 - `NODE_AGENT_CONFIG_PATH`
 - `NODE_AGENT_NODE_KEY`
 - `NODE_AGENT_LISTEN_ADDR`
 - `NODE_AGENT_HEARTBEAT_SECONDS`
-- `NODE_AGENT_CONFIG_PATH`
 
 Default config path:
 
 - `/etc/node-plane/agent.toml`
+
+TLS certificate paths can be set in `agent.toml` with `tls_certificate_path`,
+`tls_key_path` and `tls_client_ca_path`. Defaults point to `/etc/node-plane/tls/`.
 
 Current RPC surface:
 

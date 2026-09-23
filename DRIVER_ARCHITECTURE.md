@@ -1,5 +1,10 @@
 # Node Driver Architecture
 
+> Historical design draft. For current ownership decisions and operation
+> behavior, see [CORE_ARCHITECTURE.md](CORE_ARCHITECTURE.md) and the
+> [driver README](rust/node-driver/README.md). The SQLite and scaffold status
+> descriptions below no longer represent the current implementation.
+
 ## Goal
 
 Introduce a Rust node driver service that keeps long-lived connections to nodes and becomes the single execution layer for node operations.

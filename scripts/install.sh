@@ -571,13 +571,13 @@ configure_env() {
       ssh_key="$(prompt_value "Enter SSH_KEY for remote node management" "$ssh_key")"
     fi
     if [[ -z "$image_repo" ]]; then
-      image_repo="ghcr.io/seventh7dev/node-plane"
+      image_repo="ghcr.io/saharoktyan/node-plane"
     fi
     if [[ -z "$image_tag" ]]; then
       image_tag="$(current_semver "$install_ref")"
     fi
     if [[ $NON_INTERACTIVE -eq 0 ]]; then
-      image_repo="$(prompt_value "Enter NODE_PLANE_IMAGE_REPO (default: ghcr.io/seventh7dev/node-plane, or use node-plane for local builds)" "$image_repo")"
+      image_repo="$(prompt_value "Enter NODE_PLANE_IMAGE_REPO (default: ghcr.io/saharoktyan/node-plane, or use node-plane for local builds)" "$image_repo")"
       image_tag="$(prompt_value "Enter NODE_PLANE_IMAGE_TAG (use local for local builds)" "$image_tag")"
     fi
     set_env_value SSH_KEY "$ssh_key"
