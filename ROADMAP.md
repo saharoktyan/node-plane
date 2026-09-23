@@ -1,5 +1,12 @@
 # Roadmap
 
+Current priority (2026-09-24): stabilize the shared free core, Rust driver and
+node agent, and separate backend business scenarios from the Telegram adapter.
+See [CORE_ARCHITECTURE.md](CORE_ARCHITECTURE.md) for the execution contract.
+Device management, VLESS subscriptions, traffic limits, expanded metrics and
+alerts are deferred to future Pro modules. The version-oriented sections below
+are historical direction, not the current delivery order.
+
 This document outlines the planned direction for upcoming Node Plane releases.
 
 It is intentionally lightweight:

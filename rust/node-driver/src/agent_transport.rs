@@ -1,19 +1,35 @@
-use tonic::transport::Channel;
+use std::env;
+use std::fs;
+
+use tonic::transport::{Certificate, Channel, ClientTlsConfig, Endpoint, Identity};
 
 use crate::agent::v1::node_agent_service_client::NodeAgentServiceClient;
 use crate::agent::v1::{
     AddAwgUserRequest, AddXrayUserRequest, AgentEmpty, CheckPortsRequest, CheckPortsResponse,
     DeleteProfileRequest, DeleteRuntimeRequest, DeleteRuntimeResponse, InitXrayRequest,
     InitXrayResponse, InstallDockerRequest, InstallDockerResponse, ListRemoteProfilesRequest,
-    LocalHealth, OpenPortsRequest, OpenPortsResponse, PortCheckSpec, PathExistsRequest,
-    RemoteProfileRecord, RemoveAuthorizedKeyRequest,
-    RemoveAuthorizedKeyResponse, RunDiagnosticsRequest, RunDiagnosticsResponse,
-    RuntimeCommandResponse, RuntimeFacts, RuntimeFileSpec, SyncNodeEnvRequest, SyncNodeEnvResponse,
-    SyncRuntimeFilesRequest, SyncRuntimeFilesResponse, SyncXrayRequest, SyncXrayResponse,
+    LocalHealth, OpenPortsRequest, OpenPortsResponse, PathExistsRequest, PortCheckSpec,
+    RemoteProfileRecord, RemoveAuthorizedKeyRequest, RemoveAuthorizedKeyResponse,
+    RunDiagnosticsRequest, RunDiagnosticsResponse, RuntimeCommandResponse, RuntimeFacts,
+    RuntimeFileSpec, SyncNodeEnvRequest, SyncNodeEnvResponse, SyncRuntimeFilesRequest,
+    SyncRuntimeFilesResponse, SyncXrayRequest, SyncXrayResponse,
 };
 
 pub struct AgentTransport {
     target: String,
+}
+
+fn required_tls_path(name: &str) -> std::io::Result<String> {
+    env::var(name)
+        .map(|value| value.trim().to_string())
+        .ok()
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("required mutual TLS setting {name} is missing"),
+            )
+        })
 }
 
 impl AgentTransport {
@@ -23,8 +39,34 @@ impl AgentTransport {
         }
     }
 
-    async fn client(&self) -> Result<NodeAgentServiceClient<Channel>, tonic::transport::Error> {
-        NodeAgentServiceClient::connect(format!("http://{}", self.target)).await
+    async fn client(
+        &self,
+    ) -> Result<NodeAgentServiceClient<Channel>, Box<dyn std::error::Error + Send + Sync>> {
+        let ca = fs::read(required_tls_path("NODE_AGENT_CA_CERT")?)?;
+        let certificate = fs::read(required_tls_path("NODE_AGENT_CLIENT_CERT")?)?;
+        let key = fs::read(required_tls_path("NODE_AGENT_CLIENT_KEY")?)?;
+        let host = self
+            .target
+            .rsplit_once(':')
+            .map(|(host, _)| host)
+            .unwrap_or(self.target.as_str())
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .to_string();
+        if host.is_empty() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "agent target must include a host",
+            )
+            .into());
+        }
+        let tls = ClientTlsConfig::new()
+            .ca_certificate(Certificate::from_pem(ca))
+            .identity(Identity::from_pem(certificate, key))
+            .domain_name(host);
+        let endpoint =
+            Endpoint::from_shared(format!("https://{}", self.target))?.tls_config(tls)?;
+        Ok(NodeAgentServiceClient::new(endpoint.connect().await?))
     }
 
     pub async fn get_runtime_facts(&self) -> Result<RuntimeFacts, tonic::Status> {
@@ -77,10 +119,7 @@ impl AgentTransport {
         Ok(response.into_inner())
     }
 
-    pub async fn sync_node_env(
-        &self,
-        content: &str,
-    ) -> Result<SyncNodeEnvResponse, tonic::Status> {
+    pub async fn sync_node_env(&self, content: &str) -> Result<SyncNodeEnvResponse, tonic::Status> {
         let mut client = self.client().await.map_err(|err| {
             tonic::Status::unavailable(format!("failed to connect to node agent: {err}"))
         })?;

@@ -30,7 +30,12 @@ STRICT_MODE=0
 DRY_RUN=0
 AGENT_PORT="${NODE_AGENT_PORT:-50061}"
 BIN_SOURCE="${NODE_PLANE_BIN_SOURCE:-auto}" # auto|release|build
-GITHUB_REPO="${NODE_PLANE_GITHUB_REPO:-seventh7dev/node-plane}"
+GITHUB_REPO="${NODE_PLANE_GITHUB_REPO:-saharoktyan/node-plane}"
+TLS_ROOT="${SHARED_ROOT}/driver-agent-tls"
+TLS_CA_CERT="${TLS_ROOT}/ca.crt"
+TLS_CA_KEY="${TLS_ROOT}/ca.key"
+TLS_CLIENT_CERT="${TLS_ROOT}/driver-client.crt"
+TLS_CLIENT_KEY="${TLS_ROOT}/driver-client.key"
 RELEASE_REF="${NODE_PLANE_BINARY_RELEASE:-}"
 DRIVER_ASSET_NAME="${NODE_PLANE_DRIVER_ASSET_NAME:-node-plane-driver-linux-amd64.tar.gz}"
 AGENT_ASSET_NAME="${NODE_PLANE_AGENT_ASSET_NAME:-node-plane-agent-linux-amd64.tar.gz}"
@@ -59,6 +64,138 @@ need_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
     echo "Missing required command: $1" >&2
     exit 1
+  fi
+}
+
+certificate_matches_key() {
+  local certificate="$1" private_key="$2" cert_public key_public
+  cert_public="$(openssl x509 -in "$certificate" -pubkey -noout \
+    | openssl pkey -pubin -outform DER 2>/dev/null | sha256sum | awk '{print $1}')" || return 1
+  key_public="$(openssl pkey -in "$private_key" -pubout -outform DER \
+    2>/dev/null | sha256sum | awk '{print $1}')" || return 1
+  [[ -n "$cert_public" && "$cert_public" == "$key_public" ]]
+}
+
+issue_driver_client_certificate() {
+  local client_tmp
+  client_tmp="$(mktemp -d "${TLS_ROOT}/.client.XXXXXX")"
+  openssl req -new -newkey rsa:2048 -nodes -sha256 \
+    -keyout "${client_tmp}/driver-client.key" \
+    -out "${client_tmp}/driver-client.csr" -subj "/CN=node-plane-driver"
+  cat > "${client_tmp}/client.ext" <<'EXT'
+basicConstraints=critical,CA:FALSE
+keyUsage=critical,digitalSignature,keyEncipherment
+extendedKeyUsage=clientAuth
+EXT
+  openssl x509 -req -in "${client_tmp}/driver-client.csr" \
+    -CA "$TLS_CA_CERT" -CAkey "$TLS_CA_KEY" -CAcreateserial \
+    -days 825 -sha256 -extfile "${client_tmp}/client.ext" \
+    -out "${client_tmp}/driver-client.crt"
+  install -m 0600 "${client_tmp}/driver-client.key" "$TLS_CLIENT_KEY"
+  install -m 0644 "${client_tmp}/driver-client.crt" "$TLS_CLIENT_CERT"
+  rm -rf "$client_tmp"
+}
+
+prepare_driver_agent_tls() {
+  need_cmd openssl
+  umask 077
+  mkdir -p "$TLS_ROOT/nodes"
+  chmod 0700 "$TLS_ROOT" "$TLS_ROOT/nodes"
+  if [[ ! -e "$TLS_CA_CERT" && ! -e "$TLS_CA_KEY" ]]; then
+    local ca_tmp
+    ca_tmp="$(mktemp -d "${TLS_ROOT}/.ca.XXXXXX")"
+    openssl req -x509 -newkey rsa:3072 -nodes -sha256 -days 3650 \
+      -keyout "${ca_tmp}/ca.key" -out "${ca_tmp}/ca.crt" \
+      -subj "/CN=Node Plane Driver Agent CA" \
+      -addext "basicConstraints=critical,CA:TRUE" \
+      -addext "keyUsage=critical,keyCertSign,cRLSign"
+    install -m 0600 "${ca_tmp}/ca.key" "$TLS_CA_KEY"
+    install -m 0644 "${ca_tmp}/ca.crt" "$TLS_CA_CERT"
+    rm -rf "$ca_tmp"
+  elif [[ ! -s "$TLS_CA_CERT" || ! -s "$TLS_CA_KEY" ]]; then
+    echo "Incomplete driver-agent CA material in ${TLS_ROOT}; refusing to replace it." >&2
+    return 1
+  fi
+  chmod 0600 "$TLS_CA_KEY"
+  chmod 0644 "$TLS_CA_CERT"
+  if ! certificate_matches_key "$TLS_CA_CERT" "$TLS_CA_KEY"; then
+    echo "Driver-agent CA certificate and private key do not match." >&2
+    return 1
+  fi
+  if ! openssl x509 -checkend 15552000 -noout -in "$TLS_CA_CERT" >/dev/null 2>&1; then
+    echo "Driver-agent CA expires within 180 days; rotate the CA and reissue certificates before rollout." >&2
+    return 1
+  fi
+
+  if [[ ! -e "$TLS_CLIENT_CERT" && ! -e "$TLS_CLIENT_KEY" ]]; then
+    issue_driver_client_certificate
+  elif [[ ! -s "$TLS_CLIENT_CERT" || ! -s "$TLS_CLIENT_KEY" ]]; then
+    echo "Incomplete driver client certificate in ${TLS_ROOT}; refusing to replace it." >&2
+    return 1
+  elif ! openssl x509 -checkend 2592000 -noout -in "$TLS_CLIENT_CERT" >/dev/null 2>&1 \
+    || ! openssl verify -CAfile "$TLS_CA_CERT" "$TLS_CLIENT_CERT" >/dev/null 2>&1 \
+    || ! certificate_matches_key "$TLS_CLIENT_CERT" "$TLS_CLIENT_KEY"; then
+    issue_driver_client_certificate
+  fi
+  chmod 0600 "$TLS_CLIENT_KEY"
+  chmod 0644 "$TLS_CLIENT_CERT"
+}
+
+prepare_node_tls() {
+  local server_key="$1"
+  local server_host="$2"
+  local san_host="$server_host"
+  if [[ ! "$server_key" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+    echo "Unsafe node key for TLS rollout: ${server_key}" >&2
+    return 1
+  fi
+  if [[ "$san_host" == \[*\] ]]; then
+    san_host="${san_host:1:${#san_host}-2}"
+  fi
+  if [[ "$san_host" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ || "$san_host" == *:* ]]; then
+    NODE_TLS_SAN="IP:${san_host}"
+  elif [[ "$san_host" =~ ^[A-Za-z0-9.-]+$ ]]; then
+    NODE_TLS_SAN="DNS:${san_host}"
+  else
+    echo "Node agent TLS requires an IPv4 address or DNS host, got: ${server_host}" >&2
+    return 1
+  fi
+  NODE_TLS_DIR="${TLS_ROOT}/nodes/${server_key}"
+  NODE_TLS_CERT="${NODE_TLS_DIR}/server.crt"
+  NODE_TLS_KEY="${NODE_TLS_DIR}/server.key"
+  mkdir -p "$NODE_TLS_DIR"
+  chmod 0700 "$NODE_TLS_DIR"
+
+  local expected_san="${NODE_TLS_DIR}/server.san"
+  local regenerate=0
+  if [[ ! -s "$NODE_TLS_CERT" || ! -s "$NODE_TLS_KEY" || ! -s "$expected_san" ]] \
+    || [[ "$(cat "$expected_san" 2>/dev/null || true)" != "$NODE_TLS_SAN" ]] \
+    || ! openssl x509 -checkend 2592000 -noout -in "$NODE_TLS_CERT" >/dev/null 2>&1 \
+    || ! openssl verify -CAfile "$TLS_CA_CERT" "$NODE_TLS_CERT" >/dev/null 2>&1 \
+    || ! certificate_matches_key "$NODE_TLS_CERT" "$NODE_TLS_KEY"; then
+    regenerate=1
+  fi
+  if [[ $regenerate -eq 1 ]]; then
+    local node_tmp
+    node_tmp="$(mktemp -d "${NODE_TLS_DIR}/.cert.XXXXXX")"
+    openssl req -new -newkey rsa:2048 -nodes -sha256 \
+      -keyout "${node_tmp}/server.key" -out "${node_tmp}/server.csr" \
+      -subj "/CN=${server_key}"
+    cat > "${node_tmp}/server.ext" <<EXT
+basicConstraints=critical,CA:FALSE
+keyUsage=critical,digitalSignature,keyEncipherment
+extendedKeyUsage=serverAuth
+subjectAltName=${NODE_TLS_SAN}
+EXT
+    openssl x509 -req -in "${node_tmp}/server.csr" \
+      -CA "$TLS_CA_CERT" -CAkey "$TLS_CA_KEY" -CAcreateserial \
+      -days 825 -sha256 -extfile "${node_tmp}/server.ext" \
+      -out "${node_tmp}/server.crt"
+    install -m 0600 "${node_tmp}/server.key" "$NODE_TLS_KEY"
+    install -m 0644 "${node_tmp}/server.crt" "$NODE_TLS_CERT"
+    printf '%s\n' "$NODE_TLS_SAN" > "$expected_san"
+    chmod 0600 "$expected_san"
+    rm -rf "$node_tmp"
   fi
 }
 
@@ -228,7 +365,7 @@ Dry run:
 
 Key env overrides:
   NODE_PLANE_BIN_SOURCE             auto|release|build (default: auto)
-  NODE_PLANE_GITHUB_REPO            owner/repo (default: seventh7dev/node-plane)
+  NODE_PLANE_GITHUB_REPO            owner/repo (default: saharoktyan/node-plane)
   NODE_PLANE_BINARY_RELEASE         release tag (default: v<VERSION> from app root)
   NODE_PLANE_DRIVER_ASSET_NAME      driver asset filename
   NODE_PLANE_AGENT_ASSET_NAME       agent asset filename
@@ -488,6 +625,11 @@ deploy_agents() {
     return 0
   fi
 
+  if [[ $DRY_RUN -eq 0 ]]; then
+    set_step "prepare driver-agent mutual TLS certificates"
+    prepare_driver_agent_tls
+  fi
+
   local failed=0
   local mappings=()
   local local_agent_sum
@@ -521,7 +663,14 @@ deploy_agents() {
     if [[ "$reach_host" == *"@"* ]]; then
       reach_host="${reach_host##*@}"
     fi
-    mappings+=("${server_key}=${reach_host}:${AGENT_PORT}")
+    if [[ "$reach_host" == *:* ]]; then
+      reach_host="${reach_host#\[}"
+      reach_host="${reach_host%\]}"
+      reach_host="[${reach_host}]"
+      mappings+=("${server_key}=${reach_host}:${AGENT_PORT}")
+    else
+      mappings+=("${server_key}=${reach_host}:${AGENT_PORT}")
+    fi
 
     echo
     echo "Deploying node-agent to ${server_key} (${target}:${ssh_port})..."
@@ -550,12 +699,77 @@ deploy_agents() {
       continue
     fi
 
+    set_step "prepare mutual TLS certificate for ${server_key}"
+    if ! prepare_node_tls "$server_key" "$reach_host"; then
+      failed=$((failed + 1))
+      continue
+    fi
+    local remote_tls_dir quoted_remote_tls_dir
+    if ! remote_tls_dir="$(ssh "${ssh_opts[@]}" "$target" 'umask 077; mktemp -d "${HOME}/.node-plane-agent-tls.XXXXXX"')"; then
+      echo "Failed to create private TLS staging directory on ${server_key}" >&2
+      failed=$((failed + 1))
+      continue
+    fi
+    printf -v quoted_remote_tls_dir '%q' "$remote_tls_dir"
+    if ! scp "${scp_opts[@]}" \
+      "$TLS_CA_CERT" "$NODE_TLS_CERT" "$NODE_TLS_KEY" \
+      "${target}:${remote_tls_dir}/"; then
+      ssh "${ssh_opts[@]}" "$target" "rm -rf -- ${quoted_remote_tls_dir}" >/dev/null 2>&1 || true
+      echo "Failed to transfer TLS material to ${server_key}" >&2
+      failed=$((failed + 1))
+      continue
+    fi
+
+    local tls_setup_script tls_changed
+    tls_setup_script="$(mktemp)"
+    cat > "$tls_setup_script" <<'TLSSETUP'
+set -euo pipefail
+stage="$1"
+trap 'rm -rf -- "$stage"' EXIT
+changed=0
+sudo mkdir -p /etc/node-plane/tls
+sudo chown root:root /etc/node-plane/tls
+sudo chmod 0700 /etc/node-plane/tls
+install_if_changed() {
+  local name="$1" destination="$2" mode="$3"
+  local source="${stage}/${name}"
+  if ! sudo test -f "$destination" || ! sudo cmp -s "$source" "$destination"; then
+    sudo install -o root -g root -m "$mode" "$source" "$destination"
+    changed=1
+  fi
+  sudo chown root:root "$destination"
+  sudo chmod "$mode" "$destination"
+}
+install_if_changed ca.crt /etc/node-plane/tls/ca.crt 0644
+install_if_changed server.crt /etc/node-plane/tls/server.crt 0644
+install_if_changed server.key /etc/node-plane/tls/server.key 0600
+echo "$changed"
+TLSSETUP
+    if ! tls_changed="$(ssh "${ssh_opts[@]}" "$target" "bash -s -- ${quoted_remote_tls_dir}" < "$tls_setup_script")"; then
+      echo "Failed to install mutual TLS material on ${server_key}" >&2
+      failed=$((failed + 1))
+      ssh "${ssh_opts[@]}" "$target" "rm -rf -- ${quoted_remote_tls_dir}" >/dev/null 2>&1 || true
+      rm -f "$tls_setup_script"
+      continue
+    fi
+    rm -f "$tls_setup_script"
+
     local remote_sum=""
     remote_sum="$(ssh "${ssh_opts[@]}" "$target" 'if [ -x /usr/local/bin/node-plane-agent ]; then sha256sum /usr/local/bin/node-plane-agent | awk "{print \$1}"; fi' 2>/dev/null || true)"
     if [[ "$remote_sum" == "$local_agent_sum" ]]; then
       if ssh "${ssh_opts[@]}" "$target" 'sudo systemctl is-active --quiet node-plane-agent' >/dev/null 2>&1; then
-        echo "node-agent is up to date and active on ${server_key}; skipping reinstall."
-        continue
+        if [[ "$tls_changed" == "1" ]]; then
+          if ssh "${ssh_opts[@]}" "$target" 'sudo systemctl restart node-plane-agent && sudo systemctl is-active --quiet node-plane-agent' >/dev/null 2>&1; then
+            echo "node-agent certificates rotated and service restarted on ${server_key}."
+            continue
+          fi
+          echo "node-agent restart after certificate update failed on ${server_key}" >&2
+          failed=$((failed + 1))
+          continue
+        else
+          echo "node-agent is up to date and active on ${server_key}; skipping reinstall."
+          continue
+        fi
       fi
       if ssh "${ssh_opts[@]}" "$target" 'sudo systemctl restart node-plane-agent && sudo systemctl is-active --quiet node-plane-agent' >/dev/null 2>&1; then
         echo "node-agent binary unchanged; service restarted on ${server_key}."
@@ -582,6 +796,9 @@ sudo mkdir -p /etc/node-plane
 sudo tee /etc/node-plane/agent.toml >/dev/null <<'AGENTCFG'
 node_key = "${server_key}"
 listen_addr = "0.0.0.0:${AGENT_PORT}"
+tls_certificate_path = "/etc/node-plane/tls/server.crt"
+tls_key_path = "/etc/node-plane/tls/server.key"
+tls_client_ca_path = "/etc/node-plane/tls/ca.crt"
 AGENTCFG
 sudo tee /etc/systemd/system/node-plane-agent.service >/dev/null <<'UNIT'
 [Unit]
@@ -631,6 +848,9 @@ EOF
       if set_env_value_if_changed "$ENV_FILE" "NODE_DRIVER_BACKEND" "grpc"; then ENV_CHANGED=1; fi
       if set_env_value_if_changed "$ENV_FILE" "NODE_DRIVER_GRPC_TARGET" "127.0.0.1:50051"; then ENV_CHANGED=1; fi
       if set_env_value_if_changed "$ENV_FILE" "NODE_AGENT_TARGETS" "$mapping_csv"; then ENV_CHANGED=1; fi
+      if set_env_value_if_changed "$ENV_FILE" "NODE_AGENT_CA_CERT" "$TLS_CA_CERT"; then ENV_CHANGED=1; fi
+      if set_env_value_if_changed "$ENV_FILE" "NODE_AGENT_CLIENT_CERT" "$TLS_CLIENT_CERT"; then ENV_CHANGED=1; fi
+      if set_env_value_if_changed "$ENV_FILE" "NODE_AGENT_CLIENT_KEY" "$TLS_CLIENT_KEY"; then ENV_CHANGED=1; fi
       echo "Configured NODE_AGENT_TARGETS in ${ENV_FILE}: ${mapping_csv}"
     fi
   fi

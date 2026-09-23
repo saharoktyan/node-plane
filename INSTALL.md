@@ -36,7 +36,7 @@ Use this when the bot should run separately and manage nodes remotely.
 
 - bot runs in Docker via `docker compose`
 - all managed nodes are connected over `ssh`
-- runtime images are pulled from `ghcr.io/seventh7dev/node-plane`
+- runtime images are pulled from `ghcr.io/saharoktyan/node-plane`
 - best fit for multi-node setups
 
 Important constraint:
@@ -47,7 +47,7 @@ Important constraint:
 ### Recommended path: install with `install.sh`
 
 ```bash
-git clone https://github.com/seventh7dev/node-plane.git node-plane-src
+git clone https://github.com/saharoktyan/node-plane.git node-plane-src
 cd node-plane-src
 ./scripts/install.sh --mode simple
 ```
@@ -55,7 +55,7 @@ cd node-plane-src
 If you prefer SSH cloning, add a GitHub SSH key to the host first and then use:
 
 ```bash
-git clone git@github.com:seventh7dev/node-plane.git node-plane-src
+git clone git@github.com:saharoktyan/node-plane.git node-plane-src
 ```
 
 If you want the installer to place and start the systemd unit automatically:
@@ -135,7 +135,7 @@ In practice, the script already performs these steps and is the preferred path.
 ### Recommended path: install with `install.sh`
 
 ```bash
-git clone https://github.com/seventh7dev/node-plane.git node-plane-src
+git clone https://github.com/saharoktyan/node-plane.git node-plane-src
 cd node-plane-src
 ./scripts/install.sh --mode portable
 ```
@@ -143,7 +143,7 @@ cd node-plane-src
 If you prefer SSH cloning, add a GitHub SSH key to the host first and then use:
 
 ```bash
-git clone git@github.com:seventh7dev/node-plane.git node-plane-src
+git clone git@github.com:saharoktyan/node-plane.git node-plane-src
 ```
 
 The script will prompt for missing values and write the portable-mode settings into `.env`.
@@ -156,7 +156,7 @@ BOT_TOKEN=...
 ADMIN_IDS=123456789
 SSH_KEY=/root/.ssh/id_ed25519
 NODE_PLANE_INSTALL_REF=<release-tag>
-NODE_PLANE_IMAGE_REPO=ghcr.io/seventh7dev/node-plane
+NODE_PLANE_IMAGE_REPO=ghcr.io/saharoktyan/node-plane
 NODE_PLANE_IMAGE_TAG=<release-tag>
 DB_BACKEND=postgres
 ```
@@ -251,11 +251,17 @@ Driver/agent rollout (for grpc driver mode):
 
 - `update.sh --mode simple` now runs `setup_driver_agents.sh` automatically by default (`NODE_PLANE_AUTO_SETUP_DRIVER_AGENTS=1`).
 - To disable automatic rollout during update, set `NODE_PLANE_AUTO_SETUP_DRIVER_AGENTS=0`.
-- Optional post-install auto rollout can be enabled with `NODE_PLANE_AUTO_SETUP_DRIVER_AGENTS_ON_INSTALL=1`.
+- Simple-mode post-install rollout is enabled by default; disable it with `NODE_PLANE_AUTO_SETUP_DRIVER_AGENTS_ON_INSTALL=0`.
 - Binary source policy for driver/agent rollout:
   - `NODE_PLANE_BIN_SOURCE=auto` (default): try GitHub release binaries first, fallback to local build.
   - `NODE_PLANE_BIN_SOURCE=release`: only download release binaries (Rust toolchain not required).
   - `NODE_PLANE_BIN_SOURCE=build`: only local `cargo build --release`.
+- The rollout generates a private driver-agent CA and mutual TLS identities in
+  `${NODE_PLANE_SHARED_DIR}/driver-agent-tls/`. Keep this directory private and
+  backed up with the controller; the CA private key is never installed on nodes.
+  It uses `openssl` locally and requires sudo access over SSH to install
+  certificates on each managed node. Agent calls fail closed when TLS settings
+  or valid certificates are missing.
 - Release asset source can be tuned with:
   - `NODE_PLANE_GITHUB_REPO`
   - `NODE_PLANE_BINARY_RELEASE`

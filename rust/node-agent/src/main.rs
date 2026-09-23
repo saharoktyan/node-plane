@@ -1,7 +1,7 @@
 use std::env;
 use std::fs;
-use std::net::TcpListener;
 use std::net::SocketAddr;
+use std::net::TcpListener;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -11,7 +11,10 @@ use std::time::Duration;
 use chrono::Utc;
 use serde::Deserialize;
 use serde_json::Value;
-use tonic::{Request, Response, Status, transport::Server};
+use tonic::{
+    Request, Response, Status,
+    transport::{Certificate, Identity, Server, ServerTlsConfig},
+};
 
 pub mod agent {
     pub mod v1 {
@@ -23,11 +26,11 @@ use agent::v1::node_agent_service_server::{NodeAgentService, NodeAgentServiceSer
 use agent::v1::{
     AddAwgUserRequest, AddXrayUserRequest, AgentEmpty, CheckPortsRequest, CheckPortsResponse,
     DeleteProfileRequest, DeleteRuntimeRequest, DeleteRuntimeResponse, DiagnosticItem,
-    InitXrayRequest, InitXrayResponse, InstallDockerRequest,
-    InstallDockerResponse, ListRemoteProfilesRequest, ListRemoteProfilesResponse, LocalHealth,
-    OpenPortsRequest, OpenPortsResponse, PathExistsRequest, PathExistsResponse, PortStatus,
-    RemoteProfileRecord, RemoveAuthorizedKeyRequest, RemoveAuthorizedKeyResponse,
-    RunDiagnosticsRequest, RunDiagnosticsResponse, RuntimeCommandResponse, RuntimeFacts, RuntimeFileSpec,
+    InitXrayRequest, InitXrayResponse, InstallDockerRequest, InstallDockerResponse,
+    ListRemoteProfilesRequest, ListRemoteProfilesResponse, LocalHealth, OpenPortsRequest,
+    OpenPortsResponse, PathExistsRequest, PathExistsResponse, PortStatus, RemoteProfileRecord,
+    RemoveAuthorizedKeyRequest, RemoveAuthorizedKeyResponse, RunDiagnosticsRequest,
+    RunDiagnosticsResponse, RuntimeCommandResponse, RuntimeFacts, RuntimeFileSpec,
     SyncNodeEnvRequest, SyncNodeEnvResponse, SyncRuntimeFilesRequest, SyncRuntimeFilesResponse,
     SyncXrayRequest, SyncXrayResponse,
 };
@@ -97,6 +100,12 @@ exit 1
 struct AgentConfig {
     node_key: String,
     listen_addr: String,
+    #[serde(default = "default_tls_certificate_path")]
+    tls_certificate_path: String,
+    #[serde(default = "default_tls_key_path")]
+    tls_key_path: String,
+    #[serde(default = "default_tls_client_ca_path")]
+    tls_client_ca_path: String,
     heartbeat_seconds: u64,
     runtime_root: String,
     state_dir: String,
@@ -104,6 +113,18 @@ struct AgentConfig {
     node_env_path: String,
     xray_config_path: String,
     awg_config_path: String,
+}
+
+fn default_tls_certificate_path() -> String {
+    "/etc/node-plane/tls/server.crt".to_string()
+}
+
+fn default_tls_key_path() -> String {
+    "/etc/node-plane/tls/server.key".to_string()
+}
+
+fn default_tls_client_ca_path() -> String {
+    "/etc/node-plane/tls/ca.crt".to_string()
 }
 
 impl Default for AgentConfig {
@@ -120,6 +141,9 @@ impl Default for AgentConfig {
                 .ok()
                 .filter(|value| !value.trim().is_empty())
                 .unwrap_or_else(|| "127.0.0.1:50061".to_string()),
+            tls_certificate_path: default_tls_certificate_path(),
+            tls_key_path: default_tls_key_path(),
+            tls_client_ca_path: default_tls_client_ca_path(),
             heartbeat_seconds: env::var("NODE_AGENT_HEARTBEAT_SECONDS")
                 .ok()
                 .and_then(|value| value.parse::<u64>().ok())
@@ -424,7 +448,12 @@ impl AgentState {
         let busy = items.iter().filter(|item| item.status == "busy").count();
         let invalid = items.iter().filter(|item| item.status == "invalid").count();
         let free = items.iter().filter(|item| item.status == "free").count();
-        let summary = format!("checked={} free={} busy={} invalid={invalid}", items.len(), free, busy);
+        let summary = format!(
+            "checked={} free={} busy={} invalid={invalid}",
+            items.len(),
+            free,
+            busy
+        );
         CheckPortsResponse { summary, items }
     }
 
@@ -433,12 +462,14 @@ impl AgentState {
         let Some(parent) = path.parent() else {
             return Err(Status::internal("node env path has no parent directory"));
         };
-        fs::create_dir_all(parent)
-            .map_err(|err| Status::internal(format!("failed to create node env directory: {err}")))?;
+        fs::create_dir_all(parent).map_err(|err| {
+            Status::internal(format!("failed to create node env directory: {err}"))
+        })?;
         fs::write(path, content)
             .map_err(|err| Status::internal(format!("failed to write node env: {err}")))?;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o600))
-            .map_err(|err| Status::internal(format!("failed to set node env permissions: {err}")))?;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600)).map_err(|err| {
+            Status::internal(format!("failed to set node env permissions: {err}"))
+        })?;
         Ok(SyncNodeEnvResponse {
             summary: format!("node.env written to {}", self.config.node_env_path),
             path: self.config.node_env_path.clone(),
@@ -449,15 +480,20 @@ impl AgentState {
         let resolved = self.resolve_runtime_path(&spec.path);
         let path = Path::new(&resolved);
         let Some(parent) = path.parent() else {
-            return Err(Status::internal("runtime file path has no parent directory"));
+            return Err(Status::internal(
+                "runtime file path has no parent directory",
+            ));
         };
-        fs::create_dir_all(parent)
-            .map_err(|err| Status::internal(format!("failed to create runtime directory: {err}")))?;
-        fs::write(path, &spec.content)
-            .map_err(|err| Status::internal(format!("failed to write runtime file {}: {err}", resolved)))?;
+        fs::create_dir_all(parent).map_err(|err| {
+            Status::internal(format!("failed to create runtime directory: {err}"))
+        })?;
+        fs::write(path, &spec.content).map_err(|err| {
+            Status::internal(format!("failed to write runtime file {}: {err}", resolved))
+        })?;
         let mode = u32::from_str_radix(spec.mode.trim(), 8).unwrap_or(0o644);
-        fs::set_permissions(path, fs::Permissions::from_mode(mode))
-            .map_err(|err| Status::internal(format!("failed to set permissions on {}: {err}", resolved)))?;
+        fs::set_permissions(path, fs::Permissions::from_mode(mode)).map_err(|err| {
+            Status::internal(format!("failed to set permissions on {}: {err}", resolved))
+        })?;
         Ok(())
     }
 
@@ -512,7 +548,11 @@ impl AgentState {
             let detail = if !stderr.is_empty() { stderr } else { stdout };
             return Err(Status::failed_precondition(format!(
                 "sync-xray.sh failed: {}",
-                if detail.is_empty() { "unknown error".to_string() } else { detail }
+                if detail.is_empty() {
+                    "unknown error".to_string()
+                } else {
+                    detail
+                }
             )));
         }
         let generated_json = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -523,7 +563,8 @@ impl AgentState {
     }
 
     fn run_runtime_command(&self, script_name: &str, args: &[String]) -> Result<String, Status> {
-        let script_path = self.resolve_runtime_path(&format!("/opt/node-plane-runtime/{script_name}"));
+        let script_path =
+            self.resolve_runtime_path(&format!("/opt/node-plane-runtime/{script_name}"));
         let output = Command::new(&script_path)
             .args(args)
             .output()
@@ -536,7 +577,11 @@ impl AgentState {
         let detail = if stderr.is_empty() { stdout } else { stderr };
         Err(Status::failed_precondition(format!(
             "{script_name} failed: {}",
-            if detail.is_empty() { "unknown error".to_string() } else { detail }
+            if detail.is_empty() {
+                "unknown error".to_string()
+            } else {
+                detail
+            }
         )))
     }
 
@@ -641,7 +686,9 @@ impl AgentState {
 
     fn add_xray_user(&self, request: AddXrayUserRequest) -> Result<RuntimeCommandResponse, Status> {
         if request.profile_name.trim().is_empty() || request.uuid.trim().is_empty() {
-            return Err(Status::invalid_argument("profile_name and uuid are required"));
+            return Err(Status::invalid_argument(
+                "profile_name and uuid are required",
+            ));
         }
         let mut args = vec![request.profile_name, request.uuid];
         if !request.short_id.trim().is_empty() {
@@ -698,7 +745,9 @@ impl AgentState {
             .arg("-c")
             .arg(INSTALL_DOCKER_SCRIPT)
             .output()
-            .map_err(|err| Status::internal(format!("failed to execute docker install script: {err}")))?;
+            .map_err(|err| {
+                Status::internal(format!("failed to execute docker install script: {err}"))
+            })?;
         let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         let summary = if stderr.is_empty() {
@@ -874,7 +923,11 @@ impl AgentState {
 
         let _ = Command::new("ufw").arg("reload").output();
         let opened = items.iter().filter(|item| item.status == "opened").count();
-        let summary = format!("requested={} opened={} failed={failed}", items.len(), opened);
+        let summary = format!(
+            "requested={} opened={} failed={failed}",
+            items.len(),
+            opened
+        );
         Ok(OpenPortsResponse { summary, items })
     }
 }
@@ -934,7 +987,8 @@ impl NodeAgentService for NodeAgentApi {
         request: Request<SyncNodeEnvRequest>,
     ) -> Result<Response<SyncNodeEnvResponse>, Status> {
         Ok(Response::new(
-            self.state.sync_node_env(request.into_inner().content.as_str())?,
+            self.state
+                .sync_node_env(request.into_inner().content.as_str())?,
         ))
     }
 
@@ -973,7 +1027,8 @@ impl NodeAgentService for NodeAgentApi {
         request: Request<DeleteRuntimeRequest>,
     ) -> Result<Response<DeleteRuntimeResponse>, Status> {
         Ok(Response::new(
-            self.state.delete_runtime(request.into_inner().preserve_config)?,
+            self.state
+                .delete_runtime(request.into_inner().preserve_config)?,
         ))
     }
 
@@ -1009,7 +1064,9 @@ impl NodeAgentService for NodeAgentApi {
         &self,
         request: Request<PathExistsRequest>,
     ) -> Result<Response<PathExistsResponse>, Status> {
-        Ok(Response::new(self.state.path_exists(&request.into_inner().path)))
+        Ok(Response::new(
+            self.state.path_exists(&request.into_inner().path),
+        ))
     }
 
     async fn remove_authorized_key(
@@ -1026,28 +1083,36 @@ impl NodeAgentService for NodeAgentApi {
         &self,
         request: Request<AddXrayUserRequest>,
     ) -> Result<Response<RuntimeCommandResponse>, Status> {
-        Ok(Response::new(self.state.add_xray_user(request.into_inner())?))
+        Ok(Response::new(
+            self.state.add_xray_user(request.into_inner())?,
+        ))
     }
 
     async fn delete_xray_user(
         &self,
         request: Request<DeleteProfileRequest>,
     ) -> Result<Response<RuntimeCommandResponse>, Status> {
-        Ok(Response::new(self.state.delete_xray_user(request.into_inner())?))
+        Ok(Response::new(
+            self.state.delete_xray_user(request.into_inner())?,
+        ))
     }
 
     async fn add_awg_user(
         &self,
         request: Request<AddAwgUserRequest>,
     ) -> Result<Response<RuntimeCommandResponse>, Status> {
-        Ok(Response::new(self.state.add_awg_user(request.into_inner())?))
+        Ok(Response::new(
+            self.state.add_awg_user(request.into_inner())?,
+        ))
     }
 
     async fn delete_awg_user(
         &self,
         request: Request<DeleteProfileRequest>,
     ) -> Result<Response<RuntimeCommandResponse>, Status> {
-        Ok(Response::new(self.state.delete_awg_user(request.into_inner())?))
+        Ok(Response::new(
+            self.state.delete_awg_user(request.into_inner())?,
+        ))
     }
 }
 
@@ -1088,7 +1153,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
+    let server_identity = Identity::from_pem(
+        fs::read(&config.tls_certificate_path)?,
+        fs::read(&config.tls_key_path)?,
+    );
+    let client_ca = Certificate::from_pem(fs::read(&config.tls_client_ca_path)?);
+    let tls = ServerTlsConfig::new()
+        .identity(server_identity)
+        .client_ca_root(client_ca);
+
     Server::builder()
+        .tls_config(tls)?
         .add_service(NodeAgentServiceServer::new(api))
         .serve_with_shutdown(addr, async {
             let _ = tokio::signal::ctrl_c().await;
