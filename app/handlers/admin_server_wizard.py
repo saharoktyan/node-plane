@@ -566,7 +566,7 @@ def _reusable_runtime_config_status(server: RegisteredServer) -> bool | None:
     statuses = {item.kind: item.status for item in diagnostics.items if item.kind in required}
     if any(status == "ok" for status in statuses.values()):
         return True
-    if all(statuses.get(kind) == "missing" for kind in required):
+    if all(statuses.get(kind) in {"missing", "invalid"} for kind in required):
         return False
     return None
 

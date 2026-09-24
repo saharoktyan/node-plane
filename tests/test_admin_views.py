@@ -889,6 +889,10 @@ class BootstrapRolloutRegressionTests(unittest.TestCase):
         self.assertNotIn("srv:bootrun:reinstall:preserve:lv1", callbacks)
         self.assertIn("srv:bootrun:reinstall:clean:lv1", callbacks)
 
+        diagnostics.items[0].status = "invalid"
+        with patch.object(admin_server_wizard, "get_node_driver", return_value=SimpleNamespace(get_node_diagnostics=lambda _key: diagnostics)):
+            self.assertIs(admin_server_wizard._reusable_runtime_config_status(server), False)
+
         diagnostics.items[0].status = "ok"
         with patch.object(admin_server_wizard, "get_node_driver", return_value=SimpleNamespace(get_node_diagnostics=lambda _key: diagnostics)):
             availability = admin_server_wizard._reusable_runtime_config_status(server)
