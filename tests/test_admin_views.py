@@ -854,5 +854,37 @@ class ProfileProvisioningRegressionTests(unittest.TestCase):
         error_view.assert_not_called()
 
 
+class BootstrapRolloutRegressionTests(unittest.TestCase):
+    def test_missing_binaries_offer_cargo_install_button(self) -> None:
+        markup = admin_server_wizard._agent_rollout_result_markup("lv1", "en", "RUST_INSTALL_REQUIRED")
+        self.assertEqual(markup.inline_keyboard[0][0].callback_data, "srv:action:rolloutagentrust:lv1")
+
+    def test_successful_bootstrap_stays_successful_when_agent_rollout_fails(self) -> None:
+        update = SimpleNamespace(callback_query=SimpleNamespace(message=SimpleNamespace(chat_id=1, message_id=2)))
+        context = SimpleNamespace(user_data={})
+        operation = SimpleNamespace(status="SUCCEEDED", progress_message="Bootstrap completed.")
+        with patch.object(admin_server_wizard, "answer_cb"), patch.object(
+            admin_server_wizard, "guard", return_value=True
+        ), patch.object(admin_server_wizard, "get_locale_for_update", return_value="en"), patch.object(
+            admin_server_wizard, "_wizard_get", return_value={"step": "advanced", "data": {}}
+        ), patch.object(admin_server_wizard, "_wizard_lang", return_value="en"
+        ), patch.object(
+            admin_server_wizard, "_start_progress_animation", return_value=lambda: None
+        ), patch.object(
+            admin_server_wizard, "_run_driver_action", return_value=operation
+        ), patch.object(
+            admin_server_wizard, "ensure_driver_agent_rollout_for_ssh", return_value=(1, "HTTP 404")
+        ), patch.object(
+            admin_server_wizard, "_action_result_text", return_value="result"
+        ) as render_result, patch.object(
+            admin_server_wizard, "_server_card_markup", return_value=None
+        ), patch.object(admin_server_wizard, "_wizard_edit"):
+            admin_server_wizard.on_server_callback(update, context, "bootrun:bootstrap:preserve:lv1")
+
+        self.assertEqual(render_result.call_args.args[1], 0)
+        self.assertIn("HTTP 404", render_result.call_args.args[2])
+        self.assertIn("agent setup needs attention", render_result.call_args.args[2])
+
+
 if __name__ == "__main__":
     unittest.main()

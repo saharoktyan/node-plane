@@ -262,26 +262,61 @@ download_to_file() {
   local url="$1"
   local out="$2"
   if has_cmd curl; then
-    curl -fsSL "$url" -o "$out"
-    return 0
+    if curl -fsSL "$url" -o "$out"; then
+      return 0
+    fi
+    rm -f "$out"
+    return 1
   fi
   if has_cmd wget; then
-    wget -qO "$out" "$url"
-    return 0
+    if wget -qO "$out" "$url"; then
+      return 0
+    fi
+    rm -f "$out"
+    return 1
   fi
   echo "Neither curl nor wget is available for downloading binaries." >&2
   return 1
+}
+
+ensure_cargo_for_auto_build() {
+  if has_cmd cargo && has_cmd protoc; then
+    return 0
+  fi
+  local answer="${NODE_PLANE_INSTALL_RUST:-ask}"
+  if [[ "$answer" == "ask" && -t 0 && -r /dev/tty ]]; then
+    read -r -p "Release binaries are unavailable. Install Rust build tools (cargo, rustc, protoc) locally? [y/N] " answer </dev/tty
+  fi
+  case "${answer,,}" in
+    y|yes|1|true) ;;
+    *)
+      echo "RUST_INSTALL_REQUIRED: release binaries and local Rust build tools are unavailable. Run again with NODE_PLANE_INSTALL_RUST=yes to install build tools, or publish release binaries." >&2
+      return 1
+      ;;
+  esac
+  echo "Installing Rust build tools for a local build."
+  if has_cmd apt-get; then
+    sudo env DEBIAN_FRONTEND=noninteractive apt-get update
+    sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y cargo rustc protobuf-compiler build-essential
+  elif has_cmd dnf; then
+    sudo dnf install -y cargo rustc protobuf-compiler gcc make
+  else
+    echo "No supported package manager found. Install cargo, rustc and protoc, then rerun with NODE_PLANE_BIN_SOURCE=build." >&2
+    return 1
+  fi
+  need_cmd cargo
+  need_cmd protoc
 }
 
 check_url_access() {
   local url="$1"
   if has_cmd curl; then
     curl -fsSLI "$url" >/dev/null
-    return 0
+    return $?
   fi
   if has_cmd wget; then
     wget -q --spider "$url"
-    return 0
+    return $?
   fi
   echo "Neither curl nor wget is available for URL checks." >&2
   return 1
@@ -377,7 +412,7 @@ Purpose:
   - Write NODE_AGENT_TARGETS and switch bot to grpc driver backend in the shared .env.
 
 Binary source modes:
-  auto     Build from this release when cargo is available; otherwise use GitHub release binaries.
+  auto     Build from this release when cargo is available; otherwise try GitHub release binaries, then install Rust build tools and build locally.
   release  Use GitHub release binaries only.
   build    Use local cargo build only.
 
@@ -492,6 +527,7 @@ download_release_binaries() {
 
 build_local_binaries() {
   need_cmd cargo
+  need_cmd protoc
   set_step "build node-driver binary"
   (cd "${APP_ROOT}/rust/node-driver" && cargo build --release)
   set_step "build node-agent binary"
@@ -509,12 +545,14 @@ resolve_binaries() {
       build_local_binaries
       ;;
     auto)
-      if has_cmd cargo; then
+      if has_cmd cargo && has_cmd protoc; then
         echo "Building driver/agent binaries from APP_ROOT=${APP_ROOT}."
         build_local_binaries
-      else
-        download_release_binaries
+      elif download_release_binaries; then
         echo "Using release binaries from GitHub."
+      else
+        ensure_cargo_for_auto_build
+        build_local_binaries
       fi
       ;;
   esac
@@ -537,13 +575,18 @@ resolve_binaries_dry_run() {
       echo "Dry-run: local cargo build mode is available."
       ;;
     auto)
-      if has_cmd cargo; then
+      if has_cmd cargo && has_cmd protoc; then
         echo "Dry-run: local cargo build mode is available (auto mode)."
       else
         set_step "dry-run check release binary urls"
-        check_url_access "$driver_url"
-        check_url_access "$agent_url"
-        echo "Dry-run: release binary URLs are reachable (auto mode)."
+        if check_url_access "$driver_url" && check_url_access "$agent_url"; then
+          echo "Dry-run: release binary URLs are reachable (auto mode)."
+        elif has_cmd apt-get || has_cmd dnf; then
+          echo "Dry-run: release binaries are unavailable; Rust build tools require confirmation."
+        else
+          echo "Release binaries are unavailable and no supported Rust package manager was found." >&2
+          return 1
+        fi
       fi
       ;;
   esac

@@ -2,7 +2,7 @@ use std::env;
 use std::fs;
 use std::io::Write;
 use std::net::SocketAddr;
-use std::net::TcpListener;
+use std::net::{TcpListener, UdpSocket};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -183,7 +183,63 @@ struct AgentState {
     last_seen_at: Arc<Mutex<String>>,
 }
 
+fn xray_config_uses_port(raw: &str, kind: &str, port: u32) -> bool {
+    let tag = match kind {
+        "xray_tcp" => "reality-tcp",
+        "xray_xhttp" => "reality-xhttp",
+        _ => return false,
+    };
+    let Ok(config) = serde_json::from_str::<Value>(raw) else {
+        return false;
+    };
+    config["inbounds"].as_array().is_some_and(|inbounds| {
+        inbounds.iter().any(|inbound| {
+            inbound["tag"].as_str() == Some(tag)
+                && inbound["port"].as_u64() == Some(u64::from(port))
+        })
+    })
+}
+
+fn awg_config_uses_port(raw: &str, port: u32) -> bool {
+    raw.lines().any(|line| {
+        let line = line.trim();
+        !line.starts_with('#')
+            && line.split_once('=').is_some_and(|(key, value)| {
+                key.trim() == "ListenPort" && value.trim().parse::<u32>().ok() == Some(port)
+            })
+    })
+}
+
 impl AgentState {
+    fn container_running(name: &str) -> bool {
+        Command::new("docker")
+            .args(["inspect", "-f", "{{.State.Running}}", name])
+            .output()
+            .is_ok_and(|output| {
+                output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == "true"
+            })
+    }
+
+    fn port_is_managed(&self, kind: &str, port: u32) -> bool {
+        match kind {
+            "xray_tcp" | "xray_xhttp" => {
+                let container = self.node_env_value("XRAY_CONTAINER_NAME", "xray");
+                let config_path = self.node_env_value("XRAY_CONFIG", &self.config.xray_config_path);
+                Self::container_running(&container)
+                    && fs::read_to_string(&config_path)
+                        .is_ok_and(|raw| xray_config_uses_port(&raw, kind, port))
+            }
+            "awg" => {
+                let container = self.node_env_value("AWG_CONTAINER_NAME", "amnezia-awg");
+                let config_path = self.node_env_value("AWG_CONFIG", &self.config.awg_config_path);
+                Self::container_running(&container)
+                    && fs::read_to_string(&config_path)
+                        .is_ok_and(|raw| awg_config_uses_port(&raw, port))
+            }
+            _ => false,
+        }
+    }
+
     fn extract_awg_payload_json(summary: &str) -> String {
         let mut vpn_uri = String::new();
         if let Some(idx) = summary.find("vpn://") {
@@ -447,9 +503,13 @@ impl AgentState {
                 continue;
             }
             let bind_addr = format!("0.0.0.0:{port}");
-            match TcpListener::bind(&bind_addr) {
-                Ok(listener) => {
-                    drop(listener);
+            let bind_result = if kind == "awg" {
+                UdpSocket::bind(&bind_addr).map(|socket| drop(socket))
+            } else {
+                TcpListener::bind(&bind_addr).map(|listener| drop(listener))
+            };
+            match bind_result {
+                Ok(()) => {
                     items.push(PortStatus {
                         kind,
                         port,
@@ -459,11 +519,16 @@ impl AgentState {
                     });
                 }
                 Err(err) => {
+                    let managed = self.port_is_managed(&kind, port);
                     items.push(PortStatus {
                         kind,
                         port,
-                        status: "busy".to_string(),
-                        summary: format!("port {port} is not available"),
+                        status: if managed { "managed" } else { "busy" }.to_string(),
+                        summary: if managed {
+                            format!("port {port} is used by this node's managed runtime")
+                        } else {
+                            format!("port {port} is not available")
+                        },
                         detail: err.to_string(),
                     });
                 }
@@ -1309,7 +1374,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg(test)]
 mod tests {
-    use super::AgentConfig;
+    use super::{AgentConfig, awg_config_uses_port, xray_config_uses_port};
 
     #[test]
     fn accepts_installer_agent_config_with_default_runtime_paths() {
@@ -1326,5 +1391,22 @@ tls_client_ca_path = "/etc/node-plane/tls/ca.crt"
         assert_eq!(config.node_key, "test-node");
         assert_eq!(config.listen_addr, "0.0.0.0:50061");
         assert_eq!(config.runtime_root, "/opt/node-plane-runtime");
+    }
+
+    #[test]
+    fn recognizes_ports_owned_by_managed_runtime_configs() {
+        let xray = r#"{"inbounds":[{"tag":"reality-tcp","port":443},{"tag":"reality-xhttp","port":8443}]}"#;
+        assert!(xray_config_uses_port(xray, "xray_tcp", 443));
+        assert!(xray_config_uses_port(xray, "xray_xhttp", 8443));
+        assert!(!xray_config_uses_port(xray, "xray_tcp", 9443));
+        assert!(!xray_config_uses_port(xray, "awg", 443));
+        assert!(awg_config_uses_port(
+            "[Interface]\nListenPort = 51820\n",
+            51820
+        ));
+        assert!(!awg_config_uses_port(
+            "[Interface]\nListenPort = 51820\n",
+            51821
+        ));
     }
 }

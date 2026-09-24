@@ -484,6 +484,17 @@ def _server_card_markup(server_key: str, lang: str) -> InlineKeyboardMarkup:
     )
 
 
+def _agent_rollout_result_markup(server_key: str, lang: str, output: str) -> InlineKeyboardMarkup:
+    if "RUST_INSTALL_REQUIRED" not in output:
+        return _server_card_markup(server_key, lang)
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(t(lang, "admin.wizard.install_rust_tools"), callback_data=f"{CB_SRV}action:rolloutagentrust:{server_key}")],
+            [InlineKeyboardButton(t(lang, "admin.wizard.back_to_server"), callback_data=f"{CB_SRV}card:{server_key}")],
+        ]
+    )
+
+
 def _probe_result_markup(server_key: str, lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
@@ -2014,12 +2025,12 @@ def on_server_callback(update: Update, context: CallbackContext, payload: str) -
             rc = 0 if operation.status == "SUCCEEDED" else 1
             out = operation.progress_message
             if rc == 0:
-                rollout_rc, rollout_out = ensure_driver_agent_rollout_for_ssh(server_key)
+                rollout_rc, rollout_out = ensure_driver_agent_rollout_for_ssh(server_key, skip_if_connected=True)
                 if rollout_out:
                     out = f"{out}\n\nDriver/agent rollout:\n{rollout_out}".strip()
                 if rollout_rc != 0:
-                    rc = 1
-            _wizard_edit(context, _action_result_text(t(lang, "admin.wizard.bootstrap"), rc, out, server_key, lang), _server_card_markup(server_key, lang))
+                    out += "\n\n" + t(lang, "admin.wizard.agent_rollout_warning")
+            _wizard_edit(context, _action_result_text(t(lang, "admin.wizard.bootstrap"), rc, out, server_key, lang), _agent_rollout_result_markup(server_key, lang, out))
             return
         if action == "reinstall":
             operation = _run_driver_action(update, "reinstall_node", server_key, preserve_config=preserve_config)
@@ -2027,12 +2038,12 @@ def on_server_callback(update: Update, context: CallbackContext, payload: str) -
             rc = 0 if operation.status == "SUCCEEDED" else 1
             out = operation.progress_message
             if rc == 0:
-                rollout_rc, rollout_out = ensure_driver_agent_rollout_for_ssh(server_key)
+                rollout_rc, rollout_out = ensure_driver_agent_rollout_for_ssh(server_key, skip_if_connected=True)
                 if rollout_out:
                     out = f"{out}\n\nDriver/agent rollout:\n{rollout_out}".strip()
                 if rollout_rc != 0:
-                    rc = 1
-            _wizard_edit(context, _action_result_text(t(lang, "admin.wizard.reinstall"), rc, out, server_key, lang), _server_card_markup(server_key, lang))
+                    out += "\n\n" + t(lang, "admin.wizard.agent_rollout_warning")
+            _wizard_edit(context, _action_result_text(t(lang, "admin.wizard.reinstall"), rc, out, server_key, lang), _agent_rollout_result_markup(server_key, lang, out))
             return
         if action == "delete":
             operation = _run_driver_action(update, "delete_runtime", server_key, preserve_config=preserve_config)
@@ -2045,12 +2056,12 @@ def on_server_callback(update: Update, context: CallbackContext, payload: str) -
 
     if payload.startswith("action:"):
         _, action, server_key = payload.split(":", 2)
-        if action == "rolloutagent":
+        if action in {"rolloutagent", "rolloutagentrust"}:
             label = "Подключение agent" if lang == "ru" else "Set up agent"
             stop_progress = _start_progress_animation(context, label)
-            rc, out = ensure_driver_agent_rollout_for_ssh(server_key)
+            rc, out = ensure_driver_agent_rollout_for_ssh(server_key, install_rust=(action == "rolloutagentrust"))
             stop_progress()
-            _wizard_edit(context, _action_result_text(label, rc, out, server_key, lang), _server_card_markup(server_key, lang))
+            _wizard_edit(context, _action_result_text(label, rc, out, server_key, lang), _agent_rollout_result_markup(server_key, lang, out))
             return
         if action == "applysettings":
             label = "Применение настроек" if lang == "ru" else "Apply settings"
