@@ -1,5 +1,6 @@
 import os
 import pathlib
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -10,6 +11,115 @@ SETUP_SCRIPT = REPO_ROOT / "scripts" / "setup_driver_agents.sh"
 
 
 class DriverAgentSetupTests(unittest.TestCase):
+    def test_auto_requires_consent_before_installing_rust_tools(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            app_root = root / "current"
+            shared_root = root / "shared"
+            fake_bin = root / "bin"
+            (app_root / "rust" / "node-driver").mkdir(parents=True)
+            (app_root / "rust" / "node-agent").mkdir(parents=True)
+            shared_root.mkdir()
+            fake_bin.mkdir()
+            (shared_root / ".env").write_text("BOT_TOKEN=test\n", encoding="utf-8")
+            for command in ("bash", "dirname", "sed", "tail", "mktemp", "rm", "python3"):
+                (fake_bin / command).symlink_to(shutil.which(command))
+            for command in ("ssh", "scp", "sudo", "apt-get"):
+                path = fake_bin / command
+                path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+                path.chmod(0o755)
+            curl = fake_bin / "curl"
+            curl.write_text("#!/bin/sh\nexit 22\n", encoding="utf-8")
+            curl.chmod(0o755)
+            environment = os.environ.copy()
+            environment.update(
+                NODE_PLANE_APP_DIR=str(app_root),
+                NODE_PLANE_SHARED_DIR=str(shared_root),
+                NODE_PLANE_INSTALL_RUST="no",
+                PATH=str(fake_bin),
+            )
+            result = subprocess.run(
+                [str(SETUP_SCRIPT), "--skip-driver", "--skip-agents", "--bin-source", "auto"],
+                env=environment,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("RUST_INSTALL_REQUIRED", result.stderr)
+            self.assertNotIn("Installing Rust build tools", result.stdout)
+
+    def test_auto_dry_run_reports_build_fallback_when_release_assets_are_missing(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            app_root = root / "current"
+            shared_root = root / "shared"
+            fake_bin = root / "bin"
+            (app_root / "rust" / "node-driver").mkdir(parents=True)
+            (app_root / "rust" / "node-agent").mkdir(parents=True)
+            shared_root.mkdir()
+            fake_bin.mkdir()
+            (shared_root / ".env").write_text("BOT_TOKEN=test\n", encoding="utf-8")
+            for command in ("bash", "dirname", "sed", "tail", "mktemp", "rm", "python3"):
+                (fake_bin / command).symlink_to(shutil.which(command))
+            for command in ("ssh", "scp", "sudo", "apt-get"):
+                path = fake_bin / command
+                path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+                path.chmod(0o755)
+            curl = fake_bin / "curl"
+            curl.write_text("#!/bin/sh\nexit 22\n", encoding="utf-8")
+            curl.chmod(0o755)
+            environment = os.environ.copy()
+            environment.update(
+                NODE_PLANE_APP_DIR=str(app_root),
+                NODE_PLANE_SHARED_DIR=str(shared_root),
+                PATH=str(fake_bin),
+            )
+            result = subprocess.run(
+                [str(SETUP_SCRIPT), "--dry-run", "--skip-agents", "--bin-source", "auto"],
+                env=environment,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Rust build tools require confirmation", result.stdout)
+
+    def test_missing_release_asset_stops_before_archive_move(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            app_root = root / "current"
+            shared_root = root / "shared"
+            fake_bin = root / "bin"
+            (app_root / "rust" / "node-driver").mkdir(parents=True)
+            (app_root / "rust" / "node-agent").mkdir(parents=True)
+            shared_root.mkdir()
+            fake_bin.mkdir()
+            (shared_root / ".env").write_text("BOT_TOKEN=test\n", encoding="utf-8")
+            for command in ("ssh", "scp", "sudo"):
+                path = fake_bin / command
+                path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+                path.chmod(0o755)
+            curl = fake_bin / "curl"
+            curl.write_text("#!/bin/sh\necho 'fake HTTP 404' >&2\nexit 22\n", encoding="utf-8")
+            curl.chmod(0o755)
+            environment = os.environ.copy()
+            environment.update(
+                NODE_PLANE_APP_DIR=str(app_root),
+                NODE_PLANE_SHARED_DIR=str(shared_root),
+                PATH=f"{fake_bin}:{environment['PATH']}",
+            )
+            result = subprocess.run(
+                [str(SETUP_SCRIPT), "--bin-source", "release", "--skip-driver", "--skip-agents"],
+                env=environment,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("fake HTTP 404", result.stderr)
+            self.assertNotIn("mv: cannot stat", result.stderr)
+
     def test_dry_run_uses_installed_registry_and_preserves_empty_ssh_fields(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
