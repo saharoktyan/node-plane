@@ -22,6 +22,13 @@ Next core tasks:
   as part of the single-backend transition.
 - Offer reuse of an existing node config during reinstall only when a usable
   config actually exists. Otherwise skip that choice.
+- Update the pinned AmneziaWG runtime (currently `amneziavpn/amneziawg-go:0.2.16`)
+  to the latest suitable upstream release. Review newly supported/changed AWG
+  parameters, server and client config generation, migration of existing nodes,
+  and compatibility with previously issued configs.
+- Move Xray user add/update/remove to the Xray API so routine access changes do
+  not restart the container. Keep durable desired state and reconcile API changes
+  after an Xray restart; verify failure handling and existing user access.
 - Validate issued Xray/AWG configs, settings changes, reinstall, cleanup, and
   failure scenarios on the separate test node before treating the core cycle
   as complete.
