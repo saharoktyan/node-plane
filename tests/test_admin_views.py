@@ -711,7 +711,8 @@ class AdminViewsTests(unittest.TestCase):
         fake_server = SimpleNamespace(key="spb1", flag="🇷🇺", title="Saint-Petersburg", transport="ssh")
         markup = admin_server_wizard._full_cleanup_markup(fake_server, "en")
         buttons = [button.text for row in markup.inline_keyboard for button in row]
-        self.assertIn("Clean up node", buttons)
+        self.assertIn("Clean runtime, keep node in bot", buttons)
+        self.assertIn("Clean up and delete node", buttons)
         self.assertIn("Clean up node + remove SSH key", buttons)
 
     def test_admin_settings_menu_includes_cleanup_menu(self) -> None:
