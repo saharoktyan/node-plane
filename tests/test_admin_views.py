@@ -856,11 +856,19 @@ class ProfileProvisioningRegressionTests(unittest.TestCase):
 
 
 class BootstrapRolloutRegressionTests(unittest.TestCase):
+    def test_agent_rollout_failure_marks_server_card_for_attention(self) -> None:
+        server = SimpleNamespace(key="lv1", enabled=True, bootstrap_state="bootstrapped", protocol_kinds=[])
+        with patch.object(admin_server_wizard, "is_agent_rollout_pending", return_value=True):
+            self.assertEqual(admin_server_wizard._server_overall_status(server, "en"), ("⚠️", "needs attention"))
+            markup = admin_server_wizard._server_card_markup("lv1", "en")
+        callbacks = [button.callback_data for row in markup.inline_keyboard for button in row]
+        self.assertIn("srv:action:rolloutagent:lv1", callbacks)
+
     def test_missing_binaries_offer_cargo_install_button(self) -> None:
         markup = admin_server_wizard._agent_rollout_result_markup("lv1", "en", "RUST_INSTALL_REQUIRED")
         self.assertEqual(markup.inline_keyboard[0][0].callback_data, "srv:action:rolloutagentrust:lv1")
 
-    def test_successful_bootstrap_stays_successful_when_agent_rollout_fails(self) -> None:
+    def test_successful_bootstrap_shows_partial_failure_when_agent_rollout_fails(self) -> None:
         update = SimpleNamespace(callback_query=SimpleNamespace(message=SimpleNamespace(chat_id=1, message_id=2)))
         context = SimpleNamespace(user_data={})
         operation = SimpleNamespace(status="SUCCEEDED", progress_message="Bootstrap completed.")
@@ -882,7 +890,7 @@ class BootstrapRolloutRegressionTests(unittest.TestCase):
         ), patch.object(admin_server_wizard, "_wizard_edit"):
             admin_server_wizard.on_server_callback(update, context, "bootrun:bootstrap:preserve:lv1")
 
-        self.assertEqual(render_result.call_args.args[1], 0)
+        self.assertEqual(render_result.call_args.args[1], 1)
         self.assertIn("HTTP 404", render_result.call_args.args[2])
         self.assertIn("agent setup needs attention", render_result.call_args.args[2])
 
