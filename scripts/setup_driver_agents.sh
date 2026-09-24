@@ -322,6 +322,53 @@ check_url_access() {
   return 1
 }
 
+release_asset_api_url() {
+  local asset_name="$1"
+  local metadata="${WORK_DIR}/release.metadata.json"
+  if [[ ! -s "$metadata" ]]; then
+    download_to_file "https://api.github.com/repos/${GITHUB_REPO}/releases/tags/$(detect_release_ref)" "$metadata" || return 1
+  fi
+  "$PYTHON_BIN" - "$metadata" "$asset_name" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    release = json.load(source)
+for asset in release.get("assets", []):
+    if asset.get("name") == sys.argv[2] and asset.get("state") == "uploaded":
+        print(asset["url"])
+        break
+else:
+    raise SystemExit(1)
+PY
+}
+
+download_release_asset() {
+  local asset_name="$1" direct_url="$2" out="$3" custom_url="$4" api_url
+  if download_to_file "$direct_url" "$out"; then
+    return 0
+  fi
+  [[ -z "$custom_url" ]] || return 1
+  api_url="$(release_asset_api_url "$asset_name")" || return 1
+  echo "Direct download unavailable; trying GitHub API for ${asset_name}."
+  if has_cmd curl; then
+    curl -fsSL -H 'Accept: application/octet-stream' "$api_url" -o "$out" && return 0
+  elif has_cmd wget; then
+    wget -qO "$out" --header='Accept: application/octet-stream' "$api_url" && return 0
+  fi
+  rm -f "$out"
+  return 1
+}
+
+check_release_asset_access() {
+  local asset_name="$1" direct_url="$2" custom_url="$3"
+  if check_url_access "$direct_url"; then
+    return 0
+  fi
+  [[ -z "$custom_url" ]] || return 1
+  release_asset_api_url "$asset_name" >/dev/null
+}
+
 detect_release_ref() {
   if [[ -n "$RELEASE_REF" ]]; then
     echo "$RELEASE_REF"
@@ -490,7 +537,7 @@ download_release_binaries() {
   local agent_archive="${WORK_DIR}/agent.asset"
 
   set_step "download driver binary"
-  if ! download_to_file "$driver_url" "$driver_archive"; then
+  if ! download_release_asset "$DRIVER_ASSET_NAME" "$driver_url" "$driver_archive" "$DRIVER_BIN_URL"; then
     echo "Driver release asset ${DRIVER_ASSET_NAME} for $(detect_release_ref) is missing or inaccessible. Publish both release assets or configure authenticated binary URLs." >&2
     return 1
   fi
@@ -509,7 +556,7 @@ download_release_binaries() {
   chmod +x "$driver_out" || return 1
 
   set_step "download agent binary"
-  if ! download_to_file "$agent_url" "$agent_archive"; then
+  if ! download_release_asset "$AGENT_ASSET_NAME" "$agent_url" "$agent_archive" "$AGENT_BIN_URL"; then
     echo "Agent release asset ${AGENT_ASSET_NAME} for $(detect_release_ref) is missing or inaccessible. Publish both release assets or configure authenticated binary URLs." >&2
     return 1
   fi
@@ -618,8 +665,8 @@ resolve_binaries_dry_run() {
   case "$BIN_SOURCE" in
     release)
       set_step "dry-run check release binary urls"
-      check_url_access "$driver_url"
-      check_url_access "$agent_url"
+      check_release_asset_access "$DRIVER_ASSET_NAME" "$driver_url" "$DRIVER_BIN_URL"
+      check_release_asset_access "$AGENT_ASSET_NAME" "$agent_url" "$AGENT_BIN_URL"
       echo "Dry-run: release binary URLs are reachable."
       ;;
     build)
@@ -628,7 +675,8 @@ resolve_binaries_dry_run() {
       ;;
     auto)
       set_step "dry-run check release binary urls"
-      if check_url_access "$driver_url" && check_url_access "$agent_url"; then
+      if check_release_asset_access "$DRIVER_ASSET_NAME" "$driver_url" "$DRIVER_BIN_URL" \
+        && check_release_asset_access "$AGENT_ASSET_NAME" "$agent_url" "$AGENT_BIN_URL"; then
         echo "Dry-run: release binary URLs are reachable (auto mode)."
       elif has_cmd cargo && has_cmd protoc; then
         echo "Dry-run: release binaries are unavailable; local cargo build is available (auto mode)."

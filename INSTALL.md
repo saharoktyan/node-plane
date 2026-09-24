@@ -254,6 +254,8 @@ Driver/agent rollout (for grpc driver mode):
 - Binary source policy for driver/agent rollout:
   - `NODE_PLANE_BIN_SOURCE=auto` (default): use GitHub release binaries first, then build with Cargo if available. If neither is available, the script asks before installing Rust build tools. In the bot, confirm with **Install Cargo and continue**; for unattended runs, set `NODE_PLANE_INSTALL_RUST=yes` to allow installation or `no` to stop. Before local compilation, the script requires at least 2048 MiB available RAM and CPU busy time at or below 65%; Cargo defaults to one build job.
   - `NODE_PLANE_BIN_SOURCE=release`: only download release binaries (Rust toolchain not required).
+    If GitHub's direct asset URL returns 404 for a published public release,
+    the installer retries that asset through the GitHub Releases API.
   - `NODE_PLANE_BIN_SOURCE=build`: only local `cargo build --release`.
 - Local build limits can be adjusted with `NODE_PLANE_BUILD_MIN_MEM_MB` and
   `NODE_PLANE_BUILD_MAX_CPU_PERCENT`. If a VPS does not meet them, build and
