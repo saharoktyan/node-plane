@@ -98,6 +98,7 @@ exit 1
 "#;
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
 struct AgentConfig {
     node_key: String,
     listen_addr: String,
@@ -1304,4 +1305,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AgentConfig;
+
+    #[test]
+    fn accepts_installer_agent_config_with_default_runtime_paths() {
+        let config: AgentConfig = toml::from_str(
+            r#"
+node_key = "test-node"
+listen_addr = "0.0.0.0:50061"
+tls_certificate_path = "/etc/node-plane/tls/server.crt"
+tls_key_path = "/etc/node-plane/tls/server.key"
+tls_client_ca_path = "/etc/node-plane/tls/ca.crt"
+"#,
+        )
+        .expect("installer config must deserialize");
+        assert_eq!(config.node_key, "test-node");
+        assert_eq!(config.listen_addr, "0.0.0.0:50061");
+        assert_eq!(config.runtime_root, "/opt/node-plane-runtime");
+    }
 }

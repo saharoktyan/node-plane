@@ -253,7 +253,7 @@ Driver/agent rollout (for grpc driver mode):
 - To disable automatic rollout during update, set `NODE_PLANE_AUTO_SETUP_DRIVER_AGENTS=0`.
 - Simple-mode post-install rollout is enabled by default; disable it with `NODE_PLANE_AUTO_SETUP_DRIVER_AGENTS_ON_INSTALL=0`.
 - Binary source policy for driver/agent rollout:
-  - `NODE_PLANE_BIN_SOURCE=auto` (default): try GitHub release binaries first, fallback to local build.
+  - `NODE_PLANE_BIN_SOURCE=auto` (default): build binaries from the installed release when Cargo is available; otherwise use GitHub release binaries.
   - `NODE_PLANE_BIN_SOURCE=release`: only download release binaries (Rust toolchain not required).
   - `NODE_PLANE_BIN_SOURCE=build`: only local `cargo build --release`.
 - The rollout generates a private driver-agent CA and mutual TLS identities in
@@ -271,7 +271,7 @@ Driver/agent rollout (for grpc driver mode):
   - `NODE_PLANE_AGENT_BIN_URL`
 - Safe preflight without host changes:
   - `./scripts/setup_driver_agents.sh --dry-run`
-  - validates release URL reachability (or build fallback path) and SSH connectivity to target nodes
+  - validates release URL reachability or local build availability, plus SSH connectivity to target nodes
 
 Maintenance:
 
