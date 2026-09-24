@@ -159,6 +159,119 @@ class SystemResetTests(unittest.TestCase):
         mocked.assert_called_once()
         self.assertIn("local managed runtime removed", out)
 
+    def test_grpc_factory_reset_cleans_registered_node_through_driver(self) -> None:
+        from services.node_driver_client import DriverOperation
+        from services.node_driver_grpc import GrpcNodeDriverClient
+
+        self.server_registry.upsert_server(
+            key="nl1", region="nl", title="Netherlands", flag="NL", transport="ssh",
+            protocol_kinds=("xray",), public_host="1.2.3.4", ssh_host="1.2.3.4", ssh_user="root",
+        )
+        self.server_registry.upsert_server(
+            key="local1", region="local", title="Local", flag="", transport="local",
+            protocol_kinds=("awg",), public_host="127.0.0.1",
+        )
+        seen = []
+
+        class FakeDriver(GrpcNodeDriverClient):
+            def __init__(self):
+                pass
+
+            def full_cleanup_node(self, node_key, remove_ssh_key=False, *, command_id=None):
+                with self_db.connect() as conn:
+                    row = conn.execute("SELECT command_id FROM driver_commands WHERE source_ref = ?", (f"telegram:111:cleanup:{node_key}",)).fetchone()
+                seen.append((node_key, remove_ssh_key, command_id, row["command_id"] if row else None))
+                return DriverOperation(operation_id="op-cleanup", kind="full_cleanup_node", status="SUCCEEDED", node_key=node_key)
+
+        self_db = self.system_reset._db
+        with patch.object(self.system_reset, "get_node_driver", return_value=FakeDriver()), patch.object(
+            self.system_reset, "full_cleanup_server"
+        ) as legacy, patch.object(self.system_reset, "_cleanup_local_managed_runtime") as local_cleanup:
+            rc, out = self.system_reset.run_factory_reset(cleanup_nodes=True, source_ref="telegram:111")
+        self.assertEqual(rc, 0)
+        self.assertEqual({entry[:2] for entry in seen}, {("nl1", True), ("local1", False)})
+        self.assertTrue(all(entry[2] == entry[3] for entry in seen))
+        legacy.assert_not_called()
+        local_cleanup.assert_not_called()
+        self.assertIn("node-agent", out)
+
+    def test_grpc_reset_still_cleans_unregistered_host_runtime(self) -> None:
+        from services.node_driver_grpc import GrpcNodeDriverClient
+
+        class FakeDriver(GrpcNodeDriverClient):
+            def __init__(self):
+                pass
+
+        with patch.object(self.system_reset, "get_node_driver", return_value=FakeDriver()), patch.object(
+            self.system_reset, "_cleanup_local_managed_runtime", return_value=(0, "orphan runtime removed")
+        ) as local_cleanup:
+            rc, out = self.system_reset.run_factory_reset(cleanup_nodes=True, source_ref="telegram:113")
+        self.assertEqual(rc, 0)
+        local_cleanup.assert_called_once()
+        self.assertIn("orphan runtime removed", out)
+
+    def test_grpc_full_remove_requires_successful_node_cleanup_before_uninstall(self) -> None:
+        from services.node_driver_client import DriverOperation
+        from services.node_driver_grpc import GrpcNodeDriverClient
+
+        self.server_registry.upsert_server(
+            key="nl1", region="nl", title="Netherlands", flag="NL", transport="ssh",
+            protocol_kinds=("xray",), public_host="1.2.3.4", ssh_host="1.2.3.4", ssh_user="root",
+        )
+
+        class FakeDriver(GrpcNodeDriverClient):
+            def __init__(self):
+                pass
+
+            def full_cleanup_node(self, node_key, remove_ssh_key=False, *, command_id=None):
+                return DriverOperation(
+                    operation_id="op-failed", kind="full_cleanup_node", status="FAILED",
+                    node_key=node_key, progress_message="agent unreachable",
+                )
+
+        with patch.object(self.system_reset, "get_node_driver", return_value=FakeDriver()), patch.object(
+            self.system_reset, "schedule_full_uninstall"
+        ) as uninstall:
+            rc, out = self.system_reset.run_full_remove(cleanup_nodes=True, source_ref="telegram:114")
+        self.assertEqual(rc, 1)
+        self.assertIn("agent unreachable", out)
+        uninstall.assert_not_called()
+
+    def test_failed_grpc_cleanup_blocks_reset_and_preserves_registry(self) -> None:
+        from services.node_driver_client import DriverOperation
+        from services.node_driver_grpc import GrpcNodeDriverClient
+
+        self.server_registry.upsert_server(
+            key="nl1", region="nl", title="Netherlands", flag="NL", transport="ssh",
+            protocol_kinds=("xray",), public_host="1.2.3.4", ssh_host="1.2.3.4", ssh_user="root",
+        )
+        calls = []
+
+        class FakeDriver(GrpcNodeDriverClient):
+            def __init__(self):
+                pass
+
+            def full_cleanup_node(self, node_key, remove_ssh_key=False, *, command_id=None):
+                calls.append(command_id)
+                return DriverOperation(
+                    operation_id="op-failed", kind="full_cleanup_node", status="FAILED",
+                    node_key=node_key, progress_message="agent unreachable",
+                )
+
+            def get_operation(self, operation_id):
+                return DriverOperation(
+                    operation_id=operation_id, kind="full_cleanup_node", status="FAILED",
+                    node_key="nl1", progress_message="agent unreachable",
+                )
+
+        with patch.object(self.system_reset, "get_node_driver", return_value=FakeDriver()):
+            rc, out = self.system_reset.run_factory_reset(cleanup_nodes=True, source_ref="telegram:112")
+            second_rc, _ = self.system_reset.run_factory_reset(cleanup_nodes=True, source_ref="telegram:112")
+        self.assertEqual((rc, second_rc), (1, 1))
+        self.assertIn("agent unreachable", out)
+        self.assertEqual(len(calls), 1)
+        self.assertIsNotNone(self.server_registry.get_server("nl1"))
+
     def test_schedule_full_uninstall_spawns_detached_cleanup(self) -> None:
         with patch.object(self.system_reset.shutil, "which", return_value=None), patch.object(self.system_reset.subprocess, "Popen") as mocked:
             rc, out = self.system_reset.schedule_full_uninstall()

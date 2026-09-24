@@ -11,6 +11,9 @@ from config import BASE_DIR, INSTALL_MODE, INSTALL_ROOT, SHARED_ROOT, SOURCE_ROO
 from db import ensure_schema, get_db
 from db.migrate_sqlite_to_postgres import _generic_table_exists
 from services.backups import clear_backup_storage, maybe_create_pre_action_backup
+from services.driver_commands import execute_server_command
+from services.node_driver import get_node_driver
+from services.node_driver_grpc import GrpcNodeDriverClient
 from services.server_bootstrap import AWG_RUNTIME_CONTAINER, full_cleanup_server
 from services.server_registry import list_servers
 from services.server_runtime import is_running_in_container, run_local_command
@@ -229,19 +232,42 @@ def schedule_full_uninstall() -> Tuple[int, str]:
     return 0, "\n".join(lines)
 
 
-def run_full_remove(cleanup_nodes: bool = False) -> Tuple[int, str]:
-    if cleanup_nodes:
-        failures: List[str] = []
-        completed: List[str] = []
-        for server in list_servers(include_disabled=True):
-            rc, out = full_cleanup_server(
-                server.key,
-                remove_ssh_key=(server.transport == "ssh"),
-            )
-            if rc != 0:
-                failures.append(f"{server.key}: {(out or '').strip()[:400]}")
+def _cleanup_registered_nodes(source_ref: str) -> tuple[List[str], List[str], bool]:
+    driver = get_node_driver()
+    use_driver = isinstance(driver, GrpcNodeDriverClient)
+    if use_driver and not source_ref:
+        return ["a persistent request identifier is required for driver cleanup"], [], use_driver
+    failures: List[str] = []
+    completed: List[str] = []
+    for server in list_servers(include_disabled=True):
+        try:
+            if use_driver:
+                operation = execute_server_command(
+                    driver,
+                    f"{source_ref}:cleanup:{server.key}",
+                    "full_cleanup_node",
+                    server.key,
+                    remove_ssh_key=(server.transport == "ssh"),
+                )
+                rc = 0 if operation.status == "SUCCEEDED" else 1
+                out = operation.progress_message or operation.status
             else:
-                completed.append(server.key)
+                rc, out = full_cleanup_server(
+                    server.key,
+                    remove_ssh_key=(server.transport == "ssh"),
+                )
+        except Exception as exc:
+            rc, out = 1, str(exc)
+        if rc != 0:
+            failures.append(f"{server.key}: {(out or '').strip()[:400]}")
+        else:
+            completed.append(server.key)
+    return failures, completed, use_driver
+
+
+def run_full_remove(cleanup_nodes: bool = False, *, source_ref: str = "") -> Tuple[int, str]:
+    if cleanup_nodes:
+        failures, completed, _ = _cleanup_registered_nodes(source_ref)
         if failures:
             lines = ["Node cleanup failed.", ""]
             if completed:
@@ -319,20 +345,11 @@ echo "local managed runtime removed"
     return run_local_command(script, timeout=180)
 
 
-def run_factory_reset(cleanup_nodes: bool = False, stop_local_runtime: bool = False) -> Tuple[int, str]:
+def run_factory_reset(cleanup_nodes: bool = False, stop_local_runtime: bool = False, *, source_ref: str = "") -> Tuple[int, str]:
     backup_result = maybe_create_pre_action_backup("pre_reset")
+    use_driver = False
     if cleanup_nodes:
-        failures: List[str] = []
-        completed: List[str] = []
-        for server in list_servers(include_disabled=True):
-            rc, out = full_cleanup_server(
-                server.key,
-                remove_ssh_key=(server.transport == "ssh"),
-            )
-            if rc != 0:
-                failures.append(f"{server.key}: {(out or '').strip()[:400]}")
-            else:
-                completed.append(server.key)
+        failures, completed, use_driver = _cleanup_registered_nodes(source_ref)
         if failures:
             lines = ["Node cleanup failed.", ""]
             if completed:
@@ -347,10 +364,18 @@ def run_factory_reset(cleanup_nodes: bool = False, stop_local_runtime: bool = Fa
 
     local_runtime_summary = ""
     if cleanup_nodes:
-        rc, out = _cleanup_local_managed_runtime()
-        local_runtime_summary = (out or "").strip()
-        if rc != 0:
-            return 1, f"Local managed runtime cleanup failed.\n\n{(out or '').strip()[:1200]}"
+        local_node_registered = any(
+            server.transport == "local" for server in list_servers(include_disabled=True)
+        )
+        if use_driver and local_node_registered:
+            local_runtime_summary = "registered local runtimes cleaned through node-agent"
+        else:
+            # A host-local runtime can predate its registry entry. Keep the
+            # legacy cleanup for that orphan until the driver can address it.
+            rc, out = _cleanup_local_managed_runtime()
+            local_runtime_summary = (out or "").strip()
+            if rc != 0:
+                return 1, f"Local managed runtime cleanup failed.\n\n{(out or '').strip()[:1200]}"
 
     _wipe_local_state()
     ssh_line = _clear_local_ssh_material()
