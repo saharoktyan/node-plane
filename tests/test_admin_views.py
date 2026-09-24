@@ -96,7 +96,7 @@ class AdminViewsTests(unittest.TestCase):
 
     def test_admin_updates_markup_keeps_requested_locale(self) -> None:
         with patch.object(user_profile, "get_updates_overview", return_value={"auto_check_enabled": True, "last_run_status": "never", "update_supported": False, "branch": "dev"}), patch.object(
-            user_profile, "get_servers_needing_runtime_sync", return_value=[]
+            user_profile, "get_node_driver", return_value=SimpleNamespace(list_nodes_needing_runtime_sync=lambda: [])
         ), patch.object(user_profile, "get_release_cleanup_overview", return_value={"supported": True}):
             markup = user_profile._admin_updates_markup("en")
         self.assertEqual(markup.inline_keyboard[0][0].text, "🔎 Check")
@@ -578,7 +578,7 @@ class AdminViewsTests(unittest.TestCase):
         with patch.object(user_profile, "_problem_server_keys", return_value=["spb1"]), patch.object(
             user_profile, "list_servers", return_value=[fake_server]
         ), patch.object(
-            user_profile, "get_server_runtime_state", return_value={"state": "unknown"}
+            user_profile, "get_node_driver", return_value=SimpleNamespace(get_runtime_status=lambda _key: SimpleNamespace(state="unknown"))
         ):
             text, _markup = user_profile._render_problem_servers("en")
         self.assertIn("runtime sync needed", text)
@@ -592,17 +592,37 @@ class AdminViewsTests(unittest.TestCase):
         self.assertIn("menu:admin_runtime_sync_all", callbacks)
 
     def test_runtime_sync_confirm_lists_servers_and_action(self) -> None:
-        fake_server = SimpleNamespace(key="spb1", flag="🇷🇺", title="Saint-Petersburg")
-        with patch.object(user_profile, "get_servers_needing_runtime_sync", return_value=[fake_server]):
+        fake_server = SimpleNamespace(node_key="spb1", flag="🇷🇺", title="Saint-Petersburg")
+        with patch.object(user_profile, "get_node_driver", return_value=SimpleNamespace(list_nodes_needing_runtime_sync=lambda: [fake_server])):
             text, markup = user_profile._render_runtime_sync_confirm("en")
         self.assertIn("Saint-Petersburg (spb1)", text)
         self.assertEqual(markup.inline_keyboard[0][0].callback_data, "menu:admin_runtime_sync_run")
 
     def test_runtime_sync_confirm_can_return_to_updates(self) -> None:
-        fake_server = SimpleNamespace(key="spb1", flag="🇷🇺", title="Saint-Petersburg")
-        with patch.object(user_profile, "get_servers_needing_runtime_sync", return_value=[fake_server]):
+        fake_server = SimpleNamespace(node_key="spb1", flag="🇷🇺", title="Saint-Petersburg")
+        with patch.object(user_profile, "get_node_driver", return_value=SimpleNamespace(list_nodes_needing_runtime_sync=lambda: [fake_server])):
             _text, markup = user_profile._render_runtime_sync_confirm("en", back_callback="menu:admin_updates")
         self.assertEqual(markup.inline_keyboard[1][0].callback_data, "menu:admin_updates")
+
+    def test_runtime_sync_confirm_reports_driver_unavailable(self) -> None:
+        driver = SimpleNamespace(list_nodes_needing_runtime_sync=lambda: (_ for _ in ()).throw(RuntimeError("offline")))
+        with patch.object(user_profile, "get_node_driver", return_value=driver):
+            text, _markup = user_profile._render_runtime_sync_confirm("en")
+        self.assertIn("Could not check runtime state", text)
+
+    def test_bootstrap_menu_uses_driver_docker_diagnostics(self) -> None:
+        server = SimpleNamespace(key="spb1", bootstrap_state="new")
+        diagnostics = SimpleNamespace(items=[SimpleNamespace(kind="docker", status="missing")])
+        with patch.object(admin_server_wizard, "get_node_driver", return_value=SimpleNamespace(get_node_diagnostics=lambda _key: diagnostics)):
+            markup = admin_server_wizard._bootstrap_menu_markup(server, "en")
+        self.assertEqual(markup.inline_keyboard[0][0].callback_data, "srv:action:installdocker:spb1")
+
+    def test_bootstrap_menu_does_not_offer_install_when_agent_unavailable(self) -> None:
+        server = SimpleNamespace(key="spb1", bootstrap_state="new", transport="ssh")
+        with patch.object(admin_server_wizard, "get_node_driver", return_value=SimpleNamespace(get_node_diagnostics=lambda _key: (_ for _ in ()).throw(RuntimeError("offline")))):
+            markup = admin_server_wizard._bootstrap_menu_markup(server, "en")
+        self.assertEqual(markup.inline_keyboard[0][0].callback_data, "srv:action:rolloutagent:spb1")
+        self.assertNotIn("srv:action:installdocker:spb1", [button.callback_data for row in markup.inline_keyboard for button in row])
 
     def test_maintenance_section_includes_full_cleanup(self) -> None:
         markup = admin_server_wizard._advanced_section_markup("spb1", "maintenance", "en")

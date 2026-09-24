@@ -48,8 +48,12 @@ one scenario at a time, with compatibility for the existing client during rollou
 
 Current migration debt: driver still queries and updates business PostgreSQL
 tables, computes desired profile state during reconcile, and renders node.env.
-Python still has direct runtime execution paths. These remain until equivalent
-backend/driver paths have been exercised; they are not the target design.
+The gRPC core UI now uses driver queries and commands for runtime status,
+Docker availability, provisioning, settings, and maintenance. Python direct
+runtime paths remain behind the `inprocess` adapter, in the existing metrics,
+traffic and alert features reserved for later Pro work, and in the host-local
+orphan cleanup and agent installation procedures. The in-process backend's
+long-term role is a separate decision; these paths are not the target design.
 
 ## Operation contract
 
@@ -89,7 +93,7 @@ accepted → PENDING → RUNNING → SUCCEEDED | FAILED | CANCELLED
   return `NOT_FOUND`; live progress for nonterminal records is not implemented.
 - `ListOperations` filters before limiting and orders by update time descending,
   with operation ID as a deterministic tie-breaker.
-- All 16 implemented operation RPCs persist `RUNNING` before execution, then
+- Implemented operation RPCs persist `RUNNING` before execution, then
   update the same record at completion, preserving start time and result data.
   Failure to persist the start prevents agent dispatch. Paths that reject work
   for a missing agent complete with a terminal failure. Composite

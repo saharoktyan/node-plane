@@ -6,6 +6,7 @@ import sys
 import tempfile
 import types
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from tests.postgres_test_harness import configure_postgres_test_env
@@ -141,12 +142,12 @@ class SystemResetTests(unittest.TestCase):
         )
         calls = []
 
-        def fake_cleanup(server_key: str, remove_ssh_key: bool = False):
+        def fake_cleanup(_driver, _source_ref, _kind, server_key: str, remove_ssh_key: bool = False):
             calls.append((server_key, remove_ssh_key))
-            return 0, "ok"
+            return SimpleNamespace(status="SUCCEEDED", progress_message="ok")
 
-        self.system_reset.full_cleanup_server = fake_cleanup  # type: ignore[attr-defined]
-        rc, out = self.system_reset.run_factory_reset(cleanup_nodes=True, stop_local_runtime=False)
+        with patch.object(self.system_reset, "execute_server_command", side_effect=fake_cleanup):
+            rc, out = self.system_reset.run_factory_reset(cleanup_nodes=True, stop_local_runtime=False)
 
         self.assertEqual(rc, 0)
         self.assertIn(("nl1", True), calls)
@@ -185,13 +186,12 @@ class SystemResetTests(unittest.TestCase):
 
         self_db = self.system_reset._db
         with patch.object(self.system_reset, "get_node_driver", return_value=FakeDriver()), patch.object(
-            self.system_reset, "full_cleanup_server"
-        ) as legacy, patch.object(self.system_reset, "_cleanup_local_managed_runtime") as local_cleanup:
+            self.system_reset, "_cleanup_local_managed_runtime"
+        ) as local_cleanup:
             rc, out = self.system_reset.run_factory_reset(cleanup_nodes=True, source_ref="telegram:111")
         self.assertEqual(rc, 0)
         self.assertEqual({entry[:2] for entry in seen}, {("nl1", True), ("local1", False)})
         self.assertTrue(all(entry[2] == entry[3] for entry in seen))
-        legacy.assert_not_called()
         local_cleanup.assert_not_called()
         self.assertIn("node-agent", out)
 
@@ -327,11 +327,11 @@ class SystemResetTests(unittest.TestCase):
         )
         calls = []
 
-        def fake_cleanup(server_key: str, remove_ssh_key: bool = False):
+        def fake_cleanup(_driver, _source_ref, _kind, server_key: str, remove_ssh_key: bool = False):
             calls.append((server_key, remove_ssh_key))
-            return 0, "ok"
+            return SimpleNamespace(status="SUCCEEDED", progress_message="ok")
 
-        with patch.object(self.system_reset, "full_cleanup_server", side_effect=fake_cleanup), patch.object(
+        with patch.object(self.system_reset, "execute_server_command", side_effect=fake_cleanup), patch.object(
             self.system_reset, "schedule_full_uninstall", return_value=(0, "Node Plane removal scheduled.")
         ):
             rc, out = self.system_reset.run_full_remove(cleanup_nodes=True)

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import os
-import subprocess
 import threading
 from typing import Any, Dict, List, Optional, Sequence, Set
 
@@ -21,17 +19,14 @@ except Exception:  # pragma: no cover - test stubs may provide partial telegram 
         pass
 from telegram.ext import CallbackContext
 
-from config import APP_COMMIT, APP_ROOT, APP_SEMVER, CB_MENU, CB_SRV, LIST_PAGE_SIZE, PARSE_MODE, SHARED_ROOT
+from config import APP_COMMIT, APP_SEMVER, CB_MENU, CB_SRV, LIST_PAGE_SIZE, PARSE_MODE
 from i18n import get_locale_for_update, t
 from services.node_driver import get_node_driver
+from services.agent_rollout import ensure_driver_agent_rollout_for_ssh
 from services.driver_commands import execute_server_command
 from services.provisioning_state import (
     render_server_provisioning_summary,
     summarize_server_provisioning,
-)
-from services.server_bootstrap import (
-    is_server_docker_available,
-    show_server_metrics,
 )
 from services.app_settings import set_initial_setup_state
 from services.server_registry import RegisteredServer, forget_server, get_server, list_servers, update_server_fields, upsert_server
@@ -513,8 +508,22 @@ def _awg_entropy_result_markup(server_key: str, lang: str) -> InlineKeyboardMark
     )
 
 
+def _docker_status_from_driver(server_key: str) -> bool | None:
+    try:
+        diagnostics = get_node_driver().get_node_diagnostics(server_key)
+    except Exception:
+        return None
+    for item in diagnostics.items:
+        if item.kind == "docker":
+            return item.status == "ok"
+    return None
+
+
 def _bootstrap_menu_text(server: RegisteredServer, lang: str) -> str:
-    if not is_server_docker_available(server.key):
+    docker_available = _docker_status_from_driver(server.key)
+    if docker_available is None:
+        state = "Не удалось проверить Docker на ноде" if lang == "ru" else "Could not check Docker on the node"
+    elif not docker_available:
         state = t(lang, "admin.wizard.bootstrap_menu_state_docker_missing")
     elif server.bootstrap_state == "bootstrapped":
         state = t(lang, "admin.wizard.server_status_ready")
@@ -534,7 +543,14 @@ def _bootstrap_menu_text(server: RegisteredServer, lang: str) -> str:
 
 def _bootstrap_menu_markup(server: RegisteredServer, lang: str) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
-    if not is_server_docker_available(server.key):
+    docker_available = _docker_status_from_driver(server.key)
+    if docker_available is None:
+        if server.transport == "ssh":
+            rows.append([InlineKeyboardButton("🔌 Подключить agent" if lang == "ru" else "🔌 Set up agent", callback_data=f"{CB_SRV}action:rolloutagent:{server.key}")])
+        rows.append([InlineKeyboardButton(t(lang, "admin.wizard.probe"), callback_data=f"{CB_SRV}action:probe:{server.key}")])
+        rows.append([InlineKeyboardButton(t(lang, "admin.wizard.back_to_server"), callback_data=f"{CB_SRV}card:{server.key}")])
+        return InlineKeyboardMarkup(rows)
+    if not docker_available:
         rows.append([InlineKeyboardButton(t(lang, "admin.wizard.install_docker"), callback_data=f"{CB_SRV}action:installdocker:{server.key}")])
         rows.append([InlineKeyboardButton(t(lang, "admin.wizard.back_to_server"), callback_data=f"{CB_SRV}card:{server.key}")])
         return InlineKeyboardMarkup(rows)
@@ -1156,32 +1172,6 @@ def _action_result_text(title: str, rc: int, out: str, back_key: str, lang: str)
     if len(body) > 2500:
         body = body[-2500:]
     return f"{status} {title}\n\n{body}\n\n{t(lang, 'admin.wizard.server_label')}: {back_key}"
-
-
-def _ensure_driver_agent_rollout_for_ssh(server_key: str) -> tuple[int, str]:
-    server = get_server(server_key)
-    if not server or server.transport != "ssh":
-        return 0, ""
-    script_path = f"{APP_ROOT}/scripts/setup_driver_agents.sh"
-    if not os.path.isfile(script_path):
-        return 1, f"missing rollout script: {script_path}"
-    env = os.environ.copy()
-    env["NODE_PLANE_APP_DIR"] = APP_ROOT
-    env["NODE_PLANE_SHARED_DIR"] = SHARED_ROOT
-    env.setdefault("NODE_PLANE_BIN_SOURCE", "release")
-    try:
-        proc = subprocess.run(
-            [script_path, "--strict"],
-            cwd=APP_ROOT,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=900,
-        )
-    except Exception as exc:
-        return 1, f"driver/agent rollout failed to start: {exc}"
-    output = ((proc.stdout or "").strip() + "\n" + (proc.stderr or "").strip()).strip()
-    return proc.returncode, output or f"exit={proc.returncode}"
 
 
 def _summary_text(data: Dict[str, Any], editing: bool = False, lang: str = "ru") -> str:
@@ -2024,7 +2014,7 @@ def on_server_callback(update: Update, context: CallbackContext, payload: str) -
             rc = 0 if operation.status == "SUCCEEDED" else 1
             out = operation.progress_message
             if rc == 0:
-                rollout_rc, rollout_out = _ensure_driver_agent_rollout_for_ssh(server_key)
+                rollout_rc, rollout_out = ensure_driver_agent_rollout_for_ssh(server_key)
                 if rollout_out:
                     out = f"{out}\n\nDriver/agent rollout:\n{rollout_out}".strip()
                 if rollout_rc != 0:
@@ -2037,7 +2027,7 @@ def on_server_callback(update: Update, context: CallbackContext, payload: str) -
             rc = 0 if operation.status == "SUCCEEDED" else 1
             out = operation.progress_message
             if rc == 0:
-                rollout_rc, rollout_out = _ensure_driver_agent_rollout_for_ssh(server_key)
+                rollout_rc, rollout_out = ensure_driver_agent_rollout_for_ssh(server_key)
                 if rollout_out:
                     out = f"{out}\n\nDriver/agent rollout:\n{rollout_out}".strip()
                 if rollout_rc != 0:
@@ -2055,6 +2045,13 @@ def on_server_callback(update: Update, context: CallbackContext, payload: str) -
 
     if payload.startswith("action:"):
         _, action, server_key = payload.split(":", 2)
+        if action == "rolloutagent":
+            label = "Подключение agent" if lang == "ru" else "Set up agent"
+            stop_progress = _start_progress_animation(context, label)
+            rc, out = ensure_driver_agent_rollout_for_ssh(server_key)
+            stop_progress()
+            _wizard_edit(context, _action_result_text(label, rc, out, server_key, lang), _server_card_markup(server_key, lang))
+            return
         if action == "applysettings":
             label = "Применение настроек" if lang == "ru" else "Apply settings"
             stop_progress = _start_progress_animation(context, label)
@@ -2064,6 +2061,8 @@ def on_server_callback(update: Update, context: CallbackContext, payload: str) -
             _wizard_edit(context, _action_result_text(label, rc, operation.progress_message, server_key, lang), _advanced_menu_markup(server_key, lang))
             return
         if action == "metrics":
+            from services.server_bootstrap import show_server_metrics
+
             stop_progress = _start_progress_animation(context, t(lang, "admin.wizard.server_metrics"))
             rc, out = show_server_metrics(server_key)
             stop_progress()

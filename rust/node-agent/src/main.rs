@@ -354,7 +354,29 @@ impl AgentState {
         let version = Self::read_first_line(&self.runtime_version_path());
         let commit = Self::read_first_line(&self.runtime_commit_path());
 
+        let docker_available = Command::new("docker")
+            .arg("info")
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false)
+            || Command::new("sudo")
+                .args(["-n", "docker", "info"])
+                .output()
+                .map(|output| output.status.success())
+                .unwrap_or(false);
+
         let items = vec![
+            DiagnosticItem {
+                kind: "docker".to_string(),
+                status: if docker_available { "ok" } else { "missing" }.to_string(),
+                summary: if docker_available {
+                    "Docker daemon available"
+                } else {
+                    "Docker daemon unavailable"
+                }
+                .to_string(),
+                detail: String::new(),
+            },
             DiagnosticItem {
                 kind: "runtime_root".to_string(),
                 status: if runtime_root_exists { "ok" } else { "missing" }.to_string(),

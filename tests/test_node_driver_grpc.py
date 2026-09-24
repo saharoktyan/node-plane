@@ -28,6 +28,7 @@ class GrpcCommandIdentityTests(unittest.TestCase):
         ("regenerate_awg_entropy", "RegenerateAwgEntropy", "runtime", ("node",)),
         ("sync_runtime", "SyncRuntime", "runtime", ("node",)),
         ("sync_xray", "SyncXray", "runtime", ("node",)),
+        ("apply_node_settings", "ApplyNodeSettings", "runtime", ("node",)),
         ("reconcile_node", "ReconcileNode", "provisioning", ("node",)),
         ("reconcile_profile", "ReconcileProfile", "provisioning", ("alice",)),
         ("ensure_profile_on_node", "EnsureProfileOnNode", "provisioning", ("node", "alice", ["awg"])),
@@ -71,6 +72,16 @@ class GrpcCommandIdentityTests(unittest.TestCase):
         client, rpc = self.client_for("GetAwgEntropy", "runtime")
         rpc.return_value = SimpleNamespace(summary="preset: quic\nJc: 4")
         self.assertEqual(client.get_awg_entropy("node"), "preset: quic\nJc: 4")
+
+    def test_node_diagnostics_preserves_docker_status(self):
+        client, rpc = self.client_for("GetNodeDiagnostics", "node")
+        rpc.return_value = SimpleNamespace(
+            node_key="node", summary="ok",
+            items=[SimpleNamespace(kind="docker", status="missing", summary="daemon unavailable", detail="")],
+        )
+        result = client.get_node_diagnostics("node")
+        self.assertEqual(result.items[0].kind, "docker")
+        self.assertEqual(result.items[0].status, "missing")
 
     def test_transport_error_never_authorizes_automatic_reexecution(self):
         for key in (None, "saved-command-1"):

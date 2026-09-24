@@ -14,12 +14,12 @@ from services.backups import clear_backup_storage, maybe_create_pre_action_backu
 from services.driver_commands import execute_server_command
 from services.node_driver import get_node_driver
 from services.node_driver_grpc import GrpcNodeDriverClient
-from services.server_bootstrap import AWG_RUNTIME_CONTAINER, full_cleanup_server
 from services.server_registry import list_servers
 from services.server_runtime import is_running_in_container, run_local_command
 
 
 _db = get_db()
+AWG_RUNTIME_CONTAINER = "amnezia-awg"
 
 
 def _table_exists(conn, name: str) -> bool:
@@ -241,21 +241,15 @@ def _cleanup_registered_nodes(source_ref: str) -> tuple[List[str], List[str], bo
     completed: List[str] = []
     for server in list_servers(include_disabled=True):
         try:
-            if use_driver:
-                operation = execute_server_command(
-                    driver,
-                    f"{source_ref}:cleanup:{server.key}",
-                    "full_cleanup_node",
-                    server.key,
-                    remove_ssh_key=(server.transport == "ssh"),
-                )
-                rc = 0 if operation.status == "SUCCEEDED" else 1
-                out = operation.progress_message or operation.status
-            else:
-                rc, out = full_cleanup_server(
-                    server.key,
-                    remove_ssh_key=(server.transport == "ssh"),
-                )
+            operation = execute_server_command(
+                driver,
+                f"{source_ref}:cleanup:{server.key}",
+                "full_cleanup_node",
+                server.key,
+                remove_ssh_key=(server.transport == "ssh"),
+            )
+            rc = 0 if operation.status == "SUCCEEDED" else 1
+            out = operation.progress_message or operation.status
         except Exception as exc:
             rc, out = 1, str(exc)
         if rc != 0:

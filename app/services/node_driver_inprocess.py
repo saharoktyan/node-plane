@@ -10,6 +10,8 @@ from services.node_driver_client import (
     DriverError,
     DriverNode,
     DriverNodeCapabilities,
+    DriverDiagnosticItem,
+    DriverNodeDiagnostics,
     DriverNodeHealth,
     DriverOperation,
     DriverProfileUsage,
@@ -82,6 +84,19 @@ def _node_from_server(server: RegisteredServer) -> DriverNode:
 
 
 class InProcessNodeDriverClient(NodeDriverClient):
+    def get_node_diagnostics(self, node_key: str) -> DriverNodeDiagnostics:
+        from services.server_bootstrap import is_server_docker_available
+        from services.server_registry import get_server
+
+        if not get_server(node_key):
+            raise ValueError(f"Server {node_key} not found")
+        available = is_server_docker_available(node_key)
+        return DriverNodeDiagnostics(
+            node_key=node_key,
+            summary="Docker available" if available else "Docker unavailable",
+            items=(DriverDiagnosticItem(kind="docker", status="ok" if available else "missing"),),
+        )
+
     def apply_node_settings(self, node_key: str) -> DriverOperation:
         return _operation("apply_node_settings", node_key=node_key, status="FAILED", message="Applying settings requires NODE_DRIVER_BACKEND=grpc and an updated node agent")
 
