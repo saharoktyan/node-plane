@@ -30,14 +30,13 @@ from services.provisioning_state import (
     summarize_server_provisioning,
 )
 from services.server_bootstrap import (
-    get_server_runtime_state,
     is_server_docker_available,
     regenerate_awg_entropy,
     show_server_metrics,
     show_awg_entropy,
 )
 from services.app_settings import set_initial_setup_state
-from services.server_registry import RegisteredServer, get_server, list_servers, update_server_fields, upsert_server
+from services.server_registry import RegisteredServer, forget_server, get_server, list_servers, update_server_fields, upsert_server
 from services.xray import get_server_link_status
 from utils.tg import answer_cb, safe_delete_by_id, safe_delete_update_message, safe_edit_by_ids, safe_edit_message
 from utils.security import redact_sensitive_text, validate_server_field, validate_server_key
@@ -64,6 +63,21 @@ def _run_driver_action(update: Update, kind: str, server_key: str, **options: bo
     update_id = getattr(update, "update_id", None)
     source_ref = f"telegram:{update_id}" if update_id is not None else ""
     return execute_server_command(get_node_driver(), source_ref, kind, server_key, **options)
+
+
+def _runtime_state_from_driver(server_key: str) -> dict[str, str]:
+    try:
+        runtime = get_node_driver().get_runtime_status(server_key)
+    except Exception as exc:
+        return {"state": "unknown", "version": "", "commit": "", "message": str(exc)}
+    return {
+        "state": runtime.state,
+        "version": runtime.version,
+        "commit": runtime.commit,
+        "expected_version": runtime.expected_version,
+        "expected_commit": runtime.expected_commit,
+        "message": runtime.message,
+    }
 
 
 def _wizard_get(context: CallbackContext) -> Optional[Dict[str, Any]]:
@@ -397,7 +411,7 @@ def _format_server_notes(notes: str, lang: str) -> str:
 
 def _runtime_state_values(server_key: str, lang: str, runtime: dict[str, str] | None = None) -> tuple[str, str]:
     if runtime is None:
-        runtime = get_server_runtime_state(server_key)
+        runtime = _runtime_state_from_driver(server_key)
     state = str(runtime.get("state") or "unknown")
     version = str(runtime.get("version") or "")
     commit = str(runtime.get("commit") or "")
@@ -415,7 +429,7 @@ def _runtime_state_values(server_key: str, lang: str, runtime: dict[str, str] | 
 
 
 def _server_card_text(server: RegisteredServer, lang: str) -> str:
-    runtime = get_server_runtime_state(server.key)
+    runtime = _runtime_state_from_driver(server.key)
     runtime_state = str(runtime.get("state") or "")
     server_icon, server_text = _server_status(server, lang)
     xray_icon, xray_text = _xray_status(server, lang)
@@ -471,6 +485,7 @@ def _server_card_markup(server_key: str, lang: str) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(t(lang, "admin.wizard.bootstrap"), callback_data=f"{CB_SRV}bootmenu:{server_key}"),
             ],
             [InlineKeyboardButton(t(lang, "admin.wizard.advanced"), callback_data=f"{CB_SRV}advanced:{server_key}")],
+            [InlineKeyboardButton(t(lang, "admin.wizard.forget_server"), callback_data=f"{CB_SRV}forgetask:{server_key}")],
             [InlineKeyboardButton(t(lang, "admin.wizard.to_servers"), callback_data=f"{CB_SRV}list")],
         ]
     )
@@ -658,7 +673,7 @@ def _advanced_section_text(server: RegisteredServer, section: str, lang: str) ->
             ]
         )
     if section == "maintenance_runtime":
-        runtime = get_server_runtime_state(server.key)
+        runtime = _runtime_state_from_driver(server.key)
         state = str(runtime.get("state") or "unknown")
         version = str(runtime.get("version") or "").strip() or "—"
         commit = str(runtime.get("commit") or "").strip() or "—"
@@ -773,7 +788,7 @@ def _advanced_section_markup(server_key: str, section: str, lang: str) -> Inline
         rows.append([InlineKeyboardButton(t(lang, "admin.wizard.back_to_maintenance"), callback_data=f"{CB_SRV}advsection:maintenance:{server_key}")])
         return InlineKeyboardMarkup(rows)
     elif section == "maintenance_runtime":
-        runtime = get_server_runtime_state(server_key)
+        runtime = _runtime_state_from_driver(server_key)
         state = str(runtime.get("state") or "")
         rows = []
         if state in {"outdated", "unknown"}:
@@ -1682,6 +1697,41 @@ def on_server_callback(update: Update, context: CallbackContext, payload: str) -
 
     if payload.startswith("card:"):
         _render_server_card(context, payload.split(":", 1)[1])
+        return
+
+    if payload.startswith("forgetask:"):
+        server_key = payload.split(":", 1)[1]
+        server = get_server(server_key)
+        if server is None:
+            _wizard_edit(context, t(lang, "admin.wizard.server_not_found"), kb_back_menu(lang))
+            return
+        w["server_key"] = server_key
+        w["step"] = "forget_confirm"
+        _wizard_set(context, w)
+        _wizard_edit(
+            context,
+            t(lang, "admin.wizard.forget_confirm", server=f"{server.title} ({server.key})"),
+            InlineKeyboardMarkup([
+                [InlineKeyboardButton(t(lang, "admin.wizard.forget_confirm_button"), callback_data=f"{CB_SRV}forgetconfirm:{server_key}")],
+                [InlineKeyboardButton(t(lang, "admin.wizard.back_to_server"), callback_data=f"{CB_SRV}card:{server_key}")],
+            ]),
+        )
+        return
+
+    if payload.startswith("forgetconfirm:"):
+        server_key = payload.split(":", 1)[1]
+        if w.get("step") != "forget_confirm" or w.get("server_key") != server_key:
+            _render_server_card(context, server_key)
+            return
+        removed = forget_server(server_key)
+        w["step"] = "menu"
+        w["server_key"] = None
+        _wizard_set(context, w)
+        _wizard_edit(
+            context,
+            t(lang, "admin.wizard.forget_done" if removed else "admin.wizard.server_not_found", server_key=server_key),
+            InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, "admin.wizard.to_servers"), callback_data=f"{CB_SRV}list")]]),
+        )
         return
 
     if payload.startswith("advanced:"):

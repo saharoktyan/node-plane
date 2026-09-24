@@ -86,6 +86,10 @@ def _server_methods(server: RegisteredServer) -> list[AccessMethod]:
     return methods
 
 
+def get_access_codes_for_server_key(server_key: str) -> tuple[str, str]:
+    return _xray_code(server_key), _awg_code(server_key)
+
+
 def _all_servers() -> list[RegisteredServer]:
     return list_servers(include_disabled=False)
 

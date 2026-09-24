@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Iterable, Optional, Sequence
 
 from config import SSH_KEY
 from db import ensure_schema, get_db
+from db.migrate_sqlite_to_postgres import _generic_table_exists
 from utils.security import validate_server_field, validate_server_key
 
 
@@ -312,3 +314,36 @@ def update_server_fields(server_key: str, **fields: object) -> RegisteredServer:
     if not server:
         raise KeyError(server_key)
     return server
+
+
+def forget_server(server_key: str) -> bool:
+    """Remove controller-owned state without contacting the node."""
+    _bootstrap()
+    server = get_server(server_key)
+    if server is None:
+        return False
+    from domain.servers import get_access_codes_for_server_key
+
+    access_codes = get_access_codes_for_server_key(server.key)
+    with _db.transaction() as conn:
+        # Explicit deletion also works on SQLite connections without FK enforcement.
+        conn.execute("DELETE FROM profile_server_state WHERE server_key = ?", (server_key,))
+        conn.execute("DELETE FROM awg_server_configs WHERE server_key = ?", (server_key,))
+        conn.execute("DELETE FROM traffic_samples WHERE server_key = ?", (server_key,))
+        if _generic_table_exists(conn, "alert_state"):
+            conn.execute("DELETE FROM alert_state WHERE server_key = ?", (server_key,))
+        for code in access_codes:
+            conn.execute("DELETE FROM profile_access_methods WHERE access_code = ?", (code,))
+        for row in conn.execute("SELECT profile_name, short_id FROM xray_profiles WHERE short_id LIKE '{%'").fetchall():
+            try:
+                short_ids = json.loads(row["short_id"])
+            except (TypeError, ValueError):
+                continue
+            if isinstance(short_ids, dict) and server_key in short_ids:
+                del short_ids[server_key]
+                conn.execute(
+                    "UPDATE xray_profiles SET short_id = ? WHERE profile_name = ?",
+                    (json.dumps(short_ids, ensure_ascii=False, sort_keys=True) if short_ids else None, row["profile_name"]),
+                )
+        conn.execute("DELETE FROM servers WHERE key = ?", (server_key,))
+    return True
