@@ -1,0 +1,6 @@
+FROM rust:1.98.1-bookworm
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       binutils build-essential ca-certificates protobuf-compiler \
+    && rm -rf /var/lib/apt/lists/*
