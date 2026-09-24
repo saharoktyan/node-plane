@@ -39,6 +39,7 @@ spec.loader.exec_module(refresh_module)
 
 from services import xray
 from handlers import user_getkey
+import awg_profile
 
 
 class ConfigRefreshTests(unittest.TestCase):
@@ -55,17 +56,21 @@ PresharedKey = shared-secret
 Endpoint = old.example:51820
 AllowedIPs = 0.0.0.0/0
 """
-        current = "[Interface]\n" + "\n".join(f"{key} = new-{key}" for key in (
-            "Jc", "Jmin", "Jmax", "S1", "S2", "S3", "S4", "H1", "H2", "H3", "H4", "I1", "I2", "I3", "I4", "I5"
-        )) + "\n"
+        profile = awg_profile.new_profile("quic")
+        current = "[Interface]\n" + "\n".join(f"{key} = {value}" for key, value in profile.items()) + "\n"
         updated = refresh_module.refresh(old, current, "new.example", "53000", "new-server")
         self.assertIn("PrivateKey = client-secret", updated)
         self.assertIn("PresharedKey = shared-secret", updated)
         self.assertIn("Address = 10.8.1.2/32", updated)
-        self.assertIn("I1 = new-I1", updated)
+        self.assertIn(f"I1 = {profile['I1']}", updated)
+        self.assertIn(f"HeaderProtectionKey = {profile['HeaderProtectionKey']}", updated)
         self.assertIn("PublicKey = new-server", updated)
         self.assertIn("Endpoint = new.example:53000", updated)
         self.assertNotIn("old.example", updated)
+
+    def test_awg_refresh_rejects_unmigrated_server(self) -> None:
+        with self.assertRaisesRegex(ValueError, "3.1"):
+            refresh_module.refresh("[Interface]\nPrivateKey = old\n", "[Interface]\nJc = 4\n", "new.example", "51820", "server")
 
     def test_xray_link_uses_current_server_short_id(self) -> None:
         server = SimpleNamespace(

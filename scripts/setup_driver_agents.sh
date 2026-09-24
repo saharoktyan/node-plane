@@ -462,7 +462,7 @@ Usage:
 
 Purpose:
   - Install local node-plane-driver as a systemd service.
-  - Deploy node-plane-agent binary to SSH-managed nodes from the server registry, or one node with --node-key.
+  - Deploy node-plane-agent to local and SSH-managed nodes from the server registry, or one node with --node-key.
   - Write NODE_AGENT_TARGETS and switch bot to grpc driver backend in the shared .env.
 
 Binary source modes:
@@ -471,7 +471,7 @@ Binary source modes:
   build    Use local cargo build only.
 
 Dry run:
-  --dry-run validates binary source resolution and SSH reachability only.
+  --dry-run validates binary source resolution, local registration and SSH reachability.
   It does not install binaries, write systemd units, or restart services.
 
 Key env overrides:
@@ -500,8 +500,6 @@ if [[ ! "$AGENT_PORT" =~ ^[0-9]+$ ]]; then
 fi
 
 need_cmd python3
-need_cmd ssh
-need_cmd scp
 need_cmd sudo
 
 if [[ -f "$ENV_FILE" ]]; then
@@ -756,12 +754,16 @@ EOF
   sudo systemctl status node-plane-driver --no-pager || true
 }
 
-list_remote_servers_tsv() {
+list_managed_servers_tsv() {
   PYTHONPATH="${APP_ROOT}/app" NODE_PLANE_APP_DIR="${APP_ROOT}" NODE_PLANE_SHARED_DIR="${SHARED_ROOT}" "$PYTHON_BIN" - <<'PY'
 from services.server_registry import list_servers
 
-for srv in list_servers(include_disabled=False):
+servers = list_servers(include_disabled=False)
+if sum(server.transport == "local" for server in servers) > 1:
+    raise SystemExit("Only one local node can use the controller's node-agent service.")
+for srv in servers:
     if srv.transport == "local":
+        print("\x1f".join([srv.key, "local", "", "", "", "", "", ""]))
         continue
     if not srv.ssh_target:
         continue
@@ -772,7 +774,8 @@ for srv in list_servers(include_disabled=False):
     if not ssh_host:
         continue
     print("\x1f".join([
-        srv.key,
+    srv.key,
+    "ssh",
         ssh_host,
         str(srv.ssh_port or 22),
         ssh_user,
@@ -782,22 +785,98 @@ for srv in list_servers(include_disabled=False):
 PY
 }
 
+install_local_agent() {
+  local server_key="$1" expected_sum="$2" current_sum="" changed=0
+  local config_tmp unit_tmp
+  set_step "prepare mutual TLS certificate for local node ${server_key}"
+  prepare_node_tls "$server_key" "127.0.0.1" || return 1
+
+  set_step "install node-agent on local node ${server_key}"
+  if sudo test -x /usr/local/bin/node-plane-agent; then
+    current_sum="$(sudo sha256sum /usr/local/bin/node-plane-agent | awk '{print $1}')"
+  fi
+  if [[ "$current_sum" != "$expected_sum" ]]; then
+    sudo install -m 0755 "$agent_bin_path" /usr/local/bin/node-plane-agent || return 1
+    changed=1
+  fi
+
+  sudo mkdir -p /etc/node-plane/tls || return 1
+  sudo chmod 0700 /etc/node-plane/tls || return 1
+  local source destination mode
+  for source in "$TLS_CA_CERT" "$NODE_TLS_CERT" "$NODE_TLS_KEY"; do
+    case "$source" in
+      "$TLS_CA_CERT") destination=/etc/node-plane/tls/ca.crt; mode=0644 ;;
+      "$NODE_TLS_CERT") destination=/etc/node-plane/tls/server.crt; mode=0644 ;;
+      *) destination=/etc/node-plane/tls/server.key; mode=0600 ;;
+    esac
+    if ! sudo test -f "$destination" || ! sudo cmp -s "$source" "$destination"; then
+      sudo install -o root -g root -m "$mode" "$source" "$destination" || return 1
+      changed=1
+    fi
+    sudo chmod "$mode" "$destination" || return 1
+  done
+
+  config_tmp="$(mktemp)"
+  unit_tmp="$(mktemp)"
+  cat > "$config_tmp" <<EOF
+node_key = "${server_key}"
+listen_addr = "127.0.0.1:${AGENT_PORT}"
+tls_certificate_path = "/etc/node-plane/tls/server.crt"
+tls_key_path = "/etc/node-plane/tls/server.key"
+tls_client_ca_path = "/etc/node-plane/tls/ca.crt"
+EOF
+  cat > "$unit_tmp" <<EOF
+[Unit]
+Description=Node Plane Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=NODE_AGENT_CONFIG_PATH=/etc/node-plane/agent.toml
+Environment=NODE_AGENT_NODE_KEY=${server_key}
+Environment=NODE_AGENT_LISTEN_ADDR=127.0.0.1:${AGENT_PORT}
+ExecStart=/usr/local/bin/node-plane-agent
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  if ! sudo test -f /etc/node-plane/agent.toml || ! sudo cmp -s "$config_tmp" /etc/node-plane/agent.toml; then
+    sudo install -o root -g root -m 0600 "$config_tmp" /etc/node-plane/agent.toml || return 1
+    changed=1
+  fi
+  if ! sudo test -f /etc/systemd/system/node-plane-agent.service || ! sudo cmp -s "$unit_tmp" /etc/systemd/system/node-plane-agent.service; then
+    sudo install -o root -g root -m 0644 "$unit_tmp" /etc/systemd/system/node-plane-agent.service || return 1
+    sudo systemctl daemon-reload || return 1
+    changed=1
+  fi
+  rm -f "$config_tmp" "$unit_tmp"
+  sudo systemctl enable --now node-plane-agent || return 1
+  if [[ $changed -eq 1 ]]; then
+    sudo systemctl restart node-plane-agent || return 1
+  fi
+  if ! sudo systemctl is-active --quiet node-plane-agent; then
+    sudo systemctl status node-plane-agent --no-pager -l >&2 || true
+    sudo journalctl -u node-plane-agent -n 30 --no-pager >&2 || true
+    return 1
+  fi
+  echo "node-agent is active on local node ${server_key}"
+}
+
 deploy_agents() {
   local lines
-  if ! lines="$(list_remote_servers_tsv)"; then
+  if ! lines="$(list_managed_servers_tsv)"; then
     echo "Failed to query server registry from APP_ROOT=${APP_ROOT} using ${PYTHON_BIN}" >&2
-    if [[ $STRICT_MODE -eq 1 ]]; then
-      return 1
-    fi
-    echo "Skipping node-agent deploy (best-effort mode)." >&2
-    return 0
+    return 1
   fi
   if [[ -z "$lines" ]]; then
     if [[ -n "$ONLY_NODE_KEY" ]]; then
-      echo "No enabled SSH-managed server found for --node-key ${ONLY_NODE_KEY}" >&2
+      echo "No enabled managed server found for --node-key ${ONLY_NODE_KEY}" >&2
       return 1
     fi
-    echo "No SSH-managed enabled servers found; skipping node-agent deploy."
+    echo "No enabled managed servers found; skipping node-agent deploy."
     return 0
   fi
 
@@ -813,8 +892,23 @@ deploy_agents() {
   if [[ $DRY_RUN -eq 0 ]]; then
     local_agent_sum="$(sha256_of_file "$agent_bin_path")"
   fi
-  while IFS=$'\x1f' read -r server_key ssh_host ssh_port ssh_user ssh_key public_host; do
+  while IFS=$'\x1f' read -r server_key transport ssh_host ssh_port ssh_user ssh_key public_host; do
     [[ -z "$server_key" ]] && continue
+    if [[ "$transport" == "local" ]]; then
+      mappings+=("${server_key}=127.0.0.1:${AGENT_PORT}")
+      if [[ -n "$ONLY_NODE_KEY" && "$server_key" != "$ONLY_NODE_KEY" ]]; then
+        continue
+      fi
+      matched=$((matched + 1))
+      echo
+      echo "Deploying node-agent to local node ${server_key}..."
+      if [[ $DRY_RUN -eq 1 ]]; then
+        echo "Dry-run local agent check passed for ${server_key}"
+      elif ! install_local_agent "$server_key" "$local_agent_sum"; then
+        failed=$((failed + 1))
+      fi
+      continue
+    fi
     local target_host="$ssh_host"
     local target_user="$ssh_user"
     local target_key="$ssh_key"
@@ -855,6 +949,8 @@ deploy_agents() {
       continue
     fi
     matched=$((matched + 1))
+    need_cmd ssh
+    need_cmd scp
 
     echo
     echo "Deploying node-agent to ${server_key} (${target}:${ssh_port})..."
@@ -1040,7 +1136,7 @@ EOF
   done <<< "$lines"
 
   if [[ -n "$ONLY_NODE_KEY" && $matched -eq 0 ]]; then
-    echo "No enabled SSH-managed server found for --node-key ${ONLY_NODE_KEY}" >&2
+    echo "No enabled managed server found for --node-key ${ONLY_NODE_KEY}" >&2
     return 1
   fi
 

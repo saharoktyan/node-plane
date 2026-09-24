@@ -511,7 +511,7 @@ def _agent_rollout_result_text(rc: int, output: str, server_key: str, lang: str)
     lines = [f"✅ {title}", "", t(lang, "admin.wizard.agent_setup_done")]
     if "node-plane-driver.service" in output:
         lines.append(t(lang, "admin.wizard.agent_setup_driver_ready"))
-    if f"node-agent is active on {server_key}" in output or f"node-agent is up to date and active on {server_key}" in output:
+    if f"node-agent is active on {server_key}" in output or f"node-agent is up to date and active on {server_key}" in output or f"node-agent is active on local node {server_key}" in output:
         lines.append(t(lang, "admin.wizard.agent_setup_node_ready"))
     if "Configured NODE_AGENT_TARGETS" in output:
         lines.append(t(lang, "admin.wizard.agent_setup_target_ready"))
@@ -597,8 +597,7 @@ def _bootstrap_menu_markup(server: RegisteredServer, lang: str) -> InlineKeyboar
     rows: list[list[InlineKeyboardButton]] = []
     docker_available = _docker_status_from_driver(server.key)
     if docker_available is None:
-        if server.transport == "ssh":
-            rows.append([InlineKeyboardButton("🔌 Подключить agent" if lang == "ru" else "🔌 Set up agent", callback_data=f"{CB_SRV}action:rolloutagent:{server.key}")])
+        rows.append([InlineKeyboardButton("🔌 Подключить agent" if lang == "ru" else "🔌 Set up agent", callback_data=f"{CB_SRV}action:rolloutagent:{server.key}")])
         rows.append([InlineKeyboardButton(t(lang, "admin.wizard.probe"), callback_data=f"{CB_SRV}action:probe:{server.key}")])
         rows.append([InlineKeyboardButton(t(lang, "admin.wizard.back_to_server"), callback_data=f"{CB_SRV}card:{server.key}")])
         return InlineKeyboardMarkup(rows)
@@ -883,7 +882,7 @@ def _advanced_section_markup(server_key: str, section: str, lang: str) -> Inline
     else:
         rows = [
             [
-                InlineKeyboardButton(t(lang, "admin.wizard.server_metrics"), callback_data=f"{CB_SRV}action:metrics:{server_key}"),
+                InlineKeyboardButton("Диагностика" if lang == "ru" else "Diagnostics", callback_data=f"{CB_SRV}action:metrics:{server_key}"),
                 InlineKeyboardButton(t(lang, "admin.wizard.maintenance_ports"), callback_data=f"{CB_SRV}advsection:maintenance_ports:{server_key}"),
             ],
             [
@@ -2129,12 +2128,18 @@ def on_server_callback(update: Update, context: CallbackContext, payload: str) -
             _wizard_edit(context, _action_result_text(label, rc, operation.progress_message, server_key, lang), _advanced_menu_markup(server_key, lang))
             return
         if action == "metrics":
-            from services.server_bootstrap import show_server_metrics
-
-            stop_progress = _start_progress_animation(context, t(lang, "admin.wizard.server_metrics"))
-            rc, out = show_server_metrics(server_key)
+            label = "Диагностика" if lang == "ru" else "Diagnostics"
+            stop_progress = _start_progress_animation(context, label)
+            try:
+                diagnostics = get_node_driver().get_node_diagnostics(server_key)
+                details = [f"{item.kind}: {item.status} — {item.summary}" for item in diagnostics.items]
+                out = "\n".join([diagnostics.summary, *details]).strip()
+                rc = 0
+            except Exception as exc:
+                out = str(exc)
+                rc = 1
             stop_progress()
-            _wizard_edit(context, _action_result_text(t(lang, "admin.wizard.server_metrics"), rc, out, server_key, lang), _metrics_result_markup(server_key, lang))
+            _wizard_edit(context, _action_result_text(label, rc, out, server_key, lang), _metrics_result_markup(server_key, lang))
             return
         if action == "probe":
             stop_progress = _start_progress_animation(context, t(lang, "admin.wizard.probe"))

@@ -27,7 +27,10 @@ docker_cmd() {
 }
 
 DOCKER_DIR="${AWG_DOCKER_DIR:-/opt/node-plane-runtime/amnezia-awg}"
-IMAGE="${AWG_DOCKER_IMAGE:-node-plane-amnezia-awg:0.2.16}"
+IMAGE="${AWG_DOCKER_IMAGE:-node-plane-amnezia-awg:3.1.20260828}"
+if [[ "$IMAGE" == "node-plane-amnezia-awg:0.2.16" ]]; then
+  IMAGE="node-plane-amnezia-awg:3.1.20260828"
+fi
 CONTAINER="${AWG_CONTAINER_NAME:-amnezia-awg}"
 CFG="${AWG_CONFIG:-/opt/node-plane-runtime/amnezia-awg/data/wg0.conf}"
 IFACE="${AWG_IFACE:-wg0}"
@@ -43,6 +46,10 @@ if lsmod | grep -q '^amneziawg '; then
 fi
 
 mkdir -p "$DOCKER_DIR/data"
+if [[ ! -s "$CFG" ]]; then
+  echo "AWG config is missing or empty: $CFG" >&2
+  exit 1
+fi
 BUILD_LOG="$(mktemp)"
 if ! docker_cmd build --no-cache -t "$IMAGE" "$DOCKER_DIR" >"$BUILD_LOG" 2>&1; then
   echo "AWG image build failed." >&2
@@ -60,10 +67,45 @@ if ! docker_cmd run --rm --entrypoint /bin/sh "$IMAGE" -n /opt/amnezia/start.sh 
   exit 1
 fi
 
+CFG_BACKUP="$(mktemp "$(dirname "$CFG")/.awg-deploy-backup-XXXXXX")"
+cp -p "$CFG" "$CFG_BACKUP"
+OLD_CONTAINER=""
+OLD_CONTAINER_RENAMED=0
+NEW_CONTAINER_ATTEMPTED=0
+ROLLBACK_NEEDED=1
+restore_previous() {
+  if [[ "$ROLLBACK_NEEDED" != 1 ]]; then
+    return
+  fi
+  set +e
+  cp -p "$CFG_BACKUP" "$CFG"
+  if [[ "$NEW_CONTAINER_ATTEMPTED" == 1 ]]; then
+    docker_cmd rm -f "$CONTAINER" >/dev/null 2>&1
+  fi
+  restored=0
+  if [[ "$OLD_CONTAINER_RENAMED" == 1 ]]; then
+    docker_cmd rename "$OLD_CONTAINER" "$CONTAINER" >/dev/null 2>&1 && docker_cmd start "$CONTAINER" >/dev/null 2>&1 && restored=1
+  fi
+  rm -f "$CFG_BACKUP"
+  if [[ "$restored" == 1 ]]; then
+    echo "AWG deployment failed; previous config and container restored" >&2
+  else
+    echo "AWG deployment failed; previous config restored, but the container needs attention" >&2
+  fi
+}
+trap restore_previous EXIT
+
+python3 /opt/node-plane-runtime/awg_profile.py migrate "$CFG" "${AWG_I1_PRESET:-quic}"
+python3 /opt/node-plane-runtime/awg_profile.py validate "$CFG"
+
 if docker_cmd ps -a --format '{{.Names}}' | grep -q "^${CONTAINER}$"; then
-  docker_cmd rm -f "$CONTAINER" >/dev/null
+  OLD_CONTAINER="${CONTAINER}-previous-$$"
+  docker_cmd rename "$CONTAINER" "$OLD_CONTAINER" >/dev/null
+  OLD_CONTAINER_RENAMED=1
+  docker_cmd stop "$OLD_CONTAINER" >/dev/null
 fi
 
+NEW_CONTAINER_ATTEMPTED=1
 docker_cmd run -d \
   --name "$CONTAINER" \
   --restart no \
@@ -111,4 +153,10 @@ if [[ "$STATE" != "running" ]]; then
 fi
 
 docker_cmd update --restart unless-stopped "$CONTAINER" >/dev/null 2>&1 || true
+ROLLBACK_NEEDED=0
+trap - EXIT
+rm -f "$CFG_BACKUP"
+if [[ -n "$OLD_CONTAINER" ]]; then
+  docker_cmd rm -f "$OLD_CONTAINER" >/dev/null
+fi
 echo "AWG container deployed: $CONTAINER"

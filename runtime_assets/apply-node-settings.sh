@@ -73,7 +73,7 @@ if [[ "$APPLY_AWG" == true ]]; then
     esac
   fi
   if [[ "$CURRENT_PRESET" != "${AWG_I1_PRESET:-quic}" ]]; then
-    if ! /opt/node-plane-runtime/regenerate-awg-entropy.sh >/dev/null; then
+    if ! python3 /opt/node-plane-runtime/awg_profile.py regenerate "$CFG" "${AWG_I1_PRESET:-quic}" >/dev/null; then
       cp -p "$AWG_BACKUP" "$CFG"
       echo "AWG entropy update failed; previous config restored" >&2
       exit 1

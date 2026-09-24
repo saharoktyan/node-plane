@@ -5,6 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from awg_profile import ALL_FIELDS, interface_values, protocol_version, validate
+
 
 def parse_conf(text: str):
     cur = None
@@ -34,6 +36,9 @@ def main(conf_path, template_path, out_json_path, decoder_py, container_name="am
     cfg = parse_conf(conf_text)
     iface = cfg["Interface"]
     peer = cfg["Peer"]
+    version = protocol_version(interface_values(conf_text))
+    if version == "3.1":
+        validate(interface_values(conf_text))
 
     client_ip = iface.get("Address", "").split("/", 1)[0]
     endpoint = peer.get("Endpoint", "")
@@ -84,11 +89,18 @@ def main(conf_path, template_path, out_json_path, decoder_py, container_name="am
     out["containers"][0]["container"] = container_name
     out["containers"][0]["awg"]["port"] = str(awg_obj["port"])
     out["containers"][0]["awg"]["transport_proto"] = "udp"
-    out["containers"][0]["awg"]["protocol_version"] = "2"
+    out["containers"][0]["awg"]["protocol_version"] = version
     out["containers"][0]["awg"]["subnet_address"] = subnet_address
 
-    for key in ["H1", "H2", "H3", "H4", "I1", "I2", "I3", "I4", "I5", "Jc", "Jmax", "Jmin", "S1", "S2", "S3", "S4"]:
-        out["containers"][0]["awg"][key] = str(awg_obj[key])
+    for key in ALL_FIELDS:
+        if iface.get(key):
+            out["containers"][0]["awg"][key] = str(iface[key])
+        else:
+            out["containers"][0]["awg"].pop(key, None)
+
+    for key in ALL_FIELDS:
+        if iface.get(key):
+            awg_obj[key] = str(iface[key])
 
     out["containers"][0]["awg"]["last_config"] = json.dumps(
         awg_obj,

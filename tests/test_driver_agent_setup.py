@@ -254,6 +254,40 @@ def list_servers(include_disabled=False):
             self.assertNotIn("vpn.example.test", ssh_log.read_text(encoding="utf-8"))
             self.assertEqual((shared_root / ".env").read_text(encoding="utf-8"), "BOT_TOKEN=test\n")
 
+    def test_dry_run_includes_local_node_without_ssh(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            app_root = root / "current"
+            shared_root = root / "shared"
+            fake_bin = root / "bin"
+            for directory in (app_root / "rust" / "node-driver", app_root / "rust" / "node-agent", app_root / "app" / "services", shared_root, fake_bin):
+                directory.mkdir(parents=True, exist_ok=True)
+            (app_root / "app" / "services" / "server_registry.py").write_text(
+                """from types import SimpleNamespace
+def list_servers(include_disabled=False):
+    return [SimpleNamespace(key='home', transport='local')]
+""", encoding="utf-8",
+            )
+            (shared_root / ".env").write_text("BOT_TOKEN=test\n", encoding="utf-8")
+            for command in ("ssh", "scp", "sudo"):
+                path = fake_bin / command
+                path.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+                path.chmod(0o755)
+            environment = os.environ.copy()
+            environment.update(
+                NODE_PLANE_APP_DIR=str(app_root),
+                NODE_PLANE_SHARED_DIR=str(shared_root),
+                PATH=f"{fake_bin}:{environment['PATH']}",
+            )
+            result = subprocess.run(
+                [str(SETUP_SCRIPT), "--dry-run", "--bin-source", "build", "--node-key", "home"],
+                env=environment, text=True, capture_output=True, check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Dry-run local agent check passed for home", result.stdout)
+            self.assertIn("home=127.0.0.1:50061", result.stdout)
+            self.assertEqual((shared_root / ".env").read_text(encoding="utf-8"), "BOT_TOKEN=test\n")
+
 
 if __name__ == "__main__":
     unittest.main()

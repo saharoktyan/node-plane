@@ -2,11 +2,13 @@ import os
 import pathlib
 import shlex
 import subprocess
+import sys
 import tempfile
 import unittest
 
 
 SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "runtime_assets" / "awg-add-user.sh"
+PROFILE_TOOL = SCRIPT.parent / "awg_profile.py"
 
 
 class AwgAddUserScriptTests(unittest.TestCase):
@@ -18,10 +20,12 @@ class AwgAddUserScriptTests(unittest.TestCase):
             docker_log = root / "docker.log"
             fake_bin = root / "bin"
             fake_bin.mkdir()
-            config.write_text("[Interface]\nJc = 3\n", encoding="utf-8")
+            profile = subprocess.check_output([sys.executable, str(PROFILE_TOOL), "init", str(config)], text=True)
+            config.write_text("[Interface]\nPrivateKey = serverprivate\nAddress = 10.8.1.1/24\nListenPort = 51820\n" + profile, encoding="utf-8")
             node_env.write_text(
                 f"AWG_CONFIG={shlex.quote(str(config))}\n"
                 "AWG_SERVER_IP=203.0.113.10\n"
+                f"AWG_PROFILE_TOOL={shlex.quote(str(PROFILE_TOOL))}\n"
                 "AWG_CONF2VPN=/nonexistent/conf2vpn.py\n",
                 encoding="utf-8",
             )
@@ -64,6 +68,9 @@ class AwgAddUserScriptTests(unittest.TestCase):
             self.assertIn("Address = 10.8.1.2/32", result.stdout)
             self.assertIn("AllowedIPs = 10.8.1.2/32", config.read_text(encoding="utf-8"))
             self.assertIn("tmp=$(mktemp)", docker_log.read_text(encoding="utf-8"))
+            self.assertIn("HeaderProtectionKey = ", result.stdout)
+            self.assertIn("RandomTrailers = on", result.stdout)
+            self.assertIn("I5 = ", result.stdout)
 
 
 if __name__ == "__main__":

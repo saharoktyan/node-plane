@@ -1,4 +1,4 @@
-"""Provision the driver transport before a new SSH node can serve runtime RPCs."""
+"""Provision the driver transport before a node can serve runtime RPCs."""
 
 from __future__ import annotations
 
@@ -16,8 +16,6 @@ def ensure_driver_agent_rollout_for_ssh(
     server = get_server(server_key)
     if not server:
         return 1, f"Server {server_key} not found"
-    if server.transport != "ssh":
-        return 0, ""
     if skip_if_connected:
         # Bootstrap already reached this node through its agent. Rollout is a
         # separate maintenance action, not a second bootstrap requirement.

@@ -39,6 +39,16 @@ class AgentRolloutTests(unittest.TestCase):
         self.assertEqual(run.call_args.args[0][-2:], ["--node-key", "spb1"])
         self.assertEqual(run.call_args.kwargs["env"]["NODE_PLANE_BIN_SOURCE"], "auto")
 
+    def test_rollout_targets_local_node_too(self) -> None:
+        server = SimpleNamespace(transport="local")
+        proc = SimpleNamespace(returncode=0, stdout="local agent ready", stderr="")
+        with patch.object(agent_rollout, "get_server", return_value=server), patch.object(
+            agent_rollout.os.path, "isfile", return_value=True
+        ), patch.object(agent_rollout.subprocess, "run", return_value=proc) as run:
+            code, output = agent_rollout.ensure_driver_agent_rollout_for_ssh("home")
+        self.assertEqual((code, output), (0, "local agent ready"))
+        self.assertEqual(run.call_args.args[0][-2:], ["--node-key", "home"])
+
     def test_grpc_bootstrap_does_not_repeat_agent_rollout(self) -> None:
         server = SimpleNamespace(transport="ssh")
         with patch.object(agent_rollout, "get_server", return_value=server), patch.object(agent_rollout.subprocess, "run") as run:

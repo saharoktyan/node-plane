@@ -91,33 +91,6 @@ def cmd_status() -> None:
         print(f"- {key}: {value}")
 
 
-def cmd_awg_traffic_debug(server_key: str) -> None:
-    from services.traffic_usage import debug_awg_traffic_report
-
-    code, out = debug_awg_traffic_report(server_key)
-    if code != 0:
-        raise SystemExit(out)
-    print(out)
-
-
-def cmd_profile_traffic_debug(profile_name: str, protocol_kind: str) -> None:
-    from services.traffic_usage import debug_profile_traffic_report
-
-    code, out = debug_profile_traffic_report(profile_name, protocol_kind)
-    if code != 0:
-        raise SystemExit(out)
-    print(out)
-
-
-def cmd_collect_traffic() -> None:
-    from services.traffic_usage import run_collect_traffic_once
-
-    code, out = run_collect_traffic_once()
-    if code != 0:
-        raise SystemExit(out)
-    print(out)
-
-
 def cmd_migrate_to_postgres(sqlite_path: str) -> None:
     db = get_db()
     with db.transaction() as conn:
@@ -157,12 +130,6 @@ def main() -> None:
     migrate_parser.add_argument("--sqlite-path", default=SQLITE_DB_PATH, help="Path to the source SQLite database")
     verify_parser = subparsers.add_parser("verify-migration", help="Verify that PostgreSQL matches the source SQLite database")
     verify_parser.add_argument("--sqlite-path", default=SQLITE_DB_PATH, help="Path to the source SQLite database")
-    awg_debug_parser = subparsers.add_parser("awg-traffic-debug", help="Debug AWG peer matching and traffic sampling for a server")
-    awg_debug_parser.add_argument("server_key", help="Registered server key")
-    profile_debug_parser = subparsers.add_parser("profile-traffic-debug", help="Debug stored traffic samples and deltas for a profile")
-    profile_debug_parser.add_argument("profile_name", help="Profile name")
-    profile_debug_parser.add_argument("protocol_kind", choices=["awg", "xray"], help="Protocol kind")
-    subparsers.add_parser("collect-traffic", help="Run one traffic collection cycle immediately")
 
     args = parser.parse_args()
     if args.command == "init":
@@ -173,12 +140,6 @@ def main() -> None:
         cmd_migrate_to_postgres(args.sqlite_path)
     elif args.command == "verify-migration":
         cmd_verify_migration(args.sqlite_path)
-    elif args.command == "awg-traffic-debug":
-        cmd_awg_traffic_debug(args.server_key)
-    elif args.command == "profile-traffic-debug":
-        cmd_profile_traffic_debug(args.profile_name, args.protocol_kind)
-    elif args.command == "collect-traffic":
-        cmd_collect_traffic()
 
 
 if __name__ == "__main__":

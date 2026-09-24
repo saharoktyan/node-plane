@@ -25,6 +25,11 @@
     "mode": "0755"
   },
   {
+    "target_path": "/opt/node-plane-runtime/awg_profile.py",
+    "asset_path": "awg_profile.py",
+    "mode": "0644"
+  },
+  {
     "target_path": "/opt/node-plane-runtime/deploy-xray.sh",
     "asset_path": "deploy-xray.sh",
     "mode": "0755"

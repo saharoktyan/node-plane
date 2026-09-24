@@ -71,9 +71,12 @@ Important constraint:
 Current upstream images used by the project:
 
 - Xray: `ghcr.io/xtls/xray-core:25.12.8`
-- AWG: `amneziavpn/amneziawg-go:0.2.16`
+- AWG: `amneziavpn/amneziawg-go:3.1.20260828`
 
 For AWG nodes, Node Plane builds and deploys its own wrapper image during bootstrap.
+AWG 3.1 requires a compatible client (AmneziaVPN 5.0.1.5 or newer, or a native
+AWG 3.1 client). After an existing node is migrated, users must import a newly
+issued `.conf` or `vpn://` key; previously downloaded configs can stop working.
 
 ## Main Workflow
 
@@ -139,8 +142,8 @@ git clone git@github.com:saharoktyan/node-plane.git node-plane-src
 
 ### Operations And Maintenance
 
-- telemetry and traffic usage reporting
-- health checks and diagnostics
+- node health checks and diagnostics through the Rust driver
+- traffic usage reporting and alerting are reserved for future Pro modules
 - scripted updates with rollback support
 - automatic Docker and PostgreSQL runtime provisioning during install/update
 - release cleanup helpers

@@ -1035,13 +1035,14 @@ impl AgentState {
         let xray_container = self.node_env_value("XRAY_CONTAINER_NAME", "xray");
         let awg_container = self.node_env_value("AWG_CONTAINER_NAME", "amnezia-awg");
         let xray_image = self.node_env_value("XRAY_DOCKER_IMAGE", "ghcr.io/xtls/xray-core:25.12.8");
-        let awg_image = self.node_env_value("AWG_DOCKER_IMAGE", "node-plane-amnezia-awg:0.2.16");
+        let awg_image = self.node_env_value("AWG_DOCKER_IMAGE", "node-plane-amnezia-awg:3.1.20260828");
 
         if self.docker_available() {
             self.docker_best_effort(&["rm", "-f", &xray_container]);
             self.docker_best_effort(&["rm", "-f", &awg_container]);
             self.docker_best_effort(&["rmi", "-f", &xray_image]);
             self.docker_best_effort(&["rmi", "-f", &awg_image]);
+            self.docker_best_effort(&["rmi", "-f", "amneziavpn/amneziawg-go:3.1.20260828"]);
             self.docker_best_effort(&["rmi", "-f", "amneziavpn/amneziawg-go:0.2.16"]);
             self.docker_best_effort(&["image", "prune", "-af"]);
         }
@@ -1069,6 +1070,9 @@ impl AgentState {
             }
             if self.docker_inspect_exists(&["image", "inspect", &awg_image]) {
                 leftovers.push("awg image still present".to_string());
+            }
+            if self.docker_inspect_exists(&["image", "inspect", "amneziavpn/amneziawg-go:3.1.20260828"]) {
+                leftovers.push("amneziavpn/amneziawg-go:3.1.20260828 still present".to_string());
             }
             if self.docker_inspect_exists(&["image", "inspect", "amneziavpn/amneziawg-go:0.2.16"]) {
                 leftovers.push("amneziavpn/amneziawg-go:0.2.16 still present".to_string());
