@@ -205,6 +205,23 @@ class InProcessNodeDriverClient(NodeDriverClient):
             )
         return _operation("full_cleanup_node", node_key=node_key, status="SUCCEEDED", message=out)
 
+    def get_awg_entropy(self, node_key: str) -> str:
+        from services.server_bootstrap import show_awg_entropy
+
+        code, out = show_awg_entropy(node_key)
+        if code != 0:
+            raise RuntimeError(out)
+        return out
+
+    def regenerate_awg_entropy(self, node_key: str) -> DriverOperation:
+        from services.server_bootstrap import regenerate_awg_entropy
+
+        code, out = regenerate_awg_entropy(node_key)
+        return _operation(
+            "regenerate_awg_entropy", node_key=node_key,
+            status="SUCCEEDED" if code == 0 else "FAILED", message=out,
+        )
+
     def ensure_profile_on_node(
         self,
         node_key: str,

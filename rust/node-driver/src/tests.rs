@@ -86,8 +86,21 @@ async fn runtime_actions_without_agent_fail_explicitly() {
     check!(reinstall_node, ReinstallNodeRequest);
     check!(delete_runtime, DeleteRuntimeRequest);
     check!(full_cleanup_node, FullCleanupNodeRequest);
+    check!(regenerate_awg_entropy, RegenerateAwgEntropyRequest);
     check!(sync_runtime, SyncRuntimeRequest);
     check!(sync_xray, SyncXrayRequest);
+}
+
+#[tokio::test]
+async fn awg_entropy_read_without_agent_is_rejected() {
+    let api = RuntimeApi { ctx: context() };
+    let err = api
+        .get_awg_entropy(Request::new(GetAwgEntropyRequest {
+            node_key: "test-node".into(),
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), tonic::Code::FailedPrecondition);
 }
 
 #[tokio::test]
@@ -416,6 +429,7 @@ async fn every_action_rejects_execution_when_journal_cannot_be_written() {
     check_node!(runtime, reinstall_node, ReinstallNodeRequest);
     check_node!(runtime, delete_runtime, DeleteRuntimeRequest);
     check_node!(runtime, full_cleanup_node, FullCleanupNodeRequest);
+    check_node!(runtime, regenerate_awg_entropy, RegenerateAwgEntropyRequest);
     check_node!(runtime, sync_runtime, SyncRuntimeRequest);
     check_node!(runtime, sync_xray, SyncXrayRequest);
     check_node!(provisioning, reconcile_node, ReconcileNodeRequest);

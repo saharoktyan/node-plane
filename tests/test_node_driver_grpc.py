@@ -25,6 +25,7 @@ class GrpcCommandIdentityTests(unittest.TestCase):
         ("reinstall_node", "ReinstallNode", "runtime", ("node",)),
         ("delete_runtime", "DeleteRuntime", "runtime", ("node",)),
         ("full_cleanup_node", "FullCleanupNode", "runtime", ("node",)),
+        ("regenerate_awg_entropy", "RegenerateAwgEntropy", "runtime", ("node",)),
         ("sync_runtime", "SyncRuntime", "runtime", ("node",)),
         ("sync_xray", "SyncXray", "runtime", ("node",)),
         ("reconcile_node", "ReconcileNode", "provisioning", ("node",)),
@@ -65,6 +66,11 @@ class GrpcCommandIdentityTests(unittest.TestCase):
         client.timeout_seconds = 30
         client.full_cleanup_node("node")
         self.assertGreaterEqual(rpc.call_args.kwargs["timeout"], 200)
+
+    def test_awg_entropy_read_returns_agent_summary(self):
+        client, rpc = self.client_for("GetAwgEntropy", "runtime")
+        rpc.return_value = SimpleNamespace(summary="preset: quic\nJc: 4")
+        self.assertEqual(client.get_awg_entropy("node"), "preset: quic\nJc: 4")
 
     def test_transport_error_never_authorizes_automatic_reexecution(self):
         for key in (None, "saved-command-1"):

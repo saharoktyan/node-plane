@@ -9,6 +9,8 @@ service RuntimeService {
   rpc ReinstallNode(ReinstallNodeRequest) returns (StartOperationResponse);
   rpc DeleteRuntime(DeleteRuntimeRequest) returns (StartOperationResponse);
   rpc FullCleanupNode(FullCleanupNodeRequest) returns (StartOperationResponse);
+  rpc GetAwgEntropy(GetAwgEntropyRequest) returns (GetAwgEntropyResponse);
+  rpc RegenerateAwgEntropy(RegenerateAwgEntropyRequest) returns (StartOperationResponse);
   rpc SyncRuntime(SyncRuntimeRequest) returns (StartOperationResponse);
   rpc SyncXray(SyncXrayRequest) returns (StartOperationResponse);
   rpc GetRuntimeStatus(GetRuntimeStatusRequest) returns (GetRuntimeStatusResponse);
@@ -33,6 +35,19 @@ message DeleteRuntimeRequest {
 message FullCleanupNodeRequest {
   string node_key = 1;
   bool remove_ssh_key = 2;
+}
+
+message GetAwgEntropyRequest {
+  string node_key = 1;
+}
+
+message GetAwgEntropyResponse {
+  string node_key = 1;
+  string summary = 2;
+}
+
+message RegenerateAwgEntropyRequest {
+  string node_key = 1;
 }
 
 message SyncRuntimeRequest {

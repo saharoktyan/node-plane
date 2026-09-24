@@ -133,6 +133,12 @@ class NodeDriverClient(Protocol):
     def full_cleanup_node(self, node_key: str, remove_ssh_key: bool = False) -> DriverOperation:
         ...
 
+    def get_awg_entropy(self, node_key: str) -> str:
+        ...
+
+    def regenerate_awg_entropy(self, node_key: str) -> DriverOperation:
+        ...
+
     def ensure_profile_on_node(
         self,
         node_key: str,

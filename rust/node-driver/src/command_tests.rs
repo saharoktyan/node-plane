@@ -333,6 +333,7 @@ async fn every_rpc_returns_existing_command_without_execution() {
     check_node!(runtime, reinstall_node, ReinstallNodeRequest);
     check_node!(runtime, delete_runtime, DeleteRuntimeRequest);
     check_node!(runtime, full_cleanup_node, FullCleanupNodeRequest);
+    check_node!(runtime, regenerate_awg_entropy, RegenerateAwgEntropyRequest);
     check_node!(runtime, sync_runtime, SyncRuntimeRequest);
     check_node!(runtime, sync_xray, SyncXrayRequest);
     check_node!(provisioning, reconcile_node, ReconcileNodeRequest);
@@ -369,5 +370,5 @@ async fn every_rpc_returns_existing_command_without_execution() {
             ..Default::default()
         }
     );
-    assert_eq!(ctx.state.list_operations("", "", "", 100).len(), 15);
+    assert_eq!(ctx.state.list_operations("", "", "", 100).len(), 16);
 }

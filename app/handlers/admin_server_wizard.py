@@ -31,9 +31,7 @@ from services.provisioning_state import (
 )
 from services.server_bootstrap import (
     is_server_docker_available,
-    regenerate_awg_entropy,
     show_server_metrics,
-    show_awg_entropy,
 )
 from services.app_settings import set_initial_setup_state
 from services.server_registry import RegisteredServer, forget_server, get_server, list_servers, update_server_fields, upsert_server
@@ -2116,14 +2114,23 @@ def on_server_callback(update: Update, context: CallbackContext, payload: str) -
             return
         if action == "awgentropy":
             stop_progress = _start_progress_animation(context, t(lang, "admin.wizard.awg_entropy"))
-            rc, out = show_awg_entropy(server_key)
-            stop_progress()
+            try:
+                out = get_node_driver().get_awg_entropy(server_key)
+                rc = 0
+            except Exception as exc:
+                rc, out = 1, str(exc)
+            finally:
+                stop_progress()
             _wizard_edit(context, _action_result_text(t(lang, "admin.wizard.awg_entropy"), rc, out, server_key, lang), _awg_entropy_result_markup(server_key, lang))
             return
         if action == "awgregen":
             stop_progress = _start_progress_animation(context, t(lang, "admin.wizard.awg_regen_entropy"))
-            rc, out = regenerate_awg_entropy(server_key)
-            stop_progress()
+            try:
+                operation = _run_driver_action(update, "regenerate_awg_entropy", server_key)
+            finally:
+                stop_progress()
+            rc = 0 if operation.status == "SUCCEEDED" else 1
+            out = operation.progress_message
             _wizard_edit(context, _action_result_text(t(lang, "admin.wizard.awg_regen_entropy"), rc, out, server_key, lang), _server_card_markup(server_key, lang))
             return
         if action == "reconcile":

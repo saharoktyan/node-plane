@@ -20,6 +20,8 @@ service NodeAgentService {
   rpc DeployXray(AgentEmpty) returns (RuntimeCommandResponse);
   rpc InitAwg(AgentEmpty) returns (RuntimeCommandResponse);
   rpc DeployAwg(AgentEmpty) returns (RuntimeCommandResponse);
+  rpc GetAwgEntropy(AgentEmpty) returns (RuntimeCommandResponse);
+  rpc RegenerateAwgEntropy(AgentEmpty) returns (RuntimeCommandResponse);
   rpc PathExists(PathExistsRequest) returns (PathExistsResponse);
   rpc RemoveAuthorizedKey(RemoveAuthorizedKeyRequest) returns (RemoveAuthorizedKeyResponse);
   rpc AddXrayUser(AddXrayUserRequest) returns (RuntimeCommandResponse);

@@ -630,6 +630,22 @@ impl AgentState {
         })
     }
 
+    fn get_awg_entropy(&self) -> Result<RuntimeCommandResponse, Status> {
+        let summary = self.run_runtime_command("show-awg-entropy.sh", &[])?;
+        Ok(RuntimeCommandResponse {
+            summary,
+            payload_json: String::new(),
+        })
+    }
+
+    fn regenerate_awg_entropy(&self) -> Result<RuntimeCommandResponse, Status> {
+        let summary = self.run_runtime_command("regenerate-awg-entropy.sh", &[])?;
+        Ok(RuntimeCommandResponse {
+            summary,
+            payload_json: String::new(),
+        })
+    }
+
     fn path_exists(&self, path: &str) -> PathExistsResponse {
         PathExistsResponse {
             exists: Path::new(&self.resolve_runtime_path(path)).exists(),
@@ -1058,6 +1074,20 @@ impl NodeAgentService for NodeAgentApi {
         _request: Request<AgentEmpty>,
     ) -> Result<Response<RuntimeCommandResponse>, Status> {
         Ok(Response::new(self.state.deploy_awg()?))
+    }
+
+    async fn get_awg_entropy(
+        &self,
+        _request: Request<AgentEmpty>,
+    ) -> Result<Response<RuntimeCommandResponse>, Status> {
+        Ok(Response::new(self.state.get_awg_entropy()?))
+    }
+
+    async fn regenerate_awg_entropy(
+        &self,
+        _request: Request<AgentEmpty>,
+    ) -> Result<Response<RuntimeCommandResponse>, Status> {
+        Ok(Response::new(self.state.regenerate_awg_entropy()?))
     }
 
     async fn path_exists(

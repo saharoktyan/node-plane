@@ -414,6 +414,34 @@ class GrpcNodeDriverClient(NodeDriverClient):
                 return fetched
         return operation
 
+    def get_awg_entropy(self, node_key: str) -> str:
+        self._ensure_client()
+        try:
+            response = self._runtime_stub.GetAwgEntropy(
+                self._runtime_pb2.GetAwgEntropyRequest(node_key=node_key),
+                timeout=self.timeout_seconds,
+            )
+        except Exception as exc:
+            raise self._query_error("get_awg_entropy", exc) from exc
+        return str(response.summary)
+
+    def regenerate_awg_entropy(self, node_key: str, *, command_id: str | None = None) -> DriverOperation:
+        self._ensure_client()
+        try:
+            response = self._runtime_stub.RegenerateAwgEntropy(
+                self._runtime_pb2.RegenerateAwgEntropyRequest(node_key=node_key),
+                timeout=max(self.timeout_seconds, 200),
+                metadata=(("x-node-plane-command-id", command_id),) if command_id is not None else (),
+            )
+        except Exception as exc:
+            return self._failed_operation("regenerate_awg_entropy", exc, node_key=node_key)
+        operation = self._start_operation("regenerate_awg_entropy", response, node_key=node_key)
+        if operation.operation_id:
+            fetched = self.get_operation(operation.operation_id)
+            if fetched is not None:
+                return fetched
+        return operation
+
     def ensure_profile_on_node(
         self,
         node_key: str,

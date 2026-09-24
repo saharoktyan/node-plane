@@ -104,6 +104,24 @@ class DriverCommandJournalTests(unittest.TestCase):
             execute_server_command(driver, "telegram:103", "bootstrap_node", "node")
         self.assertEqual(len(driver.calls), 1)
 
+    def test_awg_entropy_regeneration_is_not_repeated_for_same_update(self) -> None:
+        class EntropyDriver(FakeGrpcDriver):
+            def regenerate_awg_entropy(self, node_key: str, *, command_id: str | None = None) -> DriverOperation:
+                assert command_id
+                self.calls.append((command_id, node_key, False))
+                operation = DriverOperation(
+                    operation_id="op-" + command_id, kind="regenerate_awg_entropy",
+                    status="SUCCEEDED", node_key=node_key,
+                )
+                self.operations[command_id] = operation
+                return operation
+
+        driver = EntropyDriver()
+        first = execute_server_command(driver, "telegram:105", "regenerate_awg_entropy", "node")
+        second = execute_server_command(driver, "telegram:105", "regenerate_awg_entropy", "node")
+        self.assertEqual(first.operation_id, second.operation_id)
+        self.assertEqual(len(driver.calls), 1)
+
     def test_concurrent_redelivery_uses_one_persisted_key(self) -> None:
         with get_db().transaction() as conn:
             ensure_schema(conn)

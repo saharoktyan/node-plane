@@ -15,6 +15,7 @@ _SERVER_ACTIONS = frozenset({
     "bootstrap_node", "reinstall_node", "delete_runtime", "full_cleanup_node",
     "probe_node", "check_ports", "open_ports", "install_docker",
     "sync_node_env", "sync_runtime", "sync_xray", "reconcile_node",
+    "regenerate_awg_entropy",
 })
 _OPTION_FIELDS = {
     "bootstrap_node": "preserve_config",
