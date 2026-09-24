@@ -1225,7 +1225,11 @@ def admin_menu_text_router(update: Update, context: CallbackContext) -> None:
                 reply_markup=_admin_remove_markup(lang),
                 parse_mode=PARSE_MODE,
             )
-        rc, out = run_full_remove(cleanup_nodes=cleanup_nodes)
+        update_id = getattr(update, "update_id", None)
+        rc, out = run_full_remove(
+            cleanup_nodes=cleanup_nodes,
+            source_ref=f"telegram:{update_id}" if update_id is not None else "",
+        )
         _admin_settings_state_clear(context)
         if admin_settings_state.get("chat_id") and admin_settings_state.get("message_id"):
             safe_edit_by_ids(
@@ -1263,7 +1267,12 @@ def admin_menu_text_router(update: Update, context: CallbackContext) -> None:
                 reply_markup=kb_back_to_admin(lang),
                 parse_mode=PARSE_MODE,
             )
-        rc, out = run_factory_reset(cleanup_nodes=cleanup_nodes, stop_local_runtime=(scope == "nodes_ssh"))
+        update_id = getattr(update, "update_id", None)
+        rc, out = run_factory_reset(
+            cleanup_nodes=cleanup_nodes,
+            stop_local_runtime=(scope == "nodes_ssh"),
+            source_ref=f"telegram:{update_id}" if update_id is not None else "",
+        )
         _admin_settings_state_clear(context)
         if admin_settings_state.get("chat_id") and admin_settings_state.get("message_id"):
             safe_edit_by_ids(

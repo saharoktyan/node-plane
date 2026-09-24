@@ -119,6 +119,11 @@ commands. The journal retains a returned operation ID and rejects changed
 parameters for the same update. Missing history blocks redispatch when the
 operation ID is known. An outcome without a returned ID still depends on the
 driver retaining its history file.
+Full removal and factory reset with node cleanup now submit `FullCleanupNode`
+through this journal in gRPC mode. A failed node operation prevents uninstall
+or local-state deletion. The in-process backend remains a compatibility path;
+factory reset also retains host-local shell cleanup when no local node is
+registered, to remove runtimes left by older installations.
 A local cancellation does not prove that the remote action stopped.
 Existing runtime failures do not all have structured error codes yet.
 
