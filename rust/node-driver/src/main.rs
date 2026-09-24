@@ -39,18 +39,19 @@ use driver::v1::provisioning_service_server::{ProvisioningService, ProvisioningS
 use driver::v1::runtime_service_server::{RuntimeService, RuntimeServiceServer};
 use driver::v1::telemetry_service_server::{TelemetryService, TelemetryServiceServer};
 use driver::v1::{
-    BootstrapNodeRequest, CheckPortsRequest, DeleteProfileFromNodeRequest, DeleteRuntimeRequest,
-    FullCleanupNodeRequest, GetAwgEntropyRequest, GetAwgEntropyResponse, GetNodeDiagnosticsRequest,
+    ApplyNodeSettingsRequest, BootstrapNodeRequest, CheckPortsRequest,
+    DeleteProfileFromNodeRequest, DeleteRuntimeRequest, FullCleanupNodeRequest,
+    GetAwgEntropyRequest, GetAwgEntropyResponse, GetNodeDiagnosticsRequest,
     GetNodeDiagnosticsResponse, GetNodeRequest, GetOperationRequest, GetProfileUsageRequest,
     GetProfileUsageResponse, GetRuntimeStatusRequest, GetRuntimeStatusResponse,
     InstallDockerRequest, ListNodesNeedingRuntimeSyncRequest, ListNodesNeedingRuntimeSyncResponse,
     ListNodesRequest, ListNodesResponse, ListOperationsRequest, ListOperationsResponse,
     ListRemoteProfilesRequest, ListRemoteProfilesResponse, Node, NodeCapabilities, NodeHealth,
     NodeHealthEvent, OpenPortsRequest, Operation, OperationEvent, ProbeNodeRequest, ProfileSpec,
-    ProfileUsage, ReconcileNodeRequest, ReconcileProfileRequest, RegenerateAwgEntropyRequest,
-    ReinstallNodeRequest, RemoteProfileRecord, RuntimeStatus, ServiceStatus,
-    StartOperationResponse, SyncNodeEnvRequest, SyncRuntimeRequest, SyncXrayRequest,
-    WatchNodeHealthRequest, WatchOperationRequest,
+    ProfileUsage, ReconcileNodeRequest, ReconcileProfileRequest, RefreshAwgConfigRequest,
+    RefreshAwgConfigResponse, RegenerateAwgEntropyRequest, ReinstallNodeRequest,
+    RemoteProfileRecord, RuntimeStatus, ServiceStatus, StartOperationResponse, SyncNodeEnvRequest,
+    SyncRuntimeRequest, SyncXrayRequest, WatchNodeHealthRequest, WatchOperationRequest,
 };
 
 #[derive(Clone)]
@@ -76,7 +77,6 @@ struct XraySyncGenerated {
     xray_pbk: String,
     xray_sid: String,
     xray_short_id: String,
-    xray_fp: String,
     xray_flow: String,
     xray_tcp_port: i32,
     xray_xhttp_port: i32,
@@ -837,13 +837,12 @@ impl DriverContext {
                     xray_pbk = $3,
                     xray_sid = $4,
                     xray_short_id = $5,
-                    xray_fp = $6,
-                    xray_flow = $7,
-                    xray_tcp_port = $8,
-                    xray_xhttp_port = $9,
-                    xray_xhttp_path_prefix = $10,
-                    updated_at = $11
-                WHERE key = $12
+                    xray_flow = $6,
+                    xray_tcp_port = $7,
+                    xray_xhttp_port = $8,
+                    xray_xhttp_path_prefix = $9,
+                    updated_at = $10
+                WHERE key = $11
                 ",
                 &[
                     &generated.xray_host,
@@ -851,7 +850,6 @@ impl DriverContext {
                     &generated.xray_pbk,
                     &generated.xray_sid,
                     &generated.xray_short_id,
-                    &generated.xray_fp,
                     &generated.xray_flow,
                     &generated.xray_tcp_port,
                     &generated.xray_xhttp_port,
@@ -2217,6 +2215,99 @@ impl ProvisioningService for ProvisioningApi {
 
 #[tonic::async_trait]
 impl RuntimeService for RuntimeApi {
+    async fn apply_node_settings(
+        &self,
+        request: Request<ApplyNodeSettingsRequest>,
+    ) -> Result<Response<StartOperationResponse>, Status> {
+        let identity = CommandIdentity::from_request(&request)?;
+        let req = request.into_inner();
+        let execution = match self.ctx.state.begin_command(
+            "apply_node_settings",
+            &req.node_key,
+            "",
+            identity,
+        )? {
+            CommandStart::New(operation) => operation,
+            CommandStart::Existing(response) => return Ok(Response::new(response)),
+        };
+        let Some(target) = self.ctx.agent_target(&req.node_key) else {
+            return Ok(Response::new(execution.missing_agent()?));
+        };
+        let row = match self.ctx.fetch_server_row(&req.node_key).await {
+            Ok(Some(row)) => row,
+            Ok(None) => {
+                return Ok(Response::new(
+                    execution.finish("FAILED", "server not found")?,
+                ));
+            }
+            Err(err) => return Ok(Response::new(execution.finish("FAILED", &err.to_string())?)),
+        };
+        let kinds = self
+            .ctx
+            .parse_protocol_kinds(self.ctx.row_string(&row, "protocol_kinds", "").as_str());
+        let apply_xray = kinds.iter().any(|kind| kind == "xray");
+        let apply_awg = kinds.iter().any(|kind| kind == "awg");
+        let transport = agent_transport::AgentTransport::new(target);
+        let result: Result<String, Status> = async {
+            transport.sync_runtime_files(self.ctx.runtime_file_bundle(Some(&row), &req.node_key)?).await?;
+            transport.sync_node_env(&self.ctx.render_node_env_from_row(&row)).await?;
+            let specs = self.ctx.port_check_specs_from_row(&row);
+            let opened = transport.open_ports(specs).await?;
+            if opened.items.iter().any(|item| item.status == "failed") {
+                return Err(Status::failed_precondition(format!("could not open required ports: {}", opened.summary)));
+            }
+            transport.apply_node_settings(agent::v1::ApplyNodeSettingsRequest {
+                xray_config_path: self.ctx.row_string(&row, "xray_config_path", "/opt/node-plane-runtime/xray/config.json"),
+                xray_sni: self.ctx.row_string(&row, "xray_sni", ""),
+                xray_tcp_port: self.ctx.row_i32(&row, "xray_tcp_port", 443) as u32,
+                xray_xhttp_port: self.ctx.row_i32(&row, "xray_xhttp_port", 8443) as u32,
+                xray_xhttp_path_prefix: self.ctx.row_string(&row, "xray_xhttp_path_prefix", "/assets"),
+                apply_xray,
+                apply_awg,
+            }).await?;
+            if apply_xray {
+                let synced = transport.sync_xray(
+                    &self.ctx.row_string(&row, "xray_config_path", "/opt/node-plane-runtime/xray/config.json"),
+                    &self.ctx.row_string(&row, "xray_host", self.ctx.row_string(&row, "public_host", "").as_str()),
+                    &self.ctx.row_string(&row, "xray_flow", "xtls-rprx-vision"),
+                    "ghcr.io/xtls/xray-core:25.12.8",
+                ).await?;
+                let generated: XraySyncGenerated = serde_json::from_str(&synced.generated_json)
+                    .map_err(|err| Status::internal(format!("invalid Xray sync result: {err}")))?;
+                self.ctx.update_xray_server_fields(&req.node_key, &generated).await?;
+            }
+            let db = self.ctx.db_client().await?;
+            db.execute("UPDATE servers SET bootstrap_state = 'bootstrapped', updated_at = $1 WHERE key = $2", &[&Utc::now().to_rfc3339(), &req.node_key]).await
+                .map_err(|err| Status::internal(format!("failed to mark settings applied: {err}")))?;
+            Ok("Node settings applied; existing AWG configs will be refreshed when issued".to_string())
+        }.await;
+        Ok(Response::new(match result {
+            Ok(message) => execution.finish("SUCCEEDED", &message)?,
+            Err(err) => execution.finish("FAILED", &err.to_string())?,
+        }))
+    }
+
+    async fn refresh_awg_config(
+        &self,
+        request: Request<RefreshAwgConfigRequest>,
+    ) -> Result<Response<RefreshAwgConfigResponse>, Status> {
+        let req = request.into_inner();
+        if req.wg_conf.is_empty() {
+            return Err(Status::invalid_argument("stored AWG config is missing"));
+        }
+        let target = self
+            .ctx
+            .agent_target(&req.node_key)
+            .ok_or_else(|| Status::unavailable("node agent is unavailable"))?;
+        let refreshed = agent_transport::AgentTransport::new(target)
+            .refresh_awg_config(&req.wg_conf)
+            .await?;
+        Ok(Response::new(RefreshAwgConfigResponse {
+            wg_conf: refreshed.wg_conf,
+            vpn_key: refreshed.vpn_key,
+        }))
+    }
+
     async fn bootstrap_node(
         &self,
         request: Request<BootstrapNodeRequest>,
@@ -2828,7 +2919,11 @@ impl RuntimeService for RuntimeApi {
                 "xray_config_path",
                 "/opt/node-plane-runtime/xray/config.json",
             );
-            let public_host = self.ctx.row_string(&row, "public_host", "");
+            let public_host = self.ctx.row_string(
+                &row,
+                "xray_host",
+                self.ctx.row_string(&row, "public_host", "").as_str(),
+            );
             let flow = self.ctx.row_string(&row, "xray_flow", "xtls-rprx-vision");
             let image = "ghcr.io/xtls/xray-core:25.12.8";
             let transport = agent_transport::AgentTransport::new(target);

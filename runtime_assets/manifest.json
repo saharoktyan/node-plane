@@ -15,6 +15,16 @@
     "mode": "0755"
   },
   {
+    "target_path": "/opt/node-plane-runtime/apply-node-settings.sh",
+    "asset_path": "apply-node-settings.sh",
+    "mode": "0755"
+  },
+  {
+    "target_path": "/opt/node-plane-runtime/refresh-awg-config.py",
+    "asset_path": "refresh-awg-config.py",
+    "mode": "0755"
+  },
+  {
     "target_path": "/opt/node-plane-runtime/deploy-xray.sh",
     "asset_path": "deploy-xray.sh",
     "mode": "0755"

@@ -578,14 +578,15 @@ def _bootstrap_mode_markup(server_key: str, action: str, lang: str) -> InlineKey
 
 
 def _advanced_menu_text(server: RegisteredServer, lang: str) -> str:
-    return "\n".join(
-        [
-            f"⚙️ {server.flag} {server.title} ({server.key})",
-            "",
-            t(lang, "admin.wizard.advanced_title"),
-            t(lang, "admin.wizard.advanced_intro"),
-        ]
-    )
+    lines = [
+        f"⚙️ {server.flag} {server.title} ({server.key})",
+        "",
+        t(lang, "admin.wizard.advanced_title"),
+        t(lang, "admin.wizard.advanced_intro"),
+    ]
+    if server.bootstrap_state == "edited":
+        lines.extend(["", "⚠️ Изменения не применены на ноде. Новые конфиги пока не выдаются." if lang == "ru" else "⚠️ Changes have not been applied to the node. New configs are paused."])
+    return "\n".join(lines)
 
 
 def _advanced_menu_markup(server_key: str, lang: str) -> InlineKeyboardMarkup:
@@ -603,6 +604,7 @@ def _advanced_menu_markup(server_key: str, lang: str) -> InlineKeyboardMarkup:
         protocol_row.append(InlineKeyboardButton(t(lang, "admin.wizard.advanced_awg"), callback_data=f"{CB_SRV}advsection:awg:{server_key}"))
     if protocol_row:
         rows.append(protocol_row)
+    rows.append([InlineKeyboardButton("✅ Применить изменения" if lang == "ru" else "✅ Apply changes", callback_data=f"{CB_SRV}action:applysettings:{server_key}")])
     rows.append([InlineKeyboardButton(t(lang, "admin.wizard.back_to_server"), callback_data=f"{CB_SRV}card:{server_key}")])
     return InlineKeyboardMarkup(rows)
 
@@ -760,6 +762,7 @@ def _advanced_section_markup(server_key: str, section: str, lang: str) -> Inline
                 InlineKeyboardButton(t(lang, "admin.wizard.field_xray_xhttp_port"), callback_data=f"{CB_SRV}editfield:xray_xhttp_port"),
             ],
         ]
+        rows.append([InlineKeyboardButton("✅ Применить изменения" if lang == "ru" else "✅ Apply changes", callback_data=f"{CB_SRV}action:applysettings:{server_key}")])
     elif section == "awg":
         rows = [
             [
@@ -775,6 +778,7 @@ def _advanced_section_markup(server_key: str, section: str, lang: str) -> Inline
                 InlineKeyboardButton(t(lang, "admin.wizard.awg_regen_entropy"), callback_data=f"{CB_SRV}action:awgregen:{server_key}"),
             ],
         ]
+        rows.append([InlineKeyboardButton("✅ Применить изменения" if lang == "ru" else "✅ Apply changes", callback_data=f"{CB_SRV}action:applysettings:{server_key}")])
     elif section == "maintenance_ports":
         rows = [
             [
@@ -1258,6 +1262,7 @@ def _persist_edited_server(w: Dict[str, Any], lang: str) -> tuple[Optional[Regis
             current.awg_public_host != sanitized["awg_public_host"],
             current.awg_port != sanitized["awg_port"],
             current.awg_iface != sanitized["awg_iface"],
+            current.awg_i1_preset != sanitized["awg_i1_preset"],
         ]
     )
     server = update_server_fields(
@@ -2050,6 +2055,14 @@ def on_server_callback(update: Update, context: CallbackContext, payload: str) -
 
     if payload.startswith("action:"):
         _, action, server_key = payload.split(":", 2)
+        if action == "applysettings":
+            label = "Применение настроек" if lang == "ru" else "Apply settings"
+            stop_progress = _start_progress_animation(context, label)
+            operation = _run_driver_action(update, "apply_node_settings", server_key)
+            stop_progress()
+            rc = 0 if operation.status == "SUCCEEDED" else 1
+            _wizard_edit(context, _action_result_text(label, rc, operation.progress_message, server_key, lang), _advanced_menu_markup(server_key, lang))
+            return
         if action == "metrics":
             stop_progress = _start_progress_animation(context, t(lang, "admin.wizard.server_metrics"))
             rc, out = show_server_metrics(server_key)
@@ -2268,6 +2281,8 @@ def on_server_callback(update: Update, context: CallbackContext, payload: str) -
             return
         _wizard_set(context, w)
         saved = t(lang, "admin.wizard.server_saved_inline")
+        if server.bootstrap_state == "edited":
+            saved += "\nИзменения сохранены. Нажми «Применить изменения», чтобы обновить ноду и выдаваемые конфиги." if lang == "ru" else "\nChanges saved. Select Apply changes to update the node and issued configs."
         _wizard_edit(context, f"{saved}\n\n{_advanced_menu_text(server, lang)}", _advanced_menu_markup(server.key, lang))
         return
 
@@ -2381,6 +2396,7 @@ def setserverfield_cmd(update: Update, context: CallbackContext) -> None:
         "awg_iface",
         "awg_public_host",
         "awg_port",
+        "awg_i1_preset",
     }
     try:
         if field in int_fields:

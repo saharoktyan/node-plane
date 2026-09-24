@@ -1,10 +1,11 @@
 use std::env;
 use std::fs;
+use std::io::Write;
 use std::net::SocketAddr;
 use std::net::TcpListener;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -24,15 +25,15 @@ pub mod agent {
 
 use agent::v1::node_agent_service_server::{NodeAgentService, NodeAgentServiceServer};
 use agent::v1::{
-    AddAwgUserRequest, AddXrayUserRequest, AgentEmpty, CheckPortsRequest, CheckPortsResponse,
-    DeleteProfileRequest, DeleteRuntimeRequest, DeleteRuntimeResponse, DiagnosticItem,
-    InitXrayRequest, InitXrayResponse, InstallDockerRequest, InstallDockerResponse,
+    AddAwgUserRequest, AddXrayUserRequest, AgentEmpty, ApplyNodeSettingsRequest, CheckPortsRequest,
+    CheckPortsResponse, DeleteProfileRequest, DeleteRuntimeRequest, DeleteRuntimeResponse,
+    DiagnosticItem, InitXrayRequest, InitXrayResponse, InstallDockerRequest, InstallDockerResponse,
     ListRemoteProfilesRequest, ListRemoteProfilesResponse, LocalHealth, OpenPortsRequest,
-    OpenPortsResponse, PathExistsRequest, PathExistsResponse, PortStatus, RemoteProfileRecord,
-    RemoveAuthorizedKeyRequest, RemoveAuthorizedKeyResponse, RunDiagnosticsRequest,
-    RunDiagnosticsResponse, RuntimeCommandResponse, RuntimeFacts, RuntimeFileSpec,
-    SyncNodeEnvRequest, SyncNodeEnvResponse, SyncRuntimeFilesRequest, SyncRuntimeFilesResponse,
-    SyncXrayRequest, SyncXrayResponse,
+    OpenPortsResponse, PathExistsRequest, PathExistsResponse, PortStatus, RefreshAwgConfigRequest,
+    RefreshAwgConfigResponse, RemoteProfileRecord, RemoveAuthorizedKeyRequest,
+    RemoveAuthorizedKeyResponse, RunDiagnosticsRequest, RunDiagnosticsResponse,
+    RuntimeCommandResponse, RuntimeFacts, RuntimeFileSpec, SyncNodeEnvRequest, SyncNodeEnvResponse,
+    SyncRuntimeFilesRequest, SyncRuntimeFilesResponse, SyncXrayRequest, SyncXrayResponse,
 };
 
 const INSTALL_DOCKER_SCRIPT: &str = r#"set -euo pipefail
@@ -562,6 +563,67 @@ impl AgentState {
         })
     }
 
+    fn apply_node_settings(
+        &self,
+        request: ApplyNodeSettingsRequest,
+    ) -> Result<RuntimeCommandResponse, Status> {
+        self.run_runtime_command(
+            "apply-node-settings.sh",
+            &[
+                self.resolve_runtime_path(&request.xray_config_path),
+                request.xray_sni,
+                request.xray_tcp_port.to_string(),
+                request.xray_xhttp_port.to_string(),
+                request.xray_xhttp_path_prefix,
+                request.apply_xray.to_string(),
+                request.apply_awg.to_string(),
+            ],
+        )
+        .map(|summary| RuntimeCommandResponse {
+            summary,
+            payload_json: String::new(),
+        })
+    }
+
+    fn refresh_awg_config(
+        &self,
+        request: RefreshAwgConfigRequest,
+    ) -> Result<RefreshAwgConfigResponse, Status> {
+        let script = self.resolve_runtime_path("/opt/node-plane-runtime/refresh-awg-config.py");
+        let mut child = Command::new("bash")
+            .arg("-c")
+            .arg("set -a; source \"$1\"; exec python3 \"$2\"")
+            .arg("refresh-awg")
+            .arg(&self.config.node_env_path)
+            .arg(script)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|err| Status::internal(format!("failed to start AWG refresh: {err}")))?;
+        child
+            .stdin
+            .take()
+            .ok_or_else(|| Status::internal("AWG refresh stdin missing"))?
+            .write_all(request.wg_conf.as_bytes())
+            .map_err(|err| Status::internal(format!("failed to pass AWG config: {err}")))?;
+        let output = child
+            .wait_with_output()
+            .map_err(|err| Status::internal(format!("AWG refresh failed: {err}")))?;
+        if !output.status.success() {
+            return Err(Status::failed_precondition(format!(
+                "AWG refresh failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            )));
+        }
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout)
+            .map_err(|err| Status::internal(format!("AWG refresh returned invalid JSON: {err}")))?;
+        Ok(RefreshAwgConfigResponse {
+            wg_conf: value["wg_conf"].as_str().unwrap_or_default().to_string(),
+            vpn_key: value["vpn_key"].as_str().unwrap_or_default().to_string(),
+        })
+    }
+
     fn run_runtime_command(&self, script_name: &str, args: &[String]) -> Result<String, Status> {
         let script_path =
             self.resolve_runtime_path(&format!("/opt/node-plane-runtime/{script_name}"));
@@ -1029,6 +1091,24 @@ impl NodeAgentService for NodeAgentApi {
         request: Request<SyncXrayRequest>,
     ) -> Result<Response<SyncXrayResponse>, Status> {
         Ok(Response::new(self.state.sync_xray(request.into_inner())?))
+    }
+
+    async fn apply_node_settings(
+        &self,
+        request: Request<ApplyNodeSettingsRequest>,
+    ) -> Result<Response<RuntimeCommandResponse>, Status> {
+        Ok(Response::new(
+            self.state.apply_node_settings(request.into_inner())?,
+        ))
+    }
+
+    async fn refresh_awg_config(
+        &self,
+        request: Request<RefreshAwgConfigRequest>,
+    ) -> Result<Response<RefreshAwgConfigResponse>, Status> {
+        Ok(Response::new(
+            self.state.refresh_awg_config(request.into_inner())?,
+        ))
     }
 
     async fn install_docker(

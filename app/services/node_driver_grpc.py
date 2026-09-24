@@ -278,6 +278,29 @@ class GrpcNodeDriverClient(NodeDriverClient):
                 return fetched
         return operation
 
+    def apply_node_settings(self, node_key: str, *, command_id: str | None = None) -> DriverOperation:
+        self._ensure_client()
+        try:
+            response = self._runtime_stub.ApplyNodeSettings(
+                self._runtime_pb2.ApplyNodeSettingsRequest(node_key=node_key),
+                timeout=max(self.timeout_seconds, 900),
+                metadata=(("x-node-plane-command-id", command_id),) if command_id is not None else (),
+            )
+        except Exception as exc:
+            return self._failed_operation("apply_node_settings", exc, node_key=node_key)
+        operation = self._start_operation("apply_node_settings", response, node_key=node_key)
+        return self.get_operation(operation.operation_id) or operation if operation.operation_id else operation
+
+    def refresh_awg_config(self, node_key: str, wg_conf: str) -> tuple[str, str]:
+        self._ensure_client()
+        response = self._runtime_stub.RefreshAwgConfig(
+            self._runtime_pb2.RefreshAwgConfigRequest(node_key=node_key, wg_conf=wg_conf),
+            timeout=max(self.timeout_seconds, 45),
+        )
+        if not response.wg_conf or not response.vpn_key:
+            raise RuntimeError("Driver returned an incomplete AWG config")
+        return response.wg_conf, response.vpn_key
+
     def probe_node(self, node_key: str, *, command_id: str | None = None) -> DriverOperation:
         self._ensure_client()
         try:

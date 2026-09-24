@@ -14,7 +14,7 @@ from services.node_driver_grpc import GrpcNodeDriverClient
 _SERVER_ACTIONS = frozenset({
     "bootstrap_node", "reinstall_node", "delete_runtime", "full_cleanup_node",
     "probe_node", "check_ports", "open_ports", "install_docker",
-    "sync_node_env", "sync_runtime", "sync_xray", "reconcile_node",
+    "sync_node_env", "sync_runtime", "sync_xray", "apply_node_settings", "reconcile_node",
     "regenerate_awg_entropy",
 })
 _OPTION_FIELDS = {
