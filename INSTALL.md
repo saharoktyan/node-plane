@@ -252,9 +252,12 @@ Driver/agent rollout (for grpc driver mode):
 - To disable automatic rollout during update, set `NODE_PLANE_AUTO_SETUP_DRIVER_AGENTS=0`.
 - Simple-mode post-install rollout is enabled by default; disable it with `NODE_PLANE_AUTO_SETUP_DRIVER_AGENTS_ON_INSTALL=0`.
 - Binary source policy for driver/agent rollout:
-  - `NODE_PLANE_BIN_SOURCE=auto` (default): build with Cargo when available; otherwise try GitHub release binaries. If neither is available, the script asks before installing Rust build tools. In the bot, confirm with **Install Cargo and continue**; for unattended runs, set `NODE_PLANE_INSTALL_RUST=yes` to allow installation or `no` to stop.
+  - `NODE_PLANE_BIN_SOURCE=auto` (default): use GitHub release binaries first, then build with Cargo if available. If neither is available, the script asks before installing Rust build tools. In the bot, confirm with **Install Cargo and continue**; for unattended runs, set `NODE_PLANE_INSTALL_RUST=yes` to allow installation or `no` to stop. Before local compilation, the script requires at least 2048 MiB available RAM and CPU busy time at or below 65%; Cargo defaults to one build job.
   - `NODE_PLANE_BIN_SOURCE=release`: only download release binaries (Rust toolchain not required).
   - `NODE_PLANE_BIN_SOURCE=build`: only local `cargo build --release`.
+- Local build limits can be adjusted with `NODE_PLANE_BUILD_MIN_MEM_MB` and
+  `NODE_PLANE_BUILD_MAX_CPU_PERCENT`. If a VPS does not meet them, build and
+  publish the release artifacts on another machine, then use release mode.
 - The rollout generates a private driver-agent CA and mutual TLS identities in
   `${NODE_PLANE_SHARED_DIR}/driver-agent-tls/`. Keep this directory private and
   backed up with the controller; the CA private key is never installed on nodes.

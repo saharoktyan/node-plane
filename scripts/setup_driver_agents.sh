@@ -528,12 +528,58 @@ download_release_binaries() {
 build_local_binaries() {
   need_cmd cargo
   need_cmd protoc
+  check_local_build_resources
+  export CARGO_BUILD_JOBS="${NODE_PLANE_BUILD_JOBS:-1}"
   set_step "build node-driver binary"
   (cd "${APP_ROOT}/rust/node-driver" && cargo build --release)
   set_step "build node-agent binary"
   (cd "${APP_ROOT}/rust/node-agent" && cargo build --release)
   driver_bin_path="${APP_ROOT}/rust/node-driver/target/release/node-plane-driver"
   agent_bin_path="${APP_ROOT}/rust/node-agent/target/release/node-plane-agent"
+}
+
+check_local_build_resources() {
+  local min_mem_mb max_cpu_percent mem_available_kb cpu_before idle_before cpu_after idle_after cpu_busy_percent
+  min_mem_mb="${NODE_PLANE_BUILD_MIN_MEM_MB:-2048}"
+  max_cpu_percent="${NODE_PLANE_BUILD_MAX_CPU_PERCENT:-65}"
+  if [[ ! "$min_mem_mb" =~ ^[0-9]+$ || ! "$max_cpu_percent" =~ ^[0-9]+$ ]] \
+    || (( max_cpu_percent > 100 )); then
+    echo "Invalid build resource thresholds: NODE_PLANE_BUILD_MIN_MEM_MB must be an integer and NODE_PLANE_BUILD_MAX_CPU_PERCENT must be 0..100." >&2
+    return 1
+  fi
+  if [[ ! -r /proc/meminfo || ! -r /proc/stat ]]; then
+    echo "Cannot inspect available memory and CPU load; refusing local Rust build." >&2
+    return 1
+  fi
+  mem_available_kb="$(awk '/^MemAvailable:/ {print $2; exit}' /proc/meminfo)"
+  if [[ ! "$mem_available_kb" =~ ^[0-9]+$ ]]; then
+    echo "Cannot determine available memory; refusing local Rust build." >&2
+    return 1
+  fi
+  local mem_available_mb=$((mem_available_kb / 1024))
+  if (( mem_available_mb < min_mem_mb )); then
+    echo "Not enough free memory for local Rust build: ${mem_available_mb} MiB available; need at least ${min_mem_mb} MiB. Build release binaries on another machine and rerun with NODE_PLANE_BIN_SOURCE=release." >&2
+    return 1
+  fi
+
+  read -r cpu_before idle_before < <(awk '$1 == "cpu" { idle=$5+$6; for (i=2; i<=NF; i++) total+=$i; print total, idle; exit }' /proc/stat)
+  if [[ ! "$cpu_before" =~ ^[0-9]+$ || ! "$idle_before" =~ ^[0-9]+$ ]]; then
+    echo "Cannot determine CPU load; refusing local Rust build." >&2
+    return 1
+  fi
+  sleep 2
+  read -r cpu_after idle_after < <(awk '$1 == "cpu" { idle=$5+$6; for (i=2; i<=NF; i++) total+=$i; print total, idle; exit }' /proc/stat)
+  if [[ ! "$cpu_after" =~ ^[0-9]+$ || ! "$idle_after" =~ ^[0-9]+$ ]] \
+    || (( cpu_after <= cpu_before || idle_after < idle_before )); then
+    echo "Cannot measure CPU load; refusing local Rust build." >&2
+    return 1
+  fi
+  cpu_busy_percent="$(awk -v total="$((cpu_after - cpu_before))" -v idle="$((idle_after - idle_before))" 'BEGIN { printf "%d", 100 * (total-idle) / total }')"
+  if (( cpu_busy_percent > max_cpu_percent )); then
+    echo "CPU is too busy for local Rust build: ${cpu_busy_percent}% busy; maximum is ${max_cpu_percent}%. Wait for the host to quiet down or build release binaries on another machine." >&2
+    return 1
+  fi
+  echo "Build resource check passed: ${mem_available_mb} MiB available, CPU ${cpu_busy_percent}% busy."
 }
 
 resolve_binaries() {
@@ -545,11 +591,11 @@ resolve_binaries() {
       build_local_binaries
       ;;
     auto)
-      if has_cmd cargo && has_cmd protoc; then
-        echo "Building driver/agent binaries from APP_ROOT=${APP_ROOT}."
-        build_local_binaries
-      elif download_release_binaries; then
+      if download_release_binaries; then
         echo "Using release binaries from GitHub."
+      elif has_cmd cargo && has_cmd protoc; then
+        echo "Release binaries are unavailable; building driver/agent from APP_ROOT=${APP_ROOT}."
+        build_local_binaries
       else
         ensure_cargo_for_auto_build
         build_local_binaries
@@ -575,18 +621,16 @@ resolve_binaries_dry_run() {
       echo "Dry-run: local cargo build mode is available."
       ;;
     auto)
-      if has_cmd cargo && has_cmd protoc; then
-        echo "Dry-run: local cargo build mode is available (auto mode)."
+      set_step "dry-run check release binary urls"
+      if check_url_access "$driver_url" && check_url_access "$agent_url"; then
+        echo "Dry-run: release binary URLs are reachable (auto mode)."
+      elif has_cmd cargo && has_cmd protoc; then
+        echo "Dry-run: release binaries are unavailable; local cargo build is available (auto mode)."
+      elif has_cmd apt-get || has_cmd dnf; then
+        echo "Dry-run: release binaries are unavailable; Rust build tools require confirmation."
       else
-        set_step "dry-run check release binary urls"
-        if check_url_access "$driver_url" && check_url_access "$agent_url"; then
-          echo "Dry-run: release binary URLs are reachable (auto mode)."
-        elif has_cmd apt-get || has_cmd dnf; then
-          echo "Dry-run: release binaries are unavailable; Rust build tools require confirmation."
-        else
-          echo "Release binaries are unavailable and no supported Rust package manager was found." >&2
-          return 1
-        fi
+        echo "Release binaries are unavailable and no supported Rust package manager was found." >&2
+        return 1
       fi
       ;;
   esac
