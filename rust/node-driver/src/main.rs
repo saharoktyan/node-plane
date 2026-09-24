@@ -40,16 +40,17 @@ use driver::v1::runtime_service_server::{RuntimeService, RuntimeServiceServer};
 use driver::v1::telemetry_service_server::{TelemetryService, TelemetryServiceServer};
 use driver::v1::{
     BootstrapNodeRequest, CheckPortsRequest, DeleteProfileFromNodeRequest, DeleteRuntimeRequest,
-    FullCleanupNodeRequest, GetNodeDiagnosticsRequest, GetNodeDiagnosticsResponse, GetNodeRequest,
-    GetOperationRequest, GetProfileUsageRequest, GetProfileUsageResponse, GetRuntimeStatusRequest,
-    GetRuntimeStatusResponse, InstallDockerRequest, ListNodesNeedingRuntimeSyncRequest,
-    ListNodesNeedingRuntimeSyncResponse, ListNodesRequest, ListNodesResponse,
-    ListOperationsRequest, ListOperationsResponse, ListRemoteProfilesRequest,
-    ListRemoteProfilesResponse, Node, NodeCapabilities, NodeHealth, NodeHealthEvent,
-    OpenPortsRequest, Operation, OperationEvent, ProbeNodeRequest, ProfileSpec, ProfileUsage,
-    ReconcileNodeRequest, ReconcileProfileRequest, ReinstallNodeRequest, RemoteProfileRecord,
-    RuntimeStatus, ServiceStatus, StartOperationResponse, SyncNodeEnvRequest, SyncRuntimeRequest,
-    SyncXrayRequest, WatchNodeHealthRequest, WatchOperationRequest,
+    FullCleanupNodeRequest, GetAwgEntropyRequest, GetAwgEntropyResponse, GetNodeDiagnosticsRequest,
+    GetNodeDiagnosticsResponse, GetNodeRequest, GetOperationRequest, GetProfileUsageRequest,
+    GetProfileUsageResponse, GetRuntimeStatusRequest, GetRuntimeStatusResponse,
+    InstallDockerRequest, ListNodesNeedingRuntimeSyncRequest, ListNodesNeedingRuntimeSyncResponse,
+    ListNodesRequest, ListNodesResponse, ListOperationsRequest, ListOperationsResponse,
+    ListRemoteProfilesRequest, ListRemoteProfilesResponse, Node, NodeCapabilities, NodeHealth,
+    NodeHealthEvent, OpenPortsRequest, Operation, OperationEvent, ProbeNodeRequest, ProfileSpec,
+    ProfileUsage, ReconcileNodeRequest, ReconcileProfileRequest, RegenerateAwgEntropyRequest,
+    ReinstallNodeRequest, RemoteProfileRecord, RuntimeStatus, ServiceStatus,
+    StartOperationResponse, SyncNodeEnvRequest, SyncRuntimeRequest, SyncXrayRequest,
+    WatchNodeHealthRequest, WatchOperationRequest,
 };
 
 #[derive(Clone)]
@@ -685,6 +686,22 @@ impl DriverContext {
             .query_opt("SELECT * FROM servers WHERE key = $1", &[&node_key])
             .await
             .map_err(|err| Status::internal(format!("failed to query servers: {err}")))
+    }
+
+    async fn ensure_awg_node(&self, node_key: &str) -> Result<(), Status> {
+        let row = self
+            .fetch_server_row(node_key)
+            .await?
+            .ok_or_else(|| Status::not_found("node not found"))?;
+        let protocols = row
+            .try_get::<_, String>("protocol_kinds")
+            .unwrap_or_default();
+        if !protocols.split(',').any(|kind| kind.trim() == "awg") {
+            return Err(Status::failed_precondition(
+                "AWG is not enabled on this node",
+            ));
+        }
+        Ok(())
     }
 
     async fn list_server_rows(&self, include_disabled: bool) -> Result<Vec<Row>, Status> {
@@ -2558,6 +2575,68 @@ impl RuntimeService for RuntimeApi {
             return Ok(Response::new(execution.finish(status, &summary)?));
         }
         Ok(Response::new(execution.missing_agent()?))
+    }
+
+    async fn get_awg_entropy(
+        &self,
+        request: Request<GetAwgEntropyRequest>,
+    ) -> Result<Response<GetAwgEntropyResponse>, Status> {
+        let req = request.into_inner();
+        if req.node_key.trim().is_empty() {
+            return Err(Status::invalid_argument("node_key is required"));
+        }
+        let target = self
+            .ctx
+            .agent_target(&req.node_key)
+            .ok_or_else(|| Status::failed_precondition("no node-agent target configured"))?;
+        self.ctx.ensure_awg_node(&req.node_key).await?;
+        let result = agent_transport::AgentTransport::new(target)
+            .get_awg_entropy()
+            .await?;
+        Ok(Response::new(GetAwgEntropyResponse {
+            node_key: req.node_key,
+            summary: result.summary,
+        }))
+    }
+
+    async fn regenerate_awg_entropy(
+        &self,
+        request: Request<RegenerateAwgEntropyRequest>,
+    ) -> Result<Response<StartOperationResponse>, Status> {
+        let identity = CommandIdentity::from_request(&request)?;
+        let req = request.into_inner();
+        if req.node_key.trim().is_empty() {
+            return Err(Status::invalid_argument("node_key is required"));
+        }
+        let execution = match self.ctx.state.begin_command(
+            "regenerate_awg_entropy",
+            &req.node_key,
+            "",
+            identity,
+        )? {
+            CommandStart::New(operation) => operation,
+            CommandStart::Existing(response) => return Ok(Response::new(response)),
+        };
+        let Some(target) = self.ctx.agent_target(&req.node_key) else {
+            return Ok(Response::new(execution.missing_agent()?));
+        };
+        if let Err(err) = self.ctx.ensure_awg_node(&req.node_key).await {
+            return Ok(Response::new(
+                execution.fail_with_error("awg_node_unavailable", &err.to_string())?,
+            ));
+        }
+        let result = agent_transport::AgentTransport::new(target)
+            .regenerate_awg_entropy()
+            .await;
+        match result {
+            Ok(result) => Ok(Response::new(
+                execution.finish("SUCCEEDED", &result.summary)?,
+            )),
+            Err(err) => Ok(Response::new(execution.finish(
+                "FAILED",
+                &format!("agent AWG entropy regeneration failed: {err}"),
+            )?)),
+        }
     }
 
     async fn full_cleanup_node(

@@ -326,6 +326,32 @@ class AdminViewsTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0][0].callback_data, "srv:advsection:awg:spb1")
 
+    def test_awg_entropy_actions_use_driver(self) -> None:
+        from services.node_driver_client import DriverOperation
+
+        update = SimpleNamespace(callback_query=SimpleNamespace(message=SimpleNamespace(chat_id=1, message_id=2)))
+        context = SimpleNamespace(user_data={"server_wizard": {
+            "step": "advanced_awg", "server_key": "spb1", "locale": "en", "data": {},
+            "chat_id": 1, "message_id": 2,
+        }})
+        driver = SimpleNamespace(get_awg_entropy=lambda key: "preset: quic")
+        operation = DriverOperation(
+            operation_id="op-entropy", kind="regenerate_awg_entropy", status="SUCCEEDED",
+            progress_message="WARNING: client AWG configs must be reissued",
+        )
+        with patch.object(admin_server_wizard, "guard", return_value=True), patch.object(
+            admin_server_wizard, "answer_cb"
+        ), patch.object(admin_server_wizard, "get_locale_for_update", return_value="en"), patch.object(
+            admin_server_wizard, "_start_progress_animation", return_value=lambda: None
+        ), patch.object(admin_server_wizard, "get_node_driver", return_value=driver), patch.object(
+            admin_server_wizard, "_run_driver_action", return_value=operation
+        ) as run, patch.object(admin_server_wizard, "_wizard_edit") as edit:
+            admin_server_wizard.on_server_callback(update, context, "action:awgentropy:spb1")
+            self.assertIn("preset: quic", edit.call_args.args[1])
+            admin_server_wizard.on_server_callback(update, context, "action:awgregen:spb1")
+        run.assert_called_once_with(update, "regenerate_awg_entropy", "spb1")
+        self.assertIn("client AWG configs must be reissued", edit.call_args.args[1])
+
     def test_problem_server_card_opens_without_active_server_wizard(self) -> None:
         update = SimpleNamespace(
             callback_query=SimpleNamespace(message=SimpleNamespace(chat_id=1, message_id=2)),

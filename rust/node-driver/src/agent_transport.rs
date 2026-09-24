@@ -254,6 +254,26 @@ impl AgentTransport {
         Ok(response.into_inner())
     }
 
+    pub async fn get_awg_entropy(&self) -> Result<RuntimeCommandResponse, tonic::Status> {
+        let mut client = self.client().await.map_err(|err| {
+            tonic::Status::unavailable(format!("failed to connect to node agent: {err}"))
+        })?;
+        let mut request = tonic::Request::new(AgentEmpty {});
+        request.set_timeout(Duration::from_secs(10));
+        let response = client.get_awg_entropy(request).await?;
+        Ok(response.into_inner())
+    }
+
+    pub async fn regenerate_awg_entropy(&self) -> Result<RuntimeCommandResponse, tonic::Status> {
+        let mut client = self.client().await.map_err(|err| {
+            tonic::Status::unavailable(format!("failed to connect to node agent: {err}"))
+        })?;
+        let mut request = tonic::Request::new(AgentEmpty {});
+        request.set_timeout(Duration::from_secs(180));
+        let response = client.regenerate_awg_entropy(request).await?;
+        Ok(response.into_inner())
+    }
+
     pub async fn path_exists(&self, path: &str) -> Result<bool, tonic::Status> {
         let mut client = self.client().await.map_err(|err| {
             tonic::Status::unavailable(format!("failed to connect to node agent: {err}"))

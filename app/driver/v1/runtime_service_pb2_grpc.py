@@ -55,6 +55,16 @@ class RuntimeServiceStub(object):
                 request_serializer=driver_dot_v1_dot_runtime__service__pb2.FullCleanupNodeRequest.SerializeToString,
                 response_deserializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
                 _registered_method=True)
+        self.GetAwgEntropy = channel.unary_unary(
+                '/nodeplane.driver.v1.RuntimeService/GetAwgEntropy',
+                request_serializer=driver_dot_v1_dot_runtime__service__pb2.GetAwgEntropyRequest.SerializeToString,
+                response_deserializer=driver_dot_v1_dot_runtime__service__pb2.GetAwgEntropyResponse.FromString,
+                _registered_method=True)
+        self.RegenerateAwgEntropy = channel.unary_unary(
+                '/nodeplane.driver.v1.RuntimeService/RegenerateAwgEntropy',
+                request_serializer=driver_dot_v1_dot_runtime__service__pb2.RegenerateAwgEntropyRequest.SerializeToString,
+                response_deserializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
+                _registered_method=True)
         self.SyncRuntime = channel.unary_unary(
                 '/nodeplane.driver.v1.RuntimeService/SyncRuntime',
                 request_serializer=driver_dot_v1_dot_runtime__service__pb2.SyncRuntimeRequest.SerializeToString,
@@ -99,6 +109,18 @@ class RuntimeServiceServicer(object):
         raise NotImplementedError('Method not implemented!')
 
     def FullCleanupNode(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetAwgEntropy(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def RegenerateAwgEntropy(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -149,6 +171,16 @@ def add_RuntimeServiceServicer_to_server(servicer, server):
             'FullCleanupNode': grpc.unary_unary_rpc_method_handler(
                     servicer.FullCleanupNode,
                     request_deserializer=driver_dot_v1_dot_runtime__service__pb2.FullCleanupNodeRequest.FromString,
+                    response_serializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.SerializeToString,
+            ),
+            'GetAwgEntropy': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetAwgEntropy,
+                    request_deserializer=driver_dot_v1_dot_runtime__service__pb2.GetAwgEntropyRequest.FromString,
+                    response_serializer=driver_dot_v1_dot_runtime__service__pb2.GetAwgEntropyResponse.SerializeToString,
+            ),
+            'RegenerateAwgEntropy': grpc.unary_unary_rpc_method_handler(
+                    servicer.RegenerateAwgEntropy,
+                    request_deserializer=driver_dot_v1_dot_runtime__service__pb2.RegenerateAwgEntropyRequest.FromString,
                     response_serializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.SerializeToString,
             ),
             'SyncRuntime': grpc.unary_unary_rpc_method_handler(
@@ -279,6 +311,60 @@ class RuntimeService(object):
             target,
             '/nodeplane.driver.v1.RuntimeService/FullCleanupNode',
             driver_dot_v1_dot_runtime__service__pb2.FullCleanupNodeRequest.SerializeToString,
+            driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetAwgEntropy(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/nodeplane.driver.v1.RuntimeService/GetAwgEntropy',
+            driver_dot_v1_dot_runtime__service__pb2.GetAwgEntropyRequest.SerializeToString,
+            driver_dot_v1_dot_runtime__service__pb2.GetAwgEntropyResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RegenerateAwgEntropy(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/nodeplane.driver.v1.RuntimeService/RegenerateAwgEntropy',
+            driver_dot_v1_dot_runtime__service__pb2.RegenerateAwgEntropyRequest.SerializeToString,
             driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
             options,
             channel_credentials,

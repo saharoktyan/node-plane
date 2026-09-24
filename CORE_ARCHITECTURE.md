@@ -89,7 +89,7 @@ accepted → PENDING → RUNNING → SUCCEEDED | FAILED | CANCELLED
   return `NOT_FOUND`; live progress for nonterminal records is not implemented.
 - `ListOperations` filters before limiting and orders by update time descending,
   with operation ID as a deterministic tie-breaker.
-- All 15 implemented operation RPCs persist `RUNNING` before execution, then
+- All 16 implemented operation RPCs persist `RUNNING` before execution, then
   update the same record at completion, preserving start time and result data.
   Failure to persist the start prevents agent dispatch. Paths that reject work
   for a missing agent complete with a terminal failure. Composite
@@ -138,6 +138,9 @@ open indefinitely. Reusing a removed node key requires updating the driver
 agent-target mapping through the normal rollout first.
 `FullCleanupNode` has a 180-second agent deadline and the Python caller waits
 longer than that to receive its recorded terminal result.
+AWG entropy inspection now uses a read-only driver/agent RPC. Regeneration is
+a journaled driver operation with a retained command identity; the in-process
+backend keeps the older script path until node parity testing is complete.
 A local cancellation does not prove that the remote action stopped.
 Existing runtime failures do not all have structured error codes yet.
 

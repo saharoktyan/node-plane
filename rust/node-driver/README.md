@@ -19,8 +19,9 @@ Current scope:
 - can orchestrate `BootstrapNode` through a node agent, including port checks, Docker install, runtime bundle sync, protocol init/deploy, and central registry updates;
 - can orchestrate `ReinstallNode` by composing agent-backed runtime deletion and bootstrap flows;
 - can orchestrate `FullCleanupNode`, including optional authorized key removal through the node agent;
+- can read AWG entropy and regenerate it through the node agent, recording regeneration as a durable command;
 - can execute `EnsureProfileOnNode` and `DeleteProfileFromNode` through node-agent runtime scripts and update `profile_server_state`;
-- persists the start and terminal result of all 15 implemented operation RPCs.
+- persists the start and terminal result of all 16 implemented operation RPCs.
 
 Runtime bundle source of truth:
 
@@ -70,7 +71,7 @@ asynchronous acceptance, per-node coordination and retention remain pending.
 
 ## Command identity
 
-All 15 operation RPCs accept optional metadata `x-node-plane-command-id`.
+All 16 operation RPCs accept optional metadata `x-node-plane-command-id`.
 The key is a single 1–128 character token using ASCII letters, digits, `-`, `_`,
 `.` and `:`. Its namespace spans the driver's history, across RPC methods.
 The driver atomically stores the key, method and SHA-256 of the decoded request's
