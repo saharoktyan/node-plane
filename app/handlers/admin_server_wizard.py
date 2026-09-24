@@ -915,6 +915,7 @@ def _full_cleanup_markup(server: RegisteredServer, lang: str) -> InlineKeyboardM
     rows: list[list[InlineKeyboardButton]] = [
         [InlineKeyboardButton(t(lang, "admin.wizard.full_cleanup_runtime_only"), callback_data=f"{CB_SRV}cleanuprun:runtime:{server.key}")]
     ]
+    rows.append([InlineKeyboardButton(t(lang, "admin.wizard.full_cleanup_and_delete_node"), callback_data=f"{CB_SRV}deleteask:{server.key}")])
     if server.transport == "ssh":
         rows.append(
             [InlineKeyboardButton(t(lang, "admin.wizard.full_cleanup_with_ssh"), callback_data=f"{CB_SRV}cleanuprun:runtime_ssh:{server.key}")]
