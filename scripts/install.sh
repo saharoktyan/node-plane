@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 source "${SCRIPT_DIR}/postgres_runtime.sh"
+source "${SCRIPT_DIR}/python_runtime.sh"
 
 MODE="${MODE:-}"
 NON_INTERACTIVE=0
@@ -13,6 +14,7 @@ INSTALL_REF="${NODE_PLANE_INSTALL_REF:-}"
 FORCE_REINSTALL=0
 CURRENT_STEP="startup"
 AUTO_SETUP_DRIVER_AGENTS_ON_INSTALL="${NODE_PLANE_AUTO_SETUP_DRIVER_AGENTS_ON_INSTALL:-1}"
+PYTHON_BIN=""
 
 set_step() {
   CURRENT_STEP="$1"
@@ -108,45 +110,17 @@ read_version() {
   fi
 }
 
-python_version() {
-  python3 - <<'EOF'
-import sys
-print(f"{sys.version_info.major}.{sys.version_info.minor}")
-EOF
-}
-
-python_supported() {
-  python3 - <<'EOF'
-import sys
-sys.exit(0 if sys.version_info[:2] in {(3, 11), (3, 12)} else 1)
-EOF
-}
-
-ensure_supported_python() {
-  local version
-  version="$(python_version)"
-  if python_supported; then
-    echo "Detected supported Python runtime: ${version}"
-    return 0
-  fi
-
-  echo "Unsupported Python runtime detected: ${version}" >&2
-  echo "Simple mode currently supports Python 3.11.x and 3.12.x for the bot runtime." >&2
-  echo "Install Python 3.11 or 3.12, make it available as python3, and rerun the installer." >&2
-  exit 1
-}
-
 print_python_runtime_help() {
   cat >&2 <<'EOF'
 Python runtime is incomplete for Node Plane simple mode.
-Required: python3 with working venv + pip.
+Required: Python 3.11 or 3.12 with working venv + pip.
 
 Debian/Ubuntu:
   apt-get update
-  apt-get install -y python3 python3-venv python3-pip
+  apt-get install -y python3.12-venv
 
 RHEL/Fedora:
-  dnf install -y python3 python3-pip
+  dnf install -y python3.12 python3.12-pip
 
 Then rerun scripts/install.sh.
 EOF
@@ -646,7 +620,10 @@ ensure_release_python_runtime() {
 
   if [[ ! -x "$python_bin" ]]; then
     set_step "create virtualenv"
-    python3 -m venv "${release_dir}/.venv"
+    if ! "$PYTHON_BIN" -m venv "${release_dir}/.venv"; then
+      print_python_runtime_help
+      return 1
+    fi
   fi
 
   ensure_venv_python_has_pip "$python_bin"
@@ -696,9 +673,9 @@ run_simple_install() {
   new_release_dir="${releases_dir}/${release_name}"
   reused_release=0
 
-  need_cmd python3
   set_step "validate python version"
-  ensure_supported_python
+  PYTHON_BIN="$(select_python_runtime)"
+  echo "Using Python runtime: ${PYTHON_BIN}"
 
   mkdir -p "${releases_dir}" "${shared_dir}/data" "${shared_dir}/ssh"
   sync_shared_env "$shared_dir"
