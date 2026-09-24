@@ -6,7 +6,7 @@ import tempfile
 import types
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from tests.postgres_test_harness import configure_postgres_test_env
 
@@ -46,7 +46,7 @@ sys.modules["telegram"] = telegram_module
 sys.modules["telegram.error"] = telegram_error_module
 sys.modules["telegram.ext"] = telegram_ext_module
 
-from handlers import admin_server_wizard, user_profile
+from handlers import admin_server_wizard, admin_wizard, user_profile
 from services import ssh_keys
 from ui import admin_views, user_views
 from utils import keyboards
@@ -813,6 +813,45 @@ class AdminViewsTests(unittest.TestCase):
             user_profile.admin_menu_text_router(update, context)
         mocked_reset.assert_called_once_with(cleanup_nodes=True, stop_local_runtime=False, source_ref="")
         mocked_edit.assert_called()
+
+
+class ProfileProvisioningRegressionTests(unittest.TestCase):
+    def test_edit_provides_and_saves_xray_identity_for_new_access(self) -> None:
+        method = SimpleNamespace(protocol_kind="xray", server_key="msk1", label="Xray Moscow")
+        operation = SimpleNamespace(status="SUCCEEDED", progress_message="xray: OK")
+        driver = SimpleNamespace(ensure_profile_on_node=Mock(return_value=operation))
+        context = SimpleNamespace(user_data={"cfg_wizard": {"name": "alice", "protocols": {"xray:msk1"}}})
+        profile = {"alice": {"protocols": []}}
+
+        with patch.object(admin_wizard, "_wizard_lang", return_value="en"), patch.object(
+            admin_wizard, "_start_progress_animation", return_value=lambda: None
+        ), patch.object(
+            admin_wizard,
+            "get_access_methods_for_codes",
+            side_effect=lambda codes: [method] if codes else [],
+        ), patch.object(admin_wizard, "get_node_driver", return_value=driver), patch.object(
+            admin_wizard.profile_store, "read", return_value=profile
+        ), patch.object(admin_wizard.profile_store, "write") as write_profile, patch.object(
+            admin_wizard.xray_svc, "get_short_id_local", return_value=None
+        ), patch.object(
+            admin_wizard.xray_svc, "generate_short_id", return_value="a1b2c3d4"
+        ), patch.object(admin_wizard, "ensure_xray_caps"), patch.object(
+            admin_wizard, "upsert_profile_server_state"
+        ) as write_state, patch.object(admin_wizard, "get_awg_servers", return_value={}), patch.object(
+            admin_wizard, "is_frozen", return_value=False
+        ), patch.object(admin_wizard, "_render_edit_menu", return_value=("menu", None)), patch.object(
+            admin_wizard, "_wizard_edit"
+        ), patch.object(admin_wizard, "_wizard_edit_plain") as error_view:
+            admin_wizard._save_edit(context)
+
+        sent = driver.ensure_profile_on_node.call_args.kwargs
+        self.assertTrue(sent["xray_uuid"])
+        self.assertEqual(sent["xray_short_id"], "a1b2c3d4")
+        saved = write_profile.call_args.args[0]["alice"]
+        self.assertEqual(saved["uuid"], sent["xray_uuid"])
+        self.assertEqual(saved["xray"]["server_short_ids"]["msk1"], "a1b2c3d4")
+        self.assertEqual(write_state.call_args.kwargs["status"], "provisioned")
+        error_view.assert_not_called()
 
 
 if __name__ == "__main__":

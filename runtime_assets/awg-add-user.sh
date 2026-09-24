@@ -116,7 +116,7 @@ PY
 
 USED_IPS="$(
   docker_cmd exec -i "$CONTAINER" sh -lc \
-  "wg show $IFACE allowed-ips | awk '{print \\$NF}' | cut -d/ -f1" | tr -d '\\r'
+  "wg show $IFACE allowed-ips | awk '{print \$NF}' | cut -d/ -f1" | tr -d '\r'
 )"
 
 FREE_IP=""
@@ -139,16 +139,16 @@ read -r CLIENT_PRIV CLIENT_PUB CLIENT_PSK < <(
     pub=$(printf "%s" "$priv" | wg pubkey)
     psk=$(wg genpsk)
     echo "$priv $pub $psk"
-  ' | tr -d '\\r'
+  ' | tr -d '\r'
 )
 
-SERVER_PUB="$(docker_cmd exec -i "$CONTAINER" sh -lc "wg show $IFACE public-key" | tr -d '\\r')"
+SERVER_PUB="$(docker_cmd exec -i "$CONTAINER" sh -lc "wg show $IFACE public-key" | tr -d '\r')"
 
 docker_cmd exec -i "$CONTAINER" sh -lc "
-  tmp=\\$(mktemp)
-  echo '$CLIENT_PSK' > \\$tmp
-  wg set $IFACE peer '$CLIENT_PUB' preshared-key \\$tmp allowed-ips '$FREE_IP/32'
-  rm -f \\$tmp
+  tmp=\$(mktemp)
+  echo '$CLIENT_PSK' > \$tmp
+  wg set $IFACE peer '$CLIENT_PUB' preshared-key \$tmp allowed-ips '$FREE_IP/32'
+  rm -f \$tmp
 "
 
 printf '\n# %s\n[Peer]\nPublicKey = %s\nPresharedKey = %s\nAllowedIPs = %s/32\n' \

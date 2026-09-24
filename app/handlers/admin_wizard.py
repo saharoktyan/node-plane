@@ -7,6 +7,7 @@ import re
 import threading
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Set, Tuple
+from uuid import uuid4
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import CallbackContext
@@ -727,16 +728,19 @@ def _finish_create(context: CallbackContext) -> None:
     xray_methods = [method for method in get_access_methods_for_codes(protocols) if method.protocol_kind == "xray"]
     existing_xray = rec.get("xray") if isinstance(rec.get("xray"), dict) else {}
     server_short_ids = dict(existing_xray.get("server_short_ids") or {}) if isinstance(existing_xray, dict) else {}
+    if xray_methods:
+        uuid_val = str(rec.get("uuid") or "").strip() or str(uuid4())
     for method in xray_methods:
+        method_short_id = xray_svc.get_short_id_local(name, method.server_key) or xray_svc.generate_short_id()
         operation = get_node_driver().ensure_profile_on_node(
             method.server_key,
             name,
             ["xray"],
             xray_uuid=uuid_val or "",
-            xray_short_id=xray_short_id or "",
+            xray_short_id=method_short_id,
         )
         ensured_uuid = uuid_val
-        ensured_short_id = xray_short_id
+        ensured_short_id = method_short_id
         if not _op_ok(operation):
             details = (operation.progress_message or operation.status or "")[-500:]
             xray_state_updates.append(("failed", method.server_key, uuid_val, details or "create failed"))
@@ -854,20 +858,23 @@ def _save_edit(context: CallbackContext) -> None:
     selected_xray_server_keys = {method.server_key for method in selected_xray_methods}
     existing_xray_server_keys = {method.server_key for method in existing_xray_methods}
 
-    uuid_val = rec.get("uuid") if isinstance(rec, dict) else None
+    uuid_val = str(rec.get("uuid") or "").strip() or None
     xray_short_id = None
     existing_xray = rec.get("xray") if isinstance(rec.get("xray"), dict) else {}
     server_short_ids = dict(existing_xray.get("server_short_ids") or {}) if isinstance(existing_xray, dict) else {}
+    if selected_xray_methods and not uuid_val:
+        uuid_val = str(uuid4())
     for method in selected_xray_methods:
+        method_short_id = xray_svc.get_short_id_local(name, method.server_key) or xray_svc.generate_short_id()
         operation = get_node_driver().ensure_profile_on_node(
             method.server_key,
             name,
             ["xray"],
             xray_uuid=uuid_val or "",
-            xray_short_id=xray_short_id or "",
+            xray_short_id=method_short_id,
         )
         ensured_uuid = uuid_val
-        ensured_short_id = xray_short_id
+        ensured_short_id = method_short_id
         if not _op_ok(operation) or not ensured_uuid:
             details = (operation.progress_message or operation.status or "")[-500:]
             upsert_profile_server_state(
