@@ -13,6 +13,7 @@ This guide covers installation and operational basics for both supported Node Pl
 ## Requirements
 
 - Python `3.11` or `3.12`
+- `Simple Mode` automatically picks `python3.12` or `python3.11` even when the system `python3` is newer. Install the matching `python3.12-venv` or `python3.11-venv` package as well; set `NODE_PLANE_PYTHON_BIN=/path/to/python3.12` to choose a specific interpreter.
 - Telegram bot token
 - your Telegram numeric user id in `ADMIN_IDS`
 - Docker will be installed automatically on supported Linux hosts when Node Plane needs it for runtime PostgreSQL

@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 source "${SCRIPT_DIR}/postgres_runtime.sh"
+source "${SCRIPT_DIR}/python_runtime.sh"
 
 MODE="${MODE:-auto}"
 TARGET_BRANCH="${NODE_PLANE_UPDATE_BRANCH:-}"
@@ -14,6 +15,7 @@ SKIP_RESTART=0
 HEALTH_TIMEOUT=30
 CURRENT_STEP="startup"
 AUTO_SETUP_DRIVER_AGENTS="${NODE_PLANE_AUTO_SETUP_DRIVER_AGENTS:-1}"
+PYTHON_BIN=""
 
 set_step() {
   CURRENT_STEP="$1"
@@ -326,14 +328,14 @@ wait_for_service() {
 print_python_runtime_help() {
   cat >&2 <<'EOF'
 Python runtime is incomplete for Node Plane simple mode.
-Required: python3 with working venv + pip.
+Required: Python 3.11 or 3.12 with working venv + pip.
 
 Debian/Ubuntu:
   apt-get update
-  apt-get install -y python3 python3-venv python3-pip
+  apt-get install -y python3.12-venv
 
 RHEL/Fedora:
-  dnf install -y python3 python3-pip
+  dnf install -y python3.12 python3.12-pip
 EOF
 }
 
@@ -437,8 +439,9 @@ rollback_simple() {
 }
 
 update_simple() {
-  need_cmd python3
   need_cmd sudo
+  PYTHON_BIN="$(select_python_runtime)"
+  echo "Using Python runtime: ${PYTHON_BIN}"
 
   if [[ $SKIP_DEPS -eq 1 ]]; then
     echo "--skip-deps is not supported in simple mode with release-based updates." >&2
@@ -474,7 +477,10 @@ update_simple() {
 
   echo "Installing Python runtime for new release..."
   set_step "create virtualenv"
-  python3 -m venv "${new_release_dir}/.venv"
+  if ! "$PYTHON_BIN" -m venv "${new_release_dir}/.venv"; then
+    print_python_runtime_help
+    return 1
+  fi
   ensure_venv_python_has_pip "${new_release_dir}/.venv/bin/python"
   set_step "install python build tooling"
   "${new_release_dir}/.venv/bin/python" -m pip install --upgrade pip setuptools wheel
