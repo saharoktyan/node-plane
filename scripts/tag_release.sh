@@ -165,6 +165,7 @@ run_preflight_checks() {
 build_release_artifacts() {
   need_cmd cargo
   need_cmd tar
+  need_cmd readelf
   local out_dir="$1"
   local tag="$2"
   local short_sha
@@ -184,6 +185,8 @@ build_release_artifacts() {
   local agent_bin="rust/node-agent/target/release/node-plane-agent"
   [[ -x "$driver_bin" ]] || { echo "Missing built driver binary: $driver_bin" >&2; exit 1; }
   [[ -x "$agent_bin" ]] || { echo "Missing built agent binary: $agent_bin" >&2; exit 1; }
+  check_glibc_compatibility "$driver_bin"
+  check_glibc_compatibility "$agent_bin"
 
   local driver_name="node-plane-driver-linux-amd64"
   local agent_name="node-plane-agent-linux-amd64"
@@ -215,6 +218,25 @@ EOF
   ls -1 "${release_dir}"
 }
 
+check_glibc_compatibility() {
+  local binary="$1" max_supported="2.36" required
+  if ! readelf -h "$binary" >/dev/null; then
+    echo "Not a valid ELF release binary: ${binary}" >&2
+    return 1
+  fi
+  required="$(readelf --version-info "$binary" \
+    | grep -oE 'GLIBC_[0-9]+\.[0-9]+' \
+    | sed 's/^GLIBC_//' \
+    | sort -Vu \
+    | tail -n 1 || true)"
+  if [[ -n "$required" && "$(printf '%s\n%s\n' "$max_supported" "$required" | sort -V | tail -n 1)" != "$max_supported" ]]; then
+    echo "${binary} requires glibc ${required}; release binaries must support glibc ${max_supported} or older (Debian 12)." >&2
+    echo "Build with scripts/build_release_in_container.sh before publishing this release." >&2
+    return 1
+  fi
+  echo "${binary}: maximum required glibc ${required:-none (static)}"
+}
+
 publish_github_release() {
   local out_dir="$1"
   local tag="$2"
@@ -223,6 +245,23 @@ publish_github_release() {
     echo "Artifacts dir not found for publish: $release_dir" >&2
     exit 1
   fi
+  need_cmd readelf
+  need_cmd tar
+  local verify_dir
+  verify_dir="$(mktemp -d)"
+  for name in node-plane-driver-linux-amd64 node-plane-agent-linux-amd64; do
+    if ! tar -xOzf "${release_dir}/${name}.tar.gz" "$name" > "${verify_dir}/${name}"; then
+      rm -rf "$verify_dir"
+      echo "Invalid release archive: ${name}.tar.gz" >&2
+      return 1
+    fi
+    if ! check_glibc_compatibility "${verify_dir}/${name}"; then
+      rm -rf "$verify_dir"
+      return 1
+    fi
+  done
+  rm -rf "$verify_dir"
+  (cd "$release_dir" && sha256sum -c SHA256SUMS.txt)
 
   local -a flags
   if [[ $DRAFT_RELEASE -eq 1 ]]; then

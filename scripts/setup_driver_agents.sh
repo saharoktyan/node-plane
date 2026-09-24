@@ -64,6 +64,13 @@ set_step() {
   CURRENT_STEP="$1"
 }
 
+show_agent_service_diagnostics() {
+  local target="$1"
+  shift
+  echo "node-plane-agent systemd status on ${target}:" >&2
+  ssh "$@" "$target" 'sudo systemctl status node-plane-agent --no-pager -l || true; echo "Recent node-plane-agent journal:"; sudo journalctl -u node-plane-agent -n 30 --no-pager || true' >&2 || true
+}
+
 on_error() {
   local exit_code="$1"
   echo >&2
@@ -937,6 +944,7 @@ TLSSETUP
     # have changed since the last rollout.
     if [[ "$remote_sum" == "$local_agent_sum" ]] && ssh "${ssh_opts[@]}" "$target" \
       "sudo grep -Fxq 'node_key = \"${server_key}\"' /etc/node-plane/agent.toml && sudo grep -Fxq 'listen_addr = \"0.0.0.0:${AGENT_PORT}\"' /etc/node-plane/agent.toml && sudo grep -Fxq 'Environment=NODE_AGENT_CONFIG_PATH=/etc/node-plane/agent.toml' /etc/systemd/system/node-plane-agent.service" >/dev/null 2>&1; then
+      set_step "restart node-agent on ${server_key}"
       if ssh "${ssh_opts[@]}" "$target" 'sudo systemctl is-active --quiet node-plane-agent' >/dev/null 2>&1; then
         if [[ "$tls_changed" == "1" ]]; then
           if ssh "${ssh_opts[@]}" "$target" 'sudo systemctl restart node-plane-agent && sudo systemctl is-active --quiet node-plane-agent' >/dev/null 2>&1; then
@@ -944,6 +952,7 @@ TLSSETUP
             continue
           fi
           echo "node-agent restart after certificate update failed on ${server_key}" >&2
+          show_agent_service_diagnostics "$target" "${ssh_opts[@]}"
           failed=$((failed + 1))
           continue
         else
@@ -956,12 +965,28 @@ TLSSETUP
         continue
       fi
       echo "node-agent service restart failed on ${server_key}" >&2
+      show_agent_service_diagnostics "$target" "${ssh_opts[@]}"
       failed=$((failed + 1))
       continue
     fi
 
+    set_step "install node-agent on ${server_key}"
     if ! scp "${scp_opts[@]}" "$agent_bin_path" "${target}:/tmp/node-plane-agent"; then
       echo "Failed to copy agent binary to ${server_key}" >&2
+      failed=$((failed + 1))
+      continue
+    fi
+
+    local agent_link_check
+    if ! agent_link_check="$(ssh "${ssh_opts[@]}" "$target" 'ldd /tmp/node-plane-agent 2>&1 || true')"; then
+      echo "Failed to check node-agent binary compatibility on ${server_key}" >&2
+      failed=$((failed + 1))
+      continue
+    fi
+    if [[ "$agent_link_check" == *"not found"* ]]; then
+      echo "node-agent binary is incompatible with ${server_key}; keeping the previously installed binary." >&2
+      echo "$agent_link_check" >&2
+      ssh "${ssh_opts[@]}" "$target" 'rm -f /tmp/node-plane-agent' >/dev/null 2>&1 || true
       failed=$((failed + 1))
       continue
     fi
@@ -1005,6 +1030,7 @@ sudo systemctl is-active --quiet node-plane-agent
 EOF
     if ! ssh "${ssh_opts[@]}" "$target" 'bash -s' < "$remote_script"; then
       echo "Failed to install/start node-agent on ${server_key}" >&2
+      show_agent_service_diagnostics "$target" "${ssh_opts[@]}"
       failed=$((failed + 1))
       rm -f "$remote_script"
       continue

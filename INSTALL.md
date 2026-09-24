@@ -260,6 +260,13 @@ Driver/agent rollout (for grpc driver mode):
 - Local build limits can be adjusted with `NODE_PLANE_BUILD_MIN_MEM_MB` and
   `NODE_PLANE_BUILD_MAX_CPU_PERCENT`. If a VPS does not meet them, build and
   publish the release artifacts on another machine, then use release mode.
+- Published Linux amd64 binaries must work with glibc 2.36 (Debian 12) or older.
+  A native build on a newer distribution may not start on older nodes. On a
+  machine with Docker or Podman, prepare portable artifacts with
+  `./scripts/build_release_in_container.sh <tag>`, then create/push the tag and
+  publish those artifacts with `./scripts/tag_release.sh <tag> --no-tag --no-build --publish --no-draft`.
+  The release script rejects binaries that require a newer glibc. Agent rollout
+  also checks the staged binary on each node before replacing the installed one.
 - The rollout generates a private driver-agent CA and mutual TLS identities in
   `${NODE_PLANE_SHARED_DIR}/driver-agent-tls/`. Keep this directory private and
   backed up with the controller; the CA private key is never installed on nodes.
