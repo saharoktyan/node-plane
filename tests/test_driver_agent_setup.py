@@ -1,7 +1,10 @@
+import io
+import json
 import os
 import pathlib
 import shutil
 import subprocess
+import tarfile
 import tempfile
 import unittest
 
@@ -11,6 +14,73 @@ SETUP_SCRIPT = REPO_ROOT / "scripts" / "setup_driver_agents.sh"
 
 
 class DriverAgentSetupTests(unittest.TestCase):
+    def test_github_api_downloads_assets_when_direct_links_return_404(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            app_root = root / "current"
+            shared_root = root / "shared"
+            fake_bin = root / "bin"
+            for directory in (app_root / "rust" / "node-driver", app_root / "rust" / "node-agent", shared_root, fake_bin):
+                directory.mkdir(parents=True)
+            (shared_root / ".env").write_text("BOT_TOKEN=test\n", encoding="utf-8")
+            for name, asset_id in (("driver", 101), ("agent", 102)):
+                archive = root / f"{name}.tar.gz"
+                binary_name = f"node-plane-{name}-linux-amd64"
+                with tarfile.open(archive, "w:gz") as output:
+                    payload = b"#!/bin/sh\nexit 0\n"
+                    info = tarfile.TarInfo(binary_name)
+                    info.mode = 0o755
+                    info.size = len(payload)
+                    output.addfile(info, io.BytesIO(payload))
+            metadata = root / "release.json"
+            metadata.write_text(json.dumps({"assets": [
+                {"name": f"node-plane-{name}-linux-amd64.tar.gz", "state": "uploaded", "url": f"https://api.github.com/repos/example/node-plane/releases/assets/{asset_id}"}
+                for name, asset_id in (("driver", 101), ("agent", 102))
+            ]}), encoding="utf-8")
+            for command in ("ssh", "scp", "sudo"):
+                path = fake_bin / command
+                path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+                path.chmod(0o755)
+            curl_log = root / "curl.log"
+            curl = fake_bin / "curl"
+            curl.write_text("""#!/bin/sh
+printf '%s\\n' "$*" >> "$CURL_LOG"
+out=''
+url=''
+previous=''
+for arg in "$@"; do
+  if [ "$previous" = '-o' ]; then out="$arg"; fi
+  case "$arg" in https://*) url="$arg";; esac
+  previous="$arg"
+done
+case "$url" in
+  */releases/download/*) exit 22;;
+  */releases/tags/*) cp "$METADATA" "$out";;
+  */releases/assets/101) cp "$DRIVER_ARCHIVE" "$out";;
+  */releases/assets/102) cp "$AGENT_ARCHIVE" "$out";;
+  *) exit 1;;
+esac
+""", encoding="utf-8")
+            curl.chmod(0o755)
+            environment = os.environ.copy()
+            environment.update(
+                NODE_PLANE_APP_DIR=str(app_root),
+                NODE_PLANE_SHARED_DIR=str(shared_root),
+                NODE_PLANE_BINARY_RELEASE="v0.4.1-alpha.7",
+                PATH=f"{fake_bin}:{environment['PATH']}",
+                CURL_LOG=str(curl_log),
+                METADATA=str(metadata),
+                DRIVER_ARCHIVE=str(root / "driver.tar.gz"),
+                AGENT_ARCHIVE=str(root / "agent.tar.gz"),
+            )
+            result = subprocess.run(
+                [str(SETUP_SCRIPT), "--skip-driver", "--skip-agents", "--bin-source", "release"],
+                env=environment, text=True, capture_output=True, check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("trying GitHub API", result.stdout)
+            self.assertIn("Accept: application/octet-stream", curl_log.read_text(encoding="utf-8"))
+
     def test_auto_requires_consent_before_installing_rust_tools(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
