@@ -24,6 +24,7 @@ from telegram.ext import CallbackContext
 from config import APP_COMMIT, APP_ROOT, APP_SEMVER, CB_MENU, CB_SRV, LIST_PAGE_SIZE, PARSE_MODE, SHARED_ROOT
 from i18n import get_locale_for_update, t
 from services.node_driver import get_node_driver
+from services.driver_commands import execute_server_command
 from services.provisioning_state import (
     render_server_provisioning_summary,
     summarize_server_provisioning,
@@ -57,6 +58,12 @@ def _md(value: Any) -> str:
 
 def _safe_output(value: str, limit: int = 1500) -> str:
     return redact_sensitive_text(value or "")[:limit]
+
+
+def _run_driver_action(update: Update, kind: str, server_key: str, **options: bool):
+    update_id = getattr(update, "update_id", None)
+    source_ref = f"telegram:{update_id}" if update_id is not None else ""
+    return execute_server_command(get_node_driver(), source_ref, kind, server_key, **options)
 
 
 def _wizard_get(context: CallbackContext) -> Optional[Dict[str, Any]]:
@@ -1893,7 +1900,7 @@ def on_server_callback(update: Update, context: CallbackContext, payload: str) -
     if payload.startswith("cleanuprun:"):
         _, mode, server_key = payload.split(":", 2)
         stop_progress = _start_progress_animation(context, t(lang, "admin.wizard.full_cleanup"))
-        operation = get_node_driver().full_cleanup_node(server_key, remove_ssh_key=(mode == "runtime_ssh"))
+        operation = _run_driver_action(update, "full_cleanup_node", server_key, remove_ssh_key=(mode == "runtime_ssh"))
         stop_progress()
         rc = 0 if operation.status == "SUCCEEDED" else 1
         out = operation.progress_message
@@ -1910,7 +1917,7 @@ def on_server_callback(update: Update, context: CallbackContext, payload: str) -
         }.get(action, t(lang, "admin.wizard.work"))
         stop_progress = _start_progress_animation(context, action_title)
         if action == "bootstrap":
-            operation = get_node_driver().bootstrap_node(server_key, preserve_config=preserve_config)
+            operation = _run_driver_action(update, "bootstrap_node", server_key, preserve_config=preserve_config)
             stop_progress()
             rc = 0 if operation.status == "SUCCEEDED" else 1
             out = operation.progress_message
@@ -1923,7 +1930,7 @@ def on_server_callback(update: Update, context: CallbackContext, payload: str) -
             _wizard_edit(context, _action_result_text(t(lang, "admin.wizard.bootstrap"), rc, out, server_key, lang), _server_card_markup(server_key, lang))
             return
         if action == "reinstall":
-            operation = get_node_driver().reinstall_node(server_key, preserve_config=preserve_config)
+            operation = _run_driver_action(update, "reinstall_node", server_key, preserve_config=preserve_config)
             stop_progress()
             rc = 0 if operation.status == "SUCCEEDED" else 1
             out = operation.progress_message
@@ -1936,7 +1943,7 @@ def on_server_callback(update: Update, context: CallbackContext, payload: str) -
             _wizard_edit(context, _action_result_text(t(lang, "admin.wizard.reinstall"), rc, out, server_key, lang), _server_card_markup(server_key, lang))
             return
         if action == "delete":
-            operation = get_node_driver().delete_runtime(server_key, preserve_config=preserve_config)
+            operation = _run_driver_action(update, "delete_runtime", server_key, preserve_config=preserve_config)
             stop_progress()
             rc = 0 if operation.status == "SUCCEEDED" else 1
             out = operation.progress_message
@@ -1954,7 +1961,7 @@ def on_server_callback(update: Update, context: CallbackContext, payload: str) -
             return
         if action == "probe":
             stop_progress = _start_progress_animation(context, t(lang, "admin.wizard.probe"))
-            operation = get_node_driver().probe_node(server_key)
+            operation = _run_driver_action(update, "probe_node", server_key)
             stop_progress()
             rc = 0 if operation.status == "SUCCEEDED" else 1
             out = operation.progress_message
@@ -1962,7 +1969,7 @@ def on_server_callback(update: Update, context: CallbackContext, payload: str) -
             return
         if action == "checkports":
             stop_progress = _start_progress_animation(context, t(lang, "admin.wizard.check_ports"))
-            operation = get_node_driver().check_ports(server_key)
+            operation = _run_driver_action(update, "check_ports", server_key)
             stop_progress()
             rc = 0 if operation.status == "SUCCEEDED" else 1
             out = operation.progress_message
@@ -1970,7 +1977,7 @@ def on_server_callback(update: Update, context: CallbackContext, payload: str) -
             return
         if action == "openports":
             stop_progress = _start_progress_animation(context, t(lang, "admin.wizard.open_ports"))
-            operation = get_node_driver().open_ports(server_key)
+            operation = _run_driver_action(update, "open_ports", server_key)
             stop_progress()
             rc = 0 if operation.status == "SUCCEEDED" else 1
             out = operation.progress_message
@@ -1978,7 +1985,7 @@ def on_server_callback(update: Update, context: CallbackContext, payload: str) -
             return
         if action == "installdocker":
             stop_progress = _start_progress_animation(context, t(lang, "admin.wizard.install_docker"))
-            operation = get_node_driver().install_docker(server_key)
+            operation = _run_driver_action(update, "install_docker", server_key)
             stop_progress()
             rc = 0 if operation.status == "SUCCEEDED" else 1
             out = operation.progress_message
@@ -1986,7 +1993,7 @@ def on_server_callback(update: Update, context: CallbackContext, payload: str) -
             return
         if action == "syncenv":
             stop_progress = _start_progress_animation(context, t(lang, "admin.wizard.sync_env"))
-            operation = get_node_driver().sync_node_env(server_key)
+            operation = _run_driver_action(update, "sync_node_env", server_key)
             stop_progress()
             rc = 0 if operation.status == "SUCCEEDED" else 1
             out = operation.progress_message
@@ -1994,7 +2001,7 @@ def on_server_callback(update: Update, context: CallbackContext, payload: str) -
             return
         if action == "syncruntime":
             stop_progress = _start_progress_animation(context, t(lang, "admin.wizard.sync_runtime"))
-            operation = get_node_driver().sync_runtime(server_key)
+            operation = _run_driver_action(update, "sync_runtime", server_key)
             stop_progress()
             rc = 0 if operation.status == "SUCCEEDED" else 1
             out = operation.progress_message
@@ -2002,7 +2009,7 @@ def on_server_callback(update: Update, context: CallbackContext, payload: str) -
             return
         if action == "syncxray":
             stop_progress = _start_progress_animation(context, t(lang, "admin.wizard.sync_xray"))
-            operation = get_node_driver().sync_xray(server_key)
+            operation = _run_driver_action(update, "sync_xray", server_key)
             stop_progress()
             rc = 0 if operation.status == "SUCCEEDED" else 1
             out = operation.progress_message
@@ -2022,7 +2029,7 @@ def on_server_callback(update: Update, context: CallbackContext, payload: str) -
             return
         if action == "reconcile":
             stop_progress = _start_progress_animation(context, t(lang, "admin.wizard.reconcile"))
-            operation = get_node_driver().reconcile_node(server_key)
+            operation = _run_driver_action(update, "reconcile_node", server_key)
             stop_progress()
             rc = 0 if operation.status == "SUCCEEDED" else 1
             out = operation.progress_message
@@ -2304,7 +2311,7 @@ def syncnodeenv_cmd(update: Update, context: CallbackContext) -> None:
     if len(parts) != 2:
         update.effective_message.reply_text(t(lang, "admin.cmd.usage_syncnodeenv"))
         return
-    operation = get_node_driver().sync_node_env(parts[1])
+    operation = _run_driver_action(update, "sync_node_env", parts[1])
     code = 0 if operation.status == "SUCCEEDED" else 1
     out = operation.progress_message
     if code != 0:

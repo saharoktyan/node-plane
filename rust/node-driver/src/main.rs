@@ -12,10 +12,13 @@ use tonic::{Request, Response, Status, transport::Server};
 mod agent_transport;
 mod operations;
 
-use operations::DriverState;
+use operations::{CommandIdentity, CommandStart, DriverState};
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod command_tests;
 
 pub mod agent {
     pub mod v1 {
@@ -1499,12 +1502,19 @@ impl NodeService for NodeApi {
         &self,
         request: Request<SyncNodeEnvRequest>,
     ) -> Result<Response<StartOperationResponse>, Status> {
+        let identity = CommandIdentity::from_request(&request)?;
         let req = request.into_inner();
-        if let Some(target) = self.ctx.agent_target(&req.node_key) {
-            let operation = self
+
+        let operation =
+            match self
                 .ctx
                 .state
-                .begin_operation("sync_node_env", &req.node_key, "")?;
+                .begin_command("sync_node_env", &req.node_key, "", identity)?
+            {
+                CommandStart::New(operation) => operation,
+                CommandStart::Existing(response) => return Ok(Response::new(response)),
+            };
+        if let Some(target) = self.ctx.agent_target(&req.node_key) {
             let content = match self.ctx.fetch_server_row(&req.node_key).await {
                 Ok(Some(row)) => self.ctx.render_node_env_from_row(&row),
                 _ => self.ctx.render_default_node_env(&req.node_key),
@@ -1521,23 +1531,26 @@ impl NodeService for NodeApi {
             };
             return Ok(Response::new(operation.finish(status, &summary)?));
         }
-        Ok(Response::new(self.ctx.state.missing_agent_operation(
-            "sync_node_env",
-            &req.node_key,
-            "",
-        )?))
+        Ok(Response::new(operation.missing_agent()?))
     }
 
     async fn probe_node(
         &self,
         request: Request<ProbeNodeRequest>,
     ) -> Result<Response<StartOperationResponse>, Status> {
+        let identity = CommandIdentity::from_request(&request)?;
         let req = request.into_inner();
-        if let Some(target) = self.ctx.agent_target(&req.node_key) {
-            let operation = self
+
+        let operation =
+            match self
                 .ctx
                 .state
-                .begin_operation("probe_node", &req.node_key, "")?;
+                .begin_command("probe_node", &req.node_key, "", identity)?
+            {
+                CommandStart::New(operation) => operation,
+                CommandStart::Existing(response) => return Ok(Response::new(response)),
+            };
+        if let Some(target) = self.ctx.agent_target(&req.node_key) {
             let transport = agent_transport::AgentTransport::new(target);
             let summary = match (
                 transport.get_node_health().await,
@@ -1560,23 +1573,26 @@ impl NodeService for NodeApi {
             };
             return Ok(Response::new(operation.finish(status, &summary)?));
         }
-        Ok(Response::new(self.ctx.state.missing_agent_operation(
-            "probe_node",
-            &req.node_key,
-            "",
-        )?))
+        Ok(Response::new(operation.missing_agent()?))
     }
 
     async fn check_ports(
         &self,
         request: Request<CheckPortsRequest>,
     ) -> Result<Response<StartOperationResponse>, Status> {
+        let identity = CommandIdentity::from_request(&request)?;
         let req = request.into_inner();
-        if let Some(target) = self.ctx.agent_target(&req.node_key) {
-            let operation = self
+
+        let operation =
+            match self
                 .ctx
                 .state
-                .begin_operation("check_ports", &req.node_key, "")?;
+                .begin_command("check_ports", &req.node_key, "", identity)?
+            {
+                CommandStart::New(operation) => operation,
+                CommandStart::Existing(response) => return Ok(Response::new(response)),
+            };
+        if let Some(target) = self.ctx.agent_target(&req.node_key) {
             let specs = match self.ctx.fetch_server_row(&req.node_key).await {
                 Ok(Some(row)) => self.ctx.port_check_specs_from_row(&row),
                 _ => self.ctx.default_port_check_specs(),
@@ -1612,23 +1628,26 @@ impl NodeService for NodeApi {
             };
             return Ok(Response::new(operation.finish(status, &summary)?));
         }
-        Ok(Response::new(self.ctx.state.missing_agent_operation(
-            "check_ports",
-            &req.node_key,
-            "",
-        )?))
+        Ok(Response::new(operation.missing_agent()?))
     }
 
     async fn open_ports(
         &self,
         request: Request<OpenPortsRequest>,
     ) -> Result<Response<StartOperationResponse>, Status> {
+        let identity = CommandIdentity::from_request(&request)?;
         let req = request.into_inner();
-        if let Some(target) = self.ctx.agent_target(&req.node_key) {
-            let operation = self
+
+        let operation =
+            match self
                 .ctx
                 .state
-                .begin_operation("open_ports", &req.node_key, "")?;
+                .begin_command("open_ports", &req.node_key, "", identity)?
+            {
+                CommandStart::New(operation) => operation,
+                CommandStart::Existing(response) => return Ok(Response::new(response)),
+            };
+        if let Some(target) = self.ctx.agent_target(&req.node_key) {
             let specs = match self.ctx.fetch_server_row(&req.node_key).await {
                 Ok(Some(row)) => self.ctx.port_check_specs_from_row(&row),
                 _ => self.ctx.default_port_check_specs(),
@@ -1661,23 +1680,26 @@ impl NodeService for NodeApi {
             };
             return Ok(Response::new(operation.finish(status, &summary)?));
         }
-        Ok(Response::new(self.ctx.state.missing_agent_operation(
-            "open_ports",
-            &req.node_key,
-            "",
-        )?))
+        Ok(Response::new(operation.missing_agent()?))
     }
 
     async fn install_docker(
         &self,
         request: Request<InstallDockerRequest>,
     ) -> Result<Response<StartOperationResponse>, Status> {
+        let identity = CommandIdentity::from_request(&request)?;
         let req = request.into_inner();
-        if let Some(target) = self.ctx.agent_target(&req.node_key) {
-            let operation = self
+
+        let operation =
+            match self
                 .ctx
                 .state
-                .begin_operation("install_docker", &req.node_key, "")?;
+                .begin_command("install_docker", &req.node_key, "", identity)?
+            {
+                CommandStart::New(operation) => operation,
+                CommandStart::Existing(response) => return Ok(Response::new(response)),
+            };
+        if let Some(target) = self.ctx.agent_target(&req.node_key) {
             let transport = agent_transport::AgentTransport::new(target);
             let summary = match transport.install_docker().await {
                 Ok(result) => result.summary,
@@ -1690,11 +1712,7 @@ impl NodeService for NodeApi {
             };
             return Ok(Response::new(operation.finish(status, &summary)?));
         }
-        Ok(Response::new(self.ctx.state.missing_agent_operation(
-            "install_docker",
-            &req.node_key,
-            "",
-        )?))
+        Ok(Response::new(operation.missing_agent()?))
     }
 }
 
@@ -1704,6 +1722,7 @@ impl ProvisioningService for ProvisioningApi {
         &self,
         request: Request<driver::v1::EnsureProfileOnNodeRequest>,
     ) -> Result<Response<StartOperationResponse>, Status> {
+        let identity = CommandIdentity::from_request(&request)?;
         let req = request.into_inner();
         let profile = req.profile.unwrap_or_else(|| ProfileSpec {
             profile_name: String::new(),
@@ -1712,6 +1731,16 @@ impl ProvisioningService for ProvisioningApi {
             xray: None,
         });
         let profile_name = profile.profile_name.trim().to_string();
+
+        let execution = match self.ctx.state.begin_command(
+            "ensure_profile_on_node",
+            &req.node_key,
+            &profile_name,
+            identity,
+        )? {
+            CommandStart::New(operation) => operation,
+            CommandStart::Existing(response) => return Ok(Response::new(response)),
+        };
         if let Some(target) = self.ctx.agent_target(&req.node_key) {
             let transport = agent_transport::AgentTransport::new(target);
             let mut lines = Vec::new();
@@ -1824,27 +1853,31 @@ impl ProvisioningService for ProvisioningApi {
                 lines.push("no supported protocol kinds requested".to_string());
                 failed = true;
             }
-            return Ok(Response::new(self.ctx.state.finish_operation_with_result(
-                "ensure_profile_on_node",
-                &req.node_key,
-                &profile_name,
+            return Ok(Response::new(execution.finish_with_result(
                 if failed { "FAILED" } else { "SUCCEEDED" },
                 &lines.join("\n"),
                 &result_json,
             )?));
         }
-        Ok(Response::new(self.ctx.state.missing_agent_operation(
-            "ensure_profile_on_node",
-            &req.node_key,
-            &profile_name,
-        )?))
+        Ok(Response::new(execution.missing_agent()?))
     }
 
     async fn delete_profile_from_node(
         &self,
         request: Request<DeleteProfileFromNodeRequest>,
     ) -> Result<Response<StartOperationResponse>, Status> {
+        let identity = CommandIdentity::from_request(&request)?;
         let req = request.into_inner();
+
+        let execution = match self.ctx.state.begin_command(
+            "delete_profile_from_node",
+            &req.node_key,
+            &req.profile_name,
+            identity,
+        )? {
+            CommandStart::New(operation) => operation,
+            CommandStart::Existing(response) => return Ok(Response::new(response)),
+        };
         if let Some(target) = self.ctx.agent_target(&req.node_key) {
             let transport = agent_transport::AgentTransport::new(target);
             let mut lines = Vec::new();
@@ -1904,38 +1937,38 @@ impl ProvisioningService for ProvisioningApi {
                 lines.push("no supported protocol kinds requested".to_string());
                 failed = true;
             }
-            return Ok(Response::new(self.ctx.state.finish_operation(
-                "delete_profile_from_node",
-                &req.node_key,
-                &req.profile_name,
+            return Ok(Response::new(execution.finish(
                 if failed { "FAILED" } else { "SUCCEEDED" },
                 &lines.join("\n"),
             )?));
         }
-        Ok(Response::new(self.ctx.state.missing_agent_operation(
-            "delete_profile_from_node",
-            &req.node_key,
-            &req.profile_name,
-        )?))
+        Ok(Response::new(execution.missing_agent()?))
     }
 
     async fn reconcile_node(
         &self,
         request: Request<ReconcileNodeRequest>,
     ) -> Result<Response<StartOperationResponse>, Status> {
+        let identity = CommandIdentity::from_request(&request)?;
         let req = request.into_inner();
         let node_key = req.node_key.trim().to_string();
         if node_key.is_empty() {
             return Err(Status::invalid_argument("node_key is required"));
         }
+
+        let execution =
+            match self
+                .ctx
+                .state
+                .begin_command("reconcile_node", &node_key, "", identity)?
+            {
+                CommandStart::New(operation) => operation,
+                CommandStart::Existing(response) => return Ok(Response::new(response)),
+            };
         let Some(row) = self.ctx.fetch_server_row(&node_key).await? else {
-            return Ok(Response::new(self.ctx.state.finish_operation(
-                "reconcile_node",
-                &node_key,
-                "",
-                "FAILED",
-                &format!("Server {node_key} not found"),
-            )?));
+            return Ok(Response::new(
+                execution.finish("FAILED", &format!("Server {node_key} not found"))?,
+            ));
         };
         let protocol_kinds = self.ctx.parse_protocol_kinds(
             row.try_get::<_, Option<String>>("protocol_kinds")
@@ -1945,22 +1978,15 @@ impl ProvisioningService for ProvisioningApi {
                 .as_str(),
         );
         if protocol_kinds.is_empty() {
-            return Ok(Response::new(self.ctx.state.finish_operation(
-                "reconcile_node",
-                &node_key,
-                "",
+            return Ok(Response::new(execution.finish(
                 "SUCCEEDED",
                 &format!("server: {node_key}\nno managed protocols"),
             )?));
         }
         let Some(target) = self.ctx.agent_target(&node_key) else {
-            return Ok(Response::new(self.ctx.state.finish_operation(
-                "reconcile_node",
-                &node_key,
-                "",
-                "FAILED",
-                "no node-agent target configured",
-            )?));
+            return Ok(Response::new(
+                execution.finish("FAILED", "no node-agent target configured")?,
+            ));
         };
 
         let mut overall_code = 0;
@@ -1987,24 +2013,29 @@ impl ProvisioningService for ProvisioningApi {
         } else {
             parts.join("\n\n")
         };
-        Ok(Response::new(self.ctx.state.finish_operation(
-            "reconcile_node",
-            &node_key,
-            "",
-            status,
-            &message,
-        )?))
+        Ok(Response::new(execution.finish(status, &message)?))
     }
 
     async fn reconcile_profile(
         &self,
         request: Request<ReconcileProfileRequest>,
     ) -> Result<Response<StartOperationResponse>, Status> {
+        let identity = CommandIdentity::from_request(&request)?;
         let req = request.into_inner();
         let profile_name = req.profile_name.trim().to_string();
         if profile_name.is_empty() {
             return Err(Status::invalid_argument("profile_name is required"));
         }
+
+        let execution =
+            match self
+                .ctx
+                .state
+                .begin_command("reconcile_profile", "", &profile_name, identity)?
+            {
+                CommandStart::New(operation) => operation,
+                CommandStart::Existing(response) => return Ok(Response::new(response)),
+            };
         let client = self.ctx.db_client().await?;
         let exists = client
             .query_opt(
@@ -2014,13 +2045,9 @@ impl ProvisioningService for ProvisioningApi {
             .await
             .map_err(|err| Status::internal(format!("failed to query profile: {err}")))?;
         if exists.is_none() {
-            return Ok(Response::new(self.ctx.state.finish_operation(
-                "reconcile_profile",
-                "",
-                &profile_name,
-                "FAILED",
-                &format!("profile {profile_name} not found"),
-            )?));
+            return Ok(Response::new(
+                execution.finish("FAILED", &format!("profile {profile_name} not found"))?,
+            ));
         }
 
         let profile_codes_rows = client
@@ -2074,10 +2101,7 @@ impl ProvisioningService for ProvisioningApi {
             }
         }
         if target_node_keys.is_empty() {
-            return Ok(Response::new(self.ctx.state.finish_operation(
-                "reconcile_profile",
-                "",
-                &profile_name,
+            return Ok(Response::new(execution.finish(
                 "SUCCEEDED",
                 &format!("profile: {profile_name}\nno managed protocols"),
             )?));
@@ -2108,10 +2132,7 @@ impl ProvisioningService for ProvisioningApi {
             ));
         }
 
-        Ok(Response::new(self.ctx.state.finish_operation(
-            "reconcile_profile",
-            "",
-            &profile_name,
+        Ok(Response::new(execution.finish(
             if overall_failed {
                 "FAILED"
             } else {
@@ -2183,24 +2204,28 @@ impl RuntimeService for RuntimeApi {
         &self,
         request: Request<BootstrapNodeRequest>,
     ) -> Result<Response<StartOperationResponse>, Status> {
+        let identity = CommandIdentity::from_request(&request)?;
         let req = request.into_inner();
+
+        let execution =
+            match self
+                .ctx
+                .state
+                .begin_command("bootstrap_node", &req.node_key, "", identity)?
+            {
+                CommandStart::New(operation) => operation,
+                CommandStart::Existing(response) => return Ok(Response::new(response)),
+            };
         if let Some(target) = self.ctx.agent_target(&req.node_key) {
             let row = match self.ctx.fetch_server_row(&req.node_key).await {
                 Ok(Some(row)) => row,
                 Ok(None) => {
-                    return Ok(Response::new(self.ctx.state.finish_operation(
-                        "bootstrap_node",
-                        &req.node_key,
-                        "",
-                        "FAILED",
-                        "server not found",
-                    )?));
+                    return Ok(Response::new(
+                        execution.finish("FAILED", "server not found")?,
+                    ));
                 }
                 Err(err) => {
-                    return Ok(Response::new(self.ctx.state.finish_operation(
-                        "bootstrap_node",
-                        &req.node_key,
-                        "",
+                    return Ok(Response::new(execution.finish(
                         "FAILED",
                         &format!("failed to load server registry row: {err}"),
                     )?));
@@ -2233,13 +2258,7 @@ impl RuntimeService for RuntimeApi {
                             .ctx
                             .mark_bootstrap_state(&req.node_key, "bootstrap_failed", &message)
                             .await;
-                        return Ok(Response::new(self.ctx.state.finish_operation(
-                            "bootstrap_node",
-                            &req.node_key,
-                            "",
-                            "FAILED",
-                            &message,
-                        )?));
+                        return Ok(Response::new(execution.finish("FAILED", &message)?));
                     }
                 }
                 Err(err) => {
@@ -2248,13 +2267,7 @@ impl RuntimeService for RuntimeApi {
                         .ctx
                         .mark_bootstrap_state(&req.node_key, "bootstrap_failed", &message)
                         .await;
-                    return Ok(Response::new(self.ctx.state.finish_operation(
-                        "bootstrap_node",
-                        &req.node_key,
-                        "",
-                        "FAILED",
-                        &message,
-                    )?));
+                    return Ok(Response::new(execution.finish("FAILED", &message)?));
                 }
             }
 
@@ -2264,13 +2277,7 @@ impl RuntimeService for RuntimeApi {
                     .ctx
                     .mark_bootstrap_state(&req.node_key, "bootstrap_failed", &message)
                     .await;
-                return Ok(Response::new(self.ctx.state.finish_operation(
-                    "bootstrap_node",
-                    &req.node_key,
-                    "",
-                    "FAILED",
-                    &message,
-                )?));
+                return Ok(Response::new(execution.finish("FAILED", &message)?));
             }
 
             let files = self.ctx.runtime_file_bundle(Some(&row), &req.node_key)?;
@@ -2280,13 +2287,7 @@ impl RuntimeService for RuntimeApi {
                     .ctx
                     .mark_bootstrap_state(&req.node_key, "bootstrap_failed", &message)
                     .await;
-                return Ok(Response::new(self.ctx.state.finish_operation(
-                    "bootstrap_node",
-                    &req.node_key,
-                    "",
-                    "FAILED",
-                    &message,
-                )?));
+                return Ok(Response::new(execution.finish("FAILED", &message)?));
             }
 
             if protocol_kinds.iter().any(|item| item == "xray") {
@@ -2340,13 +2341,7 @@ impl RuntimeService for RuntimeApi {
                                             )
                                             .await;
                                         return Ok(Response::new(
-                                            self.ctx.state.finish_operation(
-                                                "bootstrap_node",
-                                                &req.node_key,
-                                                "",
-                                                "FAILED",
-                                                &message,
-                                            )?,
+                                            execution.finish("FAILED", &message)?,
                                         ));
                                     }
                                 }
@@ -2361,13 +2356,9 @@ impl RuntimeService for RuntimeApi {
                                             &message,
                                         )
                                         .await;
-                                    return Ok(Response::new(self.ctx.state.finish_operation(
-                                        "bootstrap_node",
-                                        &req.node_key,
-                                        "",
-                                        "FAILED",
-                                        &message,
-                                    )?));
+                                    return Ok(Response::new(
+                                        execution.finish("FAILED", &message)?,
+                                    ));
                                 }
                             }
                         }
@@ -2377,13 +2368,7 @@ impl RuntimeService for RuntimeApi {
                                 .ctx
                                 .mark_bootstrap_state(&req.node_key, "bootstrap_failed", &message)
                                 .await;
-                            return Ok(Response::new(self.ctx.state.finish_operation(
-                                "bootstrap_node",
-                                &req.node_key,
-                                "",
-                                "FAILED",
-                                &message,
-                            )?));
+                            return Ok(Response::new(execution.finish("FAILED", &message)?));
                         }
                     }
                     completed_parts.push("Xray settings generated".to_string());
@@ -2396,13 +2381,7 @@ impl RuntimeService for RuntimeApi {
                         .ctx
                         .mark_bootstrap_state(&req.node_key, "bootstrap_failed", &message)
                         .await;
-                    return Ok(Response::new(self.ctx.state.finish_operation(
-                        "bootstrap_node",
-                        &req.node_key,
-                        "",
-                        "FAILED",
-                        &message,
-                    )?));
+                    return Ok(Response::new(execution.finish("FAILED", &message)?));
                 }
                 completed_parts.push("Xray runtime deployed".to_string());
             }
@@ -2425,13 +2404,7 @@ impl RuntimeService for RuntimeApi {
                             .ctx
                             .mark_bootstrap_state(&req.node_key, "bootstrap_failed", &message)
                             .await;
-                        return Ok(Response::new(self.ctx.state.finish_operation(
-                            "bootstrap_node",
-                            &req.node_key,
-                            "",
-                            "FAILED",
-                            &message,
-                        )?));
+                        return Ok(Response::new(execution.finish("FAILED", &message)?));
                     }
                 }
                 if let Err(err) = transport.deploy_awg().await {
@@ -2440,13 +2413,7 @@ impl RuntimeService for RuntimeApi {
                         .ctx
                         .mark_bootstrap_state(&req.node_key, "bootstrap_failed", &message)
                         .await;
-                    return Ok(Response::new(self.ctx.state.finish_operation(
-                        "bootstrap_node",
-                        &req.node_key,
-                        "",
-                        "FAILED",
-                        &message,
-                    )?));
+                    return Ok(Response::new(execution.finish("FAILED", &message)?));
                 }
                 completed_parts.push("AWG runtime deployed".to_string());
             }
@@ -2458,39 +2425,34 @@ impl RuntimeService for RuntimeApi {
                 .await
             {
                 Ok(()) => {
-                    return Ok(Response::new(self.ctx.state.finish_operation(
-                        "bootstrap_node",
-                        &req.node_key,
-                        "",
-                        "SUCCEEDED",
-                        &summary,
-                    )?));
+                    return Ok(Response::new(execution.finish("SUCCEEDED", &summary)?));
                 }
                 Err(err) => {
                     let message =
                         format!("bootstrap completed on agent but registry update failed: {err}");
-                    return Ok(Response::new(self.ctx.state.finish_operation(
-                        "bootstrap_node",
-                        &req.node_key,
-                        "",
-                        "FAILED",
-                        &message,
-                    )?));
+                    return Ok(Response::new(execution.finish("FAILED", &message)?));
                 }
             }
         }
-        Ok(Response::new(self.ctx.state.missing_agent_operation(
-            "bootstrap_node",
-            &req.node_key,
-            "",
-        )?))
+        Ok(Response::new(execution.missing_agent()?))
     }
 
     async fn reinstall_node(
         &self,
         request: Request<ReinstallNodeRequest>,
     ) -> Result<Response<StartOperationResponse>, Status> {
+        let identity = CommandIdentity::from_request(&request)?;
         let req = request.into_inner();
+
+        let execution =
+            match self
+                .ctx
+                .state
+                .begin_command("reinstall_node", &req.node_key, "", identity)?
+            {
+                CommandStart::New(operation) => operation,
+                CommandStart::Existing(response) => return Ok(Response::new(response)),
+            };
         if let Some(target) = self.ctx.agent_target(&req.node_key) {
             if !req.preserve_config {
                 let transport = agent_transport::AgentTransport::new(target);
@@ -2498,22 +2460,13 @@ impl RuntimeService for RuntimeApi {
                     Ok(result) => match self.ctx.mark_runtime_deleted(&req.node_key, false).await {
                         Ok(()) => result.summary,
                         Err(err) => {
-                            return Ok(Response::new(self.ctx.state.finish_operation(
-                                "reinstall_node",
-                                &req.node_key,
-                                "",
-                                "FAILED",
-                                &format!(
+                            return Ok(Response::new(execution.finish("FAILED", &format!(
                                     "runtime deleted on agent but central registry update failed: {err}"
-                                ),
-                            )?));
+                                ))?));
                         }
                     },
                     Err(err) => {
-                        return Ok(Response::new(self.ctx.state.finish_operation(
-                            "reinstall_node",
-                            &req.node_key,
-                            "",
+                        return Ok(Response::new(execution.finish(
                             "FAILED",
                             &format!("agent runtime delete failed before reinstall: {err}"),
                         )?));
@@ -2536,13 +2489,7 @@ impl RuntimeService for RuntimeApi {
                         "Clean reinstall.\n{cleanup_summary}\n\n{}",
                         op.progress_message
                     );
-                    return Ok(Response::new(self.ctx.state.finish_operation(
-                        "reinstall_node",
-                        &req.node_key,
-                        "",
-                        &status,
-                        &message,
-                    )?));
+                    return Ok(Response::new(execution.finish(&status, &message)?));
                 }
             } else {
                 let bootstrap_response = self
@@ -2562,35 +2509,32 @@ impl RuntimeService for RuntimeApi {
                         "Reinstall with existing config preserved.\n{}",
                         op.progress_message
                     );
-                    return Ok(Response::new(self.ctx.state.finish_operation(
-                        "reinstall_node",
-                        &req.node_key,
-                        "",
-                        &status,
-                        &message,
-                    )?));
+                    return Ok(Response::new(execution.finish(&status, &message)?));
                 }
             }
-            return Ok(Response::new(self.ctx.state.finish_operation(
-                "reinstall_node",
-                &req.node_key,
-                "",
-                "FAILED",
-                "bootstrap operation result was not found",
-            )?));
+            return Ok(Response::new(
+                execution.finish("FAILED", "bootstrap operation result was not found")?,
+            ));
         }
-        Ok(Response::new(self.ctx.state.missing_agent_operation(
-            "reinstall_node",
-            &req.node_key,
-            "",
-        )?))
+        Ok(Response::new(execution.missing_agent()?))
     }
 
     async fn delete_runtime(
         &self,
         request: Request<DeleteRuntimeRequest>,
     ) -> Result<Response<StartOperationResponse>, Status> {
+        let identity = CommandIdentity::from_request(&request)?;
         let req = request.into_inner();
+
+        let execution =
+            match self
+                .ctx
+                .state
+                .begin_command("delete_runtime", &req.node_key, "", identity)?
+            {
+                CommandStart::New(operation) => operation,
+                CommandStart::Existing(response) => return Ok(Response::new(response)),
+            };
         if let Some(target) = self.ctx.agent_target(&req.node_key) {
             let transport = agent_transport::AgentTransport::new(target);
             let summary = match transport.delete_runtime(req.preserve_config).await {
@@ -2611,53 +2555,46 @@ impl RuntimeService for RuntimeApi {
             } else {
                 "FAILED"
             };
-            return Ok(Response::new(self.ctx.state.finish_operation(
-                "delete_runtime",
-                &req.node_key,
-                "",
-                status,
-                &summary,
-            )?));
+            return Ok(Response::new(execution.finish(status, &summary)?));
         }
-        Ok(Response::new(self.ctx.state.missing_agent_operation(
-            "delete_runtime",
-            &req.node_key,
-            "",
-        )?))
+        Ok(Response::new(execution.missing_agent()?))
     }
 
     async fn full_cleanup_node(
         &self,
         request: Request<FullCleanupNodeRequest>,
     ) -> Result<Response<StartOperationResponse>, Status> {
+        let identity = CommandIdentity::from_request(&request)?;
         let req = request.into_inner();
+
+        let execution =
+            match self
+                .ctx
+                .state
+                .begin_command("full_cleanup_node", &req.node_key, "", identity)?
+            {
+                CommandStart::New(operation) => operation,
+                CommandStart::Existing(response) => return Ok(Response::new(response)),
+            };
         if let Some(target) = self.ctx.agent_target(&req.node_key) {
             let transport = agent_transport::AgentTransport::new(target);
-            let cleanup_summary = match transport.delete_runtime(false).await {
-                Ok(result) => match self.ctx.mark_runtime_deleted(&req.node_key, false).await {
-                    Ok(()) => result.summary,
-                    Err(err) => {
-                        return Ok(Response::new(self.ctx.state.finish_operation(
-                            "full_cleanup_node",
-                            &req.node_key,
-                            "",
-                            "FAILED",
-                            &format!(
+            let cleanup_summary =
+                match transport.delete_runtime(false).await {
+                    Ok(result) => match self.ctx.mark_runtime_deleted(&req.node_key, false).await {
+                        Ok(()) => result.summary,
+                        Err(err) => {
+                            return Ok(Response::new(execution.finish("FAILED", &format!(
                                 "runtime deleted on agent but central registry update failed: {err}"
-                            ),
+                            ))?));
+                        }
+                    },
+                    Err(err) => {
+                        return Ok(Response::new(execution.finish(
+                            "FAILED",
+                            &format!("agent runtime delete failed: {err}"),
                         )?));
                     }
-                },
-                Err(err) => {
-                    return Ok(Response::new(self.ctx.state.finish_operation(
-                        "full_cleanup_node",
-                        &req.node_key,
-                        "",
-                        "FAILED",
-                        &format!("agent runtime delete failed: {err}"),
-                    )?));
-                }
-            };
+                };
 
             let mut lines = vec![cleanup_summary];
             let mut notes = vec!["full cleanup completed".to_string()];
@@ -2688,34 +2625,33 @@ impl RuntimeService for RuntimeApi {
             let notes_text = notes.join("; ");
             if let Err(err) = self.ctx.mark_full_cleanup(&req.node_key, &notes_text).await {
                 lines.push(format!("central registry notes update failed: {err}"));
-                return Ok(Response::new(self.ctx.state.finish_operation(
-                    "full_cleanup_node",
-                    &req.node_key,
-                    "",
-                    "FAILED",
-                    &lines.join("\n"),
-                )?));
+                return Ok(Response::new(
+                    execution.finish("FAILED", &lines.join("\n"))?,
+                ));
             }
-            return Ok(Response::new(self.ctx.state.finish_operation(
-                "full_cleanup_node",
-                &req.node_key,
-                "",
-                "SUCCEEDED",
-                &lines.join("\n"),
-            )?));
+            return Ok(Response::new(
+                execution.finish("SUCCEEDED", &lines.join("\n"))?,
+            ));
         }
-        Ok(Response::new(self.ctx.state.missing_agent_operation(
-            "full_cleanup_node",
-            &req.node_key,
-            "",
-        )?))
+        Ok(Response::new(execution.missing_agent()?))
     }
 
     async fn sync_runtime(
         &self,
         request: Request<SyncRuntimeRequest>,
     ) -> Result<Response<StartOperationResponse>, Status> {
+        let identity = CommandIdentity::from_request(&request)?;
         let req = request.into_inner();
+
+        let execution =
+            match self
+                .ctx
+                .state
+                .begin_command("sync_runtime", &req.node_key, "", identity)?
+            {
+                CommandStart::New(operation) => operation,
+                CommandStart::Existing(response) => return Ok(Response::new(response)),
+            };
         if let Some(target) = self.ctx.agent_target(&req.node_key) {
             let row = match self.ctx.fetch_server_row(&req.node_key).await {
                 Ok(Some(row)) => Some(row),
@@ -2757,43 +2693,37 @@ impl RuntimeService for RuntimeApi {
             } else {
                 "FAILED"
             };
-            return Ok(Response::new(self.ctx.state.finish_operation(
-                "sync_runtime",
-                &req.node_key,
-                "",
-                status,
-                &summary,
-            )?));
+            return Ok(Response::new(execution.finish(status, &summary)?));
         }
-        Ok(Response::new(self.ctx.state.missing_agent_operation(
-            "sync_runtime",
-            &req.node_key,
-            "",
-        )?))
+        Ok(Response::new(execution.missing_agent()?))
     }
 
     async fn sync_xray(
         &self,
         request: Request<SyncXrayRequest>,
     ) -> Result<Response<StartOperationResponse>, Status> {
+        let identity = CommandIdentity::from_request(&request)?;
         let req = request.into_inner();
+
+        let execution =
+            match self
+                .ctx
+                .state
+                .begin_command("sync_xray", &req.node_key, "", identity)?
+            {
+                CommandStart::New(operation) => operation,
+                CommandStart::Existing(response) => return Ok(Response::new(response)),
+            };
         if let Some(target) = self.ctx.agent_target(&req.node_key) {
             let row = match self.ctx.fetch_server_row(&req.node_key).await {
                 Ok(Some(row)) => row,
                 Ok(None) => {
-                    return Ok(Response::new(self.ctx.state.finish_operation(
-                        "sync_xray",
-                        &req.node_key,
-                        "",
-                        "FAILED",
-                        "server not found",
-                    )?));
+                    return Ok(Response::new(
+                        execution.finish("FAILED", "server not found")?,
+                    ));
                 }
                 Err(err) => {
-                    return Ok(Response::new(self.ctx.state.finish_operation(
-                        "sync_xray",
-                        &req.node_key,
-                        "",
+                    return Ok(Response::new(execution.finish(
                         "FAILED",
                         &format!("failed to load server registry row: {err}"),
                     )?));
@@ -2807,13 +2737,9 @@ impl RuntimeService for RuntimeApi {
                     .as_str(),
             );
             if !protocol_kinds.iter().any(|item| item == "xray") {
-                return Ok(Response::new(self.ctx.state.finish_operation(
-                    "sync_xray",
-                    &req.node_key,
-                    "",
-                    "FAILED",
-                    "xray is not enabled on this server",
-                )?));
+                return Ok(Response::new(
+                    execution.finish("FAILED", "xray is not enabled on this server")?,
+                ));
             }
             let config_path = self.ctx.row_string(
                 &row,
@@ -2850,19 +2776,9 @@ impl RuntimeService for RuntimeApi {
             } else {
                 "FAILED"
             };
-            return Ok(Response::new(self.ctx.state.finish_operation(
-                "sync_xray",
-                &req.node_key,
-                "",
-                status,
-                &summary,
-            )?));
+            return Ok(Response::new(execution.finish(status, &summary)?));
         }
-        Ok(Response::new(self.ctx.state.missing_agent_operation(
-            "sync_xray",
-            &req.node_key,
-            "",
-        )?))
+        Ok(Response::new(execution.missing_agent()?))
     }
 
     async fn get_runtime_status(

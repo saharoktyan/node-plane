@@ -131,14 +131,9 @@ async fn watch_returns_terminal_result_and_closes() {
     let ctx = context();
     let started = ctx
         .state
-        .finish_operation_with_result(
-            "ensure_profile_on_node",
-            "node",
-            "alice",
-            "SUCCEEDED",
-            "done",
-            "{\"awg\":{}}",
-        )
+        .begin_operation("ensure_profile_on_node", "node", "alice")
+        .unwrap()
+        .finish_with_result("SUCCEEDED", "done", "{\"awg\":{}}")
         .unwrap();
     let api = OperationApi { ctx };
     let mut stream = api
@@ -203,8 +198,11 @@ fn operations_survive_reopening_storage() {
         std::env::temp_dir().join(format!("node-plane-operations-{}", uuid::Uuid::new_v4()));
     let path = directory.join("operations.bin");
     let state = DriverState::open(path.clone()).unwrap();
+    let payload = "{\"awg\":{\"config\":\"test-config\"}}";
     let started = state
-        .finish_operation("sync_xray", "node", "", "SUCCEEDED", "done")
+        .begin_operation("ensure_profile_on_node", "node", "alice")
+        .unwrap()
+        .finish_with_result("SUCCEEDED", "done", payload)
         .unwrap();
     drop(state);
     let reopened = DriverState::open(path.clone()).unwrap();
@@ -216,6 +214,9 @@ fn operations_survive_reopening_storage() {
         "done"
     );
     assert_eq!(reopened.list_operations("node", "", "", 10).len(), 1);
+    let recovered = reopened.get_operation(&started.operation_id).unwrap();
+    assert_eq!(recovered.result_json, payload);
+    assert_eq!(recovered.profile_name, "alice");
     use std::os::unix::fs::PermissionsExt;
     assert_eq!(
         std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
@@ -244,11 +245,7 @@ fn failed_persistence_does_not_publish_operation() {
     let state = DriverState::open(parent_file.join("operations.bin")).unwrap();
     std::fs::rename(&parent_file, directory.join("moved")).unwrap();
     std::fs::write(&parent_file, b"").unwrap();
-    assert!(
-        state
-            .finish_operation("sync_xray", "node", "", "SUCCEEDED", "done")
-            .is_err()
-    );
+    assert!(state.begin_operation("sync_xray", "node", "").is_err());
     assert!(state.list_operations("", "", "", 10).is_empty());
     std::fs::remove_dir_all(directory).unwrap();
 }
@@ -293,7 +290,9 @@ fn restart_marks_unfinished_work_unknown_and_preserves_terminal_results() {
             .unwrap();
     }
     let completed = state
-        .finish_operation("probe_node", "node", "", "SUCCEEDED", "ok")
+        .begin_operation("probe_node", "node", "")
+        .unwrap()
+        .finish("SUCCEEDED", "ok")
         .unwrap();
     let terminal_before = state.get_operation(&completed.operation_id).unwrap();
     drop(state);
@@ -358,7 +357,7 @@ fn history_allows_only_one_driver_until_every_clone_is_dropped() {
 }
 
 #[tokio::test]
-async fn install_docker_rejects_execution_when_journal_cannot_be_written() {
+async fn every_action_rejects_execution_when_journal_cannot_be_written() {
     let directory =
         std::env::temp_dir().join(format!("node-plane-journal-{}", uuid::Uuid::new_v4()));
     let parent = directory.join("data");
@@ -368,15 +367,132 @@ async fn install_docker_rejects_execution_when_journal_cannot_be_written() {
         .insert("node".into(), "127.0.0.1:1".into());
     std::fs::rename(&parent, directory.join("moved")).unwrap();
     std::fs::write(&parent, b"").unwrap();
-    let api = NodeApi { ctx };
-    let error = api
-        .install_docker(Request::new(InstallDockerRequest {
+    let node = NodeApi { ctx: ctx.clone() };
+    let runtime = RuntimeApi { ctx: ctx.clone() };
+    let provisioning = ProvisioningApi { ctx: ctx.clone() };
+    macro_rules! check {
+        ($api:ident, $method:ident, $request:expr) => {
+            let error = $api.$method(Request::new($request)).await.unwrap_err();
+            assert_eq!(error.code(), tonic::Code::Internal, stringify!($method));
+            assert!(
+                error.message().starts_with("failed to persist operation:"),
+                "{}: {error}",
+                stringify!($method)
+            );
+        };
+    }
+    macro_rules! check_node {
+        ($api:ident, $method:ident, $request:ident) => {
+            check!(
+                $api,
+                $method,
+                $request {
+                    node_key: "node".into(),
+                    ..Default::default()
+                }
+            );
+        };
+    }
+    check_node!(node, sync_node_env, SyncNodeEnvRequest);
+    check_node!(node, probe_node, ProbeNodeRequest);
+    check_node!(node, check_ports, CheckPortsRequest);
+    check_node!(node, open_ports, OpenPortsRequest);
+    check_node!(node, install_docker, InstallDockerRequest);
+    check_node!(runtime, bootstrap_node, BootstrapNodeRequest);
+    check_node!(runtime, reinstall_node, ReinstallNodeRequest);
+    check_node!(runtime, delete_runtime, DeleteRuntimeRequest);
+    check_node!(runtime, full_cleanup_node, FullCleanupNodeRequest);
+    check_node!(runtime, sync_runtime, SyncRuntimeRequest);
+    check_node!(runtime, sync_xray, SyncXrayRequest);
+    check_node!(provisioning, reconcile_node, ReconcileNodeRequest);
+    check!(
+        provisioning,
+        reconcile_profile,
+        ReconcileProfileRequest {
+            profile_name: "alice".into()
+        }
+    );
+    check!(
+        provisioning,
+        ensure_profile_on_node,
+        driver::v1::EnsureProfileOnNodeRequest {
             node_key: "node".into(),
+            profile: Some(ProfileSpec {
+                profile_name: "alice".into(),
+                ..Default::default()
+            }),
+        }
+    );
+    check!(
+        provisioning,
+        delete_profile_from_node,
+        DeleteProfileFromNodeRequest {
+            node_key: "node".into(),
+            profile_name: "alice".into(),
+            protocol_kinds: vec!["awg".into()],
+        }
+    );
+    assert!(ctx.state.list_operations("", "", "", 100).is_empty());
+    drop((node, runtime, provisioning, ctx));
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[tokio::test]
+async fn reconcile_early_errors_leave_terminal_records() {
+    let ctx = context();
+    let api = ProvisioningApi { ctx: ctx.clone() };
+    assert!(
+        api.reconcile_node(Request::new(ReconcileNodeRequest {
+            node_key: "node".into()
         }))
         .await
-        .unwrap_err();
-    assert_eq!(error.code(), tonic::Code::Internal);
-    assert!(api.ctx.state.list_operations("", "", "", 10).is_empty());
-    drop(api);
-    std::fs::remove_dir_all(directory).unwrap();
+        .is_err()
+    );
+    assert!(
+        api.reconcile_profile(Request::new(ReconcileProfileRequest {
+            profile_name: "alice".into()
+        }))
+        .await
+        .is_err()
+    );
+    let items = ctx.state.list_operations("", "", "", 10);
+    assert_eq!(items.len(), 2);
+    for operation in items {
+        assert_eq!(operation.status, "FAILED");
+        assert!(!operation.finished_at.is_empty());
+        assert_eq!(operation.error.unwrap().code, "execution_interrupted");
+    }
+}
+
+#[tokio::test]
+async fn reinstall_and_nested_bootstrap_finish_their_own_records() {
+    let mut ctx = context();
+    ctx.agent_targets
+        .insert("node".into(), "127.0.0.1:1".into());
+    let api = RuntimeApi { ctx: ctx.clone() };
+    // Missing database fails bootstrap before any remote request. Reinstall
+    // must complete its own record using that child result, with no RUNNING leak.
+    let response = api
+        .reinstall_node(Request::new(ReinstallNodeRequest {
+            node_key: "node".into(),
+            preserve_config: true,
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+    let parent = ctx.state.get_operation(&response.operation_id).unwrap();
+    assert_eq!(parent.kind, "reinstall_node");
+    assert_eq!(parent.status, "FAILED");
+    let records = ctx.state.list_operations("node", "", "", 10);
+    assert_eq!(records.len(), 2);
+    assert!(
+        records
+            .iter()
+            .all(|operation| operation.status == "FAILED" && operation.error.is_none())
+    );
+    assert!(
+        records
+            .iter()
+            .any(|operation| operation.kind == "bootstrap_node")
+    );
 }

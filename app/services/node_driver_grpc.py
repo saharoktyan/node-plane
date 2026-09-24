@@ -122,6 +122,8 @@ class GrpcNodeDriverClient(NodeDriverClient):
         )
 
     def _failed_operation(self, kind: str, exc: Exception, *, node_key: str = "", profile_name: str = "") -> DriverOperation:
+        # A transport error does not establish whether the node action ran.
+        # Only an explicitly retained command_id can deduplicate resubmission.
         detail = self._rpc_error_text(exc)
         return DriverOperation(
             operation_id="",
@@ -130,7 +132,7 @@ class GrpcNodeDriverClient(NodeDriverClient):
             node_key=node_key,
             profile_name=profile_name,
             progress_message=detail,
-            error=DriverError(code="grpc_error", summary=f"{kind} RPC failed", detail=detail, retryable=True),
+            error=DriverError(code="grpc_error", summary=f"{kind} RPC failed", detail=detail, retryable=False),
         )
 
     def _query_error(self, kind: str, exc: Exception) -> RuntimeError:
@@ -225,12 +227,13 @@ class GrpcNodeDriverClient(NodeDriverClient):
             raise self._query_error("list_nodes_needing_runtime_sync", exc) from exc
         return [self._node_from_pb(item) for item in getattr(response, "items", [])]
 
-    def sync_node_env(self, node_key: str) -> DriverOperation:
+    def sync_node_env(self, node_key: str, *, command_id: str | None = None) -> DriverOperation:
         self._ensure_client()
         try:
             response = self._node_stub.SyncNodeEnv(
                 self._node_pb2.SyncNodeEnvRequest(node_key=node_key),
                 timeout=self.timeout_seconds,
+                metadata=(("x-node-plane-command-id", command_id),) if command_id is not None else (),
             )
         except Exception as exc:
             return self._failed_operation("sync_node_env", exc, node_key=node_key)
@@ -241,12 +244,13 @@ class GrpcNodeDriverClient(NodeDriverClient):
                 return fetched
         return operation
 
-    def sync_runtime(self, node_key: str) -> DriverOperation:
+    def sync_runtime(self, node_key: str, *, command_id: str | None = None) -> DriverOperation:
         self._ensure_client()
         try:
             response = self._runtime_stub.SyncRuntime(
                 self._runtime_pb2.SyncRuntimeRequest(node_key=node_key),
                 timeout=self.timeout_seconds,
+                metadata=(("x-node-plane-command-id", command_id),) if command_id is not None else (),
             )
         except Exception as exc:
             return self._failed_operation("sync_runtime", exc, node_key=node_key)
@@ -257,12 +261,13 @@ class GrpcNodeDriverClient(NodeDriverClient):
                 return fetched
         return operation
 
-    def sync_xray(self, node_key: str) -> DriverOperation:
+    def sync_xray(self, node_key: str, *, command_id: str | None = None) -> DriverOperation:
         self._ensure_client()
         try:
             response = self._runtime_stub.SyncXray(
                 self._runtime_pb2.SyncXrayRequest(node_key=node_key),
                 timeout=self.timeout_seconds,
+                metadata=(("x-node-plane-command-id", command_id),) if command_id is not None else (),
             )
         except Exception as exc:
             return self._failed_operation("sync_xray", exc, node_key=node_key)
@@ -273,12 +278,13 @@ class GrpcNodeDriverClient(NodeDriverClient):
                 return fetched
         return operation
 
-    def probe_node(self, node_key: str) -> DriverOperation:
+    def probe_node(self, node_key: str, *, command_id: str | None = None) -> DriverOperation:
         self._ensure_client()
         try:
             response = self._node_stub.ProbeNode(
                 self._node_pb2.ProbeNodeRequest(node_key=node_key),
                 timeout=self.timeout_seconds,
+                metadata=(("x-node-plane-command-id", command_id),) if command_id is not None else (),
             )
         except Exception as exc:
             return self._failed_operation("probe_node", exc, node_key=node_key)
@@ -289,12 +295,13 @@ class GrpcNodeDriverClient(NodeDriverClient):
                 return fetched
         return operation
 
-    def check_ports(self, node_key: str) -> DriverOperation:
+    def check_ports(self, node_key: str, *, command_id: str | None = None) -> DriverOperation:
         self._ensure_client()
         try:
             response = self._node_stub.CheckPorts(
                 self._node_pb2.CheckPortsRequest(node_key=node_key),
                 timeout=self.timeout_seconds,
+                metadata=(("x-node-plane-command-id", command_id),) if command_id is not None else (),
             )
         except Exception as exc:
             return self._failed_operation("check_ports", exc, node_key=node_key)
@@ -305,12 +312,13 @@ class GrpcNodeDriverClient(NodeDriverClient):
                 return fetched
         return operation
 
-    def open_ports(self, node_key: str) -> DriverOperation:
+    def open_ports(self, node_key: str, *, command_id: str | None = None) -> DriverOperation:
         self._ensure_client()
         try:
             response = self._node_stub.OpenPorts(
                 self._node_pb2.OpenPortsRequest(node_key=node_key),
                 timeout=self.timeout_seconds,
+                metadata=(("x-node-plane-command-id", command_id),) if command_id is not None else (),
             )
         except Exception as exc:
             return self._failed_operation("open_ports", exc, node_key=node_key)
@@ -321,12 +329,13 @@ class GrpcNodeDriverClient(NodeDriverClient):
                 return fetched
         return operation
 
-    def install_docker(self, node_key: str) -> DriverOperation:
+    def install_docker(self, node_key: str, *, command_id: str | None = None) -> DriverOperation:
         self._ensure_client()
         try:
             response = self._node_stub.InstallDocker(
                 self._node_pb2.InstallDockerRequest(node_key=node_key),
                 timeout=self.timeout_seconds,
+                metadata=(("x-node-plane-command-id", command_id),) if command_id is not None else (),
             )
         except Exception as exc:
             return self._failed_operation("install_docker", exc, node_key=node_key)
@@ -337,12 +346,13 @@ class GrpcNodeDriverClient(NodeDriverClient):
                 return fetched
         return operation
 
-    def bootstrap_node(self, node_key: str, preserve_config: bool = False) -> DriverOperation:
+    def bootstrap_node(self, node_key: str, preserve_config: bool = False, *, command_id: str | None = None) -> DriverOperation:
         self._ensure_client()
         try:
             response = self._runtime_stub.BootstrapNode(
                 self._runtime_pb2.BootstrapNodeRequest(node_key=node_key, preserve_config=preserve_config),
                 timeout=self.timeout_seconds,
+                metadata=(("x-node-plane-command-id", command_id),) if command_id is not None else (),
             )
         except Exception as exc:
             return self._failed_operation("bootstrap_node", exc, node_key=node_key)
@@ -353,12 +363,13 @@ class GrpcNodeDriverClient(NodeDriverClient):
                 return fetched
         return operation
 
-    def reinstall_node(self, node_key: str, preserve_config: bool = False) -> DriverOperation:
+    def reinstall_node(self, node_key: str, preserve_config: bool = False, *, command_id: str | None = None) -> DriverOperation:
         self._ensure_client()
         try:
             response = self._runtime_stub.ReinstallNode(
                 self._runtime_pb2.ReinstallNodeRequest(node_key=node_key, preserve_config=preserve_config),
                 timeout=self.timeout_seconds,
+                metadata=(("x-node-plane-command-id", command_id),) if command_id is not None else (),
             )
         except Exception as exc:
             return self._failed_operation("reinstall_node", exc, node_key=node_key)
@@ -369,12 +380,13 @@ class GrpcNodeDriverClient(NodeDriverClient):
                 return fetched
         return operation
 
-    def delete_runtime(self, node_key: str, preserve_config: bool = False) -> DriverOperation:
+    def delete_runtime(self, node_key: str, preserve_config: bool = False, *, command_id: str | None = None) -> DriverOperation:
         self._ensure_client()
         try:
             response = self._runtime_stub.DeleteRuntime(
                 self._runtime_pb2.DeleteRuntimeRequest(node_key=node_key, preserve_config=preserve_config),
                 timeout=self.timeout_seconds,
+                metadata=(("x-node-plane-command-id", command_id),) if command_id is not None else (),
             )
         except Exception as exc:
             return self._failed_operation("delete_runtime", exc, node_key=node_key)
@@ -385,12 +397,13 @@ class GrpcNodeDriverClient(NodeDriverClient):
                 return fetched
         return operation
 
-    def full_cleanup_node(self, node_key: str, remove_ssh_key: bool = False) -> DriverOperation:
+    def full_cleanup_node(self, node_key: str, remove_ssh_key: bool = False, *, command_id: str | None = None) -> DriverOperation:
         self._ensure_client()
         try:
             response = self._runtime_stub.FullCleanupNode(
                 self._runtime_pb2.FullCleanupNodeRequest(node_key=node_key, remove_ssh_key=remove_ssh_key),
                 timeout=self.timeout_seconds,
+                metadata=(("x-node-plane-command-id", command_id),) if command_id is not None else (),
             )
         except Exception as exc:
             return self._failed_operation("full_cleanup_node", exc, node_key=node_key)
@@ -410,6 +423,7 @@ class GrpcNodeDriverClient(NodeDriverClient):
         xray_uuid: str = "",
         xray_short_id: str = "",
         awg_peer_name: str = "",
+        command_id: str | None = None,
     ) -> DriverOperation:
         self._ensure_client()
         profile = self._types_pb2.ProfileSpec(
@@ -422,6 +436,7 @@ class GrpcNodeDriverClient(NodeDriverClient):
             response = self._provisioning_stub.EnsureProfileOnNode(
                 self._provisioning_pb2.EnsureProfileOnNodeRequest(node_key=node_key, profile=profile),
                 timeout=self.timeout_seconds,
+                metadata=(("x-node-plane-command-id", command_id),) if command_id is not None else (),
             )
         except Exception as exc:
             return self._failed_operation("ensure_profile_on_node", exc, node_key=node_key, profile_name=profile_name)
@@ -432,7 +447,7 @@ class GrpcNodeDriverClient(NodeDriverClient):
                 return fetched
         return operation
 
-    def delete_profile_from_node(self, node_key: str, profile_name: str, protocol_kinds: list[str]) -> DriverOperation:
+    def delete_profile_from_node(self, node_key: str, profile_name: str, protocol_kinds: list[str], *, command_id: str | None = None) -> DriverOperation:
         self._ensure_client()
         try:
             response = self._provisioning_stub.DeleteProfileFromNode(
@@ -442,6 +457,7 @@ class GrpcNodeDriverClient(NodeDriverClient):
                     protocol_kinds=protocol_kinds,
                 ),
                 timeout=self.timeout_seconds,
+                metadata=(("x-node-plane-command-id", command_id),) if command_id is not None else (),
             )
         except Exception as exc:
             return self._failed_operation("delete_profile_from_node", exc, node_key=node_key, profile_name=profile_name)
@@ -452,12 +468,13 @@ class GrpcNodeDriverClient(NodeDriverClient):
                 return fetched
         return operation
 
-    def reconcile_node(self, node_key: str) -> DriverOperation:
+    def reconcile_node(self, node_key: str, *, command_id: str | None = None) -> DriverOperation:
         self._ensure_client()
         try:
             response = self._provisioning_stub.ReconcileNode(
                 self._provisioning_pb2.ReconcileNodeRequest(node_key=node_key),
                 timeout=self.timeout_seconds,
+                metadata=(("x-node-plane-command-id", command_id),) if command_id is not None else (),
             )
         except Exception as exc:
             return self._failed_operation("reconcile_node", exc, node_key=node_key)
@@ -468,12 +485,13 @@ class GrpcNodeDriverClient(NodeDriverClient):
                 return fetched
         return operation
 
-    def reconcile_profile(self, profile_name: str) -> DriverOperation:
+    def reconcile_profile(self, profile_name: str, *, command_id: str | None = None) -> DriverOperation:
         self._ensure_client()
         try:
             response = self._provisioning_stub.ReconcileProfile(
                 self._provisioning_pb2.ReconcileProfileRequest(profile_name=profile_name),
                 timeout=self.timeout_seconds,
+                metadata=(("x-node-plane-command-id", command_id),) if command_id is not None else (),
             )
         except Exception as exc:
             return self._failed_operation("reconcile_profile", exc, profile_name=profile_name)

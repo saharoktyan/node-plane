@@ -80,6 +80,11 @@ class SystemResetTests(unittest.TestCase):
         self.app_settings.set_menu_title("Test Title")
         with self.system_reset._db.transaction() as conn:
             conn.execute(
+                """INSERT INTO driver_commands(source_ref, command_id, kind, request_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)""",
+                ("telegram:1", "saved-1", "bootstrap_node", "{}", "2026-04-01T00:00:00Z", "2026-04-01T00:00:00Z"),
+            )
+            conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS alert_state (
                     alert_key TEXT PRIMARY KEY,
@@ -118,6 +123,8 @@ class SystemResetTests(unittest.TestCase):
         self.assertEqual(self.app_settings.get_menu_title(), self.config.MENU_TITLE)
         with self.system_reset._db.connect() as conn:
             row = conn.execute("SELECT COUNT(*) AS c FROM alert_state").fetchone()
+            self.assertEqual(int(row["c"]), 0)
+            row = conn.execute("SELECT COUNT(*) AS c FROM driver_commands").fetchone()
             self.assertEqual(int(row["c"]), 0)
 
     def test_factory_reset_requests_remote_key_cleanup_for_ssh_nodes(self) -> None:

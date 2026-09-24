@@ -217,6 +217,8 @@ def _insert_rows(conn, table: str, columns: list[str], rows: list[tuple[Any, ...
 
 
 def _clear_target(conn, include_alert_state: bool) -> None:
+    if _generic_table_exists(conn, "driver_commands"):
+        conn.execute("DELETE FROM driver_commands")
     clear_order = [name for name, _cols in TABLE_COLUMNS]
     if include_alert_state or _generic_table_exists(conn, "alert_state"):
         clear_order.append("alert_state")
