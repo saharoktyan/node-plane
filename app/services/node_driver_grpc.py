@@ -68,7 +68,7 @@ class GrpcNodeDriverClient(NodeDriverClient):
             except ImportError as exc:
                 raise RuntimeError(
                     "gRPC backend requested but 'grpcio' is not installed. "
-                    "Install gRPC dependencies or switch NODE_DRIVER_BACKEND=inprocess."
+                    "Install the project's gRPC dependencies."
                 ) from exc
             self._grpc = grpc
         if self._channel is None:

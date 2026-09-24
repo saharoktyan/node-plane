@@ -137,7 +137,7 @@ class DriverCommandJournalTests(unittest.TestCase):
         self.assertEqual(first.operation_id, second.operation_id)
         self.assertEqual({call[0] for call in driver.calls}, {self.row("telegram:104")["command_id"]})
 
-    def test_inprocess_driver_keeps_existing_call_shape(self) -> None:
+    def test_driver_command_keeps_existing_call_shape(self) -> None:
         class LocalDriver:
             def bootstrap_node(self, node_key: str, preserve_config: bool = False) -> DriverOperation:
                 return DriverOperation(operation_id="local", kind="bootstrap_node", status="SUCCEEDED", node_key=node_key)

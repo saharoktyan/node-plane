@@ -28,9 +28,7 @@ class AgentRolloutTests(unittest.TestCase):
     def test_rollout_targets_only_requested_ssh_node(self) -> None:
         server = SimpleNamespace(transport="ssh")
         proc = SimpleNamespace(returncode=0, stdout="ready", stderr="")
-        with patch.object(agent_rollout, "NODE_DRIVER_BACKEND", "inprocess"), patch.object(
-            agent_rollout, "get_server", return_value=server
-        ), patch.object(
+        with patch.object(agent_rollout, "get_server", return_value=server), patch.object(
             agent_rollout.os.path, "isfile", return_value=True
         ), patch.object(
             agent_rollout.subprocess, "run", return_value=proc
@@ -43,9 +41,7 @@ class AgentRolloutTests(unittest.TestCase):
 
     def test_grpc_bootstrap_does_not_repeat_agent_rollout(self) -> None:
         server = SimpleNamespace(transport="ssh")
-        with patch.object(agent_rollout, "NODE_DRIVER_BACKEND", "grpc"), patch.object(
-            agent_rollout, "get_server", return_value=server
-        ), patch.object(agent_rollout.subprocess, "run") as run:
+        with patch.object(agent_rollout, "get_server", return_value=server), patch.object(agent_rollout.subprocess, "run") as run:
             code, output = agent_rollout.ensure_driver_agent_rollout_for_ssh("spb1", skip_if_connected=True)
         self.assertEqual((code, output), (0, ""))
         run.assert_not_called()
@@ -53,9 +49,7 @@ class AgentRolloutTests(unittest.TestCase):
     def test_manual_grpc_rollout_still_runs(self) -> None:
         server = SimpleNamespace(transport="ssh")
         proc = SimpleNamespace(returncode=0, stdout="ready", stderr="")
-        with patch.object(agent_rollout, "NODE_DRIVER_BACKEND", "grpc"), patch.object(
-            agent_rollout, "get_server", return_value=server
-        ), patch.object(
+        with patch.object(agent_rollout, "get_server", return_value=server), patch.object(
             agent_rollout.os.path, "isfile", return_value=True
         ), patch.object(
             agent_rollout.subprocess, "run", return_value=proc

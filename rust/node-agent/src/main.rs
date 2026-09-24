@@ -300,17 +300,19 @@ impl AgentState {
     }
 
     fn runtime_facts(&self) -> RuntimeFacts {
-        let xray_config = Path::new(&self.config.xray_config_path);
-        let awg_config = Path::new(&self.config.awg_config_path);
+        let xray_config_path = self.node_env_value("XRAY_CONFIG", &self.config.xray_config_path);
+        let awg_config_path = self.node_env_value("AWG_CONFIG", &self.config.awg_config_path);
+        let xray_config_present = Path::new(&xray_config_path).is_file();
+        let awg_config_present = Path::new(&awg_config_path).is_file();
         RuntimeFacts {
             node_key: self.config.node_key.clone(),
             version: Self::read_first_line(&self.runtime_version_path()),
             commit: Self::read_first_line(&self.runtime_commit_path()),
             runtime_root: self.config.runtime_root.clone(),
-            xray_config_path: self.config.xray_config_path.clone(),
-            awg_config_path: self.config.awg_config_path.clone(),
-            xray_config_present: xray_config.is_file(),
-            awg_config_present: awg_config.is_file(),
+            xray_config_path,
+            awg_config_path,
+            xray_config_present,
+            awg_config_present,
         }
     }
 
@@ -405,8 +407,10 @@ impl AgentState {
     }
 
     fn diagnostics(&self) -> RunDiagnosticsResponse {
-        let xray_exists = Path::new(&self.config.xray_config_path).is_file();
-        let awg_exists = Path::new(&self.config.awg_config_path).is_file();
+        let xray_config_path = self.node_env_value("XRAY_CONFIG", &self.config.xray_config_path);
+        let awg_config_path = self.node_env_value("AWG_CONFIG", &self.config.awg_config_path);
+        let xray_exists = Path::new(&xray_config_path).is_file();
+        let awg_exists = Path::new(&awg_config_path).is_file();
         let runtime_root_exists = Path::new(&self.config.runtime_root).is_dir();
         let version = Self::read_first_line(&self.runtime_version_path());
         let commit = Self::read_first_line(&self.runtime_commit_path());
@@ -443,13 +447,13 @@ impl AgentState {
             DiagnosticItem {
                 kind: "xray_config".to_string(),
                 status: if xray_exists { "ok" } else { "missing" }.to_string(),
-                summary: self.config.xray_config_path.clone(),
+                summary: xray_config_path,
                 detail: String::new(),
             },
             DiagnosticItem {
                 kind: "awg_config".to_string(),
                 status: if awg_exists { "ok" } else { "missing" }.to_string(),
-                summary: self.config.awg_config_path.clone(),
+                summary: awg_config_path,
                 detail: String::new(),
             },
             DiagnosticItem {
@@ -1374,7 +1378,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{AgentConfig, awg_config_uses_port, xray_config_uses_port};
+    use super::{AgentConfig, AgentState, awg_config_uses_port, xray_config_uses_port};
+    use std::{fs, process, time::{SystemTime, UNIX_EPOCH}};
 
     #[test]
     fn accepts_installer_agent_config_with_default_runtime_paths() {
@@ -1408,5 +1413,33 @@ tls_client_ca_path = "/etc/node-plane/tls/ca.crt"
             "[Interface]\nListenPort = 51820\n",
             51821
         ));
+    }
+
+    #[test]
+    fn diagnostics_and_runtime_facts_use_node_env_config_paths() {
+        let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!("node-plane-agent-{}-{nonce}", process::id()));
+        fs::create_dir_all(&root).unwrap();
+        let xray = root.join("custom-xray.json");
+        let awg = root.join("custom-awg.conf");
+        let env_path = root.join("node.env");
+        fs::write(&xray, "{}").unwrap();
+        fs::write(&awg, "[Interface]\n").unwrap();
+        fs::write(&env_path, format!("XRAY_CONFIG={}\nAWG_CONFIG={}\n", xray.display(), awg.display())).unwrap();
+
+        let config = AgentConfig {
+            runtime_root: root.display().to_string(),
+            node_env_path: env_path.display().to_string(),
+            ..AgentConfig::default()
+        };
+        let state = AgentState::new(config);
+        let facts = state.runtime_facts();
+        assert!(facts.xray_config_present);
+        assert!(facts.awg_config_present);
+        assert_eq!(facts.xray_config_path, xray.display().to_string());
+        let items = state.diagnostics().items;
+        assert_eq!(items.iter().find(|item| item.kind == "xray_config").unwrap().status, "ok");
+        assert_eq!(items.iter().find(|item| item.kind == "awg_config").unwrap().status, "ok");
+        fs::remove_dir_all(root).unwrap();
     }
 }

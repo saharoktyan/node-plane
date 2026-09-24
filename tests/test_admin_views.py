@@ -868,6 +868,62 @@ class BootstrapRolloutRegressionTests(unittest.TestCase):
         markup = admin_server_wizard._agent_rollout_result_markup("lv1", "en", "RUST_INSTALL_REQUIRED")
         self.assertEqual(markup.inline_keyboard[0][0].callback_data, "srv:action:rolloutagentrust:lv1")
 
+    def test_successful_agent_setup_has_a_short_result(self) -> None:
+        raw = "node-plane-driver.service is up to date.\nnode-agent is active on lv1\nConfigured NODE_AGENT_TARGETS in .env\n" + "systemd log\n" * 80
+        text = admin_server_wizard._agent_rollout_result_text(0, raw, "lv1", "en")
+        self.assertIn("Driver: running", text)
+        self.assertIn("Node agent: running", text)
+        self.assertNotIn("systemd log", text)
+
+    def test_reinstall_only_offers_preservation_for_confirmed_config(self) -> None:
+        server = SimpleNamespace(key="lv1", protocol_kinds=("xray", "awg"), flag="🏳️", title="Test")
+        diagnostics = SimpleNamespace(items=[
+            SimpleNamespace(kind="xray_config", status="missing"),
+            SimpleNamespace(kind="awg_config", status="missing"),
+        ])
+        with patch.object(admin_server_wizard, "get_node_driver", return_value=SimpleNamespace(get_node_diagnostics=lambda _key: diagnostics)):
+            availability = admin_server_wizard._reusable_runtime_config_status(server)
+        self.assertIs(availability, False)
+        markup = admin_server_wizard._bootstrap_mode_markup(server.key, "reinstall", "en", availability)
+        callbacks = [button.callback_data for row in markup.inline_keyboard for button in row]
+        self.assertNotIn("srv:bootrun:reinstall:preserve:lv1", callbacks)
+        self.assertIn("srv:bootrun:reinstall:clean:lv1", callbacks)
+
+        diagnostics.items[0].status = "ok"
+        with patch.object(admin_server_wizard, "get_node_driver", return_value=SimpleNamespace(get_node_diagnostics=lambda _key: diagnostics)):
+            availability = admin_server_wizard._reusable_runtime_config_status(server)
+        self.assertIs(availability, True)
+        markup = admin_server_wizard._bootstrap_mode_markup(server.key, "reinstall", "en", availability)
+        self.assertIn("srv:bootrun:reinstall:preserve:lv1", [button.callback_data for row in markup.inline_keyboard for button in row])
+
+    def test_reinstall_blocks_actions_when_config_check_fails(self) -> None:
+        markup = admin_server_wizard._bootstrap_mode_markup("lv1", "reinstall", "en", None)
+        callbacks = [button.callback_data for row in markup.inline_keyboard for button in row]
+        self.assertEqual(callbacks, ["srv:bootmode:reinstall:lv1", "srv:bootmenu:lv1"])
+
+    def test_stale_reinstall_preserve_button_rechecks_config(self) -> None:
+        update = SimpleNamespace(callback_query=SimpleNamespace(message=SimpleNamespace(chat_id=1, message_id=2)))
+        context = SimpleNamespace(user_data={})
+        server = SimpleNamespace(key="lv1", protocol_kinds=("awg",))
+        with patch.object(admin_server_wizard, "answer_cb"), patch.object(
+            admin_server_wizard, "guard", return_value=True
+        ), patch.object(
+            admin_server_wizard, "get_locale_for_update", return_value="en"
+        ), patch.object(
+            admin_server_wizard, "_wizard_get", return_value={"step": "bootstrap_mode_reinstall", "data": {}}
+        ), patch.object(
+            admin_server_wizard, "get_server", return_value=server
+        ), patch.object(
+            admin_server_wizard, "_reusable_runtime_config_status", return_value=False
+        ), patch.object(
+            admin_server_wizard, "_open_bootstrap_mode"
+        ) as reopen, patch.object(
+            admin_server_wizard, "_run_driver_action"
+        ) as driver_action:
+            admin_server_wizard.on_server_callback(update, context, "bootrun:reinstall:preserve:lv1")
+        reopen.assert_called_once_with(context, "lv1", "reinstall")
+        driver_action.assert_not_called()
+
     def test_successful_bootstrap_shows_partial_failure_when_agent_rollout_fails(self) -> None:
         update = SimpleNamespace(callback_query=SimpleNamespace(message=SimpleNamespace(chat_id=1, message_id=2)))
         context = SimpleNamespace(user_data={})

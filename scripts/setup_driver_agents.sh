@@ -1056,7 +1056,6 @@ EOF
       echo "Dry-run mapping preview: ${mapping_csv}"
     else
       set_step "write driver/agent env configuration"
-      if set_env_value_if_changed "$ENV_FILE" "NODE_DRIVER_BACKEND" "grpc"; then ENV_CHANGED=1; fi
       if set_env_value_if_changed "$ENV_FILE" "NODE_DRIVER_GRPC_TARGET" "127.0.0.1:50051"; then ENV_CHANGED=1; fi
       if set_env_value_if_changed "$ENV_FILE" "NODE_AGENT_TARGETS" "$mapping_csv"; then ENV_CHANGED=1; fi
       if set_env_value_if_changed "$ENV_FILE" "NODE_AGENT_CA_CERT" "$TLS_CA_CERT"; then ENV_CHANGED=1; fi

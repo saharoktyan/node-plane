@@ -13,7 +13,6 @@ from db.migrate_sqlite_to_postgres import _generic_table_exists
 from services.backups import clear_backup_storage, maybe_create_pre_action_backup
 from services.driver_commands import execute_server_command
 from services.node_driver import get_node_driver
-from services.node_driver_grpc import GrpcNodeDriverClient
 from services.server_registry import list_servers
 from services.server_runtime import is_running_in_container, run_local_command
 
@@ -234,12 +233,12 @@ def schedule_full_uninstall() -> Tuple[int, str]:
 
 def _cleanup_registered_nodes(source_ref: str) -> tuple[List[str], List[str], bool]:
     driver = get_node_driver()
-    use_driver = isinstance(driver, GrpcNodeDriverClient)
-    if use_driver and not source_ref:
-        return ["a persistent request identifier is required for driver cleanup"], [], use_driver
+    servers = list_servers(include_disabled=True)
+    if servers and not source_ref:
+        return ["a persistent request identifier is required for driver cleanup"], [], True
     failures: List[str] = []
     completed: List[str] = []
-    for server in list_servers(include_disabled=True):
+    for server in servers:
         try:
             operation = execute_server_command(
                 driver,
@@ -256,7 +255,7 @@ def _cleanup_registered_nodes(source_ref: str) -> tuple[List[str], List[str], bo
             failures.append(f"{server.key}: {(out or '').strip()[:400]}")
         else:
             completed.append(server.key)
-    return failures, completed, use_driver
+    return failures, completed, True
 
 
 def run_full_remove(cleanup_nodes: bool = False, *, source_ref: str = "") -> Tuple[int, str]:
