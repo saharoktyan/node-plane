@@ -12,12 +12,10 @@ from db import ensure_schema, get_db
 from i18n import get_user_locale, t
 from services import app_settings
 from services.server_registry import RegisteredServer, get_server, list_servers
-from services.server_runtime import run_server_command
 
 _log = logging.getLogger("alerts")
 _db = get_db()
 _schema_ready = False
-_HOST_CHECK_TIMEOUT = 25
 _MAX_WORKERS = 4
 _CONFIRM_CYCLES = 1
 _ALERT_STATE_UPSERT_SQL = """
@@ -191,98 +189,6 @@ def count_active_alerts() -> int:
     return int(row["c"]) if row and row["c"] is not None else 0
 
 
-def _float(value: str, default: float = 0.0) -> float:
-    try:
-        return float(str(value or "").strip())
-    except Exception:
-        return default
-
-
-def _int(value: str, default: int = 0) -> int:
-    try:
-        return int(str(value or "").strip())
-    except Exception:
-        return default
-
-
-def _service_specs(server: RegisteredServer) -> list[tuple[str, str]]:
-    specs: list[tuple[str, str]] = []
-    if "xray" in server.protocol_kinds:
-        specs.append(("xray", "xray"))
-    if "awg" in server.protocol_kinds:
-        specs.append(("awg", "amnezia-awg"))
-    return specs
-
-
-def _health_script(server: RegisteredServer) -> str:
-    service_cases: list[str] = []
-    for service_name, default_container in _service_specs(server):
-        env_name = "XRAY_CONTAINER_NAME" if service_name == "xray" else "AWG_CONTAINER_NAME"
-        service_cases.append(
-            f"""
-container="${{{env_name}:-{default_container}}}"
-if docker_cmd inspect "$container" >/dev/null 2>&1; then
-  if [[ "$(docker_cmd inspect -f '{{{{.State.Running}}}}' "$container" 2>/dev/null || echo false)" == "true" ]]; then
-    echo "service:{service_name}:running"
-  else
-    echo "service:{service_name}:stopped"
-  fi
-else
-  echo "service:{service_name}:missing"
-fi
-"""
-        )
-    return f"""#!/usr/bin/env bash
-set -euo pipefail
-if [[ -r /proc/loadavg ]]; then
-  echo "load1:$(cut -d' ' -f1 /proc/loadavg)"
-fi
-cpus="$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)"
-echo "cpus:$cpus"
-if command -v df >/dev/null 2>&1; then
-  echo "disk_free_percent:$(df -P / | awk 'NR==2 {{gsub("%","",$5); print 100-$5}}')"
-fi
-if [[ -r /proc/meminfo ]]; then
-  mem_total="$(awk '/MemTotal:/ {{print $2}}' /proc/meminfo)"
-  mem_avail="$(awk '/MemAvailable:/ {{print $2}}' /proc/meminfo)"
-  if [[ -n "$mem_total" && "$mem_total" != "0" ]]; then
-    echo "mem_used_percent:$(( (100 * (mem_total - mem_avail)) / mem_total ))"
-  fi
-fi
-docker_cmd() {{
-  if docker info >/dev/null 2>&1; then
-    docker "$@"
-    return
-  fi
-  if command -v sudo >/dev/null 2>&1 && sudo docker info >/dev/null 2>&1; then
-    sudo docker "$@"
-    return
-  fi
-  return 1
-}}
-if [[ -f /etc/node-plane/node.env ]]; then
-  source /etc/node-plane/node.env
-fi
-{"".join(service_cases)}
-"""
-
-
-def _parse_health_output(out: str) -> dict[str, str]:
-    payload: dict[str, str] = {}
-    for raw_line in (out or "").splitlines():
-        line = raw_line.strip()
-        if ":" not in line:
-            continue
-        if line.startswith("service:"):
-            parts = line.split(":", 2)
-            if len(parts) == 3:
-                payload[f"service:{parts[1]}"] = parts[2]
-            continue
-        key, value = line.split(":", 1)
-        payload[key.strip()] = value.strip()
-    return payload
-
-
 def _current_resolved_payload(row: dict[str, Any]) -> dict[str, Any]:
     server_key = str(row.get("server_key") or "")
     server = get_server(server_key)
@@ -293,94 +199,12 @@ def _current_resolved_payload(row: dict[str, Any]) -> dict[str, Any]:
     alert_type = str(row.get("alert_type") or "")
     if alert_type == "node_unreachable":
         return {"server_name": server_name}
-    rc, out = run_server_command(server, _health_script(server), timeout=_HOST_CHECK_TIMEOUT)
-    if rc != 0:
-        return {"server_name": server_name, **fallback}
-    payload = _parse_health_output(out)
-    if alert_type == "disk_low":
-        return {"server_name": server_name, "free_percent": _int(payload.get("disk_free_percent"), 0)}
-    if alert_type == "ram_high":
-        return {"server_name": server_name, "used_percent": _int(payload.get("mem_used_percent"), 0)}
-    if alert_type == "load_high":
-        return {
-            "server_name": server_name,
-            "load1": f"{_float(payload.get('load1'), 0.0):.2f}",
-            "cpus": max(1, _int(payload.get("cpus"), 1)),
-        }
-    if alert_type == "service_down":
-        service_name = str(fallback.get("service") or "")
-        return {
-            "server_name": server_name,
-            "service": service_name,
-            "status": str(payload.get(f"service:{service_name}") or "running"),
-        }
-    return {"server_name": server_name, **fallback}
+    return {**fallback, "server_name": server_name}
 
 
 def _server_alerts(server: RegisteredServer) -> list[AlertRecord]:
-    if not server.enabled or server.bootstrap_state != "bootstrapped":
-        return []
-    rc, out = run_server_command(server, _health_script(server), timeout=_HOST_CHECK_TIMEOUT)
-    if rc != 0:
-        return [
-            AlertRecord(
-                alert_key=f"server:{server.key}:node_unreachable",
-                server_key=server.key,
-                alert_type="node_unreachable",
-                severity="critical",
-                payload={"server_name": f"{server.flag} {server.title} ({server.key})", "message": (out or "").strip()[:300]},
-            )
-        ]
-    payload = _parse_health_output(out)
-    alerts: list[AlertRecord] = []
-    server_name = f"{server.flag} {server.title} ({server.key})"
-    free_percent = _int(payload.get("disk_free_percent"), 100)
-    if free_percent < 15:
-        alerts.append(
-            AlertRecord(
-                alert_key=f"server:{server.key}:disk_low",
-                server_key=server.key,
-                alert_type="disk_low",
-                severity="critical" if free_percent < 10 else "warning",
-                payload={"server_name": server_name, "free_percent": free_percent},
-            )
-        )
-    mem_used = _int(payload.get("mem_used_percent"), 0)
-    if mem_used > 85:
-        alerts.append(
-            AlertRecord(
-                alert_key=f"server:{server.key}:ram_high",
-                server_key=server.key,
-                alert_type="ram_high",
-                severity="critical" if mem_used > 92 else "warning",
-                payload={"server_name": server_name, "used_percent": mem_used},
-            )
-        )
-    load1 = _float(payload.get("load1"), 0.0)
-    cpus = max(1, _int(payload.get("cpus"), 1))
-    if load1 > (cpus * 1.5):
-        alerts.append(
-            AlertRecord(
-                alert_key=f"server:{server.key}:load_high",
-                server_key=server.key,
-                alert_type="load_high",
-                severity="critical" if load1 > (cpus * 2.5) else "warning",
-                payload={"server_name": server_name, "load1": f"{load1:.2f}", "cpus": cpus},
-            )
-        )
-    for service_name, _default in _service_specs(server):
-        service_status = str(payload.get(f"service:{service_name}") or "").strip().lower()
-        if service_status != "running":
-            alerts.append(
-                AlertRecord(
-                    alert_key=f"server:{server.key}:service:{service_name}:down",
-                    server_key=server.key,
-                    alert_type="service_down",
-                    severity="critical",
-                    payload={"server_name": server_name, "service": service_name, "status": service_status or "down"},
-                )
-            )
-    return alerts
+    # Alert scanning is deferred to Pro; it must not revive Python shell access.
+    return []
 
 
 def _collect_alerts() -> list[AlertRecord]:

@@ -28,6 +28,7 @@ I1_PRESET="${AWG_I1_PRESET:-quic}"
 CONF2VPN="${AWG_CONF2VPN:-/opt/node-plane-runtime/conf2vpn.py}"
 AWG_TEMPLATE="${AWG_TEMPLATE:-/opt/node-plane-runtime/awg-template.json}"
 AMNEZIA_DECODER="${AWG_DECODER:-/opt/node-plane-runtime/amnezia-config-decoder.py}"
+PROFILE_TOOL="${AWG_PROFILE_TOOL:-/opt/node-plane-runtime/awg_profile.py}"
 SERVER_KEY="${SERVER_KEY:-}"
 NAME="${1:-}"
 
@@ -43,6 +44,7 @@ if [[ ! -f "$CFG" ]]; then
   echo "Prepare $CFG first or sync the existing config into the mounted data dir." >&2
   exit 1
 fi
+python3 "$PROFILE_TOOL" validate "$CFG"
 if [[ -z "$SERVER_IP" ]]; then
   echo "AWG_SERVER_IP is not configured in /etc/node-plane/node.env" >&2
   exit 1
@@ -79,6 +81,15 @@ values = {
     "I3": "",
     "I4": "",
     "I5": "",
+    "HEADER_PROTECTION_KEY": "",
+    "CONTENT_PADDING_ADDITION": "",
+    "REKEY_AFTER_TIME": "",
+    "REKEY_TIMEOUT": "",
+    "REJECT_AFTER_TIME": "",
+    "KEEPALIVE_TIMEOUT": "",
+    "MAX_HANDSHAKE_ATTEMPTS": "",
+    "RANDOM_TRAILERS": "",
+    "DISABLE_COOKIES": "",
 }
 mapping = {
     "Jc": "JC",
@@ -97,6 +108,15 @@ mapping = {
     "I3": "I3",
     "I4": "I4",
     "I5": "I5",
+    "HeaderProtectionKey": "HEADER_PROTECTION_KEY",
+    "ContentPaddingAddition": "CONTENT_PADDING_ADDITION",
+    "RekeyAfterTime": "REKEY_AFTER_TIME",
+    "RekeyTimeout": "REKEY_TIMEOUT",
+    "RejectAfterTime": "REJECT_AFTER_TIME",
+    "KeepaliveTimeout": "KEEPALIVE_TIMEOUT",
+    "MaxHandshakeAttempts": "MAX_HANDSHAKE_ATTEMPTS",
+    "RandomTrailers": "RANDOM_TRAILERS",
+    "DisableCookies": "DISABLE_COOKIES",
 }
 
 with open(cfg_path, "r", encoding="utf-8", errors="ignore") as fh:
@@ -181,6 +201,10 @@ I2 = $I2
 I3 = $I3
 I4 = $I4
 I5 = $I5
+HeaderProtectionKey = $HEADER_PROTECTION_KEY
+ContentPaddingAddition = $CONTENT_PADDING_ADDITION
+RandomTrailers = $RANDOM_TRAILERS
+DisableCookies = $DISABLE_COOKIES
 
 [Peer]
 PublicKey = $SERVER_PUB
@@ -189,6 +213,20 @@ Endpoint = $SERVER_IP:$SERVER_PORT
 AllowedIPs = $ALLOWED_IPS
 PersistentKeepalive = $KEEPALIVE
 EOF
+
+for optional in \
+  "RekeyAfterTime:$REKEY_AFTER_TIME" \
+  "RekeyTimeout:$REKEY_TIMEOUT" \
+  "RejectAfterTime:$REJECT_AFTER_TIME" \
+  "KeepaliveTimeout:$KEEPALIVE_TIMEOUT" \
+  "MaxHandshakeAttempts:$MAX_HANDSHAKE_ATTEMPTS"; do
+  key="${optional%%:*}"
+  value="${optional#*:}"
+  if [[ -n "$value" ]]; then
+    sed -i "/^\[Peer\]$/i ${key} = ${value}\n" "$TMP_CONF"
+  fi
+done
+python3 "$PROFILE_TOOL" validate "$TMP_CONF"
 
 cat "$TMP_CONF"
 

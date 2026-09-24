@@ -49,10 +49,12 @@ one scenario at a time, with compatibility for the existing client during rollou
 Current migration debt: driver still queries and updates business PostgreSQL
 tables, computes desired profile state during reconcile, and renders node.env.
 The core UI uses the gRPC driver for runtime status, Docker availability,
-provisioning, settings, and maintenance. The `inprocess` driver adapter has
-been removed. Python direct runtime paths still exist in metrics, traffic and
-alert features reserved for later Pro work, and in host-local orphan cleanup
-and agent installation procedures; these paths are not the target design.
+provisioning, settings, diagnostics, and maintenance. The `inprocess` driver
+adapter and Python's direct node command transport have been removed. Both
+`transport=local` and SSH-managed nodes use a node-agent; the local agent
+listens on `127.0.0.1`. Python still runs controller maintenance and the
+installer/agent rollout. Traffic sampling and alert jobs are disabled pending
+Pro modules.
 
 ## Operation contract
 
@@ -87,7 +89,7 @@ accepted → PENDING → RUNNING → SUCCEEDED | FAILED | CANCELLED
 - This configuration error is not automatically retryable. Configure the target
   before issuing a new request.
 - `CollectTrafficSnapshot` and `WatchNodeHealth` explicitly return
-  `UNIMPLEMENTED`; the existing Python traffic collector remains unchanged.
+  `UNIMPLEMENTED`; the former Python traffic collector is no longer scheduled.
 - `WatchOperation` returns the recorded terminal result and closes. Unknown IDs
   return `NOT_FOUND`; live progress for nonterminal records is not implemented.
 - `ListOperations` filters before limiting and orders by update time descending,

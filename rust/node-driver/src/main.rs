@@ -527,7 +527,7 @@ impl DriverContext {
             self.shell_env_assignment("XRAY_INBOUND_XHTTP_TAG", "reality-xhttp"),
             self.shell_env_assignment("AWG_CONTAINER_NAME", "amnezia-awg"),
             self.shell_env_assignment("AWG_DOCKER_DIR", "/opt/node-plane-runtime/amnezia-awg"),
-            self.shell_env_assignment("AWG_DOCKER_IMAGE", "node-plane-amnezia-awg:0.2.16"),
+            self.shell_env_assignment("AWG_DOCKER_IMAGE", "node-plane-amnezia-awg:3.1.20260828"),
             self.shell_env_assignment("AWG_IFACE", awg_iface.as_str()),
             self.shell_env_assignment(
                 "AWG_CONFIG",
@@ -560,7 +560,7 @@ impl DriverContext {
             self.shell_env_assignment("XRAY_INBOUND_XHTTP_TAG", "reality-xhttp"),
             self.shell_env_assignment("AWG_CONTAINER_NAME", "amnezia-awg"),
             self.shell_env_assignment("AWG_DOCKER_DIR", "/opt/node-plane-runtime/amnezia-awg"),
-            self.shell_env_assignment("AWG_DOCKER_IMAGE", "node-plane-amnezia-awg:0.2.16"),
+            self.shell_env_assignment("AWG_DOCKER_IMAGE", "node-plane-amnezia-awg:3.1.20260828"),
             self.shell_env_assignment("AWG_IFACE", "wg0"),
             self.shell_env_assignment(
                 "AWG_CONFIG",

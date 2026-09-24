@@ -1,4 +1,4 @@
-FROM amneziavpn/amneziawg-go:0.2.16
+FROM amneziavpn/amneziawg-go:3.1.20260828@sha256:cbafc02b8373a83f428272db6d8001b37bc02e6211cbd8c0cb4e2e3759b12b72
 
 LABEL maintainer="AmneziaVPN"
 

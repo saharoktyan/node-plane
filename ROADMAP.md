@@ -8,10 +8,9 @@ alerts are deferred to future Pro modules. The version-oriented sections below
 are historical direction, not the current delivery order.
 
 Current core checkpoint (2026-09-24): release driver and agent binaries install
-successfully, both services are active, and the bot reads node data (including
-technical metrics). Provisioning finishes without visible errors through both
-local and agent paths. Issued VPN configs have not yet been tested for real
-connectivity.
+successfully, both services are active, and the bot reads node data. Provisioning
+finishes without visible errors on the tested SSH node. Issued VPN configs have
+not yet been tested for real connectivity.
 
 Next core tasks:
 - [x] Show a concise result after successful agent setup; keep full service
@@ -20,14 +19,23 @@ Next core tasks:
   Installation and maintenance still need validation on a separate node.
 - [x] Offer config preservation during reinstall only when agent diagnostics
   confirms an existing config; block the action when diagnostics is unavailable.
-- Update the pinned AmneziaWG runtime (currently `amneziavpn/amneziawg-go:0.2.16`)
-  to the latest suitable upstream release. Review newly supported/changed AWG
-  parameters, server and client config generation, migration of existing nodes,
-  and compatibility with previously issued configs. Research checkpoint:
-  [the upstream image](https://hub.docker.com/r/amneziavpn/amneziawg-go/tags)
-  currently lists `3.1.20260828`; [upstream configuration docs](https://github.com/amnezia-vpn/amneziawg-go/blob/master/README.md#configuration)
-  describe header protection, content padding and timing parameters. The
-  runtime image and config schema have not yet been changed.
+- [x] Deploy node-agent on the controller for `transport=local`, bind it to
+  `127.0.0.1`, and route local node operations through the same gRPC driver.
+  Live rollout on a separate local node is still awaiting validation.
+- [x] Remove Python's direct node command transport and the unused Python
+  bootstrap/provisioning implementations. Node diagnostics now use driver RPCs.
+  Legacy traffic sampling and alert jobs are disabled while the Pro design is
+  pending; old samples remain in the database.
+- [x] Research AmneziaWG changes from the current `0.2.16` image to upstream
+  `3.1.20260828` and define the migration. See
+  [AMNEZIAWG_UPGRADE_PLAN.md](AMNEZIAWG_UPGRADE_PLAN.md). Existing client
+  configs may be invalidated during an explicit in-place migration; all users
+  must receive fresh configs afterwards.
+- [x] Implement the AmneziaWG 3.1 runtime, config/export schema, existing-profile
+  refresh, and driver/agent rollout path described there; local tests and a
+  container configuration smoke test pass.
+- [ ] Validate AmneziaWG 3.1 on the separate node with real clients and traffic,
+  both `.conf` and `vpn://` imports, reinstall/settings changes, and rollback.
 - Move Xray user add/update/remove to the Xray API so routine access changes do
   not restart the container. Keep durable desired state and reconcile API changes
   after an Xray restart; verify failure handling and existing user access.

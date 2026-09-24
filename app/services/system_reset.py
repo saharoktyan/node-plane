@@ -14,7 +14,7 @@ from services.backups import clear_backup_storage, maybe_create_pre_action_backu
 from services.driver_commands import execute_server_command
 from services.node_driver import get_node_driver
 from services.server_registry import list_servers
-from services.server_runtime import is_running_in_container, run_local_command
+from services.controller_runtime import is_running_in_container, run_local_command
 
 
 _db = get_db()
@@ -112,6 +112,8 @@ def _managed_local_image_refs() -> List[str]:
     if image_repo and image_tag:
         refs.append(f"{image_repo}:{image_tag}")
     for ref in (
+        "node-plane-amnezia-awg:3.1.20260828",
+        "amneziavpn/amneziawg-go:3.1.20260828",
         "node-plane-amnezia-awg:0.2.16",
         "amneziavpn/amneziawg-go:0.2.16",
         "ghcr.io/xtls/xray-core:25.12.8",
@@ -326,7 +328,9 @@ if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
   docker_rm "${{XRAY_CONTAINER_NAME:-xray}}"
   docker_rm "${{AWG_CONTAINER_NAME:-{AWG_RUNTIME_CONTAINER}}}"
   docker_rmi "${{XRAY_DOCKER_IMAGE:-ghcr.io/xtls/xray-core:25.12.8}}"
-  docker_rmi "${{AWG_DOCKER_IMAGE:-node-plane-amnezia-awg:0.2.16}}"
+  docker_rmi "${{AWG_DOCKER_IMAGE:-node-plane-amnezia-awg:3.1.20260828}}"
+  docker_rmi "node-plane-amnezia-awg:0.2.16"
+  docker_rmi "amneziavpn/amneziawg-go:3.1.20260828"
   docker_rmi "amneziavpn/amneziawg-go:0.2.16"
   docker image prune -af >/dev/null 2>&1 || true
 fi

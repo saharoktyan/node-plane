@@ -249,6 +249,11 @@ Driver/agent rollout (the only driver mode is gRPC):
 ```
 
 - `update.sh --mode simple` now runs `setup_driver_agents.sh` automatically by default (`NODE_PLANE_AUTO_SETUP_DRIVER_AGENTS=1`).
+- A node registered with `transport=local` gets a node-agent systemd service on
+  the controller itself. It listens only on `127.0.0.1` with mutual TLS; the
+  driver target is recorded as `<node-key>=127.0.0.1:50061`. Use **Set up agent**
+  in the node's Bootstrap menu if this is an existing installation. Only one
+  local node can use the controller's agent service.
 - To disable automatic rollout during update, set `NODE_PLANE_AUTO_SETUP_DRIVER_AGENTS=0`.
 - Simple-mode post-install rollout is enabled by default; disable it with `NODE_PLANE_AUTO_SETUP_DRIVER_AGENTS_ON_INSTALL=0`.
 - Binary source policy for driver/agent rollout:

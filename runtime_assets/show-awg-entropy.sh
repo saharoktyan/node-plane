@@ -15,7 +15,7 @@ import os
 
 cfg_path = os.environ["CFG_ENV"]
 preset = os.environ.get("PRESET_ENV", "quic")
-keys = ["Jc", "Jmin", "Jmax", "S1", "S2", "S3", "S4", "H1", "H2", "H3", "H4", "I1", "I2", "I3", "I4", "I5"]
+keys = ["Jc", "Jmin", "Jmax", "S1", "S2", "S3", "S4", "H1", "H2", "H3", "H4", "I1", "I2", "I3", "I4", "I5", "HeaderProtectionKey", "ContentPaddingAddition", "RekeyAfterTime", "RekeyTimeout", "RejectAfterTime", "KeepaliveTimeout", "MaxHandshakeAttempts", "RandomTrailers", "DisableCookies"]
 values = {key: "" for key in keys}
 
 with open(cfg_path, "r", encoding="utf-8", errors="ignore") as fh:
@@ -29,5 +29,5 @@ with open(cfg_path, "r", encoding="utf-8", errors="ignore") as fh:
 
 print(f"preset: {preset}")
 for key in keys:
-    print(f"{key}: {values[key] or '—'}")
+    print(f"{key}: {'[set]' if key == 'HeaderProtectionKey' and values[key] else (values[key] or '—')}")
 PY

@@ -6,7 +6,7 @@ CFG="${AWG_CONFIG_FILE:-/opt/amnezia/awg/wg0.conf}"
 NETWORK="${AWG_NETWORK:-10.8.1.0/24}"
 GO_IMPL="${WG_QUICK_USERSPACE_IMPLEMENTATION:-amneziawg-go}"
 GO_PID=""
-PUB_IFACE="$(ip route get 1.1.1.1 2>/dev/null | awk '/dev/ {for (i=1;i<=NF;i++) if ($i==\"dev\") {print $(i+1); exit}}' || true)"
+PUB_IFACE="$(ip route get 1.1.1.1 2>/dev/null | awk '/dev/ {for (i=1;i<=NF;i++) if ($i=="dev") {print $(i+1); exit}}' || true)"
 
 echo "AWG runtime starting: iface=$IFACE cfg=$CFG network=$NETWORK"
 
@@ -25,7 +25,7 @@ conf_value() {
 strip_conf() {
   awk '
     function keep_interface(key) {
-      return key == "PrivateKey" || key == "ListenPort" || key == "FwMark" || key == "Jc" || key == "Jmin" || key == "Jmax" || key == "S1" || key == "S2" || key == "S3" || key == "S4" || key == "H1" || key == "H2" || key == "H3" || key == "H4" || key == "I1" || key == "I2" || key == "I3" || key == "I4" || key == "I5"
+      return key == "PrivateKey" || key == "ListenPort" || key == "FwMark" || key == "Jc" || key == "Jmin" || key == "Jmax" || key == "S1" || key == "S2" || key == "S3" || key == "S4" || key == "H1" || key == "H2" || key == "H3" || key == "H4" || key == "I1" || key == "I2" || key == "I3" || key == "I4" || key == "I5" || key == "HeaderProtectionKey" || key == "ContentPaddingAddition" || key == "RekeyAfterTime" || key == "RekeyTimeout" || key == "RejectAfterTime" || key == "KeepaliveTimeout" || key == "MaxHandshakeAttempts" || key == "RandomTrailers" || key == "DisableCookies"
     }
     function keep_peer(key) {
       return key == "PublicKey" || key == "PresharedKey" || key == "AllowedIPs" || key == "Endpoint" || key == "PersistentKeepalive"

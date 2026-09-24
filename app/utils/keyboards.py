@@ -210,15 +210,10 @@ def kb_admin_settings_menu(
     updates_label: str | None = None,
 ) -> InlineKeyboardMarkup:
     updates_text = updates_label or t(lang, "menu.updates")
-    telemetry_label = t(lang, "admin.settings.telemetry_on") if telemetry_enabled else t(lang, "admin.settings.telemetry_off")
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton(t(lang, "admin.settings.bot_title"), callback_data=f"{CB_MENU}admin_settings_bot_title"),
             InlineKeyboardButton(t(lang, "admin.settings.requests_menu"), callback_data=f"{CB_MENU}admin_settings_requests"),
-        ],
-        [
-            InlineKeyboardButton(t(lang, "admin.settings.alerts_menu"), callback_data=f"{CB_MENU}admin_settings_alerts"),
-            InlineKeyboardButton(telemetry_label, callback_data=f"{CB_MENU}admin_settings_toggle_telemetry"),
         ],
         [
             InlineKeyboardButton(updates_text, callback_data=f"{CB_MENU}admin_updates"),

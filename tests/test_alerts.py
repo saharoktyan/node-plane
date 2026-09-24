@@ -75,16 +75,14 @@ class AlertsTests(unittest.TestCase):
             self.alerts.alert_monitor_job()
         collect.assert_not_called()
 
-    def test_resolved_disk_alert_uses_current_free_percent(self) -> None:
+    def test_resolved_disk_alert_retains_last_known_value(self) -> None:
         row = {
             "server_key": "lv1",
             "alert_type": "disk_low",
             "payload": {"server_name": "old", "free_percent": 0},
         }
         server = SimpleNamespace(key="lv1", title="Latvia #1", flag="🇱🇻", protocol_kinds=tuple())
-        with patch.object(self.alerts, "get_server", return_value=server), patch.object(
-            self.alerts, "run_server_command", return_value=(0, "disk_free_percent:27\ncpus:1\nload1:0.01\n")
-        ):
+        with patch.object(self.alerts, "get_server", return_value=server):
             payload = self.alerts._current_resolved_payload(row)
         self.assertEqual(payload["server_name"], "🇱🇻 Latvia #1 (lv1)")
-        self.assertEqual(payload["free_percent"], 27)
+        self.assertEqual(payload["free_percent"], 0)

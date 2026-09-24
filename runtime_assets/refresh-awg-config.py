@@ -8,21 +8,27 @@ import tempfile
 from pathlib import Path
 
 from conf2vpn import parse_conf
+from awg_profile import ALL_FIELDS, interface_values, validate
 
 
 def refresh(old_conf: str, server_conf: str, endpoint: str, port: str, server_pub: str) -> str:
     old = parse_conf(old_conf)
     current = parse_conf(server_conf)
+    validate(interface_values(server_conf))
     iface, peer = old['Interface'], old['Peer']
     if not all((iface.get('PrivateKey'), iface.get('PublicKey'), iface.get('Address'), peer.get('PresharedKey'))):
         raise ValueError('Stored AWG config does not contain reusable peer credentials')
     if not endpoint or not server_pub:
         raise ValueError('AWG server endpoint or public key is missing')
-    for key in ('Jc', 'Jmin', 'Jmax', 'S1', 'S2', 'S3', 'S4', 'H1', 'H2', 'H3', 'H4', 'I1', 'I2', 'I3', 'I4', 'I5'):
+    for key in ALL_FIELDS:
         value = current['Interface'].get(key)
-        if not value:
+        if key in ALL_FIELDS[:16] and not value:
             raise ValueError(f'AWG server config is missing {key}')
-        iface[key] = value
+        if value:
+            iface[key] = value
+        else:
+            iface.pop(key, None)
+    validate(iface)
     peer['PublicKey'] = server_pub
     peer['Endpoint'] = f'{endpoint}:{port}'
     lines = ['[Interface]'] + [f'{key} = {value}' for key, value in iface.items()]

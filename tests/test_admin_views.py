@@ -175,11 +175,10 @@ class AdminViewsTests(unittest.TestCase):
         )
         rows = markup.inline_keyboard
         self.assertEqual([button.callback_data for button in rows[0]], ["menu:admin_settings_bot_title", "menu:admin_settings_requests"])
-        self.assertEqual([button.callback_data for button in rows[1]], ["menu:admin_settings_alerts", "menu:admin_settings_toggle_telemetry"])
-        self.assertEqual([button.callback_data for button in rows[2]], ["menu:admin_updates", "menu:admin_backups"])
-        self.assertEqual([button.callback_data for button in rows[3]], ["menu:sshkey"])
-        self.assertEqual([button.callback_data for button in rows[4]], ["menu:admin_settings_reset"])
-        self.assertEqual(rows[2][0].text, "🟢 Updates")
+        self.assertEqual([button.callback_data for button in rows[1]], ["menu:admin_updates", "menu:admin_backups"])
+        self.assertEqual([button.callback_data for button in rows[2]], ["menu:sshkey"])
+        self.assertEqual([button.callback_data for button in rows[3]], ["menu:admin_settings_reset"])
+        self.assertEqual(rows[1][0].text, "🟢 Updates")
 
     def test_admin_alerts_settings_menu_groups_core_toggles(self) -> None:
         markup = keyboards.kb_admin_alerts_settings_menu(enabled=True, interval_minutes=15, notify_resolved=False, lang="en")
@@ -269,9 +268,9 @@ class AdminViewsTests(unittest.TestCase):
         self.assertNotIn("srv:advsection:xray:spb1", callbacks)
         self.assertIn("srv:advsection:awg:spb1", callbacks)
 
-    def test_maintenance_menu_uses_plain_metrics_label(self) -> None:
+    def test_maintenance_menu_uses_diagnostics_label(self) -> None:
         markup = admin_server_wizard._advanced_section_markup("spb1", "maintenance", "en")
-        self.assertEqual(markup.inline_keyboard[0][0].text, "Metrics")
+        self.assertEqual(markup.inline_keyboard[0][0].text, "Diagnostics")
 
     def test_maintenance_section_groups_into_submenus(self) -> None:
         markup = admin_server_wizard._advanced_section_markup("spb1", "maintenance", "en")
@@ -624,6 +623,12 @@ class AdminViewsTests(unittest.TestCase):
         self.assertEqual(markup.inline_keyboard[0][0].callback_data, "srv:action:rolloutagent:spb1")
         self.assertNotIn("srv:action:installdocker:spb1", [button.callback_data for row in markup.inline_keyboard for button in row])
 
+    def test_bootstrap_menu_offers_local_agent_setup(self) -> None:
+        server = SimpleNamespace(key="home", bootstrap_state="new", transport="local")
+        with patch.object(admin_server_wizard, "get_node_driver", return_value=SimpleNamespace(get_node_diagnostics=lambda _key: (_ for _ in ()).throw(RuntimeError("offline")))):
+            markup = admin_server_wizard._bootstrap_menu_markup(server, "en")
+        self.assertEqual(markup.inline_keyboard[0][0].callback_data, "srv:action:rolloutagent:home")
+
     def test_maintenance_section_includes_full_cleanup(self) -> None:
         markup = admin_server_wizard._advanced_section_markup("spb1", "maintenance", "en")
         buttons = [button.text for row in markup.inline_keyboard for button in row]
@@ -874,6 +879,10 @@ class BootstrapRolloutRegressionTests(unittest.TestCase):
         self.assertIn("Driver: running", text)
         self.assertIn("Node agent: running", text)
         self.assertNotIn("systemd log", text)
+
+    def test_successful_local_agent_setup_reports_node_ready(self) -> None:
+        text = admin_server_wizard._agent_rollout_result_text(0, "node-agent is active on local node home", "home", "en")
+        self.assertIn("Node agent: running", text)
 
     def test_reinstall_only_offers_preservation_for_confirmed_config(self) -> None:
         server = SimpleNamespace(key="lv1", protocol_kinds=("xray", "awg"), flag="🏳️", title="Test")
