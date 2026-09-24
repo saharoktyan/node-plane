@@ -27,6 +27,7 @@ def _wipe_local_state() -> None:
     with _db.transaction() as conn:
         ensure_schema(conn)
         for table in (
+            "driver_commands",
             "alert_state",
             "profile_server_state",
             "awg_server_configs",

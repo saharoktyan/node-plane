@@ -5,6 +5,17 @@ from typing import Iterable
 
 BASE_DDL: Iterable[str] = (
     """
+    CREATE TABLE IF NOT EXISTS driver_commands (
+        source_ref TEXT PRIMARY KEY,
+        command_id TEXT NOT NULL UNIQUE,
+        kind TEXT NOT NULL,
+        request_json TEXT NOT NULL,
+        operation_id TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS schema_meta (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
@@ -178,7 +189,7 @@ def ensure_schema(conn) -> None:
     conn.execute(
         """
         INSERT INTO schema_meta(key, value)
-        VALUES ('schema_version', '5')
+        VALUES ('schema_version', '6')
         ON CONFLICT(key) DO UPDATE SET value = excluded.value
         """
     )

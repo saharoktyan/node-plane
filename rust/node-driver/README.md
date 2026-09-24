@@ -20,8 +20,7 @@ Current scope:
 - can orchestrate `ReinstallNode` by composing agent-backed runtime deletion and bootstrap flows;
 - can orchestrate `FullCleanupNode`, including optional authorized key removal through the node agent;
 - can execute `EnsureProfileOnNode` and `DeleteProfileFromNode` through node-agent runtime scripts and update `profile_server_state`;
-- persists terminal `Operation` records for mutating RPCs and records execution
-  start for the five NodeService actions.
+- persists the start and terminal result of all 15 implemented operation RPCs.
 
 Runtime bundle source of truth:
 
@@ -42,11 +41,13 @@ operation with `error.code=agent_not_configured`. They do not enqueue work.
 return `NOT_FOUND`. Live progress is not implemented. `ListOperations` returns
 the most recently updated matching records first.
 
-Operations are still executed inside the request. `SyncNodeEnv`, `ProbeNode`,
-`CheckPorts`, `OpenPorts` and `InstallDocker` persist `RUNNING` before contacting
-a configured agent. Completion updates the same ID and retains its start time.
-If the initial write fails, the action is rejected before contacting the agent.
-Other actions still persist only their terminal records.
+Operations are still executed inside the request. All implemented operation
+RPCs in NodeService, ProvisioningService and RuntimeService persist `RUNNING`
+before execution. Completion updates the same ID and retains its start time and
+structured result. If the initial write fails, the action is rejected before
+contacting the agent. Missing-agent paths complete the record with a terminal
+failure. Reinstall and profile reconciliation also record
+their nested bootstrap/node-reconciliation operations under separate IDs.
 
 Dropping an unfinished execution (for example, when its RPC is cancelled) marks
 it `FAILED` with `error.code=execution_interrupted` and `retryable=false`.
@@ -63,9 +64,41 @@ file prevents two driver processes from opening the same history concurrently;
 keep it in place while the driver is running. The OS releases the lock when the
 process exits, including after a crash.
 
-An interrupted caller can use `ListOperations` to inspect recent work, but it
-may never receive an operation ID. Durable asynchronous acceptance, command
-deduplication, per-node coordination and retention remain pending.
+An interrupted caller can resubmit with its saved command key to recover the
+operation ID, or use `ListOperations` to inspect recent work. Durable
+asynchronous acceptance, per-node coordination and retention remain pending.
+
+## Command identity
+
+All 15 operation RPCs accept optional metadata `x-node-plane-command-id`.
+The key is a single 1–128 character token using ASCII letters, digits, `-`, `_`,
+`.` and `:`. Its namespace spans the driver's history, across RPC methods.
+The driver atomically stores the key, method and SHA-256 of the decoded request's
+protobuf encoding with the initial operation. Repeated fields retain their
+order; changed request parameters require a new key.
+
+Reusing the key with the same request returns the existing operation ID without
+executing the action again, including while it is `RUNNING` and after restart.
+Reusing it for a different request or method returns `ALREADY_EXISTS`.
+Failed and interrupted results are also retained: fixing configuration does
+not cause an old key to execute again. A new intentional action requires a new
+key. Requests without metadata retain independent execution semantics.
+
+`GrpcNodeDriverClient` exposes `command_id` as an optional keyword on these
+methods, for example `driver.install_docker("node-a", command_id=saved_key)`.
+The backend persists the key and request before the first call for server
+actions in the admin wizard and the `/bootstrapserver`, `/probeserver` and
+`/syncxrayserver` commands. It maps the Telegram update ID to one key in
+PostgreSQL, then records the operation ID if a response arrives. Redelivery of
+the same update retrieves the prior result or resubmits with the same key after
+an ambiguous RPC failure. Profile provisioning and other bot flows do not yet
+use the command journal. The Python client does not automatically retry and reports RPC errors as
+`retryable=false`. This requires an updated driver; older drivers ignore the
+metadata. Deduplication lasts as long as the operation history is retained.
+
+The driver reads v1 history and writes v2 on the next update. v2 adds command
+identity alongside the operation; existing IDs and results are preserved.
+Older driver binaries cannot read v2 history.
 
 ## Run
 
@@ -107,8 +140,8 @@ There is no plaintext fallback.
 ## Next implementation targets
 
 1. Review mutual TLS with valid, missing and wrong credentials.
-2. Extend execution-start records to the remaining actions, then add node-state
-   reconciliation, command deduplication and safe retry semantics.
+2. Persist command identities in backend workflows and add node-state
+   reconciliation for interrupted work before enabling automatic retries.
 3. Move business desired-state construction into backend commands.
 4. Remove remaining direct Python execution paths after parity validation.
 

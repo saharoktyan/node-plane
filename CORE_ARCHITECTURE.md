@@ -69,7 +69,7 @@ accepted → PENDING → RUNNING → SUCCEEDED | FAILED | CANCELLED
 - A transport timeout does not prove that the node mutation failed. Do not
   automatically repeat a mutating command until idempotency/reconciliation makes
   the retry safe.
-- Future retries reuse the same logical command identity. Concurrent mutations
+- Resubmissions reuse the same logical command identity. Concurrent mutations
   on the same node must be serialized or explicitly coordinated.
 - Durable acceptance, restart recovery, retention and progress delivery must be
   implemented before switching long operations to asynchronous acceptance.
@@ -89,23 +89,37 @@ accepted → PENDING → RUNNING → SUCCEEDED | FAILED | CANCELLED
   return `NOT_FOUND`; live progress for nonterminal records is not implemented.
 - `ListOperations` filters before limiting and orders by update time descending,
   with operation ID as a deterministic tie-breaker.
-- `SyncNodeEnv`, `ProbeNode`, `CheckPorts`, `OpenPorts` and `InstallDocker`
-  persist `RUNNING` before contacting a configured agent, then update the same
-  record at completion. Failure to persist the start prevents agent dispatch.
+- All 15 implemented operation RPCs persist `RUNNING` before execution, then
+  update the same record at completion, preserving start time and result data.
+  Failure to persist the start prevents agent dispatch. Paths that reject work
+  for a missing agent complete with a terminal failure. Composite
+  operations retain separate records for their nested commands.
 - Dropping an unfinished execution or recovering it at startup records
   `FAILED` with `execution_interrupted` and `retryable=false`: the node outcome
   is unknown and must be inspected before another command. Recovery never
   automatically repeats a remote action.
 - A separate advisory lock on the local history allows only one driver writer.
+- Optional `x-node-plane-command-id` metadata binds one key to a method and
+  request fingerprint. Identical resubmissions return the same operation ID,
+  including concurrent submissions and restart recovery. Different payloads
+  using the same key are rejected. Failed/interrupted commands are not executed
+  again under that key. The Python gRPC client accepts explicit `command_id`;
+  RPC errors no longer advertise automatic retry. v1 history remains readable,
+  and subsequent writes use the v2 envelope that preserves the identity.
 
 ### Still not implemented
 
-Execution currently completes inside the mutating RPC. Actions outside the
-five NodeService commands still persist only terminal records. A crash can
+Execution currently completes inside the mutating RPC. A crash can
 leave the mutation applied without an ID returned to the caller. There is no
 durable queue, live operation subscription, remote cancellation, per-node
-serialization or idempotent retry mechanism. A local cancellation does not
-prove that the remote action stopped.
+serialization or automatic retry mechanism. Admin server actions now persist
+command keys in PostgreSQL before calling the driver, keyed by Telegram update
+ID and exact action parameters. Other backend workflows still submit anonymous
+commands. The journal retains a returned operation ID and rejects changed
+parameters for the same update. Missing history blocks redispatch when the
+operation ID is known. An outcome without a returned ID still depends on the
+driver retaining its history file.
+A local cancellation does not prove that the remote action stopped.
 Existing runtime failures do not all have structured error codes yet.
 
 The agent transport now uses mutual TLS. The controller's CA private key and

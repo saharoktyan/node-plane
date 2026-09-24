@@ -238,6 +238,11 @@ class SQLiteToPostgresMigrationTests(unittest.TestCase):
         with self.dest_db.transaction() as conn:
             ensure_schema(conn)
             conn.execute(
+                """INSERT INTO driver_commands(source_ref, command_id, kind, request_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)""",
+                ("telegram:1", "stale-1", "bootstrap_node", "{}", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"),
+            )
+            conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS alert_state (
                     alert_key TEXT PRIMARY KEY,
@@ -270,6 +275,8 @@ class SQLiteToPostgresMigrationTests(unittest.TestCase):
         self.assertEqual(verify["status"], "success")
         with self.dest_db.connect() as conn:
             row = conn.execute("SELECT COUNT(*) AS c FROM alert_state").fetchone()
+            self.assertEqual(int(row["c"]), 0)
+            row = conn.execute("SELECT COUNT(*) AS c FROM driver_commands").fetchone()
             self.assertEqual(int(row["c"]), 0)
 
 

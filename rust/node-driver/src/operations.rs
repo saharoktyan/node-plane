@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::os::unix::fs::OpenOptionsExt;
@@ -7,16 +7,65 @@ use std::sync::{Arc, Mutex};
 
 use chrono::Utc;
 use prost::Message;
-use tonic::Status;
+use sha2::{Digest, Sha256};
+use tonic::{Request, Status};
 use uuid::Uuid;
 
 use crate::driver::v1::{DriverError, Operation, StartOperationResponse};
 
-const FILE_HEADER: &[u8] = b"NODE-PLANE-OPERATIONS-v1\n";
+const LEGACY_FILE_HEADER: &[u8] = b"NODE-PLANE-OPERATIONS-v1\n";
+const FILE_HEADER: &[u8] = b"NODE-PLANE-OPERATIONS-v2\n";
+
+#[derive(Clone, PartialEq, Message)]
+struct StoredOperation {
+    #[prost(message, required, tag = "1")]
+    operation: Operation,
+    #[prost(string, tag = "2")]
+    command_id: String,
+    #[prost(bytes = "vec", tag = "3")]
+    request_hash: Vec<u8>,
+}
+
+pub(crate) struct CommandIdentity {
+    command_id: String,
+    request_hash: Vec<u8>,
+}
+
+impl CommandIdentity {
+    pub(crate) fn from_request<T: Message>(request: &Request<T>) -> Result<Option<Self>, Status> {
+        let mut values = request.metadata().get_all("x-node-plane-command-id").iter();
+        let Some(value) = values.next() else {
+            return Ok(None);
+        };
+        let command_id = value
+            .to_str()
+            .map_err(|_| Status::invalid_argument("invalid command id"))?;
+        if values.next().is_some()
+            || command_id.is_empty()
+            || command_id.len() > 128
+            || !command_id
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || b"-_.:".contains(&c))
+        {
+            return Err(Status::invalid_argument(
+                "command id must be a single 1-128 character ASCII token",
+            ));
+        }
+        Ok(Some(Self {
+            command_id: command_id.to_string(),
+            request_hash: Sha256::digest(request.get_ref().encode_to_vec()).to_vec(),
+        }))
+    }
+}
+
+pub(crate) enum CommandStart {
+    New(RunningOperation),
+    Existing(StartOperationResponse),
+}
 
 #[derive(Clone, Default)]
 pub(crate) struct DriverState {
-    operations: Arc<Mutex<HashMap<String, Operation>>>,
+    operations: Arc<Mutex<HashMap<String, StoredOperation>>>,
     storage_path: Option<Arc<PathBuf>>,
     // Keep the advisory lock alive for every clone of this state.
     _storage_lock: Option<Arc<fs::File>>,
@@ -46,16 +95,43 @@ impl DriverState {
         lock.try_lock().map_err(io::Error::other)?;
         let mut operations = match fs::read(&path) {
             Ok(bytes) => {
-                let mut rest = bytes.strip_prefix(FILE_HEADER).ok_or_else(|| {
-                    io::Error::new(io::ErrorKind::InvalidData, "invalid operations file header")
-                })?;
+                let legacy = bytes.starts_with(LEGACY_FILE_HEADER);
+                let mut rest = bytes
+                    .strip_prefix(if legacy {
+                        LEGACY_FILE_HEADER
+                    } else {
+                        FILE_HEADER
+                    })
+                    .ok_or_else(|| {
+                        io::Error::new(io::ErrorKind::InvalidData, "invalid operations file header")
+                    })?;
                 let mut items = HashMap::new();
+                let mut command_ids = HashSet::new();
                 while !rest.is_empty() {
-                    let operation = Operation::decode_length_delimited(&mut rest)
-                        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
-                    if operation.operation_id.is_empty()
+                    let record = if legacy {
+                        Operation::decode_length_delimited(&mut rest).map(|operation| {
+                            StoredOperation {
+                                operation,
+                                command_id: String::new(),
+                                request_hash: Vec::new(),
+                            }
+                        })
+                    } else {
+                        StoredOperation::decode_length_delimited(&mut rest)
+                    }
+                    .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+                    if !record.command_id.is_empty()
+                        && (record.request_hash.len() != 32
+                            || !command_ids.insert(record.command_id.clone()))
+                    {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "invalid or duplicate command identity",
+                        ));
+                    }
+                    if record.operation.operation_id.is_empty()
                         || items
-                            .insert(operation.operation_id.clone(), operation)
+                            .insert(record.operation.operation_id.clone(), record)
                             .is_some()
                     {
                         return Err(io::Error::new(
@@ -70,7 +146,8 @@ impl DriverState {
             Err(err) => return Err(err),
         };
         let mut recovered = false;
-        for operation in operations.values_mut() {
+        for record in operations.values_mut() {
+            let operation = &mut record.operation;
             if matches!(operation.status.as_str(), "PENDING" | "RUNNING") {
                 mark_interrupted(
                     operation,
@@ -89,12 +166,46 @@ impl DriverState {
         })
     }
 
+    #[cfg(test)]
     pub(crate) fn begin_operation(
         &self,
         kind: &str,
         node_key: &str,
         profile_name: &str,
     ) -> Result<RunningOperation, Status> {
+        match self.begin_command(kind, node_key, profile_name, None)? {
+            CommandStart::New(operation) => Ok(operation),
+            CommandStart::Existing(_) => unreachable!("anonymous commands are never deduplicated"),
+        }
+    }
+
+    pub(crate) fn begin_command(
+        &self,
+        kind: &str,
+        node_key: &str,
+        profile_name: &str,
+        identity: Option<CommandIdentity>,
+    ) -> Result<CommandStart, Status> {
+        let mut current = self.operations.lock().expect("operations lock poisoned");
+        if let Some(identity) = &identity {
+            if let Some(record) = current
+                .values()
+                .find(|record| record.command_id == identity.command_id)
+            {
+                if record.operation.kind != kind
+                    || record.operation.node_key != node_key
+                    || record.operation.profile_name != profile_name
+                    || record.request_hash != identity.request_hash
+                {
+                    return Err(Status::already_exists(
+                        "command id was used with a different request",
+                    ));
+                }
+                return Ok(CommandStart::Existing(StartOperationResponse {
+                    operation_id: record.operation.operation_id.clone(),
+                }));
+            }
+        }
         let timestamp = Utc::now().to_rfc3339();
         let operation = Operation {
             operation_id: Uuid::new_v4().to_string(),
@@ -107,14 +218,26 @@ impl DriverState {
             progress_message: "execution started".to_string(),
             ..Default::default()
         };
-        self.put_operation(operation.clone())?;
-        Ok(RunningOperation {
+        let (command_id, request_hash) = identity
+            .map(|identity| (identity.command_id, identity.request_hash))
+            .unwrap_or_default();
+        let mut updated = current.clone();
+        updated.insert(
+            operation.operation_id.clone(),
+            StoredOperation {
+                operation: operation.clone(),
+                command_id,
+                request_hash,
+            },
+        );
+        self.save_updated(&mut current, updated)?;
+        Ok(CommandStart::New(RunningOperation {
             state: self.clone(),
             operation: Some(operation),
-        })
+        }))
     }
 
-    fn persist(path: &Path, operations: &HashMap<String, Operation>) -> io::Result<()> {
+    fn persist(path: &Path, operations: &HashMap<String, StoredOperation>) -> io::Result<()> {
         let parent = path.parent().ok_or_else(|| {
             io::Error::new(io::ErrorKind::InvalidInput, "operations path has no parent")
         })?;
@@ -128,7 +251,7 @@ impl DriverState {
                 .open(&temporary)?;
             file.write_all(FILE_HEADER)?;
             let mut sorted: Vec<_> = operations.values().collect();
-            sorted.sort_by(|a, b| a.operation_id.cmp(&b.operation_id));
+            sorted.sort_by(|a, b| a.operation.operation_id.cmp(&b.operation.operation_id));
             for operation in sorted {
                 let mut bytes = Vec::new();
                 operation
@@ -154,77 +277,23 @@ impl DriverState {
         let operation_id = operation.operation_id.clone();
         let mut current = self.operations.lock().expect("operations lock poisoned");
         let mut updated = current.clone();
-        updated.insert(operation_id.clone(), operation);
+        let record = updated.entry(operation_id.clone()).or_default();
+        record.operation = operation;
+        self.save_updated(&mut current, updated)?;
+        Ok(StartOperationResponse { operation_id })
+    }
+
+    fn save_updated(
+        &self,
+        current: &mut HashMap<String, StoredOperation>,
+        updated: HashMap<String, StoredOperation>,
+    ) -> Result<(), Status> {
         if let Some(path) = &self.storage_path {
             Self::persist(path, &updated)
                 .map_err(|err| Status::internal(format!("failed to persist operation: {err}")))?;
         }
         *current = updated;
-        Ok(StartOperationResponse { operation_id })
-    }
-
-    pub(crate) fn missing_agent_operation(
-        &self,
-        kind: &str,
-        node_key: &str,
-        profile_name: &str,
-    ) -> Result<StartOperationResponse, Status> {
-        let timestamp = Utc::now().to_rfc3339();
-        let summary = "no node-agent target configured";
-        self.put_operation(Operation {
-            operation_id: Uuid::new_v4().to_string(),
-            kind: kind.to_string(),
-            status: "FAILED".to_string(),
-            node_key: node_key.to_string(),
-            profile_name: profile_name.to_string(),
-            started_at: timestamp.clone(),
-            updated_at: timestamp.clone(),
-            finished_at: timestamp,
-            progress_message: summary.to_string(),
-            error: Some(DriverError {
-                code: "agent_not_configured".to_string(),
-                summary: summary.to_string(),
-                detail: "Configure the node in NODE_AGENT_TARGETS before retrying.".to_string(),
-                retryable: false,
-            }),
-            result_json: String::new(),
-        })
-    }
-
-    pub(crate) fn finish_operation(
-        &self,
-        kind: &str,
-        node_key: &str,
-        profile_name: &str,
-        status: &str,
-        message: &str,
-    ) -> Result<StartOperationResponse, Status> {
-        self.finish_operation_with_result(kind, node_key, profile_name, status, message, "")
-    }
-
-    pub(crate) fn finish_operation_with_result(
-        &self,
-        kind: &str,
-        node_key: &str,
-        profile_name: &str,
-        status: &str,
-        message: &str,
-        result_json: &str,
-    ) -> Result<StartOperationResponse, Status> {
-        let timestamp = Utc::now().to_rfc3339();
-        self.put_operation(Operation {
-            operation_id: Uuid::new_v4().to_string(),
-            kind: kind.to_string(),
-            status: status.to_string(),
-            node_key: node_key.to_string(),
-            profile_name: profile_name.to_string(),
-            started_at: timestamp.clone(),
-            updated_at: timestamp.clone(),
-            finished_at: timestamp,
-            progress_message: message.to_string(),
-            error: None,
-            result_json: result_json.to_string(),
-        })
+        Ok(())
     }
 
     pub(crate) fn get_operation(&self, operation_id: &str) -> Option<Operation> {
@@ -232,7 +301,7 @@ impl DriverState {
             .lock()
             .expect("operations lock poisoned")
             .get(operation_id)
-            .cloned()
+            .map(|record| record.operation.clone())
     }
 
     pub(crate) fn list_operations(
@@ -247,6 +316,7 @@ impl DriverState {
             .lock()
             .expect("operations lock poisoned")
             .values()
+            .map(|record| &record.operation)
             .filter(|op| node_key.is_empty() || op.node_key == node_key)
             .filter(|op| profile_name.is_empty() || op.profile_name == profile_name)
             .filter(|op| status.is_empty() || op.status == status)
@@ -271,9 +341,44 @@ pub(crate) struct RunningOperation {
 
 impl RunningOperation {
     pub(crate) fn finish(
+        self,
+        status: &str,
+        summary: &str,
+    ) -> Result<StartOperationResponse, Status> {
+        self.finish_with_result(status, summary, "")
+    }
+
+    pub(crate) fn finish_with_result(
+        self,
+        status: &str,
+        summary: &str,
+        result_json: &str,
+    ) -> Result<StartOperationResponse, Status> {
+        self.complete(status, summary, result_json, None)
+    }
+
+    pub(crate) fn missing_agent(self) -> Result<StartOperationResponse, Status> {
+        let summary = "no node-agent target configured";
+        self.complete(
+            "FAILED",
+            summary,
+            "",
+            Some(DriverError {
+                code: "agent_not_configured".to_string(),
+                summary: summary.to_string(),
+                detail: "Configure the node target, then submit a new command identity."
+                    .to_string(),
+                retryable: false,
+            }),
+        )
+    }
+
+    fn complete(
         mut self,
         status: &str,
         summary: &str,
+        result_json: &str,
+        error: Option<DriverError>,
     ) -> Result<StartOperationResponse, Status> {
         let mut operation = self
             .operation
@@ -284,6 +389,8 @@ impl RunningOperation {
         operation.updated_at = Utc::now().to_rfc3339();
         operation.finished_at = operation.updated_at.clone();
         operation.progress_message = summary.to_string();
+        operation.result_json = result_json.to_string();
+        operation.error = error;
         let response = self.state.put_operation(operation)?;
         self.operation = None;
         Ok(response)

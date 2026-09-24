@@ -10,6 +10,7 @@ from config import PARSE_MODE
 from i18n import get_locale_for_update, t
 from services.app_settings import set_initial_setup_state
 from services.node_driver import get_node_driver
+from services.driver_commands import execute_server_command
 from services.provisioning_state import delete_profile_server_state, upsert_profile_server_state
 from services.server_registry import list_servers, update_server_fields, upsert_server
 from services.ssh_keys import render_public_key_guide
@@ -24,6 +25,12 @@ from .admin_common import guard, kb_back_menu
 
 def _safe_output(value: str, limit: int = 1500) -> str:
     return redact_sensitive_text(value or "")[:limit]
+
+
+def _run_driver_action(update: Update, kind: str, server_key: str):
+    update_id = getattr(update, "update_id", None)
+    source_ref = f"telegram:{update_id}" if update_id is not None else ""
+    return execute_server_command(get_node_driver(), source_ref, kind, server_key)
 
 
 def add_cmd(update: Update, context: CallbackContext) -> None:
@@ -202,7 +209,7 @@ def probeserver_cmd(update: Update, context: CallbackContext) -> None:
     if len(parts) != 2:
         update.effective_message.reply_text(t(lang, "admin.cmd.usage_probeserver"))
         return
-    operation = get_node_driver().probe_node(parts[1])
+    operation = _run_driver_action(update, "probe_node", parts[1])
     code = 0 if operation.status == "SUCCEEDED" else 1
     out = operation.progress_message
     if code != 0:
@@ -244,7 +251,7 @@ def bootstrapserver_cmd(update: Update, context: CallbackContext) -> None:
         return
     key = parts[1]
     update.effective_message.reply_text(t(lang, "admin.cmd.bootstrap_running", server=key), parse_mode=PARSE_MODE)
-    operation = get_node_driver().bootstrap_node(key)
+    operation = _run_driver_action(update, "bootstrap_node", key)
     code = 0 if operation.status == "SUCCEEDED" else 1
     out = operation.progress_message
     if code != 0:
@@ -313,7 +320,7 @@ def syncxrayserver_cmd(update: Update, context: CallbackContext) -> None:
         update.effective_message.reply_text(t(lang, "admin.cmd.usage_syncxrayserver"))
         return
     key = parts[1]
-    operation = get_node_driver().sync_xray(key)
+    operation = _run_driver_action(update, "sync_xray", key)
     code = 0 if operation.status == "SUCCEEDED" else 1
     out = operation.progress_message
     if code != 0:
