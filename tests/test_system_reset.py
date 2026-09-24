@@ -147,7 +147,7 @@ class SystemResetTests(unittest.TestCase):
             return SimpleNamespace(status="SUCCEEDED", progress_message="ok")
 
         with patch.object(self.system_reset, "execute_server_command", side_effect=fake_cleanup):
-            rc, out = self.system_reset.run_factory_reset(cleanup_nodes=True, stop_local_runtime=False)
+            rc, out = self.system_reset.run_factory_reset(cleanup_nodes=True, stop_local_runtime=False, source_ref="telegram:cleanup-1")
 
         self.assertEqual(rc, 0)
         self.assertIn(("nl1", True), calls)
@@ -334,7 +334,7 @@ class SystemResetTests(unittest.TestCase):
         with patch.object(self.system_reset, "execute_server_command", side_effect=fake_cleanup), patch.object(
             self.system_reset, "schedule_full_uninstall", return_value=(0, "Node Plane removal scheduled.")
         ):
-            rc, out = self.system_reset.run_full_remove(cleanup_nodes=True)
+            rc, out = self.system_reset.run_full_remove(cleanup_nodes=True, source_ref="telegram:cleanup-2")
 
         self.assertEqual(rc, 0)
         self.assertIn(("nl1", True), calls)

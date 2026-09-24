@@ -12,6 +12,17 @@ if APP_ROOT not in sys.path:
 
 from services.node_driver_client import DriverOperation
 from services.node_driver_grpc import GrpcNodeDriverClient
+from services import node_driver
+
+
+class DriverFactoryTests(unittest.TestCase):
+    def test_grpc_is_the_only_driver(self):
+        previous = node_driver._driver
+        try:
+            node_driver._driver = None
+            self.assertIsInstance(node_driver.get_node_driver(), GrpcNodeDriverClient)
+        finally:
+            node_driver._driver = previous
 
 
 class GrpcCommandIdentityTests(unittest.TestCase):

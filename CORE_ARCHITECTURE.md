@@ -48,12 +48,11 @@ one scenario at a time, with compatibility for the existing client during rollou
 
 Current migration debt: driver still queries and updates business PostgreSQL
 tables, computes desired profile state during reconcile, and renders node.env.
-The gRPC core UI now uses driver queries and commands for runtime status,
-Docker availability, provisioning, settings, and maintenance. Python direct
-runtime paths remain behind the `inprocess` adapter, in the existing metrics,
-traffic and alert features reserved for later Pro work, and in the host-local
-orphan cleanup and agent installation procedures. The in-process backend's
-long-term role is a separate decision; these paths are not the target design.
+The core UI uses the gRPC driver for runtime status, Docker availability,
+provisioning, settings, and maintenance. The `inprocess` driver adapter has
+been removed. Python direct runtime paths still exist in metrics, traffic and
+alert features reserved for later Pro work, and in host-local orphan cleanup
+and agent installation procedures; these paths are not the target design.
 
 ## Operation contract
 
@@ -125,8 +124,7 @@ operation ID is known. An outcome without a returned ID still depends on the
 driver retaining its history file.
 Full removal and factory reset with node cleanup now submit `FullCleanupNode`
 through this journal in gRPC mode. A failed node operation prevents uninstall
-or local-state deletion. The in-process backend remains a compatibility path;
-factory reset also retains host-local shell cleanup when no local node is
+or local-state deletion. Factory reset retains host-local shell cleanup when no local node is
 registered, to remove runtimes left by older installations.
 The admin node card has one confirmed removal action. It first submits
 `FullCleanupNode` through the command journal, then removes controller-owned
@@ -135,16 +133,15 @@ Only a typed agent connection failure or agent timeout offers a second,
 explicit confirmation to remove the bot record without node access; other
 cleanup failures keep the record. After a timeout, the remote outcome is
 unknown. The card's runtime status
-read now goes through `GetRuntimeStatus` on the selected driver backend. Agent
+read now goes through `GetRuntimeStatus` on the gRPC driver. Agent
 connections have a five-second connect timeout, and runtime-facts reads have
 a five-second response deadline, so an unreachable VPS does not hold the card
 open indefinitely. Reusing a removed node key requires updating the driver
 agent-target mapping through the normal rollout first.
 `FullCleanupNode` has a 180-second agent deadline and the Python caller waits
 longer than that to receive its recorded terminal result.
-AWG entropy inspection now uses a read-only driver/agent RPC. Regeneration is
-a journaled driver operation with a retained command identity; the in-process
-backend keeps the older script path until node parity testing is complete.
+AWG entropy inspection uses a read-only driver/agent RPC. Regeneration is
+a journaled driver operation with a retained command identity.
 A local cancellation does not prove that the remote action stopped.
 Existing runtime failures do not all have structured error codes yet.
 

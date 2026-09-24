@@ -14,18 +14,20 @@ local and agent paths. Issued VPN configs have not yet been tested for real
 connectivity.
 
 Next core tasks:
-- Show a concise result after successful agent setup; keep full service logs
-  available for failures or a detailed view.
-- Make gRPC the only backend and remove `inprocess` after validating dependent
-  installation and maintenance paths. Agent setup currently asks for a bot
-  restart to activate gRPC, but the UI has no restart button; handle activation
-  as part of the single-backend transition.
-- Offer reuse of an existing node config during reinstall only when a usable
-  config actually exists. Otherwise skip that choice.
+- [x] Show a concise result after successful agent setup; keep full service
+  logs available on failure.
+- [x] Make gRPC the only driver backend and remove the `inprocess` adapter.
+  Installation and maintenance still need validation on a separate node.
+- [x] Offer config preservation during reinstall only when agent diagnostics
+  confirms an existing config; block the action when diagnostics is unavailable.
 - Update the pinned AmneziaWG runtime (currently `amneziavpn/amneziawg-go:0.2.16`)
   to the latest suitable upstream release. Review newly supported/changed AWG
   parameters, server and client config generation, migration of existing nodes,
-  and compatibility with previously issued configs.
+  and compatibility with previously issued configs. Research checkpoint:
+  [the upstream image](https://hub.docker.com/r/amneziavpn/amneziawg-go/tags)
+  currently lists `3.1.20260828`; [upstream configuration docs](https://github.com/amnezia-vpn/amneziawg-go/blob/master/README.md#configuration)
+  describe header protection, content padding and timing parameters. The
+  runtime image and config schema have not yet been changed.
 - Move Xray user add/update/remove to the Xray API so routine access changes do
   not restart the container. Keep durable desired state and reconcile API changes
   after an Xray restart; verify failure handling and existing user access.

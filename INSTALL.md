@@ -241,7 +241,7 @@ Update an existing deployment:
 ./scripts/update.sh --mode portable
 ```
 
-Driver/agent rollout (for grpc driver mode):
+Driver/agent rollout (the only driver mode is gRPC):
 
 ```bash
 ./scripts/setup_driver_agents.sh

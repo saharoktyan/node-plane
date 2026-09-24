@@ -504,6 +504,21 @@ def _agent_rollout_result_markup(server_key: str, lang: str, output: str) -> Inl
     )
 
 
+def _agent_rollout_result_text(rc: int, output: str, server_key: str, lang: str) -> str:
+    title = "Подключение agent" if lang == "ru" else "Set up agent"
+    if rc != 0:
+        return _action_result_text(title, rc, output, server_key, lang)
+    lines = [f"✅ {title}", "", t(lang, "admin.wizard.agent_setup_done")]
+    if "node-plane-driver.service" in output:
+        lines.append(t(lang, "admin.wizard.agent_setup_driver_ready"))
+    if f"node-agent is active on {server_key}" in output or f"node-agent is up to date and active on {server_key}" in output:
+        lines.append(t(lang, "admin.wizard.agent_setup_node_ready"))
+    if "Configured NODE_AGENT_TARGETS" in output:
+        lines.append(t(lang, "admin.wizard.agent_setup_target_ready"))
+    lines.extend(["", t(lang, "admin.wizard.server_label") + f": {server_key}"])
+    return "\n".join(lines)
+
+
 def _probe_result_markup(server_key: str, lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
@@ -536,6 +551,23 @@ def _docker_status_from_driver(server_key: str) -> bool | None:
     for item in diagnostics.items:
         if item.kind == "docker":
             return item.status == "ok"
+    return None
+
+
+def _reusable_runtime_config_status(server: RegisteredServer) -> bool | None:
+    kinds = set(server.protocol_kinds)
+    required = {"xray_config" if kind == "xray" else "awg_config" for kind in kinds if kind in {"xray", "awg"}}
+    if not required:
+        return False
+    try:
+        diagnostics = get_node_driver().get_node_diagnostics(server.key)
+    except Exception:
+        return None
+    statuses = {item.kind: item.status for item in diagnostics.items if item.kind in required}
+    if any(status == "ok" for status in statuses.values()):
+        return True
+    if all(statuses.get(kind) == "missing" for kind in required):
+        return False
     return None
 
 
@@ -586,31 +618,38 @@ def _bootstrap_menu_markup(server: RegisteredServer, lang: str) -> InlineKeyboar
     return InlineKeyboardMarkup(rows)
 
 
-def _bootstrap_mode_text(server: RegisteredServer, action: str, lang: str) -> str:
+def _bootstrap_mode_text(server: RegisteredServer, action: str, lang: str, reusable_config: bool | None = True) -> str:
     action_key = {
         "bootstrap": "admin.wizard.bootstrap",
         "reinstall": "admin.wizard.reinstall",
         "delete": "admin.wizard.delete_runtime",
     }[action]
+    intro = t(lang, "admin.wizard.bootstrap_mode_intro")
+    if action == "reinstall" and reusable_config is False:
+        intro = t(lang, "admin.wizard.reinstall_no_config")
+    elif action == "reinstall" and reusable_config is None:
+        intro = t(lang, "admin.wizard.reinstall_config_unknown")
     return "\n".join(
         [
             f"🛠 {server.flag} {server.title} ({server.key})",
             "",
             t(lang, "admin.wizard.bootstrap_mode_title", action=t(lang, action_key)),
-            t(lang, "admin.wizard.bootstrap_mode_intro"),
+            intro,
         ]
     )
 
 
-def _bootstrap_mode_markup(server_key: str, action: str, lang: str) -> InlineKeyboardMarkup:
+def _bootstrap_mode_markup(server_key: str, action: str, lang: str, reusable_config: bool | None = True) -> InlineKeyboardMarkup:
     clean_key = "admin.wizard.clean_remove" if action == "delete" else "admin.wizard.clean_reinstall"
-    return InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton(t(lang, "admin.wizard.keep_config"), callback_data=f"{CB_SRV}bootrun:{action}:preserve:{server_key}")],
-            [InlineKeyboardButton(t(lang, clean_key), callback_data=f"{CB_SRV}bootrun:{action}:clean:{server_key}")],
-            [InlineKeyboardButton(t(lang, "admin.wizard.back_to_bootstrap"), callback_data=f"{CB_SRV}bootmenu:{server_key}")],
-        ]
-    )
+    rows = []
+    if action != "reinstall" or reusable_config is True:
+        rows.append([InlineKeyboardButton(t(lang, "admin.wizard.keep_config"), callback_data=f"{CB_SRV}bootrun:{action}:preserve:{server_key}")])
+    if action != "reinstall" or reusable_config is not None:
+        rows.append([InlineKeyboardButton(t(lang, clean_key), callback_data=f"{CB_SRV}bootrun:{action}:clean:{server_key}")])
+    if action == "reinstall" and reusable_config is None:
+        rows.append([InlineKeyboardButton(t(lang, "admin.wizard.retry_check"), callback_data=f"{CB_SRV}bootmode:{action}:{server_key}")])
+    rows.append([InlineKeyboardButton(t(lang, "admin.wizard.back_to_bootstrap"), callback_data=f"{CB_SRV}bootmenu:{server_key}")])
+    return InlineKeyboardMarkup(rows)
 
 
 def _advanced_menu_text(server: RegisteredServer, lang: str) -> str:
@@ -903,7 +942,8 @@ def _open_bootstrap_mode(context: CallbackContext, server_key: str, action: str)
         w["server_key"] = server_key
         w["step"] = f"bootstrap_mode_{action}"
         _wizard_set(context, w)
-    _wizard_edit(context, _bootstrap_mode_text(server, action, _wizard_lang(context)), _bootstrap_mode_markup(server_key, action, _wizard_lang(context)))
+    reusable_config = _reusable_runtime_config_status(server) if action == "reinstall" else True
+    _wizard_edit(context, _bootstrap_mode_text(server, action, _wizard_lang(context), reusable_config), _bootstrap_mode_markup(server_key, action, _wizard_lang(context), reusable_config))
 
 
 def _full_cleanup_text(server: RegisteredServer, lang: str) -> str:
@@ -2023,6 +2063,11 @@ def on_server_callback(update: Update, context: CallbackContext, payload: str) -
     if payload.startswith("bootrun:"):
         _, action, mode, server_key = payload.split(":", 3)
         preserve_config = mode == "preserve"
+        if action == "reinstall" and preserve_config:
+            server = get_server(server_key)
+            if server is None or _reusable_runtime_config_status(server) is not True:
+                _open_bootstrap_mode(context, server_key, action)
+                return
         action_title = {
             "bootstrap": t(lang, "admin.wizard.bootstrap"),
             "reinstall": t(lang, "admin.wizard.reinstall"),
@@ -2073,7 +2118,7 @@ def on_server_callback(update: Update, context: CallbackContext, payload: str) -
             stop_progress = _start_progress_animation(context, label)
             rc, out = ensure_driver_agent_rollout_for_ssh(server_key, install_rust=(action == "rolloutagentrust"))
             stop_progress()
-            _wizard_edit(context, _action_result_text(label, rc, out, server_key, lang), _agent_rollout_result_markup(server_key, lang, out))
+            _wizard_edit(context, _agent_rollout_result_text(rc, out, server_key, lang), _agent_rollout_result_markup(server_key, lang, out))
             return
         if action == "applysettings":
             label = "Применение настроек" if lang == "ru" else "Apply settings"
