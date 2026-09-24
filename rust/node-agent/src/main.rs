@@ -411,6 +411,42 @@ impl AgentState {
         let awg_config_path = self.node_env_value("AWG_CONFIG", &self.config.awg_config_path);
         let xray_exists = Path::new(&xray_config_path).is_file();
         let awg_exists = Path::new(&awg_config_path).is_file();
+        let xray_reusable = xray_exists
+            && fs::read_to_string(&xray_config_path)
+                .ok()
+                .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+                .and_then(|config| config.get("inbounds")?.as_array().cloned())
+                .is_some_and(|inbounds| {
+                    inbounds.iter().any(|inbound| {
+                        inbound.get("protocol").and_then(Value::as_str) == Some("vless")
+                    })
+                });
+        let awg_reusable = awg_exists
+            && fs::read_to_string(&awg_config_path).is_ok_and(|raw| {
+                let mut in_interface = false;
+                let mut has_private_key = false;
+                let mut has_listen_port = false;
+                for line in raw.lines().map(str::trim) {
+                    if line.starts_with('[') {
+                        in_interface = line.eq_ignore_ascii_case("[Interface]");
+                    } else if in_interface {
+                        if let Some(value) = line
+                            .strip_prefix("PrivateKey")
+                            .and_then(|rest| rest.trim_start().strip_prefix('='))
+                        {
+                            has_private_key = !value.trim().is_empty();
+                        }
+                        if let Some(value) = line
+                            .strip_prefix("ListenPort")
+                            .and_then(|rest| rest.trim_start().strip_prefix('='))
+                        {
+                            has_listen_port =
+                                value.trim().parse::<u16>().is_ok_and(|port| port > 0);
+                        }
+                    }
+                }
+                has_private_key && has_listen_port
+            });
         let runtime_root_exists = Path::new(&self.config.runtime_root).is_dir();
         let version = Self::read_first_line(&self.runtime_version_path());
         let commit = Self::read_first_line(&self.runtime_commit_path());
@@ -446,13 +482,27 @@ impl AgentState {
             },
             DiagnosticItem {
                 kind: "xray_config".to_string(),
-                status: if xray_exists { "ok" } else { "missing" }.to_string(),
+                status: if !xray_exists {
+                    "missing"
+                } else if xray_reusable {
+                    "ok"
+                } else {
+                    "invalid"
+                }
+                .to_string(),
                 summary: xray_config_path,
                 detail: String::new(),
             },
             DiagnosticItem {
                 kind: "awg_config".to_string(),
-                status: if awg_exists { "ok" } else { "missing" }.to_string(),
+                status: if !awg_exists {
+                    "missing"
+                } else if awg_reusable {
+                    "ok"
+                } else {
+                    "invalid"
+                }
+                .to_string(),
                 summary: awg_config_path,
                 detail: String::new(),
             },
@@ -1379,7 +1429,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::{AgentConfig, AgentState, awg_config_uses_port, xray_config_uses_port};
-    use std::{fs, process, time::{SystemTime, UNIX_EPOCH}};
+    use std::{
+        fs, process,
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     #[test]
     fn accepts_installer_agent_config_with_default_runtime_paths() {
@@ -1417,15 +1470,30 @@ tls_client_ca_path = "/etc/node-plane/tls/ca.crt"
 
     #[test]
     fn diagnostics_and_runtime_facts_use_node_env_config_paths() {
-        let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
         let root = std::env::temp_dir().join(format!("node-plane-agent-{}-{nonce}", process::id()));
         fs::create_dir_all(&root).unwrap();
         let xray = root.join("custom-xray.json");
         let awg = root.join("custom-awg.conf");
         let env_path = root.join("node.env");
-        fs::write(&xray, "{}").unwrap();
-        fs::write(&awg, "[Interface]\n").unwrap();
-        fs::write(&env_path, format!("XRAY_CONFIG={}\nAWG_CONFIG={}\n", xray.display(), awg.display())).unwrap();
+        fs::write(&xray, r#"{"inbounds":[{"protocol":"vless"}]}"#).unwrap();
+        fs::write(
+            &awg,
+            "[Interface]\nPrivateKey = test-key\nListenPort = 51820\n",
+        )
+        .unwrap();
+        fs::write(
+            &env_path,
+            format!(
+                "XRAY_CONFIG={}\nAWG_CONFIG={}\n",
+                xray.display(),
+                awg.display()
+            ),
+        )
+        .unwrap();
 
         let config = AgentConfig {
             runtime_root: root.display().to_string(),
@@ -1438,8 +1506,41 @@ tls_client_ca_path = "/etc/node-plane/tls/ca.crt"
         assert!(facts.awg_config_present);
         assert_eq!(facts.xray_config_path, xray.display().to_string());
         let items = state.diagnostics().items;
-        assert_eq!(items.iter().find(|item| item.kind == "xray_config").unwrap().status, "ok");
-        assert_eq!(items.iter().find(|item| item.kind == "awg_config").unwrap().status, "ok");
+        assert_eq!(
+            items
+                .iter()
+                .find(|item| item.kind == "xray_config")
+                .unwrap()
+                .status,
+            "ok"
+        );
+        assert_eq!(
+            items
+                .iter()
+                .find(|item| item.kind == "awg_config")
+                .unwrap()
+                .status,
+            "ok"
+        );
+        fs::write(&xray, "{}").unwrap();
+        fs::write(&awg, "[Interface]\n").unwrap();
+        let items = state.diagnostics().items;
+        assert_eq!(
+            items
+                .iter()
+                .find(|item| item.kind == "xray_config")
+                .unwrap()
+                .status,
+            "invalid"
+        );
+        assert_eq!(
+            items
+                .iter()
+                .find(|item| item.kind == "awg_config")
+                .unwrap()
+                .status,
+            "invalid"
+        );
         fs::remove_dir_all(root).unwrap();
     }
 }
