@@ -7,6 +7,25 @@ Device management, VLESS subscriptions, traffic limits, expanded metrics and
 alerts are deferred to future Pro modules. The version-oriented sections below
 are historical direction, not the current delivery order.
 
+Current core checkpoint (2026-09-24): release driver and agent binaries install
+successfully, both services are active, and the bot reads node data (including
+technical metrics). Provisioning finishes without visible errors through both
+local and agent paths. Issued VPN configs have not yet been tested for real
+connectivity.
+
+Next core tasks:
+- Show a concise result after successful agent setup; keep full service logs
+  available for failures or a detailed view.
+- Make gRPC the only backend and remove `inprocess` after validating dependent
+  installation and maintenance paths. Agent setup currently asks for a bot
+  restart to activate gRPC, but the UI has no restart button; handle activation
+  as part of the single-backend transition.
+- Offer reuse of an existing node config during reinstall only when a usable
+  config actually exists. Otherwise skip that choice.
+- Validate issued Xray/AWG configs, settings changes, reinstall, cleanup, and
+  failure scenarios on the separate test node before treating the core cycle
+  as complete.
+
 This document outlines the planned direction for upcoming Node Plane releases.
 
 It is intentionally lightweight:
