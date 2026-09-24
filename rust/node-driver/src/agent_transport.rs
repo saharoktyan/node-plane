@@ -1,5 +1,6 @@
 use std::env;
 use std::fs;
+use std::time::Duration;
 
 use tonic::transport::{Certificate, Channel, ClientTlsConfig, Endpoint, Identity};
 
@@ -64,8 +65,9 @@ impl AgentTransport {
             .ca_certificate(Certificate::from_pem(ca))
             .identity(Identity::from_pem(certificate, key))
             .domain_name(host);
-        let endpoint =
-            Endpoint::from_shared(format!("https://{}", self.target))?.tls_config(tls)?;
+        let endpoint = Endpoint::from_shared(format!("https://{}", self.target))?
+            .tls_config(tls)?
+            .connect_timeout(Duration::from_secs(5));
         Ok(NodeAgentServiceClient::new(endpoint.connect().await?))
     }
 
@@ -73,7 +75,9 @@ impl AgentTransport {
         let mut client = self.client().await.map_err(|err| {
             tonic::Status::unavailable(format!("failed to connect to node agent: {err}"))
         })?;
-        let response = client.get_runtime_facts(AgentEmpty {}).await?;
+        let mut request = tonic::Request::new(AgentEmpty {});
+        request.set_timeout(Duration::from_secs(5));
+        let response = client.get_runtime_facts(request).await?;
         Ok(response.into_inner())
     }
 

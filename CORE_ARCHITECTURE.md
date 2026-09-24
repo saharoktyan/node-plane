@@ -124,6 +124,15 @@ through this journal in gRPC mode. A failed node operation prevents uninstall
 or local-state deletion. The in-process backend remains a compatibility path;
 factory reset also retains host-local shell cleanup when no local node is
 registered, to remove runtimes left by older installations.
+The admin node card now has a separate, confirmed "remove from bot" path. It
+deletes controller-owned node state and profile bindings in one database
+transaction, without contacting the agent. This handles a permanently lost VPS;
+it does not claim to remove software on that VPS. The card's runtime status
+read now goes through `GetRuntimeStatus` on the selected driver backend. Agent
+connections have a five-second connect timeout, and runtime-facts reads have
+a five-second response deadline, so an unreachable VPS does not hold the card
+open indefinitely. Reusing a removed node key requires updating the driver
+agent-target mapping through the normal rollout first.
 A local cancellation does not prove that the remote action stopped.
 Existing runtime failures do not all have structured error codes yet.
 

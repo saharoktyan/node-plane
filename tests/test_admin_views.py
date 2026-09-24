@@ -286,13 +286,13 @@ class AdminViewsTests(unittest.TestCase):
         self.assertEqual(rows[1][0].callback_data, "srv:advsection:maintenance:spb1")
 
     def test_maintenance_runtime_section_shows_sync_only_for_drift(self) -> None:
-        with patch.object(admin_server_wizard, "get_server_runtime_state", return_value={"state": "unknown", "version": "", "commit": ""}):
+        with patch.object(admin_server_wizard, "_runtime_state_from_driver", return_value={"state": "unknown", "version": "", "commit": ""}):
             markup = admin_server_wizard._advanced_section_markup("spb1", "maintenance_runtime", "en")
         callbacks = [button.callback_data for row in markup.inline_keyboard for button in row]
         self.assertIn("srv:action:syncruntime:spb1", callbacks)
 
     def test_maintenance_runtime_section_hides_sync_when_current(self) -> None:
-        with patch.object(admin_server_wizard, "get_server_runtime_state", return_value={"state": "up_to_date", "version": "0.3.1-alpha.1", "commit": "abc1234"}):
+        with patch.object(admin_server_wizard, "_runtime_state_from_driver", return_value={"state": "up_to_date", "version": "0.3.1-alpha.1", "commit": "abc1234"}):
             markup = admin_server_wizard._advanced_section_markup("spb1", "maintenance_runtime", "en")
         callbacks = [button.callback_data for row in markup.inline_keyboard for button in row]
         self.assertNotIn("srv:action:syncruntime:spb1", callbacks)
@@ -340,6 +340,39 @@ class AdminViewsTests(unittest.TestCase):
             admin_server_wizard.on_server_callback(update, context, "card:spb1")
         render_card.assert_called_once_with(context, "spb1")
         self.assertIn("server_wizard", context.user_data)
+
+    def test_server_card_offers_offline_removal(self) -> None:
+        markup = admin_server_wizard._server_card_markup("spb1", "en")
+        callbacks = [button.callback_data for row in markup.inline_keyboard for button in row]
+        self.assertIn("srv:forgetask:spb1", callbacks)
+
+    def test_confirmed_offline_removal_does_not_call_node_driver(self) -> None:
+        update = SimpleNamespace(callback_query=SimpleNamespace(message=SimpleNamespace(chat_id=1, message_id=2)))
+        context = SimpleNamespace(user_data={"server_wizard": {
+            "step": "forget_confirm", "server_key": "spb1", "locale": "en", "data": {},
+            "chat_id": 1, "message_id": 2,
+        }})
+        with patch.object(admin_server_wizard, "guard", return_value=True), patch.object(
+            admin_server_wizard, "answer_cb"
+        ), patch.object(admin_server_wizard, "get_locale_for_update", return_value="en"), patch.object(
+            admin_server_wizard, "forget_server", return_value=True
+        ) as forget, patch.object(admin_server_wizard, "get_node_driver") as driver, patch.object(
+            admin_server_wizard, "_wizard_edit"
+        ) as edit:
+            admin_server_wizard.on_server_callback(update, context, "forgetconfirm:spb1")
+        forget.assert_called_once_with("spb1")
+        driver.assert_not_called()
+        self.assertIn("removed from the bot", edit.call_args.args[1])
+
+    def test_runtime_status_read_uses_driver(self) -> None:
+        fake_driver = SimpleNamespace(get_runtime_status=lambda key: SimpleNamespace(
+            state="up_to_date", version="1.0", commit="abc", expected_version="1.0",
+            expected_commit="abc", message="reported by agent",
+        ))
+        with patch.object(admin_server_wizard, "get_node_driver", return_value=fake_driver):
+            state = admin_server_wizard._runtime_state_from_driver("spb1")
+        self.assertEqual(state["state"], "up_to_date")
+        self.assertEqual(state["message"], "reported by agent")
 
     def test_render_proto_keyboard_uses_save_label_in_edit_mode(self) -> None:
         fake_methods = [
@@ -464,7 +497,7 @@ class AdminViewsTests(unittest.TestCase):
 
     def test_maintenance_runtime_text_shows_runtime_state(self) -> None:
         fake_server = SimpleNamespace(flag="🇷🇺", title="Saint-Petersburg", key="spb1")
-        with patch.object(admin_server_wizard, "get_server_runtime_state", return_value={"state": "unknown", "version": "", "commit": ""}):
+        with patch.object(admin_server_wizard, "_runtime_state_from_driver", return_value={"state": "unknown", "version": "", "commit": ""}):
             text = admin_server_wizard._advanced_section_text(fake_server, "maintenance_runtime", "en")
         self.assertIn("Runtime", text)
         self.assertIn("state: legacy/unknown", text)
@@ -490,7 +523,7 @@ class AdminViewsTests(unittest.TestCase):
             awg_iface="wg0",
             notes="",
         )
-        with patch.object(admin_server_wizard, "get_server_runtime_state", return_value={"state": "up_to_date"}), patch.object(
+        with patch.object(admin_server_wizard, "_runtime_state_from_driver", return_value={"state": "up_to_date"}), patch.object(
             admin_server_wizard, "_server_status", return_value=("✅", "ready")
         ), patch.object(
             admin_server_wizard, "_xray_status", return_value=("—", "disabled")
@@ -588,7 +621,7 @@ class AdminViewsTests(unittest.TestCase):
             user_profile, "safe_edit_by_ids"
         ) as mocked_edit:
             user_profile.admin_menu_text_router(update, context)
-        mocked_remove.assert_called_once_with(cleanup_nodes=False)
+        mocked_remove.assert_called_once_with(cleanup_nodes=False, source_ref="")
         mocked_edit.assert_called()
 
     def test_remove_callback_sets_full_remove_state(self) -> None:
@@ -644,7 +677,7 @@ class AdminViewsTests(unittest.TestCase):
             user_profile, "safe_edit_by_ids"
         ) as mocked_edit:
             user_profile.admin_menu_text_router(update, context)
-        mocked_reset.assert_called_once_with(cleanup_nodes=True, stop_local_runtime=False)
+        mocked_reset.assert_called_once_with(cleanup_nodes=True, stop_local_runtime=False, source_ref="")
         mocked_edit.assert_called()
 
 
