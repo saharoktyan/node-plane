@@ -851,8 +851,14 @@ EOF
   if [[ "$AUTO_SETUP_DRIVER_AGENTS_ON_INSTALL" == "1" ]]; then
     echo
     echo "Running post-install driver/agent setup (best-effort)..."
-    if ! "${REPO_ROOT}/scripts/setup_driver_agents.sh"; then
+    if ! NODE_PLANE_BASE_DIR="${base_dir}" \
+      NODE_PLANE_APP_DIR="${current_link}" \
+      NODE_PLANE_SHARED_DIR="${shared_dir}" \
+      "${current_link}/scripts/setup_driver_agents.sh"; then
       echo "Driver/agent setup reported issues. Continuing because best-effort is enabled." >&2
+    elif [[ $AUTO_INSTALL_SYSTEMD -eq 1 ]]; then
+      # The bot may already be running with the old backend from before rollout.
+      sudo systemctl restart "${service_name}"
     fi
   fi
 

@@ -676,10 +676,21 @@ main() {
     simple)
       update_simple
       if [[ "$AUTO_SETUP_DRIVER_AGENTS" == "1" ]]; then
+        local base_dir current_link shared_dir
+        local -a rollout_paths
+        mapfile -t rollout_paths < <(simple_paths)
+        base_dir="${rollout_paths[0]}"
+        shared_dir="${rollout_paths[2]}"
+        current_link="${rollout_paths[4]}"
         echo
         echo "Running post-update driver/agent setup (best-effort)..."
-        if ! "${REPO_ROOT}/scripts/setup_driver_agents.sh"; then
+        if ! NODE_PLANE_BASE_DIR="${base_dir}" \
+          NODE_PLANE_APP_DIR="${current_link}" \
+          NODE_PLANE_SHARED_DIR="${shared_dir}" \
+          "${current_link}/scripts/setup_driver_agents.sh"; then
           echo "Driver/agent setup reported issues. Continuing because best-effort is enabled." >&2
+        elif [[ $SKIP_RESTART -eq 0 ]]; then
+          sudo systemctl restart node-plane
         fi
       fi
       ;;

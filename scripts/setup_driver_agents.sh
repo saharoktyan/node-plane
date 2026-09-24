@@ -4,9 +4,22 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-APP_ROOT="${NODE_PLANE_APP_DIR:-$REPO_ROOT}"
-BASE_ROOT="${NODE_PLANE_BASE_DIR:-}"
-SHARED_ROOT="${NODE_PLANE_SHARED_DIR:-}"
+checkout_env_value() {
+  local key="$1"
+  if [[ -f "${REPO_ROOT}/.env" ]]; then
+    sed -n "s/^${key}=//p" "${REPO_ROOT}/.env" | tail -n 1
+  fi
+}
+
+APP_ROOT="${NODE_PLANE_APP_DIR:-}"
+if [[ -z "$APP_ROOT" ]]; then
+  APP_ROOT="$(checkout_env_value NODE_PLANE_APP_DIR)"
+  if [[ -z "$APP_ROOT" || ! -d "$APP_ROOT" ]]; then
+    APP_ROOT="$REPO_ROOT"
+  fi
+fi
+BASE_ROOT="${NODE_PLANE_BASE_DIR:-$(checkout_env_value NODE_PLANE_BASE_DIR)}"
+SHARED_ROOT="${NODE_PLANE_SHARED_DIR:-$(checkout_env_value NODE_PLANE_SHARED_DIR)}"
 if [[ -z "$SHARED_ROOT" ]]; then
   if [[ -n "$BASE_ROOT" ]]; then
     SHARED_ROOT="${BASE_ROOT}/shared"
@@ -364,7 +377,7 @@ Purpose:
   - Write NODE_AGENT_TARGETS and switch bot to grpc driver backend in the shared .env.
 
 Binary source modes:
-  auto     Try GitHub release binaries first; fallback to local cargo build.
+  auto     Build from this release when cargo is available; otherwise use GitHub release binaries.
   release  Use GitHub release binaries only.
   build    Use local cargo build only.
 
@@ -496,11 +509,12 @@ resolve_binaries() {
       build_local_binaries
       ;;
     auto)
-      if download_release_binaries; then
-        echo "Using release binaries from GitHub."
-      else
-        echo "Release download failed; falling back to local cargo build."
+      if has_cmd cargo; then
+        echo "Building driver/agent binaries from APP_ROOT=${APP_ROOT}."
         build_local_binaries
+      else
+        download_release_binaries
+        echo "Using release binaries from GitHub."
       fi
       ;;
   esac
@@ -523,12 +537,13 @@ resolve_binaries_dry_run() {
       echo "Dry-run: local cargo build mode is available."
       ;;
     auto)
-      set_step "dry-run check release binary urls"
-      if check_url_access "$driver_url" && check_url_access "$agent_url"; then
-        echo "Dry-run: release binary URLs are reachable (auto mode)."
+      if has_cmd cargo; then
+        echo "Dry-run: local cargo build mode is available (auto mode)."
       else
-        echo "Dry-run: release binary URLs are not reachable, auto mode would fallback to local build."
-        need_cmd cargo
+        set_step "dry-run check release binary urls"
+        check_url_access "$driver_url"
+        check_url_access "$agent_url"
+        echo "Dry-run: release binary URLs are reachable (auto mode)."
       fi
       ;;
   esac
@@ -608,7 +623,7 @@ for srv in list_servers(include_disabled=False):
     public_host = (srv.public_host or ssh_host or "").strip()
     if not ssh_host:
         continue
-    print("\t".join([
+    print("\x1f".join([
         srv.key,
         ssh_host,
         str(srv.ssh_port or 22),
@@ -646,9 +661,11 @@ deploy_agents() {
   local failed=0
   local matched=0
   local mappings=()
-  local local_agent_sum
-  local_agent_sum="$(sha256_of_file "$agent_bin_path")"
-  while IFS=$'\t' read -r server_key ssh_host ssh_port ssh_user ssh_key public_host; do
+  local local_agent_sum=""
+  if [[ $DRY_RUN -eq 0 ]]; then
+    local_agent_sum="$(sha256_of_file "$agent_bin_path")"
+  fi
+  while IFS=$'\x1f' read -r server_key ssh_host ssh_port ssh_user ssh_key public_host; do
     [[ -z "$server_key" ]] && continue
     local target_host="$ssh_host"
     local target_user="$ssh_user"
@@ -775,7 +792,10 @@ TLSSETUP
 
     local remote_sum=""
     remote_sum="$(ssh "${ssh_opts[@]}" "$target" 'if [ -x /usr/local/bin/node-plane-agent ]; then sha256sum /usr/local/bin/node-plane-agent | awk "{print \$1}"; fi' 2>/dev/null || true)"
-    if [[ "$remote_sum" == "$local_agent_sum" ]]; then
+    # A matching binary alone is not enough: the node key, port or unit may
+    # have changed since the last rollout.
+    if [[ "$remote_sum" == "$local_agent_sum" ]] && ssh "${ssh_opts[@]}" "$target" \
+      "sudo grep -Fxq 'node_key = \"${server_key}\"' /etc/node-plane/agent.toml && sudo grep -Fxq 'listen_addr = \"0.0.0.0:${AGENT_PORT}\"' /etc/node-plane/agent.toml && sudo grep -Fxq 'Environment=NODE_AGENT_CONFIG_PATH=/etc/node-plane/agent.toml' /etc/systemd/system/node-plane-agent.service" >/dev/null 2>&1; then
       if ssh "${ssh_opts[@]}" "$target" 'sudo systemctl is-active --quiet node-plane-agent' >/dev/null 2>&1; then
         if [[ "$tls_changed" == "1" ]]; then
           if ssh "${ssh_opts[@]}" "$target" 'sudo systemctl restart node-plane-agent && sudo systemctl is-active --quiet node-plane-agent' >/dev/null 2>&1; then
