@@ -223,7 +223,7 @@ fetch_origin_refs() {
     echo "The installer source checkout is not a git repository." >&2
     exit 1
   fi
-  git fetch --quiet --tags origin
+  git fetch --quiet --prune --tags origin
 }
 
 print_repo_location_note() {
@@ -407,7 +407,6 @@ choose_mode() {
 configure_env() {
   ensure_env_file
   ensure_common_dirs
-  fetch_origin_refs
   set_step "read installer environment"
 
   local bot_token admin_ids base_dir app_dir shared_dir source_dir install_mode ssh_key image_repo image_tag update_branch install_ref latest_install_ref
@@ -422,7 +421,9 @@ configure_env() {
   ssh_key="$(read_env_value SSH_KEY)"
   image_repo="$(read_env_value NODE_PLANE_IMAGE_REPO)"
   image_tag="$(read_env_value NODE_PLANE_IMAGE_TAG)"
-  install_ref="${INSTALL_REF:-$(read_env_value NODE_PLANE_INSTALL_REF)}"
+  # .env records the previous installation's ref; only an explicit CLI/env
+  # override should pin a future installation to that same version.
+  install_ref="$INSTALL_REF"
   db_backend="$(read_env_value DB_BACKEND)"
   postgres_dsn="$(read_env_value POSTGRES_DSN)"
   sqlite_db_path="$(read_env_value SQLITE_DB_PATH)"
@@ -463,6 +464,10 @@ configure_env() {
     update_branch="$(prompt_value "Enter default update branch (main or dev)" "$update_branch")"
     update_branch="$(normalize_update_branch "$update_branch")"
   fi
+  echo "Refreshing release tags from origin..."
+  set_step "fetch release tags"
+  fetch_origin_refs
+  set_step "select install ref"
   latest_install_ref="$(latest_release_tag_for_branch "$update_branch")"
   if [[ -z "$install_ref" ]]; then
     install_ref="$latest_install_ref"

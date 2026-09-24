@@ -76,7 +76,6 @@ ADMIN_IDS=123456789
 NODE_PLANE_BASE_DIR=/opt/node-plane
 NODE_PLANE_APP_DIR=/opt/node-plane/current
 NODE_PLANE_SHARED_DIR=/opt/node-plane/shared
-NODE_PLANE_INSTALL_REF=<release-tag>
 DB_BACKEND=postgres
 ```
 
@@ -156,7 +155,6 @@ For a predictable non-interactive setup, configure `.env` first with at least:
 BOT_TOKEN=...
 ADMIN_IDS=123456789
 SSH_KEY=/root/.ssh/id_ed25519
-NODE_PLANE_INSTALL_REF=<release-tag>
 NODE_PLANE_IMAGE_REPO=ghcr.io/saharoktyan/node-plane
 NODE_PLANE_IMAGE_TAG=<release-tag>
 DB_BACKEND=postgres
@@ -214,7 +212,7 @@ Key variables:
 - `NODE_PLANE_SHARED_DIR`: shared state path, usually `/opt/node-plane/shared`
 - `NODE_PLANE_SOURCE_DIR`: source checkout path
 - `NODE_PLANE_INSTALL_MODE`: `simple` or `portable`
-- `NODE_PLANE_INSTALL_REF`: git tag/ref selected by the installer; defaults to the latest release tag for `NODE_PLANE_UPDATE_BRANCH`
+- `NODE_PLANE_INSTALL_REF`: records the tag/ref selected at the last installation; the next run fetches tags and defaults to the latest release tag for `NODE_PLANE_UPDATE_BRANCH`. Use `--ref <tag>` (or an exported `NODE_PLANE_INSTALL_REF`) to pin a specific version.
 - `DB_BACKEND`: should be `postgres` for `0.4`
 - `POSTGRES_DSN`: PostgreSQL DSN used for runtime storage; optional if you let the installer/update path auto-provision PostgreSQL
 - `SSH_KEY`: SSH private key used for remote node management
