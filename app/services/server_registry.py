@@ -327,6 +327,7 @@ def forget_server(server_key: str) -> bool:
     access_codes = get_access_codes_for_server_key(server.key)
     with _db.transaction() as conn:
         # Explicit deletion also works on SQLite connections without FK enforcement.
+        conn.execute("DELETE FROM schema_meta WHERE key = ?", (f"agent_rollout_pending:{server_key}",))
         conn.execute("DELETE FROM profile_server_state WHERE server_key = ?", (server_key,))
         conn.execute("DELETE FROM awg_server_configs WHERE server_key = ?", (server_key,))
         conn.execute("DELETE FROM traffic_samples WHERE server_key = ?", (server_key,))

@@ -29,6 +29,7 @@ _DRIVER_AGENTS_LAST_RUN_FINISHED_AT_KEY = "driver_agents_last_run_finished_at"
 _DRIVER_AGENTS_LAST_RUN_STATUS_KEY = "driver_agents_last_run_status"
 _DRIVER_AGENTS_LAST_RUN_LOG_TAIL_KEY = "driver_agents_last_run_log_tail"
 _DRIVER_AGENTS_LAST_RUN_UNIT_KEY = "driver_agents_last_run_unit"
+_AGENT_ROLLOUT_PENDING_PREFIX = "agent_rollout_pending:"
 _UPDATES_BRANCH_KEY = "updates_branch"
 _UPDATES_DEV_TRACK_KEY = "updates_dev_track"
 _UPDATES_LOCAL_VERSION_KEY = "updates_local_version"
@@ -87,6 +88,20 @@ def _meta_set(key: str, value: str) -> str:
     with _db.transaction() as conn:
         conn.execute(_META_UPSERT_SQL, (key, normalized))
     return normalized
+
+
+def is_agent_rollout_pending(server_key: str) -> bool:
+    return _meta_get(f"{_AGENT_ROLLOUT_PENDING_PREFIX}{server_key}") == "1"
+
+
+def set_agent_rollout_pending(server_key: str, pending: bool) -> None:
+    key = f"{_AGENT_ROLLOUT_PENDING_PREFIX}{server_key}"
+    if pending:
+        _meta_set(key, "1")
+        return
+    _ensure_runtime_schema()
+    with _db.transaction() as conn:
+        conn.execute("DELETE FROM schema_meta WHERE key = ?", (key,))
 
 
 def set_global_telemetry_enabled(enabled: bool) -> bool:

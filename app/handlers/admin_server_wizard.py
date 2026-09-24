@@ -28,7 +28,7 @@ from services.provisioning_state import (
     render_server_provisioning_summary,
     summarize_server_provisioning,
 )
-from services.app_settings import set_initial_setup_state
+from services.app_settings import is_agent_rollout_pending, set_initial_setup_state
 from services.server_registry import RegisteredServer, forget_server, get_server, list_servers, update_server_fields, upsert_server
 from services.xray import get_server_link_status
 from utils.tg import answer_cb, safe_delete_by_id, safe_delete_update_message, safe_edit_by_ids, safe_edit_message
@@ -304,6 +304,9 @@ def _server_overall_status(server: RegisteredServer, lang: str) -> tuple[str, st
     if server.bootstrap_state != "bootstrapped":
         return server_icon, server_text
 
+    if is_agent_rollout_pending(server.key):
+        return "⚠️", t(lang, "admin.wizard.server_status_attention")
+
     prov = summarize_server_provisioning(server.key)
     if prov["overall"] == "failed":
         return "⚠️", t(lang, "admin.wizard.server_status_attention")
@@ -374,6 +377,8 @@ def _server_recommended_actions(server: RegisteredServer, lang: str, runtime_sta
     if server.bootstrap_state != "bootstrapped":
         items.append(t(lang, "admin.wizard.server_action_bootstrap"))
         return items
+    if is_agent_rollout_pending(server.key):
+        items.append(t(lang, "admin.wizard.server_action_agent_setup"))
     if runtime_state in {"outdated", "unknown"}:
         items.append(t(lang, "admin.wizard.server_action_runtime_sync"))
     prov = summarize_server_provisioning(server.key)
@@ -456,6 +461,9 @@ def _server_card_text(server: RegisteredServer, lang: str) -> str:
         "",
         t(lang, "admin.wizard.server_card_profiles"),
     ]
+    if is_agent_rollout_pending(server.key):
+        runtime_index = lines.index(runtime_state_line)
+        lines.insert(runtime_index + 1, t(lang, "admin.wizard.server_card_agent_pending"))
     if total <= 0:
         lines.append(t(lang, "admin.wizard.server_card_profiles_empty"))
     else:
@@ -471,17 +479,18 @@ def _server_card_text(server: RegisteredServer, lang: str) -> str:
 
 
 def _server_card_markup(server_key: str, lang: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
+    rows = [
         [
-            [
-                InlineKeyboardButton(t(lang, "admin.wizard.probe"), callback_data=f"{CB_SRV}action:probe:{server_key}"),
-                InlineKeyboardButton(t(lang, "admin.wizard.bootstrap"), callback_data=f"{CB_SRV}bootmenu:{server_key}"),
-            ],
-            [InlineKeyboardButton(t(lang, "admin.wizard.advanced"), callback_data=f"{CB_SRV}advanced:{server_key}")],
-            [InlineKeyboardButton(t(lang, "admin.wizard.delete_server"), callback_data=f"{CB_SRV}deleteask:{server_key}")],
-            [InlineKeyboardButton(t(lang, "admin.wizard.to_servers"), callback_data=f"{CB_SRV}list")],
-        ]
-    )
+            InlineKeyboardButton(t(lang, "admin.wizard.probe"), callback_data=f"{CB_SRV}action:probe:{server_key}"),
+            InlineKeyboardButton(t(lang, "admin.wizard.bootstrap"), callback_data=f"{CB_SRV}bootmenu:{server_key}"),
+        ],
+        [InlineKeyboardButton(t(lang, "admin.wizard.advanced"), callback_data=f"{CB_SRV}advanced:{server_key}")],
+        [InlineKeyboardButton(t(lang, "admin.wizard.delete_server"), callback_data=f"{CB_SRV}deleteask:{server_key}")],
+        [InlineKeyboardButton(t(lang, "admin.wizard.to_servers"), callback_data=f"{CB_SRV}list")],
+    ]
+    if is_agent_rollout_pending(server_key):
+        rows.insert(2, [InlineKeyboardButton(t(lang, "admin.wizard.setup_agent"), callback_data=f"{CB_SRV}action:rolloutagent:{server_key}")])
+    return InlineKeyboardMarkup(rows)
 
 
 def _agent_rollout_result_markup(server_key: str, lang: str, output: str) -> InlineKeyboardMarkup:
@@ -2030,6 +2039,7 @@ def on_server_callback(update: Update, context: CallbackContext, payload: str) -
                 if rollout_out:
                     out = f"{out}\n\nDriver/agent rollout:\n{rollout_out}".strip()
                 if rollout_rc != 0:
+                    rc = 1
                     out += "\n\n" + t(lang, "admin.wizard.agent_rollout_warning")
             _wizard_edit(context, _action_result_text(t(lang, "admin.wizard.bootstrap"), rc, out, server_key, lang), _agent_rollout_result_markup(server_key, lang, out))
             return
@@ -2043,6 +2053,7 @@ def on_server_callback(update: Update, context: CallbackContext, payload: str) -
                 if rollout_out:
                     out = f"{out}\n\nDriver/agent rollout:\n{rollout_out}".strip()
                 if rollout_rc != 0:
+                    rc = 1
                     out += "\n\n" + t(lang, "admin.wizard.agent_rollout_warning")
             _wizard_edit(context, _action_result_text(t(lang, "admin.wizard.reinstall"), rc, out, server_key, lang), _agent_rollout_result_markup(server_key, lang, out))
             return

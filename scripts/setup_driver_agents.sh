@@ -412,7 +412,7 @@ Purpose:
   - Write NODE_AGENT_TARGETS and switch bot to grpc driver backend in the shared .env.
 
 Binary source modes:
-  auto     Build from this release when cargo is available; otherwise try GitHub release binaries, then install Rust build tools and build locally.
+  auto     Use GitHub release binaries first; if unavailable, build locally when resources and Rust tools are available.
   release  Use GitHub release binaries only.
   build    Use local cargo build only.
 
@@ -490,7 +490,10 @@ download_release_binaries() {
   local agent_archive="${WORK_DIR}/agent.asset"
 
   set_step "download driver binary"
-  download_to_file "$driver_url" "$driver_archive" || return 1
+  if ! download_to_file "$driver_url" "$driver_archive"; then
+    echo "Driver release asset ${DRIVER_ASSET_NAME} for $(detect_release_ref) is missing or inaccessible. Publish both release assets or configure authenticated binary URLs." >&2
+    return 1
+  fi
   if tar -tzf "$driver_archive" >/dev/null 2>&1; then
     tar -xzf "$driver_archive" -C "$WORK_DIR" || return 1
     if [[ -x "${WORK_DIR}/node-plane-driver-linux-amd64" ]]; then
@@ -506,7 +509,10 @@ download_release_binaries() {
   chmod +x "$driver_out" || return 1
 
   set_step "download agent binary"
-  download_to_file "$agent_url" "$agent_archive" || return 1
+  if ! download_to_file "$agent_url" "$agent_archive"; then
+    echo "Agent release asset ${AGENT_ASSET_NAME} for $(detect_release_ref) is missing or inaccessible. Publish both release assets or configure authenticated binary URLs." >&2
+    return 1
+  fi
   if tar -tzf "$agent_archive" >/dev/null 2>&1; then
     tar -xzf "$agent_archive" -C "$WORK_DIR" || return 1
     if [[ -x "${WORK_DIR}/node-plane-agent-linux-amd64" ]]; then

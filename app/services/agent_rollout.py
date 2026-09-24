@@ -6,6 +6,7 @@ import os
 import subprocess
 
 from config import APP_ROOT, NODE_DRIVER_BACKEND, SHARED_ROOT
+from services.app_settings import set_agent_rollout_pending
 from services.server_registry import get_server
 
 
@@ -20,9 +21,11 @@ def ensure_driver_agent_rollout_for_ssh(
     if skip_if_connected and NODE_DRIVER_BACKEND == "grpc":
         # Bootstrap already reached this node through its agent. Rollout is a
         # separate maintenance action, not a second bootstrap requirement.
+        set_agent_rollout_pending(server_key, False)
         return 0, ""
     script_path = f"{APP_ROOT}/scripts/setup_driver_agents.sh"
     if not os.path.isfile(script_path):
+        set_agent_rollout_pending(server_key, True)
         return 1, f"missing rollout script: {script_path}"
     env = os.environ.copy()
     env["NODE_PLANE_APP_DIR"] = APP_ROOT
@@ -39,8 +42,10 @@ def ensure_driver_agent_rollout_for_ssh(
             timeout=1800,
         )
     except Exception as exc:
+        set_agent_rollout_pending(server_key, True)
         return 1, f"driver/agent rollout failed to start: {exc}"
     output = ((proc.stdout or "").strip() + "\n" + (proc.stderr or "").strip()).strip()
+    set_agent_rollout_pending(server_key, proc.returncode != 0)
     if proc.returncode == 0 and NODE_DRIVER_BACKEND != "grpc":
         output += "\nRestart the bot to activate NODE_DRIVER_BACKEND=grpc from the updated environment."
     return proc.returncode, output or f"exit={proc.returncode}"
