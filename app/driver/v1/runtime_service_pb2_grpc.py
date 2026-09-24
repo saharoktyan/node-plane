@@ -75,6 +75,16 @@ class RuntimeServiceStub(object):
                 request_serializer=driver_dot_v1_dot_runtime__service__pb2.SyncXrayRequest.SerializeToString,
                 response_deserializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
                 _registered_method=True)
+        self.ApplyNodeSettings = channel.unary_unary(
+                '/nodeplane.driver.v1.RuntimeService/ApplyNodeSettings',
+                request_serializer=driver_dot_v1_dot_runtime__service__pb2.ApplyNodeSettingsRequest.SerializeToString,
+                response_deserializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
+                _registered_method=True)
+        self.RefreshAwgConfig = channel.unary_unary(
+                '/nodeplane.driver.v1.RuntimeService/RefreshAwgConfig',
+                request_serializer=driver_dot_v1_dot_runtime__service__pb2.RefreshAwgConfigRequest.SerializeToString,
+                response_deserializer=driver_dot_v1_dot_runtime__service__pb2.RefreshAwgConfigResponse.FromString,
+                _registered_method=True)
         self.GetRuntimeStatus = channel.unary_unary(
                 '/nodeplane.driver.v1.RuntimeService/GetRuntimeStatus',
                 request_serializer=driver_dot_v1_dot_runtime__service__pb2.GetRuntimeStatusRequest.SerializeToString,
@@ -138,6 +148,18 @@ class RuntimeServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ApplyNodeSettings(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def RefreshAwgConfig(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def GetRuntimeStatus(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -192,6 +214,16 @@ def add_RuntimeServiceServicer_to_server(servicer, server):
                     servicer.SyncXray,
                     request_deserializer=driver_dot_v1_dot_runtime__service__pb2.SyncXrayRequest.FromString,
                     response_serializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.SerializeToString,
+            ),
+            'ApplyNodeSettings': grpc.unary_unary_rpc_method_handler(
+                    servicer.ApplyNodeSettings,
+                    request_deserializer=driver_dot_v1_dot_runtime__service__pb2.ApplyNodeSettingsRequest.FromString,
+                    response_serializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.SerializeToString,
+            ),
+            'RefreshAwgConfig': grpc.unary_unary_rpc_method_handler(
+                    servicer.RefreshAwgConfig,
+                    request_deserializer=driver_dot_v1_dot_runtime__service__pb2.RefreshAwgConfigRequest.FromString,
+                    response_serializer=driver_dot_v1_dot_runtime__service__pb2.RefreshAwgConfigResponse.SerializeToString,
             ),
             'GetRuntimeStatus': grpc.unary_unary_rpc_method_handler(
                     servicer.GetRuntimeStatus,
@@ -420,6 +452,60 @@ class RuntimeService(object):
             '/nodeplane.driver.v1.RuntimeService/SyncXray',
             driver_dot_v1_dot_runtime__service__pb2.SyncXrayRequest.SerializeToString,
             driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ApplyNodeSettings(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/nodeplane.driver.v1.RuntimeService/ApplyNodeSettings',
+            driver_dot_v1_dot_runtime__service__pb2.ApplyNodeSettingsRequest.SerializeToString,
+            driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RefreshAwgConfig(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/nodeplane.driver.v1.RuntimeService/RefreshAwgConfig',
+            driver_dot_v1_dot_runtime__service__pb2.RefreshAwgConfigRequest.SerializeToString,
+            driver_dot_v1_dot_runtime__service__pb2.RefreshAwgConfigResponse.FromString,
             options,
             channel_credentials,
             insecure,

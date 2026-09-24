@@ -82,6 +82,12 @@ def _node_from_server(server: RegisteredServer) -> DriverNode:
 
 
 class InProcessNodeDriverClient(NodeDriverClient):
+    def apply_node_settings(self, node_key: str) -> DriverOperation:
+        return _operation("apply_node_settings", node_key=node_key, status="FAILED", message="Applying settings requires NODE_DRIVER_BACKEND=grpc and an updated node agent")
+
+    def refresh_awg_config(self, node_key: str, wg_conf: str) -> tuple[str, str]:
+        raise RuntimeError("Refreshing existing AWG configs requires NODE_DRIVER_BACKEND=grpc and an updated node agent")
+
     def get_node(self, node_key: str) -> Optional[DriverNode]:
         from services.server_registry import get_server
 

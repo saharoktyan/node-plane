@@ -13,6 +13,8 @@ service RuntimeService {
   rpc RegenerateAwgEntropy(RegenerateAwgEntropyRequest) returns (StartOperationResponse);
   rpc SyncRuntime(SyncRuntimeRequest) returns (StartOperationResponse);
   rpc SyncXray(SyncXrayRequest) returns (StartOperationResponse);
+  rpc ApplyNodeSettings(ApplyNodeSettingsRequest) returns (StartOperationResponse);
+  rpc RefreshAwgConfig(RefreshAwgConfigRequest) returns (RefreshAwgConfigResponse);
   rpc GetRuntimeStatus(GetRuntimeStatusRequest) returns (GetRuntimeStatusResponse);
   rpc ListNodesNeedingRuntimeSync(ListNodesNeedingRuntimeSyncRequest) returns (ListNodesNeedingRuntimeSyncResponse);
 }
@@ -56,6 +58,20 @@ message SyncRuntimeRequest {
 
 message SyncXrayRequest {
   string node_key = 1;
+}
+
+message ApplyNodeSettingsRequest {
+  string node_key = 1;
+}
+
+message RefreshAwgConfigRequest {
+  string node_key = 1;
+  string wg_conf = 2;
+}
+
+message RefreshAwgConfigResponse {
+  string wg_conf = 1;
+  string vpn_key = 2;
 }
 
 message GetRuntimeStatusRequest {

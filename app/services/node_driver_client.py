@@ -88,6 +88,11 @@ class DriverOperation:
 
 
 class NodeDriverClient(Protocol):
+    def apply_node_settings(self, node_key: str) -> DriverOperation:
+        ...
+
+    def refresh_awg_config(self, node_key: str, wg_conf: str) -> tuple[str, str]:
+        ...
     def get_node(self, node_key: str) -> Optional[DriverNode]:
         ...
 

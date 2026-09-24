@@ -116,12 +116,12 @@ values.update(preset_values(preset))
 
 text = open(cfg_path, "r", encoding="utf-8", errors="ignore").read()
 for key, value in values.items():
-    pattern = rf"(?m)^#?\\s*{re.escape(key)} =.*$"
+    pattern = rf"(?m)^#?\s*{re.escape(key)}\s*=.*$"
     replacement = f"{key} = {value}"
     if re.search(pattern, text):
         text = re.sub(pattern, replacement, text, count=1)
     else:
-        text = re.sub(r"(?m)^(H4 = .*)$", r"\\1\\n" + replacement, text, count=1)
+        text = re.sub(r"(?m)^(H4 = .*)$", lambda match: match.group(1) + "\n" + replacement, text, count=1)
 
 with open(tmp_path, "w", encoding="utf-8") as fh:
     fh.write(text)
@@ -131,7 +131,7 @@ python3 -m json.tool /dev/null >/dev/null 2>&1 || true
 cp -a "$CFG" "${CFG}.bak.$(date +%Y%m%d-%H%M%S)"
 mv "$TMP" "$CFG"
 chmod 600 "$CFG"
-docker_cmd restart "$CONTAINER" >/dev/null 2>&1 || true
+docker_cmd restart "$CONTAINER" >/dev/null
 /opt/node-plane-runtime/show-awg-entropy.sh
 echo
 echo "WARNING: client AWG configs must be reissued after entropy regeneration."

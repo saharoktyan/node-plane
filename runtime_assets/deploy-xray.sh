@@ -60,4 +60,11 @@ docker_cmd run -d \
   -v "$CONFIG:/etc/xray/config.json:ro" \
   "$IMAGE" run -c /etc/xray/config.json >/dev/null
 
+sleep 2
+if [[ "$(docker_cmd inspect -f '{{.State.Status}}' "$CONTAINER" 2>/dev/null || echo unknown)" != "running" ]]; then
+  docker_cmd logs "$CONTAINER" >&2 || true
+  echo "Xray container did not start with the current config" >&2
+  exit 1
+fi
+
 echo "Xray container deployed: $CONTAINER"

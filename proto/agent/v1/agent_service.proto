@@ -14,6 +14,8 @@ service NodeAgentService {
   rpc OpenPorts(OpenPortsRequest) returns (OpenPortsResponse);
   rpc SyncRuntimeFiles(SyncRuntimeFilesRequest) returns (SyncRuntimeFilesResponse);
   rpc SyncXray(SyncXrayRequest) returns (SyncXrayResponse);
+  rpc ApplyNodeSettings(ApplyNodeSettingsRequest) returns (RuntimeCommandResponse);
+  rpc RefreshAwgConfig(RefreshAwgConfigRequest) returns (RefreshAwgConfigResponse);
   rpc InstallDocker(InstallDockerRequest) returns (InstallDockerResponse);
   rpc DeleteRuntime(DeleteRuntimeRequest) returns (DeleteRuntimeResponse);
   rpc InitXray(InitXrayRequest) returns (InitXrayResponse);
@@ -91,6 +93,25 @@ message SyncXrayRequest {
 message SyncXrayResponse {
   string summary = 1;
   string generated_json = 2;
+}
+
+message ApplyNodeSettingsRequest {
+  string xray_config_path = 1;
+  string xray_sni = 2;
+  uint32 xray_tcp_port = 3;
+  uint32 xray_xhttp_port = 4;
+  string xray_xhttp_path_prefix = 5;
+  bool apply_xray = 6;
+  bool apply_awg = 7;
+}
+
+message RefreshAwgConfigRequest {
+  string wg_conf = 1;
+}
+
+message RefreshAwgConfigResponse {
+  string wg_conf = 1;
+  string vpn_key = 2;
 }
 
 message InstallDockerRequest {}

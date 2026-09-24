@@ -296,12 +296,26 @@ def build_vless_link_transport(name: str, uuid: str, transport: str, server_key:
     server = get_server(server_key)
     if not server:
         raise KeyError(server_key)
+    if server.bootstrap_state == "edited":
+        raise ValueError(f"Server {server_key} has unapplied settings")
+
+    # Re-read Reality settings from the node on every issue; a manual key/SID
+    # rotation must not leave a previously provisioned user with an old link.
+    from services.node_driver import get_node_driver
+    try:
+        operation = get_node_driver().sync_xray(server_key)
+    except Exception as exc:
+        raise ValueError(f"Could not verify current Xray settings: {exc}") from exc
+    if operation.status != "SUCCEEDED":
+        raise ValueError(f"Could not verify current Xray settings: {operation.progress_message}")
+    server = get_server(server_key)
 
     ready, reason = get_server_link_status(server_key)
     if not ready:
         raise ValueError(reason)
 
-    short_id = get_short_id_local(name, server_key) or server.xray_short_id or server.xray_sid
+    # A profile's saved short ID can outlive a Reality key/short-ID rotation.
+    short_id = server.xray_short_id or server.xray_sid
     path_prefix = server.xray_xhttp_path_prefix or "/assets"
 
     if transport == "xhttp":
@@ -337,6 +351,8 @@ def get_server_link_status(server_key: str) -> tuple[bool, str]:
     server = get_server(server_key)
     if not server:
         return False, f"Server {server_key} not found"
+    if server.bootstrap_state == "edited":
+        return False, f"Server {server_key} has unapplied settings"
 
     missing: list[str] = []
     if not server.xray_host:

@@ -16,6 +16,7 @@ from services.app_settings import get_menu_title_markdown
 from services import xray as xray_svc
 from services.awg import _extract_wg_conf
 from services.awg_profiles import get_awg_server, update_awg_server
+from services.node_driver import get_node_driver
 from services.profile_state import _extract_vpn_key, ensure_xray_caps, get_allowed_protocols, get_profile, get_profile_access_status
 from ui.user_views import render_getkey_overview, render_server_menu
 from utils.keyboards import (
@@ -109,8 +110,35 @@ def _awg_help_text(method: AccessMethod, vpn_key: str | None, has_conf: bool, la
     return "\n".join(lines)
 
 
+def _current_awg_server(name: str, server_key: str) -> dict | None:
+    """Refresh the saved peer using live node settings before issuing either AWG format."""
+    rec = get_awg_server(name, server_key)
+    if not isinstance(rec, dict):
+        return None
+    server = get_server(server_key)
+    if not server or server.bootstrap_state == "edited":
+        raise RuntimeError("Параметры ноды ещё не применены" if server else "Нода не найдена")
+    wg_conf = rec.get("wg_conf") or _extract_wg_conf(str(rec.get("config") or ""))
+    if not wg_conf:
+        raise RuntimeError("Старый AWG-конфиг не содержит ключи peer; перевыпусти профиль")
+    refreshed_conf, refreshed_key = get_node_driver().refresh_awg_config(server_key, wg_conf)
+    rec["wg_conf"] = refreshed_conf
+    rec["config"] = refreshed_key
+    update_awg_server(name, server_key, rec)
+    return rec
+
+
+def _awg_refresh_error(lang: str, exc: Exception) -> str:
+    if lang == "ru":
+        return f"Не удалось обновить AWG-конфиг по данным ноды: {exc}. Старый конфиг не выдаётся."
+    return f"Could not refresh the AWG config from the node: {exc}. The old config was not issued."
+
+
 def _render_awg_main_screen(name: str, method: AccessMethod, lang: str):
-    rec = get_awg_server(name, method.server_key)
+    try:
+        rec = _current_awg_server(name, method.server_key)
+    except Exception as exc:
+        return _awg_refresh_error(lang, exc), kb_back_to_getkey_menu([(f"server:{method.server_key}", f"{method.server.flag} {method.server.title}")], lang)
     if not isinstance(rec, dict) or not (rec.get("config") or rec.get("wg_conf")):
         return t(lang, "getkey.awg_config_missing"), kb_back_to_getkey_menu([(f"server:{method.server_key}", f"{method.server.flag} {method.server.title}")], lang)
     key = _extract_vpn_key(str(rec.get("config") or ""))
@@ -354,7 +382,11 @@ def on_getkey_callback(update: Update, context: CallbackContext, payload: str) -
         name = profile_name
         server_key = payload.split(":", 1)[1]
         method = get_awg_access_method_by_server_key(server_key)
-        rec = get_awg_server(name, server_key)
+        try:
+            rec = _current_awg_server(name, server_key)
+        except Exception as exc:
+            safe_edit_message(update, context, _awg_refresh_error(lang, exc), reply_markup=kb_awg_key_actions(server_key, _server_back_payload(server_key), lang), parse_mode=None)
+            return
         if not method or not isinstance(rec, dict):
             safe_edit_message(
                 update,
@@ -408,7 +440,11 @@ def on_getkey_callback(update: Update, context: CallbackContext, payload: str) -
         name = profile_name
         server_key = payload.split(":", 1)[1]
         awg_method = get_awg_access_method_by_server_key(server_key)
-        rec = get_awg_server(name, server_key)
+        try:
+            rec = _current_awg_server(name, server_key)
+        except Exception as exc:
+            safe_edit_message(update, context, _awg_refresh_error(lang, exc), reply_markup=kb_awg_key_actions(server_key, _server_back_payload(server_key), lang), parse_mode=None)
+            return
         if not isinstance(rec, dict):
             safe_edit_message(
                 update,

@@ -13,7 +13,7 @@ def parse_conf(text: str):
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
-        m = re.match(r"^\\[(Interface|Peer)\\]$", line, re.I)
+        m = re.match(r"^\[(Interface|Peer)\]$", line, re.I)
         if m:
             cur = m.group(1).capitalize()
             continue
@@ -28,7 +28,7 @@ def _split_csv(value: str):
 
 
 def main(conf_path, template_path, out_json_path, decoder_py, container_name="amnezia-awg", description="awg"):
-    conf_text = Path(conf_path).read_text(encoding="utf-8", errors="ignore").strip() + "\\n"
+    conf_text = Path(conf_path).read_text(encoding="utf-8", errors="ignore").strip() + "\n"
     tpl = json.loads(Path(template_path).read_text(encoding="utf-8"))
 
     cfg = parse_conf(conf_text)
