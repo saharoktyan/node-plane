@@ -373,6 +373,24 @@ impl RunningOperation {
         )
     }
 
+    pub(crate) fn fail_with_error(
+        self,
+        code: &str,
+        summary: &str,
+    ) -> Result<StartOperationResponse, Status> {
+        self.complete(
+            "FAILED",
+            summary,
+            "",
+            Some(DriverError {
+                code: code.to_string(),
+                summary: summary.to_string(),
+                detail: String::new(),
+                retryable: false,
+            }),
+        )
+    }
+
     fn complete(
         mut self,
         status: &str,

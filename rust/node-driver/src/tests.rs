@@ -25,6 +25,20 @@ fn assert_missing_agent(ctx: &DriverContext, response: Response<StartOperationRe
     assert!(op.result_json.is_empty());
 }
 
+#[test]
+fn typed_cleanup_failure_is_available_to_backend() {
+    let state = DriverState::default();
+    let running = state
+        .begin_operation("full_cleanup_node", "offline", "")
+        .unwrap();
+    let response = running
+        .fail_with_error("agent_unreachable", "connection refused")
+        .unwrap();
+    let operation = state.get_operation(&response.operation_id).unwrap();
+    assert_eq!(operation.status, "FAILED");
+    assert_eq!(operation.error.unwrap().code, "agent_unreachable");
+}
+
 // Missing transport must never create a phantom queued operation, including
 // destructive RPCs. No database, node, or shell execution is needed here.
 #[tokio::test]

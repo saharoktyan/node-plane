@@ -341,12 +341,13 @@ class AdminViewsTests(unittest.TestCase):
         render_card.assert_called_once_with(context, "spb1")
         self.assertIn("server_wizard", context.user_data)
 
-    def test_server_card_offers_offline_removal(self) -> None:
+    def test_server_card_has_one_delete_action(self) -> None:
         markup = admin_server_wizard._server_card_markup("spb1", "en")
         callbacks = [button.callback_data for row in markup.inline_keyboard for button in row]
-        self.assertIn("srv:forgetask:spb1", callbacks)
+        self.assertIn("srv:deleteask:spb1", callbacks)
+        self.assertNotIn("srv:forgetask:spb1", callbacks)
 
-    def test_confirmed_offline_removal_does_not_call_node_driver(self) -> None:
+    def test_old_forget_confirmation_now_requires_driver_cleanup(self) -> None:
         update = SimpleNamespace(callback_query=SimpleNamespace(message=SimpleNamespace(chat_id=1, message_id=2)))
         context = SimpleNamespace(user_data={"server_wizard": {
             "step": "forget_confirm", "server_key": "spb1", "locale": "en", "data": {},
@@ -355,14 +356,101 @@ class AdminViewsTests(unittest.TestCase):
         with patch.object(admin_server_wizard, "guard", return_value=True), patch.object(
             admin_server_wizard, "answer_cb"
         ), patch.object(admin_server_wizard, "get_locale_for_update", return_value="en"), patch.object(
-            admin_server_wizard, "forget_server", return_value=True
-        ) as forget, patch.object(admin_server_wizard, "get_node_driver") as driver, patch.object(
+            admin_server_wizard, "get_server", return_value=SimpleNamespace(title="Server", key="spb1")
+        ), patch.object(admin_server_wizard, "forget_server") as forget, patch.object(
             admin_server_wizard, "_wizard_edit"
         ) as edit:
             admin_server_wizard.on_server_callback(update, context, "forgetconfirm:spb1")
+        forget.assert_not_called()
+        self.assertEqual(context.user_data["server_wizard"]["step"], "delete_confirm")
+        self.assertIn("srv:deleterun:spb1", [
+            button.callback_data for row in edit.call_args.args[2].inline_keyboard for button in row
+        ])
+
+    def test_successful_node_delete_cleans_runtime_then_forgets_server(self) -> None:
+        from services.node_driver_client import DriverOperation
+
+        update = SimpleNamespace(callback_query=SimpleNamespace(message=SimpleNamespace(chat_id=1, message_id=2)))
+        context = SimpleNamespace(user_data={"server_wizard": {
+            "step": "delete_confirm", "server_key": "spb1", "locale": "en", "data": {},
+            "chat_id": 1, "message_id": 2,
+        }})
+        server = SimpleNamespace(transport="ssh")
+        operation = DriverOperation(operation_id="op-1", kind="full_cleanup_node", status="SUCCEEDED")
+        with patch.object(admin_server_wizard, "guard", return_value=True), patch.object(
+            admin_server_wizard, "answer_cb"
+        ), patch.object(admin_server_wizard, "get_locale_for_update", return_value="en"), patch.object(
+            admin_server_wizard, "get_server", return_value=server
+        ), patch.object(admin_server_wizard, "_start_progress_animation", return_value=lambda: None), patch.object(
+            admin_server_wizard, "_run_driver_action", return_value=operation
+        ) as cleanup, patch.object(
+            admin_server_wizard, "forget_server", return_value=True
+        ) as forget, patch.object(
+            admin_server_wizard, "_wizard_edit"
+        ) as edit:
+            admin_server_wizard.on_server_callback(update, context, "deleterun:spb1")
+        cleanup.assert_called_once_with(update, "full_cleanup_node", "spb1", remove_ssh_key=True)
         forget.assert_called_once_with("spb1")
-        driver.assert_not_called()
-        self.assertIn("removed from the bot", edit.call_args.args[1])
+        self.assertIn("cleaned up and removed", edit.call_args.args[1])
+
+    def test_unreachable_node_offers_confirmed_local_fallback(self) -> None:
+        from services.node_driver_client import DriverError, DriverOperation
+
+        update = SimpleNamespace(callback_query=SimpleNamespace(message=SimpleNamespace(chat_id=1, message_id=2)))
+        context = SimpleNamespace(user_data={"server_wizard": {
+            "step": "delete_confirm", "server_key": "spb1", "locale": "en", "data": {},
+            "chat_id": 1, "message_id": 2,
+        }})
+        operation = DriverOperation(
+            operation_id="op-2", kind="full_cleanup_node", status="FAILED",
+            progress_message="connection timed out",
+            error=DriverError(code="agent_timeout", summary="agent timed out"),
+        )
+        with patch.object(admin_server_wizard, "guard", return_value=True), patch.object(
+            admin_server_wizard, "answer_cb"
+        ), patch.object(admin_server_wizard, "get_locale_for_update", return_value="en"), patch.object(
+            admin_server_wizard, "get_server", return_value=SimpleNamespace(transport="ssh")
+        ), patch.object(admin_server_wizard, "_start_progress_animation", return_value=lambda: None), patch.object(
+            admin_server_wizard, "_run_driver_action", return_value=operation
+        ), patch.object(admin_server_wizard, "forget_server", return_value=True) as forget, patch.object(
+            admin_server_wizard, "_wizard_edit"
+        ) as edit:
+            admin_server_wizard.on_server_callback(update, context, "deleterun:spb1")
+            forget.assert_not_called()
+            self.assertEqual(context.user_data["server_wizard"]["step"], "delete_fallback")
+            self.assertIn("srv:deletefallback:spb1", [
+                button.callback_data for row in edit.call_args.args[2].inline_keyboard for button in row
+            ])
+            admin_server_wizard.on_server_callback(update, context, "deletefallback:spb1")
+        forget.assert_called_once_with("spb1")
+
+    def test_cleanup_error_does_not_offer_local_fallback(self) -> None:
+        from services.node_driver_client import DriverError, DriverOperation
+
+        update = SimpleNamespace(callback_query=SimpleNamespace(message=SimpleNamespace(chat_id=1, message_id=2)))
+        context = SimpleNamespace(user_data={"server_wizard": {
+            "step": "delete_confirm", "server_key": "spb1", "locale": "en", "data": {},
+            "chat_id": 1, "message_id": 2,
+        }})
+        operation = DriverOperation(
+            operation_id="op-3", kind="full_cleanup_node", status="FAILED",
+            progress_message="runtime script failed",
+            error=DriverError(code="agent_cleanup_failed", summary="runtime script failed"),
+        )
+        with patch.object(admin_server_wizard, "guard", return_value=True), patch.object(
+            admin_server_wizard, "answer_cb"
+        ), patch.object(admin_server_wizard, "get_locale_for_update", return_value="en"), patch.object(
+            admin_server_wizard, "get_server", return_value=SimpleNamespace(transport="ssh")
+        ), patch.object(admin_server_wizard, "_start_progress_animation", return_value=lambda: None), patch.object(
+            admin_server_wizard, "_run_driver_action", return_value=operation
+        ), patch.object(admin_server_wizard, "forget_server") as forget, patch.object(
+            admin_server_wizard, "_wizard_edit"
+        ) as edit:
+            admin_server_wizard.on_server_callback(update, context, "deleterun:spb1")
+        forget.assert_not_called()
+        self.assertNotIn("srv:deletefallback:spb1", [
+            button.callback_data for row in edit.call_args.args[2].inline_keyboard for button in row
+        ])
 
     def test_runtime_status_read_uses_driver(self) -> None:
         fake_driver = SimpleNamespace(get_runtime_status=lambda key: SimpleNamespace(

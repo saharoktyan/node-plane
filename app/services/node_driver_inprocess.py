@@ -198,7 +198,11 @@ class InProcessNodeDriverClient(NodeDriverClient):
 
         code, out = full_cleanup_server(node_key, remove_ssh_key=remove_ssh_key)
         if code != 0:
-            return _operation("full_cleanup_node", node_key=node_key, status="FAILED", message=out)
+            error_code = "node_unreachable" if code == 255 else "agent_timeout" if code == 124 else "cleanup_failed"
+            return _operation(
+                "full_cleanup_node", node_key=node_key, status="FAILED", message=out,
+                error=DriverError(code=error_code, summary=out, retryable=False),
+            )
         return _operation("full_cleanup_node", node_key=node_key, status="SUCCEEDED", message=out)
 
     def ensure_profile_on_node(
