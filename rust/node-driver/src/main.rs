@@ -2589,10 +2589,13 @@ impl RuntimeService for RuntimeApi {
                         }
                     },
                     Err(err) => {
-                        return Ok(Response::new(execution.finish(
-                            "FAILED",
-                            &format!("agent runtime delete failed: {err}"),
-                        )?));
+                        let summary = format!("agent runtime delete failed: {err}");
+                        let code = match err.code() {
+                            tonic::Code::Unavailable => "agent_unreachable",
+                            tonic::Code::DeadlineExceeded => "agent_timeout",
+                            _ => "agent_cleanup_failed",
+                        };
+                        return Ok(Response::new(execution.fail_with_error(code, &summary)?));
                     }
                 };
 

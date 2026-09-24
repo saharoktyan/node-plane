@@ -60,6 +60,12 @@ class GrpcCommandIdentityTests(unittest.TestCase):
         client.install_docker("node")
         self.assertEqual(rpc.call_args.kwargs["metadata"], ())
 
+    def test_cleanup_rpc_waits_for_agent_deadline(self):
+        client, rpc = self.client_for("FullCleanupNode", "runtime")
+        client.timeout_seconds = 30
+        client.full_cleanup_node("node")
+        self.assertGreaterEqual(rpc.call_args.kwargs["timeout"], 200)
+
     def test_transport_error_never_authorizes_automatic_reexecution(self):
         for key in (None, "saved-command-1"):
             with self.subTest(command_id=key):

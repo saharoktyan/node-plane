@@ -195,9 +195,9 @@ impl AgentTransport {
         let mut client = self.client().await.map_err(|err| {
             tonic::Status::unavailable(format!("failed to connect to node agent: {err}"))
         })?;
-        let response = client
-            .delete_runtime(DeleteRuntimeRequest { preserve_config })
-            .await?;
+        let mut request = tonic::Request::new(DeleteRuntimeRequest { preserve_config });
+        request.set_timeout(Duration::from_secs(180));
+        let response = client.delete_runtime(request).await?;
         Ok(response.into_inner())
     }
 

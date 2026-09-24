@@ -485,7 +485,7 @@ def _server_card_markup(server_key: str, lang: str) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(t(lang, "admin.wizard.bootstrap"), callback_data=f"{CB_SRV}bootmenu:{server_key}"),
             ],
             [InlineKeyboardButton(t(lang, "admin.wizard.advanced"), callback_data=f"{CB_SRV}advanced:{server_key}")],
-            [InlineKeyboardButton(t(lang, "admin.wizard.forget_server"), callback_data=f"{CB_SRV}forgetask:{server_key}")],
+            [InlineKeyboardButton(t(lang, "admin.wizard.delete_server"), callback_data=f"{CB_SRV}deleteask:{server_key}")],
             [InlineKeyboardButton(t(lang, "admin.wizard.to_servers"), callback_data=f"{CB_SRV}list")],
         ]
     )
@@ -544,7 +544,6 @@ def _bootstrap_menu_markup(server: RegisteredServer, lang: str) -> InlineKeyboar
         rows.append(
             [
                 InlineKeyboardButton(t(lang, "admin.wizard.reinstall"), callback_data=f"{CB_SRV}bootmode:reinstall:{server.key}"),
-                InlineKeyboardButton(t(lang, "admin.wizard.delete_runtime"), callback_data=f"{CB_SRV}bootmode:delete:{server.key}"),
             ],
         )
     else:
@@ -1699,28 +1698,78 @@ def on_server_callback(update: Update, context: CallbackContext, payload: str) -
         _render_server_card(context, payload.split(":", 1)[1])
         return
 
-    if payload.startswith("forgetask:"):
+    if payload.startswith(("deleteask:", "forgetask:", "forgetconfirm:")):
         server_key = payload.split(":", 1)[1]
         server = get_server(server_key)
         if server is None:
             _wizard_edit(context, t(lang, "admin.wizard.server_not_found"), kb_back_menu(lang))
             return
         w["server_key"] = server_key
-        w["step"] = "forget_confirm"
+        w["step"] = "delete_confirm"
         _wizard_set(context, w)
         _wizard_edit(
             context,
-            t(lang, "admin.wizard.forget_confirm", server=f"{server.title} ({server.key})"),
+            t(lang, "admin.wizard.delete_confirm", server=f"{server.title} ({server.key})"),
             InlineKeyboardMarkup([
-                [InlineKeyboardButton(t(lang, "admin.wizard.forget_confirm_button"), callback_data=f"{CB_SRV}forgetconfirm:{server_key}")],
+                [InlineKeyboardButton(t(lang, "admin.wizard.delete_confirm_button"), callback_data=f"{CB_SRV}deleterun:{server_key}")],
                 [InlineKeyboardButton(t(lang, "admin.wizard.back_to_server"), callback_data=f"{CB_SRV}card:{server_key}")],
             ]),
         )
         return
 
-    if payload.startswith("forgetconfirm:"):
+    if payload.startswith("deleterun:"):
         server_key = payload.split(":", 1)[1]
-        if w.get("step") != "forget_confirm" or w.get("server_key") != server_key:
+        if w.get("step") != "delete_confirm" or w.get("server_key") != server_key:
+            _render_server_card(context, server_key)
+            return
+        server = get_server(server_key)
+        if server is None:
+            _wizard_edit(context, t(lang, "admin.wizard.server_not_found"), kb_back_menu(lang))
+            return
+        stop_progress = _start_progress_animation(context, t(lang, "admin.wizard.delete_server"))
+        try:
+            operation = _run_driver_action(
+                update, "full_cleanup_node", server_key,
+                remove_ssh_key=(server.transport == "ssh"),
+            )
+        finally:
+            stop_progress()
+        if operation.status == "SUCCEEDED":
+            forget_server(server_key)
+            w["step"] = "menu"
+            w["server_key"] = None
+            _wizard_set(context, w)
+            _wizard_edit(
+                context,
+                t(lang, "admin.wizard.delete_done", server_key=server_key),
+                InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, "admin.wizard.to_servers"), callback_data=f"{CB_SRV}list")]]),
+            )
+            return
+        error_code = operation.error.code if operation.error else ""
+        if error_code in {"agent_unreachable", "node_unreachable", "agent_timeout", "agent_not_configured"}:
+            w["step"] = "delete_fallback"
+            _wizard_set(context, w)
+            _wizard_edit(
+                context,
+                t(lang, "admin.wizard.delete_fallback", error=_safe_output(operation.progress_message, 500)),
+                InlineKeyboardMarkup([
+                    [InlineKeyboardButton(t(lang, "admin.wizard.delete_fallback_button"), callback_data=f"{CB_SRV}deletefallback:{server_key}")],
+                    [InlineKeyboardButton(t(lang, "admin.wizard.back_to_server"), callback_data=f"{CB_SRV}card:{server_key}")],
+                ]),
+            )
+            return
+        w["step"] = "advanced"
+        _wizard_set(context, w)
+        _wizard_edit(
+            context,
+            _action_result_text(t(lang, "admin.wizard.delete_server"), 1, operation.progress_message, server_key, lang),
+            _server_card_markup(server_key, lang),
+        )
+        return
+
+    if payload.startswith("deletefallback:"):
+        server_key = payload.split(":", 1)[1]
+        if w.get("step") != "delete_fallback" or w.get("server_key") != server_key:
             _render_server_card(context, server_key)
             return
         removed = forget_server(server_key)

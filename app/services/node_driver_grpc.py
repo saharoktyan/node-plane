@@ -402,7 +402,7 @@ class GrpcNodeDriverClient(NodeDriverClient):
         try:
             response = self._runtime_stub.FullCleanupNode(
                 self._runtime_pb2.FullCleanupNodeRequest(node_key=node_key, remove_ssh_key=remove_ssh_key),
-                timeout=self.timeout_seconds,
+                timeout=max(self.timeout_seconds, 200),
                 metadata=(("x-node-plane-command-id", command_id),) if command_id is not None else (),
             )
         except Exception as exc:

@@ -124,15 +124,20 @@ through this journal in gRPC mode. A failed node operation prevents uninstall
 or local-state deletion. The in-process backend remains a compatibility path;
 factory reset also retains host-local shell cleanup when no local node is
 registered, to remove runtimes left by older installations.
-The admin node card now has a separate, confirmed "remove from bot" path. It
-deletes controller-owned node state and profile bindings in one database
-transaction, without contacting the agent. This handles a permanently lost VPS;
-it does not claim to remove software on that VPS. The card's runtime status
+The admin node card has one confirmed removal action. It first submits
+`FullCleanupNode` through the command journal, then removes controller-owned
+node state and profile bindings in one database transaction on success.
+Only a typed agent connection failure or agent timeout offers a second,
+explicit confirmation to remove the bot record without node access; other
+cleanup failures keep the record. After a timeout, the remote outcome is
+unknown. The card's runtime status
 read now goes through `GetRuntimeStatus` on the selected driver backend. Agent
 connections have a five-second connect timeout, and runtime-facts reads have
 a five-second response deadline, so an unreachable VPS does not hold the card
 open indefinitely. Reusing a removed node key requires updating the driver
 agent-target mapping through the normal rollout first.
+`FullCleanupNode` has a 180-second agent deadline and the Python caller waits
+longer than that to receive its recorded terminal result.
 A local cancellation does not prove that the remote action stopped.
 Existing runtime failures do not all have structured error codes yet.
 
