@@ -28,6 +28,21 @@ class DriverNodeHealth:
 
 
 @dataclass(frozen=True)
+class DriverDiagnosticItem:
+    kind: str
+    status: str
+    summary: str = ""
+    detail: str = ""
+
+
+@dataclass(frozen=True)
+class DriverNodeDiagnostics:
+    node_key: str
+    summary: str
+    items: tuple[DriverDiagnosticItem, ...] = ()
+
+
+@dataclass(frozen=True)
 class DriverNode:
     node_key: str
     transport: str
@@ -88,6 +103,8 @@ class DriverOperation:
 
 
 class NodeDriverClient(Protocol):
+    def get_node_diagnostics(self, node_key: str) -> DriverNodeDiagnostics:
+        ...
     def apply_node_settings(self, node_key: str) -> DriverOperation:
         ...
 

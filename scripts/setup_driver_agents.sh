@@ -29,6 +29,7 @@ SKIP_AGENTS=0
 STRICT_MODE=0
 DRY_RUN=0
 AGENT_PORT="${NODE_AGENT_PORT:-50061}"
+ONLY_NODE_KEY=""
 BIN_SOURCE="${NODE_PLANE_BIN_SOURCE:-auto}" # auto|release|build
 GITHUB_REPO="${NODE_PLANE_GITHUB_REPO:-saharoktyan/node-plane}"
 TLS_ROOT="${SHARED_ROOT}/driver-agent-tls"
@@ -336,6 +337,14 @@ while [[ $# -gt 0 ]]; do
       AGENT_PORT="${1#*=}"
       shift
       ;;
+    --node-key)
+      ONLY_NODE_KEY="${2:-}"
+      shift 2
+      ;;
+    --node-key=*)
+      ONLY_NODE_KEY="${1#*=}"
+      shift
+      ;;
     --bin-source)
       BIN_SOURCE="${2:-}"
       shift 2
@@ -347,11 +356,11 @@ while [[ $# -gt 0 ]]; do
     -h|--help)
       cat <<'EOF'
 Usage:
-  scripts/setup_driver_agents.sh [--skip-driver] [--skip-agents] [--agent-port 50061] [--strict] [--dry-run] [--bin-source auto|release|build]
+  scripts/setup_driver_agents.sh [--skip-driver] [--skip-agents] [--node-key KEY] [--agent-port 50061] [--strict] [--dry-run] [--bin-source auto|release|build]
 
 Purpose:
   - Install local node-plane-driver as a systemd service.
-  - Deploy node-plane-agent binary to SSH-managed nodes from the server registry.
+  - Deploy node-plane-agent binary to SSH-managed nodes from the server registry, or one node with --node-key.
   - Write NODE_AGENT_TARGETS and switch bot to grpc driver backend in the shared .env.
 
 Binary source modes:
@@ -621,6 +630,10 @@ deploy_agents() {
     return 0
   fi
   if [[ -z "$lines" ]]; then
+    if [[ -n "$ONLY_NODE_KEY" ]]; then
+      echo "No enabled SSH-managed server found for --node-key ${ONLY_NODE_KEY}" >&2
+      return 1
+    fi
     echo "No SSH-managed enabled servers found; skipping node-agent deploy."
     return 0
   fi
@@ -631,6 +644,7 @@ deploy_agents() {
   fi
 
   local failed=0
+  local matched=0
   local mappings=()
   local local_agent_sum
   local_agent_sum="$(sha256_of_file "$agent_bin_path")"
@@ -671,6 +685,11 @@ deploy_agents() {
     else
       mappings+=("${server_key}=${reach_host}:${AGENT_PORT}")
     fi
+
+    if [[ -n "$ONLY_NODE_KEY" && "$server_key" != "$ONLY_NODE_KEY" ]]; then
+      continue
+    fi
+    matched=$((matched + 1))
 
     echo
     echo "Deploying node-agent to ${server_key} (${target}:${ssh_port})..."
@@ -832,6 +851,11 @@ EOF
     rm -f "$remote_script"
     echo "node-agent is active on ${server_key}"
   done <<< "$lines"
+
+  if [[ -n "$ONLY_NODE_KEY" && $matched -eq 0 ]]; then
+    echo "No enabled SSH-managed server found for --node-key ${ONLY_NODE_KEY}" >&2
+    return 1
+  fi
 
   if [[ $STRICT_MODE -eq 1 && $failed -gt 0 ]]; then
     echo "node-agent deploy failures: ${failed}" >&2

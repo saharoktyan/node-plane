@@ -8,6 +8,8 @@ from services.node_driver_client import (
     DriverError,
     DriverNode,
     DriverNodeCapabilities,
+    DriverDiagnosticItem,
+    DriverNodeDiagnostics,
     DriverNodeHealth,
     DriverOperation,
     DriverProfileUsage,
@@ -18,6 +20,24 @@ from services.node_driver_client import (
 
 
 class GrpcNodeDriverClient(NodeDriverClient):
+    def get_node_diagnostics(self, node_key: str) -> DriverNodeDiagnostics:
+        self._ensure_client()
+        try:
+            response = self._node_stub.GetNodeDiagnostics(
+                self._node_pb2.GetNodeDiagnosticsRequest(node_key=node_key),
+                timeout=self.timeout_seconds,
+            )
+        except Exception as exc:
+            raise self._query_error("get_node_diagnostics", exc) from exc
+        return DriverNodeDiagnostics(
+            node_key=str(response.node_key),
+            summary=str(response.summary),
+            items=tuple(
+                DriverDiagnosticItem(kind=str(item.kind), status=str(item.status), summary=str(item.summary), detail=str(item.detail))
+                for item in response.items
+            ),
+        )
+
     def __init__(self, target: str | None = None, timeout_seconds: int | None = None) -> None:
         self.target = (target or NODE_DRIVER_GRPC_TARGET).strip() or NODE_DRIVER_GRPC_TARGET
         self.timeout_seconds = int(timeout_seconds or NODE_DRIVER_GRPC_TIMEOUT_SECONDS)

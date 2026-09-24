@@ -1478,6 +1478,9 @@ impl NodeService for NodeApi {
                     items,
                 }));
             }
+            return Err(Status::unavailable(
+                "node agent diagnostics are unavailable",
+            ));
         }
         let summary = match self.ctx.fetch_server_row(&req.node_key).await? {
             Some(row) => {
