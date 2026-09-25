@@ -414,6 +414,10 @@ def is_driver_agents_update_needed() -> bool:
         return False
     if not os.path.isfile("/usr/local/bin/node-plane-driver") or not os.path.isfile("/etc/systemd/system/node-plane-driver.service"):
         return True
+    state = app_settings.get_driver_agents_state()
+    successful_commit = str(state.get("last_successful_commit") or "").strip()
+    if successful_commit:
+        return not APP_COMMIT or APP_COMMIT == "unknown" or not successful_commit.startswith(APP_COMMIT)
     try:
         with open(f"{SHARED_ROOT}/driver-agent-installed-commit", encoding="utf-8") as marker:
             installed_commit = marker.read().strip()
@@ -509,7 +513,7 @@ def schedule_driver_agents_setup(timeout: int = 30) -> Dict[str, str]:
                 message = output or f"failed to start driver/agent setup job (exit {proc.returncode})"
                 app_settings.record_driver_agents_run_finished("failed", _utcnow_iso(), message)
                 return {"status": "failed", "message": message}
-            app_settings.record_driver_agents_run_started(started_at, unit_name)
+            app_settings.record_driver_agents_run_started(started_at, unit_name, APP_COMMIT)
             return {"status": "running", "unit_name": unit_name}
         except Exception as exc:
             app_settings.record_driver_agents_run_finished("failed", _utcnow_iso(), str(exc))
