@@ -9,7 +9,7 @@ import qrcode
 from telegram import Update
 from telegram.ext import CallbackContext
 
-from config import PARSE_MODE
+from config import CB_GETKEY, PARSE_MODE
 from domain.servers import AccessMethod, get_access_method_by_getkey_payload, get_access_methods_for_codes, get_awg_access_method_by_server_key, get_server
 from i18n import get_locale_for_update, t
 from services.app_settings import get_menu_title_markdown
@@ -163,7 +163,7 @@ def _render_xray_main_screen(name: str, method: AccessMethod, transport: str, la
         link = xray_svc.build_vless_link_transport(name, uuid_val, transport, method.server_key)
     except ValueError as exc:
         return t(lang, "getkey.xray_not_ready", error=exc), kb_xray_transport(method.getkey_payload, _server_back_payload(method.server_key), lang)
-    return _xray_help_text(method, transport, link, lang), kb_xray_key_actions(method.getkey_payload, transport, method.getkey_payload, lang)
+    return _xray_help_text(method, transport, link, lang), kb_xray_key_actions(method.getkey_payload, transport, f"{CB_GETKEY}{method.getkey_payload}", lang)
 
 
 def on_getkey_callback(update: Update, context: CallbackContext, payload: str) -> None:
@@ -315,7 +315,7 @@ def on_getkey_callback(update: Update, context: CallbackContext, payload: str) -
             update,
             context,
             _xray_help_text(method, transport, link, lang),
-            reply_markup=kb_xray_key_actions(method_payload, transport, method_payload, lang),
+            reply_markup=kb_xray_key_actions(method_payload, transport, f"{CB_GETKEY}{method_payload}", lang),
             parse_mode=PARSE_MODE,
         )
         return

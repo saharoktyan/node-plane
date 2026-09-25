@@ -45,14 +45,24 @@ sys.modules.setdefault("telegram", telegram_module)
 sys.modules["telegram"] = telegram_module
 sys.modules["telegram.error"] = telegram_error_module
 sys.modules["telegram.ext"] = telegram_ext_module
+qrcode_module = types.ModuleType("qrcode")
+qrcode_module.make = lambda value: None
+sys.modules.setdefault("qrcode", qrcode_module)
 
-from handlers import admin_server_wizard, admin_wizard, user_profile
+from handlers import admin_server_wizard, admin_wizard, user, user_getkey, user_profile
 from services import ssh_keys
 from ui import admin_views, user_views
 from utils import keyboards
 
 
 class AdminViewsTests(unittest.TestCase):
+    def test_xhttp_config_back_button_routes_to_transport_menu(self) -> None:
+        method = SimpleNamespace(getkey_payload="xray_msk1", server_key="msk1", label="VLESS Moscow #1")
+        with patch.object(user_getkey, "get_profile", return_value={"uuid": "uuid"}), patch.object(user_getkey.xray_svc, "build_vless_link_transport", return_value="vless://example"):
+            _text, markup = user_getkey._render_xray_main_screen("alice", method, "xhttp", "en")
+        self.assertEqual(markup.inline_keyboard[-1][0].callback_data, "getkey:xray_msk1")
+        self.assertTrue(callable(user._has_access))
+
     def test_admin_menu_groups_operational_and_system_sections(self) -> None:
         markup = keyboards.kb_admin_menu(lang="en", updates_label="🆕 Updates")
         rows = markup.inline_keyboard
