@@ -14,7 +14,7 @@ if [[ -s "$CFG" ]]; then
   exit 0
 fi
 
-SERVER_PRIV="$(wg genkey)"
+SERVER_PRIV="$(python3 "$PROFILE_TOOL" genkey)"
 TMP="$(mktemp "$(dirname "$CFG")/.awg-init-XXXXXX")"
 trap 'rm -f "$TMP"' EXIT
 {

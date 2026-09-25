@@ -16,6 +16,14 @@ AWG3_FIELDS = ("HeaderProtectionKey", "ContentPaddingAddition", "RekeyAfterTime"
 ALL_FIELDS = LEGACY_FIELDS + AWG3_FIELDS
 
 
+def new_private_key() -> str:
+    """Generate a clamped X25519 private key in WireGuard's base64 format."""
+    key = bytearray(secrets.token_bytes(32))
+    key[0] &= 248
+    key[31] = (key[31] & 127) | 64
+    return base64.b64encode(key).decode("ascii")
+
+
 def interface_values(config: str) -> dict[str, str]:
     section = ""
     values: dict[str, str] = {}
@@ -159,8 +167,11 @@ def migrate(config: str, preset: str) -> str:
 
 
 def main() -> None:
+    if sys.argv[1:] == ["genkey"]:
+        print(new_private_key())
+        return
     if len(sys.argv) < 3 or sys.argv[1] not in ("init", "migrate", "regenerate", "validate"):
-        raise SystemExit("Usage: awg_profile.py init|migrate|regenerate|validate PATH [PRESET]")
+        raise SystemExit("Usage: awg_profile.py genkey | init|migrate|regenerate|validate PATH [PRESET]")
     action, path = sys.argv[1], Path(sys.argv[2])
     preset = sys.argv[3] if len(sys.argv) > 3 else "quic"
     if action == "init":

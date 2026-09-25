@@ -1,8 +1,13 @@
 import contextlib
+import base64
 import importlib.util
 import io
 import json
+import os
 import pathlib
+import shlex
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -20,6 +25,50 @@ REFRESH_SPEC.loader.exec_module(refresh_awg_config)
 
 
 class AwgProfile31Tests(unittest.TestCase):
+    def test_server_private_key_uses_wireguard_format(self):
+        key = base64.b64decode(awg_profile.new_private_key(), validate=True)
+        self.assertEqual(len(key), 32)
+        self.assertEqual(key[0] & 7, 0)
+        self.assertEqual(key[31] & 0x80, 0)
+        self.assertEqual(key[31] & 0x40, 0x40)
+
+    def test_init_awg_does_not_need_host_wg_command(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            tools = root / "bin"
+            tools.mkdir()
+            for name in ("mkdir", "dirname", "mktemp", "rm", "chmod", "mv"):
+                (tools / name).symlink_to(shutil.which(name))
+            (tools / "python3").symlink_to(sys.executable)
+
+            config = root / "wg0.conf"
+            node_env = root / "node.env"
+            node_env.write_text(
+                f"AWG_CONFIG={shlex.quote(str(config))}\n"
+                f"AWG_PROFILE_TOOL={shlex.quote(str(ASSETS / 'awg_profile.py'))}\n"
+                "AWG_SERVER_ADDRESS=10.8.1.1/24\n",
+                encoding="utf-8",
+            )
+            script = root / "init-awg.sh"
+            script.write_text(
+                (ASSETS / "init-awg.sh").read_text(encoding="utf-8").replace(
+                    "source /etc/node-plane/node.env",
+                    f"source {shlex.quote(str(node_env))}",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            subprocess.run(
+                ["/bin/bash", str(script)],
+                env={**os.environ, "PATH": str(tools)},
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            values = awg_profile.interface_values(config.read_text(encoding="utf-8"))
+            self.assertEqual(len(base64.b64decode(values["PrivateKey"], validate=True)), 32)
+            awg_profile.validate(values)
+
     def test_legacy_migration_keeps_peer_and_i_sequence_and_refreshes_both_exports(self):
         old_server = """[Interface]
 PrivateKey = serverprivate
