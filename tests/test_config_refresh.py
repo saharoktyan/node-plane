@@ -44,8 +44,8 @@ import awg_profile
 
 class ConfigRefreshTests(unittest.TestCase):
     def test_awg_refresh_uses_node_and_profile_name(self) -> None:
-        self.assertEqual(refresh_module.profile_description("msk1", "alice"), "msk1 · alice")
-        self.assertEqual(refresh_module.profile_description("", ""), "AmneziaWG")
+        self.assertEqual(refresh_module.profile_description("Moscow #1 · alice"), "Moscow #1 · alice")
+        self.assertEqual(refresh_module.profile_description(""), "AmneziaWG")
 
     def test_existing_awg_peer_gets_current_endpoint_and_entropy(self) -> None:
         old = """[Interface]

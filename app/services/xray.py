@@ -73,14 +73,14 @@ def build_vless_link_transport(name: str, uuid: str, transport: str, server_key:
             f"?encryption=none&security=reality&sni={server.xray_sni}"
             f"&fp={server.xray_fp}&pbk={server.xray_pbk}&sid={short_id}"
             f"&type=xhttp&path={quote(path_prefix, safe='')}"
-            f"#reality-{server.key}-{name}-xhttp"
+            f"#{quote(f'VLESS {server.title} · {name} · XHTTP', safe='')}"
         )
     return (
         f"vless://{uuid}@{server.xray_host}:{server.xray_tcp_port}"
         f"?encryption=none&security=reality&sni={server.xray_sni}"
         f"&fp={server.xray_fp}&pbk={server.xray_pbk}&sid={short_id}"
         f"&type=tcp&flow={server.xray_flow}"
-        f"#reality-{server.key}-{name}-tcp"
+        f"#{quote(f'VLESS {server.title} · {name} · TCP', safe='')}"
     )
 
 
