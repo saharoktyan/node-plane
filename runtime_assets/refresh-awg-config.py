@@ -11,8 +11,8 @@ from conf2vpn import parse_conf
 from awg_profile import ALL_FIELDS, interface_values, validate
 
 
-def profile_description(server_key: str, profile_name: str) -> str:
-    return ' · '.join(part for part in (server_key.strip(), profile_name.strip()) if part) or 'AmneziaWG'
+def profile_description(profile_name: str) -> str:
+    return profile_name.strip() or 'AmneziaWG'
 
 
 def refresh(old_conf: str, server_conf: str, endpoint: str, port: str, server_pub: str) -> str:
@@ -46,8 +46,7 @@ def main() -> None:
     server_conf = cfg.read_text(encoding='utf-8')
     container = os.environ.get('AWG_CONTAINER_NAME', 'amnezia-awg')
     profile_name = sys.argv[1].strip() if len(sys.argv) > 1 else ''
-    server_key = os.environ.get('SERVER_KEY', '').strip()
-    description = profile_description(server_key, profile_name)
+    description = profile_description(profile_name)
     iface = os.environ.get('AWG_IFACE', 'wg0')
     pub = ''
     for command in (['docker'], ['sudo', 'docker']):
