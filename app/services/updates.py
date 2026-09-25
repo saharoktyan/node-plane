@@ -8,7 +8,7 @@ import threading
 from datetime import datetime, timezone
 from typing import Dict, List
 
-from config import APP_COMMIT, APP_ROOT, APP_SEMVER, APP_VERSION, BASE_DIR, INSTALL_MODE, SOURCE_ROOT
+from config import APP_COMMIT, APP_ROOT, APP_SEMVER, APP_VERSION, BASE_DIR, INSTALL_MODE, SHARED_ROOT, SOURCE_ROOT
 from services import app_settings
 from services.backups import maybe_create_pre_action_backup
 
@@ -409,6 +409,19 @@ def is_driver_agents_setup_supported() -> bool:
     return detect_install_mode() == "simple" and os.path.isfile(_script_path("setup_driver_agents.sh"))
 
 
+def is_driver_agents_update_needed() -> bool:
+    if not is_driver_agents_setup_supported():
+        return False
+    if not os.path.isfile("/usr/local/bin/node-plane-driver") or not os.path.isfile("/etc/systemd/system/node-plane-driver.service"):
+        return True
+    try:
+        with open(f"{SHARED_ROOT}/driver-agent-installed-commit", encoding="utf-8") as marker:
+            installed_commit = marker.read().strip()
+    except OSError:
+        return True
+    return not APP_COMMIT or APP_COMMIT == "unknown" or not installed_commit.startswith(APP_COMMIT)
+
+
 def refresh_driver_agents_run_state(timeout: int = 20) -> Dict[str, str]:
     state = app_settings.get_driver_agents_state()
     unit_name = str(state.get("last_run_unit") or "").strip()
@@ -484,6 +497,7 @@ def schedule_driver_agents_setup(timeout: int = 30) -> Dict[str, str]:
                 "--setenv",
                 f"NODE_PLANE_APP_DIR={APP_ROOT}",
                 f"{source_root}/scripts/setup_driver_agents.sh",
+                "--strict",
             )
             proc = _run_cmd(cmd, cwd=source_root, timeout=timeout)
             output = ((proc.stdout or "").strip() + "\n" + (proc.stderr or "").strip()).strip()
@@ -502,6 +516,7 @@ def get_driver_agents_setup_overview() -> Dict[str, str | bool]:
     state = refresh_driver_agents_run_state()
     return {
         "supported": is_driver_agents_setup_supported(),
+        "update_needed": is_driver_agents_update_needed(),
         "last_run_started_at": state.get("last_run_started_at", ""),
         "last_run_finished_at": state.get("last_run_finished_at", ""),
         "last_run_status": state.get("last_run_status", "never"),

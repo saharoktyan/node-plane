@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import sys
 import tempfile
@@ -9,6 +10,7 @@ import types
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlsplit
 
 from tests.postgres_test_harness import configure_postgres_test_env
 
@@ -78,7 +80,7 @@ AllowedIPs = 0.0.0.0/0
 
     def test_xray_link_uses_current_server_short_id(self) -> None:
         server = SimpleNamespace(
-            key="node", xray_host="new.example", xray_xhttp_port=8443,
+            key="node", title="Moscow #1", xray_host="new.example", xray_xhttp_port=8443,
             xray_tcp_port=443, xray_sni="sni.example", xray_fp="firefox",
             xray_pbk="new-pbk", xray_short_id="current-sid", xray_sid="current-sid",
             xray_flow="xtls-rprx-vision", xray_xhttp_path_prefix="/assets", bootstrap_state="bootstrapped",
@@ -91,10 +93,27 @@ AllowedIPs = 0.0.0.0/0
         self.assertIn("@new.example:443", link)
         self.assertNotIn("stale-sid", link)
 
+    def test_xhttp_link_imports_client_transport_settings(self) -> None:
+        server = SimpleNamespace(
+            key="node", xray_host="new.example", xray_xhttp_port=8443,
+            xray_sni="sni.example", xray_fp="chrome", xray_pbk="public-key",
+            xray_short_id="current-sid", xray_sid="current-sid",
+            xray_xhttp_path_prefix="/assets/xhttp", bootstrap_state="bootstrapped",
+            title="Moscow #1",
+        )
+        driver = SimpleNamespace(sync_xray=lambda node: SimpleNamespace(status="SUCCEEDED"))
+        with patch.object(xray, "get_server", return_value=server), patch.object(xray, "get_server_link_status", return_value=(True, "ok")), patch("services.node_driver.get_node_driver", return_value=driver):
+            link = xray.build_vless_link_transport("alice", "uuid", "xhttp", "node")
+        params = parse_qs(urlsplit(link).query)
+        self.assertEqual(params["mode"], ["auto"])
+        self.assertEqual(params["path"], ["/assets/xhttp"])
+        self.assertEqual(json.loads(params["extra"][0]), {"xmux": {"maxConcurrency": "16-32"}})
+        self.assertNotIn("allowInsecure", params)
+
     def test_awg_issuance_refreshes_and_persists_existing_peer(self) -> None:
         old = {"config": "vpn://old", "wg_conf": "[Interface]\nPrivateKey = old\n"}
         driver = SimpleNamespace(refresh_awg_config=lambda node, conf, name: ("[Interface]\nPrivateKey = new\n", "vpn://new"))
-        with patch.object(user_getkey, "get_awg_server", return_value=old), patch.object(user_getkey, "get_server", return_value=SimpleNamespace(bootstrap_state="bootstrapped")), patch.object(user_getkey, "get_node_driver", return_value=driver), patch.object(user_getkey, "update_awg_server") as save:
+        with patch.object(user_getkey, "get_awg_server", return_value=old), patch.object(user_getkey, "get_server", return_value=SimpleNamespace(title="Moscow #1", bootstrap_state="bootstrapped")), patch.object(user_getkey, "get_node_driver", return_value=driver), patch.object(user_getkey, "update_awg_server") as save:
             result = user_getkey._current_awg_server("alice", "node")
         self.assertEqual(result["config"], "vpn://new")
         self.assertEqual(result["wg_conf"], "[Interface]\nPrivateKey = new\n")

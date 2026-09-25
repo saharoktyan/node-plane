@@ -272,6 +272,25 @@ class UpdatesTests(unittest.TestCase):
         self.assertEqual(state["last_run_status"], "success")
         self.assertEqual(state["last_run_log_tail"], "")
 
+    def test_driver_agent_setup_reports_node_failures(self) -> None:
+        proc = SimpleNamespace(returncode=0, stdout="started", stderr="")
+        with patch.object(self.updates, "refresh_driver_agents_run_state", return_value={"last_run_status": "never"}), patch.object(self.updates, "is_driver_agents_setup_supported", return_value=True), patch.object(self.updates, "_effective_source_root", return_value="/opt/node-plane/current"), patch.object(self.updates, "_run_cmd", return_value=proc) as run:
+            result = self.updates.schedule_driver_agents_setup()
+        self.assertEqual(result["status"], "running")
+        self.assertIn("--strict", run.call_args.args[0])
+
+    def test_driver_agent_update_button_depends_on_installed_commit(self) -> None:
+        with tempfile.TemporaryDirectory() as shared_root:
+            marker = os.path.join(shared_root, "driver-agent-installed-commit")
+            with patch.object(self.updates, "is_driver_agents_setup_supported", return_value=True), patch.object(self.updates, "SHARED_ROOT", shared_root), patch.object(self.updates, "APP_COMMIT", "abc1234"), patch.object(self.updates.os.path, "isfile", return_value=True):
+                self.assertTrue(self.updates.is_driver_agents_update_needed())
+                with open(marker, "w", encoding="utf-8") as output:
+                    output.write("abc1234fullcommit\n")
+                self.assertFalse(self.updates.is_driver_agents_update_needed())
+                with open(marker, "w", encoding="utf-8") as output:
+                    output.write("oldcommit\n")
+                self.assertTrue(self.updates.is_driver_agents_update_needed())
+
     def test_auto_check_job_skips_when_disabled(self) -> None:
         self.app_settings.set_updates_auto_check_enabled(False)
         with patch("services.updates.check_for_updates") as mocked:

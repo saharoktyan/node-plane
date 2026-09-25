@@ -1185,9 +1185,22 @@ fi
 if [[ $SKIP_DRIVER -eq 0 && $DRY_RUN -eq 0 ]]; then
   set_step "restart node-plane-driver with updated env"
   if [[ $DRIVER_BIN_CHANGED -eq 1 || $DRIVER_UNIT_CHANGED -eq 1 || $ENV_CHANGED -eq 1 ]]; then
-    sudo systemctl restart node-plane-driver || true
+    sudo systemctl restart node-plane-driver
+    sudo systemctl is-active --quiet node-plane-driver
   else
     echo "No local driver/env changes detected; skipping final node-plane-driver restart."
+  fi
+fi
+
+if [[ $DRY_RUN -eq 0 && $STRICT_MODE -eq 1 && $SKIP_DRIVER -eq 0 && $SKIP_AGENTS -eq 0 ]]; then
+  release_commit=""
+  if [[ -f "${APP_ROOT}/BUILD_COMMIT" ]]; then
+    release_commit="$(tr -d '\r\n' < "${APP_ROOT}/BUILD_COMMIT")"
+  elif git -C "$APP_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    release_commit="$(git -C "$APP_ROOT" rev-parse HEAD)"
+  fi
+  if [[ -n "$release_commit" ]]; then
+    printf '%s\n' "$release_commit" > "${SHARED_ROOT}/driver-agent-installed-commit"
   fi
 fi
 

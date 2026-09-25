@@ -5,6 +5,7 @@ Runtime mutations and observations go through the Rust driver.
 
 from __future__ import annotations
 
+import json
 import secrets
 from typing import Optional
 from urllib.parse import quote
@@ -68,11 +69,12 @@ def build_vless_link_transport(name: str, uuid: str, transport: str, server_key:
     short_id = server.xray_short_id or server.xray_sid
     path_prefix = server.xray_xhttp_path_prefix or "/assets"
     if transport == "xhttp":
+        xhttp_extra = quote(json.dumps({"xmux": {"maxConcurrency": "16-32"}}, separators=(",", ":")), safe="")
         return (
             f"vless://{uuid}@{server.xray_host}:{server.xray_xhttp_port}"
             f"?encryption=none&security=reality&sni={server.xray_sni}"
             f"&fp={server.xray_fp}&pbk={server.xray_pbk}&sid={short_id}"
-            f"&type=xhttp&path={quote(path_prefix, safe='')}"
+            f"&type=xhttp&path={quote(path_prefix, safe='')}&mode=auto&extra={xhttp_extra}"
             f"#{quote(f'VLESS {server.title} · {name} · XHTTP', safe='')}"
         )
     return (

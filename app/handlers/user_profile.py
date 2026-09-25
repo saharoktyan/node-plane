@@ -848,7 +848,7 @@ def _admin_updates_markup(lang: str) -> InlineKeyboardMarkup:
         update_supported=show_update_action,
         update_running=update_running,
         branch=str(overview.get("branch") or get_updates_branch()),
-        driver_agents_setup_supported=bool(driver_agents_setup.get("supported")),
+        driver_agents_setup_supported=bool(driver_agents_setup.get("supported")) and (bool(driver_agents_setup.get("update_needed")) or str(driver_agents_setup.get("last_run_status") or "") == "running"),
         driver_agents_setup_running=str(driver_agents_setup.get("last_run_status") or "") == "running",
         runtime_sync_available=bool(_runtime_sync_targets()[0]),
         release_cleanup_available=bool(cleanup_overview.get("supported")),
@@ -1866,6 +1866,7 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
     if payload == "admin_updates_toggle_auto" and is_admin:
         enabled = set_updates_auto_check_enabled(not is_updates_auto_check_enabled())
         overview = get_updates_overview()
+        driver_agents_setup = get_driver_agents_setup_overview()
         update_running = str(overview.get("last_run_status") or "") == "running"
         show_update_action = bool(overview.get("update_supported")) and (bool(overview.get("update_available")) or update_running)
         safe_edit_message(
@@ -1877,8 +1878,8 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
                 update_supported=show_update_action,
                 update_running=update_running,
                 branch=str(overview.get("branch") or get_updates_branch()),
-                driver_agents_setup_supported=bool(get_driver_agents_setup_overview().get("supported")),
-                driver_agents_setup_running=str(get_driver_agents_setup_overview().get("last_run_status") or "") == "running",
+                driver_agents_setup_supported=bool(driver_agents_setup.get("supported")) and (bool(driver_agents_setup.get("update_needed")) or str(driver_agents_setup.get("last_run_status") or "") == "running"),
+                driver_agents_setup_running=str(driver_agents_setup.get("last_run_status") or "") == "running",
                 runtime_sync_available=bool(_runtime_sync_targets()[0]),
                 release_cleanup_available=bool(get_release_cleanup_overview().get("supported")),
                 lang=lang,
