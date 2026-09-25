@@ -496,6 +496,10 @@ def schedule_driver_agents_setup(timeout: int = 30) -> Dict[str, str]:
                 f"NODE_PLANE_SOURCE_DIR={source_root}",
                 "--setenv",
                 f"NODE_PLANE_APP_DIR={APP_ROOT}",
+                "--setenv",
+                f"NODE_PLANE_BASE_DIR={BASE_DIR}",
+                "--setenv",
+                f"NODE_PLANE_SHARED_DIR={SHARED_ROOT}",
                 f"{source_root}/scripts/setup_driver_agents.sh",
                 "--strict",
             )

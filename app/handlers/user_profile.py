@@ -904,11 +904,18 @@ def _render_admin_updates_text(lang: str, include_failure_log: bool = True) -> s
     setup_last_run_value = _updates_run_status_label(setup_last_run_status, lang)
     if setup_last_run_at:
         setup_last_run_value = f"{setup_last_run_value} · {_human_ago(setup_last_run_at, lang)}"
+    if setup_last_run_status == "running":
+        setup_update_state = "running"
+    elif driver_agents_setup.get("update_needed"):
+        setup_update_state = "needed"
+    else:
+        setup_update_state = "current"
     lines.extend(
         [
             "",
             t(lang, "admin.updates.section_driver_agents"),
             t(lang, "admin.updates.driver_agents_setup_supported", value=t(lang, "common.yes") if driver_agents_setup.get("supported") else t(lang, "common.no")),
+            t(lang, "admin.updates.driver_agents_update_state", value=t(lang, f"admin.updates.driver_agents_state_{setup_update_state}")),
             t(lang, "admin.updates.driver_agents_setup_last_run", value=setup_last_run_value),
         ]
     )
