@@ -133,6 +133,9 @@ PersistentKeepalive = 25
                 conf2vpn.main(conf, ASSETS / "awg-template.json", output, ASSETS / "amnezia-config-decoder.py")
             self.assertTrue(printed.getvalue().startswith("vpn://"))
             payload = json.loads(output.read_text(encoding="utf-8"))["containers"][0]["awg"]
+            exported = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(exported["defaultContainer"], "amnezia-awg2")
+            self.assertEqual(exported["containers"][0]["container"], "amnezia-awg2")
             self.assertEqual(payload["protocol_version"], "3.1")
             self.assertEqual(payload["HeaderProtectionKey"], values["HeaderProtectionKey"])
             self.assertEqual(payload["I5"], "<r 1000>")

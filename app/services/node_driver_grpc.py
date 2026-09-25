@@ -311,10 +311,10 @@ class GrpcNodeDriverClient(NodeDriverClient):
         operation = self._start_operation("apply_node_settings", response, node_key=node_key)
         return self.get_operation(operation.operation_id) or operation if operation.operation_id else operation
 
-    def refresh_awg_config(self, node_key: str, wg_conf: str) -> tuple[str, str]:
+    def refresh_awg_config(self, node_key: str, wg_conf: str, profile_name: str) -> tuple[str, str]:
         self._ensure_client()
         response = self._runtime_stub.RefreshAwgConfig(
-            self._runtime_pb2.RefreshAwgConfigRequest(node_key=node_key, wg_conf=wg_conf),
+            self._runtime_pb2.RefreshAwgConfigRequest(node_key=node_key, wg_conf=wg_conf, profile_name=profile_name),
             timeout=max(self.timeout_seconds, 45),
         )
         if not response.wg_conf or not response.vpn_key:

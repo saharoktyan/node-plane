@@ -43,6 +43,10 @@ import awg_profile
 
 
 class ConfigRefreshTests(unittest.TestCase):
+    def test_awg_refresh_uses_node_and_profile_name(self) -> None:
+        self.assertEqual(refresh_module.profile_description("msk1", "alice"), "msk1 · alice")
+        self.assertEqual(refresh_module.profile_description("", ""), "AmneziaWG")
+
     def test_existing_awg_peer_gets_current_endpoint_and_entropy(self) -> None:
         old = """[Interface]
 PrivateKey = client-secret
@@ -89,7 +93,7 @@ AllowedIPs = 0.0.0.0/0
 
     def test_awg_issuance_refreshes_and_persists_existing_peer(self) -> None:
         old = {"config": "vpn://old", "wg_conf": "[Interface]\nPrivateKey = old\n"}
-        driver = SimpleNamespace(refresh_awg_config=lambda node, conf: ("[Interface]\nPrivateKey = new\n", "vpn://new"))
+        driver = SimpleNamespace(refresh_awg_config=lambda node, conf, name: ("[Interface]\nPrivateKey = new\n", "vpn://new"))
         with patch.object(user_getkey, "get_awg_server", return_value=old), patch.object(user_getkey, "get_server", return_value=SimpleNamespace(bootstrap_state="bootstrapped")), patch.object(user_getkey, "get_node_driver", return_value=driver), patch.object(user_getkey, "update_awg_server") as save:
             result = user_getkey._current_awg_server("alice", "node")
         self.assertEqual(result["config"], "vpn://new")

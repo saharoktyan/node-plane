@@ -29,7 +29,7 @@ def _split_csv(value: str):
     return [part.strip() for part in (value or "").split(",") if part.strip()]
 
 
-def main(conf_path, template_path, out_json_path, decoder_py, container_name="amnezia-awg", description="awg"):
+def main(conf_path, template_path, out_json_path, decoder_py, container_name="amnezia-awg", description="AmneziaWG"):
     conf_text = Path(conf_path).read_text(encoding="utf-8", errors="ignore").strip() + "\n"
     tpl = json.loads(Path(template_path).read_text(encoding="utf-8"))
 
@@ -85,8 +85,11 @@ def main(conf_path, template_path, out_json_path, decoder_py, container_name="am
     out["description"] = description
     out["dns1"] = dns1
     out["dns2"] = dns2
-    out["defaultContainer"] = container_name
-    out["containers"][0]["container"] = container_name
+    # AmneziaVPN identifies modern AWG by its protocol container marker, not
+    # by the Docker container name used on the node.
+    protocol_container = "amnezia-awg2" if version == "3.1" else container_name
+    out["defaultContainer"] = protocol_container
+    out["containers"][0]["container"] = protocol_container
     out["containers"][0]["awg"]["port"] = str(awg_obj["port"])
     out["containers"][0]["awg"]["transport_proto"] = "udp"
     out["containers"][0]["awg"]["protocol_version"] = version
@@ -130,5 +133,5 @@ if __name__ == "__main__":
         print("Usage: conf2vpn.py <conf> <template.json> <out.json> <amnezia-config-decoder.py> [container_name] [description]")
         sys.exit(1)
     container_name = sys.argv[5] if len(sys.argv) >= 6 else "amnezia-awg"
-    description = sys.argv[6] if len(sys.argv) >= 7 else "awg"
+    description = sys.argv[6] if len(sys.argv) >= 7 else "AmneziaWG"
     main(sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], container_name, description)

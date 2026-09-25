@@ -107,6 +107,7 @@ message ApplyNodeSettingsRequest {
 
 message RefreshAwgConfigRequest {
   string wg_conf = 1;
+  string profile_name = 2;
 }
 
 message RefreshAwgConfigResponse {

@@ -2350,7 +2350,7 @@ impl RuntimeService for RuntimeApi {
             .agent_target(&req.node_key)
             .ok_or_else(|| Status::unavailable("node agent is unavailable"))?;
         let refreshed = agent_transport::AgentTransport::new(target)
-            .refresh_awg_config(&req.wg_conf)
+            .refresh_awg_config(&req.wg_conf, &req.profile_name)
             .await?;
         Ok(Response::new(RefreshAwgConfigResponse {
             wg_conf: refreshed.wg_conf,

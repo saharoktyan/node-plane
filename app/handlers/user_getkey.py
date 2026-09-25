@@ -121,7 +121,7 @@ def _current_awg_server(name: str, server_key: str) -> dict | None:
     wg_conf = rec.get("wg_conf") or _extract_wg_conf(str(rec.get("config") or ""))
     if not wg_conf:
         raise RuntimeError("Старый AWG-конфиг не содержит ключи peer; перевыпусти профиль")
-    refreshed_conf, refreshed_key = get_node_driver().refresh_awg_config(server_key, wg_conf)
+    refreshed_conf, refreshed_key = get_node_driver().refresh_awg_config(server_key, wg_conf, name)
     rec["wg_conf"] = refreshed_conf
     rec["config"] = refreshed_key
     update_awg_server(name, server_key, rec)
@@ -473,7 +473,7 @@ def on_getkey_callback(update: Update, context: CallbackContext, payload: str) -
             return
 
         conf_io = io.BytesIO(wg_conf.encode("utf-8"))
-        conf_io.name = f"{name}_{server_key}.conf"
+        conf_io.name = f"AmneziaWG_{server_key}_{name}.conf"
         sent = context.bot.send_document(
             chat_id=chat_id,
             document=conf_io,
