@@ -822,6 +822,38 @@ class AdminViewsTests(unittest.TestCase):
 
 
 class ProfileProvisioningRegressionTests(unittest.TestCase):
+    def test_new_profile_exists_in_database_before_driver_provisioning(self) -> None:
+        method = SimpleNamespace(protocol_kind="xray", server_key="msk1", label="Xray Moscow")
+        saved_profiles: list[dict] = []
+
+        def ensure_profile_on_node(*args, **kwargs):
+            self.assertEqual(args[0], "msk1")
+            self.assertIn("alice", saved_profiles[-1])
+            return SimpleNamespace(status="SUCCEEDED", progress_message="xray: OK")
+
+        driver = SimpleNamespace(ensure_profile_on_node=Mock(side_effect=ensure_profile_on_node))
+        context = SimpleNamespace(user_data={"cfg_wizard": {"name": "alice", "protocols": {"xray:msk1"}}})
+        with patch.object(admin_wizard, "_wizard_lang", return_value="en"), patch.object(
+            admin_wizard, "_start_progress_animation", return_value=lambda: None
+        ), patch.object(
+            admin_wizard, "get_access_methods_for_codes", return_value=[method]
+        ), patch.object(admin_wizard, "get_node_driver", return_value=driver), patch.object(
+            admin_wizard.profile_store, "read", return_value={}
+        ), patch.object(
+            admin_wizard.profile_store, "write", side_effect=lambda data: saved_profiles.append(dict(data))
+        ), patch.object(
+            admin_wizard.xray_svc, "get_short_id_local", return_value=None
+        ), patch.object(
+            admin_wizard.xray_svc, "generate_short_id", return_value="a1b2c3d4"
+        ), patch.object(admin_wizard, "ensure_xray_caps"), patch.object(
+            admin_wizard, "upsert_profile_server_state"
+        ), patch.object(admin_wizard, "_get_all_names", return_value=["alice"]), patch.object(
+            admin_wizard, "_render_profile_dashboard", return_value=("", None)
+        ), patch.object(admin_wizard, "_wizard_set"), patch.object(admin_wizard, "_wizard_edit_plain"):
+            admin_wizard._finish_create(context)
+
+        self.assertEqual(driver.ensure_profile_on_node.call_count, 1)
+
     def test_edit_provides_and_saves_xray_identity_for_new_access(self) -> None:
         method = SimpleNamespace(protocol_kind="xray", server_key="msk1", label="Xray Moscow")
         operation = SimpleNamespace(status="SUCCEEDED", progress_message="xray: OK")

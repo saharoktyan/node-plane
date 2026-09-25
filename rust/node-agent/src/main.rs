@@ -241,16 +241,18 @@ impl AgentState {
     }
 
     fn extract_awg_payload_json(summary: &str) -> String {
-        let mut vpn_uri = String::new();
-        if let Some(idx) = summary.find("vpn://") {
-            let tail = &summary[idx..];
-            let end = tail
-                .find(|ch: char| ch.is_whitespace())
-                .unwrap_or(tail.len());
-            vpn_uri = tail[..end].trim().to_string();
-        }
+        let vpn_uri = summary
+            .lines()
+            .map(str::trim)
+            .find(|line| line.starts_with("vpn://"))
+            .unwrap_or_default()
+            .to_string();
         let wg_conf = if let Some(idx) = summary.find("[Interface]") {
-            summary[idx..].trim().to_string()
+            let config_and_key = &summary[idx..];
+            let end = config_and_key
+                .find("\n===========")
+                .unwrap_or(config_and_key.len());
+            config_and_key[..end].trim().to_string()
         } else {
             String::new()
         };
@@ -942,7 +944,7 @@ impl AgentState {
         let summary = self.run_runtime_command("awg-add-user.sh", &[request.profile_name])?;
         Ok(RuntimeCommandResponse {
             payload_json: Self::extract_awg_payload_json(summary.as_str()),
-            summary,
+            summary: "AWG profile configured".to_string(),
         })
     }
 
@@ -1035,7 +1037,8 @@ impl AgentState {
         let xray_container = self.node_env_value("XRAY_CONTAINER_NAME", "xray");
         let awg_container = self.node_env_value("AWG_CONTAINER_NAME", "amnezia-awg");
         let xray_image = self.node_env_value("XRAY_DOCKER_IMAGE", "ghcr.io/xtls/xray-core:25.12.8");
-        let awg_image = self.node_env_value("AWG_DOCKER_IMAGE", "node-plane-amnezia-awg:3.1.20260828");
+        let awg_image =
+            self.node_env_value("AWG_DOCKER_IMAGE", "node-plane-amnezia-awg:3.1.20260828");
 
         if self.docker_available() {
             self.docker_best_effort(&["rm", "-f", &xray_container]);
@@ -1071,7 +1074,11 @@ impl AgentState {
             if self.docker_inspect_exists(&["image", "inspect", &awg_image]) {
                 leftovers.push("awg image still present".to_string());
             }
-            if self.docker_inspect_exists(&["image", "inspect", "amneziavpn/amneziawg-go:3.1.20260828"]) {
+            if self.docker_inspect_exists(&[
+                "image",
+                "inspect",
+                "amneziavpn/amneziawg-go:3.1.20260828",
+            ]) {
                 leftovers.push("amneziavpn/amneziawg-go:3.1.20260828 still present".to_string());
             }
             if self.docker_inspect_exists(&["image", "inspect", "amneziavpn/amneziawg-go:0.2.16"]) {
@@ -1437,6 +1444,18 @@ mod tests {
         fs, process,
         time::{SystemTime, UNIX_EPOCH},
     };
+
+    #[test]
+    fn awg_payload_keeps_vpn_key_out_of_wireguard_config() {
+        let summary = "[Interface]\nPrivateKey = client\n\n[Peer]\nPublicKey = server\n\n=========== AMNEZIA TEXT KEY (vpn://) ===========\nvpn://abc123\n=================================================";
+        let payload = AgentState::extract_awg_payload_json(summary);
+        let value: serde_json::Value = serde_json::from_str(&payload).unwrap();
+        assert_eq!(value["vpn_uri"], "vpn://abc123");
+        assert_eq!(
+            value["wg_conf"],
+            "[Interface]\nPrivateKey = client\n\n[Peer]\nPublicKey = server"
+        );
+    }
 
     #[test]
     fn accepts_installer_agent_config_with_default_runtime_paths() {

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 source /etc/node-plane/node.env
 
 docker_cmd() {
@@ -53,9 +54,51 @@ DISPLAY_NAME="$NAME"
 if [[ -n "$SERVER_KEY" ]]; then
   DISPLAY_NAME="${SERVER_KEY}-${NAME}"
 fi
+if [[ ! "$DISPLAY_NAME" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  echo "Invalid AWG profile name" >&2
+  exit 1
+fi
 if ! docker_cmd ps --format '{{.Names}}' | grep -q "^${CONTAINER}$"; then
   echo "Container ${CONTAINER} not running" >&2
   exit 1
+fi
+for asset in "$CONF2VPN" "$AWG_TEMPLATE" "$AMNEZIA_DECODER"; do
+  if [[ ! -f "$asset" ]]; then
+    echo "AWG client config asset is missing: $asset" >&2
+    exit 1
+  fi
+done
+
+CLIENTS_DIR="${AWG_CLIENTS_DIR:-/opt/node-plane-runtime/awg-clients}"
+CLIENT_RESULT="${CLIENTS_DIR}/${DISPLAY_NAME}.txt"
+mkdir -p "$CLIENTS_DIR"
+chmod 700 "$CLIENTS_DIR"
+if grep -Fxq "# ${DISPLAY_NAME}" "$CFG"; then
+  if [[ -s "$CLIENT_RESULT" ]]; then
+    cat "$CLIENT_RESULT"
+    exit 0
+  fi
+  # Earlier failed operations could leave a peer without a saved private key.
+  # Remove that orphan before creating a replacement the bot can deliver.
+  STALE_PUB="$(awk -v name="$DISPLAY_NAME" '
+    $0 == "# " name {found=1; next}
+    found && /^PublicKey = / {print $3; exit}
+    found && NF == 0 {exit}
+  ' "$CFG")"
+  if [[ -z "$STALE_PUB" ]]; then
+    echo "Existing AWG peer has no public key: ${DISPLAY_NAME}" >&2
+    exit 1
+  fi
+  docker_cmd exec -i "$CONTAINER" wg set "$IFACE" peer "$STALE_PUB" remove
+  STALE_TMP="$(mktemp "$(dirname "$CFG")/.awg-orphan-XXXXXX")"
+  awk -v name="$DISPLAY_NAME" '
+    $0 == "# " name {skip=1; next}
+    skip && NF == 0 {skip=0; next}
+    skip {next}
+    {print}
+  ' "$CFG" > "$STALE_TMP"
+  chmod 600 "$STALE_TMP"
+  mv "$STALE_TMP" "$CFG"
 fi
 
 eval "$(
@@ -176,6 +219,8 @@ printf '\n# %s\n[Peer]\nPublicKey = %s\nPresharedKey = %s\nAllowedIPs = %s/32\n'
 
 TMP_CONF="$(mktemp /tmp/awg-client-XXXX.conf)"
 TMP_JSON="$(mktemp /tmp/awg-amnezia-XXXX.json)"
+RESULT_TMP="$(mktemp "${CLIENTS_DIR}/.client-XXXXXX")"
+trap 'rm -f "$TMP_CONF" "$TMP_JSON" "$RESULT_TMP"' EXIT
 
 cat > "$TMP_CONF" <<EOF
 [Interface]
@@ -228,9 +273,8 @@ for optional in \
 done
 python3 "$PROFILE_TOOL" validate "$TMP_CONF"
 
-cat "$TMP_CONF"
-
-if [[ -f "$CONF2VPN" && -f "$AWG_TEMPLATE" && -f "$AMNEZIA_DECODER" ]]; then
+{
+  cat "$TMP_CONF"
   echo
   echo "=========== AMNEZIA TEXT KEY (vpn://) ==========="
   python3 "$CONF2VPN" \
@@ -241,6 +285,7 @@ if [[ -f "$CONF2VPN" && -f "$AWG_TEMPLATE" && -f "$AMNEZIA_DECODER" ]]; then
     "$CONTAINER" \
     "$DISPLAY_NAME"
   echo "================================================="
-fi
-
-rm -f "$TMP_CONF" "$TMP_JSON"
+} > "$RESULT_TMP"
+chmod 600 "$RESULT_TMP"
+mv "$RESULT_TMP" "$CLIENT_RESULT"
+cat "$CLIENT_RESULT"

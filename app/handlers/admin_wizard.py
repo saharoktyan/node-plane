@@ -725,6 +725,11 @@ def _finish_create(context: CallbackContext) -> None:
     xray_short_id: Optional[str] = None
     subs = profile_store.read()
     rec = subs.get(name, {}) if isinstance(subs.get(name, {}), dict) else {}
+    if name not in subs:
+        now = utcnow().isoformat(timespec="minutes")
+        rec = {"type": "none", "created_at": now, "expires_at": None, "protocols": sorted(protocols)}
+        subs[name] = rec
+        profile_store.write(subs)
     xray_methods = [method for method in get_access_methods_for_codes(protocols) if method.protocol_kind == "xray"]
     existing_xray = rec.get("xray") if isinstance(rec.get("xray"), dict) else {}
     server_short_ids = dict(existing_xray.get("server_short_ids") or {}) if isinstance(existing_xray, dict) else {}
