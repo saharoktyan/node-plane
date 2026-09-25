@@ -67,6 +67,7 @@ message ApplyNodeSettingsRequest {
 message RefreshAwgConfigRequest {
   string node_key = 1;
   string wg_conf = 2;
+  string profile_name = 3;
 }
 
 message RefreshAwgConfigResponse {

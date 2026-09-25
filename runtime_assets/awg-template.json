@@ -33,11 +33,11 @@
         "subnet_address": "10.8.1.0",
         "transport_proto": "udp"
       },
-      "container": "amnezia-awg"
+      "container": "amnezia-awg2"
     }
   ],
-  "defaultContainer": "amnezia-awg",
-  "description": "awg",
+  "defaultContainer": "amnezia-awg2",
+  "description": "AmneziaWG",
   "dns1": "1.1.1.1",
   "dns2": "1.0.0.1",
   "hostName": "",

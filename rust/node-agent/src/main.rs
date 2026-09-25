@@ -736,10 +736,11 @@ impl AgentState {
         let script = self.resolve_runtime_path("/opt/node-plane-runtime/refresh-awg-config.py");
         let mut child = Command::new("bash")
             .arg("-c")
-            .arg("set -a; source \"$1\"; exec python3 \"$2\"")
+            .arg("set -a; source \"$1\"; exec python3 \"$2\" \"$3\"")
             .arg("refresh-awg")
             .arg(&self.config.node_env_path)
             .arg(script)
+            .arg(&request.profile_name)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

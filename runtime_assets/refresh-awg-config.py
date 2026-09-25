@@ -11,6 +11,10 @@ from conf2vpn import parse_conf
 from awg_profile import ALL_FIELDS, interface_values, validate
 
 
+def profile_description(server_key: str, profile_name: str) -> str:
+    return ' · '.join(part for part in (server_key.strip(), profile_name.strip()) if part) or 'AmneziaWG'
+
+
 def refresh(old_conf: str, server_conf: str, endpoint: str, port: str, server_pub: str) -> str:
     old = parse_conf(old_conf)
     current = parse_conf(server_conf)
@@ -41,6 +45,9 @@ def main() -> None:
     old_conf = sys.stdin.read()
     server_conf = cfg.read_text(encoding='utf-8')
     container = os.environ.get('AWG_CONTAINER_NAME', 'amnezia-awg')
+    profile_name = sys.argv[1].strip() if len(sys.argv) > 1 else ''
+    server_key = os.environ.get('SERVER_KEY', '').strip()
+    description = profile_description(server_key, profile_name)
     iface = os.environ.get('AWG_IFACE', 'wg0')
     pub = ''
     for command in (['docker'], ['sudo', 'docker']):
@@ -62,7 +69,7 @@ def main() -> None:
         result = subprocess.run([
             'python3', '/opt/node-plane-runtime/conf2vpn.py', str(conf),
             '/opt/node-plane-runtime/awg-template.json', str(output),
-            '/opt/node-plane-runtime/amnezia-config-decoder.py', container, 'awg',
+            '/opt/node-plane-runtime/amnezia-config-decoder.py', container, description,
         ], capture_output=True, text=True, check=True)
     key = next((line.strip() for line in result.stdout.splitlines() if line.strip().startswith('vpn://')), '')
     if not key:

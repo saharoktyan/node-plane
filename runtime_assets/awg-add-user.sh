@@ -51,8 +51,10 @@ if [[ -z "$SERVER_IP" ]]; then
   exit 1
 fi
 DISPLAY_NAME="$NAME"
+PROFILE_DESCRIPTION="$NAME"
 if [[ -n "$SERVER_KEY" ]]; then
   DISPLAY_NAME="${SERVER_KEY}-${NAME}"
+  PROFILE_DESCRIPTION="${SERVER_KEY} · ${NAME}"
 fi
 if [[ ! "$DISPLAY_NAME" =~ ^[A-Za-z0-9._-]+$ ]]; then
   echo "Invalid AWG profile name" >&2
@@ -283,7 +285,7 @@ python3 "$PROFILE_TOOL" validate "$TMP_CONF"
     "$TMP_JSON" \
     "$AMNEZIA_DECODER" \
     "$CONTAINER" \
-    "$DISPLAY_NAME"
+    "$PROFILE_DESCRIPTION"
   echo "================================================="
 } > "$RESULT_TMP"
 chmod 600 "$RESULT_TMP"

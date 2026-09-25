@@ -270,12 +270,14 @@ impl AgentTransport {
     pub async fn refresh_awg_config(
         &self,
         wg_conf: &str,
+        profile_name: &str,
     ) -> Result<RefreshAwgConfigResponse, tonic::Status> {
         let mut client = self.client().await.map_err(|err| {
             tonic::Status::unavailable(format!("failed to connect to node agent: {err}"))
         })?;
         let mut request = tonic::Request::new(RefreshAwgConfigRequest {
             wg_conf: wg_conf.to_string(),
+            profile_name: profile_name.to_string(),
         });
         request.set_timeout(Duration::from_secs(30));
         Ok(client.refresh_awg_config(request).await?.into_inner())
