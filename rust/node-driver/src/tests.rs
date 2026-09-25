@@ -11,6 +11,21 @@ fn context() -> DriverContext {
     }
 }
 
+#[test]
+fn runtime_assets_use_active_app_root_when_configured() {
+    let app_root = std::path::PathBuf::from("/opt/node-plane/current");
+    let manifest_dir = std::path::Path::new("/build/rust/node-driver");
+
+    assert_eq!(
+        runtime_assets_dir_from(Some(app_root), manifest_dir),
+        std::path::PathBuf::from("/opt/node-plane/current/runtime_assets")
+    );
+    assert_eq!(
+        runtime_assets_dir_from(None, manifest_dir),
+        std::path::PathBuf::from("/build/rust/node-driver/../../runtime_assets")
+    );
+}
+
 fn assert_missing_agent(ctx: &DriverContext, response: Response<StartOperationResponse>) {
     let op = ctx
         .state

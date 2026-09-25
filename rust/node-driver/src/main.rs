@@ -85,9 +85,8 @@ struct XraySyncGenerated {
 
 impl DriverContext {
     fn runtime_assets_dir(&self) -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../..")
-            .join("runtime_assets")
+        let app_root = env::var_os("NODE_PLANE_APP_DIR").map(PathBuf::from);
+        runtime_assets_dir_from(app_root, Path::new(env!("CARGO_MANIFEST_DIR")))
     }
 
     fn runtime_manifest_path(&self) -> PathBuf {
@@ -95,8 +94,13 @@ impl DriverContext {
     }
 
     fn load_runtime_manifest(&self) -> Result<Vec<RuntimeAssetManifestEntry>, Status> {
-        let raw = fs::read_to_string(self.runtime_manifest_path())
-            .map_err(|err| Status::internal(format!("failed to read runtime manifest: {err}")))?;
+        let path = self.runtime_manifest_path();
+        let raw = fs::read_to_string(&path).map_err(|err| {
+            Status::internal(format!(
+                "failed to read runtime manifest at {}: {err}",
+                path.display()
+            ))
+        })?;
         serde_json::from_str::<Vec<RuntimeAssetManifestEntry>>(&raw)
             .map_err(|err| Status::internal(format!("failed to parse runtime manifest: {err}")))
     }
@@ -1016,6 +1020,12 @@ impl DriverContext {
             .map_err(|err| Status::internal(format!("failed to update bootstrap state: {err}")))?;
         Ok(())
     }
+}
+
+fn runtime_assets_dir_from(app_root: Option<PathBuf>, manifest_dir: &Path) -> PathBuf {
+    app_root
+        .map(|root| root.join("runtime_assets"))
+        .unwrap_or_else(|| manifest_dir.join("../..").join("runtime_assets"))
 }
 
 #[derive(Clone)]
