@@ -526,7 +526,7 @@ impl DriverContext {
                 self.row_string(row, "xray_service_name", "xray").as_str(),
             ),
             self.shell_env_assignment("XRAY_DOCKER_DIR", "/opt/node-plane-runtime/xray"),
-            self.shell_env_assignment("XRAY_DOCKER_IMAGE", "ghcr.io/xtls/xray-core:25.12.8"),
+            self.shell_env_assignment("XRAY_DOCKER_IMAGE", "ghcr.io/xtls/xray-core:26.3.27"),
             self.shell_env_assignment("XRAY_INBOUND_TCP_TAG", "reality-tcp"),
             self.shell_env_assignment("XRAY_INBOUND_XHTTP_TAG", "reality-xhttp"),
             self.shell_env_assignment("AWG_CONTAINER_NAME", "amnezia-awg"),
@@ -559,7 +559,7 @@ impl DriverContext {
             self.shell_env_assignment("XRAY_CONFIG", "/opt/node-plane-runtime/xray/config.json"),
             self.shell_env_assignment("XRAY_CONTAINER_NAME", "xray"),
             self.shell_env_assignment("XRAY_DOCKER_DIR", "/opt/node-plane-runtime/xray"),
-            self.shell_env_assignment("XRAY_DOCKER_IMAGE", "ghcr.io/xtls/xray-core:25.12.8"),
+            self.shell_env_assignment("XRAY_DOCKER_IMAGE", "ghcr.io/xtls/xray-core:26.3.27"),
             self.shell_env_assignment("XRAY_INBOUND_TCP_TAG", "reality-tcp"),
             self.shell_env_assignment("XRAY_INBOUND_XHTTP_TAG", "reality-xhttp"),
             self.shell_env_assignment("AWG_CONTAINER_NAME", "amnezia-awg"),
@@ -2320,7 +2320,7 @@ impl RuntimeService for RuntimeApi {
                     &self.ctx.row_string(&row, "xray_config_path", "/opt/node-plane-runtime/xray/config.json"),
                     &self.ctx.row_string(&row, "xray_host", self.ctx.row_string(&row, "public_host", "").as_str()),
                     &self.ctx.row_string(&row, "xray_flow", "xtls-rprx-vision"),
-                    "ghcr.io/xtls/xray-core:25.12.8",
+                    "ghcr.io/xtls/xray-core:26.3.27",
                 ).await?;
                 let generated: XraySyncGenerated = serde_json::from_str(&synced.generated_json)
                     .map_err(|err| Status::internal(format!("invalid Xray sync result: {err}")))?;
@@ -2474,7 +2474,7 @@ impl RuntimeService for RuntimeApi {
                             xhttp_port,
                             &path_prefix,
                             &flow,
-                            "ghcr.io/xtls/xray-core:25.12.8",
+                            "ghcr.io/xtls/xray-core:26.3.27",
                         )
                         .await
                     {
@@ -2975,7 +2975,7 @@ impl RuntimeService for RuntimeApi {
                 self.ctx.row_string(&row, "public_host", "").as_str(),
             );
             let flow = self.ctx.row_string(&row, "xray_flow", "xtls-rprx-vision");
-            let image = "ghcr.io/xtls/xray-core:25.12.8";
+            let image = "ghcr.io/xtls/xray-core:26.3.27";
             let transport = agent_transport::AgentTransport::new(target);
             let summary = match transport
                 .sync_xray(&config_path, &public_host, &flow, image)

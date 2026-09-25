@@ -8,7 +8,7 @@ TCP_PORT="${4:-443}"
 XHTTP_PORT="${5:-8443}"
 PATH_PREFIX="${6:-/assets}"
 FLOW="${7:-xtls-rprx-vision}"
-IMAGE="${8:-ghcr.io/xtls/xray-core:25.12.8}"
+IMAGE="${8:-ghcr.io/xtls/xray-core:26.3.27}"
 
 if [[ -z "$PUBLIC_HOST" ]]; then
   echo "PUBLIC_HOST is required" >&2
@@ -25,6 +25,7 @@ X25519_OUT="$(docker run --rm "$IMAGE" x25519)"
 read -r PRIVATE_KEY REALITY_PASSWORD < <(
   XRAY_X25519_OUT="$X25519_OUT" python3 - <<'PY'
 import os
+import re
 
 text = os.environ.get("XRAY_X25519_OUT", "")
 lines = [line.rstrip() for line in text.splitlines()]
@@ -45,9 +46,16 @@ def extract(prefixes):
     return ""
 
 private_key = extract(("private key", "privatekey"))
-reality_password = extract(("password",))
-if not reality_password:
-    reality_password = extract(("public key", "publickey"))
+reality_password = ""
+for line in lines:
+    match = re.match(r"^(?:Password(?:\s+\(PublicKey\))?|Public\s*Key)\s*:\s*(\S+)\s*$", line.strip(), re.I)
+    if match:
+        reality_password = match.group(1)
+        break
+if not re.fullmatch(r"[A-Za-z0-9_-]{43}", private_key or ""):
+    raise SystemExit("Could not parse xray x25519 private key")
+if not re.fullmatch(r"[A-Za-z0-9_-]{43}", reality_password or ""):
+    raise SystemExit("Could not parse xray x25519 public key")
 print(private_key, reality_password)
 PY
 )

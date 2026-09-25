@@ -70,7 +70,7 @@ Important constraint:
 
 Current upstream images used by the project:
 
-- Xray: `ghcr.io/xtls/xray-core:25.12.8`
+- Xray: `ghcr.io/xtls/xray-core:26.3.27`
 - AWG: `amneziavpn/amneziawg-go:3.1.20260828`
 
 For AWG nodes, Node Plane builds and deploys its own wrapper image during bootstrap.

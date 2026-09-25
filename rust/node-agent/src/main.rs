@@ -1037,7 +1037,7 @@ impl AgentState {
     fn delete_runtime(&self, preserve_config: bool) -> Result<DeleteRuntimeResponse, Status> {
         let xray_container = self.node_env_value("XRAY_CONTAINER_NAME", "xray");
         let awg_container = self.node_env_value("AWG_CONTAINER_NAME", "amnezia-awg");
-        let xray_image = self.node_env_value("XRAY_DOCKER_IMAGE", "ghcr.io/xtls/xray-core:25.12.8");
+        let xray_image = self.node_env_value("XRAY_DOCKER_IMAGE", "ghcr.io/xtls/xray-core:26.3.27");
         let awg_image =
             self.node_env_value("AWG_DOCKER_IMAGE", "node-plane-amnezia-awg:3.1.20260828");
 
