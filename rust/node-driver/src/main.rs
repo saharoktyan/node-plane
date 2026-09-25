@@ -342,7 +342,7 @@ impl DriverContext {
                 .unwrap_or_default()
                 .as_str(),
         );
-        let enabled = row.try_get::<_, bool>("enabled").unwrap_or(true);
+        let enabled = row.try_get::<_, i32>("enabled").unwrap_or(1) != 0;
         let bootstrap_state = row
             .try_get::<_, Option<String>>("bootstrap_state")
             .ok()
@@ -713,7 +713,7 @@ impl DriverContext {
         let sql = if include_disabled {
             "SELECT * FROM servers ORDER BY title, key"
         } else {
-            "SELECT * FROM servers WHERE enabled = TRUE ORDER BY title, key"
+            "SELECT * FROM servers WHERE enabled = 1 ORDER BY title, key"
         };
         client
             .query(sql, &[])
@@ -886,7 +886,7 @@ impl DriverContext {
                 INSERT INTO profile_server_state(
                     profile_name, server_key, protocol_kind, desired_enabled, status,
                     remote_id, last_error, created_at, updated_at
-                ) VALUES ($1, $2, $3, TRUE, $4, $5, $6, $7, $7)
+                ) VALUES ($1, $2, $3, 1, $4, $5, $6, $7, $7)
                 ON CONFLICT(profile_name, server_key, protocol_kind) DO UPDATE SET
                     desired_enabled = excluded.desired_enabled,
                     status = excluded.status,
@@ -906,7 +906,11 @@ impl DriverContext {
             )
             .await
             .map_err(|err| {
-                Status::internal(format!("failed to upsert profile server state: {err}"))
+                let detail = err.as_db_error().map_or_else(
+                    || err.to_string(),
+                    |db_err| format!("{} (SQLSTATE {})", db_err.message(), db_err.code().code()),
+                );
+                Status::internal(format!("failed to upsert profile server state: {detail}"))
             })?;
         Ok(())
     }
@@ -1770,6 +1774,39 @@ impl ProvisioningService for ProvisioningApi {
             CommandStart::Existing(response) => return Ok(Response::new(response)),
         };
         if let Some(target) = self.ctx.agent_target(&req.node_key) {
+            // Confirm registry writes before creating remote users. A failed DB
+            // update must not leave a new peer without a deliverable config.
+            for protocol in profile
+                .protocol_kinds
+                .iter()
+                .map(|value| value.trim().to_lowercase())
+            {
+                if protocol != "xray" && protocol != "awg" {
+                    continue;
+                }
+                let remote_id = if protocol == "xray" {
+                    profile.xray.as_ref().map_or("", |spec| spec.uuid.trim())
+                } else {
+                    ""
+                };
+                if let Err(err) = self
+                    .ctx
+                    .upsert_profile_server_state(
+                        &profile_name,
+                        &req.node_key,
+                        &protocol,
+                        "pending",
+                        remote_id,
+                        "",
+                    )
+                    .await
+                {
+                    return Ok(Response::new(execution.finish(
+                        "FAILED",
+                        &format!("{protocol} state preparation failed: {err}"),
+                    )?));
+                }
+            }
             let transport = agent_transport::AgentTransport::new(target);
             let mut lines = Vec::new();
             let mut failed = false;
