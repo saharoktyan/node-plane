@@ -116,7 +116,7 @@ def _managed_local_image_refs() -> List[str]:
         "amneziavpn/amneziawg-go:3.1.20260828",
         "node-plane-amnezia-awg:0.2.16",
         "amneziavpn/amneziawg-go:0.2.16",
-        "ghcr.io/xtls/xray-core:25.12.8",
+        "ghcr.io/xtls/xray-core:26.3.27",
     ):
         if ref not in refs:
             refs.append(ref)
@@ -327,7 +327,7 @@ if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
   fi
   docker_rm "${{XRAY_CONTAINER_NAME:-xray}}"
   docker_rm "${{AWG_CONTAINER_NAME:-{AWG_RUNTIME_CONTAINER}}}"
-  docker_rmi "${{XRAY_DOCKER_IMAGE:-ghcr.io/xtls/xray-core:25.12.8}}"
+  docker_rmi "${{XRAY_DOCKER_IMAGE:-ghcr.io/xtls/xray-core:26.3.27}}"
   docker_rmi "${{AWG_DOCKER_IMAGE:-node-plane-amnezia-awg:3.1.20260828}}"
   docker_rmi "node-plane-amnezia-awg:0.2.16"
   docker_rmi "amneziavpn/amneziawg-go:3.1.20260828"

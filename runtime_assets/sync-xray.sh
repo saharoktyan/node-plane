@@ -4,7 +4,7 @@ set -euo pipefail
 CONFIG_PATH="${1:-/opt/node-plane-runtime/xray/config.json}"
 PUBLIC_HOST="${2:-}"
 FLOW="${3:-xtls-rprx-vision}"
-IMAGE="${4:-ghcr.io/xtls/xray-core:25.12.8}"
+IMAGE="${4:-ghcr.io/xtls/xray-core:26.3.27}"
 
 if [[ -z "$PUBLIC_HOST" ]]; then
   echo "PUBLIC_HOST is required" >&2
@@ -18,6 +18,7 @@ fi
 CONFIG_PATH_ENV="$CONFIG_PATH" PUBLIC_HOST_ENV="$PUBLIC_HOST" FLOW_ENV="$FLOW" XRAY_IMAGE_ENV="$IMAGE" python3 - <<'PY'
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -57,25 +58,11 @@ if res.returncode != 0:
 reality_password = ""
 for line in (res.stdout or "").splitlines():
     line = line.strip()
-    lower = line.lower()
-    if lower.startswith("password:"):
-        reality_password = line.split(":", 1)[1].strip()
+    match = re.match(r"^(?:Password(?:\s+\(PublicKey\))?|Public\s*Key)\s*:\s*(\S+)\s*$", line, re.I)
+    if match:
+        reality_password = match.group(1)
         break
-    if lower.startswith("password "):
-        reality_password = line.split(None, 1)[1].strip()
-        break
-    if lower.startswith("public key:"):
-        reality_password = line.split(":", 1)[1].strip()
-        break
-    if lower.startswith("publickey "):
-        reality_password = line.split(None, 1)[1].strip()
-        break
-    if lower in {"password:", "publickey:", "public key:"}:
-        continue
-    if not reality_password and line and not lower.startswith(("private", "hash32")):
-        reality_password = line
-        break
-if not reality_password:
+if not re.fullmatch(r"[A-Za-z0-9_-]{43}", reality_password):
     raise SystemExit("Could not derive Reality password from private key")
 
 path_prefix = (
