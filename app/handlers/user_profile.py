@@ -20,7 +20,7 @@ except Exception:  # pragma: no cover - test stubs may provide partial telegram 
         pass
 from telegram.ext import CallbackContext
 
-from config import ADMIN_IDS, APP_VERSION, CB_SRV, LIST_PAGE_SIZE, PARSE_MODE
+from config import ADMIN_IDS, APP_COMMIT, APP_VERSION, CB_SRV, LIST_PAGE_SIZE, PARSE_MODE
 from domain.servers import get_access_methods_for_codes
 from i18n import get_locale_for_update, get_user_locale, set_user_locale, t
 from services.app_settings import (
@@ -910,12 +910,16 @@ def _render_admin_updates_text(lang: str, include_failure_log: bool = True) -> s
         setup_update_state = "needed"
     else:
         setup_update_state = "current"
+    deployed_commit = str(driver_agents_setup.get("last_successful_commit") or "").strip()
+    deployed_commit = deployed_commit[:8] if deployed_commit else "—"
+    expected_commit = APP_COMMIT[:8] if APP_COMMIT and APP_COMMIT != "unknown" else "—"
     lines.extend(
         [
             "",
             t(lang, "admin.updates.section_driver_agents"),
             t(lang, "admin.updates.driver_agents_setup_supported", value=t(lang, "common.yes") if driver_agents_setup.get("supported") else t(lang, "common.no")),
             t(lang, "admin.updates.driver_agents_update_state", value=t(lang, f"admin.updates.driver_agents_state_{setup_update_state}")),
+            t(lang, "admin.updates.driver_agents_commit", expected=expected_commit, deployed=deployed_commit),
             t(lang, "admin.updates.driver_agents_setup_last_run", value=setup_last_run_value),
         ]
     )

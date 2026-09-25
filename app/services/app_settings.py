@@ -29,6 +29,8 @@ _DRIVER_AGENTS_LAST_RUN_FINISHED_AT_KEY = "driver_agents_last_run_finished_at"
 _DRIVER_AGENTS_LAST_RUN_STATUS_KEY = "driver_agents_last_run_status"
 _DRIVER_AGENTS_LAST_RUN_LOG_TAIL_KEY = "driver_agents_last_run_log_tail"
 _DRIVER_AGENTS_LAST_RUN_UNIT_KEY = "driver_agents_last_run_unit"
+_DRIVER_AGENTS_LAST_RUN_COMMIT_KEY = "driver_agents_last_run_commit"
+_DRIVER_AGENTS_LAST_SUCCESSFUL_COMMIT_KEY = "driver_agents_last_successful_commit"
 _AGENT_ROLLOUT_PENDING_PREFIX = "agent_rollout_pending:"
 _UPDATES_BRANCH_KEY = "updates_branch"
 _UPDATES_DEV_TRACK_KEY = "updates_dev_track"
@@ -287,21 +289,28 @@ def get_driver_agents_state() -> dict[str, str]:
         "last_run_status": _meta_get(_DRIVER_AGENTS_LAST_RUN_STATUS_KEY, "never"),
         "last_run_log_tail": _meta_get(_DRIVER_AGENTS_LAST_RUN_LOG_TAIL_KEY, ""),
         "last_run_unit": _meta_get(_DRIVER_AGENTS_LAST_RUN_UNIT_KEY, ""),
+        "last_run_commit": _meta_get(_DRIVER_AGENTS_LAST_RUN_COMMIT_KEY, ""),
+        "last_successful_commit": _meta_get(_DRIVER_AGENTS_LAST_SUCCESSFUL_COMMIT_KEY, ""),
     }
 
 
-def record_driver_agents_run_started(started_at: str, unit_name: str) -> None:
+def record_driver_agents_run_started(started_at: str, unit_name: str, commit: str = "") -> None:
     _meta_set(_DRIVER_AGENTS_LAST_RUN_STARTED_AT_KEY, started_at)
     _meta_set(_DRIVER_AGENTS_LAST_RUN_FINISHED_AT_KEY, "")
     _meta_set(_DRIVER_AGENTS_LAST_RUN_STATUS_KEY, "running")
     _meta_set(_DRIVER_AGENTS_LAST_RUN_LOG_TAIL_KEY, "")
     _meta_set(_DRIVER_AGENTS_LAST_RUN_UNIT_KEY, unit_name)
+    _meta_set(_DRIVER_AGENTS_LAST_RUN_COMMIT_KEY, commit)
 
 
 def record_driver_agents_run_finished(status: str, finished_at: str, log_tail: str = "") -> None:
     _meta_set(_DRIVER_AGENTS_LAST_RUN_FINISHED_AT_KEY, finished_at)
     _meta_set(_DRIVER_AGENTS_LAST_RUN_STATUS_KEY, status)
     _meta_set(_DRIVER_AGENTS_LAST_RUN_LOG_TAIL_KEY, log_tail)
+    if status == "success":
+        commit = _meta_get(_DRIVER_AGENTS_LAST_RUN_COMMIT_KEY, "").strip()
+        if commit:
+            _meta_set(_DRIVER_AGENTS_LAST_SUCCESSFUL_COMMIT_KEY, commit)
 
 
 def set_driver_agents_run_log_tail(log_tail: str) -> None:
