@@ -83,6 +83,26 @@ struct XraySyncGenerated {
     xray_xhttp_path_prefix: String,
 }
 
+impl XraySyncGenerated {
+    fn parse(raw: &str) -> Result<Self, Status> {
+        let generated: Self = serde_json::from_str(raw)
+            .map_err(|err| Status::internal(format!("invalid Xray sync result: {err}")))?;
+        // Xray Reality public keys are 32-byte URL-safe base64 values without padding.
+        // Reject old helper output such as "(Public Key): ..." before it reaches the DB.
+        if generated.xray_pbk.len() != 43
+            || !generated
+                .xray_pbk
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+        {
+            return Err(Status::internal(
+                "invalid Reality public key returned by runtime helper",
+            ));
+        }
+        Ok(generated)
+    }
+}
+
 impl DriverContext {
     fn runtime_assets_dir(&self) -> PathBuf {
         let app_root = env::var_os("NODE_PLANE_APP_DIR").map(PathBuf::from);
@@ -2322,8 +2342,7 @@ impl RuntimeService for RuntimeApi {
                     &self.ctx.row_string(&row, "xray_flow", "xtls-rprx-vision"),
                     "ghcr.io/xtls/xray-core:26.3.27",
                 ).await?;
-                let generated: XraySyncGenerated = serde_json::from_str(&synced.generated_json)
-                    .map_err(|err| Status::internal(format!("invalid Xray sync result: {err}")))?;
+                let generated = XraySyncGenerated::parse(&synced.generated_json)?;
                 self.ctx.update_xray_server_fields(&req.node_key, &generated).await?;
             }
             let db = self.ctx.db_client().await?;
@@ -2478,34 +2497,15 @@ impl RuntimeService for RuntimeApi {
                         )
                         .await
                     {
-                        Ok(result) => {
-                            match serde_json::from_str::<XraySyncGenerated>(&result.generated_json)
-                            {
-                                Ok(generated) => {
-                                    if let Err(err) = self
-                                        .ctx
-                                        .update_xray_server_fields(&req.node_key, &generated)
-                                        .await
-                                    {
-                                        let message = format!(
-                                            "failed to persist generated xray settings: {err}"
-                                        );
-                                        let _ = self
-                                            .ctx
-                                            .mark_bootstrap_state(
-                                                &req.node_key,
-                                                "bootstrap_failed",
-                                                &message,
-                                            )
-                                            .await;
-                                        return Ok(Response::new(
-                                            execution.finish("FAILED", &message)?,
-                                        ));
-                                    }
-                                }
-                                Err(err) => {
+                        Ok(result) => match XraySyncGenerated::parse(&result.generated_json) {
+                            Ok(generated) => {
+                                if let Err(err) = self
+                                    .ctx
+                                    .update_xray_server_fields(&req.node_key, &generated)
+                                    .await
+                                {
                                     let message =
-                                        format!("agent init xray returned invalid json: {err}");
+                                        format!("failed to persist generated xray settings: {err}");
                                     let _ = self
                                         .ctx
                                         .mark_bootstrap_state(
@@ -2519,7 +2519,20 @@ impl RuntimeService for RuntimeApi {
                                     ));
                                 }
                             }
-                        }
+                            Err(err) => {
+                                let message =
+                                    format!("agent init xray returned invalid json: {err}");
+                                let _ = self
+                                    .ctx
+                                    .mark_bootstrap_state(
+                                        &req.node_key,
+                                        "bootstrap_failed",
+                                        &message,
+                                    )
+                                    .await;
+                                return Ok(Response::new(execution.finish("FAILED", &message)?));
+                            }
+                        },
                         Err(err) => {
                             let message = format!("agent init xray failed: {err}");
                             let _ = self
@@ -2977,12 +2990,16 @@ impl RuntimeService for RuntimeApi {
             let flow = self.ctx.row_string(&row, "xray_flow", "xtls-rprx-vision");
             let image = "ghcr.io/xtls/xray-core:26.3.27";
             let transport = agent_transport::AgentTransport::new(target);
-            let summary = match transport
-                .sync_xray(&config_path, &public_host, &flow, image)
-                .await
-            {
-                Ok(result) => {
-                    match serde_json::from_str::<XraySyncGenerated>(&result.generated_json) {
+            // Driver updates do not restart node agents, so explicitly refresh
+            // runtime helpers before invoking sync-xray on every node.
+            let files = self.ctx.runtime_file_bundle(Some(&row), &req.node_key)?;
+            let summary = match transport.sync_runtime_files(files).await {
+                Err(err) => format!("failed to sync runtime helpers before Xray sync: {err}"),
+                Ok(_) => match transport
+                    .sync_xray(&config_path, &public_host, &flow, image)
+                    .await
+                {
+                    Ok(result) => match XraySyncGenerated::parse(&result.generated_json) {
                         Ok(generated) => {
                             match self
                                 .ctx
@@ -2994,9 +3011,9 @@ impl RuntimeService for RuntimeApi {
                             }
                         }
                         Err(err) => format!("agent xray sync returned invalid json: {err}"),
-                    }
-                }
-                Err(err) => format!("agent xray sync failed: {err}"),
+                    },
+                    Err(err) => format!("agent xray sync failed: {err}"),
+                },
             };
             let status = if summary.trim_start().starts_with('{') {
                 "SUCCEEDED"
