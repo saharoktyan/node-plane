@@ -1,7 +1,8 @@
 # Xray-core: 25.12.8 → 26.3.27
 
 Checked on 2026-09-25 against the [official Xray-core releases](https://github.com/XTLS/Xray-core/releases).
-Node Plane uses VLESS over REALITY on TCP and XHTTP, with a local StatsService API.
+Node Plane uses VLESS over REALITY on TCP and XHTTP, with local StatsService
+and HandlerService APIs.
 The target is `ghcr.io/xtls/xray-core:26.3.27`, the latest release marked
 **Latest** by upstream. The newer 26.4–26.9 releases, including 26.9.9, are
 marked **Pre-release** and are outside this core upgrade.
@@ -38,7 +39,13 @@ the server does not need reprovisioning. Do not add `allowInsecure` to REALITY
 links. If an Android client only connects with that switch enabled, collect
 its core version and connection log to diagnose the actual handshake failure.
 
-Still to verify on a test node: the running version, an existing TCP and XHTTP
-client passing traffic after the update, user add/remove, restart and rollback.
-The separate planned move to Xray's HandlerService API is not part of this
-version bump; current user operations still rewrite the config and restart Xray.
+Profile add/update/remove now persists users in `config.json` and applies the
+same change to both live inbounds through HandlerService without a routine
+container restart. A one-time redeploy enables HandlerService and replaces
+the old file bind mount with a directory mount. The Xray CLI results and live
+users are checked before reporting success. A local `26.3.27` container test
+verified add, restart recovery from the file, and delete.
+
+Still to verify on a separate node: existing TCP and XHTTP clients passing
+traffic after this rollout, migration from an existing file-mounted container,
+and rollback.

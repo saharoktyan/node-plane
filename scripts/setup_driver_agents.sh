@@ -1147,6 +1147,27 @@ EOF
 
   if [[ ${#mappings[@]} -gt 0 ]]; then
     local mapping_csv
+    if [[ -n "$ONLY_NODE_KEY" ]]; then
+      # A targeted rollout must not erase routes for agents that were set up
+      # earlier if the current registry query omits them temporarily.
+      local previous_mapping old_mapping old_key new_mapping
+      local -a previous_mappings=()
+      local -A mapped_keys=()
+      for new_mapping in "${mappings[@]}"; do
+        mapped_keys["${new_mapping%%=*}"]=1
+      done
+      previous_mapping="$(read_env_value "NODE_AGENT_TARGETS" "$ENV_FILE")"
+      IFS=',' read -r -a previous_mappings <<< "$previous_mapping"
+      for old_mapping in "${previous_mappings[@]}"; do
+        [[ "$old_mapping" == *=* ]] || continue
+        old_key="${old_mapping%%=*}"
+        [[ -n "$old_key" && -n "${old_mapping#*=}" ]] || continue
+        if [[ -z "${mapped_keys[$old_key]+x}" ]]; then
+          mappings+=("$old_mapping")
+          mapped_keys["$old_key"]=1
+        fi
+      done
+    fi
     mapping_csv="$(IFS=,; echo "${mappings[*]}")"
     if [[ $DRY_RUN -eq 1 ]]; then
       echo "Dry-run mapping preview: ${mapping_csv}"

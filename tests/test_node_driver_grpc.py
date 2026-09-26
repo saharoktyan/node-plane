@@ -79,6 +79,18 @@ class GrpcCommandIdentityTests(unittest.TestCase):
         client.full_cleanup_node("node")
         self.assertGreaterEqual(rpc.call_args.kwargs["timeout"], 200)
 
+    def test_first_install_operations_wait_for_docker_and_container_setup(self):
+        for method, rpc_name, service in (
+            ("install_docker", "InstallDocker", "node"),
+            ("bootstrap_node", "BootstrapNode", "runtime"),
+            ("reinstall_node", "ReinstallNode", "runtime"),
+        ):
+            with self.subTest(method=method):
+                client, rpc = self.client_for(rpc_name, service)
+                client.timeout_seconds = 30
+                getattr(client, method)("node")
+                self.assertGreaterEqual(rpc.call_args.kwargs["timeout"], 1800)
+
     def test_awg_entropy_read_returns_agent_summary(self):
         client, rpc = self.client_for("GetAwgEntropy", "runtime")
         rpc.return_value = SimpleNamespace(summary="preset: quic\nJc: 4")

@@ -3,21 +3,7 @@ set -euo pipefail
 source /etc/node-plane/node.env
 
 CONFIG="${XRAY_CONFIG:-/opt/node-plane-runtime/xray/config.json}"
-CONTAINER="${XRAY_CONTAINER_NAME:-xray}"
 tmp="$(mktemp)"
-
-docker_cmd() {
-  if docker info >/dev/null 2>&1; then
-    docker "$@"
-    return
-  fi
-  if command -v sudo >/dev/null 2>&1 && sudo docker info >/dev/null 2>&1; then
-    sudo docker "$@"
-    return
-  fi
-  echo "Docker is not available for this user." >&2
-  exit 1
-}
 
 CONFIG_ENV="$CONFIG" TMP_ENV="$tmp" python3 - <<'PY'
 import json
@@ -51,6 +37,10 @@ if api.get("tag") != "api":
 services = list(api.get("services") or [])
 if "StatsService" not in services:
     services.append("StatsService")
+    api["services"] = services
+    changed = True
+if "HandlerService" not in services:
+    services.append("HandlerService")
     api["services"] = services
     changed = True
 
@@ -142,7 +132,7 @@ if [[ "$changed" == "1" ]]; then
   cp -a "$CONFIG" "${CONFIG}.bak.$(date +%Y%m%d-%H%M%S)"
   mv "$tmp" "$CONFIG"
   chmod 0600 "$CONFIG"
-  docker_cmd restart "$CONTAINER" >/dev/null 2>&1 || true
+  /opt/node-plane-runtime/deploy-xray.sh
   echo "enabled"
 else
   rm -f "$tmp"

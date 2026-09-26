@@ -26,6 +26,17 @@ fn runtime_assets_use_active_app_root_when_configured() {
     );
 }
 
+#[test]
+fn local_agent_config_recovers_missing_target_without_routing_remote_agents_locally() {
+    let local = "node_key = \"msk1\"\nlisten_addr = \"127.0.0.1:50061\"\n";
+    assert_eq!(
+        local_agent_target_from_config_content(local),
+        Some(("msk1".into(), "127.0.0.1:50061".into()))
+    );
+    let remote = "node_key = \"lv1\"\nlisten_addr = \"0.0.0.0:50061\"\n";
+    assert_eq!(local_agent_target_from_config_content(remote), None);
+}
+
 fn assert_missing_agent(ctx: &DriverContext, response: Response<StartOperationResponse>) {
     let op = ctx
         .state

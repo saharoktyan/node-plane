@@ -158,7 +158,7 @@ impl DriverContext {
     }
 
     fn parse_agent_targets() -> HashMap<String, String> {
-        env::var("NODE_AGENT_TARGETS")
+        let mut targets: HashMap<String, String> = env::var("NODE_AGENT_TARGETS")
             .ok()
             .unwrap_or_default()
             .split(',')
@@ -173,7 +173,13 @@ impl DriverContext {
                     Some((node_key.to_string(), target.to_string()))
                 }
             })
-            .collect()
+            .collect();
+        let local_config = env::var("NODE_AGENT_CONFIG_PATH")
+            .unwrap_or_else(|_| "/etc/node-plane/agent.toml".to_string());
+        if let Some((node_key, target)) = local_agent_target_from_config(Path::new(&local_config)) {
+            targets.entry(node_key).or_insert(target);
+        }
+        targets
     }
 
     fn bot_public_key(&self) -> Result<String, Status> {
@@ -1050,6 +1056,29 @@ fn runtime_assets_dir_from(app_root: Option<PathBuf>, manifest_dir: &Path) -> Pa
     app_root
         .map(|root| root.join("runtime_assets"))
         .unwrap_or_else(|| manifest_dir.join("../..").join("runtime_assets"))
+}
+
+fn local_agent_target_from_config(path: &Path) -> Option<(String, String)> {
+    let content = fs::read_to_string(path).ok()?;
+    local_agent_target_from_config_content(&content)
+}
+
+fn local_agent_target_from_config_content(content: &str) -> Option<(String, String)> {
+    let field = |name: &str| {
+        content.lines().find_map(|line| {
+            let (key, value) = line.trim().split_once('=')?;
+            (key.trim() == name)
+                .then(|| value.trim().trim_matches('"').to_string())
+                .filter(|value| !value.is_empty())
+        })
+    };
+    let node_key = field("node_key")?;
+    let target = field("listen_addr")?;
+    if target.starts_with("127.0.0.1:") || target.starts_with("[::1]:") {
+        Some((node_key, target))
+    } else {
+        None
+    }
 }
 
 #[derive(Clone)]

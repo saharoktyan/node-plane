@@ -735,8 +735,11 @@ def _finish_create(context: CallbackContext) -> None:
     server_short_ids = dict(existing_xray.get("server_short_ids") or {}) if isinstance(existing_xray, dict) else {}
     if xray_methods:
         uuid_val = str(rec.get("uuid") or "").strip() or str(uuid4())
+    xray_server_short_ids = {
+        server.key: server.xray_short_id or server.xray_sid for server in list_servers()
+    } if xray_methods else {}
     for method in xray_methods:
-        method_short_id = xray_svc.get_short_id_local(name, method.server_key) or xray_svc.generate_short_id()
+        method_short_id = xray_server_short_ids.get(method.server_key, "")
         operation = get_node_driver().ensure_profile_on_node(
             method.server_key,
             name,
@@ -869,8 +872,11 @@ def _save_edit(context: CallbackContext) -> None:
     server_short_ids = dict(existing_xray.get("server_short_ids") or {}) if isinstance(existing_xray, dict) else {}
     if selected_xray_methods and not uuid_val:
         uuid_val = str(uuid4())
+    xray_server_short_ids = {
+        server.key: server.xray_short_id or server.xray_sid for server in list_servers()
+    } if selected_xray_methods else {}
     for method in selected_xray_methods:
-        method_short_id = xray_svc.get_short_id_local(name, method.server_key) or xray_svc.generate_short_id()
+        method_short_id = xray_server_short_ids.get(method.server_key, "")
         operation = get_node_driver().ensure_profile_on_node(
             method.server_key,
             name,

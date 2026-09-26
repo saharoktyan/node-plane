@@ -880,9 +880,7 @@ class ProfileProvisioningRegressionTests(unittest.TestCase):
         ), patch.object(admin_wizard, "get_node_driver", return_value=driver), patch.object(
             admin_wizard.profile_store, "read", return_value=profile
         ), patch.object(admin_wizard.profile_store, "write") as write_profile, patch.object(
-            admin_wizard.xray_svc, "get_short_id_local", return_value=None
-        ), patch.object(
-            admin_wizard.xray_svc, "generate_short_id", return_value="a1b2c3d4"
+            admin_wizard, "list_servers", return_value=[SimpleNamespace(key="msk1", xray_short_id="a1b2c3d4", xray_sid="")]
         ), patch.object(admin_wizard, "ensure_xray_caps"), patch.object(
             admin_wizard, "upsert_profile_server_state"
         ) as write_state, patch.object(admin_wizard, "get_awg_servers", return_value={}), patch.object(
