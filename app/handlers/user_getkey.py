@@ -184,6 +184,27 @@ def on_getkey_callback(update: Update, context: CallbackContext, payload: str) -
     is_admin = _is_admin(update)
     lang = get_locale_for_update(update)
 
+    # Old config/QR buttons must never re-provision revoked or frozen access.
+    profile_name = _resolve_profile_name(user.id if user else None)
+    if profile_name:
+        state = get_profile_access_status(profile_name, lang)
+        allowed = get_access_methods_for_codes(get_allowed_protocols(profile_name))
+        target_kind, target = None, None
+        if payload.startswith(("awg_qr:", "awg_qr_back:", "awg_conf:", "awg_vpn:", "awg_conf_back:")):
+            target_kind, target = "awg", payload.split(":", 1)[1]
+            permitted = any(method.protocol_kind == target_kind and method.server_key == target for method in allowed)
+        elif payload.startswith(("xray_transport:", "xray_qr:", "xray_qr_back:")):
+            target_kind, target = "xray", payload.split(":")[1]
+            permitted = any(method.protocol_kind == target_kind and method.getkey_payload == target for method in allowed)
+        else:
+            requested_method = get_access_method_by_getkey_payload(payload)
+            permitted = requested_method is None or any(method.code == requested_method.code for method in allowed)
+        if state["frozen"] or not permitted:
+            _delete_all_getkey_artifacts(context, chat_id)
+            safe_edit_message(update, context, state["text"] if state["frozen"] else t(lang, "getkey.no_protocols"),
+                              reply_markup=kb_getkey_servers([], lang), parse_mode=PARSE_MODE)
+            return
+
     if payload == "menu":
         _delete_all_getkey_artifacts(context, chat_id)
         _delete_all_awg_conf(context, chat_id)

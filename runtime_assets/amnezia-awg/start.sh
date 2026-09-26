@@ -84,11 +84,12 @@ cleanup() {
   fi
 }
 
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 0' INT TERM
 
 if [ ! -f "$CFG" ]; then
   echo "Config not found: $CFG"
-  exec sh -c 'while :; do sleep 3600; done'
+  while :; do sleep 1 & wait $!; done
   exit 0
 fi
 
@@ -130,4 +131,4 @@ setup_nat
 
 echo "AWG runtime ready: iface=$IFACE pub_iface=${PUB_IFACE:-none}"
 
-exec sh -c 'while :; do sleep 3600; done'
+while :; do sleep 1 & wait $!; done

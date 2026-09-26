@@ -35,17 +35,9 @@ if ! docker_cmd ps --format '{{.Names}}' | grep -q "^${CONTAINER}$"; then
   echo "Container ${CONTAINER} not found" >&2
   exit 1
 fi
-tmp="$(mktemp)"
-awk -v name="$DISPLAY_NAME" '
-  {
-    if ($0 == "# " name) {skip=1; next}
-    if (skip && NF==0) {skip=0; next}
-    if (skip) next
-    print
-  }
-' "$CFG" > "$tmp"
-cp -a "$CFG" "${CFG}.bak.$(date +%Y%m%d-%H%M%S)"
-mv "$tmp" "$CFG"
-docker_cmd restart "$CONTAINER" >/dev/null
-rm -f "${AWG_CLIENTS_DIR:-/opt/node-plane-runtime/awg-clients}/${DISPLAY_NAME}.txt"
+CLIENTS_DIR="${AWG_CLIENTS_DIR:-/opt/node-plane-runtime/awg-clients}"
+IFACE="${AWG_IFACE:-wg0}"
+exec 9>"${CFG}.lock"
+flock -x 9
+python3 "$(dirname "${BASH_SOURCE[0]}")/awg-peer-state.py" revoke "$CFG" "$CLIENTS_DIR" "$DISPLAY_NAME" "$CONTAINER" "$IFACE"
 echo "OK"

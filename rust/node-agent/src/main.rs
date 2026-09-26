@@ -1034,6 +1034,83 @@ impl AgentState {
             .unwrap_or(false)
     }
 
+    fn remove_runtime_files(&self) -> Result<(), Status> {
+        // Capture overrides before deleting node.env. Only delete individual
+        // config files outside owned runtime directories, never their parents.
+        let configs = [
+            self.node_env_value("XRAY_CONFIG", &self.config.xray_config_path),
+            self.node_env_value("AWG_CONFIG", &self.config.awg_config_path),
+        ];
+        for config in configs {
+            let path = Path::new(&config);
+            let parent = path.parent().unwrap_or(Path::new("."));
+            let filename = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("");
+            if parent.exists() {
+                for entry in
+                    fs::read_dir(parent).map_err(|err| Status::internal(err.to_string()))?
+                {
+                    let entry = entry.map_err(|err| Status::internal(err.to_string()))?;
+                    let name = entry.file_name().to_string_lossy().into_owned();
+                    if name == filename
+                        || name == format!("{filename}.lock")
+                        || name.starts_with(&format!("{filename}.bak."))
+                        || name.starts_with(".awg-deploy-backup-")
+                        || name.starts_with(".awg-config-backup-")
+                        || name.starts_with(".awg-regenerate-backup-")
+                        || name.starts_with(".xray-config-backup-")
+                    {
+                        fs::remove_file(entry.path()).map_err(|err| {
+                            Status::internal(format!("failed to remove config artifact: {err}"))
+                        })?;
+                    }
+                }
+            }
+        }
+        let clients = self.node_env_value(
+            "AWG_CLIENTS_DIR",
+            &format!("{}/awg-clients", self.config.runtime_root),
+        );
+        let xray_dir = self.node_env_value(
+            "XRAY_DOCKER_DIR",
+            &format!("{}/xray", self.config.runtime_root),
+        );
+        let awg_dir = self.node_env_value(
+            "AWG_DOCKER_DIR",
+            &format!("{}/amnezia-awg", self.config.runtime_root),
+        );
+        for directory in [clients, xray_dir, awg_dir, self.config.runtime_root.clone()] {
+            let path = Path::new(&directory);
+            if !path.is_absolute() || path.parent().is_none() {
+                return Err(Status::failed_precondition(
+                    "refusing invalid runtime cleanup directory",
+                ));
+            }
+            if path.exists() {
+                fs::remove_dir_all(path).map_err(|err| {
+                    Status::internal(format!("failed to remove runtime directory: {err}"))
+                })?;
+            }
+        }
+        for path in [
+            self.config.node_env_path.clone(),
+            format!("{}.example", self.config.node_env_path),
+        ] {
+            match fs::remove_file(path) {
+                Ok(()) => (),
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => (),
+                Err(err) => {
+                    return Err(Status::internal(format!(
+                        "failed to remove node environment: {err}"
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn delete_runtime(&self, preserve_config: bool) -> Result<DeleteRuntimeResponse, Status> {
         let xray_container = self.node_env_value("XRAY_CONTAINER_NAME", "xray");
         let awg_container = self.node_env_value("AWG_CONTAINER_NAME", "amnezia-awg");
@@ -1041,24 +1118,30 @@ impl AgentState {
         let awg_image =
             self.node_env_value("AWG_DOCKER_IMAGE", "node-plane-amnezia-awg:3.1.20260828");
 
+        if !self.docker_available()
+            && Command::new("docker")
+                .arg("--version")
+                .output()
+                .map(|output| output.status.success())
+                .unwrap_or(false)
+        {
+            return Err(Status::failed_precondition(
+                "Docker is unavailable; cannot verify runtime cleanup",
+            ));
+        }
         if self.docker_available() {
             self.docker_best_effort(&["rm", "-f", &xray_container]);
+            // Give the AWG entrypoint time to remove its interface/NAT rules.
+            self.docker_best_effort(&["stop", "--time", "10", &awg_container]);
             self.docker_best_effort(&["rm", "-f", &awg_container]);
             self.docker_best_effort(&["rmi", "-f", &xray_image]);
             self.docker_best_effort(&["rmi", "-f", &awg_image]);
             self.docker_best_effort(&["rmi", "-f", "amneziavpn/amneziawg-go:3.1.20260828"]);
             self.docker_best_effort(&["rmi", "-f", "amneziavpn/amneziawg-go:0.2.16"]);
-            self.docker_best_effort(&["image", "prune", "-af"]);
         }
 
         if !preserve_config {
-            let _ = fs::remove_file(&self.config.node_env_path);
-            let _ = fs::remove_file(format!("{}.example", self.config.node_env_path));
-            if Path::new(&self.config.runtime_root).exists() {
-                fs::remove_dir_all(&self.config.runtime_root).map_err(|err| {
-                    Status::internal(format!("failed to remove runtime root: {err}"))
-                })?;
-            }
+            self.remove_runtime_files()?;
         }
 
         let mut leftovers = Vec::new();
@@ -1272,6 +1355,56 @@ impl NodeAgentService for NodeAgentApi {
         Ok(Response::new(self.state.install_docker()?))
     }
 
+    async fn uninstall_agent(
+        &self,
+        _request: Request<AgentEmpty>,
+    ) -> Result<Response<RuntimeCommandResponse>, Status> {
+        // A transient systemd unit survives termination of this service. Stop
+        // this process only after the RPC response has been delivered.
+        let script = r#"set -eu
+systemctl disable node-plane-agent.service
+rm -f /etc/systemd/system/node-plane-agent.service "$1" "$2" "$3" "$4" "$5"
+rm -rf "$6" "$7"
+rmdir /etc/node-plane/tls /etc/node-plane 2>/dev/null || true
+systemctl stop node-plane-agent.service
+systemctl daemon-reload
+"#;
+        let binary = env::current_exe()
+            .map_err(|err| Status::internal(format!("cannot locate agent executable: {err}")))?;
+        let config_path = env::var("NODE_AGENT_CONFIG_PATH")
+            .unwrap_or_else(|_| "/etc/node-plane/agent.toml".to_string());
+        let output = Command::new("systemd-run")
+            .args([
+                "--quiet",
+                "--collect",
+                "--on-active=2s",
+                "/bin/sh",
+                "-c",
+                script,
+                "node-plane-uninstall",
+            ])
+            .arg(binary)
+            .args([
+                &config_path,
+                &self.state.config.tls_certificate_path,
+                &self.state.config.tls_key_path,
+                &self.state.config.tls_client_ca_path,
+                &self.state.config.state_dir,
+                &self.state.config.log_dir,
+            ])
+            .output()
+            .map_err(|err| Status::internal(format!("failed to schedule agent removal: {err}")))?;
+        if !output.status.success() {
+            return Err(Status::internal(
+                String::from_utf8_lossy(&output.stderr).to_string(),
+            ));
+        }
+        Ok(Response::new(RuntimeCommandResponse {
+            summary: "agent uninstall scheduled".to_string(),
+            payload_json: String::new(),
+        }))
+    }
+
     async fn delete_runtime(
         &self,
         request: Request<DeleteRuntimeRequest>,
@@ -1445,6 +1578,57 @@ mod tests {
         fs, process,
         time::{SystemTime, UNIX_EPOCH},
     };
+
+    #[test]
+    fn cleanup_removes_external_configs_and_peer_archives_only() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root =
+            std::env::temp_dir().join(format!("node-plane-cleanup-{}-{nonce}", process::id()));
+        let runtime = root.join("runtime");
+        let external = root.join("external");
+        let clients = root.join("clients");
+        fs::create_dir_all(&runtime).unwrap();
+        fs::create_dir_all(&external).unwrap();
+        fs::create_dir_all(&clients).unwrap();
+        for name in [
+            "xray.json",
+            "xray.json.bak.20260101",
+            "wg.conf",
+            "wg.conf.lock",
+            "unrelated.txt",
+        ] {
+            fs::write(external.join(name), "data").unwrap();
+        }
+        fs::write(clients.join("alice.revoked.json"), "private-key").unwrap();
+        let node_env = root.join("node.env");
+        fs::write(
+            &node_env,
+            format!(
+                "XRAY_CONFIG={}\nAWG_CONFIG={}\nAWG_CLIENTS_DIR={}\n",
+                external.join("xray.json").display(),
+                external.join("wg.conf").display(),
+                clients.display()
+            ),
+        )
+        .unwrap();
+        let state = AgentState::new(AgentConfig {
+            runtime_root: runtime.display().to_string(),
+            node_env_path: node_env.display().to_string(),
+            ..AgentConfig::default()
+        });
+        state.remove_runtime_files().unwrap();
+        assert!(!runtime.exists());
+        assert!(!clients.exists());
+        assert!(!node_env.exists());
+        assert!(!external.join("xray.json").exists());
+        assert!(!external.join("xray.json.bak.20260101").exists());
+        assert!(!external.join("wg.conf.lock").exists());
+        assert!(external.join("unrelated.txt").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn awg_payload_keeps_vpn_key_out_of_wireguard_config() {

@@ -73,8 +73,20 @@ done
 
 CLIENTS_DIR="${AWG_CLIENTS_DIR:-/opt/node-plane-runtime/awg-clients}"
 CLIENT_RESULT="${CLIENTS_DIR}/${DISPLAY_NAME}.txt"
+PEER_STATE="$(dirname "${BASH_SOURCE[0]}")/awg-peer-state.py"
+exec 9>"${CFG}.lock"
+flock -x 9
 mkdir -p "$CLIENTS_DIR"
 chmod 700 "$CLIENTS_DIR"
+if [[ -f "${CLIENTS_DIR}/${DISPLAY_NAME}.revoked.json" ]]; then
+  if python3 "$PEER_STATE" restore "$CFG" "$CLIENTS_DIR" "$DISPLAY_NAME" "$CONTAINER" "$IFACE"; then
+    cat "$CLIENT_RESULT"
+    exit 0
+  else
+    restore_rc=$?
+    [[ "$restore_rc" -eq 2 ]] || exit "$restore_rc"
+  fi
+fi
 if grep -Fxq "# ${DISPLAY_NAME}" "$CFG"; then
   if [[ -s "$CLIENT_RESULT" ]]; then
     cat "$CLIENT_RESULT"
@@ -184,6 +196,7 @@ USED_IPS="$(
   "wg show $IFACE allowed-ips | awk '{print \$NF}' | cut -d/ -f1" | tr -d '\r'
 )"
 
+USED_IPS+=$'\n'"$(python3 "$PEER_STATE" reserved "$CFG" "$CLIENTS_DIR")"
 FREE_IP=""
 for i in $(seq 1 254); do
   ip="10.8.1.$i"

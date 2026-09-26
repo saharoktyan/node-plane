@@ -639,10 +639,31 @@ class AdminViewsTests(unittest.TestCase):
             markup = admin_server_wizard._bootstrap_menu_markup(server, "en")
         self.assertEqual(markup.inline_keyboard[0][0].callback_data, "srv:action:rolloutagent:home")
 
-    def test_maintenance_section_includes_full_cleanup(self) -> None:
+    def test_probe_failure_has_warning_and_no_raw_rpc_details(self):
+        text = admin_server_wizard._action_result_text("🔎 Probe", 1,
+            'agent probe failed: status: Unavailable, message: "failed to connect to node agent: transport error", metadata: MetadataMap {}', "node", "en")
+        self.assertTrue(text.startswith("⚠️"))
+        self.assertIn("Cannot reach", text)
+        self.assertNotIn("MetadataMap", text)
+
+    def test_docker_success_marker_after_apt_output_is_summarized(self):
+        text = admin_server_wizard._localize_action_output("apt package output\nDOCKER_INSTALL_STATUS|ok|available\nNo services need to be restarted.", "en")
+        self.assertNotIn("apt package", text)
+        self.assertNotIn("DOCKER_INSTALL_STATUS", text)
+        self.assertIn("Docker", text)
+
+    def test_apply_button_is_only_in_settings_root(self):
+        with patch.object(admin_server_wizard, "get_server", return_value=SimpleNamespace(protocol_kinds=("awg", "xray"))):
+            for section in ("general", "awg", "xray", "maintenance"):
+                markup = admin_server_wizard._advanced_section_markup("node", section, "en")
+                self.assertNotIn("srv:action:applysettings:node", [button.callback_data for row in markup.inline_keyboard for button in row])
+            markup = admin_server_wizard._advanced_menu_markup("node", "en")
+            self.assertIn("srv:action:applysettings:node", [button.callback_data for row in markup.inline_keyboard for button in row])
+
+    def test_removal_is_only_on_server_card(self) -> None:
         markup = admin_server_wizard._advanced_section_markup("spb1", "maintenance", "en")
         buttons = [button.text for row in markup.inline_keyboard for button in row]
-        self.assertIn("🧨 Full Cleanup", buttons)
+        self.assertNotIn("🧨 Full Cleanup", buttons)
 
     def test_maintenance_runtime_text_shows_runtime_state(self) -> None:
         fake_server = SimpleNamespace(flag="🇷🇺", title="Saint-Petersburg", key="spb1")

@@ -18,6 +18,7 @@ service NodeAgentService {
   rpc RefreshAwgConfig(RefreshAwgConfigRequest) returns (RefreshAwgConfigResponse);
   rpc InstallDocker(InstallDockerRequest) returns (InstallDockerResponse);
   rpc DeleteRuntime(DeleteRuntimeRequest) returns (DeleteRuntimeResponse);
+  rpc UninstallAgent(AgentEmpty) returns (RuntimeCommandResponse);
   rpc InitXray(InitXrayRequest) returns (InitXrayResponse);
   rpc DeployXray(AgentEmpty) returns (RuntimeCommandResponse);
   rpc InitAwg(AgentEmpty) returns (RuntimeCommandResponse);

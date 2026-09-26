@@ -624,16 +624,18 @@ def on_cfg_callback(update: Update, context: CallbackContext, payload: str) -> N
             _wizard_edit(context, *_render_status_menu(name, frozen=is_frozen(name), lang=lang))
             return
         if act == "freeze":
-            freeze_profile(name)
+            ok, result = freeze_profile(name)
             w["step"] = "status_menu"
             _wizard_set(context, w)
-            _wizard_edit(context, *_render_status_menu(name, frozen=True, lang=lang))
+            text, markup = _render_status_menu(name, frozen=True, lang=lang)
+            _wizard_edit(context, text if ok else text + "\n\n" + result, markup)
             return
         if act == "unfreeze":
-            unfreeze_profile(name)
+            ok, result = unfreeze_profile(name)
             w["step"] = "status_menu"
             _wizard_set(context, w)
-            _wizard_edit(context, *_render_status_menu(name, frozen=False, lang=lang))
+            text, markup = _render_status_menu(name, frozen=False, lang=lang)
+            _wizard_edit(context, text if ok else text + "\n\n" + result, markup)
             return
         if act == "save":
             context.dispatcher.run_async(_run_async_save, context=context)
@@ -861,7 +863,8 @@ def _save_edit(context: CallbackContext) -> None:
 
     rec["protocols"] = sorted(protocols)
 
-    selected_xray_methods = [method for method in get_access_methods_for_codes(protocols) if method.protocol_kind == "xray"]
+    effective_protocols = set() if rec.get("frozen") else protocols
+    selected_xray_methods = [method for method in get_access_methods_for_codes(effective_protocols) if method.protocol_kind == "xray"]
     existing_xray_methods = [method for method in get_access_methods_for_codes(existing_protocols) if method.protocol_kind == "xray"]
     selected_xray_server_keys = {method.server_key for method in selected_xray_methods}
     existing_xray_server_keys = {method.server_key for method in existing_xray_methods}
@@ -944,7 +947,7 @@ def _save_edit(context: CallbackContext) -> None:
     subs[name] = rec
     profile_store.write(subs)
 
-    selected_awg_methods = [method for method in get_access_methods_for_codes(protocols) if method.protocol_kind == "awg"]
+    selected_awg_methods = [method for method in get_access_methods_for_codes(effective_protocols) if method.protocol_kind == "awg"]
     selected_server_keys = {method.server_key for method in selected_awg_methods}
     existing_servers = get_awg_servers(name)
     existing_server_keys = set(existing_servers.keys())

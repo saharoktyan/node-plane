@@ -189,6 +189,16 @@ impl AgentTransport {
         Ok(response.into_inner())
     }
 
+    pub async fn uninstall_agent(&self) -> Result<(), tonic::Status> {
+        let mut client = self.client().await.map_err(|err| {
+            tonic::Status::unavailable(format!("failed to connect to node agent: {err}"))
+        })?;
+        let mut request = tonic::Request::new(AgentEmpty {});
+        request.set_timeout(Duration::from_secs(30));
+        client.uninstall_agent(request).await?;
+        Ok(())
+    }
+
     pub async fn delete_runtime(
         &self,
         preserve_config: bool,

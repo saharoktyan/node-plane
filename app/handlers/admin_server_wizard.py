@@ -836,7 +836,6 @@ def _advanced_section_markup(server_key: str, section: str, lang: str) -> Inline
                 InlineKeyboardButton(t(lang, "admin.wizard.field_xray_xhttp_port"), callback_data=f"{CB_SRV}editfield:xray_xhttp_port"),
             ],
         ]
-        rows.append([InlineKeyboardButton("✅ Применить изменения" if lang == "ru" else "✅ Apply changes", callback_data=f"{CB_SRV}action:applysettings:{server_key}")])
     elif section == "awg":
         rows = [
             [
@@ -852,7 +851,6 @@ def _advanced_section_markup(server_key: str, section: str, lang: str) -> Inline
                 InlineKeyboardButton(t(lang, "admin.wizard.awg_regen_entropy"), callback_data=f"{CB_SRV}action:awgregen:{server_key}"),
             ],
         ]
-        rows.append([InlineKeyboardButton("✅ Применить изменения" if lang == "ru" else "✅ Apply changes", callback_data=f"{CB_SRV}action:applysettings:{server_key}")])
     elif section == "maintenance_ports":
         rows = [
             [
@@ -889,7 +887,6 @@ def _advanced_section_markup(server_key: str, section: str, lang: str) -> Inline
                 InlineKeyboardButton(t(lang, "admin.wizard.maintenance_runtime"), callback_data=f"{CB_SRV}advsection:maintenance_runtime:{server_key}"),
                 InlineKeyboardButton(t(lang, "admin.wizard.maintenance_repair"), callback_data=f"{CB_SRV}advsection:maintenance_repair:{server_key}"),
             ],
-            [InlineKeyboardButton(t(lang, "admin.wizard.full_cleanup"), callback_data=f"{CB_SRV}cleanupmenu:{server_key}")],
         ]
     rows.append([InlineKeyboardButton(t(lang, "admin.wizard.back_to_advanced"), callback_data=f"{CB_SRV}advanced:{server_key}")])
     return InlineKeyboardMarkup(rows)
@@ -997,16 +994,26 @@ def _open_advanced_section(context: CallbackContext, server_key: str, section: s
         w["step"] = f"advanced_{section}"
         w["advanced_section"] = section
         _wizard_set(context, w)
-    _wizard_edit(context, _advanced_section_text(server, section, _wizard_lang(context)), _advanced_section_markup(server_key, section, _wizard_lang(context)))
+    lang = _wizard_lang(context)
+    text = _advanced_section_text(server, section, lang)
+    if server.bootstrap_state == "edited":
+        text += "\n\n⚠️ Изменения сохранены, но не применены. Вернитесь в настройки ноды и нажмите «Применить изменения»." if lang == "ru" else "\n\n⚠️ Changes are saved but not applied. Return to node settings and select Apply changes."
+    _wizard_edit(context, text, _advanced_section_markup(server_key, section, lang))
 
 
 def _localize_action_output(out: str, lang: str, *, server_key: str | None = None) -> str:
     body = (out or "").strip()
     if not body:
         return t(lang, "admin.wizard.no_output")
+    if "no node-agent target configured" in body or "agent_not_configured" in body:
+        return "Агент ещё не подключён. Выполните «Подключить агент»." if lang == "ru" else "The agent is not configured yet. Use Set up agent."
+    if any(token in body.lower() for token in ("failed to connect to node agent", "status: unavailable", "statuscode.unavailable", "deadline exceeded", "deadlineexceeded")):
+        return "Нет связи с агентом на ноде. Проверьте, установлен и запущен ли агент, и повторите попытку." if lang == "ru" else "Cannot reach the node agent. Check that it is installed and running, then try again."
 
-    if body.startswith("DOCKER_INSTALL_STATUS|"):
-        parts = body.splitlines()
+
+    if any(line.startswith("DOCKER_INSTALL_STATUS|") for line in body.splitlines()):
+        header_line = next(line for line in reversed(body.splitlines()) if line.startswith("DOCKER_INSTALL_STATUS|"))
+        parts = [header_line] + [line for line in body.splitlines() if line != header_line]
         header = parts[0].split("|")
         details = "\n".join(parts[1:]).strip()
         status = header[1] if len(header) > 1 else "error"
@@ -1226,7 +1233,7 @@ def _action_result_text(title: str, rc: int, out: str, back_key: str, lang: str)
                 t(lang, "admin.wizard.probe_section_unsupported"),
             )
         )
-        status = "⚠️" if has_probe_issues else "✅"
+        status = "⚠️" if rc != 0 or has_probe_issues else "✅"
     else:
         status = "✅" if rc == 0 else "⚠️"
     if len(body) > 2500:
@@ -1300,6 +1307,10 @@ def _persist_edited_server(w: Dict[str, Any], lang: str) -> tuple[Optional[Regis
 
     runtime_edited = any(
         [
+            current.title != sanitized["title"],
+            current.flag != sanitized["flag"],
+            current.region != sanitized["region"],
+            current.notes != sanitized["notes"],
             current.transport != sanitized["transport"],
             (current.public_host or "") != sanitized["public_host"],
             (current.ssh_host or "") != sanitized["ssh_host"],
@@ -1751,6 +1762,9 @@ def on_server_callback(update: Update, context: CallbackContext, payload: str) -
         _render_server_card(context, payload.split(":", 1)[1])
         return
 
+    if payload.startswith(("cleanupmenu:", "cleanupdelete:", "cleanuprun:")):
+        payload = "deleteask:" + payload.rsplit(":", 1)[1]
+
     if payload.startswith(("deleteask:", "forgetask:", "forgetconfirm:")):
         server_key = payload.split(":", 1)[1]
         server = get_server(server_key)
@@ -1804,7 +1818,7 @@ def on_server_callback(update: Update, context: CallbackContext, payload: str) -
             _wizard_set(context, w)
             _wizard_edit(
                 context,
-                t(lang, "admin.wizard.delete_fallback", error=_safe_output(operation.progress_message, 500)),
+                t(lang, "admin.wizard.delete_fallback", error=_localize_action_output(operation.progress_message, lang, server_key=server_key)),
                 InlineKeyboardMarkup([
                     [InlineKeyboardButton(t(lang, "admin.wizard.delete_fallback_button"), callback_data=f"{CB_SRV}deletefallback:{server_key}")],
                     [InlineKeyboardButton(t(lang, "admin.wizard.back_to_server"), callback_data=f"{CB_SRV}card:{server_key}")],
