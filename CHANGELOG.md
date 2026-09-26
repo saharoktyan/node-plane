@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.4.1-alpha.22 - 2026-09-26
+
+- Restore missing AWG peers and Xray users before issuing configs after a clean reinstall.
+- Offer native AmneziaVPN `.vpn` files alongside `.conf` exports for AWG 3.1 clients.
+- Return to pending requests or the admin menu after approving/rejecting access; ignore repeated decisions.
+- Keep detailed AWG issuance errors in logs rather than user messages.
+
 ## 0.3.9 - 2026-04-04
 
 ### Added

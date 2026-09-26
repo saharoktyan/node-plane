@@ -2231,40 +2231,31 @@ def on_menu_callback(update: Update, context: CallbackContext, payload: str) -> 
         safe_edit_message(update, context, text, reply_markup=markup, parse_mode=PARSE_MODE)
         return
 
-    if payload.startswith("admin_request_approve:") and is_admin:
+    if is_admin and payload.startswith(("admin_request_approve:", "admin_request_reject:")):
         req_user_id = int(payload.rsplit(":", 1)[-1])
-        profile_name = _ensure_profile_for_request(req_user_id)
-        _set_admin_flag(req_user_id, access_granted=True, access_request_pending=False, profile_name=profile_name)
-        try:
-            context.bot.send_message(chat_id=req_user_id, text=t(get_user_locale(req_user_id), "admin.requests.notify_approved"))
-        except Exception:
-            pass
-        page = state.get("page", 0) if state else 0
-        text, markup = _render_request_card(str(req_user_id), lang, page=page)
-        safe_edit_message(
-            update,
-            context,
-            f"{t(lang, 'admin.requests.approved_with_profile')}\n{t(lang, 'admin.requests.profile_created', name=_md(profile_name))}\n\n{text}",
-            reply_markup=InlineKeyboardMarkup(
-                [
-                    [InlineKeyboardButton(t(lang, "admin.requests.setup_now"), callback_data=f"cfg:quickedit:{profile_name}")],
-                    [InlineKeyboardButton(t(lang, "admin.requests.setup_later"), callback_data="menu:admin_requests")],
-                ]
-            ),
-            parse_mode=PARSE_MODE,
-        )
-        return
-
-    if payload.startswith("admin_request_reject:") and is_admin:
-        req_user_id = int(payload.rsplit(":", 1)[-1])
-        _set_admin_flag(req_user_id, access_granted=False, access_request_pending=False)
-        try:
-            context.bot.send_message(chat_id=req_user_id, text=t(get_user_locale(req_user_id), "admin.requests.notify_rejected"))
-        except Exception:
-            pass
-        page = state.get("page", 0) if state else 0
-        text, markup = _render_request_card(str(req_user_id), lang, page=page)
-        safe_edit_message(update, context, f"{t(lang, 'admin.requests.rejected_admin')}\n\n{text}", reply_markup=markup, parse_mode=PARSE_MODE)
+        request = user_store.read().get(str(req_user_id))
+        if isinstance(request, dict) and request.get("access_request_pending"):
+            approved = payload.startswith("admin_request_approve:")
+            fields = {"access_granted": approved, "access_request_pending": False}
+            if approved:
+                fields["profile_name"] = _ensure_profile_for_request(req_user_id)
+            _set_admin_flag(req_user_id, **fields)
+            try:
+                notice = "admin.requests.notify_approved" if approved else "admin.requests.notify_rejected"
+                context.bot.send_message(chat_id=req_user_id, text=t(get_user_locale(req_user_id), notice))
+            except Exception:
+                pass
+        # Read fresh pending requests rather than the cached/search-filtered list.
+        # A stale callback only refreshes navigation; it cannot change a decision.
+        ids = _all_pending_request_ids()
+        _request_state_clear(context)
+        if ids:
+            _open_requests_dashboard(update, context, lang, ids=ids)
+        else:
+            safe_edit_message(
+                update, context, _render_admin_menu_text(lang),
+                reply_markup=_admin_menu_markup(lang), parse_mode=PARSE_MODE,
+            )
         return
 
     if payload == "request_access" and user:

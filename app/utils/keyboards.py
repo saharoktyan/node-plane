@@ -142,7 +142,8 @@ def kb_awg_key_actions(region: str, back_payload: Optional[str] = None, lang: st
     back_target = back_payload or f"{CB_GETKEY}menu"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(t(lang, "getkey.show_qr"), callback_data=f"{CB_GETKEY}awg_qr:{region}")],
-        [InlineKeyboardButton(t(lang, "getkey.download_conf"), callback_data=f"{CB_GETKEY}awg_conf:{region}")],
+        [InlineKeyboardButton(t(lang, "getkey.download_awg_vpn"), callback_data=f"{CB_GETKEY}awg_vpn:{region}")],
+        [InlineKeyboardButton(t(lang, "getkey.download_awg_conf"), callback_data=f"{CB_GETKEY}awg_conf:{region}")],
         [InlineKeyboardButton(t(lang, "menu.back"), callback_data=back_target)],
     ])
 

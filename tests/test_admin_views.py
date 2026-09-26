@@ -900,6 +900,43 @@ class ProfileProvisioningRegressionTests(unittest.TestCase):
         error_view.assert_not_called()
 
 
+class AccessRequestDecisionTests(unittest.TestCase):
+    def test_decisions_leave_card_and_stale_click_cannot_change_access(self):
+        for approved in (True, False):
+            for remaining in ([], ["43"]):
+                with self.subTest(approved=approved, remaining=remaining):
+                    record = {"access_request_pending": True}
+                    update = SimpleNamespace(effective_user=SimpleNamespace(id=1))
+                    context = SimpleNamespace(user_data={"access_requests": {"ids": ["42"]}}, bot=Mock())
+
+                    def save(_user_id, **fields):
+                        record.update(fields)
+
+                    with patch.object(user_profile, "answer_cb"), patch.object(user_profile, "_is_admin", return_value=True), \
+                         patch.object(user_profile, "get_locale_for_update", return_value="en"), \
+                         patch.object(user_profile, "get_user_locale", return_value="en"), \
+                         patch.object(user_profile.user_store, "read", return_value={"42": record}), \
+                         patch.object(user_profile, "_set_admin_flag", side_effect=save) as set_flag, \
+                         patch.object(user_profile, "_ensure_profile_for_request", return_value="alice"), \
+                         patch.object(user_profile, "_all_pending_request_ids", return_value=remaining), \
+                         patch.object(user_profile, "_open_requests_dashboard") as dashboard, \
+                         patch.object(user_profile, "_render_admin_menu_text", return_value="admin menu"), \
+                         patch.object(user_profile, "_admin_menu_markup", return_value="admin buttons"), \
+                         patch.object(user_profile, "safe_edit_message") as edit:
+                        action = "approve" if approved else "reject"
+                        user_profile.on_menu_callback(update, context, f"admin_request_{action}:42")
+                        if remaining:
+                            dashboard.assert_called_once_with(update, context, "en", ids=remaining)
+                        else:
+                            self.assertEqual(edit.call_args.args[2], "admin menu")
+                            self.assertEqual(edit.call_args.kwargs["reply_markup"], "admin buttons")
+                        opposite = "reject" if approved else "approve"
+                        user_profile.on_menu_callback(update, context, f"admin_request_{opposite}:42")
+                        set_flag.assert_called_once()
+                        context.bot.send_message.assert_called_once()
+                        self.assertEqual(record["access_granted"], approved)
+
+
 class BootstrapRolloutRegressionTests(unittest.TestCase):
     def test_agent_rollout_failure_marks_server_card_for_attention(self) -> None:
         server = SimpleNamespace(key="lv1", enabled=True, bootstrap_state="bootstrapped", protocol_kinds=[])
