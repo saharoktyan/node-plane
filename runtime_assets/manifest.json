@@ -50,6 +50,11 @@
     "mode": "0755"
   },
   {
+    "target_path": "/opt/node-plane-runtime/xray-user-api.py",
+    "asset_path": "xray-user-api.py",
+    "mode": "0755"
+  },
+  {
     "target_path": "/opt/node-plane-runtime/xray-list-users.sh",
     "asset_path": "xray-list-users.sh",
     "mode": "0755"

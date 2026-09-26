@@ -84,7 +84,7 @@ config = {
             }
         }
     },
-    "api": {"tag": "api", "services": ["StatsService"]},
+    "api": {"tag": "api", "services": ["StatsService", "HandlerService"]},
     "inbounds": [
         {
             "tag": "api",

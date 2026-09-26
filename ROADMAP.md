@@ -7,10 +7,11 @@ Device management, VLESS subscriptions, traffic limits, expanded metrics and
 alerts are deferred to future Pro modules. The version-oriented sections below
 are historical direction, not the current delivery order.
 
-Current core checkpoint (2026-09-24): release driver and agent binaries install
-successfully, both services are active, and the bot reads node data. Provisioning
-finishes without visible errors on the tested SSH node. Issued VPN configs have
-not yet been tested for real connectivity.
+Current core checkpoint (2026-09-25): driver and agent run on both the local
+and SSH nodes. AmneziaWG 3.1 connects and passes traffic on the local node.
+Xray profile synchronization on Moscow works again after restoring its missing
+`msk1=127.0.0.1:50061` entry in `NODE_AGENT_TARGETS`. Xray client traffic and
+the full protocol lifecycle still need live testing.
 
 Next core tasks:
 - [x] Show a concise result after successful agent setup; keep full service
@@ -36,9 +37,16 @@ Next core tasks:
   container configuration smoke test pass.
 - [ ] Validate AmneziaWG 3.1 on the separate node with real clients and traffic,
   both `.conf` and `vpn://` imports, reinstall/settings changes, and rollback.
-- Move Xray user add/update/remove to the Xray API so routine access changes do
-  not restart the container. Keep durable desired state and reconcile API changes
-  after an Xray restart; verify failure handling and existing user access.
+- [ ] Finish protocol configuration and live client checks, especially Xray TCP
+  and XHTTP access on the local and SSH nodes.
+- [x] Move Xray user add/update/remove to HandlerService without routine
+  container restarts. Persist the same users in `config.json`, verify both live
+  inbounds, and mount the config directory so a container restart reads updates.
+  Local integration testing covered add, restart recovery, and delete.
+- [ ] Validate this Xray API rollout and existing user access on the separate
+  node, including an upgrade from an existing file-mounted container.
+- [ ] Validate the bootstrap timeout and local-agent target recovery fixes
+  included in alpha.21 on the separate node.
 - Validate issued Xray/AWG configs, settings changes, reinstall, cleanup, and
   failure scenarios on the separate test node before treating the core cycle
   as complete.

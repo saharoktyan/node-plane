@@ -50,7 +50,7 @@ chmod 0600 "$CONFIG" >/dev/null 2>&1 || true
 docker_cmd pull "$IMAGE" >/dev/null
 docker_cmd run --rm \
   --user 0:0 \
-  -v "$CONFIG:/etc/xray/config.json:ro" \
+  -v "$(dirname "$CONFIG"):/etc/xray:ro" \
   "$IMAGE" run -test -c /etc/xray/config.json >/dev/null
 
 PREVIOUS_CONTAINER=""
@@ -70,7 +70,7 @@ start_container() {
     --restart unless-stopped \
     --user 0:0 \
     --network host \
-    -v "$CONFIG:/etc/xray/config.json:ro" \
+    -v "$(dirname "$CONFIG"):/etc/xray:ro" \
     "$IMAGE" run -c /etc/xray/config.json >/dev/null
 }
 

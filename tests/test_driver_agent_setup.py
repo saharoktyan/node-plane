@@ -288,6 +288,47 @@ def list_servers(include_disabled=False):
             self.assertIn("home=127.0.0.1:50061", result.stdout)
             self.assertEqual((shared_root / ".env").read_text(encoding="utf-8"), "BOT_TOKEN=test\n")
 
+    def test_targeted_rollout_keeps_other_registry_and_existing_targets(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            app_root = root / "current"
+            shared_root = root / "shared"
+            fake_bin = root / "bin"
+            for directory in (app_root / "rust" / "node-driver", app_root / "rust" / "node-agent", app_root / "app" / "services", shared_root, fake_bin):
+                directory.mkdir(parents=True, exist_ok=True)
+            (app_root / "app" / "services" / "server_registry.py").write_text(
+                """from types import SimpleNamespace
+def list_servers(include_disabled=False):
+    return [
+        SimpleNamespace(key='msk1', transport='local'),
+        SimpleNamespace(key='lv1', transport='ssh', ssh_target='root@lv1.example.test',
+                        ssh_host='lv1.example.test', ssh_port=22, ssh_user='root',
+                        ssh_key_path='', public_host='lv1.example.test'),
+    ]
+""", encoding="utf-8",
+            )
+            (shared_root / ".env").write_text(
+                "BOT_TOKEN=test\nNODE_AGENT_TARGETS=legacy=legacy.example.test:50061\n", encoding="utf-8",
+            )
+            ssh = fake_bin / "ssh"
+            ssh.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            ssh.chmod(0o755)
+            environment = os.environ.copy()
+            environment.update(
+                NODE_PLANE_APP_DIR=str(app_root),
+                NODE_PLANE_SHARED_DIR=str(shared_root),
+                PATH=f"{fake_bin}:{environment['PATH']}",
+            )
+            result = subprocess.run(
+                [str(SETUP_SCRIPT), "--dry-run", "--bin-source", "build", "--node-key", "lv1"],
+                env=environment, text=True, capture_output=True, check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn(
+                "msk1=127.0.0.1:50061,lv1=lv1.example.test:50061,legacy=legacy.example.test:50061",
+                result.stdout,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

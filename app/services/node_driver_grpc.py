@@ -19,6 +19,11 @@ from services.node_driver_client import (
 )
 
 
+# A clean node may need apt to install Docker before bootstrap can pull and
+# start protocol containers. These RPCs currently return only on completion.
+_NODE_INSTALL_TIMEOUT_SECONDS = 1800
+
+
 class GrpcNodeDriverClient(NodeDriverClient):
     def get_node_diagnostics(self, node_key: str) -> DriverNodeDiagnostics:
         self._ensure_client()
@@ -377,7 +382,7 @@ class GrpcNodeDriverClient(NodeDriverClient):
         try:
             response = self._node_stub.InstallDocker(
                 self._node_pb2.InstallDockerRequest(node_key=node_key),
-                timeout=self.timeout_seconds,
+                timeout=max(self.timeout_seconds, _NODE_INSTALL_TIMEOUT_SECONDS),
                 metadata=(("x-node-plane-command-id", command_id),) if command_id is not None else (),
             )
         except Exception as exc:
@@ -394,7 +399,7 @@ class GrpcNodeDriverClient(NodeDriverClient):
         try:
             response = self._runtime_stub.BootstrapNode(
                 self._runtime_pb2.BootstrapNodeRequest(node_key=node_key, preserve_config=preserve_config),
-                timeout=self.timeout_seconds,
+                timeout=max(self.timeout_seconds, _NODE_INSTALL_TIMEOUT_SECONDS),
                 metadata=(("x-node-plane-command-id", command_id),) if command_id is not None else (),
             )
         except Exception as exc:
@@ -411,7 +416,7 @@ class GrpcNodeDriverClient(NodeDriverClient):
         try:
             response = self._runtime_stub.ReinstallNode(
                 self._runtime_pb2.ReinstallNodeRequest(node_key=node_key, preserve_config=preserve_config),
-                timeout=self.timeout_seconds,
+                timeout=max(self.timeout_seconds, _NODE_INSTALL_TIMEOUT_SECONDS),
                 metadata=(("x-node-plane-command-id", command_id),) if command_id is not None else (),
             )
         except Exception as exc:
