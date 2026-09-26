@@ -39,12 +39,29 @@ Next core tasks:
   both `.conf` and `vpn://` imports, reinstall/settings changes, and rollback.
 - [ ] Finish protocol configuration and live client checks, especially Xray TCP
   and XHTTP access on the local and SSH nodes.
+- [x] Verify settings application with existing users: newly issued configs
+  contain the applied server parameters and work; AWG `.conf` imports pass
+  traffic (user verified on 2026-09-26).
+- [ ] Investigate Amnezia's generic names on `.conf` import; `vpn://` already
+  carries the node title and profile name.
+  Upstream `extractWireGuardConfig` assigns `nextAvailableServerName()` and
+  does not read a name from the file. A native Amnezia file is needed to keep
+  an automatic title; a `.conf` field/comment cannot fix this in Node Plane.
+- YouTube ads investigation: no ad blocking is configured by Node Plane.
+  AWG currently routes IPv4 only (`0.0.0.0/0`); direct IPv6 is a possible
+  explanation if the client does not block it. Confirm on the device before
+  changing routing. Google also uses location signals beyond the exit IP.
+- [ ] Validate the issuance fix after clean reinstall: restore the missing
+  AWG peer/Xray UUID through the driver before issuing a config. The fix is
+  in the working tree; regression tests cover replacement of stale AWG keys
+  and blocked Xray issuance when provisioning fails.
 - [x] Move Xray user add/update/remove to HandlerService without routine
   container restarts. Persist the same users in `config.json`, verify both live
   inbounds, and mount the config directory so a container restart reads updates.
   Local integration testing covered add, restart recovery, and delete.
-- [ ] Validate this Xray API rollout and existing user access on the separate
-  node, including an upgrade from an existing file-mounted container.
+- [x] Validate Xray API rollout on an existing node: after one container
+  recreation, subsequent user operations do not restart it and newly issued
+  configs pass traffic (user verified on 2026-09-26).
 - [ ] Validate the bootstrap timeout and local-agent target recovery fixes
   included in alpha.21 on the separate node.
 - Validate issued Xray/AWG configs, settings changes, reinstall, cleanup, and
@@ -139,3 +156,5 @@ The roadmap follows three broader priorities:
 - simpler operator workflows
 - simpler config delivery
 - less manual repetition in day-to-day administration
+
+- AWG: добавлен файл `.vpn` для AmneziaVPN с сохранением названия; `.conf` оставлен для отдельных AWG 3.1 клиентов. Импорт Windows/Android AmneziaWG принимает `.conf`/ZIP, не `.vpn`. Проверка импорта `.vpn` в приложении остаётся в ручных тестах.

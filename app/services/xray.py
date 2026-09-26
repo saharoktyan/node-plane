@@ -55,7 +55,11 @@ def build_vless_link_transport(name: str, uuid: str, transport: str, server_key:
     from services.node_driver import get_node_driver
 
     try:
-        operation = get_node_driver().sync_xray(server_key)
+        driver = get_node_driver()
+        provisioned = driver.ensure_profile_on_node(server_key, name, ["xray"], xray_uuid=uuid)
+        if provisioned.status != "SUCCEEDED":
+            raise ValueError("Xray profile could not be restored on the node")
+        operation = driver.sync_xray(server_key)
     except Exception as exc:
         raise ValueError(f"Could not verify current Xray settings: {exc}") from exc
     if operation.status != "SUCCEEDED":

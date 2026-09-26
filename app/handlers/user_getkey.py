@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import io
+import json
+import logging
 from collections import defaultdict
 from typing import Dict, List
 
@@ -114,15 +116,20 @@ def _current_awg_server(name: str, server_key: str) -> dict | None:
     """Refresh the saved peer using live node settings before issuing either AWG format."""
     rec = get_awg_server(name, server_key)
     if not isinstance(rec, dict):
-        return None
+        rec = {}
     server = get_server(server_key)
     if not server or server.bootstrap_state == "edited":
         raise RuntimeError("Параметры ноды ещё не применены" if server else "Нода не найдена")
-    wg_conf = rec.get("wg_conf") or _extract_wg_conf(str(rec.get("config") or ""))
+    driver = get_node_driver()
+    operation = driver.ensure_profile_on_node(server_key, name, ["awg"])
+    if not operation or operation.status != "SUCCEEDED":
+        raise RuntimeError("AWG profile provisioning failed")
+    payload = json.loads(str(getattr(operation, "result_json", "") or "{}"))
+    wg_conf = payload.get("wg_conf")
     if not wg_conf:
-        raise RuntimeError("Старый AWG-конфиг не содержит ключи peer; перевыпусти профиль")
+        raise RuntimeError("Driver did not return the current AWG peer config")
     profile_label = f"{server.title} · {name}"
-    refreshed_conf, refreshed_key = get_node_driver().refresh_awg_config(server_key, wg_conf, profile_label)
+    refreshed_conf, refreshed_key = driver.refresh_awg_config(server_key, wg_conf, profile_label)
     rec["wg_conf"] = refreshed_conf
     rec["config"] = refreshed_key
     update_awg_server(name, server_key, rec)
@@ -130,9 +137,10 @@ def _current_awg_server(name: str, server_key: str) -> dict | None:
 
 
 def _awg_refresh_error(lang: str, exc: Exception) -> str:
+    logging.getLogger(__name__).warning("AWG config issuance failed", exc_info=True)
     if lang == "ru":
-        return f"Не удалось обновить AWG-конфиг по данным ноды: {exc}. Старый конфиг не выдаётся."
-    return f"Could not refresh the AWG config from the node: {exc}. The old config was not issued."
+        return "Не удалось подготовить актуальный AWG-конфиг. Попробуйте позже или обратитесь к администратору. Старый конфиг не выдаётся."
+    return "Could not prepare a current AWG config. Try again later or contact the administrator. The old config was not issued."
 
 
 def _render_awg_main_screen(name: str, method: AccessMethod, lang: str):
@@ -432,7 +440,8 @@ def on_getkey_callback(update: Update, context: CallbackContext, payload: str) -
         _send_main_getkey_message(context, chat_id, text, markup, PARSE_MODE)
         return
 
-    if payload.startswith("awg_conf:"):
+    if payload.startswith(("awg_conf:", "awg_vpn:")):
+        vpn_file = payload.startswith("awg_vpn:")
         _delete_all_getkey_artifacts(context, chat_id)
         profile_name = _resolve_profile_name(user.id if user else None)
         if not user or not profile_name:
@@ -456,8 +465,8 @@ def on_getkey_callback(update: Update, context: CallbackContext, payload: str) -
             )
             return
 
-        wg_conf = rec.get("wg_conf")
-        if not wg_conf:
+        wg_conf = _extract_vpn_key(str(rec.get("config") or "")) if vpn_file else rec.get("wg_conf")
+        if not wg_conf and not vpn_file:
             wg_conf = _extract_wg_conf(rec.get("config", "") or "")
             if wg_conf:
                 rec["wg_conf"] = wg_conf
@@ -467,18 +476,19 @@ def on_getkey_callback(update: Update, context: CallbackContext, payload: str) -
             safe_edit_message(
                 update,
                 context,
-                t(lang, "getkey.awg_conf_extract_failed"),
+                t(lang, "getkey.awg_vpn_missing" if vpn_file else "getkey.awg_conf_extract_failed"),
                 reply_markup=kb_awg_key_actions(server_key, _server_back_payload(awg_method.server_key) if awg_method else None, lang),
                 parse_mode=PARSE_MODE,
             )
             return
 
         conf_io = io.BytesIO(wg_conf.encode("utf-8"))
-        conf_io.name = f"AmneziaWG {get_server(server_key).title} - {name}.conf"
+        extension = "vpn" if vpn_file else "conf"
+        conf_io.name = f"AmneziaWG {get_server(server_key).title} - {name}.{extension}"
         sent = context.bot.send_document(
             chat_id=chat_id,
             document=conf_io,
-            caption=t(lang, "getkey.awg_conf_caption"),
+            caption=t(lang, "getkey.awg_vpn_caption" if vpn_file else "getkey.awg_conf_caption"),
             reply_markup=kb_getkey_attachment_back(f"getkey:awg_conf_back:{server_key}", lang),
         )
         context.user_data[_artifact_msg_key("awg_conf", server_key)] = sent.message_id

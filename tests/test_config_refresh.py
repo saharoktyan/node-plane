@@ -9,7 +9,7 @@ import unittest
 import types
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from urllib.parse import parse_qs, urlsplit
 
 from tests.postgres_test_harness import configure_postgres_test_env
@@ -45,6 +45,18 @@ import awg_profile
 
 
 class ConfigRefreshTests(unittest.TestCase):
+    def test_awg_file_formats_use_current_config(self) -> None:
+        for extension, expected in (("vpn", "vpn://fresh"), ("conf", "current-conf")):
+            with self.subTest(extension=extension):
+                update = SimpleNamespace(effective_chat=SimpleNamespace(id=1), effective_user=SimpleNamespace(id=2))
+                context = SimpleNamespace(bot=Mock(), user_data={})
+                context.bot.send_document.return_value = SimpleNamespace(message_id=3)
+                with patch.object(user_getkey, "answer_cb"), patch.object(user_getkey, "_is_admin", return_value=False), patch.object(user_getkey, "get_locale_for_update", return_value="en"), patch.object(user_getkey, "_delete_all_getkey_artifacts"), patch.object(user_getkey, "_resolve_profile_name", return_value="alice"), patch.object(user_getkey, "get_access_method_by_getkey_payload", return_value=None), patch.object(user_getkey, "get_awg_access_method_by_server_key", return_value=None), patch.object(user_getkey, "_current_awg_server", return_value={"config": "vpn://fresh", "wg_conf": "current-conf"}), patch.object(user_getkey, "get_server", return_value=SimpleNamespace(title="Moscow #1")), patch.object(user_getkey, "kb_getkey_attachment_back"), patch.object(user_getkey, "safe_delete_update_message"):
+                    user_getkey.on_getkey_callback(update, context, f"awg_{extension}:node")
+                document = context.bot.send_document.call_args.kwargs["document"]
+                self.assertEqual(document.getvalue().decode(), expected)
+                self.assertEqual(document.name, f"AmneziaWG Moscow #1 - alice.{extension}")
+
     def test_awg_refresh_uses_node_and_profile_name(self) -> None:
         self.assertEqual(refresh_module.profile_description("Moscow #1 · alice"), "Moscow #1 · alice")
         self.assertEqual(refresh_module.profile_description(""), "AmneziaWG")
@@ -85,7 +97,7 @@ AllowedIPs = 0.0.0.0/0
             xray_pbk="new-pbk", xray_short_id="current-sid", xray_sid="current-sid",
             xray_flow="xtls-rprx-vision", xray_xhttp_path_prefix="/assets", bootstrap_state="bootstrapped",
         )
-        driver = SimpleNamespace(sync_xray=lambda node: SimpleNamespace(status="SUCCEEDED"))
+        driver = SimpleNamespace(sync_xray=lambda node: SimpleNamespace(status="SUCCEEDED"), ensure_profile_on_node=Mock(return_value=SimpleNamespace(status="SUCCEEDED")))
         with patch.object(xray, "get_server", return_value=server), patch.object(xray, "get_server_link_status", return_value=(True, "ok")), patch.object(xray, "get_short_id_local", return_value="stale-sid"), patch("services.node_driver.get_node_driver", return_value=driver):
             link = xray.build_vless_link_transport("alice", "uuid", "tcp", "node")
         self.assertIn("sid=current-sid", link)
@@ -101,7 +113,7 @@ AllowedIPs = 0.0.0.0/0
             xray_xhttp_path_prefix="/assets/xhttp", bootstrap_state="bootstrapped",
             title="Moscow #1",
         )
-        driver = SimpleNamespace(sync_xray=lambda node: SimpleNamespace(status="SUCCEEDED"))
+        driver = SimpleNamespace(sync_xray=lambda node: SimpleNamespace(status="SUCCEEDED"), ensure_profile_on_node=Mock(return_value=SimpleNamespace(status="SUCCEEDED")))
         with patch.object(xray, "get_server", return_value=server), patch.object(xray, "get_server_link_status", return_value=(True, "ok")), patch("services.node_driver.get_node_driver", return_value=driver):
             link = xray.build_vless_link_transport("alice", "uuid", "xhttp", "node")
         params = parse_qs(urlsplit(link).query)
@@ -112,7 +124,7 @@ AllowedIPs = 0.0.0.0/0
 
     def test_awg_issuance_refreshes_and_persists_existing_peer(self) -> None:
         old = {"config": "vpn://old", "wg_conf": "[Interface]\nPrivateKey = old\n"}
-        driver = SimpleNamespace(refresh_awg_config=lambda node, conf, name: ("[Interface]\nPrivateKey = new\n", "vpn://new"))
+        driver = SimpleNamespace(refresh_awg_config=lambda node, conf, name: ("[Interface]\nPrivateKey = new\n", "vpn://new"), ensure_profile_on_node=Mock(return_value=SimpleNamespace(status="SUCCEEDED", result_json=json.dumps({"wg_conf": old["wg_conf"]}))))
         with patch.object(user_getkey, "get_awg_server", return_value=old), patch.object(user_getkey, "get_server", return_value=SimpleNamespace(title="Moscow #1", bootstrap_state="bootstrapped")), patch.object(user_getkey, "get_node_driver", return_value=driver), patch.object(user_getkey, "update_awg_server") as save:
             result = user_getkey._current_awg_server("alice", "node")
         self.assertEqual(result["config"], "vpn://new")
@@ -124,6 +136,34 @@ AllowedIPs = 0.0.0.0/0
             with self.assertRaises(RuntimeError):
                 user_getkey._current_awg_server("alice", "node")
         driver.assert_not_called()
+
+    def test_awg_after_clean_reinstall_uses_recreated_peer_credentials(self) -> None:
+        driver = SimpleNamespace(
+            ensure_profile_on_node=Mock(return_value=SimpleNamespace(
+                status="SUCCEEDED", result_json=json.dumps({"wg_conf": "new-peer-conf"}))),
+            refresh_awg_config=Mock(return_value=("refreshed-new-peer", "vpn://fresh")),
+        )
+        with patch.object(user_getkey, "get_awg_server", return_value={"wg_conf": "deleted-peer-conf"}), \
+             patch.object(user_getkey, "get_server", return_value=SimpleNamespace(title="Moscow", bootstrap_state="bootstrapped")), \
+             patch.object(user_getkey, "get_node_driver", return_value=driver), \
+             patch.object(user_getkey, "update_awg_server") as save:
+            result = user_getkey._current_awg_server("alice", "node")
+        driver.ensure_profile_on_node.assert_called_once_with("node", "alice", ["awg"])
+        driver.refresh_awg_config.assert_called_once_with("node", "new-peer-conf", "Moscow · alice")
+        self.assertEqual(result["wg_conf"], "refreshed-new-peer")
+        save.assert_called_once()
+
+    def test_xray_issuance_blocks_when_profile_cannot_be_restored(self) -> None:
+        driver = SimpleNamespace(
+            ensure_profile_on_node=Mock(return_value=SimpleNamespace(status="FAILED")),
+            sync_xray=Mock(),
+        )
+        with patch.object(xray, "get_server", return_value=SimpleNamespace(bootstrap_state="bootstrapped")), \
+             patch("services.node_driver.get_node_driver", return_value=driver):
+            with self.assertRaises(ValueError):
+                xray.build_vless_link_transport("alice", "uuid", "tcp", "node")
+        driver.ensure_profile_on_node.assert_called_once_with("node", "alice", ["xray"], xray_uuid="uuid")
+        driver.sync_xray.assert_not_called()
 
 
 if __name__ == "__main__":
