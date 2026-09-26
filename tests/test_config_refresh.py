@@ -39,7 +39,7 @@ assert spec and spec.loader
 refresh_module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(refresh_module)
 
-from services import xray
+from services import xray, profile_state
 from handlers import user_getkey
 import awg_profile
 
@@ -51,11 +51,41 @@ class ConfigRefreshTests(unittest.TestCase):
                 update = SimpleNamespace(effective_chat=SimpleNamespace(id=1), effective_user=SimpleNamespace(id=2))
                 context = SimpleNamespace(bot=Mock(), user_data={})
                 context.bot.send_document.return_value = SimpleNamespace(message_id=3)
-                with patch.object(user_getkey, "answer_cb"), patch.object(user_getkey, "_is_admin", return_value=False), patch.object(user_getkey, "get_locale_for_update", return_value="en"), patch.object(user_getkey, "_delete_all_getkey_artifacts"), patch.object(user_getkey, "_resolve_profile_name", return_value="alice"), patch.object(user_getkey, "get_access_method_by_getkey_payload", return_value=None), patch.object(user_getkey, "get_awg_access_method_by_server_key", return_value=None), patch.object(user_getkey, "_current_awg_server", return_value={"config": "vpn://fresh", "wg_conf": "current-conf"}), patch.object(user_getkey, "get_server", return_value=SimpleNamespace(title="Moscow #1")), patch.object(user_getkey, "kb_getkey_attachment_back"), patch.object(user_getkey, "safe_delete_update_message"):
+                with patch.object(user_getkey, "answer_cb"), patch.object(user_getkey, "_is_admin", return_value=False), patch.object(user_getkey, "get_locale_for_update", return_value="en"), patch.object(user_getkey, "_delete_all_getkey_artifacts"), patch.object(user_getkey, "_resolve_profile_name", return_value="alice"), patch.object(user_getkey, "get_access_method_by_getkey_payload", return_value=None), patch.object(user_getkey, "get_profile_access_status", return_value={"frozen": False, "active": True}), patch.object(user_getkey, "get_allowed_protocols", return_value=[]), patch.object(user_getkey, "get_access_methods_for_codes", return_value=[SimpleNamespace(protocol_kind="awg", server_key="node")]), patch.object(user_getkey, "get_awg_access_method_by_server_key", return_value=None), patch.object(user_getkey, "_current_awg_server", return_value={"config": "vpn://fresh", "wg_conf": "current-conf"}), patch.object(user_getkey, "get_server", return_value=SimpleNamespace(title="Moscow #1")), patch.object(user_getkey, "kb_getkey_attachment_back"), patch.object(user_getkey, "safe_delete_update_message"):
                     user_getkey.on_getkey_callback(update, context, f"awg_{extension}:node")
                 document = context.bot.send_document.call_args.kwargs["document"]
                 self.assertEqual(document.getvalue().decode(), expected)
                 self.assertEqual(document.name, f"AmneziaWG Moscow #1 - alice.{extension}")
+
+    def test_old_awg_button_cannot_reenable_revoked_or_frozen_access(self):
+        for frozen in (True, False):
+            with self.subTest(frozen=frozen):
+                update = SimpleNamespace(effective_chat=SimpleNamespace(id=1), effective_user=SimpleNamespace(id=2))
+                context = SimpleNamespace(bot=Mock(), user_data={})
+                with patch.object(user_getkey, "answer_cb"), patch.object(user_getkey, "_is_admin", return_value=False), patch.object(user_getkey, "get_locale_for_update", return_value="en"), patch.object(user_getkey, "_resolve_profile_name", return_value="alice"), patch.object(user_getkey, "get_profile_access_status", return_value={"frozen": frozen, "text": "Frozen"}), patch.object(user_getkey, "get_allowed_protocols", return_value=[]), patch.object(user_getkey, "get_access_methods_for_codes", return_value=[]), patch.object(user_getkey, "_delete_all_getkey_artifacts"), patch.object(user_getkey, "kb_getkey_servers"), patch.object(user_getkey, "safe_edit_message"), patch.object(user_getkey, "_current_awg_server") as issue:
+                    user_getkey.on_getkey_callback(update, context, "awg_vpn:node")
+                issue.assert_not_called()
+                context.bot.send_document.assert_not_called()
+
+    def test_freeze_revokes_both_protocols_and_reports_partial_failure(self):
+        methods = [SimpleNamespace(server_key="node", protocol_kind=kind, label=kind) for kind in ("xray", "awg")]
+        driver = Mock()
+        driver.delete_profile_from_node.side_effect = [SimpleNamespace(status="SUCCEEDED", progress_message=""), SimpleNamespace(status="FAILED", progress_message="offline")]
+        with patch.object(profile_state, "get_profile", return_value={"uuid": "stable-id"}), patch.object(profile_state, "get_allowed_protocols", return_value=[]), patch("domain.servers.get_access_methods_for_codes", return_value=methods), patch("services.node_driver.get_node_driver", return_value=driver), patch("services.provisioning_state.upsert_profile_server_state") as state:
+            errors = profile_state._sync_profile_frozen_access("alice", frozen=True)
+        self.assertEqual(errors, ["awg"])
+        self.assertEqual(driver.delete_profile_from_node.call_count, 2)
+        self.assertFalse(state.call_args_list[0].kwargs["desired_enabled"])
+        self.assertEqual(state.call_args_list[1].kwargs["status"], "failed")
+
+    def test_unfreeze_restores_existing_uuid_for_both_protocols(self):
+        methods = [SimpleNamespace(server_key="node", protocol_kind=kind, label=kind) for kind in ("xray", "awg")]
+        driver = Mock()
+        driver.ensure_profile_on_node.return_value = SimpleNamespace(status="SUCCEEDED", progress_message="")
+        with patch.object(profile_state, "get_profile", return_value={"uuid": "stable-id"}), patch.object(profile_state, "get_allowed_protocols", return_value=[]), patch("domain.servers.get_access_methods_for_codes", return_value=methods), patch("services.node_driver.get_node_driver", return_value=driver), patch("services.provisioning_state.upsert_profile_server_state"):
+            self.assertEqual(profile_state._sync_profile_frozen_access("alice", frozen=False), [])
+        self.assertEqual(driver.ensure_profile_on_node.call_count, 2)
+        self.assertEqual(driver.ensure_profile_on_node.call_args_list[0].kwargs["xray_uuid"], "stable-id")
 
     def test_awg_refresh_uses_node_and_profile_name(self) -> None:
         self.assertEqual(refresh_module.profile_description("Moscow #1 · alice"), "Moscow #1 · alice")

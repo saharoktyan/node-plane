@@ -21,6 +21,7 @@ class AwgAddUserScriptTests(unittest.TestCase):
             docker_log = root / "docker.log"
             fake_bin = root / "bin"
             fake_bin.mkdir()
+            (root / "awg-peer-state.py").write_text((SCRIPT.parent / "awg-peer-state.py").read_text())
             profile = subprocess.check_output([sys.executable, str(PROFILE_TOOL), "init", str(config)], text=True)
             config.write_text("[Interface]\nPrivateKey = serverprivate\nAddress = 10.8.1.1/24\nListenPort = 51820\n" + profile, encoding="utf-8")
             node_env.write_text(
@@ -105,7 +106,12 @@ class AwgAddUserScriptTests(unittest.TestCase):
             )
             subprocess.run(["bash", str(delete), "alice"], env=env, text=True, capture_output=True, check=True)
             self.assertNotIn("# msk1-alice", config.read_text(encoding="utf-8"))
-            self.assertFalse(cached.exists())
+            self.assertTrue(cached.exists())
+            self.assertTrue((root / "clients" / "msk1-alice.revoked.json").exists())
+            restored = subprocess.run(["bash", str(runnable), "alice"], env=env, text=True, capture_output=True, check=True)
+            self.assertEqual(restored.stdout, replaced.stdout)
+            self.assertEqual(config.read_text().count("# msk1-alice"), 1)
+            self.assertNotIn("restart amnezia-awg", docker_log.read_text())
 
 
 if __name__ == "__main__":

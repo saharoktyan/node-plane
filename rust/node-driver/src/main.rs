@@ -1136,6 +1136,8 @@ impl ProvisioningApi {
                   ON pam.profile_name = p.name
                 LEFT JOIN xray_profiles xp
                   ON xp.profile_name = p.name
+                LEFT JOIN profile_state ps ON ps.profile_name = p.name
+                WHERE COALESCE(ps.frozen, 0) = 0
                 ORDER BY p.name
                 ",
                 &[],
@@ -1186,6 +1188,8 @@ impl ProvisioningApi {
                 FROM profiles p
                 JOIN profile_access_methods pam
                   ON pam.profile_name = p.name
+                LEFT JOIN profile_state ps ON ps.profile_name = p.name
+                WHERE COALESCE(ps.frozen, 0) = 0
                 ORDER BY p.name
                 ",
                 &[],
@@ -1823,6 +1827,22 @@ impl ProvisioningService for ProvisioningApi {
             CommandStart::Existing(response) => return Ok(Response::new(response)),
         };
         if let Some(target) = self.ctx.agent_target(&req.node_key) {
+            let client = self.ctx.db_client().await?;
+            let frozen = client
+                .query_opt(
+                    "SELECT frozen FROM profile_state WHERE profile_name = $1",
+                    &[&profile_name],
+                )
+                .await
+                .map_err(|err| Status::internal(format!("failed to check profile status: {err}")))?
+                .map(|row| row.get::<_, i32>(0) != 0)
+                .unwrap_or(false);
+            if frozen {
+                return Ok(Response::new(execution.fail_with_error(
+                    "profile_frozen",
+                    "profile is frozen; access cannot be provisioned",
+                )?));
+            }
             // Confirm registry writes before creating remote users. A failed DB
             // update must not leave a new peer without a deliverable config.
             for protocol in profile
@@ -2877,16 +2897,41 @@ impl RuntimeService for RuntimeApi {
                             }
                         }
                         Err(err) => {
-                            lines.push(format!("SSH key removal failed: {err}"));
-                            notes.push("ssh key removal failed".to_string());
+                            return Ok(Response::new(execution.fail_with_error(
+                                "ssh_key_cleanup_failed",
+                                &format!("SSH key removal failed: {err}"),
+                            )?));
                         }
                     },
                     Err(err) => {
-                        lines.push(format!("SSH key removal failed: {err}"));
-                        notes.push("ssh key removal failed".to_string());
+                        return Ok(Response::new(execution.fail_with_error(
+                            "ssh_key_cleanup_failed",
+                            &format!("SSH key removal failed: {err}"),
+                        )?));
                     }
                 }
             }
+            if let Err(err) = transport.uninstall_agent().await {
+                return Ok(Response::new(execution.fail_with_error(
+                    "agent_uninstall_failed",
+                    &format!("agent removal failed: {err}"),
+                )?));
+            }
+            let mut stopped = false;
+            for _ in 0..10 {
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                if transport.get_node_health().await.is_err() {
+                    stopped = true;
+                    break;
+                }
+            }
+            if !stopped {
+                return Ok(Response::new(execution.fail_with_error(
+                    "agent_uninstall_failed",
+                    "agent is still running after removal",
+                )?));
+            }
+            notes.push("agent removed".to_string());
             let notes_text = notes.join("; ");
             if let Err(err) = self.ctx.mark_full_cleanup(&req.node_key, &notes_text).await {
                 lines.push(format!("central registry notes update failed: {err}"));

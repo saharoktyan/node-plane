@@ -42,7 +42,7 @@ Next core tasks:
 - [x] Verify settings application with existing users: newly issued configs
   contain the applied server parameters and work; AWG `.conf` imports pass
   traffic (user verified on 2026-09-26).
-- [ ] Investigate Amnezia's generic names on `.conf` import; `vpn://` already
+- [x] Investigate Amnezia's generic names on `.conf` import; `vpn://` already
   carries the node title and profile name.
   Upstream `extractWireGuardConfig` assigns `nextAvailableServerName()` and
   does not read a name from the file. A native Amnezia file is needed to keep
@@ -51,10 +51,10 @@ Next core tasks:
   AWG currently routes IPv4 only (`0.0.0.0/0`); direct IPv6 is a possible
   explanation if the client does not block it. Confirm on the device before
   changing routing. Google also uses location signals beyond the exit IP.
-- [ ] Validate the issuance fix after clean reinstall: restore the missing
-  AWG peer/Xray UUID through the driver before issuing a config. The fix is
-  in the working tree; regression tests cover replacement of stale AWG keys
-  and blocked Xray issuance when provisioning fails.
+- [x] Validate the issuance fix after clean reinstall: restore the missing
+  AWG peer/Xray UUID through the driver before issuing a config. User verified
+  fresh working XHTTP and AWG `vpn://`/`.vpn` configs on alpha.22. TCP remains
+  under investigation on iOS; it works in the configured Android NekoBox.
 - [x] Move Xray user add/update/remove to HandlerService without routine
   container restarts. Persist the same users in `config.json`, verify both live
   inbounds, and mount the config directory so a container restart reads updates.
@@ -158,3 +158,31 @@ The roadmap follows three broader priorities:
 - less manual repetition in day-to-day administration
 
 - AWG: добавлен файл `.vpn` для AmneziaVPN с сохранением названия; `.conf` оставлен для отдельных AWG 3.1 клиентов. Импорт Windows/Android AmneziaWG принимает `.conf`/ZIP, не `.vpn`. Проверка импорта `.vpn` в приложении остаётся в ручных тестах.
+
+## Live test checkpoint — 2026-09-26, alpha.22
+
+Confirmed by the user:
+- Clean reinstall: fresh XHTTP and AWG native configs connect; `.vpn` works.
+- Xray revoke takes effect immediately; granting access restores the same client config.
+- AWG revoke takes effect immediately; revocation survives a container restart.
+- Xray revocation survives a container restart; regrant restores the same config.
+- Offline agent: profile updates fail, cleanup offers registry-only removal; recovery works after agent start.
+- Fresh SSH node: Docker installation succeeds.
+
+Corrections in the working tree (need release and live verification):
+- Freeze/unfreeze now revokes/restores both protocols through the driver. Saving a frozen profile and old config buttons cannot enable access.
+- AWG revoked peer keys and IP are retained securely on the node; regrant restores the same peer. Clean reinstall cannot restore credentials tied to the previous server key.
+- Failed probe uses a warning and readable agent status; Docker installation output is summarized.
+- Basic edits mark settings pending; Apply changes appears only in the node settings root, with pending-change hints in subsections.
+- Node removal is offered only on the card. Full cleanup removes managed runtime and schedules agent/systemd/binary/TLS removal, then the driver waits for the agent to stop. No global Docker image pruning.
+
+Remaining live checks:
+- Freeze/unfreeze and AWG old-config recovery, including after restart.
+- Full node removal: agent process, binary, unit and node credentials are gone; bot registry entry is removed.
+- Pending Basic settings apply only via the root Apply changes button.
+- Add via Xray API, then restart the container while access remains granted: the same client config still works.
+- Fresh-node complete bootstrap and client traffic in one run.
+- TCP on iOS: REALITY/VLESS accepts the profile and logs outbound requests. IPv4 HTTPS from lv1 succeeds, IPv6 HTTPS fails. Android NekoBox works with previously adjusted settings. User reports working NekoBox uses Google DoH, direct DNS 8.8.8.8, IPv6 disabled and ipv4_only throughout. Equivalent iOS settings did not resolve the timeout. The same TCP config works in Linux NekoBox as well; at user request further iOS/v2rayBox investigation is deferred. No speculative TCP protocol changes made.
+
+- Full cleanup audit: remove effective external Xray/AWG config paths, config backups and locks, and AWG saved/revoked client keys. Agent removal uses its actual executable/config/TLS/state/log paths. AWG is stopped gracefully so its exit handler removes its NAT rules and interface; fixed the entrypoint replacing the shell and losing that handler. SSH-key cleanup errors prevent a successful deletion report.
+- Controller cleanup also removes the deleted node’s TLS directory and persisted NODE_AGENT_TARGETS entry, retaining the CA and credentials of other nodes. Docker daemon unavailability blocks cleanup instead of claiming success without inspecting containers.

@@ -100,7 +100,8 @@ def freeze_profile(name: str) -> Tuple[bool, str]:
         return d
 
     profile_store.update(mut)
-    return True, f"🧊 Профиль *{name}* заморожен."
+    errors = _sync_profile_frozen_access(name, frozen=True)
+    return not errors, f"🧊 Профиль *{name}* заморожен." + ("\nНе удалось отключить доступ на нодах: " + "; ".join(errors) if errors else "")
 
 
 def unfreeze_profile(name: str) -> Tuple[bool, str]:
@@ -113,7 +114,36 @@ def unfreeze_profile(name: str) -> Tuple[bool, str]:
         return d
 
     profile_store.update(mut)
-    return True, f"🔥 Профиль *{name}* разморожен."
+    errors = _sync_profile_frozen_access(name, frozen=False)
+    return not errors, f"🔥 Профиль *{name}* разморожен." + ("\nНе удалось восстановить доступ на нодах: " + "; ".join(errors) if errors else "")
+
+
+def _sync_profile_frozen_access(name: str, *, frozen: bool) -> List[str]:
+    from domain.servers import get_access_methods_for_codes
+    from services.node_driver import get_node_driver
+    from services.provisioning_state import upsert_profile_server_state
+
+    record = get_profile(name)
+    errors = []
+    driver = get_node_driver()
+    for method in get_access_methods_for_codes(get_allowed_protocols(name)):
+        try:
+            if frozen:
+                operation = driver.delete_profile_from_node(method.server_key, name, [method.protocol_kind])
+            else:
+                operation = driver.ensure_profile_on_node(method.server_key, name, [method.protocol_kind], xray_uuid=str(record.get("uuid") or ""))
+            ok = operation.status == "SUCCEEDED"
+            details = operation.progress_message if not ok else None
+        except Exception as exc:
+            ok, details = False, str(exc)
+        upsert_profile_server_state(name, method.server_key, method.protocol_kind,
+                                    desired_enabled=not frozen,
+                                    status=("revoked" if frozen else "provisioned") if ok else "failed",
+                                    last_error=details)
+        if not ok:
+            logger.warning("Profile status sync failed: %s/%s/%s: %s", name, method.server_key, method.protocol_kind, details)
+            errors.append(method.label)
+    return errors
 
 
 def get_allowed_protocols(name: str) -> List[str]:

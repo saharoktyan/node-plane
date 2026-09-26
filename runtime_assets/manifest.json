@@ -123,5 +123,10 @@
     "target_path": "/opt/node-plane-runtime/deploy-awg.sh",
     "asset_path": "deploy-awg.sh",
     "mode": "0755"
+  },
+  {
+    "target_path": "/opt/node-plane-runtime/awg-peer-state.py",
+    "asset_path": "awg-peer-state.py",
+    "mode": "0644"
   }
 ]

@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
+import tempfile
+from pathlib import Path
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Iterable, Optional, Sequence
@@ -316,6 +320,45 @@ def update_server_fields(server_key: str, **fields: object) -> RegisteredServer:
     return server
 
 
+def _remove_node_credentials(server_key: str) -> None:
+    """Remove this node's certificates and persisted target, retaining shared CA."""
+    from config import SHARED_ROOT
+
+    validate_server_key(server_key)
+    shared = Path(os.environ.get("NODE_PLANE_SHARED_DIR") or SHARED_ROOT)
+    certificates = shared / "driver-agent-tls" / "nodes" / server_key
+    if certificates.exists():
+        shutil.rmtree(certificates)
+    env_path = shared / ".env"
+    if env_path.exists():
+        content = env_path.read_text(encoding="utf-8")
+        lines = []
+        for line in content.splitlines(keepends=True):
+            if line.strip().startswith("NODE_AGENT_TARGETS="):
+                value = line.split("=", 1)[1].strip().strip("\"'")
+                targets = [item for item in value.split(",") if item.strip().split("=", 1)[0] != server_key]
+                line = "NODE_AGENT_TARGETS=" + ",".join(targets) + "\n"
+            lines.append(line)
+        updated = "".join(lines)
+        if updated != content:
+            fd, temporary = tempfile.mkstemp(prefix=".node-targets-", dir=shared)
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                    stream.write(updated)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.chmod(temporary, env_path.stat().st_mode & 0o777)
+                os.replace(temporary, env_path)
+            finally:
+                if os.path.exists(temporary):
+                    os.unlink(temporary)
+    if "NODE_AGENT_TARGETS" in os.environ:
+        os.environ["NODE_AGENT_TARGETS"] = ",".join(
+            item for item in os.environ["NODE_AGENT_TARGETS"].split(",")
+            if item.strip().split("=", 1)[0] != server_key
+        )
+
+
 def forget_server(server_key: str) -> bool:
     """Remove controller-owned state without contacting the node."""
     _bootstrap()
@@ -325,6 +368,7 @@ def forget_server(server_key: str) -> bool:
     from domain.servers import get_access_codes_for_server_key
 
     access_codes = get_access_codes_for_server_key(server.key)
+    _remove_node_credentials(server_key)
     with _db.transaction() as conn:
         # Explicit deletion also works on SQLite connections without FK enforcement.
         conn.execute("DELETE FROM schema_meta WHERE key = ?", (f"agent_rollout_pending:{server_key}",))

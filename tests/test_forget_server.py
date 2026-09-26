@@ -5,6 +5,8 @@ import os
 import sys
 import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 from tests.postgres_test_harness import configure_postgres_test_env
 
@@ -56,6 +58,22 @@ class ForgetServerTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.tmpdir.cleanup()
+
+    def test_removes_only_deleted_node_certificates_and_target(self) -> None:
+        root = Path(self.tmpdir.name)
+        tls = root / "driver-agent-tls"
+        for key in ("gone", "keep"):
+            (tls / "nodes" / key).mkdir(parents=True)
+            (tls / "nodes" / key / "server.key").write_text("private")
+        (tls / "ca.key").write_text("shared-private")
+        env = root / ".env"
+        env.write_text("NODE_AGENT_TARGETS=gone=host:50061,keep=other:50061\nOTHER=value\n")
+        with patch.dict(os.environ, {"NODE_PLANE_SHARED_DIR": str(root)}):
+            self.registry._remove_node_credentials("gone")
+        self.assertFalse((tls / "nodes" / "gone").exists())
+        self.assertTrue((tls / "nodes" / "keep" / "server.key").exists())
+        self.assertTrue((tls / "ca.key").exists())
+        self.assertEqual(env.read_text(), "NODE_AGENT_TARGETS=keep=other:50061\nOTHER=value\n")
 
     def test_forget_offline_server_removes_only_its_controller_state(self) -> None:
         # An old AWG grant can remain after the node's protocol list changes.
