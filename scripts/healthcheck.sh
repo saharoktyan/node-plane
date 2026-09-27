@@ -118,10 +118,11 @@ EOF
 
 read_env_value() {
   local key="$1"
-  if [[ ! -f .env ]]; then
+  local file="${2:-${ENV_FILE:-.env}}"
+  if [[ ! -f "$file" ]]; then
     return 0
   fi
-  sed -n "s/^${key}=//p" .env | tail -n 1
+  sed -n "s/^${key}=//p" "$file" | tail -n 1
 }
 
 check_file_exists() {
@@ -134,40 +135,35 @@ check_file_exists() {
   fi
 }
 
+systemd_unit_installed() {
+  has_cmd systemctl && [[ "$(systemctl show node-plane.service --property=LoadState --value 2>/dev/null || true)" == "loaded" ]]
+}
+
 detect_mode() {
   if [[ "$MODE" != "auto" ]]; then
     return 0
   fi
-
-  if has_cmd docker && { docker compose ps >/dev/null 2>&1 || command -v docker-compose >/dev/null 2>&1; }; then
-    if has_cmd docker && docker ps --format '{{.Names}}' 2>/dev/null | grep -qx 'node-plane'; then
-      MODE="portable"
-      return 0
-    fi
-  fi
-
-  if has_cmd systemctl && systemctl list-unit-files node-plane.service >/dev/null 2>&1; then
+  # Prefer the explicitly configured host installation over node containers.
+  if systemd_unit_installed || [[ -d .venv ]] || [[ -n "$(read_env_value NODE_PLANE_APP_DIR)" ]]; then
     MODE="simple"
-    return 0
-  fi
-
-  if [[ -d .venv ]]; then
+  elif has_cmd docker && docker ps --format '{{.Names}}' 2>/dev/null | grep -qx 'node-plane'; then
+    MODE="portable"
+  else
     MODE="simple"
-    return 0
   fi
-
-  MODE="portable"
 }
 
 check_repo_basics() {
   section "Repository"
   check_file_exists "app/main.py" "App entrypoint"
   check_file_exists "requirements.txt" "Requirements file"
-  check_file_exists "docker-compose.yml" "Compose file"
+  if [[ "$MODE" == "portable" ]]; then
+    check_file_exists "docker-compose.yml" "Compose file"
+  fi
   check_file_exists ".env.example" "Environment template"
 
-  if [[ -f .env ]]; then
-    ok ".env file exists"
+  if [[ -f "$ENV_FILE" ]]; then
+    ok "Environment file exists: $ENV_FILE"
   else
     fail ".env file is missing"
     add_remediation "Create the environment file: cp .env.example .env"
@@ -254,27 +250,23 @@ check_simple_mode() {
   fi
   current_target="$(readlink -f "$app_dir" 2>/dev/null || true)"
 
-  if has_cmd python3; then
-    local version
-    version="$(python_version)"
-    if python_supported; then
-      ok "python3 is available (${version})"
-      python_ok=1
-    else
-      fail "python3 version ${version} is unsupported for the current bot runtime"
-      add_remediation "Install Python 3.11.x or 3.12.x on the host and recreate the virtualenv"
-    fi
-  else
-    fail "python3 is missing"
-    add_remediation "Install Python 3.11.x or 3.12.x on the host"
+  local runtime_python="${app_dir}/.venv/bin/python"
+  if [[ ! -x "$runtime_python" ]]; then
+    runtime_python="$(select_python_runtime 2>/dev/null || true)"
   fi
-
-  if has_cmd pip || python3 -m pip --version >/dev/null 2>&1; then
-    ok "pip is available"
+  if [[ -n "$runtime_python" ]] && "$runtime_python" -c 'import sys; sys.exit(0 if sys.version_info[:2] in {(3,11),(3,12)} else 1)' >/dev/null 2>&1; then
+    ok "Bot Python runtime is supported ($runtime_python)"
+    python_ok=1
+  else
+    fail "No supported bot Python runtime found"
+    add_remediation "Install Python 3.11/3.12 and rerun ./scripts/install.sh --mode simple"
+  fi
+  if [[ -n "$runtime_python" ]] && "$runtime_python" -m pip --version >/dev/null 2>&1; then
+    ok "pip is available in the bot runtime"
     pip_ok=1
   else
-    fail "pip is missing"
-    add_remediation "Install pip for Python 3 on the host"
+    fail "pip is missing in the bot runtime"
+    add_remediation "Recreate the bot virtualenv with ./scripts/install.sh --mode simple"
   fi
 
   if [[ -n "$app_dir" && -x "${app_dir}/.venv/bin/python" ]]; then
@@ -348,7 +340,7 @@ check_simple_mode() {
   fi
 
   if has_cmd systemctl; then
-    if systemctl list-unit-files node-plane.service >/dev/null 2>&1; then
+    if systemd_unit_installed; then
       ok "systemd unit node-plane.service is installed"
       systemd_ok=1
       if systemctl is-active --quiet node-plane.service; then
@@ -501,6 +493,16 @@ print_remediations() {
     printf -- '- %s\n' "$item"
   done
 }
+
+source "${SCRIPT_DIR}/python_runtime.sh"
+ENV_FILE="${NODE_PLANE_SHARED_DIR:+${NODE_PLANE_SHARED_DIR}/.env}"
+if [[ -z "$ENV_FILE" || ! -f "$ENV_FILE" ]]; then
+  ENV_FILE="${REPO_ROOT}/.env"
+  configured_shared="$(read_env_value NODE_PLANE_SHARED_DIR)"
+  if [[ -n "$configured_shared" && -f "${configured_shared}/.env" ]]; then
+    ENV_FILE="${configured_shared}/.env"
+  fi
+fi
 
 detect_mode
 case "$MODE" in
