@@ -820,12 +820,12 @@ EOF
   echo "Generated systemd unit:"
   echo "  ${unit_path}"
   echo
-  if [[ $AUTO_INSTALL_SYSTEMD -eq 1 ]]; then
+  if [[ $AUTO_INSTALL_SYSTEMD -eq 1 || $NON_INTERACTIVE -eq 1 ]]; then
     install_systemd_unit "$unit_path"
   elif [[ $NON_INTERACTIVE -eq 0 ]]; then
     local answer
-    read -r -p "Install the systemd unit to /etc/systemd/system/${service_name}.service now? [y/N]: " answer
-    if [[ "${answer:-}" =~ ^[Yy]$ ]]; then
+    read -r -p "Install the systemd unit to /etc/systemd/system/${service_name}.service now? [Y/n]: " answer
+    if [[ "${answer:-y}" =~ ^([Yy]|[Yy][Ee][Ss])$ ]]; then
       install_systemd_unit "$unit_path"
     fi
   fi
@@ -840,7 +840,7 @@ EOF
       echo "Driver/agent setup reported issues. Continuing because best-effort is enabled." >&2
     elif [[ $AUTO_INSTALL_SYSTEMD -eq 1 ]]; then
       # The bot may already be running with the old backend from before rollout.
-      sudo systemctl restart "${service_name}"
+      run_as_root systemctl restart "${service_name}"
     fi
   fi
 
@@ -866,11 +866,10 @@ EOF
 install_systemd_unit() {
   local unit_path="$1"
   local service_name="node-plane"
-  need_cmd sudo
   set_step "install systemd unit"
-  sudo cp "$unit_path" "/etc/systemd/system/${service_name}.service"
-  sudo systemctl daemon-reload
-  if ! sudo systemctl enable --now "${service_name}"; then
+  run_as_root cp "$unit_path" "/etc/systemd/system/${service_name}.service"
+  run_as_root systemctl daemon-reload
+  if ! run_as_root systemctl enable --now "${service_name}"; then
     echo
     echo "systemd failed to start ${service_name}.service."
     echo "Inspect these commands:"
@@ -878,7 +877,8 @@ install_systemd_unit() {
     echo "  sudo journalctl -xeu ${service_name}"
     exit 1
   fi
-  sudo systemctl status "${service_name}" --no-pager || true
+  AUTO_INSTALL_SYSTEMD=1
+  run_as_root systemctl status "${service_name}" --no-pager || true
 }
 
 run_portable_install() {
