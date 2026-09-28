@@ -1,5 +1,10 @@
 # Backend API v1: контракт и авторизация
 
+Current-scope note: this draft describes the first VPN-specific API slice.
+It does not define the future service catalog or a universal access model.
+[SERVICE_EXPANSION_ARCHITECTURE.md](SERVICE_EXPANSION_ARCHITECTURE.md) supersedes
+its Pro/licensing assumptions; those features are deferred indefinitely.
+
 Дата: 2026-09-28. Статус: проект контракта для реализации; маршруты и новая
 авторизация пока не работают. Приоритет — первая вертикаль identity → профиль
 → доступные ноды → выдача конфигов. HTTP-фреймворк выбираем отдельно.
@@ -190,6 +195,7 @@ idempotency_conflict, request_already_decided; 422 invalid_input;
   POST commands с закрытым enum: probe, check_ports, open_ports, install_docker,
   bootstrap, reinstall, apply_settings, sync_runtime, reconcile, regenerate_awg,
   remove_node. Настройки отдельно показывают desired/applied revisions.
+
 - Remove node: полноценная очистка по умолчанию; registry-only — отдельная
   подтверждаемая команда, доступная после typed unreachable/timeout результата,
   с сохранённым неизвестным исходом VPS. UI не принимает решение по строке ошибки.
@@ -461,3 +467,28 @@ systemd-остановки прежней process group; ручные root-оп�
 ноде обязательна перед включением сценария в установку. Если для AWG утрачен
 peer identity, инспекция не подтверждает отсутствие и repair отказывается.
 Backend-owned decommission и обновление настроек протоколов ещё впереди.
+
+## Backend node inventory and read-only runtime inspection
+
+The implemented admin inventory routes are `GET /api/v1/nodes`, `GET
+/api/v1/nodes/{key}`, `POST /api/v1/nodes`, and `PATCH /api/v1/nodes/{key}`.
+Creation stores a disabled draft (desired revision 1, applied revision 0).
+PATCH requires `If-Match`; writes require a UUID idempotency key. Public
+protocol settings are desired values only. Provisioning and safe config
+issuance remain subsequent backend work.
+
+`GET /api/v1/nodes/{key}/runtime` uses a dedicated read-only driver RPC that
+queries the configured agent without the legacy server registry. It confirms
+the reported node key and returns health plus config-file presence. Its
+`settings_verified` value is false because these facts cannot prove that
+the desired settings were applied. Agent errors are reduced to typed public
+codes without leaking a target address or transport stack trace.
+
+`POST /api/v1/nodes/{key}/apply-settings` accepts no arbitrary shell input;
+it snapshots the current backend revision and settings under an admin-only
+idempotent command. `GET /api/v1/node-settings-operations/{id}` reports queue,
+blocked, superseded, or success state. The worker uses a dedicated driver RPC
+and the agent's durable node-wide journal. A matching digest/revision from the
+agent is required before `applied_revision` changes. This first implementation
+requires an already installed agent and protocol runtime; new-node bootstrap
+and recovery of permanently ambiguous mutations are still pending.

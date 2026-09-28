@@ -39,16 +39,18 @@ use driver::v1::provisioning_service_server::{ProvisioningService, ProvisioningS
 use driver::v1::runtime_service_server::{RuntimeService, RuntimeServiceServer};
 use driver::v1::telemetry_service_server::{TelemetryService, TelemetryServiceServer};
 use driver::v1::{
-    ApplyNodeSettingsRequest, BootstrapNodeRequest, CheckPortsRequest, DecommissionNodeRequest,
+    ApplyBackendNodeSettingsRequest, ApplyNodeSettingsRequest, BackendNodeObservation,
+    BackendNodeSettingsResult, BootstrapNodeRequest, CheckPortsRequest, DecommissionNodeRequest,
     DecommissionNodeResponse, DeleteProfileFromNodeRequest, DeleteRuntimeRequest,
     FullCleanupNodeRequest, GetAwgEntropyRequest, GetAwgEntropyResponse, GetNodeDiagnosticsRequest,
     GetNodeDiagnosticsResponse, GetNodeRequest, GetOperationRequest, GetProfileUsageRequest,
     GetProfileUsageResponse, GetRuntimeStatusRequest, GetRuntimeStatusResponse,
-    InstallDockerRequest, ListNodesNeedingRuntimeSyncRequest, ListNodesNeedingRuntimeSyncResponse,
-    ListNodesRequest, ListNodesResponse, ListOperationsRequest, ListOperationsResponse,
-    ListRemoteProfilesRequest, ListRemoteProfilesResponse, Node, NodeCapabilities, NodeHealth,
-    NodeHealthEvent, OpenPortsRequest, Operation, OperationEvent, ProbeNodeRequest, ProfileSpec,
-    ProfileUsage, ReconcileNodeRequest, ReconcileProfileRequest, RefreshAwgConfigRequest,
+    InspectBackendNodeRequest, InstallDockerRequest, ListNodesNeedingRuntimeSyncRequest,
+    ListNodesNeedingRuntimeSyncResponse, ListNodesRequest, ListNodesResponse,
+    ListOperationsRequest, ListOperationsResponse, ListRemoteProfilesRequest,
+    ListRemoteProfilesResponse, Node, NodeCapabilities, NodeHealth, NodeHealthEvent,
+    OpenPortsRequest, Operation, OperationEvent, ProbeNodeRequest, ProfileSpec, ProfileUsage,
+    ReconcileNodeRequest, ReconcileProfileRequest, RefreshAwgConfigRequest,
     RefreshAwgConfigResponse, RegenerateAwgEntropyRequest, ReinstallNodeRequest,
     RemoteProfileRecord, RuntimeStatus, ServiceStatus, StartOperationResponse, SyncNodeEnvRequest,
     SyncRuntimeRequest, SyncXrayRequest, WatchNodeHealthRequest, WatchOperationRequest,
@@ -1476,6 +1478,34 @@ fn missing_runtime_status(node_key: &str, app_semver: &str, app_commit: &str) ->
 
 #[tonic::async_trait]
 impl NodeService for NodeApi {
+    async fn inspect_backend_node(
+        &self,
+        request: Request<InspectBackendNodeRequest>,
+    ) -> Result<Response<BackendNodeObservation>, Status> {
+        let node_key = request.into_inner().node_key;
+        if node_key.trim().is_empty() {
+            return Err(Status::invalid_argument("node_key is required"));
+        }
+        let target = self
+            .ctx
+            .agent_target(&node_key)
+            .ok_or_else(|| Status::failed_precondition("no node-agent target configured"))?;
+        let transport = agent_transport::AgentTransport::new(target);
+        let facts = transport.get_runtime_facts().await?;
+        if facts.node_key != node_key {
+            return Err(Status::failed_precondition("agent node identity mismatch"));
+        }
+        let health = transport.get_node_health().await?;
+        Ok(Response::new(BackendNodeObservation {
+            node_key,
+            health_state: health.state,
+            runtime_version: facts.version,
+            runtime_commit: facts.commit,
+            xray_config_present: facts.xray_config_present,
+            awg_config_present: facts.awg_config_present,
+        }))
+    }
+
     async fn get_node(&self, request: Request<GetNodeRequest>) -> Result<Response<Node>, Status> {
         let req = request.into_inner();
         if req.node_key.trim().is_empty() {
@@ -2503,6 +2533,154 @@ impl ProvisioningService for ProvisioningApi {
 
 #[tonic::async_trait]
 impl RuntimeService for RuntimeApi {
+    async fn prepare_backend_node(
+        &self,
+        request: Request<driver::v1::PrepareBackendNodeRequest>,
+    ) -> Result<Response<BackendNodeSettingsResult>, Status> {
+        let node_key = request.into_inner().node_key;
+        if node_key.is_empty() || node_key.len() > 64 || !node_key.bytes().all(|byte|
+            byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-') {
+            return Err(Status::invalid_argument("node key is required"));
+        }
+        let target = self.ctx.agent_target(&node_key)
+            .ok_or_else(|| Status::failed_precondition("no node-agent target configured"))?;
+        let transport = agent_transport::AgentTransport::new(target);
+        let facts = transport.get_runtime_facts().await?;
+        if facts.node_key != node_key {
+            return Err(Status::failed_precondition("agent node identity mismatch"));
+        }
+        if transport.path_exists("/etc/node-plane/profile-intents.sqlite3").await? {
+            return Err(Status::failed_precondition(
+                "managed runtime cannot be prepared as a fresh node",
+            ));
+        }
+        let env_exists = transport.path_exists("/etc/node-plane/node.env").await?;
+        let mut files = self.ctx.runtime_file_bundle(None, &node_key)?;
+        if env_exists {
+            // Preserve an existing environment, especially when preparation is
+            // retried after an interrupted Docker installation.
+            files.retain(|file| file.path != "/etc/node-plane/node.env");
+        }
+        transport.sync_runtime_files(files).await?;
+        transport.install_docker().await?;
+        Ok(Response::new(BackendNodeSettingsResult {
+            result_json: format!("{{\"node_key\":\"{}\",\"prepared\":true}}", node_key),
+        }))
+    }
+
+    async fn apply_backend_node_settings(
+        &self,
+        request: Request<ApplyBackendNodeSettingsRequest>,
+    ) -> Result<Response<StartOperationResponse>, Status> {
+        let identity = CommandIdentity::from_request(&request)?
+            .ok_or_else(|| Status::invalid_argument("stable command id is required"))?;
+        let command_id = identity.command_id().to_string();
+        let req = request.into_inner();
+        if req.node_key.is_empty() || req.desired_revision == 0 {
+            return Err(Status::invalid_argument(
+                "node key and revision are required",
+            ));
+        }
+        let execution = match self.ctx.state.begin_command(
+            "apply_backend_node_settings",
+            &req.node_key,
+            "",
+            Some(identity),
+        )? {
+            CommandStart::New(operation) => operation,
+            CommandStart::Existing(response) => return Ok(Response::new(response)),
+        };
+        let Some(target) = self.ctx.agent_target(&req.node_key) else {
+            return Ok(Response::new(execution.missing_agent()?));
+        };
+        let transport = agent_transport::AgentTransport::new(target);
+        let result: Result<String, Status> = async {
+            let facts = transport.get_runtime_facts().await?;
+            if facts.node_key != req.node_key {
+                return Err(Status::failed_precondition("agent node identity mismatch"));
+            }
+            let response = transport
+                .apply_backend_node_settings(agent::v1::ApplyBackendNodeSettingsRequest {
+                    command_id,
+                    desired_revision: req.desired_revision,
+                    protocols_json: req.protocols_json,
+                    settings_json: req.settings_json,
+                    node_key: req.node_key,
+                })
+                .await?;
+            Ok(response.payload_json)
+        }
+        .await;
+        Ok(Response::new(match result {
+            Ok(payload) => execution.finish_with_result(
+                "SUCCEEDED",
+                "backend node settings applied",
+                &payload,
+            )?,
+            Err(error) => execution.finish("FAILED", &error.to_string())?,
+        }))
+    }
+
+    async fn recover_backend_node_settings(
+        &self,
+        request: Request<ApplyBackendNodeSettingsRequest>,
+    ) -> Result<Response<BackendNodeSettingsResult>, Status> {
+        let command_id = CommandIdentity::from_request(&request)?
+            .ok_or_else(|| Status::invalid_argument("stable command id is required"))?
+            .command_id()
+            .to_string();
+        let req = request.into_inner();
+        let target = self
+            .ctx
+            .agent_target(&req.node_key)
+            .ok_or_else(|| Status::failed_precondition("no node-agent target configured"))?;
+        let transport = agent_transport::AgentTransport::new(target);
+        let facts = transport.get_runtime_facts().await?;
+        if facts.node_key != req.node_key {
+            return Err(Status::failed_precondition("agent node identity mismatch"));
+        }
+        let response = transport
+            .recover_backend_node_settings(agent::v1::ApplyBackendNodeSettingsRequest {
+                command_id,
+                desired_revision: req.desired_revision,
+                protocols_json: req.protocols_json,
+                settings_json: req.settings_json,
+                node_key: req.node_key,
+            })
+            .await?;
+        Ok(Response::new(BackendNodeSettingsResult {
+            result_json: response.payload_json,
+        }))
+    }
+
+    async fn resolve_backend_node_settings(
+        &self,
+        request: Request<ApplyBackendNodeSettingsRequest>,
+    ) -> Result<Response<BackendNodeSettingsResult>, Status> {
+        let command_id = CommandIdentity::from_request(&request)?
+            .ok_or_else(|| Status::invalid_argument("stable command id is required"))?
+            .command_id()
+            .to_string();
+        let req = request.into_inner();
+        let target = self.ctx.agent_target(&req.node_key)
+            .ok_or_else(|| Status::failed_precondition("no node-agent target configured"))?;
+        let transport = agent_transport::AgentTransport::new(target);
+        let facts = transport.get_runtime_facts().await?;
+        if facts.node_key != req.node_key {
+            return Err(Status::failed_precondition("agent node identity mismatch"));
+        }
+        let response = transport.resolve_backend_node_settings(
+            agent::v1::ApplyBackendNodeSettingsRequest {
+                command_id, desired_revision: req.desired_revision,
+                protocols_json: req.protocols_json,
+                settings_json: req.settings_json, node_key: req.node_key,
+            },
+        ).await?;
+        Ok(Response::new(BackendNodeSettingsResult {
+            result_json: response.payload_json,
+        }))
+    }
+
     async fn decommission_node(
         &self,
         request: Request<DecommissionNodeRequest>,

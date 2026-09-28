@@ -19,8 +19,14 @@ class SQLIdentityRepository:
             conn.execute("""CREATE TABLE IF NOT EXISTS backend_accounts (
                 id TEXT PRIMARY KEY,
                 role TEXT NOT NULL DEFAULT 'member' CHECK(role IN ('member', 'admin')),
-                status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'approved', 'rejected', 'disabled'))
+                status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'approved', 'rejected', 'disabled')),
+                revision INTEGER NOT NULL DEFAULT 1
             )""")
+            conn.execute("""CREATE TABLE IF NOT EXISTS backend_account_guard (
+                id INTEGER PRIMARY KEY CHECK(id = 1), revision INTEGER NOT NULL
+            )""")
+            conn.execute("""INSERT INTO backend_account_guard(id, revision) VALUES (1, 1)
+                ON CONFLICT(id) DO NOTHING""")
             conn.execute("""CREATE TABLE IF NOT EXISTS backend_external_identities (
                 provider TEXT NOT NULL,
                 subject TEXT NOT NULL,

@@ -85,6 +85,26 @@ class RuntimeServiceStub(object):
                 request_serializer=driver_dot_v1_dot_runtime__service__pb2.ApplyNodeSettingsRequest.SerializeToString,
                 response_deserializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
                 _registered_method=True)
+        self.ApplyBackendNodeSettings = channel.unary_unary(
+                '/nodeplane.driver.v1.RuntimeService/ApplyBackendNodeSettings',
+                request_serializer=driver_dot_v1_dot_runtime__service__pb2.ApplyBackendNodeSettingsRequest.SerializeToString,
+                response_deserializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
+                _registered_method=True)
+        self.PrepareBackendNode = channel.unary_unary(
+                '/nodeplane.driver.v1.RuntimeService/PrepareBackendNode',
+                request_serializer=driver_dot_v1_dot_runtime__service__pb2.PrepareBackendNodeRequest.SerializeToString,
+                response_deserializer=driver_dot_v1_dot_runtime__service__pb2.BackendNodeSettingsResult.FromString,
+                _registered_method=True)
+        self.RecoverBackendNodeSettings = channel.unary_unary(
+                '/nodeplane.driver.v1.RuntimeService/RecoverBackendNodeSettings',
+                request_serializer=driver_dot_v1_dot_runtime__service__pb2.ApplyBackendNodeSettingsRequest.SerializeToString,
+                response_deserializer=driver_dot_v1_dot_runtime__service__pb2.BackendNodeSettingsResult.FromString,
+                _registered_method=True)
+        self.ResolveBackendNodeSettings = channel.unary_unary(
+                '/nodeplane.driver.v1.RuntimeService/ResolveBackendNodeSettings',
+                request_serializer=driver_dot_v1_dot_runtime__service__pb2.ApplyBackendNodeSettingsRequest.SerializeToString,
+                response_deserializer=driver_dot_v1_dot_runtime__service__pb2.BackendNodeSettingsResult.FromString,
+                _registered_method=True)
         self.RefreshAwgConfig = channel.unary_unary(
                 '/nodeplane.driver.v1.RuntimeService/RefreshAwgConfig',
                 request_serializer=driver_dot_v1_dot_runtime__service__pb2.RefreshAwgConfigRequest.SerializeToString,
@@ -166,6 +186,31 @@ class RuntimeServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ApplyBackendNodeSettings(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def PrepareBackendNode(self, request, context):
+        """Idempotent preparation of an already installed agent; no legacy registry read.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def RecoverBackendNodeSettings(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ResolveBackendNodeSettings(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def RefreshAwgConfig(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -236,6 +281,26 @@ def add_RuntimeServiceServicer_to_server(servicer, server):
                     servicer.ApplyNodeSettings,
                     request_deserializer=driver_dot_v1_dot_runtime__service__pb2.ApplyNodeSettingsRequest.FromString,
                     response_serializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.SerializeToString,
+            ),
+            'ApplyBackendNodeSettings': grpc.unary_unary_rpc_method_handler(
+                    servicer.ApplyBackendNodeSettings,
+                    request_deserializer=driver_dot_v1_dot_runtime__service__pb2.ApplyBackendNodeSettingsRequest.FromString,
+                    response_serializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.SerializeToString,
+            ),
+            'PrepareBackendNode': grpc.unary_unary_rpc_method_handler(
+                    servicer.PrepareBackendNode,
+                    request_deserializer=driver_dot_v1_dot_runtime__service__pb2.PrepareBackendNodeRequest.FromString,
+                    response_serializer=driver_dot_v1_dot_runtime__service__pb2.BackendNodeSettingsResult.SerializeToString,
+            ),
+            'RecoverBackendNodeSettings': grpc.unary_unary_rpc_method_handler(
+                    servicer.RecoverBackendNodeSettings,
+                    request_deserializer=driver_dot_v1_dot_runtime__service__pb2.ApplyBackendNodeSettingsRequest.FromString,
+                    response_serializer=driver_dot_v1_dot_runtime__service__pb2.BackendNodeSettingsResult.SerializeToString,
+            ),
+            'ResolveBackendNodeSettings': grpc.unary_unary_rpc_method_handler(
+                    servicer.ResolveBackendNodeSettings,
+                    request_deserializer=driver_dot_v1_dot_runtime__service__pb2.ApplyBackendNodeSettingsRequest.FromString,
+                    response_serializer=driver_dot_v1_dot_runtime__service__pb2.BackendNodeSettingsResult.SerializeToString,
             ),
             'RefreshAwgConfig': grpc.unary_unary_rpc_method_handler(
                     servicer.RefreshAwgConfig,
@@ -523,6 +588,114 @@ class RuntimeService(object):
             '/nodeplane.driver.v1.RuntimeService/ApplyNodeSettings',
             driver_dot_v1_dot_runtime__service__pb2.ApplyNodeSettingsRequest.SerializeToString,
             driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ApplyBackendNodeSettings(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/nodeplane.driver.v1.RuntimeService/ApplyBackendNodeSettings',
+            driver_dot_v1_dot_runtime__service__pb2.ApplyBackendNodeSettingsRequest.SerializeToString,
+            driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def PrepareBackendNode(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/nodeplane.driver.v1.RuntimeService/PrepareBackendNode',
+            driver_dot_v1_dot_runtime__service__pb2.PrepareBackendNodeRequest.SerializeToString,
+            driver_dot_v1_dot_runtime__service__pb2.BackendNodeSettingsResult.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RecoverBackendNodeSettings(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/nodeplane.driver.v1.RuntimeService/RecoverBackendNodeSettings',
+            driver_dot_v1_dot_runtime__service__pb2.ApplyBackendNodeSettingsRequest.SerializeToString,
+            driver_dot_v1_dot_runtime__service__pb2.BackendNodeSettingsResult.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ResolveBackendNodeSettings(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/nodeplane.driver.v1.RuntimeService/ResolveBackendNodeSettings',
+            driver_dot_v1_dot_runtime__service__pb2.ApplyBackendNodeSettingsRequest.SerializeToString,
+            driver_dot_v1_dot_runtime__service__pb2.BackendNodeSettingsResult.FromString,
             options,
             channel_credentials,
             insecure,

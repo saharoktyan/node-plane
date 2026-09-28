@@ -8,7 +8,7 @@ class BackendDriverTransportTests(unittest.TestCase):
     def test_explicit_intent_and_command_identity_cross_grpc_boundary(self):
         import grpc
         from backend.driver_transport import GrpcIntentDriver
-        from driver.v1 import provisioning_service_pb2_grpc, operation_service_pb2_grpc, types_pb2
+        from driver.v1 import provisioning_service_pb2_grpc, operation_service_pb2_grpc, node_service_pb2_grpc, runtime_service_pb2_grpc, types_pb2
 
         received = []
         lookups = []
@@ -46,11 +46,43 @@ class BackendDriverTransportTests(unittest.TestCase):
 
             def GetOperation(self, request, context):
                 self_id = request.operation_id
+                if self_id == 'node-settings-operation':
+                    return types_pb2.Operation(operation_id=self_id, kind='apply_backend_node_settings',
+                        node_key='node', status='SUCCEEDED', result_json='{"node_key":"node"}')
                 return types_pb2.Operation(operation_id=self_id, status='SUCCEEDED', result_json='{"config":"private"}')
+
+        class Runtime(runtime_service_pb2_grpc.RuntimeServiceServicer):
+            def PrepareBackendNode(self, request, context):
+                from driver.v1 import runtime_service_pb2
+                return runtime_service_pb2.BackendNodeSettingsResult(
+                    result_json='{"node_key":"node","prepared":true}')
+
+            def ApplyBackendNodeSettings(self, request, context):
+                received.append((request, dict(context.invocation_metadata())))
+                return types_pb2.StartOperationResponse(operation_id='node-settings-operation')
+
+            def RecoverBackendNodeSettings(self, request, context):
+                from driver.v1 import runtime_service_pb2
+                return runtime_service_pb2.BackendNodeSettingsResult(result_json='{"node_key":"node"}')
+
+            def ResolveBackendNodeSettings(self, request, context):
+                from driver.v1 import runtime_service_pb2
+                received.append((request, dict(context.invocation_metadata())))
+                return runtime_service_pb2.BackendNodeSettingsResult(
+                    result_json='{"config_matches":false,"containers_running":true}')
+
+        class Nodes(node_service_pb2_grpc.NodeServiceServicer):
+            def InspectBackendNode(self, request, context):
+                from driver.v1 import node_service_pb2
+                return node_service_pb2.BackendNodeObservation(node_key=request.node_key,
+                    health_state='running', runtime_version='test', runtime_commit='abc',
+                    xray_config_present=True, awg_config_present=False)
 
         server = grpc.server(ThreadPoolExecutor(max_workers=2))
         provisioning_service_pb2_grpc.add_ProvisioningServiceServicer_to_server(Provisioning(), server)
         operation_service_pb2_grpc.add_OperationServiceServicer_to_server(Operations(), server)
+        node_service_pb2_grpc.add_NodeServiceServicer_to_server(Nodes(), server)
+        runtime_service_pb2_grpc.add_RuntimeServiceServicer_to_server(Runtime(), server)
         port = server.add_insecure_port('127.0.0.1:0')
         server.start()
         self.addCleanup(lambda: server.stop(0).wait())
@@ -66,6 +98,13 @@ class BackendDriverTransportTests(unittest.TestCase):
             mismatched = driver.lookup('stable-task-id', {**intent, 'runtime_name': 'another'})
             delayed = driver.lookup('driver-timeout', intent)
             missing = driver.lookup('missing-driver-result', intent)
+            node = driver.inspect_node('node')
+            driver.prepare_node('node')
+            node_intent = {'node_key': 'node', 'revision': 2, 'protocols': ['awg'],
+                           'settings': {'public_host': 'node.example', 'awg_port': 51820}}
+            applied = driver.apply_node_settings('node-settings-task', node_intent)
+            node_recovered = driver.recover_node_settings('node-settings-task', node_intent)
+            node_resolved = driver.resolve_node_settings('node-settings-task', node_intent)
         self.assertTrue(recovered['succeeded'])
         self.assertEqual(inspected, {'disk_present': True, 'live_present': True,
                                      'identity_matches': True, 'config_available': True})
@@ -79,7 +118,7 @@ class BackendDriverTransportTests(unittest.TestCase):
         self.assertEqual(delayed['result_json'], '{"config":"recovered"}')
         self.assertTrue(missing['succeeded'])
         self.assertIsNone(missing['driver_operation_id'])
-        self.assertEqual(len(received), 1)
+        self.assertEqual(len(received), 3)
         self.assertTrue(result['succeeded'])
         self.assertEqual(result['driver_operation_id'], 'driver-operation')
         request, metadata = received[0]
@@ -87,6 +126,17 @@ class BackendDriverTransportTests(unittest.TestCase):
         self.assertEqual(request.desired_revision, 2)
         self.assertEqual(request.xray.profile_name, 'p_test')
         self.assertEqual(request.xray.uuid, intent['xray']['uuid'])
+        self.assertEqual(applied, '{"node_key":"node"}')
+        self.assertEqual(node_recovered, applied)
+        self.assertEqual(node_resolved, {'config_matches': False, 'containers_running': True})
+        node_request, node_metadata = received[1]
+        self.assertEqual(node_metadata['x-node-plane-command-id'], 'node-settings-task')
+        self.assertEqual(node_request.desired_revision, 2)
+        self.assertEqual(node_request.settings_json, '{"awg_port":51820,"public_host":"node.example"}')
+        self.assertEqual(received[2][1]['x-node-plane-command-id'], 'node-settings-task')
+        self.assertEqual(node, {'node_key': 'node', 'health_state': 'running',
+                                'runtime_version': 'test', 'runtime_commit': 'abc',
+                                'xray_config_present': True, 'awg_config_present': False})
 
     def test_remote_driver_requires_explicit_secure_transport(self):
         from backend.driver_transport import local_channel

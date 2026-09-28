@@ -25,11 +25,12 @@ pub mod agent {
 
 use agent::v1::node_agent_service_server::{NodeAgentService, NodeAgentServiceServer};
 use agent::v1::{
-    AddAwgUserRequest, AddXrayUserRequest, AgentEmpty, ApplyNodeSettingsRequest, CheckPortsRequest,
-    CheckPortsResponse, DeleteProfileRequest, DeleteRuntimeRequest, DeleteRuntimeResponse,
-    DiagnosticItem, InitXrayRequest, InitXrayResponse, InstallDockerRequest, InstallDockerResponse,
-    ListRemoteProfilesRequest, ListRemoteProfilesResponse, LocalHealth, OpenPortsRequest,
-    OpenPortsResponse, PathExistsRequest, PathExistsResponse, PortStatus, RefreshAwgConfigRequest,
+    AddAwgUserRequest, AddXrayUserRequest, AgentEmpty, ApplyBackendNodeSettingsRequest,
+    ApplyNodeSettingsRequest, CheckPortsRequest, CheckPortsResponse, DeleteProfileRequest,
+    DeleteRuntimeRequest, DeleteRuntimeResponse, DiagnosticItem, InitXrayRequest, InitXrayResponse,
+    InstallDockerRequest, InstallDockerResponse, ListRemoteProfilesRequest,
+    ListRemoteProfilesResponse, LocalHealth, OpenPortsRequest, OpenPortsResponse,
+    PathExistsRequest, PathExistsResponse, PortStatus, RefreshAwgConfigRequest,
     RefreshAwgConfigResponse, RemoteProfileRecord, RemoveAuthorizedKeyRequest,
     RemoveAuthorizedKeyResponse, RunDiagnosticsRequest, RunDiagnosticsResponse,
     RuntimeCommandResponse, RuntimeFacts, RuntimeFileSpec, SyncNodeEnvRequest, SyncNodeEnvResponse,
@@ -63,6 +64,12 @@ apt_run() {
 if ! command -v apt-get >/dev/null 2>&1; then
   echo "apt-get is not available. Automatic Docker install is supported only on Debian/Ubuntu." >&2
   exit 1
+fi
+
+# Runtime initialization and profile helpers run Python on the node host.
+if ! command -v python3 >/dev/null 2>&1; then
+  apt_run update
+  apt_run install -y python3
 fi
 
 if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
@@ -1758,6 +1765,121 @@ impl NodeAgentService for NodeAgentApi {
         Ok(Response::new(
             self.state.apply_node_settings(request.into_inner())?,
         ))
+    }
+
+    async fn apply_backend_node_settings(
+        &self,
+        request: Request<ApplyBackendNodeSettingsRequest>,
+    ) -> Result<Response<RuntimeCommandResponse>, Status> {
+        let req = request.into_inner();
+        if req.node_key != self.state.config.node_key || req.desired_revision == 0 {
+            return Err(Status::failed_precondition(
+                "node identity or revision mismatch",
+            ));
+        }
+        let intent = serde_json::json!({
+            "kind": "node_settings", "node_key": req.node_key,
+            "command_id": req.command_id, "revision": req.desired_revision,
+            "protocols": serde_json::from_str::<Value>(&req.protocols_json)
+                .map_err(|_| Status::invalid_argument("invalid protocols"))?,
+            "settings": serde_json::from_str::<Value>(&req.settings_json)
+                .map_err(|_| Status::invalid_argument("invalid settings"))?,
+        });
+        let output = self
+            .state
+            .run_runtime_command(
+                "apply-profile-intent.py",
+                &["apply-node-settings".to_string(), intent.to_string()],
+            )
+            .map_err(|_| {
+                Status::failed_precondition("node settings intent blocked; reconciliation required")
+            })?;
+        let value: Value = serde_json::from_str(&output)
+            .map_err(|_| Status::internal("invalid node settings response"))?;
+        let payload = value
+            .get("payload_json")
+            .and_then(Value::as_str)
+            .ok_or_else(|| Status::internal("invalid node settings response"))?;
+        Ok(Response::new(RuntimeCommandResponse {
+            summary: "node settings applied".to_string(),
+            payload_json: payload.to_string(),
+        }))
+    }
+
+    async fn recover_backend_node_settings(
+        &self,
+        request: Request<ApplyBackendNodeSettingsRequest>,
+    ) -> Result<Response<RuntimeCommandResponse>, Status> {
+        let req = request.into_inner();
+        if req.node_key != self.state.config.node_key || req.desired_revision == 0 {
+            return Err(Status::failed_precondition(
+                "node identity or revision mismatch",
+            ));
+        }
+        let intent = serde_json::json!({
+            "kind": "node_settings", "node_key": req.node_key,
+            "command_id": req.command_id, "revision": req.desired_revision,
+            "protocols": serde_json::from_str::<Value>(&req.protocols_json)
+                .map_err(|_| Status::invalid_argument("invalid protocols"))?,
+            "settings": serde_json::from_str::<Value>(&req.settings_json)
+                .map_err(|_| Status::invalid_argument("invalid settings"))?,
+        });
+        let output = self
+            .state
+            .run_runtime_command(
+                "apply-profile-intent.py",
+                &["lookup-node-settings".to_string(), intent.to_string()],
+            )
+            .map_err(|_| Status::failed_precondition("node settings success is not confirmed"))?;
+        let value: Value = serde_json::from_str(&output)
+            .map_err(|_| Status::internal("invalid node settings response"))?;
+        let payload = value
+            .get("payload_json")
+            .and_then(Value::as_str)
+            .ok_or_else(|| Status::internal("invalid node settings response"))?;
+        Ok(Response::new(RuntimeCommandResponse {
+            summary: "node settings confirmed".to_string(),
+            payload_json: payload.to_string(),
+        }))
+    }
+
+    async fn resolve_backend_node_settings(
+        &self,
+        request: Request<ApplyBackendNodeSettingsRequest>,
+    ) -> Result<Response<RuntimeCommandResponse>, Status> {
+        let req = request.into_inner();
+        if req.node_key != self.state.config.node_key || req.desired_revision == 0 {
+            return Err(Status::failed_precondition(
+                "node identity or revision mismatch",
+            ));
+        }
+        let intent = serde_json::json!({
+            "kind": "node_settings", "node_key": req.node_key,
+            "command_id": req.command_id, "revision": req.desired_revision,
+            "protocols": serde_json::from_str::<Value>(&req.protocols_json)
+                .map_err(|_| Status::invalid_argument("invalid protocols"))?,
+            "settings": serde_json::from_str::<Value>(&req.settings_json)
+                .map_err(|_| Status::invalid_argument("invalid settings"))?,
+        });
+        let output = self.state.run_runtime_command(
+            "apply-profile-intent.py",
+            &["resolve-node-settings".to_string(), intent.to_string()],
+        ).map_err(|_| Status::failed_precondition(
+            "node settings repair requires a restarted agent and live inspection",
+        ))?;
+        let value: Value = serde_json::from_str(&output)
+            .map_err(|_| Status::internal("invalid node settings repair response"))?;
+        let observation = value.get("observation")
+            .ok_or_else(|| Status::internal("invalid node settings repair observation"))?;
+        for key in ["config_matches", "containers_running"] {
+            if observation.get(key).and_then(Value::as_bool).is_none() {
+                return Err(Status::internal("invalid node settings repair observation"));
+            }
+        }
+        Ok(Response::new(RuntimeCommandResponse {
+            summary: "interrupted node settings command retired".to_string(),
+            payload_json: observation.to_string(),
+        }))
     }
 
     async fn refresh_awg_config(

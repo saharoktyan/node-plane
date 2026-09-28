@@ -43,6 +43,12 @@ STRICT_MODE=0
 DRY_RUN=0
 AGENT_PORT="${NODE_AGENT_PORT:-50061}"
 ONLY_NODE_KEY=""
+BACKEND_NODE_KEY=""
+BACKEND_NODE_MODE=""
+BACKEND_SSH_TARGET=""
+BACKEND_SSH_PORT="22"
+BACKEND_SSH_IDENTITY=""
+BACKEND_AGENT_HOST=""
 BIN_SOURCE="${NODE_PLANE_BIN_SOURCE:-auto}" # auto|release|build
 GITHUB_REPO="${NODE_PLANE_GITHUB_REPO:-saharoktyan/node-plane}"
 TLS_ROOT="${SHARED_ROOT}/driver-agent-tls"
@@ -447,6 +453,33 @@ while [[ $# -gt 0 ]]; do
       ONLY_NODE_KEY="${1#*=}"
       shift
       ;;
+    --backend-node-key)
+      BACKEND_NODE_KEY="${2:-}"
+      shift 2
+      ;;
+    --backend-local)
+      if [[ -n "$BACKEND_NODE_MODE" ]]; then echo "Choose one backend transport." >&2; exit 1; fi
+      BACKEND_NODE_MODE="local"
+      shift
+      ;;
+    --backend-ssh-target)
+      if [[ -n "$BACKEND_NODE_MODE" ]]; then echo "Choose one backend transport." >&2; exit 1; fi
+      BACKEND_NODE_MODE="ssh"
+      BACKEND_SSH_TARGET="${2:-}"
+      shift 2
+      ;;
+    --backend-ssh-port)
+      BACKEND_SSH_PORT="${2:-}"
+      shift 2
+      ;;
+    --backend-ssh-identity)
+      BACKEND_SSH_IDENTITY="${2:-}"
+      shift 2
+      ;;
+    --backend-agent-host)
+      BACKEND_AGENT_HOST="${2:-}"
+      shift 2
+      ;;
     --bin-source)
       BIN_SOURCE="${2:-}"
       shift 2
@@ -459,11 +492,13 @@ while [[ $# -gt 0 ]]; do
       cat <<'EOF'
 Usage:
   scripts/setup_driver_agents.sh [--skip-driver] [--skip-agents] [--node-key KEY] [--agent-port 50061] [--strict] [--dry-run] [--bin-source auto|release|build]
+  scripts/setup_driver_agents.sh --backend-node-key KEY (--backend-local | --backend-ssh-target user@host) [--backend-ssh-port 22] [--backend-ssh-identity PATH] [--backend-agent-host HOST] [--bin-source release]
 
 Purpose:
   - Install local node-plane-driver as a systemd service.
   - Deploy node-plane-agent to local and SSH-managed nodes from the server registry, or one node with --node-key.
-  - Write NODE_AGENT_TARGETS and switch bot to grpc driver backend in the shared .env.
+  - Backend mode installs one agent for an existing backend node without reading the legacy server registry.
+  - Write NODE_AGENT_TARGETS and driver mTLS settings in the shared .env.
 
 Binary source modes:
   auto     Use GitHub release binaries first; if unavailable, build locally when resources and Rust tools are available.
@@ -491,6 +526,46 @@ EOF
       ;;
   esac
 done
+
+if [[ -n "$BACKEND_NODE_KEY" || -n "$BACKEND_NODE_MODE" || -n "$BACKEND_SSH_TARGET" || -n "$BACKEND_AGENT_HOST" || -n "$BACKEND_SSH_IDENTITY" || "$BACKEND_SSH_PORT" != 22 ]]; then
+  if [[ ! "$BACKEND_NODE_KEY" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$ ]]; then
+    echo "Backend node key must match the backend inventory key format." >&2
+    exit 1
+  fi
+  if [[ "$BACKEND_NODE_MODE" != local && "$BACKEND_NODE_MODE" != ssh ]]; then
+    echo "Choose exactly one backend transport: --backend-local or --backend-ssh-target." >&2
+    exit 1
+  fi
+  if [[ -n "$ONLY_NODE_KEY" || $SKIP_AGENTS -eq 1 || $SKIP_DRIVER -eq 1 ]]; then
+    echo "Backend onboarding cannot combine with --node-key, --skip-agents, or --skip-driver." >&2
+    exit 1
+  fi
+  if [[ "$BACKEND_NODE_MODE" == local ]]; then
+    if [[ -n "$BACKEND_SSH_TARGET" || -n "$BACKEND_SSH_IDENTITY" || "$BACKEND_SSH_PORT" != 22 || -n "$BACKEND_AGENT_HOST" ]]; then
+      echo "SSH options cannot be used with --backend-local." >&2
+      exit 1
+    fi
+  else
+    if [[ ! "$BACKEND_SSH_TARGET" =~ ^([A-Za-z_][A-Za-z0-9._-]*@)?([A-Za-z0-9.-]+|\[[0-9A-Fa-f:]+\])$ ]]; then
+      echo "Invalid --backend-ssh-target." >&2
+      exit 1
+    fi
+    if [[ ! "$BACKEND_SSH_PORT" =~ ^[0-9]+$ ]] || (( BACKEND_SSH_PORT < 1 || BACKEND_SSH_PORT > 65535 )); then
+      echo "Invalid --backend-ssh-port." >&2
+      exit 1
+    fi
+    if [[ -n "$BACKEND_SSH_IDENTITY" && ! -f "$BACKEND_SSH_IDENTITY" ]]; then
+      echo "SSH identity file is missing." >&2
+      exit 1
+    fi
+    if [[ -n "$BACKEND_AGENT_HOST" && ! "$BACKEND_AGENT_HOST" =~ ^([A-Za-z0-9.-]+|\[[0-9A-Fa-f:]+\])$ ]]; then
+      echo "Invalid --backend-agent-host." >&2
+      exit 1
+    fi
+  fi
+  ONLY_NODE_KEY="$BACKEND_NODE_KEY"
+  STRICT_MODE=1
+fi
 
 ensure_bin_source_mode
 
@@ -755,6 +830,28 @@ EOF
 }
 
 list_managed_servers_tsv() {
+  if [[ -n "$BACKEND_NODE_KEY" ]]; then
+    # Trusted local confirmation only. SSH credentials remain CLI-only and are
+    # never added to the public backend node inventory or old bot registry.
+    PYTHONPATH="${APP_ROOT}/app" NODE_PLANE_APP_DIR="${APP_ROOT}" NODE_PLANE_SHARED_DIR="${SHARED_ROOT}" \
+      "$PYTHON_BIN" - "$BACKEND_NODE_KEY" <<'PY'
+import sys
+from db import get_db
+with get_db().connect() as conn:
+    row = conn.execute('SELECT key FROM backend_nodes WHERE key = ?', (sys.argv[1],)).fetchone()
+if row is None:
+    raise SystemExit('Backend node is absent; create its draft before onboarding the agent')
+PY
+    if [[ "$BACKEND_NODE_MODE" == local ]]; then
+      printf '%s\x1flocal\x1f\x1f\x1f\x1f\x1f\n' "$BACKEND_NODE_KEY"
+    else
+      local ssh_host="$BACKEND_SSH_TARGET"
+      local agent_host="${BACKEND_AGENT_HOST:-${BACKEND_SSH_TARGET##*@}}"
+      printf '%s\x1fssh\x1f%s\x1f%s\x1f\x1f%s\x1f%s\n' \
+        "$BACKEND_NODE_KEY" "$ssh_host" "$BACKEND_SSH_PORT" "$BACKEND_SSH_IDENTITY" "$agent_host"
+    fi
+    return
+  fi
   PYTHONPATH="${APP_ROOT}/app" NODE_PLANE_APP_DIR="${APP_ROOT}" NODE_PLANE_SHARED_DIR="${SHARED_ROOT}" "$PYTHON_BIN" - <<'PY'
 from services.server_registry import list_servers
 
@@ -788,6 +885,11 @@ PY
 install_local_agent() {
   local server_key="$1" expected_sum="$2" current_sum="" changed=0
   local config_tmp unit_tmp
+  if [[ -n "$BACKEND_NODE_KEY" ]] && sudo test -f /etc/node-plane/agent.toml \
+    && ! sudo grep -Fxq "node_key = \"${server_key}\"" /etc/node-plane/agent.toml; then
+    echo "A different local agent already owns this host; refusing to replace it." >&2
+    return 1
+  fi
   set_step "prepare mutual TLS certificate for local node ${server_key}"
   prepare_node_tls "$server_key" "127.0.0.1" || return 1
 
@@ -976,6 +1078,12 @@ deploy_agents() {
       else
         echo "Dry-run SSH check passed for ${server_key}"
       fi
+      continue
+    fi
+
+    if [[ -n "$BACKEND_NODE_KEY" ]] && ! ssh "${ssh_opts[@]}" "$target" \
+      "if sudo test -f /etc/node-plane/agent.toml && ! sudo grep -Fxq 'node_key = \"${server_key}\"' /etc/node-plane/agent.toml; then echo 'A different agent already owns this host' >&2; exit 1; fi"; then
+      failed=$((failed + 1))
       continue
     fi
 
@@ -1211,6 +1319,18 @@ if [[ $SKIP_DRIVER -eq 0 && $DRY_RUN -eq 0 ]]; then
   else
     echo "No local driver/env changes detected; skipping final node-plane-driver restart."
   fi
+fi
+
+if [[ -n "$BACKEND_NODE_KEY" && $DRY_RUN -eq 0 ]]; then
+  set_step "verify backend agent route for ${BACKEND_NODE_KEY}"
+  PYTHONPATH="${APP_ROOT}/app" NODE_PLANE_APP_DIR="${APP_ROOT}" NODE_PLANE_SHARED_DIR="${SHARED_ROOT}" \
+    "$PYTHON_BIN" - "$BACKEND_NODE_KEY" <<'PY'
+import sys
+from backend.driver_transport import GrpcIntentDriver, local_channel
+with local_channel('127.0.0.1:50051') as channel:
+    observation = GrpcIntentDriver(channel).inspect_node(sys.argv[1])
+print(f"Backend agent route verified: {observation['node_key']} ({observation['health_state']})")
+PY
 fi
 
 if [[ $DRY_RUN -eq 0 && $STRICT_MODE -eq 1 && $SKIP_DRIVER -eq 0 && $SKIP_AGENTS -eq 0 ]]; then

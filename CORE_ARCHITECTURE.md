@@ -2,17 +2,18 @@
 
 Updated: 2026-09-24.
 
-This document defines the implementation boundary for the shared free core and
-future Pro modules. It supersedes the ownership recommendations in the older
-driver scaffold document. Requirements below are targets unless explicitly
-marked as implemented.
+This document defines the implementation boundary for the shared core. It
+supersedes the ownership recommendations in the older driver scaffold document.
+Requirements below are targets unless explicitly marked as implemented. The
+service-expansion and current commercial scope are defined in
+[SERVICE_EXPANSION_ARCHITECTURE.md](SERVICE_EXPANSION_ARCHITECTURE.md).
 
 ## Ownership
 
 | Layer | Owns | Must not own |
 | --- | --- | --- |
 | Telegram adapter | Dialog state, localization, rendering, authenticated Telegram identity | Access policy, provisioning decisions, transport execution |
-| Python backend | Authorization, profiles, node registry, desired state, business scenarios, feature availability | SSH commands and node-local mutations |
+| Python backend | Authorization, accounts, VPN profiles, node and future service-instance registry, desired state, business scenarios | SSH commands and node-local mutations |
 | Rust driver | Execution, transport, operation lifecycle, observations | Telegram identity, subscription policy, licensing decisions |
 | Node agent | Local runtime adapters, configuration changes, runtime facts | Global desired state, business database, product tiers |
 
@@ -22,15 +23,16 @@ CallbackContext, or localized output. Every entry point checks permissions;
 hiding a button is not authorization. An internal scheduler uses an explicitly
 defined service actor rather than pretending to be a Telegram user.
 
-Pro extends backend scenarios and interfaces. It does not fork the driver or
-agent. Core provides technical primitives such as reading counters and removing
-access; Pro owns device accounting and traffic-limit policy. Core must remain
-usable without the licensing service.
+No paid edition or license service is required by the current migration.
+Protocol-specific and future service adapters extend business scenarios through
+typed capabilities; they do not fork the driver or agent. The current VPN
+profile/grant schema remains a VPN slice, not a universal account model.
 
 ## Data boundary
 
-Backend is authoritative for users, profiles, access methods, node configuration
-and desired state. Driver owns execution records and observed runtime facts.
+Backend is authoritative for accounts, VPN profiles, future service access,
+node configuration and desired state. Driver owns execution records and
+observed runtime facts.
 Agent owns the application of runtime files and local commands.
 
 Target flow for provisioning:
@@ -54,7 +56,7 @@ adapter and Python's direct node command transport have been removed. Both
 `transport=local` and SSH-managed nodes use a node-agent; the local agent
 listens on `127.0.0.1`. Python still runs controller maintenance and the
 installer/agent rollout. Traffic sampling and alert jobs are disabled pending
-Pro modules.
+their own product and implementation decisions.
 
 ## Operation contract
 
@@ -169,5 +171,5 @@ revocation still require a manual rollout procedure.
 4. Core integration: real PostgreSQL and a disposable node covering bootstrap,
    Xray/AWG create/edit/delete, drift, reinstall, cleanup and failures.
 
-Unit tests do not replace the disposable-node gate. Existing Pro candidates and
-PTB v22 migration remain outside this core implementation stage.
+Unit tests do not replace the disposable-node gate. Deferred optional features
+and the aiogram 3 client rebuild remain outside this core implementation stage.

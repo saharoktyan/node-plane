@@ -3,9 +3,14 @@
 Current priority (2026-09-24): stabilize the shared free core, Rust driver and
 node agent, and separate backend business scenarios from the Telegram adapter.
 See [CORE_ARCHITECTURE.md](CORE_ARCHITECTURE.md) for the execution contract.
-Device management, VLESS subscriptions, traffic limits, expanded metrics and
-alerts are deferred to future Pro modules. The version-oriented sections below
-are historical direction, not the current delivery order.
+The backend must leave room for additional VPN protocols and a small, curated
+set of privacy services without turning the Telegram bot into a general-purpose
+orchestrator. See [SERVICE_EXPANSION_ARCHITECTURE.md](SERVICE_EXPANSION_ARCHITECTURE.md).
+Pro licensing and feature gates are deferred indefinitely. Device management,
+VLESS subscriptions, traffic limits, expanded metrics and alerts remain outside
+the current delivery scope; their eventual packaging is undecided. The
+version-oriented sections below are historical direction, not the current
+delivery order.
 
 Current core checkpoint (2026-09-25): driver and agent run on both the local
 and SSH nodes. AmneziaWG 3.1 connects and passes traffic on the local node.
@@ -24,6 +29,10 @@ installer issue closed. Historical checklists below are not a complete account
 of remaining implementation work.
 
 Remaining shared-core work, in priority order:
+- [ ] Keep shared account, node, authorization and operation contracts
+  independent of VPN protocols while preserving the current VPN-specific
+  profile/grant/config path. Define service-instance and access-enrollment
+  resources only when a second service provides a concrete contract.
 - [ ] Extract business scenarios from Telegram handlers into backend entry
   points with explicit actors, inputs and shared authorization. Keep Telegram
   responsible for dialogue, localization and rendering only.
@@ -45,20 +54,29 @@ Remaining shared-core work, in priority order:
   Keep unreported checks open. iOS/v2rayBox TCP investigation is deferred by
   user request; the same TCP config works in Android and Linux NekoBox.
 - [ ] Execute the combined [backend and Telegram migration plan](BACKEND_TELEGRAM_MIGRATION_PLAN.md):
-  extract scenarios and define API → run a separate backend and validate it →
-  move each Telegram scenario directly to PTB v22, backend API and Rich Messages
-  → update deployment and remove the old adapter. Do not perform an interim
-  PTB v22 conversion of the old screens. Rich API support must be verified in
-  the selected PTB/API version.
+  finish and validate the standalone backend and worker, including installation
+  and disposable-node tests → build a new aiogram 3 client against the complete
+  backend API → replace the old adapter. Do not wire the legacy bot to the new
+  backend or convert its screens as an interim step. The new client
+  keeps the one-edited-message navigation concept but redesigns the screens.
+  Prototype Rich Messages on real Telegram clients before relying on embedded
+  media and controls for the whole interface.
+
+Backend migration progress: access-request creation, self/admin reads, and
+approve/reject decisions now have backend-owned storage, authorization, and
+idempotent HTTP commands. Administrator account list/detail and guarded
+role/status changes are also available, with revision checks and last-admin
+protection. The old Telegram request UI still uses legacy state; notification
+delivery and adapter cutover remain open. Approval changes account status only
+and does not grant VPN access.
 
 Interface/product decision:
-- Rich Messages and basic interface usability belong to free Core as well as
-  Pro. Compact node cards, collapsed config/instruction blocks and navigation
-  are shared product quality, not licensed features.
-- Pro sells additional functionality and its screens: subscriptions, devices,
-  limits, expanded metrics and alerts. First Pro module and licensing integration
-  follow stabilization of backend extension boundaries; no general plugin
-  framework is required in advance.
+- Rich Messages and basic interface usability belong to the shared product.
+  Compact node cards, collapsed config/instruction blocks and navigation are
+  not licensed features.
+- A paid edition and licensing integration are not planned for the current
+  development cycle. Revisit monetization only after the core has users and
+  measurable maintenance costs.
 - Config delivery should retain native files/QR and optional expanded text.
   Copy buttons must check Telegram's text-length limit; long AWG keys must not
   be truncated to fit.
@@ -75,8 +93,8 @@ Next core tasks:
   Live rollout on a separate local node is still awaiting validation.
 - [x] Remove Python's direct node command transport and the unused Python
   bootstrap/provisioning implementations. Node diagnostics now use driver RPCs.
-  Legacy traffic sampling and alert jobs are disabled while the Pro design is
-  pending; old samples remain in the database.
+  Legacy traffic sampling and alert jobs are disabled pending a separate
+  product decision; old samples remain in the database.
 - [x] Research AmneziaWG changes from the current `0.2.16` image to upstream
   `3.1.20260828` and define the migration. See
   [AMNEZIAWG_UPGRADE_PLAN.md](AMNEZIAWG_UPGRADE_PLAN.md). Existing client

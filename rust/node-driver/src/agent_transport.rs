@@ -6,15 +6,16 @@ use tonic::transport::{Certificate, Channel, ClientTlsConfig, Endpoint, Identity
 
 use crate::agent::v1::node_agent_service_client::NodeAgentServiceClient;
 use crate::agent::v1::{
-    AddAwgUserRequest, AddXrayUserRequest, AgentEmpty, ApplyNodeSettingsRequest, CheckPortsRequest,
-    CheckPortsResponse, DecommissionRequest, DeleteProfileRequest, DeleteRuntimeRequest,
-    DeleteRuntimeResponse, InitXrayRequest, InitXrayResponse, InstallDockerRequest,
-    InstallDockerResponse, ListRemoteProfilesRequest, LocalHealth, OpenPortsRequest,
-    OpenPortsResponse, PathExistsRequest, PortCheckSpec, RefreshAwgConfigRequest,
-    RefreshAwgConfigResponse, RemoteProfileRecord, RemoveAuthorizedKeyRequest,
-    RemoveAuthorizedKeyResponse, RunDiagnosticsRequest, RunDiagnosticsResponse,
-    RuntimeCommandResponse, RuntimeFacts, RuntimeFileSpec, SyncNodeEnvRequest, SyncNodeEnvResponse,
-    SyncRuntimeFilesRequest, SyncRuntimeFilesResponse, SyncXrayRequest, SyncXrayResponse,
+    AddAwgUserRequest, AddXrayUserRequest, AgentEmpty, ApplyBackendNodeSettingsRequest,
+    ApplyNodeSettingsRequest, CheckPortsRequest, CheckPortsResponse, DecommissionRequest,
+    DeleteProfileRequest, DeleteRuntimeRequest, DeleteRuntimeResponse, InitXrayRequest,
+    InitXrayResponse, InstallDockerRequest, InstallDockerResponse, ListRemoteProfilesRequest,
+    LocalHealth, OpenPortsRequest, OpenPortsResponse, PathExistsRequest, PortCheckSpec,
+    RefreshAwgConfigRequest, RefreshAwgConfigResponse, RemoteProfileRecord,
+    RemoveAuthorizedKeyRequest, RemoveAuthorizedKeyResponse, RunDiagnosticsRequest,
+    RunDiagnosticsResponse, RuntimeCommandResponse, RuntimeFacts, RuntimeFileSpec,
+    SyncNodeEnvRequest, SyncNodeEnvResponse, SyncRuntimeFilesRequest, SyncRuntimeFilesResponse,
+    SyncXrayRequest, SyncXrayResponse,
 };
 
 pub struct AgentTransport {
@@ -35,6 +36,41 @@ fn required_tls_path(name: &str) -> std::io::Result<String> {
 }
 
 impl AgentTransport {
+    pub async fn apply_backend_node_settings(
+        &self,
+        request: ApplyBackendNodeSettingsRequest,
+    ) -> Result<RuntimeCommandResponse, tonic::Status> {
+        let mut client = self.client().await.map_err(|err| {
+            tonic::Status::unavailable(format!("failed to connect to node agent: {err}"))
+        })?;
+        Ok(client
+            .apply_backend_node_settings(request)
+            .await?
+            .into_inner())
+    }
+
+    pub async fn recover_backend_node_settings(
+        &self,
+        request: ApplyBackendNodeSettingsRequest,
+    ) -> Result<RuntimeCommandResponse, tonic::Status> {
+        let mut client = self.client().await.map_err(|err| {
+            tonic::Status::unavailable(format!("failed to connect to node agent: {err}"))
+        })?;
+        Ok(client
+            .recover_backend_node_settings(request)
+            .await?
+            .into_inner())
+    }
+
+    pub async fn resolve_backend_node_settings(
+        &self,
+        request: ApplyBackendNodeSettingsRequest,
+    ) -> Result<RuntimeCommandResponse, tonic::Status> {
+        let mut client = self.client().await.map_err(|err| {
+            tonic::Status::unavailable(format!("failed to connect to node agent: {err}"))
+        })?;
+        Ok(client.resolve_backend_node_settings(request).await?.into_inner())
+    }
     pub fn new(target: impl Into<String>) -> Self {
         Self {
             target: target.into(),

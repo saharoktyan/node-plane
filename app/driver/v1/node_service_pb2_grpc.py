@@ -50,6 +50,11 @@ class NodeServiceStub(object):
                 request_serializer=driver_dot_v1_dot_node__service__pb2.GetNodeDiagnosticsRequest.SerializeToString,
                 response_deserializer=driver_dot_v1_dot_node__service__pb2.GetNodeDiagnosticsResponse.FromString,
                 _registered_method=True)
+        self.InspectBackendNode = channel.unary_unary(
+                '/nodeplane.driver.v1.NodeService/InspectBackendNode',
+                request_serializer=driver_dot_v1_dot_node__service__pb2.InspectBackendNodeRequest.SerializeToString,
+                response_deserializer=driver_dot_v1_dot_node__service__pb2.BackendNodeObservation.FromString,
+                _registered_method=True)
         self.WatchNodeHealth = channel.unary_stream(
                 '/nodeplane.driver.v1.NodeService/WatchNodeHealth',
                 request_serializer=driver_dot_v1_dot_node__service__pb2.WatchNodeHealthRequest.SerializeToString,
@@ -99,6 +104,13 @@ class NodeServiceServicer(object):
 
     def GetNodeDiagnostics(self, request, context):
         """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def InspectBackendNode(self, request, context):
+        """Backend-owned read path: only the configured agent target is consulted.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
@@ -156,6 +168,11 @@ def add_NodeServiceServicer_to_server(servicer, server):
                     servicer.GetNodeDiagnostics,
                     request_deserializer=driver_dot_v1_dot_node__service__pb2.GetNodeDiagnosticsRequest.FromString,
                     response_serializer=driver_dot_v1_dot_node__service__pb2.GetNodeDiagnosticsResponse.SerializeToString,
+            ),
+            'InspectBackendNode': grpc.unary_unary_rpc_method_handler(
+                    servicer.InspectBackendNode,
+                    request_deserializer=driver_dot_v1_dot_node__service__pb2.InspectBackendNodeRequest.FromString,
+                    response_serializer=driver_dot_v1_dot_node__service__pb2.BackendNodeObservation.SerializeToString,
             ),
             'WatchNodeHealth': grpc.unary_stream_rpc_method_handler(
                     servicer.WatchNodeHealth,
@@ -269,6 +286,33 @@ class NodeService(object):
             '/nodeplane.driver.v1.NodeService/GetNodeDiagnostics',
             driver_dot_v1_dot_node__service__pb2.GetNodeDiagnosticsRequest.SerializeToString,
             driver_dot_v1_dot_node__service__pb2.GetNodeDiagnosticsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def InspectBackendNode(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/nodeplane.driver.v1.NodeService/InspectBackendNode',
+            driver_dot_v1_dot_node__service__pb2.InspectBackendNodeRequest.SerializeToString,
+            driver_dot_v1_dot_node__service__pb2.BackendNodeObservation.FromString,
             options,
             channel_credentials,
             insecure,

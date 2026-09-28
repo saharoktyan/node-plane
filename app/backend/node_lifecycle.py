@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
-import re
 from uuid import uuid4
 
 from .authorization import AccessDenied, require_permission
@@ -19,6 +18,8 @@ class NodeLifecycle:
         self.db = db
 
     def initialize_schema(self):
+        from .node_settings import NodeSettingsService
+        NodeSettingsService(self.db).initialize_schema()
         with self.db.transaction() as conn:
             conn.execute('''CREATE TABLE IF NOT EXISTS backend_node_drains (
                 node_key TEXT PRIMARY KEY REFERENCES backend_nodes(key),
@@ -49,12 +50,16 @@ class NodeLifecycle:
                 node_key TEXT PRIMARY KEY REFERENCES backend_nodes(key),
                 target TEXT NOT NULL
             )''')
+            conn.execute('''CREATE TABLE IF NOT EXISTS backend_node_host_identities (
+                node_key TEXT PRIMARY KEY REFERENCES backend_nodes(key),
+                fingerprint TEXT NOT NULL
+            )''')
 
-    def bind_verification_target(self, actor, node_key, target):
-        """Bind the future host check while the node is still active."""
+    def bind_verification_target(self, actor, node_key, verifier):
+        """Bind an active agent and its host fingerprint before draining."""
         require_permission(actor, 'maintenance.manage')
-        if target != 'local' and (not isinstance(target, str) or not re.fullmatch(r'root@[A-Za-z0-9.\[\]:_-]{1,255}', target)):
-            raise AccessDenied('invalid_verification_target', 422)
+        target = 'local' if verifier.local else verifier.ssh_target
+        fingerprint = verifier.capture_identity(node_key)
         with self.db.transaction() as conn:
             node = conn.execute('''UPDATE backend_nodes SET enabled = enabled
                 WHERE key = ? RETURNING enabled''', (node_key,)).fetchone()
@@ -66,11 +71,16 @@ class NodeLifecycle:
             if old is not None:
                 if old['target'] != target:
                     raise AccessDenied('verification_target_conflict', 409)
-                return {'node_key': node_key, 'target': target}
-            conn.execute('INSERT INTO backend_node_verification_targets(node_key, target) VALUES (?, ?)', (node_key, target))
-            return {'node_key': node_key, 'target': target}
+            identity = conn.execute('SELECT fingerprint FROM backend_node_host_identities WHERE node_key = ?', (node_key,)).fetchone()
+            if identity is not None and identity['fingerprint'] != fingerprint:
+                raise AccessDenied('verification_identity_conflict', 409)
+            if old is None:
+                conn.execute('INSERT INTO backend_node_verification_targets(node_key, target) VALUES (?, ?)', (node_key, target))
+            if identity is None:
+                conn.execute('INSERT INTO backend_node_host_identities(node_key, fingerprint) VALUES (?, ?)', (node_key, fingerprint))
+            return {'node_key': node_key, 'target': target, 'host_fingerprint': fingerprint}
 
-    def start_drain(self, actor, node_key):
+    def start_drain(self, actor, node_key, *, abandon_uncertain_settings=False):
         """Atomically stop new grants and queue revocation of every known target.
 
         Callers must hold the same exclusive lock as backend.executor. A worker
@@ -87,6 +97,12 @@ class NodeLifecycle:
             if previous is not None:
                 return {'node_key': node_key, 'status': 'draining',
                         'operation_ids': json.loads(previous['operation_ids_json'])}
+            if not abandon_uncertain_settings and conn.execute('''SELECT 1 FROM backend_node_settings_tasks WHERE node_key = ?
+                AND status IN ('running', 'blocked')''', (node_key,)).fetchone():
+                raise AccessDenied('node_settings_uncertain', 409)
+            conn.execute("""UPDATE backend_node_settings_tasks SET status = 'superseded' WHERE node_key = ?
+                AND status IN ('awaiting_executor', 'running', 'blocked')""" if abandon_uncertain_settings else
+                "UPDATE backend_node_settings_tasks SET status = 'superseded' WHERE node_key = ? AND status = 'awaiting_executor'", (node_key,))
             conn.execute('UPDATE backend_nodes SET enabled = 0 WHERE key = ?', (node_key,))
             # Include historical targets even when their grant was removed: an
             # earlier ensure may have run, timed out, or remained queued.
@@ -212,7 +228,7 @@ class NodeLifecycle:
                         'unfinished_tasks': existing['unfinished_tasks']}
         # Safe without agent contact: the operator explicitly accepts that
         # remote profiles, containers, or a delayed command may still exist.
-        self.start_drain(actor, node_key)
+        self.start_drain(actor, node_key, abandon_uncertain_settings=True)
         with self.db.transaction() as conn:
             node = conn.execute('''UPDATE backend_nodes SET enabled = 0
                 WHERE key = ? RETURNING key''', (node_key,)).fetchone()
@@ -237,6 +253,7 @@ class NodeLifecycle:
             conn.execute('DELETE FROM backend_node_cleanup WHERE node_key = ?', (node_key,))
             conn.execute('DELETE FROM backend_node_drains WHERE node_key = ?', (node_key,))
             conn.execute('DELETE FROM backend_node_verification_targets WHERE node_key = ?', (node_key,))
+            conn.execute('DELETE FROM backend_node_host_identities WHERE node_key = ?', (node_key,))
             conn.execute('DELETE FROM backend_nodes WHERE key = ?', (node_key,))
             return {'node_key': node_key, 'mode': 'registry_only',
                     'unfinished_tasks': len(changed)}
@@ -258,13 +275,15 @@ class NodeLifecycle:
             if cleanup is None or cleanup['phase'] not in {'uninstall_uncertain', 'uninstall_scheduled'}:
                 raise AccessDenied('agent_uninstall_not_requested', 409)
             bound = conn.execute('SELECT target FROM backend_node_verification_targets WHERE node_key = ?', (node_key,)).fetchone()
+            identity = conn.execute('SELECT fingerprint FROM backend_node_host_identities WHERE node_key = ?', (node_key,)).fetchone()
             requested_target = 'local' if verifier.local else verifier.ssh_target
-            if bound is None or bound['target'] != requested_target:
+            if bound is None or bound['target'] != requested_target or identity is None:
                 raise AccessDenied('verification_target_mismatch', 409)
-        evidence = verifier.verify(node_key)
+        evidence = verifier.verify(node_key, identity['fingerprint'])
         if (not isinstance(evidence, dict) or evidence.get('result') != 'agent_and_standard_artifacts_absent'
                 or evidence.get('method') not in {'local', 'ssh'}
                 or not isinstance(evidence.get('target'), str)
+                or evidence.get('host_fingerprint') != identity['fingerprint']
                 or not isinstance(evidence.get('checked_at'), str)):
             raise ValueError('invalid host verification evidence')
         with self.db.transaction() as conn:
@@ -278,7 +297,9 @@ class NodeLifecycle:
             if not self._revocation_state(conn, node_key)[2]:
                 raise AccessDenied('node_revocations_incomplete', 409)
             bound = conn.execute('SELECT target FROM backend_node_verification_targets WHERE node_key = ?', (node_key,)).fetchone()
-            if bound is None or bound['target'] != evidence['target']:
+            identity = conn.execute('SELECT fingerprint FROM backend_node_host_identities WHERE node_key = ?', (node_key,)).fetchone()
+            if (bound is None or bound['target'] != evidence['target'] or identity is None
+                    or identity['fingerprint'] != evidence['host_fingerprint']):
                 raise AccessDenied('verification_target_mismatch', 409)
             conn.execute('''INSERT INTO backend_node_retirements(
                 node_key, actor_id, mode, reason, previous_cleanup_phase,
@@ -290,5 +311,6 @@ class NodeLifecycle:
             conn.execute('DELETE FROM backend_node_cleanup WHERE node_key = ?', (node_key,))
             conn.execute('DELETE FROM backend_node_drains WHERE node_key = ?', (node_key,))
             conn.execute('DELETE FROM backend_node_verification_targets WHERE node_key = ?', (node_key,))
+            conn.execute('DELETE FROM backend_node_host_identities WHERE node_key = ?', (node_key,))
             conn.execute('DELETE FROM backend_nodes WHERE key = ?', (node_key,))
         return {'node_key': node_key, 'mode': 'verified'}

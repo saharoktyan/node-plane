@@ -215,28 +215,34 @@ class BackendNodeLifecycleTests(unittest.TestCase):
     def test_verified_retirement_requires_uninstall_and_host_evidence(self):
         self.prepare()
         lifecycle = NodeLifecycle(self.db)
-        self.assertEqual(lifecycle.bind_verification_target(self.actor(), 'node', 'root@node.example')['target'], 'root@node.example')
-        self.assertEqual(lifecycle.bind_verification_target(self.actor(), 'node', 'root@node.example')['target'], 'root@node.example')
-        with self.assertRaises(Exception):
-            lifecycle.bind_verification_target(self.actor(), 'node', 'root@wrong.example')
-        lifecycle.start_drain(self.actor(), 'node')
         class Verifier:
             calls = 0
             fail = False
             local = False
             ssh_target = 'root@node.example'
-            def verify(self, node_key):
+            fingerprint = 'a' * 64
+            def capture_identity(self, node_key):
+                return self.fingerprint
+            def verify(self, node_key, expected_fingerprint):
                 self.calls += 1
                 if self.fail:
                     raise TimeoutError('host unreachable')
                 return {'method': 'ssh', 'target': 'root@node.example',
+                    'host_fingerprint': expected_fingerprint,
                     'checked_at': '2026-09-28T00:00:00+00:00',
                     'result': 'agent_and_standard_artifacts_absent'}
         verifier = Verifier()
+        self.assertEqual(lifecycle.bind_verification_target(self.actor(), 'node', verifier)['target'], 'root@node.example')
+        self.assertEqual(lifecycle.bind_verification_target(self.actor(), 'node', verifier)['host_fingerprint'], 'a' * 64)
+        verifier.fingerprint = 'b' * 64
+        with self.assertRaises(Exception):
+            lifecycle.bind_verification_target(self.actor(), 'node', verifier)
+        verifier.fingerprint = 'a' * 64
         verifier.ssh_target = 'root@wrong.example'
         with self.assertRaises(Exception):
-            lifecycle.retire_verified(self.actor(), 'node', verifier)
+            lifecycle.bind_verification_target(self.actor(), 'node', verifier)
         verifier.ssh_target = 'root@node.example'
+        lifecycle.start_drain(self.actor(), 'node')
         with self.assertRaises(Exception):
             lifecycle.retire_verified(self.actor(), 'node', verifier)
         self.assertEqual(verifier.calls, 0)
