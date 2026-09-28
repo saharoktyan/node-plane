@@ -55,6 +55,11 @@ class RuntimeServiceStub(object):
                 request_serializer=driver_dot_v1_dot_runtime__service__pb2.FullCleanupNodeRequest.SerializeToString,
                 response_deserializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
                 _registered_method=True)
+        self.DecommissionNode = channel.unary_unary(
+                '/nodeplane.driver.v1.RuntimeService/DecommissionNode',
+                request_serializer=driver_dot_v1_dot_runtime__service__pb2.DecommissionNodeRequest.SerializeToString,
+                response_deserializer=driver_dot_v1_dot_runtime__service__pb2.DecommissionNodeResponse.FromString,
+                _registered_method=True)
         self.GetAwgEntropy = channel.unary_unary(
                 '/nodeplane.driver.v1.RuntimeService/GetAwgEntropy',
                 request_serializer=driver_dot_v1_dot_runtime__service__pb2.GetAwgEntropyRequest.SerializeToString,
@@ -120,6 +125,13 @@ class RuntimeServiceServicer(object):
 
     def FullCleanupNode(self, request, context):
         """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def DecommissionNode(self, request, context):
+        """Explicit backend-owned path; does not access legacy server/profile tables.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
@@ -194,6 +206,11 @@ def add_RuntimeServiceServicer_to_server(servicer, server):
                     servicer.FullCleanupNode,
                     request_deserializer=driver_dot_v1_dot_runtime__service__pb2.FullCleanupNodeRequest.FromString,
                     response_serializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.SerializeToString,
+            ),
+            'DecommissionNode': grpc.unary_unary_rpc_method_handler(
+                    servicer.DecommissionNode,
+                    request_deserializer=driver_dot_v1_dot_runtime__service__pb2.DecommissionNodeRequest.FromString,
+                    response_serializer=driver_dot_v1_dot_runtime__service__pb2.DecommissionNodeResponse.SerializeToString,
             ),
             'GetAwgEntropy': grpc.unary_unary_rpc_method_handler(
                     servicer.GetAwgEntropy,
@@ -344,6 +361,33 @@ class RuntimeService(object):
             '/nodeplane.driver.v1.RuntimeService/FullCleanupNode',
             driver_dot_v1_dot_runtime__service__pb2.FullCleanupNodeRequest.SerializeToString,
             driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def DecommissionNode(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/nodeplane.driver.v1.RuntimeService/DecommissionNode',
+            driver_dot_v1_dot_runtime__service__pb2.DecommissionNodeRequest.SerializeToString,
+            driver_dot_v1_dot_runtime__service__pb2.DecommissionNodeResponse.FromString,
             options,
             channel_credentials,
             insecure,

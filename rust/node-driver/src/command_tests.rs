@@ -1,6 +1,90 @@
 use super::*;
 use prost::Message;
 
+fn explicit_intent() -> driver::v1::ApplyProfileIntentRequest {
+    driver::v1::ApplyProfileIntentRequest {
+        node_key: "node".into(),
+        runtime_name: "p_test".into(),
+        protocol_kind: "awg".into(),
+        action: "ensure".into(),
+        desired_revision: 1,
+        xray: None,
+    }
+}
+
+#[test]
+fn command_lookup_is_read_only_and_recovers_saved_result() {
+    let state = DriverState::default();
+    assert!(state.get_operation_by_command("unknown").is_none());
+    assert!(state.get_operation_by_command("").is_none());
+    let request = install_request("lookup-command");
+    let CommandStart::New(execution) = start(&state, &request) else {
+        panic!()
+    };
+    assert_eq!(
+        state
+            .get_operation_by_command("lookup-command")
+            .unwrap()
+            .status,
+        "RUNNING"
+    );
+    execution
+        .finish_with_result("SUCCEEDED", "done", "private result")
+        .unwrap();
+    let found = state.get_operation_by_command("lookup-command").unwrap();
+    assert_eq!(found.status, "SUCCEEDED");
+    assert_eq!(found.result_json, "private result");
+    assert_eq!(state.list_operations("", "", "", 10).len(), 1);
+}
+
+#[test]
+fn explicit_intent_validates_identity_and_protocol_before_dispatch() {
+    let mut req = explicit_intent();
+    assert!(validate_profile_intent(&req).is_ok());
+    req.runtime_name = "unsafe;command".into();
+    assert!(validate_profile_intent(&req).is_err());
+    req.runtime_name = "p_test".into();
+    req.protocol_kind = "xray".into();
+    assert!(validate_profile_intent(&req).is_err());
+    req.xray = Some(driver::v1::XraySpec {
+        profile_name: "p_test".into(),
+        uuid: "12345678-1234-1234-1234-123456789abc".into(),
+        short_id: "123456789abcdef0".into(),
+    });
+    assert!(validate_profile_intent(&req).is_ok());
+    req.action = "delete".into();
+    assert!(validate_profile_intent(&req).is_err());
+    req.xray = None;
+    assert!(validate_profile_intent(&req).is_ok());
+}
+
+#[test]
+fn explicit_intent_revision_cannot_reuse_another_commands_identity() {
+    let state = DriverState::default();
+    let req = keyed(explicit_intent(), "backend-task-1");
+    let identity = CommandIdentity::from_request(&req).unwrap();
+    let CommandStart::New(execution) = state
+        .begin_command("apply_profile_intent", "node", "p_test", identity)
+        .unwrap()
+    else {
+        panic!()
+    };
+    execution.finish("SUCCEEDED", "applied").unwrap();
+    let mut changed = explicit_intent();
+    changed.desired_revision = 2;
+    let changed = keyed(changed, "backend-task-1");
+    assert!(
+        state
+            .begin_command(
+                "apply_profile_intent",
+                "node",
+                "p_test",
+                CommandIdentity::from_request(&changed).unwrap()
+            )
+            .is_err()
+    );
+}
+
 fn keyed<T>(message: T, key: &str) -> Request<T> {
     let mut request = Request::new(message);
     request

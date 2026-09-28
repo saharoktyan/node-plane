@@ -25,7 +25,7 @@ _sym_db = _symbol_database.Default()
 from driver.v1 import types_pb2 as driver_dot_v1_dot_types__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1f\x64river/v1/runtime_service.proto\x12\x13nodeplane.driver.v1\x1a\x15\x64river/v1/types.proto\"A\n\x14\x42ootstrapNodeRequest\x12\x10\n\x08node_key\x18\x01 \x01(\t\x12\x17\n\x0fpreserve_config\x18\x02 \x01(\x08\"A\n\x14ReinstallNodeRequest\x12\x10\n\x08node_key\x18\x01 \x01(\t\x12\x17\n\x0fpreserve_config\x18\x02 \x01(\x08\"A\n\x14\x44\x65leteRuntimeRequest\x12\x10\n\x08node_key\x18\x01 \x01(\t\x12\x17\n\x0fpreserve_config\x18\x02 \x01(\x08\"B\n\x16\x46ullCleanupNodeRequest\x12\x10\n\x08node_key\x18\x01 \x01(\t\x12\x16\n\x0eremove_ssh_key\x18\x02 \x01(\x08\"(\n\x14GetAwgEntropyRequest\x12\x10\n\x08node_key\x18\x01 \x01(\t\":\n\x15GetAwgEntropyResponse\x12\x10\n\x08node_key\x18\x01 \x01(\t\x12\x0f\n\x07summary\x18\x02 \x01(\t\"/\n\x1bRegenerateAwgEntropyRequest\x12\x10\n\x08node_key\x18\x01 \x01(\t\"&\n\x12SyncRuntimeRequest\x12\x10\n\x08node_key\x18\x01 \x01(\t\"#\n\x0fSyncXrayRequest\x12\x10\n\x08node_key\x18\x01 \x01(\t\",\n\x18\x41pplyNodeSettingsRequest\x12\x10\n\x08node_key\x18\x01 \x01(\t\"R\n\x17RefreshAwgConfigRequest\x12\x10\n\x08node_key\x18\x01 \x01(\t\x12\x0f\n\x07wg_conf\x18\x02 \x01(\t\x12\x14\n\x0cprofile_name\x18\x03 \x01(\t\"<\n\x18RefreshAwgConfigResponse\x12\x0f\n\x07wg_conf\x18\x01 \x01(\t\x12\x0f\n\x07vpn_key\x18\x02 \x01(\t\"+\n\x17GetRuntimeStatusRequest\x12\x10\n\x08node_key\x18\x01 \x01(\t\"\x85\x01\n\x18GetRuntimeStatusResponse\x12\x33\n\x07runtime\x18\x01 \x01(\x0b\x32\".nodeplane.driver.v1.RuntimeStatus\x12\x34\n\x08services\x18\x02 \x03(\x0b\x32\".nodeplane.driver.v1.ServiceStatus\"$\n\"ListNodesNeedingRuntimeSyncRequest\"O\n#ListNodesNeedingRuntimeSyncResponse\x12(\n\x05items\x18\x01 \x03(\x0b\x32\x19.nodeplane.driver.v1.Node2\xc1\n\n\x0eRuntimeService\x12g\n\rBootstrapNode\x12).nodeplane.driver.v1.BootstrapNodeRequest\x1a+.nodeplane.driver.v1.StartOperationResponse\x12g\n\rReinstallNode\x12).nodeplane.driver.v1.ReinstallNodeRequest\x1a+.nodeplane.driver.v1.StartOperationResponse\x12g\n\rDeleteRuntime\x12).nodeplane.driver.v1.DeleteRuntimeRequest\x1a+.nodeplane.driver.v1.StartOperationResponse\x12k\n\x0f\x46ullCleanupNode\x12+.nodeplane.driver.v1.FullCleanupNodeRequest\x1a+.nodeplane.driver.v1.StartOperationResponse\x12\x66\n\rGetAwgEntropy\x12).nodeplane.driver.v1.GetAwgEntropyRequest\x1a*.nodeplane.driver.v1.GetAwgEntropyResponse\x12u\n\x14RegenerateAwgEntropy\x12\x30.nodeplane.driver.v1.RegenerateAwgEntropyRequest\x1a+.nodeplane.driver.v1.StartOperationResponse\x12\x63\n\x0bSyncRuntime\x12\'.nodeplane.driver.v1.SyncRuntimeRequest\x1a+.nodeplane.driver.v1.StartOperationResponse\x12]\n\x08SyncXray\x12$.nodeplane.driver.v1.SyncXrayRequest\x1a+.nodeplane.driver.v1.StartOperationResponse\x12o\n\x11\x41pplyNodeSettings\x12-.nodeplane.driver.v1.ApplyNodeSettingsRequest\x1a+.nodeplane.driver.v1.StartOperationResponse\x12o\n\x10RefreshAwgConfig\x12,.nodeplane.driver.v1.RefreshAwgConfigRequest\x1a-.nodeplane.driver.v1.RefreshAwgConfigResponse\x12o\n\x10GetRuntimeStatus\x12,.nodeplane.driver.v1.GetRuntimeStatusRequest\x1a-.nodeplane.driver.v1.GetRuntimeStatusResponse\x12\x90\x01\n\x1bListNodesNeedingRuntimeSync\x12\x37.nodeplane.driver.v1.ListNodesNeedingRuntimeSyncRequest\x1a\x38.nodeplane.driver.v1.ListNodesNeedingRuntimeSyncResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1f\x64river/v1/runtime_service.proto\x12\x13nodeplane.driver.v1\x1a\x15\x64river/v1/types.proto\"A\n\x14\x42ootstrapNodeRequest\x12\x10\n\x08node_key\x18\x01 \x01(\t\x12\x17\n\x0fpreserve_config\x18\x02 \x01(\x08\"A\n\x14ReinstallNodeRequest\x12\x10\n\x08node_key\x18\x01 \x01(\t\x12\x17\n\x0fpreserve_config\x18\x02 \x01(\x08\"A\n\x14\x44\x65leteRuntimeRequest\x12\x10\n\x08node_key\x18\x01 \x01(\t\x12\x17\n\x0fpreserve_config\x18\x02 \x01(\x08\"B\n\x16\x46ullCleanupNodeRequest\x12\x10\n\x08node_key\x18\x01 \x01(\t\x12\x16\n\x0eremove_ssh_key\x18\x02 \x01(\x08\"N\n\x17\x44\x65\x63ommissionNodeRequest\x12\x10\n\x08node_key\x18\x01 \x01(\t\x12\x12\n\ncommand_id\x18\x02 \x01(\t\x12\r\n\x05phase\x18\x03 \x01(\t\":\n\x18\x44\x65\x63ommissionNodeResponse\x12\r\n\x05phase\x18\x01 \x01(\t\x12\x0f\n\x07summary\x18\x02 \x01(\t\"(\n\x14GetAwgEntropyRequest\x12\x10\n\x08node_key\x18\x01 \x01(\t\":\n\x15GetAwgEntropyResponse\x12\x10\n\x08node_key\x18\x01 \x01(\t\x12\x0f\n\x07summary\x18\x02 \x01(\t\"/\n\x1bRegenerateAwgEntropyRequest\x12\x10\n\x08node_key\x18\x01 \x01(\t\"&\n\x12SyncRuntimeRequest\x12\x10\n\x08node_key\x18\x01 \x01(\t\"#\n\x0fSyncXrayRequest\x12\x10\n\x08node_key\x18\x01 \x01(\t\",\n\x18\x41pplyNodeSettingsRequest\x12\x10\n\x08node_key\x18\x01 \x01(\t\"R\n\x17RefreshAwgConfigRequest\x12\x10\n\x08node_key\x18\x01 \x01(\t\x12\x0f\n\x07wg_conf\x18\x02 \x01(\t\x12\x14\n\x0cprofile_name\x18\x03 \x01(\t\"<\n\x18RefreshAwgConfigResponse\x12\x0f\n\x07wg_conf\x18\x01 \x01(\t\x12\x0f\n\x07vpn_key\x18\x02 \x01(\t\"+\n\x17GetRuntimeStatusRequest\x12\x10\n\x08node_key\x18\x01 \x01(\t\"\x85\x01\n\x18GetRuntimeStatusResponse\x12\x33\n\x07runtime\x18\x01 \x01(\x0b\x32\".nodeplane.driver.v1.RuntimeStatus\x12\x34\n\x08services\x18\x02 \x03(\x0b\x32\".nodeplane.driver.v1.ServiceStatus\"$\n\"ListNodesNeedingRuntimeSyncRequest\"O\n#ListNodesNeedingRuntimeSyncResponse\x12(\n\x05items\x18\x01 \x03(\x0b\x32\x19.nodeplane.driver.v1.Node2\xb2\x0b\n\x0eRuntimeService\x12g\n\rBootstrapNode\x12).nodeplane.driver.v1.BootstrapNodeRequest\x1a+.nodeplane.driver.v1.StartOperationResponse\x12g\n\rReinstallNode\x12).nodeplane.driver.v1.ReinstallNodeRequest\x1a+.nodeplane.driver.v1.StartOperationResponse\x12g\n\rDeleteRuntime\x12).nodeplane.driver.v1.DeleteRuntimeRequest\x1a+.nodeplane.driver.v1.StartOperationResponse\x12k\n\x0f\x46ullCleanupNode\x12+.nodeplane.driver.v1.FullCleanupNodeRequest\x1a+.nodeplane.driver.v1.StartOperationResponse\x12o\n\x10\x44\x65\x63ommissionNode\x12,.nodeplane.driver.v1.DecommissionNodeRequest\x1a-.nodeplane.driver.v1.DecommissionNodeResponse\x12\x66\n\rGetAwgEntropy\x12).nodeplane.driver.v1.GetAwgEntropyRequest\x1a*.nodeplane.driver.v1.GetAwgEntropyResponse\x12u\n\x14RegenerateAwgEntropy\x12\x30.nodeplane.driver.v1.RegenerateAwgEntropyRequest\x1a+.nodeplane.driver.v1.StartOperationResponse\x12\x63\n\x0bSyncRuntime\x12\'.nodeplane.driver.v1.SyncRuntimeRequest\x1a+.nodeplane.driver.v1.StartOperationResponse\x12]\n\x08SyncXray\x12$.nodeplane.driver.v1.SyncXrayRequest\x1a+.nodeplane.driver.v1.StartOperationResponse\x12o\n\x11\x41pplyNodeSettings\x12-.nodeplane.driver.v1.ApplyNodeSettingsRequest\x1a+.nodeplane.driver.v1.StartOperationResponse\x12o\n\x10RefreshAwgConfig\x12,.nodeplane.driver.v1.RefreshAwgConfigRequest\x1a-.nodeplane.driver.v1.RefreshAwgConfigResponse\x12o\n\x10GetRuntimeStatus\x12,.nodeplane.driver.v1.GetRuntimeStatusRequest\x1a-.nodeplane.driver.v1.GetRuntimeStatusResponse\x12\x90\x01\n\x1bListNodesNeedingRuntimeSync\x12\x37.nodeplane.driver.v1.ListNodesNeedingRuntimeSyncRequest\x1a\x38.nodeplane.driver.v1.ListNodesNeedingRuntimeSyncResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -40,30 +40,34 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_DELETERUNTIMEREQUEST']._serialized_end=278
   _globals['_FULLCLEANUPNODEREQUEST']._serialized_start=280
   _globals['_FULLCLEANUPNODEREQUEST']._serialized_end=346
-  _globals['_GETAWGENTROPYREQUEST']._serialized_start=348
-  _globals['_GETAWGENTROPYREQUEST']._serialized_end=388
-  _globals['_GETAWGENTROPYRESPONSE']._serialized_start=390
-  _globals['_GETAWGENTROPYRESPONSE']._serialized_end=448
-  _globals['_REGENERATEAWGENTROPYREQUEST']._serialized_start=450
-  _globals['_REGENERATEAWGENTROPYREQUEST']._serialized_end=497
-  _globals['_SYNCRUNTIMEREQUEST']._serialized_start=499
-  _globals['_SYNCRUNTIMEREQUEST']._serialized_end=537
-  _globals['_SYNCXRAYREQUEST']._serialized_start=539
-  _globals['_SYNCXRAYREQUEST']._serialized_end=574
-  _globals['_APPLYNODESETTINGSREQUEST']._serialized_start=576
-  _globals['_APPLYNODESETTINGSREQUEST']._serialized_end=620
-  _globals['_REFRESHAWGCONFIGREQUEST']._serialized_start=622
-  _globals['_REFRESHAWGCONFIGREQUEST']._serialized_end=704
-  _globals['_REFRESHAWGCONFIGRESPONSE']._serialized_start=706
-  _globals['_REFRESHAWGCONFIGRESPONSE']._serialized_end=766
-  _globals['_GETRUNTIMESTATUSREQUEST']._serialized_start=768
-  _globals['_GETRUNTIMESTATUSREQUEST']._serialized_end=811
-  _globals['_GETRUNTIMESTATUSRESPONSE']._serialized_start=814
-  _globals['_GETRUNTIMESTATUSRESPONSE']._serialized_end=947
-  _globals['_LISTNODESNEEDINGRUNTIMESYNCREQUEST']._serialized_start=949
-  _globals['_LISTNODESNEEDINGRUNTIMESYNCREQUEST']._serialized_end=985
-  _globals['_LISTNODESNEEDINGRUNTIMESYNCRESPONSE']._serialized_start=987
-  _globals['_LISTNODESNEEDINGRUNTIMESYNCRESPONSE']._serialized_end=1066
-  _globals['_RUNTIMESERVICE']._serialized_start=1069
-  _globals['_RUNTIMESERVICE']._serialized_end=2414
+  _globals['_DECOMMISSIONNODEREQUEST']._serialized_start=348
+  _globals['_DECOMMISSIONNODEREQUEST']._serialized_end=426
+  _globals['_DECOMMISSIONNODERESPONSE']._serialized_start=428
+  _globals['_DECOMMISSIONNODERESPONSE']._serialized_end=486
+  _globals['_GETAWGENTROPYREQUEST']._serialized_start=488
+  _globals['_GETAWGENTROPYREQUEST']._serialized_end=528
+  _globals['_GETAWGENTROPYRESPONSE']._serialized_start=530
+  _globals['_GETAWGENTROPYRESPONSE']._serialized_end=588
+  _globals['_REGENERATEAWGENTROPYREQUEST']._serialized_start=590
+  _globals['_REGENERATEAWGENTROPYREQUEST']._serialized_end=637
+  _globals['_SYNCRUNTIMEREQUEST']._serialized_start=639
+  _globals['_SYNCRUNTIMEREQUEST']._serialized_end=677
+  _globals['_SYNCXRAYREQUEST']._serialized_start=679
+  _globals['_SYNCXRAYREQUEST']._serialized_end=714
+  _globals['_APPLYNODESETTINGSREQUEST']._serialized_start=716
+  _globals['_APPLYNODESETTINGSREQUEST']._serialized_end=760
+  _globals['_REFRESHAWGCONFIGREQUEST']._serialized_start=762
+  _globals['_REFRESHAWGCONFIGREQUEST']._serialized_end=844
+  _globals['_REFRESHAWGCONFIGRESPONSE']._serialized_start=846
+  _globals['_REFRESHAWGCONFIGRESPONSE']._serialized_end=906
+  _globals['_GETRUNTIMESTATUSREQUEST']._serialized_start=908
+  _globals['_GETRUNTIMESTATUSREQUEST']._serialized_end=951
+  _globals['_GETRUNTIMESTATUSRESPONSE']._serialized_start=954
+  _globals['_GETRUNTIMESTATUSRESPONSE']._serialized_end=1087
+  _globals['_LISTNODESNEEDINGRUNTIMESYNCREQUEST']._serialized_start=1089
+  _globals['_LISTNODESNEEDINGRUNTIMESYNCREQUEST']._serialized_end=1125
+  _globals['_LISTNODESNEEDINGRUNTIMESYNCRESPONSE']._serialized_start=1127
+  _globals['_LISTNODESNEEDINGRUNTIMESYNCRESPONSE']._serialized_end=1206
+  _globals['_RUNTIMESERVICE']._serialized_start=1209
+  _globals['_RUNTIMESERVICE']._serialized_end=2667
 # @@protoc_insertion_point(module_scope)

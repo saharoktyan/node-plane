@@ -39,9 +39,9 @@ use driver::v1::provisioning_service_server::{ProvisioningService, ProvisioningS
 use driver::v1::runtime_service_server::{RuntimeService, RuntimeServiceServer};
 use driver::v1::telemetry_service_server::{TelemetryService, TelemetryServiceServer};
 use driver::v1::{
-    ApplyNodeSettingsRequest, BootstrapNodeRequest, CheckPortsRequest,
-    DeleteProfileFromNodeRequest, DeleteRuntimeRequest, FullCleanupNodeRequest,
-    GetAwgEntropyRequest, GetAwgEntropyResponse, GetNodeDiagnosticsRequest,
+    ApplyNodeSettingsRequest, BootstrapNodeRequest, CheckPortsRequest, DecommissionNodeRequest,
+    DecommissionNodeResponse, DeleteProfileFromNodeRequest, DeleteRuntimeRequest,
+    FullCleanupNodeRequest, GetAwgEntropyRequest, GetAwgEntropyResponse, GetNodeDiagnosticsRequest,
     GetNodeDiagnosticsResponse, GetNodeRequest, GetOperationRequest, GetProfileUsageRequest,
     GetProfileUsageResponse, GetRuntimeStatusRequest, GetRuntimeStatusResponse,
     InstallDockerRequest, ListNodesNeedingRuntimeSyncRequest, ListNodesNeedingRuntimeSyncResponse,
@@ -1801,8 +1801,177 @@ impl NodeService for NodeApi {
     }
 }
 
+fn validate_profile_intent(req: &driver::v1::ApplyProfileIntentRequest) -> Result<(), Status> {
+    let valid_name = |value: &str| {
+        !value.is_empty()
+            && value.len() <= 64
+            && value
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || b"_-".contains(&c))
+    };
+    if !valid_name(&req.node_key)
+        || !valid_name(&req.runtime_name)
+        || req.desired_revision == 0
+        || !matches!(req.protocol_kind.as_str(), "awg" | "xray")
+        || !matches!(req.action.as_str(), "ensure" | "delete")
+    {
+        return Err(Status::invalid_argument("invalid profile intent"));
+    }
+    if req.protocol_kind == "xray" && req.action == "ensure" {
+        let spec = req
+            .xray
+            .as_ref()
+            .ok_or_else(|| Status::invalid_argument("xray identity is required"))?;
+        if spec.profile_name != req.runtime_name
+            || uuid::Uuid::parse_str(&spec.uuid).is_err()
+            || spec.short_id.len() != 16
+            || !spec.short_id.bytes().all(|c| c.is_ascii_hexdigit())
+        {
+            return Err(Status::invalid_argument("invalid xray identity"));
+        }
+    } else if req.xray.is_some() {
+        return Err(Status::invalid_argument("unexpected xray identity"));
+    }
+    Ok(())
+}
+
 #[tonic::async_trait]
 impl ProvisioningService for ProvisioningApi {
+    async fn recover_profile_intent(
+        &self,
+        request: Request<driver::v1::ApplyProfileIntentRequest>,
+    ) -> Result<Response<driver::v1::RecoverProfileIntentResponse>, Status> {
+        validate_profile_intent(request.get_ref())?;
+        let identity = CommandIdentity::from_request(&request)?
+            .ok_or_else(|| Status::invalid_argument("command identity is required"))?;
+        let command_id = identity.command_id().to_string();
+        let req = request.into_inner();
+        let target = self
+            .ctx
+            .agent_target(&req.node_key)
+            .ok_or_else(|| Status::failed_precondition("agent not configured"))?;
+        let spec = req.xray.as_ref();
+        let result = agent_transport::AgentTransport::new(target)
+            .recover_profile_intent(agent::v1::ApplyProfileIntentRequest {
+                command_id,
+                protocol_kind: req.protocol_kind,
+                profile_name: req.runtime_name,
+                desired_revision: req.desired_revision,
+                action: req.action,
+                uuid: spec.map_or_else(String::new, |s| s.uuid.clone()),
+                short_id: spec.map_or_else(String::new, |s| s.short_id.clone()),
+            })
+            .await?;
+        Ok(Response::new(driver::v1::RecoverProfileIntentResponse {
+            payload_json: result.payload_json,
+        }))
+    }
+
+    async fn resolve_profile_intent(
+        &self,
+        request: Request<driver::v1::ApplyProfileIntentRequest>,
+    ) -> Result<Response<driver::v1::ProfileInspection>, Status> {
+        validate_profile_intent(request.get_ref())?;
+        let identity = CommandIdentity::from_request(&request)?
+            .ok_or_else(|| Status::invalid_argument("command identity is required"))?;
+        let command_id = identity.command_id().to_string();
+        let req = request.into_inner();
+        let target = self
+            .ctx
+            .agent_target(&req.node_key)
+            .ok_or_else(|| Status::failed_precondition("agent not configured"))?;
+        let spec = req.xray.as_ref();
+        let result = agent_transport::AgentTransport::new(target)
+            .resolve_profile_intent(agent::v1::ApplyProfileIntentRequest {
+                command_id,
+                protocol_kind: req.protocol_kind,
+                profile_name: req.runtime_name,
+                desired_revision: req.desired_revision,
+                action: req.action,
+                uuid: spec.map_or_else(String::new, |s| s.uuid.clone()),
+                short_id: spec.map_or_else(String::new, |s| s.short_id.clone()),
+            })
+            .await?;
+        Ok(Response::new(driver::v1::ProfileInspection {
+            disk_present: result.disk_present,
+            live_present: result.live_present,
+            identity_matches: result.identity_matches,
+            config_available: result.config_available,
+        }))
+    }
+
+    async fn inspect_profile_intent(
+        &self,
+        request: Request<driver::v1::ApplyProfileIntentRequest>,
+    ) -> Result<Response<driver::v1::ProfileInspection>, Status> {
+        let req = request.into_inner();
+        validate_profile_intent(&req)?;
+        let target = self
+            .ctx
+            .agent_target(&req.node_key)
+            .ok_or_else(|| Status::failed_precondition("agent not configured"))?;
+        let expected = req.xray.as_ref().map_or("", |s| s.uuid.as_str());
+        let result = agent_transport::AgentTransport::new(target)
+            .inspect_profile(&req.protocol_kind, &req.runtime_name, expected)
+            .await?;
+        Ok(Response::new(driver::v1::ProfileInspection {
+            disk_present: result.disk_present,
+            live_present: result.live_present,
+            identity_matches: result.identity_matches,
+            config_available: result.config_available,
+        }))
+    }
+
+    async fn apply_profile_intent(
+        &self,
+        request: Request<driver::v1::ApplyProfileIntentRequest>,
+    ) -> Result<Response<StartOperationResponse>, Status> {
+        validate_profile_intent(request.get_ref())?;
+        let identity = CommandIdentity::from_request(&request)?
+            .ok_or_else(|| Status::invalid_argument("command identity is required"))?;
+        let command_id = identity.command_id().to_string();
+        let req = request.into_inner();
+        let execution = match self.ctx.state.begin_command(
+            "apply_profile_intent",
+            &req.node_key,
+            &req.runtime_name,
+            Some(identity),
+        )? {
+            CommandStart::New(operation) => operation,
+            CommandStart::Existing(response) => return Ok(Response::new(response)),
+        };
+        let Some(target) = self.ctx.agent_target(&req.node_key) else {
+            return Ok(Response::new(execution.missing_agent()?));
+        };
+        let transport = agent_transport::AgentTransport::new(target);
+        let spec = req.xray.as_ref();
+        let result = transport
+            .apply_profile_intent(agent::v1::ApplyProfileIntentRequest {
+                command_id,
+                protocol_kind: req.protocol_kind,
+                profile_name: req.runtime_name,
+                desired_revision: req.desired_revision,
+                action: req.action,
+                uuid: spec.map_or_else(String::new, |s| s.uuid.clone()),
+                short_id: spec.map_or_else(String::new, |s| s.short_id.clone()),
+            })
+            .await;
+        let response = match result {
+            Ok(result) => execution.finish_with_result(
+                "SUCCEEDED",
+                "profile intent applied",
+                &result.payload_json,
+            )?,
+            // A transport error does not establish whether the agent applied the
+            // command. Do not automatically issue another identity after failure.
+            Err(_) => execution.fail_with_error(
+                "outcome_unknown",
+                "agent execution outcome is unknown; reconcile node state",
+            )?,
+        };
+        Ok(Response::new(response))
+    }
+
     async fn ensure_profile_on_node(
         &self,
         request: Request<driver::v1::EnsureProfileOnNodeRequest>,
@@ -2334,6 +2503,49 @@ impl ProvisioningService for ProvisioningApi {
 
 #[tonic::async_trait]
 impl RuntimeService for RuntimeApi {
+    async fn decommission_node(
+        &self,
+        request: Request<DecommissionNodeRequest>,
+    ) -> Result<Response<DecommissionNodeResponse>, Status> {
+        let req = request.into_inner();
+        if uuid::Uuid::parse_str(&req.command_id)
+            .map(|value| value.to_string() != req.command_id)
+            .unwrap_or(true)
+        {
+            return Err(Status::invalid_argument(
+                "invalid decommission command identity",
+            ));
+        }
+        let target = self
+            .ctx
+            .agent_target(&req.node_key)
+            .ok_or_else(|| Status::failed_precondition("no node-agent target configured"))?;
+        let transport = agent_transport::AgentTransport::new(target);
+        let summary = match req.phase.as_str() {
+            "prepare" => {
+                transport.prepare_decommission(&req.command_id).await?;
+                "profile mutations fenced"
+            }
+            "delete_runtime" => {
+                transport
+                    .delete_runtime_for_decommission(&req.command_id)
+                    .await?;
+                "runtime cleanup verified by agent"
+            }
+            "uninstall" => {
+                let public_key = self.ctx.bot_public_key()?;
+                transport
+                    .uninstall_agent_for_decommission(&req.command_id, &public_key)
+                    .await?;
+                "agent uninstall scheduled; independent verification still required"
+            }
+            _ => return Err(Status::invalid_argument("invalid decommission phase")),
+        };
+        Ok(Response::new(DecommissionNodeResponse {
+            phase: req.phase,
+            summary: summary.to_string(),
+        }))
+    }
     async fn apply_node_settings(
         &self,
         request: Request<ApplyNodeSettingsRequest>,
@@ -3250,6 +3462,26 @@ impl TelemetryService for TelemetryApi {
 
 #[tonic::async_trait]
 impl OperationService for OperationApi {
+    async fn get_operation_by_command(
+        &self,
+        request: Request<driver::v1::GetOperationByCommandRequest>,
+    ) -> Result<Response<Operation>, Status> {
+        let command_id = request.into_inner().command_id;
+        if command_id.is_empty()
+            || command_id.len() > 128
+            || !command_id
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || b"-_.:".contains(&c))
+        {
+            return Err(Status::invalid_argument("invalid command identity"));
+        }
+        self.ctx
+            .state
+            .get_operation_by_command(&command_id)
+            .map(Response::new)
+            .ok_or_else(|| Status::not_found("command operation not found"))
+    }
+
     async fn get_operation(
         &self,
         request: Request<GetOperationRequest>,

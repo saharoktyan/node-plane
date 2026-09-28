@@ -32,6 +32,9 @@ pub(crate) struct CommandIdentity {
 }
 
 impl CommandIdentity {
+    pub(crate) fn command_id(&self) -> &str {
+        &self.command_id
+    }
     pub(crate) fn from_request<T: Message>(request: &Request<T>) -> Result<Option<Self>, Status> {
         let mut values = request.metadata().get_all("x-node-plane-command-id").iter();
         let Some(value) = values.next() else {
@@ -294,6 +297,15 @@ impl DriverState {
         }
         *current = updated;
         Ok(())
+    }
+
+    pub(crate) fn get_operation_by_command(&self, command_id: &str) -> Option<Operation> {
+        self.operations
+            .lock()
+            .expect("operations lock poisoned")
+            .values()
+            .find(|record| record.command_id == command_id && !command_id.is_empty())
+            .map(|record| record.operation.clone())
     }
 
     pub(crate) fn get_operation(&self, operation_id: &str) -> Option<Operation> {

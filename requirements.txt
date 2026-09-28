@@ -8,3 +8,4 @@ pillow==11.3.0
 psycopg[binary]==3.2.13
 grpcio==1.74.0
 protobuf==6.31.1
+-r requirements-backend.txt

@@ -3,7 +3,7 @@ use std::fs;
 use std::io::Write;
 use std::net::SocketAddr;
 use std::net::{TcpListener, UdpSocket};
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -181,6 +181,7 @@ impl AgentConfig {
 struct AgentState {
     config: AgentConfig,
     last_seen_at: Arc<Mutex<String>>,
+    instance_id: String,
 }
 
 fn xray_config_uses_port(raw: &str, kind: &str, port: u32) -> bool {
@@ -270,6 +271,11 @@ impl AgentState {
         Self {
             config,
             last_seen_at: Arc::new(Mutex::new(Utc::now().to_rfc3339())),
+            instance_id: fs::read_to_string("/proc/sys/kernel/random/uuid")
+                .map(|value| value.trim().to_string())
+                .unwrap_or_else(|_| {
+                    format!("{}-{}", std::process::id(), Utc::now().timestamp_micros())
+                }),
         }
     }
 
@@ -603,6 +609,7 @@ impl AgentState {
     }
 
     fn sync_node_env(&self, content: &str) -> Result<SyncNodeEnvResponse, Status> {
+        let _guard = self.guard_fenced_maintenance()?;
         let path = Path::new(&self.config.node_env_path);
         let Some(parent) = path.parent() else {
             return Err(Status::internal("node env path has no parent directory"));
@@ -666,6 +673,28 @@ impl AgentState {
         &self,
         request: SyncRuntimeFilesRequest,
     ) -> Result<SyncRuntimeFilesResponse, Status> {
+        // Code and container assets may still be upgraded. Existing protocol
+        // config and node.env must not be replaced around the revision fence.
+        let xray_config = self.node_env_value("XRAY_CONFIG", &self.config.xray_config_path);
+        let awg_config = self.node_env_value("AWG_CONFIG", &self.config.awg_config_path);
+        let sensitive = request.files.iter().any(|spec| {
+            let path = self.resolve_runtime_path(&spec.path);
+            path == self.config.node_env_path
+                || path == xray_config
+                || path == awg_config
+                || path.ends_with("/xray/config.json")
+                || path.ends_with("/amnezia-awg/data/wg0.conf")
+                || ([&xray_config, &awg_config].iter().any(|config| {
+                    fs::canonicalize(&path).is_ok_and(|candidate| {
+                        fs::canonicalize(config).is_ok_and(|target| candidate == target)
+                    })
+                }))
+        });
+        let _guard = if sensitive {
+            self.guard_fenced_maintenance()?
+        } else {
+            None
+        };
         let mut written_files = 0u32;
         for spec in request.files {
             self.write_runtime_file(&spec)?;
@@ -678,29 +707,16 @@ impl AgentState {
     }
 
     fn sync_xray(&self, request: SyncXrayRequest) -> Result<SyncXrayResponse, Status> {
-        let script_path = self.resolve_runtime_path("/opt/node-plane-runtime/sync-xray.sh");
         let config_path = self.resolve_runtime_path(&request.config_path);
-        let output = Command::new(&script_path)
-            .arg(&config_path)
-            .arg(request.public_host)
-            .arg(request.flow)
-            .arg(request.image)
-            .output()
-            .map_err(|err| Status::internal(format!("failed to execute sync-xray.sh: {err}")))?;
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            let detail = if !stderr.is_empty() { stderr } else { stdout };
-            return Err(Status::failed_precondition(format!(
-                "sync-xray.sh failed: {}",
-                if detail.is_empty() {
-                    "unknown error".to_string()
-                } else {
-                    detail
-                }
-            )));
-        }
-        let generated_json = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let generated_json = self.run_runtime_command(
+            "sync-xray.sh",
+            &[
+                config_path,
+                request.public_host,
+                request.flow,
+                request.image,
+            ],
+        )?;
         Ok(SyncXrayResponse {
             summary: "xray settings synced".to_string(),
             generated_json,
@@ -772,7 +788,40 @@ impl AgentState {
     fn run_runtime_command(&self, script_name: &str, args: &[String]) -> Result<String, Status> {
         let script_path =
             self.resolve_runtime_path(&format!("/opt/node-plane-runtime/{script_name}"));
-        let output = Command::new(&script_path)
+        let helper = self.resolve_runtime_path("/opt/node-plane-runtime/apply-profile-intent.py");
+        let journal = Path::new("/etc/node-plane/profile-intents.sqlite3");
+        let scope = match script_name {
+            "xray-add-user-existing.sh" | "xray-del-user.sh" => Some("xray"),
+            "awg-add-user.sh" | "awg-del-user.sh" => Some("awg"),
+            "init-xray.sh"
+            | "deploy-xray.sh"
+            | "init-awg.sh"
+            | "deploy-awg.sh"
+            | "apply-node-settings.sh"
+            | "regenerate-awg-entropy.sh"
+            | "sync-xray.sh" => Some("all"),
+            _ => None,
+        };
+        if scope.is_some() && !Path::new(&helper).exists() && journal.exists() {
+            return Err(Status::failed_precondition(
+                "profile fence helper missing; legacy mutation refused",
+            ));
+        }
+        let mut command = if scope.is_some() && Path::new(&helper).exists() {
+            let mut command = Command::new(&helper);
+            let kind = scope.expect("guarded command has scope");
+            let profile = if kind == "all" {
+                ""
+            } else {
+                args.first().map(String::as_str).unwrap_or("")
+            };
+            command.args(["run-legacy", kind, profile, script_name]);
+            command
+        } else {
+            Command::new(&script_path)
+        };
+        let output = command
+            .env("NODE_PLANE_AGENT_INSTANCE_ID", &self.instance_id)
             .args(args)
             .output()
             .map_err(|err| Status::internal(format!("failed to execute {script_name}: {err}")))?;
@@ -790,6 +839,132 @@ impl AgentState {
                 detail
             }
         )))
+    }
+
+    fn guard_fenced_maintenance(&self) -> Result<Option<fs::File>, Status> {
+        let helper = self.resolve_runtime_path("/opt/node-plane-runtime/apply-profile-intent.py");
+        let journal = Path::new("/etc/node-plane/profile-intents.sqlite3");
+        if !Path::new(&helper).exists() && !journal.exists() {
+            return Ok(None);
+        }
+        if !Path::new(&helper).exists() {
+            return Err(Status::failed_precondition(
+                "profile fence helper missing; maintenance refused",
+            ));
+        }
+        let lock = fs::OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .mode(0o600)
+            .open("/etc/node-plane/profile-intents.sqlite3.lock")
+            .map_err(|_| Status::failed_precondition("profile fence lock unavailable"))?;
+        lock.lock()
+            .map_err(|_| Status::failed_precondition("profile fence lock unavailable"))?;
+        let output = Command::new(&helper)
+            .arg("guard-maintenance")
+            .output()
+            .map_err(|_| Status::failed_precondition("profile fence check unavailable"))?;
+        if !output.status.success() {
+            return Err(Status::failed_precondition(
+                "runtime is managed by the explicit backend; maintenance refused",
+            ));
+        }
+        Ok(Some(lock))
+    }
+
+    fn prepare_decommission(&self, command_id: &str) -> Result<(), Status> {
+        let helper = self.resolve_runtime_path("/opt/node-plane-runtime/apply-profile-intent.py");
+        if !Path::new(&helper).exists() {
+            if Path::new("/etc/node-plane/profile-intents.sqlite3").exists() {
+                return Err(Status::failed_precondition(
+                    "profile journal exists without its helper; decommission refused",
+                ));
+            }
+            let valid_id = command_id.len() == 36
+                && command_id.bytes().enumerate().all(|(index, byte)| {
+                    if matches!(index, 8 | 13 | 18 | 23) {
+                        byte == b'-'
+                    } else {
+                        byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()
+                    }
+                });
+            if !valid_id {
+                return Err(Status::invalid_argument(
+                    "invalid decommission command identity",
+                ));
+            }
+            let lock = fs::OpenOptions::new()
+                .create(true)
+                .read(true)
+                .write(true)
+                .mode(0o600)
+                .open("/etc/node-plane/profile-intents.sqlite3.lock")
+                .map_err(|_| Status::failed_precondition("profile fence lock unavailable"))?;
+            lock.lock()
+                .map_err(|_| Status::failed_precondition("profile fence lock unavailable"))?;
+            let marker_path = "/etc/node-plane/profile-intents.sqlite3.disabled";
+            if Path::new(marker_path).exists() {
+                self.verify_prepared_decommission(command_id)?;
+                return Ok(());
+            }
+            let mut marker = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(marker_path)
+                .map_err(|_| Status::failed_precondition("cannot create decommission fence"))?;
+            marker
+                .write_all(
+                    serde_json::json!({"kind": "decommission", "command_id": command_id})
+                        .to_string()
+                        .as_bytes(),
+                )
+                .and_then(|_| marker.write_all(b"\n"))
+                .and_then(|_| marker.sync_all())
+                .and_then(|_| fs::File::open("/etc/node-plane")?.sync_all())
+                .map_err(|_| Status::failed_precondition("cannot persist decommission fence"))?;
+            return Ok(());
+        }
+        let output = Command::new(&helper)
+            .args(["prepare-decommission", command_id])
+            .output()
+            .map_err(|_| Status::failed_precondition("decommission helper unavailable"))?;
+        if !output.status.success() {
+            return Err(Status::failed_precondition(
+                "profile revocations are not confirmed; decommission refused",
+            ));
+        }
+        Ok(())
+    }
+
+    fn verify_prepared_decommission(&self, command_id: &str) -> Result<(), Status> {
+        let marker = fs::read("/etc/node-plane/profile-intents.sqlite3.disabled")
+            .map_err(|_| Status::failed_precondition("decommission identity is not prepared"))?;
+        let record: Value = serde_json::from_slice(&marker)
+            .map_err(|_| Status::failed_precondition("decommission identity is not prepared"))?;
+        if record != serde_json::json!({"kind": "decommission", "command_id": command_id}) {
+            return Err(Status::failed_precondition(
+                "decommission identity is not prepared",
+            ));
+        }
+        Ok(())
+    }
+
+    fn guard_prepared_decommission(&self, command_id: &str) -> Result<fs::File, Status> {
+        let lock = fs::OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .mode(0o600)
+            .open("/etc/node-plane/profile-intents.sqlite3.lock")
+            .map_err(|_| Status::failed_precondition("profile fence lock unavailable"))?;
+        lock.lock()
+            .map_err(|_| Status::failed_precondition("profile fence lock unavailable"))?;
+        // Runtime cleanup removes the helper itself. The durable marker lives
+        // outside runtime_root and remains readable until agent uninstall.
+        self.verify_prepared_decommission(command_id)?;
+        Ok(lock)
     }
 
     fn init_xray(&self, request: InitXrayRequest) -> Result<InitXrayResponse, Status> {
@@ -1112,6 +1287,14 @@ impl AgentState {
     }
 
     fn delete_runtime(&self, preserve_config: bool) -> Result<DeleteRuntimeResponse, Status> {
+        let _guard = self.guard_fenced_maintenance()?;
+        self.delete_runtime_unchecked(preserve_config)
+    }
+
+    fn delete_runtime_unchecked(
+        &self,
+        preserve_config: bool,
+    ) -> Result<DeleteRuntimeResponse, Status> {
         let xray_container = self.node_env_value("XRAY_CONTAINER_NAME", "xray");
         let awg_container = self.node_env_value("AWG_CONTAINER_NAME", "amnezia-awg");
         let xray_image = self.node_env_value("XRAY_DOCKER_IMAGE", "ghcr.io/xtls/xray-core:26.3.27");
@@ -1140,10 +1323,6 @@ impl AgentState {
             self.docker_best_effort(&["rmi", "-f", "amneziavpn/amneziawg-go:0.2.16"]);
         }
 
-        if !preserve_config {
-            self.remove_runtime_files()?;
-        }
-
         let mut leftovers = Vec::new();
         if self.docker_available() {
             if self.docker_inspect_exists(&["container", "inspect", &xray_container]) {
@@ -1168,6 +1347,14 @@ impl AgentState {
             if self.docker_inspect_exists(&["image", "inspect", "amneziavpn/amneziawg-go:0.2.16"]) {
                 leftovers.push("amneziavpn/amneziawg-go:0.2.16 still present".to_string());
             }
+        }
+        if !leftovers.is_empty() {
+            return Err(Status::failed_precondition(leftovers.join("\n")));
+        }
+        // Keep node.env until Docker cleanup has been verified: it contains
+        // custom container/image names needed for an idempotent retry.
+        if !preserve_config {
+            self.remove_runtime_files()?;
         }
         if !preserve_config && Path::new(&self.config.node_env_path).exists() {
             leftovers.push("node.env still present".to_string());
@@ -1252,6 +1439,85 @@ struct NodeAgentApi {
     state: AgentState,
 }
 
+impl NodeAgentApi {
+    fn schedule_uninstall(
+        &self,
+        bot_public_key: Option<&str>,
+    ) -> Result<RuntimeCommandResponse, Status> {
+        let public_key = bot_public_key.unwrap_or("").trim();
+        if public_key
+            .chars()
+            .any(|value| matches!(value, '\n' | '\r' | '\0'))
+            || public_key.len() > 4096
+        {
+            return Err(Status::invalid_argument("invalid bot SSH public key"));
+        }
+        let authorized_keys = if bot_public_key.is_some() {
+            self.state
+                .authorized_keys_path()?
+                .to_string_lossy()
+                .into_owned()
+        } else {
+            String::new()
+        };
+        // The transient unit survives termination of this service. Do not
+        // remove the durable fence until the agent has actually stopped.
+        let script = r#"set -eu
+systemctl disable node-plane-agent.service
+systemctl stop node-plane-agent.service
+rm -f /etc/node-plane/profile-intents.sqlite3 /etc/node-plane/profile-intents.sqlite3.lock /etc/node-plane/profile-intents.sqlite3.disabled /etc/node-plane/profile-intents.sqlite3-journal /etc/node-plane/profile-intents.sqlite3-wal /etc/node-plane/profile-intents.sqlite3-shm
+rm -f /etc/systemd/system/node-plane-agent.service "$1" "$2" "$3" "$4" "$5"
+rm -rf "$6" "$7"
+rmdir /etc/node-plane/tls /etc/node-plane 2>/dev/null || true
+systemctl daemon-reload
+if [ -n "$9" ]; then
+    for file in "$8" /root/.ssh/authorized_keys /home/*/.ssh/authorized_keys; do
+        [ -f "$file" ] || continue
+        grep -Fvx -- "$9" "$file" > "$file.node-plane-tmp" || [ "$?" -eq 1 ]
+        mv "$file.node-plane-tmp" "$file"
+        chmod 600 "$file"
+    done
+fi
+"#;
+        let binary = env::current_exe()
+            .map_err(|err| Status::internal(format!("cannot locate agent executable: {err}")))?;
+        let config_path = env::var("NODE_AGENT_CONFIG_PATH")
+            .unwrap_or_else(|_| "/etc/node-plane/agent.toml".to_string());
+        let output = Command::new("systemd-run")
+            .args([
+                "--quiet",
+                "--collect",
+                "--on-active=2s",
+                "/bin/sh",
+                "-c",
+                script,
+                "node-plane-uninstall",
+            ])
+            .arg(binary)
+            .args([
+                &config_path,
+                &self.state.config.tls_certificate_path,
+                &self.state.config.tls_key_path,
+                &self.state.config.tls_client_ca_path,
+                &self.state.config.state_dir,
+                &self.state.config.log_dir,
+                &authorized_keys,
+                public_key,
+            ])
+            .output()
+            .map_err(|err| Status::internal(format!("failed to schedule agent removal: {err}")))?;
+        if !output.status.success() {
+            return Err(Status::internal(
+                String::from_utf8_lossy(&output.stderr).to_string(),
+            ));
+        }
+        Ok(RuntimeCommandResponse {
+            summary: "agent uninstall scheduled".to_string(),
+            payload_json: String::new(),
+        })
+    }
+}
+
 #[tonic::async_trait]
 impl NodeAgentService for NodeAgentApi {
     async fn get_runtime_facts(
@@ -1266,6 +1532,161 @@ impl NodeAgentService for NodeAgentApi {
         _request: Request<AgentEmpty>,
     ) -> Result<Response<LocalHealth>, Status> {
         Ok(Response::new(self.state.health()))
+    }
+
+    async fn resolve_profile_intent(
+        &self,
+        request: Request<agent::v1::ApplyProfileIntentRequest>,
+    ) -> Result<Response<agent::v1::ProfileInspection>, Status> {
+        let req = request.into_inner();
+        let intent = serde_json::json!({
+            "command_id": req.command_id, "protocol": req.protocol_kind,
+            "runtime_name": req.profile_name, "revision": req.desired_revision,
+            "action": req.action, "uuid": req.uuid, "short_id": req.short_id,
+        });
+        let output = self
+            .state
+            .run_runtime_command(
+                "apply-profile-intent.py",
+                &["resolve".to_string(), intent.to_string()],
+            )
+            .map_err(|_| {
+                Status::failed_precondition(
+                    "profile repair requires a restarted agent and live inspection",
+                )
+            })?;
+        let value: Value = serde_json::from_str(&output)
+            .map_err(|_| Status::internal("invalid repair response"))?;
+        let observation = &value["observation"];
+        let boolean = |key: &str| {
+            observation
+                .get(key)
+                .and_then(Value::as_bool)
+                .ok_or_else(|| Status::internal("invalid repair observation"))
+        };
+        Ok(Response::new(agent::v1::ProfileInspection {
+            disk_present: boolean("disk_present")?,
+            live_present: boolean("live_present")?,
+            identity_matches: boolean("identity_matches")?,
+            config_available: boolean("config_available")?,
+        }))
+    }
+
+    async fn recover_profile_intent(
+        &self,
+        request: Request<agent::v1::ApplyProfileIntentRequest>,
+    ) -> Result<Response<RuntimeCommandResponse>, Status> {
+        let req = request.into_inner();
+        let intent = serde_json::json!({
+            "command_id": req.command_id, "protocol": req.protocol_kind,
+            "runtime_name": req.profile_name, "revision": req.desired_revision,
+            "action": req.action, "uuid": req.uuid, "short_id": req.short_id,
+        });
+        let output = self
+            .state
+            .run_runtime_command(
+                "apply-profile-intent.py",
+                &["lookup".to_string(), intent.to_string()],
+            )
+            .map_err(|_| {
+                Status::failed_precondition("profile intent blocked; reconciliation required")
+            })?;
+        let value: Value = serde_json::from_str(&output)
+            .map_err(|_| Status::internal("invalid intent response"))?;
+        let summary = value["summary"]
+            .as_str()
+            .ok_or_else(|| Status::internal("invalid intent response"))?;
+        let payload = if intent["protocol"] == "awg" && intent["action"] == "ensure" {
+            AgentState::extract_awg_payload_json(summary)
+        } else {
+            String::new()
+        };
+        Ok(Response::new(RuntimeCommandResponse {
+            summary: "profile intent applied".to_string(),
+            payload_json: payload,
+        }))
+    }
+
+    async fn apply_profile_intent(
+        &self,
+        request: Request<agent::v1::ApplyProfileIntentRequest>,
+    ) -> Result<Response<RuntimeCommandResponse>, Status> {
+        let req = request.into_inner();
+        let intent = serde_json::json!({
+            "command_id": req.command_id, "protocol": req.protocol_kind,
+            "runtime_name": req.profile_name, "revision": req.desired_revision,
+            "action": req.action, "uuid": req.uuid, "short_id": req.short_id,
+        });
+        let output = self
+            .state
+            .run_runtime_command("apply-profile-intent.py", &[intent.to_string()])
+            .map_err(|_| {
+                Status::failed_precondition("profile intent blocked; reconciliation required")
+            })?;
+        let value: Value = serde_json::from_str(&output)
+            .map_err(|_| Status::internal("invalid intent response"))?;
+        let summary = value["summary"]
+            .as_str()
+            .ok_or_else(|| Status::internal("invalid intent response"))?;
+        let payload = if intent["protocol"] == "awg" && intent["action"] == "ensure" {
+            AgentState::extract_awg_payload_json(summary)
+        } else {
+            String::new()
+        };
+        Ok(Response::new(RuntimeCommandResponse {
+            summary: "profile intent applied".to_string(),
+            payload_json: payload,
+        }))
+    }
+
+    async fn inspect_profile(
+        &self,
+        request: Request<agent::v1::InspectProfileRequest>,
+    ) -> Result<Response<agent::v1::ProfileInspection>, Status> {
+        let req = request.into_inner();
+        let valid_name = !req.profile_name.is_empty()
+            && req.profile_name.len() <= 64
+            && req
+                .profile_name
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || b"_-".contains(&c));
+        if !valid_name || !matches!(req.protocol_kind.as_str(), "awg" | "xray") {
+            return Err(Status::invalid_argument("invalid inspection target"));
+        }
+        let mut args = vec![req.protocol_kind.clone(), req.profile_name];
+        if req.protocol_kind == "xray" {
+            if !req.expected_xray_uuid.is_empty()
+                && !(req.expected_xray_uuid.len() == 36
+                    && req.expected_xray_uuid.bytes().enumerate().all(|(i, c)| {
+                        if matches!(i, 8 | 13 | 18 | 23) {
+                            c == b'-'
+                        } else {
+                            c.is_ascii_hexdigit()
+                        }
+                    }))
+            {
+                return Err(Status::invalid_argument("xray identity is required"));
+            }
+            args.push(req.expected_xray_uuid);
+        }
+        let output = self
+            .state
+            .run_runtime_command("inspect-profile.sh", &args)
+            .map_err(|_| Status::failed_precondition("live profile inspection unavailable"))?;
+        let value: Value = serde_json::from_str(&output)
+            .map_err(|_| Status::internal("invalid inspection response"))?;
+        let boolean = |key: &str| {
+            value
+                .get(key)
+                .and_then(Value::as_bool)
+                .ok_or_else(|| Status::internal("invalid inspection response"))
+        };
+        Ok(Response::new(agent::v1::ProfileInspection {
+            disk_present: boolean("disk_present")?,
+            live_present: boolean("live_present")?,
+            identity_matches: boolean("identity_matches")?,
+            config_available: boolean("config_available")?,
+        }))
     }
 
     async fn list_remote_profiles(
@@ -1359,50 +1780,67 @@ impl NodeAgentService for NodeAgentApi {
         &self,
         _request: Request<AgentEmpty>,
     ) -> Result<Response<RuntimeCommandResponse>, Status> {
-        // A transient systemd unit survives termination of this service. Stop
-        // this process only after the RPC response has been delivered.
-        let script = r#"set -eu
-systemctl disable node-plane-agent.service
-rm -f /etc/systemd/system/node-plane-agent.service "$1" "$2" "$3" "$4" "$5"
-rm -rf "$6" "$7"
-rmdir /etc/node-plane/tls /etc/node-plane 2>/dev/null || true
-systemctl stop node-plane-agent.service
-systemctl daemon-reload
-"#;
-        let binary = env::current_exe()
-            .map_err(|err| Status::internal(format!("cannot locate agent executable: {err}")))?;
-        let config_path = env::var("NODE_AGENT_CONFIG_PATH")
-            .unwrap_or_else(|_| "/etc/node-plane/agent.toml".to_string());
-        let output = Command::new("systemd-run")
-            .args([
-                "--quiet",
-                "--collect",
-                "--on-active=2s",
-                "/bin/sh",
-                "-c",
-                script,
-                "node-plane-uninstall",
-            ])
-            .arg(binary)
-            .args([
-                &config_path,
-                &self.state.config.tls_certificate_path,
-                &self.state.config.tls_key_path,
-                &self.state.config.tls_client_ca_path,
-                &self.state.config.state_dir,
-                &self.state.config.log_dir,
-            ])
-            .output()
-            .map_err(|err| Status::internal(format!("failed to schedule agent removal: {err}")))?;
-        if !output.status.success() {
-            return Err(Status::internal(
-                String::from_utf8_lossy(&output.stderr).to_string(),
-            ));
-        }
+        let _guard = self.state.guard_fenced_maintenance()?;
+        // The delayed systemd unit runs after this RPC. A durable tombstone
+        // closes the gap between scheduling uninstall and stopping the agent.
+        let disabled_path = "/etc/node-plane/profile-intents.sqlite3.disabled";
+        let mut marker = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(disabled_path)
+            .map_err(|_| Status::failed_precondition("cannot fence agent removal"))?;
+        marker
+            .write_all(b"agent removal scheduled\n")
+            .and_then(|_| marker.sync_all())
+            .and_then(|_| fs::File::open("/etc/node-plane")?.sync_all())
+            .map_err(|_| Status::failed_precondition("cannot persist agent removal fence"))?;
+        Ok(Response::new(self.schedule_uninstall(None)?))
+    }
+
+    async fn prepare_decommission(
+        &self,
+        request: Request<agent::v1::DecommissionRequest>,
+    ) -> Result<Response<RuntimeCommandResponse>, Status> {
+        self.state
+            .prepare_decommission(&request.into_inner().command_id)?;
         Ok(Response::new(RuntimeCommandResponse {
-            summary: "agent uninstall scheduled".to_string(),
+            summary: "decommission prepared; profile mutations fenced".to_string(),
             payload_json: String::new(),
         }))
+    }
+
+    async fn delete_runtime_for_decommission(
+        &self,
+        request: Request<agent::v1::DecommissionRequest>,
+    ) -> Result<Response<DeleteRuntimeResponse>, Status> {
+        let _guard = self
+            .state
+            .guard_prepared_decommission(&request.into_inner().command_id)?;
+        Ok(Response::new(self.state.delete_runtime_unchecked(false)?))
+    }
+
+    async fn uninstall_agent_for_decommission(
+        &self,
+        request: Request<agent::v1::DecommissionRequest>,
+    ) -> Result<Response<RuntimeCommandResponse>, Status> {
+        let req = request.into_inner();
+        let _guard = self.state.guard_prepared_decommission(&req.command_id)?;
+        // The backend must call this only after a verified runtime delete.
+        // The agent independently checks that its owned runtime paths are gone.
+        if Path::new(&self.state.config.runtime_root).exists()
+            || Path::new(&self.state.config.node_env_path).exists()
+        {
+            return Err(Status::failed_precondition(
+                "runtime cleanup is not complete",
+            ));
+        }
+        if req.bot_public_key.trim().is_empty() {
+            return Err(Status::invalid_argument("bot SSH public key is required"));
+        }
+        Ok(Response::new(
+            self.schedule_uninstall(Some(&req.bot_public_key))?,
+        ))
     }
 
     async fn delete_runtime(
