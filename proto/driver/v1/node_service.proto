@@ -8,6 +8,8 @@ service NodeService {
   rpc GetNode(GetNodeRequest) returns (Node);
   rpc ListNodes(ListNodesRequest) returns (ListNodesResponse);
   rpc GetNodeDiagnostics(GetNodeDiagnosticsRequest) returns (GetNodeDiagnosticsResponse);
+  // Backend-owned read path: only the configured agent target is consulted.
+  rpc InspectBackendNode(InspectBackendNodeRequest) returns (BackendNodeObservation);
   rpc WatchNodeHealth(WatchNodeHealthRequest) returns (stream NodeHealthEvent);
   rpc SyncNodeEnv(SyncNodeEnvRequest) returns (StartOperationResponse);
   rpc ProbeNode(ProbeNodeRequest) returns (StartOperationResponse);
@@ -36,6 +38,19 @@ message GetNodeDiagnosticsResponse {
   string node_key = 1;
   string summary = 2;
   repeated DiagnosticItem items = 3;
+}
+
+message InspectBackendNodeRequest {
+  string node_key = 1;
+}
+
+message BackendNodeObservation {
+  string node_key = 1;
+  string health_state = 2;
+  string runtime_version = 3;
+  string runtime_commit = 4;
+  bool xray_config_present = 5;
+  bool awg_config_present = 6;
 }
 
 message WatchNodeHealthRequest {

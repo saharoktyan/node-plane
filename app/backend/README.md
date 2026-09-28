@@ -3,6 +3,16 @@
 Status: identity/authorization/opaque credentials and initial HTTP API implemented.
 The new Telegram adapter and installer service wiring are not connected.
 Current production bot remains unchanged.
+HTTP request handling uses FastAPI's asynchronous server and middleware, but
+the current database-backed endpoints are synchronous functions executed in
+its thread pool. The finite driver worker and gRPC client are synchronous too.
+The future aiogram client will use asynchronous HTTP calls; Python backend I/O
+should become async only where concurrency or latency measurements justify it.
+The implemented profile/grant/config models are VPN-specific. Future curated
+services use the boundaries in
+[SERVICE_EXPANSION_ARCHITECTURE.md](../../SERVICE_EXPANSION_ARCHITECTURE.md),
+not additional values in the VPN protocol column. Licensing is outside the
+current backend scope.
 
 Local administration uses the configured PostgreSQL database. Set
 NODE_PLANE_SHARED_DIR to the install's shared directory so config loads its .env.
@@ -90,16 +100,135 @@ protocols; frozen/expired profiles do not contribute grants. It returns no SSH
 parameters or credentials. Pagination filters ownership before applying limit.
 OpenAPI defines safe output models for these routes.
 
-Node registry management is not implemented yet; these
-read models are not connected to legacy driver provisioning tables. Local profile
+These read models are not connected to legacy driver provisioning tables. Local profile
 creation does not install runtime or grant VPN access. New state is exercised in
 isolated tests; PostgreSQL and real driver integration remain pending.
 
-Before draining a node, bind its future verification target while it is still
-active. This immutable binding prevents checking an unrelated empty machine:
+## Administrator node inventory
+
+`GET /api/v1/nodes` and `GET /api/v1/nodes/{key}` expose the new backend-owned
+inventory to approved administrators. `POST /api/v1/nodes` creates a disabled
+draft with public metadata, supported VPN protocols/transports, and a small
+allowlist of desired public protocol settings. `PATCH /api/v1/nodes/{key}` edits
+that desired record. Both writes require a UUID `Idempotency-Key`; PATCH also
+requires the current `ETag` in `If-Match`. The response carries separate
+`desired_revision` and `applied_revision`. A new draft starts at 1/0, and edits
+advance only the desired revision. Settings are replaced as a whole when sent
+in PATCH. They cannot be mistaken for runtime-confirmed values.
+
+Node keys cannot be reused after retirement. A protocol with active grants
+cannot be removed from the inventory. Creation does not deploy an agent or
+protocol runtime. The admin model deliberately has
+no SSH credentials or private keys. The current `GET /me/nodes` remains a
+separate grant-filtered member view. No new config issuance is available yet:
+it must compare applied node settings and successful profile intents before
+returning credentials. `init-schema` creates the node command journal on a
+fresh development database; older prototype schemas need recreation.
+
+For a node with an already installed agent and configured driver target, admin
+`POST /api/v1/nodes/{key}/apply-settings` queues the current desired revision
+(`If-Match` plus UUID `Idempotency-Key`). Poll
+`GET /api/v1/node-settings-operations/{id}`. The shared backend worker sends a
+dedicated revision-bound command to the driver; the agent journals it under
+the same lock as profile intents. It updates node.env, opens declared ports,
+deploys selected protocol containers, then verifies effective config fields
+and running containers. Only the matching confirmed result advances
+`applied_revision` and enables the node. Incomplete drafts are rejected.
+After creating a disabled backend draft, install/bind its agent with the
+explicit installer mode. SSH credentials are CLI-only and never stored in the
+public node inventory or read from the legacy bot registry:
 
 ```sh
-PYTHONPATH=app .venv/bin/python -m backend.admin_cli bind-node-verification-target --node-key NODE --admin-account-id ACCOUNT_UUID --lock-file /opt/node-plane/shared/backend-worker.lock --ssh-target root@node.example
+NODE_PLANE_BIN_SOURCE=release scripts/setup_driver_agents.sh --backend-node-key lv1 --backend-ssh-target root@lv1.example --backend-ssh-identity /path/to/admin-key
+NODE_PLANE_BIN_SOURCE=release scripts/setup_driver_agents.sh --backend-node-key local1 --backend-local
+```
+
+Use `--backend-ssh-port` for a non-default SSH port and
+`--backend-agent-host` if the driver's reachable agent address differs from
+the SSH address. `--dry-run` checks inputs, binaries and SSH reachability
+without installation. The installer preserves other `NODE_AGENT_TARGETS`
+entries, restarts driver after updating the shared environment, and verifies
+the new agent route. The binary assets must match this checkout's gRPC schema.
+The worker first performs a read-only agent probe. If runtime files or protocol
+configs are missing, the driver prepares this unmanaged agent: it copies the
+versioned runtime bundle, preserves any existing node.env, and installs Docker.
+Only after preparation succeeds does the settings command start. Inside that
+durable command the agent initializes missing Xray/AWG configs without replacing
+existing keys, deploys protocols, and verifies the result. An absent agent or
+failed preparation leaves the task queued without starting that command.
+An unknown result stays blocked; the worker attempts read-only recovery from
+the agent journal on restart. Never resend it with a new command ID while
+the old outcome remains uncertain. For a permanently interrupted command,
+restart the node agent first, then retire that exact command through the
+trusted local CLI while holding the worker lock:
+
+```sh
+PYTHONPATH=app .venv/bin/python -m backend.admin_cli resolve-blocked-node-settings --task-id TASK_UUID --admin-account-id ACCOUNT_UUID --lock-file /opt/node-plane/shared/backend-worker.lock
+PYTHONPATH=app .venv/bin/python -m backend.executor --lock-file /opt/node-plane/shared/backend-worker.lock
+```
+
+The agent inspects live config and containers, marks the old command
+superseded, and never claims it succeeded. Backend queues a fresh revision;
+only its verified result enables the node. If the agent is still running the
+old command, restart is required before this repair. The old Telegram bot and
+installer do not use this path yet. PostgreSQL integration and real-node
+testing still require work.
+
+`GET /api/v1/nodes/{key}/runtime` uses a dedicated read-only driver RPC to
+inspect the configured agent directly. It returns health state, runtime
+version/commit, and whether Xray/AWG config files exist. The driver verifies
+the agent's reported node key and never reads the legacy `servers` table for
+this call. An unconfigured or unreachable agent produces a typed, redacted
+error. `settings_verified` remains false: this read-only observation reports
+file presence and health, not a fresh comparison with desired settings. The
+legacy `ApplyNodeSettings` RPC still reads `servers` and is not used by the
+backend settings worker.
+
+## Account access requests
+
+The backend now owns access-request creation, pending-list reads, and admin
+approve/reject decisions. `POST /api/v1/me/access-requests` requires an
+Idempotency-Key UUID. `GET /api/v1/me/access-requests` lists the caller's own
+history; `GET /api/v1/access-requests` lists pending requests for approved
+administrators. `POST /api/v1/access-requests/{id}/decision` accepts only
+`approve` or `reject` with an Idempotency-Key. Replaying the same decision key
+returns its saved result; another decision on a closed request returns a conflict.
+One account can have only one pending request, and a rejected account may apply
+again. The request transition and account status change share one transaction.
+Approval does not create a VPN profile or grant access to any node.
+
+These routes use the new backend identity tables. The current Telegram request
+screens and notifications still use legacy storage, so this slice is not active
+in the production bot. Notification delivery and Telegram adapter migration are
+separate follow-up work. Initialize the new table with `admin_cli init-schema`
+on a fresh development database before starting the HTTP service.
+
+## Administrator account management
+
+Approved administrators can list accounts at `GET /api/v1/accounts`, inspect one
+at `GET /api/v1/accounts/{id}`, and change its role/status with
+`PATCH /api/v1/accounts/{id}`. The detail response carries an ETag; PATCH
+requires that revision in `If-Match` and a UUID `Idempotency-Key`. A repeated
+command returns the saved response, a changed payload with the same key
+conflicts, and an outdated revision fails before mutation. The account list
+includes verified Telegram ID but no username-based identity matching.
+
+The update serializes administrator changes through one database guard row,
+checks the actor's current role inside the transaction, and refuses removal
+of the last approved administrator or self-revocation. A pending access request
+must be decided through its own endpoint before account state changes.
+Approving an account does not assign a VPN profile or node grant. The current
+installer and Telegram bot do not use these routes yet. `init-schema` creates
+the command journal; the experimental account revision column requires a fresh
+development database rather than an in-place migration of earlier prototypes.
+
+Before draining a node, independently reach its active agent and bind the
+verification target. The preflight checks `node_key` in the agent config and
+stores a hash of the host's machine ID. It refuses an unreachable agent or
+a different node at the supplied address:
+
+```sh
+PYTHONPATH=app .venv/bin/python -m backend.admin_cli bind-node-verification-target --node-key NODE --admin-account-id ACCOUNT_UUID --lock-file /opt/node-plane/shared/backend-worker.lock --ssh-target root@node.example --ssh-identity-file /path/to/admin-key
 ```
 
 Use `--local` for the bot host instead of `--ssh-target`. The first
@@ -151,10 +280,11 @@ PYTHONPATH=app .venv/bin/python -m backend.admin_cli verify-and-remove-node --no
 For a local node, use `--local` instead of the SSH arguments. Verification
 checks the inactive agent service, absence of its standard unit, binary,
 configuration, runtime, state and log paths, bot SSH key and default managed
-containers. The host check is read-only. Bind the actual node host before drain:
-the target is administrator-supplied and this experimental backend cannot yet
-cross-check it against a durable enrolled host identity. The immutable
-retirement record stores the method and target. Custom artifacts, SSH homes
+containers. The host check is read-only and rejects a changed machine ID.
+The immutable retirement record stores the method, target and host fingerprint.
+This identifies the configured agent host before cleanup, although cloned
+machine IDs and independent root compromise remain outside this guarantee.
+Custom artifacts, SSH homes
 outside `/root` and `/home`, and old untracked UFW rules are not proven absent
 by this check and require separate review.
 

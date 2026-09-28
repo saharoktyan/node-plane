@@ -11,9 +11,12 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
+import shutil
 import sqlite3
 import subprocess
 import sys
+import tempfile
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -114,6 +117,281 @@ def lookup(intent, path):
         return json.loads(row[2])
     finally:
         connection.close()
+
+
+def validate_node_settings(intent):
+    if not isinstance(intent, dict) or set(intent) != {'kind', 'node_key', 'command_id', 'revision', 'protocols', 'settings'}:
+        raise ValueError('invalid node settings intent')
+    if intent['kind'] != 'node_settings' or not isinstance(intent['node_key'], str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,63}', intent['node_key']):
+        raise ValueError('invalid node key')
+    if not isinstance(intent['command_id'], str) or not re.fullmatch(r'[A-Za-z0-9_.:-]{1,128}', intent['command_id']):
+        raise ValueError('invalid command identity')
+    if type(intent['revision']) is not int or intent['revision'] <= 0:
+        raise ValueError('invalid revision')
+    protocols = intent['protocols']
+    if (not isinstance(protocols, list) or not protocols or len(protocols) > 2
+            or len(set(protocols)) != len(protocols) or set(protocols) - {'awg', 'xray'}):
+        raise ValueError('invalid protocols')
+    settings = intent['settings']
+    fields = {'public_host', 'xray_host', 'xray_sni', 'xray_tcp_port', 'xray_xhttp_port',
+              'xray_xhttp_path', 'awg_public_host', 'awg_port'}
+    if not isinstance(settings, dict) or set(settings) - fields:
+        raise ValueError('invalid settings')
+    required = {'public_host'}
+    if 'xray' in protocols:
+        required |= {'xray_sni', 'xray_tcp_port', 'xray_xhttp_port', 'xray_xhttp_path'}
+    if 'awg' in protocols:
+        required.add('awg_port')
+    if not required <= set(settings):
+        raise ValueError('node settings are incomplete')
+    for field, value in settings.items():
+        if field.endswith('_port'):
+            if type(value) is not int or not 1 <= value <= 65535:
+                raise ValueError('invalid port')
+        elif (not isinstance(value, str) or not value or len(value) > 255
+              or any(ord(char) < 33 or ord(char) > 126 for char in value)):
+            raise ValueError('invalid text setting')
+        if field in {'public_host', 'xray_host', 'xray_sni', 'awg_public_host'} and (
+                not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9.-]*[A-Za-z0-9]', value)
+                or '..' in value):
+            raise ValueError('invalid host setting')
+        if field == 'xray_xhttp_path' and not re.fullmatch(r'/[A-Za-z0-9/_~.%+-]*', value):
+            raise ValueError('invalid Xray path')
+    if 'xray' in protocols and (settings['xray_tcp_port'] == settings['xray_xhttp_port']
+                                or not settings['xray_xhttp_path'].startswith('/')):
+        raise ValueError('invalid Xray ports or path')
+
+
+def node_settings_digest(intent):
+    value = {'protocols': sorted(intent['protocols']), 'settings': intent['settings']}
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+
+
+def apply_node_settings(intent, path, runner):
+    """Journal one node-wide settings mutation under the profile command lock."""
+    validate_node_settings(intent)
+    fingerprint = hashlib.sha256(json.dumps(intent, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(str(path) + '.lock', 'a') as lock:
+        os.chmod(lock.name, 0o600)
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if Path(str(path) + '.disabled').exists():
+            raise ValueError('agent removal is in progress')
+        connection = sqlite3.connect(path)
+        try:
+            os.chmod(path, 0o600)
+            connection.execute('PRAGMA synchronous=FULL')
+            connection.execute('CREATE TABLE IF NOT EXISTS commands (id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, status TEXT NOT NULL, response TEXT, instance_id TEXT NOT NULL)')
+            connection.execute('CREATE TABLE IF NOT EXISTS fences (protocol TEXT, profile TEXT, revision INTEGER NOT NULL, command_id TEXT NOT NULL, action TEXT, PRIMARY KEY(protocol, profile))')
+            connection.execute('CREATE TABLE IF NOT EXISTS node_settings_fence (node_key TEXT PRIMARY KEY, revision INTEGER NOT NULL, command_id TEXT NOT NULL)')
+            prior = connection.execute('SELECT fingerprint, status, response FROM commands WHERE id = ?', (intent['command_id'],)).fetchone()
+            if prior:
+                if prior[0] != fingerprint:
+                    raise ValueError('command identity conflict')
+                if prior[1] == 'succeeded':
+                    return json.loads(prior[2])
+                raise ValueError('previous command did not complete successfully')
+            if connection.execute("SELECT 1 FROM commands WHERE status = 'running' LIMIT 1").fetchone():
+                raise ValueError('unfinished execution requires operator reconciliation')
+            fence = connection.execute('SELECT revision FROM node_settings_fence WHERE node_key = ?', (intent['node_key'],)).fetchone()
+            if fence and intent['revision'] <= fence[0]:
+                raise ValueError('stale or conflicting revision')
+            instance_id = os.environ.get('NODE_PLANE_AGENT_INSTANCE_ID', 'standalone')
+            with connection:
+                connection.execute("INSERT INTO commands(id, fingerprint, status, instance_id) VALUES (?, ?, 'running', ?)",
+                                   (intent['command_id'], fingerprint, instance_id))
+                connection.execute('''INSERT INTO node_settings_fence(node_key, revision, command_id)
+                    VALUES (?, ?, ?) ON CONFLICT(node_key) DO UPDATE SET revision = excluded.revision,
+                    command_id = excluded.command_id''', (intent['node_key'], intent['revision'], intent['command_id']))
+            response = runner(intent, lock.fileno())
+            if (not isinstance(response, dict) or set(response) != {'summary', 'payload_json'}
+                    or any(not isinstance(value, str) for value in response.values())):
+                raise ValueError('invalid node settings result')
+            payload = json.loads(response['payload_json'])
+            if payload != {'node_key': intent['node_key'], 'revision': intent['revision'],
+                           'settings_sha256': node_settings_digest(intent)}:
+                raise ValueError('node settings verification mismatch')
+            with connection:
+                connection.execute("UPDATE commands SET status = 'succeeded', response = ? WHERE id = ?",
+                                   (json.dumps(response), intent['command_id']))
+            return response
+        finally:
+            connection.close()
+
+
+def lookup_node_settings(intent, path):
+    validate_node_settings(intent)
+    fingerprint = hashlib.sha256(json.dumps(intent, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+    connection = sqlite3.connect(Path(path).resolve().as_uri() + '?mode=ro', uri=True, timeout=2)
+    try:
+        row = connection.execute('SELECT fingerprint, status, response FROM commands WHERE id = ?', (intent['command_id'],)).fetchone()
+        if not row or row[0] != fingerprint or row[1] != 'succeeded':
+            raise ValueError('node settings success is not confirmed')
+        return json.loads(row[2])
+    finally:
+        connection.close()
+
+
+def resolve_node_settings(intent, path, inspector):
+    """Retire an interrupted settings command after the old agent has stopped.
+
+    This never reports application as successful. A new revision must verify
+    the complete runtime state before the backend enables the node again.
+    """
+    validate_node_settings(intent)
+    path = Path(path)
+    fingerprint = hashlib.sha256(json.dumps(intent, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+    with open(str(path) + '.lock', 'a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if Path(str(path) + '.disabled').exists():
+            raise ValueError('agent removal is in progress')
+        connection = sqlite3.connect(path)
+        try:
+            row = connection.execute('SELECT fingerprint, status, response, instance_id FROM commands WHERE id = ?',
+                                     (intent['command_id'],)).fetchone()
+            if not row or row[0] != fingerprint:
+                raise ValueError('command identity mismatch')
+            if row[1] == 'superseded':
+                return json.loads(row[2])
+            if row[1] != 'running':
+                raise ValueError('command is not interrupted')
+            current_instance = os.environ.get('NODE_PLANE_AGENT_INSTANCE_ID', 'standalone')
+            if not current_instance or row[3] == current_instance:
+                raise ValueError('agent service restart is required before repair')
+            observation = inspector(intent)
+            if set(observation) != {'config_matches', 'containers_running'} or any(
+                    type(value) is not bool for value in observation.values()):
+                raise ValueError('live inspection unavailable')
+            record = {'observation': observation, 'resolved_at': datetime.now(timezone.utc).isoformat()}
+            with connection:
+                changed = connection.execute("UPDATE commands SET status = 'superseded', response = ? WHERE id = ? AND status = 'running'",
+                                             (json.dumps(record, sort_keys=True), intent['command_id']))
+                if changed.rowcount != 1:
+                    raise ValueError('command changed during repair')
+            return record
+        finally:
+            connection.close()
+
+
+def verify_node_settings_config(intent, xray_path, awg_path):
+    settings = intent['settings']
+    if 'xray' in intent['protocols']:
+        data = json.loads(Path(xray_path).read_text())
+        inbounds = {item.get('tag'): item for item in data.get('inbounds', [])}
+        for tag, port in (('reality-tcp', settings['xray_tcp_port']),
+                          ('reality-xhttp', settings['xray_xhttp_port'])):
+            inbound = inbounds[tag]
+            reality = inbound['streamSettings']['realitySettings']
+            if (inbound['port'] != port or reality['serverNames'] != [settings['xray_sni']]
+                    or reality['dest'] != settings['xray_sni'] + ':443'):
+                raise ValueError('Xray settings verification failed')
+        if inbounds['reality-xhttp']['streamSettings']['xhttpSettings']['path'] != settings['xray_xhttp_path']:
+            raise ValueError('Xray path verification failed')
+    if 'awg' in intent['protocols']:
+        awg_config = Path(awg_path).read_text()
+        if not re.search(r'(?m)^ListenPort\s*=\s*' + str(settings['awg_port']) + r'\s*$', awg_config):
+            raise ValueError('AWG port verification failed')
+
+
+def inspect_node_settings_for_repair(intent):
+    env_path = Path('/etc/node-plane/node.env')
+    paths = subprocess.run(['bash', '-c', 'source "$1"; printf "%s\n%s\n%s\n%s\n" "${XRAY_CONFIG:-/opt/node-plane-runtime/xray/config.json}" "${AWG_CONFIG:-/opt/node-plane-runtime/amnezia-awg/data/wg0.conf}" "${XRAY_CONTAINER_NAME:-xray}" "${AWG_CONTAINER_NAME:-amnezia-awg}"',
+                            'node-settings-paths', str(env_path)], check=True, capture_output=True,
+                           text=True, timeout=30).stdout.splitlines()
+    if len(paths) != 4:
+        raise ValueError('invalid node environment')
+    try:
+        verify_node_settings_config(intent, paths[0], paths[1])
+        matches = True
+    except (OSError, ValueError, KeyError, TypeError):
+        matches = False
+    containers = ([paths[2]] if 'xray' in intent['protocols'] else []) + ([paths[3]] if 'awg' in intent['protocols'] else [])
+    running = all(subprocess.run(['docker', 'inspect', '-f', '{{.State.Running}}', name],
+                                 capture_output=True, text=True, timeout=30).stdout.strip() == 'true'
+                  for name in containers)
+    return {'config_matches': matches, 'containers_running': running}
+
+
+def run_node_settings(intent, lock_fd, *, env_path=Path('/etc/node-plane/node.env'), root=Path(__file__).parent):
+    """Apply to an already bootstrapped node; no implicit install or key reset."""
+    settings = intent['settings']
+    env_path = Path(env_path)
+    root = Path(root)
+    if not env_path.is_file() or not (root / 'apply-node-settings.sh').is_file():
+        raise ValueError('node runtime is not bootstrapped')
+    paths = subprocess.run(['bash', '-c', 'source "$1"; printf "%s\n%s\n%s\n%s\n" "${XRAY_CONFIG:-/opt/node-plane-runtime/xray/config.json}" "${AWG_CONFIG:-/opt/node-plane-runtime/amnezia-awg/data/wg0.conf}" "${XRAY_CONTAINER_NAME:-xray}" "${AWG_CONTAINER_NAME:-amnezia-awg}"',
+                            'node-settings-paths', str(env_path)], check=True, capture_output=True, text=True).stdout.splitlines()
+    if len(paths) != 4:
+        raise ValueError('invalid node environment')
+    xray_path, awg_path = map(Path, paths[:2])
+    # Existing environment remains intact. Replace only backend-owned public
+    # settings, using the same shell quoting as the legacy env renderer.
+    replacements = {
+        'SERVER_KEY': intent['node_key'],
+        'AWG_SERVER_IP': settings.get('awg_public_host', settings['public_host']),
+        'AWG_SERVER_PORT': str(settings.get('awg_port', 51820)),
+    }
+    original = env_path.read_text()
+    lines = [line for line in original.splitlines() if not any(
+        re.match(r'^\s*' + name + r'=', line) for name in replacements)]
+    lines += [f'{name}={shlex.quote(value)}' for name, value in replacements.items()]
+    with tempfile.NamedTemporaryFile(mode='w', dir=env_path.parent, delete=False) as staged:
+        staged.write('\n'.join(lines) + '\n')
+        staged.flush()
+        os.fsync(staged.fileno())
+        staged_path = Path(staged.name)
+    staged_path.chmod(0o600)
+    os.replace(staged_path, env_path)
+    directory = os.open(env_path.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+    # A freshly prepared agent has the runtime scripts and node.env but no
+    # protocol configs. Initialize only missing configs under this same durable
+    # command identity; existing keys must never be regenerated on retry.
+    if 'xray' in intent['protocols']:
+        if not xray_path.exists():
+            subprocess.run([str(root / 'init-xray.sh'), str(xray_path), settings['public_host'],
+                            settings['xray_sni'], str(settings['xray_tcp_port']),
+                            str(settings['xray_xhttp_port']), settings['xray_xhttp_path'],
+                            'xtls-rprx-vision', 'ghcr.io/xtls/xray-core:26.3.27'],
+                           check=True, capture_output=True, text=True, pass_fds=(lock_fd,))
+        json.loads(xray_path.read_text())
+    if 'awg' in intent['protocols']:
+        if not awg_path.exists():
+            subprocess.run([str(root / 'init-awg.sh')], check=True, capture_output=True,
+                           text=True, pass_fds=(lock_fd,))
+        awg_path.read_text()
+    rules = []
+    if 'xray' in intent['protocols']:
+        rules += [f"{settings['xray_tcp_port']}/tcp", f"{settings['xray_xhttp_port']}/tcp"]
+    if 'awg' in intent['protocols']:
+        rules.append(f"{settings['awg_port']}/udp")
+    if shutil.which('ufw'):
+        for rule in rules:
+            subprocess.run(['ufw', 'allow', rule], check=True, capture_output=True, text=True,
+                           pass_fds=(lock_fd,))
+        subprocess.run(['ufw', 'reload'], check=True, capture_output=True, text=True,
+                       pass_fds=(lock_fd,))
+    args = [str(root / 'apply-node-settings.sh'),
+            str(xray_path), settings.get('xray_sni', ''),
+            str(settings.get('xray_tcp_port', 443)), str(settings.get('xray_xhttp_port', 8443)),
+            settings.get('xray_xhttp_path', '/assets'),
+            str('xray' in intent['protocols']).lower(), str('awg' in intent['protocols']).lower()]
+    subprocess.run(args, check=True, capture_output=True, text=True, pass_fds=(lock_fd,))
+    # The apply script only reports success after protocol config edits and
+    # deployment. Read the resulting files independently before acknowledgment.
+    verify_node_settings_config(intent, xray_path, awg_path)
+    for container in ([paths[2]] if 'xray' in intent['protocols'] else []) + ([paths[3]] if 'awg' in intent['protocols'] else []):
+        state = subprocess.run(['docker', 'inspect', '-f', '{{.State.Running}}', container],
+                               check=True, capture_output=True, text=True).stdout.strip()
+        if state != 'true':
+            raise ValueError('managed protocol container is not running')
+    payload = {'node_key': intent['node_key'], 'revision': intent['revision'],
+               'settings_sha256': node_settings_digest(intent)}
+    return {'summary': 'node settings applied and verified', 'payload_json': json.dumps(payload, sort_keys=True)}
 
 
 def _decommission_id(command_id):
@@ -248,6 +526,8 @@ def guard_legacy(path, protocol=None, profile=None):
     try:
         if protocol is None:
             owned = connection.execute('SELECT 1 FROM fences LIMIT 1').fetchone()
+            if (not owned and connection.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'node_settings_fence'").fetchone()):
+                owned = connection.execute('SELECT 1 FROM node_settings_fence LIMIT 1').fetchone()
         else:
             if (protocol not in {'awg', 'xray'} or not isinstance(profile, str)
                     or not profile or len(profile) > 128 or '\0' in profile):
@@ -293,6 +573,18 @@ def run_legacy(path, scope, profile, script, args):
 if __name__ == '__main__':
     os.umask(0o077)
     try:
+        if len(sys.argv) == 3 and sys.argv[1] == 'apply-node-settings':
+            result = apply_node_settings(json.loads(sys.argv[2]), '/etc/node-plane/profile-intents.sqlite3', run_node_settings)
+            print(json.dumps(result))
+            sys.exit(0)
+        if len(sys.argv) == 3 and sys.argv[1] == 'lookup-node-settings':
+            result = lookup_node_settings(json.loads(sys.argv[2]), '/etc/node-plane/profile-intents.sqlite3')
+            print(json.dumps(result))
+            sys.exit(0)
+        if len(sys.argv) == 3 and sys.argv[1] == 'resolve-node-settings':
+            result = resolve_node_settings(json.loads(sys.argv[2]), '/etc/node-plane/profile-intents.sqlite3', inspect_node_settings_for_repair)
+            print(json.dumps(result))
+            sys.exit(0)
         if len(sys.argv) == 3 and sys.argv[1] == 'resolve':
             result = resolve_interrupted(json.loads(sys.argv[2]), '/etc/node-plane/profile-intents.sqlite3', inspect_for_repair)
             print(json.dumps(result))

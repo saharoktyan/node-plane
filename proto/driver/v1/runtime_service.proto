@@ -16,6 +16,11 @@ service RuntimeService {
   rpc SyncRuntime(SyncRuntimeRequest) returns (StartOperationResponse);
   rpc SyncXray(SyncXrayRequest) returns (StartOperationResponse);
   rpc ApplyNodeSettings(ApplyNodeSettingsRequest) returns (StartOperationResponse);
+  rpc ApplyBackendNodeSettings(ApplyBackendNodeSettingsRequest) returns (StartOperationResponse);
+  // Idempotent preparation of an already installed agent; no legacy registry read.
+  rpc PrepareBackendNode(PrepareBackendNodeRequest) returns (BackendNodeSettingsResult);
+  rpc RecoverBackendNodeSettings(ApplyBackendNodeSettingsRequest) returns (BackendNodeSettingsResult);
+  rpc ResolveBackendNodeSettings(ApplyBackendNodeSettingsRequest) returns (BackendNodeSettingsResult);
   rpc RefreshAwgConfig(RefreshAwgConfigRequest) returns (RefreshAwgConfigResponse);
   rpc GetRuntimeStatus(GetRuntimeStatusRequest) returns (GetRuntimeStatusResponse);
   rpc ListNodesNeedingRuntimeSync(ListNodesNeedingRuntimeSyncRequest) returns (ListNodesNeedingRuntimeSyncResponse);
@@ -75,6 +80,21 @@ message SyncXrayRequest {
 
 message ApplyNodeSettingsRequest {
   string node_key = 1;
+}
+
+message ApplyBackendNodeSettingsRequest {
+  string node_key = 1;
+  uint64 desired_revision = 2;
+  string protocols_json = 3;
+  string settings_json = 4;
+}
+
+message PrepareBackendNodeRequest {
+  string node_key = 1;
+}
+
+message BackendNodeSettingsResult {
+  string result_json = 1;
 }
 
 message RefreshAwgConfigRequest {

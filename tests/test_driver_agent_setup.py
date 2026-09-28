@@ -14,6 +14,58 @@ SETUP_SCRIPT = REPO_ROOT / "scripts" / "setup_driver_agents.sh"
 
 
 class DriverAgentSetupTests(unittest.TestCase):
+    def test_backend_dry_run_uses_backend_draft_without_legacy_registry(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            app_root = root / 'current'
+            shared_root = root / 'shared'
+            fake_bin = root / 'bin'
+            for directory in (app_root / 'rust/node-driver', app_root / 'rust/node-agent',
+                              app_root / 'app/db', shared_root, fake_bin):
+                directory.mkdir(parents=True, exist_ok=True)
+            (shared_root / '.env').write_text('BOT_TOKEN=test\n', encoding='utf-8')
+            (app_root / 'app/db/__init__.py').write_text('''class Result:
+    def fetchone(self):
+        return {'key': 'lv1'}
+class Connection:
+    def __enter__(self):
+        return self
+    def __exit__(self, *args):
+        pass
+    def execute(self, query, args):
+        assert args == ('lv1',)
+        return Result()
+class DB:
+    def connect(self):
+        return Connection()
+def get_db():
+    return DB()
+''', encoding='utf-8')
+            ssh_log = root / 'ssh.log'
+            for command in ('ssh', 'scp', 'sudo'):
+                path = fake_bin / command
+                path.write_text(f'#!/bin/sh\nprintf "%s\\n" "$*" >> "{ssh_log}"\n', encoding='utf-8')
+                path.chmod(0o755)
+            environment = os.environ.copy()
+            environment.update(NODE_PLANE_APP_DIR=str(app_root),
+                               NODE_PLANE_SHARED_DIR=str(shared_root),
+                               PATH=f"{fake_bin}:{environment['PATH']}")
+            result = subprocess.run([str(SETUP_SCRIPT), '--dry-run', '--bin-source', 'build',
+                '--backend-node-key', 'lv1', '--backend-ssh-target', 'root@203.0.113.10',
+                '--backend-agent-host', 'vpn.example.test'], env=environment, text=True,
+                capture_output=True, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('Dry-run SSH check passed for lv1', result.stdout)
+            self.assertIn('lv1=vpn.example.test:50061', result.stdout)
+            self.assertIn('root@203.0.113.10', ssh_log.read_text(encoding='utf-8'))
+            self.assertNotIn('vpn.example.test', ssh_log.read_text(encoding='utf-8'))
+            self.assertEqual((shared_root / '.env').read_text(encoding='utf-8'), 'BOT_TOKEN=test\n')
+            local = subprocess.run([str(SETUP_SCRIPT), '--dry-run', '--bin-source', 'build',
+                '--backend-node-key', 'lv1', '--backend-local'], env=environment, text=True,
+                capture_output=True, check=False)
+            self.assertEqual(local.returncode, 0, local.stderr)
+            self.assertIn('lv1=127.0.0.1:50061', local.stdout)
+
     def test_github_api_downloads_assets_when_direct_links_return_404(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)

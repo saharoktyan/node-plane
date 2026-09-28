@@ -11,6 +11,7 @@ import json
 import os
 from .authorization import AccessDenied, require_permission
 from .operations import OperationRepository
+from .node_settings import NodeSettingsExecutor
 
 
 class IntentExecutor:
@@ -131,6 +132,8 @@ class IntentExecutor:
             row = conn.execute("""SELECT t.*, o.profile_id, o.desired_revision
                 FROM backend_operation_tasks t JOIN backend_operations o ON o.id = t.operation_id
                 WHERE t.status = 'awaiting_executor'
+                  AND NOT EXISTS (SELECT 1 FROM backend_node_settings_tasks ns
+                      WHERE ns.node_key = t.node_key AND ns.status IN ('awaiting_executor', 'running', 'blocked'))
                   AND NOT EXISTS (SELECT 1 FROM backend_operation_tasks b
                       WHERE b.node_key = t.node_key AND b.status IN ('running', 'blocked'))
                   AND NOT EXISTS (SELECT 1 FROM backend_operation_tasks earlier
@@ -187,10 +190,13 @@ def main():
         from .driver_transport import GrpcIntentDriver, local_channel
         with local_channel(args.driver) as channel:
             executor = IntentExecutor(get_db(), GrpcIntentDriver(channel))
+            node_executor = NodeSettingsExecutor(executor.db, executor.driver)
             executor.recover()
+            node_executor.recover()
             executor.reconcile_completed()
+            node_executor.reconcile_completed()
             executor.inspect_blocked()
-            while executor.run_one():
+            while node_executor.run_one() or executor.run_one():
                 pass
 
 

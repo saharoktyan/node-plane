@@ -15,13 +15,19 @@ from .identity_repository import SQLIdentityRepository
 from .profiles import ProfileRepository
 from .profile_commands import ProfileCommands
 from .node_lifecycle import NodeLifecycle
+from .access_requests import AccessRequestService
+from .accounts import AccountService
+from .nodes import NodeService
+from .node_settings import NodeSettingsService
 
 
 def bootstrap_admin(repository: SQLIdentityRepository, telegram_user_id: int):
     validate_telegram_id(telegram_user_id)
     account = repository.resolve_telegram(telegram_user_id)
     with repository.db.transaction() as conn:
-        conn.execute("UPDATE backend_accounts SET role = 'admin', status = 'approved' WHERE id = ?", (account.id,))
+        conn.execute('UPDATE backend_account_guard SET revision = revision + 1 WHERE id = 1')
+        conn.execute("""UPDATE backend_accounts SET role = 'admin', status = 'approved',
+            revision = revision + 1 WHERE id = ? AND (role != 'admin' OR status != 'approved')""", (account.id,))
     return repository.get_account(account.id)
 
 
@@ -56,6 +62,12 @@ def main():
     repair.add_argument('--admin-account-id', required=True)
     repair.add_argument('--lock-file', type=Path, required=True)
     repair.add_argument('--driver', default='127.0.0.1:50051')
+    repair_settings = commands.add_parser('resolve-blocked-node-settings',
+        help='After restarting the agent, retire an uncertain settings command and queue a fresh revision')
+    repair_settings.add_argument('--task-id', required=True)
+    repair_settings.add_argument('--admin-account-id', required=True)
+    repair_settings.add_argument('--lock-file', type=Path, required=True)
+    repair_settings.add_argument('--driver', default='127.0.0.1:50051')
     drain = commands.add_parser('drain-node', help='Disable grants and queue revocation; does not remove runtime or agent')
     drain.add_argument('--node-key', required=True)
     drain.add_argument('--admin-account-id', required=True)
@@ -91,6 +103,8 @@ def main():
     bind_target = bind.add_mutually_exclusive_group(required=True)
     bind_target.add_argument('--local', action='store_true')
     bind_target.add_argument('--ssh-target')
+    bind.add_argument('--ssh-identity-file', type=Path)
+    bind.add_argument('--ssh-port', type=int, default=22)
     args = parser.parse_args()
     from db import get_db
     db = get_db()
@@ -102,6 +116,10 @@ def main():
             credentials.initialize_schema()
             ProfileRepository(db).initialize_schema()
             ProfileCommands(db).initialize_schema()
+            AccessRequestService(db).initialize_schema()
+            AccountService(db).initialize_schema()
+            NodeService(db).initialize_schema()
+            NodeSettingsService(db).initialize_schema()
             print('Backend identity schema initialized.')
         elif args.command == 'bootstrap-admin':
             account = bootstrap_admin(identities, args.telegram_id)
@@ -140,6 +158,22 @@ def main():
                 with local_channel(args.driver) as channel:
                     outcome = IntentExecutor(db, GrpcIntentDriver(channel)).resolve_blocked(actor, task_id)
             print(f"Repair queued as operation {outcome['operation_id']}; inspect and run backend.executor to apply the current desired state.")
+        elif args.command == 'resolve-blocked-node-settings':
+            from uuid import UUID
+            from .node_settings import NodeSettingsExecutor
+            from .driver_transport import GrpcIntentDriver, local_channel
+            task_id = str(UUID(args.task_id))
+            account = identities.get_account(str(UUID(args.admin_account_id)))
+            if account is None or account.role != 'admin' or account.status != 'approved':
+                parser.error('an approved backend administrator account is required')
+            actor = Actor(Principal('local-settings-repair', PrincipalKind.ACCOUNT,
+                                    frozenset({'maintenance.manage'}), account.id), account)
+            fd = os.open(args.lock_file, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(fd, 'a') as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                with local_channel(args.driver) as channel:
+                    outcome = NodeSettingsExecutor(db, GrpcIntentDriver(channel)).resolve_blocked(actor, task_id)
+            print(f"Interrupted settings task retired after live inspection; fresh revision {outcome['revision']} queued as {outcome['task_id']}. Run backend.executor with the same lock file.")
         elif args.command == 'drain-node':
             from uuid import UUID
             account = identities.get_account(str(UUID(args.admin_account_id)))
@@ -194,7 +228,7 @@ def main():
                 parser.error('an approved backend administrator account is required')
             actor = Actor(Principal('local-verified-removal', PrincipalKind.ACCOUNT,
                                     frozenset({'maintenance.manage'}), account.id), account)
-            from .removal_verifier import RemovalVerifier, RemovalVerificationError
+            from .removal_verifier import RemovalVerifier
             verifier = RemovalVerifier(local=args.local, ssh_target=args.ssh_target,
                 ssh_identity_file=args.ssh_identity_file, ssh_port=args.ssh_port,
                 bot_public_key=args.bot_public_key_file.read_text().strip())
@@ -210,12 +244,14 @@ def main():
                 parser.error('an approved backend administrator account is required')
             actor = Actor(Principal('local-verification-binding', PrincipalKind.ACCOUNT,
                                     frozenset({'maintenance.manage'}), account.id), account)
-            target = 'local' if args.local else args.ssh_target
+            from .removal_verifier import RemovalVerifier
+            verifier = RemovalVerifier(local=args.local, ssh_target=args.ssh_target,
+                ssh_identity_file=args.ssh_identity_file, ssh_port=args.ssh_port)
             fd = os.open(args.lock_file, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
             with os.fdopen(fd, 'a') as lock:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                outcome = NodeLifecycle(db).bind_verification_target(actor, args.node_key, target)
-            print(f"Node {outcome['node_key']} verification target bound: {outcome['target']}.")
+                outcome = NodeLifecycle(db).bind_verification_target(actor, args.node_key, verifier)
+            print(f"Node {outcome['node_key']} verification target bound: {outcome['target']} (active agent identity checked).")
     except (OSError, ValueError, AccessDenied) as error:
         parser.error(str(error))
 

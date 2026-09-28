@@ -1,4 +1,8 @@
-"""Backend-owned profile/grant read models and trusted local provisioning."""
+"""VPN profile/grant models and trusted local provisioning.
+
+These tables are one service-specific slice. Future Matrix/password-manager
+access must not be represented as another value in the VPN protocol column.
+"""
 from __future__ import annotations
 
 import base64
@@ -48,7 +52,10 @@ class ProfileRepository:
                 key TEXT PRIMARY KEY, title TEXT NOT NULL, region TEXT NOT NULL,
                 flag TEXT NOT NULL DEFAULT '', enabled INTEGER NOT NULL DEFAULT 1,
                 protocols_json TEXT NOT NULL,
-                xray_transports_json TEXT NOT NULL DEFAULT '[]'
+                xray_transports_json TEXT NOT NULL DEFAULT '[]',
+                desired_revision INTEGER NOT NULL DEFAULT 1,
+                applied_revision INTEGER NOT NULL DEFAULT 0,
+                settings_json TEXT NOT NULL DEFAULT '{}'
             )''')
             conn.execute('''CREATE TABLE IF NOT EXISTS backend_grants (
                 profile_id TEXT NOT NULL REFERENCES backend_profiles(id) ON DELETE CASCADE,

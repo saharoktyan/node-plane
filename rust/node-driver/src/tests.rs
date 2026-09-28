@@ -51,6 +51,42 @@ fn assert_missing_agent(ctx: &DriverContext, response: Response<StartOperationRe
     assert!(op.result_json.is_empty());
 }
 
+#[tokio::test]
+async fn backend_node_inspection_does_not_fall_back_to_legacy_server_rows() {
+    let api = NodeApi { ctx: context() };
+    let error = api
+        .inspect_backend_node(Request::new(InspectBackendNodeRequest {
+            node_key: "test-node".into(),
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), tonic::Code::FailedPrecondition);
+    assert_eq!(error.message(), "no node-agent target configured");
+}
+
+#[tokio::test]
+async fn backend_settings_apply_requires_identity_and_never_uses_legacy_server_rows() {
+    let ctx = context();
+    let api = RuntimeApi { ctx: ctx.clone() };
+    let request = ApplyBackendNodeSettingsRequest {
+        node_key: "test-node".into(),
+        desired_revision: 1,
+        protocols_json: "[\"awg\"]".into(),
+        settings_json: "{}".into(),
+    };
+    let missing = api
+        .apply_backend_node_settings(Request::new(request.clone()))
+        .await
+        .unwrap_err();
+    assert_eq!(missing.code(), tonic::Code::InvalidArgument);
+    let mut keyed = Request::new(request);
+    keyed.metadata_mut().insert(
+        "x-node-plane-command-id",
+        "stable-node-task".parse().unwrap(),
+    );
+    assert_missing_agent(&ctx, api.apply_backend_node_settings(keyed).await.unwrap());
+}
+
 #[test]
 fn typed_cleanup_failure_is_available_to_backend() {
     let state = DriverState::default();

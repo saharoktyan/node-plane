@@ -11,6 +11,10 @@ from backend.identity_repository import SQLIdentityRepository
 from backend.profiles import ProfileRepository
 from backend.profile_commands import ProfileCommands
 from backend.http_api import create_app
+from backend.access_requests import AccessRequestService
+from backend.accounts import AccountService
+from backend.nodes import NodeService
+from backend.node_settings import NodeSettingsService
 from fastapi.testclient import TestClient
 
 
@@ -24,6 +28,10 @@ class BackendHTTPTests(unittest.TestCase):
         self.credentials.initialize_schema()
         ProfileRepository(self.db).initialize_schema()
         ProfileCommands(self.db).initialize_schema()
+        AccessRequestService(self.db).initialize_schema()
+        AccountService(self.db).initialize_schema()
+        NodeService(self.db).initialize_schema()
+        NodeSettingsService(self.db).initialize_schema()
         self.admin = bootstrap_admin(self.identities, 101)
         self.token_id, self.token = self.credentials.issue(PrincipalKind.ADAPTER, ADAPTER_SCOPES)
         self.headers = {'Authorization': 'Bearer ' + self.token}

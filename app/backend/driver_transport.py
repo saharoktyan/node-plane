@@ -4,11 +4,70 @@ import grpc
 
 class GrpcIntentDriver:
     def __init__(self, channel, timeout=60):
-        from driver.v1 import provisioning_service_pb2_grpc, operation_service_pb2_grpc, runtime_service_pb2_grpc
+        from driver.v1 import provisioning_service_pb2_grpc, operation_service_pb2_grpc, runtime_service_pb2_grpc, node_service_pb2_grpc
         self.provisioning = provisioning_service_pb2_grpc.ProvisioningServiceStub(channel)
         self.operations = operation_service_pb2_grpc.OperationServiceStub(channel)
         self.runtime = runtime_service_pb2_grpc.RuntimeServiceStub(channel)
+        self.nodes = node_service_pb2_grpc.NodeServiceStub(channel)
         self.timeout = timeout
+
+    def inspect_node(self, node_key):
+        """Read facts from the agent via a driver path independent of legacy servers."""
+        from driver.v1 import node_service_pb2
+        response = self.nodes.InspectBackendNode(
+            node_service_pb2.InspectBackendNodeRequest(node_key=node_key), timeout=self.timeout)
+        if response.node_key != node_key:
+            raise ValueError('driver returned a different node identity')
+        return {'node_key': response.node_key, 'health_state': response.health_state,
+                'runtime_version': response.runtime_version, 'runtime_commit': response.runtime_commit,
+                'xray_config_present': response.xray_config_present,
+                'awg_config_present': response.awg_config_present}
+
+    def prepare_node(self, node_key):
+        """Prepare an already installed, unmanaged agent for a first apply."""
+        from driver.v1 import runtime_service_pb2
+        import json
+        response = self.runtime.PrepareBackendNode(
+            runtime_service_pb2.PrepareBackendNodeRequest(node_key=node_key),
+            timeout=max(self.timeout, 1200))
+        if json.loads(response.result_json) != {'node_key': node_key, 'prepared': True}:
+            raise ValueError('driver returned an invalid node preparation result')
+
+    @staticmethod
+    def node_settings_request(intent):
+        from driver.v1 import runtime_service_pb2
+        import json
+        return runtime_service_pb2.ApplyBackendNodeSettingsRequest(
+            node_key=intent['node_key'], desired_revision=intent['revision'],
+            protocols_json=json.dumps(intent['protocols'], sort_keys=True, separators=(',', ':')),
+            settings_json=json.dumps(intent['settings'], sort_keys=True, separators=(',', ':')))
+
+    def apply_node_settings(self, task_id, intent):
+        from driver.v1 import operation_service_pb2
+        started = self.runtime.ApplyBackendNodeSettings(self.node_settings_request(intent),
+            metadata=(('x-node-plane-command-id', task_id),), timeout=max(self.timeout, 1200))
+        operation = self.operations.GetOperation(operation_service_pb2.GetOperationRequest(
+            operation_id=started.operation_id), timeout=self.timeout)
+        if operation.kind != 'apply_backend_node_settings' or operation.node_key != intent['node_key']:
+            raise ValueError('driver returned an unrelated node operation')
+        if operation.status != 'SUCCEEDED':
+            raise ValueError('node settings were not applied')
+        return operation.result_json
+
+    def recover_node_settings(self, task_id, intent):
+        response = self.runtime.RecoverBackendNodeSettings(self.node_settings_request(intent),
+            metadata=(('x-node-plane-command-id', task_id),), timeout=self.timeout)
+        return response.result_json
+
+    def resolve_node_settings(self, task_id, intent):
+        import json
+        response = self.runtime.ResolveBackendNodeSettings(self.node_settings_request(intent),
+            metadata=(('x-node-plane-command-id', task_id),), timeout=self.timeout)
+        observation = json.loads(response.result_json)
+        if set(observation) != {'config_matches', 'containers_running'} or any(
+                type(value) is not bool for value in observation.values()):
+            raise ValueError('driver returned an invalid node settings observation')
+        return observation
 
     def decommission(self, node_key, command_id, phase):
         from driver.v1 import runtime_service_pb2

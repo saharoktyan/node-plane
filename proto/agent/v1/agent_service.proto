@@ -19,6 +19,9 @@ service NodeAgentService {
   rpc SyncRuntimeFiles(SyncRuntimeFilesRequest) returns (SyncRuntimeFilesResponse);
   rpc SyncXray(SyncXrayRequest) returns (SyncXrayResponse);
   rpc ApplyNodeSettings(ApplyNodeSettingsRequest) returns (RuntimeCommandResponse);
+  rpc ApplyBackendNodeSettings(ApplyBackendNodeSettingsRequest) returns (RuntimeCommandResponse);
+  rpc RecoverBackendNodeSettings(ApplyBackendNodeSettingsRequest) returns (RuntimeCommandResponse);
+  rpc ResolveBackendNodeSettings(ApplyBackendNodeSettingsRequest) returns (RuntimeCommandResponse);
   rpc RefreshAwgConfig(RefreshAwgConfigRequest) returns (RefreshAwgConfigResponse);
   rpc InstallDocker(InstallDockerRequest) returns (InstallDockerResponse);
   rpc DeleteRuntime(DeleteRuntimeRequest) returns (DeleteRuntimeResponse);
@@ -136,6 +139,14 @@ message ApplyNodeSettingsRequest {
   string xray_xhttp_path_prefix = 5;
   bool apply_xray = 6;
   bool apply_awg = 7;
+}
+
+message ApplyBackendNodeSettingsRequest {
+  string command_id = 1;
+  uint64 desired_revision = 2;
+  string protocols_json = 3;
+  string settings_json = 4;
+  string node_key = 5;
 }
 
 message RefreshAwgConfigRequest {

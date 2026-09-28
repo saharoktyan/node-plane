@@ -1,17 +1,71 @@
 # План отдельного backend и нового Telegram-интерфейса
 
-Дата: 2026-09-28. Статус: согласованное направление, реализация не начата.
+Current-scope note: this migration still targets the existing VPN workflows.
+Future curated services and the indefinite deferral of Pro/licensing are
+described in [SERVICE_EXPANSION_ARCHITECTURE.md](SERVICE_EXPANSION_ARCHITECTURE.md).
+Any Pro-related steps below are historical options, not current work items.
+
+## Updated execution order — 2026-09-28
+
+Finish the backend product scenarios and operational integration before building
+the replacement Telegram client. The existing PTB v13 bot remains the test
+interface for its legacy stack during this period; it is not connected to the
+new backend through temporary production adapters. Exercise the new backend
+directly through API tests, local administration and disposable-node tests.
+
+"Backend complete" means the target API supports account and access-request
+management, VPN profile/grant lifecycle, current AWG/Xray config issuance,
+node registration/settings/provisioning/removal, operations and recovery, and
+the controller maintenance needed for an ordinary installation. It also means
+the backend and worker run as installed services, use PostgreSQL, and pass the
+end-to-end tests without a Telegram process. This is a bounded migration
+milestone, not a promise to implement future privacy services or Pro features.
+
+Only then create a new aiogram 3 Telegram client. Use the old bot as a map of
+user journeys and navigation, not as a screen-by-screen implementation spec.
+The replacement should have one persistent, edited control message per chat
+where practical. New messages are acceptable when needed for a downloadable
+artifact, QR code, notification, or a Telegram API/client limitation. Keep
+those messages few and manage their lifecycle deliberately.
+
+Rich Messages are a candidate rendering format, not a prerequisite for the
+backend. Telegram Bot API supports edited rich messages, collapsible details,
+in-message callback buttons and embedded media. Test a real single-message
+prototype on Android, iOS and Desktop before committing all screens to this
+format. A Rich Message is still a Telegram message, not an HTML mini-site;
+interactive state changes require bot callbacks and rendering. The Bot API
+copy-text button is limited to 256 characters, so never truncate a long AWG
+key to make it copyable. Preserve downloadable `.vpn`/`.conf` artifacts and
+QR delivery. aiogram 3.31 provides typed Rich Message methods and models;
+still keep a plain-message fallback for Telegram clients that cannot display
+the intended screen. Do not add Rich Message support
+to the legacy PTB v13 bot.
+
+API references: [Telegram Bot API rich-message formatting](https://core.telegram.org/bots/api#rich-message-formatting-options),
+[message editing](https://core.telegram.org/bots/api#editmessagetext),
+[copy-text limit](https://core.telegram.org/bots/api#copytextbutton), and
+[aiogram Rich Message API](https://docs.aiogram.dev/en/v3.31.0/api/methods/send_rich_message.html).
+
+This section supersedes the earlier stage-D instruction to migrate Telegram
+screens alongside each backend vertical slice and the earlier PTB v22 choice.
+The target architecture and
+acceptance criteria below remain applicable; historical progress notes remain
+as written.
+
+Status (2026-09-28): backend implementation is underway; the new Telegram
+client has not started. The Russian sections below record the original plan,
+with the updated order above taking precedence where they differ.
 
 Этот план уточняет следующий этап бесплатного open-core. Выделение backend,
-переход на PTB v22 и переработка экранов выполняются в одной программе работ.
+переход на aiogram 3 и переработка экранов выполняются в одной программе работ.
 Внутри неё сначала проверяется API, затем каждый Telegram-сценарий переносится
 сразу на новый контракт, новую библиотеку и новое представление. Старый интерфейс
-не переносим на PTB v22 отдельной промежуточной миграцией.
+не переносим на aiogram 3 отдельной промежуточной миграцией.
 
 ## 1. Результат и границы
 
 ```text
-Telegram (PTB v22) / будущие CLI, Web, приложения
+Telegram (aiogram 3) / будущие CLI, Web, приложения
                          ↓ API
 Backend: авторизация, профили, ноды, желаемое состояние, Core/Pro
                          ↓ gRPC
@@ -98,12 +152,12 @@ CallbackContext, callback payload и локализованного текста
 задачи переживают отключение клиента с доступным статусом или явно неизвестным
 исходом, без бесконтрольного повторного исполнения.
 
-## 5. Этап D — Telegram сразу на PTB v22 и Rich Messages
+## 5. Этап D — Telegram сразу на aiogram 3 и Rich Messages
 
-- [ ] Проверить поддержку необходимых Rich Messages в выбранной версии PTB
+- [ ] Проверить поддержку необходимых Rich Messages в выбранной версии aiogram
   и Telegram API. Если нужны отсутствующие методы, решение остаётся внутри
-  нового v22-адаптера; временный слой для PTB v13 не создаём.
-- [ ] Создать lifecycle PTB v22, API-клиент, модели диалогов и единый слой
+  нового aiogram-адаптера; временный слой для PTB v13 не создаём.
+- [ ] Создать lifecycle aiogram 3, API-клиент, модели диалогов и единый слой
   rendering/send/edit/error. Учесть асинхронность, таймауты, лимиты Telegram,
   остановку процесса и необходимые фоновые задачи.
 - [ ] Переносить вертикальными сценариями: основное меню и профиль → получение
@@ -405,13 +459,55 @@ runtime отсутствуют, процесс агента не запущен,
 исторические target больше не создают новые intent для этого ключа.
 
 При удалении агента его transient unit убирает точное совпадение SSH-ключа
-бота из home агента и стандартных `/root` и `/home/*`. Привязка адреса пока
-вводится администратором: backend не может сопоставить её с сохранённым
-идентификатором реально зарегистрированного хоста. Это нужно добавить перед
-production cutover, иначе ошибочно привязанная чистая машина даст ложное
-подтверждение.
+бота из home агента и стандартных `/root` и `/home/*`. Перед drain привязка
+адреса теперь проверяет `node_key` работающего агента на хосте и сохраняет
+отпечаток `/etc/machine-id`; финальная проверка сверяет тот же отпечаток.
+Неверно указанный чистый хост больше не может пройти такую проверку.
+Этот механизм не защищает от клонированного machine-id или компрометации
+root-доступа и всё ещё требует проверки на реальной ноде.
 
 Пока host check проверяет стандартные пути и контейнеры, но не доказывает
 отсутствие пользовательских override-путей, нестандартных home или старых UFW-правил. Firewall
 cleanup и проверка на PostgreSQL/реальной ноде остаются перед production
 cutover. Новая схема ещё не связана с инсталлятором и Telegram UI.
+
+### Backend node inventory — 2026-09-28
+
+The standalone backend now owns admin node inventory reads and desired-state
+edits. New nodes start disabled with desired revision 1 and applied revision 0.
+Create and update use idempotency keys; updates also require an exact revision.
+Retired keys cannot be reused, and a protocol cannot be removed while grants
+still reference it. This is an inventory slice, not a runtime deployment path.
+
+Next, connect backend-owned provisioning to the driver, capture verified
+applied settings and node identity, and only then implement config issuance.
+Issuance must reject pending settings, missing runtime confirmation, frozen or
+expired profiles, and revoked grants. The existing Telegram bot still uses its
+legacy registry until the new aiogram adapter replaces it.
+
+The first driver integration is a separate read-only `InspectBackendNode` RPC.
+It contacts the configured agent without querying the legacy server registry,
+checks the returned node key, and exposes runtime health and config-file
+presence through an admin-only backend endpoint. This observation deliberately
+does not advance `applied_revision`; only the separate explicit backend
+settings command can acknowledge a revision after runtime verification.
+
+The explicit backend settings command is now implemented for an already
+bootstrapped node. It is queued by an admin API, applied by the same locked
+worker that processes profile intents, and journaled on the agent under the
+shared mutation fence. A successful agent result includes the exact desired
+revision and settings digest; only then does the backend advance its applied
+revision and enable the node. Timeout or malformed confirmation blocks the
+task. An agent/runtime absent during read-only preflight leaves the task queued
+for a later worker run. Worker restart performs read-only recovery from the
+agent journal.
+The installer now has an explicit backend-node mode for local and SSH hosts.
+It confirms the draft in backend storage, reuses the existing mTLS and binary
+rollout, updates only the selected agent target, and verifies the driver route
+without querying the legacy server registry. The settings worker can then
+prepare that clean node. Preparation copies runtime assets and
+installs Docker before a durable settings command creates missing protocol
+configs. Permanently blocked settings tasks have an explicit restart-and-repair
+path that queues a fresh revision. PostgreSQL and live-agent integration remain
+before production cutover. Config issuance is
+still absent.
