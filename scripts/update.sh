@@ -426,6 +426,13 @@ rollback_simple() {
   ln -sfn "$previous_release" "$current_link"
   sudo systemctl daemon-reload
   sudo systemctl restart node-plane
+  if sudo systemctl list-unit-files node-plane-backend.service --no-legend 2>/dev/null | grep -q node-plane-backend.service; then
+    if [[ -f "${previous_release}/app/backend/http_api.py" ]]; then
+      sudo systemctl restart node-plane-backend.service || true
+    else
+      sudo systemctl stop node-plane-backend-worker.timer node-plane-backend.service || true
+    fi
+  fi
   if wait_for_service "$HEALTH_TIMEOUT"; then
     echo "Rollback completed."
     echo "Failed release remains at: ${failed_release}"
@@ -548,6 +555,17 @@ update_simple() {
     echo "No SQLite source found at ${sqlite_db_path}; skipping SQLite -> PostgreSQL migration."
   fi
 
+  if [[ -f "${new_release_dir}/app/backend/admin_cli.py" ]]; then
+    set_step "initialize backend schema"
+    NODE_PLANE_BASE_DIR="${base_dir}" \
+    NODE_PLANE_APP_DIR="${new_release_dir}" \
+    NODE_PLANE_SHARED_DIR="${shared_dir}" \
+    DB_BACKEND="postgres" \
+    POSTGRES_DSN="${postgres_dsn}" \
+    PYTHONPATH="${new_release_dir}/app" \
+    "${new_release_dir}/.venv/bin/python" -m backend.admin_cli init-schema
+  fi
+
   if [[ $SKIP_RESTART -eq 1 ]]; then
     echo "Skipping service restart"
     echo "Release is prepared but not activated:"
@@ -581,6 +599,13 @@ update_simple() {
     POSTGRES_DSN="${postgres_dsn}" \
     SQLITE_DB_PATH="${sqlite_db_path}" \
     "${new_release_dir}/.venv/bin/python" "${new_release_dir}/app/manage_db.py" init
+  fi
+
+  if [[ -f "${new_release_dir}/scripts/install_backend_systemd.sh" ]]; then
+    set_step "install backend services"
+    if ! sudo bash "${new_release_dir}/scripts/install_backend_systemd.sh" "$base_dir" "$shared_dir"; then
+      rollback_simple "$previous_release" "$current_link" "$new_release_dir"
+    fi
   fi
 
   echo "Restarting node-plane.service..."
@@ -702,7 +727,8 @@ main() {
       fi
       ;;
     portable)
-      update_portable
+      echo "Portable Docker updates are temporarily unsupported; use a systemd installation." >&2
+      return 1
       ;;
     *)
       echo "Unsupported mode: ${MODE}" >&2

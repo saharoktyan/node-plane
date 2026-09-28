@@ -21,6 +21,7 @@ service RuntimeService {
   rpc PrepareBackendNode(PrepareBackendNodeRequest) returns (BackendNodeSettingsResult);
   rpc RecoverBackendNodeSettings(ApplyBackendNodeSettingsRequest) returns (BackendNodeSettingsResult);
   rpc ResolveBackendNodeSettings(ApplyBackendNodeSettingsRequest) returns (BackendNodeSettingsResult);
+  rpc GetBackendXrayPublic(GetBackendXrayPublicRequest) returns (BackendXrayPublicResult);
   rpc RefreshAwgConfig(RefreshAwgConfigRequest) returns (RefreshAwgConfigResponse);
   rpc GetRuntimeStatus(GetRuntimeStatusRequest) returns (GetRuntimeStatusResponse);
   rpc ListNodesNeedingRuntimeSync(ListNodesNeedingRuntimeSyncRequest) returns (ListNodesNeedingRuntimeSyncResponse);
@@ -95,6 +96,15 @@ message PrepareBackendNodeRequest {
 
 message BackendNodeSettingsResult {
   string result_json = 1;
+}
+
+message GetBackendXrayPublicRequest {
+  string node_key = 1;
+}
+
+message BackendXrayPublicResult {
+  string node_key = 1;
+  string metadata_json = 2;
 }
 
 message RefreshAwgConfigRequest {

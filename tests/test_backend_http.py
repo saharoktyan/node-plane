@@ -15,6 +15,7 @@ from backend.access_requests import AccessRequestService
 from backend.accounts import AccountService
 from backend.nodes import NodeService
 from backend.node_settings import NodeSettingsService
+from backend.config_issuance import ConfigIssuanceService
 from fastapi.testclient import TestClient
 
 
@@ -32,6 +33,7 @@ class BackendHTTPTests(unittest.TestCase):
         AccountService(self.db).initialize_schema()
         NodeService(self.db).initialize_schema()
         NodeSettingsService(self.db).initialize_schema()
+        ConfigIssuanceService(self.db).initialize_schema()
         self.admin = bootstrap_admin(self.identities, 101)
         self.token_id, self.token = self.credentials.issue(PrincipalKind.ADAPTER, ADAPTER_SCOPES)
         self.headers = {'Authorization': 'Bearer ' + self.token}

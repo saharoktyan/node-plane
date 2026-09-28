@@ -1882,6 +1882,40 @@ impl NodeAgentService for NodeAgentApi {
         }))
     }
 
+    async fn get_backend_xray_public(
+        &self,
+        _request: Request<AgentEmpty>,
+    ) -> Result<Response<agent::v1::BackendXrayPublic>, Status> {
+        let script = self.state.resolve_runtime_path("/opt/node-plane-runtime/sync-xray.sh");
+        let config = self.state.node_env_value(
+            "XRAY_CONFIG", "/opt/node-plane-runtime/xray/config.json");
+        let image = self.state.node_env_value(
+            "XRAY_DOCKER_IMAGE", "ghcr.io/xtls/xray-core:26.3.27");
+        let output = Command::new(script)
+            .args([config, "localhost".to_string(), "xtls-rprx-vision".to_string(), image])
+            .output()
+            .map_err(|_| Status::failed_precondition("Xray public metadata is unavailable"))?;
+        if !output.status.success() {
+            return Err(Status::failed_precondition("Xray public metadata is unavailable"));
+        }
+        let value: Value = serde_json::from_slice(&output.stdout)
+            .map_err(|_| Status::internal("invalid Xray public metadata"))?;
+        // The helper returns public identity only. Never return the private
+        // server key even if a future helper accidentally emits it.
+        let allowed = ["xray_sni", "xray_pbk", "xray_sid", "xray_short_id",
+            "xray_tcp_port", "xray_xhttp_port", "xray_xhttp_path_prefix",
+            "xray_flow", "xray_fp"];
+        let mut public = serde_json::Map::new();
+        for key in allowed {
+            let field = value.get(key)
+                .ok_or_else(|| Status::internal("incomplete Xray public metadata"))?;
+            public.insert(key.to_string(), field.clone());
+        }
+        Ok(Response::new(agent::v1::BackendXrayPublic {
+            metadata_json: Value::Object(public).to_string(),
+        }))
+    }
+
     async fn refresh_awg_config(
         &self,
         request: Request<RefreshAwgConfigRequest>,

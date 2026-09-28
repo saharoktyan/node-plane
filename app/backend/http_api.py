@@ -24,6 +24,7 @@ from .access_requests import AccessRequestService
 from .accounts import AccountService
 from .nodes import NodeService
 from .node_settings import NodeSettingsService
+from .config_issuance import ConfigIssuanceService
 
 
 class ResolveInput(BaseModel):
@@ -159,6 +160,29 @@ class NodeSettingsTaskOutput(BaseModel):
     status: str
 
 
+class ConfigIssuanceInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    node_key: Annotated[str, Field(min_length=1, max_length=64)]
+    protocol: Literal['xray', 'awg']
+    transport: Literal['tcp', 'xhttp', 'vpn', 'conf']
+
+
+class ConfigIssuanceOutput(BaseModel):
+    id: UUID
+    profile_id: UUID
+    node_key: str
+    protocol: str
+    transport: str
+    status: str
+    expires_at: str
+
+
+class ConfigArtifactOutput(BaseModel):
+    filename: str | None
+    media_type: str
+    content: str
+
+
 class ProfileCreateInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
     display_name: Annotated[str, Field(min_length=1, max_length=128)]
@@ -248,6 +272,7 @@ def create_app(db, *, node_driver=None) -> FastAPI:
     accounts = AccountService(db)
     nodes = NodeService(db)
     node_settings = NodeSettingsService(db)
+    config_issuances = ConfigIssuanceService(db, node_driver)
 
     def error(request, code, status):
         headers = {'WWW-Authenticate': 'Bearer'} if status == 401 else None
@@ -334,6 +359,7 @@ def create_app(db, *, node_driver=None) -> FastAPI:
                 conn.execute('SELECT id FROM backend_account_guard LIMIT 1').fetchone()
                 conn.execute('SELECT actor_account_id FROM backend_node_commands LIMIT 1').fetchone()
                 conn.execute('SELECT id FROM backend_node_settings_tasks LIMIT 1').fetchone()
+                conn.execute('SELECT id FROM backend_config_issuances LIMIT 1').fetchone()
         except Exception:
             return error(request, 'dependency_unavailable', 503)
         return {'status': 'ready'}
@@ -525,6 +551,22 @@ def create_app(db, *, node_driver=None) -> FastAPI:
     @app.get('/api/v1/operations/{operation_id}', response_model=OperationOutput)
     def operation(operation_id: UUID, current=Depends(actor)):
         return operations.get(current, str(operation_id))
+
+    @app.post('/api/v1/profiles/{profile_id}/config-issuances',
+              response_model=ConfigIssuanceOutput, status_code=202)
+    def request_config(profile_id: UUID, body: ConfigIssuanceInput, request: Request,
+                       command_key: Annotated[str, Header(alias='Idempotency-Key')],
+                       current=Depends(actor)):
+        return config_issuances.request(current, str(profile_id), body.node_key,
+            body.protocol, body.transport, header(request, 'Idempotency-Key'))
+
+    @app.get('/api/v1/config-issuances/{issuance_id}', response_model=ConfigIssuanceOutput)
+    def get_config_issuance(issuance_id: UUID, current=Depends(actor)):
+        return config_issuances.get(current, str(issuance_id))
+
+    @app.get('/api/v1/config-issuances/{issuance_id}/artifact', response_model=ConfigArtifactOutput)
+    def get_config_artifact(issuance_id: UUID, current=Depends(actor)):
+        return config_issuances.artifact(current, str(issuance_id))
 
     return app
 

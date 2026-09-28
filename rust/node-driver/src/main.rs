@@ -80,6 +80,7 @@ struct XraySyncGenerated {
     xray_sid: String,
     xray_short_id: String,
     xray_flow: String,
+    xray_fp: String,
     xray_tcp_port: i32,
     xray_xhttp_port: i32,
     xray_xhttp_path_prefix: String,
@@ -2533,6 +2534,45 @@ impl ProvisioningService for ProvisioningApi {
 
 #[tonic::async_trait]
 impl RuntimeService for RuntimeApi {
+    async fn get_backend_xray_public(
+        &self,
+        request: Request<driver::v1::GetBackendXrayPublicRequest>,
+    ) -> Result<Response<driver::v1::BackendXrayPublicResult>, Status> {
+        let node_key = request.into_inner().node_key;
+        if node_key.is_empty() {
+            return Err(Status::invalid_argument("node key is required"));
+        }
+        let target = self.ctx.agent_target(&node_key)
+            .ok_or_else(|| Status::failed_precondition("no node-agent target configured"))?;
+        let transport = agent_transport::AgentTransport::new(target);
+        let facts = transport.get_runtime_facts().await?;
+        if facts.node_key != node_key {
+            return Err(Status::failed_precondition("agent node identity mismatch"));
+        }
+        let response = transport.get_backend_xray_public().await?;
+        let metadata = XraySyncGenerated::parse(&response.metadata_json)?;
+        if metadata.xray_short_id.len() != 16 || !metadata.xray_short_id.bytes().all(|b| b.is_ascii_hexdigit())
+            || metadata.xray_sid != metadata.xray_short_id
+            || metadata.xray_sni.is_empty()
+            || metadata.xray_tcp_port <= 0 || metadata.xray_xhttp_port <= 0 {
+            return Err(Status::internal("invalid Xray public metadata returned by agent"));
+        }
+        let public = serde_json::json!({
+            "sni": metadata.xray_sni,
+            "public_key": metadata.xray_pbk,
+            "short_id": metadata.xray_short_id,
+            "tcp_port": metadata.xray_tcp_port,
+            "xhttp_port": metadata.xray_xhttp_port,
+            "xhttp_path": metadata.xray_xhttp_path_prefix,
+            "flow": metadata.xray_flow,
+            "fingerprint": metadata.xray_fp,
+        });
+        Ok(Response::new(driver::v1::BackendXrayPublicResult {
+            node_key,
+            metadata_json: public.to_string(),
+        }))
+    }
+
     async fn prepare_backend_node(
         &self,
         request: Request<driver::v1::PrepareBackendNodeRequest>,

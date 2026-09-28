@@ -19,6 +19,7 @@ from .access_requests import AccessRequestService
 from .accounts import AccountService
 from .nodes import NodeService
 from .node_settings import NodeSettingsService
+from .config_issuance import ConfigIssuanceService
 
 
 def bootstrap_admin(repository: SQLIdentityRepository, telegram_user_id: int):
@@ -120,6 +121,7 @@ def main():
             AccountService(db).initialize_schema()
             NodeService(db).initialize_schema()
             NodeSettingsService(db).initialize_schema()
+            ConfigIssuanceService(db).initialize_schema()
             print('Backend identity schema initialized.')
         elif args.command == 'bootstrap-admin':
             account = bootstrap_admin(identities, args.telegram_id)

@@ -509,5 +509,26 @@ prepare that clean node. Preparation copies runtime assets and
 installs Docker before a durable settings command creates missing protocol
 configs. Permanently blocked settings tasks have an explicit restart-and-repair
 path that queues a fresh revision. PostgreSQL and live-agent integration remain
-before production cutover. Config issuance is
-still absent.
+before production cutover.
+
+The first backend-owned config issuance path now covers Xray TCP and XHTTP.
+An authenticated account requests a short-lived issuance for its profile and
+granted node. The backend requires a successful profile ensure at the current
+revision and fully applied node settings. The worker verifies the live Xray
+profile and reads only public connection metadata through the driver/agent;
+it never stores the resulting VLESS URI. Artifact retrieval repeats the grant,
+revision, and live-runtime checks before constructing the link. Revocation,
+profile changes, node changes, or expiry make the old issuance unusable.
+AWG issuance now follows the same revision and access checks. It takes the
+private client config from the successful profile intent, asks the agent to
+refresh it against the live server peer, and stores only a digest in the
+issuance row. Artifact retrieval repeats the refresh and can return `.vpn` or
+`.conf`. Real-node acceptance and the new aiogram client remain pending.
+
+The systemd installer now initializes the backend schema and installs a
+loopback-only API service and a timer-driven worker using the active release
+and shared environment. Update restarts the API; healthcheck reports API and
+timer state. Portable Docker installation is temporarily unsupported while
+this path is verified. The legacy Telegram bot remains separate; the next
+milestone is a new aiogram client for the primary install-node-issue-config
+journey, followed by real-node acceptance and remaining maintenance work.
