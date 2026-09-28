@@ -35,6 +35,26 @@ class ProvisioningServiceStub(object):
         Args:
             channel: A grpc.Channel.
         """
+        self.ResolveProfileIntent = channel.unary_unary(
+                '/nodeplane.driver.v1.ProvisioningService/ResolveProfileIntent',
+                request_serializer=driver_dot_v1_dot_provisioning__service__pb2.ApplyProfileIntentRequest.SerializeToString,
+                response_deserializer=driver_dot_v1_dot_provisioning__service__pb2.ProfileInspection.FromString,
+                _registered_method=True)
+        self.RecoverProfileIntent = channel.unary_unary(
+                '/nodeplane.driver.v1.ProvisioningService/RecoverProfileIntent',
+                request_serializer=driver_dot_v1_dot_provisioning__service__pb2.ApplyProfileIntentRequest.SerializeToString,
+                response_deserializer=driver_dot_v1_dot_provisioning__service__pb2.RecoverProfileIntentResponse.FromString,
+                _registered_method=True)
+        self.InspectProfileIntent = channel.unary_unary(
+                '/nodeplane.driver.v1.ProvisioningService/InspectProfileIntent',
+                request_serializer=driver_dot_v1_dot_provisioning__service__pb2.ApplyProfileIntentRequest.SerializeToString,
+                response_deserializer=driver_dot_v1_dot_provisioning__service__pb2.ProfileInspection.FromString,
+                _registered_method=True)
+        self.ApplyProfileIntent = channel.unary_unary(
+                '/nodeplane.driver.v1.ProvisioningService/ApplyProfileIntent',
+                request_serializer=driver_dot_v1_dot_provisioning__service__pb2.ApplyProfileIntentRequest.SerializeToString,
+                response_deserializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
+                _registered_method=True)
         self.EnsureProfileOnNode = channel.unary_unary(
                 '/nodeplane.driver.v1.ProvisioningService/EnsureProfileOnNode',
                 request_serializer=driver_dot_v1_dot_provisioning__service__pb2.EnsureProfileOnNodeRequest.SerializeToString,
@@ -64,6 +84,32 @@ class ProvisioningServiceStub(object):
 
 class ProvisioningServiceServicer(object):
     """Missing associated documentation comment in .proto file."""
+
+    def ResolveProfileIntent(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def RecoverProfileIntent(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def InspectProfileIntent(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ApplyProfileIntent(self, request, context):
+        """Explicit backend-owned intent. Never reads legacy business tables.
+        x-node-plane-command-id is mandatory and must remain stable on retries.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
 
     def EnsureProfileOnNode(self, request, context):
         """Missing associated documentation comment in .proto file."""
@@ -98,6 +144,26 @@ class ProvisioningServiceServicer(object):
 
 def add_ProvisioningServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
+            'ResolveProfileIntent': grpc.unary_unary_rpc_method_handler(
+                    servicer.ResolveProfileIntent,
+                    request_deserializer=driver_dot_v1_dot_provisioning__service__pb2.ApplyProfileIntentRequest.FromString,
+                    response_serializer=driver_dot_v1_dot_provisioning__service__pb2.ProfileInspection.SerializeToString,
+            ),
+            'RecoverProfileIntent': grpc.unary_unary_rpc_method_handler(
+                    servicer.RecoverProfileIntent,
+                    request_deserializer=driver_dot_v1_dot_provisioning__service__pb2.ApplyProfileIntentRequest.FromString,
+                    response_serializer=driver_dot_v1_dot_provisioning__service__pb2.RecoverProfileIntentResponse.SerializeToString,
+            ),
+            'InspectProfileIntent': grpc.unary_unary_rpc_method_handler(
+                    servicer.InspectProfileIntent,
+                    request_deserializer=driver_dot_v1_dot_provisioning__service__pb2.ApplyProfileIntentRequest.FromString,
+                    response_serializer=driver_dot_v1_dot_provisioning__service__pb2.ProfileInspection.SerializeToString,
+            ),
+            'ApplyProfileIntent': grpc.unary_unary_rpc_method_handler(
+                    servicer.ApplyProfileIntent,
+                    request_deserializer=driver_dot_v1_dot_provisioning__service__pb2.ApplyProfileIntentRequest.FromString,
+                    response_serializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.SerializeToString,
+            ),
             'EnsureProfileOnNode': grpc.unary_unary_rpc_method_handler(
                     servicer.EnsureProfileOnNode,
                     request_deserializer=driver_dot_v1_dot_provisioning__service__pb2.EnsureProfileOnNodeRequest.FromString,
@@ -133,6 +199,114 @@ def add_ProvisioningServiceServicer_to_server(servicer, server):
  # This class is part of an EXPERIMENTAL API.
 class ProvisioningService(object):
     """Missing associated documentation comment in .proto file."""
+
+    @staticmethod
+    def ResolveProfileIntent(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/nodeplane.driver.v1.ProvisioningService/ResolveProfileIntent',
+            driver_dot_v1_dot_provisioning__service__pb2.ApplyProfileIntentRequest.SerializeToString,
+            driver_dot_v1_dot_provisioning__service__pb2.ProfileInspection.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RecoverProfileIntent(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/nodeplane.driver.v1.ProvisioningService/RecoverProfileIntent',
+            driver_dot_v1_dot_provisioning__service__pb2.ApplyProfileIntentRequest.SerializeToString,
+            driver_dot_v1_dot_provisioning__service__pb2.RecoverProfileIntentResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def InspectProfileIntent(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/nodeplane.driver.v1.ProvisioningService/InspectProfileIntent',
+            driver_dot_v1_dot_provisioning__service__pb2.ApplyProfileIntentRequest.SerializeToString,
+            driver_dot_v1_dot_provisioning__service__pb2.ProfileInspection.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ApplyProfileIntent(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/nodeplane.driver.v1.ProvisioningService/ApplyProfileIntent',
+            driver_dot_v1_dot_provisioning__service__pb2.ApplyProfileIntentRequest.SerializeToString,
+            driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
 
     @staticmethod
     def EnsureProfileOnNode(request,

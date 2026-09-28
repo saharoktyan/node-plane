@@ -13,6 +13,56 @@ Xray profile synchronization on Moscow works again after restoring its missing
 `msk1=127.0.0.1:50061` entry in `NODE_AGENT_TARGETS`. Xray client traffic and
 the full protocol lifecycle still need live testing.
 
+## Current open-core checkpoint — 2026-09-28
+
+The execution migration is implemented: gRPC-only Rust driver, mutual-TLS
+local/SSH agents, persistent operation history and command deduplication,
+AWG 3.1, Xray 26.3.27 and durable Xray HandlerService user changes.
+Alpha.23 contains profile suspension/AWG identity recovery and full-cleanup
+fixes; alpha.24 contains installer/healthcheck fixes. The user considers the
+installer issue closed. Historical checklists below are not a complete account
+of remaining implementation work.
+
+Remaining shared-core work, in priority order:
+- [ ] Extract business scenarios from Telegram handlers into backend entry
+  points with explicit actors, inputs and shared authorization. Keep Telegram
+  responsible for dialogue, localization and rendering only.
+- [ ] Complete backend/driver data ownership: backend constructs explicit
+  execution intent and desired-state revisions; driver stops reconstructing
+  policy from business tables and returns structured observations/results.
+- [ ] Extend retained command identities beyond admin node actions to profile
+  workflows; coordinate concurrent mutations on the same node and complete
+  structured error handling. Durable asynchronous execution, live progress,
+  cancellation and automatic retry are still unimplemented; do not introduce
+  them without durable acceptance and ambiguity/recovery tests.
+- [ ] Audit exceptional orphan runtime cleanup and remaining legacy Pro
+  collector/alert code against the shared-core boundary. Replace the host-local
+  cleanup exception once a driver-managed recovery path exists.
+- [ ] Close outstanding integration checks on PostgreSQL and a disposable node:
+  freeze/unfreeze; AWG old-key restoration; full removal including agent and
+  credentials; Basic settings; Xray granted access after container restart;
+  fresh bootstrap; drift/reconcile and invalid-config/rollback failures.
+  Keep unreported checks open. iOS/v2rayBox TCP investigation is deferred by
+  user request; the same TCP config works in Android and Linux NekoBox.
+- [ ] Execute the combined [backend and Telegram migration plan](BACKEND_TELEGRAM_MIGRATION_PLAN.md):
+  extract scenarios and define API → run a separate backend and validate it →
+  move each Telegram scenario directly to PTB v22, backend API and Rich Messages
+  → update deployment and remove the old adapter. Do not perform an interim
+  PTB v22 conversion of the old screens. Rich API support must be verified in
+  the selected PTB/API version.
+
+Interface/product decision:
+- Rich Messages and basic interface usability belong to free Core as well as
+  Pro. Compact node cards, collapsed config/instruction blocks and navigation
+  are shared product quality, not licensed features.
+- Pro sells additional functionality and its screens: subscriptions, devices,
+  limits, expanded metrics and alerts. First Pro module and licensing integration
+  follow stabilization of backend extension boundaries; no general plugin
+  framework is required in advance.
+- Config delivery should retain native files/QR and optional expanded text.
+  Copy buttons must check Telegram's text-length limit; long AWG keys must not
+  be truncated to fit.
+
 Next core tasks:
 - [x] Show a concise result after successful agent setup; keep full service
   logs available on failure.
@@ -169,7 +219,7 @@ Confirmed by the user:
 - Offline agent: profile updates fail, cleanup offers registry-only removal; recovery works after agent start.
 - Fresh SSH node: Docker installation succeeds.
 
-Corrections in the working tree (need release and live verification):
+Corrections released in alpha.23 (remaining live checks below):
 - Freeze/unfreeze now revokes/restores both protocols through the driver. Saving a frozen profile and old config buttons cannot enable access.
 - AWG revoked peer keys and IP are retained securely on the node; regrant restores the same peer. Clean reinstall cannot restore credentials tied to the previous server key.
 - Failed probe uses a warning and readable agent status; Docker installation output is summarized.
@@ -188,3 +238,160 @@ Remaining live checks:
 - Controller cleanup also removes the deleted node’s TLS directory and persisted NODE_AGENT_TARGETS entry, retaining the CA and credentials of other nodes. Docker daemon unavailability blocks cleanup instead of claiming success without inspecting containers.
 
 - Post-alpha.23 installer audit: systemd unit installation defaults to Yes (automatic in non-interactive mode); interactive acceptance is retained for the post-rollout bot restart. Root installations no longer require sudo for the service step. Healthcheck reads shared .env, checks the installed venv interpreter/pip, identifies the actual bot unit via LoadState and does not require Compose in simple mode. Verified with a mocked systemd host without Compose; fresh-host installation remains a live check.
+
+- Backend API contract design started: see [BACKEND_API_CONTRACT.md](BACKEND_API_CONTRACT.md). Identity/delegation, resource permissions and initial API routes are specified as implementation targets; no new API server is running yet.
+
+- Backend identity foundation implemented in app/backend: resolve/me, explicit delegation, scope/role/resource policy and additive SQL identity repository. Eleven isolated tests pass. No HTTP/token verifier or existing-account import is connected yet; production Telegram behavior remains on the old path.
+
+- Development compatibility decision (2026-09-28): current test accounts,
+  nodes and configs may be replaced; no interim migration chain is required.
+  Prefer the clean target architecture/schema. After stabilization, support
+  manual recreation or a small legacy-user import keyed by Telegram ID;
+  old node/runtime credentials need not survive. See the migration plan’s
+  compatibility override. Stable-release updates will require compatibility.
+
+- Backend credentials/bootstrap implemented: opaque bearer hash verification, expiry/revocation, scoped principals and trusted local admin CLI with exclusive 0600 secret-file creation. HTTP integration and PostgreSQL concurrency gate remain pending.
+
+- Initial FastAPI HTTP slice implemented: live/identity-schema readiness, authenticated identity resolve/me, strict input, safe errors, persistent registration idempotency and OpenAPI snapshot. Eight HTTP tests pass. Installer wiring, profiles/nodes and durable long-operation executor are not implemented yet.
+
+- Backend profile/available-node reads implemented on clean UUID ownership/grant models, with safe typed responses and keyset pagination. Local profile creation is available; HTTP mutations, node management and driver integration remain pending. Seven additional HTTP checks pass; no production cutover.
+
+- Profile desired-state mutations implemented with admin permissions, atomic grants, persistent idempotency and optimistic revisions. Runtime is explicitly not_dispatched; actual driver/executor integration is the next step. Eight additional HTTP mutation checks pass.
+
+
+### Журнал операций нового backend — 2026-09-28
+
+Реализован атомарный outbox: изменения профиля/grants, ответ для повтора команды,
+operation и задачи по node/protocol сохраняются одной транзакцией. Ответ содержит
+operation_id и runtime_status: awaiting_executor либо no_targets. Это заменяет
+прежний промежуточный not_dispatched. GET /api/v1/operations/{id} проверяет actor
+и permissions; внутренние intent snapshots и runtime_name не выдаются.
+
+Отзыв учитывает прежние grants и исторические цели операций; freeze и уже
+истёкший expires_at создают delete intent. Повтор команды возвращает прежнюю
+operation без повторной постановки. Проверены rollback при сбое outbox,
+изоляция чужих операций и отсутствие внутренних полей в HTTP-ответах.
+
+Исполнитель пока не подключён. Старый provisioning RPC driver всё ещё читает
+legacy бизнес-таблицы, поэтому следующий шаг — явный контракт исполнения,
+стабильные credentials, сериализация задач по ноде и recovery неопределённого
+результата. Автоматическая обработка будущего истечения срока тоже впереди.
+Проверки на реальном PostgreSQL и ноде остаются обязательными.
+
+
+### Явный driver-контракт и первый исполнитель — 2026-09-28
+
+Добавлен ProvisioningService.ApplyProfileIntent: один node/protocol/action,
+revision, runtime_name и явная Xray identity. Требуется стабильный command ID;
+новый RPC не читает и не меняет прежние бизнес-таблицы. Driver сохраняет результат
+и отклоняет изменённое задание с прежним ID. Ошибка агента считается неизвестным
+результатом, а не доказательством отсутствия удалённых изменений.
+
+Новый backend хранит постоянные Xray UUID/short ID и передаёт их в intent.
+Добавлен отдельный CLI executor: атомарный claim перед RPC, приватное сохранение
+результата, порядок ревизий и блокировка очереди ноды при неизвестном результате.
+После перезапуска running-задачи блокируются; слепого повтора нет. Один worker
+host, обязательный общий file lock; распределённое исполнение не заявлено.
+
+Это реализация для новой тестовой схемы: прежний промежуточный backend требует
+чистой БД, init-schema не выполняет миграцию изменённых ограничений. Текущие
+установки автоматически не очищаются. Исполнитель ещё не подключён к установщику
+и боту. Впереди recovery/reconciliation, плановый expiry, выдача конфигов и
+интеграционные проверки на PostgreSQL с настоящими driver/agent.
+
+
+### Восстановление подтверждённого результата — 2026-09-28
+
+Добавлен read-only RPC GetOperationByCommand и восстановление blocked-задач
+по сохранённому command ID. Успешный результат ApplyProfileIntent с совпадающими
+node/runtime profile восстанавливает статус и приватный payload без повторной
+мутации. Следующие ревизии после этого могут исполняться. Missing/running/failed,
+несовпадение цели и ошибка связи оставляют ноду заблокированной.
+
+Сверка по ListRemoteProfiles намеренно не используется как доказательство:
+агент читает файлы конфигов, а не подтверждённое live-состояние AWG/Xray.
+Полная reconciliation для interrupted/failed результатов ещё впереди;
+автоматическая повторная выдача доступа в этом случае не выполняется.
+
+
+### Live-проверка профилей — 2026-09-28
+
+Добавлены agent InspectProfile и driver InspectProfileIntent. Read-only runtime
+helper проверяет Xray через HandlerService для TCP/XHTTP (UUID + flow), AWG через
+wg show dump внутри контейнера (peer key + PSK + AllowedIPs), сравнивает результат
+с файлом под общим mutation lock. RPC возвращает только булевы признаки.
+Отсутствие сохранённой AWG peer identity, ошибка API/контейнера/конфига и
+некорректный ответ означают unknown, а не отсутствие доступа.
+
+Worker сохраняет наблюдения для blocked-задач; GET operation показывает inspection
+и inspected_at. Неудачная повторная проверка заменяет прежнее наблюдение на
+available=false. Наблюдение не разблокирует failed/interrupted команды:
+необходимо исключить позднее применение старого запроса через fenced execution
+и repair-контракт. Автоматически восстанавливается только подтверждённый успех
+из журнала driver. Проверки с настоящими контейнерами и PostgreSQL впереди.
+Промежуточная схема outbox изменилась; приёмка — на чистой тестовой БД.
+
+
+### Ревизии и журнал исполнения агента — 2026-09-28
+
+Явные задания нового backend теперь проходят agent ApplyProfileIntent. Durable
+SQLite-журнал сохраняет command ID, fingerprint всего payload, revision fence
+по profile/protocol и результат. Общий flock сериализует мутации; revision и
+running записываются до запуска runtime. Старые ревизии и конфликтующие ID
+отклоняются, успешные повторы возвращают сохранённый AWG/result без мутации.
+
+Незавершённая/ошибочная внешняя операция сохраняет running и блокирует дальнейшие
+явные задания ноды, включая после рестарта. Read-only RecoverProfileIntent
+проверяет полный payload и позволяет восстановить успех агента, завершившегося
+после таймаута driver. Backend использует его при missing/failed driver record.
+Это закрывает позднее успешное завершение; действительно прерванные команды
+требуют отдельного audited repair/reset, автоматического обхода блокировки нет.
+
+Граница гарантии — новый explicit backend path. Legacy RPC, node maintenance и
+ручные правки пока не координируются этим журналом; их интеграция ещё впереди.
+Runtime cleanup сохраняет fence. Полное удаление агента сначала останавливает
+сервис и дочерние процессы, затем удаляет journal/lock вместе с его файлами.
+Проверки на PostgreSQL и настоящих контейнерах остаются впереди.
+
+
+### Защита перехода от legacy RPC — 2026-09-28
+
+Legacy Add/Delete Xray/AWG на обновлённом агенте теперь используют общий lock и
+проверяют revision fence перед запуском скрипта. Для backend-managed профиля
+старая команда отклоняется; другие legacy-профили продолжают работать. Проверка
+и запуск ребёнка держат один lock, так что между ними не может появиться новая
+ревизия. Повреждённый журнал либо отсутствие helper при существующем журнале
+означают fail-closed.
+
+Legacy init/deploy/apply-settings/sync-xray и регенерация AWG entropy блокируются
+при наличии любого fence. SyncNodeEnv, DeleteRuntime и запись активных конфигов
+через SyncRuntimeFiles также получают maintenance guard; обновление packaged
+runtime-кода остаётся возможным. UninstallAgent запрещён для fenced ноды и
+сохраняет marker до фактической остановки сервиса, закрывая окно отложенного
+systemd удаления. Если scheduling не удался, marker остаётся для ручной проверки.
+
+Контракт контролируемого repair/decommission всё ещё нужен. Legacy full cleanup
+сейчас отказывается удалять fenced ноду, чтобы не потерять журнал. Прямые
+root/операторские изменения Docker и файлов вне RPC-гарантии. Изменение ещё не
+выкачено на тестовые VPS и требует совместного обновления agent/runtime assets.
+
+
+### Административное восстановление blocked — 2026-09-28
+
+Добавлен явный ResolveProfileIntent и локальная команда backend.admin_cli
+resolve-blocked (approved admin account + тот же file lock, что у worker).
+После systemd-рестарта агента новая instance ID позволяет под общим lock
+сверить live-состояние и навсегда пометить старый command ID как superseded.
+Без рестарта либо при недоступной инспекции блокировка остаётся. Старая мутация
+не повторяется. Backend атомарно помечает старые задачи profile/node superseded,
+увеличивает desired_revision и ставит актуальное состояние в outbox. Результат
+фиксируется в backend_repairs; если удалённый шаг прошёл, но транзакция backend
+упала, повтор получает прежний agent audit record. Дальше worker применяет
+новую ревизию.
+
+Это trusted-local maintenance, не Telegram/public HTTP. Гарантия требует
+systemd-остановки прежней process group; ручные root-операции и потенциально
+задержавшееся действие Docker daemon за этой границей. Проверка на реальной
+ноде обязательна перед включением сценария в установку. Если для AWG утрачен
+peer identity, инспекция не подтверждает отсутствие и repair отказывается.
+Backend-owned decommission и обновление настроек протоколов ещё впереди.

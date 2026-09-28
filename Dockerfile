@@ -14,7 +14,7 @@ RUN apt-get update \
         tzdata \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt ./requirements.txt
+COPY requirements.txt requirements-backend.txt ./
 
 RUN pip install -r requirements.txt
 

@@ -128,5 +128,20 @@
     "target_path": "/opt/node-plane-runtime/awg-peer-state.py",
     "asset_path": "awg-peer-state.py",
     "mode": "0644"
+  },
+  {
+    "target_path": "/opt/node-plane-runtime/inspect-profile.sh",
+    "asset_path": "inspect-profile.sh",
+    "mode": "0755"
+  },
+  {
+    "target_path": "/opt/node-plane-runtime/inspect-profile.py",
+    "asset_path": "inspect-profile.py",
+    "mode": "0755"
+  },
+  {
+    "target_path": "/opt/node-plane-runtime/apply-profile-intent.py",
+    "asset_path": "apply-profile-intent.py",
+    "mode": "0755"
   }
 ]

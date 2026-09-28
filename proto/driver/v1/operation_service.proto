@@ -5,9 +5,15 @@ package nodeplane.driver.v1;
 import "driver/v1/types.proto";
 
 service OperationService {
+  // Read-only recovery lookup; never starts or retries execution.
+  rpc GetOperationByCommand(GetOperationByCommandRequest) returns (Operation);
   rpc GetOperation(GetOperationRequest) returns (Operation);
   rpc WatchOperation(WatchOperationRequest) returns (stream OperationEvent);
   rpc ListOperations(ListOperationsRequest) returns (ListOperationsResponse);
+}
+
+message GetOperationByCommandRequest {
+  string command_id = 1;
 }
 
 message GetOperationRequest {

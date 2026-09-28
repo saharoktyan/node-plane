@@ -7,14 +7,14 @@ use tonic::transport::{Certificate, Channel, ClientTlsConfig, Endpoint, Identity
 use crate::agent::v1::node_agent_service_client::NodeAgentServiceClient;
 use crate::agent::v1::{
     AddAwgUserRequest, AddXrayUserRequest, AgentEmpty, ApplyNodeSettingsRequest, CheckPortsRequest,
-    CheckPortsResponse, DeleteProfileRequest, DeleteRuntimeRequest, DeleteRuntimeResponse,
-    InitXrayRequest, InitXrayResponse, InstallDockerRequest, InstallDockerResponse,
-    ListRemoteProfilesRequest, LocalHealth, OpenPortsRequest, OpenPortsResponse, PathExistsRequest,
-    PortCheckSpec, RefreshAwgConfigRequest, RefreshAwgConfigResponse, RemoteProfileRecord,
-    RemoveAuthorizedKeyRequest, RemoveAuthorizedKeyResponse, RunDiagnosticsRequest,
-    RunDiagnosticsResponse, RuntimeCommandResponse, RuntimeFacts, RuntimeFileSpec,
-    SyncNodeEnvRequest, SyncNodeEnvResponse, SyncRuntimeFilesRequest, SyncRuntimeFilesResponse,
-    SyncXrayRequest, SyncXrayResponse,
+    CheckPortsResponse, DecommissionRequest, DeleteProfileRequest, DeleteRuntimeRequest,
+    DeleteRuntimeResponse, InitXrayRequest, InitXrayResponse, InstallDockerRequest,
+    InstallDockerResponse, ListRemoteProfilesRequest, LocalHealth, OpenPortsRequest,
+    OpenPortsResponse, PathExistsRequest, PortCheckSpec, RefreshAwgConfigRequest,
+    RefreshAwgConfigResponse, RemoteProfileRecord, RemoveAuthorizedKeyRequest,
+    RemoveAuthorizedKeyResponse, RunDiagnosticsRequest, RunDiagnosticsResponse,
+    RuntimeCommandResponse, RuntimeFacts, RuntimeFileSpec, SyncNodeEnvRequest, SyncNodeEnvResponse,
+    SyncRuntimeFilesRequest, SyncRuntimeFilesResponse, SyncXrayRequest, SyncXrayResponse,
 };
 
 pub struct AgentTransport {
@@ -212,6 +212,52 @@ impl AgentTransport {
         Ok(response.into_inner())
     }
 
+    pub async fn prepare_decommission(&self, command_id: &str) -> Result<(), tonic::Status> {
+        let mut client = self.client().await.map_err(|err| {
+            tonic::Status::unavailable(format!("failed to connect to node agent: {err}"))
+        })?;
+        let mut request = tonic::Request::new(DecommissionRequest {
+            command_id: command_id.to_string(),
+            bot_public_key: String::new(),
+        });
+        request.set_timeout(Duration::from_secs(30));
+        client.prepare_decommission(request).await?;
+        Ok(())
+    }
+
+    pub async fn delete_runtime_for_decommission(
+        &self,
+        command_id: &str,
+    ) -> Result<(), tonic::Status> {
+        let mut client = self.client().await.map_err(|err| {
+            tonic::Status::unavailable(format!("failed to connect to node agent: {err}"))
+        })?;
+        let mut request = tonic::Request::new(DecommissionRequest {
+            command_id: command_id.to_string(),
+            bot_public_key: String::new(),
+        });
+        request.set_timeout(Duration::from_secs(180));
+        client.delete_runtime_for_decommission(request).await?;
+        Ok(())
+    }
+
+    pub async fn uninstall_agent_for_decommission(
+        &self,
+        command_id: &str,
+        bot_public_key: &str,
+    ) -> Result<(), tonic::Status> {
+        let mut client = self.client().await.map_err(|err| {
+            tonic::Status::unavailable(format!("failed to connect to node agent: {err}"))
+        })?;
+        let mut request = tonic::Request::new(DecommissionRequest {
+            command_id: command_id.to_string(),
+            bot_public_key: bot_public_key.to_string(),
+        });
+        request.set_timeout(Duration::from_secs(30));
+        client.uninstall_agent_for_decommission(request).await?;
+        Ok(())
+    }
+
     pub async fn init_xray(
         &self,
         config_path: &str,
@@ -338,6 +384,58 @@ impl AgentTransport {
             })
             .await?;
         Ok(response.into_inner())
+    }
+
+    pub async fn recover_profile_intent(
+        &self,
+        request: crate::agent::v1::ApplyProfileIntentRequest,
+    ) -> Result<RuntimeCommandResponse, tonic::Status> {
+        let mut client = self
+            .client()
+            .await
+            .map_err(|_| tonic::Status::unavailable("agent unavailable"))?;
+        Ok(client.recover_profile_intent(request).await?.into_inner())
+    }
+
+    pub async fn resolve_profile_intent(
+        &self,
+        request: crate::agent::v1::ApplyProfileIntentRequest,
+    ) -> Result<crate::agent::v1::ProfileInspection, tonic::Status> {
+        let mut client = self
+            .client()
+            .await
+            .map_err(|_| tonic::Status::unavailable("agent unavailable"))?;
+        Ok(client.resolve_profile_intent(request).await?.into_inner())
+    }
+
+    pub async fn apply_profile_intent(
+        &self,
+        request: crate::agent::v1::ApplyProfileIntentRequest,
+    ) -> Result<RuntimeCommandResponse, tonic::Status> {
+        let mut client = self
+            .client()
+            .await
+            .map_err(|_| tonic::Status::unavailable("agent unavailable"))?;
+        Ok(client.apply_profile_intent(request).await?.into_inner())
+    }
+
+    pub async fn inspect_profile(
+        &self,
+        protocol: &str,
+        profile: &str,
+        expected_uuid: &str,
+    ) -> Result<crate::agent::v1::ProfileInspection, tonic::Status> {
+        let mut client = self
+            .client()
+            .await
+            .map_err(|_| tonic::Status::unavailable("agent unavailable"))?;
+        let mut request = tonic::Request::new(crate::agent::v1::InspectProfileRequest {
+            protocol_kind: protocol.to_string(),
+            profile_name: profile.to_string(),
+            expected_xray_uuid: expected_uuid.to_string(),
+        });
+        request.set_timeout(Duration::from_secs(20));
+        Ok(client.inspect_profile(request).await?.into_inner())
     }
 
     pub async fn add_xray_user(

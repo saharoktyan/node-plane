@@ -5,11 +5,37 @@ package nodeplane.driver.v1;
 import "driver/v1/types.proto";
 
 service ProvisioningService {
+  rpc ResolveProfileIntent(ApplyProfileIntentRequest) returns (ProfileInspection);
+  rpc RecoverProfileIntent(ApplyProfileIntentRequest) returns (RecoverProfileIntentResponse);
+  rpc InspectProfileIntent(ApplyProfileIntentRequest) returns (ProfileInspection);
+  // Explicit backend-owned intent. Never reads legacy business tables.
+  // x-node-plane-command-id is mandatory and must remain stable on retries.
+  rpc ApplyProfileIntent(ApplyProfileIntentRequest) returns (StartOperationResponse);
   rpc EnsureProfileOnNode(EnsureProfileOnNodeRequest) returns (StartOperationResponse);
   rpc DeleteProfileFromNode(DeleteProfileFromNodeRequest) returns (StartOperationResponse);
   rpc ReconcileNode(ReconcileNodeRequest) returns (StartOperationResponse);
   rpc ReconcileProfile(ReconcileProfileRequest) returns (StartOperationResponse);
   rpc ListRemoteProfiles(ListRemoteProfilesRequest) returns (ListRemoteProfilesResponse);
+}
+
+message RecoverProfileIntentResponse {
+  string payload_json = 1;
+}
+
+message ProfileInspection {
+  bool disk_present = 1;
+  bool live_present = 2;
+  bool identity_matches = 3;
+  bool config_available = 4;
+}
+
+message ApplyProfileIntentRequest {
+  string node_key = 1;
+  string runtime_name = 2;
+  string protocol_kind = 3; // awg or xray
+  string action = 4; // ensure or delete
+  uint64 desired_revision = 5;
+  XraySpec xray = 6; // required for xray ensure, absent otherwise
 }
 
 message EnsureProfileOnNodeRequest {

@@ -25,21 +25,23 @@ _sym_db = _symbol_database.Default()
 from driver.v1 import types_pb2 as driver_dot_v1_dot_types__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n!driver/v1/operation_service.proto\x12\x13nodeplane.driver.v1\x1a\x15\x64river/v1/types.proto\"+\n\x13GetOperationRequest\x12\x14\n\x0coperation_id\x18\x01 \x01(\t\"-\n\x15WatchOperationRequest\x12\x14\n\x0coperation_id\x18\x01 \x01(\t\"^\n\x15ListOperationsRequest\x12\x10\n\x08node_key\x18\x01 \x01(\t\x12\x14\n\x0cprofile_name\x18\x02 \x01(\t\x12\x0e\n\x06status\x18\x03 \x01(\t\x12\r\n\x05limit\x18\x04 \x01(\r\"G\n\x16ListOperationsResponse\x12-\n\x05items\x18\x01 \x03(\x0b\x32\x1e.nodeplane.driver.v1.Operation2\xbc\x02\n\x10OperationService\x12X\n\x0cGetOperation\x12(.nodeplane.driver.v1.GetOperationRequest\x1a\x1e.nodeplane.driver.v1.Operation\x12\x63\n\x0eWatchOperation\x12*.nodeplane.driver.v1.WatchOperationRequest\x1a#.nodeplane.driver.v1.OperationEvent0\x01\x12i\n\x0eListOperations\x12*.nodeplane.driver.v1.ListOperationsRequest\x1a+.nodeplane.driver.v1.ListOperationsResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n!driver/v1/operation_service.proto\x12\x13nodeplane.driver.v1\x1a\x15\x64river/v1/types.proto\"2\n\x1cGetOperationByCommandRequest\x12\x12\n\ncommand_id\x18\x01 \x01(\t\"+\n\x13GetOperationRequest\x12\x14\n\x0coperation_id\x18\x01 \x01(\t\"-\n\x15WatchOperationRequest\x12\x14\n\x0coperation_id\x18\x01 \x01(\t\"^\n\x15ListOperationsRequest\x12\x10\n\x08node_key\x18\x01 \x01(\t\x12\x14\n\x0cprofile_name\x18\x02 \x01(\t\x12\x0e\n\x06status\x18\x03 \x01(\t\x12\r\n\x05limit\x18\x04 \x01(\r\"G\n\x16ListOperationsResponse\x12-\n\x05items\x18\x01 \x03(\x0b\x32\x1e.nodeplane.driver.v1.Operation2\xa8\x03\n\x10OperationService\x12j\n\x15GetOperationByCommand\x12\x31.nodeplane.driver.v1.GetOperationByCommandRequest\x1a\x1e.nodeplane.driver.v1.Operation\x12X\n\x0cGetOperation\x12(.nodeplane.driver.v1.GetOperationRequest\x1a\x1e.nodeplane.driver.v1.Operation\x12\x63\n\x0eWatchOperation\x12*.nodeplane.driver.v1.WatchOperationRequest\x1a#.nodeplane.driver.v1.OperationEvent0\x01\x12i\n\x0eListOperations\x12*.nodeplane.driver.v1.ListOperationsRequest\x1a+.nodeplane.driver.v1.ListOperationsResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'driver.v1.operation_service_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
-  _globals['_GETOPERATIONREQUEST']._serialized_start=81
-  _globals['_GETOPERATIONREQUEST']._serialized_end=124
-  _globals['_WATCHOPERATIONREQUEST']._serialized_start=126
-  _globals['_WATCHOPERATIONREQUEST']._serialized_end=171
-  _globals['_LISTOPERATIONSREQUEST']._serialized_start=173
-  _globals['_LISTOPERATIONSREQUEST']._serialized_end=267
-  _globals['_LISTOPERATIONSRESPONSE']._serialized_start=269
-  _globals['_LISTOPERATIONSRESPONSE']._serialized_end=340
-  _globals['_OPERATIONSERVICE']._serialized_start=343
-  _globals['_OPERATIONSERVICE']._serialized_end=659
+  _globals['_GETOPERATIONBYCOMMANDREQUEST']._serialized_start=81
+  _globals['_GETOPERATIONBYCOMMANDREQUEST']._serialized_end=131
+  _globals['_GETOPERATIONREQUEST']._serialized_start=133
+  _globals['_GETOPERATIONREQUEST']._serialized_end=176
+  _globals['_WATCHOPERATIONREQUEST']._serialized_start=178
+  _globals['_WATCHOPERATIONREQUEST']._serialized_end=223
+  _globals['_LISTOPERATIONSREQUEST']._serialized_start=225
+  _globals['_LISTOPERATIONSREQUEST']._serialized_end=319
+  _globals['_LISTOPERATIONSRESPONSE']._serialized_start=321
+  _globals['_LISTOPERATIONSRESPONSE']._serialized_end=392
+  _globals['_OPERATIONSERVICE']._serialized_start=395
+  _globals['_OPERATIONSERVICE']._serialized_end=819
 # @@protoc_insertion_point(module_scope)

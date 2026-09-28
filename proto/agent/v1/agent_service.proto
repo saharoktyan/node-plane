@@ -5,6 +5,10 @@ package nodeplane.agent.v1;
 import "agent/v1/types.proto";
 
 service NodeAgentService {
+  rpc ResolveProfileIntent(ApplyProfileIntentRequest) returns (ProfileInspection);
+  rpc RecoverProfileIntent(ApplyProfileIntentRequest) returns (RuntimeCommandResponse);
+  rpc ApplyProfileIntent(ApplyProfileIntentRequest) returns (RuntimeCommandResponse);
+  rpc InspectProfile(InspectProfileRequest) returns (ProfileInspection);
   rpc GetRuntimeFacts(AgentEmpty) returns (RuntimeFacts);
   rpc GetNodeHealth(AgentEmpty) returns (LocalHealth);
   rpc ListRemoteProfiles(ListRemoteProfilesRequest) returns (ListRemoteProfilesResponse);
@@ -19,6 +23,11 @@ service NodeAgentService {
   rpc InstallDocker(InstallDockerRequest) returns (InstallDockerResponse);
   rpc DeleteRuntime(DeleteRuntimeRequest) returns (DeleteRuntimeResponse);
   rpc UninstallAgent(AgentEmpty) returns (RuntimeCommandResponse);
+  // Backend-owned deletion: preparation fences new mutations only after all
+  // managed profiles have a successful delete as their latest intent.
+  rpc PrepareDecommission(DecommissionRequest) returns (RuntimeCommandResponse);
+  rpc DeleteRuntimeForDecommission(DecommissionRequest) returns (DeleteRuntimeResponse);
+  rpc UninstallAgentForDecommission(DecommissionRequest) returns (RuntimeCommandResponse);
   rpc InitXray(InitXrayRequest) returns (InitXrayResponse);
   rpc DeployXray(AgentEmpty) returns (RuntimeCommandResponse);
   rpc InitAwg(AgentEmpty) returns (RuntimeCommandResponse);
@@ -31,6 +40,29 @@ service NodeAgentService {
   rpc DeleteXrayUser(DeleteProfileRequest) returns (RuntimeCommandResponse);
   rpc AddAwgUser(AddAwgUserRequest) returns (RuntimeCommandResponse);
   rpc DeleteAwgUser(DeleteProfileRequest) returns (RuntimeCommandResponse);
+}
+
+message ApplyProfileIntentRequest {
+  string command_id = 1;
+  string protocol_kind = 2;
+  string profile_name = 3;
+  uint64 desired_revision = 4;
+  string action = 5;
+  string uuid = 6;
+  string short_id = 7;
+}
+
+message InspectProfileRequest {
+  string protocol_kind = 1;
+  string profile_name = 2;
+  string expected_xray_uuid = 3;
+}
+
+message ProfileInspection {
+  bool disk_present = 1;
+  bool live_present = 2;
+  bool identity_matches = 3;
+  bool config_available = 4;
 }
 
 message ListRemoteProfilesRequest {
@@ -124,6 +156,11 @@ message InstallDockerResponse {
 
 message DeleteRuntimeRequest {
   bool preserve_config = 1;
+}
+
+message DecommissionRequest {
+  string command_id = 1;
+  string bot_public_key = 2; // uninstall phase only
 }
 
 message DeleteRuntimeResponse {
