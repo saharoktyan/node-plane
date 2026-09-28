@@ -36,6 +36,15 @@ fn required_tls_path(name: &str) -> std::io::Result<String> {
 }
 
 impl AgentTransport {
+    pub async fn get_backend_xray_public(
+        &self,
+    ) -> Result<crate::agent::v1::BackendXrayPublic, tonic::Status> {
+        let mut client = self.client().await.map_err(|err| {
+            tonic::Status::unavailable(format!("failed to connect to node agent: {err}"))
+        })?;
+        Ok(client.get_backend_xray_public(AgentEmpty {}).await?.into_inner())
+    }
+
     pub async fn apply_backend_node_settings(
         &self,
         request: ApplyBackendNodeSettingsRequest,

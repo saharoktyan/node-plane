@@ -1723,6 +1723,208 @@
           }
         }
       }
+    },
+    "/api/v1/profiles/{profile_id}/config-issuances": {
+      "post": {
+        "summary": "Request Config",
+        "operationId": "request_config_api_v1_profiles__profile_id__config_issuances_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Profile Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfigIssuanceInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigIssuanceOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/config-issuances/{issuance_id}": {
+      "get": {
+        "summary": "Get Config Issuance",
+        "operationId": "get_config_issuance_api_v1_config_issuances__issuance_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "issuance_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Issuance Id"
+            }
+          },
+          {
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigIssuanceOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/config-issuances/{issuance_id}/artifact": {
+      "get": {
+        "summary": "Get Config Artifact",
+        "operationId": "get_config_artifact_api_v1_config_issuances__issuance_id__artifact_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "issuance_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Issuance Id"
+            }
+          },
+          {
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigArtifactOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2116,6 +2318,117 @@
           "transports"
         ],
         "title": "AvailableProtocol"
+      },
+      "ConfigArtifactOutput": {
+        "properties": {
+          "filename": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filename"
+          },
+          "media_type": {
+            "type": "string",
+            "title": "Media Type"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          }
+        },
+        "type": "object",
+        "required": [
+          "filename",
+          "media_type",
+          "content"
+        ],
+        "title": "ConfigArtifactOutput"
+      },
+      "ConfigIssuanceInput": {
+        "properties": {
+          "node_key": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Node Key"
+          },
+          "protocol": {
+            "type": "string",
+            "enum": [
+              "xray",
+              "awg"
+            ],
+            "title": "Protocol"
+          },
+          "transport": {
+            "type": "string",
+            "enum": [
+              "tcp",
+              "xhttp",
+              "vpn",
+              "conf"
+            ],
+            "title": "Transport"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "node_key",
+          "protocol",
+          "transport"
+        ],
+        "title": "ConfigIssuanceInput"
+      },
+      "ConfigIssuanceOutput": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "profile_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Profile Id"
+          },
+          "node_key": {
+            "type": "string",
+            "title": "Node Key"
+          },
+          "protocol": {
+            "type": "string",
+            "title": "Protocol"
+          },
+          "transport": {
+            "type": "string",
+            "title": "Transport"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "expires_at": {
+            "type": "string",
+            "title": "Expires At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "profile_id",
+          "node_key",
+          "protocol",
+          "transport",
+          "status",
+          "expires_at"
+        ],
+        "title": "ConfigIssuanceOutput"
       },
       "GrantInput": {
         "properties": {

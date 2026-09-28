@@ -354,6 +354,26 @@ check_simple_mode() {
       warn "systemd unit node-plane.service is not installed"
       add_remediation "Install the unit: ./scripts/install.sh --mode simple --install-systemd"
     fi
+    if [[ -f "${app_dir}/app/backend/http_api.py" ]]; then
+      if systemctl is-active --quiet node-plane-backend.service; then
+        ok "node-plane-backend.service is active"
+      else
+        warn "node-plane-backend.service is not active"
+        add_remediation "Rerun ./scripts/install.sh --mode simple --install-systemd, then inspect sudo journalctl -u node-plane-backend"
+      fi
+      if systemctl is-active --quiet node-plane-backend-worker.timer; then
+        ok "node-plane-backend-worker.timer is active"
+      else
+        warn "node-plane-backend-worker.timer is not active"
+        add_remediation "Start the worker timer: sudo systemctl enable --now node-plane-backend-worker.timer"
+      fi
+      if [[ -x "${app_dir}/.venv/bin/python" ]] && "${app_dir}/.venv/bin/python" -c 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8080/health/ready", timeout=3).read()' >/dev/null 2>&1; then
+        ok "backend API is ready on loopback"
+      else
+        warn "backend API readiness check failed"
+        add_remediation "Inspect sudo journalctl -u node-plane-backend and verify backend schema initialization"
+      fi
+    fi
   else
     warn "systemctl is unavailable on this host"
     add_remediation "Use simple mode on a systemd-based Linux host"

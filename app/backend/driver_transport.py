@@ -33,6 +33,36 @@ class GrpcIntentDriver:
         if json.loads(response.result_json) != {'node_key': node_key, 'prepared': True}:
             raise ValueError('driver returned an invalid node preparation result')
 
+    def read_xray_public(self, node_key):
+        """Read the live Reality public identity; no legacy registry access."""
+        from driver.v1 import runtime_service_pb2
+        import json
+        import re
+        response = self.runtime.GetBackendXrayPublic(
+            runtime_service_pb2.GetBackendXrayPublicRequest(node_key=node_key),
+            timeout=self.timeout)
+        if response.node_key != node_key:
+            raise ValueError('driver returned a different node identity')
+        value = json.loads(response.metadata_json)
+        required = {'sni', 'public_key', 'short_id', 'tcp_port', 'xhttp_port',
+                    'xhttp_path', 'flow', 'fingerprint'}
+        if (set(value) != required or not re.fullmatch(r'[A-Za-z0-9_-]{43}', value['public_key'])
+            or not re.fullmatch(r'[0-9a-fA-F]{16}', value['short_id'])
+            or any(type(value[port]) is not int or not 1 <= value[port] <= 65535
+                   for port in ('tcp_port', 'xhttp_port'))):
+            raise ValueError('driver returned invalid Xray public metadata')
+        return value
+
+    def refresh_awg_config(self, node_key, wg_conf, profile_name):
+        """Refresh a stored peer against the live agent configuration."""
+        from driver.v1 import runtime_service_pb2
+        response = self.runtime.RefreshAwgConfig(
+            runtime_service_pb2.RefreshAwgConfigRequest(node_key=node_key,
+                wg_conf=wg_conf, profile_name=profile_name), timeout=self.timeout)
+        if not response.wg_conf.startswith('[Interface]') or not response.vpn_key.startswith('vpn://'):
+            raise ValueError('driver returned an invalid AWG config')
+        return {'wg_conf': response.wg_conf, 'vpn_key': response.vpn_key}
+
     @staticmethod
     def node_settings_request(intent):
         from driver.v1 import runtime_service_pb2

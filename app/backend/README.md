@@ -1,7 +1,8 @@
 # Backend application layer
 
 Status: identity/authorization/opaque credentials and initial HTTP API implemented.
-The new Telegram adapter and installer service wiring are not connected.
+The new Telegram adapter is not connected. The systemd installer now initializes
+the backend schema and installs separate API and worker units.
 Current production bot remains unchanged.
 HTTP request handling uses FastAPI's asynchronous server and middleware, but
 the current database-backed endpoints are synchronous functions executed in
@@ -51,6 +52,18 @@ Tests use SQLite for isolated SQL/policy checks. PostgreSQL integration, includi
 concurrent identity resolution, is still required before production cutover.
 
 ## Run the initial HTTP service
+
+For a systemd installation, `scripts/install.sh --mode simple --install-systemd`
+initializes the backend schema in the shared PostgreSQL database and installs
+`node-plane-backend.service` plus `node-plane-backend-worker.timer`. The API
+binds to `127.0.0.1:8080`; the timer runs the finite worker every five seconds
+after its previous invocation finishes. Both use the active release symlink
+and the same shared environment file as the legacy bot. `scripts/update.sh`
+reinitializes the schema and restarts the API when switching releases.
+`scripts/healthcheck.sh --mode simple` checks both units and API readiness.
+Portable Docker installation is temporarily unsupported during this migration.
+The installed legacy Telegram bot still uses its old business stack; installing
+these services does not switch it to the new backend.
 
 Install requirements.txt and requirements-dev.txt for HTTP testing. Backend
 transport dependencies are also listed separately in requirements-backend.txt.
@@ -120,9 +133,9 @@ Node keys cannot be reused after retirement. A protocol with active grants
 cannot be removed from the inventory. Creation does not deploy an agent or
 protocol runtime. The admin model deliberately has
 no SSH credentials or private keys. The current `GET /me/nodes` remains a
-separate grant-filtered member view. No new config issuance is available yet:
-it must compare applied node settings and successful profile intents before
-returning credentials. `init-schema` creates the node command journal on a
+separate grant-filtered member view. Xray config issuance now compares applied
+node settings and successful profile intents before returning credentials.
+`init-schema` creates the node command journal on a
 fresh development database; older prototype schemas need recreation.
 
 For a node with an already installed agent and configured driver target, admin
@@ -343,6 +356,25 @@ remain acceptance requirements.
 
 ## Explicit driver executor (development)
 
+### Xray and AWG config issuance
+
+`POST /api/v1/profiles/{profile_id}/config-issuances` queues an Xray TCP/XHTTP
+link or an AWG `.vpn`/`.conf` artifact for a granted node; it requires a UUID
+`Idempotency-Key`. Poll
+`GET /api/v1/config-issuances/{id}`, then fetch the short-lived link from
+`GET /api/v1/config-issuances/{id}/artifact`. The worker checks that the
+profile's current revision was applied and that the node settings are current,
+then verifies the live protocol user through the driver. Xray reads public
+connection parameters from the agent. AWG refreshes the stored private client
+config against the current server config and verifies that its peer still exists.
+The artifact is assembled only when the
+artifact is requested, after repeating access, revision, and live checks.
+Issuances expire after 15 minutes; revocation invalidates them immediately.
+The issuance table stores only public Xray metadata or an AWG artifact digest,
+not the generated artifact. The successful AWG profile intent still retains
+its private client config in the backend task result. Real-node acceptance
+remains to be implemented.
+
 Driver ProvisioningService.ApplyProfileIntent takes a single node/protocol,
 ensure/delete action, runtime name, desired revision and explicit Xray identity.
 It does not read or write legacy profile business tables. The command identity
@@ -372,7 +404,7 @@ This changes the intermediate backend table constraints/columns. init-schema is
 not an upgrade migration for the preceding experimental schema: use a fresh test
 database for this stage. No existing installation is reset automatically. Legacy
 bot tables and running nodes are untouched. Real PostgreSQL/driver/agent execution,
-reconciliation of blocked tasks, scheduled expiry enforcement, and config issuance
+reconciliation of blocked tasks, scheduled expiry enforcement, and AWG config issuance
 remain pending. The worker's HTTP operation status can now become running,
 succeeded or blocked in addition to awaiting_executor/no_targets.
 

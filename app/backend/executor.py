@@ -12,6 +12,7 @@ import os
 from .authorization import AccessDenied, require_permission
 from .operations import OperationRepository
 from .node_settings import NodeSettingsExecutor
+from .config_issuance import ConfigIssuanceService
 
 
 class IntentExecutor:
@@ -191,12 +192,14 @@ def main():
         with local_channel(args.driver) as channel:
             executor = IntentExecutor(get_db(), GrpcIntentDriver(channel))
             node_executor = NodeSettingsExecutor(executor.db, executor.driver)
+            config_executor = ConfigIssuanceService(executor.db, executor.driver)
             executor.recover()
             node_executor.recover()
+            config_executor.recover()
             executor.reconcile_completed()
             node_executor.reconcile_completed()
             executor.inspect_blocked()
-            while node_executor.run_one() or executor.run_one():
+            while node_executor.run_one() or executor.run_one() or config_executor.run_one():
                 pass
 
 

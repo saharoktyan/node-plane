@@ -22,6 +22,7 @@ service NodeAgentService {
   rpc ApplyBackendNodeSettings(ApplyBackendNodeSettingsRequest) returns (RuntimeCommandResponse);
   rpc RecoverBackendNodeSettings(ApplyBackendNodeSettingsRequest) returns (RuntimeCommandResponse);
   rpc ResolveBackendNodeSettings(ApplyBackendNodeSettingsRequest) returns (RuntimeCommandResponse);
+  rpc GetBackendXrayPublic(AgentEmpty) returns (BackendXrayPublic);
   rpc RefreshAwgConfig(RefreshAwgConfigRequest) returns (RefreshAwgConfigResponse);
   rpc InstallDocker(InstallDockerRequest) returns (InstallDockerResponse);
   rpc DeleteRuntime(DeleteRuntimeRequest) returns (DeleteRuntimeResponse);
@@ -147,6 +148,10 @@ message ApplyBackendNodeSettingsRequest {
   string protocols_json = 3;
   string settings_json = 4;
   string node_key = 5;
+}
+
+message BackendXrayPublic {
+  string metadata_json = 1;
 }
 
 message RefreshAwgConfigRequest {

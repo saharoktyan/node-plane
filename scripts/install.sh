@@ -71,11 +71,11 @@ while [[ $# -gt 0 ]]; do
     -h|--help)
       cat <<'EOF'
 Usage:
-  scripts/install.sh [--mode simple|portable] [--branch main|dev] [--ref <git-ref>] [--non-interactive] [--install-systemd] [--force]
+  scripts/install.sh [--mode simple] [--branch main|dev] [--ref <git-ref>] [--non-interactive] [--install-systemd] [--force]
 
 Modes:
   simple    Host install via venv + systemd. Supports same-host runtime deployment.
-  portable  Docker-based bot install. Intended for remote SSH-managed nodes.
+  portable  Temporarily unsupported while the separate backend is integrated.
 
 Flags:
   --branch            Default update branch for this installation
@@ -390,16 +390,14 @@ choose_mode() {
     return 0
   fi
   if [[ $NON_INTERACTIVE -eq 1 ]]; then
-    echo "Mode is required in non-interactive mode. Use --mode simple or --mode portable." >&2
+    echo "Mode is required in non-interactive mode. Use --mode simple." >&2
     exit 1
   fi
   echo "Choose installation mode:"
   echo "  1) simple   Host install via systemd, supports same-host runtime deployment"
-  echo "  2) portable Docker install, for remote SSH-managed nodes"
-  read -r -p "Enter 1 or 2 [1]: " selection
+  read -r -p "Enter 1 [1]: " selection
   case "${selection:-1}" in
     1) MODE="simple" ;;
-    2) MODE="portable" ;;
     *) echo "Unsupported selection: ${selection}" >&2; exit 1 ;;
   esac
 }
@@ -771,6 +769,17 @@ run_simple_install() {
     "${new_release_dir}/.venv/bin/python" "${new_release_dir}/app/manage_db.py" init
   fi
 
+  if [[ -f "${new_release_dir}/app/backend/admin_cli.py" ]]; then
+    set_step "initialize backend schema"
+    NODE_PLANE_BASE_DIR="${base_dir}" \
+    NODE_PLANE_APP_DIR="${new_release_dir}" \
+    NODE_PLANE_SHARED_DIR="${shared_dir}" \
+    DB_BACKEND="postgres" \
+    POSTGRES_DSN="$(read_env_value POSTGRES_DSN "$runtime_env_file")" \
+    PYTHONPATH="${new_release_dir}/app" \
+    "${new_release_dir}/.venv/bin/python" -m backend.admin_cli init-schema
+  fi
+
   ln -sfn "$new_release_dir" "$current_link"
 
   validate_simple_layout "$current_link" "$shared_dir"
@@ -822,11 +831,19 @@ EOF
   echo
   if [[ $AUTO_INSTALL_SYSTEMD -eq 1 || $NON_INTERACTIVE -eq 1 ]]; then
     install_systemd_unit "$unit_path"
+    if [[ -f "${current_link}/scripts/install_backend_systemd.sh" ]]; then
+      set_step "install backend services"
+      run_as_root bash "${current_link}/scripts/install_backend_systemd.sh" "$base_dir" "$shared_dir"
+    fi
   elif [[ $NON_INTERACTIVE -eq 0 ]]; then
     local answer
     read -r -p "Install the systemd unit to /etc/systemd/system/${service_name}.service now? [Y/n]: " answer
     if [[ "${answer:-y}" =~ ^([Yy]|[Yy][Ee][Ss])$ ]]; then
       install_systemd_unit "$unit_path"
+      if [[ -f "${current_link}/scripts/install_backend_systemd.sh" ]]; then
+        set_step "install backend services"
+        run_as_root bash "${current_link}/scripts/install_backend_systemd.sh" "$base_dir" "$shared_dir"
+      fi
     fi
   fi
 
@@ -955,7 +972,11 @@ run_portable_install() {
 
 choose_mode
 case "$MODE" in
-  simple|portable) ;;
+  simple) ;;
+  portable)
+    echo "Portable Docker installation is temporarily unsupported; use --mode simple." >&2
+    exit 1
+    ;;
   *)
     echo "Unsupported mode: ${MODE}. Use simple or portable." >&2
     exit 1

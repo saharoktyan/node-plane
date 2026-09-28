@@ -52,6 +52,13 @@ class BackendDriverTransportTests(unittest.TestCase):
                 return types_pb2.Operation(operation_id=self_id, status='SUCCEEDED', result_json='{"config":"private"}')
 
         class Runtime(runtime_service_pb2_grpc.RuntimeServiceServicer):
+            def GetBackendXrayPublic(self, request, context):
+                from driver.v1 import runtime_service_pb2
+                return runtime_service_pb2.BackendXrayPublicResult(node_key=request.node_key,
+                    metadata_json='{"sni":"www.cloudflare.com","public_key":"' + 'a' * 43 +
+                    '","short_id":"0123456789abcdef","tcp_port":443,"xhttp_port":8443,'
+                    '"xhttp_path":"/assets","flow":"xtls-rprx-vision","fingerprint":"chrome"}')
+
             def PrepareBackendNode(self, request, context):
                 from driver.v1 import runtime_service_pb2
                 return runtime_service_pb2.BackendNodeSettingsResult(
@@ -100,6 +107,7 @@ class BackendDriverTransportTests(unittest.TestCase):
             missing = driver.lookup('missing-driver-result', intent)
             node = driver.inspect_node('node')
             driver.prepare_node('node')
+            public = driver.read_xray_public('node')
             node_intent = {'node_key': 'node', 'revision': 2, 'protocols': ['awg'],
                            'settings': {'public_host': 'node.example', 'awg_port': 51820}}
             applied = driver.apply_node_settings('node-settings-task', node_intent)
@@ -137,6 +145,7 @@ class BackendDriverTransportTests(unittest.TestCase):
         self.assertEqual(node, {'node_key': 'node', 'health_state': 'running',
                                 'runtime_version': 'test', 'runtime_commit': 'abc',
                                 'xray_config_present': True, 'awg_config_present': False})
+        self.assertEqual(public['public_key'], 'a' * 43)
 
     def test_remote_driver_requires_explicit_secure_transport(self):
         from backend.driver_transport import local_channel
