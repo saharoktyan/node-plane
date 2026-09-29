@@ -448,7 +448,7 @@ rollback_simple() {
 
 update_simple() {
   need_cmd sudo
-  if sudo systemctl is-active --quiet node-plane-telegram.service; then
+  if systemctl list-unit-files node-plane-telegram.service >/dev/null 2>&1; then
     SIMPLE_BOT_SERVICE="node-plane-telegram.service"
   fi
   PYTHON_BIN="$(select_python_runtime)"
