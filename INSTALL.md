@@ -127,7 +127,7 @@ the current stack before the next release, select the development branch and
 its head explicitly:
 
 ```bash
-./scripts/install.sh --mode simple --branch dev --ref dev
+./scripts/install.sh --mode simple --branch dev
 ```
 
 The installer prepares the backend, worker, Telegram adapter credential, and
