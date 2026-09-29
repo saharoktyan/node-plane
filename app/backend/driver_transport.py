@@ -2,6 +2,10 @@
 import grpc
 
 
+class AgentNotConfigured(RuntimeError):
+    """The driver has no live agent target for this node."""
+
+
 class GrpcIntentDriver:
     def __init__(self, channel, timeout=60):
         from driver.v1 import provisioning_service_pb2_grpc, operation_service_pb2_grpc, runtime_service_pb2_grpc, node_service_pb2_grpc
@@ -22,6 +26,34 @@ class GrpcIntentDriver:
                 'runtime_version': response.runtime_version, 'runtime_commit': response.runtime_commit,
                 'xray_config_present': response.xray_config_present,
                 'awg_config_present': response.awg_config_present}
+
+    def diagnose_node(self, node_key):
+        """Read agent diagnostics without accepting the driver's legacy DB fallback."""
+        from driver.v1 import node_service_pb2
+        response = self.nodes.GetNodeDiagnostics(
+            node_service_pb2.GetNodeDiagnosticsRequest(node_key=node_key),
+            timeout=self.timeout)
+        if response.node_key != node_key:
+            raise ValueError('driver returned a different node identity')
+        if not response.items:
+            raise AgentNotConfigured('driver returned no agent diagnostics')
+        expected = {'docker', 'runtime_root', 'xray_config', 'awg_config', 'runtime_version'}
+        items = {item.kind: item for item in response.items if item.kind in expected}
+        known_count = sum(item.kind in expected for item in response.items)
+        if len(items) != len(expected) or known_count != len(expected):
+            raise ValueError('driver returned incomplete agent diagnostics')
+        for kind in expected - {'runtime_version'}:
+            if items[kind].status not in {'ok', 'missing', 'invalid'}:
+                raise ValueError('driver returned invalid agent diagnostics')
+        version = items['runtime_version']
+        if version.status not in {'ok', 'unknown'}:
+            raise ValueError('driver returned invalid runtime version status')
+        return {'node_key': node_key,
+                'docker': items['docker'].status,
+                'runtime_root': items['runtime_root'].status,
+                'xray_config': items['xray_config'].status,
+                'awg_config': items['awg_config'].status,
+                'runtime_version': version.summary.strip()[:64] if version.status == 'ok' else None}
 
     def prepare_node(self, node_key):
         """Prepare an already installed, unmanaged agent for a first apply."""

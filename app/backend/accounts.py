@@ -32,15 +32,22 @@ class AccountService:
 
     @staticmethod
     def public(row):
-        return {'id': row['id'], 'role': row['role'], 'status': row['status'],
+        result = {'id': row['id'], 'role': row['role'], 'status': row['status'],
                 'revision': row['revision'],
                 'telegram_user_id': int(row['telegram_subject']) if row['telegram_subject'] else None}
+        for key in ('username', 'first_name', 'last_name', 'language_code', 'locale', 'locale_selected'):
+            if key in row.keys():
+                result[key] = row[key]
+        return result
 
     @staticmethod
     def _read(conn, account_id):
         return conn.execute('''SELECT a.id, a.role, a.status, a.revision,
-            i.subject AS telegram_subject FROM backend_accounts a
+            i.subject AS telegram_subject, d.username, d.first_name, d.last_name,
+            d.language_code, d.locale, d.locale_selected
+            FROM backend_accounts a
             LEFT JOIN backend_external_identities i ON i.account_id = a.id AND i.provider = 'telegram'
+            LEFT JOIN backend_telegram_identity_details d ON d.subject = i.subject
             WHERE a.id = ?''', (account_id,)).fetchone()
 
     def get(self, actor, account_id):
@@ -58,8 +65,11 @@ class AccountService:
         after = _cursor(cursor, 'accounts')
         with self.db.connect() as conn:
             rows = conn.execute('''SELECT a.id, a.role, a.status, a.revision,
-                i.subject AS telegram_subject FROM backend_accounts a
+                i.subject AS telegram_subject, d.username, d.first_name, d.last_name,
+                d.language_code, d.locale, d.locale_selected
+                FROM backend_accounts a
                 LEFT JOIN backend_external_identities i ON i.account_id = a.id AND i.provider = 'telegram'
+                LEFT JOIN backend_telegram_identity_details d ON d.subject = i.subject
                 WHERE a.id > ? ORDER BY a.id LIMIT ?''', (after, limit + 1)).fetchall()
         return _page([self.public(row) for row in rows], limit, 'accounts', 'id')
 

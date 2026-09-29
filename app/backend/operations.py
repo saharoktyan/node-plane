@@ -104,3 +104,11 @@ class OperationRepository:
                     raise AccessDenied('resource_not_found', 404) from None
             tasks = conn.execute('SELECT id, node_key, protocol, action, status, inspection_json, inspected_at FROM backend_operation_tasks WHERE operation_id = ? ORDER BY node_key, protocol', (operation_id,)).fetchall()
             return {field: row[field] for field in ('id', 'profile_id', 'desired_revision', 'status', 'created_at')} | {'tasks': [{**{key: t[key] for key in ('id', 'node_key', 'protocol', 'action', 'status', 'inspected_at')}, 'inspection': json.loads(t['inspection_json']) if t['inspection_json'] else None} for t in tasks]}
+
+    def latest_for_profile(self, actor, profile_id):
+        require_permission(actor, 'operations.read')
+        with self.db.connect() as conn:
+            row = conn.execute('''SELECT id FROM backend_operations WHERE profile_id = ?
+                ORDER BY desired_revision DESC, created_at DESC, id DESC LIMIT 1''',
+                (profile_id,)).fetchone()
+        return self.get(actor, row['id']) if row is not None else None

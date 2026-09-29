@@ -85,6 +85,17 @@ class BackendDriverTransportTests(unittest.TestCase):
                     health_state='running', runtime_version='test', runtime_commit='abc',
                     xray_config_present=True, awg_config_present=False)
 
+            def GetNodeDiagnostics(self, request, context):
+                from driver.v1 import node_service_pb2
+                return node_service_pb2.GetNodeDiagnosticsResponse(node_key=request.node_key,
+                    items=[types_pb2.DiagnosticItem(kind=kind, status=status,
+                        summary=summary) for kind, status, summary in (
+                            ('docker', 'ok', 'Docker daemon available'),
+                            ('runtime_root', 'ok', '/opt/node-plane-runtime'),
+                            ('xray_config', 'ok', '/private/xray/config.json'),
+                            ('awg_config', 'missing', '/private/awg/wg0.conf'),
+                            ('runtime_version', 'ok', '0.4.3'))])
+
         server = grpc.server(ThreadPoolExecutor(max_workers=2))
         provisioning_service_pb2_grpc.add_ProvisioningServiceServicer_to_server(Provisioning(), server)
         operation_service_pb2_grpc.add_OperationServiceServicer_to_server(Operations(), server)
@@ -106,6 +117,7 @@ class BackendDriverTransportTests(unittest.TestCase):
             delayed = driver.lookup('driver-timeout', intent)
             missing = driver.lookup('missing-driver-result', intent)
             node = driver.inspect_node('node')
+            diagnostics = driver.diagnose_node('node')
             driver.prepare_node('node')
             public = driver.read_xray_public('node')
             node_intent = {'node_key': 'node', 'revision': 2, 'protocols': ['awg'],
@@ -145,7 +157,22 @@ class BackendDriverTransportTests(unittest.TestCase):
         self.assertEqual(node, {'node_key': 'node', 'health_state': 'running',
                                 'runtime_version': 'test', 'runtime_commit': 'abc',
                                 'xray_config_present': True, 'awg_config_present': False})
+        self.assertEqual(diagnostics, {'node_key': 'node', 'docker': 'ok',
+            'runtime_root': 'ok', 'xray_config': 'ok', 'awg_config': 'missing',
+            'runtime_version': '0.4.3'})
         self.assertEqual(public['public_key'], 'a' * 43)
+
+    def test_diagnostics_reject_legacy_response_without_agent_items(self):
+        from backend.driver_transport import AgentNotConfigured, GrpcIntentDriver
+        from driver.v1 import node_service_pb2
+        from unittest.mock import Mock
+        driver = GrpcIntentDriver.__new__(GrpcIntentDriver)
+        driver.nodes = Mock()
+        driver.timeout = 1
+        driver.nodes.GetNodeDiagnostics.return_value = (
+            node_service_pb2.GetNodeDiagnosticsResponse(node_key='node', summary='saved state'))
+        with self.assertRaises(AgentNotConfigured):
+            driver.diagnose_node('node')
 
     def test_remote_driver_requires_explicit_secure_transport(self):
         from backend.driver_transport import local_channel

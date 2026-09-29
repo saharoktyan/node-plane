@@ -33,6 +33,16 @@ class SQLIdentityRepository:
                 account_id TEXT NOT NULL REFERENCES backend_accounts(id),
                 PRIMARY KEY(provider, subject)
             )""")
+            conn.execute("""CREATE TABLE IF NOT EXISTS backend_telegram_identity_details (
+                subject TEXT PRIMARY KEY,
+                username TEXT,
+                first_name TEXT,
+                last_name TEXT,
+                language_code TEXT,
+                locale TEXT,
+                locale_selected INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL
+            )""")
 
             conn.execute("""CREATE TABLE IF NOT EXISTS backend_identity_commands (
                 principal_id TEXT NOT NULL, command_key TEXT NOT NULL,
@@ -85,6 +95,15 @@ class SQLIdentityRepository:
                 WHERE i.provider = 'telegram' AND i.subject = ?""", (str(user_id),)).fetchone()
         return self._account(row)
 
+    def telegram_details_for_account(self, account_id: str) -> dict:
+        with self.db.connect() as conn:
+            row = conn.execute('''SELECT d.username, d.first_name, d.last_name, d.language_code,
+                d.locale, d.locale_selected
+                FROM backend_external_identities i JOIN backend_telegram_identity_details d
+                ON d.subject = i.subject WHERE i.account_id = ? AND i.provider = 'telegram'
+                ORDER BY i.subject LIMIT 1''', (account_id,)).fetchone()
+        return dict(row) if row is not None else {}
+
     def _resolve(self, conn, user_id: int) -> Account:
         candidate = str(uuid4())
         conn.execute("INSERT INTO backend_accounts(id) VALUES (?)", (candidate,))
@@ -100,6 +119,34 @@ class SQLIdentityRepository:
     def resolve_telegram(self, user_id: int) -> Account:
         with self.db.transaction() as conn:
             return self._resolve(conn, user_id)
+
+    def update_telegram_details(self, user_id: int, *, username=None, first_name=None,
+                                last_name=None, language_code=None) -> None:
+        """Keep display metadata separate from authentication identity and roles."""
+        from datetime import datetime, timezone
+        with self.db.transaction() as conn:
+            conn.execute('''INSERT INTO backend_telegram_identity_details
+                (subject, username, first_name, last_name, language_code, locale, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(subject) DO UPDATE SET
+                username = excluded.username, first_name = excluded.first_name,
+                last_name = excluded.last_name, language_code = excluded.language_code,
+                locale = COALESCE(backend_telegram_identity_details.locale, excluded.locale),
+                updated_at = excluded.updated_at''',
+                (str(user_id), username, first_name, last_name, language_code,
+                 language_code[:2].lower() if (language_code or '')[:2].lower() in {'ru', 'en'} else 'en',
+                 datetime.now(timezone.utc).isoformat()))
+
+    def set_telegram_locale_for_account(self, account_id: str, locale: str) -> None:
+        with self.db.transaction() as conn:
+            row = conn.execute('''SELECT subject FROM backend_external_identities
+                WHERE account_id = ? AND provider = 'telegram' LIMIT 1''', (account_id,)).fetchone()
+            if row is None:
+                raise AccessDenied('telegram_identity_required', 409)
+            conn.execute('''INSERT INTO backend_telegram_identity_details
+                (subject, locale, locale_selected, updated_at)
+                VALUES (?, ?, 1, CURRENT_TIMESTAMP) ON CONFLICT(subject) DO UPDATE SET
+                locale = excluded.locale, locale_selected = 1, updated_at = excluded.updated_at''',
+                (row['subject'], locale))
 
     def resolve_telegram_command(self, principal_id: str, command_key: str, user_id: int) -> Account:
         with self.db.transaction() as conn:

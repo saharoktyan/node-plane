@@ -21,14 +21,21 @@ class IdentityRepository(Protocol):
 class IdentityService:
     repository: IdentityRepository
 
-    def resolve_telegram(self, principal: Principal, user_id: int, *, command_key: str | None = None) -> Account:
+    def resolve_telegram(self, principal: Principal, user_id: int, *, command_key: str | None = None,
+                         username=None, first_name=None, last_name=None, language_code=None) -> Account:
         if principal.kind != PrincipalKind.ADAPTER or "identity.telegram.resolve" not in principal.scopes:
             raise AccessDenied("permission_denied")
         validate_telegram_id(user_id)
         # Registration never accepts role, account ID or profile ownership.
         if command_key is not None:
-            return self.repository.resolve_telegram_command(principal.id, command_key, user_id)
-        return self.repository.resolve_telegram(user_id)
+            account = self.repository.resolve_telegram_command(principal.id, command_key, user_id)
+        else:
+            account = self.repository.resolve_telegram(user_id)
+        update_details = getattr(self.repository, 'update_telegram_details', None)
+        if update_details is not None:
+            update_details(user_id, username=username, first_name=first_name,
+                           last_name=last_name, language_code=language_code)
+        return account
 
     def me(self, principal: Principal, *, telegram_user_id: int | None = None) -> Account:
         actor = resolve_actor(principal, self.repository, telegram_user_id=telegram_user_id)

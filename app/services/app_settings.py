@@ -213,6 +213,8 @@ def set_updates_branch(branch: str) -> str:
     normalized = str(branch or "").strip().lower()
     if normalized not in {"main", "dev"}:
         raise ValueError("Unsupported updates branch")
+    if normalized != get_updates_branch():
+        _clear_update_check()
     _meta_set(_UPDATES_BRANCH_KEY, normalized)
     return normalized
 
@@ -226,8 +228,22 @@ def set_updates_dev_track(track: str) -> str:
     normalized = str(track or "").strip().lower()
     if normalized not in {"tag", "head"}:
         raise ValueError("Unsupported updates dev track")
+    if normalized != get_updates_dev_track():
+        _clear_update_check()
     _meta_set(_UPDATES_DEV_TRACK_KEY, normalized)
     return normalized
+
+
+def _clear_update_check() -> None:
+    for key, value in (
+        (_UPDATES_LAST_CHECKED_AT_KEY, ""),
+        (_UPDATES_LAST_STATUS_KEY, "never"),
+        (_UPDATES_UPDATE_AVAILABLE_KEY, "0"),
+        (_UPDATES_REMOTE_VERSION_KEY, ""),
+        (_UPDATES_REMOTE_LABEL_KEY, ""),
+        (_UPDATES_UPSTREAM_REF_KEY, ""),
+    ):
+        _meta_set(key, value)
 
 
 def record_update_check(result: dict[str, str]) -> None:

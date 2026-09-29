@@ -26,10 +26,32 @@ class ProfileCommands:
 
     @staticmethod
     def result(conn, profile_id):
-        row = conn.execute('SELECT * FROM backend_profiles WHERE id = ?', (profile_id,)).fetchone()
+        row = conn.execute('''SELECT p.*, CASE WHEN d.profile_id IS NULL THEN 0 ELSE 1 END AS deleting
+            FROM backend_profiles p LEFT JOIN backend_profile_deletions d ON d.profile_id = p.id
+            WHERE p.id = ?''', (profile_id,)).fetchone()
         grants = conn.execute('SELECT node_key, protocol FROM backend_grants WHERE profile_id = ? ORDER BY node_key, protocol', (profile_id,)).fetchall()
         return {'profile': ProfileRepository.public(row),
                 'grants': [{'node_key': r['node_key'], 'protocol': r['protocol']} for r in grants]}
+
+    @staticmethod
+    def validate_grants(conn, grants):
+        if not isinstance(grants, list) or len(grants) > 100:
+            raise AccessDenied('invalid_input', 422)
+        seen = set()
+        for grant in grants:
+            if not isinstance(grant, dict) or set(grant) != {'node_key', 'protocol'}:
+                raise AccessDenied('invalid_input', 422)
+            node_key, protocol = grant['node_key'], grant['protocol']
+            if (not isinstance(node_key, str) or not isinstance(protocol, str)
+                    or protocol not in {'awg', 'xray'} or (node_key, protocol) in seen):
+                raise AccessDenied('invalid_input', 422)
+            seen.add((node_key, protocol))
+            # The lock prevents a concurrent drain from accepting a new grant.
+            node = conn.execute('''UPDATE backend_nodes SET enabled = enabled
+                WHERE key = ? RETURNING enabled, protocols_json''', (node_key,)).fetchone()
+            if node is None or not node['enabled'] or protocol not in json.loads(node['protocols_json']):
+                raise AccessDenied('grant_target_unavailable', 422)
+        return seen
 
     def execute(self, actor, key, *, action, profile_id=None, revision=None, values=None):
         try:
@@ -37,7 +59,7 @@ class ProfileCommands:
         except (TypeError, ValueError, AttributeError):
             raise AccessDenied('invalid_idempotency_key', 422) from None
         require_permission(actor, 'grants.manage' if action == 'grants' else 'profiles.manage')
-        if action not in {'create', 'edit', 'grants'}:
+        if action not in {'create', 'edit', 'grants', 'delete'}:
             raise ValueError('unknown profile command')
         values = values or {}
         fingerprint = hashlib.sha256(json.dumps({'action': action, 'profile_id': profile_id,
@@ -56,7 +78,7 @@ class ProfileCommands:
             if profile_id is not None:
                 previous_targets = OperationRepository.targets(conn, profile_id)
             if action == 'create':
-                if set(values) - {'display_name', 'owner_account_id'}:
+                if set(values) - {'display_name', 'owner_account_id', 'grants'}:
                     raise AccessDenied('invalid_input', 422)
                 display_name = values.get('display_name')
                 if not isinstance(display_name, str) or not display_name.strip() or len(display_name) > 128:
@@ -64,20 +86,40 @@ class ProfileCommands:
                 owner = values.get('owner_account_id')
                 if owner is not None and conn.execute('SELECT id FROM backend_accounts WHERE id = ?', (owner,)).fetchone() is None:
                     raise AccessDenied('owner_not_found', 422)
+                grants = self.validate_grants(conn, values.get('grants', []))
                 profile_id = str(uuid4())
-                conn.execute('INSERT INTO backend_profiles(id, runtime_name, display_name, owner_account_id) VALUES (?, ?, ?, ?)',
-                             (profile_id, 'p_' + uuid4().hex, display_name.strip(), owner))
+                conn.execute('''INSERT INTO backend_profiles
+                    (id, runtime_name, display_name, owner_account_id, created_at)
+                    VALUES (?, ?, ?, ?, ?)''',
+                    (profile_id, 'p_' + uuid4().hex, display_name.strip(), owner,
+                     datetime.now(timezone.utc).isoformat()))
+                for node_key, protocol in sorted(grants):
+                    conn.execute('INSERT INTO backend_grants(profile_id, node_key, protocol) VALUES (?, ?, ?)',
+                                 (profile_id, node_key, protocol))
             else:
                 if revision is None:
                     raise AccessDenied('revision_required', 428)
-                row = conn.execute('SELECT desired_revision FROM backend_profiles WHERE id = ?', (profile_id,)).fetchone()
+                row = conn.execute('''SELECT p.desired_revision, d.profile_id AS deleting
+                    FROM backend_profiles p LEFT JOIN backend_profile_deletions d ON d.profile_id = p.id
+                    WHERE p.id = ?''', (profile_id,)).fetchone()
                 if row is None:
                     raise AccessDenied('resource_not_found', 404)
+                if row['deleting'] is not None:
+                    raise AccessDenied('profile_deleting', 409)
                 if type(revision) is not int or revision < 1:
                     raise AccessDenied('invalid_revision', 422)
                 if row['desired_revision'] != revision:
                     raise AccessDenied('revision_conflict', 412)
-                if action == 'edit':
+                if action == 'delete':
+                    if values:
+                        raise AccessDenied('invalid_input', 422)
+                    conn.execute('''INSERT INTO backend_profile_deletions(profile_id, requested_at)
+                        VALUES (?, ?)''', (profile_id, datetime.now(timezone.utc).isoformat()))
+                    conn.execute('DELETE FROM backend_grants WHERE profile_id = ?', (profile_id,))
+                    cursor = conn.execute('''UPDATE backend_profiles
+                        SET frozen = 1, desired_revision = desired_revision + 1
+                        WHERE id = ? AND desired_revision = ? RETURNING id''', (profile_id, revision))
+                elif action == 'edit':
                     if not values or set(values) - {'display_name', 'frozen', 'expires_at'}:
                         raise AccessDenied('invalid_input', 422)
                     if 'display_name' in values:
@@ -101,22 +143,9 @@ class ProfileCommands:
                                          (*parameters, profile_id, revision))
                 else:
                     grants = values.get('grants')
-                    if set(values) != {'grants'} or not isinstance(grants, list) or len(grants) > 100:
+                    if set(values) != {'grants'}:
                         raise AccessDenied('invalid_input', 422)
-                    seen = set()
-                    for grant in grants:
-                        if not isinstance(grant, dict) or set(grant) != {'node_key', 'protocol'}:
-                            raise AccessDenied('invalid_input', 422)
-                        node_key, protocol = grant['node_key'], grant['protocol']
-                        if not isinstance(node_key, str) or not isinstance(protocol, str) or protocol not in {'awg', 'xray'} or (node_key, protocol) in seen:
-                            raise AccessDenied('invalid_input', 422)
-                        seen.add((node_key, protocol))
-                        # Serialize target validation with node draining and
-                        # cleanup even under PostgreSQL READ COMMITTED.
-                        node = conn.execute('''UPDATE backend_nodes SET enabled = enabled
-                            WHERE key = ? RETURNING enabled, protocols_json''', (node_key,)).fetchone()
-                        if node is None or not node['enabled'] or protocol not in json.loads(node['protocols_json']):
-                            raise AccessDenied('grant_target_unavailable', 422)
+                    seen = self.validate_grants(conn, grants)
                     cursor = conn.execute('UPDATE backend_profiles SET desired_revision = desired_revision + 1 WHERE id = ? AND desired_revision = ? RETURNING id', (profile_id, revision))
                 if cursor.fetchone() is None:
                     raise AccessDenied('revision_conflict', 412)
@@ -126,6 +155,9 @@ class ProfileCommands:
                         conn.execute('INSERT INTO backend_grants(profile_id, node_key, protocol) VALUES (?, ?, ?)', (profile_id, node_key, protocol))
             result = self.result(conn, profile_id)
             operation = OperationRepository.record(conn, actor, profile_id, previous_targets)
+            if action == 'delete':
+                conn.execute('''UPDATE backend_profile_deletions SET operation_id = ?
+                    WHERE profile_id = ?''', (operation['id'], profile_id))
             result['operation_id'] = operation['id']
             result['runtime_status'] = operation['status']
             conn.execute('''UPDATE backend_profile_commands SET result_json = ?

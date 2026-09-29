@@ -558,12 +558,21 @@ def get_updates_overview() -> Dict[str, str | bool]:
     local_commit = _commit_from_label(str(local_label))
     remote_commit = _commit_from_label(str(remote_label))
     upstream_ref = str(state.get("upstream_ref", ""))
-    branch = str(state.get("branch", app_settings.get_updates_branch()))
-    dev_track = str(state.get("dev_track", app_settings.get_updates_dev_track()) or "tag")
-    if not remote_label:
-        remote_label = remote_version or APP_VERSION
+    branch = app_settings.get_updates_branch()
+    dev_track = app_settings.get_updates_dev_track()
+    checked_for_selection = (state.get("branch", branch) == branch and
+                             state.get("dev_track", dev_track) == dev_track)
+    if not checked_for_selection:
+        remote_label = ""
+        remote_version = ""
+        remote_commit = ""
+        upstream_ref = ""
+    elif not remote_label:
+        remote_label = remote_version
     update_available = state.get("update_available", "0") == "1"
-    last_status = state.get("last_status", "never")
+    last_status = state.get("last_status", "never") if checked_for_selection else "never"
+    if not checked_for_selection:
+        update_available = False
     same_or_older_semver = bool(remote_version) and _compare_versions(remote_version, current_version) <= 0
     tracks_dev_head = branch == "dev" and dev_track == "head" and upstream_ref == "origin/dev"
     if same_or_older_semver and not (tracks_dev_head and local_commit and remote_commit and local_commit != remote_commit):
@@ -579,7 +588,7 @@ def get_updates_overview() -> Dict[str, str | bool]:
         "source_dir": _effective_source_root(),
         "update_supported": is_manual_update_supported(),
         "auto_check_enabled": app_settings.is_updates_auto_check_enabled(),
-        "last_checked_at": state.get("last_checked_at", ""),
+        "last_checked_at": state.get("last_checked_at", "") if checked_for_selection else "",
         "last_status": last_status,
         "update_available": update_available,
         "local_version": state.get("local_version", "") or _version_from_label(str(local_label)) or current_version,
