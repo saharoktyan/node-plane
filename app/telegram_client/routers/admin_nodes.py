@@ -35,13 +35,14 @@ async def show_admin_nodes(chat_id, user_id, message_id, bot, backend, state):
     await render(bot, chat_id, Screen('Серверы', ('Выберите сервер для настройки и управления.',) if page['items'] else ('Пока нет зарегистрированных серверов.',)), rows, state, message_id)
 
 
+
 @router.callback_query(NewNodeCallback.filter())
 async def new_node_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
     await query.answer()
     await state.set_state(NodeDraftState.waiting_for_key)
     await state.update_data(wizard_data={})
     rows = [[InlineKeyboardButton(text='🔙 Отмена', callback_data=AdminNodesCallback().pack())]]
-    await render(bot, query.message.chat.id, Screen('Добавление сервера (1/5)', ('Введите уникальный идентификатор (key) для сервера (только латиница и цифры):',)), rows, state, query.message.message_id)
+    await render(bot, query.message.chat.id, Screen('Создание сервера (1/7)', ('Введите уникальный идентификатор (key) для сервера (только латиница и цифры):',)), rows, state, query.message.message_id)
 
 @router.message(NodeDraftState.waiting_for_key, F.text)
 async def process_wizard_key(message: Message, bot: Bot, state: FSMContext):
@@ -54,7 +55,7 @@ async def process_wizard_key(message: Message, bot: Bot, state: FSMContext):
     await state.update_data(wizard_data=w)
     await state.set_state(NodeDraftState.waiting_for_title)
     rows = [[InlineKeyboardButton(text='🔙 Отмена', callback_data=AdminNodesCallback().pack())]]
-    await render(bot, message.chat.id, Screen('Добавление сервера (2/5)', ('Введите понятное название (title) для сервера:',)), rows, state)
+    await render(bot, message.chat.id, Screen('Создание сервера (2/7)', ('Введите понятное название (title) для сервера:',)), rows, state)
 
 @router.message(NodeDraftState.waiting_for_title, F.text)
 async def process_wizard_title(message: Message, bot: Bot, state: FSMContext):
@@ -65,7 +66,7 @@ async def process_wizard_title(message: Message, bot: Bot, state: FSMContext):
     await state.update_data(wizard_data=w)
     await state.set_state(NodeDraftState.waiting_for_region)
     rows = [[InlineKeyboardButton(text='🔙 Отмена', callback_data=AdminNodesCallback().pack())]]
-    await render(bot, message.chat.id, Screen('Добавление сервера (3/5)', ('Введите регион сервера (например: EU, RU, US):',)), rows, state)
+    await render(bot, message.chat.id, Screen('Создание сервера (3/7)', ('Введите регион сервера (например: EU, RU, US):',)), rows, state)
 
 @router.message(NodeDraftState.waiting_for_region, F.text)
 async def process_wizard_region(message: Message, bot: Bot, state: FSMContext):
@@ -79,7 +80,7 @@ async def process_wizard_region(message: Message, bot: Bot, state: FSMContext):
         [InlineKeyboardButton(text='Пропустить', callback_data="wizard_skip_flag")],
         [InlineKeyboardButton(text='🔙 Отмена', callback_data=AdminNodesCallback().pack())]
     ]
-    await render(bot, message.chat.id, Screen('Добавление сервера (4/5)', ('Отправьте эмодзи флага или нажмите "Пропустить":',)), rows, state)
+    await render(bot, message.chat.id, Screen('Создание сервера (4/7)', ('Отправьте эмодзи флага или нажмите "Пропустить":',)), rows, state)
 
 @router.callback_query(F.data == "wizard_skip_flag")
 async def wizard_skip_flag_cb(query: CallbackQuery, bot: Bot, state: FSMContext):
@@ -88,9 +89,7 @@ async def wizard_skip_flag_cb(query: CallbackQuery, bot: Bot, state: FSMContext)
     w = data.get('wizard_data', {})
     w['flag'] = "🏳️"
     await state.update_data(wizard_data=w)
-    await state.set_state(NodeDraftState.waiting_for_public_host)
-    rows = [[InlineKeyboardButton(text='🔙 Отмена', callback_data=AdminNodesCallback().pack())]]
-    await render(bot, query.message.chat.id, Screen('Добавление сервера (5/5)', ('Введите публичный хост или IP сервера:',)), rows, state, query.message.message_id)
+    await render_wizard_transport(query.message.chat.id, bot, state, query.message.message_id)
 
 @router.message(NodeDraftState.waiting_for_flag, F.text)
 async def process_wizard_flag(message: Message, bot: Bot, state: FSMContext):
@@ -99,10 +98,47 @@ async def process_wizard_flag(message: Message, bot: Bot, state: FSMContext):
     w = data.get('wizard_data', {})
     w['flag'] = message.text.strip()
     await state.update_data(wizard_data=w)
+    await render_wizard_transport(message.chat.id, bot, state)
+
+async def render_wizard_transport(chat_id: int, bot: Bot, state: FSMContext, message_id: int | None = None):
+    await state.set_state(NodeDraftState.waiting_for_transport)
+    rows = [
+        [InlineKeyboardButton(text='🌐 Установить по SSH', callback_data="wizard_transport:ssh")],
+        [InlineKeyboardButton(text='💻 Установить локально', callback_data="wizard_transport:local")],
+        [InlineKeyboardButton(text='🔙 Отмена', callback_data=AdminNodesCallback().pack())]
+    ]
+    await render(bot, chat_id, Screen('Создание сервера (5/7)', ('Выберите способ установки агента:',)), rows, state, message_id)
+
+@router.callback_query(F.data.startswith("wizard_transport:"))
+async def wizard_transport_cb(query: CallbackQuery, bot: Bot, state: FSMContext):
+    await query.answer()
+    transport = query.data.split(":")[1]
+    data = await state.get_data()
+    w = data.get('wizard_data', {})
+    w['transport'] = transport
+    await state.update_data(wizard_data=w)
+    
+    if transport == "ssh":
+        await state.set_state(NodeDraftState.waiting_for_target)
+        rows = [[InlineKeyboardButton(text='🔙 Отмена', callback_data=AdminNodesCallback().pack())]]
+        await render(bot, query.message.chat.id, Screen('Создание сервера (SSH)', ('Введите SSH endpoint (например: root@192.168.1.10:22):',)), rows, state, query.message.message_id)
+    else:
+        w['ssh_target'] = None
+        await state.update_data(wizard_data=w)
+        await state.set_state(NodeDraftState.waiting_for_public_host)
+        rows = [[InlineKeyboardButton(text='🔙 Отмена', callback_data=AdminNodesCallback().pack())]]
+        await render(bot, query.message.chat.id, Screen('Создание сервера (6/7)', ('Введите публичный хост или IP сервера:',)), rows, state, query.message.message_id)
+
+@router.message(NodeDraftState.waiting_for_target, F.text)
+async def process_wizard_target(message: Message, bot: Bot, state: FSMContext):
+    await message.delete()
+    data = await state.get_data()
+    w = data.get('wizard_data', {})
+    w['ssh_target'] = message.text.strip()
+    await state.update_data(wizard_data=w)
     await state.set_state(NodeDraftState.waiting_for_public_host)
     rows = [[InlineKeyboardButton(text='🔙 Отмена', callback_data=AdminNodesCallback().pack())]]
-    await render(bot, message.chat.id, Screen('Добавление сервера (5/5)', ('Введите публичный хост или IP сервера:',)), rows, state)
-
+    await render(bot, message.chat.id, Screen('Создание сервера (6/7)', ('Введите публичный хост или IP сервера:',)), rows, state)
 
 @router.message(NodeDraftState.waiting_for_public_host, F.text)
 async def process_wizard_host(message: Message, bot: Bot, backend: BackendClient, state: FSMContext):
@@ -129,7 +165,30 @@ async def render_wizard_protocols(chat_id: int, bot: Bot, state: FSMContext, mes
         [InlineKeyboardButton(text='🚀 Сохранить (Apply)', callback_data="wizard_proto:done")],
         [InlineKeyboardButton(text='🔙 Отмена', callback_data=AdminNodesCallback().pack())]
     ]
-    await render(bot, chat_id, Screen('Добавление сервера (6/6)', ('Выберите протоколы, которые будут установлены на этом сервере:',)), rows, state, message_id)
+    await render(bot, chat_id, Screen('Создание сервера (7/7)', ('Выберите протоколы, которые будут установлены на этом сервере:',)), rows, state, message_id)
+
+import json
+import os
+
+def save_node_transport(node_key: str, transport: str, ssh_target: str | None):
+    # Quick persistent store for transports since backend NodeCreateInput doesn't take it
+    path = "app/telegram_client/node_transports.json"
+    data = {}
+    if os.path.exists(path):
+        with open(path, "r") as f:
+            try: data = json.load(f)
+            except: pass
+    data[node_key] = {"transport": transport, "ssh_target": ssh_target}
+    with open(path, "w") as f:
+        json.dump(data, f)
+
+def get_node_transport(node_key: str):
+    path = "app/telegram_client/node_transports.json"
+    if os.path.exists(path):
+        with open(path, "r") as f:
+            try: return json.load(f).get(node_key, {})
+            except: pass
+    return {}
 
 @router.callback_query(F.data.startswith("wizard_proto:"))
 async def wizard_proto_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
@@ -140,7 +199,6 @@ async def wizard_proto_cb(query: CallbackQuery, bot: Bot, backend: BackendClient
     protocols = w.get('protocols', [])
     
     if action == "done":
-        # Finished! Create the node on the backend
         try:
             await backend.request('POST', '/api/v1/nodes', telegram_user_id=query.from_user.id, json={
                 "key": w["key"],
@@ -152,6 +210,7 @@ async def wizard_proto_cb(query: CallbackQuery, bot: Bot, backend: BackendClient
                     "public_host": w["public_host"]
                 }
             })
+            save_node_transport(w["key"], w.get("transport", "local"), w.get("ssh_target"))
             await state.clear()
             rows = [[InlineKeyboardButton(text='🔙 К списку серверов', callback_data=AdminNodesCallback().pack())]]
             await render(bot, query.message.chat.id, Screen('Успех', (f'Сервер {w["title"]} успешно создан!',)), rows, state, query.message.message_id)
@@ -167,35 +226,6 @@ async def wizard_proto_cb(query: CallbackQuery, bot: Bot, backend: BackendClient
     w['protocols'] = protocols
     await state.update_data(wizard_data=w)
     await render_wizard_protocols(query.message.chat.id, bot, state, query.message.message_id)
-
-@router.callback_query(SubmitNodeCallback.filter())
-async def submit_node_cb(query: CallbackQuery, callback_data: SubmitNodeCallback, bot: Bot, backend: BackendClient, state: FSMContext):
-    await query.answer()
-    user_id = query.from_user.id
-    choice = callback_data.choice
-    data = await state.get_data()
-    base = data.get('node_base')
-    if not base:
-        await show_admin_nodes(query.message.chat.id, user_id, query.message.message_id, bot, backend, state)
-        return
-        
-    protocols = ['awg', 'xray'] if choice == 'both' else [choice]
-    settings = {'public_host': base['public_host']}
-    if 'awg' in protocols: settings['awg_port'] = 51820
-    if 'xray' in protocols:
-        settings.update({'xray_sni': 'www.cloudflare.com', 'xray_tcp_port': 443, 'xray_xhttp_port': 8443, 'xray_xhttp_path': '/assets'})
-    
-    body = {key: base[key] for key in ('key', 'title', 'region')}
-    body.update({'protocols': protocols, 'xray_transports': ['tcp', 'xhttp'] if 'xray' in protocols else [], 'settings': settings})
-    
-    try:
-        node = await backend.create_node(user_id, body, command_key=None)
-        await state.clear()
-        await show_admin_node(query.message.chat.id, user_id, query.message.message_id, node['key'], bot, backend, state)
-    except BackendError as exc:
-        await render(bot, query.message.chat.id, Screen('Could not register node', (f'Reason: {exc.code}', 'Retry this selection or cancel.')),
-            [[InlineKeyboardButton(text='Retry', callback_data=SubmitNodeCallback(choice=choice).pack())],
-             [InlineKeyboardButton(text='Cancel', callback_data=AdminNodesCallback().pack())]], state, query.message.message_id)
 
 
 @router.callback_query(AdminNodeCallback.filter())
@@ -605,14 +635,34 @@ async def show_rollout_status(chat_id, user_id, message_id, task_id, bot, backen
 
 
 
+
 @router.callback_query(F.data.startswith("bootstrap_menu:"))
 async def bootstrap_menu_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
     await query.answer()
     node_key = query.data.split(":")[1]
     
+    # We will just show all 3 buttons sequentially as requested
+    # Real implementation would check backend states
     rows = [
-        [InlineKeyboardButton(text="🌐 Установить по SSH", callback_data=BindSshCallback(node_key=node_key).pack())],
-        [InlineKeyboardButton(text="💻 Установить локально", callback_data=BindLocalCallback(node_key=node_key).pack())],
+        [InlineKeyboardButton(text="🔧 Set up agent", callback_data=f"bs_agent:{node_key}")],
+        [InlineKeyboardButton(text="🐳 Install docker", callback_data=f"bs_docker:{node_key}")],
+        [InlineKeyboardButton(text="🚀 Bootstrap", callback_data=ApplyNodeCallback(node_key=node_key).pack())],
         [InlineKeyboardButton(text="🔙 Назад", callback_data=AdminNodeCallback(node_key=node_key).pack())]
     ]
-    await render(bot, query.message.chat.id, Screen("Установка (Bootstrap)", ("Выберите способ установки и привязки агента для этого сервера:",)), rows, state, query.message.message_id)
+    await render(bot, query.message.chat.id, Screen("Установка (Bootstrap)", ("Управление установкой агента и зависимостей на сервере:",)), rows, state, query.message.message_id)
+
+@router.callback_query(F.data.startswith("bs_agent:"))
+async def bs_agent_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
+    node_key = query.data.split(":")[1]
+    trans = get_node_transport(node_key)
+    try:
+        # Mocking or calling the real agent-rollouts endpoint
+        # If the backend is ready, we would call it here
+        # await backend.request('POST', f'/api/v1/nodes/{node_key}/agent-rollouts', json={"transport": trans.get("transport", "local"), "ssh_target": trans.get("ssh_target")})
+        await query.answer("Agent setup initiated (mock)", show_alert=True)
+    except Exception as e:
+        await query.answer(f"Error: {e}", show_alert=True)
+
+@router.callback_query(F.data.startswith("bs_docker:"))
+async def bs_docker_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
+    await query.answer("Docker installation initiated (mock)", show_alert=True)
