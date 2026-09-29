@@ -234,7 +234,7 @@ async def select_protocol_cb(query: CallbackQuery, callback_data: ProtocolSelect
     trans = callback_data.transport
     
     try:
-        res = await backend.request('POST', f'/api/v1/profiles/{pid}/config-issuances', telegram_user_id=user_id, command=True, json={
+        res = await backend.request('POST', f'/api/v1/profiles/{pid}/config-issuances', telegram_user_id=user_id, command=True, body={
             "node_key": nk,
             "protocol": proto,
             "transport": trans

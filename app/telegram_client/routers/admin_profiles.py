@@ -155,7 +155,7 @@ async def process_profile_create(message: Message, bot: Bot, backend: BackendCli
         account_id = None
         if tg_id:
             # Resolve account
-            res = await backend.request('POST', '/api/v1/integrations/telegram/identities/resolve', command=True, json={'telegram_user_id': tg_id})
+            res = await backend.request('POST', '/api/v1/integrations/telegram/identities/resolve', command=True, body={'telegram_user_id': tg_id})
             account_id = res['id']
             display_name = f"tg_{tg_id}"
         else:
@@ -163,7 +163,7 @@ async def process_profile_create(message: Message, bot: Bot, backend: BackendCli
             display_name = identity
             
         # Create profile
-        await backend.request('POST', '/api/v1/profiles', telegram_user_id=message.from_user.id, command=True, json={
+        await backend.request('POST', '/api/v1/profiles', telegram_user_id=message.from_user.id, command=True, body={
             'display_name': display_name,
             'owner_account_id': account_id
         })
@@ -268,14 +268,50 @@ async def grant_nodes_cb(query: CallbackQuery, callback_data: GrantNodesCallback
 @router.callback_query(AddGrantCallback.filter())
 async def add_grant_cb(query: CallbackQuery, callback_data: AddGrantCallback, bot: Bot, backend: BackendClient, state: FSMContext):
     await query.answer()
-    await backend.request('POST', f'/api/v1/profiles/{callback_data.profile_id}/grants', body={'node_key': callback_data.node_key, 'protocols': ['xray', 'amneziawg']}, telegram_user_id=query.from_user.id, command=True)
+    user_id = query.from_user.id
+    grants = await backend.request('GET', f'/api/v1/profiles/{callback_data.profile_id}/grants', telegram_user_id=user_id)
+    new_grants = [{'node_key': g['node_key'], 'protocols': g['protocols']} for g in grants]
+    new_grants.append({'node_key': callback_data.node_key, 'protocols': ['xray', 'amneziawg']})
+    await backend.request('PATCH', f'/api/v1/profiles/{callback_data.profile_id}/grants', body={'grants': new_grants}, telegram_user_id=user_id, command=True)
     await grant_nodes_cb(query, GrantNodesCallback(profile_id=callback_data.profile_id), bot, backend, state)
 
 @router.callback_query(RemoveGrantCallback.filter())
 async def remove_grant_cb(query: CallbackQuery, callback_data: RemoveGrantCallback, bot: Bot, backend: BackendClient, state: FSMContext):
     await query.answer()
-    await backend.request('DELETE', f'/api/v1/profiles/{callback_data.profile_id}/grants/{callback_data.node_key}', telegram_user_id=query.from_user.id, command=True)
+    user_id = query.from_user.id
+    grants = await backend.request('GET', f'/api/v1/profiles/{callback_data.profile_id}/grants', telegram_user_id=user_id)
+    new_grants = [{'node_key': g['node_key'], 'protocols': g['protocols']} for g in grants if g['node_key'] != callback_data.node_key]
+    await backend.request('PATCH', f'/api/v1/profiles/{callback_data.profile_id}/grants', body={'grants': new_grants}, telegram_user_id=user_id, command=True)
     await grant_nodes_cb(query, GrantNodesCallback(profile_id=callback_data.profile_id), bot, backend, state)
+
+
+from .callbacks import ToggleProtocolCallback
+
+@router.callback_query(ToggleProtocolCallback.filter())
+async def toggle_protocol_cb(query: CallbackQuery, callback_data: ToggleProtocolCallback, bot: Bot, backend: BackendClient, state: FSMContext):
+    await query.answer()
+    profile_id = callback_data.profile_id
+    node_key = callback_data.node_key
+    protocol = callback_data.protocol
+    user_id = query.from_user.id
+    
+    grants = await backend.request('GET', f'/api/v1/profiles/{profile_id}/grants', telegram_user_id=user_id)
+    grant = next((g for g in grants if g['node_key'] == node_key), None)
+    if not grant:
+        await grant_nodes_cb(query, GrantNodesCallback(profile_id=profile_id), bot, backend, state)
+        return
+        
+    protos = grant['protocols']
+    new_protos = list(protos)
+    if protocol in new_protos: new_protos.remove(protocol)
+    else: new_protos.append(protocol)
+    
+    new_grants = [{'node_key': g['node_key'], 'protocols': g['protocols']} for g in grants if g['node_key'] != node_key]
+    new_grants.append({'node_key': node_key, 'protocols': new_protos})
+    
+    await backend.request('PATCH', f'/api/v1/profiles/{profile_id}/grants', body={'grants': new_grants}, telegram_user_id=user_id, command=True)
+    await grant_protocols_cb(query, GrantProtocolsCallback(profile_id=profile_id, node_key=node_key), bot, backend, state)
+
 
 @router.callback_query(GrantProtocolsCallback.filter())
 async def grant_protocols_cb(query: CallbackQuery, callback_data: GrantProtocolsCallback, bot: Bot, backend: BackendClient, state: FSMContext):
@@ -292,17 +328,17 @@ async def grant_protocols_cb(query: CallbackQuery, callback_data: GrantProtocols
         
     protos = grant['protocols']
     
-    async def toggle(p):
-        new_protos = list(protos)
-        if p in new_protos: new_protos.remove(p)
-        else: new_protos.append(p)
-        await backend.request('PUT', f'/api/v1/profiles/{profile_id}/grants/{node_key}', body={'protocols': new_protos}, telegram_user_id=user_id, command=True)
-        await grant_protocols_cb(query, callback_data, bot, backend, state)
+    node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=user_id)
+    node_protocols = node.get('protocols', [])
+    
+    rows = []
+    for np in node_protocols:
+        is_selected = np in protos
+        label = f">{np.capitalize()}<" if is_selected else np.capitalize()
+        rows.append([InlineKeyboardButton(text=label, callback_data=ToggleProtocolCallback(profile_id=profile_id, node_key=node_key, protocol=np).pack())])
         
-    # Wait, aiogram handlers can't easily inline a toggle function dynamically unless we add a ToggleProtocolCallback
-    # Let's just render the screen with buttons that go back to GrantNodes for now to avoid creating more callback classes
-    # Actually, we can use a simpler approach or just create a ToggleProtocolCallback in callbacks.py if needed.
-    pass
+    rows.append([InlineKeyboardButton(text="🔙 Применить / Назад", callback_data=GrantNodesCallback(profile_id=profile_id).pack())])
+    await render(bot, query.message.chat.id, Screen('Доступ к протоколам', (f"Выберите протоколы для сервера {node_key}.",)), rows, state, query.message.message_id)
 
 @router.callback_query(ToggleFreezeCallback.filter())
 async def toggle_freeze_cb(query: CallbackQuery, callback_data: ToggleFreezeCallback, bot: Bot, backend: BackendClient, state: FSMContext):
@@ -311,8 +347,10 @@ async def toggle_freeze_cb(query: CallbackQuery, callback_data: ToggleFreezeCall
     profile_id = callback_data.profile_id
     
     profile = await backend.request('GET', f'/api/v1/profiles/{profile_id}', telegram_user_id=user_id)
-    new_status = 'active' if profile.get('status') == 'frozen' else 'frozen'
+    is_frozen = profile.get('status') == 'frozen'
+    new_frozen = not is_frozen
     
-    await backend.request('PUT', f'/api/v1/profiles/{profile_id}', body={'status': new_status}, telegram_user_id=user_id, command=True)
+    await backend.request('PATCH', f'/api/v1/profiles/{profile_id}', body={'frozen': new_frozen}, telegram_user_id=user_id, command=True)
     await admin_profile_cb(query, AdminProfileCallback(profile_id=profile_id), bot, backend, state)
+
 

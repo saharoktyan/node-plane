@@ -200,7 +200,7 @@ async def wizard_proto_cb(query: CallbackQuery, bot: Bot, backend: BackendClient
     
     if action == "done":
         try:
-            await backend.request('POST', '/api/v1/nodes', telegram_user_id=query.from_user.id, json={
+            await backend.request('POST', '/api/v1/nodes', telegram_user_id=query.from_user.id, body={
                 "key": w["key"],
                 "title": w["title"],
                 "region": w["region"],
@@ -610,7 +610,7 @@ async def bs_agent_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, st
     trans = get_node_transport(node_key)
     
     try:
-        res = await backend.request('POST', f'/api/v1/nodes/{node_key}/agent-rollouts', telegram_user_id=query.from_user.id, command=True, json={
+        res = await backend.request('POST', f'/api/v1/nodes/{node_key}/agent-rollouts', telegram_user_id=query.from_user.id, command=True, body={
             "transport": trans.get("transport", "local"), 
             "ssh_target": trans.get("ssh_target")
         })

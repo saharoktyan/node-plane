@@ -174,3 +174,8 @@ class ToggleFreezeCallback(CallbackData, prefix="toggle_freeze"):
 
 class AdminSettingsCallback(CallbackData, prefix="admin_settings"):
     pass
+
+class ToggleProtocolCallback(CallbackData, prefix="tog_proto"):
+    profile_id: str
+    node_key: str
+    protocol: str
