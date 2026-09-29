@@ -271,7 +271,8 @@ async def add_grant_cb(query: CallbackQuery, callback_data: AddGrantCallback, bo
     user_id = query.from_user.id
     grants = await backend.request('GET', f'/api/v1/profiles/{callback_data.profile_id}/grants', telegram_user_id=user_id)
     new_grants = [{'node_key': g['node_key'], 'protocols': g['protocols']} for g in grants]
-    new_grants.append({'node_key': callback_data.node_key, 'protocols': ['xray', 'amneziawg']})profile = await backend.request('GET', f'/api/v1/profiles/{callback_data.profile_id}', telegram_user_id=user_id)
+    new_grants.append({'node_key': callback_data.node_key, 'protocols': ['xray', 'amneziawg']})
+    profile = await backend.request('GET', f'/api/v1/profiles/{callback_data.profile_id}', telegram_user_id=user_id)
     await backend.request('PATCH', f'/api/v1/profiles/{callback_data.profile_id}/grants', body={'grants': new_grants}, telegram_user_id=user_id, command=True, revision=profile['revision'])
     await grant_nodes_cb(query, GrantNodesCallback(profile_id=callback_data.profile_id), bot, backend, state)
 
@@ -280,7 +281,8 @@ async def remove_grant_cb(query: CallbackQuery, callback_data: RemoveGrantCallba
     await query.answer()
     user_id = query.from_user.id
     grants = await backend.request('GET', f'/api/v1/profiles/{callback_data.profile_id}/grants', telegram_user_id=user_id)
-    new_grants = [{'node_key': g['node_key'], 'protocols': g['protocols']} for g in grants if g['node_key'] != callback_data.node_key]profile = await backend.request('GET', f'/api/v1/profiles/{callback_data.profile_id}', telegram_user_id=user_id)
+    new_grants = [{'node_key': g['node_key'], 'protocols': g['protocols']} for g in grants if g['node_key'] != callback_data.node_key]
+    profile = await backend.request('GET', f'/api/v1/profiles/{callback_data.profile_id}', telegram_user_id=user_id)
     await backend.request('PATCH', f'/api/v1/profiles/{callback_data.profile_id}/grants', body={'grants': new_grants}, telegram_user_id=user_id, command=True, revision=profile['revision'])
     await grant_nodes_cb(query, GrantNodesCallback(profile_id=callback_data.profile_id), bot, backend, state)
 
@@ -307,7 +309,8 @@ async def toggle_protocol_cb(query: CallbackQuery, callback_data: ToggleProtocol
     else: new_protos.append(protocol)
     
     new_grants = [{'node_key': g['node_key'], 'protocols': g['protocols']} for g in grants if g['node_key'] != node_key]
-    new_grants.append({'node_key': node_key, 'protocols': new_protos})profile = await backend.request('GET', f'/api/v1/profiles/{profile_id}', telegram_user_id=user_id)
+    new_grants.append({'node_key': node_key, 'protocols': new_protos})
+    profile = await backend.request('GET', f'/api/v1/profiles/{profile_id}', telegram_user_id=user_id)
     await backend.request('PATCH', f'/api/v1/profiles/{profile_id}/grants', body={'grants': new_grants}, telegram_user_id=user_id, command=True, revision=profile['revision'])
     await grant_protocols_cb(query, GrantProtocolsCallback(profile_id=profile_id, node_key=node_key), bot, backend, state)
 
