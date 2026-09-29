@@ -80,7 +80,7 @@ async def process_wizard_region(message: Message, bot: Bot, state: FSMContext):
         [InlineKeyboardButton(text='Пропустить', callback_data="wizard_skip_flag")],
         [InlineKeyboardButton(text='🔙 Отмена', callback_data=AdminNodesCallback().pack())]
     ]
-    await render(bot, message.chat.id, Screen('Создание сервера (4/7)', ('Отправьте эмодзи флага или нажмите "Пропустить":',)), rows, state)
+    await render(bot, message.chat.id, Screen('Создание сервера (4/7)', ('Отправьте эмодзи флага или нажмите "⏭ Skip":',)), rows, state)
 
 @router.callback_query(F.data == "wizard_skip_flag")
 async def wizard_skip_flag_cb(query: CallbackQuery, bot: Bot, state: FSMContext):
@@ -162,7 +162,7 @@ async def render_wizard_protocols(chat_id: int, bot: Bot, state: FSMContext, mes
     rows = [
         [InlineKeyboardButton(text=mark("xray", "Xray"), callback_data="wizard_proto:xray")],
         [InlineKeyboardButton(text=mark("awg", "Awg"), callback_data="wizard_proto:awg")],
-        [InlineKeyboardButton(text='🚀 Сохранить (Apply)', callback_data="wizard_proto:done")],
+        [InlineKeyboardButton(text='✅ Done', callback_data="wizard_proto:done")],
         [InlineKeyboardButton(text='🔙 Отмена', callback_data=AdminNodesCallback().pack())]
     ]
     await render(bot, chat_id, Screen('Создание сервера (7/7)', ('Выберите протоколы, которые будут установлены на этом сервере:',)), rows, state, message_id)
@@ -200,7 +200,7 @@ async def wizard_proto_cb(query: CallbackQuery, bot: Bot, backend: BackendClient
     
     if action == "done":
         try:
-            await backend.request('POST', '/api/v1/nodes', telegram_user_id=query.from_user.id, body={
+            await backend.request('POST', '/api/v1/nodes', telegram_user_id=query.from_user.id, command=True, body={
                 "key": w["key"],
                 "title": w["title"],
                 "region": w["region"],

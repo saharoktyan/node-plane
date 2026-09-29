@@ -271,8 +271,8 @@ async def add_grant_cb(query: CallbackQuery, callback_data: AddGrantCallback, bo
     user_id = query.from_user.id
     grants = await backend.request('GET', f'/api/v1/profiles/{callback_data.profile_id}/grants', telegram_user_id=user_id)
     new_grants = [{'node_key': g['node_key'], 'protocols': g['protocols']} for g in grants]
-    new_grants.append({'node_key': callback_data.node_key, 'protocols': ['xray', 'amneziawg']})
-    await backend.request('PATCH', f'/api/v1/profiles/{callback_data.profile_id}/grants', body={'grants': new_grants}, telegram_user_id=user_id, command=True)
+    new_grants.append({'node_key': callback_data.node_key, 'protocols': ['xray', 'amneziawg']})profile = await backend.request('GET', f'/api/v1/profiles/{callback_data.profile_id}', telegram_user_id=user_id)
+    await backend.request('PATCH', f'/api/v1/profiles/{callback_data.profile_id}/grants', body={'grants': new_grants}, telegram_user_id=user_id, command=True, revision=profile['revision'])
     await grant_nodes_cb(query, GrantNodesCallback(profile_id=callback_data.profile_id), bot, backend, state)
 
 @router.callback_query(RemoveGrantCallback.filter())
@@ -280,8 +280,8 @@ async def remove_grant_cb(query: CallbackQuery, callback_data: RemoveGrantCallba
     await query.answer()
     user_id = query.from_user.id
     grants = await backend.request('GET', f'/api/v1/profiles/{callback_data.profile_id}/grants', telegram_user_id=user_id)
-    new_grants = [{'node_key': g['node_key'], 'protocols': g['protocols']} for g in grants if g['node_key'] != callback_data.node_key]
-    await backend.request('PATCH', f'/api/v1/profiles/{callback_data.profile_id}/grants', body={'grants': new_grants}, telegram_user_id=user_id, command=True)
+    new_grants = [{'node_key': g['node_key'], 'protocols': g['protocols']} for g in grants if g['node_key'] != callback_data.node_key]profile = await backend.request('GET', f'/api/v1/profiles/{callback_data.profile_id}', telegram_user_id=user_id)
+    await backend.request('PATCH', f'/api/v1/profiles/{callback_data.profile_id}/grants', body={'grants': new_grants}, telegram_user_id=user_id, command=True, revision=profile['revision'])
     await grant_nodes_cb(query, GrantNodesCallback(profile_id=callback_data.profile_id), bot, backend, state)
 
 
@@ -307,9 +307,8 @@ async def toggle_protocol_cb(query: CallbackQuery, callback_data: ToggleProtocol
     else: new_protos.append(protocol)
     
     new_grants = [{'node_key': g['node_key'], 'protocols': g['protocols']} for g in grants if g['node_key'] != node_key]
-    new_grants.append({'node_key': node_key, 'protocols': new_protos})
-    
-    await backend.request('PATCH', f'/api/v1/profiles/{profile_id}/grants', body={'grants': new_grants}, telegram_user_id=user_id, command=True)
+    new_grants.append({'node_key': node_key, 'protocols': new_protos})profile = await backend.request('GET', f'/api/v1/profiles/{profile_id}', telegram_user_id=user_id)
+    await backend.request('PATCH', f'/api/v1/profiles/{profile_id}/grants', body={'grants': new_grants}, telegram_user_id=user_id, command=True, revision=profile['revision'])
     await grant_protocols_cb(query, GrantProtocolsCallback(profile_id=profile_id, node_key=node_key), bot, backend, state)
 
 
@@ -337,7 +336,7 @@ async def grant_protocols_cb(query: CallbackQuery, callback_data: GrantProtocols
         label = f">{np.capitalize()}<" if is_selected else np.capitalize()
         rows.append([InlineKeyboardButton(text=label, callback_data=ToggleProtocolCallback(profile_id=profile_id, node_key=node_key, protocol=np).pack())])
         
-    rows.append([InlineKeyboardButton(text="🔙 Применить / Назад", callback_data=GrantNodesCallback(profile_id=profile_id).pack())])
+    rows.append([InlineKeyboardButton(text="🔙 Назад", callback_data=GrantNodesCallback(profile_id=profile_id).pack())])
     await render(bot, query.message.chat.id, Screen('Доступ к протоколам', (f"Выберите протоколы для сервера {node_key}.",)), rows, state, query.message.message_id)
 
 @router.callback_query(ToggleFreezeCallback.filter())
@@ -350,7 +349,7 @@ async def toggle_freeze_cb(query: CallbackQuery, callback_data: ToggleFreezeCall
     is_frozen = profile.get('status') == 'frozen'
     new_frozen = not is_frozen
     
-    await backend.request('PATCH', f'/api/v1/profiles/{profile_id}', body={'frozen': new_frozen}, telegram_user_id=user_id, command=True)
+    await backend.request('PATCH', f'/api/v1/profiles/{profile_id}', body={'frozen': new_frozen}, telegram_user_id=user_id, command=True, revision=profile['revision'])
     await admin_profile_cb(query, AdminProfileCallback(profile_id=profile_id), bot, backend, state)
 
 
