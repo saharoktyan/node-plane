@@ -21,14 +21,14 @@ async def requests_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, st
     page = await backend.request('GET', '/api/v1/access-requests?limit=25', telegram_user_id=user_id)
     rows = []
     for item in page['items']:
-        rows.append([InlineKeyboardButton(text=f"Review {item['account_id'][:8]}", callback_data=ReviewCallback(request_id=item['id']).pack())])
+        rows.append([InlineKeyboardButton(text=f"Рассмотреть {item['account_id'][:8]}", callback_data=ReviewCallback(request_id=item['id']).pack())])
     if not page['items']:
         # if there are no requests, render home (you could just fallback or import show_home if you wanted to avoid duplication)
         from .user import show_home
         await show_home(query.message.chat.id, user_id, bot, backend, state, query.message.message_id)
         return
-    rows.append([InlineKeyboardButton(text='Back', callback_data=HomeCallback().pack())])
-    await render(bot, query.message.chat.id, Screen('Access requests', (f"Pending: {len(page['items'])}",)), rows, state, query.message.message_id)
+    rows.append([InlineKeyboardButton(text='🔙 Назад', callback_data='admin_menu')])
+    await render(bot, query.message.chat.id, Screen('Заявки на доступ', (f"Ожидают: {len(page['items'])}",)), rows, state, query.message.message_id)
 
 @router.callback_query(ReviewCallback.filter())
 async def review_cb(query: CallbackQuery, callback_data: ReviewCallback, bot: Bot, backend: BackendClient, state: FSMContext):
@@ -36,9 +36,9 @@ async def review_cb(query: CallbackQuery, callback_data: ReviewCallback, bot: Bo
     user_id = query.from_user.id
     request_id = callback_data.request_id
     rows = [
-        [InlineKeyboardButton(text='Approve', callback_data=DecideCallback(request_id=request_id, decision='approve').pack()),
-         InlineKeyboardButton(text='Reject', callback_data=DecideCallback(request_id=request_id, decision='reject').pack())],
-        [InlineKeyboardButton(text='Back', callback_data=RequestsCallback().pack())]
+        [InlineKeyboardButton(text='✅ Одобрить', callback_data=DecideCallback(request_id=request_id, decision='approve').pack()),
+         InlineKeyboardButton(text='❌ Отклонить', callback_data=DecideCallback(request_id=request_id, decision='reject').pack())],
+        [InlineKeyboardButton(text='🔙 Назад', callback_data=RequestsCallback().pack())]
     ]
     await render(bot, query.message.chat.id, Screen('Access request', ('Approve or reject this account.',)), rows, state, query.message.message_id)
 
@@ -56,13 +56,13 @@ async def decide_cb(query: CallbackQuery, callback_data: DecideCallback, bot: Bo
     page = await backend.request('GET', '/api/v1/access-requests?limit=25', telegram_user_id=user_id)
     rows = []
     for item in page['items']:
-        rows.append([InlineKeyboardButton(text=f"Review {item['account_id'][:8]}", callback_data=ReviewCallback(request_id=item['id']).pack())])
+        rows.append([InlineKeyboardButton(text=f"Рассмотреть {item['account_id'][:8]}", callback_data=ReviewCallback(request_id=item['id']).pack())])
     if not page['items']:
         from .user import show_home
         await show_home(query.message.chat.id, user_id, bot, backend, state, query.message.message_id)
     else:
-        rows.append([InlineKeyboardButton(text='Back', callback_data=HomeCallback().pack())])
-        await render(bot, query.message.chat.id, Screen('Access requests', (f"Pending: {len(page['items'])}",)), rows, state, query.message.message_id)
+        rows.append([InlineKeyboardButton(text='🔙 Назад', callback_data='admin_menu')])
+        await render(bot, query.message.chat.id, Screen('Заявки на доступ', (f"Ожидают: {len(page['items'])}",)), rows, state, query.message.message_id)
     
     # notify requester
     account_id = result['account_id']
@@ -80,9 +80,9 @@ async def notification_review_cb(query: CallbackQuery, callback_data: Notificati
     user_id = query.from_user.id
     request_id = callback_data.request_id
     rows = [
-        [InlineKeyboardButton(text='Approve', callback_data=DecideCallback(request_id=request_id, decision='approve').pack()),
-         InlineKeyboardButton(text='Reject', callback_data=DecideCallback(request_id=request_id, decision='reject').pack())],
-        [InlineKeyboardButton(text='Back', callback_data=RequestsCallback().pack())]
+        [InlineKeyboardButton(text='✅ Одобрить', callback_data=DecideCallback(request_id=request_id, decision='approve').pack()),
+         InlineKeyboardButton(text='❌ Отклонить', callback_data=DecideCallback(request_id=request_id, decision='reject').pack())],
+        [InlineKeyboardButton(text='🔙 Назад', callback_data=RequestsCallback().pack())]
     ]
     await render(bot, query.message.chat.id, Screen('Access request', ('Approve or reject this account.',)), rows, state, query.message.message_id)
 

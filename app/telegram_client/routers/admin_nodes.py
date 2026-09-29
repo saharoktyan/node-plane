@@ -30,9 +30,9 @@ async def admin_nodes_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
 async def show_admin_nodes(chat_id, user_id, message_id, bot, backend, state):
     page = await backend.admin_nodes(user_id)
     rows = [[InlineKeyboardButton(text=f"{node['flag']} {node['title']}".strip(), callback_data=AdminNodeCallback(node_key=node['key']).pack())] for node in page['items']]
-    rows.append([InlineKeyboardButton(text='Add node', callback_data=NewNodeCallback().pack())])
-    rows.append([InlineKeyboardButton(text='Back', callback_data=HomeCallback().pack())])
-    await render(bot, chat_id, Screen('Nodes', ('Select a node to inspect its settings and agent.',) if page['items'] else ('No nodes are registered yet.',)), rows, state, message_id)
+    rows.append([InlineKeyboardButton(text='➕ Добавить сервер', callback_data=NewNodeCallback().pack())])
+    rows.append([InlineKeyboardButton(text='🔙 Назад', callback_data='admin_menu')])
+    await render(bot, chat_id, Screen('Серверы', ('Выберите сервер для настройки и управления.',) if page['items'] else ('Пока нет зарегистрированных серверов.',)), rows, state, message_id)
 
 @router.callback_query(NewNodeCallback.filter())
 async def new_node_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
@@ -110,7 +110,7 @@ async def show_admin_node(chat_id, user_id, message_id, node_key, bot, backend, 
     rows.append([InlineKeyboardButton(text='Updates', callback_data=NodeUpdatesCallback(node_key=node_key).pack())])
     if node['desired_revision'] != node['applied_revision']:
         rows.append([InlineKeyboardButton(text='Apply settings', callback_data=ApplyNodeCallback(node_key=node_key).pack())])
-    rows.append([InlineKeyboardButton(text='Back', callback_data=AdminNodesCallback().pack())])
+    rows.append([InlineKeyboardButton(text='🔙 Назад', callback_data=AdminNodesCallback().pack())])
     await render(bot, chat_id, Screen(node['title'], (f"State: {node_state}", f"Protocols: {', '.join(node['protocols']) or 'none'}", f"Revision: {node['applied_revision']} / {node['desired_revision']}")), rows, state, message_id)
 
 @router.callback_query(NodeSettingsCallback.filter())
@@ -131,7 +131,7 @@ async def show_node_settings(chat_id, user_id, message_id, node_key, bot, backen
             or (field.startswith('awg_') and 'awg' in node['protocols'])
             or (field.startswith('xray_') and 'xray' in node['protocols'])]
     rows += [[InlineKeyboardButton(text='Protocols', callback_data=NodeProtocolsCallback(node_key=node_key).pack())],
-             [InlineKeyboardButton(text='Back', callback_data=AdminNodeCallback(node_key=node_key).pack())]]
+             [InlineKeyboardButton(text='🔙 Назад', callback_data=AdminNodeCallback(node_key=node_key).pack())]]
              
     details = (f"Name: {node['title']}", f"Region: {node['region']}", f"Flag: {node['flag'] or 'none'}", *(f'{k}: {v}' for k, v in sorted(settings.items())))
     await render(bot, chat_id, Screen('Node settings', (f"Desired revision: {node['desired_revision']}", f"Applied revision: {node['applied_revision']}", 'Save fields here, then apply on the node card.'), 'Current values', details), rows, state, message_id)
@@ -187,7 +187,7 @@ async def show_node_protocols(chat_id, user_id, message_id, node_key, bot, backe
     rows = [[InlineKeyboardButton(text=('✓ ' if kind in enabled else '+ ') + kind.upper(), callback_data=ToggleNodeProtocolCallback(node_key=node_key, kind=kind).pack())] for kind in ('awg', 'xray')]
     if 'xray' in enabled:
         rows += [[InlineKeyboardButton(text=('✓ ' if kind in transports else '+ ') + kind.upper(), callback_data=ToggleNodeTransportCallback(node_key=node_key, kind=kind).pack())] for kind in ('tcp', 'xhttp')]
-    rows.append([InlineKeyboardButton(text='Back', callback_data=NodeSettingsCallback(node_key=node_key).pack())])
+    rows.append([InlineKeyboardButton(text='🔙 Назад', callback_data=NodeSettingsCallback(node_key=node_key).pack())])
     await render(bot, chat_id, Screen('Node protocols', ('Changes are saved as desired state. Apply them on the node card.', 'Removing a protocol in use by profiles is rejected.')), rows, state, message_id)
 
 @router.callback_query(ToggleNodeProtocolCallback.filter())
@@ -207,7 +207,7 @@ async def toggle_node_feature(chat_id, user_id, message_id, node_key, kind, tran
     selected = transports if transport else protocols
     selected.symmetric_difference_update({kind})
     if not protocols:
-        await render(bot, chat_id, Screen('Protocol required', ('Keep at least one VPN protocol enabled.',)), [[InlineKeyboardButton(text='Back', callback_data=NodeProtocolsCallback(node_key=node_key).pack())]], state, message_id)
+        await render(bot, chat_id, Screen('Protocol required', ('Keep at least one VPN protocol enabled.',)), [[InlineKeyboardButton(text='🔙 Назад', callback_data=NodeProtocolsCallback(node_key=node_key).pack())]], state, message_id)
         return
     if 'xray' not in protocols: transports.clear()
     elif not transports: transports.update({'tcp', 'xhttp'} if not transport else {'tcp'})
@@ -228,7 +228,7 @@ async def probe_node_cb(query: CallbackQuery, callback_data: ProbeNodeCallback, 
     node_key = callback_data.node_key
     try:
         observation = await backend.node_runtime(user_id, node_key)
-        await render(bot, query.message.chat.id, Screen(f'Node {node_key}', (f"Agent: {observation['health_state']}", f"Xray config: {'present' if observation['xray_config_present'] else 'missing'}", f"AWG config: {'present' if observation['awg_config_present'] else 'missing'}")), [[InlineKeyboardButton(text='Back', callback_data=AdminNodeCallback(node_key=node_key).pack())]], state, query.message.message_id)
+        await render(bot, query.message.chat.id, Screen(f'Node {node_key}', (f"Agent: {observation['health_state']}", f"Xray config: {'present' if observation['xray_config_present'] else 'missing'}", f"AWG config: {'present' if observation['awg_config_present'] else 'missing'}")), [[InlineKeyboardButton(text='🔙 Назад', callback_data=AdminNodeCallback(node_key=node_key).pack())]], state, query.message.message_id)
     except BackendError as exc:
         pass # Handle properly
 
@@ -242,7 +242,7 @@ async def apply_node(chat_id, user_id, message_id, node_key, bot, backend, state
         node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=user_id)
         revision = node['desired_revision']
     operation = await backend.apply_node_settings(user_id, node_key, revision)
-    await render(bot, chat_id, Screen('Applying node settings', ('The backend worker is verifying the node.',)), [[InlineKeyboardButton(text='Back', callback_data=AdminNodeCallback(node_key=node_key).pack())]], state, message_id)
+    await render(bot, chat_id, Screen('Applying node settings', ('The backend worker is verifying the node.',)), [[InlineKeyboardButton(text='🔙 Назад', callback_data=AdminNodeCallback(node_key=node_key).pack())]], state, message_id)
     
     for _ in range(30):
         s = await backend.node_settings_operation(user_id, operation['id'])
@@ -265,7 +265,7 @@ async def show_node_apply_status(chat_id, user_id, message_id, operation_id, nod
     if s['status'] == 'succeeded':
         await show_admin_node(chat_id, user_id, message_id, node_key, bot, backend, state)
         return
-    rows = [[InlineKeyboardButton(text='Back', callback_data=AdminNodeCallback(node_key=node_key).pack())]]
+    rows = [[InlineKeyboardButton(text='🔙 Назад', callback_data=AdminNodeCallback(node_key=node_key).pack())]]
     if s['status'] in {'blocked', 'superseded'}:
         await render(bot, chat_id, Screen('Node needs attention', ('Settings were not confirmed. Check the agent and operation state.',)), rows, state, message_id)
         return
@@ -299,7 +299,7 @@ async def show_node_maintenance(chat_id, user_id, message_id, node_key, bot, bac
             rows.append([InlineKeyboardButton(text='Next cleanup step', callback_data=CleanupStepCallback(node_key=node_key, expected_phase=st['cleanup_phase'] or 'not_started').pack())])
             
     rows += [[InlineKeyboardButton(text='Remove from bot only', callback_data=ConfirmRegistryRemovalCallback(node_key=node_key).pack())],
-             [InlineKeyboardButton(text='Back', callback_data=AdminNodeCallback(node_key=node_key).pack())]]
+             [InlineKeyboardButton(text='🔙 Назад', callback_data=AdminNodeCallback(node_key=node_key).pack())]]
     
     await render(bot, chat_id, Screen('Node maintenance', tuple(lines), 'Full cleanup', ('Bind the host before draining. SSH binding requires root access and a pinned host key.', 'After uninstall, remote verification needs a separate root SSH key on the controller.', 'Registry-only removal leaves runtime artifacts on the VPS.')), rows, state, message_id)
 
@@ -377,7 +377,7 @@ async def updates_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, sta
     user_id = query.from_user.id
     page = await backend.admin_nodes(user_id)
     rows = [[InlineKeyboardButton(text=node['title'], callback_data=NodeUpdatesCallback(node_key=node['key']).pack())] for node in page['items']]
-    rows.append([InlineKeyboardButton(text='Back', callback_data=HomeCallback().pack())])
+    rows.append([InlineKeyboardButton(text='🔙 Назад', callback_data='admin_menu')])
     await render(bot, query.message.chat.id, Screen('Updates', ('Select a node to compare its runtime with this release.', 'Controller updates are installed from the controller host.')), rows, state, query.message.message_id)
 
 @router.callback_query(NodeUpdatesCallback.filter())
@@ -406,7 +406,7 @@ async def node_updates_cb(query: CallbackQuery, callback_data: NodeUpdatesCallba
                      [InlineKeyboardButton(text='Set up SSH agent', callback_data=RolloutSshCallback(node_key=node_key).pack())]]
         else:
             rows.append([InlineKeyboardButton(text='Refresh runtime', callback_data=RefreshRuntimeCallback(node_key=node_key).pack())])
-    rows.append([InlineKeyboardButton(text='Back', callback_data=AdminNodeCallback(node_key=node_key).pack())])
+    rows.append([InlineKeyboardButton(text='🔙 Назад', callback_data=AdminNodeCallback(node_key=node_key).pack())])
     await render(bot, query.message.chat.id, Screen('Node updates', lines), rows, state, query.message.message_id)
 
 @router.callback_query(RefreshRuntimeCallback.filter())
