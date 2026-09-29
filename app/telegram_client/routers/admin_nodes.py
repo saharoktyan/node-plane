@@ -1,5 +1,5 @@
 import re
-from pathlib import Path
+from uuid import uuid4
 from aiogram import Router, Bot, F
 from aiogram.types import CallbackQuery, InlineKeyboardButton, Message
 from aiogram.fsm.context import FSMContext
@@ -9,14 +9,14 @@ from ..screens import Screen
 from .common import render
 from .states import NodeDraftState, NodeEditState, MaintenanceState, AgentDraftState
 from .callbacks import (
-    AdminNodesCallback, NewNodeCallback, SubmitNodeCallback, AdminNodeCallback,
+    AdminNodesCallback, NewNodeCallback, AdminNodeCallback,
     NodeSettingsCallback, EditNodeFieldCallback, NodeProtocolsCallback,
     ToggleNodeProtocolCallback, ToggleNodeTransportCallback, NodeMaintenanceCallback,
     BindLocalCallback, BindSshCallback, ConfirmNodeDrainCallback, DrainNodeCallback,
     CleanupStepCallback, VerifyRetirementCallback, ConfirmRegistryRemovalCallback,
-    RetireRegistryCallback, UpdatesCallback, NodeUpdatesCallback, RefreshRuntimeCallback,
+    RetireRegistryCallback, RefreshRuntimeCallback,
     RolloutLocalCallback, RolloutSshCallback, RolloutStatusCallback, RetryRolloutCallback,
-    ProbeNodeCallback, ApplyNodeCallback, NodeApplyStatusCallback, HomeCallback
+    ProbeNodeCallback, ApplyNodeCallback, NodeApplyStatusCallback
 )
 import asyncio
 
@@ -25,6 +25,7 @@ router = Router()
 @router.callback_query(AdminNodesCallback.filter())
 async def admin_nodes_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
     await query.answer()
+    await state.clear()
     await show_admin_nodes(query.message.chat.id, query.from_user.id, query.message.message_id, bot, backend, state)
 
 async def show_admin_nodes(chat_id, user_id, message_id, bot, backend, state):
@@ -40,7 +41,8 @@ async def show_admin_nodes(chat_id, user_id, message_id, bot, backend, state):
 async def new_node_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
     await query.answer()
     await state.set_state(NodeDraftState.waiting_for_key)
-    await state.update_data(wizard_data={})
+    await state.update_data(wizard_data={}, create_node_command_key=str(uuid4()),
+                            rollout_command_key=str(uuid4()))
     rows = [[InlineKeyboardButton(text='🔙 Отмена', callback_data=AdminNodesCallback().pack())]]
     await render(bot, query.message.chat.id, Screen('Создание сервера (1/7)', ('Введите уникальный идентификатор (key) для сервера (только латиница и цифры):',)), rows, state, query.message.message_id)
 
@@ -134,7 +136,15 @@ async def process_wizard_target(message: Message, bot: Bot, state: FSMContext):
     await message.delete()
     data = await state.get_data()
     w = data.get('wizard_data', {})
-    w['ssh_target'] = message.text.strip()
+    target = message.text.strip()
+    if target.endswith(':22'):
+        target = target[:-3]
+    if not re.fullmatch(r'(?:[A-Za-z_][A-Za-z0-9._-]*@)?[A-Za-z0-9][A-Za-z0-9.-]*', target):
+        await render(bot, message.chat.id, Screen('Некорректный SSH адрес',
+            ('Укажите root@host без номера порта (используется порт 22).',)),
+            [[InlineKeyboardButton(text='Отмена', callback_data=AdminNodesCallback().pack())]], state)
+        return
+    w['ssh_target'] = target
     await state.update_data(wizard_data=w)
     await state.set_state(NodeDraftState.waiting_for_public_host)
     rows = [[InlineKeyboardButton(text='🔙 Отмена', callback_data=AdminNodesCallback().pack())]]
@@ -167,29 +177,6 @@ async def render_wizard_protocols(chat_id: int, bot: Bot, state: FSMContext, mes
     ]
     await render(bot, chat_id, Screen('Создание сервера (7/7)', ('Выберите протоколы, которые будут установлены на этом сервере:',)), rows, state, message_id)
 
-import json
-import os
-
-def save_node_transport(node_key: str, transport: str, ssh_target: str | None):
-    # Quick persistent store for transports since backend NodeCreateInput doesn't take it
-    path = "app/telegram_client/node_transports.json"
-    data = {}
-    if os.path.exists(path):
-        with open(path, "r") as f:
-            try: data = json.load(f)
-            except: pass
-    data[node_key] = {"transport": transport, "ssh_target": ssh_target}
-    with open(path, "w") as f:
-        json.dump(data, f)
-
-def get_node_transport(node_key: str):
-    path = "app/telegram_client/node_transports.json"
-    if os.path.exists(path):
-        with open(path, "r") as f:
-            try: return json.load(f).get(node_key, {})
-            except: pass
-    return {}
-
 @router.callback_query(F.data.startswith("wizard_proto:"))
 async def wizard_proto_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
     await query.answer()
@@ -199,24 +186,39 @@ async def wizard_proto_cb(query: CallbackQuery, bot: Bot, backend: BackendClient
     protocols = w.get('protocols', [])
     
     if action == "done":
+        if not protocols:
+            await render(bot, query.message.chat.id, Screen('Выберите протокол',
+                ('Нужен хотя бы один протокол.',)),
+                [[InlineKeyboardButton(text='Назад', callback_data='wizard_proto:back')]],
+                state, query.message.message_id)
+            return
         try:
-            await backend.request('POST', '/api/v1/nodes', telegram_user_id=query.from_user.id, command=True, body={
+            await backend.create_node(query.from_user.id, {
                 "key": w["key"],
                 "title": w["title"],
                 "region": w["region"],
                 "flag": w["flag"],
                 "protocols": protocols,
+                "xray_transports": ["tcp", "xhttp"] if "xray" in protocols else [],
                 "settings": {
                     "public_host": w["public_host"]
                 }
-            })
-            save_node_transport(w["key"], w.get("transport", "local"), w.get("ssh_target"))
-            await state.clear()
-            rows = [[InlineKeyboardButton(text='🔙 К списку серверов', callback_data=AdminNodesCallback().pack())]]
-            await render(bot, query.message.chat.id, Screen('Успех', (f'Сервер {w["title"]} успешно создан!',)), rows, state, query.message.message_id)
-        except Exception as exc:
+            }, command_key=data.get('create_node_command_key') or str(uuid4()))
+            await state.update_data(rollout_node_key=w['key'],
+                rollout_ssh_target=w.get('ssh_target'))
+            await queue_rollout(query.message.chat.id, query.from_user.id,
+                query.message.message_id, w['key'], w.get('transport', 'local'),
+                bot, backend, state, w.get('ssh_target'))
+        except BackendError as exc:
             rows = [[InlineKeyboardButton(text='🔙 Отмена', callback_data=AdminNodesCallback().pack())]]
-            await render(bot, query.message.chat.id, Screen('Ошибка', (f'Не удалось создать сервер: {exc}',)), rows, state, query.message.message_id)
+            await render(bot, query.message.chat.id, Screen('Ошибка',
+                (f'Не удалось создать сервер: {exc.code}',)), rows, state,
+                query.message.message_id)
+        return
+
+    if action == 'back':
+        await render_wizard_protocols(query.message.chat.id, bot, state,
+                                      query.message.message_id)
         return
         
     if action in protocols:
@@ -228,11 +230,14 @@ async def wizard_proto_cb(query: CallbackQuery, bot: Bot, backend: BackendClient
     await render_wizard_protocols(query.message.chat.id, bot, state, query.message.message_id)
 
 
-@router.callback_query(AdminNodeCallback.filter())
 async def show_admin_node(chat_id, user_id, message_id, node_key, bot, backend, state):
     try:
         node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=user_id)
-    except Exception:
+    except BackendError as exc:
+        await render(bot, chat_id, Screen('Сервер недоступен',
+            (f'Причина: {exc.code}',)),
+            [[InlineKeyboardButton(text='🔙 К списку серверов',
+                callback_data=AdminNodesCallback().pack())]], state, message_id)
         return
         
     rows = [
@@ -244,7 +249,7 @@ async def show_admin_node(chat_id, user_id, message_id, node_key, bot, backend, 
             InlineKeyboardButton(text="🚀 Применить (Apply)", callback_data=ApplyNodeCallback(node_key=node_key).pack()),
             InlineKeyboardButton(text="⚙️ Настройки", callback_data=NodeSettingsCallback(node_key=node_key).pack())
         ],
-        [InlineKeyboardButton(text="🗑 Удалить сервер", callback_data=ConfirmRegistryRemovalCallback(node_key=node_key).pack())],
+        [InlineKeyboardButton(text="🗑 Удалить сервер", callback_data=NodeMaintenanceCallback(node_key=node_key).pack())],
         [InlineKeyboardButton(text="🔙 К списку серверов", callback_data=AdminNodesCallback().pack())]
     ]
     lines = [
@@ -256,13 +261,16 @@ async def show_admin_node(chat_id, user_id, message_id, node_key, bot, backend, 
     ]
     await render(bot, chat_id, Screen(f"Сервер: {node.get('title')}", lines), rows, state, message_id)
 
+@router.callback_query(AdminNodeCallback.filter())
 async def admin_node_cb(query: CallbackQuery, callback_data: AdminNodeCallback, bot: Bot, backend: BackendClient, state: FSMContext):
     await query.answer()
+    await state.clear()
     await show_admin_node(query.message.chat.id, query.from_user.id, query.message.message_id, callback_data.node_key, bot, backend, state)
 
 @router.callback_query(NodeSettingsCallback.filter())
 async def node_settings_cb(query: CallbackQuery, callback_data: NodeSettingsCallback, bot: Bot, backend: BackendClient, state: FSMContext):
     await query.answer()
+    await state.clear()
     await show_node_settings(query.message.chat.id, query.from_user.id, query.message.message_id, callback_data.node_key, bot, backend, state)
 
 async def show_node_settings(chat_id, user_id, message_id, node_key, bot, backend, state):
@@ -295,7 +303,9 @@ async def edit_node_field_cb(query: CallbackQuery, callback_data: EditNodeFieldC
         
     node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=user_id)
     await state.set_state(NodeEditState.waiting_for_value)
-    await state.update_data(edit_node_key=node_key, edit_field=field, edit_revision=node['desired_revision'], edit_settings=node['settings'])
+    await state.update_data(edit_node_key=node_key, edit_field=field,
+        edit_revision=node['desired_revision'], edit_settings=node['settings'],
+        edit_command_key=str(uuid4()))
     
     current = node.get(field) if field in {'title', 'region', 'flag'} else node['settings'].get(field)
     await render(bot, query.message.chat.id, Screen('Edit ' + field.replace('_', ' '), (f"Current: {current or 'not set'}", 'Send the new value as a message.', 'It will take effect only after Apply settings.')),
@@ -318,7 +328,8 @@ async def process_node_edit(message: Message, bot: Bot, backend: BackendClient, 
     
     body = ({field: parsed} if field in {'title', 'region', 'flag'} else {'settings': {**settings, field: parsed}})
     try:
-        await backend.edit_node(user_id, node_key, revision, body, command_key=None)
+        await backend.edit_node(user_id, node_key, revision, body,
+                                command_key=data['edit_command_key'])
         await state.clear()
         await show_node_settings(message.chat.id, user_id, message_id, node_key, bot, backend, state)
     except BackendError as exc:
@@ -378,7 +389,11 @@ async def probe_node_cb(query: CallbackQuery, callback_data: ProbeNodeCallback, 
         observation = await backend.node_runtime(user_id, node_key)
         await render(bot, query.message.chat.id, Screen(f'Node {node_key}', (f"Agent: {observation['health_state']}", f"Xray config: {'present' if observation['xray_config_present'] else 'missing'}", f"AWG config: {'present' if observation['awg_config_present'] else 'missing'}")), [[InlineKeyboardButton(text='🔙 Назад', callback_data=AdminNodeCallback(node_key=node_key).pack())]], state, query.message.message_id)
     except BackendError as exc:
-        pass # Handle properly
+        await render(bot, query.message.chat.id, Screen('Нода недоступна',
+            (f'Причина: {exc.code}',)),
+            [[InlineKeyboardButton(text='🔙 Назад',
+                callback_data=AdminNodeCallback(node_key=node_key).pack())]],
+            state, query.message.message_id)
 
 @router.callback_query(ApplyNodeCallback.filter())
 async def apply_node_cb(query: CallbackQuery, callback_data: ApplyNodeCallback, bot: Bot, backend: BackendClient, state: FSMContext):
@@ -524,7 +539,8 @@ async def rollout_local_cb(query: CallbackQuery, callback_data: RolloutLocalCall
     await query.answer()
     user_id = query.from_user.id
     node_key = callback_data.node_key
-    await state.update_data(rollout_node_key=node_key, rollout_ssh_target=None)
+    await state.update_data(rollout_node_key=node_key, rollout_ssh_target=None,
+                            rollout_command_key=str(uuid4()))
     await queue_rollout(query.message.chat.id, user_id, query.message.message_id, node_key, 'local', bot, backend, state)
 
 @router.callback_query(RolloutSshCallback.filter())
@@ -532,7 +548,8 @@ async def rollout_ssh_cb(query: CallbackQuery, callback_data: RolloutSshCallback
     await query.answer()
     node_key = callback_data.node_key
     await state.set_state(AgentDraftState.waiting_for_ssh_target)
-    await state.update_data(rollout_node_key=node_key)
+    await state.update_data(rollout_node_key=node_key,
+                            rollout_command_key=str(uuid4()))
     await render(bot, query.message.chat.id, Screen('SSH agent setup', ('Send an SSH target such as root@lv1.example.com.', 'The controller uses its configured SSH key; port 22 is used.')), [[InlineKeyboardButton(text='Cancel', callback_data=AdminNodeCallback(node_key=node_key).pack())]], state, query.message.message_id)
 
 @router.message(AgentDraftState.waiting_for_ssh_target, F.text)
@@ -549,11 +566,14 @@ async def process_agent_ssh(message: Message, bot: Bot, backend: BackendClient, 
         
     await state.update_data(rollout_ssh_target=target)
     await queue_rollout(message.chat.id, user_id, message_id, node_key, 'ssh', bot, backend, state, target)
-    await state.clear()
 
 async def queue_rollout(chat_id, user_id, message_id, node_key, transport, bot, backend, state, ssh_target=None):
     try:
-        task = await backend.rollout_agent(user_id, node_key, transport, ssh_target=ssh_target, command_key=None)
+        data = await state.get_data()
+        task = await backend.rollout_agent(user_id, node_key, transport,
+            ssh_target=ssh_target,
+            command_key=data.get('rollout_command_key') or str(uuid4()))
+        await state.clear()
         await show_rollout_status(chat_id, user_id, message_id, task['id'], bot, backend, state)
     except BackendError as exc:
         await render(bot, chat_id, Screen('Could not queue agent setup', (f'Reason: {exc.code}', 'Retry the same request or cancel.')), [[InlineKeyboardButton(text='Retry', callback_data=RetryRolloutCallback().pack())], [InlineKeyboardButton(text='Cancel', callback_data=AdminNodeCallback(node_key=node_key).pack())]], state, message_id)
@@ -592,87 +612,13 @@ async def show_rollout_status(chat_id, user_id, message_id, task_id, bot, backen
 async def bootstrap_menu_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
     await query.answer()
     node_key = query.data.split(":")[1]
-    
-    # We will just show all 3 buttons sequentially as requested
-    # Real implementation would check backend states
     rows = [
-        [InlineKeyboardButton(text="🔧 Set up agent", callback_data=f"bs_agent:{node_key}")],
-        [InlineKeyboardButton(text="🐳 Install docker", callback_data=f"bs_docker:{node_key}")],
-        [InlineKeyboardButton(text="🚀 Bootstrap", callback_data=ApplyNodeCallback(node_key=node_key).pack())],
+        [InlineKeyboardButton(text="🔧 Агент на этом сервере", callback_data=RolloutLocalCallback(node_key=node_key).pack())],
+        [InlineKeyboardButton(text="🔧 Агент по SSH", callback_data=RolloutSshCallback(node_key=node_key).pack())],
+        [InlineKeyboardButton(text="🚀 Установить протоколы", callback_data=ApplyNodeCallback(node_key=node_key).pack())],
         [InlineKeyboardButton(text="🔙 Назад", callback_data=AdminNodeCallback(node_key=node_key).pack())]
     ]
-    await render(bot, query.message.chat.id, Screen("Установка (Bootstrap)", ("Управление установкой агента и зависимостей на сервере:",)), rows, state, query.message.message_id)
-
-
-@router.callback_query(F.data.startswith("bs_agent:"))
-async def bs_agent_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
-    node_key = query.data.split(":")[1]
-    trans = get_node_transport(node_key)
-    
-    try:
-        res = await backend.request('POST', f'/api/v1/nodes/{node_key}/agent-rollouts', telegram_user_id=query.from_user.id, command=True, body={
-            "transport": trans.get("transport", "local"), 
-            "ssh_target": trans.get("ssh_target")
-        })
-        task_id = res['id']
-        await query.answer("Agent setup initiated.", show_alert=True)
-        
-        # Poll for completion
-        for _ in range(60):
-            status_res = await backend.request('GET', f'/api/v1/agent-rollouts/{task_id}', telegram_user_id=query.from_user.id)
-            if status_res['status'] == 'succeeded':
-                rows = [[InlineKeyboardButton(text="🔙 К серверу", callback_data=AdminNodeCallback(node_key=node_key).pack())]]
-                await render(bot, query.message.chat.id, Screen("Успех", ("Агент успешно установлен!",)), rows, state, query.message.message_id)
-                return
-            if status_res['status'] == 'blocked':
-                rows = [[InlineKeyboardButton(text="🔙 Назад", callback_data=AdminNodeCallback(node_key=node_key).pack())]]
-                await render(bot, query.message.chat.id, Screen("Ошибка", ("Установка агента завершилась ошибкой (blocked). Проверьте логи.",)), rows, state, query.message.message_id)
-                return
-            await asyncio.sleep(1)
-            
-        rows = [[InlineKeyboardButton(text="🔙 Назад", callback_data=AdminNodeCallback(node_key=node_key).pack())]]
-        await render(bot, query.message.chat.id, Screen("Таймаут", ("Установка агента выполняется слишком долго.",)), rows, state, query.message.message_id)
-            
-    except Exception as e:
-        await query.answer(f"Error: {e}", show_alert=True)
-
-
-@router.callback_query(F.data.startswith("bs_docker:"))
-async def bs_docker_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
-    await query.answer()
-    node_key = query.data.split(":")[1]
-    
-    # We call the synchronous grpc client in a thread
-    import asyncio
-    from app.services.node_driver import get_node_driver
-    
-    try:
-        def start_docker_install():
-            driver = get_node_driver()
-            return driver.install_docker(node_key)
-            
-        op = await asyncio.to_thread(start_docker_install)
-        
-        # Poll operation
-        def get_op_status(op_id):
-            return get_node_driver().get_operation(op_id)
-            
-        for _ in range(30):
-            current_op = await asyncio.to_thread(get_op_status, op.id)
-            if current_op.status == "success":
-                rows = [[InlineKeyboardButton(text="🔙 К серверу", callback_data=AdminNodeCallback(node_key=node_key).pack())]]
-                await render(bot, query.message.chat.id, Screen("Успех", ("Docker успешно установлен!",)), rows, state, query.message.message_id)
-                return
-            elif current_op.status in ("failed", "superseded"):
-                rows = [[InlineKeyboardButton(text="🔙 Назад", callback_data=AdminNodeCallback(node_key=node_key).pack())]]
-                await render(bot, query.message.chat.id, Screen("Ошибка", (f"Установка Docker завершилась с ошибкой: {current_op.error}",)), rows, state, query.message.message_id)
-                return
-            await asyncio.sleep(1)
-            
-        rows = [[InlineKeyboardButton(text="🔙 Назад", callback_data=AdminNodeCallback(node_key=node_key).pack())]]
-        await render(bot, query.message.chat.id, Screen("Таймаут", ("Установка Docker выполняется слишком долго.",)), rows, state, query.message.message_id)
-        
-    except Exception as e:
-        rows = [[InlineKeyboardButton(text="🔙 Назад", callback_data=AdminNodeCallback(node_key=node_key).pack())]]
-        await render(bot, query.message.chat.id, Screen("Ошибка", (f"Ошибка при вызове драйвера: {e}",)), rows, state, query.message.message_id)
-
+    await render(bot, query.message.chat.id, Screen("Установка",
+        ("Установите агент на нужный хост, затем примените настройки ноды.",
+         "Docker и VPN-протоколы устанавливаются при применении настроек.")),
+        rows, state, query.message.message_id)

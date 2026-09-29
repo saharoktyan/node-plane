@@ -23,7 +23,7 @@ from .config_issuance import ConfigIssuanceService
 from .agent_rollout import AgentRolloutService
 
 
-def bootstrap_admin(repository: SQLIdentityRepository, telegram_user_id: int, db):
+def bootstrap_admin(repository: SQLIdentityRepository, telegram_user_id: int, db=None):
     validate_telegram_id(telegram_user_id)
     account = repository.resolve_telegram(telegram_user_id)
     with repository.db.transaction() as conn:
@@ -31,12 +31,13 @@ def bootstrap_admin(repository: SQLIdentityRepository, telegram_user_id: int, db
         conn.execute("""UPDATE backend_accounts SET role = 'admin', status = 'approved',
             revision = revision + 1 WHERE id = ? AND (role != 'admin' OR status != 'approved')""", (account.id,))
     
-    from .profiles import ProfileRepository
-    pref = ProfileRepository(db)
-    # Check if a profile exists
-    profiles = pref.owned(account.id, after='', limit=1)
-    if not profiles:
-        pref.create_profile(runtime_name=f"tg_{telegram_user_id}", display_name=f"Admin {telegram_user_id}", owner_account_id=account.id)
+    # The CLI supplies the fully initialized application database. Callers
+    # bootstrapping only the identity schema may omit it.
+    if db is not None:
+        pref = ProfileRepository(db)
+        if not pref.owned(account.id, after='', limit=1):
+            pref.create_profile(runtime_name=f"tg_{telegram_user_id}",
+                display_name=f"Admin {telegram_user_id}", owner_account_id=account.id)
         
     return repository.get_account(account.id)
 
