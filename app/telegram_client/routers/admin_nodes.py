@@ -103,31 +103,70 @@ async def process_wizard_flag(message: Message, bot: Bot, state: FSMContext):
     rows = [[InlineKeyboardButton(text='🔙 Отмена', callback_data=AdminNodesCallback().pack())]]
     await render(bot, message.chat.id, Screen('Добавление сервера (5/5)', ('Введите публичный хост или IP сервера:',)), rows, state)
 
+
 @router.message(NodeDraftState.waiting_for_public_host, F.text)
 async def process_wizard_host(message: Message, bot: Bot, backend: BackendClient, state: FSMContext):
     await message.delete()
     data = await state.get_data()
     w = data.get('wizard_data', {})
     w['public_host'] = message.text.strip()
+    w['protocols'] = []
+    await state.update_data(wizard_data=w)
+    await state.set_state(NodeDraftState.waiting_for_protocols)
+    await render_wizard_protocols(message.chat.id, bot, state)
+
+async def render_wizard_protocols(chat_id: int, bot: Bot, state: FSMContext, message_id: int | None = None):
+    data = await state.get_data()
+    w = data.get('wizard_data', {})
+    protocols = w.get('protocols', [])
     
-    # Finished! Create the node on the backend
-    try:
-        await backend.request('POST', '/api/v1/nodes', telegram_user_id=message.from_user.id, json={
-            "key": w["key"],
-            "title": w["title"],
-            "region": w["region"],
-            "flag": w["flag"],
-            "protocols": [],
-            "settings": {
-                "public_host": w["public_host"]
-            }
-        })
-        await state.clear()
-        rows = [[InlineKeyboardButton(text='К списку серверов', callback_data=AdminNodesCallback().pack())]]
-        await render(bot, message.chat.id, Screen('Успех', (f'Сервер {w["title"]} успешно создан!',)), rows, state)
-    except Exception as exc:
-        rows = [[InlineKeyboardButton(text='🔙 Отмена', callback_data=AdminNodesCallback().pack())]]
-        await render(bot, message.chat.id, Screen('Ошибка', (f'Не удалось создать сервер: {exc}',)), rows, state)
+    def mark(code: str, label: str) -> str:
+        return f">{label}<" if code in protocols else label
+
+    rows = [
+        [InlineKeyboardButton(text=mark("xray", "Xray"), callback_data="wizard_proto:xray")],
+        [InlineKeyboardButton(text=mark("awg", "Awg"), callback_data="wizard_proto:awg")],
+        [InlineKeyboardButton(text='🚀 Сохранить (Apply)', callback_data="wizard_proto:done")],
+        [InlineKeyboardButton(text='🔙 Отмена', callback_data=AdminNodesCallback().pack())]
+    ]
+    await render(bot, chat_id, Screen('Добавление сервера (6/6)', ('Выберите протоколы, которые будут установлены на этом сервере:',)), rows, state, message_id)
+
+@router.callback_query(F.data.startswith("wizard_proto:"))
+async def wizard_proto_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
+    await query.answer()
+    action = query.data.split(":")[1]
+    data = await state.get_data()
+    w = data.get('wizard_data', {})
+    protocols = w.get('protocols', [])
+    
+    if action == "done":
+        # Finished! Create the node on the backend
+        try:
+            await backend.request('POST', '/api/v1/nodes', telegram_user_id=query.from_user.id, json={
+                "key": w["key"],
+                "title": w["title"],
+                "region": w["region"],
+                "flag": w["flag"],
+                "protocols": protocols,
+                "settings": {
+                    "public_host": w["public_host"]
+                }
+            })
+            await state.clear()
+            rows = [[InlineKeyboardButton(text='🔙 К списку серверов', callback_data=AdminNodesCallback().pack())]]
+            await render(bot, query.message.chat.id, Screen('Успех', (f'Сервер {w["title"]} успешно создан!',)), rows, state, query.message.message_id)
+        except Exception as exc:
+            rows = [[InlineKeyboardButton(text='🔙 Отмена', callback_data=AdminNodesCallback().pack())]]
+            await render(bot, query.message.chat.id, Screen('Ошибка', (f'Не удалось создать сервер: {exc}',)), rows, state, query.message.message_id)
+        return
+        
+    if action in protocols:
+        protocols.remove(action)
+    else:
+        protocols.append(action)
+    w['protocols'] = protocols
+    await state.update_data(wizard_data=w)
+    await render_wizard_protocols(query.message.chat.id, bot, state, query.message.message_id)
 
 @router.callback_query(SubmitNodeCallback.filter())
 async def submit_node_cb(query: CallbackQuery, callback_data: SubmitNodeCallback, bot: Bot, backend: BackendClient, state: FSMContext):
@@ -169,17 +208,20 @@ async def admin_node_cb(query: CallbackQuery, callback_data: AdminNodeCallback, 
         await query.answer("Node not found", show_alert=True)
         return
         
+
     rows = [
         [
             InlineKeyboardButton(text="📡 Опрос (Probe)", callback_data=ProbeNodeCallback(node_key=node_key).pack()),
-            InlineKeyboardButton(text="🚀 Применить (Apply)", callback_data=ApplyNodeCallback(node_key=node_key).pack())
+            InlineKeyboardButton(text="Установка (Bootstrap)", callback_data=f"bootstrap_menu:{node_key}")
         ],
-        [InlineKeyboardButton(text="⚙️ Дополнительно", callback_data=NodeSettingsCallback(node_key=node_key).pack())],
+        [
+            InlineKeyboardButton(text="🚀 Применить (Apply)", callback_data=ApplyNodeCallback(node_key=node_key).pack()),
+            InlineKeyboardButton(text="⚙️ Настройки", callback_data=NodeSettingsCallback(node_key=node_key).pack())
+        ],
         [InlineKeyboardButton(text="🗑 Удалить сервер", callback_data=ConfirmRegistryRemovalCallback(node_key=node_key).pack())],
         [InlineKeyboardButton(text="🔙 К списку серверов", callback_data=AdminNodesCallback().pack())]
     ]
-    
-    # We construct a human friendly card
+# We construct a human friendly card
     lines = [
         f"Region: {node.get('region', 'N/A')} {node.get('flag', '')}",
         f"Protocols: {', '.join(node.get('protocols', [])) or 'None'}",
@@ -561,3 +603,16 @@ async def show_rollout_status(chat_id, user_id, message_id, task_id, bot, backen
     rows.append([InlineKeyboardButton(text='Node card', callback_data=AdminNodeCallback(node_key=task['node_key']).pack())])
     await render(bot, chat_id, Screen('Agent setup', lines), rows, state, message_id)
 
+
+
+@router.callback_query(F.data.startswith("bootstrap_menu:"))
+async def bootstrap_menu_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
+    await query.answer()
+    node_key = query.data.split(":")[1]
+    
+    rows = [
+        [InlineKeyboardButton(text="🌐 Установить по SSH", callback_data=BindSshCallback(node_key=node_key).pack())],
+        [InlineKeyboardButton(text="💻 Установить локально", callback_data=BindLocalCallback(node_key=node_key).pack())],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data=AdminNodeCallback(node_key=node_key).pack())]
+    ]
+    await render(bot, query.message.chat.id, Screen("Установка (Bootstrap)", ("Выберите способ установки и привязки агента для этого сервера:",)), rows, state, query.message.message_id)
