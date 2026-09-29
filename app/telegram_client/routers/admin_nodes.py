@@ -229,16 +229,12 @@ async def wizard_proto_cb(query: CallbackQuery, bot: Bot, backend: BackendClient
 
 
 @router.callback_query(AdminNodeCallback.filter())
-async def admin_node_cb(query: CallbackQuery, callback_data: AdminNodeCallback, bot: Bot, backend: BackendClient, state: FSMContext):
-    await query.answer()
-    node_key = callback_data.node_key
+async def show_admin_node(chat_id, user_id, message_id, node_key, bot, backend, state):
     try:
-        node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=query.from_user.id)
+        node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=user_id)
     except Exception:
-        await query.answer("Node not found", show_alert=True)
         return
         
-
     rows = [
         [
             InlineKeyboardButton(text="📡 Опрос (Probe)", callback_data=ProbeNodeCallback(node_key=node_key).pack()),
@@ -251,7 +247,6 @@ async def admin_node_cb(query: CallbackQuery, callback_data: AdminNodeCallback, 
         [InlineKeyboardButton(text="🗑 Удалить сервер", callback_data=ConfirmRegistryRemovalCallback(node_key=node_key).pack())],
         [InlineKeyboardButton(text="🔙 К списку серверов", callback_data=AdminNodesCallback().pack())]
     ]
-# We construct a human friendly card
     lines = [
         f"Region: {node.get('region', 'N/A')} {node.get('flag', '')}",
         f"Protocols: {', '.join(node.get('protocols', [])) or 'None'}",
@@ -259,7 +254,12 @@ async def admin_node_cb(query: CallbackQuery, callback_data: AdminNodeCallback, 
         "",
         "В этом меню можно управлять состоянием узла."
     ]
-    await render(bot, query.message.chat.id, Screen(f"Сервер: {node.get('title')}", lines), rows, state, query.message.message_id)
+    await render(bot, chat_id, Screen(f"Сервер: {node.get('title')}", lines), rows, state, message_id)
+
+async def admin_node_cb(query: CallbackQuery, callback_data: AdminNodeCallback, bot: Bot, backend: BackendClient, state: FSMContext):
+    await query.answer()
+    await show_admin_node(query.message.chat.id, query.from_user.id, query.message.message_id, callback_data.node_key, bot, backend, state)
+
 @router.callback_query(NodeSettingsCallback.filter())
 async def node_settings_cb(query: CallbackQuery, callback_data: NodeSettingsCallback, bot: Bot, backend: BackendClient, state: FSMContext):
     await query.answer()
