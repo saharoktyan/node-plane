@@ -6,8 +6,8 @@ class ProfileDraftState(StatesGroup):
 class NodeDraftState(StatesGroup):
     waiting_for_key = State()
     waiting_for_title = State()
-    waiting_for_flag = State()
     waiting_for_region = State()
+    waiting_for_flag = State()
     waiting_for_transport = State()
     waiting_for_target = State()
     waiting_for_public_host = State()
