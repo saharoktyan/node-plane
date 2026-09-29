@@ -787,6 +787,41 @@ def create_app(db, *, node_driver=None) -> FastAPI:
     def get_config_artifact(issuance_id: UUID, current=Depends(actor)):
         return config_issuances.artifact(current, str(issuance_id))
 
+
+    class SshKeyOutput(BaseModel):
+        public_key: str
+
+    @app.get('/api/v1/system/ssh-key', response_model=SshKeyOutput)
+    def get_system_ssh_key(current=Depends(actor)):
+        import subprocess
+        import os
+        import pathlib
+        if current.role != 'admin':
+            raise HTTPException(403)
+        private_path = pathlib.Path(os.environ.get('SSH_KEY', '/opt/node-plane/ssh/id_ed25519'))
+        public_path = pathlib.Path(f"{private_path}.pub")
+        private_path.parent.mkdir(parents=True, exist_ok=True)
+        os.chmod(private_path.parent, 0o700)
+        
+        if private_path.exists() and not public_path.exists():
+            proc = subprocess.run(["ssh-keygen", "-y", "-f", str(private_path)], capture_output=True, text=True)
+            if proc.returncode == 0:
+                public_path.write_text((proc.stdout or "").strip() + "
+", encoding="utf-8")
+                os.chmod(public_path, 0o644)
+        
+        if not private_path.exists():
+            proc = subprocess.run(["ssh-keygen", "-t", "ed25519", "-N", "", "-C", "node-plane", "-f", str(private_path)], capture_output=True, text=True)
+            if proc.returncode == 0:
+                os.chmod(private_path, 0o600)
+                if public_path.exists():
+                    os.chmod(public_path, 0o644)
+
+        if not public_path.exists():
+            raise HTTPException(500, detail="Failed to ensure SSH keypair")
+            
+        return SshKeyOutput(public_key=public_path.read_text(encoding='utf-8').strip())
+
     return app
 
 
