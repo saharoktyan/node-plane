@@ -1,5 +1,5 @@
 import os
-from aiogram import Router, Bot, F
+from aiogram import Router, Bot
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.fsm.context import FSMContext
 from aiogram.exceptions import TelegramAPIError
@@ -9,7 +9,7 @@ from ..screens import Screen
 from .common import render, send_notice
 from .callbacks import (
     RequestsCallback, ReviewCallback, DecideCallback,
-    NotificationReviewCallback, HomeCallback
+    NotificationReviewCallback
 )
 
 router = Router()
@@ -17,6 +17,11 @@ router = Router()
 @router.callback_query(RequestsCallback.filter())
 async def requests_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
     await query.answer()
+    await show_requests(query, bot, backend, state)
+
+
+async def show_requests(query: CallbackQuery, bot: Bot, backend: BackendClient,
+                        state: FSMContext):
     user_id = query.from_user.id
     page = await backend.request('GET', '/api/v1/access-requests?limit=25', telegram_user_id=user_id)
     rows = []
@@ -33,8 +38,12 @@ async def requests_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, st
 @router.callback_query(ReviewCallback.filter())
 async def review_cb(query: CallbackQuery, callback_data: ReviewCallback, bot: Bot, backend: BackendClient, state: FSMContext):
     await query.answer()
-    user_id = query.from_user.id
     request_id = callback_data.request_id
+    page = await backend.request('GET', '/api/v1/access-requests?limit=25',
+                                 telegram_user_id=query.from_user.id)
+    if not any(item['id'] == request_id for item in page['items']):
+        await show_requests(query, bot, backend, state)
+        return
     rows = [
         [InlineKeyboardButton(text='✅ Одобрить', callback_data=DecideCallback(request_id=request_id, decision='approve').pack()),
          InlineKeyboardButton(text='❌ Отклонить', callback_data=DecideCallback(request_id=request_id, decision='reject').pack())],
@@ -49,8 +58,14 @@ async def decide_cb(query: CallbackQuery, callback_data: DecideCallback, bot: Bo
     request_id = callback_data.request_id
     decision = callback_data.decision
     
-    result = await backend.request('POST', f'/api/v1/access-requests/{request_id}/decision',
-                                   telegram_user_id=user_id, command=True, body={'decision': decision})
+    try:
+        result = await backend.request('POST', f'/api/v1/access-requests/{request_id}/decision',
+                                       telegram_user_id=user_id, command=True, body={'decision': decision})
+    except BackendError as exc:
+        if exc.code != 'request_already_decided':
+            raise
+        await show_requests(query, bot, backend, state)
+        return
     
     # call requests
     page = await backend.request('GET', '/api/v1/access-requests?limit=25', telegram_user_id=user_id)
@@ -76,15 +91,8 @@ async def decide_cb(query: CallbackQuery, callback_data: DecideCallback, bot: Bo
 
 @router.callback_query(NotificationReviewCallback.filter())
 async def notification_review_cb(query: CallbackQuery, callback_data: NotificationReviewCallback, bot: Bot, backend: BackendClient, state: FSMContext):
-    await query.answer()
-    user_id = query.from_user.id
-    request_id = callback_data.request_id
-    rows = [
-        [InlineKeyboardButton(text='✅ Одобрить', callback_data=DecideCallback(request_id=request_id, decision='approve').pack()),
-         InlineKeyboardButton(text='❌ Отклонить', callback_data=DecideCallback(request_id=request_id, decision='reject').pack())],
-        [InlineKeyboardButton(text='🔙 Назад', callback_data=RequestsCallback().pack())]
-    ]
-    await render(bot, query.message.chat.id, Screen('Access request', ('Approve or reject this account.',)), rows, state, query.message.message_id)
+    await review_cb(query, ReviewCallback(request_id=callback_data.request_id),
+                    bot, backend, state)
 
 async def notify_admins(bot: Bot, backend: BackendClient, request_id: str):
     for raw_id in os.environ.get('ADMIN_IDS', '').split(','):
@@ -100,4 +108,3 @@ async def notify_admins(bot: Bot, backend: BackendClient, request_id: str):
             await send_notice(bot, admin_id, notice, markup)
         except (ValueError, BackendError, TelegramAPIError):
             continue
-

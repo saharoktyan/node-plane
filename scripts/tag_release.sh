@@ -153,6 +153,11 @@ if [[ $PUBLISH_RELEASE -eq 1 ]]; then
   fi
 fi
 
+# Keep this check even in --skip-tests mode: a broken Telegram module must
+# never be tagged or published merely because runtime dependencies are absent.
+set_step "compile Telegram client"
+python3 -m compileall -q app/telegram_client
+
 run_preflight_checks() {
   set_step "python tests"
   python3 -m unittest discover -s tests
