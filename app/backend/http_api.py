@@ -806,8 +806,7 @@ def create_app(db, *, node_driver=None) -> FastAPI:
         if private_path.exists() and not public_path.exists():
             proc = subprocess.run(["ssh-keygen", "-y", "-f", str(private_path)], capture_output=True, text=True)
             if proc.returncode == 0:
-                public_path.write_text((proc.stdout or "").strip() + "
-", encoding="utf-8")
+                public_path.write_text((proc.stdout or "").strip() + "\\n", encoding="utf-8")
                 os.chmod(public_path, 0o644)
         
         if not private_path.exists():
