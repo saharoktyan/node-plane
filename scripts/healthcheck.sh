@@ -136,7 +136,8 @@ check_file_exists() {
 }
 
 systemd_unit_installed() {
-  has_cmd systemctl && [[ "$(systemctl show node-plane.service --property=LoadState --value 2>/dev/null || true)" == "loaded" ]]
+  has_cmd systemctl && { [[ "$(systemctl show node-plane.service --property=LoadState --value 2>/dev/null || true)" == "loaded" ]] \
+    || [[ "$(systemctl show node-plane-telegram.service --property=LoadState --value 2>/dev/null || true)" == "loaded" ]]; }
 }
 
 detect_mode() {
@@ -340,15 +341,19 @@ check_simple_mode() {
   fi
 
   if has_cmd systemctl; then
+    local bot_service="node-plane.service"
+    if systemctl is-active --quiet node-plane-telegram.service; then
+      bot_service="node-plane-telegram.service"
+    fi
     if systemd_unit_installed; then
-      ok "systemd unit node-plane.service is installed"
+      ok "systemd bot unit is installed"
       systemd_ok=1
-      if systemctl is-active --quiet node-plane.service; then
-        ok "node-plane.service is active"
+      if systemctl is-active --quiet "$bot_service"; then
+        ok "${bot_service} is active"
         service_active_ok=1
       else
-        warn "node-plane.service is not active"
-        add_remediation "Start the service: sudo systemctl enable --now node-plane"
+        warn "${bot_service} is not active"
+        add_remediation "Start the selected bot service with systemctl after checking its configuration"
       fi
     else
       warn "systemd unit node-plane.service is not installed"

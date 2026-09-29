@@ -49,6 +49,19 @@ class BackendProfileTests(unittest.TestCase):
         _, token = self.credentials.issue(PrincipalKind.ACCOUNT, frozenset({'account.self.read'}), account_id=self.admin.id)
         self.assertEqual(self.client.get(f'/api/v1/profiles/{self.foreign}', headers={'Authorization': 'Bearer ' + token}).status_code, 403)
 
+    def test_admin_profile_list_and_grants_are_authorized(self):
+        self.prepare()
+        self.node('n1')
+        self.grant(self.profile, 'n1', 'awg')
+        self.assertEqual(self.get('/api/v1/profiles').status_code, 403)
+        self.assertEqual(self.get(f'/api/v1/profiles/{self.foreign}/grants').status_code, 404)
+        self.assertEqual(self.get(f'/api/v1/profiles/{self.profile}/grants').json()['items'],
+                         [{'node_key': 'n1', 'protocol': 'awg'}])
+        self.headers['X-Node-Plane-Telegram-User-ID'] = '101'
+        page = self.get('/api/v1/profiles').json()
+        self.assertEqual({item['id'] for item in page['items']},
+                         {self.profile, self.foreign, self.unowned})
+
     def test_pagination_filters_before_limit(self):
         self.prepare()
         second = self.repo.create_profile(runtime_name='alice2', display_name='Alice 2', owner_account_id=self.member.id)
@@ -92,6 +105,21 @@ class BackendProfileTests(unittest.TestCase):
         self.db.connection.execute("UPDATE backend_accounts SET status = 'pending' WHERE id = ?", (self.member.id,))
         self.assertEqual(self.get('/api/v1/me/profiles').status_code, 403)
         self.assertEqual(self.get('/api/v1/me/nodes').status_code, 403)
+
+    def test_profile_nodes_only_expose_its_grants_and_awg_formats(self):
+        self.prepare()
+        other = self.repo.create_profile(runtime_name='alice2', display_name='Alice 2',
+                                         owner_account_id=self.member.id)
+        self.node('awg-node', protocols=('awg',))
+        self.node('other-node', protocols=('awg',))
+        self.grant(self.profile, 'awg-node', 'awg')
+        self.grant(other, 'other-node', 'awg')
+        page = self.get(f'/api/v1/profiles/{self.profile}/nodes')
+        self.assertEqual(page.status_code, 200, page.text)
+        self.assertEqual([item['key'] for item in page.json()['items']], ['awg-node'])
+        self.assertEqual(page.json()['items'][0]['protocols'],
+                         [{'kind': 'awg', 'transports': ['vpn', 'conf']}])
+        self.assertEqual(self.get(f'/api/v1/profiles/{self.foreign}/nodes').status_code, 404)
 
     def test_node_pagination_and_cross_kind_cursor(self):
         self.prepare()

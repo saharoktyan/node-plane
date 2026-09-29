@@ -97,6 +97,10 @@ class NodeLifecycle:
             if previous is not None:
                 return {'node_key': node_key, 'status': 'draining',
                         'operation_ids': json.loads(previous['operation_ids_json'])}
+            if conn.execute('''SELECT 1 FROM backend_agent_rollouts WHERE node_key = ?
+                AND status IN ('awaiting_executor', 'running')''',
+                (node_key,)).fetchone():
+                raise AccessDenied('agent_rollout_uncertain', 409)
             if not abandon_uncertain_settings and conn.execute('''SELECT 1 FROM backend_node_settings_tasks WHERE node_key = ?
                 AND status IN ('running', 'blocked')''', (node_key,)).fetchone():
                 raise AccessDenied('node_settings_uncertain', 409)
@@ -137,6 +141,25 @@ class NodeLifecycle:
                     'blocked_tasks': blocked, 'revocations_complete': ready,
                     'cleanup_phase': cleanup['phase'] if cleanup else None}
 
+    def overview(self, actor, node_key):
+        require_permission(actor, 'maintenance.manage')
+        with self.db.connect() as conn:
+            node = conn.execute('SELECT key FROM backend_nodes WHERE key = ?',
+                                (node_key,)).fetchone()
+            if node is None:
+                raise AccessDenied('resource_not_found', 404)
+            drain = conn.execute('SELECT 1 FROM backend_node_drains WHERE node_key = ?',
+                                 (node_key,)).fetchone()
+            bound = conn.execute('''SELECT target FROM backend_node_verification_targets
+                WHERE node_key = ?''', (node_key,)).fetchone()
+        if drain is not None:
+            return {**self.drain_status(actor, node_key),
+                    'verification_target': bound['target'] if bound else None}
+        return {'node_key': node_key, 'status': 'active', 'operation_ids': [],
+                'pending_tasks': 0, 'blocked_tasks': 0,
+                'revocations_complete': False, 'cleanup_phase': None,
+                'verification_target': bound['target'] if bound else None}
+
     @staticmethod
     def _revocation_state(conn, node_key):
         rows = conn.execute('''SELECT t.status, t.action FROM backend_operation_tasks t
@@ -158,7 +181,7 @@ class NodeLifecycle:
             row['action'] == 'delete' and row['status'] == 'succeeded' for row in latest)
         return pending, blocked, ready
 
-    def cleanup(self, actor, node_key, driver):
+    def cleanup(self, actor, node_key, driver, *, expected_phase=None):
         """Advance one verifiable remote phase under the worker's file lock.
 
         An ambiguous uninstall cannot be retried automatically: the agent may
@@ -181,6 +204,12 @@ class NodeLifecycle:
                     datetime.now(timezone.utc).isoformat()))
             else:
                 command_id, phase = row['command_id'], row['phase']
+            if expected_phase is not None:
+                allowed = (phase == expected_phase or
+                           expected_phase == 'not_started' and phase == 'preparing')
+                if not allowed:
+                    return {'node_key': node_key, 'phase': phase,
+                            'command_id': command_id}
         if phase in {'uninstall_uncertain', 'uninstall_scheduled'}:
             return {'node_key': node_key, 'phase': phase, 'command_id': command_id}
         if phase == 'preparing':

@@ -49,6 +49,35 @@ class SQLIdentityRepository:
             row = conn.execute("SELECT id, role, status FROM backend_accounts WHERE id = ?", (account_id,)).fetchone()
         return self._account(row)
 
+    def create_account(self, *, status='approved') -> Account:
+        """Create an account without requiring any external identity provider."""
+        if status not in {'pending', 'approved'}:
+            raise ValueError('invalid account status')
+        account_id = str(uuid4())
+        with self.db.transaction() as conn:
+            conn.execute('INSERT INTO backend_accounts(id, status) VALUES (?, ?)',
+                         (account_id, status))
+        return Account(account_id, 'member', status)
+
+    def link_telegram(self, account_id: str, user_id: int) -> Account:
+        """Attach Telegram as an optional login to an existing account."""
+        from .authorization import validate_telegram_id
+        validate_telegram_id(user_id)
+        with self.db.transaction() as conn:
+            row = conn.execute('SELECT id, role, status FROM backend_accounts WHERE id = ?',
+                               (account_id,)).fetchone()
+            if row is None:
+                raise AccessDenied('resource_not_found', 404)
+            existing = conn.execute('''SELECT account_id FROM backend_external_identities
+                WHERE provider = 'telegram' AND subject = ?''', (str(user_id),)).fetchone()
+            if existing is not None:
+                if existing['account_id'] != account_id:
+                    raise AccessDenied('identity_already_linked', 409)
+            else:
+                conn.execute('''INSERT INTO backend_external_identities(provider, subject, account_id)
+                    VALUES ('telegram', ?, ?)''', (str(user_id), account_id))
+            return self._account(row)
+
     def find_telegram_account(self, user_id: int) -> Account | None:
         with self.db.connect() as conn:
             row = conn.execute("""SELECT a.id, a.role, a.status FROM backend_accounts a

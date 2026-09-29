@@ -52,9 +52,22 @@ The target architecture and
 acceptance criteria below remain applicable; historical progress notes remain
 as written.
 
-Status (2026-09-28): backend implementation is underway; the new Telegram
-client has not started. The Russian sections below record the original plan,
-with the updated order above taking precedence where they differ.
+Status (2026-09-29): the aiogram 3 client is ready for a disposable-node
+acceptance test. It uses
+the standalone backend for member registration, access requests, profile and
+node selection, and current AWG/Xray artifact issuance. Admin screens cover
+approvals, account/profile access, node registration, local/SSH agent rollout,
+probe, editing and applying desired node settings, verified cleanup,
+registry-only removal, runtime refresh, access-request notifications and
+downloadable file/QR delivery. Node and rollout requests retain idempotency
+keys across lost backend responses. The backend worker owns agent installation
+and protocol deployment. A separate systemd unit can be installed without
+activating it; activation stops the legacy polling service. Remaining before
+replacing the legacy bot: test Rich Messages on real Telegram clients and the
+full workflow against PostgreSQL and disposable nodes, then address any
+findings. Notifications are currently best-effort; durable delivery can follow
+the acceptance pass. The Russian sections below record the original plan, with this status
+and the updated order above taking precedence where they differ.
 
 Этот план уточняет следующий этап бесплатного open-core. Выделение backend,
 переход на aiogram 3 и переработка экранов выполняются в одной программе работ.
@@ -532,3 +545,26 @@ timer state. Portable Docker installation is temporarily unsupported while
 this path is verified. The legacy Telegram bot remains separate; the next
 milestone is a new aiogram client for the primary install-node-issue-config
 journey, followed by real-node acceptance and remaining maintenance work.
+
+The aiogram 3 client has started as a separate package. Its first flow uses
+backend identity resolution, access requests, profile-scoped node discovery,
+and revision-checked Xray/AWG issuance. Screens are structured Rich Messages
+with short callback tokens, and configs are sent as documents. It is not yet
+the installed bot: admin node creation/agent rollout, profile/grant management,
+notifications, persistence of control-message state, and real-client rendering
+checks remain before switching the systemd bot service.
+
+The client now also has an admin profile/access slice: account selection,
+profile creation, freeze/unfreeze, and grant add/remove. The backend exposes
+authorized profile and grant reads so the UI can preserve existing grants
+when replacing the desired access set. Node creation and agent rollout are
+still the main missing pieces of the install-to-config Telegram journey.
+Node inspection and explicit settings application are available through the
+first admin node card; the client still cannot register a node or install its
+agent, so it must not replace the legacy bot service yet.
+
+Account and VPN profile identities are independent of Telegram. A profile's
+owner is an optional backend account UUID; Telegram user IDs live only in the
+external-identity table. Trusted local administration can now create an account
+without Telegram and attach a Telegram identity later. This keeps future CLI
+or web authentication compatible with existing accounts and profiles.

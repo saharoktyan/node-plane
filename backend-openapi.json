@@ -520,6 +520,154 @@
         }
       }
     },
+    "/api/v1/profiles": {
+      "get": {
+        "summary": "All Profiles",
+        "operationId": "all_profiles_api_v1_profiles_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 25,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 512
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfilePage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create Profile",
+        "operationId": "create_profile_api_v1_profiles_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProfileCreateInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileCommandOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/profiles/{profile_id}": {
       "get": {
         "summary": "Profile",
@@ -675,6 +823,161 @@
         }
       }
     },
+    "/api/v1/profiles/{profile_id}/grants": {
+      "get": {
+        "summary": "Profile Grants",
+        "operationId": "profile_grants_api_v1_profiles__profile_id__grants_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Profile Id"
+            }
+          },
+          {
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GrantPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "summary": "Replace Grants",
+        "operationId": "replace_grants_api_v1_profiles__profile_id__grants_patch",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Profile Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GrantsInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileCommandOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/me/nodes": {
       "get": {
         "summary": "Own Nodes",
@@ -685,6 +988,96 @@
           }
         ],
         "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 25,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 512
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodePage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/profiles/{profile_id}/nodes": {
+      "get": {
+        "summary": "Profile Nodes",
+        "operationId": "profile_nodes_api_v1_profiles__profile_id__nodes_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Profile Id"
+            }
+          },
           {
             "name": "limit",
             "in": "query",
@@ -1262,6 +1655,536 @@
         }
       }
     },
+    "/api/v1/nodes/{node_key}/agent-rollouts": {
+      "post": {
+        "summary": "Request Agent Rollout",
+        "operationId": "request_agent_rollout_api_v1_nodes__node_key__agent_rollouts_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "node_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Node Key"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentRolloutInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentRolloutOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agent-rollouts/{task_id}": {
+      "get": {
+        "summary": "Get Agent Rollout",
+        "operationId": "get_agent_rollout_api_v1_agent_rollouts__task_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Task Id"
+            }
+          },
+          {
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentRolloutOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/nodes/{node_key}/maintenance": {
+      "get": {
+        "summary": "Get Node Maintenance",
+        "operationId": "get_node_maintenance_api_v1_nodes__node_key__maintenance_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "node_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Node Key"
+            }
+          },
+          {
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeMaintenanceOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/nodes/{node_key}/bind-verification-target": {
+      "post": {
+        "summary": "Bind Node Verification Target",
+        "operationId": "bind_node_verification_target_api_v1_nodes__node_key__bind_verification_target_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "node_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Node Key"
+            }
+          },
+          {
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerificationTargetInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerificationTargetOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/nodes/{node_key}/drain": {
+      "post": {
+        "summary": "Drain Node",
+        "operationId": "drain_node_api_v1_nodes__node_key__drain_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "node_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Node Key"
+            }
+          },
+          {
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DrainOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/nodes/{node_key}/cleanup-step": {
+      "post": {
+        "summary": "Cleanup Node Step",
+        "operationId": "cleanup_node_step_api_v1_nodes__node_key__cleanup_step_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "node_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Node Key"
+            }
+          },
+          {
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CleanupStepInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CleanupStepOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/nodes/{node_key}/verify-and-retire": {
+      "post": {
+        "summary": "Verify And Retire Node",
+        "operationId": "verify_and_retire_node_api_v1_nodes__node_key__verify_and_retire_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "node_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Node Key"
+            }
+          },
+          {
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerifiedRetirementOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/nodes/{node_key}/retire-registry-only": {
+      "post": {
+        "summary": "Retire Node Registry Only",
+        "operationId": "retire_node_registry_only_api_v1_nodes__node_key__retire_registry_only_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "node_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Node Key"
+            }
+          },
+          {
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegistryRetirementInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryRetirementOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/accounts": {
       "get": {
         "summary": "List Accounts",
@@ -1480,172 +2403,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AdminAccountOutput"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/profiles": {
-      "post": {
-        "summary": "Create Profile",
-        "operationId": "create_profile_api_v1_profiles_post",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Idempotency-Key"
-            }
-          },
-          {
-            "name": "X-Node-Plane-Telegram-User-ID",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Node-Plane-Telegram-User-Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ProfileCreateInput"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProfileCommandOutput"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/profiles/{profile_id}/grants": {
-      "patch": {
-        "summary": "Replace Grants",
-        "operationId": "replace_grants_api_v1_profiles__profile_id__grants_patch",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "profile_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Profile Id"
-            }
-          },
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Idempotency-Key"
-            }
-          },
-          {
-            "name": "If-Match",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "If-Match"
-            }
-          },
-          {
-            "name": "X-Node-Plane-Telegram-User-ID",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Node-Plane-Telegram-User-Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/GrantsInput"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProfileCommandOutput"
                 }
               }
             }
@@ -2262,6 +3019,64 @@
         ],
         "title": "AdminNodePage"
       },
+      "AgentRolloutInput": {
+        "properties": {
+          "transport": {
+            "type": "string",
+            "enum": [
+              "local",
+              "ssh"
+            ],
+            "title": "Transport"
+          },
+          "ssh_target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ssh Target"
+          },
+          "ssh_port": {
+            "type": "integer",
+            "title": "Ssh Port",
+            "default": 22
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "transport"
+        ],
+        "title": "AgentRolloutInput"
+      },
+      "AgentRolloutOutput": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "node_key": {
+            "type": "string",
+            "title": "Node Key"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "node_key",
+          "status"
+        ],
+        "title": "AgentRolloutOutput"
+      },
       "AvailableNode": {
         "properties": {
           "key": {
@@ -2318,6 +3133,49 @@
           "transports"
         ],
         "title": "AvailableProtocol"
+      },
+      "CleanupStepInput": {
+        "properties": {
+          "expected_phase": {
+            "type": "string",
+            "enum": [
+              "not_started",
+              "preparing",
+              "prepared",
+              "runtime_deleted"
+            ],
+            "title": "Expected Phase"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expected_phase"
+        ],
+        "title": "CleanupStepInput"
+      },
+      "CleanupStepOutput": {
+        "properties": {
+          "node_key": {
+            "type": "string",
+            "title": "Node Key"
+          },
+          "phase": {
+            "type": "string",
+            "title": "Phase"
+          },
+          "command_id": {
+            "type": "string",
+            "title": "Command Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "node_key",
+          "phase",
+          "command_id"
+        ],
+        "title": "CleanupStepOutput"
       },
       "ConfigArtifactOutput": {
         "properties": {
@@ -2430,6 +3288,32 @@
         ],
         "title": "ConfigIssuanceOutput"
       },
+      "DrainOutput": {
+        "properties": {
+          "node_key": {
+            "type": "string",
+            "title": "Node Key"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "operation_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Operation Ids"
+          }
+        },
+        "type": "object",
+        "required": [
+          "node_key",
+          "status",
+          "operation_ids"
+        ],
+        "title": "DrainOutput"
+      },
       "GrantInput": {
         "properties": {
           "node_key": {
@@ -2450,6 +3334,22 @@
           "protocol"
         ],
         "title": "GrantInput"
+      },
+      "GrantPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/GrantInput"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "GrantPage"
       },
       "GrantsInput": {
         "properties": {
@@ -2653,6 +3553,71 @@
         "additionalProperties": false,
         "type": "object",
         "title": "NodeEditInput"
+      },
+      "NodeMaintenanceOutput": {
+        "properties": {
+          "node_key": {
+            "type": "string",
+            "title": "Node Key"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "operation_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Operation Ids"
+          },
+          "pending_tasks": {
+            "type": "integer",
+            "title": "Pending Tasks"
+          },
+          "blocked_tasks": {
+            "type": "integer",
+            "title": "Blocked Tasks"
+          },
+          "revocations_complete": {
+            "type": "boolean",
+            "title": "Revocations Complete"
+          },
+          "cleanup_phase": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cleanup Phase"
+          },
+          "verification_target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verification Target"
+          }
+        },
+        "type": "object",
+        "required": [
+          "node_key",
+          "status",
+          "operation_ids",
+          "pending_tasks",
+          "blocked_tasks",
+          "revocations_complete",
+          "cleanup_phase",
+          "verification_target"
+        ],
+        "title": "NodeMaintenanceOutput"
       },
       "NodePage": {
         "properties": {
@@ -3197,6 +4162,51 @@
         ],
         "title": "ProfilePage"
       },
+      "RegistryRetirementInput": {
+        "properties": {
+          "accept_unverified_runtime": {
+            "type": "boolean",
+            "const": true,
+            "title": "Accept Unverified Runtime"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 20,
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "accept_unverified_runtime",
+          "reason"
+        ],
+        "title": "RegistryRetirementInput"
+      },
+      "RegistryRetirementOutput": {
+        "properties": {
+          "node_key": {
+            "type": "string",
+            "title": "Node Key"
+          },
+          "mode": {
+            "type": "string",
+            "title": "Mode"
+          },
+          "unfinished_tasks": {
+            "type": "integer",
+            "title": "Unfinished Tasks"
+          }
+        },
+        "type": "object",
+        "required": [
+          "node_key",
+          "mode",
+          "unfinished_tasks"
+        ],
+        "title": "RegistryRetirementOutput"
+      },
       "ResolveInput": {
         "properties": {
           "telegram_user_id": {
@@ -3252,6 +4262,84 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "VerificationTargetInput": {
+        "properties": {
+          "transport": {
+            "type": "string",
+            "enum": [
+              "local",
+              "ssh"
+            ],
+            "title": "Transport"
+          },
+          "ssh_target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ssh Target"
+          },
+          "ssh_port": {
+            "type": "integer",
+            "maximum": 65535.0,
+            "minimum": 1.0,
+            "title": "Ssh Port",
+            "default": 22
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "transport"
+        ],
+        "title": "VerificationTargetInput"
+      },
+      "VerificationTargetOutput": {
+        "properties": {
+          "node_key": {
+            "type": "string",
+            "title": "Node Key"
+          },
+          "target": {
+            "type": "string",
+            "title": "Target"
+          },
+          "host_fingerprint": {
+            "type": "string",
+            "title": "Host Fingerprint"
+          }
+        },
+        "type": "object",
+        "required": [
+          "node_key",
+          "target",
+          "host_fingerprint"
+        ],
+        "title": "VerificationTargetOutput"
+      },
+      "VerifiedRetirementOutput": {
+        "properties": {
+          "node_key": {
+            "type": "string",
+            "title": "Node Key"
+          },
+          "mode": {
+            "type": "string",
+            "const": "verified",
+            "title": "Mode"
+          }
+        },
+        "type": "object",
+        "required": [
+          "node_key",
+          "mode"
+        ],
+        "title": "VerifiedRetirementOutput"
       }
     },
     "securitySchemes": {

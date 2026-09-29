@@ -47,7 +47,10 @@ sys.modules["telegram.error"] = telegram_error_module
 sys.modules["telegram.ext"] = telegram_ext_module
 qrcode_module = types.ModuleType("qrcode")
 qrcode_module.make = lambda value: None
-sys.modules.setdefault("qrcode", qrcode_module)
+try:
+    import qrcode  # noqa: F401
+except ModuleNotFoundError:
+    sys.modules.setdefault("qrcode", qrcode_module)
 
 from handlers import admin_server_wizard, admin_wizard, user, user_getkey, user_profile
 from services import ssh_keys

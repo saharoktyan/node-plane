@@ -1,6 +1,10 @@
 """HTTP transport for identity services; constructing an app performs no DDL."""
 
 from uuid import UUID, uuid4
+from contextlib import contextmanager
+import fcntl
+import os
+from pathlib import Path
 from typing import Annotated, Literal
 
 from fastapi import Depends, FastAPI, Header, Query, Request, Response, Security
@@ -25,6 +29,8 @@ from .accounts import AccountService
 from .nodes import NodeService
 from .node_settings import NodeSettingsService
 from .config_issuance import ConfigIssuanceService
+from .agent_rollout import AgentRolloutService
+from .node_lifecycle import NodeLifecycle
 
 
 class ResolveInput(BaseModel):
@@ -70,6 +76,10 @@ class ProfileOutput(BaseModel):
 class ProfilePage(BaseModel):
     items: list[ProfileOutput]
     next_cursor: str | None
+
+
+class GrantPage(BaseModel):
+    items: list['GrantInput']
 
 
 class AvailableProtocol(BaseModel):
@@ -158,6 +168,77 @@ class NodeSettingsTaskOutput(BaseModel):
     node_key: str
     revision: int
     status: str
+
+
+class AgentRolloutInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    transport: Literal['local', 'ssh']
+    ssh_target: str | None = None
+    ssh_port: int = 22
+
+
+class AgentRolloutOutput(BaseModel):
+    id: UUID
+    node_key: str
+    status: str
+
+
+class NodeMaintenanceOutput(BaseModel):
+    node_key: str
+    status: str
+    operation_ids: list[str]
+    pending_tasks: int
+    blocked_tasks: int
+    revocations_complete: bool
+    cleanup_phase: str | None
+    verification_target: str | None
+
+
+class VerificationTargetInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    transport: Literal['local', 'ssh']
+    ssh_target: str | None = None
+    ssh_port: Annotated[StrictInt, Field(ge=1, le=65535)] = 22
+
+
+class VerificationTargetOutput(BaseModel):
+    node_key: str
+    target: str
+    host_fingerprint: str
+
+
+class DrainOutput(BaseModel):
+    node_key: str
+    status: str
+    operation_ids: list[str]
+
+
+class CleanupStepOutput(BaseModel):
+    node_key: str
+    phase: str
+    command_id: str
+
+
+class CleanupStepInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    expected_phase: Literal['not_started', 'preparing', 'prepared', 'runtime_deleted']
+
+
+class VerifiedRetirementOutput(BaseModel):
+    node_key: str
+    mode: Literal['verified']
+
+
+class RegistryRetirementInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    accept_unverified_runtime: Literal[True]
+    reason: Annotated[StrictStr, Field(min_length=20, max_length=500)]
+
+
+class RegistryRetirementOutput(BaseModel):
+    node_key: str
+    mode: str
+    unfinished_tasks: int
 
 
 class ConfigIssuanceInput(BaseModel):
@@ -273,6 +354,23 @@ def create_app(db, *, node_driver=None) -> FastAPI:
     nodes = NodeService(db)
     node_settings = NodeSettingsService(db)
     config_issuances = ConfigIssuanceService(db, node_driver)
+    agent_rollouts = AgentRolloutService(db)
+    lifecycle = NodeLifecycle(db)
+
+    @contextmanager
+    def maintenance_lock(current):
+        require_permission(current, 'maintenance.manage')
+        shared = os.environ.get('NODE_PLANE_SHARED_DIR')
+        if not shared:
+            raise AccessDenied('maintenance_unavailable', 503)
+        lock_path = Path(shared) / 'data' / 'backend-worker.lock'
+        try:
+            fd = os.open(lock_path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(fd, 'a') as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                yield
+        except BlockingIOError:
+            raise AccessDenied('maintenance_busy', 409) from None
 
     def error(request, code, status):
         headers = {'WWW-Authenticate': 'Bearer'} if status == 401 else None
@@ -360,6 +458,7 @@ def create_app(db, *, node_driver=None) -> FastAPI:
                 conn.execute('SELECT actor_account_id FROM backend_node_commands LIMIT 1').fetchone()
                 conn.execute('SELECT id FROM backend_node_settings_tasks LIMIT 1').fetchone()
                 conn.execute('SELECT id FROM backend_config_issuances LIMIT 1').fetchone()
+                conn.execute('SELECT id FROM backend_agent_rollouts LIMIT 1').fetchone()
         except Exception:
             return error(request, 'dependency_unavailable', 503)
         return {'status': 'ready'}
@@ -415,16 +514,31 @@ def create_app(db, *, node_driver=None) -> FastAPI:
                      cursor: Annotated[str | None, Query(max_length=512)] = None):
         return profiles.list_owned(current, limit=limit, cursor=cursor)
 
+    @app.get('/api/v1/profiles', response_model=ProfilePage)
+    def all_profiles(current=Depends(actor), limit: Annotated[int, Query(ge=1, le=100)] = 25,
+                     cursor: Annotated[str | None, Query(max_length=512)] = None):
+        return profiles.list_all(current, limit=limit, cursor=cursor)
+
     @app.get('/api/v1/profiles/{profile_id}', response_model=ProfileOutput)
     def profile(profile_id: UUID, response: Response, current=Depends(actor)):
         result = profiles.get(current, str(profile_id))
         response.headers['ETag'] = '"' + str(result['desired_revision']) + '"'
         return result
 
+    @app.get('/api/v1/profiles/{profile_id}/grants', response_model=GrantPage)
+    def profile_grants(profile_id: UUID, current=Depends(actor)):
+        return profiles.grants(current, str(profile_id))
+
     @app.get('/api/v1/me/nodes', response_model=NodePage)
     def own_nodes(current=Depends(actor), limit: Annotated[int, Query(ge=1, le=100)] = 25,
                   cursor: Annotated[str | None, Query(max_length=512)] = None):
         return profiles.available_nodes(current, limit=limit, cursor=cursor)
+
+    @app.get('/api/v1/profiles/{profile_id}/nodes', response_model=NodePage)
+    def profile_nodes(profile_id: UUID, current=Depends(actor),
+                      limit: Annotated[int, Query(ge=1, le=100)] = 25,
+                      cursor: Annotated[str | None, Query(max_length=512)] = None):
+        return profiles.profile_nodes(current, str(profile_id), limit=limit, cursor=cursor)
 
     @app.get('/api/v1/nodes', response_model=AdminNodePage)
     def list_nodes(current=Depends(actor), limit: Annotated[int, Query(ge=1, le=100)] = 25,
@@ -489,6 +603,111 @@ def create_app(db, *, node_driver=None) -> FastAPI:
     @app.get('/api/v1/node-settings-operations/{task_id}', response_model=NodeSettingsTaskOutput)
     def get_node_settings_operation(task_id: UUID, current=Depends(actor)):
         return node_settings.get(current, str(task_id))
+
+    @app.post('/api/v1/nodes/{node_key}/agent-rollouts',
+              response_model=AgentRolloutOutput, status_code=202)
+    def request_agent_rollout(node_key: str, body: AgentRolloutInput, request: Request,
+                              command_key: Annotated[str, Header(alias='Idempotency-Key')],
+                              current=Depends(actor)):
+        return agent_rollouts.request(current, node_key, header(request, 'Idempotency-Key'),
+            transport=body.transport, ssh_target=body.ssh_target, ssh_port=body.ssh_port)
+
+    @app.get('/api/v1/agent-rollouts/{task_id}', response_model=AgentRolloutOutput)
+    def get_agent_rollout(task_id: UUID, current=Depends(actor)):
+        return agent_rollouts.get(current, str(task_id))
+
+    @app.get('/api/v1/nodes/{node_key}/maintenance', response_model=NodeMaintenanceOutput)
+    def get_node_maintenance(node_key: str, current=Depends(actor)):
+        return lifecycle.overview(current, node_key)
+
+    @app.post('/api/v1/nodes/{node_key}/bind-verification-target',
+              response_model=VerificationTargetOutput)
+    def bind_node_verification_target(node_key: str, body: VerificationTargetInput,
+                                      current=Depends(actor)):
+        from .removal_verifier import RemovalVerifier, RemovalVerificationError
+        if body.transport == 'local':
+            if body.ssh_target is not None or body.ssh_port != 22:
+                raise AccessDenied('invalid_input', 422)
+        elif not body.ssh_target or body.ssh_port != 22:
+            raise AccessDenied('invalid_input', 422)
+        try:
+            verifier = RemovalVerifier(local=body.transport == 'local',
+                ssh_target=body.ssh_target,
+                ssh_identity_file=os.environ.get('SSH_KEY') if body.transport == 'ssh' else None,
+                ssh_port=body.ssh_port)
+        except ValueError:
+            raise AccessDenied('invalid_input', 422) from None
+        with maintenance_lock(current):
+            try:
+                return lifecycle.bind_verification_target(current, node_key, verifier)
+            except RemovalVerificationError:
+                raise AccessDenied('host_verification_failed', 409) from None
+
+    @app.post('/api/v1/nodes/{node_key}/drain', response_model=DrainOutput)
+    def drain_node(node_key: str, current=Depends(actor)):
+        with maintenance_lock(current):
+            with db.connect() as conn:
+                bound = conn.execute('''SELECT 1 FROM backend_node_verification_targets
+                    WHERE node_key = ?''', (node_key,)).fetchone()
+            if bound is None:
+                raise AccessDenied('verification_target_required', 409)
+            return lifecycle.start_drain(current, node_key)
+
+    @app.post('/api/v1/nodes/{node_key}/cleanup-step',
+              response_model=CleanupStepOutput)
+    def cleanup_node_step(node_key: str, body: CleanupStepInput,
+                          current=Depends(actor)):
+        from .driver_transport import GrpcIntentDriver, local_channel
+        with maintenance_lock(current):
+            try:
+                with local_channel(os.environ.get('NODE_DRIVER_GRPC_TARGET',
+                                               '127.0.0.1:50051')) as channel:
+                    return lifecycle.cleanup(current, node_key,
+                        GrpcIntentDriver(channel), expected_phase=body.expected_phase)
+            except AccessDenied:
+                raise
+            except Exception:
+                raise AccessDenied('node_cleanup_unavailable', 503) from None
+
+    @app.post('/api/v1/nodes/{node_key}/verify-and-retire',
+              response_model=VerifiedRetirementOutput)
+    def verify_and_retire_node(node_key: str, current=Depends(actor)):
+        from .removal_verifier import RemovalVerifier, RemovalVerificationError
+        with maintenance_lock(current):
+            with db.connect() as conn:
+                bound = conn.execute('''SELECT target FROM backend_node_verification_targets
+                    WHERE node_key = ?''', (node_key,)).fetchone()
+            if bound is None:
+                raise AccessDenied('verification_target_required', 409)
+            bot_key_file = os.environ.get('NODE_PLANE_BOT_PUBLIC_KEY_FILE')
+            if not bot_key_file and os.environ.get('SSH_KEY'):
+                bot_key_file = os.environ['SSH_KEY'] + '.pub'
+            if not bot_key_file:
+                raise AccessDenied('verification_key_unavailable', 503)
+            try:
+                bot_key = Path(bot_key_file).read_text(encoding='utf-8').strip()
+                if bound['target'] == 'local':
+                    verifier = RemovalVerifier(local=True, bot_public_key=bot_key)
+                else:
+                    independent_key = os.environ.get('NODE_PLANE_REMOVAL_SSH_KEY')
+                    if not independent_key or not Path(independent_key).is_file():
+                        raise AccessDenied('independent_verification_key_required', 503)
+                    bot_private_key = os.environ.get('SSH_KEY')
+                    if bot_private_key and Path(bot_private_key).is_file() and os.path.samefile(
+                            independent_key, bot_private_key):
+                        raise AccessDenied('independent_verification_key_required', 503)
+                    verifier = RemovalVerifier(ssh_target=bound['target'],
+                        ssh_identity_file=independent_key, bot_public_key=bot_key)
+                return lifecycle.retire_verified(current, node_key, verifier)
+            except (OSError, ValueError, RemovalVerificationError):
+                raise AccessDenied('host_verification_failed', 409) from None
+
+    @app.post('/api/v1/nodes/{node_key}/retire-registry-only',
+              response_model=RegistryRetirementOutput)
+    def retire_node_registry_only(node_key: str, body: RegistryRetirementInput,
+                                  current=Depends(actor)):
+        with maintenance_lock(current):
+            return lifecycle.retire_registry_only(current, node_key, body.reason)
 
     def revision_header(request):
         value = header(request, 'If-Match')

@@ -95,24 +95,39 @@ class ProfileRepository:
                                 (account_id, after, limit)).fetchall()
         return [self.public(row) for row in rows]
 
-    def available_nodes(self, account_id, *, after, limit):
+    def all_profiles(self, *, after, limit):
+        with self.db.connect() as conn:
+            rows = conn.execute('SELECT * FROM backend_profiles WHERE id > ? ORDER BY id LIMIT ?',
+                                (after, limit)).fetchall()
+        return [self.public(row) for row in rows]
+
+    def grants(self, profile_id):
+        with self.db.connect() as conn:
+            rows = conn.execute('''SELECT node_key, protocol FROM backend_grants
+                WHERE profile_id = ? ORDER BY node_key, protocol''', (profile_id,)).fetchall()
+        return [{'node_key': row['node_key'], 'protocol': row['protocol']} for row in rows]
+
+    def available_nodes(self, account_id, *, after, limit, profile_id=None):
         now = datetime.now(timezone.utc).isoformat()
         with self.db.connect() as conn:
             rows = conn.execute('''SELECT n.key, n.title, n.region, n.flag, n.protocols_json, n.xray_transports_json
                 FROM backend_nodes n WHERE n.enabled = 1 AND n.key > ? AND EXISTS (
                     SELECT 1 FROM backend_grants g JOIN backend_profiles p ON p.id = g.profile_id
                     WHERE g.node_key = n.key AND p.owner_account_id = ? AND p.frozen = 0
+                    AND (? IS NULL OR p.id = ?)
                     AND n.protocols_json LIKE ('%' || '"' || g.protocol || '"' || '%')
                     AND (p.expires_at IS NULL OR p.expires_at > ?)) ORDER BY n.key LIMIT ?''',
-                                (after, account_id, now, limit)).fetchall()
+                                (after, account_id, profile_id, profile_id, now, limit)).fetchall()
             output = []
             for node in rows:
                 grants = conn.execute('''SELECT DISTINCT g.protocol FROM backend_grants g
                     JOIN backend_profiles p ON p.id = g.profile_id
                     WHERE g.node_key = ? AND p.owner_account_id = ? AND p.frozen = 0
-                    AND (p.expires_at IS NULL OR p.expires_at > ?)''', (node['key'], account_id, now)).fetchall()
+                    AND (? IS NULL OR p.id = ?)
+                    AND (p.expires_at IS NULL OR p.expires_at > ?)''',
+                    (node['key'], account_id, profile_id, profile_id, now)).fetchall()
                 allowed = {row['protocol'] for row in grants} & set(json.loads(node['protocols_json']))
-                protocols = [{'kind': kind, 'transports': sorted(set(json.loads(node['xray_transports_json'])) & {'tcp', 'xhttp'}) if kind == 'xray' else []}
+                protocols = [{'kind': kind, 'transports': sorted(set(json.loads(node['xray_transports_json'])) & {'tcp', 'xhttp'}) if kind == 'xray' else ['vpn', 'conf']}
                              for kind in sorted(allowed & {'awg', 'xray'})]
                 output.append({key: node[key] for key in ('key', 'title', 'region', 'flag')} | {'protocols': protocols})
         return output
@@ -143,7 +158,24 @@ class ProfileService:
         require_profile(actor, resource, administrative=row['owner_account_id'] != actor.account.id)
         return self.repository.public(row)
 
+    def list_all(self, actor, *, limit=25, cursor=None):
+        require_permission(actor, 'profiles.manage')
+        after = self.page_input(limit, cursor, 'admin_profiles')
+        return _page(self.repository.all_profiles(after=after, limit=limit + 1),
+                     limit, 'admin_profiles', 'id')
+
+    def grants(self, actor, profile_id):
+        self.get(actor, profile_id)
+        return {'items': self.repository.grants(profile_id)}
+
     def available_nodes(self, actor, *, limit=25, cursor=None):
         require_permission(actor, 'nodes.available.read')
         after = self.page_input(limit, cursor, 'nodes')
         return _page(self.repository.available_nodes(actor.account.id, after=after, limit=limit + 1), limit, 'nodes', 'key')
+
+    def profile_nodes(self, actor, profile_id, *, limit=25, cursor=None):
+        self.get(actor, profile_id)
+        require_permission(actor, 'nodes.available.read')
+        after = self.page_input(limit, cursor, 'nodes')
+        return _page(self.repository.available_nodes(actor.account.id, after=after,
+            limit=limit + 1, profile_id=profile_id), limit, 'nodes', 'key')

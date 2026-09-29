@@ -13,6 +13,7 @@ from .authorization import AccessDenied, require_permission
 from .operations import OperationRepository
 from .node_settings import NodeSettingsExecutor
 from .config_issuance import ConfigIssuanceService
+from .agent_rollout import AgentRolloutService
 
 
 class IntentExecutor:
@@ -193,13 +194,15 @@ def main():
             executor = IntentExecutor(get_db(), GrpcIntentDriver(channel))
             node_executor = NodeSettingsExecutor(executor.db, executor.driver)
             config_executor = ConfigIssuanceService(executor.db, executor.driver)
+            rollout_executor = AgentRolloutService(executor.db)
             executor.recover()
             node_executor.recover()
             config_executor.recover()
+            rollout_executor.recover()
             executor.reconcile_completed()
             node_executor.reconcile_completed()
             executor.inspect_blocked()
-            while node_executor.run_one() or executor.run_one() or config_executor.run_one():
+            while rollout_executor.run_one() or node_executor.run_one() or executor.run_one() or config_executor.run_one():
                 pass
 
 

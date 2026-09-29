@@ -32,7 +32,10 @@ qrcode.make = lambda value: None
 sys.modules.setdefault("telegram", telegram)
 sys.modules.setdefault("telegram.ext", telegram_ext)
 sys.modules.setdefault("telegram.error", telegram_error)
-sys.modules.setdefault("qrcode", qrcode)
+try:
+    import qrcode as real_qrcode  # noqa: F401
+except ModuleNotFoundError:
+    sys.modules.setdefault("qrcode", qrcode)
 
 spec = importlib.util.spec_from_file_location("refresh_awg_config", ROOT / "runtime_assets" / "refresh-awg-config.py")
 assert spec and spec.loader

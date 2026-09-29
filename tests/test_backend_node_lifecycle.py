@@ -1,4 +1,5 @@
 import unittest
+from uuid import uuid4
 
 from backend.authorization import Actor, Principal, PrincipalKind
 from backend.executor import IntentExecutor
@@ -47,6 +48,43 @@ class BackendNodeLifecycleTests(unittest.TestCase):
         lifecycle = NodeLifecycle(self.db)
         self.assertEqual(lifecycle.start_drain(self.actor(), 'node')['operation_ids'], [])
         self.assertTrue(lifecycle.drain_status(self.actor(), 'node')['revocations_complete'])
+
+    def test_cleanup_retry_cannot_advance_past_observed_phase(self):
+        self.prepare()
+        lifecycle = NodeLifecycle(self.db)
+        lifecycle.start_drain(self.actor(), 'node')
+        calls = []
+        class Driver:
+            def decommission(self, node_key, command_id, phase):
+                calls.append(phase)
+                return 'OK'
+        driver = Driver()
+        first = lifecycle.cleanup(self.actor(), 'node', driver,
+                                  expected_phase='not_started')
+        repeated = lifecycle.cleanup(self.actor(), 'node', driver,
+                                     expected_phase='not_started')
+        self.assertEqual(first, repeated)
+        self.assertEqual(calls, ['prepare'])
+        next_step = lifecycle.cleanup(self.actor(), 'node', driver,
+                                      expected_phase='prepared')
+        self.assertEqual(next_step['phase'], 'runtime_deleted')
+        self.assertEqual(calls, ['prepare', 'delete_runtime'])
+
+    def test_drain_waits_for_active_agent_rollout(self):
+        self.prepare()
+        rollout_id = str(uuid4())
+        with self.db.transaction() as conn:
+            conn.execute('''INSERT INTO backend_agent_rollouts
+                (id, node_key, actor_account_id, command_key, intent_json, status)
+                VALUES (?, 'node', ?, ?, '{}', 'awaiting_executor')''',
+                (rollout_id, self.admin.id, str(uuid4())))
+        lifecycle = NodeLifecycle(self.db)
+        with self.assertRaisesRegex(Exception, 'agent_rollout_uncertain'):
+            lifecycle.start_drain(self.actor(), 'node')
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_agent_rollouts SET status = 'succeeded' WHERE id = ?",
+                         (rollout_id,))
+        self.assertEqual(lifecycle.start_drain(self.actor(), 'node')['status'], 'draining')
 
     def test_blocked_delete_does_not_claim_revocation_complete(self):
         profile = self.prepare()
