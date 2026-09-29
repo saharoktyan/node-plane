@@ -5,7 +5,7 @@ from aiogram.fsm.context import FSMContext
 from ..backend import BackendClient, BackendError
 from ..screens import Screen
 from .common import render
-from .states import ProfileDraftState, ProfileAccessState
+from .states import ProfileDraftState
 
 from aiogram.fsm.state import State, StatesGroup
 
@@ -55,13 +55,13 @@ async def new_profile_cb(query: CallbackQuery, callback_data: NewProfileCallback
     user_id = query.from_user.id
     account_id = callback_data.account_id
     
-    await state.set_state(ProfileDraftState, ProfileAccessState, ProfileCreateState, ProfileSearchState.waiting_for_name)
+    await state.set_state(ProfileDraftState.waiting_for_name)
     await state.update_data(profile_account_id=account_id)
     
     rows = [[InlineKeyboardButton(text='Cancel', callback_data=AccountsCallback().pack())]]
     await render(bot, query.message.chat.id, Screen('New VPN profile', ('Send the profile name as a message.',)), rows, state, query.message.message_id)
 
-@router.message(ProfileDraftState, ProfileAccessState, ProfileCreateState, ProfileSearchState.waiting_for_name, F.text)
+@router.message(ProfileDraftState.waiting_for_name, F.text)
 async def process_profile_name(message: Message, bot: Bot, backend: BackendClient, state: FSMContext):
     await message.delete()
     if message.from_user is None or message.chat.type != 'private':
