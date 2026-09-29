@@ -136,17 +136,99 @@ async def update_action_cb(query: CallbackQuery, callback_data: UpdateActionCall
         await query.answer()
         overview = await backend.updates_overview(user_id)
         status = overview.get('last_run_status', '')
+        log = overview.get('last_run_log_tail', '')
         
+        import datetime
+        try:
+            started = overview.get('last_run_started_at', '')
+            if started:
+                started_dt = datetime.datetime.fromisoformat(started.replace("Z", "+00:00"))
+                elapsed = int((datetime.datetime.now(datetime.timezone.utc) - started_dt).total_seconds())
+                time_str = f"{elapsed}s"
+            else:
+                time_str = "..."
+        except:
+            time_str = "..."
+            
+        core_st, tg_st, drv_st = "running", "pending", "pending"
+        agents = {}
+        for line in log.splitlines():
+            if "activate new release" in line or "restart node-plane.service" in line:
+                core_st = "done"
+                tg_st = "running"
+            if "Running post-update driver/agent setup" in line:
+                tg_st = "done"
+                drv_st = "running"
+            if "install local node-plane-driver" in line or "node-plane-driver binary is up to date" in line:
+                drv_st = "done"
+            
+            if "Deploying node-agent to local node" in line:
+                parts = line.split("local node ")
+                if len(parts) > 1:
+                    key = parts[1].replace("...", "").strip()
+                    agents[key] = "running"
+            elif "Deploying node-agent to " in line:
+                parts = line.split("Deploying node-agent to ")
+                if len(parts) > 1:
+                    key = parts[1].split(" ")[0].strip()
+                    agents[key] = "running"
+            
+            if "node-agent is active on " in line:
+                parts = line.split("node-agent is active on ")
+                if len(parts) > 1:
+                    key = parts[1].split(" ")[-1].strip()
+                    agents[key] = "done"
+            elif "node-agent deploy failures" in line or "failed to install/start node-agent on" in line.lower():
+                for k, v in list(agents.items()):
+                    if v == "running": agents[k] = "failed"
+                    
+        if status == 'success' or status == 'completed':
+            core_st, tg_st, drv_st = "done", "done", "done"
+            for k in list(agents.keys()): agents[k] = "done"
+        elif status == 'failed':
+            if core_st == "running": core_st = "failed"
+            elif tg_st == "running": tg_st = "failed"
+            elif drv_st == "running": drv_st = "failed"
+            for k in list(agents.keys()):
+                if agents[k] == "running": agents[k] = "failed"
+
+        reason = "Неизвестная ошибка"
+        for line in log.splitlines():
+            if "Update failed during step:" in line:
+                reason = line.split(":", 1)[-1].strip()
+            elif "failed" in line.lower() or "error" in line.lower():
+                reason = line[:50]
+
+        def fmt(s):
+            if s == "done": return f"done ({time_str})"
+            if s == "running": return f"running ({time_str})"
+            if s == "failed": return f"failed ({reason})"
+            return s
+            
+        lines = [
+            f"Core: {fmt(core_st)}",
+            f"Telegram: {fmt(tg_st)}",
+            f"Driver: {fmt(drv_st)}"
+        ]
+        if agents:
+            lines.append("Agents:")
+            for k, v in agents.items():
+                lines.append(f"  - {k}: {fmt(v)}")
+
         if status == 'running':
             rows = [[InlineKeyboardButton(text="🔄 Check (Обновить)", callback_data=UpdateActionCallback(action='status').pack())]]
-            await render(bot, query.message.chat.id, Screen("Обновление выполняется", ("Установка все еще идет...",)), rows, state, query.message.message_id)
+            await render(bot, query.message.chat.id, Screen("Обновление выполняется", tuple(lines)), rows, state, query.message.message_id)
         elif status == 'success' or status == 'completed':
             rows = [[InlineKeyboardButton(text="✅ Done", callback_data=UpdatesCallback().pack())]]
-            await render(bot, query.message.chat.id, Screen("Успех", ("Обновление успешно завершено! Все компоненты обновлены.",)), rows, state, query.message.message_id)
+            lines.insert(0, "Обновление успешно завершено! Все компоненты обновлены.")
+            lines.append("")
+            await render(bot, query.message.chat.id, Screen("Успех", tuple(lines)), rows, state, query.message.message_id)
         else:
             rows = [[InlineKeyboardButton(text="🔙 Назад", callback_data=UpdatesCallback().pack())]]
-            log = overview.get('last_run_log_tail', '')
-            await render(bot, query.message.chat.id, Screen("Ошибка обновления", (f"Статус: {status}\n\nЛог:\n`{log}`",)), rows, state, query.message.message_id)
+            err_lines = list(lines)
+            err_lines.append("")
+            err_lines.append(f"Лог:\n`{log[-1000:]}`")
+            await render(bot, query.message.chat.id, Screen("Ошибка обновления", tuple(err_lines)), rows, state, query.message.message_id)
         return
         
     if action == 'cleanup_menu':
