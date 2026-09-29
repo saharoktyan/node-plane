@@ -54,13 +54,13 @@ async def new_profile_cb(query: CallbackQuery, callback_data: NewProfileCallback
     user_id = query.from_user.id
     account_id = callback_data.account_id
     
-    await state.set_state(ProfileDraftState.waiting_for_name)
+    await state.set_state(ProfileDraftState, ProfileAccessState, ProfileCreateState, ProfileSearchState.waiting_for_name)
     await state.update_data(profile_account_id=account_id)
     
     rows = [[InlineKeyboardButton(text='Cancel', callback_data=AccountsCallback().pack())]]
     await render(bot, query.message.chat.id, Screen('New VPN profile', ('Send the profile name as a message.',)), rows, state, query.message.message_id)
 
-@router.message(ProfileDraftState.waiting_for_name, F.text)
+@router.message(ProfileDraftState, ProfileAccessState, ProfileCreateState, ProfileSearchState.waiting_for_name, F.text)
 async def process_profile_name(message: Message, bot: Bot, backend: BackendClient, state: FSMContext):
     await message.delete()
     if message.from_user is None or message.chat.type != 'private':
@@ -159,20 +159,19 @@ async def admin_profile_cb(query: CallbackQuery, callback_data: AdminProfileCall
     await query.answer()
     await show_admin_profile(query.message.chat.id, query.from_user.id, query.message.message_id, callback_data.profile_id, bot, backend, state)
 
+
 async def show_admin_profile(chat_id: int, user_id: int, message_id: int, profile_id: str, bot: Bot, backend: BackendClient, state: FSMContext):
     profile = await backend.request('GET', f'/api/v1/profiles/{profile_id}', telegram_user_id=user_id)
     grants = (await backend.profile_grants(user_id, profile_id))['items']
-    status = 'Frozen' if profile['frozen'] else 'Active'
+    status = 'Заморожен' if profile['frozen'] else 'Активен'
     
     rows = [
-        [InlineKeyboardButton(text='Unfreeze' if profile['frozen'] else 'Freeze', callback_data=ToggleFreezeCallback(profile_id=profile_id).pack())],
-        [InlineKeyboardButton(text='Add access', callback_data=GrantNodesCallback(profile_id=profile_id).pack())]
+        [InlineKeyboardButton(text='Разморозить' if profile['frozen'] else 'Заморозить', callback_data=ToggleFreezeCallback(profile_id=profile_id).pack())],
+        [InlineKeyboardButton(text='Управление доступом', callback_data=GrantNodesCallback(profile_id=profile_id).pack())]
     ]
-    for grant in grants:
-        rows.append([InlineKeyboardButton(text=f"Remove {grant['node_key']} · {grant['protocol'].upper()}", callback_data=RemoveGrantCallback(profile_id=profile_id, node_key=grant['node_key'], protocol=grant['protocol']).pack())])
     rows.append([InlineKeyboardButton(text='🔙 Назад', callback_data=AdminProfilesCallback().pack())])
     
-    lines = (f'Status: {status}', f'Access entries: {len(grants)}', 'Changes are applied by the backend worker.')
+    lines = (f'Статус: {status}', f'Доступы: {len(grants)} шт.', 'Изменения применяются воркером.')
     await render(bot, chat_id, Screen(profile['display_name'], lines), rows, state, message_id)
 
 @router.callback_query(GrantNodesCallback.filter())
@@ -181,9 +180,9 @@ async def grant_nodes_cb(query: CallbackQuery, callback_data: GrantNodesCallback
     user_id = query.from_user.id
     profile_id = callback_data.profile_id
     page = await backend.admin_nodes(user_id)
-    rows = [[InlineKeyboardButton(text=node['title'], callback_data=GrantProtocolsCallback(profile_id=profile_id, node_key=node['key']).pack())] for node in page['items'] if node['enabled']]
+    rows = [[InlineKeyboardButton(text=node['title'], callback_data=GrantProtocolsCallback(profile_id=profile_id, node_key=node['key']).pack())] for node in page['items']]
     rows.append([InlineKeyboardButton(text='🔙 Назад', callback_data=AdminProfileCallback(profile_id=profile_id).pack())])
-    await render(bot, query.message.chat.id, Screen('Choose a node', ('Only installed and enabled nodes can receive profile access.',)), rows, state, query.message.message_id)
+    await render(bot, query.message.chat.id, Screen('Выбор сервера', ('Выберите сервер для настройки доступа:',)), rows, state, query.message.message_id)
 
 @router.callback_query(GrantProtocolsCallback.filter())
 async def grant_protocols_cb(query: CallbackQuery, callback_data: GrantProtocolsCallback, bot: Bot, backend: BackendClient, state: FSMContext):
@@ -192,32 +191,87 @@ async def grant_protocols_cb(query: CallbackQuery, callback_data: GrantProtocols
     profile_id = callback_data.profile_id
     node_key = callback_data.node_key
     
+    # Check if we already have editing state for this profile/node
+    # If not, initialize it from backend
+    data = await state.get_data()
+    editing = data.get('editing_grants')
+    if not editing or editing.get('profile_id') != profile_id or editing.get('node_key') != node_key:
+        grants = (await backend.profile_grants(user_id, profile_id))['items']
+        selected = [g['protocol'] for g in grants if g['node_key'] == node_key]
+        editing = {'profile_id': profile_id, 'node_key': node_key, 'selected': selected}
+        await state.update_data(editing_grants=editing)
+        
+    await render_grant_protocols(query.message.chat.id, bot, backend, user_id, profile_id, node_key, editing['selected'], state, query.message.message_id)
+
+async def render_grant_protocols(chat_id: int, bot: Bot, backend: BackendClient, user_id: int, profile_id: str, node_key: str, selected: list[str], state: FSMContext, message_id: int):
     node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=user_id)
-    rows = [[InlineKeyboardButton(text=protocol.upper(), callback_data=AddGrantCallback(profile_id=profile_id, node_key=node_key, protocol=protocol).pack())] for protocol in node['protocols']]
+    
+    def mark(code: str, label: str) -> str:
+        return f">{label}<" if code in selected else label
+
+    rows = []
+    for protocol in node['protocols']:
+        # We'll use a string callback for toggling to easily pass data since it's just local to this screen
+        rows.append([InlineKeyboardButton(text=mark(protocol, protocol.capitalize()), callback_data=f"toggle_grant:{protocol}")])
+        
+    rows.append([InlineKeyboardButton(text='🚀 Применить', callback_data="apply_grants")])
     rows.append([InlineKeyboardButton(text='🔙 Назад', callback_data=GrantNodesCallback(profile_id=profile_id).pack())])
-    await render(bot, query.message.chat.id, Screen(node['title'], ('Choose a protocol to grant.',)), rows, state, query.message.message_id)
+    await render(bot, chat_id, Screen(node['title'], ('Отметьте протоколы, к которым нужно дать доступ, и нажмите Применить.',)), rows, state, message_id)
 
-@router.callback_query(AddGrantCallback.filter())
-async def add_grant_cb(query: CallbackQuery, callback_data: AddGrantCallback, bot: Bot, backend: BackendClient, state: FSMContext):
+@router.callback_query(F.data.startswith("toggle_grant:"))
+async def toggle_grant_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
     await query.answer()
-    await change_grant(query.from_user.id, callback_data.profile_id, callback_data.node_key, callback_data.protocol, True, backend)
-    await show_admin_profile(query.message.chat.id, query.from_user.id, query.message.message_id, callback_data.profile_id, bot, backend, state)
+    protocol = query.data.split(":")[1]
+    data = await state.get_data()
+    editing = data.get('editing_grants')
+    if not editing: return
+    
+    selected = editing.get('selected', [])
+    if protocol in selected:
+        selected.remove(protocol)
+    else:
+        selected.append(protocol)
+        
+    editing['selected'] = selected
+    await state.update_data(editing_grants=editing)
+    await render_grant_protocols(query.message.chat.id, bot, backend, query.from_user.id, editing['profile_id'], editing['node_key'], selected, state, query.message.message_id)
 
-@router.callback_query(RemoveGrantCallback.filter())
-async def remove_grant_cb(query: CallbackQuery, callback_data: RemoveGrantCallback, bot: Bot, backend: BackendClient, state: FSMContext):
+@router.callback_query(F.data == "apply_grants")
+async def apply_grants_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
     await query.answer()
-    await change_grant(query.from_user.id, callback_data.profile_id, callback_data.node_key, callback_data.protocol, False, backend)
-    await show_admin_profile(query.message.chat.id, query.from_user.id, query.message.message_id, callback_data.profile_id, bot, backend, state)
-
-async def change_grant(user_id: int, profile_id: str, node_key: str, protocol: str, add: bool, backend: BackendClient):
-    profile = await backend.request('GET', f'/api/v1/profiles/{profile_id}', telegram_user_id=user_id)
+    data = await state.get_data()
+    editing = data.get('editing_grants')
+    if not editing: return
+    
+    user_id = query.from_user.id
+    profile_id = editing['profile_id']
+    node_key = editing['node_key']
+    selected = editing['selected']
+    
+    # We need to compute delta or just use a batch replacement if backend supports it.
+    # The current backend API (SQL) has granular POST/DELETE.
+    # We'll fetch current and do granular.
     grants = (await backend.profile_grants(user_id, profile_id))['items']
-    target = {'node_key': node_key, 'protocol': protocol}
-    if add and target not in grants:
-        grants.append(target)
-    elif not add and target in grants:
-        grants = [g for g in grants if g != target]
-    await backend.replace_grants(user_id, profile_id, profile['desired_revision'], grants)
+    current_selected = [g['protocol'] for g in grants if g['node_key'] == node_key]
+    
+    to_add = set(selected) - set(current_selected)
+    to_remove = set(current_selected) - set(selected)
+    
+    try:
+        for proto in to_add:
+            await backend.request('POST', f'/api/v1/profiles/{profile_id}/grants', telegram_user_id=user_id, json={'node_key': node_key, 'protocol': proto})
+        for proto in to_remove:
+            # We don't have a direct DELETE by protocol yet in the python backend client, maybe we can just do raw request
+            # Let's check how RemoveGrantCallback worked
+            # Assuming endpoint: DELETE /api/v1/profiles/{profile_id}/grants/{node_key}/{protocol}
+            await backend.request('DELETE', f'/api/v1/profiles/{profile_id}/grants/{node_key}/{proto}', telegram_user_id=user_id)
+            
+        await state.update_data(editing_grants=None)
+        rows = [[InlineKeyboardButton(text='🔙 Вернуться', callback_data=GrantNodesCallback(profile_id=profile_id).pack())]]
+        await render(bot, query.message.chat.id, Screen('Успех', ('Доступ успешно обновлен!',)), rows, state, query.message.message_id)
+    except Exception as exc:
+        rows = [[InlineKeyboardButton(text='🔙 Назад', callback_data=GrantNodesCallback(profile_id=profile_id).pack())]]
+        await render(bot, query.message.chat.id, Screen('Ошибка', (f'Не удалось обновить: {exc}',)), rows, state, query.message.message_id)
 
 @router.callback_query(ToggleFreezeCallback.filter())
 async def toggle_freeze_cb(query: CallbackQuery, callback_data: ToggleFreezeCallback, bot: Bot, backend: BackendClient, state: FSMContext):
