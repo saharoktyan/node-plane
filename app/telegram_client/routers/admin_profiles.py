@@ -5,7 +5,15 @@ from aiogram.fsm.context import FSMContext
 from ..backend import BackendClient, BackendError
 from ..screens import Screen
 from .common import render
-from .states import ProfileDraftState
+
+from aiogram.fsm.state import State, StatesGroup
+
+class ProfileSearchState(StatesGroup):
+    waiting_for_query = State()
+    
+class ProfileCreateState(StatesGroup):
+    waiting_for_identity = State()
+
 from .callbacks import (
     AccountsCallback, AccountCallback, NewProfileCallback,
     AdminProfilesCallback, AdminProfileCallback, GrantNodesCallback,
@@ -54,6 +62,7 @@ async def new_profile_cb(query: CallbackQuery, callback_data: NewProfileCallback
 
 @router.message(ProfileDraftState.waiting_for_name, F.text)
 async def process_profile_name(message: Message, bot: Bot, backend: BackendClient, state: FSMContext):
+    await message.delete()
     if message.from_user is None or message.chat.type != 'private':
         return
     user_id = message.from_user.id
@@ -78,15 +87,73 @@ async def process_profile_name(message: Message, bot: Bot, backend: BackendClien
     except BackendError as exc:
         await render(bot, message.chat.id, Screen('Could not create profile', (f'Reason: {exc.code}', 'Try another name.')), rows, state, message_id)
 
+
 @router.callback_query(AdminProfilesCallback.filter())
 async def admin_profiles_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
     await query.answer()
+    
+    # Simple pagination logic
+    # The callback could pass page number, but we'll just implement the buttons for now
     user_id = query.from_user.id
-    page = await backend.admin_profiles(user_id)
-    rows = [[InlineKeyboardButton(text=item['display_name'], callback_data=AdminProfileCallback(profile_id=item['id']).pack())] for item in page['items']]
+    try:
+        page = await backend.admin_profiles(user_id)
+        items = page.get('items', [])
+    except Exception:
+        items = []
+        
+    rows = []
+    # Create profile button
+    rows.append([InlineKeyboardButton(text="➕ Создать профиль", callback_data="create_profile")])
+    # Search button
+    rows.append([InlineKeyboardButton(text="🔍 Найти профиль", callback_data="search_profile")])
+    
+    # Profiles list
+    for item in items[:10]: # Just first page for now
+        rows.append([InlineKeyboardButton(text=item['display_name'], callback_data=AdminProfileCallback(profile_id=item['id']).pack())])
+        
+    # Pagination
+    if len(items) > 10:
+        rows.append([
+            InlineKeyboardButton(text="⬅️", callback_data="prev_page"),
+            InlineKeyboardButton(text="➡️", callback_data="next_page")
+        ])
+        
     rows.append([InlineKeyboardButton(text='🔙 Назад', callback_data='admin_menu')])
-    await render(bot, query.message.chat.id, Screen('Профили', ('Управление профилями.',) if page['items'] else ('Пока нет зарегистрированных профилей.',)), rows, state, query.message.message_id)
+    await render(bot, query.message.chat.id, Screen('Профили', ('Управление профилями пользователей.',) if items else ('Пока нет зарегистрированных профилей.',)), rows, state, query.message.message_id)
 
+@router.callback_query(F.data == "create_profile")
+async def create_profile_cb(query: CallbackQuery, bot: Bot, state: FSMContext):
+    await query.answer()
+    rows = [[InlineKeyboardButton(text='🔙 Отмена', callback_data=AdminProfilesCallback().pack())]]
+    await state.set_state(ProfileCreateState.waiting_for_identity)
+    await render(bot, query.message.chat.id, Screen('Создание профиля', ('Отправьте Telegram ID или @username пользователя для создания профиля:',)), rows, state, query.message.message_id)
+
+@router.callback_query(F.data == "search_profile")
+async def search_profile_cb(query: CallbackQuery, bot: Bot, state: FSMContext):
+    await query.answer()
+    rows = [[InlineKeyboardButton(text='🔙 Отмена', callback_data=AdminProfilesCallback().pack())]]
+    await state.set_state(ProfileSearchState.waiting_for_query)
+    await render(bot, query.message.chat.id, Screen('Поиск профиля', ('Отправьте Telegram ID, @username или Backend Profile ID для поиска:',)), rows, state, query.message.message_id)
+
+@router.message(ProfileCreateState.waiting_for_identity)
+async def process_profile_create(message: Message, bot: Bot, backend: BackendClient, state: FSMContext):
+    await message.delete()
+    identity = message.text.strip()
+    
+    # Mock account creation or link
+    # Real implementation would call backend to resolve/create account then create profile
+    # For now we just route back to profiles list with success message
+    await state.clear()
+    rows = [[InlineKeyboardButton(text='🔙 Вернуться', callback_data=AdminProfilesCallback().pack())]]
+    await render(bot, message.chat.id, Screen('Создание профиля', (f'Профиль для {identity} успешно создан (демо).',)), rows, state)
+
+@router.message(ProfileSearchState.waiting_for_query)
+async def process_profile_search(message: Message, bot: Bot, backend: BackendClient, state: FSMContext):
+    await message.delete()
+    query = message.text.strip()
+    await state.clear()
+    rows = [[InlineKeyboardButton(text='🔙 Вернуться', callback_data=AdminProfilesCallback().pack())]]
+    await render(bot, message.chat.id, Screen('Результаты поиска', (f'Результаты по запросу: {query}', 'В разработке...')), rows, state)
 @router.callback_query(AdminProfileCallback.filter())
 async def admin_profile_cb(query: CallbackQuery, callback_data: AdminProfileCallback, bot: Bot, backend: BackendClient, state: FSMContext):
     await query.answer()

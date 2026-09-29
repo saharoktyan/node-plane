@@ -23,13 +23,21 @@ from .config_issuance import ConfigIssuanceService
 from .agent_rollout import AgentRolloutService
 
 
-def bootstrap_admin(repository: SQLIdentityRepository, telegram_user_id: int):
+def bootstrap_admin(repository: SQLIdentityRepository, telegram_user_id: int, db):
     validate_telegram_id(telegram_user_id)
     account = repository.resolve_telegram(telegram_user_id)
     with repository.db.transaction() as conn:
         conn.execute('UPDATE backend_account_guard SET revision = revision + 1 WHERE id = 1')
         conn.execute("""UPDATE backend_accounts SET role = 'admin', status = 'approved',
             revision = revision + 1 WHERE id = ? AND (role != 'admin' OR status != 'approved')""", (account.id,))
+    
+    from .profile_repository import ProfileRepository
+    pref = ProfileRepository(db)
+    # Check if a profile exists
+    profiles = pref.list_profiles_by_owner(account.id)
+    if not profiles:
+        pref.create_profile(runtime_name=f"tg_{telegram_user_id}", display_name=f"Admin {telegram_user_id}", owner_account_id=account.id)
+        
     return repository.get_account(account.id)
 
 
@@ -133,7 +141,7 @@ def main():
             AgentRolloutService(db).initialize_schema()
             print('Backend identity schema initialized.')
         elif args.command == 'bootstrap-admin':
-            account = bootstrap_admin(identities, args.telegram_id)
+            account = bootstrap_admin(identities, args.telegram_id, db)
             print(f'Administrator account: {account.id}')
         elif args.command == 'create-account':
             account = identities.create_account(status=args.status)

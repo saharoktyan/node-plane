@@ -34,36 +34,100 @@ async def show_admin_nodes(chat_id, user_id, message_id, bot, backend, state):
     rows.append([InlineKeyboardButton(text='🔙 Назад', callback_data='admin_menu')])
     await render(bot, chat_id, Screen('Серверы', ('Выберите сервер для настройки и управления.',) if page['items'] else ('Пока нет зарегистрированных серверов.',)), rows, state, message_id)
 
+
 @router.callback_query(NewNodeCallback.filter())
 async def new_node_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
     await query.answer()
-    await state.set_state(NodeDraftState.waiting_for_node_base)
-    rows = [[InlineKeyboardButton(text='Cancel', callback_data=AdminNodesCallback().pack())]]
-    await render(bot, query.message.chat.id, Screen('New node', ('Send: key | name | region | public host', 'Example: lv1 | Latvia #1 | EU | lv1.example.com')), rows, state, query.message.message_id)
+    await state.set_state(NodeDraftState.waiting_for_key)
+    await state.update_data(wizard_data={})
+    rows = [[InlineKeyboardButton(text='🔙 Отмена', callback_data=AdminNodesCallback().pack())]]
+    await render(bot, query.message.chat.id, Screen('Добавление сервера (1/5)', ('Введите уникальный идентификатор (key) для сервера (только латиница и цифры):',)), rows, state, query.message.message_id)
 
-@router.message(NodeDraftState.waiting_for_node_base, F.text)
-async def process_node_base(message: Message, bot: Bot, backend: BackendClient, state: FSMContext):
-    if message.from_user is None or message.chat.type != 'private': return
-    user_id = message.from_user.id
-    data = await state.get_data()
-    message_id = data.get('control_message_id')
-    fields = [part.strip() for part in (message.text or '').split('|')]
-    
-    rows = [[InlineKeyboardButton(text='Cancel', callback_data=AdminNodesCallback().pack())]]
-    if len(fields) != 4 or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,63}', fields[0]) or not fields[1] or not fields[2] or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9.-]*[A-Za-z0-9]', fields[3]):
-        await render(bot, message.chat.id, Screen('New node', ('Send: key | name | region | public host', 'Example: lv1 | Latvia #1 | EU | lv1.example.com')), rows, state, message_id)
+@router.message(NodeDraftState.waiting_for_key, F.text)
+async def process_wizard_key(message: Message, bot: Bot, state: FSMContext):
+    await message.delete()
+    if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,63}', message.text.strip()):
         return
-        
-    await state.update_data(node_base=dict(zip(('key', 'title', 'region', 'public_host'), fields)))
-    await state.set_state(NodeDraftState.waiting_for_protocol_choice)
-    await show_node_protocol_choice(message.chat.id, user_id, message_id, bot, backend, state)
+    data = await state.get_data()
+    w = data.get('wizard_data', {})
+    w['key'] = message.text.strip()
+    await state.update_data(wizard_data=w)
+    await state.set_state(NodeDraftState.waiting_for_title)
+    rows = [[InlineKeyboardButton(text='🔙 Отмена', callback_data=AdminNodesCallback().pack())]]
+    await render(bot, message.chat.id, Screen('Добавление сервера (2/5)', ('Введите понятное название (title) для сервера:',)), rows, state)
 
-async def show_node_protocol_choice(chat_id, user_id, message_id, bot, backend, state):
-    rows = [[InlineKeyboardButton(text='AWG + Xray', callback_data=SubmitNodeCallback(choice='both').pack())],
-            [InlineKeyboardButton(text='AWG only', callback_data=SubmitNodeCallback(choice='awg').pack()),
-             InlineKeyboardButton(text='Xray only', callback_data=SubmitNodeCallback(choice='xray').pack())],
-            [InlineKeyboardButton(text='Cancel', callback_data=AdminNodesCallback().pack())]]
-    await render(bot, chat_id, Screen('Choose protocols', ('Default ports: AWG 51820, Xray TCP 443, XHTTP 8443.', 'Xray SNI defaults to www.cloudflare.com. Settings can be edited later.')), rows, state, message_id)
+@router.message(NodeDraftState.waiting_for_title, F.text)
+async def process_wizard_title(message: Message, bot: Bot, state: FSMContext):
+    await message.delete()
+    data = await state.get_data()
+    w = data.get('wizard_data', {})
+    w['title'] = message.text.strip()
+    await state.update_data(wizard_data=w)
+    await state.set_state(NodeDraftState.waiting_for_region)
+    rows = [[InlineKeyboardButton(text='🔙 Отмена', callback_data=AdminNodesCallback().pack())]]
+    await render(bot, message.chat.id, Screen('Добавление сервера (3/5)', ('Введите регион сервера (например: EU, RU, US):',)), rows, state)
+
+@router.message(NodeDraftState.waiting_for_region, F.text)
+async def process_wizard_region(message: Message, bot: Bot, state: FSMContext):
+    await message.delete()
+    data = await state.get_data()
+    w = data.get('wizard_data', {})
+    w['region'] = message.text.strip()
+    await state.update_data(wizard_data=w)
+    await state.set_state(NodeDraftState.waiting_for_flag)
+    rows = [
+        [InlineKeyboardButton(text='Пропустить', callback_data="wizard_skip_flag")],
+        [InlineKeyboardButton(text='🔙 Отмена', callback_data=AdminNodesCallback().pack())]
+    ]
+    await render(bot, message.chat.id, Screen('Добавление сервера (4/5)', ('Отправьте эмодзи флага или нажмите "Пропустить":',)), rows, state)
+
+@router.callback_query(F.data == "wizard_skip_flag")
+async def wizard_skip_flag_cb(query: CallbackQuery, bot: Bot, state: FSMContext):
+    await query.answer()
+    data = await state.get_data()
+    w = data.get('wizard_data', {})
+    w['flag'] = "🏳️"
+    await state.update_data(wizard_data=w)
+    await state.set_state(NodeDraftState.waiting_for_public_host)
+    rows = [[InlineKeyboardButton(text='🔙 Отмена', callback_data=AdminNodesCallback().pack())]]
+    await render(bot, query.message.chat.id, Screen('Добавление сервера (5/5)', ('Введите публичный хост или IP сервера:',)), rows, state, query.message.message_id)
+
+@router.message(NodeDraftState.waiting_for_flag, F.text)
+async def process_wizard_flag(message: Message, bot: Bot, state: FSMContext):
+    await message.delete()
+    data = await state.get_data()
+    w = data.get('wizard_data', {})
+    w['flag'] = message.text.strip()
+    await state.update_data(wizard_data=w)
+    await state.set_state(NodeDraftState.waiting_for_public_host)
+    rows = [[InlineKeyboardButton(text='🔙 Отмена', callback_data=AdminNodesCallback().pack())]]
+    await render(bot, message.chat.id, Screen('Добавление сервера (5/5)', ('Введите публичный хост или IP сервера:',)), rows, state)
+
+@router.message(NodeDraftState.waiting_for_public_host, F.text)
+async def process_wizard_host(message: Message, bot: Bot, backend: BackendClient, state: FSMContext):
+    await message.delete()
+    data = await state.get_data()
+    w = data.get('wizard_data', {})
+    w['public_host'] = message.text.strip()
+    
+    # Finished! Create the node on the backend
+    try:
+        await backend.request('POST', '/api/v1/nodes', telegram_user_id=message.from_user.id, json={
+            "key": w["key"],
+            "title": w["title"],
+            "region": w["region"],
+            "flag": w["flag"],
+            "protocols": [],
+            "settings": {
+                "public_host": w["public_host"]
+            }
+        })
+        await state.clear()
+        rows = [[InlineKeyboardButton(text='К списку серверов', callback_data=AdminNodesCallback().pack())]]
+        await render(bot, message.chat.id, Screen('Успех', (f'Сервер {w["title"]} успешно создан!',)), rows, state)
+    except Exception as exc:
+        rows = [[InlineKeyboardButton(text='🔙 Отмена', callback_data=AdminNodesCallback().pack())]]
+        await render(bot, message.chat.id, Screen('Ошибка', (f'Не удалось создать сервер: {exc}',)), rows, state)
 
 @router.callback_query(SubmitNodeCallback.filter())
 async def submit_node_cb(query: CallbackQuery, callback_data: SubmitNodeCallback, bot: Bot, backend: BackendClient, state: FSMContext):
@@ -94,25 +158,36 @@ async def submit_node_cb(query: CallbackQuery, callback_data: SubmitNodeCallback
             [[InlineKeyboardButton(text='Retry', callback_data=SubmitNodeCallback(choice=choice).pack())],
              [InlineKeyboardButton(text='Cancel', callback_data=AdminNodesCallback().pack())]], state, query.message.message_id)
 
+
 @router.callback_query(AdminNodeCallback.filter())
 async def admin_node_cb(query: CallbackQuery, callback_data: AdminNodeCallback, bot: Bot, backend: BackendClient, state: FSMContext):
     await query.answer()
-    await show_admin_node(query.message.chat.id, query.from_user.id, query.message.message_id, callback_data.node_key, bot, backend, state)
-
-async def show_admin_node(chat_id, user_id, message_id, node_key, bot, backend, state):
-    node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=user_id)
-    node_state = 'Ready' if node['enabled'] and node['desired_revision'] == node['applied_revision'] else 'Setup needed'
-    rows = [[InlineKeyboardButton(text='Probe agent', callback_data=ProbeNodeCallback(node_key=node_key).pack())]]
-    rows.append([InlineKeyboardButton(text='Settings', callback_data=NodeSettingsCallback(node_key=node_key).pack()),
-                 InlineKeyboardButton(text='Maintenance', callback_data=NodeMaintenanceCallback(node_key=node_key).pack())])
-    rows.append([InlineKeyboardButton(text='Set up local agent', callback_data=RolloutLocalCallback(node_key=node_key).pack())])
-    rows.append([InlineKeyboardButton(text='Set up SSH agent', callback_data=RolloutSshCallback(node_key=node_key).pack())])
-    rows.append([InlineKeyboardButton(text='Updates', callback_data=NodeUpdatesCallback(node_key=node_key).pack())])
-    if node['desired_revision'] != node['applied_revision']:
-        rows.append([InlineKeyboardButton(text='Apply settings', callback_data=ApplyNodeCallback(node_key=node_key).pack())])
-    rows.append([InlineKeyboardButton(text='🔙 Назад', callback_data=AdminNodesCallback().pack())])
-    await render(bot, chat_id, Screen(node['title'], (f"State: {node_state}", f"Protocols: {', '.join(node['protocols']) or 'none'}", f"Revision: {node['applied_revision']} / {node['desired_revision']}")), rows, state, message_id)
-
+    node_key = callback_data.node_key
+    try:
+        node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=query.from_user.id)
+    except Exception:
+        await query.answer("Node not found", show_alert=True)
+        return
+        
+    rows = [
+        [
+            InlineKeyboardButton(text="📡 Опрос (Probe)", callback_data=ProbeNodeCallback(node_key=node_key).pack()),
+            InlineKeyboardButton(text="🚀 Применить (Apply)", callback_data=ApplyNodeCallback(node_key=node_key).pack())
+        ],
+        [InlineKeyboardButton(text="⚙️ Дополнительно", callback_data=NodeSettingsCallback(node_key=node_key).pack())],
+        [InlineKeyboardButton(text="🗑 Удалить сервер", callback_data=ConfirmRegistryRemovalCallback(node_key=node_key).pack())],
+        [InlineKeyboardButton(text="🔙 К списку серверов", callback_data=AdminNodesCallback().pack())]
+    ]
+    
+    # We construct a human friendly card
+    lines = [
+        f"Region: {node.get('region', 'N/A')} {node.get('flag', '')}",
+        f"Protocols: {', '.join(node.get('protocols', [])) or 'None'}",
+        f"Transports: {', '.join(node.get('xray_transports', [])) or 'None'}",
+        "",
+        "В этом меню можно управлять состоянием узла."
+    ]
+    await render(bot, query.message.chat.id, Screen(f"Сервер: {node.get('title')}", lines), rows, state, query.message.message_id)
 @router.callback_query(NodeSettingsCallback.filter())
 async def node_settings_cb(query: CallbackQuery, callback_data: NodeSettingsCallback, bot: Bot, backend: BackendClient, state: FSMContext):
     await query.answer()
@@ -156,6 +231,7 @@ async def edit_node_field_cb(query: CallbackQuery, callback_data: EditNodeFieldC
 
 @router.message(NodeEditState.waiting_for_value, F.text)
 async def process_node_edit(message: Message, bot: Bot, backend: BackendClient, state: FSMContext):
+    await message.delete()
     if message.from_user is None or message.chat.type != 'private': return
     user_id, value = message.from_user.id, message.text.strip()
     data = await state.get_data()

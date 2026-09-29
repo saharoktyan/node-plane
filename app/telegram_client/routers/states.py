@@ -4,8 +4,13 @@ class ProfileDraftState(StatesGroup):
     waiting_for_name = State()
 
 class NodeDraftState(StatesGroup):
-    waiting_for_node_base = State()
-    waiting_for_protocol_choice = State()
+    waiting_for_key = State()
+    waiting_for_title = State()
+    waiting_for_flag = State()
+    waiting_for_region = State()
+    waiting_for_transport = State()
+    waiting_for_target = State()
+    waiting_for_public_host = State()
 
 class AgentDraftState(StatesGroup):
     waiting_for_ssh_target = State()

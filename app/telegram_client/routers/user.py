@@ -6,14 +6,32 @@ from aiogram.filters import CommandStart
 from ..backend import BackendClient, BackendError
 from ..screens import Screen
 from .common import render
+
+from app.services.profile_state import user_store
+from app.i18n import t, set_user_locale, get_user_locale
 from .callbacks import HomeCallback, RequestAccessCallback, ProfilesCallback, AdminSettingsCallback, RequestsCallback, AdminProfilesCallback, AdminNodesCallback, UpdatesCallback
 
 router = Router()
 
 @router.message(CommandStart())
 async def start_cmd(message: Message, bot: Bot, backend: BackendClient, state: FSMContext):
+    try: await message.delete()
+    except: pass
     if message.from_user is None or message.chat.type != 'private':
         return
+
+    try:
+        user_rec = user_store.get_user(message.from_user.id)
+        if not user_rec or not user_rec.get('locale_explicitly_selected'):
+            rows = [
+                [InlineKeyboardButton(text="🇷🇺 Русский", callback_data="lang_select:ru")],
+                [InlineKeyboardButton(text="🇬🇧 English", callback_data="lang_select:en")]
+            ]
+            await render(bot, message.chat.id, Screen('Language / Язык', ('Select your language / Выберите язык:',)), rows, state)
+            return
+    except Exception:
+        pass
+    
     try:
         await backend.resolve(message.from_user.id)
         await show_home(message.chat.id, message.from_user.id, bot, backend, state)
@@ -54,11 +72,25 @@ async def profile_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, sta
     rows = [[InlineKeyboardButton(text="🔙 Назад", callback_data=HomeCallback().pack())]]
     await render(bot, query.message.chat.id, Screen('Мой профиль', ('Ваша учетная запись Node Plane.',)), rows, state, query.message.message_id)
 
+
+@router.callback_query(F.data.startswith("lang_select:"))
+async def lang_select_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
+    await query.answer()
+    lang = query.data.split(":")[1]
+    set_user_locale(query.from_user.id, lang)
+    if query.message:
+        await show_home(query.message.chat.id, query.from_user.id, bot, backend, state, query.message.message_id)
+
 @router.callback_query(F.data == "user_settings")
 async def settings_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
     await query.answer()
-    rows = [[InlineKeyboardButton(text="🔙 Назад", callback_data=HomeCallback().pack())]]
-    await render(bot, query.message.chat.id, Screen('Настройки', ('Настройки уведомлений.',)), rows, state, query.message.message_id)
+    lang = get_user_locale(query.from_user.id)
+    rows = [
+        [InlineKeyboardButton(text="🇷🇺 Русский" if lang == "en" else "🇬🇧 English", callback_data="lang_select:en" if lang == "ru" else "lang_select:ru")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data=HomeCallback().pack())]
+    ]
+    await render(bot, query.message.chat.id, Screen('Настройки', ('Настройки пользователя.',)), rows, state, query.message.message_id)
+
 
 @router.callback_query(F.data == "admin_menu")
 async def admin_menu_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
