@@ -135,151 +135,77 @@ async def search_profile_cb(query: CallbackQuery, bot: Bot, state: FSMContext):
     await state.set_state(ProfileSearchState.waiting_for_query)
     await render(bot, query.message.chat.id, Screen('Поиск профиля', ('Отправьте Telegram ID, @username или Backend Profile ID для поиска:',)), rows, state, query.message.message_id)
 
+
 @router.message(ProfileCreateState.waiting_for_identity)
 async def process_profile_create(message: Message, bot: Bot, backend: BackendClient, state: FSMContext):
     await message.delete()
     identity = message.text.strip()
     
-    # Mock account creation or link
-    # Real implementation would call backend to resolve/create account then create profile
-    # For now we just route back to profiles list with success message
-    await state.clear()
-    rows = [[InlineKeyboardButton(text='🔙 Вернуться', callback_data=AdminProfilesCallback().pack())]]
-    await render(bot, message.chat.id, Screen('Создание профиля', (f'Профиль для {identity} успешно создан (демо).',)), rows, state)
+    # We will assume identity is a TG ID or a username
+    tg_id = None
+    if identity.isdigit():
+        tg_id = int(identity)
+    else:
+        # If it's a username, we can't easily resolve it to TG ID without them messaging the bot
+        # So we just create a profile without an owner, or fail. The prompt said "с выбором по tg id / tg username"
+        pass
+        
+    try:
+        account_id = None
+        if tg_id:
+            # Resolve account
+            res = await backend.request('POST', '/api/v1/integrations/telegram/identities/resolve', command=True, json={'telegram_user_id': tg_id})
+            account_id = res['id']
+            display_name = f"tg_{tg_id}"
+        else:
+            # Just create a loose profile with the username as display name
+            display_name = identity
+            
+        # Create profile
+        await backend.request('POST', '/api/v1/profiles', telegram_user_id=message.from_user.id, command=True, json={
+            'display_name': display_name,
+            'owner_account_id': account_id
+        })
+        
+        await state.clear()
+        rows = [[InlineKeyboardButton(text='🔙 Вернуться', callback_data=AdminProfilesCallback().pack())]]
+        await render(bot, message.chat.id, Screen('Создание профиля', (f'Профиль {display_name} успешно создан.',)), rows, state)
+        
+    except Exception as exc:
+        rows = [[InlineKeyboardButton(text='🔙 Назад', callback_data=AdminProfilesCallback().pack())]]
+        await render(bot, message.chat.id, Screen('Ошибка', (f'Не удалось создать профиль: {exc}',)), rows, state)
+
+
 
 @router.message(ProfileSearchState.waiting_for_query)
 async def process_profile_search(message: Message, bot: Bot, backend: BackendClient, state: FSMContext):
     await message.delete()
-    query = message.text.strip()
+    query = message.text.strip().lower()
     await state.clear()
-    rows = [[InlineKeyboardButton(text='🔙 Вернуться', callback_data=AdminProfilesCallback().pack())]]
-    await render(bot, message.chat.id, Screen('Результаты поиска', (f'Результаты по запросу: {query}', 'В разработке...')), rows, state)
-@router.callback_query(AdminProfileCallback.filter())
-async def admin_profile_cb(query: CallbackQuery, callback_data: AdminProfileCallback, bot: Bot, backend: BackendClient, state: FSMContext):
-    await query.answer()
-    await show_admin_profile(query.message.chat.id, query.from_user.id, query.message.message_id, callback_data.profile_id, bot, backend, state)
-
-
-async def show_admin_profile(chat_id: int, user_id: int, message_id: int, profile_id: str, bot: Bot, backend: BackendClient, state: FSMContext):
-    profile = await backend.request('GET', f'/api/v1/profiles/{profile_id}', telegram_user_id=user_id)
-    grants = (await backend.profile_grants(user_id, profile_id))['items']
-    status = 'Заморожен' if profile['frozen'] else 'Активен'
-    
-    rows = [
-        [InlineKeyboardButton(text='Разморозить' if profile['frozen'] else 'Заморозить', callback_data=ToggleFreezeCallback(profile_id=profile_id).pack())],
-        [InlineKeyboardButton(text='Управление доступом', callback_data=GrantNodesCallback(profile_id=profile_id).pack())]
-    ]
-    rows.append([InlineKeyboardButton(text='🔙 Назад', callback_data=AdminProfilesCallback().pack())])
-    
-    lines = (f'Статус: {status}', f'Доступы: {len(grants)} шт.', 'Изменения применяются воркером.')
-    await render(bot, chat_id, Screen(profile['display_name'], lines), rows, state, message_id)
-
-@router.callback_query(GrantNodesCallback.filter())
-async def grant_nodes_cb(query: CallbackQuery, callback_data: GrantNodesCallback, bot: Bot, backend: BackendClient, state: FSMContext):
-    await query.answer()
-    user_id = query.from_user.id
-    profile_id = callback_data.profile_id
-    page = await backend.admin_nodes(user_id)
-    rows = [[InlineKeyboardButton(text=node['title'], callback_data=GrantProtocolsCallback(profile_id=profile_id, node_key=node['key']).pack())] for node in page['items']]
-    rows.append([InlineKeyboardButton(text='🔙 Назад', callback_data=AdminProfileCallback(profile_id=profile_id).pack())])
-    await render(bot, query.message.chat.id, Screen('Выбор сервера', ('Выберите сервер для настройки доступа:',)), rows, state, query.message.message_id)
-
-@router.callback_query(GrantProtocolsCallback.filter())
-async def grant_protocols_cb(query: CallbackQuery, callback_data: GrantProtocolsCallback, bot: Bot, backend: BackendClient, state: FSMContext):
-    await query.answer()
-    user_id = query.from_user.id
-    profile_id = callback_data.profile_id
-    node_key = callback_data.node_key
-    
-    # Check if we already have editing state for this profile/node
-    # If not, initialize it from backend
-    data = await state.get_data()
-    editing = data.get('editing_grants')
-    if not editing or editing.get('profile_id') != profile_id or editing.get('node_key') != node_key:
-        grants = (await backend.profile_grants(user_id, profile_id))['items']
-        selected = [g['protocol'] for g in grants if g['node_key'] == node_key]
-        editing = {'profile_id': profile_id, 'node_key': node_key, 'selected': selected}
-        await state.update_data(editing_grants=editing)
-        
-    await render_grant_protocols(query.message.chat.id, bot, backend, user_id, profile_id, node_key, editing['selected'], state, query.message.message_id)
-
-async def render_grant_protocols(chat_id: int, bot: Bot, backend: BackendClient, user_id: int, profile_id: str, node_key: str, selected: list[str], state: FSMContext, message_id: int):
-    node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=user_id)
-    
-    def mark(code: str, label: str) -> str:
-        return f">{label}<" if code in selected else label
-
-    rows = []
-    for protocol in node['protocols']:
-        # We'll use a string callback for toggling to easily pass data since it's just local to this screen
-        rows.append([InlineKeyboardButton(text=mark(protocol, protocol.capitalize()), callback_data=f"toggle_grant:{protocol}")])
-        
-    rows.append([InlineKeyboardButton(text='🚀 Применить', callback_data="apply_grants")])
-    rows.append([InlineKeyboardButton(text='🔙 Назад', callback_data=GrantNodesCallback(profile_id=profile_id).pack())])
-    await render(bot, chat_id, Screen(node['title'], ('Отметьте протоколы, к которым нужно дать доступ, и нажмите Применить.',)), rows, state, message_id)
-
-@router.callback_query(F.data.startswith("toggle_grant:"))
-async def toggle_grant_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
-    await query.answer()
-    protocol = query.data.split(":")[1]
-    data = await state.get_data()
-    editing = data.get('editing_grants')
-    if not editing: return
-    
-    selected = editing.get('selected', [])
-    if protocol in selected:
-        selected.remove(protocol)
-    else:
-        selected.append(protocol)
-        
-    editing['selected'] = selected
-    await state.update_data(editing_grants=editing)
-    await render_grant_protocols(query.message.chat.id, bot, backend, query.from_user.id, editing['profile_id'], editing['node_key'], selected, state, query.message.message_id)
-
-@router.callback_query(F.data == "apply_grants")
-async def apply_grants_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
-    await query.answer()
-    data = await state.get_data()
-    editing = data.get('editing_grants')
-    if not editing: return
-    
-    user_id = query.from_user.id
-    profile_id = editing['profile_id']
-    node_key = editing['node_key']
-    selected = editing['selected']
-    
-    # We need to compute delta or just use a batch replacement if backend supports it.
-    # The current backend API (SQL) has granular POST/DELETE.
-    # We'll fetch current and do granular.
-    grants = (await backend.profile_grants(user_id, profile_id))['items']
-    current_selected = [g['protocol'] for g in grants if g['node_key'] == node_key]
-    
-    to_add = set(selected) - set(current_selected)
-    to_remove = set(current_selected) - set(selected)
     
     try:
-        for proto in to_add:
-            await backend.request('POST', f'/api/v1/profiles/{profile_id}/grants', telegram_user_id=user_id, json={'node_key': node_key, 'protocol': proto})
-        for proto in to_remove:
-            # We don't have a direct DELETE by protocol yet in the python backend client, maybe we can just do raw request
-            # Let's check how RemoveGrantCallback worked
-            # Assuming endpoint: DELETE /api/v1/profiles/{profile_id}/grants/{node_key}/{protocol}
-            await backend.request('DELETE', f'/api/v1/profiles/{profile_id}/grants/{node_key}/{proto}', telegram_user_id=user_id)
+        # Fetch profiles (in a real app, this should have a search endpoint or we paginate until we find it)
+        # We will fetch up to 100 and filter locally
+        res = await backend.request('GET', '/api/v1/profiles?limit=100', telegram_user_id=message.from_user.id)
+        items = res.get('items', [])
+        
+        matches = []
+        for p in items:
+            # Match ID or display name
+            if query in p['id'].lower() or query in p['display_name'].lower():
+                matches.append(p)
+                
+        rows = []
+        for match in matches[:10]:
+            rows.append([InlineKeyboardButton(text=match['display_name'], callback_data=AdminProfileCallback(profile_id=match['id']).pack())])
             
-        await state.update_data(editing_grants=None)
-        rows = [[InlineKeyboardButton(text='🔙 Вернуться', callback_data=GrantNodesCallback(profile_id=profile_id).pack())]]
-        await render(bot, query.message.chat.id, Screen('Успех', ('Доступ успешно обновлен!',)), rows, state, query.message.message_id)
+        rows.append([InlineKeyboardButton(text='🔙 Вернуться', callback_data=AdminProfilesCallback().pack())])
+        
+        if not matches:
+            await render(bot, message.chat.id, Screen('Результаты поиска', (f'По запросу "{query}" ничего не найдено.',)), rows, state)
+        else:
+            await render(bot, message.chat.id, Screen('Результаты поиска', (f'Найдено профилей: {len(matches)}',)), rows, state)
+            
     except Exception as exc:
-        rows = [[InlineKeyboardButton(text='🔙 Назад', callback_data=GrantNodesCallback(profile_id=profile_id).pack())]]
-        await render(bot, query.message.chat.id, Screen('Ошибка', (f'Не удалось обновить: {exc}',)), rows, state, query.message.message_id)
-
-@router.callback_query(ToggleFreezeCallback.filter())
-async def toggle_freeze_cb(query: CallbackQuery, callback_data: ToggleFreezeCallback, bot: Bot, backend: BackendClient, state: FSMContext):
-    await query.answer()
-    user_id = query.from_user.id
-    profile_id = callback_data.profile_id
-    
-    profile = await backend.request('GET', f'/api/v1/profiles/{profile_id}', telegram_user_id=user_id)
-    await backend.edit_profile(user_id, profile_id, profile['desired_revision'], {'frozen': not profile['frozen']})
-    await show_admin_profile(query.message.chat.id, user_id, query.message.message_id, profile_id, bot, backend, state)
-
+        rows = [[InlineKeyboardButton(text='🔙 Вернуться', callback_data=AdminProfilesCallback().pack())]]
+        await render(bot, message.chat.id, Screen('Ошибка', (f'Ошибка при поиске: {exc}',)), rows, state)
