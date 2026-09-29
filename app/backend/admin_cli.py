@@ -34,7 +34,7 @@ def bootstrap_admin(repository: SQLIdentityRepository, telegram_user_id: int, db
     from .profiles import ProfileRepository
     pref = ProfileRepository(db)
     # Check if a profile exists
-    profiles = pref.list_profiles_by_owner(account.id)
+    profiles = pref.owned(account.id, after='', limit=1)
     if not profiles:
         pref.create_profile(runtime_name=f"tg_{telegram_user_id}", display_name=f"Admin {telegram_user_id}", owner_account_id=account.id)
         
