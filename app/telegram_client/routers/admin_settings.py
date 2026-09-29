@@ -21,7 +21,7 @@ async def admin_settings_cb(query: CallbackQuery, bot: Bot, backend: BackendClie
     rows = [
         [
             InlineKeyboardButton(text="Название бота", callback_data="settings_bot_title"),
-            InlineKeyboardButton(text="Заявки на доступ", callback_data="settings_requests"),
+            InlineKeyboardButton(text="Заявки на доступ", callback_data=RequestsCallback().pack()),
         ],
         [
             InlineKeyboardButton(text="Обновления", callback_data=UpdatesCallback().pack()),
