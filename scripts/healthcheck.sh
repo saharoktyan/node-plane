@@ -136,8 +136,7 @@ check_file_exists() {
 }
 
 systemd_unit_installed() {
-  has_cmd systemctl && { [[ "$(systemctl show node-plane.service --property=LoadState --value 2>/dev/null || true)" == "loaded" ]] \
-    || [[ "$(systemctl show node-plane-telegram.service --property=LoadState --value 2>/dev/null || true)" == "loaded" ]]; }
+  has_cmd systemctl && [[ "$(systemctl show node-plane-telegram.service --property=LoadState --value 2>/dev/null || true)" == "loaded" ]]
 }
 
 detect_mode() {
@@ -156,7 +155,7 @@ detect_mode() {
 
 check_repo_basics() {
   section "Repository"
-  check_file_exists "app/main.py" "App entrypoint"
+  check_file_exists "app/telegram_client/main.py" "Telegram client entrypoint"
   check_file_exists "requirements.txt" "Requirements file"
   if [[ "$MODE" == "portable" ]]; then
     check_file_exists "docker-compose.yml" "Compose file"
@@ -174,13 +173,14 @@ check_repo_basics() {
 check_env() {
   section "Configuration"
 
-  local bot_token admin_ids base_dir app_dir shared_dir ssh_key
+  local bot_token admin_ids base_dir app_dir shared_dir ssh_key adapter_token_file
   bot_token="$(read_env_value BOT_TOKEN)"
   admin_ids="$(read_env_value ADMIN_IDS)"
   base_dir="$(read_env_value NODE_PLANE_BASE_DIR)"
   app_dir="$(read_env_value NODE_PLANE_APP_DIR)"
   shared_dir="$(read_env_value NODE_PLANE_SHARED_DIR)"
   ssh_key="$(read_env_value SSH_KEY)"
+  adapter_token_file="$(read_env_value NODE_PLANE_BACKEND_ADAPTER_TOKEN_FILE)"
 
   if [[ -n "$bot_token" && "$bot_token" != "replace_me" ]]; then
     ok "BOT_TOKEN is configured"
@@ -194,6 +194,13 @@ check_env() {
   else
     fail "ADMIN_IDS is missing or still set to placeholder"
     add_remediation "Set ADMIN_IDS in .env to your Telegram numeric user id"
+  fi
+
+  if [[ -n "$adapter_token_file" && -f "$adapter_token_file" && -r "$adapter_token_file" ]]; then
+    ok "backend adapter credential is available"
+  else
+    fail "backend adapter credential is missing or unreadable"
+    add_remediation "Rerun ./scripts/install.sh --mode simple to create the aiogram adapter credential"
   fi
 
   if [[ "$MODE" == "simple" ]]; then
@@ -341,10 +348,7 @@ check_simple_mode() {
   fi
 
   if has_cmd systemctl; then
-    local bot_service="node-plane.service"
-    if systemctl is-active --quiet node-plane-telegram.service; then
-      bot_service="node-plane-telegram.service"
-    fi
+    local bot_service="node-plane-telegram.service"
     if systemd_unit_installed; then
       ok "systemd bot unit is installed"
       systemd_ok=1
@@ -356,7 +360,7 @@ check_simple_mode() {
         add_remediation "Start the selected bot service with systemctl after checking its configuration"
       fi
     else
-      warn "systemd unit node-plane.service is not installed"
+      warn "systemd unit node-plane-telegram.service is not installed"
       add_remediation "Install the unit: ./scripts/install.sh --mode simple --install-systemd"
     fi
     if [[ -f "${app_dir}/app/backend/http_api.py" ]]; then

@@ -27,21 +27,16 @@ when it fits, an on-demand QR image. Admins listed in `ADMIN_IDS` receive a
 best-effort Rich Message when a user requests access; a decision notifies the
 requester. These notifications are not durable across bot crashes.
 
-For a manual test, initialize the backend with the systemd installer, then
-bootstrap an admin and create an adapter credential as documented in
-[`app/backend/README.md`](../backend/README.md). Set
-`NODE_PLANE_BACKEND_ADAPTER_TOKEN_FILE` to that credential file and run
-`PYTHONPATH=app .venv/bin/python -m telegram_client.main` with `BOT_TOKEN` and
-the shared environment loaded. `NODE_PLANE_BACKEND_URL` defaults to
-`http://127.0.0.1:8080`. The legacy bot and this client must not poll the same
-Telegram token at the same time. Run
-`scripts/install_telegram_client_systemd.sh BASE_DIR SHARED_DIR` to install an
-inactive systemd unit. Pass
-`--activate` only when ready to stop and disable the legacy
-`node-plane.service` and start the new `node-plane-telegram.service`; startup
-failure restores the previous service and its enabled state. The script requires `BOT_TOKEN` and
-`NODE_PLANE_BACKEND_ADAPTER_TOKEN_FILE` in the shared `.env`. Test the new flow
-with a disposable node before switching the production Telegram token.
+In simple mode, `scripts/install.sh` initializes the backend schema, bootstraps
+each Telegram administrator listed in `ADMIN_IDS`, creates an adapter credential
+on first install, and starts the backend, worker timer, and aiogram client.
+It disables the old `node-plane.service` when activating
+`node-plane-telegram.service`; startup failure restores an active old service.
+The adapter credential path is stored in the shared `.env` and preserved across
+reinstalls. `NODE_PLANE_BACKEND_URL` defaults to `http://127.0.0.1:8080`.
+For a manual installation, the individual unit installer remains available:
+`scripts/install_telegram_client_systemd.sh BASE_DIR SHARED_DIR --activate`.
+Test the new flow with a disposable node before using it for production access.
 The simple-mode updater and health check recognize the active new service;
 updating it does not run the legacy registry-based agent rollout.
 

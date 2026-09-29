@@ -81,7 +81,7 @@ Flags:
   --branch            Default update branch for this installation
   --ref, --tag        Git tag/ref to install, defaults to the latest release tag for the selected branch
   --non-interactive   Fail instead of prompting for missing values
-  --install-systemd   In simple mode, install the systemd unit automatically
+  --install-systemd   In simple mode, start backend, worker, and aiogram client automatically
   --force             Reinstall even if the target release is already active
 EOF
       exit 0
@@ -267,7 +267,7 @@ latest_release_tag_for_branch() {
   local regex
   case "$branch" in
     main) regex='^v?[0-9]+\.[0-9]+\.[0-9]+$' ;;
-    dev) regex='^v?[0-9]+\.[0-9]+\.[0-9]+-alpha\.[0-9]+$' ;;
+    dev) regex='^v?[0-9]+\.[0-9]+\.[0-9]+(-alpha\.[0-9]+)?$' ;;
     *) echo "Unsupported update branch: $branch" >&2; exit 1 ;;
   esac
   while IFS= read -r tag; do
@@ -381,8 +381,57 @@ export_release_tree() {
 
 sync_shared_env() {
   local shared_dir="$1"
+  local existing_token_file=""
   mkdir -p "$shared_dir"
+  if [[ -f "${shared_dir}/.env" ]]; then
+    existing_token_file="$(read_env_value NODE_PLANE_BACKEND_ADAPTER_TOKEN_FILE "${shared_dir}/.env")"
+  fi
   cp .env "${shared_dir}/.env"
+  if [[ -z "$(read_env_value NODE_PLANE_BACKEND_ADAPTER_TOKEN_FILE .env)" \
+    && -n "$existing_token_file" && -f "$existing_token_file" && -r "$existing_token_file" ]]; then
+    set_env_value_in_file "${shared_dir}/.env" NODE_PLANE_BACKEND_ADAPTER_TOKEN_FILE "$existing_token_file"
+  fi
+}
+
+prepare_telegram_identity() {
+  local release_dir="$1" base_dir="$2" shared_dir="$3" env_file="${shared_dir}/.env"
+  local admin_ids admin_id token_file postgres_dsn
+  admin_ids="$(read_env_value ADMIN_IDS "$env_file")"
+  postgres_dsn="$(read_env_value POSTGRES_DSN "$env_file")"
+  IFS=',' read -ra ids <<< "$admin_ids"
+  for admin_id in "${ids[@]}"; do
+    admin_id="${admin_id//[[:space:]]/}"
+    if [[ ! "$admin_id" =~ ^[0-9]+$ ]]; then
+      echo "Invalid Telegram administrator ID: ${admin_id}" >&2
+      return 1
+    fi
+    NODE_PLANE_BASE_DIR="$base_dir" NODE_PLANE_APP_DIR="$release_dir" \
+      NODE_PLANE_SHARED_DIR="$shared_dir" DB_BACKEND=postgres POSTGRES_DSN="$postgres_dsn" \
+      PYTHONPATH="${release_dir}/app" \
+      "${release_dir}/.venv/bin/python" -m backend.admin_cli bootstrap-admin --telegram-id "$admin_id"
+  done
+
+  token_file="$(read_env_value NODE_PLANE_BACKEND_ADAPTER_TOKEN_FILE "$env_file")"
+  if [[ -z "$token_file" ]]; then
+    token_file="${shared_dir}/data/telegram-adapter.token"
+  fi
+  if [[ -e "$token_file" && ! -f "$token_file" ]]; then
+    echo "Adapter credential path is not a regular file: $token_file" >&2
+    return 1
+  fi
+  if [[ -e "$token_file" && ! -r "$token_file" ]]; then
+    echo "Adapter credential is not readable: $token_file" >&2
+    return 1
+  fi
+  if [[ ! -f "$token_file" ]]; then
+    mkdir -p "$(dirname "$token_file")"
+    NODE_PLANE_BASE_DIR="$base_dir" NODE_PLANE_APP_DIR="$release_dir" \
+      NODE_PLANE_SHARED_DIR="$shared_dir" DB_BACKEND=postgres POSTGRES_DSN="$postgres_dsn" \
+      PYTHONPATH="${release_dir}/app" \
+      "${release_dir}/.venv/bin/python" -m backend.admin_cli issue-token --kind adapter --output "$token_file"
+  fi
+  set_env_value_in_file "$env_file" NODE_PLANE_BACKEND_ADAPTER_TOKEN_FILE "$token_file"
+  set_env_value NODE_PLANE_BACKEND_ADAPTER_TOKEN_FILE "$token_file"
 }
 
 choose_mode() {
@@ -595,8 +644,8 @@ validate_simple_layout() {
     echo "Missing environment file: $shared_dir/.env" >&2
     missing=1
   fi
-  if [[ ! -f "$app_dir/app/main.py" ]]; then
-    echo "Missing app entrypoint: $app_dir/app/main.py" >&2
+  if [[ ! -f "$app_dir/app/telegram_client/main.py" ]]; then
+    echo "Missing Telegram client entrypoint: $app_dir/app/telegram_client/main.py" >&2
     missing=1
   fi
   if [[ ! -x "$app_dir/.venv/bin/python" ]]; then
@@ -640,7 +689,6 @@ ensure_release_python_runtime() {
 }
 
 run_simple_install() {
-  local service_name="node-plane"
   local base_dir app_dir shared_dir releases_dir current_link new_release_dir release_name install_ref install_version install_commit reused_release
   local runtime_env_file db_backend postgres_dsn sqlite_db_path
   local supports_postgres_migration=0
@@ -778,33 +826,13 @@ run_simple_install() {
     POSTGRES_DSN="$(read_env_value POSTGRES_DSN "$runtime_env_file")" \
     PYTHONPATH="${new_release_dir}/app" \
     "${new_release_dir}/.venv/bin/python" -m backend.admin_cli init-schema
+    set_step "prepare Telegram administrators and adapter credential"
+    prepare_telegram_identity "$new_release_dir" "$base_dir" "$shared_dir"
   fi
 
   ln -sfn "$new_release_dir" "$current_link"
 
   validate_simple_layout "$current_link" "$shared_dir"
-
-  local unit_path="${REPO_ROOT}/scripts/${service_name}.service"
-  cat > "$unit_path" <<EOF
-[Unit]
-Description=Node Plane
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-WorkingDirectory=${current_link}
-Environment=NODE_PLANE_BASE_DIR=${base_dir}
-Environment=NODE_PLANE_APP_DIR=${current_link}
-Environment=NODE_PLANE_SHARED_DIR=${shared_dir}
-EnvironmentFile=${shared_dir}/.env
-ExecStart=${current_link}/.venv/bin/python ${current_link}/app/main.py
-Restart=always
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
-EOF
 
   echo
   echo "Simple mode environment is prepared."
@@ -826,24 +854,15 @@ EOF
   echo "Shared state:"
   echo "  ${shared_dir}"
   echo
-  echo "Generated systemd unit:"
-  echo "  ${unit_path}"
+  echo "Systemd services: node-plane-backend, node-plane-backend-worker.timer, node-plane-telegram"
   echo
   if [[ $AUTO_INSTALL_SYSTEMD -eq 1 || $NON_INTERACTIVE -eq 1 ]]; then
-    install_systemd_unit "$unit_path"
-    if [[ -f "${current_link}/scripts/install_backend_systemd.sh" ]]; then
-      set_step "install backend services"
-      run_as_root bash "${current_link}/scripts/install_backend_systemd.sh" "$base_dir" "$shared_dir"
-    fi
+    install_systemd_stack "$current_link" "$base_dir" "$shared_dir"
   elif [[ $NON_INTERACTIVE -eq 0 ]]; then
     local answer
-    read -r -p "Install the systemd unit to /etc/systemd/system/${service_name}.service now? [Y/n]: " answer
+    read -r -p "Install and start the backend, worker, and Telegram client now? [Y/n]: " answer
     if [[ "${answer:-y}" =~ ^([Yy]|[Yy][Ee][Ss])$ ]]; then
-      install_systemd_unit "$unit_path"
-      if [[ -f "${current_link}/scripts/install_backend_systemd.sh" ]]; then
-        set_step "install backend services"
-        run_as_root bash "${current_link}/scripts/install_backend_systemd.sh" "$base_dir" "$shared_dir"
-      fi
+      install_systemd_stack "$current_link" "$base_dir" "$shared_dir"
     fi
   fi
 
@@ -855,9 +874,6 @@ EOF
       NODE_PLANE_SHARED_DIR="${shared_dir}" \
       "${current_link}/scripts/setup_driver_agents.sh"; then
       echo "Driver/agent setup reported issues. Continuing because best-effort is enabled." >&2
-    elif [[ $AUTO_INSTALL_SYSTEMD -eq 1 ]]; then
-      # The bot may already be running with the old backend from before rollout.
-      run_as_root systemctl restart "${service_name}"
     fi
   fi
 
@@ -869,33 +885,24 @@ EOF
   if [[ $AUTO_INSTALL_SYSTEMD -eq 1 ]]; then
     echo "  2. Service install is done. Verify the host setup:"
   else
-    echo "  2. Start the bot service, then verify the host setup:"
-    echo "     sudo systemctl enable --now ${service_name}"
+    echo "  2. Install the backend, worker, and Telegram client, then verify the host setup:"
+    echo "     sudo ${current_link}/scripts/install_backend_systemd.sh ${base_dir} ${shared_dir}"
+    echo "     sudo ${current_link}/scripts/install_telegram_client_systemd.sh ${base_dir} ${shared_dir} --activate"
   fi
   echo "     ./scripts/healthcheck.sh --mode simple"
   echo "  3. Open the bot from the Telegram account listed in ADMIN_IDS"
   echo "  4. Send /start once"
-  echo "     The bot will create the admin profile automatically and show first-run setup"
-  echo "  5. Choose: Set up this server"
-  echo "  6. Open the new server card and run Probe, then Bootstrap"
+  echo "     The administrator account is already prepared in the backend"
+  echo "  5. Add a node, install its agent, then apply its settings"
 }
 
-install_systemd_unit() {
-  local unit_path="$1"
-  local service_name="node-plane"
-  set_step "install systemd unit"
-  run_as_root cp "$unit_path" "/etc/systemd/system/${service_name}.service"
-  run_as_root systemctl daemon-reload
-  if ! run_as_root systemctl enable --now "${service_name}"; then
-    echo
-    echo "systemd failed to start ${service_name}.service."
-    echo "Inspect these commands:"
-    echo "  sudo systemctl status ${service_name} --no-pager"
-    echo "  sudo journalctl -xeu ${service_name}"
-    exit 1
-  fi
+install_systemd_stack() {
+  local current_link="$1" base_dir="$2" shared_dir="$3"
+  set_step "install backend services"
+  run_as_root bash "${current_link}/scripts/install_backend_systemd.sh" "$base_dir" "$shared_dir"
+  set_step "activate Telegram client"
+  run_as_root bash "${current_link}/scripts/install_telegram_client_systemd.sh" "$base_dir" "$shared_dir" --activate
   AUTO_INSTALL_SYSTEMD=1
-  run_as_root systemctl status "${service_name}" --no-pager || true
 }
 
 run_portable_install() {

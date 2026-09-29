@@ -29,12 +29,13 @@ if [[ ! -x "${current_dir}/.venv/bin/python" || ! -f "${shared_dir}/.env" ]]; th
   echo "Installed release or shared environment is missing" >&2
   exit 1
 fi
-set -a
-# shellcheck disable=SC1091
-source "${shared_dir}/.env"
-set +a
-if [[ -z "${BOT_TOKEN:-}" || -z "${NODE_PLANE_BACKEND_ADAPTER_TOKEN_FILE:-}" \
-   || ! -r "${NODE_PLANE_BACKEND_ADAPTER_TOKEN_FILE:-/nonexistent}" ]]; then
+read_env_value() {
+  sed -n "s/^${1}=//p" "${shared_dir}/.env" | tail -n 1
+}
+bot_token="$(read_env_value BOT_TOKEN)"
+adapter_token_file="$(read_env_value NODE_PLANE_BACKEND_ADAPTER_TOKEN_FILE)"
+if [[ -z "$bot_token" || -z "$adapter_token_file" \
+   || ! -f "$adapter_token_file" || ! -r "$adapter_token_file" ]]; then
   echo "BOT_TOKEN and a readable NODE_PLANE_BACKEND_ADAPTER_TOKEN_FILE are required" >&2
   exit 1
 fi

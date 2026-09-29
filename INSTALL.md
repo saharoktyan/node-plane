@@ -59,7 +59,7 @@ If you prefer SSH cloning, add a GitHub SSH key to the host first and then use:
 git clone git@github.com:saharoktyan/node-plane.git node-plane-src
 ```
 
-If you want the installer to place and start the systemd unit automatically:
+To start the full stack without an interactive systemd prompt:
 
 ```bash
 ./scripts/install.sh --mode simple --install-systemd
@@ -95,7 +95,12 @@ Do not place the git checkout inside the install root. `Simple Mode` exports rel
 - release history under `/opt/node-plane/releases/`
 - active release symlink under `/opt/node-plane/current`
 - shared runtime state under `/opt/node-plane/shared/`
-- a generated systemd unit under `scripts/node-plane.service`
+- initialized backend schema and administrator accounts from `ADMIN_IDS`
+- a private Telegram adapter credential under the shared data directory
+- `node-plane-backend.service`, `node-plane-backend-worker.timer`, and `node-plane-telegram.service`
+
+The installer disables the old `node-plane.service` when it starts the aiogram
+client. Only the new client polls the Telegram token.
 
 ### First run after installer setup
 
@@ -109,97 +114,25 @@ Then in Telegram:
 
 1. Open the bot from the account listed in `ADMIN_IDS`
 2. Send `/start`
-3. Choose `Set up this server`
-4. Open the created server card
-5. Run `Probe`
-6. Run `Bootstrap`
+3. Add a local or SSH node, then install its agent
+4. Apply node settings to deploy the selected VPN protocols
+5. Create a profile, grant access, and issue a config
 
 You can later add more remote nodes over `ssh` from the same bot.
 
-### Manual setup
+### Testing from the development branch
 
-Use this only if you want to inspect or reproduce what the installer does.
-
-1. Prepare `.env` with `BOT_TOKEN`, `ADMIN_IDS`, and the `NODE_PLANE_*` paths. `POSTGRES_DSN` is optional if you want the script to auto-provision PostgreSQL.
-2. Create the release layout under the install root.
-3. Create a Python virtualenv inside the active release.
-4. Install dependencies from `requirements.txt`.
-5. Run `app/manage_db.py init` with the correct `NODE_PLANE_*` environment.
-6. Create a `systemd` unit that points to the active release under `/opt/node-plane/current`.
-7. Start the service, then run `./scripts/healthcheck.sh --mode simple`.
-
-In practice, the script already performs these steps and is the preferred path.
-
-## Portable Mode
-
-### Recommended path: install with `install.sh`
+The stable `v0.4.2` release predates the full aiogram installation flow. To test
+the current stack before the next release, select the development branch and
+its head explicitly:
 
 ```bash
-git clone https://github.com/saharoktyan/node-plane.git node-plane-src
-cd node-plane-src
-./scripts/install.sh --mode portable
+./scripts/install.sh --mode simple --branch dev --ref dev
 ```
 
-If you prefer SSH cloning, add a GitHub SSH key to the host first and then use:
-
-```bash
-git clone git@github.com:saharoktyan/node-plane.git node-plane-src
-```
-
-The script will prompt for missing values and write the portable-mode settings into `.env`.
-It also suggests the latest release tag for the chosen branch as the default install ref and image tag.
-
-For a predictable non-interactive setup, configure `.env` first with at least:
-
-```env
-BOT_TOKEN=...
-ADMIN_IDS=123456789
-SSH_KEY=/root/.ssh/id_ed25519
-NODE_PLANE_IMAGE_REPO=ghcr.io/saharoktyan/node-plane
-NODE_PLANE_IMAGE_TAG=<release-tag>
-DB_BACKEND=postgres
-```
-
-`Portable Mode` can also leave `POSTGRES_DSN` empty. The installer will populate it automatically for the bundled `postgres` compose service.
-
-### Start the bot
-
-```bash
-docker compose pull
-docker compose up -d
-```
-
-Then validate:
-
-```bash
-./scripts/healthcheck.sh --mode portable
-```
-
-### Prepare the first remote node
-
-In Telegram:
-
-1. Open the bot from the account listed in `ADMIN_IDS`
-2. Send `/start`
-3. Choose `Set up over SSH`
-4. Open `Admin -> SSH Key`
-5. Copy the generated public key
-6. Add it to `~/.ssh/authorized_keys` on the target server
-7. Open the created server card
-8. Run `Probe`
-9. Run `Bootstrap`
-
-### Manual setup
-
-Use this only if you want to reproduce the installer manually.
-
-1. Prepare `.env` with `BOT_TOKEN`, `ADMIN_IDS`, `SSH_KEY`, `NODE_PLANE_IMAGE_REPO`, and `NODE_PLANE_IMAGE_TAG`.
-2. Pull the selected image from GHCR with `docker compose pull`.
-3. Start the bot with `docker compose up -d`.
-4. Validate the containerized setup with `./scripts/healthcheck.sh --mode portable`.
-5. Complete SSH key onboarding and node bootstrap from Telegram.
-
-For normal use, the installer-first path above is the intended one.
+The installer prepares the backend, worker, Telegram adapter credential, and
+aiogram service. Docker Compose installation is unsupported while the project
+finishes the systemd migration.
 
 ## Environment Variables
 
