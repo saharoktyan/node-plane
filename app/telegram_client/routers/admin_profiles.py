@@ -24,7 +24,7 @@ async def accounts_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, st
     for account in page['items']:
         name = str(account.get('telegram_user_id') or account['id'][:8])
         rows.append([InlineKeyboardButton(text=f"{name} · {account['status']}", callback_data=AccountCallback(account_id=account['id']).pack())])
-    rows.append([InlineKeyboardButton(text='Back', callback_data=HomeCallback().pack())])
+    rows.append([InlineKeyboardButton(text='🔙 Назад', callback_data='admin_menu')])
     await render(bot, query.message.chat.id, Screen('Accounts', ('Select an account to create its VPN profile.',)), rows, state, query.message.message_id)
 
 @router.callback_query(AccountCallback.filter())
@@ -36,7 +36,7 @@ async def account_cb(query: CallbackQuery, callback_data: AccountCallback, bot: 
     label = str(account.get('telegram_user_id') or account['id'][:8])
     rows = [
         [InlineKeyboardButton(text='Create VPN profile', callback_data=NewProfileCallback(account_id=account_id).pack())],
-        [InlineKeyboardButton(text='Back', callback_data=AccountsCallback().pack())]
+        [InlineKeyboardButton(text='🔙 Назад', callback_data=AccountsCallback().pack())]
     ]
     await render(bot, query.message.chat.id, Screen(f'Account {label}', (f"Status: {account['status']}", f"Role: {account['role']}")), rows, state, query.message.message_id)
 
@@ -84,8 +84,8 @@ async def admin_profiles_cb(query: CallbackQuery, bot: Bot, backend: BackendClie
     user_id = query.from_user.id
     page = await backend.admin_profiles(user_id)
     rows = [[InlineKeyboardButton(text=item['display_name'], callback_data=AdminProfileCallback(profile_id=item['id']).pack())] for item in page['items']]
-    rows.append([InlineKeyboardButton(text='Back', callback_data=HomeCallback().pack())])
-    await render(bot, query.message.chat.id, Screen('VPN profiles', ('Select a profile to manage access.',) if page['items'] else ('No profiles yet. Create one from Accounts.',)), rows, state, query.message.message_id)
+    rows.append([InlineKeyboardButton(text='🔙 Назад', callback_data='admin_menu')])
+    await render(bot, query.message.chat.id, Screen('Профили', ('Управление профилями.',) if page['items'] else ('Пока нет зарегистрированных профилей.',)), rows, state, query.message.message_id)
 
 @router.callback_query(AdminProfileCallback.filter())
 async def admin_profile_cb(query: CallbackQuery, callback_data: AdminProfileCallback, bot: Bot, backend: BackendClient, state: FSMContext):
@@ -103,7 +103,7 @@ async def show_admin_profile(chat_id: int, user_id: int, message_id: int, profil
     ]
     for grant in grants:
         rows.append([InlineKeyboardButton(text=f"Remove {grant['node_key']} · {grant['protocol'].upper()}", callback_data=RemoveGrantCallback(profile_id=profile_id, node_key=grant['node_key'], protocol=grant['protocol']).pack())])
-    rows.append([InlineKeyboardButton(text='Back', callback_data=AdminProfilesCallback().pack())])
+    rows.append([InlineKeyboardButton(text='🔙 Назад', callback_data=AdminProfilesCallback().pack())])
     
     lines = (f'Status: {status}', f'Access entries: {len(grants)}', 'Changes are applied by the backend worker.')
     await render(bot, chat_id, Screen(profile['display_name'], lines), rows, state, message_id)
@@ -115,7 +115,7 @@ async def grant_nodes_cb(query: CallbackQuery, callback_data: GrantNodesCallback
     profile_id = callback_data.profile_id
     page = await backend.admin_nodes(user_id)
     rows = [[InlineKeyboardButton(text=node['title'], callback_data=GrantProtocolsCallback(profile_id=profile_id, node_key=node['key']).pack())] for node in page['items'] if node['enabled']]
-    rows.append([InlineKeyboardButton(text='Back', callback_data=AdminProfileCallback(profile_id=profile_id).pack())])
+    rows.append([InlineKeyboardButton(text='🔙 Назад', callback_data=AdminProfileCallback(profile_id=profile_id).pack())])
     await render(bot, query.message.chat.id, Screen('Choose a node', ('Only installed and enabled nodes can receive profile access.',)), rows, state, query.message.message_id)
 
 @router.callback_query(GrantProtocolsCallback.filter())
@@ -127,7 +127,7 @@ async def grant_protocols_cb(query: CallbackQuery, callback_data: GrantProtocols
     
     node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=user_id)
     rows = [[InlineKeyboardButton(text=protocol.upper(), callback_data=AddGrantCallback(profile_id=profile_id, node_key=node_key, protocol=protocol).pack())] for protocol in node['protocols']]
-    rows.append([InlineKeyboardButton(text='Back', callback_data=GrantNodesCallback(profile_id=profile_id).pack())])
+    rows.append([InlineKeyboardButton(text='🔙 Назад', callback_data=GrantNodesCallback(profile_id=profile_id).pack())])
     await render(bot, query.message.chat.id, Screen(node['title'], ('Choose a protocol to grant.',)), rows, state, query.message.message_id)
 
 @router.callback_query(AddGrantCallback.filter())
