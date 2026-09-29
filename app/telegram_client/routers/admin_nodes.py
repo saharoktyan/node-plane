@@ -651,18 +651,76 @@ async def bootstrap_menu_cb(query: CallbackQuery, bot: Bot, backend: BackendClie
     ]
     await render(bot, query.message.chat.id, Screen("Установка (Bootstrap)", ("Управление установкой агента и зависимостей на сервере:",)), rows, state, query.message.message_id)
 
+
 @router.callback_query(F.data.startswith("bs_agent:"))
 async def bs_agent_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
     node_key = query.data.split(":")[1]
     trans = get_node_transport(node_key)
+    
     try:
-        # Mocking or calling the real agent-rollouts endpoint
-        # If the backend is ready, we would call it here
-        # await backend.request('POST', f'/api/v1/nodes/{node_key}/agent-rollouts', json={"transport": trans.get("transport", "local"), "ssh_target": trans.get("ssh_target")})
-        await query.answer("Agent setup initiated (mock)", show_alert=True)
+        res = await backend.request('POST', f'/api/v1/nodes/{node_key}/agent-rollouts', telegram_user_id=query.from_user.id, command=True, json={
+            "transport": trans.get("transport", "local"), 
+            "ssh_target": trans.get("ssh_target")
+        })
+        task_id = res['id']
+        await query.answer("Agent setup initiated.", show_alert=True)
+        
+        # Poll for completion
+        for _ in range(60):
+            status_res = await backend.request('GET', f'/api/v1/agent-rollouts/{task_id}', telegram_user_id=query.from_user.id)
+            if status_res['status'] == 'succeeded':
+                rows = [[InlineKeyboardButton(text="🔙 К серверу", callback_data=AdminNodeCallback(node_key=node_key).pack())]]
+                await render(bot, query.message.chat.id, Screen("Успех", ("Агент успешно установлен!",)), rows, state, query.message.message_id)
+                return
+            if status_res['status'] == 'blocked':
+                rows = [[InlineKeyboardButton(text="🔙 Назад", callback_data=AdminNodeCallback(node_key=node_key).pack())]]
+                await render(bot, query.message.chat.id, Screen("Ошибка", ("Установка агента завершилась ошибкой (blocked). Проверьте логи.",)), rows, state, query.message.message_id)
+                return
+            await asyncio.sleep(1)
+            
+        rows = [[InlineKeyboardButton(text="🔙 Назад", callback_data=AdminNodeCallback(node_key=node_key).pack())]]
+        await render(bot, query.message.chat.id, Screen("Таймаут", ("Установка агента выполняется слишком долго.",)), rows, state, query.message.message_id)
+            
     except Exception as e:
         await query.answer(f"Error: {e}", show_alert=True)
 
+
 @router.callback_query(F.data.startswith("bs_docker:"))
 async def bs_docker_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
-    await query.answer("Docker installation initiated (mock)", show_alert=True)
+    await query.answer()
+    node_key = query.data.split(":")[1]
+    
+    # We call the synchronous grpc client in a thread
+    import asyncio
+    from app.services.node_driver import get_node_driver
+    
+    try:
+        def start_docker_install():
+            driver = get_node_driver()
+            return driver.install_docker(node_key)
+            
+        op = await asyncio.to_thread(start_docker_install)
+        
+        # Poll operation
+        def get_op_status(op_id):
+            return get_node_driver().get_operation(op_id)
+            
+        for _ in range(30):
+            current_op = await asyncio.to_thread(get_op_status, op.id)
+            if current_op.status == "success":
+                rows = [[InlineKeyboardButton(text="🔙 К серверу", callback_data=AdminNodeCallback(node_key=node_key).pack())]]
+                await render(bot, query.message.chat.id, Screen("Успех", ("Docker успешно установлен!",)), rows, state, query.message.message_id)
+                return
+            elif current_op.status in ("failed", "superseded"):
+                rows = [[InlineKeyboardButton(text="🔙 Назад", callback_data=AdminNodeCallback(node_key=node_key).pack())]]
+                await render(bot, query.message.chat.id, Screen("Ошибка", (f"Установка Docker завершилась с ошибкой: {current_op.error}",)), rows, state, query.message.message_id)
+                return
+            await asyncio.sleep(1)
+            
+        rows = [[InlineKeyboardButton(text="🔙 Назад", callback_data=AdminNodeCallback(node_key=node_key).pack())]]
+        await render(bot, query.message.chat.id, Screen("Таймаут", ("Установка Docker выполняется слишком долго.",)), rows, state, query.message.message_id)
+        
+    except Exception as e:
+        rows = [[InlineKeyboardButton(text="🔙 Назад", callback_data=AdminNodeCallback(node_key=node_key).pack())]]
+        await render(bot, query.message.chat.id, Screen("Ошибка", (f"Ошибка при вызове драйвера: {e}",)), rows, state, query.message.message_id)
+
