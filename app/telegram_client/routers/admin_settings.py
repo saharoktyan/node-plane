@@ -6,7 +6,7 @@ from aiogram.fsm.context import FSMContext
 from .common import render, BackendMiddleware
 from ..backend import BackendClient, BackendError
 from ..screens import Screen
-from .callbacks import AdminSettingsCallback, HomeCallback, UpdatesCallback
+from .callbacks import AdminSettingsCallback, HomeCallback, UpdatesCallback, RequestsCallback
 
 class SshKeyCallback(CallbackData, prefix="ssh_key"):
     pass

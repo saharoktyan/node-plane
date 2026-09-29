@@ -126,7 +126,7 @@ async def admin_announce_cb(query: CallbackQuery, bot: Bot, backend: BackendClie
 
 
 
-from .callbacks import ProfilesCallback
+from aiogram.filters.callback_data import CallbackData
 
 class NodeSelectCallback(CallbackData, prefix="node_sel"):
     profile_id: str

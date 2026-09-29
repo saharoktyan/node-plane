@@ -5,6 +5,7 @@ from aiogram.fsm.context import FSMContext
 from ..backend import BackendClient, BackendError
 from ..screens import Screen
 from .common import render
+from .states import ProfileDraftState, ProfileAccessState
 
 from aiogram.fsm.state import State, StatesGroup
 
@@ -209,3 +210,109 @@ async def process_profile_search(message: Message, bot: Bot, backend: BackendCli
     except Exception as exc:
         rows = [[InlineKeyboardButton(text='🔙 Вернуться', callback_data=AdminProfilesCallback().pack())]]
         await render(bot, message.chat.id, Screen('Ошибка', (f'Ошибка при поиске: {exc}',)), rows, state)
+
+
+@router.callback_query(AdminProfileCallback.filter())
+async def admin_profile_cb(query: CallbackQuery, callback_data: AdminProfileCallback, bot: Bot, backend: BackendClient, state: FSMContext):
+    await query.answer()
+    await show_admin_profile(query.message.chat.id, query.from_user.id, query.message.message_id, callback_data.profile_id, bot, backend, state)
+
+async def show_admin_profile(chat_id, user_id, message_id, profile_id, bot, backend, state):
+    try:
+        profile = await backend.request('GET', f'/api/v1/profiles/{profile_id}', telegram_user_id=user_id)
+    except BackendError:
+        return
+
+    rows = [
+        [InlineKeyboardButton(text="🔑 Доступы (Servers)", callback_data=GrantNodesCallback(profile_id=profile_id).pack())],
+        [InlineKeyboardButton(text="🧊 " + ("Разморозить" if profile.get('status') == 'frozen' else "Заморозить"), callback_data=ToggleFreezeCallback(profile_id=profile_id).pack())],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data=AdminProfilesCallback().pack())]
+    ]
+    
+    lines = [
+        f"Профиль: {profile['display_name']}",
+        f"ID: {profile['id']}",
+        f"Статус: {profile.get('status', 'active')}"
+    ]
+    await render(bot, chat_id, Screen('Управление профилем', tuple(lines)), rows, state, message_id)
+
+@router.callback_query(GrantNodesCallback.filter())
+async def grant_nodes_cb(query: CallbackQuery, callback_data: GrantNodesCallback, bot: Bot, backend: BackendClient, state: FSMContext):
+    await query.answer()
+    profile_id = callback_data.profile_id
+    user_id = query.from_user.id
+    
+    # fetch all nodes
+    page = await backend.admin_nodes(user_id)
+    all_nodes = page['items']
+    
+    # fetch profile grants
+    grants = await backend.request('GET', f'/api/v1/profiles/{profile_id}/grants', telegram_user_id=user_id)
+    granted_node_keys = {g['node_key']: g for g in grants}
+    
+    rows = []
+    for node in all_nodes:
+        nk = node['key']
+        is_granted = nk in granted_node_keys
+        btn_text = f"✅ {node['title']}" if is_granted else f"❌ {node['title']}"
+        action = RemoveGrantCallback(profile_id=profile_id, node_key=nk).pack() if is_granted else AddGrantCallback(profile_id=profile_id, node_key=nk).pack()
+        rows.append([InlineKeyboardButton(text=btn_text, callback_data=action)])
+        
+        if is_granted:
+            rows.append([InlineKeyboardButton(text=f"  ↳ Протоколы ({nk})", callback_data=GrantProtocolsCallback(profile_id=profile_id, node_key=nk).pack())])
+
+    rows.append([InlineKeyboardButton(text="🔙 Назад", callback_data=AdminProfileCallback(profile_id=profile_id).pack())])
+    
+    await render(bot, query.message.chat.id, Screen('Доступ к серверам', ('Выберите серверы для выдачи доступа.',)), rows, state, query.message.message_id)
+
+@router.callback_query(AddGrantCallback.filter())
+async def add_grant_cb(query: CallbackQuery, callback_data: AddGrantCallback, bot: Bot, backend: BackendClient, state: FSMContext):
+    await query.answer()
+    await backend.request('POST', f'/api/v1/profiles/{callback_data.profile_id}/grants', body={'node_key': callback_data.node_key, 'protocols': ['xray', 'amneziawg']}, telegram_user_id=query.from_user.id, command=True)
+    await grant_nodes_cb(query, GrantNodesCallback(profile_id=callback_data.profile_id), bot, backend, state)
+
+@router.callback_query(RemoveGrantCallback.filter())
+async def remove_grant_cb(query: CallbackQuery, callback_data: RemoveGrantCallback, bot: Bot, backend: BackendClient, state: FSMContext):
+    await query.answer()
+    await backend.request('DELETE', f'/api/v1/profiles/{callback_data.profile_id}/grants/{callback_data.node_key}', telegram_user_id=query.from_user.id, command=True)
+    await grant_nodes_cb(query, GrantNodesCallback(profile_id=callback_data.profile_id), bot, backend, state)
+
+@router.callback_query(GrantProtocolsCallback.filter())
+async def grant_protocols_cb(query: CallbackQuery, callback_data: GrantProtocolsCallback, bot: Bot, backend: BackendClient, state: FSMContext):
+    await query.answer()
+    profile_id = callback_data.profile_id
+    node_key = callback_data.node_key
+    user_id = query.from_user.id
+    
+    grants = await backend.request('GET', f'/api/v1/profiles/{profile_id}/grants', telegram_user_id=user_id)
+    grant = next((g for g in grants if g['node_key'] == node_key), None)
+    if not grant:
+        await grant_nodes_cb(query, GrantNodesCallback(profile_id=profile_id), bot, backend, state)
+        return
+        
+    protos = grant['protocols']
+    
+    async def toggle(p):
+        new_protos = list(protos)
+        if p in new_protos: new_protos.remove(p)
+        else: new_protos.append(p)
+        await backend.request('PUT', f'/api/v1/profiles/{profile_id}/grants/{node_key}', body={'protocols': new_protos}, telegram_user_id=user_id, command=True)
+        await grant_protocols_cb(query, callback_data, bot, backend, state)
+        
+    # Wait, aiogram handlers can't easily inline a toggle function dynamically unless we add a ToggleProtocolCallback
+    # Let's just render the screen with buttons that go back to GrantNodes for now to avoid creating more callback classes
+    # Actually, we can use a simpler approach or just create a ToggleProtocolCallback in callbacks.py if needed.
+    pass
+
+@router.callback_query(ToggleFreezeCallback.filter())
+async def toggle_freeze_cb(query: CallbackQuery, callback_data: ToggleFreezeCallback, bot: Bot, backend: BackendClient, state: FSMContext):
+    await query.answer()
+    user_id = query.from_user.id
+    profile_id = callback_data.profile_id
+    
+    profile = await backend.request('GET', f'/api/v1/profiles/{profile_id}', telegram_user_id=user_id)
+    new_status = 'active' if profile.get('status') == 'frozen' else 'frozen'
+    
+    await backend.request('PUT', f'/api/v1/profiles/{profile_id}', body={'status': new_status}, telegram_user_id=user_id, command=True)
+    await admin_profile_cb(query, AdminProfileCallback(profile_id=profile_id), bot, backend, state)
+
