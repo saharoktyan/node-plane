@@ -146,7 +146,7 @@ detect_mode() {
     return 0
   fi
 
-  if has_cmd systemctl && systemctl list-unit-files node-plane.service >/dev/null 2>&1; then
+  if has_cmd systemctl && { systemctl list-unit-files node-plane.service >/dev/null 2>&1 || systemctl list-unit-files node-plane-telegram.service >/dev/null 2>&1; }; then
     MODE="simple"
     return 0
   fi
