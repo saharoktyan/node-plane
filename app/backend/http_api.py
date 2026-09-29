@@ -821,6 +821,37 @@ def create_app(db, *, node_driver=None) -> FastAPI:
             
         return SshKeyOutput(public_key=public_path.read_text(encoding='utf-8').strip())
 
+
+    @app.get('/api/v1/settings.manages')
+    def get_updates(current=Depends(actor)):
+        require_permission(current, 'settings.manage')
+        import app.services.updates as updater
+        return updater.get_updates_overview()
+
+    @app.post('/api/v1/settings.manages/check')
+    def check_updates(current=Depends(actor)):
+        require_permission(current, 'settings.manage')
+        import app.services.updates as updater
+        return updater.check_for_updates()
+
+    @app.post('/api/v1/settings.manages/run')
+    def run_update(current=Depends(actor)):
+        require_permission(current, 'settings.manage')
+        import app.services.updates as updater
+        return updater.schedule_update()
+
+    @app.get('/api/v1/system/cleanup')
+    def get_cleanup(current=Depends(actor)):
+        require_permission(current, 'settings.manage')
+        import app.services.updates as updater
+        return updater.get_release_cleanup_overview()
+
+    @app.post('/api/v1/system/cleanup/run')
+    def run_cleanup(current=Depends(actor)):
+        require_permission(current, 'settings.manage')
+        import app.services.updates as updater
+        return updater.schedule_release_cleanup()
+
     return app
 
 

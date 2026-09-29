@@ -14,6 +14,22 @@ class BackendError(Exception):
 
 
 class BackendClient:
+
+    async def updates_overview(self, telegram_user_id: int):
+        return await self.request('GET', '/api/v1/system/updates', telegram_user_id=telegram_user_id)
+
+    async def check_updates(self, telegram_user_id: int):
+        return await self.request('POST', '/api/v1/system/updates/check', telegram_user_id=telegram_user_id)
+
+    async def run_update(self, telegram_user_id: int):
+        return await self.request('POST', '/api/v1/system/updates/run', telegram_user_id=telegram_user_id, command=True)
+
+    async def cleanup_overview(self, telegram_user_id: int):
+        return await self.request('GET', '/api/v1/system/cleanup', telegram_user_id=telegram_user_id)
+
+    async def run_cleanup(self, telegram_user_id: int):
+        return await self.request('POST', '/api/v1/system/cleanup/run', telegram_user_id=telegram_user_id, command=True)
+
     def __init__(self, session: aiohttp.ClientSession, base_url: str, adapter_token: str):
         parsed = urlsplit(base_url)
         if parsed.scheme != 'http' or parsed.hostname not in {'127.0.0.1', 'localhost'} or not parsed.port or parsed.path not in {'', '/'}:
