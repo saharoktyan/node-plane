@@ -101,15 +101,8 @@ cd node-plane-src
 
 Then follow the full guide in [INSTALL.md](INSTALL.md).
 
-### Portable Mode
-
-```bash
-git clone https://github.com/saharoktyan/node-plane.git node-plane-src
-cd node-plane-src
-./scripts/install.sh --mode portable
-```
-
-Then follow the full guide in [INSTALL.md](INSTALL.md).
+Portable Mode is temporarily unsupported. The simple-mode installer starts the
+backend, worker timer, and aiogram Telegram client as systemd services.
 
 If you prefer SSH for cloning, configure a GitHub SSH key on the host first and then use:
 

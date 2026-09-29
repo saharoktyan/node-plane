@@ -18,13 +18,14 @@ class HostHealthcheckTests(unittest.TestCase):
             scripts.mkdir()
             for name in ("healthcheck.sh", "python_runtime.sh"):
                 shutil.copy(ROOT / "scripts" / name, scripts / name)
-            (root / "app").mkdir()
-            for name in ("app/main.py", "requirements.txt", ".env.example"):
+            (root / "app/telegram_client").mkdir(parents=True)
+            for name in ("app/telegram_client/main.py", "requirements.txt", ".env.example"):
                 (root / name).touch()
             shared = root / "shared"
             shared.mkdir()
             (shared / "data").mkdir()
             (shared / "ssh").mkdir()
+            (shared / "data/telegram-adapter.token").write_text("test-token\n")
             release = root / "release"
             (release / ".venv/bin").mkdir(parents=True)
             current = root / "current"
@@ -33,6 +34,7 @@ class HostHealthcheckTests(unittest.TestCase):
                 f"BOT_TOKEN=test\nADMIN_IDS=42\nNODE_PLANE_BASE_DIR={root}\n"
                 f"NODE_PLANE_APP_DIR={current}\nNODE_PLANE_SHARED_DIR={shared}\n"
                 "DB_BACKEND=postgres\nPOSTGRES_DSN=postgresql://test\n"
+                f"NODE_PLANE_BACKEND_ADAPTER_TOKEN_FILE={shared / 'data/telegram-adapter.token'}\n"
             )
             bins = root / "bin"
             bins.mkdir()
