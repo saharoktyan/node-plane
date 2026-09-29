@@ -798,7 +798,7 @@ def create_app(db, *, node_driver=None) -> FastAPI:
         import pathlib
         if current.role != 'admin':
             raise HTTPException(403)
-        private_path = pathlib.Path(os.environ.get('SSH_KEY', '/opt/node-plane/ssh/id_ed25519'))
+        private_path = pathlib.Path(os.environ.get('SSH_KEY', '/opt/node-plane/shared/ssh/id_ed25519'))
         public_path = pathlib.Path(f"{private_path}.pub")
         private_path.parent.mkdir(parents=True, exist_ok=True)
         os.chmod(private_path.parent, 0o700)
