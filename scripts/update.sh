@@ -16,6 +16,7 @@ HEALTH_TIMEOUT=30
 CURRENT_STEP="startup"
 AUTO_SETUP_DRIVER_AGENTS="${NODE_PLANE_AUTO_SETUP_DRIVER_AGENTS:-1}"
 PYTHON_BIN=""
+SIMPLE_BOT_SERVICE="node-plane.service"
 
 set_step() {
   CURRENT_STEP="$1"
@@ -316,7 +317,7 @@ wait_for_service() {
   local timeout="$1"
   local elapsed=0
   while (( elapsed < timeout )); do
-    if sudo systemctl is-active --quiet node-plane.service; then
+    if sudo systemctl is-active --quiet "$SIMPLE_BOT_SERVICE"; then
       return 0
     fi
     sleep 2
@@ -416,8 +417,8 @@ rollback_simple() {
   if [[ -z "$previous_release" || ! -d "$previous_release" ]]; then
     echo "No previous release is available for rollback." >&2
     echo "Failed release remains at: ${failed_release}" >&2
-    sudo systemctl status node-plane --no-pager || true
-    sudo journalctl -u node-plane -n 50 --no-pager || true
+    sudo systemctl status "$SIMPLE_BOT_SERVICE" --no-pager || true
+    sudo journalctl -u "$SIMPLE_BOT_SERVICE" -n 50 --no-pager || true
     exit 1
   fi
 
@@ -425,7 +426,7 @@ rollback_simple() {
   echo "  ${previous_release}"
   ln -sfn "$previous_release" "$current_link"
   sudo systemctl daemon-reload
-  sudo systemctl restart node-plane
+  sudo systemctl restart "$SIMPLE_BOT_SERVICE"
   if sudo systemctl list-unit-files node-plane-backend.service --no-legend 2>/dev/null | grep -q node-plane-backend.service; then
     if [[ -f "${previous_release}/app/backend/http_api.py" ]]; then
       sudo systemctl restart node-plane-backend.service || true
@@ -441,12 +442,15 @@ rollback_simple() {
 
   echo "Rollback failed. Inspect the service manually." >&2
   sudo systemctl status node-plane --no-pager || true
-  sudo journalctl -u node-plane -n 80 --no-pager || true
+  sudo journalctl -u "$SIMPLE_BOT_SERVICE" -n 80 --no-pager || true
   exit 1
 }
 
 update_simple() {
   need_cmd sudo
+  if sudo systemctl is-active --quiet node-plane-telegram.service; then
+    SIMPLE_BOT_SERVICE="node-plane-telegram.service"
+  fi
   PYTHON_BIN="$(select_python_runtime)"
   echo "Using Python runtime: ${PYTHON_BIN}"
 
@@ -608,23 +612,23 @@ update_simple() {
     fi
   fi
 
-  echo "Restarting node-plane.service..."
-  set_step "restart node-plane.service"
+  echo "Restarting ${SIMPLE_BOT_SERVICE}..."
+  set_step "restart ${SIMPLE_BOT_SERVICE}"
   sudo systemctl daemon-reload
-  if ! sudo systemctl restart node-plane; then
+  if ! sudo systemctl restart "$SIMPLE_BOT_SERVICE"; then
     echo "Service restart failed immediately."
     rollback_simple "$previous_release" "$current_link" "$new_release_dir"
   fi
 
   if wait_for_service "$HEALTH_TIMEOUT"; then
     echo "New release is healthy."
-    sudo systemctl status node-plane --no-pager || true
+    sudo systemctl status "$SIMPLE_BOT_SERVICE" --no-pager || true
     return 0
   fi
 
   echo "Updated release did not become healthy within ${HEALTH_TIMEOUT}s."
-  set_step "wait for node-plane.service health"
-  sudo journalctl -u node-plane -n 50 --no-pager || true
+  set_step "wait for ${SIMPLE_BOT_SERVICE} health"
+  sudo journalctl -u "$SIMPLE_BOT_SERVICE" -n 50 --no-pager || true
   rollback_simple "$previous_release" "$current_link" "$new_release_dir"
 }
 
@@ -706,7 +710,7 @@ main() {
   case "$MODE" in
     simple)
       update_simple
-      if [[ "$AUTO_SETUP_DRIVER_AGENTS" == "1" ]]; then
+      if [[ "$AUTO_SETUP_DRIVER_AGENTS" == "1" && "$SIMPLE_BOT_SERVICE" == "node-plane.service" ]]; then
         local base_dir current_link shared_dir
         local -a rollout_paths
         mapfile -t rollout_paths < <(simple_paths)
@@ -722,8 +726,10 @@ main() {
           echo "Bot release is active, but driver/agent rollout failed. Retry Set up agent from Updates after resolving the error." >&2
           return 1
         elif [[ $SKIP_RESTART -eq 0 ]]; then
-          sudo systemctl restart node-plane
+          sudo systemctl restart "$SIMPLE_BOT_SERVICE"
         fi
+      elif [[ "$SIMPLE_BOT_SERVICE" == "node-plane-telegram.service" ]]; then
+        echo "Backend nodes use their own agent rollout; refresh each changed node from the Telegram Updates screen."
       fi
       ;;
     portable)

@@ -19,6 +19,22 @@ Local administration uses the configured PostgreSQL database. Set
 NODE_PLANE_SHARED_DIR to the install's shared directory so config loads its .env.
 Do not put a DSN/password or bearer token into command-line arguments.
 
+Accounts and VPN profiles have independent UUIDs. A profile optionally points
+to an owner account; it never stores a Telegram ID. Telegram IDs are optional
+`backend_external_identities` of accounts, so the same account can later be
+used from another authenticated client. Create an account without Telegram,
+then optionally attach Telegram as another login:
+
+```bash
+PYTHONPATH=app .venv/bin/python -m backend.admin_cli create-account
+PYTHONPATH=app .venv/bin/python -m backend.admin_cli link-telegram --account-id ACCOUNT_UUID --telegram-id 123456789
+```
+
+The link command is idempotent for the same account and refuses a Telegram ID
+already linked to another account. Account-bound credentials work without any
+Telegram identity. Future CLI/web login methods must bind to the account UUID,
+not create another profile namespace.
+
 From the checkout, using its supported Python runtime:
 
 ```bash
@@ -97,6 +113,11 @@ be addressed during the deployment stage.
 
 ## Profile and available-node reads
 
+The admin-only `GET /api/v1/profiles` lists all profiles. An authorized caller
+can read a profile's current grants at `GET /api/v1/profiles/{id}/grants`.
+The aiogram client uses these reads before revision-checked access changes;
+the separate member view remains filtered by owner and active grants.
+
 The clean target schema adds backend_profiles (UUID, runtime identity, owner,
 state/revision), backend_nodes (public node metadata and supported protocols)
 and backend_grants. No automatic mirror/import of old profiles/servers is made.
@@ -162,6 +183,40 @@ the SSH address. `--dry-run` checks inputs, binaries and SSH reachability
 without installation. The installer preserves other `NODE_AGENT_TARGETS`
 entries, restarts driver after updating the shared environment, and verifies
 the new agent route. The binary assets must match this checkout's gRPC schema.
+The new Telegram client can queue this same single-node rollout through
+`POST /api/v1/nodes/{key}/agent-rollouts` and inspect its status with
+`GET /api/v1/agent-rollouts/{task_id}`. An approved administrator supplies a
+local or SSH target, but never an SSH key path through the API. The worker
+uses the controller's configured `SSH_KEY` (or default OpenSSH identity) and
+release binaries, then verifies
+the driver route. The request has a durable idempotency key. If the worker is
+interrupted mid-installation, the task becomes `blocked` rather than silently
+running the installer a second time. Inspect the controller and node before
+requesting a fresh rollout. A successful rollout only prepares the agent;
+the separate Apply settings command installs the selected VPN protocols.
+
+The authenticated maintenance API exposes the same guarded lifecycle to
+approved administrators. `GET /api/v1/nodes/{key}/maintenance` shows the
+verification target, drain and cleanup phases. Before full cleanup,
+`POST /api/v1/nodes/{key}/bind-verification-target` checks an active agent and
+binds a local host or `root@host` on port 22, using the controller's `SSH_KEY`
+for SSH preflight. The host key must already be pinned in known_hosts.
+`POST /api/v1/nodes/{key}/drain` refuses an unbound target and queues profile
+revocations. Once they are complete, each
+`POST /api/v1/nodes/{key}/cleanup-step` advances one durable phase under the
+worker lock. Its `expected_phase` body must equal the phase shown before the
+request; a retry after a lost response returns the reached phase without
+advancing again. `POST /api/v1/nodes/{key}/verify-and-retire` checks that the agent,
+runtime and standard artifacts are absent before removing the node record.
+Remote final verification requires `NODE_PLANE_REMOVAL_SSH_KEY`, an independent
+root SSH key distinct from `SSH_KEY`, and a pinned known_hosts entry. Set
+`NODE_PLANE_BOT_PUBLIC_KEY_FILE` to the bot SSH public key file, or the API
+uses `SSH_KEY.pub`. Local final verification needs the public key but no second
+private key. Every remote check fails closed if it cannot verify the host.
+`POST /api/v1/nodes/{key}/retire-registry-only` requires explicit acceptance
+that remote artifacts may remain; it is for a lost or expired VPS and never
+reports a verified full cleanup. These HTTP mutations enforce the same file
+lock as the worker and trusted local CLI.
 The worker first performs a read-only agent probe. If runtime files or protocol
 configs are missing, the driver prepares this unmanaged agent: it copies the
 versioned runtime bundle, preserves any existing node.env, and installs Docker.

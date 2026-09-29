@@ -14,6 +14,7 @@ from backend.authorization import (
 )
 from backend.identity import IdentityService
 from backend.identity_repository import SQLIdentityRepository
+from backend.profiles import ProfileRepository
 
 
 class Database:
@@ -60,6 +61,23 @@ class BackendIdentityTests(unittest.TestCase):
         self.assertEqual((self.alice.role, self.alice.status), ('member', 'pending'))
         self.assertEqual(self.service.resolve_telegram(self.adapter, 101), self.alice)
         self.assertEqual(self.db.connection.execute('SELECT COUNT(*) FROM backend_accounts').fetchone()[0], 2)
+
+    def test_profile_owner_exists_without_telegram_and_can_link_later(self):
+        account = self.repository.create_account()
+        profiles = ProfileRepository(self.db)
+        profiles.initialize_schema()
+        profile_id = profiles.create_profile(runtime_name='cli_user',
+            display_name='CLI user', owner_account_id=account.id)
+        self.assertIsNone(self.repository.find_telegram_account(303))
+        direct = Principal('cli', PrincipalKind.ACCOUNT, self.scopes, account.id)
+        self.assertEqual(resolve_actor(direct, self.repository).account.id, account.id)
+        self.assertEqual(profiles.get(profile_id)['owner_account_id'], account.id)
+        self.repository.link_telegram(account.id, 303)
+        self.repository.link_telegram(account.id, 303)
+        self.assertEqual(resolve_actor(self.adapter, self.repository,
+            telegram_user_id=303).account.id, account.id)
+        self.denied('identity_already_linked',
+            lambda: self.repository.link_telegram(self.alice.id, 303))
 
     def test_account_credentials_cannot_delegate_or_register(self):
         principal = Principal('account', PrincipalKind.ACCOUNT, self.scopes, self.alice.id)

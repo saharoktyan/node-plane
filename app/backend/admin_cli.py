@@ -20,6 +20,7 @@ from .accounts import AccountService
 from .nodes import NodeService
 from .node_settings import NodeSettingsService
 from .config_issuance import ConfigIssuanceService
+from .agent_rollout import AgentRolloutService
 
 
 def bootstrap_admin(repository: SQLIdentityRepository, telegram_user_id: int):
@@ -47,6 +48,13 @@ def main():
     commands.add_parser('init-schema')
     bootstrap = commands.add_parser('bootstrap-admin')
     bootstrap.add_argument('--telegram-id', type=int, required=True)
+    create_account = commands.add_parser('create-account',
+        help='Create a member account without Telegram identity')
+    create_account.add_argument('--status', choices=['pending', 'approved'], default='approved')
+    link_telegram = commands.add_parser('link-telegram',
+        help='Attach a Telegram login to an existing backend account')
+    link_telegram.add_argument('--account-id', required=True)
+    link_telegram.add_argument('--telegram-id', type=int, required=True)
     issue = commands.add_parser('issue-token')
     issue.add_argument('--kind', choices=['account', 'adapter'], required=True)
     issue.add_argument('--account-id')
@@ -122,10 +130,18 @@ def main():
             NodeService(db).initialize_schema()
             NodeSettingsService(db).initialize_schema()
             ConfigIssuanceService(db).initialize_schema()
+            AgentRolloutService(db).initialize_schema()
             print('Backend identity schema initialized.')
         elif args.command == 'bootstrap-admin':
             account = bootstrap_admin(identities, args.telegram_id)
             print(f'Administrator account: {account.id}')
+        elif args.command == 'create-account':
+            account = identities.create_account(status=args.status)
+            print(f'Account ID: {account.id}')
+        elif args.command == 'link-telegram':
+            from uuid import UUID
+            account = identities.link_telegram(str(UUID(args.account_id)), args.telegram_id)
+            print(f'Telegram identity linked to account {account.id}')
         elif args.command == 'issue-token':
             kind = PrincipalKind(args.kind)
             scopes = frozenset(args.scope or (ADAPTER_SCOPES if kind == PrincipalKind.ADAPTER else PERMISSIONS))
