@@ -31,7 +31,7 @@ def bootstrap_admin(repository: SQLIdentityRepository, telegram_user_id: int, db
         conn.execute("""UPDATE backend_accounts SET role = 'admin', status = 'approved',
             revision = revision + 1 WHERE id = ? AND (role != 'admin' OR status != 'approved')""", (account.id,))
     
-    from .profile_repository import ProfileRepository
+    from .profiles import ProfileRepository
     pref = ProfileRepository(db)
     # Check if a profile exists
     profiles = pref.list_profiles_by_owner(account.id)
