@@ -519,54 +519,6 @@ async def retire_registry_cb(query: CallbackQuery, callback_data: RetireRegistry
     result = await backend.retire_node_registry_only(query.from_user.id, callback_data.node_key)
     await render(bot, query.message.chat.id, Screen('Node removed from bot', (f"Node: {result['node_key']}", 'Remote runtime was not verified or removed.')), [[InlineKeyboardButton(text='Nodes', callback_data=AdminNodesCallback().pack())]], state, query.message.message_id)
 
-@router.callback_query(UpdatesCallback.filter())
-async def updates_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
-    await query.answer()
-    user_id = query.from_user.id
-    page = await backend.admin_nodes(user_id)
-    rows = [[InlineKeyboardButton(text=node['title'], callback_data=NodeUpdatesCallback(node_key=node['key']).pack())] for node in page['items']]
-    rows.append([InlineKeyboardButton(text='🔙 Назад', callback_data='admin_menu')])
-    await render(bot, query.message.chat.id, Screen('Updates', ('Select a node to compare its runtime with this release.', 'Controller updates are installed from the controller host.')), rows, state, query.message.message_id)
-
-@router.callback_query(NodeUpdatesCallback.filter())
-async def node_updates_cb(query: CallbackQuery, callback_data: NodeUpdatesCallback, bot: Bot, backend: BackendClient, state: FSMContext):
-    await query.answer()
-    user_id = query.from_user.id
-    node_key = callback_data.node_key
-    expected = (Path(__file__).resolve().parents[3] / 'VERSION').read_text().strip()
-    try:
-        runtime = await backend.node_runtime(user_id, node_key)
-        installed = runtime['runtime_version'] or 'unknown'
-        error = None
-    except BackendError as exc:
-        installed = 'unreachable'
-        error = exc.code
-        
-    lines = (f'Current release: {expected}', f'Node runtime: {installed}')
-    if error: lines += (f'Agent status: {error}',)
-    elif installed != expected: lines += ('Agent/runtime setup may be needed.',)
-    else: lines += ('Runtime version matches this release.',)
-    
-    rows = []
-    if installed != expected:
-        if installed == 'unreachable':
-            rows += [[InlineKeyboardButton(text='Set up local agent', callback_data=RolloutLocalCallback(node_key=node_key).pack())],
-                     [InlineKeyboardButton(text='Set up SSH agent', callback_data=RolloutSshCallback(node_key=node_key).pack())]]
-        else:
-            rows.append([InlineKeyboardButton(text='Refresh runtime', callback_data=RefreshRuntimeCallback(node_key=node_key).pack())])
-    rows.append([InlineKeyboardButton(text='🔙 Назад', callback_data=AdminNodeCallback(node_key=node_key).pack())])
-    await render(bot, query.message.chat.id, Screen('Node updates', lines), rows, state, query.message.message_id)
-
-@router.callback_query(RefreshRuntimeCallback.filter())
-async def refresh_runtime_cb(query: CallbackQuery, callback_data: RefreshRuntimeCallback, bot: Bot, backend: BackendClient, state: FSMContext):
-    await query.answer()
-    user_id = query.from_user.id
-    node_key = callback_data.node_key
-    
-    node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=user_id)
-    updated = await backend.edit_node(user_id, node_key, node['desired_revision'], {'settings': node['settings']}, command_key=None)
-    await apply_node(query.message.chat.id, user_id, query.message.message_id, updated['key'], bot, backend, state, revision=updated['desired_revision'])
-
 @router.callback_query(RolloutLocalCallback.filter())
 async def rollout_local_cb(query: CallbackQuery, callback_data: RolloutLocalCallback, bot: Bot, backend: BackendClient, state: FSMContext):
     await query.answer()
