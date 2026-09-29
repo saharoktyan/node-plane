@@ -6,8 +6,7 @@ from aiogram.fsm.context import FSMContext
 from .common import render, BackendMiddleware
 from ..backend import BackendClient, BackendError
 from ..screens import Screen
-
-    pass
+from .callbacks import AdminSettingsCallback, HomeCallback
 
 class SshKeyCallback(CallbackData, prefix="ssh_key"):
     pass
@@ -21,7 +20,7 @@ router = Router()
 async def admin_settings_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
     rows = [
         [InlineKeyboardButton(text="SSH Key Management", callback_data=SshKeyCallback().pack())],
-        [InlineKeyboardButton(text="Home", callback_data="home")]
+        [InlineKeyboardButton(text="Home", callback_data=HomeCallback().pack())]
     ]
     await render(bot, query.message.chat.id, Screen("System Settings", ("Configure global controller settings.",)), rows, state, query.message.message_id)
 
