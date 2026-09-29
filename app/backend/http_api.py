@@ -10,7 +10,7 @@ from typing import Annotated, Literal
 from fastapi import Depends, FastAPI, Header, Query, Request, Response, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.exceptions import RequestValidationError
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
 from starlette.exceptions import HTTPException
 from starlette.responses import JSONResponse
 
@@ -31,11 +31,18 @@ from .node_settings import NodeSettingsService
 from .config_issuance import ConfigIssuanceService
 from .agent_rollout import AgentRolloutService
 from .node_lifecycle import NodeLifecycle
+from .admin_overview import AdminOverviewService
+from .node_overview import NodeOverviewService
+from config import APP_VERSION
 
 
 class ResolveInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
     telegram_user_id: Annotated[StrictInt, Field(gt=0, lt=2**63)]
+    username: Annotated[StrictStr, Field(max_length=64)] | None = None
+    first_name: Annotated[StrictStr, Field(max_length=128)] | None = None
+    last_name: Annotated[StrictStr, Field(max_length=128)] | None = None
+    language_code: Annotated[StrictStr, Field(max_length=16)] | None = None
 
 
 class AccountOutput(BaseModel):
@@ -46,11 +53,20 @@ class AccountOutput(BaseModel):
 
 class MeOutput(AccountOutput):
     permissions: list[str]
+    language_code: str | None = None
+    locale: str | None = None
+    locale_selected: bool = False
 
 
 class AdminAccountOutput(AccountOutput):
     revision: int
     telegram_user_id: int | None
+    username: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
+    language_code: str | None = None
+    locale: str | None = None
+    locale_selected: bool = False
 
 
 class AccountPage(BaseModel):
@@ -64,6 +80,11 @@ class AccountEditInput(BaseModel):
     status: Literal['pending', 'approved', 'rejected', 'disabled'] | None = None
 
 
+class AccountPreferencesInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    locale: Literal['ru', 'en']
+
+
 class ProfileOutput(BaseModel):
     id: UUID
     display_name: str
@@ -71,11 +92,58 @@ class ProfileOutput(BaseModel):
     frozen: bool
     expires_at: str | None
     desired_revision: int
+    deleting: bool = False
 
 
 class ProfilePage(BaseModel):
     items: list[ProfileOutput]
     next_cursor: str | None
+
+
+class MemberProfileNode(BaseModel):
+    key: str
+    title: str
+    flag: str
+    protocols: list[Literal['awg', 'xray']]
+
+
+class MemberProfileSummary(BaseModel):
+    profile_id: UUID
+    display_name: str
+    frozen: bool
+    expired: bool
+    expires_at: str | None
+    created_at: str | None
+    nodes: list[MemberProfileNode]
+    node_count: int
+    protocol_count: int
+    xray_count: int
+    awg_count: int
+    issued_count: int
+    last_issued_at: str | None
+
+
+class ProblemNodeOutput(BaseModel):
+    key: str
+    title: str
+
+
+class AdminOverviewOutput(BaseModel):
+    version: str
+    nodes_total: int
+    nodes_enabled: int
+    profiles_total: int
+    profiles_active: int
+    profiles_frozen: int
+    pending_requests: int
+    problem_nodes: list[ProblemNodeOutput]
+
+
+class UpdatePreferencesInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    auto_check_enabled: bool | None = Field(default=None, strict=True)
+    branch: Literal['main', 'dev'] | None = None
+    dev_track: Literal['tag', 'head'] | None = None
 
 
 class GrantPage(BaseModel):
@@ -121,6 +189,8 @@ class NodeCreateInput(BaseModel):
     protocols: list[Literal['awg', 'xray']]
     xray_transports: list[Literal['tcp', 'xhttp']] = Field(default_factory=list)
     settings: NodeSettingsInput = Field(default_factory=NodeSettingsInput)
+    transport: Literal['local', 'ssh'] | None = None
+    ssh_target: StrictStr | None = None
 
 
 class NodeEditInput(BaseModel):
@@ -131,6 +201,8 @@ class NodeEditInput(BaseModel):
     protocols: list[Literal['awg', 'xray']] | None = None
     xray_transports: list[Literal['tcp', 'xhttp']] | None = None
     settings: NodeSettingsInput | None = None
+    transport: Literal['local', 'ssh'] | None = None
+    ssh_target: StrictStr | None = None
 
 
 class AdminNodeOutput(BaseModel):
@@ -144,11 +216,28 @@ class AdminNodeOutput(BaseModel):
     desired_revision: int
     applied_revision: int
     settings: dict[str, str | int]
+    transport: str | None = None
+    ssh_target: str | None = None
 
 
 class AdminNodePage(BaseModel):
     items: list[AdminNodeOutput]
     next_cursor: str | None
+
+
+class AdminNodeOverviewOutput(BaseModel):
+    node_key: str
+    enabled: bool
+    state: str
+    desired_revision: int
+    applied_revision: int
+    settings_task_status: str | None
+    settings_complete: bool
+    access_total: int
+    ready: int
+    pending: int
+    failed: int
+    attention: int
 
 
 class NodeRuntimeObservation(BaseModel):
@@ -161,6 +250,15 @@ class NodeRuntimeObservation(BaseModel):
     desired_revision: int
     applied_revision: int
     settings_verified: bool
+
+
+class NodeDiagnosticsOutput(BaseModel):
+    node_key: str
+    docker: Literal['ok', 'missing', 'invalid']
+    runtime_root: Literal['ok', 'missing', 'invalid']
+    xray_config: Literal['ok', 'missing', 'invalid']
+    awg_config: Literal['ok', 'missing', 'invalid']
+    runtime_version: str | None
 
 
 class NodeSettingsTaskOutput(BaseModel):
@@ -264,10 +362,17 @@ class ConfigArtifactOutput(BaseModel):
     content: str
 
 
+class GrantInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    node_key: Annotated[str, Field(min_length=1, max_length=64)]
+    protocol: str
+
+
 class ProfileCreateInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
     display_name: Annotated[str, Field(min_length=1, max_length=128)]
     owner_account_id: UUID | None = None
+    grants: Annotated[list[GrantInput], Field(max_length=100)] = Field(default_factory=list)
 
 
 class ProfileEditInput(BaseModel):
@@ -275,12 +380,6 @@ class ProfileEditInput(BaseModel):
     display_name: Annotated[str, Field(min_length=1, max_length=128)] | None = None
     frozen: bool | None = Field(default=None, strict=True)
     expires_at: str | None = None
-
-
-class GrantInput(BaseModel):
-    model_config = ConfigDict(extra='forbid')
-    node_key: Annotated[str, Field(min_length=1, max_length=64)]
-    protocol: str
 
 
 class GrantsInput(BaseModel):
@@ -302,6 +401,12 @@ class AccessRequestOutput(BaseModel):
     created_at: str
     decided_at: str | None
     decided_by: UUID | None
+    telegram_user_id: int | None = None
+    username: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
+    language_code: str | None = None
+    locale: str | None = None
 
 
 class AccessRequestPage(BaseModel):
@@ -312,6 +417,17 @@ class AccessRequestPage(BaseModel):
 class AccessDecisionInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
     decision: Literal['approve', 'reject']
+
+
+class AccessRequestPolicyInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    enabled: StrictBool | None = None
+    gate_message: StrictStr | None = Field(default=None, max_length=500)
+
+
+class AccessRequestPolicyOutput(BaseModel):
+    enabled: bool
+    gate_message: str
 
 
 class ProfileInspectionOutput(BaseModel):
@@ -349,6 +465,8 @@ def create_app(db, *, node_driver=None) -> FastAPI:
     profiles = ProfileService(ProfileRepository(db))
     profile_commands = ProfileCommands(db)
     operations = OperationRepository(db)
+    admin_overview = AdminOverviewService(db)
+    node_overview = NodeOverviewService(db)
     access_requests = AccessRequestService(db)
     accounts = AccountService(db)
     nodes = NodeService(db)
@@ -453,6 +571,7 @@ def create_app(db, *, node_driver=None) -> FastAPI:
                 conn.execute('SELECT node_key FROM backend_node_verification_targets LIMIT 1').fetchone()
                 conn.execute('SELECT fingerprint FROM backend_node_host_identities LIMIT 1').fetchone()
                 conn.execute('SELECT id FROM backend_access_requests LIMIT 1').fetchone()
+                conn.execute('SELECT key FROM backend_system_settings LIMIT 1').fetchone()
                 conn.execute('SELECT actor_account_id FROM backend_account_commands LIMIT 1').fetchone()
                 conn.execute('SELECT id FROM backend_account_guard LIMIT 1').fetchone()
                 conn.execute('SELECT actor_account_id FROM backend_node_commands LIMIT 1').fetchone()
@@ -474,7 +593,9 @@ def create_app(db, *, node_driver=None) -> FastAPI:
             key = str(UUID(raw_key))
         except (TypeError, ValueError, AttributeError):
             raise AccessDenied('invalid_idempotency_key', 422) from None
-        return service.resolve_telegram(principal, body.telegram_user_id, command_key=key)
+        return service.resolve_telegram(principal, body.telegram_user_id, command_key=key,
+            username=body.username, first_name=body.first_name, last_name=body.last_name,
+            language_code=body.language_code)
 
     @app.get('/api/v1/me', response_model=MeOutput)
     def me(current=Depends(actor)):
@@ -487,12 +608,36 @@ def create_app(db, *, node_driver=None) -> FastAPI:
                 continue
             permissions.append(permission)
         return MeOutput(id=current.account.id, role=current.account.role, status=current.account.status,
-                        permissions=permissions)
+                        permissions=permissions,
+                        **identities.telegram_details_for_account(current.account.id))
+
+    @app.patch('/api/v1/me/preferences', response_model=MeOutput)
+    def update_my_preferences(body: AccountPreferencesInput, current=Depends(actor)):
+        require_permission(current, 'account.self.preferences.write')
+        identities.set_telegram_locale_for_account(current.account.id, body.locale)
+        permissions = []
+        for permission in sorted(SELF_PERMISSIONS | APPROVED_PERMISSIONS | ADMIN_PERMISSIONS):
+            try:
+                require_permission(current, permission)
+            except AccessDenied:
+                continue
+            permissions.append(permission)
+        return MeOutput(id=current.account.id, role=current.account.role, status=current.account.status,
+                        permissions=permissions,
+                        **identities.telegram_details_for_account(current.account.id))
 
     @app.post('/api/v1/me/access-requests', response_model=AccessRequestOutput, status_code=201)
     def create_access_request(request: Request,
                               command_key: Annotated[str, Header(alias='Idempotency-Key')], current=Depends(actor)):
         return access_requests.create(current, header(request, 'Idempotency-Key'))
+
+    @app.get('/api/v1/system/access-requests', response_model=AccessRequestPolicyOutput)
+    def get_access_request_policy(current=Depends(actor)):
+        return access_requests.policy(current)
+
+    @app.patch('/api/v1/system/access-requests', response_model=AccessRequestPolicyOutput)
+    def edit_access_request_policy(body: AccessRequestPolicyInput, current=Depends(actor)):
+        return access_requests.update_policy(current, **body.model_dump(exclude_unset=True))
 
     @app.get('/api/v1/me/access-requests', response_model=AccessRequestPage)
     def own_access_requests(current=Depends(actor), limit: Annotated[int, Query(ge=1, le=100)] = 25,
@@ -501,8 +646,14 @@ def create_app(db, *, node_driver=None) -> FastAPI:
 
     @app.get('/api/v1/access-requests', response_model=AccessRequestPage)
     def pending_access_requests(current=Depends(actor), limit: Annotated[int, Query(ge=1, le=100)] = 25,
-                                cursor: Annotated[str | None, Query(max_length=512)] = None):
-        return access_requests.list_pending(current, limit=limit, cursor=cursor)
+                                cursor: Annotated[str | None, Query(max_length=512)] = None,
+                                search: Annotated[str | None, Query(max_length=128)] = None):
+        return access_requests.list_pending(current, limit=limit, cursor=cursor,
+                                            search=search)
+
+    @app.get('/api/v1/access-requests/{request_id}', response_model=AccessRequestOutput)
+    def get_pending_access_request(request_id: UUID, current=Depends(actor)):
+        return access_requests.get_pending(current, str(request_id))
 
     @app.post('/api/v1/access-requests/{request_id}/decision', response_model=AccessRequestOutput)
     def decide_access_request(request_id: UUID, body: AccessDecisionInput, request: Request,
@@ -514,10 +665,19 @@ def create_app(db, *, node_driver=None) -> FastAPI:
                      cursor: Annotated[str | None, Query(max_length=512)] = None):
         return profiles.list_owned(current, limit=limit, cursor=cursor)
 
+    @app.get('/api/v1/me/profiles/{profile_id}/summary', response_model=MemberProfileSummary)
+    def own_profile_summary(profile_id: UUID, current=Depends(actor)):
+        return profiles.own_summary(current, str(profile_id))
+
     @app.get('/api/v1/profiles', response_model=ProfilePage)
     def all_profiles(current=Depends(actor), limit: Annotated[int, Query(ge=1, le=100)] = 25,
-                     cursor: Annotated[str | None, Query(max_length=512)] = None):
-        return profiles.list_all(current, limit=limit, cursor=cursor)
+                     cursor: Annotated[str | None, Query(max_length=512)] = None,
+                     search: Annotated[str | None, Query(max_length=128)] = None):
+        return profiles.list_all(current, limit=limit, cursor=cursor, search=search)
+
+    @app.get('/api/v1/admin/overview', response_model=AdminOverviewOutput)
+    def administration_overview(current=Depends(actor)):
+        return {'version': APP_VERSION, **admin_overview.get(current)}
 
     @app.get('/api/v1/profiles/{profile_id}', response_model=ProfileOutput)
     def profile(profile_id: UUID, response: Response, current=Depends(actor)):
@@ -528,6 +688,11 @@ def create_app(db, *, node_driver=None) -> FastAPI:
     @app.get('/api/v1/profiles/{profile_id}/grants', response_model=GrantPage)
     def profile_grants(profile_id: UUID, current=Depends(actor)):
         return profiles.grants(current, str(profile_id))
+
+    @app.get('/api/v1/profiles/{profile_id}/operation', response_model=OperationOutput | None)
+    def latest_profile_operation(profile_id: UUID, current=Depends(actor)):
+        profiles.get(current, str(profile_id))
+        return operations.latest_for_profile(current, str(profile_id))
 
     @app.get('/api/v1/me/nodes', response_model=NodePage)
     def own_nodes(current=Depends(actor), limit: Annotated[int, Query(ge=1, le=100)] = 25,
@@ -542,14 +707,19 @@ def create_app(db, *, node_driver=None) -> FastAPI:
 
     @app.get('/api/v1/nodes', response_model=AdminNodePage)
     def list_nodes(current=Depends(actor), limit: Annotated[int, Query(ge=1, le=100)] = 25,
-                   cursor: Annotated[str | None, Query(max_length=512)] = None):
-        return nodes.list(current, limit=limit, cursor=cursor)
+                   cursor: Annotated[str | None, Query(max_length=512)] = None,
+                   search: Annotated[str | None, Query(max_length=128)] = None):
+        return nodes.list(current, limit=limit, cursor=cursor, search=search)
 
     @app.get('/api/v1/nodes/{node_key}', response_model=AdminNodeOutput)
     def get_node(node_key: str, response: Response, current=Depends(actor)):
         result = nodes.get(current, node_key)
         response.headers['ETag'] = '"' + str(result['desired_revision']) + '"'
         return result
+
+    @app.get('/api/v1/nodes/{node_key}/overview', response_model=AdminNodeOverviewOutput)
+    def get_node_overview(node_key: str, current=Depends(actor)):
+        return node_overview.get(current, node_key)
 
     @app.get('/api/v1/nodes/{node_key}/runtime', response_model=NodeRuntimeObservation)
     def inspect_node_runtime(node_key: str, current=Depends(actor)):
@@ -573,6 +743,27 @@ def create_app(db, *, node_driver=None) -> FastAPI:
         # They cannot acknowledge the desired settings or enable the node.
         return {**observation, 'desired_revision': node['desired_revision'],
                 'applied_revision': node['applied_revision'], 'settings_verified': False}
+
+    @app.get('/api/v1/nodes/{node_key}/diagnostics', response_model=NodeDiagnosticsOutput)
+    def get_node_diagnostics(node_key: str, current=Depends(actor)):
+        nodes.get(current, node_key)
+        try:
+            if node_driver is None:
+                from .driver_transport import GrpcIntentDriver, local_channel
+                with local_channel('127.0.0.1:50051') as channel:
+                    return GrpcIntentDriver(channel).diagnose_node(node_key)
+            return node_driver.diagnose_node(node_key)
+        except Exception as failure:
+            import grpc
+            from .driver_transport import AgentNotConfigured
+            if isinstance(failure, AgentNotConfigured):
+                raise AccessDenied('node_agent_unconfigured', 409) from None
+            if isinstance(failure, grpc.RpcError):
+                if failure.code() == grpc.StatusCode.FAILED_PRECONDITION:
+                    raise AccessDenied('node_agent_unconfigured', 409) from None
+                if failure.code() in {grpc.StatusCode.UNAVAILABLE, grpc.StatusCode.DEADLINE_EXCEEDED}:
+                    raise AccessDenied('node_agent_unavailable', 503) from None
+            raise AccessDenied('driver_unavailable', 503) from None
 
     @app.post('/api/v1/nodes', response_model=AdminNodeOutput, status_code=201)
     def create_node(body: NodeCreateInput, request: Request, response: Response,
@@ -767,6 +958,15 @@ def create_app(db, *, node_driver=None) -> FastAPI:
             profile_id=str(profile_id), revision=revision_header(request), values=body.model_dump())
         return mutation_response(response, result)
 
+    @app.delete('/api/v1/profiles/{profile_id}', response_model=ProfileCommandOutput)
+    def delete_profile(profile_id: UUID, request: Request, response: Response,
+                       command_key: Annotated[str, Header(alias='Idempotency-Key')],
+                       if_match: Annotated[str | None, Header(alias='If-Match')] = None,
+                       current=Depends(actor)):
+        result = profile_commands.execute(current, header(request, 'Idempotency-Key'),
+            action='delete', profile_id=str(profile_id), revision=revision_header(request))
+        return mutation_response(response, result)
+
     @app.get('/api/v1/operations/{operation_id}', response_model=OperationOutput)
     def operation(operation_id: UUID, current=Depends(actor)):
         return operations.get(current, str(operation_id))
@@ -828,6 +1028,21 @@ def create_app(db, *, node_driver=None) -> FastAPI:
         import app.services.updates as updater
         return updater.get_updates_overview()
 
+    @app.patch('/api/v1/system/updates/preferences')
+    def edit_update_preferences(body: UpdatePreferencesInput, current=Depends(actor)):
+        require_permission(current, 'settings.manage')
+        values = body.model_dump(exclude_unset=True)
+        if not values or any(value is None for value in values.values()):
+            raise AccessDenied('invalid_input', 422)
+        from app.services import app_settings, updates
+        if 'branch' in values:
+            app_settings.set_updates_branch(values['branch'])
+        if 'dev_track' in values:
+            app_settings.set_updates_dev_track(values['dev_track'])
+        if 'auto_check_enabled' in values:
+            app_settings.set_updates_auto_check_enabled(values['auto_check_enabled'])
+        return updates.get_updates_overview()
+
     @app.post('/api/v1/system/updates/check')
     def check_updates(current=Depends(actor)):
         require_permission(current, 'settings.manage')
@@ -843,14 +1058,14 @@ def create_app(db, *, node_driver=None) -> FastAPI:
     @app.get('/api/v1/system/cleanup')
     def get_cleanup(current=Depends(actor)):
         require_permission(current, 'settings.manage')
-        import app.services.updates as updater
-        return updater.get_release_cleanup_overview()
+        from app.services.release_cleanup import get_release_cleanup_overview
+        return get_release_cleanup_overview()
 
     @app.post('/api/v1/system/cleanup/run')
     def run_cleanup(current=Depends(actor)):
         require_permission(current, 'settings.manage')
-        import app.services.updates as updater
-        return updater.schedule_release_cleanup()
+        from app.services.release_cleanup import run_release_cleanup
+        return run_release_cleanup()
 
     return app
 

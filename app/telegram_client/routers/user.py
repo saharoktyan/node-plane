@@ -10,12 +10,14 @@ import time
 from aiogram import Bot, F, Router
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
+from aiogram.exceptions import TelegramAPIError
 from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardButton, Message
 import qrcode
 from qrcode.exceptions import DataOverflowError
 
 from ..backend import BackendClient, BackendError
 from ..screens import Screen
+from ..i18n import normalize_locale, tr
 from .callbacks import HomeCallback
 from .common import render
 
@@ -43,6 +45,24 @@ def button(owner_id: int, label: str, name: str, *args: str) -> InlineKeyboardBu
     return InlineKeyboardButton(text=label, callback_data='u:' + token)
 
 
+async def clear_artifacts(bot: Bot, chat_id: int, state: FSMContext) -> None:
+    data = await state.get_data()
+    for message_id in data.get('artifact_message_ids', []):
+        try:
+            await bot.delete_message(chat_id, message_id)
+        except TelegramAPIError:
+            pass
+    await state.update_data(artifact_message_ids=[], delivered_issuances=[])
+
+
+async def track_artifact(state: FSMContext, message_id: int) -> None:
+    data = await state.get_data()
+    message_ids = list(data.get('artifact_message_ids', []))
+    if message_id not in message_ids:
+        message_ids.append(message_id)
+    await state.update_data(artifact_message_ids=message_ids[-20:])
+
+
 @router.message(CommandStart())
 async def start_cmd(message: Message, bot: Bot, backend: BackendClient,
                     state: FSMContext) -> None:
@@ -53,11 +73,20 @@ async def start_cmd(message: Message, bot: Bot, backend: BackendClient,
     except Exception:
         pass
     try:
-        await backend.resolve(message.from_user.id)
-        await show_home(message.chat.id, message.from_user.id, bot, backend, state)
+        await clear_artifacts(bot, message.chat.id, state)
+        await backend.resolve(message.from_user.id, username=message.from_user.username,
+            first_name=message.from_user.first_name, last_name=message.from_user.last_name,
+            language_code=message.from_user.language_code)
+        account = await backend.me(message.from_user.id)
+        await state.update_data(locale=normalize_locale(account.get('locale') or account.get('language_code')))
+        if not account.get('locale_selected'):
+            await show_language_picker(message.chat.id, message.from_user.id, bot, state)
+        else:
+            await show_home(message.chat.id, message.from_user.id, bot, backend, state)
     except BackendError:
         await render(bot, message.chat.id,
-            Screen('Node Plane', ('Сервис временно недоступен. Повторите /start позже.',)),
+            Screen(tr(message.from_user.language_code, 'home.title'),
+                   (tr(message.from_user.language_code, 'home.service_unavailable'),)),
             [], state)
 
 
@@ -66,56 +95,156 @@ async def home_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
                   state: FSMContext) -> None:
     await query.answer()
     if query.message:
+        old_data = await state.get_data()
+        locale = old_data.get('locale') or query.from_user.language_code
+        await clear_artifacts(bot, query.message.chat.id, state)
         await state.clear()
+        await state.update_data(locale=normalize_locale(locale))
         await show_home(query.message.chat.id, query.from_user.id, bot, backend,
                         state, query.message.message_id)
 
 
 async def show_home(chat_id: int, user_id: int, bot: Bot, backend: BackendClient,
                     state: FSMContext, message_id: int | None = None) -> None:
+    locale = normalize_locale((await state.get_data()).get('locale'))
     account = await backend.me(user_id)
     rows: list[list[InlineKeyboardButton]] = []
     if account['status'] != 'approved':
+        policy = await backend.access_request_policy(user_id)
         requests = await backend.request('GET', '/api/v1/me/access-requests?limit=25',
                                          telegram_user_id=user_id)
         pending = any(item['status'] == 'pending' for item in requests['items'])
-        if not pending:
-            rows.append([button(user_id, '🚀 Запросить доступ', 'request_access')])
-        lines = ('Заявка ожидает решения администратора.',) if pending else (
-            'Запросите доступ, чтобы получать VPN-конфиги.',)
+        if policy['enabled'] and not pending:
+            rows.append([button(user_id, tr(locale, 'home.request_access'), 'request_access')])
+        if pending:
+            lines = (tr(locale, 'home.waiting'),)
+        elif policy['enabled']:
+            lines = (tr(locale, 'home.request_prompt'),)
+        else:
+            lines = (policy['gate_message'],)
     else:
-        rows.append([button(user_id, '🔑 Получить конфиг', 'profiles')])
-        rows.append([button(user_id, '👤 Мой аккаунт', 'account_info')])
-        lines = ('Выберите действие.',)
+        rows.append([button(user_id, tr(locale, 'home.get_config'), 'profiles')])
+        rows.append([button(user_id, tr(locale, 'home.account'), 'account_info')])
+        lines = (tr(locale, 'home.choose'),)
+    rows.append([button(user_id, tr(locale, 'home.settings'), 'member_settings')])
     if account['role'] == 'admin' and account['status'] == 'approved':
-        rows.append([button(user_id, '👑 Админ-панель', 'admin_menu')])
-    await render(bot, chat_id, Screen('Node Plane', lines), rows, state, message_id)
+        rows.append([button(user_id, tr(locale, 'home.admin'), 'admin_menu')])
+    await render(bot, chat_id, Screen(tr(locale, 'home.title'), lines), rows, state, message_id)
+
+
+async def show_language_picker(chat_id: int, user_id: int, bot: Bot,
+                               state: FSMContext, message_id: int | None = None) -> None:
+    data = await state.get_data()
+    locale = normalize_locale(data.get('locale'))
+    rows = [[button(user_id, tr(locale, 'settings.russian'), 'first_locale', 'ru'),
+             button(user_id, tr(locale, 'settings.english'), 'first_locale', 'en')]]
+    await render(bot, chat_id, Screen(tr(locale, 'language.title'),
+        (tr(locale, 'language.prompt'),)), rows, state, message_id)
 
 
 async def show_profiles(chat_id: int, user_id: int, message_id: int, bot: Bot,
                         backend: BackendClient, state: FSMContext) -> None:
+    locale = normalize_locale((await state.get_data()).get('locale'))
     page = await backend.profiles(user_id)
+    if len(page['items']) == 1:
+        await show_profile(chat_id, user_id, message_id, page['items'][0]['id'],
+                           bot, backend, state)
+        return
     rows = [[button(user_id, item['display_name'], 'profile', item['id'])]
             for item in page['items']]
-    rows.append([button(user_id, '🔙 Назад', 'home')])
-    await render(bot, chat_id, Screen('Мои профили',
-        ('Выберите профиль.',) if page['items'] else ('Профилей пока нет.',)),
+    rows.append([button(user_id, tr(locale, 'back'), 'home')])
+    await render(bot, chat_id, Screen(tr(locale, 'profiles.title'),
+        (tr(locale, 'profiles.choose'),) if page['items'] else (tr(locale, 'profiles.empty'),)),
         rows, state, message_id)
+
+
+async def show_account_info(chat_id: int, user_id: int, message_id: int,
+                            bot: Bot, backend: BackendClient, state: FSMContext,
+                            username: str | None = None) -> None:
+    locale = normalize_locale((await state.get_data()).get('locale'))
+    account = await backend.me(user_id)
+    page = await backend.profiles(user_id)
+    if len(page['items']) == 1:
+        await show_account_profile(chat_id, user_id, message_id, page['items'][0]['id'],
+                                   bot, backend, state, username=username)
+        return
+    rows = [[button(user_id, item['display_name'], 'account_profile',
+                    item['id'], 'account_info')] for item in page['items']]
+    rows.append([button(user_id, tr(locale, 'back'), 'home')])
+    lines = (tr(locale, 'account.id', id=account['id']),
+             tr(locale, 'account.status', status=tr(locale, f"status.{account['status']}")),
+             tr(locale, 'account.profiles_choose' if page['items'] else 'account.profiles_empty'))
+    await render(bot, chat_id, Screen(tr(locale, 'account.title'), lines),
+                 rows, state, message_id)
+
+
+async def show_account_profile(chat_id: int, user_id: int, message_id: int,
+                               profile_id: str, bot: Bot, backend: BackendClient,
+                               state: FSMContext, *, username: str | None = None,
+                               back_to: str = 'home') -> None:
+    locale = normalize_locale((await state.get_data()).get('locale'))
+    summary = await backend.member_profile_summary(user_id, profile_id)
+    status_key = ('profile.frozen' if summary['frozen'] else
+                  'profile.expired' if summary['expired'] else 'profile.active')
+    status = tr(locale, status_key)
+    lines = [tr(locale, 'account.profile_name', name=summary['display_name']),
+             tr(locale, 'account.status', status=status),
+             tr(locale, 'account.telegram_id', id=user_id),
+             tr(locale, 'account.username', value='@' + username if username else '—')]
+    if summary.get('expires_at'):
+        lines.append(tr(locale, 'account.profile_expires',
+            value=summary['expires_at'][:10]))
+    if summary['nodes']:
+        lines.append(tr(locale, 'account.access_title'))
+        for node in summary['nodes']:
+            protocols = ', '.join(tr(locale, 'protocol.' + kind)
+                                  for kind in node['protocols'])
+            lines.append(tr(locale, 'account.access_node',
+                node=f"{node['flag']} {node['title']}".strip(), protocols=protocols))
+    else:
+        lines.append(tr(locale, 'account.access_empty'))
+    rows = [[button(user_id, tr(locale, 'account.statistics'), 'account_stats',
+                    profile_id, back_to)],
+            [button(user_id, tr(locale, 'back'), back_to)]]
+    await render(bot, chat_id, Screen(tr(locale, 'account.profile_title'), tuple(lines)),
+                 rows, state, message_id)
+
+
+async def show_account_stats(chat_id: int, user_id: int, message_id: int,
+                             profile_id: str, bot: Bot, backend: BackendClient,
+                             state: FSMContext, *, back_to: str = 'home') -> None:
+    locale = normalize_locale((await state.get_data()).get('locale'))
+    summary = await backend.member_profile_summary(user_id, profile_id)
+    lines = (tr(locale, 'account.profile_name', name=summary['display_name']),
+             tr(locale, 'account.member_since',
+                value=(summary.get('created_at') or '')[:10] or '—'),
+             tr(locale, 'account.stats_nodes', count=summary['node_count']),
+             tr(locale, 'account.stats_protocols', count=summary['protocol_count']),
+             tr(locale, 'account.stats_xray', count=summary['xray_count']),
+             tr(locale, 'account.stats_awg', count=summary['awg_count']),
+             tr(locale, 'account.stats_issued', count=summary['issued_count']),
+             tr(locale, 'account.stats_last',
+                value=(summary.get('last_issued_at') or '')[:16].replace('T', ' ') or '—'))
+    await render(bot, chat_id, Screen(tr(locale, 'account.stats_title'), lines),
+        [[button(user_id, tr(locale, 'back'), 'account_profile', profile_id, back_to)]],
+        state, message_id)
 
 
 async def show_profile(chat_id: int, user_id: int, message_id: int,
                        profile_id: str, bot: Bot, backend: BackendClient,
                        state: FSMContext) -> None:
-    profile = await backend.request('GET', f'/api/v1/profiles/{profile_id}',
-                                    telegram_user_id=user_id)
+    locale = normalize_locale((await state.get_data()).get('locale'))
+    profile = await backend.member_profile_summary(user_id, profile_id)
     page = await backend.profile_nodes(user_id, profile_id)
     rows = [[button(user_id, f"{node['flag']} {node['title']}".strip(),
                     'node', profile_id, node['key'])] for node in page['items']]
-    rows.append([button(user_id, '🔙 Назад', 'profiles')])
-    status = 'Заморожен' if profile['frozen'] else 'Активен'
+    rows.append([button(user_id, tr(locale, 'back'), 'profiles')])
+    status_key = ('profile.frozen' if profile['frozen'] else
+                  'profile.expired' if profile['expired'] else 'profile.active')
+    status = tr(locale, status_key)
     await render(bot, chat_id, Screen(profile['display_name'],
-        (f'Статус: {status}', 'Выберите сервер.') if page['items'] else
-        (f'Статус: {status}', 'Доступных серверов пока нет.')),
+        (tr(locale, 'account.status', status=status), tr(locale, 'nodes.choose')) if page['items'] else
+        (tr(locale, 'account.status', status=status), tr(locale, 'nodes.empty'))),
         rows, state, message_id)
 
 
@@ -127,13 +256,40 @@ async def show_node(chat_id: int, user_id: int, message_id: int,
     if node is None:
         await show_profile(chat_id, user_id, message_id, profile_id, bot, backend, state)
         return
-    rows = [[button(user_id, f"{protocol['kind'].upper()} · {transport.upper()}",
-                    'issue', profile_id, node_key, protocol['kind'], transport)]
-            for protocol in node['protocols'] for transport in protocol['transports']]
-    rows.append([button(user_id, '🔙 Назад', 'profile', profile_id)])
+    locale = normalize_locale((await state.get_data()).get('locale'))
+    rows = [[button(user_id, tr(locale, f"protocol.{protocol['kind']}"),
+                    'protocol', profile_id, node_key, protocol['kind'])]
+            for protocol in node['protocols']]
+    rows.append([button(user_id, tr(locale, 'back'), 'profile', profile_id)])
     await render(bot, chat_id, Screen(node['title'],
-        (f"Регион: {node['region']}", 'Выберите формат конфига.')),
+        (node['region'], tr(locale, 'node.choose_protocol'))),
         rows, state, message_id)
+
+
+async def show_protocol(chat_id: int, user_id: int, message_id: int, profile_id: str,
+                       node_key: str, protocol: str, bot: Bot, backend: BackendClient,
+                       state: FSMContext) -> None:
+    locale = normalize_locale((await state.get_data()).get('locale'))
+    page = await backend.profile_nodes(user_id, profile_id)
+    node = next((item for item in page['items'] if item['key'] == node_key), None)
+    selected = next((item for item in node['protocols'] if item['kind'] == protocol), None) if node else None
+    if selected is None:
+        await show_node(chat_id, user_id, message_id, profile_id, node_key, bot, backend, state)
+        return
+    if protocol == 'awg':
+        rows = [
+            [button(user_id, tr(locale, 'awg.get_vpn'), 'issue', profile_id, node_key, 'awg', 'vpn')],
+            [button(user_id, tr(locale, 'awg.get_conf'), 'issue', profile_id, node_key, 'awg', 'conf')],
+        ]
+        title = tr(locale, 'awg.title', node=node['title'])
+    else:
+        rows = [[button(user_id, tr(locale, f'transport.{transport}'), 'issue',
+                        profile_id, node_key, 'xray', transport)]
+                for transport in selected['transports']]
+        title = tr(locale, 'xray.title', node=node['title'])
+    rows.append([button(user_id, tr(locale, 'back'), 'node', profile_id, node_key)])
+    prompt = tr(locale, 'awg.choose_format' if protocol == 'awg' else 'transport.choose')
+    await render(bot, chat_id, Screen(title, (prompt,)), rows, state, message_id)
 
 
 async def show_issuance(chat_id: int, user_id: int, message_id: int,
@@ -141,35 +297,44 @@ async def show_issuance(chat_id: int, user_id: int, message_id: int,
                         state: FSMContext) -> None:
     result = await backend.issuance(user_id, issuance_id)
     profile_id, node_key = result['profile_id'], result['node_key']
-    rows = [[button(user_id, '🔙 Назад', 'node', profile_id, node_key)]]
+    locale = normalize_locale((await state.get_data()).get('locale'))
+    rows = [[button(user_id, tr(locale, 'back'), 'protocol', profile_id, node_key,
+                    result['protocol'])]]
     if result['status'] == 'succeeded':
         artifact = await backend.artifact(user_id, issuance_id)
         content = artifact['content']
         filename = artifact['filename'] or f"{result['protocol']}-{node_key}.txt"
-        await bot.send_document(chat_id, BufferedInputFile(content.encode(), filename))
-        if len(content.encode()) <= 2500:
-            rows.insert(0, [button(user_id, 'Показать QR', 'qr', issuance_id)])
+        data = await state.get_data()
+        delivered = set(data.get('delivered_issuances', []))
+        if issuance_id not in delivered:
+            sent = await bot.send_document(chat_id, BufferedInputFile(content.encode(), filename))
+            await track_artifact(state, sent.message_id)
+            delivered.add(issuance_id)
+            await state.update_data(delivered_issuances=list(delivered))
+        if (result['protocol'] == 'xray' or result.get('transport') == 'vpn') and len(content.encode()) <= 2500:
+            rows.insert(0, [button(user_id, tr(locale, 'config.qr'), 'qr', issuance_id)])
         details = (content,) if result['protocol'] == 'xray' else ()
-        await render(bot, chat_id, Screen('Конфиг готов',
-            ('Импортируйте прикреплённый файл в VPN-клиент.',),
-            'VLESS-ссылка' if details else None, details), rows, state, message_id)
+        await render(bot, chat_id, Screen(tr(locale, 'config.ready'),
+            (tr(locale, 'config.import_file'),),
+            tr(locale, 'config.vless_link') if details else None, details), rows, state, message_id)
     elif result['status'] in {'blocked', 'superseded', 'failed'}:
-        await render(bot, chat_id, Screen('Конфиг недоступен',
-            ('Проверьте доступ и состояние ноды, затем запросите новый конфиг.',)),
+        await render(bot, chat_id, Screen(tr(locale, 'config.not_ready'),
+            (tr(locale, 'config.unavailable'),)),
             rows, state, message_id)
     else:
-        rows.insert(0, [button(user_id, 'Обновить', 'issuance', issuance_id)])
-        await render(bot, chat_id, Screen('Конфиг готовится',
-            ('Backend ещё обрабатывает запрос.',)), rows, state, message_id)
+        rows.insert(0, [button(user_id, tr(locale, 'config.ready'), 'issuance', issuance_id)])
+        await render(bot, chat_id, Screen(tr(locale, 'config.preparing_title'),
+            (tr(locale, 'config.pending'),)), rows, state, message_id)
 
 
 async def issue(chat_id: int, user_id: int, message_id: int, profile_id: str,
                 node_key: str, protocol: str, transport: str, bot: Bot,
                 backend: BackendClient, state: FSMContext) -> None:
+    locale = normalize_locale((await state.get_data()).get('locale'))
     queued = await backend.issue(user_id, profile_id, node_key, protocol, transport)
-    await render(bot, chat_id, Screen('Подготовка конфига',
-        ('Проверяем доступ и состояние ноды…',)),
-        [[button(user_id, '🔙 Назад', 'node', profile_id, node_key)]], state, message_id)
+    await render(bot, chat_id, Screen(tr(locale, 'config.preparing_title'),
+        (tr(locale, 'config.preparing'),)),
+        [[button(user_id, tr(locale, 'back'), 'protocol', profile_id, node_key, protocol)]], state, message_id)
     for _ in range(15):
         result = await backend.issuance(user_id, queued['id'])
         if result['status'] in {'succeeded', 'blocked', 'superseded', 'failed'}:
@@ -182,11 +347,12 @@ async def show_qr(chat_id: int, user_id: int, message_id: int, issuance_id: str,
                   bot: Bot, backend: BackendClient, state: FSMContext) -> None:
     result = await backend.issuance(user_id, issuance_id)
     artifact = await backend.artifact(user_id, issuance_id)
-    content = artifact['content']
-    rows = [[button(user_id, '🔙 Назад', 'node', result['profile_id'], result['node_key'])]]
+    content = qr_payload(result['protocol'], result['transport'], artifact['content'])
+    locale = normalize_locale((await state.get_data()).get('locale'))
+    rows = [[button(user_id, tr(locale, 'back'), 'qr_back', issuance_id)]]
     if len(content.encode()) > 2500:
-        await render(bot, chat_id, Screen('QR недоступен',
-            ('Конфиг слишком длинный для QR. Используйте файл.',)), rows, state, message_id)
+        await render(bot, chat_id, Screen(tr(locale, 'qr.unavailable'),
+            (tr(locale, 'qr.too_long'),)), rows, state, message_id)
         return
     code = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_L,
                          box_size=6, border=4)
@@ -194,14 +360,19 @@ async def show_qr(chat_id: int, user_id: int, message_id: int, issuance_id: str,
     try:
         code.make(fit=True)
     except DataOverflowError:
-        await render(bot, chat_id, Screen('QR недоступен',
-            ('Конфиг слишком длинный для QR. Используйте файл.',)), rows, state, message_id)
+        await render(bot, chat_id, Screen(tr(locale, 'qr.unavailable'),
+            (tr(locale, 'qr.too_long'),)), rows, state, message_id)
         return
     image = BytesIO()
     code.make_image(fill_color='black', back_color='white').save(image, format='PNG')
-    await bot.send_photo(chat_id, BufferedInputFile(image.getvalue(), 'config.png'))
-    await render(bot, chat_id, Screen('QR готов', ('Отсканируйте отправленное изображение.',)),
+    sent = await bot.send_photo(chat_id, BufferedInputFile(image.getvalue(), 'config.png'))
+    await track_artifact(state, sent.message_id)
+    await render(bot, chat_id, Screen(tr(locale, 'qr.ready'), (tr(locale, 'qr.scan'),)),
                  rows, state, message_id)
+
+
+def qr_payload(protocol: str, transport: str, content: str) -> str:
+    return content.removeprefix('vpn://') if protocol == 'awg' and transport == 'vpn' else content
 
 
 @router.callback_query(F.data.startswith('u:'))
@@ -212,13 +383,20 @@ async def user_action_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
     token = (query.data or '')[2:]
     action = actions.get(token)
     if action is None or action.owner_id != query.from_user.id or action.expires_at < time.monotonic():
-        await query.answer('Экран устарел. Отправьте /start.', show_alert=True)
+        locale = normalize_locale((await state.get_data()).get('locale') or query.from_user.language_code)
+        await query.answer(tr(locale, 'callback.stale'), show_alert=True)
         return
     actions.pop(token, None)
     await query.answer()
     chat_id, user_id, message_id = query.message.chat.id, query.from_user.id, query.message.message_id
     try:
+        if action.name != 'issuance':
+            await clear_artifacts(bot, chat_id, state)
         if action.name == 'home':
+            await show_home(chat_id, user_id, bot, backend, state, message_id)
+        elif action.name == 'first_locale':
+            await backend.set_locale(user_id, action.args[0])
+            await state.update_data(locale=action.args[0])
             await show_home(chat_id, user_id, bot, backend, state, message_id)
         elif action.name == 'profiles':
             await show_profiles(chat_id, user_id, message_id, bot, backend, state)
@@ -226,17 +404,34 @@ async def user_action_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
             await show_profile(chat_id, user_id, message_id, action.args[0], bot, backend, state)
         elif action.name == 'node':
             await show_node(chat_id, user_id, message_id, *action.args, bot, backend, state)
+        elif action.name == 'protocol':
+            await show_protocol(chat_id, user_id, message_id, *action.args, bot, backend, state)
         elif action.name == 'issue':
             await issue(chat_id, user_id, message_id, *action.args, bot, backend, state)
         elif action.name == 'issuance':
             await show_issuance(chat_id, user_id, message_id, action.args[0], bot, backend, state)
         elif action.name == 'qr':
             await show_qr(chat_id, user_id, message_id, action.args[0], bot, backend, state)
+        elif action.name == 'qr_back':
+            await show_issuance(chat_id, user_id, message_id, action.args[0], bot,
+                                backend, state)
         elif action.name == 'account_info':
-            account = await backend.me(user_id)
-            await render(bot, chat_id, Screen('Мой аккаунт',
-                (f"ID: {account['id']}", f"Статус: {account['status']}")),
-                [[button(user_id, '🔙 Назад', 'home')]], state, message_id)
+            await show_account_info(chat_id, user_id, message_id, bot, backend, state,
+                                    username=query.from_user.username)
+        elif action.name == 'account_profile':
+            await show_account_profile(chat_id, user_id, message_id, action.args[0],
+                bot, backend, state, username=query.from_user.username,
+                back_to=action.args[1])
+        elif action.name == 'account_stats':
+            await show_account_stats(chat_id, user_id, message_id, action.args[0],
+                bot, backend, state, back_to=action.args[1])
+        elif action.name == 'member_settings':
+            await show_member_settings(chat_id, user_id, message_id, bot, backend, state)
+        elif action.name == 'set_locale':
+            await backend.set_locale(user_id, action.args[0])
+            await state.update_data(locale=action.args[0])
+            await show_member_settings(chat_id, user_id, message_id, bot, backend, state,
+                                       saved=True)
         elif action.name == 'request_access':
             request = await backend.request_access(user_id)
             await show_home(chat_id, user_id, bot, backend, state, message_id)
@@ -245,8 +440,22 @@ async def user_action_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
         elif action.name == 'admin_menu':
             await show_admin_menu(chat_id, user_id, message_id, bot, state)
     except BackendError as exc:
-        await render(bot, chat_id, Screen('Действие недоступно',
-            (f'Причина: {exc.code}',)), [[button(user_id, 'Главная', 'home')]],
+        locale = normalize_locale((await state.get_data()).get('locale'))
+        if exc.code == 'access_requests_disabled':
+            await show_home(chat_id, user_id, bot, backend, state, message_id)
+            return
+        if exc.code in {'profile_frozen', 'profile_expired', 'grant_revoked',
+                        'account_disabled', 'permission_denied'}:
+            cause = 'access'
+        elif exc.status == 404:
+            cause = 'missing'
+        elif exc.status >= 500:
+            cause = 'service'
+        else:
+            cause = 'retry'
+        await render(bot, chat_id, Screen(tr(locale, 'action.unavailable'),
+            (tr(locale, 'action.error.' + cause),)),
+            [[button(user_id, tr(locale, 'home.title'), 'home')]],
             state, message_id)
 
 
@@ -254,15 +463,92 @@ async def show_admin_menu(chat_id: int, user_id: int, message_id: int,
                           bot: Bot, state: FSMContext) -> None:
     from .callbacks import (AccountsCallback, AdminNodesCallback,
                             AdminProfilesCallback, AdminSettingsCallback, RequestsCallback)
+    locale = normalize_locale((await state.get_data()).get('locale'))
     rows = [
-        [InlineKeyboardButton(text='🎫 Заявки', callback_data=RequestsCallback().pack())],
-        [InlineKeyboardButton(text='🖥 Серверы', callback_data=AdminNodesCallback().pack()),
-         InlineKeyboardButton(text='👥 Профили', callback_data=AdminProfilesCallback().pack())],
-        [InlineKeyboardButton(text='👤 Аккаунты', callback_data=AccountsCallback().pack())],
-        [InlineKeyboardButton(text='⚙️ Настройки', callback_data=AdminSettingsCallback().pack())],
-        [button(user_id, '🔙 Назад', 'home')],
+        [InlineKeyboardButton(text=tr(locale, 'admin.status'), callback_data='admin_status')],
+        [InlineKeyboardButton(text=tr(locale, 'admin.requests'), callback_data=RequestsCallback().pack())],
+        [InlineKeyboardButton(text=tr(locale, 'admin.nodes'), callback_data=AdminNodesCallback().pack()),
+         InlineKeyboardButton(text=tr(locale, 'admin.profiles'), callback_data=AdminProfilesCallback().pack())],
+        [InlineKeyboardButton(text=tr(locale, 'admin.accounts'), callback_data=AccountsCallback().pack())],
+        [InlineKeyboardButton(text=tr(locale, 'admin.settings'), callback_data=AdminSettingsCallback().pack())],
+        [button(user_id, tr(locale, 'back'), 'home')],
     ]
-    await render(bot, chat_id, Screen('Админ-панель', ('Управление Node Plane.',)),
+    await render(bot, chat_id, Screen(tr(locale, 'admin.menu'), (tr(locale, 'admin.description'),)),
+                 rows, state, message_id)
+
+
+@router.callback_query(F.data == 'admin_status')
+async def admin_status_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
+                          state: FSMContext) -> None:
+    await query.answer()
+    await show_admin_status(query.message.chat.id, query.from_user.id,
+        query.message.message_id, bot, backend, state)
+
+
+async def show_admin_status(chat_id: int, user_id: int, message_id: int,
+                            bot: Bot, backend: BackendClient, state: FSMContext) -> None:
+    from .callbacks import AdminNodesCallback, AdminProfilesCallback, RequestsCallback
+    locale = normalize_locale((await state.get_data()).get('locale'))
+    overview = await backend.admin_overview(user_id)
+    lines = [tr(locale, 'admin.status.version', version=overview['version']),
+             tr(locale, 'admin.status.nodes', active=overview['nodes_enabled'],
+                total=overview['nodes_total']),
+             tr(locale, 'admin.status.profiles', active=overview['profiles_active'],
+                total=overview['profiles_total']),
+             tr(locale, 'admin.status.frozen', count=overview['profiles_frozen']),
+             tr(locale, 'admin.status.pending', count=overview['pending_requests']),
+             tr(locale, 'admin.status.problems', count=len(overview['problem_nodes'])),
+             tr(locale, 'admin.status.runtime_note')]
+    rows = []
+    if overview['pending_requests']:
+        rows.append([InlineKeyboardButton(text=tr(locale, 'admin.requests'),
+            callback_data=RequestsCallback().pack())])
+    if overview['problem_nodes']:
+        rows.append([InlineKeyboardButton(text=tr(locale, 'admin.status.open_problems'),
+            callback_data='admin_problem_nodes')])
+    rows.extend([[InlineKeyboardButton(text=tr(locale, 'admin.nodes'),
+        callback_data=AdminNodesCallback().pack()),
+        InlineKeyboardButton(text=tr(locale, 'admin.profiles'),
+        callback_data=AdminProfilesCallback().pack())],
+        [InlineKeyboardButton(text=tr(locale, 'admin.status.refresh'),
+        callback_data='admin_status')],
+        [InlineKeyboardButton(text=tr(locale, 'back'), callback_data='admin_menu')]])
+    await render(bot, chat_id, Screen(tr(locale, 'admin.status.title'), tuple(lines)),
+                 rows, state, message_id)
+
+
+@router.callback_query(F.data == 'admin_problem_nodes')
+async def admin_problem_nodes_cb(query: CallbackQuery, bot: Bot,
+                                 backend: BackendClient, state: FSMContext) -> None:
+    from .callbacks import AdminNodeCallback
+    await query.answer()
+    locale = normalize_locale((await state.get_data()).get('locale'))
+    overview = await backend.admin_overview(query.from_user.id)
+    rows = [[InlineKeyboardButton(text=node['title'],
+        callback_data=AdminNodeCallback(node_key=node['key']).pack())]
+        for node in overview['problem_nodes']]
+    rows.append([InlineKeyboardButton(text=tr(locale, 'back'),
+        callback_data='admin_status')])
+    lines = (tr(locale, 'admin.status.problem_nodes_hint'),) if rows[:-1] else (
+        tr(locale, 'admin.status.no_problems'),)
+    await render(bot, query.message.chat.id,
+        Screen(tr(locale, 'admin.status.problem_nodes'), lines),
+        rows, state, query.message.message_id)
+
+
+async def show_member_settings(chat_id: int, user_id: int, message_id: int,
+                               bot: Bot, backend: BackendClient, state: FSMContext,
+                               saved: bool = False) -> None:
+    locale = normalize_locale((await state.get_data()).get('locale'))
+    rows = [
+        [button(user_id, tr(locale, 'settings.russian'), 'set_locale', 'ru'),
+         button(user_id, tr(locale, 'settings.english'), 'set_locale', 'en')],
+        [button(user_id, tr(locale, 'back'), 'home')],
+    ]
+    lines = [tr(locale, 'settings.locale')]
+    if saved:
+        lines.insert(0, tr(locale, 'settings.locale_saved'))
+    await render(bot, chat_id, Screen(tr(locale, 'settings.title'), tuple(lines)),
                  rows, state, message_id)
 
 

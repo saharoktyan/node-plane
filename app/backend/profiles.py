@@ -46,8 +46,14 @@ class ProfileRepository:
                 owner_account_id TEXT REFERENCES backend_accounts(id),
                 frozen INTEGER NOT NULL DEFAULT 0 CHECK(frozen IN (0, 1)),
                 expires_at TEXT,
+                created_at TEXT,
                 desired_revision INTEGER NOT NULL DEFAULT 1
             )''')
+            if getattr(self.db, 'backend_name', 'sqlite') == 'postgres':
+                conn.execute('ALTER TABLE backend_profiles ADD COLUMN IF NOT EXISTS created_at TEXT')
+            elif 'created_at' not in {row['name'] for row in conn.execute(
+                    'PRAGMA table_info(backend_profiles)').fetchall()}:
+                conn.execute('ALTER TABLE backend_profiles ADD COLUMN created_at TEXT')
             conn.execute('''CREATE TABLE IF NOT EXISTS backend_nodes (
                 key TEXT PRIMARY KEY, title TEXT NOT NULL, region TEXT NOT NULL,
                 flag TEXT NOT NULL DEFAULT '', enabled INTEGER NOT NULL DEFAULT 1,
@@ -63,6 +69,11 @@ class ProfileRepository:
                 protocol TEXT NOT NULL CHECK(protocol IN ('awg', 'xray')),
                 PRIMARY KEY(profile_id, node_key, protocol)
             )''')
+            conn.execute('''CREATE TABLE IF NOT EXISTS backend_profile_deletions (
+                profile_id TEXT PRIMARY KEY REFERENCES backend_profiles(id),
+                requested_at TEXT NOT NULL,
+                operation_id TEXT
+            )''')
             conn.execute('CREATE INDEX IF NOT EXISTS idx_backend_profile_owner ON backend_profiles(owner_account_id, id)')
         from .node_lifecycle import NodeLifecycle
         NodeLifecycle(self.db).initialize_schema()
@@ -77,35 +88,101 @@ class ProfileRepository:
         with self.db.transaction() as conn:
             if owner_account_id is not None and conn.execute('SELECT id FROM backend_accounts WHERE id = ?', (owner_account_id,)).fetchone() is None:
                 raise ValueError('owner account does not exist')
-            conn.execute('INSERT INTO backend_profiles(id, runtime_name, display_name, owner_account_id) VALUES (?, ?, ?, ?)',
-                         (profile_id, runtime_name, display_name, owner_account_id))
+            conn.execute('''INSERT INTO backend_profiles
+                (id, runtime_name, display_name, owner_account_id, created_at)
+                VALUES (?, ?, ?, ?, ?)''',
+                (profile_id, runtime_name, display_name, owner_account_id,
+                 datetime.now(timezone.utc).isoformat()))
         return profile_id
 
     @staticmethod
     def public(row):
-        return {key: row[key] for key in ('id', 'display_name', 'owner_account_id', 'expires_at', 'desired_revision')} | {'frozen': bool(row['frozen'])}
+        return {key: row[key] for key in ('id', 'display_name', 'owner_account_id', 'expires_at', 'desired_revision')} | {
+            'frozen': bool(row['frozen']),
+            'deleting': bool(row['deleting']) if 'deleting' in row.keys() else False}
 
     def get(self, profile_id):
         with self.db.connect() as conn:
-            return conn.execute('SELECT * FROM backend_profiles WHERE id = ?', (profile_id,)).fetchone()
+            return conn.execute('''SELECT p.*, CASE WHEN d.profile_id IS NULL THEN 0 ELSE 1 END AS deleting
+                FROM backend_profiles p LEFT JOIN backend_profile_deletions d ON d.profile_id = p.id
+                WHERE p.id = ?''', (profile_id,)).fetchone()
 
     def owned(self, account_id, *, after, limit):
         with self.db.connect() as conn:
-            rows = conn.execute('SELECT * FROM backend_profiles WHERE owner_account_id = ? AND id > ? ORDER BY id LIMIT ?',
+            rows = conn.execute('''SELECT p.* FROM backend_profiles p WHERE p.owner_account_id = ? AND p.id > ?
+                AND NOT EXISTS (SELECT 1 FROM backend_profile_deletions d WHERE d.profile_id = p.id)
+                ORDER BY p.id LIMIT ?''',
                                 (account_id, after, limit)).fetchall()
         return [self.public(row) for row in rows]
 
     def all_profiles(self, *, after, limit):
         with self.db.connect() as conn:
-            rows = conn.execute('SELECT * FROM backend_profiles WHERE id > ? ORDER BY id LIMIT ?',
+            rows = conn.execute('''SELECT p.*, CASE WHEN d.profile_id IS NULL THEN 0 ELSE 1 END AS deleting
+                FROM backend_profiles p LEFT JOIN backend_profile_deletions d ON d.profile_id = p.id
+                WHERE p.id > ? AND (d.profile_id IS NULL OR EXISTS (
+                    SELECT 1 FROM backend_operations o WHERE o.id = d.operation_id
+                    AND o.status NOT IN ('no_targets', 'succeeded')))
+                ORDER BY p.id LIMIT ?''',
                                 (after, limit)).fetchall()
         return [self.public(row) for row in rows]
+
+    def search_profiles(self, term, *, after, limit):
+        """Match names with Unicode case folding while paging by stable profile ID."""
+        matches = []
+        current = after
+        with self.db.connect() as conn:
+            while len(matches) < limit:
+                rows = conn.execute('''SELECT p.*, CASE WHEN d.profile_id IS NULL THEN 0 ELSE 1 END AS deleting
+                    FROM backend_profiles p LEFT JOIN backend_profile_deletions d ON d.profile_id = p.id
+                    WHERE p.id > ? AND (d.profile_id IS NULL OR EXISTS (
+                        SELECT 1 FROM backend_operations o WHERE o.id = d.operation_id
+                        AND o.status NOT IN ('no_targets', 'succeeded')))
+                    ORDER BY p.id LIMIT 200''', (current,)).fetchall()
+                if not rows:
+                    break
+                for row in rows:
+                    current = row['id']
+                    if term in row['display_name'].casefold() or term in row['id'].casefold():
+                        matches.append(self.public(row))
+                        if len(matches) >= limit:
+                            break
+                if len(rows) < 200:
+                    break
+        return matches
 
     def grants(self, profile_id):
         with self.db.connect() as conn:
             rows = conn.execute('''SELECT node_key, protocol FROM backend_grants
                 WHERE profile_id = ? ORDER BY node_key, protocol''', (profile_id,)).fetchall()
         return [{'node_key': row['node_key'], 'protocol': row['protocol']} for row in rows]
+
+    def summary(self, profile_id):
+        with self.db.connect() as conn:
+            profile = conn.execute('''SELECT id, display_name, frozen, expires_at, created_at
+                FROM backend_profiles WHERE id = ?''', (profile_id,)).fetchone()
+            rows = conn.execute('''SELECT n.key, n.title, n.flag, g.protocol
+                FROM backend_grants g JOIN backend_nodes n ON n.key = g.node_key
+                WHERE g.profile_id = ? ORDER BY n.title, n.key, g.protocol''',
+                (profile_id,)).fetchall()
+            activity = conn.execute('''SELECT COUNT(*) AS issued_count,
+                MAX(created_at) AS last_issued_at FROM backend_config_issuances
+                WHERE profile_id = ? AND status = 'succeeded' ''',
+                (profile_id,)).fetchone()
+        nodes = {}
+        for row in rows:
+            entry = nodes.setdefault(row['key'], {'key': row['key'], 'title': row['title'],
+                'flag': row['flag'], 'protocols': []})
+            entry['protocols'].append(row['protocol'])
+        return {'profile_id': profile_id, 'display_name': profile['display_name'],
+            'frozen': bool(profile['frozen']), 'expires_at': profile['expires_at'],
+            'expired': bool(profile['expires_at'] and
+                datetime.fromisoformat(profile['expires_at']) <= datetime.now(timezone.utc)),
+            'created_at': profile['created_at'], 'nodes': list(nodes.values()),
+            'node_count': len(nodes), 'protocol_count': len(rows),
+            'xray_count': sum(row['protocol'] == 'xray' for row in rows),
+            'awg_count': sum(row['protocol'] == 'awg' for row in rows),
+            'issued_count': activity['issued_count'],
+            'last_issued_at': activity['last_issued_at']}
 
     def available_nodes(self, account_id, *, after, limit, profile_id=None):
         now = datetime.now(timezone.utc).isoformat()
@@ -155,18 +232,32 @@ class ProfileService:
         resource = ProfileResource(row['id'], row['owner_account_id'], bool(row['frozen']))
         if row['owner_account_id'] != actor.account.id and actor.account.role != 'admin':
             raise AccessDenied('resource_not_found', 404)
+        if row['deleting'] and actor.account.role != 'admin':
+            raise AccessDenied('resource_not_found', 404)
         require_profile(actor, resource, administrative=row['owner_account_id'] != actor.account.id)
         return self.repository.public(row)
 
-    def list_all(self, actor, *, limit=25, cursor=None):
+    def list_all(self, actor, *, limit=25, cursor=None, search=None):
         require_permission(actor, 'profiles.manage')
-        after = self.page_input(limit, cursor, 'admin_profiles')
-        return _page(self.repository.all_profiles(after=after, limit=limit + 1),
-                     limit, 'admin_profiles', 'id')
+        if search is not None and (not isinstance(search, str) or not 1 <= len(search.strip()) <= 128):
+            raise AccessDenied('invalid_input', 422)
+        term = search.strip().casefold() if search else None
+        kind = 'admin_profiles_search:' + term if term else 'admin_profiles'
+        after = self.page_input(limit, cursor, kind)
+        rows = (self.repository.search_profiles(term, after=after, limit=limit + 1)
+                if term else self.repository.all_profiles(after=after, limit=limit + 1))
+        return _page(rows, limit, kind, 'id')
 
     def grants(self, actor, profile_id):
         self.get(actor, profile_id)
         return {'items': self.repository.grants(profile_id)}
+
+    def own_summary(self, actor, profile_id):
+        require_permission(actor, 'profiles.self.read')
+        profile = self.get(actor, profile_id)
+        if profile['owner_account_id'] != actor.account.id:
+            raise AccessDenied('resource_not_found', 404)
+        return self.repository.summary(profile_id)
 
     def available_nodes(self, actor, *, limit=25, cursor=None):
         require_permission(actor, 'nodes.available.read')

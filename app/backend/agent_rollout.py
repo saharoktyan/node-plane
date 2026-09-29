@@ -62,6 +62,11 @@ class AgentRolloutService:
             node = conn.execute('SELECT key FROM backend_nodes WHERE key = ?', (node_key,)).fetchone()
             if node is None:
                 raise AccessDenied('resource_not_found', 404)
+            connection = conn.execute('''SELECT transport, ssh_target FROM backend_node_connections
+                WHERE node_key = ?''', (node_key,)).fetchone()
+            if connection is not None and (connection['transport'] != transport
+                                           or connection['ssh_target'] != ssh_target):
+                raise AccessDenied('node_connection_mismatch', 409)
             if conn.execute('''SELECT 1 FROM backend_node_drains WHERE node_key = ?''',
                             (node_key,)).fetchone():
                 raise AccessDenied('node_already_draining', 409)

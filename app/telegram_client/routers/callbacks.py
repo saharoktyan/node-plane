@@ -47,6 +47,10 @@ class DecideCallback(CallbackData, prefix="decide"):
 class NotificationReviewCallback(CallbackData, prefix="notification_review"):
     request_id: str
 
+class NotificationDecisionCallback(CallbackData, prefix="notification_decide"):
+    request_id: str
+    decision: str
+
 class AccountsCallback(CallbackData, prefix="accounts"):
     pass
 
@@ -118,9 +122,6 @@ class UpdatesCallback(CallbackData, prefix="updates"):
 class NodeUpdatesCallback(CallbackData, prefix="node_updates"):
     node_key: str
 
-class RefreshRuntimeCallback(CallbackData, prefix="refresh_runtime"):
-    node_key: str
-
 class ToggleNodeProtocolCallback(CallbackData, prefix="toggle_node_protocol"):
     node_key: str
     kind: str
@@ -172,6 +173,9 @@ class ToggleFreezeCallback(CallbackData, prefix="toggle_freeze"):
     profile_id: str
 
 class AdminSettingsCallback(CallbackData, prefix="admin_settings"):
+    pass
+
+class RequestPolicyCallback(CallbackData, prefix="request_policy"):
     pass
 
 class ToggleProtocolCallback(CallbackData, prefix="tog_proto"):

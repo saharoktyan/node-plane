@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from uuid import uuid4
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 
 import aiohttp
 
@@ -17,6 +17,10 @@ class BackendClient:
 
     async def updates_overview(self, telegram_user_id: int):
         return await self.request('GET', '/api/v1/system/updates', telegram_user_id=telegram_user_id)
+
+    async def update_preferences(self, telegram_user_id: int, changes: dict):
+        return await self.request('PATCH', '/api/v1/system/updates/preferences',
+                                  telegram_user_id=telegram_user_id, body=changes)
 
     async def check_updates(self, telegram_user_id: int):
         return await self.request('POST', '/api/v1/system/updates/check', telegram_user_id=telegram_user_id)
@@ -63,15 +67,26 @@ class BackendClient:
         except (aiohttp.ClientError, TimeoutError, ValueError) as exc:
             raise BackendError('backend_unavailable', 503) from exc
 
-    async def resolve(self, telegram_user_id: int) -> dict:
+    async def resolve(self, telegram_user_id: int, *, username=None, first_name=None,
+                      last_name=None, language_code=None) -> dict:
         return await self.request('POST', '/api/v1/integrations/telegram/identities/resolve',
-                                  body={'telegram_user_id': telegram_user_id}, command=True)
+            body={'telegram_user_id': telegram_user_id, 'username': username,
+                  'first_name': first_name, 'last_name': last_name,
+                  'language_code': language_code}, command=True)
 
     async def me(self, telegram_user_id: int) -> dict:
         return await self.request('GET', '/api/v1/me', telegram_user_id=telegram_user_id)
 
+    async def set_locale(self, telegram_user_id: int, locale: str) -> dict:
+        return await self.request('PATCH', '/api/v1/me/preferences', telegram_user_id=telegram_user_id,
+                                  body={'locale': locale})
+
     async def profiles(self, telegram_user_id: int) -> dict:
         return await self.request('GET', '/api/v1/me/profiles?limit=100', telegram_user_id=telegram_user_id)
+
+    async def member_profile_summary(self, telegram_user_id: int, profile_id: str) -> dict:
+        return await self.request('GET', f'/api/v1/me/profiles/{profile_id}/summary',
+                                  telegram_user_id=telegram_user_id)
 
     async def nodes(self, telegram_user_id: int) -> dict:
         return await self.request('GET', '/api/v1/me/nodes?limit=100', telegram_user_id=telegram_user_id)
@@ -83,6 +98,31 @@ class BackendClient:
     async def request_access(self, telegram_user_id: int) -> dict:
         return await self.request('POST', '/api/v1/me/access-requests',
                                   telegram_user_id=telegram_user_id, command=True)
+
+    async def access_request_policy(self, telegram_user_id: int) -> dict:
+        return await self.request('GET', '/api/v1/system/access-requests',
+                                  telegram_user_id=telegram_user_id)
+
+    async def update_access_request_policy(self, telegram_user_id: int, changes: dict) -> dict:
+        return await self.request('PATCH', '/api/v1/system/access-requests',
+                                  telegram_user_id=telegram_user_id, body=changes)
+
+    async def pending_access_requests(self, telegram_user_id: int, *,
+                                       cursor: str | None = None,
+                                       search: str | None = None,
+                                       limit: int = 10) -> dict:
+        params = {'limit': limit}
+        if cursor:
+            params['cursor'] = cursor
+        if search:
+            params['search'] = search
+        return await self.request('GET', '/api/v1/access-requests?' + urlencode(params),
+                                  telegram_user_id=telegram_user_id)
+
+    async def pending_access_request(self, telegram_user_id: int,
+                                     request_id: str) -> dict:
+        return await self.request('GET', f'/api/v1/access-requests/{request_id}',
+                                  telegram_user_id=telegram_user_id)
 
     async def issue(self, telegram_user_id: int, profile_id: str, node_key: str,
                     protocol: str, transport: str) -> dict:
@@ -102,23 +142,45 @@ class BackendClient:
         return await self.request('GET', '/api/v1/accounts?limit=100',
                                   telegram_user_id=telegram_user_id)
 
-    async def admin_profiles(self, telegram_user_id: int) -> dict:
-        return await self.request('GET', '/api/v1/profiles?limit=100',
+    async def admin_profiles(self, telegram_user_id: int, *, cursor: str | None = None,
+                             search: str | None = None, limit: int = 10) -> dict:
+        from urllib.parse import urlencode
+        query = {'limit': limit}
+        if cursor:
+            query['cursor'] = cursor
+        if search:
+            query['search'] = search
+        return await self.request('GET', '/api/v1/profiles?' + urlencode(query),
                                   telegram_user_id=telegram_user_id)
 
-    async def admin_nodes(self, telegram_user_id: int) -> dict:
-        return await self.request('GET', '/api/v1/nodes?limit=100',
+    async def admin_nodes(self, telegram_user_id: int, *, cursor: str | None = None,
+                          search: str | None = None, limit: int = 100) -> dict:
+        params = {'limit': limit}
+        if cursor:
+            params['cursor'] = cursor
+        if search:
+            params['search'] = search
+        return await self.request('GET', '/api/v1/nodes?' + urlencode(params),
                                   telegram_user_id=telegram_user_id)
 
     async def profile_grants(self, telegram_user_id: int, profile_id: str) -> dict:
         return await self.request('GET', f'/api/v1/profiles/{profile_id}/grants',
                                   telegram_user_id=telegram_user_id)
 
+    async def profile_operation(self, telegram_user_id: int, profile_id: str) -> dict | None:
+        return await self.request('GET', f'/api/v1/profiles/{profile_id}/operation',
+                                  telegram_user_id=telegram_user_id)
+
+    async def admin_overview(self, telegram_user_id: int) -> dict:
+        return await self.request('GET', '/api/v1/admin/overview',
+                                  telegram_user_id=telegram_user_id)
+
     async def create_profile(self, telegram_user_id: int, account_id: str, name: str,
-                             command_key: str) -> dict:
+                             command_key: str, grants: list[dict] | None = None) -> dict:
         return await self.request('POST', '/api/v1/profiles', telegram_user_id=telegram_user_id,
                                   command=True, command_key=command_key,
-                                  body={'display_name': name, 'owner_account_id': account_id})
+                                  body={'display_name': name, 'owner_account_id': account_id,
+                                        'grants': grants or []})
 
     async def edit_profile(self, telegram_user_id: int, profile_id: str,
                            revision: int, changes: dict) -> dict:
@@ -131,8 +193,22 @@ class BackendClient:
             telegram_user_id=telegram_user_id, command=True, revision=revision,
             body={'grants': grants})
 
+    async def delete_profile(self, telegram_user_id: int, profile_id: str,
+                             revision: int, command_key: str) -> dict:
+        return await self.request('DELETE', f'/api/v1/profiles/{profile_id}',
+            telegram_user_id=telegram_user_id, command=True,
+            command_key=command_key, revision=revision)
+
     async def node_runtime(self, telegram_user_id: int, node_key: str) -> dict:
         return await self.request('GET', f'/api/v1/nodes/{node_key}/runtime',
+                                  telegram_user_id=telegram_user_id)
+
+    async def node_diagnostics(self, telegram_user_id: int, node_key: str) -> dict:
+        return await self.request('GET', f'/api/v1/nodes/{node_key}/diagnostics',
+                                  telegram_user_id=telegram_user_id)
+
+    async def node_overview(self, telegram_user_id: int, node_key: str) -> dict:
+        return await self.request('GET', f'/api/v1/nodes/{node_key}/overview',
                                   telegram_user_id=telegram_user_id)
 
     async def apply_node_settings(self, telegram_user_id: int, node_key: str,

@@ -5,6 +5,7 @@ from contextlib import contextmanager, nullcontext
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 import json
+import re
 from urllib.parse import quote
 from uuid import UUID, uuid4
 
@@ -257,7 +258,8 @@ class ConfigIssuanceService:
                 raise AccessDenied('config_stale', 409)
         if row['protocol'] == 'awg':
             extension = row['transport']
-            return {'filename': f'awg-{row["node_key"]}.{extension}',
+            safe_title = re.sub(r'[^\w .()#-]+', '', node['title']).strip(' .') or row['node_key']
+            return {'filename': f'AmneziaWG - {safe_title}.{extension}',
                     'media_type': 'text/plain',
                     'content': refreshed['vpn_key'] if extension == 'vpn' else refreshed['wg_conf']}
         settings = json.loads(node['settings_json'])
@@ -272,4 +274,6 @@ class ConfigIssuanceService:
                        '&extra=%7B%22xmux%22%3A%7B%22maxConcurrency%22%3A%2216-32%22%7D%7D')
         label = quote(f'VLESS {node["title"]} · {profile["display_name"]} · {row["transport"].upper()}', safe='')
         uri = f'vless://{identity["xray_uuid"]}@{host}:{port}?{params}#{label}'
-        return {'filename': None, 'media_type': 'text/uri-list', 'content': uri}
+        safe_title = re.sub(r'[^\w .()#-]+', '', node['title']).strip(' .') or row['node_key']
+        return {'filename': f'VLESS - {safe_title} - {row["transport"].upper()}.txt',
+                'media_type': 'text/uri-list', 'content': uri}

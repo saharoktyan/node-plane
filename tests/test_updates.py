@@ -73,6 +73,19 @@ class UpdatesTests(unittest.TestCase):
         self.assertEqual(overview["upstream_ref"], "origin/main")
         self.assertEqual(overview["branch"], "dev")
 
+    def test_switching_branch_hides_the_previous_branch_result(self) -> None:
+        proc = SimpleNamespace(returncode=0, stdout=(
+            "CHECK_UPDATES|available\nbranch: dev\nremote_version: 0.2.0-alpha.3\n"
+            "remote_label: 0.2.0-alpha.3 · def5678\n"), stderr="")
+        with patch("services.updates.subprocess.run", return_value=proc):
+            self.updates.check_for_updates(branch="dev")
+        self.app_settings.set_updates_branch("main")
+        overview = self.updates.get_updates_overview()
+        self.assertEqual(overview["branch"], "main")
+        self.assertFalse(overview["update_available"])
+        self.assertEqual(overview["remote_label"], "")
+        self.assertEqual(overview["last_status"], "never")
+
     def test_check_for_updates_uses_tag_preference_for_dev_by_default(self) -> None:
         proc = SimpleNamespace(returncode=0, stdout="CHECK_UPDATES|up_to_date\n", stderr="")
         with patch("services.updates.subprocess.run", return_value=proc) as mocked:
