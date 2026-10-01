@@ -67,10 +67,6 @@ async def show_admin_nodes(chat_id, user_id, message_id, bot, backend, state, pa
             marker = '⚠️' if summary['state'] != 'applied_unverified' or summary['failed'] or summary['attention'] else '✅'
             label = tr(locale, 'node_tools.list_row', marker=marker, name=label, ready=summary['ready'], total=summary['access_total'])
         rows.append([InlineKeyboardButton(text=label, callback_data=AdminNodeCallback(node_key=node['key']).pack())])
-    rows.append([InlineKeyboardButton(text=tr(locale, 'nodes.admin.search'), callback_data='admin_node_search')])
-    if search:
-        rows.append([InlineKeyboardButton(text=tr(locale, 'nodes.admin.show_all'),
-            callback_data='admin_node_all')])
     arrows = []
     if page_index > 0:
         arrows.append(InlineKeyboardButton(text='◀️', callback_data=f'admin_node_page:{page_index - 1}'))
@@ -79,6 +75,9 @@ async def show_admin_nodes(chat_id, user_id, message_id, bot, backend, state, pa
     if arrows:
         rows.append(arrows)
     rows.append([InlineKeyboardButton(text=tr(locale, 'nodes.admin.add'), callback_data=NewNodeCallback().pack())])
+    rows.append([InlineKeyboardButton(text=tr(locale, 'nodes.admin.search'), callback_data='admin_node_search')])
+    if search:
+        rows.append([InlineKeyboardButton(text=tr(locale, 'nodes.admin.show_all'), callback_data='admin_node_all')])
     rows.append([InlineKeyboardButton(text=tr(locale, 'back'), callback_data='admin_menu')])
     lines = [tr(locale, 'nodes.admin.choose') if page['items'] else
              tr(locale, 'nodes.admin.no_results' if search else 'nodes.admin.empty')]
@@ -622,13 +621,14 @@ async def show_node_settings(chat_id, user_id, message_id, node_key, bot, backen
     settings = node['settings']
     locale = normalize_locale((await state.get_data()).get('locale'))
     await state.set_state(None)
-    rows = [[InlineKeyboardButton(text=tr(locale, 'node_tools.general'), callback_data=f'node_section:general:{node_key}')]]
-    for protocol in ('xray', 'awg'):
-        if protocol in node['protocols']:
-            rows.append([InlineKeyboardButton(text=tr(locale, 'node_tools.' + protocol), callback_data=f'node_section:{protocol}:{node_key}')])
-    rows += [[InlineKeyboardButton(text=tr(locale, 'node_tools.maintenance'), callback_data=f'node_tools:{node_key}')],
-             [InlineKeyboardButton(text=tr(locale, 'nodes.card.apply'), callback_data=ApplyNodeCallback(node_key=node_key).pack())],
-             [InlineKeyboardButton(text=tr(locale, 'back'), callback_data=AdminNodeCallback(node_key=node_key).pack())]]
+    rows = [[InlineKeyboardButton(text=tr(locale, 'node_tools.general'), callback_data=f'node_section:general:{node_key}'),
+             InlineKeyboardButton(text=tr(locale, 'node_tools.maintenance'), callback_data=f'node_tools:{node_key}')]]
+    protocol_row = [InlineKeyboardButton(text=tr(locale, 'node_tools.' + protocol),
+        callback_data=f'node_section:{protocol}:{node_key}') for protocol in ('xray', 'awg') if protocol in node['protocols']]
+    if protocol_row:
+        rows.append(protocol_row)
+    rows += [[InlineKeyboardButton(text=tr(locale, 'nodes.card.apply'), callback_data=ApplyNodeCallback(node_key=node_key).pack())],
+             [InlineKeyboardButton(text=tr(locale, 'nodes.card.back_to_server'), callback_data=AdminNodeCallback(node_key=node_key).pack())]]
     details = [tr(locale, 'nodes.settings.value',
                   field=tr(locale, 'nodes.settings.field.' + field),
                   value=node[field] or '—') for field in ('title', 'region', 'flag')]
@@ -731,6 +731,17 @@ async def edit_node_field_cb(query: CallbackQuery, callback_data: EditNodeFieldC
     
     current = node.get(field) if field in {'title', 'region', 'flag', 'notes'} else node['settings'].get(field)
     locale = normalize_locale((await state.get_data()).get('locale'))
+    if field == 'awg_i1_preset':
+        rows = [[InlineKeyboardButton(text=label,
+                    callback_data=f'node_awg_preset:{preset}:{node_key}')]
+                for preset, label in (('quic', 'QUIC'), ('dns', 'DNS'), ('chaos', 'Chaos'))]
+        rows.append([InlineKeyboardButton(text=tr(locale, 'back'),
+            callback_data=f'node_section:awg:{node_key}')])
+        await render(bot, query.message.chat.id,
+            Screen(tr(locale, 'nodes.settings.field.awg_i1_preset'),
+                (tr(locale, 'nodes.settings.current_value', value=current or 'quic'),
+                 tr(locale, 'nodes.settings.apply_note'))), rows, state, query.message.message_id)
+        return
     await render(bot, query.message.chat.id,
         Screen(tr(locale, 'nodes.settings.edit_title',
                 field=tr(locale, 'nodes.settings.field.' + field)),
@@ -739,6 +750,20 @@ async def edit_node_field_cb(query: CallbackQuery, callback_data: EditNodeFieldC
         [[InlineKeyboardButton(text=tr(locale, 'back'),
             callback_data=f'node_section:{(await state.get_data()).get("edit_section", "general")}:{node_key}')]],
         state, query.message.message_id)
+
+@router.callback_query(F.data.startswith('node_awg_preset:'))
+async def select_awg_preset(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
+    await query.answer()
+    _, preset, node_key = query.data.split(':', 2)
+    if preset not in {'quic', 'dns', 'chaos'}:
+        return
+    node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=query.from_user.id)
+    await backend.edit_node(query.from_user.id, node_key, node['desired_revision'],
+        {'settings': {**node['settings'], 'awg_i1_preset': preset}}, command_key=str(uuid4()))
+    await _clear_node_flow(state)
+    from .admin_node_tools import show_section
+    await show_section(query.message.chat.id, query.from_user.id, query.message.message_id,
+        'awg', node_key, bot, backend, state)
 
 @router.message(NodeEditState.waiting_for_value, F.text)
 async def process_node_edit(message: Message, bot: Bot, backend: BackendClient, state: FSMContext):
@@ -861,7 +886,13 @@ async def probe_node_cb(query: CallbackQuery, callback_data: ProbeNodeCallback, 
         callback_data=AdminNodeCallback(node_key=node_key).pack())]]
     try:
         observation = await backend.node_runtime(user_id, node_key)
-        lines = (tr(locale, 'nodes.probe.agent', value=observation['health_state']),
+        agent_state = observation['health_state']
+        if agent_state == 'degraded' and not observation.get('runtime_version'):
+            # Older agents used absence of the runtime directory as agent health.
+            agent_state = 'running'
+        if agent_state not in {'running', 'degraded'}:
+            agent_state = 'unknown'
+        lines = (tr(locale, 'nodes.probe.agent', value=tr(locale, 'nodes.probe.state.' + agent_state)),
             tr(locale, 'nodes.probe.version', value=observation.get('runtime_version') or '—'),
             tr(locale, 'nodes.probe.xray', value=tr(locale,
                 'nodes.probe.present' if observation['xray_config_present'] else 'nodes.probe.missing')),

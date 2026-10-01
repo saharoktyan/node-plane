@@ -636,8 +636,8 @@ async def show_admin_menu(chat_id: int, user_id: int, message_id: int,
     except BackendError:
         title = tr(locale, 'admin.menu')
     rows = [
-        [InlineKeyboardButton(text=tr(locale, 'admin.status'), callback_data='admin_status')],
-        [InlineKeyboardButton(text=tr(locale, 'admin.requests'), callback_data=RequestsCallback().pack())],
+        [InlineKeyboardButton(text=tr(locale, 'admin.status'), callback_data='admin_status'),
+         InlineKeyboardButton(text=tr(locale, 'admin.requests'), callback_data=RequestsCallback().pack())],
         [InlineKeyboardButton(text=tr(locale, 'admin.nodes'), callback_data=AdminNodesCallback().pack()),
          InlineKeyboardButton(text=tr(locale, 'admin.profiles'), callback_data=AdminProfilesCallback().pack())],
         [InlineKeyboardButton(text=tr(locale, 'admin.accounts'), callback_data=AccountsCallback().pack())],

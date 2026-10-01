@@ -89,16 +89,30 @@ async def show_section(chat_id, user_id, message_id, section, node_key, bot, bac
         return
     await state.set_state(None)
     await state.update_data(edit_section=section)
-    rows = [[button(locale, 'nodes.settings.field.' + field,
-             EditNodeFieldCallback(node_key=node_key, field=field).pack())] for field in fields[section]]
+    def field_button(field):
+        return button(locale, 'nodes.settings.field.' + field,
+                      EditNodeFieldCallback(node_key=node_key, field=field).pack())
     if section == 'general':
         from .callbacks import NodeProtocolsCallback
-        rows += [[button(locale, 'nodes.settings.connection', f'node_connection:{node_key}')],
-                 [button(locale, 'nodes.settings.protocols', NodeProtocolsCallback(node_key=node_key).pack())]]
-    if section == 'awg':
-        rows += [[button(locale, 'node_tools.entropy', f'node_view:entropy:{node_key}')],
-                 [button(locale, 'node_tools.regenerate_entropy', f'node_action:regenerate_entropy:{node_key}')]]
-    rows.append([button(locale, 'back', NodeSettingsCallback(node_key=node_key).pack())])
+        connection = button(locale, 'nodes.settings.field.transport', f'node_connection:{node_key}')
+        target = button(locale, 'nodes.settings.field.ssh_target',
+            EditNodeFieldCallback(node_key=node_key, field='ssh_target').pack()
+            if node.get('transport') == 'ssh' else f'node_connection:{node_key}')
+        rows = [[field_button('title'), field_button('flag')],
+                [field_button('region'), connection],
+                [target, field_button('public_host')],
+                [button(locale, 'nodes.settings.protocols', NodeProtocolsCallback(node_key=node_key).pack()), field_button('notes')]]
+    elif section == 'xray':
+        rows = [[field_button('xray_host'), field_button('xray_sni')],
+                [field_button('xray_fingerprint')],
+                [field_button('xray_tcp_port'), field_button('xray_xhttp_port')],
+                [field_button('xray_xhttp_path')]]
+    else:
+        rows = [[field_button('awg_public_host'), field_button('awg_interface')],
+                [field_button('awg_port'), field_button('awg_i1_preset')],
+                [button(locale, 'node_tools.entropy', f'node_view:entropy:{node_key}'),
+                 button(locale, 'node_tools.regenerate_entropy', f'node_action:regenerate_entropy:{node_key}')]]
+    rows.append([button(locale, 'nodes.card.back_to_settings', NodeSettingsCallback(node_key=node_key).pack())])
     defaults = {'xray_fingerprint': 'chrome', 'awg_interface': 'wg0', 'awg_i1_preset': 'quic'}
     lines = [tr(locale, 'nodes.settings.value', field=tr(locale, 'nodes.settings.field.' + field),
                 value=node.get(field, node['settings'].get(field, defaults.get(field, '—'))) or '—') for field in fields[section]]
@@ -111,8 +125,8 @@ async def tools_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state
     await query.answer()
     node_key = query.data.split(':', 1)[1]
     locale = normalize_locale((await state.get_data()).get('locale'))
-    rows = [[button(locale, 'node_tools.' + name, f'node_view:{name}:{node_key}')]
-            for name in ('diagnostics', 'ports', 'runtime', 'repair')]
+    rows = [[button(locale, 'node_tools.' + name, f'node_view:{name}:{node_key}') for name in names]
+            for names in (('diagnostics', 'ports'), ('runtime', 'repair'))]
     rows += [[button(locale, 'node_tools.cleanup_runtime', f'node_action:cleanup_runtime:{node_key}')],
              [button(locale, 'back', NodeSettingsCallback(node_key=node_key).pack())]]
     await render(bot, query.message.chat.id, Screen(tr(locale, 'node_tools.maintenance'), ()), rows, state, query.message.message_id)
@@ -142,10 +156,10 @@ async def view_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state:
                     for key in ('docker', 'xray_config_valid', 'awg_config_valid', 'xray_running', 'awg_running')
                     if not key.startswith(('xray', 'awg')) or key.split('_')[0] in node['protocols']]
         elif view == 'ports':
-            rows = [[button(locale, 'node_tools.' + action, f'node_action:{action}:{node_key}')]
-                    for action in ('check_ports', 'open_ports')]
+            rows = [[button(locale, 'node_tools.' + action, f'node_action:{action}:{node_key}')
+                    for action in ('check_ports', 'open_ports')]]
         elif view == 'repair':
-            actions = ['sync_env', 'reconcile_access'] + (['sync_xray'] if 'xray' in node['protocols'] else [])
+            actions = ['sync_env'] + (['sync_xray'] if 'xray' in node['protocols'] else []) + ['reconcile_access']
             rows = [[button(locale, 'node_tools.' + action, f'node_action:{action}:{node_key}')] for action in actions]
         else:
             return

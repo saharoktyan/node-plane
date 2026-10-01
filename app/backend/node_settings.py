@@ -7,7 +7,7 @@ import re
 from uuid import UUID, uuid4
 
 from .authorization import AccessDenied, require_permission
-from .nodes import _validate
+from .nodes import _validate, protocol_defaults
 
 
 def _key(value):
@@ -33,7 +33,7 @@ def _valid_result(intent, raw):
 
 def _snapshot(node):
     protocols = json.loads(node['protocols_json'])
-    settings = json.loads(node['settings_json'])
+    settings = protocol_defaults(json.loads(node['settings_json']), protocols)
     if not protocols or 'public_host' not in settings or ('xray' in protocols and not {
         'xray_sni', 'xray_tcp_port', 'xray_xhttp_port', 'xray_xhttp_path'} <= set(settings)) or (
         'awg' in protocols and 'awg_port' not in settings):
