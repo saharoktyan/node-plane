@@ -34,14 +34,20 @@ class BackendNodeTests(unittest.TestCase):
         node = created.json()
         self.assertFalse(node['enabled'])
         self.assertEqual((node['desired_revision'], node['applied_revision']), (1, 0))
-        self.assertEqual(node['settings'], {'public_host': 'lv1.example.test', 'xray_tcp_port': 443})
+        self.assertEqual(node['settings']['public_host'], 'lv1.example.test')
+        self.assertEqual(node['settings']['xray_tcp_port'], 443)
+        self.assertEqual(node['settings']['xray_sni'], 'www.cloudflare.com')
+        self.assertEqual(node['settings']['xray_xhttp_port'], 8443)
+        self.assertEqual(node['settings']['awg_port'], 51820)
         self.assertEqual(created.headers['ETag'], '"1"')
         listed = self.client.get('/api/v1/nodes', headers=self.admin_headers())
         self.assertEqual(listed.json()['items'], [node])
         self.assertEqual(self.client.get('/api/v1/nodes/lv1', headers=self.admin_headers()).json(), node)
         changed = self.edit(1, {'title': 'Latvia #2', 'settings': {'public_host': 'new.example.test'}})
         self.assertEqual(changed.status_code, 200, changed.text)
-        self.assertEqual(changed.json()['settings'], {'public_host': 'new.example.test'})
+        self.assertEqual(changed.json()['settings']['public_host'], 'new.example.test')
+        self.assertEqual(changed.json()['settings']['xray_host'], 'new.example.test')
+        self.assertEqual(changed.json()['settings']['awg_public_host'], 'new.example.test')
         self.assertEqual(changed.json()['desired_revision'], 2)
         self.assertEqual(changed.json()['applied_revision'], 0)
         self.assertFalse(changed.json()['enabled'])
@@ -137,3 +143,37 @@ class BackendNodeTests(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.json()['error']['code'], 'node_agent_unavailable')
         self.assertNotIn('secret agent address', response.text)
+
+    def test_minimal_creation_is_installable_and_preserves_explicit_parameters(self):
+        from backend.node_overview import NodeOverviewService
+        from backend.node_settings import _snapshot
+        for transport, key in (('local','local1'), ('ssh','remote1')):
+            body = {'key':key, 'title':'Node', 'region':'EU', 'transport':transport,
+                    'protocols':['awg','xray'], 'settings':{'public_host':'node.example'}}
+            if transport == 'ssh':
+                body['ssh_target'] = 'root@node.example'
+            created = self.create(body).json()
+            self.assertEqual(created['xray_transports'], ['tcp','xhttp'])
+            with self.db.connect() as conn:
+                row = conn.execute('SELECT * FROM backend_nodes WHERE key=?', (key,)).fetchone()
+                snapshot = _snapshot(row)
+            self.assertEqual(snapshot['settings']['awg_i1_preset'], 'quic')
+            self.assertEqual(snapshot['settings']['xray_xhttp_path'], '/assets')
+            from backend.authorization import Actor
+            actor = Actor(self.credentials.authenticate(self.headers['Authorization']), self.admin)
+            self.assertTrue(NodeOverviewService(self.db).get(actor, key)['settings_complete'])
+        custom = self.create({'key':'custom','title':'Custom','region':'EU','protocols':['awg','xray'],
+            'settings':{'public_host':'node.example','awg_port':51111,'awg_i1_preset':'dns',
+                        'xray_sni':'example.com','xray_xhttp_path':'/custom'}}).json()['settings']
+        self.assertEqual((custom['awg_port'],custom['awg_i1_preset'],custom['xray_sni'],custom['xray_xhttp_path']), (51111,'dns','example.com','/custom'))
+
+    def test_existing_minimal_node_has_defaults_without_changing_applied_revision(self):
+        from backend.node_settings import _snapshot
+        self.create()
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_nodes SET settings_json=? WHERE key='lv1'", ('{"public_host":"node.example"}',))
+            row = conn.execute("SELECT * FROM backend_nodes WHERE key='lv1'").fetchone()
+            self.assertEqual(_snapshot(row)['settings']['awg_interface'], 'wg0')
+        result = self.client.get('/api/v1/nodes/lv1',headers=self.admin_headers()).json()
+        self.assertEqual(result['settings']['xray_tcp_port'],443)
+        self.assertEqual(result['applied_revision'],0)

@@ -335,15 +335,13 @@ impl AgentState {
 
     fn health(&self) -> LocalHealth {
         let runtime_root = Path::new(&self.config.runtime_root);
-        let state = if runtime_root.is_dir() {
-            "running"
-        } else {
-            "degraded"
-        };
+        // A responding agent is healthy even before VPN runtime provisioning.
+        // Runtime readiness is reported separately by RuntimeFacts/diagnostics.
+        let state = "running";
         let summary = if runtime_root.is_dir() {
             "runtime root present"
         } else {
-            "runtime root missing"
+            "agent ready; runtime not installed"
         };
         LocalHealth {
             state: state.to_string(),
@@ -2228,6 +2226,23 @@ mod tests {
         fs, process,
         time::{SystemTime, UNIX_EPOCH},
     };
+
+    #[test]
+    fn agent_health_does_not_require_provisioned_runtime() {
+        let root = std::env::temp_dir().join(format!(
+            "node-plane-health-{}-{}", process::id(),
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        let state = AgentState::new(AgentConfig {
+            runtime_root: root.display().to_string(),
+            xray_config_path: root.join("xray.json").display().to_string(),
+            ..AgentConfig::default()
+        });
+        assert!(!root.exists());
+        assert_eq!(state.health().state, "running");
+        assert_eq!(state.health().summary, "agent ready; runtime not installed");
+        assert!(!state.runtime_facts().xray_config_present);
+    }
 
     #[test]
     fn cleanup_removes_external_configs_and_peer_archives_only() {

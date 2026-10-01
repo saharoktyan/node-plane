@@ -331,18 +331,19 @@ async def show_admin_profiles(chat_id: int, user_id: int, message_id: int,
         cursors = cursors[:page_index + 1]
     await state.update_data(admin_profile_cursors=cursors,
                             admin_profile_page=page_index)
-    rows = [[InlineKeyboardButton(text=tr(locale, 'profiles.admin.new'),
+    controls = [[InlineKeyboardButton(text=tr(locale, 'profiles.admin.new'),
                 callback_data=AccountsCallback().pack())],
             [InlineKeyboardButton(text=tr(locale, 'profiles.admin.search'),
                 callback_data='search_profile')]]
     if search:
-        rows.append([InlineKeyboardButton(text=tr(locale, 'profiles.admin.show_all'),
+        controls.append([InlineKeyboardButton(text=tr(locale, 'profiles.admin.show_all'),
             callback_data='admin_profiles_all')])
-    rows.extend([[InlineKeyboardButton(
+    rows = [[InlineKeyboardButton(
         text=(tr(locale, 'profile.admin.deleting_prefix') if item.get('deleting') else '')
              + item['display_name'],
         callback_data=AdminProfileCallback(profile_id=item['id']).pack())]
-        for item in page['items']])
+        for item in page['items']]
+    rows.extend(controls)
     arrows = []
     if page_index > 0:
         arrows.append(InlineKeyboardButton(text='◀️',

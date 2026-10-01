@@ -25,6 +25,25 @@ REFRESH_SPEC.loader.exec_module(refresh_awg_config)
 
 
 class AwgProfile31Tests(unittest.TestCase):
+    def test_all_presets_generate_valid_complete_profiles(self):
+        for preset in ('quic', 'dns', 'chaos'):
+            with self.subTest(preset=preset):
+                for _ in range(20):
+                    profile = awg_profile.new_profile(preset)
+                    awg_profile.validate(profile)
+                    self.assertTrue(all(profile[f'I{i}'] for i in range(1, 6)))
+                    if preset == 'quic':
+                        self.assertEqual(profile['I1'], '<b 0xc000000001><rc 8><r 900>')
+                    elif preset == 'dns':
+                        self.assertEqual(profile['I1'], '<rc 2><b 0x01000001000000000000><r 32>')
+                    else:
+                        self.assertRegex(profile['I1'], r'^<b 0x[0-9a-f]{8}><rc 4><r [0-9]+>$')
+                        self.assertTrue(500 <= int(profile['I1'].split('<r ')[1].rstrip('>')) <= 900)
+                self.assertNotEqual(awg_profile.new_profile(preset)['HeaderProtectionKey'],
+                                    awg_profile.new_profile(preset)['HeaderProtectionKey'])
+        with self.assertRaises(ValueError):
+            awg_profile.new_profile('invalid')
+
     def test_server_private_key_uses_wireguard_format(self):
         key = base64.b64decode(awg_profile.new_private_key(), validate=True)
         self.assertEqual(len(key), 32)
@@ -68,6 +87,20 @@ class AwgProfile31Tests(unittest.TestCase):
             values = awg_profile.interface_values(config.read_text(encoding="utf-8"))
             self.assertEqual(len(base64.b64decode(values["PrivateKey"], validate=True)), 32)
             awg_profile.validate(values)
+            previous = config.read_text()
+            subprocess.run(['/bin/bash', str(script)], env={**os.environ, 'PATH': str(tools)}, check=True, capture_output=True)
+            self.assertEqual(config.read_text(), previous)
+            # A clean reinstall must generate fresh keys/entropy, while keep-config
+            # reinstall and repeated bootstrap preserve the existing identities.
+            config.unlink()
+            subprocess.run(['/bin/bash', str(script)], env={**os.environ, 'PATH': str(tools)}, check=True, capture_output=True)
+            regenerated = awg_profile.interface_values(config.read_text())
+            awg_profile.validate(regenerated)
+            self.assertNotEqual(regenerated['PrivateKey'], values['PrivateKey'])
+            self.assertNotEqual(regenerated['HeaderProtectionKey'], values['HeaderProtectionKey'])
+            self.assertTrue(3 <= int(regenerated['Jc']) <= 7)
+            self.assertTrue(all(16 <= int(regenerated[f'S{i}']) <= 32 for i in range(1,5)))
+            self.assertEqual([regenerated[f'H{i}'] for i in range(1,5)], ['1','2','3','4'])
 
     def test_legacy_migration_keeps_peer_and_i_sequence_and_refreshes_both_exports(self):
         old_server = """[Interface]

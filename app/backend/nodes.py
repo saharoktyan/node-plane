@@ -21,6 +21,26 @@ _PORTS = frozenset({'xray_tcp_port', 'xray_xhttp_port', 'awg_port'})
 _SSH_TARGET = re.compile(r'(?:[A-Za-z_][A-Za-z0-9._-]*@)?(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:]+\])\Z')
 
 
+def protocol_defaults(settings, protocols):
+    """Fill omitted public settings; secret protocol material is generated on-node."""
+    result = dict(settings)
+    host = result.get('public_host')
+    defaults = {}
+    if 'xray' in protocols:
+        defaults.update(xray_sni='www.cloudflare.com', xray_fingerprint='chrome',
+                        xray_tcp_port=443, xray_xhttp_port=8443,
+                        xray_xhttp_path='/assets')
+        if host:
+            defaults['xray_host'] = host
+    if 'awg' in protocols:
+        defaults.update(awg_port=51820, awg_interface='wg0', awg_i1_preset='quic')
+        if host:
+            defaults['awg_public_host'] = host
+    for field, value in defaults.items():
+        result.setdefault(field, value)
+    return dict(sorted(result.items()))
+
+
 def _command_key(value):
     try:
         return str(UUID(value))
@@ -121,7 +141,7 @@ class NodeService:
                 'protocols': json.loads(row['protocols_json']),
                 'xray_transports': json.loads(row['xray_transports_json']),
                 'desired_revision': row['desired_revision'], 'applied_revision': row['applied_revision'],
-                'settings': json.loads(row['settings_json']),
+                'settings': protocol_defaults(json.loads(row['settings_json']), json.loads(row['protocols_json'])),
                 'transport': row['transport'], 'ssh_target': row['ssh_target'], 'notes': row['notes'] or ''}
 
     @staticmethod
@@ -204,6 +224,8 @@ class NodeService:
                     raise AccessDenied('node_key_retired', 409)
                 if conn.execute('SELECT 1 FROM backend_nodes WHERE key = ?', (node_key,)).fetchone():
                     raise AccessDenied('node_key_conflict', 409)
+                values['settings'] = protocol_defaults(values.get('settings', {}), values['protocols'])
+                values.setdefault('xray_transports', ['tcp', 'xhttp'] if 'xray' in values['protocols'] else [])
                 inserted = conn.execute('''INSERT INTO backend_nodes
                     (key, title, region, flag, enabled, protocols_json, xray_transports_json, settings_json)
                     VALUES (?, ?, ?, ?, 0, ?, ?, ?) ON CONFLICT(key) DO NOTHING RETURNING key''',
@@ -230,6 +252,9 @@ class NodeService:
                 connection = conn.execute(self._select() + ' WHERE n.key = ?', (node_key,)).fetchone()
                 next_values = self.public(connection)
                 next_values.update(values)
+                next_values['settings'] = protocol_defaults(next_values['settings'], next_values['protocols'])
+                if 'protocols' in values and 'xray_transports' not in values and 'xray' in values['protocols'] and not next_values['xray_transports']:
+                    next_values['xray_transports'] = ['tcp', 'xhttp']
                 if (next_values['transport'] == 'ssh') != bool(next_values['ssh_target']):
                     raise AccessDenied('invalid_input', 422)
                 if 'xray' not in next_values['protocols'] and next_values['xray_transports']:

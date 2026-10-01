@@ -27,6 +27,19 @@ class RouterStartupTests(TestCase):
 
 
 class TelegramFlowTests(IsolatedAsyncioTestCase):
+    async def test_awg_preset_selection_updates_desired_settings_only(self):
+        backend = SimpleNamespace(request=AsyncMock(return_value={
+            'desired_revision': 4, 'settings': {'awg_port': 51820, 'awg_i1_preset': 'quic'}}),
+            edit_node=AsyncMock())
+        from telegram_client.routers import admin_node_tools
+        for preset in ('quic', 'dns', 'chaos'):
+            self.query.data = f'node_awg_preset:{preset}:lv1'
+            with patch.object(admin_node_tools, 'show_section', new_callable=AsyncMock):
+                await admin_nodes.select_awg_preset(self.query, self.bot, backend, self.state)
+            body = backend.edit_node.call_args.args[3]
+            self.assertEqual(body['settings'], {'awg_port': 51820, 'awg_i1_preset': preset})
+        self.assertEqual(backend.request.call_count, 3)
+
     async def test_node_action_preserves_command_idempotency_header(self):
         client = BackendClient.__new__(BackendClient)
         client.request = AsyncMock(return_value={'id': 'job'})
@@ -42,7 +55,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         self.query.data = 'backup_create'
         with patch.object(admin_backups, 'render', new_callable=AsyncMock) as draw:
             await admin_backups.backup_cb(self.query, self.bot, backend, self.state)
-            self.assertEqual(draw.call_args.args[3][0][1].text, 'Create backup')
+            self.assertEqual(draw.call_args.args[3][0][1].text, user.tr('en', 'backups.create'))
             draft = self.state_data['backup_draft']
             self.query.data = 'backup_submit:' + draft['nonce']
             await admin_backups.backup_cb(self.query, self.bot, backend, self.state)

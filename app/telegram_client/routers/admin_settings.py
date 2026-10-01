@@ -10,7 +10,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, Message
 from ..backend import BackendClient, BackendError
 from ..screens import Screen
 from ..i18n import normalize_locale, tr
-from .callbacks import AdminSettingsCallback, RequestsCallback, RequestPolicyCallback, UpdatesCallback
+from .callbacks import AdminSettingsCallback, RequestPolicyCallback, UpdatesCallback
 from .common import render
 
 router = Router()
@@ -53,15 +53,14 @@ async def admin_settings_cb(query: CallbackQuery, bot: Bot,
     await query.answer()
     locale = await _locale(state)
     rows = [
-        [InlineKeyboardButton(text=tr(locale, 'settings.admin.requests'), callback_data=RequestsCallback().pack())],
-        [InlineKeyboardButton(text=tr(locale, 'settings.admin.request_policy'), callback_data=RequestPolicyCallback().pack())],
-        [InlineKeyboardButton(text=tr(locale, 'settings.admin.bot_title'), callback_data='bot_title_settings')],
-        [InlineKeyboardButton(text=tr(locale, 'settings.admin.updates'), callback_data=UpdatesCallback().pack())],
-        [InlineKeyboardButton(text=tr(locale, 'backups.title'), callback_data='backups')],
-        [InlineKeyboardButton(text=tr(locale, 'alerts.title'), callback_data='alerts')],
-        [InlineKeyboardButton(text=tr(locale, 'traffic.title'), callback_data='traffic')],
-        [InlineKeyboardButton(text=tr(locale, 'system_cleanup.title'), callback_data='system_cleanup')],
+        [InlineKeyboardButton(text=tr(locale, 'settings.admin.bot_title'), callback_data='bot_title_settings'),
+         InlineKeyboardButton(text=tr(locale, 'settings.admin.request_policy'), callback_data=RequestPolicyCallback().pack())],
+        [InlineKeyboardButton(text=tr(locale, 'settings.admin.updates'), callback_data=UpdatesCallback().pack()),
+         InlineKeyboardButton(text=tr(locale, 'backups.title'), callback_data='backups')],
+        [InlineKeyboardButton(text=tr(locale, 'alerts.title'), callback_data='alerts'),
+         InlineKeyboardButton(text=tr(locale, 'traffic.title'), callback_data='traffic')],
         [InlineKeyboardButton(text=tr(locale, 'settings.admin.ssh_key'), callback_data=SshKeyCallback().pack())],
+        [InlineKeyboardButton(text=tr(locale, 'system_cleanup.title'), callback_data='system_cleanup')],
         [InlineKeyboardButton(text=tr(locale, 'back'), callback_data='admin_menu')],
     ]
     await render(bot, query.message.chat.id, Screen(tr(locale, 'settings.admin.title'),
@@ -318,13 +317,13 @@ async def show_updates(query: CallbackQuery, bot: Bot, backend: BackendClient,
     except BackendError:
         lines += (tr(locale, 'update_tools.rollout_status', status=tr(locale, 'update_tools.unknown')),)
     rows = [[InlineKeyboardButton(text=tr(locale, 'updates.check'),
-        callback_data=UpdateActionCallback(action='check').pack())]]
-    rows.append([InlineKeyboardButton(text=tr(locale, 'updates.choose_branch'),
+        callback_data=UpdateActionCallback(action='check').pack()),
+        InlineKeyboardButton(text=tr(locale, 'updates.auto_on' if overview.get('auto_check_enabled') else 'updates.auto_off'),
+        callback_data=UpdateActionCallback(action='auto_check').pack())],
+        [InlineKeyboardButton(text=tr(locale, 'updates.choose_branch'),
         callback_data=UpdateActionCallback(action='branch_menu').pack()),
-        InlineKeyboardButton(text=tr(locale, 'updates.toggle_auto'),
-        callback_data=UpdateActionCallback(action='auto_check').pack())])
-    rows.append([InlineKeyboardButton(text=tr(locale, 'update_tools.versions'), callback_data='uv_page:0'),
-                 InlineKeyboardButton(text=tr(locale, 'update_tools.fleet'), callback_data='ufleet')])
+        InlineKeyboardButton(text=tr(locale, 'update_tools.versions'), callback_data='uv_page:0')],
+        [InlineKeyboardButton(text=tr(locale, 'update_tools.fleet'), callback_data='ufleet')]]
     latest = overview.get('latest_job')
     if latest and latest['status'] in {'awaiting_executor', 'running'}:
         rows.insert(0, [InlineKeyboardButton(text=tr(locale, 'update_tools.progress'),
