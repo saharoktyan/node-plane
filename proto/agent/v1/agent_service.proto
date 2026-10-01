@@ -5,6 +5,7 @@ package nodeplane.agent.v1;
 import "agent/v1/types.proto";
 
 service NodeAgentService {
+  rpc BackendNodeAction(BackendNodeActionRequest) returns (RuntimeCommandResponse);
   rpc ResolveProfileIntent(ApplyProfileIntentRequest) returns (ProfileInspection);
   rpc RecoverProfileIntent(ApplyProfileIntentRequest) returns (RuntimeCommandResponse);
   rpc ApplyProfileIntent(ApplyProfileIntentRequest) returns (RuntimeCommandResponse);
@@ -44,6 +45,14 @@ service NodeAgentService {
   rpc DeleteXrayUser(DeleteProfileRequest) returns (RuntimeCommandResponse);
   rpc AddAwgUser(AddAwgUserRequest) returns (RuntimeCommandResponse);
   rpc DeleteAwgUser(DeleteProfileRequest) returns (RuntimeCommandResponse);
+}
+
+message BackendNodeActionRequest {
+  string node_key = 1;
+  string command_id = 2;
+  string action = 3;
+  string intent_json = 4;
+  bool recover = 5;
 }
 
 message ApplyProfileIntentRequest {

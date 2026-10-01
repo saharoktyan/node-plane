@@ -466,7 +466,7 @@ update_simple() {
   shared_dir="${_paths[2]}"
   releases_dir="${_paths[3]}"
   current_link="${_paths[4]}"
-  local runtime_env_file db_backend postgres_dsn sqlite_db_path
+  local runtime_env_file db_backend postgres_dsn
   runtime_env_file="${shared_dir}/.env"
 
   local previous_release new_release_name new_release_dir
@@ -502,12 +502,12 @@ update_simple() {
   set_step "load database runtime configuration"
   db_backend="$(read_env_value DB_BACKEND "$runtime_env_file")"
   postgres_dsn="$(read_env_value POSTGRES_DSN "$runtime_env_file")"
-  sqlite_db_path="$(read_env_value SQLITE_DB_PATH "$runtime_env_file")"
-  if [[ -z "$db_backend" || "$db_backend" == "sqlite" ]]; then
+  if [[ -z "$db_backend" ]]; then
     db_backend="postgres"
   fi
-  if [[ -z "$sqlite_db_path" ]]; then
-    sqlite_db_path="${shared_dir}/data/bot.sqlite3"
+  if [[ "$db_backend" != "postgres" ]]; then
+    echo "Only PostgreSQL runtime is supported." >&2
+    exit 1
   fi
   if [[ "$db_backend" == "postgres" ]]; then
     set_step "auto-provision local postgresql runtime"
@@ -524,40 +524,8 @@ update_simple() {
   NODE_PLANE_SHARED_DIR="${shared_dir}" \
   DB_BACKEND="${db_backend}" \
   POSTGRES_DSN="${postgres_dsn}" \
-  SQLITE_DB_PATH="${sqlite_db_path}" \
   "${new_release_dir}/.venv/bin/python" "${new_release_dir}/app/manage_db.py" init
 
-  if [[ -f "$sqlite_db_path" ]]; then
-    local migrate_output
-    echo "Migrating SQLite data into PostgreSQL..."
-    set_step "migrate sqlite to postgresql"
-    migrate_output="$(
-      NODE_PLANE_BASE_DIR="${base_dir}" \
-      NODE_PLANE_APP_DIR="${new_release_dir}" \
-      NODE_PLANE_SHARED_DIR="${shared_dir}" \
-      DB_BACKEND="${db_backend}" \
-      POSTGRES_DSN="${postgres_dsn}" \
-      SQLITE_DB_PATH="${sqlite_db_path}" \
-      "${new_release_dir}/.venv/bin/python" "${new_release_dir}/app/manage_db.py" migrate-to-postgres --sqlite-path "$sqlite_db_path"
-    )"
-    printf '%s\n' "$migrate_output"
-
-    if printf '%s\n' "$migrate_output" | grep -q '^MIGRATE|success$'; then
-      echo "Verifying PostgreSQL migration..."
-      set_step "verify sqlite to postgresql migration"
-      NODE_PLANE_BASE_DIR="${base_dir}" \
-      NODE_PLANE_APP_DIR="${new_release_dir}" \
-      NODE_PLANE_SHARED_DIR="${shared_dir}" \
-      DB_BACKEND="${db_backend}" \
-      POSTGRES_DSN="${postgres_dsn}" \
-      SQLITE_DB_PATH="${sqlite_db_path}" \
-      "${new_release_dir}/.venv/bin/python" "${new_release_dir}/app/manage_db.py" verify-migration --sqlite-path "$sqlite_db_path"
-    else
-      echo "Skipping PostgreSQL verification because legacy SQLite import was not applied."
-    fi
-  else
-    echo "No SQLite source found at ${sqlite_db_path}; skipping SQLite -> PostgreSQL migration."
-  fi
 
   if [[ -f "${new_release_dir}/app/backend/admin_cli.py" ]]; then
     set_step "initialize backend schema"
@@ -585,7 +553,7 @@ update_simple() {
   # auto-provision PostgreSQL runtime before service restart.
   db_backend="$(read_env_value DB_BACKEND "$runtime_env_file")"
   postgres_dsn="$(read_env_value POSTGRES_DSN "$runtime_env_file")"
-  if [[ -z "$db_backend" || "$db_backend" == "sqlite" ]]; then
+  if [[ -z "$db_backend" ]]; then
     db_backend="postgres"
   fi
   if [[ "$db_backend" == "postgres" ]]; then
@@ -601,7 +569,6 @@ update_simple() {
     NODE_PLANE_SHARED_DIR="${shared_dir}" \
     DB_BACKEND="${db_backend}" \
     POSTGRES_DSN="${postgres_dsn}" \
-    SQLITE_DB_PATH="${sqlite_db_path}" \
     "${new_release_dir}/.venv/bin/python" "${new_release_dir}/app/manage_db.py" init
   fi
 

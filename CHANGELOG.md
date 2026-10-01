@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.3-alpha.19
+
+- Complete native backend/aiogram administration: node maintenance and removal,
+  announcements, alerts, opt-in traffic statistics, updates and backups.
+- Add confirmed controller reset and full systemd uninstall with ownership checks.
+- Remove the backend SQLite implementation; retain agent command journals.
+- Limit Telegram commands to start, help, id, version and administrator status.
+- Keep RU/EN localization and backend authorization across the migrated screens.
+
 ## Unreleased
 
 ## 0.4.1-alpha.22 - 2026-09-26

@@ -269,8 +269,8 @@ artifact, сервис resolve/me и SQL-репозиторий identity с яв
 Проверки principal относятся к уже аутентифицированному объекту: этот слой не
 проверяет bearer-секрет. Token storage/verifier, bootstrap администратора и profile ownership, HTTP API, features и config issuance executor
 ещё не реализованы. Существующий бот не переключён на этот backend.
-SQLite-тесты SQL-репозитория и policy проходят; конкурентная регистрация на
-настоящем PostgreSQL остаётся обязательной интеграционной проверкой.
+Isolated repository and policy tests pass; concurrent registration on
+real PostgreSQL still requires integration verification.
 
 ## Credentials и bootstrap — реализация
 
@@ -492,3 +492,45 @@ and the agent's durable node-wide journal. A matching digest/revision from the
 agent is required before `applied_revision` changes. This first implementation
 requires an already installed agent and protocol runtime; new-node bootstrap
 and recovery of permanently ambiguous mutations are still pending.
+
+## Traffic accounting contract (2026-09-30)
+
+- `GET /api/v1/system/traffic`: admin-only global availability, collection readiness,
+  fixed five-minute interval and sanitized last batch result.
+- `PATCH /api/v1/system/traffic/preferences`: admin-only strict boolean `enabled`.
+- `PATCH /api/v1/me/preferences`: optional strict boolean `traffic_consent`; only
+  the authenticated account can grant/withdraw consent. Withdrawal purges usage.
+- `GET /api/v1/me/profiles/{profile_id}/summary`: owned-profile traffic summary,
+  hidden when globally unavailable; consent-required/waiting/current/unknown
+  states and protocol byte totals with tracking/sample times. Administrative
+  profile access does not bypass ownership or account consent.
+
+Sampling never resets native counters. First observations baseline earlier
+traffic; outages remain unknown. Policy/consent generations fence in-flight
+responses, and grants/owner/revisions are rechecked. Totals are approximate, not
+traffic-limit or billing enforcement. No browsing history is collected.
+
+
+## Controller cleanup (2026-10-01)
+
+`maintenance.manage` controls `/api/v1/system/cleanup`. GET reports supported
+installation ownership, account/profile/node counts and the latest job. POST
+`/plans` accepts only `{action: "reset"|"remove", cleanup_nodes: boolean}` and
+returns an expiring operator/principal-bound plan plus the exact confirmation
+phrase. POST `/jobs` accepts `{plan_id, confirmation_phrase}` and requires a UUID
+`Idempotency-Key`. Reusing a consumed plan returns its original job; changed or
+expired plans are rejected before effects. Paths cannot be supplied by API clients.
+
+GET `/jobs/{id}` reports sanitized status, phase, snapshot ID and individual node
+results. POST `/retry` retries a blocked safe step; POST `/abort` stops before the
+irreversible controller phase. Both suffixes are under `/jobs/{id}`. POST
+`/jobs/{id}/shutdown-ack` is reserved for the confirming actor/principal after the
+client delivers the final screen. Full removal waits in `awaiting_shutdown` until
+this acknowledgment. Systemd logs own the final removal result; a queued shutdown
+is not proof of successful removal. Uncertain launch is blocked without replay.
+
+Cleanup fences other mutations and transport claims. Reset keeps the current
+administrator and active credential; one pre-reset snapshot remains on disk.
+Full removal clears controller data, including an external PostgreSQL deployment,
+and deletes only installer-owned resources. See the parity checkpoint for the
+retention policy and independent node verification prerequisites.

@@ -278,7 +278,13 @@ Approval does not create a VPN profile or grant access to any node.
 message displayed to accounts without access. `PATCH` updates either field and
 requires administrator settings permission. Request creation checks the same
 backend policy transactionally, so hiding the Telegram button is not the only
-enforcement layer.
+enforcement layer. The policy response also reports a per-administrator
+`notify_requests` preference; administrators can update it independently, and
+the Telegram adapter checks it before sending request notifications.
+
+`GET /api/v1/system/bot-title` returns the public menu title; administrators
+change it with `PATCH` and a `title` value. The setting belongs to the backend
+so non-Telegram clients can use the same presentation metadata.
 
 These routes use the backend identity tables. Telegram identity resolution also
 stores the user's current display name, username, and Telegram language code;
@@ -636,3 +642,183 @@ that old protocol commands cannot complete after restart. If AWG has no saved
 peer identity, live absence cannot be proven and repair remains blocked. Backend
 node decommissioning and coordinated protocol settings updates still need their
 own API; legacy full cleanup intentionally refuses fenced nodes.
+# Node installation and maintenance jobs
+
+## System updates
+
+The version catalog is available at `GET /api/v1/system/updates/versions?offset=0`.
+`GET /api/v1/system/updates/rollout` reads the running driver/agent binary commits
+and runtime commits through the native driver, using the backend node registry.
+Unknown reachability is not evidence that a component is current.
+
+`POST /api/v1/system/updates/run` requires `Idempotency-Key` and accepts either
+`{"kind":"version","branch":"dev","target_ref":"v0.4.3-alpha.19"}`,
+`{"kind":"agents"}` or `{"kind":"runtimes"}`. The version/ref is checked
+against the selected branch catalog and downgrade policy. Dev HEAD execution is
+pinned to its selected commit. `GET /api/v1/system/updates/jobs/{id}` reports
+worker progress and individual batch outcomes. The worker uses the systemd
+updater for stack changes and existing rollout/native runtime jobs for nodes.
+
+The database stores a claim before launching a system update or driver-only
+installer. Interrupted launches are blocked, never automatically replayed.
+Agent/runtime child commands use deterministic IDs, so restarting batch
+coordination cannot create duplicate child jobs. Successful installer exits
+are followed by a live commit check. Batch errors are reported per component;
+unknown nodes can be repaired through their node cards.
+
+Automatic upstream checks run from the existing backend-worker timer, at most
+hourly when enabled. They never install updates automatically. These endpoints
+support the systemd installation only; Docker stack installation remains
+unsupported.
+
+`POST /api/v1/nodes/{key}/actions` accepts an action, desired revision and
+`Idempotency-Key`; `GET /api/v1/node-jobs/{id}` reports durable progress. The worker
+executes native driver/agent RPCs, not Telegram-owned shell commands. Bootstrap,
+reinstall, Docker setup, ports, runtime sync, repair and entropy operations share
+this contract. `GET /api/v1/nodes/{key}/services` supplies live installation and
+runtime facts for conditional UI actions.
+
+Config-changing jobs disable issuance until their node settings are acknowledged
+and profile reconciliation completes. Clean reinstall invalidates artifact cache
+and advances profile intent revisions. Interrupted jobs become blocked; resolve
+reads the native journal, or retires an unfinished command after agent restart,
+without replaying an uncertain mutation.
+
+`POST /api/v1/nodes/{key}/remove-step` queues full worker-driven removal;
+`GET /api/v1/nodes/{key}/removal` reports progress. An explicit `retry: true` retries
+a blocked saga. Full removal revokes access before runtime/agent cleanup and only
+retires the registry after independent host verification. For SSH nodes configure
+`NODE_PLANE_REMOVAL_SSH_KEY` with root access, distinct from `SSH_KEY`; supply the
+bot public key via `SSH_KEY` or `NODE_PLANE_BOT_PUBLIC_KEY_FILE`. Verification
+credentials are checked before destructive steps. Local verification uses that
+public key without an independent SSH connection. Runtime-only cleanup preserves
+the node and agent and must not be reported as full removal.
+
+## Backend backups and database support
+
+PostgreSQL is the only supported backend database. The installer initializes
+the current PostgreSQL schema directly; legacy database migration commands and
+fallback database adapters have been removed. Node agents retain their independent
+SQLite command journals for idempotency and revision fencing. Isolated tests may
+use SQL fakes; these do not represent supported production databases.
+
+The Backups screen uses `/api/v1/system/backups`: overview, paginated catalog,
+metadata, scheduling preferences and durable create/restore jobs. Native snapshots
+are private JSON files in `shared/backups/backend`, with checksums and schema
+compatibility checks. They contain accounts, external identities, profiles, grants,
+node settings/connections and access requests. Bearer credentials, operation
+history and issued artifacts are excluded. SSH connection settings can contain
+sensitive values, so snapshot files must remain private.
+
+Restore blocks new HTTP mutations and config issuance, creates a pre-restore
+snapshot, freezes current profiles and waits for worker-owned revocations. A failed
+revocation blocks restoration and leaves profiles frozen; resolve the failed
+operations before retrying. The database replacement is transactional, preserves
+the restoring administrator, revokes account credentials and clears operational
+caches. Restored nodes are disabled and unapplied; enable them and apply their
+settings explicitly before issuing fresh configurations. Revisions advance beyond
+the current state so agent fences cannot reject the restored configuration.
+
+This is a configuration backup, not a host/filesystem or PostgreSQL disaster
+recovery backup. PostgreSQL snapshot isolation and locking still require deployment
+integration testing; isolated unit tests verify orchestration and policy only.
+
+## Announcement delivery
+
+`POST /api/v1/announcements/preview` validates text and counts eligible recipients.
+`POST /api/v1/announcements` requires an administrator and Idempotency-Key; it
+snapshots approved Telegram accounts except the sender. GET on the collection
+returns the latest job, and GET on an ID returns durable delivery counts.
+
+A trusted Telegram adapter with `settings.manage` scope uses the integration
+claim/ack endpoints without a delegated user header. These endpoints deliver
+already admitted work; account/service credentials cannot claim it. Each claim
+uses a stable command UUID, is bound to its adapter credential, rechecks account
+eligibility, and expires after two minutes. An expired claim becomes unknown,
+not queued. No ambiguous send is automatically replayed. The Telegram client
+acknowledges explicit failure, success or uncertainty without persisting raw API
+errors. Telegram delivery is not exactly-once; unknown outcomes require human
+review. The client polls asynchronously and uses Rich Messages with a safe plain
+fallback after explicit rejection.
+
+`PATCH /api/v1/me/preferences` also accepts strict `announcement_silent` boolean;
+this preference belongs to the backend account rather than its Telegram identity.
+A locale preference still requires a linked Telegram identity. Pending broadcasts
+block backup restoration; the outbox is excluded from snapshots and cleared
+during restoration.
+
+## Alert monitoring
+
+GET `/api/v1/system/alerts` returns policy, current recorded conditions, last scan
+status and delivery counts. PATCH on `/preferences` accepts strict enable/resolved
+booleans and a 5/15-minute interval. Monitoring is disabled by default. The backend
+worker scans after processing queued mutations, with up to four read-only agent
+requests in parallel and a five-second per-RPC timeout. Scans are skipped during
+backup restoration. Disabled/unapplied nodes and active maintenance are excluded.
+
+Agent runtime inspection reports host measurements in `host_metrics` and an
+explicit `inspection_available` marker. It reads `/proc/meminfo`, the runtime
+filesystem and host load. The first thresholds are fixed: disk free <10%, used RAM
+>=90%, load1/CPU count >=2. Missing, invalid or older-runtime readings are unknown,
+and do not clear previous conditions. The driver is checked before and after a
+scan; driver failure records a failed scan without manufacturing node outages.
+Synchronize node runtimes to obtain these new measurements.
+
+`backend_alert_state` persists active conditions. Transitions produce immutable
+alert events and per-admin deliveries; repeated scans do not repeat notifications.
+Recovery notices are optional. Removed protocols retire service conditions, and
+node retirement deletes its alert state/events/deliveries. Monitoring reads state
+and never mutates protocol settings or enables a node.
+
+A trusted Telegram adapter claims and acknowledges deliveries through integration
+endpoints, under the same adapter-only `settings.manage` transport scope as
+announcements. Each claim is bound to an adapter and command key, expires after
+two minutes and becomes unknown rather than being replayed. Recipient admin role
+and Telegram identity are rechecked. Alert and announcement transports alternate
+inside the async client poller, which survives leaving UI screens. Notification
+text belongs to the RU/EN presentation catalog. Snapshot restoration clears
+monitoring/outbox state and is blocked while an alert delivery is in flight.
+
+Automated tests use isolated SQL fixtures and fake driver observations. Real
+PostgreSQL locking, VPS resource collection and live Telegram delivery still
+require integration acceptance.
+
+
+## Opt-in traffic statistics
+
+`GET /api/v1/system/traffic` and `PATCH /api/v1/system/traffic/preferences`
+require `settings.manage`. Availability defaults off. Owners separately set the
+strict boolean `traffic_consent` through `/me/preferences`; `/me` reports both
+consent and availability. Consent is bound to the backend account, not Telegram.
+Revocation deletes account traffic rows immediately and changes a generation
+fence, so a delayed snapshot cannot restore them. Global pauses preserve totals
+but clear baselines. Repeating the same setting does not reset accounting.
+
+The worker calls the native driver/agent read-only `traffic` action every five
+minutes, with batches of 32 profile/node/protocol pairs, four concurrent requests
+and a ten-second RPC timeout. Larger sets rotate. Admission requires approved
+owners with consent, active grants, synchronized profiles and applied nodes;
+maintenance, restore, drains and cleanup exclude collection. A final transaction
+rechecks generations and revisions before accepting observations. Agent helpers
+need runtime synchronization; reads never deploy runtime files or query the old
+bot tables. AWG uses container `wg show <interface> transfer`; Xray uses a filtered
+StatsService query with reset explicitly false. No private keys/config artifacts or
+other profiles' counters are returned by the snapshot.
+
+`backend_traffic_usage` retains only last cumulative counters, upload/download
+totals and timestamps per owned profile/node/protocol. The first sample excludes
+prior traffic. Container/boot epochs and decreases detect resets. Failed reads
+preserve the previous baseline and mark unknown; they never simulate zero traffic.
+Profile/node deletion cascades usage deletion. Configuration snapshots preserve
+availability/consent, but exclude usage, sampling times/cursors and generations.
+
+The owned profile summary includes optional `traffic`: absent when globally
+unavailable, `consent_required` without consent, `waiting` before sampling,
+`current` for recent measurements or `unknown` for unavailable/paused/stale
+measurements. Each protocol total includes tracking start and last sample times.
+These are approximate diagnostics, not billing counters: unsampled traffic before
+an epoch ends cannot be recovered. Protocol-native byte counters can include
+protocol overhead and AWG/Xray totals are not guaranteed directly comparable.
+
+Agent/parser, worker admission/accounting and localized UI tests pass with isolated
+SQL fixtures. Real PostgreSQL locking and live VPS/Telegram acceptance are pending.

@@ -10,6 +10,151 @@ button, notification, and error while restoring parity; do not add one-language
 text as a temporary shortcut. Locale preference belongs to the backend identity
 record and the first-run/settings language screens must allow the user to change it.
 
+## Scope update and alerts checkpoint (2026-09-30)
+
+Command inventory and implementation are deferred for a separate product review.
+Historical command rows remain reference material; legacy aliases are not an
+automatic parity requirement. Screen/button parity remains in scope.
+
+The Alerts block now has backend policy and aiogram screens for enable/disable,
+5/15-minute intervals, recovery notices, active conditions and delivery results.
+The backend worker performs read-only inspections after queued mutations, using
+at most four concurrent agent requests and a five-second driver RPC timeout.
+Only enabled nodes with applied settings are monitored; new nodes, pending
+settings, maintenance, drains and cleanup are excluded.
+
+The agent reports available-memory RAM usage, free space on the runtime filesystem,
+1-minute load and CPU count. Fixed initial thresholds are disk free below 10%,
+RAM usage at least 90%, and load at least twice the CPU count. Observations remain
+separate from desired state: monitoring never enables nodes or applies settings.
+Older runtime bundles without an explicit trustworthy inspection marker report
+unknown service/resource measurements until runtime synchronization.
+
+Persistent alert state emits notifications only for condition transitions.
+Unknown readings preserve previous alarms; driver/control-plane failure does not
+fabricate an outage on every node. Resolved notices are optional, and removed
+protocols retire their service alarms without claiming recovery. Admin eligibility
+and node availability are checked again before delivery. Delivery claims use the
+same no-replay-on-uncertainty contract as announcements, with localized Rich
+Messages and safe plain-text fallback. Polling alternates alerts and announcements
+so one queue cannot starve the other. Node deletion removes its monitoring state
+and notification history; snapshot restoration excludes alert state/outboxes.
+
+Automated verification covers transitions, unknown/malformed metrics, driver and
+agent failure, maintenance exclusion, recipient revocation, queue interruption,
+policy and RU/EN screens. Live agent/Telegram/PostgreSQL acceptance remains open.
+Factory reset/full removal is implemented in the October 1 checkpoint below. Traffic telemetry
+is implemented in the checkpoint below. Commands will be reviewed separately.
+
+## Announcements implementation checkpoint (2026-09-30)
+
+- Admin menu exposes announcement overview, compose, preview, edit through Back,
+  explicit Send and durable delivery results. Composition retains the draft;
+  Back and Preview/Send share a row where both actions are available.
+- The backend validates the message and snapshots approved Telegram recipients,
+  excluding the sender. Pending/disabled accounts and accounts without Telegram
+  identities are excluded. Eligibility is checked again before delivery.
+- Stable command keys prevent duplicate broadcasts after double taps. A separate
+  async Telegram transport polls persisted deliveries after client restart; leaving
+  the compose/result screens does not cancel an admitted broadcast.
+- The result distinguishes queued, sending, sent, failed, skipped and unknown.
+  Telegram does not support idempotent message sends: expired or ambiguous claims
+  become unknown and are not automatically replayed. Explicit Rich Message
+  rejection can safely use a plain-text fallback without Markdown.
+- Member settings persist announcement sound preference per backend account;
+  delivery applies the current preference and recipient locale. RU/EN strings
+  cover the new screens, buttons, notifications and errors.
+- Backup restore is blocked while announcement delivery is pending; restore
+  excludes and clears the announcement outbox so old broadcasts cannot replay.
+
+Implementation and automated checks are complete for this slice. Live Telegram
+acceptance remains required, including blocked recipients and client restarts.
+Alerts and telemetry are implemented in later checkpoints. Factory reset/full
+removal is implemented below; final live acceptance remains open and commands are deferred.
+
+## Node installation and maintenance implementation checkpoint (2026-09-30)
+
+The tables below retain the original comparison baseline. For the node block,
+this checkpoint supersedes their “Missing”/“Broken” implementation statuses:
+
+- Node cards and lists expose saved readiness/provisioning summaries; cards also
+  query live agent/container state, runtime version/commit and drift. Agent
+  absence and connection failure use localized explanations.
+- Installation checks Docker and reusable protocol configs. Keep-config reinstall
+  is offered only when all selected protocol configs are reusable, and the agent
+  checks again before execution. Bootstrap and clean reinstall are durable worker
+  jobs; progress does not depend on keeping the Telegram screen open.
+- Settings have General/connection/protocol, Xray and AWG sections, including
+  notes, fingerprint, interface and I1 preset. Settings are desired state until
+  explicitly applied; Apply belongs to the settings root.
+- Diagnostics, port check/open, runtime inspection/sync, environment/Xray repair,
+  access reconciliation and AWG entropy inspection/regeneration have backend
+  operations and localized result/Back screens. Runtime sync is conditional on
+  drift; Xray repair is conditional on the selected protocol.
+- Mutations carry stable command IDs and node revisions. Interrupted native
+  operations require journal recovery or explicit retirement after agent restart;
+  they are never blindly replayed. Rebuilds fence config issuance and schedule
+  fresh profile reconciliation before issuing new artifacts.
+- Full deletion has one card entry. The worker revokes access, removes runtime
+  and the agent, verifies host cleanup, then removes the registry entry. Runtime
+  cleanup retaining the node/agent is a separate maintenance operation. Registry
+  removal alone is offered after connection/verification failure.
+- Agent installation checks release binaries before local build. Missing Rust
+  offers an explicit installation confirmation; resource failures explain that
+  release binaries are needed instead of displaying console logs.
+- New node screens/actions have RU/EN catalog entries. Automated checks cover
+  job idempotency, interruption, config fencing/reconciliation, cleanup and
+  worker-driven removal. This is implementation verification, not live acceptance.
+
+Deployment prerequisite: verified SSH removal needs an independent root-access
+key in `NODE_PLANE_REMOVAL_SSH_KEY`, distinct from the bot key being removed.
+Local verification needs the bot public key through `SSH_KEY` or
+`NODE_PLANE_BOT_PUBLIC_KEY_FILE`. Missing credentials block deletion before
+revocation or runtime cleanup.
+
+Remaining outside this block: backups/reset/alerts, the complete
+command-alias inventory, and the final cross-section live acceptance matrix.
+Node live acceptance must still exercise first installation on a clean host,
+both reinstall variants, interrupted-operation recovery, local/SSH full removal,
+and returning working AWG/Xray configs after reconciliation.
+
+## Updates implementation checkpoint (2026-09-30)
+
+The Updates rows below retain the original comparison baseline. Their missing
+implementation items are now covered by the backend and aiogram update screens:
+
+- Paginated version catalog with current/upgrade/downgrade/blocked markers,
+  compatibility explanations, an explicit confirmation and Back navigation.
+  The backend reloads the catalog and checks the selected branch/ref before
+  accepting a command. Dev HEAD is pinned to a full commit for execution.
+- Latest-version updates use the same confirmation and durable command contract.
+  Double taps reuse one command key. The worker schedules the existing systemd
+  updater; an uncertain launch is blocked rather than replayed.
+- Branch and dev tag/HEAD selection, auto-check toggle and hourly backend-worker
+  checks. A failed upstream check does not prevent provisioning/cleanup work.
+- Fleet overview displays actual driver/agent binary commits separately from
+  runtime commits. Current components hide mutation buttons; unreachable
+  components remain unknown. Installation success is verified against the
+  expected commit before a batch item is marked successful.
+- Durable driver/agent rollout and runtime-sync batches use the backend node
+  registry, persist individual results, and continue after leaving Telegram.
+  Driver-only rollout supports an empty node registry. Runtime synchronization
+  reuses the native node-job journal/recovery contract.
+- Updates shows the latest task/progress/result; release cleanup keeps its
+  eligibility/count/size checks. All added screens/messages have RU/EN entries.
+
+Live acceptance remains necessary: install a selected release on a systemd
+host, return to the bot after stack restart, confirm that fleet update buttons
+vanish after successful rollout, and test partial failure on an unavailable
+node. This checkpoint records implementation and automated verification; no
+release or live system update was performed as part of it.
+
+Follow-up verification (2026-09-30): the access-request policy PATCH contract now
+accepts the per-admin notification preference sent by the settings screen.
+QR delivery also respects navigation: an artifact read completed after Back
+does not send a photo; a photo sent while navigating away is deleted and does
+not replace the destination screen. Both QR cases have async regression tests.
+
 Implementation progress (2026-09-29): the first parity slice is underway. The
 member config path now groups protocol selection, Xray transport selection, and
 AWG file-format selection; successful config delivery avoids re-sending the
@@ -113,7 +258,15 @@ telemetry and notification preferences still need separate backend support.
 AWG QR generation now uses the import payload without the `vpn://` prefix, as
 the PTB client did. QR Back returns to the issuance screen; tracked attachment
 messages are removed on navigation and can be sent again when returning to
-that screen. The `.conf` artifact no longer offers an Amnezia QR button.
+that screen. The `.conf` artifact no longer offers an Amnezia QR button. A
+successful `.vpn` issuance now shows protocol-specific import guidance and the
+full `vpn://` URI in a collapsible Rich Message section. AWG and VLESS files
+include both server title and profile name in their filenames.
+
+Config issuance polling now stops updating the control screen after Back or
+another member action. Late artifact reads and backend errors are discarded
+when their screen is no longer active; a file whose send completes after
+navigation is removed. Pending results expose a localized Refresh status action.
 
 Access requests now use backend cursor pagination and search by Telegram ID,
 name, or username. The request card loads by ID and shows identity and timestamp.
@@ -125,7 +278,12 @@ Access-request policy now has backend-owned enabled/message settings. The admin
 can toggle new requests and edit the text shown to users without access; request
 creation enforces the toggle in the backend. The member home hides the request
 button and displays the configured message when requests are disabled. Admin
-notification preferences and request reminder behavior remain open.
+notification preferences are stored per administrator and suppress new-request
+messages when disabled. Request reminder behavior remains open.
+
+The bot menu title is now a backend-owned setting with an administrator edit
+screen; the member home, admin menu, and first-run language screen render the
+configured title instead of a fixed label.
 
 The installation menu now checks the backend's settings snapshot before showing
 Install protocols. Incomplete settings lead to the settings screen; an applied
@@ -159,25 +317,25 @@ PTB: `user_common.py:start_cmd`, `user_profile.py:on_menu_callback`, `keyboards.
 
 | PTB screen/button | PTB result and visibility | aiogram today | Exact parity task |
 |---|---|---|---|
-| `/start` first visit → RU / EN | Saves Telegram identity; first visit asks for language before home. Admin gets a profile automatically. | Resolves identity, offers RU/EN on first visit, persists locale and opens the appropriate home. | Automatic admin profile creation and editable bot title remain missing. |
-| `/start` again; `menu:main` / Back | Renders configured bot title and access-aware main menu. | `/start` and Back use the chosen locale but static `Node Plane` title. | Read editable title from backend and preserve access-gate policy. |
+| `/start` first visit → RU / EN | Saves Telegram identity; first visit asks for language before home. Admin gets a profile automatically. | Resolves identity, offers RU/EN on first visit, persists locale, and uses backend title on the language screen. | Automatic admin profile creation remains missing. |
+| `/start` again; `menu:main` / Back | Renders configured bot title and access-aware main menu. | Reads backend title for member and admin home screens. | Present. |
 | No access: `menu:request_access` | Button is hidden when requests are disabled; disabled screen shows custom access-gate text. Pending request has its own state. | Backend policy controls button visibility and custom gate text; pending state remains distinct; disabled accounts are rejected by authorization. | Add richer rejected/disabled explanations and explicit reapply policy. |
 | Main: Get key (`getkey:menu`) | Directly lists accessible servers for the single bound PTB profile. | Opens a list of owned profiles first. | Preserve the server-first PTB path for a single profile; retain a profile chooser only when multiple owned profiles make it necessary. |
-| Main: Profile (`menu:profile`) | Detailed profile identity, status, access per server; Statistics and Back. | `My account` shows owned profile(s), Telegram identity, active/frozen/expired status, optional expiry and grouped node/protocol access. Statistics are backend-backed. | Traffic telemetry and notification preferences remain unimplemented. |
-| Main: Settings (`menu:settings`) | Language, announcement sound, conditional traffic telemetry, Back. | Language picker and persistence are present; sound and telemetry controls are missing. | Add API-backed announcement and telemetry preferences, including the global telemetry availability setting. |
+| Main: Profile (`menu:profile`) | Detailed profile identity, status, access per server; Statistics and Back. | `My account` shows owned profile(s), Telegram identity, active/frozen/expired status, optional expiry and grouped node/protocol access. Statistics are backend-backed. | Traffic telemetry and notification preferences are backend-owned and implemented; live acceptance remains open. |
+| Main: Settings (`menu:settings`) | Language, announcement sound, conditional traffic telemetry, Back. | Language, announcement sound and conditional traffic-consent controls are implemented. | Present; traffic consent can still be revoked when global availability is disabled. |
 | Main: Admin (`menu:admin`) | Admin dashboard or first-node setup invitation. | Basic admin menu, no first-node invitation. | Add first-node setup gate (local / remote / later) and admin dashboard parity. |
-| `/whoami`, `/version`, `/getkey` | Returns Telegram identity, bot version, or invokes start/home respectively. | Only `/start` is registered. | Add the three commands with corresponding behavior and locale. |
+| `/whoami`, `/version`, `/getkey` | Returns Telegram identity, bot version, or invokes start/home respectively. | All three commands exist: identity is shown locally, version comes from the backend, and Get key follows the start/home flow including first-run language choice. | Present. |
 
 ### Member profile and statistics
 
 | PTB button/screen | aiogram today | Exact parity task |
 |---|---|---|
-| Profile → Statistics (`menu:profile_stats`) | Missing. | Shows profile creation date, node/protocol counts, Xray/AWG counts, successful config issuance count and latest issuance. | Add opt-in traffic telemetry only after backend aggregation and consent settings exist. |
+| Profile → Statistics (`menu:profile_stats`) | Missing. | Shows profile creation date, node/protocol counts, Xray/AWG counts, successful config issuance count and latest issuance. | Opt-in Xray/AWG totals and sample times are included; unknown/stale observations are explicitly marked. |
 | Profile → Back | Account info goes straight home. | Profile Back returns home; Statistics Back returns to profile. | Present. |
 | Profile identity/status/access | Account info lacks profile name, username, Telegram ID, access summary. | Owner-only backend summary exposes profile data, while Telegram identity remains optional and separate from profile ownership. | Existing profiles without a creation date display `—`. |
 | Settings → Language → RU / EN → Back | Language picker is available from member Settings. | Persist locale and redraw current screen using selected language; first-run choice has no Back, settings choice does. |
-| Settings → Silent announcements toggle → Back | Missing. | Persist preference; broadcast must respect it. |
-| Settings → Traffic telemetry toggle (only if globally available) → Back | Missing. | Add global and per-user preference, traffic aggregation API, conditional visibility, and consent/disabled state. |
+| Settings → Silent announcements toggle → Back | Implemented: account preference and delivery behavior. | Live acceptance of silent delivery remains. |
+| Settings → Traffic telemetry toggle (only if globally available) → Back | Present. | Backend account consent, conditional visibility, global availability and member summaries are implemented. Existing consent remains revocable while globally unavailable. |
 
 ## 2. Member configuration issuance
 
@@ -186,11 +344,11 @@ PTB: `user_getkey.py`, `ui/user_views.py`, `utils/keyboards.py`. New: `telegram_
 | PTB screen/button | PTB result | aiogram today | Exact parity task |
 |---|---|---|---|
 | Get key → server rows → Back | Lists only granted nodes, groups connection methods under each node, Back to home. | Owned profiles → nodes; node screen lists transport-flattened actions. | Preserve the hierarchy and readable server/method labels. Provide optional profile chooser only when needed. Honor inactive/frozen/no-method screens. |
-| Server → AWG | Refreshes live AWG peer, shows import instructions and `vpn://` URI on an AWG screen. | AWG VPN/CONF buttons issue immediately; successful screen shows attachment but no URI or import guide. | Add AWG overview with current URI and instructions, then explicit QR / `.vpn` / `.conf` actions. Keep backend live-artifact freshness checks. |
-| AWG → Show QR | Encodes the Amnezia payload (without `vpn://`), sends photo with Back; Back reopens AWG screen after refresh. | AWG `.vpn` QR strips `vpn://`; Back returns to issuance result. `.conf` does not show QR. | Add AWG overview/import help and return to it after fresh artifact validation; current path stays on issuance result. |
-| AWG → Download `.vpn` | Sends named file and import caption with Back to AWG screen. | Sends `.vpn` as soon as transport is selected; filename comes from backend as `awg-{node_key}.vpn`. | Explicit `.vpn` button, human-readable filename (`server title · profile`), caption, return to AWG screen and artifact cleanup. |
-| AWG → Download `.conf` | Same as `.vpn` with `.conf` for compatible clients. | Direct action exists. | Same filename/caption/back behavior; preserve selectable `.conf` (do not silently remove it). |
-| Server → Xray → XHTTP (primary) / TCP (fallback) | Separate transport picker; Xray screen shows live VLESS link and import guidance. | Separate TCP/XHTTP picker; selecting a transport queues issuance, then shows VLESS link in collapsible details and sends a `.txt` file. | Add import guidance; consider separating issuance from the transport picker so it more closely matches the PTB result screen. |
+| Server → AWG | Refreshes live AWG peer, shows import instructions and `vpn://` URI on an AWG screen. | `.vpn`/`.conf` choices issue immediately; success sends a named file, shows format-specific guidance, and `.vpn` adds a collapsible URI. | Add a pre-issuance AWG overview and return to it after QR/file use. Keep backend live-artifact freshness checks. |
+| AWG → Show QR | Encodes the Amnezia payload (without `vpn://`), sends photo with Back; Back reopens AWG screen after refresh. | AWG `.vpn` QR strips `vpn://`; Back returns to issuance result. `.conf` does not show QR. | Add pre-issuance AWG overview and return to it after fresh artifact validation; current path stays on issuance result. |
+| AWG → Download `.vpn` | Sends named file and import caption with Back to AWG screen. | Sends `.vpn` after selection; filename includes server title and profile; result has import guidance and expandable URI. | Add explicit result actions/back to AWG overview and artifact cleanup. |
+| AWG → Download `.conf` | Same as `.vpn` with `.conf` for compatible clients. | Sends `.conf` with server/profile filename and compatible-client import guidance. | Add explicit result actions/back to AWG overview and artifact cleanup. |
+| Server → Xray → XHTTP (primary) / TCP (fallback) | Separate transport picker; Xray screen shows live VLESS link and import guidance. | Separate TCP/XHTTP picker; selecting a transport queues issuance, then shows VLESS link in collapsible details, sends a named `.txt` file, and gives protocol-specific import guidance. | Add an import screen before issuance only if needed; current path goes directly to a usable result. |
 | Xray → Show QR → Back | Sends QR with caption; Back returns to same transport's Xray screen, then Back to transport picker, then server. | QR is shown from issuance result; Back returns to that result. Its Back returns to transport picker, then node. | Add import caption/instructions and verify freshness on the full path. |
 | AWG/Xray error screens | Friendly, localized error; never hand out stale config after refresh failure. | Backend codes are mapped to localized access/missing/service/retry text; blocked/superseded issuance shows a fresh-config recovery prompt. | Add protocol-specific recovery guidance and distinguish more issuance failure causes. |
 | Issuance waiting/Refresh | PTB actions run to result; no explicit polling screen. | New pending screen with Refresh, 15-second polling loop. | Keep this new async screen if useful; ensure no repeat file sends or duplicate issuance on refresh/back, and handle timeout/worker unavailable. |
@@ -206,7 +364,7 @@ PTB: `user_profile.py` request dashboard/card/search/decision and `request_acces
 | Request dashboard: user label, paging arrows, current page, Search, Back | Backend cursor pagination and search by Telegram ID, username, first/last name; preserves search and page context. | Present. |
 | Request card: identity, username, full name, request timestamp/status; Approve / Reject / To list | Loads by request ID and shows user name, Telegram ID, username and timestamp; only pending requests expose decisions. | Present; stale requests return to the current list/page. |
 | Decision → user notification and pending list/admin menu | Decision refreshes the current cursor/search page, or opens admin menu when none remain; requester notice uses their stored locale. | Respect admin notification preferences and verify stale/double-click behavior. |
-| Admin request notification preference | Missing. | Add preference to admin settings; best-effort notification delivery must honor it. |
+| Admin request notification preference | Per-admin toggle in access policy settings; notification delivery checks it. | Present. |
 
 ## 4. Admin home and profile administration
 
@@ -219,7 +377,7 @@ PTB admin menu: `kb_admin_menu` and `user_profile.py`. Profile wizard: `admin_wi
 | Initial setup: Local / Remote / Later | Missing. | Show when no node was set up; each choice opens the appropriate create flow; Later persists dismissal. |
 | Status / Requests row | Requests present; Status absent. | Add status overview with version, node/protocol readiness, profile totals, pending requests, runtime drift and recommended actions. Add `Requests`, `Problem nodes`, `Sync runtimes` conditional buttons and their screens. |
 | Servers / Profiles row | Both present. | Restore status indicators, counts, hierarchy and navigation in their sections. |
-| Announcement | Missing. | Add compose → preview → Edit / Send / Cancel; broadcast to approved users, skip sender, honor silent preference, report sent/failed. Needs backend job/API, not direct DB access from bot. |
+| Announcement | Implemented; see the announcements checkpoint above. | Live acceptance: compose → preview → Back to edit / Send; approved recipients, sender exclusion, sound preference and truthful delivery counts. |
 | Admin settings / Back | Present, but settings are a small subset. | Complete section 6 below; Back to member home. |
 | Extra Accounts | New-only screen. | Keep as additive account management, but do not use it as a substitute for PTB profile dashboard and create flow. |
 
@@ -300,12 +458,12 @@ PTB: `utils/keyboards.py` and `user_profile.py`. New: `admin_settings.py`. The n
 
 | PTB button/screen | aiogram today | Exact parity task |
 |---|---|---|
-| Bot title → input current title → Back/saved | Missing. | Backend setting and edit screen; use title on `/start` and home. |
+| Bot title → input current title → Back/saved | Backend title setting and edit screen; member home, admin menu and first-run language screen use it. | Present. |
 | Requests settings → access-gate message / notify toggle / request enable toggle / Back | Separate pending-request list and policy screen; policy screen edits message and enable toggle through backend routes. | Add admin notification preference and verify all settings transitions. |
 | SSH key → summary → Details guide → Back | New screen displays raw public key and a one-line instruction; no Details. | Add summary, copyable public key and full host authorization guide with exact back paths. |
 | Cleanup system → local reset / reset with nodes / full remove bot / full remove bot+nodes; typed phrase/Back/result | Missing. New `cleanup` only deletes old release directories. | Add a separate, strongly confirmed factory-reset/full-remove workflow. Never conflate it with release cleanup or node removal. Backend must own the operation and report partial remote cleanup. |
-| PTB alerts settings: enable / interval 5 or 15 min / resolved notices / Back | Missing. `admin_settings_alerts` handler exists in PTB but current settings keyboard has no button to open it. | Treat as inventory/desired parity despite present reachability gap; add backend alert policy and screen, then expose intentionally in admin settings. |
-| PTB global telemetry toggle handler | No current PTB keyboard button points to `admin_settings_toggle_telemetry`; new client also lacks it. | Decide an admin-settings placement and implement global availability setting before member telemetry screen. |
+| PTB alerts settings: enable / interval 5 or 15 min / resolved notices / Back | Implemented: backend monitor/policy and reachable aiogram settings; see checkpoint above. | Live monitoring and Telegram delivery acceptance remain. |
+| PTB global telemetry toggle handler | No current PTB keyboard button points to `admin_settings_toggle_telemetry`; new client also lacks it. | Admin settings now expose Traffic statistics, global availability, interval and last batch result. |
 
 ### Updates
 
@@ -325,10 +483,10 @@ PTB: `utils/keyboards.py` and `user_profile.py`. New: `admin_settings.py`. The n
 
 | PTB screen/button | aiogram today | Exact parity task |
 |---|---|---|
-| Backups overview: last backup, count/size/status → Create / Restore / Settings / Back | Missing. | Backend backup service/API and overview; avoid accessing files directly from Telegram. |
-| Create backup → duplicate/failed/success result | Missing. | Job with idempotent result and proper status. |
-| Restore → paginated backup list → choose → metadata/warning → confirm restore → result | Missing. | Backend list/detail/restore operation with strong confirmation, compatibility check and results. |
-| Settings: scheduled backup on/off, intervals 6/12/24 h, keep 5/10/20, Back | Missing. | Persist scheduler settings and show selected values. |
+| Backups overview: last backup, count/size/status → Create / Restore / Settings / Back | Implemented: backend-native snapshot overview and aiogram screen. | Verify on a systemd deployment. |
+| Create backup → duplicate/failed/success result | Implemented: durable idempotent create job, deduplication and results. | Verify on a systemd deployment. |
+| Restore → paginated backup list → choose → metadata/warning → confirm restore → result | Implemented: paginated catalog, metadata, checksum/schema validation, confirmation and worker restore with prior revocation. | Verify restore against live PostgreSQL and agents. |
+| Settings: scheduled backup on/off, intervals 6/12/24 h, keep 5/10/20, Back | Implemented: backend policy, worker scheduling and selected values. | Verify scheduled execution on a deployment. |
 
 ## 7. Cross-cutting backend and test work required by this map
 
@@ -341,3 +499,92 @@ The following are dependencies, not permission to omit screens:
 5. **Command parity:** PTB registers `/start`, `/whoami`, `/getkey`, `/version`, `/add`, `/del`, `/list`, `/servers`, `/addserver`, `/serverwizard`, `/serverconfig`, `/setserverfield`, `/syncnodeenv`, `/probeserver`, `/bootstrapserver`, `/diag`, `/setxrayserver`, `/syncxrayserver`, `/sshkey`, `/createcfg`, `/changecfg` in `app/main.py`. The new dispatcher registers only `/start`. Implement equivalent commands or explicit links into the same aiogram screens and backend actions; document arguments and permissions.
 
 Suggested implementation order, without dropping any inventory item: (1) member navigation/config artifacts and request details; (2) profile CRUD/provisioning and admin status; (3) node creation/card/bootstrap/advanced parity; (4) maintenance/repair/removal; (5) settings/locales/announcements/updates/backups/reset; (6) all command aliases and end-to-end parity matrix. Each stage is complete only when every listed PTB button in that stage has an aiogram destination and tested backend effect, including error and Back paths.
+
+
+### Traffic telemetry implementation checkpoint (2026-09-30)
+
+- Admin traffic settings expose backend-owned availability and the last sampling
+  result. Member consent is independent of Telegram identity, defaults off,
+  remains revocable while globally unavailable and deletes that account's history
+  on withdrawal. Enabling availability never opts accounts in.
+- The worker samples at most 32 synchronized profile/node/protocol pairs every
+  five minutes, rotating larger fleets with four concurrent requests. Frozen,
+  expired, deleting, orphaned, unsynchronized and unconsenting profiles, pending
+  node settings, drains, cleanup and restore are excluded.
+- Driver forwards a read-only action without runtime deployment or legacy DB
+  access. The agent checks requested identity, reads filtered non-resetting Xray
+  StatsService counters or AWG peer transfer counters and returns only that
+  profile's byte counters. Reads use the existing shared mutation lock and fail
+  immediately if maintenance holds it. Runtime synchronization is required.
+- First samples establish baselines. Container/boot epochs and counter decreases
+  handle restarts/resets without negative totals or replay. Unavailable counters
+  retain previous readings and mark results unknown. Pausing collection clears
+  baselines, retaining totals but excluding the pause from later accounting.
+- Final admission rechecks settings generations, owner, grants and revisions;
+  even an off/on consent change while a request is in flight fences its response.
+  Snapshots retain consent/policy but exclude usage and transient collection state;
+  node retirement and profile deletion remove traffic rows.
+- Profile statistics show localized Xray/AWG upload/download totals, collection
+  start and last sample. Stale, paused or unavailable counters are explicit.
+  Sampling is approximate: unsampled bytes before a restart can be lost; these
+  totals are not billing or enforcement counters. Only byte counts are retained.
+
+Automated tests cover protocol parsing, reset handling, consent/ownership races,
+policy pauses, admission, unknown results, batch rotation and RU/EN screens.
+Real VPS, Telegram and PostgreSQL integration acceptance remains open. The next
+step is live acceptance of reset/full removal (implemented below); commands remain deferred.
+
+
+### Controller reset and full removal checkpoint (2026-10-01)
+
+The Cleanup system inventory row is now implemented in the native backend and
+aiogram settings. This supersedes its original Missing status.
+
+- Four choices match PTB: reset controller, reset including registered nodes,
+  remove controller, remove including registered nodes. Release-directory cleanup
+  and individual node removal remain separate operations.
+- The backend returns a ten-minute, operator/principal-bound plan tied to the
+  current account/profile/grant/node inventory and installer-owned paths. Exact
+  typed confirmation and a stable command key admit one durable job. Back before
+  admission leaves everything untouched. RU/EN screens include progress, individual
+  node results, a recovery snapshot, retry, stop and final shutdown confirmation.
+- Admission excludes active mutations and claimed notifications. New mutations,
+  alert/announcement claims, automatic updates/backups and monitoring commits are
+  fenced during cleanup. A failed step stays blocked until explicit recovery.
+- A private pre-action snapshot is created before effects. With-node variants use
+  the existing drain/revoke/remove/independent-verification workflow. Any blocked
+  or registry-only removal prevents erasing the controller. Retry addresses failed
+  items; stopping a job cannot undo nodes already cleaned or access already revoked.
+- Reset deletes profiles, grants, nodes, other accounts, credentials, runtime
+  journals, telemetry and managed SSH/mTLS keys. It intentionally preserves the
+  confirming administrator's account/identities/locale, the active API client
+  credential, shared environment, installation and one recovery snapshot so the
+  new installation can immediately be configured again. Reset journals prevent
+  replay of a consumed confirmation. With no node cleanup, runtimes remain unmanaged.
+- Full removal prepares an independent systemd task outside the checkout. Telegram
+  must deliver its final screen before acknowledging shutdown. The task stops the
+  aiogram client, API, worker/timer and driver; removes owned unit/binary files,
+  installation/shared paths and verified managed PostgreSQL container. External
+  PostgreSQL data in the explicit Node Plane table inventory is cleared. Original
+  source checkouts, unrelated containers/images, Docker packages and arbitrary
+  host files are not swept. No Docker prune is used.
+- An installer-written private ownership manifest is mandatory. Rerun the systemd
+  installer to register existing installations. Repurposed units, unsafe paths and
+  unverified PostgreSQL container ownership fail closed. A shutdown launch with an
+  uncertain result is never replayed automatically; inspect the named systemd unit.
+
+Policy, HTTP authorization/strict inputs, idempotency, blocked remote cleanup,
+reset retention, backup failure, uncertain shutdown, owned-path validation,
+script syntax, installer rendering and localized Telegram confirmation are covered
+by automated tests. Actual destructive VPS/PostgreSQL/Telegram acceptance is still
+required. Commands remain explicitly deferred for a separate design discussion.
+
+
+### Supported commands (2026-10-01)
+
+The agreed command set is `/start`, `/help`, `/id`, `/version`, `/status`.
+`/status` reuses the existing administrator overview and backend authorization.
+`/help` is localized; the Telegram command menu is registered in English and
+Russian. Commands leave the active wizard and cancel pending artifact delivery.
+`/whoami` and `/getkey` aliases are removed from the aiogram client. Other legacy
+commands are intentionally excluded from parity by the product decision above.

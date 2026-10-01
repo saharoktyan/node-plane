@@ -65,7 +65,7 @@ class NodeLifecycle:
                 WHERE key = ? RETURNING enabled''', (node_key,)).fetchone()
             if node is None:
                 raise AccessDenied('resource_not_found', 404)
-            if not node['enabled'] or conn.execute('SELECT 1 FROM backend_node_drains WHERE node_key = ?', (node_key,)).fetchone():
+            if conn.execute('SELECT 1 FROM backend_node_drains WHERE node_key = ?', (node_key,)).fetchone():
                 raise AccessDenied('node_already_draining', 409)
             old = conn.execute('SELECT target FROM backend_node_verification_targets WHERE node_key = ?', (node_key,)).fetchone()
             if old is not None:
@@ -104,6 +104,10 @@ class NodeLifecycle:
             if not abandon_uncertain_settings and conn.execute('''SELECT 1 FROM backend_node_settings_tasks WHERE node_key = ?
                 AND status IN ('running', 'blocked')''', (node_key,)).fetchone():
                 raise AccessDenied('node_settings_uncertain', 409)
+            if not abandon_uncertain_settings and conn.execute("SELECT 1 FROM backend_node_jobs WHERE node_key = ? AND status IN ('running', 'blocked')", (node_key,)).fetchone():
+                raise AccessDenied('node_settings_uncertain', 409)
+            conn.execute("UPDATE backend_node_jobs SET status = 'superseded' WHERE node_key = ? AND status IN ('awaiting_executor', 'running', 'blocked')" if abandon_uncertain_settings else
+                         "UPDATE backend_node_jobs SET status = 'superseded' WHERE node_key = ? AND status = 'awaiting_executor'", (node_key,))
             conn.execute("""UPDATE backend_node_settings_tasks SET status = 'superseded' WHERE node_key = ?
                 AND status IN ('awaiting_executor', 'running', 'blocked')""" if abandon_uncertain_settings else
                 "UPDATE backend_node_settings_tasks SET status = 'superseded' WHERE node_key = ? AND status = 'awaiting_executor'", (node_key,))
@@ -283,6 +287,9 @@ class NodeLifecycle:
             conn.execute('DELETE FROM backend_node_drains WHERE node_key = ?', (node_key,))
             conn.execute('DELETE FROM backend_node_verification_targets WHERE node_key = ?', (node_key,))
             conn.execute('DELETE FROM backend_node_host_identities WHERE node_key = ?', (node_key,))
+            conn.execute("UPDATE backend_node_removals SET status = 'abandoned' WHERE node_key = ?", (node_key,))
+            from .alerts import AlertService
+            AlertService.retire_node(conn, node_key)
             conn.execute('DELETE FROM backend_nodes WHERE key = ?', (node_key,))
             return {'node_key': node_key, 'mode': 'registry_only',
                     'unfinished_tasks': len(changed)}
@@ -341,5 +348,8 @@ class NodeLifecycle:
             conn.execute('DELETE FROM backend_node_drains WHERE node_key = ?', (node_key,))
             conn.execute('DELETE FROM backend_node_verification_targets WHERE node_key = ?', (node_key,))
             conn.execute('DELETE FROM backend_node_host_identities WHERE node_key = ?', (node_key,))
+            from .alerts import AlertService
+            AlertService.retire_node(conn, node_key)
             conn.execute('DELETE FROM backend_nodes WHERE key = ?', (node_key,))
+            conn.execute("UPDATE backend_node_removals SET status = 'succeeded', error_code = NULL WHERE node_key = ?", (node_key,))
         return {'node_key': node_key, 'mode': 'verified'}

@@ -18,6 +18,7 @@ router = Router()
 
 class RequestPolicyState(StatesGroup):
     waiting_for_gate_message = State()
+    waiting_for_bot_title = State()
 
 
 async def _locale(state: FSMContext) -> str:
@@ -54,12 +55,87 @@ async def admin_settings_cb(query: CallbackQuery, bot: Bot,
     rows = [
         [InlineKeyboardButton(text=tr(locale, 'settings.admin.requests'), callback_data=RequestsCallback().pack())],
         [InlineKeyboardButton(text=tr(locale, 'settings.admin.request_policy'), callback_data=RequestPolicyCallback().pack())],
+        [InlineKeyboardButton(text=tr(locale, 'settings.admin.bot_title'), callback_data='bot_title_settings')],
         [InlineKeyboardButton(text=tr(locale, 'settings.admin.updates'), callback_data=UpdatesCallback().pack())],
+        [InlineKeyboardButton(text=tr(locale, 'backups.title'), callback_data='backups')],
+        [InlineKeyboardButton(text=tr(locale, 'alerts.title'), callback_data='alerts')],
+        [InlineKeyboardButton(text=tr(locale, 'traffic.title'), callback_data='traffic')],
+        [InlineKeyboardButton(text=tr(locale, 'system_cleanup.title'), callback_data='system_cleanup')],
         [InlineKeyboardButton(text=tr(locale, 'settings.admin.ssh_key'), callback_data=SshKeyCallback().pack())],
         [InlineKeyboardButton(text=tr(locale, 'back'), callback_data='admin_menu')],
     ]
     await render(bot, query.message.chat.id, Screen(tr(locale, 'settings.admin.title'),
         (tr(locale, 'settings.admin.description'),)), rows, state, query.message.message_id)
+
+
+@router.callback_query(F.data == 'bot_title_settings')
+async def bot_title_settings_cb(query: CallbackQuery, bot: Bot,
+                                backend: BackendClient, state: FSMContext) -> None:
+    await query.answer()
+    await state.set_state(None)
+    locale = await _locale(state)
+    try:
+        title = (await backend.bot_title(query.from_user.id))['title']
+        screen = Screen(tr(locale, 'bot_title.title'),
+                        (tr(locale, 'bot_title.current', value=title),))
+        rows = [[InlineKeyboardButton(text=tr(locale, 'bot_title.edit'), callback_data='bot_title_edit')],
+                [InlineKeyboardButton(text=tr(locale, 'back'), callback_data=AdminSettingsCallback().pack())]]
+    except BackendError as exc:
+        screen = Screen(tr(locale, 'bot_title.title'), (_friendly_error(locale, exc),))
+        rows = [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data=AdminSettingsCallback().pack())]]
+    await render(bot, query.message.chat.id, screen, rows, state, query.message.message_id)
+
+
+@router.callback_query(F.data == 'bot_title_edit')
+async def bot_title_edit_cb(query: CallbackQuery, bot: Bot, state: FSMContext) -> None:
+    await query.answer()
+    locale = await _locale(state)
+    await state.set_state(RequestPolicyState.waiting_for_bot_title)
+    await render(bot, query.message.chat.id,
+        Screen(tr(locale, 'bot_title.title'), (tr(locale, 'bot_title.prompt'),)),
+        [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data='bot_title_settings')]],
+        state, query.message.message_id)
+
+
+@router.message(RequestPolicyState.waiting_for_bot_title, F.text)
+async def bot_title_text(message: Message, bot: Bot, backend: BackendClient,
+                         state: FSMContext) -> None:
+    if message.from_user is None or message.chat.type != 'private':
+        return
+    try:
+        await message.delete()
+    except Exception:
+        pass
+    locale = await _locale(state)
+    value = (message.text or '').strip()
+    message_id = (await state.get_data()).get('control_message_id')
+    if not value or len(value) > 64:
+        await render(bot, message.chat.id,
+            Screen(tr(locale, 'bot_title.title'), (tr(locale, 'bot_title.invalid'),)),
+            [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data='bot_title_settings')]],
+            state, message_id)
+        return
+    await state.set_state(None)
+    try:
+        await backend.update_bot_title(message.from_user.id, value)
+        await bot_title_settings_view(message.chat.id, message.from_user.id, message_id,
+                                      bot, backend, state)
+    except BackendError as exc:
+        await render(bot, message.chat.id,
+            Screen(tr(locale, 'bot_title.title'), (_friendly_error(locale, exc),)),
+            [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data='bot_title_settings')]],
+            state, message_id)
+
+
+async def bot_title_settings_view(chat_id: int, user_id: int, message_id: int,
+                                 bot: Bot, backend: BackendClient,
+                                 state: FSMContext) -> None:
+    locale = await _locale(state)
+    title = (await backend.bot_title(user_id))['title']
+    rows = [[InlineKeyboardButton(text=tr(locale, 'bot_title.edit'), callback_data='bot_title_edit')],
+            [InlineKeyboardButton(text=tr(locale, 'back'), callback_data=AdminSettingsCallback().pack())]]
+    await render(bot, chat_id, Screen(tr(locale, 'bot_title.title'),
+        (tr(locale, 'bot_title.current', value=title),)), rows, state, message_id)
 
 
 async def show_request_policy(chat_id: int, user_id: int, message_id: int,
@@ -69,11 +145,14 @@ async def show_request_policy(chat_id: int, user_id: int, message_id: int,
     rows = [
         [InlineKeyboardButton(text=tr(locale, 'request_policy.toggle_on' if policy['enabled']
             else 'request_policy.toggle_off'), callback_data='request_policy_toggle')],
+        [InlineKeyboardButton(text=tr(locale, 'request_policy.notify_on' if policy.get('notify_requests')
+            else 'request_policy.notify_off'), callback_data='request_policy_notify')],
         [InlineKeyboardButton(text=tr(locale, 'request_policy.edit_message'), callback_data='request_policy_edit')],
         [InlineKeyboardButton(text=tr(locale, 'back'), callback_data=AdminSettingsCallback().pack())],
     ]
     await render(bot, chat_id, Screen(tr(locale, 'request_policy.title'),
         (tr(locale, 'request_policy.status', value=tr(locale, 'request_policy.enabled' if policy['enabled'] else 'request_policy.disabled')),
+         tr(locale, 'request_policy.notifications', value=tr(locale, 'request_policy.enabled' if policy.get('notify_requests') else 'request_policy.disabled')),
          tr(locale, 'request_policy.current_message', value=policy['gate_message']))),
         rows, state, message_id)
 
@@ -102,6 +181,24 @@ async def request_policy_toggle_cb(query: CallbackQuery, bot: Bot, backend: Back
         current = await backend.access_request_policy(query.from_user.id)
         await backend.update_access_request_policy(query.from_user.id,
             {'enabled': not current['enabled']})
+        await show_request_policy(query.message.chat.id, query.from_user.id,
+            query.message.message_id, bot, backend, state)
+    except BackendError as exc:
+        locale = await _locale(state)
+        await render(bot, query.message.chat.id,
+            Screen(tr(locale, 'request_policy.title'), (_friendly_error(locale, exc),)),
+            [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data=RequestPolicyCallback().pack())]],
+            state, query.message.message_id)
+
+
+@router.callback_query(F.data == 'request_policy_notify')
+async def request_policy_notify_cb(query: CallbackQuery, bot: Bot,
+                                   backend: BackendClient, state: FSMContext) -> None:
+    await query.answer()
+    try:
+        current = await backend.access_request_policy(query.from_user.id)
+        await backend.update_access_request_policy(query.from_user.id,
+            {'notify_requests': not current.get('notify_requests', True)})
         await show_request_policy(query.message.chat.id, query.from_user.id,
             query.message.message_id, bot, backend, state)
     except BackendError as exc:
@@ -209,18 +306,38 @@ async def show_updates(query: CallbackQuery, bot: Bot, backend: BackendClient,
         tr(locale, 'updates.check_status', value=_update_status(locale, overview.get('last_status'))),
         tr(locale, 'updates.last_run', value=_update_status(locale, status)),
     )
+    try:
+        fleet = await backend.update_rollout(query.from_user.id)
+        agent_state = ('required' if fleet['agents_required'] else
+                       'unknown' if fleet['driver_status'] == 'unknown' or
+                       any(n['agent_status'] == 'unknown' for n in fleet['nodes']) else 'current')
+        lines += (tr(locale, 'update_tools.rollout_status', status=tr(locale, 'update_tools.' + agent_state)),)
+        if fleet.get('latest_job'):
+            lines += (tr(locale, 'update_tools.last_batch',
+                status=tr(locale, 'update_tools.status.' + fleet['latest_job']['status'])),)
+    except BackendError:
+        lines += (tr(locale, 'update_tools.rollout_status', status=tr(locale, 'update_tools.unknown')),)
     rows = [[InlineKeyboardButton(text=tr(locale, 'updates.check'),
         callback_data=UpdateActionCallback(action='check').pack())]]
     rows.append([InlineKeyboardButton(text=tr(locale, 'updates.choose_branch'),
         callback_data=UpdateActionCallback(action='branch_menu').pack()),
         InlineKeyboardButton(text=tr(locale, 'updates.toggle_auto'),
         callback_data=UpdateActionCallback(action='auto_check').pack())])
-    if status == 'running':
+    rows.append([InlineKeyboardButton(text=tr(locale, 'update_tools.versions'), callback_data='uv_page:0'),
+                 InlineKeyboardButton(text=tr(locale, 'update_tools.fleet'), callback_data='ufleet')])
+    latest = overview.get('latest_job')
+    if latest and latest['status'] in {'awaiting_executor', 'running'}:
+        rows.insert(0, [InlineKeyboardButton(text=tr(locale, 'update_tools.progress'),
+            callback_data=f"update_job:{latest['id']}")])
+    elif status == 'running':
         rows.insert(0, [InlineKeyboardButton(text=tr(locale, 'updates.refresh'),
             callback_data=UpdatesCallback().pack())])
     elif overview.get('update_supported') and overview.get('update_available'):
         rows.append([InlineKeyboardButton(text=tr(locale, 'updates.run'),
             callback_data=UpdateActionCallback(action='run').pack())])
+    if latest and latest['status'] not in {'awaiting_executor', 'running'}:
+        rows.append([InlineKeyboardButton(text=tr(locale, 'update_tools.result'),
+            callback_data=f"update_job:{latest['id']}")])
     rows.append([InlineKeyboardButton(text=tr(locale, 'updates.cleanup'),
         callback_data=UpdateActionCallback(action='cleanup_menu').pack())])
     rows.append([InlineKeyboardButton(text=tr(locale, 'back'),
@@ -241,6 +358,9 @@ async def show_update_branches(query: CallbackQuery, bot: Bot,
     rows = [[InlineKeyboardButton(text=f"{'✅ ' if selected == branch else ''}{branch}",
         callback_data=UpdateActionCallback(action=f'branch_{branch}').pack())]
         for branch in ('main', 'dev')]
+    if selected == 'dev':
+        rows.append([InlineKeyboardButton(text=f"{'✅ ' if overview.get('dev_track') == track else ''}{track}",
+            callback_data=UpdateActionCallback(action=f'track_{track}').pack()) for track in ('tag', 'head')])
     rows.append([InlineKeyboardButton(text=tr(locale, 'back'),
         callback_data=UpdatesCallback().pack())])
     await render(bot, query.message.chat.id,
@@ -319,9 +439,12 @@ async def update_action_cb(query: CallbackQuery, callback_data: UpdateActionCall
             await backend.update_preferences(query.from_user.id,
                 {'branch': action.removeprefix('branch_')})
             await show_update_branches(query, bot, backend, state)
+        elif action in {'track_tag', 'track_head'}:
+            await backend.update_preferences(query.from_user.id, {'dev_track': action.removeprefix('track_')})
+            await show_update_branches(query, bot, backend, state)
         elif action == 'run':
-            await backend.run_update(query.from_user.id)
-            await show_updates(query, bot, backend, state)
+            from .admin_updates import confirm_latest
+            await confirm_latest(query, bot, backend, state)
         elif action == 'cleanup_menu':
             await show_release_cleanup(query, bot, backend, state)
         elif action == 'cleanup_run':
@@ -338,3 +461,33 @@ async def update_action_cb(query: CallbackQuery, callback_data: UpdateActionCall
             [[InlineKeyboardButton(text=tr(locale, 'back'),
                 callback_data=UpdatesCallback().pack())]],
             state, query.message.message_id)
+
+
+@router.callback_query(F.data.in_({'traffic', 'traffic:on', 'traffic:off'}))
+async def traffic_settings_cb(query: CallbackQuery, bot: Bot,
+                              backend: BackendClient, state: FSMContext) -> None:
+    await query.answer()
+    locale = await _locale(state)
+    rows = [[InlineKeyboardButton(text=tr(locale, 'back'),
+                                  callback_data=AdminSettingsCallback().pack())]]
+    try:
+        if query.data != 'traffic':
+            policy = await backend.update_traffic_policy(query.from_user.id, query.data == 'traffic:on')
+        else:
+            policy = await backend.traffic_policy(query.from_user.id)
+        enabled = policy['enabled']
+        rows.insert(0, [InlineKeyboardButton(
+            text=tr(locale, 'traffic.enabled' if enabled else 'traffic.disabled'),
+            callback_data='traffic:off' if enabled else 'traffic:on')])
+        lines = (tr(locale, 'traffic.description'), tr(locale, 'traffic.collection_note'),
+                 tr(locale, 'traffic.interval', minutes=policy['interval_minutes']))
+        scan = policy.get('last_scan')
+        if scan:
+            lines += (tr(locale, 'traffic.scan', at=scan['at'][:16].replace('T', ' '),
+                         checked=scan['profiles_checked'], unknown=scan['unknown']),)
+        else:
+            lines += (tr(locale, 'traffic.not_checked'),)
+    except BackendError as exc:
+        lines = (_friendly_error(locale, exc),)
+    await render(bot, query.message.chat.id, Screen(tr(locale, 'traffic.title'), lines),
+                 rows, state, query.message.message_id)

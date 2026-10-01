@@ -14,6 +14,23 @@ class BackendError(Exception):
 
 
 class BackendClient:
+    async def node_services(self, user_id, node_key):
+        return await self.request('GET', f'/api/v1/nodes/{node_key}/services', telegram_user_id=user_id)
+
+    async def node_action(self, user_id, node_key, action, revision, command_key):
+        return await self.request('POST', f'/api/v1/nodes/{node_key}/actions',
+            telegram_user_id=user_id, body={'action': action, 'revision': revision},
+            command=True, command_key=command_key)
+
+    async def node_job(self, user_id, job_id):
+        return await self.request('GET', f'/api/v1/node-jobs/{job_id}', telegram_user_id=user_id)
+
+    async def resolve_node_job(self, user_id, job_id):
+        return await self.request('POST', f'/api/v1/node-jobs/{job_id}/resolve', telegram_user_id=user_id)
+
+    async def remove_node_step(self, user_id, node_key, retry=False):
+        return await self.request('POST', f'/api/v1/nodes/{node_key}/remove-step',
+            telegram_user_id=user_id, body={'retry': retry}, timeout_seconds=180)
 
     async def updates_overview(self, telegram_user_id: int):
         return await self.request('GET', '/api/v1/system/updates', telegram_user_id=telegram_user_id)
@@ -25,11 +42,42 @@ class BackendClient:
     async def check_updates(self, telegram_user_id: int):
         return await self.request('POST', '/api/v1/system/updates/check', telegram_user_id=telegram_user_id)
 
-    async def run_update(self, telegram_user_id: int):
-        return await self.request('POST', '/api/v1/system/updates/run', telegram_user_id=telegram_user_id, command=True)
+    async def run_update(self, telegram_user_id: int, body: dict, command_key: str):
+        return await self.request('POST', '/api/v1/system/updates/run', telegram_user_id=telegram_user_id,
+                                  command=True, command_key=command_key, body=body)
+
+    async def update_versions(self, user_id: int, offset=0):
+        return await self.request('GET', f'/api/v1/system/updates/versions?offset={offset}',
+                                  telegram_user_id=user_id, timeout_seconds=90)
+
+    async def update_rollout(self, user_id: int):
+        return await self.request('GET', '/api/v1/system/updates/rollout',
+                                  telegram_user_id=user_id, timeout_seconds=180)
+
+    async def update_job(self, user_id: int, job_id: str):
+        return await self.request('GET', f'/api/v1/system/updates/jobs/{job_id}', telegram_user_id=user_id)
 
     async def cleanup_overview(self, telegram_user_id: int):
         return await self.request('GET', '/api/v1/system/cleanup', telegram_user_id=telegram_user_id)
+
+    async def backups_overview(self, user_id):
+        return await self.request('GET','/api/v1/system/backups',telegram_user_id=user_id)
+
+    async def backup_catalog(self, user_id, offset=0):
+        return await self.request('GET',f'/api/v1/system/backups/catalog?offset={offset}',telegram_user_id=user_id)
+
+    async def backup_detail(self, user_id, backup_id):
+        return await self.request('GET',f'/api/v1/system/backups/catalog/{backup_id}',telegram_user_id=user_id)
+
+    async def backup_preferences(self, user_id, changes):
+        return await self.request('PATCH','/api/v1/system/backups/preferences',telegram_user_id=user_id,body=changes)
+
+    async def backup_command(self,user_id,body,key):
+        return await self.request('POST','/api/v1/system/backups/jobs',telegram_user_id=user_id,
+                                  body=body,command=True,command_key=key)
+
+    async def backup_job(self,user_id,job_id):
+        return await self.request('GET',f'/api/v1/system/backups/jobs/{job_id}',telegram_user_id=user_id)
 
     async def run_cleanup(self, telegram_user_id: int):
         return await self.request('POST', '/api/v1/system/cleanup/run', telegram_user_id=telegram_user_id, command=True)
@@ -77,6 +125,41 @@ class BackendClient:
     async def me(self, telegram_user_id: int) -> dict:
         return await self.request('GET', '/api/v1/me', telegram_user_id=telegram_user_id)
 
+    async def set_announcement_silent(self, telegram_user_id, silent):
+        return await self.request('PATCH','/api/v1/me/preferences',telegram_user_id=telegram_user_id,
+                                  body={'announcement_silent':silent})
+
+    async def announcement_preview(self, user_id, text):
+        return await self.request('POST','/api/v1/announcements/preview',telegram_user_id=user_id,body={'text':text})
+
+    async def announcement_latest(self, user_id):
+        return await self.request('GET','/api/v1/announcements',telegram_user_id=user_id)
+
+    async def alerts_overview(self,user_id):
+        return await self.request('GET','/api/v1/system/alerts',telegram_user_id=user_id)
+
+    async def alert_preferences(self,user_id,changes):
+        return await self.request('PATCH','/api/v1/system/alerts/preferences',telegram_user_id=user_id,body=changes)
+
+    async def alert_claim(self,key):
+        return await self.request('POST','/api/v1/integrations/telegram/alerts/claim',command=True,command_key=key)
+
+    async def alert_ack(self,delivery_id,key,status):
+        return await self.request('POST',f'/api/v1/integrations/telegram/alerts/{delivery_id}/ack',body={'status':status},command=True,command_key=key)
+
+    async def announcement_create(self, user_id, text, key):
+        return await self.request('POST','/api/v1/announcements',telegram_user_id=user_id,body={'text':text},command=True,command_key=key)
+
+    async def announcement_status(self, user_id, announcement_id):
+        return await self.request('GET',f'/api/v1/announcements/{announcement_id}',telegram_user_id=user_id)
+
+    async def announcement_claim(self, key):
+        return await self.request('POST','/api/v1/integrations/telegram/announcements/claim',command=True,command_key=key)
+
+    async def announcement_ack(self, delivery_id, key, status):
+        return await self.request('POST',f'/api/v1/integrations/telegram/announcements/{delivery_id}/ack',
+                                  body={'status':status},command=True,command_key=key)
+
     async def set_locale(self, telegram_user_id: int, locale: str) -> dict:
         return await self.request('PATCH', '/api/v1/me/preferences', telegram_user_id=telegram_user_id,
                                   body={'locale': locale})
@@ -106,6 +189,19 @@ class BackendClient:
     async def update_access_request_policy(self, telegram_user_id: int, changes: dict) -> dict:
         return await self.request('PATCH', '/api/v1/system/access-requests',
                                   telegram_user_id=telegram_user_id, body=changes)
+
+    async def bot_title(self, telegram_user_id: int) -> dict:
+        return await self.request('GET', '/api/v1/system/bot-title',
+                                  telegram_user_id=telegram_user_id)
+
+    async def update_bot_title(self, telegram_user_id: int, title: str) -> dict:
+        return await self.request('PATCH', '/api/v1/system/bot-title',
+                                  telegram_user_id=telegram_user_id,
+                                  body={'title': title})
+
+    async def system_version(self, telegram_user_id: int) -> dict:
+        return await self.request('GET', '/api/v1/system/version',
+                                  telegram_user_id=telegram_user_id)
 
     async def pending_access_requests(self, telegram_user_id: int, *,
                                        cursor: str | None = None,
@@ -155,7 +251,7 @@ class BackendClient:
 
     async def admin_nodes(self, telegram_user_id: int, *, cursor: str | None = None,
                           search: str | None = None, limit: int = 100) -> dict:
-        params = {'limit': limit}
+        params = {'limit': limit, 'include_summary': 'true'}
         if cursor:
             params['cursor'] = cursor
         if search:
@@ -234,10 +330,10 @@ class BackendClient:
 
     async def rollout_agent(self, telegram_user_id: int, node_key: str,
                             transport: str, *, ssh_target: str | None = None,
-                            command_key: str) -> dict:
+                            command_key: str, install_rust: bool = False) -> dict:
         return await self.request('POST', f'/api/v1/nodes/{node_key}/agent-rollouts',
             telegram_user_id=telegram_user_id, command=True, command_key=command_key,
-            body={'transport': transport, 'ssh_target': ssh_target})
+            body={'transport': transport, 'ssh_target': ssh_target, 'install_rust': install_rust})
 
     async def agent_rollout(self, telegram_user_id: int, task_id: str) -> dict:
         return await self.request('GET', f'/api/v1/agent-rollouts/{task_id}',
@@ -278,3 +374,36 @@ class BackendClient:
             telegram_user_id=telegram_user_id,
             body={'accept_unverified_runtime': True,
                   'reason': 'Operator removed node from Telegram; remote runtime unverified.'})
+
+    async def traffic_policy(self, telegram_user_id):
+        return await self.request('GET', '/api/v1/system/traffic', telegram_user_id=telegram_user_id)
+
+    async def system_cleanup_overview(self, telegram_user_id):
+        return await self.request('GET', '/api/v1/system/cleanup', telegram_user_id=telegram_user_id)
+
+    async def system_cleanup_plan(self, telegram_user_id, action, cleanup_nodes):
+        return await self.request('POST', '/api/v1/system/cleanup/plans',
+                                  telegram_user_id=telegram_user_id,
+                                  body={'action': action, 'cleanup_nodes': cleanup_nodes})
+
+    async def system_cleanup_command(self, telegram_user_id, plan_id, phrase, command_key):
+        return await self.request('POST', '/api/v1/system/cleanup/jobs',
+                                  telegram_user_id=telegram_user_id, command=True,
+                                  command_key=command_key,
+                                  body={'plan_id': plan_id, 'confirmation_phrase': phrase})
+
+    async def system_cleanup_job(self, telegram_user_id, job_id):
+        return await self.request('GET', f'/api/v1/system/cleanup/jobs/{job_id}', telegram_user_id=telegram_user_id)
+
+    async def system_cleanup_action(self, telegram_user_id, job_id, action):
+        if action not in {'retry','abort','shutdown-ack'}:
+            raise ValueError('unsupported cleanup action')
+        return await self.request('POST', f'/api/v1/system/cleanup/jobs/{job_id}/{action}', telegram_user_id=telegram_user_id)
+
+    async def update_traffic_policy(self, telegram_user_id, enabled):
+        return await self.request('PATCH', '/api/v1/system/traffic/preferences',
+                                  telegram_user_id=telegram_user_id, body={'enabled': enabled})
+
+    async def set_traffic_consent(self, telegram_user_id, consent):
+        return await self.request('PATCH', '/api/v1/me/preferences',
+                                  telegram_user_id=telegram_user_id, body={'traffic_consent': consent})

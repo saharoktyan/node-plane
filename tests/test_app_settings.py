@@ -22,7 +22,6 @@ class AppSettingsTests(unittest.TestCase):
         self.tmpdir = tempfile.TemporaryDirectory()
         base = self.tmpdir.name
         configure_postgres_test_env(base)
-        os.environ["SQLITE_DB_PATH"] = os.path.join(base, "bot.sqlite3")
         os.environ["SUBS_DB_PATH"] = os.path.join(base, "subs.json")
         os.environ["USERS_DB_PATH"] = os.path.join(base, "users.json")
         os.environ["WG_DB_PATH"] = os.path.join(base, "wg_db.json")

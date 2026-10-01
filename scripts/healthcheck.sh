@@ -319,31 +319,21 @@ check_simple_mode() {
     add_remediation "Create runtime directories under NODE_PLANE_SHARED_DIR: mkdir -p ${shared_dir}/data ${shared_dir}/ssh"
   fi
 
-  local runtime_env_file db_backend postgres_dsn sqlite_db_path
+  local runtime_env_file db_backend postgres_dsn
   runtime_env_file="${shared_dir}/.env"
   db_backend="$(read_env_value DB_BACKEND "$runtime_env_file")"
   postgres_dsn="$(read_env_value POSTGRES_DSN "$runtime_env_file")"
-  sqlite_db_path="$(read_env_value SQLITE_DB_PATH "$runtime_env_file")"
   if [[ -z "$db_backend" ]]; then
     db_backend="postgres"
-  fi
-  if [[ -z "$sqlite_db_path" ]]; then
-    sqlite_db_path="${shared_dir}/data/bot.sqlite3"
   fi
 
   if [[ "$db_backend" == "postgres" && -n "$postgres_dsn" ]]; then
     ok "PostgreSQL runtime is configured"
-  elif [[ "$db_backend" == "sqlite" && -f "$sqlite_db_path" ]]; then
-    warn "Legacy SQLite source is still present at ${sqlite_db_path}"
-    add_remediation "Run a 0.4 update with POSTGRES_DSN configured to migrate data into PostgreSQL"
-  elif [[ "$db_backend" == "sqlite" ]]; then
-    warn "Legacy SQLite mode is configured but no SQLite source was found"
-    add_remediation "Switch DB_BACKEND to postgres, set POSTGRES_DSN in ${shared_dir}/.env, and rerun installation/update"
   elif [[ "$db_backend" == "postgres" ]]; then
     warn "POSTGRES_DSN is missing for PostgreSQL runtime"
     add_remediation "Set POSTGRES_DSN in ${shared_dir}/.env and rerun installation/update"
   else
-    warn "No PostgreSQL configuration or legacy SQLite source was detected"
+    warn "No PostgreSQL configuration was detected"
     add_remediation "Set POSTGRES_DSN in ${shared_dir}/.env and initialize the database: .venv/bin/python app/manage_db.py init"
   fi
 

@@ -21,6 +21,7 @@ from .nodes import NodeService
 from .node_settings import NodeSettingsService
 from .config_issuance import ConfigIssuanceService
 from .agent_rollout import AgentRolloutService
+from .system_settings import SystemSettingsService
 
 
 def bootstrap_admin(repository: SQLIdentityRepository, telegram_user_id: int, db=None):
@@ -135,6 +136,7 @@ def main():
             ProfileRepository(db).initialize_schema()
             ProfileCommands(db).initialize_schema()
             AccessRequestService(db).initialize_schema()
+            SystemSettingsService(db).initialize_schema()
             AccountService(db).initialize_schema()
             NodeService(db).initialize_schema()
             NodeSettingsService(db).initialize_schema()

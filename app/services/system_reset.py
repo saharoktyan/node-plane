@@ -9,7 +9,7 @@ from typing import List, Tuple
 
 from config import BASE_DIR, INSTALL_MODE, INSTALL_ROOT, SHARED_ROOT, SOURCE_ROOT, SSH_DIR
 from db import ensure_schema, get_db
-from db.migrate_sqlite_to_postgres import _generic_table_exists
+from db.runtime_tables import _generic_table_exists
 from services.backups import clear_backup_storage, maybe_create_pre_action_backup
 from services.driver_commands import execute_server_command
 from services.node_driver import get_node_driver

@@ -50,6 +50,9 @@ class SQLIdentityRepository:
                 PRIMARY KEY(principal_id, command_key)
             )""")
 
+        from .system_cleanup import SystemCleanupService
+        SystemCleanupService(self.db).initialize_schema()
+
     @staticmethod
     def _account(row) -> Account | None:
         return Account(row['id'], row['role'], row['status']) if row is not None else None
@@ -65,6 +68,8 @@ class SQLIdentityRepository:
             raise ValueError('invalid account status')
         account_id = str(uuid4())
         with self.db.transaction() as conn:
+            from .maintenance_gate import admit
+            admit(conn)
             conn.execute('INSERT INTO backend_accounts(id, status) VALUES (?, ?)',
                          (account_id, status))
         return Account(account_id, 'member', status)
@@ -74,6 +79,8 @@ class SQLIdentityRepository:
         from .authorization import validate_telegram_id
         validate_telegram_id(user_id)
         with self.db.transaction() as conn:
+            from .maintenance_gate import admit
+            admit(conn)
             row = conn.execute('SELECT id, role, status FROM backend_accounts WHERE id = ?',
                                (account_id,)).fetchone()
             if row is None:
@@ -118,6 +125,8 @@ class SQLIdentityRepository:
 
     def resolve_telegram(self, user_id: int) -> Account:
         with self.db.transaction() as conn:
+            from .maintenance_gate import admit
+            admit(conn)
             return self._resolve(conn, user_id)
 
     def update_telegram_details(self, user_id: int, *, username=None, first_name=None,
@@ -125,6 +134,8 @@ class SQLIdentityRepository:
         """Keep display metadata separate from authentication identity and roles."""
         from datetime import datetime, timezone
         with self.db.transaction() as conn:
+            from .maintenance_gate import admit
+            admit(conn)
             conn.execute('''INSERT INTO backend_telegram_identity_details
                 (subject, username, first_name, last_name, language_code, locale, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(subject) DO UPDATE SET
@@ -138,6 +149,8 @@ class SQLIdentityRepository:
 
     def set_telegram_locale_for_account(self, account_id: str, locale: str) -> None:
         with self.db.transaction() as conn:
+            from .maintenance_gate import admit
+            admit(conn)
             row = conn.execute('''SELECT subject FROM backend_external_identities
                 WHERE account_id = ? AND provider = 'telegram' LIMIT 1''', (account_id,)).fetchone()
             if row is None:
@@ -150,6 +163,8 @@ class SQLIdentityRepository:
 
     def resolve_telegram_command(self, principal_id: str, command_key: str, user_id: int) -> Account:
         with self.db.transaction() as conn:
+            from .maintenance_gate import admit
+            admit(conn)
             conn.execute("""INSERT INTO backend_identity_commands(principal_id, command_key, telegram_subject)
                 VALUES (?, ?, ?) ON CONFLICT(principal_id, command_key) DO NOTHING""",
                 (principal_id, command_key, str(user_id)))

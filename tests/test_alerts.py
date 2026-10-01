@@ -32,7 +32,6 @@ class AlertsTests(unittest.TestCase):
         configure_postgres_test_env(base)
         os.environ["NODE_PLANE_APP_DIR"] = base
         os.environ["NODE_PLANE_SHARED_DIR"] = base
-        os.environ["SQLITE_DB_PATH"] = os.path.join(base, "bot.sqlite3")
         os.environ["ADMIN_IDS"] = "123"
 
         import config

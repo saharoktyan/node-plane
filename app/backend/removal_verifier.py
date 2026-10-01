@@ -51,6 +51,11 @@ if [ "$(id -u)" -ne 0 ] || ! command -v systemctl >/dev/null 2>&1; then
     printf '%s\\n' 'verification_unavailable' >&2
     exit 20
 fi
+attempt=0
+while systemctl is-active --quiet node-plane-agent.service && [ "$attempt" -lt 15 ]; do
+    sleep 1
+    attempt=$((attempt + 1))
+done
 if systemctl is-active --quiet node-plane-agent.service; then
     printf '%s\\n' 'agent_still_active' >&2
     exit 21

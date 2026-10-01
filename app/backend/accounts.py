@@ -37,7 +37,7 @@ class AccountService:
                 'telegram_user_id': int(row['telegram_subject']) if row['telegram_subject'] else None}
         for key in ('username', 'first_name', 'last_name', 'language_code', 'locale', 'locale_selected'):
             if key in row.keys():
-                result[key] = row[key]
+                result[key] = bool(row[key]) if key == 'locale_selected' else row[key]
         return result
 
     @staticmethod
@@ -87,6 +87,8 @@ class AccountService:
         input_json = json.dumps({'target': account_id, 'role': role, 'status': status,
                                  'revision': revision}, sort_keys=True)
         with self.db.transaction() as conn:
+            from .maintenance_gate import admit
+            admit(conn)
             # One guard row serializes all admin removals across PostgreSQL workers.
             conn.execute('UPDATE backend_account_guard SET revision = revision + 1 WHERE id = 1')
             current_actor = conn.execute('SELECT role, status FROM backend_accounts WHERE id = ?',

@@ -53,25 +53,44 @@ class AccessRequestService:
     def policy(self, actor):
         require_permission(actor, 'access_requests.self.read')
         with self.db.connect() as conn:
-            return self._policy(conn)
+            result = self._policy(conn)
+            if actor.account.role == 'admin' and actor.account.status == 'approved':
+                key = f"admin_request_notifications:{actor.account.id}"
+                row = conn.execute('SELECT value FROM backend_system_settings WHERE key = ?', (key,)).fetchone()
+                result['notify_requests'] = not row or row['value'] != '0'
+            else:
+                result['notify_requests'] = None
+            return result
 
-    def update_policy(self, actor, *, enabled=None, gate_message=None):
+    def update_policy(self, actor, *, enabled=None, gate_message=None, notify_requests=None):
         require_permission(actor, 'settings.manage')
-        if enabled is None and gate_message is None:
+        if enabled is None and gate_message is None and notify_requests is None:
             raise AccessDenied('invalid_input', 422)
-        if enabled is not None and type(enabled) is not bool:
+        if any(value is not None and type(value) is not bool
+               for value in (enabled, notify_requests)):
             raise AccessDenied('invalid_input', 422)
         if gate_message is not None and (not isinstance(gate_message, str) or
                                          not gate_message.strip() or len(gate_message.strip()) > 500):
             raise AccessDenied('invalid_input', 422)
         with self.db.transaction() as conn:
+            from .maintenance_gate import admit
+            admit(conn)
             if enabled is not None:
                 conn.execute('''INSERT INTO backend_system_settings(key, value) VALUES ('access_requests_enabled', ?)
                     ON CONFLICT(key) DO UPDATE SET value = excluded.value''', ('1' if enabled else '0',))
             if gate_message is not None:
                 conn.execute('''INSERT INTO backend_system_settings(key, value) VALUES ('access_gate_message', ?)
                     ON CONFLICT(key) DO UPDATE SET value = excluded.value''', (gate_message.strip(),))
-            return self._policy(conn)
+            if notify_requests is not None:
+                key = f"admin_request_notifications:{actor.account.id}"
+                conn.execute('''INSERT INTO backend_system_settings(key, value) VALUES (?, ?)
+                    ON CONFLICT(key) DO UPDATE SET value = excluded.value''',
+                    (key, '1' if notify_requests else '0'))
+            result = self._policy(conn)
+            key = f"admin_request_notifications:{actor.account.id}"
+            row = conn.execute('SELECT value FROM backend_system_settings WHERE key = ?', (key,)).fetchone()
+            result['notify_requests'] = not row or row['value'] != '0'
+            return result
 
     @staticmethod
     def public(row):
@@ -96,6 +115,8 @@ class AccessRequestService:
         key = _command_key(command_key)
         account_id = actor.account.id
         with self.db.transaction() as conn:
+            from .maintenance_gate import admit
+            admit(conn)
             # Serialize requests and decisions for this account on PostgreSQL.
             conn.execute('UPDATE backend_accounts SET status = status WHERE id = ?', (account_id,))
             previous = conn.execute('''SELECT * FROM backend_access_requests
@@ -178,6 +199,8 @@ class AccessRequestService:
             raise AccessDenied('invalid_input', 422)
         status = 'approved' if decision == 'approve' else 'rejected'
         with self.db.transaction() as conn:
+            from .maintenance_gate import admit
+            admit(conn)
             row = conn.execute('SELECT * FROM backend_access_requests WHERE id = ?', (request_id,)).fetchone()
             if row is None:
                 raise AccessDenied('resource_not_found', 404)

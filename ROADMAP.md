@@ -149,8 +149,8 @@ Primary goal:
 - improve reliability, data model flexibility, and execution architecture
 
 Planned work:
-- migrate storage from SQLite to PostgreSQL
-- prepare and validate a migration path from the current SQLite schema
+- use PostgreSQL as the only backend database
+- initialize the current schema directly; legacy database imports are unsupported
 - introduce a Rust control service alongside the bot
 - introduce a node agent that runs on managed servers
 - establish a gRPC channel between the control service and each node
@@ -413,3 +413,16 @@ systemd-остановки прежней process group; ручные root-оп�
 ноде обязательна перед включением сценария в установку. Если для AWG утрачен
 peer identity, инспекция не подтверждает отсутствие и repair отказывается.
 Backend-owned decommission и обновление настроек протоколов ещё впереди.
+
+
+### 2026-10-01: Native controller cleanup
+
+Factory reset and full systemd removal now have backend-owned durable jobs and
+localized aiogram screens, including typed confirmation, node verification,
+explicit retries and delivery-before-shutdown acknowledgment. Reset retains the
+operator/client credential and one recovery snapshot. Full removal is scoped to
+installer-owned resources; no host-wide Docker pruning is performed. Existing
+installations need a systemd installer rerun to write the ownership manifest.
+The remaining gate is live acceptance of these destructive workflows and the
+combined end-to-end parity matrix. Legacy command aliases are deferred for separate
+review, as requested. Automated coverage does not replace VPS/PostgreSQL acceptance.

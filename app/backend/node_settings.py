@@ -91,6 +91,8 @@ class NodeSettingsService:
         if type(revision) is not int or revision < 1:
             raise AccessDenied('invalid_revision', 422)
         with self.db.transaction() as conn:
+            from .maintenance_gate import admit
+            admit(conn)
             account = conn.execute('''UPDATE backend_accounts SET role = role WHERE id = ?
                 RETURNING role, status''', (actor.account.id,)).fetchone()
             if account is None or account['role'] != 'admin' or account['status'] != 'approved':
@@ -109,6 +111,8 @@ class NodeSettingsService:
                 raise AccessDenied('node_already_draining', 409)
             if node['desired_revision'] != revision:
                 raise AccessDenied('revision_conflict', 412)
+            if conn.execute("SELECT 1 FROM backend_node_jobs WHERE node_key = ? AND status IN ('awaiting_executor', 'running', 'blocked')", (node_key,)).fetchone():
+                raise AccessDenied('node_operation_pending', 409)
             if node['applied_revision'] >= revision:
                 raise AccessDenied('settings_already_applied', 409)
             intent = _snapshot(node)

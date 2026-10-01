@@ -266,7 +266,8 @@ def list_available_versions(branch: str | None = None, timeout: int = 60) -> Dic
         kind = str(item.get("kind") or "tag")
         commit = str(item.get("commit") or "")
         if kind == "head" and selected_branch == "dev":
-            is_current_head = bool(APP_COMMIT) and APP_COMMIT != "unknown" and commit == APP_COMMIT
+            is_current_head = (bool(APP_COMMIT) and APP_COMMIT != "unknown" and len(APP_COMMIT) >= 7
+                               and len(commit) >= 7 and (commit.startswith(APP_COMMIT) or APP_COMMIT.startswith(commit)))
             transition = {
                 "allowed": not is_current_head,
                 "action": "current" if is_current_head else "upgrade",

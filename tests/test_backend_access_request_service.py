@@ -5,6 +5,7 @@ from uuid import uuid4
 
 from tests.test_backend_identity import Database
 from backend.access_requests import AccessRequestService
+from backend.system_settings import SystemSettingsService
 from backend.admin_cli import bootstrap_admin
 from backend.authorization import AccessDenied, Principal, PrincipalKind, resolve_actor
 from backend.identity_repository import SQLIdentityRepository
@@ -18,9 +19,11 @@ class AccessRequestServiceTests(unittest.TestCase):
         self.identities.initialize_schema()
         self.requests = AccessRequestService(self.db)
         self.requests.initialize_schema()
+        self.system_settings = SystemSettingsService(self.db)
+        self.system_settings.initialize_schema()
         self.admin = bootstrap_admin(self.identities, 101)
         self.member = self.identities.resolve_telegram(102)
-        scopes = frozenset({'delegate.telegram', 'access_requests.self.create',
+        scopes = frozenset({'delegate.telegram', 'account.self.read', 'access_requests.self.create',
                             'access_requests.self.read', 'access_requests.manage',
                             'settings.manage'})
         principal = Principal('adapter', PrincipalKind.ADAPTER, scopes)
@@ -66,19 +69,38 @@ class AccessRequestServiceTests(unittest.TestCase):
         self.assertEqual(self.requests.policy(self.member_actor), {
             'enabled': True,
             'gate_message': 'Authorization is required to use this bot.',
+            'notify_requests': None,
         })
         updated = self.requests.update_policy(self.admin_actor, enabled=False,
-            gate_message='Contact the administrator.')
+            gate_message='Contact the administrator.', notify_requests=False)
         self.assertEqual(updated, {
             'enabled': False,
             'gate_message': 'Contact the administrator.',
+            'notify_requests': False,
         })
-        self.assertEqual(self.requests.policy(self.member_actor), updated)
+        self.assertEqual(self.requests.policy(self.member_actor), {
+            'enabled': False,
+            'gate_message': 'Contact the administrator.',
+            'notify_requests': None,
+        })
+        self.assertFalse(self.requests.policy(self.admin_actor)['notify_requests'])
         with self.assertRaises(AccessDenied) as error:
             self.requests.create(self.member_actor, str(uuid4()))
         self.assertEqual(error.exception.code, 'access_requests_disabled')
         with self.assertRaises(AccessDenied):
             self.requests.update_policy(self.member_actor, enabled=True)
+
+    def test_bot_title_is_backend_owned_and_admin_managed(self):
+        self.assertEqual(self.system_settings.bot_title(self.member_actor),
+                         {'title': 'Node Plane'})
+        self.assertEqual(self.system_settings.update_bot_title(
+            self.admin_actor, 'My VPN'), {'title': 'My VPN'})
+        self.assertEqual(self.system_settings.bot_title(self.member_actor),
+                         {'title': 'My VPN'})
+        with self.assertRaises(AccessDenied):
+            self.system_settings.update_bot_title(self.member_actor, 'Member edit')
+        with self.assertRaises(AccessDenied):
+            self.system_settings.update_bot_title(self.admin_actor, ' ')
 
     def test_pending_requests_search_and_cursor_pagination(self):
         actors = [self.member_actor]

@@ -84,10 +84,28 @@ Unit=node-plane-backend-worker.service
 WantedBy=timers.target
 EOF
 
+python3 - "$base_dir" "$shared_dir" "${render_dir}/.node-plane-installation.json" <<'PYMARKER'
+import json, os, pathlib, re, sys
+base, shared, output = map(pathlib.Path, sys.argv[1:])
+container = None
+if (shared / 'postgres').is_dir():
+    for line in (shared / '.env').read_text().splitlines():
+        if line.startswith('NODE_PLANE_POSTGRES_CONTAINER='):
+            container = line.split('=', 1)[1].strip().strip('"').strip("'")
+    container = container or 'node-plane-postgres'
+    if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}', container):
+        raise SystemExit('Invalid PostgreSQL container name')
+output.write_text(json.dumps({'format': 'node-plane-systemd-v1',
+    'base_dir': str(base.resolve()), 'shared_dir': str(shared.resolve()),
+    'postgres_container': container}) + '\n')
+os.chmod(output, 0o600)
+PYMARKER
+
 if [[ $# -gt 2 ]]; then
   exit 0
 fi
 
+install -m 0600 "${render_dir}/.node-plane-installation.json" "${base_dir}/.node-plane-installation.json"
 install -m 0644 "${render_dir}/node-plane-backend.service" /etc/systemd/system/
 install -m 0644 "${render_dir}/node-plane-backend-worker.service" /etc/systemd/system/
 install -m 0644 "${render_dir}/node-plane-backend-worker.timer" /etc/systemd/system/
