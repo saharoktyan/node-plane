@@ -5,6 +5,7 @@ package nodeplane.driver.v1;
 import "driver/v1/types.proto";
 
 service RuntimeService {
+  rpc BackendNodeAction(BackendNodeActionRequest) returns (BackendNodeSettingsResult);
   rpc BootstrapNode(BootstrapNodeRequest) returns (StartOperationResponse);
   rpc ReinstallNode(ReinstallNodeRequest) returns (StartOperationResponse);
   rpc DeleteRuntime(DeleteRuntimeRequest) returns (StartOperationResponse);
@@ -25,6 +26,14 @@ service RuntimeService {
   rpc RefreshAwgConfig(RefreshAwgConfigRequest) returns (RefreshAwgConfigResponse);
   rpc GetRuntimeStatus(GetRuntimeStatusRequest) returns (GetRuntimeStatusResponse);
   rpc ListNodesNeedingRuntimeSync(ListNodesNeedingRuntimeSyncRequest) returns (ListNodesNeedingRuntimeSyncResponse);
+}
+
+message BackendNodeActionRequest {
+  string node_key = 1;
+  string command_id = 2;
+  string action = 3;
+  string intent_json = 4;
+  bool recover = 5;
 }
 
 message BootstrapNodeRequest {

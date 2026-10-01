@@ -79,7 +79,7 @@ async def render_request_page(chat_id: int, user_id: int, message_id: int,
                             request_page_index=page_index)
     if not page['items'] and not search:
         from .user import show_admin_menu
-        await show_admin_menu(chat_id, user_id, message_id, bot, state)
+        await show_admin_menu(chat_id, user_id, message_id, bot, backend, state)
         return
 
     rows = [[InlineKeyboardButton(text=tr(locale, 'requests.review',
@@ -297,6 +297,9 @@ async def notify_admins(bot: Bot, backend: BackendClient, request_id: str):
             admin_id = int(raw_id.strip())
             admin = await backend.me(admin_id)
             if admin['role'] != 'admin' or admin['status'] != 'approved':
+                continue
+            policy = await backend.access_request_policy(admin_id)
+            if not policy.get('notify_requests', True):
                 continue
             locale = normalize_locale(admin.get('locale') or admin.get('language_code'))
             notice = Screen(tr(locale, 'requests.title'),

@@ -38,6 +38,12 @@ class ProfileRepository:
         self.db = db
 
     def initialize_schema(self):
+        from .alerts import AlertService
+        AlertService(self.db).initialize_schema()
+        from .announcements import AnnouncementService
+        AnnouncementService(self.db).initialize_schema()
+        from .backups import BackupService
+        BackupService(self.db).initialize_schema()
         with self.db.transaction() as conn:
             conn.execute('''CREATE TABLE IF NOT EXISTS backend_profiles (
                 id TEXT PRIMARY KEY,
@@ -49,11 +55,8 @@ class ProfileRepository:
                 created_at TEXT,
                 desired_revision INTEGER NOT NULL DEFAULT 1
             )''')
-            if getattr(self.db, 'backend_name', 'sqlite') == 'postgres':
+            if getattr(self.db, 'backend_name', '') == 'postgres':
                 conn.execute('ALTER TABLE backend_profiles ADD COLUMN IF NOT EXISTS created_at TEXT')
-            elif 'created_at' not in {row['name'] for row in conn.execute(
-                    'PRAGMA table_info(backend_profiles)').fetchall()}:
-                conn.execute('ALTER TABLE backend_profiles ADD COLUMN created_at TEXT')
             conn.execute('''CREATE TABLE IF NOT EXISTS backend_nodes (
                 key TEXT PRIMARY KEY, title TEXT NOT NULL, region TEXT NOT NULL,
                 flag TEXT NOT NULL DEFAULT '', enabled INTEGER NOT NULL DEFAULT 1,
@@ -77,6 +80,16 @@ class ProfileRepository:
             conn.execute('CREATE INDEX IF NOT EXISTS idx_backend_profile_owner ON backend_profiles(owner_account_id, id)')
         from .node_lifecycle import NodeLifecycle
         NodeLifecycle(self.db).initialize_schema()
+        from .node_operations import NodeOperations
+        NodeOperations(self.db).initialize_schema()
+        from .node_removal import NodeRemovalService
+        NodeRemovalService(self.db).initialize_schema()
+        from .system_settings import SystemSettingsService
+        SystemSettingsService(self.db).initialize_schema()
+        from .traffic import TrafficService
+        TrafficService(self.db).initialize_schema()
+        from .system_cleanup import SystemCleanupService
+        SystemCleanupService(self.db).initialize_schema()
 
     def create_profile(self, *, runtime_name, display_name, owner_account_id=None):
         # Trusted local provisioning only, not an unauthenticated HTTP route.
@@ -86,6 +99,8 @@ class ProfileRepository:
             raise ValueError('invalid display_name')
         profile_id = str(uuid4())
         with self.db.transaction() as conn:
+            from .maintenance_gate import admit
+            admit(conn)
             if owner_account_id is not None and conn.execute('SELECT id FROM backend_accounts WHERE id = ?', (owner_account_id,)).fetchone() is None:
                 raise ValueError('owner account does not exist')
             conn.execute('''INSERT INTO backend_profiles
@@ -257,7 +272,9 @@ class ProfileService:
         profile = self.get(actor, profile_id)
         if profile['owner_account_id'] != actor.account.id:
             raise AccessDenied('resource_not_found', 404)
-        return self.repository.summary(profile_id)
+        from .traffic import TrafficService
+        return {**self.repository.summary(profile_id),
+                'traffic': TrafficService(self.repository.db).summary(actor.account.id, profile_id)}
 
     def available_nodes(self, actor, *, limit=25, cursor=None):
         require_permission(actor, 'nodes.available.read')

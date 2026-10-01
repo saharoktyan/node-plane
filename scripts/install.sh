@@ -457,7 +457,7 @@ configure_env() {
   set_step "read installer environment"
 
   local bot_token admin_ids base_dir app_dir shared_dir source_dir install_mode ssh_key image_repo image_tag update_branch install_ref latest_install_ref
-  local db_backend postgres_dsn sqlite_db_path
+  local db_backend postgres_dsn
   bot_token="$(read_env_value BOT_TOKEN)"
   admin_ids="$(read_env_value ADMIN_IDS)"
   base_dir="$(read_env_value NODE_PLANE_BASE_DIR)"
@@ -473,11 +473,10 @@ configure_env() {
   install_ref="$INSTALL_REF"
   db_backend="$(read_env_value DB_BACKEND)"
   postgres_dsn="$(read_env_value POSTGRES_DSN)"
-  sqlite_db_path="$(read_env_value SQLITE_DB_PATH)"
   update_branch="${UPDATE_BRANCH:-$(read_env_value NODE_PLANE_UPDATE_BRANCH)}"
   update_branch="$(normalize_update_branch "$update_branch")"
 
-  if [[ -z "$db_backend" || "$db_backend" == "sqlite" ]]; then
+  if [[ -z "$db_backend" ]]; then
     db_backend="postgres"
   fi
   if [[ "$db_backend" != "postgres" ]]; then
@@ -581,9 +580,6 @@ configure_env() {
     set_env_value NODE_PLANE_INSTALL_MODE "$install_mode"
     set_env_value NODE_PLANE_UPDATE_BRANCH "$update_branch"
     set_env_value NODE_PLANE_INSTALL_REF "$install_ref"
-    if [[ -z "$sqlite_db_path" ]]; then
-      sqlite_db_path="${shared_dir}/data/bot.sqlite3"
-    fi
   else
     install_mode="portable"
     if [[ -n "$base_dir" && $NON_INTERACTIVE -eq 0 ]]; then
@@ -618,9 +614,6 @@ configure_env() {
   set_env_value BOT_TOKEN "$bot_token"
   set_env_value ADMIN_IDS "$admin_ids"
   set_env_value DB_BACKEND "$db_backend"
-  if [[ -n "$sqlite_db_path" ]]; then
-    set_env_value SQLITE_DB_PATH "$sqlite_db_path"
-  fi
   if [[ "$MODE" == "portable" ]]; then
     ensure_portable_postgres_env ".env"
   elif [[ -n "$postgres_dsn" ]]; then
@@ -690,8 +683,7 @@ ensure_release_python_runtime() {
 
 run_simple_install() {
   local base_dir app_dir shared_dir releases_dir current_link new_release_dir release_name install_ref install_version install_commit reused_release
-  local runtime_env_file db_backend postgres_dsn sqlite_db_path
-  local supports_postgres_migration=0
+  local runtime_env_file db_backend postgres_dsn
   base_dir="$(read_env_value NODE_PLANE_BASE_DIR)"
   app_dir="$(read_env_value NODE_PLANE_APP_DIR)"
   shared_dir="$(read_env_value NODE_PLANE_SHARED_DIR)"
@@ -717,9 +709,6 @@ run_simple_install() {
   )"
   install_version="$(current_semver "$install_ref")"
   install_commit="$(current_git_commit "$install_ref")"
-  if ref_supports_manage_db_command "$install_ref" "migrate-to-postgres"; then
-    supports_postgres_migration=1
-  fi
   release_name="$(release_id "$install_ref")"
   new_release_dir="${releases_dir}/${release_name}"
   reused_release=0
@@ -748,74 +737,25 @@ run_simple_install() {
   # Otherwise a previous partial install can leave DB_BACKEND=postgres without
   # POSTGRES_DSN and the service will fail at import-time.
   set_step "load database runtime configuration"
-  sqlite_db_path="$(read_env_value SQLITE_DB_PATH "$runtime_env_file")"
-  if [[ -z "$sqlite_db_path" ]]; then
-    sqlite_db_path="${shared_dir}/data/bot.sqlite3"
+  db_backend="$(read_env_value DB_BACKEND "$runtime_env_file")"
+  db_backend="${db_backend:-postgres}"
+  if [[ "$db_backend" != postgres ]]; then
+    echo "Only PostgreSQL runtime is supported." >&2
+    exit 1
   fi
-  if [[ $supports_postgres_migration -eq 1 ]]; then
-    db_backend="$(read_env_value DB_BACKEND "$runtime_env_file")"
-    postgres_dsn="$(read_env_value POSTGRES_DSN "$runtime_env_file")"
-    if [[ -z "$db_backend" || "$db_backend" == "sqlite" ]]; then
-      db_backend="postgres"
-    fi
-    if [[ "$db_backend" == "postgres" ]]; then
-      set_step "auto-provision local postgresql runtime"
-      auto_provision_simple_postgres "$runtime_env_file" "$shared_dir" 1
-      postgres_dsn="$(read_env_value POSTGRES_DSN "$runtime_env_file")"
-      if [[ -z "$postgres_dsn" ]]; then
-        echo "POSTGRES_DSN is required for 0.4 installs." >&2
-        exit 1
-      fi
-    fi
-    NODE_PLANE_BASE_DIR="${base_dir}" \
-    NODE_PLANE_APP_DIR="${new_release_dir}" \
-    NODE_PLANE_SHARED_DIR="${shared_dir}" \
-    DB_BACKEND="${db_backend}" \
-    POSTGRES_DSN="${postgres_dsn}" \
-    SQLITE_DB_PATH="${sqlite_db_path}" \
-    "${new_release_dir}/.venv/bin/python" "${new_release_dir}/app/manage_db.py" init
-    if [[ $reused_release -eq 0 ]]; then
-      if [[ -f "$sqlite_db_path" ]]; then
-        local migrate_output
-        echo "Migrating SQLite data into PostgreSQL..."
-        set_step "migrate sqlite to postgresql"
-        migrate_output="$(
-          NODE_PLANE_BASE_DIR="${base_dir}" \
-          NODE_PLANE_APP_DIR="${new_release_dir}" \
-          NODE_PLANE_SHARED_DIR="${shared_dir}" \
-          DB_BACKEND="${db_backend}" \
-          POSTGRES_DSN="${postgres_dsn}" \
-          SQLITE_DB_PATH="${sqlite_db_path}" \
-          "${new_release_dir}/.venv/bin/python" "${new_release_dir}/app/manage_db.py" migrate-to-postgres --sqlite-path "$sqlite_db_path"
-        )"
-        printf '%s\n' "$migrate_output"
-        if printf '%s\n' "$migrate_output" | grep -q '^MIGRATE|success$'; then
-          echo "Verifying PostgreSQL migration..."
-          set_step "verify sqlite to postgresql migration"
-          NODE_PLANE_BASE_DIR="${base_dir}" \
-          NODE_PLANE_APP_DIR="${new_release_dir}" \
-          NODE_PLANE_SHARED_DIR="${shared_dir}" \
-          DB_BACKEND="${db_backend}" \
-          POSTGRES_DSN="${postgres_dsn}" \
-          SQLITE_DB_PATH="${sqlite_db_path}" \
-          "${new_release_dir}/.venv/bin/python" "${new_release_dir}/app/manage_db.py" verify-migration --sqlite-path "$sqlite_db_path"
-        else
-          echo "Skipping PostgreSQL verification because legacy SQLite import was not applied."
-        fi
-      else
-        echo "No SQLite source found at ${sqlite_db_path}; skipping SQLite -> PostgreSQL migration."
-      fi
-    fi
-  else
-    if [[ $reused_release -eq 0 ]]; then
-      echo "Selected ref ${install_ref} uses the legacy SQLite runtime; skipping PostgreSQL provisioning and migration."
-    fi
-    NODE_PLANE_BASE_DIR="${base_dir}" \
-    NODE_PLANE_APP_DIR="${new_release_dir}" \
-    NODE_PLANE_SHARED_DIR="${shared_dir}" \
-    SQLITE_DB_PATH="${sqlite_db_path}" \
-    "${new_release_dir}/.venv/bin/python" "${new_release_dir}/app/manage_db.py" init
+  set_step "auto-provision local postgresql runtime"
+  auto_provision_simple_postgres "$runtime_env_file" "$shared_dir" 1
+  postgres_dsn="$(read_env_value POSTGRES_DSN "$runtime_env_file")"
+  if [[ -z "$postgres_dsn" ]]; then
+    echo "POSTGRES_DSN is required." >&2
+    exit 1
   fi
+  NODE_PLANE_BASE_DIR="${base_dir}" \
+  NODE_PLANE_APP_DIR="${new_release_dir}" \
+  NODE_PLANE_SHARED_DIR="${shared_dir}" \
+  DB_BACKEND=postgres \
+  POSTGRES_DSN="${postgres_dsn}" \
+  "${new_release_dir}/.venv/bin/python" "${new_release_dir}/app/manage_db.py" init
 
   if [[ -f "${new_release_dir}/app/backend/admin_cli.py" ]]; then
     set_step "initialize backend schema"

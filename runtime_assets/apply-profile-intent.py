@@ -134,7 +134,8 @@ def validate_node_settings(intent):
         raise ValueError('invalid protocols')
     settings = intent['settings']
     fields = {'public_host', 'xray_host', 'xray_sni', 'xray_tcp_port', 'xray_xhttp_port',
-              'xray_xhttp_path', 'awg_public_host', 'awg_port'}
+              'xray_xhttp_path', 'awg_public_host', 'awg_port',
+              'xray_fingerprint', 'awg_interface', 'awg_i1_preset'}
     if not isinstance(settings, dict) or set(settings) - fields:
         raise ValueError('invalid settings')
     required = {'public_host'}
@@ -157,6 +158,12 @@ def validate_node_settings(intent):
             raise ValueError('invalid host setting')
         if field == 'xray_xhttp_path' and not re.fullmatch(r'/[A-Za-z0-9/_~.%+-]*', value):
             raise ValueError('invalid Xray path')
+        if field == 'awg_interface' and not re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]{0,14}', value):
+            raise ValueError('invalid AWG interface')
+        if field == 'awg_i1_preset' and value not in {'quic', 'dns', 'chaos'}:
+            raise ValueError('invalid AWG preset')
+        if field == 'xray_fingerprint' and value not in {'chrome', 'firefox', 'safari', 'ios', 'android', 'edge', 'random', 'randomized'}:
+            raise ValueError('invalid fingerprint')
     if 'xray' in protocols and (settings['xray_tcp_port'] == settings['xray_xhttp_port']
                                 or not settings['xray_xhttp_path'].startswith('/')):
         raise ValueError('invalid Xray ports or path')
@@ -331,7 +338,17 @@ def run_node_settings(intent, lock_fd, *, env_path=Path('/etc/node-plane/node.en
         'SERVER_KEY': intent['node_key'],
         'AWG_SERVER_IP': settings.get('awg_public_host', settings['public_host']),
         'AWG_SERVER_PORT': str(settings.get('awg_port', 51820)),
+        'AWG_IFACE': settings.get('awg_interface', 'wg0'),
+        'AWG_I1_PRESET': settings.get('awg_i1_preset', 'quic'),
+        'XRAY_FP': settings.get('xray_fingerprint', 'chrome'),
     }
+    new_awg_path = awg_path.with_name(settings.get('awg_interface', 'wg0') + '.conf')
+    if awg_path != new_awg_path and awg_path.exists():
+        # Preserve server and peer identities when changing interface names.
+        new_awg_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(awg_path, new_awg_path)
+    awg_path = new_awg_path
+    replacements['AWG_CONFIG'] = str(awg_path)
     original = env_path.read_text()
     lines = [line for line in original.splitlines() if not any(
         re.match(r'^\s*' + name + r'=', line) for name in replacements)]

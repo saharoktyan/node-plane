@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from contextlib import contextmanager
 from uuid import uuid4
 
 from backend.authorization import AccessDenied, Principal, PrincipalKind, resolve_actor
@@ -23,6 +24,21 @@ class MemberProfileSummaryTests(unittest.TestCase):
             desired_revision INTEGER NOT NULL DEFAULT 1)''')
         db.connection.execute('''INSERT INTO backend_profiles
             (id, runtime_name, display_name) VALUES ('old', 'old', 'Old')''')
+        # Exercise the PostgreSQL migration statement through a SQL test fake.
+        db.backend_name = 'postgres'
+        class MigrationConnection:
+            def execute(self, sql, params=()):
+                if sql == 'ALTER TABLE backend_profiles ADD COLUMN IF NOT EXISTS created_at TEXT':
+                    columns = [r[0] for r in db.connection.execute('SELECT * FROM backend_profiles LIMIT 0').description]
+                    if 'created_at' in columns:
+                        return db.connection.execute('SELECT 1')
+                    sql = 'ALTER TABLE backend_profiles ADD COLUMN created_at TEXT'
+                return db.connection.execute(sql, params)
+        @contextmanager
+        def transaction():
+            with db.connection:
+                yield MigrationConnection()
+        db.transaction = transaction
         ProfileRepository(db).initialize_schema()
         row = db.connection.execute('SELECT created_at FROM backend_profiles WHERE id = ?',
                                     ('old',)).fetchone()

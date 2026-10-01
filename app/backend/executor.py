@@ -136,6 +136,8 @@ class IntentExecutor:
                 WHERE t.status = 'awaiting_executor'
                   AND NOT EXISTS (SELECT 1 FROM backend_node_settings_tasks ns
                       WHERE ns.node_key = t.node_key AND ns.status IN ('awaiting_executor', 'running', 'blocked'))
+                  AND NOT EXISTS (SELECT 1 FROM backend_node_jobs nj
+                      WHERE nj.node_key = t.node_key AND nj.status IN ('awaiting_executor', 'running', 'blocked'))
                   AND NOT EXISTS (SELECT 1 FROM backend_operation_tasks b
                       WHERE b.node_key = t.node_key AND b.status IN ('running', 'blocked'))
                   AND NOT EXISTS (SELECT 1 FROM backend_operation_tasks earlier
@@ -193,17 +195,58 @@ def main():
         with local_channel(args.driver) as channel:
             executor = IntentExecutor(get_db(), GrpcIntentDriver(channel))
             node_executor = NodeSettingsExecutor(executor.db, executor.driver)
+            from .node_operations import NodeOperations
+            node_jobs = NodeOperations(executor.db, executor.driver)
+            from .node_removal import NodeRemovalService
+            removals = NodeRemovalService(executor.db, executor.driver)
             config_executor = ConfigIssuanceService(executor.db, executor.driver)
             rollout_executor = AgentRolloutService(executor.db)
+            from .updates import UpdateService
+            update_executor = UpdateService(executor.db, executor.driver)
+            update_executor.recover()
+            from .backups import BackupService
+            backup_executor = BackupService(executor.db)
+            from .system_cleanup import SystemCleanupService
+            system_cleanup = SystemCleanupService(executor.db, executor.driver)
+            from .maintenance_gate import active
+            with executor.db.connect() as conn:
+                cleaning = bool(active(conn))
+            try:
+                if not cleaning:
+                    backup_executor.scheduled()
+            except Exception:
+                import logging
+                logging.getLogger(__name__).warning('Scheduled backup failed')
+            try:
+                if not cleaning:
+                    update_executor.auto_check()
+            except Exception:
+                # An upstream check must not prevent provisioning or cleanup.
+                import logging
+                logging.getLogger(__name__).warning('Automatic update check failed')
             executor.recover()
             node_executor.recover()
+            node_jobs.recover()
+            node_jobs.reconcile_completed()
             config_executor.recover()
             rollout_executor.recover()
             executor.reconcile_completed()
             node_executor.reconcile_completed()
             executor.inspect_blocked()
-            while rollout_executor.run_one() or node_executor.run_one() or executor.run_one() or config_executor.run_one():
+            while system_cleanup.run_one() or backup_executor.run_one() or update_executor.run_one() or rollout_executor.run_one() or removals.run_one() or node_jobs.run_one() or node_executor.run_one() or executor.run_one() or config_executor.run_one():
                 pass
+            from .alerts import AlertService
+            try:
+                AlertService(executor.db, GrpcIntentDriver(channel, timeout=5)).scheduled()
+            except Exception:
+                import logging
+                logging.getLogger(__name__).warning('Alert monitor requires attention')
+            from .traffic import TrafficService
+            try:
+                TrafficService(executor.db, GrpcIntentDriver(channel, timeout=10)).scheduled()
+            except Exception:
+                import logging
+                logging.getLogger(__name__).warning('Traffic collection requires attention')
 
 
 if __name__ == '__main__':

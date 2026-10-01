@@ -19,6 +19,8 @@ from .authorization import (
     ADMIN_PERMISSIONS, require_permission, resolve_actor,
 )
 from .credentials import CredentialService
+from .announcements import AnnouncementService
+from .alerts import AlertService
 from .identity import IdentityService
 from .identity_repository import SQLIdentityRepository
 from .profiles import ProfileRepository, ProfileService
@@ -28,11 +30,15 @@ from .access_requests import AccessRequestService
 from .accounts import AccountService
 from .nodes import NodeService
 from .node_settings import NodeSettingsService
+from .node_operations import NodeOperations
 from .config_issuance import ConfigIssuanceService
 from .agent_rollout import AgentRolloutService
 from .node_lifecycle import NodeLifecycle
 from .admin_overview import AdminOverviewService
 from .node_overview import NodeOverviewService
+from .system_settings import SystemSettingsService
+from .updates import UpdateService
+from .backups import BackupService
 from config import APP_VERSION
 
 
@@ -52,6 +58,9 @@ class AccountOutput(BaseModel):
 
 
 class MeOutput(AccountOutput):
+    announcement_silent: bool = False
+    traffic_consent: bool = False
+    traffic_available: bool = False
     permissions: list[str]
     language_code: str | None = None
     locale: str | None = None
@@ -82,7 +91,43 @@ class AccountEditInput(BaseModel):
 
 class AccountPreferencesInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    locale: Literal['ru', 'en']
+    locale: Literal['ru', 'en'] | None = None
+    announcement_silent: StrictBool | None = None
+    traffic_consent: StrictBool | None = None
+
+
+class TrafficPolicyInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    enabled: StrictBool
+
+
+class SystemCleanupPlanInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    action: Literal['reset', 'remove']
+    cleanup_nodes: StrictBool
+
+
+class SystemCleanupInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    plan_id: UUID
+    confirmation_phrase: StrictStr = Field(min_length=1, max_length=64)
+
+
+class AnnouncementInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    text: StrictStr = Field(min_length=1, max_length=3000)
+
+
+class AnnouncementDeliveryInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    status: Literal['sent', 'failed', 'unknown']
+
+
+class AlertPreferencesInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    enabled: StrictBool | None = None
+    interval_minutes: Literal[5,15] | None = None
+    notify_resolved: StrictBool | None = None
 
 
 class ProfileOutput(BaseModel):
@@ -107,6 +152,19 @@ class MemberProfileNode(BaseModel):
     protocols: list[Literal['awg', 'xray']]
 
 
+class ProfileTrafficItem(BaseModel):
+    protocol: Literal['awg', 'xray']
+    uplink_bytes: int
+    downlink_bytes: int
+    tracked_since: str
+    last_sample_at: str
+
+
+class ProfileTrafficSummary(BaseModel):
+    status: Literal['consent_required', 'waiting', 'current', 'unknown']
+    items: list[ProfileTrafficItem]
+
+
 class MemberProfileSummary(BaseModel):
     profile_id: UUID
     display_name: str
@@ -121,6 +179,7 @@ class MemberProfileSummary(BaseModel):
     awg_count: int
     issued_count: int
     last_issued_at: str | None
+    traffic: ProfileTrafficSummary | None = None
 
 
 class ProblemNodeOutput(BaseModel):
@@ -144,6 +203,27 @@ class UpdatePreferencesInput(BaseModel):
     auto_check_enabled: bool | None = Field(default=None, strict=True)
     branch: Literal['main', 'dev'] | None = None
     dev_track: Literal['tag', 'head'] | None = None
+
+
+class UpdateRunInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    kind: Literal['version', 'agents', 'runtimes']
+    target_ref: StrictStr | None = None
+    branch: Literal['main', 'dev'] | None = None
+
+
+class BackupPreferencesInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    enabled: StrictBool | None = None
+    interval_hours: Literal[6,12,24] | None = None
+    keep_count: Literal[5,10,20] | None = None
+
+
+class BackupCommandInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    action: Literal['create','restore']
+    backup_id: UUID | None = None
+    checksum: StrictStr | None = Field(default=None,pattern=r'^[0-9a-f]{64}$')
 
 
 class GrantPage(BaseModel):
@@ -178,6 +258,9 @@ class NodeSettingsInput(BaseModel):
     xray_xhttp_path: StrictStr | None = None
     awg_public_host: StrictStr | None = None
     awg_port: StrictInt | None = None
+    xray_fingerprint: Literal['chrome', 'firefox', 'safari', 'ios', 'android', 'edge', 'random', 'randomized'] | None = None
+    awg_interface: StrictStr | None = None
+    awg_i1_preset: Literal['quic', 'dns', 'chaos'] | None = None
 
 
 class NodeCreateInput(BaseModel):
@@ -191,6 +274,7 @@ class NodeCreateInput(BaseModel):
     settings: NodeSettingsInput = Field(default_factory=NodeSettingsInput)
     transport: Literal['local', 'ssh'] | None = None
     ssh_target: StrictStr | None = None
+    notes: StrictStr = ''
 
 
 class NodeEditInput(BaseModel):
@@ -203,6 +287,7 @@ class NodeEditInput(BaseModel):
     settings: NodeSettingsInput | None = None
     transport: Literal['local', 'ssh'] | None = None
     ssh_target: StrictStr | None = None
+    notes: StrictStr | None = None
 
 
 class AdminNodeOutput(BaseModel):
@@ -218,6 +303,8 @@ class AdminNodeOutput(BaseModel):
     settings: dict[str, str | int]
     transport: str | None = None
     ssh_target: str | None = None
+    notes: str = ''
+    overview: dict | None = None
 
 
 class AdminNodePage(BaseModel):
@@ -238,6 +325,7 @@ class AdminNodeOverviewOutput(BaseModel):
     pending: int
     failed: int
     attention: int
+    last_job: dict | None = None
 
 
 class NodeRuntimeObservation(BaseModel):
@@ -268,17 +356,32 @@ class NodeSettingsTaskOutput(BaseModel):
     status: str
 
 
+class NodeActionInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    action: Literal['bootstrap', 'reinstall_keep', 'reinstall_clean', 'cleanup_runtime',
+        'install_docker', 'check_ports', 'open_ports', 'sync_runtime', 'sync_env',
+        'sync_xray', 'regenerate_entropy', 'reconcile_access']
+    revision: StrictInt
+
+
+class NodeRemovalInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    retry: StrictBool = False
+
+
 class AgentRolloutInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
     transport: Literal['local', 'ssh']
     ssh_target: str | None = None
     ssh_port: int = 22
+    install_rust: StrictBool = False
 
 
 class AgentRolloutOutput(BaseModel):
     id: UUID
     node_key: str
     status: str
+    failure_code: str | None = None
 
 
 class NodeMaintenanceOutput(BaseModel):
@@ -423,11 +526,26 @@ class AccessRequestPolicyInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
     enabled: StrictBool | None = None
     gate_message: StrictStr | None = Field(default=None, max_length=500)
+    notify_requests: StrictBool | None = None
 
 
 class AccessRequestPolicyOutput(BaseModel):
     enabled: bool
     gate_message: str
+    notify_requests: bool | None = None
+
+
+class BotTitleInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    title: StrictStr = Field(min_length=1, max_length=64)
+
+
+class BotTitleOutput(BaseModel):
+    title: str
+
+
+class VersionOutput(BaseModel):
+    version: str
 
 
 class ProfileInspectionOutput(BaseModel):
@@ -457,7 +575,7 @@ class OperationOutput(BaseModel):
     tasks: list[OperationTaskOutput]
 
 
-def create_app(db, *, node_driver=None) -> FastAPI:
+def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     app = FastAPI(title='Node Plane Backend', version='1.0.0', docs_url=None, redoc_url=None)
     identities = SQLIdentityRepository(db)
     credentials = CredentialService(db)
@@ -467,13 +585,30 @@ def create_app(db, *, node_driver=None) -> FastAPI:
     operations = OperationRepository(db)
     admin_overview = AdminOverviewService(db)
     node_overview = NodeOverviewService(db)
+    system_settings = SystemSettingsService(db)
     access_requests = AccessRequestService(db)
     accounts = AccountService(db)
     nodes = NodeService(db)
     node_settings = NodeSettingsService(db)
+    node_jobs = NodeOperations(db)
     config_issuances = ConfigIssuanceService(db, node_driver)
     agent_rollouts = AgentRolloutService(db)
     lifecycle = NodeLifecycle(db)
+    update_service = UpdateService(db, node_driver)
+    backup_service = BackupService(db)
+    announcements = AnnouncementService(db)
+    alerts = AlertService(db)
+    from .system_cleanup import SystemCleanupService
+    system_cleanup = SystemCleanupService(db, node_driver, host=cleanup_host)
+
+    @contextmanager
+    def live_updates():
+        if node_driver is not None:
+            yield update_service
+        else:
+            from .driver_transport import GrpcIntentDriver, local_channel
+            with local_channel('127.0.0.1:50051') as channel:
+                yield UpdateService(db, GrpcIntentDriver(channel, timeout=5))
 
     @contextmanager
     def maintenance_lock(current):
@@ -500,7 +635,21 @@ def create_app(db, *, node_driver=None) -> FastAPI:
     async def request_context(request: Request, call_next):
         request.state.request_id = str(uuid4())
         try:
-            response = await call_next(request)
+            restoring = False
+            cleaning = False
+            if request.method not in {'GET','HEAD','OPTIONS'}:
+                allowed = request.url.path.startswith('/api/v1/system/cleanup/') or request.url.path.endswith('/ack')
+                if not allowed:
+                    from .maintenance_gate import active
+                    with db.connect() as conn:
+                        cleaning = bool(active(conn))
+            if request.method not in {'GET','HEAD','OPTIONS'} and request.url.path != '/api/v1/system/backups/jobs':
+                with db.connect() as conn:
+                    restoring = bool(conn.execute("SELECT 1 FROM backend_backup_jobs WHERE action='restore' AND status IN ('awaiting_executor','running') LIMIT 1").fetchone())
+            if cleaning:
+                response = error(request,'system_cleanup_in_progress',409)
+            else:
+                response = error(request,'restore_in_progress',409) if restoring else await call_next(request)
         except Exception:
             # Do not serialize DB exceptions, request bodies or credentials.
             response = error(request, 'internal_error', 500)
@@ -572,12 +721,19 @@ def create_app(db, *, node_driver=None) -> FastAPI:
                 conn.execute('SELECT fingerprint FROM backend_node_host_identities LIMIT 1').fetchone()
                 conn.execute('SELECT id FROM backend_access_requests LIMIT 1').fetchone()
                 conn.execute('SELECT key FROM backend_system_settings LIMIT 1').fetchone()
+                conn.execute('SELECT profile_id FROM backend_traffic_usage LIMIT 1').fetchone()
+                conn.execute('SELECT id FROM backend_system_cleanup_jobs LIMIT 1').fetchone()
                 conn.execute('SELECT actor_account_id FROM backend_account_commands LIMIT 1').fetchone()
                 conn.execute('SELECT id FROM backend_account_guard LIMIT 1').fetchone()
                 conn.execute('SELECT actor_account_id FROM backend_node_commands LIMIT 1').fetchone()
                 conn.execute('SELECT id FROM backend_node_settings_tasks LIMIT 1').fetchone()
                 conn.execute('SELECT id FROM backend_config_issuances LIMIT 1').fetchone()
                 conn.execute('SELECT id FROM backend_agent_rollouts LIMIT 1').fetchone()
+                conn.execute('SELECT id FROM backend_update_jobs LIMIT 1').fetchone()
+                conn.execute('SELECT job_id FROM backend_update_items LIMIT 1').fetchone()
+                conn.execute('SELECT id FROM backend_announcements LIMIT 1').fetchone()
+                conn.execute('SELECT id FROM backend_announcement_deliveries LIMIT 1').fetchone()
+                conn.execute('SELECT node_key FROM backend_alert_state LIMIT 1').fetchone()
         except Exception:
             return error(request, 'dependency_unavailable', 503)
         return {'status': 'ready'}
@@ -609,12 +765,20 @@ def create_app(db, *, node_driver=None) -> FastAPI:
             permissions.append(permission)
         return MeOutput(id=current.account.id, role=current.account.role, status=current.account.status,
                         permissions=permissions,
+                        **system_settings.member_preferences(current),
                         **identities.telegram_details_for_account(current.account.id))
 
     @app.patch('/api/v1/me/preferences', response_model=MeOutput)
     def update_my_preferences(body: AccountPreferencesInput, current=Depends(actor)):
         require_permission(current, 'account.self.preferences.write')
-        identities.set_telegram_locale_for_account(current.account.id, body.locale)
+        if not body.model_fields_set or any(value is None for value in body.model_dump(exclude_unset=True).values()):
+            raise AccessDenied('invalid_input', 422)
+        if body.locale is not None:
+            identities.set_telegram_locale_for_account(current.account.id, body.locale)
+        if body.traffic_consent is not None:
+            system_settings.update_traffic_consent(current, body.traffic_consent)
+        if body.announcement_silent is not None:
+            system_settings.update_member_preferences(current, body.announcement_silent)
         permissions = []
         for permission in sorted(SELF_PERMISSIONS | APPROVED_PERMISSIONS | ADMIN_PERMISSIONS):
             try:
@@ -624,7 +788,92 @@ def create_app(db, *, node_driver=None) -> FastAPI:
             permissions.append(permission)
         return MeOutput(id=current.account.id, role=current.account.role, status=current.account.status,
                         permissions=permissions,
+                        **system_settings.member_preferences(current),
                         **identities.telegram_details_for_account(current.account.id))
+
+    @app.post('/api/v1/announcements/preview')
+    def announcement_preview(body: AnnouncementInput, current=Depends(actor)):
+        return announcements.preview(current, body.text)
+
+    @app.get('/api/v1/announcements')
+    def latest_announcement(current=Depends(actor)):
+        return announcements.latest(current)
+
+    @app.get('/api/v1/system/traffic')
+    def traffic_policy(current=Depends(actor)):
+        return system_settings.traffic_policy(current)
+
+    @app.get('/api/v1/system/cleanup')
+    def cleanup_overview(current=Depends(actor)):
+        return system_cleanup.overview(current)
+
+    @app.post('/api/v1/system/cleanup/plans')
+    def cleanup_plan(body:SystemCleanupPlanInput,current=Depends(actor)):
+        return system_cleanup.plan(current,body.action,body.cleanup_nodes)
+
+    @app.post('/api/v1/system/cleanup/jobs',status_code=202)
+    def cleanup_queue(body:SystemCleanupInput,request:Request,current=Depends(actor)):
+        return system_cleanup.queue(current,str(body.plan_id),body.confirmation_phrase,header(request,'Idempotency-Key'))
+
+    @app.get('/api/v1/system/cleanup/jobs/{job_id}')
+    def cleanup_job(job_id:UUID,current=Depends(actor)):
+        return system_cleanup.get(current,str(job_id))
+
+    @app.post('/api/v1/system/cleanup/jobs/{job_id}/retry')
+    def cleanup_retry(job_id:UUID,current=Depends(actor)):
+        return system_cleanup.retry(current,str(job_id))
+
+    @app.post('/api/v1/system/cleanup/jobs/{job_id}/abort')
+    def cleanup_abort(job_id:UUID,current=Depends(actor)):
+        return system_cleanup.abort(current,str(job_id))
+
+    @app.post('/api/v1/system/cleanup/jobs/{job_id}/shutdown-ack')
+    def cleanup_shutdown_ack(job_id:UUID,current=Depends(actor)):
+        return system_cleanup.acknowledge_shutdown(current,str(job_id))
+
+    @app.patch('/api/v1/system/traffic/preferences')
+    def traffic_preferences(body: TrafficPolicyInput, current=Depends(actor)):
+        return system_settings.update_traffic_policy(current, body.enabled)
+
+    @app.get('/api/v1/system/alerts')
+    def alert_overview(current=Depends(actor)):
+        return alerts.overview(current)
+
+    @app.patch('/api/v1/system/alerts/preferences')
+    def alert_preferences(body:AlertPreferencesInput,current=Depends(actor)):
+        return alerts.preferences(current,body.model_dump(exclude_unset=True))
+
+    @app.post('/api/v1/integrations/telegram/alerts/claim')
+    def claim_alert(request:Request,principal=Depends(authenticate)):
+        if header(request,'X-Node-Plane-Telegram-User-ID') is not None:
+            raise AccessDenied('invalid_input',422)
+        return {'delivery':alerts.claim(principal,header(request,'Idempotency-Key'))}
+
+    @app.post('/api/v1/integrations/telegram/alerts/{delivery_id}/ack')
+    def acknowledge_alert(delivery_id:UUID,body:AnnouncementDeliveryInput,request:Request,principal=Depends(authenticate)):
+        if header(request,'X-Node-Plane-Telegram-User-ID') is not None:
+            raise AccessDenied('invalid_input',422)
+        return alerts.acknowledge(principal,str(delivery_id),header(request,'Idempotency-Key'),body.status)
+
+    @app.post('/api/v1/announcements', status_code=202)
+    def announcement_create(body: AnnouncementInput, request: Request, current=Depends(actor)):
+        return announcements.queue(current, body.text, header(request,'Idempotency-Key'))
+
+    @app.get('/api/v1/announcements/{announcement_id}')
+    def announcement_status(announcement_id: UUID, current=Depends(actor)):
+        return announcements.get(current,str(announcement_id))
+
+    @app.post('/api/v1/integrations/telegram/announcements/claim')
+    def claim_announcement(request: Request, principal=Depends(authenticate)):
+        if header(request,'X-Node-Plane-Telegram-User-ID') is not None:
+            raise AccessDenied('invalid_input',422)
+        return {'delivery':announcements.claim(principal,header(request,'Idempotency-Key'))}
+
+    @app.post('/api/v1/integrations/telegram/announcements/{delivery_id}/ack')
+    def ack_announcement(delivery_id: UUID, body: AnnouncementDeliveryInput, request: Request, principal=Depends(authenticate)):
+        if header(request,'X-Node-Plane-Telegram-User-ID') is not None:
+            raise AccessDenied('invalid_input',422)
+        return announcements.acknowledge(principal,str(delivery_id),header(request,'Idempotency-Key'),body.status)
 
     @app.post('/api/v1/me/access-requests', response_model=AccessRequestOutput, status_code=201)
     def create_access_request(request: Request,
@@ -638,6 +887,19 @@ def create_app(db, *, node_driver=None) -> FastAPI:
     @app.patch('/api/v1/system/access-requests', response_model=AccessRequestPolicyOutput)
     def edit_access_request_policy(body: AccessRequestPolicyInput, current=Depends(actor)):
         return access_requests.update_policy(current, **body.model_dump(exclude_unset=True))
+
+    @app.get('/api/v1/system/bot-title', response_model=BotTitleOutput)
+    def get_bot_title(current=Depends(actor)):
+        return system_settings.bot_title(current)
+
+    @app.patch('/api/v1/system/bot-title', response_model=BotTitleOutput)
+    def edit_bot_title(body: BotTitleInput, current=Depends(actor)):
+        return system_settings.update_bot_title(current, body.title)
+
+    @app.get('/api/v1/system/version', response_model=VersionOutput)
+    def get_system_version(current=Depends(actor)):
+        require_permission(current, 'account.self.read')
+        return {'version': APP_VERSION}
 
     @app.get('/api/v1/me/access-requests', response_model=AccessRequestPage)
     def own_access_requests(current=Depends(actor), limit: Annotated[int, Query(ge=1, le=100)] = 25,
@@ -708,8 +970,13 @@ def create_app(db, *, node_driver=None) -> FastAPI:
     @app.get('/api/v1/nodes', response_model=AdminNodePage)
     def list_nodes(current=Depends(actor), limit: Annotated[int, Query(ge=1, le=100)] = 25,
                    cursor: Annotated[str | None, Query(max_length=512)] = None,
-                   search: Annotated[str | None, Query(max_length=128)] = None):
-        return nodes.list(current, limit=limit, cursor=cursor, search=search)
+                   search: Annotated[str | None, Query(max_length=128)] = None,
+                   include_summary: bool = False):
+        result = nodes.list(current, limit=limit, cursor=cursor, search=search)
+        if include_summary:
+            for node in result['items']:
+                node['overview'] = node_overview.get(current, node['key'])
+        return result
 
     @app.get('/api/v1/nodes/{node_key}', response_model=AdminNodeOutput)
     def get_node(node_key: str, response: Response, current=Depends(actor)):
@@ -720,6 +987,44 @@ def create_app(db, *, node_driver=None) -> FastAPI:
     @app.get('/api/v1/nodes/{node_key}/overview', response_model=AdminNodeOverviewOutput)
     def get_node_overview(node_key: str, current=Depends(actor)):
         return node_overview.get(current, node_key)
+
+    @app.get('/api/v1/nodes/{node_key}/services')
+    def get_node_services(node_key: str, current=Depends(actor)):
+        nodes.get(current, node_key)
+        try:
+            if node_driver is not None:
+                return node_driver.inspect_node_services(node_key)
+            from .driver_transport import GrpcIntentDriver, local_channel
+            with local_channel('127.0.0.1:50051') as channel:
+                return GrpcIntentDriver(channel).inspect_node_services(node_key)
+        except Exception as failure:
+            import grpc
+            if isinstance(failure, grpc.RpcError) and failure.code() == grpc.StatusCode.FAILED_PRECONDITION:
+                raise AccessDenied('node_agent_unconfigured', 409) from None
+            raise AccessDenied('node_agent_unavailable', 503) from None
+
+    @app.post('/api/v1/nodes/{node_key}/actions', status_code=202)
+    def queue_node_action(node_key: str, body: NodeActionInput,
+                          idempotency_key: str | None = Header(default=None), current=Depends(actor)):
+        return node_jobs.queue(current, node_key, body.action, revision=body.revision, command_key=idempotency_key)
+
+    @app.get('/api/v1/node-jobs/{job_id}')
+    def get_node_job(job_id: str, current=Depends(actor)):
+        return node_jobs.get(current, job_id)
+
+    @app.post('/api/v1/node-jobs/{job_id}/resolve')
+    def resolve_node_job(job_id: str, current=Depends(actor)):
+        with maintenance_lock(current):
+            try:
+                if node_driver is not None:
+                    return NodeOperations(db, node_driver).resolve(current, job_id)
+                from .driver_transport import GrpcIntentDriver, local_channel
+                with local_channel('127.0.0.1:50051') as channel:
+                    return NodeOperations(db, GrpcIntentDriver(channel)).resolve(current, job_id)
+            except AccessDenied:
+                raise
+            except Exception:
+                raise AccessDenied('node_repair_unconfirmed', 409) from None
 
     @app.get('/api/v1/nodes/{node_key}/runtime', response_model=NodeRuntimeObservation)
     def inspect_node_runtime(node_key: str, current=Depends(actor)):
@@ -801,7 +1106,7 @@ def create_app(db, *, node_driver=None) -> FastAPI:
                               command_key: Annotated[str, Header(alias='Idempotency-Key')],
                               current=Depends(actor)):
         return agent_rollouts.request(current, node_key, header(request, 'Idempotency-Key'),
-            transport=body.transport, ssh_target=body.ssh_target, ssh_port=body.ssh_port)
+            transport=body.transport, ssh_target=body.ssh_target, ssh_port=body.ssh_port, install_rust=body.install_rust)
 
     @app.get('/api/v1/agent-rollouts/{task_id}', response_model=AgentRolloutOutput)
     def get_agent_rollout(task_id: UUID, current=Depends(actor)):
@@ -899,6 +1204,16 @@ def create_app(db, *, node_driver=None) -> FastAPI:
                                   current=Depends(actor)):
         with maintenance_lock(current):
             return lifecycle.retire_registry_only(current, node_key, body.reason)
+
+    @app.post('/api/v1/nodes/{node_key}/remove-step')
+    def remove_node_step(node_key: str, body: NodeRemovalInput, current=Depends(actor)):
+        from .node_removal import NodeRemovalService
+        return NodeRemovalService(db).request(current, node_key, retry=body.retry)
+
+    @app.get('/api/v1/nodes/{node_key}/removal')
+    def get_node_removal(node_key: str, current=Depends(actor)):
+        from .node_removal import NodeRemovalService
+        return NodeRemovalService(db).get(current, node_key)
 
     def revision_header(request):
         value = header(request, 'If-Match')
@@ -1026,7 +1341,7 @@ def create_app(db, *, node_driver=None) -> FastAPI:
     def get_updates(current=Depends(actor)):
         require_permission(current, 'settings.manage')
         import app.services.updates as updater
-        return updater.get_updates_overview()
+        return {**updater.get_updates_overview(), 'latest_job': update_service.latest(current)}
 
     @app.patch('/api/v1/system/updates/preferences')
     def edit_update_preferences(body: UpdatePreferencesInput, current=Depends(actor)):
@@ -1049,11 +1364,49 @@ def create_app(db, *, node_driver=None) -> FastAPI:
         import app.services.updates as updater
         return updater.check_for_updates()
 
-    @app.post('/api/v1/system/updates/run')
-    def run_update(current=Depends(actor)):
-        require_permission(current, 'settings.manage')
-        import app.services.updates as updater
-        return updater.schedule_update()
+    @app.post('/api/v1/system/updates/run', status_code=202)
+    def run_update(body: UpdateRunInput, request: Request, current=Depends(actor)):
+        with live_updates() as service:
+            return service.queue(current, header(request, 'Idempotency-Key'), body.kind,
+                                 target_ref=body.target_ref, branch=body.branch)
+
+    @app.get('/api/v1/system/updates/versions')
+    def update_versions(offset: int = Query(default=0, ge=0), current=Depends(actor)):
+        return update_service.versions(current, offset)
+
+    @app.get('/api/v1/system/updates/rollout')
+    def update_rollout(current=Depends(actor)):
+        with live_updates() as service:
+            return service.rollout_overview(current)
+
+    @app.get('/api/v1/system/updates/jobs/{job_id}')
+    def update_job(job_id: UUID, current=Depends(actor)):
+        return update_service.get(current, str(job_id))
+
+    @app.get('/api/v1/system/backups')
+    def get_backups(current=Depends(actor)):
+        return backup_service.overview(current)
+
+    @app.get('/api/v1/system/backups/catalog')
+    def backup_catalog(offset:int=Query(default=0,ge=0),current=Depends(actor)):
+        return backup_service.catalog(current,offset)
+
+    @app.get('/api/v1/system/backups/catalog/{backup_id}')
+    def backup_detail(backup_id:UUID,current=Depends(actor)):
+        return backup_service.detail(current,str(backup_id))
+
+    @app.patch('/api/v1/system/backups/preferences')
+    def backup_preferences(body:BackupPreferencesInput,current=Depends(actor)):
+        return backup_service.preferences(current,body.model_dump(exclude_unset=True))
+
+    @app.post('/api/v1/system/backups/jobs',status_code=202)
+    def backup_command(body:BackupCommandInput,request:Request,current=Depends(actor)):
+        return backup_service.queue(current,header(request,'Idempotency-Key'),body.action,
+                                    str(body.backup_id) if body.backup_id else None,body.checksum)
+
+    @app.get('/api/v1/system/backups/jobs/{job_id}')
+    def backup_job(job_id:UUID,current=Depends(actor)):
+        return backup_service.get(current,str(job_id))
 
     @app.get('/api/v1/system/cleanup')
     def get_cleanup(current=Depends(actor)):

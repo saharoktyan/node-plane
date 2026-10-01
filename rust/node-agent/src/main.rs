@@ -323,6 +323,8 @@ impl AgentState {
             node_key: self.config.node_key.clone(),
             version: Self::read_first_line(&self.runtime_version_path()),
             commit: Self::read_first_line(&self.runtime_commit_path()),
+            binary_version: env!("NODE_PLANE_BINARY_VERSION").to_string(),
+            binary_commit: env!("NODE_PLANE_BINARY_COMMIT").to_string(),
             runtime_root: self.config.runtime_root.clone(),
             xray_config_path,
             awg_config_path,
@@ -1527,6 +1529,33 @@ fi
 
 #[tonic::async_trait]
 impl NodeAgentService for NodeAgentApi {
+    async fn backend_node_action(
+        &self,
+        request: Request<agent::v1::BackendNodeActionRequest>,
+    ) -> Result<Response<RuntimeCommandResponse>, Status> {
+        let req = request.into_inner();
+        if req.node_key != self.state.config.node_key {
+            return Err(Status::failed_precondition("agent node identity mismatch"));
+        }
+        let output = self
+            .state
+            .run_runtime_command(
+                "backend-node-operation.py",
+                &[
+                    req.action,
+                    req.command_id,
+                    req.intent_json,
+                    req.recover.to_string(),
+                ],
+            )
+            .map_err(|_| Status::failed_precondition("node operation needs attention"))?;
+        let value: Value = serde_json::from_str(&output)
+            .map_err(|_| Status::internal("invalid node operation response"))?;
+        Ok(Response::new(RuntimeCommandResponse {
+            summary: "backend node operation completed".into(),
+            payload_json: value.to_string(),
+        }))
+    }
     async fn get_runtime_facts(
         &self,
         _request: Request<AgentEmpty>,
@@ -1861,15 +1890,21 @@ impl NodeAgentService for NodeAgentApi {
             "settings": serde_json::from_str::<Value>(&req.settings_json)
                 .map_err(|_| Status::invalid_argument("invalid settings"))?,
         });
-        let output = self.state.run_runtime_command(
-            "apply-profile-intent.py",
-            &["resolve-node-settings".to_string(), intent.to_string()],
-        ).map_err(|_| Status::failed_precondition(
-            "node settings repair requires a restarted agent and live inspection",
-        ))?;
+        let output = self
+            .state
+            .run_runtime_command(
+                "apply-profile-intent.py",
+                &["resolve-node-settings".to_string(), intent.to_string()],
+            )
+            .map_err(|_| {
+                Status::failed_precondition(
+                    "node settings repair requires a restarted agent and live inspection",
+                )
+            })?;
         let value: Value = serde_json::from_str(&output)
             .map_err(|_| Status::internal("invalid node settings repair response"))?;
-        let observation = value.get("observation")
+        let observation = value
+            .get("observation")
             .ok_or_else(|| Status::internal("invalid node settings repair observation"))?;
         for key in ["config_matches", "containers_running"] {
             if observation.get(key).and_then(Value::as_bool).is_none() {
@@ -1886,28 +1921,49 @@ impl NodeAgentService for NodeAgentApi {
         &self,
         _request: Request<AgentEmpty>,
     ) -> Result<Response<agent::v1::BackendXrayPublic>, Status> {
-        let script = self.state.resolve_runtime_path("/opt/node-plane-runtime/sync-xray.sh");
-        let config = self.state.node_env_value(
-            "XRAY_CONFIG", "/opt/node-plane-runtime/xray/config.json");
-        let image = self.state.node_env_value(
-            "XRAY_DOCKER_IMAGE", "ghcr.io/xtls/xray-core:26.3.27");
+        let script = self
+            .state
+            .resolve_runtime_path("/opt/node-plane-runtime/sync-xray.sh");
+        let config = self
+            .state
+            .node_env_value("XRAY_CONFIG", "/opt/node-plane-runtime/xray/config.json");
+        let image = self
+            .state
+            .node_env_value("XRAY_DOCKER_IMAGE", "ghcr.io/xtls/xray-core:26.3.27");
         let output = Command::new(script)
-            .args([config, "localhost".to_string(), "xtls-rprx-vision".to_string(), image])
+            .args([
+                config,
+                "localhost".to_string(),
+                "xtls-rprx-vision".to_string(),
+                image,
+            ])
             .output()
             .map_err(|_| Status::failed_precondition("Xray public metadata is unavailable"))?;
         if !output.status.success() {
-            return Err(Status::failed_precondition("Xray public metadata is unavailable"));
+            return Err(Status::failed_precondition(
+                "Xray public metadata is unavailable",
+            ));
         }
-        let value: Value = serde_json::from_slice(&output.stdout)
+        let mut value: Value = serde_json::from_slice(&output.stdout)
             .map_err(|_| Status::internal("invalid Xray public metadata"))?;
+        value["xray_fp"] = serde_json::json!(self.state.node_env_value("XRAY_FP", "chrome"));
         // The helper returns public identity only. Never return the private
         // server key even if a future helper accidentally emits it.
-        let allowed = ["xray_sni", "xray_pbk", "xray_sid", "xray_short_id",
-            "xray_tcp_port", "xray_xhttp_port", "xray_xhttp_path_prefix",
-            "xray_flow", "xray_fp"];
+        let allowed = [
+            "xray_sni",
+            "xray_pbk",
+            "xray_sid",
+            "xray_short_id",
+            "xray_tcp_port",
+            "xray_xhttp_port",
+            "xray_xhttp_path_prefix",
+            "xray_flow",
+            "xray_fp",
+        ];
         let mut public = serde_json::Map::new();
         for key in allowed {
-            let field = value.get(key)
+            let field = value
+                .get(key)
                 .ok_or_else(|| Status::internal("incomplete Xray public metadata"))?;
             public.insert(key.to_string(), field.clone());
         }

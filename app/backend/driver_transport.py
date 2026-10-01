@@ -7,6 +7,41 @@ class AgentNotConfigured(RuntimeError):
 
 
 class GrpcIntentDriver:
+    def traffic_snapshot(self, intent):
+        """Read counters through the agent; no legacy DB or runtime sync."""
+        from driver.v1 import runtime_service_pb2
+        import json
+        response = self.runtime.BackendNodeAction(runtime_service_pb2.BackendNodeActionRequest(
+            node_key=intent['node_key'], action='traffic', intent_json=json.dumps(intent)),
+            timeout=self.timeout)
+        return json.loads(response.result_json)
+
+    def binary_info(self):
+        from driver.v1 import runtime_service_pb2
+        import json
+        response = self.runtime.BackendNodeAction(runtime_service_pb2.BackendNodeActionRequest(
+            action='driver_info', intent_json='{}'), timeout=self.timeout)
+        return json.loads(response.result_json)
+
+    def node_action(self, task_id, action, intent, recover=False):
+        from driver.v1 import runtime_service_pb2
+        import json
+        intent = {key: value for key, value in intent.items() if key != 'requested_revision'}
+        response = self.runtime.BackendNodeAction(runtime_service_pb2.BackendNodeActionRequest(
+            node_key=intent['node_key'], command_id=task_id, action=action,
+            intent_json=json.dumps(intent), recover=recover), timeout=max(self.timeout, 1200))
+        return json.loads(response.result_json)
+
+    def inspect_node_services(self, node_key):
+        from driver.v1 import runtime_service_pb2
+        import json
+        response = self.runtime.BackendNodeAction(runtime_service_pb2.BackendNodeActionRequest(
+            node_key=node_key, action='inspect', intent_json='{}'), timeout=self.timeout)
+        result = json.loads(response.result_json)
+        for key in ('docker', 'xray_config_valid', 'awg_config_valid', 'xray_running', 'awg_running', 'runtime_drift'):
+            if type(result.get(key)) is not bool:
+                raise ValueError('invalid service observation')
+        return result
     def __init__(self, channel, timeout=60):
         from driver.v1 import provisioning_service_pb2_grpc, operation_service_pb2_grpc, runtime_service_pb2_grpc, node_service_pb2_grpc
         self.provisioning = provisioning_service_pb2_grpc.ProvisioningServiceStub(channel)

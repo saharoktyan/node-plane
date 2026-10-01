@@ -69,11 +69,10 @@ SSH_DIR = f"{SHARED_ROOT}/ssh"
 PROFILE_STATE_JSON_PATH = _env_str("PROFILE_STATE_JSON_PATH", _env_str("SUBS_DB_PATH", f"{DATA_DIR}/profile_state.json"))
 TELEGRAM_USERS_JSON_PATH = _env_str("TELEGRAM_USERS_JSON_PATH", _env_str("USERS_DB_PATH", f"{DATA_DIR}/telegram_users.json"))
 AWG_JSON_PATH = _env_str("AWG_JSON_PATH", _env_str("WG_DB_PATH", f"{DATA_DIR}/awg.json"))
-SQLITE_DB_PATH = _env_str("SQLITE_DB_PATH", f"{DATA_DIR}/bot.sqlite3")
 DB_BACKEND = _env_str("DB_BACKEND", "postgres").lower()
 POSTGRES_DSN = _env_str("POSTGRES_DSN")
 
-if DB_BACKEND not in {"sqlite", "postgres"}:
+if DB_BACKEND != "postgres":
     raise ValueError(f"Unsupported DB_BACKEND: {DB_BACKEND}")
 
 # Legacy aliases kept only so the one-time JSON migration script can still consume

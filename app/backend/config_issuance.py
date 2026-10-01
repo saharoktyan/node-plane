@@ -48,6 +48,8 @@ class ConfigIssuanceService:
 
     @staticmethod
     def _current(conn, profile_id, node_key, protocol, transport):
+        if conn.execute("SELECT 1 FROM backend_backup_jobs WHERE action='restore' AND status IN ('awaiting_executor','running') LIMIT 1").fetchone():
+            raise AccessDenied('restore_in_progress',409)
         profile = conn.execute('SELECT * FROM backend_profiles WHERE id = ?', (profile_id,)).fetchone()
         if profile is None:
             raise AccessDenied('resource_not_found', 404)
@@ -61,6 +63,8 @@ class ConfigIssuanceService:
         if profile['expires_at'] and datetime.fromisoformat(profile['expires_at']) <= datetime.now(timezone.utc):
             raise AccessDenied('profile_expired')
         if node is None or not node['enabled'] or node['desired_revision'] != node['applied_revision']:
+            raise AccessDenied('node_settings_pending', 409)
+        if conn.execute("SELECT 1 FROM backend_node_jobs WHERE node_key = ? AND status IN ('awaiting_executor', 'running', 'blocked')", (node_key,)).fetchone():
             raise AccessDenied('node_settings_pending', 409)
         if protocol not in json.loads(node['protocols_json']) or (
                 protocol == 'xray' and transport not in json.loads(node['xray_transports_json'])):
@@ -96,6 +100,8 @@ class ConfigIssuanceService:
                                           ('awg', 'vpn'), ('awg', 'conf')}:
             raise AccessDenied('config_not_supported', 422)
         with self.db.transaction() as conn:
+            from .maintenance_gate import admit
+            admit(conn)
             account = conn.execute('''UPDATE backend_accounts SET role = role WHERE id = ?
                 RETURNING role, status''', (actor.account.id,)).fetchone()
             if account is None:
@@ -258,8 +264,11 @@ class ConfigIssuanceService:
                 raise AccessDenied('config_stale', 409)
         if row['protocol'] == 'awg':
             extension = row['transport']
-            safe_title = re.sub(r'[^\w .()#-]+', '', node['title']).strip(' .') or row['node_key']
-            return {'filename': f'AmneziaWG - {safe_title}.{extension}',
+            safe_title = (re.sub(r'[^\w .()#-]+', '', node['title']).strip(' .')[:64]
+                          or row['node_key'])
+            safe_profile = (re.sub(r'[^\w .()#-]+', '', profile['display_name']).strip(' .')[:64]
+                            or 'Profile')
+            return {'filename': f'AmneziaWG - {safe_title} - {safe_profile}.{extension}',
                     'media_type': 'text/plain',
                     'content': refreshed['vpn_key'] if extension == 'vpn' else refreshed['wg_conf']}
         settings = json.loads(node['settings_json'])
@@ -274,6 +283,9 @@ class ConfigIssuanceService:
                        '&extra=%7B%22xmux%22%3A%7B%22maxConcurrency%22%3A%2216-32%22%7D%7D')
         label = quote(f'VLESS {node["title"]} · {profile["display_name"]} · {row["transport"].upper()}', safe='')
         uri = f'vless://{identity["xray_uuid"]}@{host}:{port}?{params}#{label}'
-        safe_title = re.sub(r'[^\w .()#-]+', '', node['title']).strip(' .') or row['node_key']
-        return {'filename': f'VLESS - {safe_title} - {row["transport"].upper()}.txt',
+        safe_title = (re.sub(r'[^\w .()#-]+', '', node['title']).strip(' .')[:64]
+                      or row['node_key'])
+        safe_profile = (re.sub(r'[^\w .()#-]+', '', profile['display_name']).strip(' .')[:64]
+                        or 'Profile')
+        return {'filename': f'VLESS - {safe_title} - {safe_profile} - {row["transport"].upper()}.txt',
                 'media_type': 'text/uri-list', 'content': uri}

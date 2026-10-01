@@ -15,7 +15,8 @@ from .profiles import _cursor, _page
 
 _KEY = re.compile(r'[A-Za-z0-9][A-Za-z0-9_-]{0,63}\Z')
 _SETTINGS = frozenset({'public_host', 'xray_host', 'xray_sni', 'xray_tcp_port',
-                       'xray_xhttp_port', 'xray_xhttp_path', 'awg_public_host', 'awg_port'})
+                       'xray_xhttp_port', 'xray_xhttp_path', 'awg_public_host', 'awg_port',
+                       'xray_fingerprint', 'awg_interface', 'awg_i1_preset'})
 _PORTS = frozenset({'xray_tcp_port', 'xray_xhttp_port', 'awg_port'})
 _SSH_TARGET = re.compile(r'(?:[A-Za-z_][A-Za-z0-9._-]*@)?(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:]+\])\Z')
 
@@ -29,8 +30,8 @@ def _command_key(value):
 
 def _validate(values, *, create):
     allowed = {'key', 'title', 'region', 'flag', 'protocols', 'xray_transports', 'settings',
-               'transport', 'ssh_target'} if create else {
-        'title', 'region', 'flag', 'protocols', 'xray_transports', 'settings', 'transport', 'ssh_target'}
+               'transport', 'ssh_target', 'notes'} if create else {
+        'title', 'region', 'flag', 'protocols', 'xray_transports', 'settings', 'transport', 'ssh_target', 'notes'}
     if not values or set(values) - allowed:
         raise AccessDenied('invalid_input', 422)
     if create and (set(values) < {'key', 'title', 'region', 'protocols'}):
@@ -44,6 +45,8 @@ def _validate(values, *, create):
         if field in values:
             values[field] = values[field].strip()
     if 'flag' in values and (not isinstance(values['flag'], str) or len(values['flag']) > 16):
+        raise AccessDenied('invalid_input', 422)
+    if 'notes' in values and (not isinstance(values['notes'], str) or len(values['notes']) > 2000):
         raise AccessDenied('invalid_input', 422)
     for field, options in (('protocols', {'awg', 'xray'}), ('xray_transports', {'tcp', 'xhttp'})):
         if field in values:
@@ -62,6 +65,12 @@ def _validate(values, *, create):
                 if type(value) is not int or not 1 <= value <= 65535:
                     raise AccessDenied('invalid_input', 422)
             elif not isinstance(value, str) or not value.strip() or len(value) > 255 or any(ord(c) < 32 for c in value):
+                raise AccessDenied('invalid_input', 422)
+            if field == 'awg_interface' and not re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]{0,14}', value):
+                raise AccessDenied('invalid_input', 422)
+            if field == 'awg_i1_preset' and value not in {'quic', 'dns', 'chaos'}:
+                raise AccessDenied('invalid_input', 422)
+            if field == 'xray_fingerprint' and value not in {'chrome', 'firefox', 'safari', 'ios', 'android', 'edge', 'random', 'randomized'}:
                 raise AccessDenied('invalid_input', 422)
         values['settings'] = dict(sorted(settings.items()))
     if create and 'xray' not in values['protocols'] and values.get('xray_transports'):
@@ -84,7 +93,14 @@ class NodeService:
         self.db = db
 
     def initialize_schema(self):
+        from .backups import BackupService
+        BackupService(self.db).initialize_schema()
+        from .updates import UpdateService
+        UpdateService(self.db, updater=False).initialize_schema()
+        from .node_operations import NodeOperations
+        NodeOperations(self.db).initialize_schema()
         with self.db.transaction() as conn:
+            conn.execute('CREATE TABLE IF NOT EXISTS backend_node_notes (node_key TEXT PRIMARY KEY REFERENCES backend_nodes(key) ON DELETE CASCADE, notes TEXT NOT NULL)')
             conn.execute('''CREATE TABLE IF NOT EXISTS backend_node_connections (
                 node_key TEXT PRIMARY KEY REFERENCES backend_nodes(key) ON DELETE CASCADE,
                 transport TEXT NOT NULL CHECK(transport IN ('local', 'ssh')),
@@ -106,12 +122,13 @@ class NodeService:
                 'xray_transports': json.loads(row['xray_transports_json']),
                 'desired_revision': row['desired_revision'], 'applied_revision': row['applied_revision'],
                 'settings': json.loads(row['settings_json']),
-                'transport': row['transport'], 'ssh_target': row['ssh_target']}
+                'transport': row['transport'], 'ssh_target': row['ssh_target'], 'notes': row['notes'] or ''}
 
     @staticmethod
     def _select():
-        return '''SELECT n.*, c.transport, c.ssh_target FROM backend_nodes n
-            LEFT JOIN backend_node_connections c ON c.node_key = n.key'''
+        return '''SELECT n.*, c.transport, c.ssh_target, m.notes FROM backend_nodes n
+            LEFT JOIN backend_node_connections c ON c.node_key = n.key
+            LEFT JOIN backend_node_notes m ON m.node_key = n.key'''
 
     def list(self, actor, *, limit=25, cursor=None, search=None):
         require_permission(actor, 'nodes.manage')
@@ -164,6 +181,8 @@ class NodeService:
         input_json = json.dumps({'action': action, 'node_key': node_key, 'revision': revision,
                                  'values': values}, sort_keys=True, separators=(',', ':'))
         with self.db.transaction() as conn:
+            from .maintenance_gate import admit
+            admit(conn)
             current_actor = conn.execute('''UPDATE backend_accounts SET role = role WHERE id = ?
                 RETURNING role, status''', (actor.account.id,)).fetchone()
             if current_actor is None or current_actor['role'] != 'admin' or current_actor['status'] != 'approved':
@@ -206,6 +225,8 @@ class NodeService:
                     raise AccessDenied('node_already_draining', 409)
                 if row['desired_revision'] != revision:
                     raise AccessDenied('revision_conflict', 412)
+                if conn.execute("SELECT 1 FROM backend_node_jobs WHERE node_key = ? AND status IN ('awaiting_executor', 'running', 'blocked')", (node_key,)).fetchone():
+                    raise AccessDenied('node_operation_pending', 409)
                 connection = conn.execute(self._select() + ' WHERE n.key = ?', (node_key,)).fetchone()
                 next_values = self.public(connection)
                 next_values.update(values)
@@ -235,6 +256,9 @@ class NodeService:
                             transport = excluded.transport, ssh_target = excluded.ssh_target''',
                             (node_key, next_values['transport'], next_values['ssh_target']))
             row = conn.execute(self._select() + ' WHERE n.key = ?', (node_key,)).fetchone()
+            if 'notes' in values:
+                conn.execute('INSERT INTO backend_node_notes(node_key, notes) VALUES (?, ?) ON CONFLICT(node_key) DO UPDATE SET notes = excluded.notes', (node_key, values['notes']))
+                row = conn.execute(self._select() + ' WHERE n.key = ?', (node_key,)).fetchone()
             result = self.public(row)
             conn.execute('''UPDATE backend_node_commands SET result_json = ?
                 WHERE actor_account_id = ? AND command_key = ?''',

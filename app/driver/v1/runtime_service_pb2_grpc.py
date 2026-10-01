@@ -35,6 +35,11 @@ class RuntimeServiceStub(object):
         Args:
             channel: A grpc.Channel.
         """
+        self.BackendNodeAction = channel.unary_unary(
+                '/nodeplane.driver.v1.RuntimeService/BackendNodeAction',
+                request_serializer=driver_dot_v1_dot_runtime__service__pb2.BackendNodeActionRequest.SerializeToString,
+                response_deserializer=driver_dot_v1_dot_runtime__service__pb2.BackendNodeSettingsResult.FromString,
+                _registered_method=True)
         self.BootstrapNode = channel.unary_unary(
                 '/nodeplane.driver.v1.RuntimeService/BootstrapNode',
                 request_serializer=driver_dot_v1_dot_runtime__service__pb2.BootstrapNodeRequest.SerializeToString,
@@ -129,6 +134,12 @@ class RuntimeServiceStub(object):
 
 class RuntimeServiceServicer(object):
     """Missing associated documentation comment in .proto file."""
+
+    def BackendNodeAction(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
 
     def BootstrapNode(self, request, context):
         """Missing associated documentation comment in .proto file."""
@@ -243,6 +254,11 @@ class RuntimeServiceServicer(object):
 
 def add_RuntimeServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
+            'BackendNodeAction': grpc.unary_unary_rpc_method_handler(
+                    servicer.BackendNodeAction,
+                    request_deserializer=driver_dot_v1_dot_runtime__service__pb2.BackendNodeActionRequest.FromString,
+                    response_serializer=driver_dot_v1_dot_runtime__service__pb2.BackendNodeSettingsResult.SerializeToString,
+            ),
             'BootstrapNode': grpc.unary_unary_rpc_method_handler(
                     servicer.BootstrapNode,
                     request_deserializer=driver_dot_v1_dot_runtime__service__pb2.BootstrapNodeRequest.FromString,
@@ -343,6 +359,33 @@ def add_RuntimeServiceServicer_to_server(servicer, server):
  # This class is part of an EXPERIMENTAL API.
 class RuntimeService(object):
     """Missing associated documentation comment in .proto file."""
+
+    @staticmethod
+    def BackendNodeAction(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/nodeplane.driver.v1.RuntimeService/BackendNodeAction',
+            driver_dot_v1_dot_runtime__service__pb2.BackendNodeActionRequest.SerializeToString,
+            driver_dot_v1_dot_runtime__service__pb2.BackendNodeSettingsResult.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
 
     @staticmethod
     def BootstrapNode(request,

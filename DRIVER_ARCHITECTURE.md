@@ -2,7 +2,7 @@
 
 > Historical design draft. For current ownership decisions and operation
 > behavior, see [CORE_ARCHITECTURE.md](CORE_ARCHITECTURE.md) and the
-> [driver README](rust/node-driver/README.md). The SQLite and scaffold status
+> [driver README](rust/node-driver/README.md). The persistence and scaffold status
 > descriptions below no longer represent the current implementation.
 
 ## Goal
@@ -26,7 +26,7 @@ This is meant to be the target architecture for:
 Today the bot mixes several responsibilities:
 
 1. Telegram update handling and UI rendering.
-2. Domain state and SQLite persistence.
+2. Domain state and database persistence.
 3. Node transport and command execution over SSH/local shell.
 4. Runtime reconciliation against AWG/Xray state on nodes.
 5. Telemetry collection and operational retries.
@@ -67,7 +67,7 @@ The Python app remains the control plane and user-facing surface:
   - which protocols are enabled
   - what the admin requested
 - Read models for UI and admin summaries.
-- Persistence of product/business state in SQLite.
+- Persistence of product/business state in PostgreSQL.
 - Recording operational summaries returned by the driver.
 
 Python should not be responsible for directly executing remote node changes once the driver is introduced.

@@ -122,7 +122,7 @@ BRANCH_REF="origin/${BRANCH}"
 if ! git rev-parse --verify "${BRANCH_REF}^{commit}" >/dev/null 2>&1; then
   emit_error "branch '${BRANCH}' not found on origin"
 fi
-BRANCH_HEAD_COMMIT="$(git rev-parse --short "${BRANCH_REF}")"
+BRANCH_HEAD_COMMIT="$(git rev-parse "${BRANCH_REF}")"
 
 LATEST_TAG="$(latest_tag_for_branch "$BRANCH" || true)"
 if [[ "$BRANCH" == "dev" && "$PREFER" == "head" ]]; then

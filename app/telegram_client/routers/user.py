@@ -8,7 +8,7 @@ import secrets
 import time
 
 from aiogram import Bot, F, Router
-from aiogram.filters import CommandStart
+from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.exceptions import TelegramAPIError
 from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardButton, Message
@@ -52,7 +52,8 @@ async def clear_artifacts(bot: Bot, chat_id: int, state: FSMContext) -> None:
             await bot.delete_message(chat_id, message_id)
         except TelegramAPIError:
             pass
-    await state.update_data(artifact_message_ids=[], delivered_issuances=[])
+    await state.update_data(artifact_message_ids=[], delivered_issuances=[],
+                            issuance_poll_token=None)
 
 
 async def track_artifact(state: FSMContext, message_id: int) -> None:
@@ -68,9 +69,10 @@ async def start_cmd(message: Message, bot: Bot, backend: BackendClient,
                     state: FSMContext) -> None:
     if message.from_user is None or message.chat.type != 'private':
         return
+    await state.set_state(None)
     try:
         await message.delete()
-    except Exception:
+    except TelegramAPIError:
         pass
     try:
         await clear_artifacts(bot, message.chat.id, state)
@@ -80,7 +82,7 @@ async def start_cmd(message: Message, bot: Bot, backend: BackendClient,
         account = await backend.me(message.from_user.id)
         await state.update_data(locale=normalize_locale(account.get('locale') or account.get('language_code')))
         if not account.get('locale_selected'):
-            await show_language_picker(message.chat.id, message.from_user.id, bot, state)
+            await show_language_picker(message.chat.id, message.from_user.id, bot, backend, state)
         else:
             await show_home(message.chat.id, message.from_user.id, bot, backend, state)
     except BackendError:
@@ -88,6 +90,78 @@ async def start_cmd(message: Message, bot: Bot, backend: BackendClient,
             Screen(tr(message.from_user.language_code, 'home.title'),
                    (tr(message.from_user.language_code, 'home.service_unavailable'),)),
             [], state)
+
+
+@router.message(Command('id'))
+async def id_cmd(message: Message, bot: Bot, backend: BackendClient,
+                     state: FSMContext) -> None:
+    if message.from_user is None or message.chat.type != 'private':
+        return
+    locale = await prepare_command(message, bot, state)
+    username = '@' + message.from_user.username if message.from_user.username else ''
+    lines = (tr(locale, 'command.whoami.id', value=message.from_user.id),
+             tr(locale, 'command.whoami.username', value=username))
+    await render(bot, message.chat.id, Screen(tr(locale, 'command.whoami.title'), lines),
+        [[button(message.from_user.id, tr(locale, 'back'), 'home')]], state)
+
+
+@router.message(Command('version'))
+async def version_cmd(message: Message, bot: Bot, backend: BackendClient,
+                      state: FSMContext) -> None:
+    if message.from_user is None or message.chat.type != 'private':
+        return
+    locale = await prepare_command(message, bot, state)
+    try:
+        await backend.resolve(message.from_user.id, username=message.from_user.username,
+            first_name=message.from_user.first_name, last_name=message.from_user.last_name,
+            language_code=message.from_user.language_code)
+        version = (await backend.system_version(message.from_user.id))['version']
+        screen = Screen(tr(locale, 'command.version.title'),
+                        (tr(locale, 'command.version.value', value=version),))
+    except BackendError:
+        screen = Screen(tr(locale, 'command.error_title'),
+                        (tr(locale, 'home.service_unavailable'),))
+    await render(bot, message.chat.id, screen,
+        [[button(message.from_user.id, tr(locale, 'back'), 'home')]], state)
+
+
+async def prepare_command(message: Message, bot: Bot, state: FSMContext) -> str:
+    await state.set_state(None)
+    await clear_artifacts(bot, message.chat.id, state)
+    try:
+        await message.delete()
+    except TelegramAPIError:
+        pass
+    return normalize_locale((await state.get_data()).get('locale') or
+                            message.from_user.language_code)
+
+
+@router.message(Command('help'))
+async def help_cmd(message: Message, bot: Bot, backend: BackendClient,
+                   state: FSMContext) -> None:
+    if message.from_user is None or message.chat.type != 'private':
+        return
+    locale = await prepare_command(message, bot, state)
+    await render(bot, message.chat.id, Screen(tr(locale, 'command.help.title'),
+        (tr(locale, 'command.help.body'),)),
+        [[button(message.from_user.id, tr(locale, 'back'), 'home')]], state)
+
+
+@router.message(Command('status'))
+async def status_cmd(message: Message, bot: Bot, backend: BackendClient,
+                     state: FSMContext) -> None:
+    if message.from_user is None or message.chat.type != 'private':
+        return
+    locale = await prepare_command(message, bot, state)
+    await state.update_data(locale=locale)
+    try:
+        await show_admin_status(message.chat.id, message.from_user.id, None,
+                                bot, backend, state)
+    except BackendError as exc:
+        key = 'command.status.denied' if exc.status in {401,403} else 'home.service_unavailable'
+        await render(bot, message.chat.id, Screen(tr(locale, 'command.error_title'),
+            (tr(locale, key),)),
+            [[button(message.from_user.id, tr(locale, 'back'), 'home')]], state)
 
 
 @router.callback_query(HomeCallback.filter())
@@ -108,6 +182,7 @@ async def show_home(chat_id: int, user_id: int, bot: Bot, backend: BackendClient
                     state: FSMContext, message_id: int | None = None) -> None:
     locale = normalize_locale((await state.get_data()).get('locale'))
     account = await backend.me(user_id)
+    bot_title = (await backend.bot_title(user_id))['title']
     rows: list[list[InlineKeyboardButton]] = []
     if account['status'] != 'approved':
         policy = await backend.access_request_policy(user_id)
@@ -129,16 +204,18 @@ async def show_home(chat_id: int, user_id: int, bot: Bot, backend: BackendClient
     rows.append([button(user_id, tr(locale, 'home.settings'), 'member_settings')])
     if account['role'] == 'admin' and account['status'] == 'approved':
         rows.append([button(user_id, tr(locale, 'home.admin'), 'admin_menu')])
-    await render(bot, chat_id, Screen(tr(locale, 'home.title'), lines), rows, state, message_id)
+    await render(bot, chat_id, Screen(bot_title, lines), rows, state, message_id)
 
 
 async def show_language_picker(chat_id: int, user_id: int, bot: Bot,
+                               backend: BackendClient,
                                state: FSMContext, message_id: int | None = None) -> None:
     data = await state.get_data()
     locale = normalize_locale(data.get('locale'))
     rows = [[button(user_id, tr(locale, 'settings.russian'), 'first_locale', 'ru'),
              button(user_id, tr(locale, 'settings.english'), 'first_locale', 'en')]]
-    await render(bot, chat_id, Screen(tr(locale, 'language.title'),
+    title = (await backend.bot_title(user_id))['title']
+    await render(bot, chat_id, Screen(title,
         (tr(locale, 'language.prompt'),)), rows, state, message_id)
 
 
@@ -225,9 +302,29 @@ async def show_account_stats(chat_id: int, user_id: int, message_id: int,
              tr(locale, 'account.stats_issued', count=summary['issued_count']),
              tr(locale, 'account.stats_last',
                 value=(summary.get('last_issued_at') or '')[:16].replace('T', ' ') or '—'))
+    traffic = summary.get('traffic')
+    if traffic:
+        lines += (tr(locale, 'traffic.status.' + traffic['status']),)
+        for item in traffic['items']:
+            lines += (tr(locale, 'traffic.totals',
+                         protocol='AmneziaWG' if item['protocol'] == 'awg' else 'Xray',
+                         upload=_traffic_bytes(item['uplink_bytes']),
+                         download=_traffic_bytes(item['downlink_bytes'])),
+                      tr(locale, 'traffic.sample',
+                         since=item['tracked_since'][:16].replace('T', ' '),
+                         at=item['last_sample_at'][:16].replace('T', ' ')))
     await render(bot, chat_id, Screen(tr(locale, 'account.stats_title'), lines),
         [[button(user_id, tr(locale, 'back'), 'account_profile', profile_id, back_to)]],
         state, message_id)
+
+
+def _traffic_bytes(value: int) -> str:
+    amount = float(value)
+    for unit in ('B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB', 'EiB'):
+        if amount < 1024 or unit == 'EiB':
+            return f'{amount:.1f} {unit}'
+        amount /= 1024
+    raise ValueError('invalid traffic size')
 
 
 async def show_profile(chat_id: int, user_id: int, message_id: int,
@@ -295,34 +392,67 @@ async def show_protocol(chat_id: int, user_id: int, message_id: int, profile_id:
 async def show_issuance(chat_id: int, user_id: int, message_id: int,
                         issuance_id: str, bot: Bot, backend: BackendClient,
                         state: FSMContext) -> None:
+    view_token = secrets.token_urlsafe(16)
+    await state.update_data(issuance_poll_token=view_token)
+    try:
+        await _render_issuance(chat_id, user_id, message_id, issuance_id,
+                               bot, backend, state, view_token)
+    except BackendError:
+        if (await state.get_data()).get('issuance_poll_token') == view_token:
+            raise
+
+
+async def _render_issuance(chat_id: int, user_id: int, message_id: int,
+                           issuance_id: str, bot: Bot, backend: BackendClient,
+                           state: FSMContext, view_token: str) -> None:
     result = await backend.issuance(user_id, issuance_id)
+    if (await state.get_data()).get('issuance_poll_token') != view_token:
+        return
     profile_id, node_key = result['profile_id'], result['node_key']
     locale = normalize_locale((await state.get_data()).get('locale'))
     rows = [[button(user_id, tr(locale, 'back'), 'protocol', profile_id, node_key,
                     result['protocol'])]]
     if result['status'] == 'succeeded':
         artifact = await backend.artifact(user_id, issuance_id)
+        if (await state.get_data()).get('issuance_poll_token') != view_token:
+            return
         content = artifact['content']
         filename = artifact['filename'] or f"{result['protocol']}-{node_key}.txt"
         data = await state.get_data()
         delivered = set(data.get('delivered_issuances', []))
         if issuance_id not in delivered:
             sent = await bot.send_document(chat_id, BufferedInputFile(content.encode(), filename))
+            if (await state.get_data()).get('issuance_poll_token') != view_token:
+                try:
+                    await bot.delete_message(chat_id, sent.message_id)
+                except TelegramAPIError:
+                    pass
+                return
             await track_artifact(state, sent.message_id)
             delivered.add(issuance_id)
             await state.update_data(delivered_issuances=list(delivered))
         if (result['protocol'] == 'xray' or result.get('transport') == 'vpn') and len(content.encode()) <= 2500:
             rows.insert(0, [button(user_id, tr(locale, 'config.qr'), 'qr', issuance_id)])
-        details = (content,) if result['protocol'] == 'xray' else ()
+        if result['protocol'] == 'xray':
+            details_title = tr(locale, 'config.vless_link')
+            details = (content,)
+            import_hint = tr(locale, 'config.import_xray')
+        elif result['transport'] == 'vpn':
+            details_title = tr(locale, 'config.awg_uri')
+            details = (content,)
+            import_hint = tr(locale, 'config.import_awg_vpn')
+        else:
+            details_title = None
+            details = ()
+            import_hint = tr(locale, 'config.import_awg_conf')
         await render(bot, chat_id, Screen(tr(locale, 'config.ready'),
-            (tr(locale, 'config.import_file'),),
-            tr(locale, 'config.vless_link') if details else None, details), rows, state, message_id)
+            (import_hint,), details_title, details), rows, state, message_id)
     elif result['status'] in {'blocked', 'superseded', 'failed'}:
         await render(bot, chat_id, Screen(tr(locale, 'config.not_ready'),
             (tr(locale, 'config.unavailable'),)),
             rows, state, message_id)
     else:
-        rows.insert(0, [button(user_id, tr(locale, 'config.ready'), 'issuance', issuance_id)])
+        rows.insert(0, [button(user_id, tr(locale, 'config.refresh'), 'issuance', issuance_id)])
         await render(bot, chat_id, Screen(tr(locale, 'config.preparing_title'),
             (tr(locale, 'config.pending'),)), rows, state, message_id)
 
@@ -331,22 +461,45 @@ async def issue(chat_id: int, user_id: int, message_id: int, profile_id: str,
                 node_key: str, protocol: str, transport: str, bot: Bot,
                 backend: BackendClient, state: FSMContext) -> None:
     locale = normalize_locale((await state.get_data()).get('locale'))
-    queued = await backend.issue(user_id, profile_id, node_key, protocol, transport)
-    await render(bot, chat_id, Screen(tr(locale, 'config.preparing_title'),
-        (tr(locale, 'config.preparing'),)),
-        [[button(user_id, tr(locale, 'back'), 'protocol', profile_id, node_key, protocol)]], state, message_id)
-    for _ in range(15):
-        result = await backend.issuance(user_id, queued['id'])
-        if result['status'] in {'succeeded', 'blocked', 'superseded', 'failed'}:
-            break
-        await asyncio.sleep(1)
-    await show_issuance(chat_id, user_id, message_id, queued['id'], bot, backend, state)
+    poll_token = secrets.token_urlsafe(16)
+    await state.update_data(issuance_poll_token=poll_token)
+
+    async def owns_screen():
+        return (await state.get_data()).get('issuance_poll_token') == poll_token
+
+    try:
+        queued = await backend.issue(user_id, profile_id, node_key, protocol, transport)
+        if not await owns_screen():
+            return
+        await render(bot, chat_id, Screen(tr(locale, 'config.preparing_title'),
+            (tr(locale, 'config.preparing'),)),
+            [[button(user_id, tr(locale, 'back'), 'protocol', profile_id, node_key, protocol)]], state, message_id)
+        for _ in range(15):
+            if not await owns_screen():
+                return
+            result = await backend.issuance(user_id, queued['id'])
+            if not await owns_screen():
+                return
+            if result['status'] in {'succeeded', 'blocked', 'superseded', 'failed'}:
+                break
+            await asyncio.sleep(1)
+        if await owns_screen():
+            await show_issuance(chat_id, user_id, message_id, queued['id'], bot, backend, state)
+    except BackendError:
+        if await owns_screen():
+            raise
 
 
 async def show_qr(chat_id: int, user_id: int, message_id: int, issuance_id: str,
                   bot: Bot, backend: BackendClient, state: FSMContext) -> None:
+    view_token = secrets.token_urlsafe(16)
+    await state.update_data(issuance_poll_token=view_token)
     result = await backend.issuance(user_id, issuance_id)
+    if (await state.get_data()).get('issuance_poll_token') != view_token:
+        return
     artifact = await backend.artifact(user_id, issuance_id)
+    if (await state.get_data()).get('issuance_poll_token') != view_token:
+        return
     content = qr_payload(result['protocol'], result['transport'], artifact['content'])
     locale = normalize_locale((await state.get_data()).get('locale'))
     rows = [[button(user_id, tr(locale, 'back'), 'qr_back', issuance_id)]]
@@ -366,6 +519,12 @@ async def show_qr(chat_id: int, user_id: int, message_id: int, issuance_id: str,
     image = BytesIO()
     code.make_image(fill_color='black', back_color='white').save(image, format='PNG')
     sent = await bot.send_photo(chat_id, BufferedInputFile(image.getvalue(), 'config.png'))
+    if (await state.get_data()).get('issuance_poll_token') != view_token:
+        try:
+            await bot.delete_message(chat_id, sent.message_id)
+        except TelegramAPIError:
+            pass
+        return
     await track_artifact(state, sent.message_id)
     await render(bot, chat_id, Screen(tr(locale, 'qr.ready'), (tr(locale, 'qr.scan'),)),
                  rows, state, message_id)
@@ -387,6 +546,7 @@ async def user_action_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
         await query.answer(tr(locale, 'callback.stale'), show_alert=True)
         return
     actions.pop(token, None)
+    await state.update_data(issuance_poll_token=None)
     await query.answer()
     chat_id, user_id, message_id = query.message.chat.id, query.from_user.id, query.message.message_id
     try:
@@ -427,6 +587,12 @@ async def user_action_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
                 bot, backend, state, back_to=action.args[1])
         elif action.name == 'member_settings':
             await show_member_settings(chat_id, user_id, message_id, bot, backend, state)
+        elif action.name == 'traffic_consent':
+            await backend.set_traffic_consent(user_id, action.args[0] == 'true')
+            await show_member_settings(chat_id, user_id, message_id, bot, backend, state)
+        elif action.name == 'announcement_silent':
+            await backend.set_announcement_silent(user_id, action.args[0] == 'true')
+            await show_member_settings(chat_id, user_id, message_id, bot, backend, state)
         elif action.name == 'set_locale':
             await backend.set_locale(user_id, action.args[0])
             await state.update_data(locale=action.args[0])
@@ -438,7 +604,7 @@ async def user_action_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
             from .admin_requests import notify_admins
             await notify_admins(bot, backend, request['id'])
         elif action.name == 'admin_menu':
-            await show_admin_menu(chat_id, user_id, message_id, bot, state)
+            await show_admin_menu(chat_id, user_id, message_id, bot, backend, state)
     except BackendError as exc:
         locale = normalize_locale((await state.get_data()).get('locale'))
         if exc.code == 'access_requests_disabled':
@@ -460,20 +626,26 @@ async def user_action_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
 
 
 async def show_admin_menu(chat_id: int, user_id: int, message_id: int,
-                          bot: Bot, state: FSMContext) -> None:
+                          bot: Bot, backend: BackendClient,
+                          state: FSMContext) -> None:
     from .callbacks import (AccountsCallback, AdminNodesCallback,
                             AdminProfilesCallback, AdminSettingsCallback, RequestsCallback)
     locale = normalize_locale((await state.get_data()).get('locale'))
+    try:
+        title = (await backend.bot_title(user_id))['title']
+    except BackendError:
+        title = tr(locale, 'admin.menu')
     rows = [
         [InlineKeyboardButton(text=tr(locale, 'admin.status'), callback_data='admin_status')],
         [InlineKeyboardButton(text=tr(locale, 'admin.requests'), callback_data=RequestsCallback().pack())],
         [InlineKeyboardButton(text=tr(locale, 'admin.nodes'), callback_data=AdminNodesCallback().pack()),
          InlineKeyboardButton(text=tr(locale, 'admin.profiles'), callback_data=AdminProfilesCallback().pack())],
         [InlineKeyboardButton(text=tr(locale, 'admin.accounts'), callback_data=AccountsCallback().pack())],
+        [InlineKeyboardButton(text=tr(locale, 'announce.title'), callback_data='announce_menu')],
         [InlineKeyboardButton(text=tr(locale, 'admin.settings'), callback_data=AdminSettingsCallback().pack())],
         [button(user_id, tr(locale, 'back'), 'home')],
     ]
-    await render(bot, chat_id, Screen(tr(locale, 'admin.menu'), (tr(locale, 'admin.description'),)),
+    await render(bot, chat_id, Screen(title, (tr(locale, 'admin.description'),)),
                  rows, state, message_id)
 
 
@@ -540,12 +712,21 @@ async def show_member_settings(chat_id: int, user_id: int, message_id: int,
                                bot: Bot, backend: BackendClient, state: FSMContext,
                                saved: bool = False) -> None:
     locale = normalize_locale((await state.get_data()).get('locale'))
+    current = await backend.me(user_id)
+    silent = current.get('announcement_silent', False)
     rows = [
         [button(user_id, tr(locale, 'settings.russian'), 'set_locale', 'ru'),
          button(user_id, tr(locale, 'settings.english'), 'set_locale', 'en')],
+        [button(user_id, tr(locale, 'announce.sound_off' if silent else 'announce.sound_on'),
+            'announcement_silent', 'false' if silent else 'true')],
         [button(user_id, tr(locale, 'back'), 'home')],
     ]
     lines = [tr(locale, 'settings.locale')]
+    if current.get('traffic_available') or current.get('traffic_consent'):
+        consent = current.get('traffic_consent', False)
+        rows.insert(-1, [button(user_id, tr(locale, 'traffic.consent_on' if consent else 'traffic.consent_off'),
+            'traffic_consent', 'false' if consent else 'true')])
+        lines.append(tr(locale, 'traffic.consent_description'))
     if saved:
         lines.insert(0, tr(locale, 'settings.locale_saved'))
     await render(bot, chat_id, Screen(tr(locale, 'settings.title'), tuple(lines)),
@@ -559,5 +740,6 @@ async def admin_menu_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
     account = await backend.me(query.from_user.id)
     if account['role'] != 'admin' or account['status'] != 'approved':
         return
+    await state.set_state(None)
     await show_admin_menu(query.message.chat.id, query.from_user.id,
-                          query.message.message_id, bot, state)
+                          query.message.message_id, bot, backend, state)

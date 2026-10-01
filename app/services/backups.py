@@ -10,7 +10,7 @@ from typing import Any, Dict, List
 
 from config import APP_VERSION, DB_BACKEND, SHARED_ROOT
 from db import ensure_schema, get_db
-from db.migrate_sqlite_to_postgres import ALERT_STATE_COLUMNS, ALERT_STATE_DDL, TABLE_COLUMNS, _generic_table_exists
+from db.runtime_tables import ALERT_STATE_COLUMNS, ALERT_STATE_DDL, TABLE_COLUMNS, _generic_table_exists
 from services import app_settings
 
 _log = logging.getLogger("backups")
@@ -371,7 +371,11 @@ def run_scheduled_backup_if_due() -> Dict[str, Any]:
 
 
 def maybe_create_pre_action_backup(trigger: str) -> Dict[str, Any]:
-    return create_backup(trigger)
+    from backend.backups import BackupService
+    try:
+        return BackupService(get_db()).create_snapshot(trigger)
+    except Exception:
+        return {'status':'failed','message':'Backend configuration backup failed'}
 
 
 def get_backups_overview() -> Dict[str, Any]:

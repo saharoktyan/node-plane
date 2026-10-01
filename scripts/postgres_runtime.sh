@@ -231,7 +231,6 @@ load_postgres_runtime_config() {
 
   POSTGRES_RUNTIME_DB_BACKEND="$(read_env_value DB_BACKEND "$runtime_env_file")"
   POSTGRES_RUNTIME_DSN="$(read_env_value POSTGRES_DSN "$runtime_env_file")"
-  POSTGRES_RUNTIME_SQLITE_PATH="$(read_env_value SQLITE_DB_PATH "$runtime_env_file")"
   POSTGRES_RUNTIME_DB_NAME="$(read_env_value NODE_PLANE_POSTGRES_DB "$runtime_env_file")"
   POSTGRES_RUNTIME_DB_USER="$(read_env_value NODE_PLANE_POSTGRES_USER "$runtime_env_file")"
   POSTGRES_RUNTIME_DB_PASSWORD="$(read_env_value NODE_PLANE_POSTGRES_PASSWORD "$runtime_env_file")"
@@ -239,11 +238,8 @@ load_postgres_runtime_config() {
   POSTGRES_RUNTIME_CONTAINER="$(read_env_value NODE_PLANE_POSTGRES_CONTAINER "$runtime_env_file")"
   POSTGRES_RUNTIME_IMAGE="$(read_env_value NODE_PLANE_POSTGRES_IMAGE "$runtime_env_file")"
 
-  if [[ -z "$POSTGRES_RUNTIME_DB_BACKEND" || "$POSTGRES_RUNTIME_DB_BACKEND" == "sqlite" ]]; then
+  if [[ -z "$POSTGRES_RUNTIME_DB_BACKEND" ]]; then
     POSTGRES_RUNTIME_DB_BACKEND="postgres"
-  fi
-  if [[ -z "$POSTGRES_RUNTIME_SQLITE_PATH" ]]; then
-    POSTGRES_RUNTIME_SQLITE_PATH="${shared_dir}/data/bot.sqlite3"
   fi
   if [[ -z "$POSTGRES_RUNTIME_DB_NAME" ]]; then
     POSTGRES_RUNTIME_DB_NAME="node_plane"
@@ -268,20 +264,6 @@ dsn_uses_managed_local_postgres() {
   [[ "$dsn" == *"@127.0.0.1:${POSTGRES_RUNTIME_PORT}/${POSTGRES_RUNTIME_DB_NAME}"* ]]
 }
 
-normalize_portable_sqlite_source_path() {
-  local runtime_env_file="$1"
-  local sqlite_path
-  sqlite_path="$(read_env_value SQLITE_DB_PATH "$runtime_env_file")"
-  if [[ -z "$sqlite_path" ]]; then
-    env_set "$runtime_env_file" "SQLITE_DB_PATH" "/opt/node-plane/data/bot.sqlite3"
-    return 0
-  fi
-  case "$sqlite_path" in
-    /opt/node-plane/shared/data/*)
-      env_set "$runtime_env_file" "SQLITE_DB_PATH" "/opt/node-plane/data/${sqlite_path#/opt/node-plane/shared/data/}"
-      ;;
-  esac
-}
 
 ensure_portable_postgres_env() {
   local runtime_env_file="$1"
@@ -300,7 +282,6 @@ ensure_portable_postgres_env() {
   env_set "$runtime_env_file" "NODE_PLANE_POSTGRES_USER" "$POSTGRES_RUNTIME_DB_USER"
   env_set "$runtime_env_file" "NODE_PLANE_POSTGRES_PORT" "5432"
   env_set "$runtime_env_file" "NODE_PLANE_POSTGRES_IMAGE" "$POSTGRES_RUNTIME_IMAGE"
-  normalize_portable_sqlite_source_path "$runtime_env_file"
 }
 
 auto_provision_simple_postgres() {

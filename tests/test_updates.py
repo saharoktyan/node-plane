@@ -28,7 +28,6 @@ class UpdatesTests(unittest.TestCase):
         os.environ["NODE_PLANE_SHARED_DIR"] = base
         os.environ["NODE_PLANE_SOURCE_DIR"] = "/opt/node-plane-src"
         os.environ["NODE_PLANE_INSTALL_MODE"] = "simple"
-        os.environ["SQLITE_DB_PATH"] = os.path.join(base, "bot.sqlite3")
         with open(os.path.join(base, "VERSION"), "w", encoding="utf-8") as fh:
             fh.write("0.2.0-alpha.2\n")
         with open(os.path.join(base, "BUILD_COMMIT"), "w", encoding="utf-8") as fh:

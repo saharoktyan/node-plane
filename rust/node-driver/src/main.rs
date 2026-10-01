@@ -2534,6 +2534,84 @@ impl ProvisioningService for ProvisioningApi {
 
 #[tonic::async_trait]
 impl RuntimeService for RuntimeApi {
+    async fn backend_node_action(
+        &self,
+        request: Request<driver::v1::BackendNodeActionRequest>,
+    ) -> Result<Response<BackendNodeSettingsResult>, Status> {
+        let req = request.into_inner();
+        if req.action == "driver_info" {
+            return Ok(Response::new(BackendNodeSettingsResult {
+                result_json: serde_json::json!({
+                    "version": env!("NODE_PLANE_BINARY_VERSION"),
+                    "commit": env!("NODE_PLANE_BINARY_COMMIT")
+                })
+                .to_string(),
+            }));
+        }
+        let target = self
+            .ctx
+            .agent_target(&req.node_key)
+            .ok_or_else(|| Status::failed_precondition("no node-agent target configured"))?;
+        let transport = agent_transport::AgentTransport::new(target);
+        let facts = transport.get_runtime_facts().await?;
+        if facts.node_key != req.node_key {
+            return Err(Status::failed_precondition("agent node identity mismatch"));
+        }
+        if req.action == "install_docker" && !req.recover {
+            transport.install_docker().await?;
+        }
+        if req.action == "inspect"
+            && !transport
+                .path_exists("/opt/node-plane-runtime/backend-node-operation.py")
+                .await?
+        {
+            let diagnostics = transport.run_diagnostics().await?;
+            let docker = diagnostics
+                .items
+                .iter()
+                .any(|item| item.kind == "docker" && item.status == "ok");
+            return Ok(Response::new(BackendNodeSettingsResult { result_json: serde_json::json!({
+                "docker": docker, "xray_config_valid": false, "awg_config_valid": false,
+                "xray_running": false, "awg_running": false, "entropy": [],
+                "runtime_version": facts.version, "runtime_commit": facts.commit,
+                "desired_runtime_version": self.ctx.app_semver, "desired_runtime_commit": self.ctx.app_commit,
+                "agent_version": facts.binary_version, "agent_commit": facts.binary_commit,
+                "runtime_drift": true,
+            }).to_string() }));
+        }
+        if !matches!(req.action.as_str(), "inspect" | "traffic") && !req.recover {
+            let mut files = self.ctx.runtime_file_bundle(None, &req.node_key)?;
+            if transport.path_exists("/etc/node-plane/node.env").await? {
+                files.retain(|file| file.path != "/etc/node-plane/node.env");
+            }
+            transport.sync_runtime_files(files).await?;
+        }
+        let response = transport
+            .backend_node_action(agent::v1::BackendNodeActionRequest {
+                node_key: req.node_key,
+                command_id: req.command_id,
+                action: req.action.clone(),
+                intent_json: req.intent_json,
+                recover: req.recover,
+            })
+            .await?;
+        let mut result: serde_json::Value = serde_json::from_str(&response.payload_json)
+            .map_err(|_| Status::internal("invalid backend node response"))?;
+        if req.action == "inspect" {
+            result["agent_version"] = serde_json::json!(facts.binary_version);
+            result["agent_commit"] = serde_json::json!(facts.binary_commit);
+            result["runtime_version"] = serde_json::json!(facts.version);
+            result["runtime_commit"] = serde_json::json!(facts.commit);
+            result["desired_runtime_version"] = serde_json::json!(self.ctx.app_semver);
+            result["desired_runtime_commit"] = serde_json::json!(self.ctx.app_commit);
+            result["runtime_drift"] = serde_json::json!(
+                facts.commit != self.ctx.app_commit || facts.version != self.ctx.app_semver
+            );
+        }
+        Ok(Response::new(BackendNodeSettingsResult {
+            result_json: result.to_string(),
+        }))
+    }
     async fn get_backend_xray_public(
         &self,
         request: Request<driver::v1::GetBackendXrayPublicRequest>,
@@ -2542,7 +2620,9 @@ impl RuntimeService for RuntimeApi {
         if node_key.is_empty() {
             return Err(Status::invalid_argument("node key is required"));
         }
-        let target = self.ctx.agent_target(&node_key)
+        let target = self
+            .ctx
+            .agent_target(&node_key)
             .ok_or_else(|| Status::failed_precondition("no node-agent target configured"))?;
         let transport = agent_transport::AgentTransport::new(target);
         let facts = transport.get_runtime_facts().await?;
@@ -2551,11 +2631,19 @@ impl RuntimeService for RuntimeApi {
         }
         let response = transport.get_backend_xray_public().await?;
         let metadata = XraySyncGenerated::parse(&response.metadata_json)?;
-        if metadata.xray_short_id.len() != 16 || !metadata.xray_short_id.bytes().all(|b| b.is_ascii_hexdigit())
+        if metadata.xray_short_id.len() != 16
+            || !metadata
+                .xray_short_id
+                .bytes()
+                .all(|b| b.is_ascii_hexdigit())
             || metadata.xray_sid != metadata.xray_short_id
             || metadata.xray_sni.is_empty()
-            || metadata.xray_tcp_port <= 0 || metadata.xray_xhttp_port <= 0 {
-            return Err(Status::internal("invalid Xray public metadata returned by agent"));
+            || metadata.xray_tcp_port <= 0
+            || metadata.xray_xhttp_port <= 0
+        {
+            return Err(Status::internal(
+                "invalid Xray public metadata returned by agent",
+            ));
         }
         let public = serde_json::json!({
             "sni": metadata.xray_sni,
@@ -2578,18 +2666,27 @@ impl RuntimeService for RuntimeApi {
         request: Request<driver::v1::PrepareBackendNodeRequest>,
     ) -> Result<Response<BackendNodeSettingsResult>, Status> {
         let node_key = request.into_inner().node_key;
-        if node_key.is_empty() || node_key.len() > 64 || !node_key.bytes().all(|byte|
-            byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-') {
+        if node_key.is_empty()
+            || node_key.len() > 64
+            || !node_key
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+        {
             return Err(Status::invalid_argument("node key is required"));
         }
-        let target = self.ctx.agent_target(&node_key)
+        let target = self
+            .ctx
+            .agent_target(&node_key)
             .ok_or_else(|| Status::failed_precondition("no node-agent target configured"))?;
         let transport = agent_transport::AgentTransport::new(target);
         let facts = transport.get_runtime_facts().await?;
         if facts.node_key != node_key {
             return Err(Status::failed_precondition("agent node identity mismatch"));
         }
-        if transport.path_exists("/etc/node-plane/profile-intents.sqlite3").await? {
+        if transport
+            .path_exists("/etc/node-plane/profile-intents.sqlite3")
+            .await?
+        {
             return Err(Status::failed_precondition(
                 "managed runtime cannot be prepared as a fresh node",
             ));
@@ -2702,20 +2799,24 @@ impl RuntimeService for RuntimeApi {
             .command_id()
             .to_string();
         let req = request.into_inner();
-        let target = self.ctx.agent_target(&req.node_key)
+        let target = self
+            .ctx
+            .agent_target(&req.node_key)
             .ok_or_else(|| Status::failed_precondition("no node-agent target configured"))?;
         let transport = agent_transport::AgentTransport::new(target);
         let facts = transport.get_runtime_facts().await?;
         if facts.node_key != req.node_key {
             return Err(Status::failed_precondition("agent node identity mismatch"));
         }
-        let response = transport.resolve_backend_node_settings(
-            agent::v1::ApplyBackendNodeSettingsRequest {
-                command_id, desired_revision: req.desired_revision,
+        let response = transport
+            .resolve_backend_node_settings(agent::v1::ApplyBackendNodeSettingsRequest {
+                command_id,
+                desired_revision: req.desired_revision,
                 protocols_json: req.protocols_json,
-                settings_json: req.settings_json, node_key: req.node_key,
-            },
-        ).await?;
+                settings_json: req.settings_json,
+                node_key: req.node_key,
+            })
+            .await?;
         Ok(Response::new(BackendNodeSettingsResult {
             result_json: response.payload_json,
         }))

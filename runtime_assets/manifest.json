@@ -140,8 +140,18 @@
     "mode": "0755"
   },
   {
+    "target_path": "/opt/node-plane-runtime/backend-node-operation.py",
+    "asset_path": "backend-node-operation.py",
+    "mode": "0755"
+  },
+  {
     "target_path": "/opt/node-plane-runtime/apply-profile-intent.py",
     "asset_path": "apply-profile-intent.py",
     "mode": "0755"
+  },
+  {
+    "target_path": "/opt/node-plane-runtime/traffic-snapshot.py",
+    "asset_path": "traffic-snapshot.py",
+    "mode": "0644"
   }
 ]

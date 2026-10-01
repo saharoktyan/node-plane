@@ -66,6 +66,8 @@ class ProfileCommands:
             'revision': revision, 'values': values}, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
         identity = (actor.principal.id, actor.account.id, key)
         with self.db.transaction() as conn:
+            from .maintenance_gate import admit
+            admit(conn)
             conn.execute('''INSERT INTO backend_profile_commands(principal_id, actor_id, command_key, fingerprint)
                 VALUES (?, ?, ?, ?) ON CONFLICT(principal_id, actor_id, command_key) DO NOTHING''', (*identity, fingerprint))
             record = conn.execute('''SELECT fingerprint, result_json FROM backend_profile_commands

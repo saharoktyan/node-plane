@@ -38,7 +38,7 @@ def reconcile_xray_server_state(server_key: str) -> tuple[int, str]:
         desired_names.add(str(name))
         uuid_val = rec.get("uuid")
         if not isinstance(uuid_val, str) or not uuid_val.strip():
-            upsert_profile_server_state(str(name), server_key, "xray", status="failed", last_error="uuid missing in SQLite")
+            upsert_profile_server_state(str(name), server_key, "xray", status="failed", last_error="uuid missing in database")
             failed += 1
             continue
 
@@ -56,7 +56,7 @@ def reconcile_xray_server_state(server_key: str) -> tuple[int, str]:
                 "xray",
                 status="needs_attention",
                 remote_id=str(remote_uuid),
-                last_error=f"uuid mismatch: sqlite={uuid_val} remote={remote_uuid}",
+                last_error=f"uuid mismatch: database={uuid_val} remote={remote_uuid}",
             )
             attention += 1
             continue

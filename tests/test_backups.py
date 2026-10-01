@@ -48,6 +48,8 @@ class _FakePostgresDB:
     def _open(self) -> _FakePostgresConn:
         conn = sqlite3.connect(self.path)
         conn.row_factory = sqlite3.Row
+        conn.create_function('to_regclass', 1, lambda name: name if conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone() else None)
         return _FakePostgresConn(conn)
 
     @contextmanager

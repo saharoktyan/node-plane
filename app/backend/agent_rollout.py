@@ -28,13 +28,16 @@ class AgentRolloutService:
                 UNIQUE(actor_account_id, command_key)
             )''')
             conn.execute('CREATE INDEX IF NOT EXISTS idx_backend_agent_rollouts_work ON backend_agent_rollouts(status, id)')
+            conn.execute('CREATE TABLE IF NOT EXISTS backend_agent_rollout_failures (task_id TEXT PRIMARY KEY, code TEXT NOT NULL)')
 
     @staticmethod
     def public(row):
         return {key: row[key] for key in ('id', 'node_key', 'status')}
 
-    def request(self, actor, node_key, command_key, *, transport, ssh_target=None, ssh_port=22):
+    def request(self, actor, node_key, command_key, *, transport, ssh_target=None, ssh_port=22, install_rust=False):
         require_permission(actor, 'nodes.manage')
+        if type(install_rust) is not bool:
+            raise AccessDenied('invalid_input', 422)
         try:
             key = str(UUID(command_key))
         except (TypeError, ValueError, AttributeError):
@@ -47,8 +50,12 @@ class AgentRolloutService:
         elif not isinstance(ssh_target, str) or not SSH_TARGET.fullmatch(ssh_target):
             raise AccessDenied('invalid_input', 422)
         intent = {'transport': transport, 'ssh_target': ssh_target, 'ssh_port': ssh_port}
+        if install_rust:
+            intent['install_rust'] = True
         encoded = json.dumps(intent, sort_keys=True, separators=(',', ':'))
         with self.db.transaction() as conn:
+            from .maintenance_gate import admit
+            admit(conn)
             account = conn.execute('''UPDATE backend_accounts SET role = role WHERE id = ?
                 RETURNING role, status''', (actor.account.id,)).fetchone()
             if account is None or account['role'] != 'admin' or account['status'] != 'approved':
@@ -84,9 +91,10 @@ class AgentRolloutService:
         require_permission(actor, 'nodes.manage')
         with self.db.connect() as conn:
             row = conn.execute('SELECT * FROM backend_agent_rollouts WHERE id = ?', (task_id,)).fetchone()
+            failure = conn.execute('SELECT code FROM backend_agent_rollout_failures WHERE task_id = ?', (task_id,)).fetchone()
         if row is None:
             raise AccessDenied('resource_not_found', 404)
-        return self.public(row)
+        return {**self.public(row), 'failure_code': failure['code'] if failure else None}
 
     def recover(self):
         with self.db.transaction() as conn:
@@ -97,7 +105,7 @@ class AgentRolloutService:
         root = Path(os.environ['NODE_PLANE_APP_DIR'])
         script = root / 'scripts' / 'setup_driver_agents.sh'
         args = ['bash', str(script), '--backend-node-key', row['node_key'],
-                '--bin-source', 'release']
+                '--bin-source', 'auto']
         if intent['transport'] == 'local':
             args.append('--backend-local')
         else:
@@ -105,8 +113,14 @@ class AgentRolloutService:
                      '--backend-ssh-port', str(intent['ssh_port'])]
         if self.runner is not None:
             return self.runner(args)
-        result = subprocess.run(args, cwd=root, stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL, timeout=1200, check=False)
+        result = subprocess.run(args, cwd=root, capture_output=True, text=True,
+            env={**os.environ, 'NODE_PLANE_INSTALL_RUST': 'yes' if intent.get('install_rust') else 'no'},
+            timeout=1200, check=False)
+        output = result.stdout + result.stderr
+        if 'RUST_INSTALL_REQUIRED:' in output:
+            self._failure_code = 'rust_required'
+        elif 'Not enough free memory' in output or 'too busy' in output:
+            self._failure_code = 'build_resources'
         return result.returncode == 0
 
     def run_one(self):
@@ -118,10 +132,13 @@ class AgentRolloutService:
             conn.execute("UPDATE backend_agent_rollouts SET status = 'running' WHERE id = ?",
                          (row['id'],))
         try:
+            self._failure_code = None
             succeeded = self._execute(row)
         except Exception:
             succeeded = False
         with self.db.transaction() as conn:
+            if self._failure_code:
+                conn.execute('INSERT INTO backend_agent_rollout_failures VALUES (?, ?) ON CONFLICT(task_id) DO UPDATE SET code=excluded.code', (row['id'], self._failure_code))
             conn.execute('''UPDATE backend_agent_rollouts SET status = ?
                 WHERE id = ? AND status = 'running' ''',
                 ('succeeded' if succeeded else 'blocked', row['id']))

@@ -80,6 +80,8 @@ class BackendConfigIssuanceTests(unittest.TestCase):
                 headers=headers).json()['status'], 'succeeded')
             artifact = client.get(f'/api/v1/config-issuances/{task_id}/artifact', headers=headers)
             self.assertEqual(artifact.status_code, 200, artifact.text)
+            self.assertEqual(artifact.json()['filename'],
+                             'VLESS - Latvia #1 - Alice - XHTTP.txt')
             self.assertIn('pbk=' + 'a' * 43, artifact.json()['content'])
             self.assertIn('type=xhttp', artifact.json()['content'])
             self.assertIn('Latvia%20%231', artifact.json()['content'])
@@ -120,7 +122,8 @@ class BackendConfigIssuanceTests(unittest.TestCase):
                 artifact = client.get(f'/api/v1/config-issuances/{queued.json()["id"]}/artifact',
                     headers=headers)
                 self.assertEqual(artifact.status_code, 200, artifact.text)
-                self.assertEqual(artifact.json()['filename'], f'awg-n1.{extension}')
+                self.assertEqual(artifact.json()['filename'],
+                                 f'AmneziaWG - Latvia #1 - Alice.{extension}')
                 self.assertIn('vpn://' if extension == 'vpn' else '[Interface]',
                     artifact.json()['content'])
             self.db.connection.execute('DELETE FROM backend_grants WHERE profile_id = ?', (profile_id,))

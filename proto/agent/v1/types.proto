@@ -13,6 +13,8 @@ message RuntimeFacts {
   string awg_config_path = 6;
   bool xray_config_present = 7;
   bool awg_config_present = 8;
+  string binary_version = 9;
+  string binary_commit = 10;
 }
 
 message LocalHealth {
