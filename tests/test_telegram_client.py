@@ -180,6 +180,27 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             await admin_requests.requests_cb(self.query, self.bot, backend, self.state)
         self.assertIn(user.tr('en', 'requests.empty'), draw.call_args.args[2].lines)
 
+    async def test_request_search_depends_on_total_pending_not_current_page(self):
+        for total, expected in ((0, False), (5, False), (6, True), (12, True)):
+            self.state_data.update(request_cursors=[None, 'last'], request_search=None)
+            item = {'id': 'request', 'account_id': 'member', 'telegram_user_id': 456, 'created_at': None}
+            backend = SimpleNamespace(pending_access_requests=AsyncMock(return_value={
+                'items': [item] if total else [], 'next_cursor': None, 'pending_total': total}))
+            with patch.object(admin_requests, 'render', new_callable=AsyncMock) as draw:
+                await admin_requests.render_request_page(123, 123, 77, self.bot,
+                    backend, self.state, 1 if total == 12 else 0)
+            screen, rows = draw.call_args.args[2:4]
+            callbacks = [b.callback_data for row in screen.fallback_rows(rows) for b in row]
+            self.assertEqual('request_search' in callbacks, expected)
+        self.state_data.update(request_search='alice', request_cursors=[None])
+        backend.pending_access_requests.return_value = {'items': [], 'next_cursor': None, 'pending_total': 5}
+        with patch.object(admin_requests, 'render', new_callable=AsyncMock) as draw:
+            await admin_requests.render_request_page(123, 123, 77, self.bot, backend, self.state, 0)
+        screen, rows = draw.call_args.args[2:4]
+        callbacks = [b.callback_data for row in screen.fallback_rows(rows) for b in row]
+        self.assertNotIn('request_search', callbacks)
+        self.assertIn('request_search_clear', callbacks)
+
     async def test_admin_menu_has_profiles_without_separate_accounts(self):
         with patch.object(user, 'render', new_callable=AsyncMock) as draw:
             await user.show_admin_menu(1, 101, 5, self.bot,
@@ -201,6 +222,12 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             with patch.object(user, 'render', new_callable=AsyncMock) as draw:
                 await user.show_admin_menu(123, 123, 77, self.bot, backend, self.state)
             screen, rows = draw.call_args.args[2:4]
+            self.assertEqual(screen.title, user.tr(locale, 'admin.menu') + ' · Node Plane')
+            access = next(section for section in screen.sections
+                if section.title.startswith(user.tr(locale, 'admin.rich.access_management')))
+            self.assertEqual(access.title, user.tr(locale, 'admin.rich.access_management') +
+                ' · ' + user.tr(locale, 'requests.pending_count', count=2))
+            self.assertEqual(screen.sections[0].lines, ())
             blocks = screen.rich(rows).blocks
             table = next(block for block in blocks if block.type == 'table')
             self.assertEqual(table.cells[1][1].text, '2/3')
@@ -449,7 +476,9 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         with patch.object(admin_alerts,'render',new_callable=AsyncMock) as draw:
             await admin_alerts.alerts_cb(self.query,self.bot,backend,self.state)
         rows=draw.call_args.args[3]
-        self.assertEqual(rows[1][1].text,'✅ 15 min')
+        self.assertEqual(rows[1][1].text,'15 min')
+        self.assertEqual(rows[1][1].style, 'primary')
+        self.assertIsNone(rows[1][0].style)
         self.assertTrue(rows[-1][0].callback_data.startswith('admin_settings'))
 
     async def test_active_alert_pagination_and_localized_transport(self):
@@ -750,6 +779,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
                     'locale': locale, 'announcement_silent': silent}))
                 with patch.object(user, 'render', new_callable=AsyncMock) as draw:
                     await user.show_member_settings(123, 123, 77, self.bot, backend, self.state)
+                self.assertEqual(draw.call_args.args[2].lines, ())
                 language, sound = draw.call_args.args[2].sections
                 self.assertEqual((language.lines, sound.lines), ((), ()))
                 self.assertEqual(len(language.rows[0]), 2)
@@ -767,14 +797,15 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
 
     async def test_admin_grant_server_lists_include_flags(self):
         backend = SimpleNamespace(admin_nodes=AsyncMock(return_value={'items': [
-            {'key': 'lv1', 'title': 'Latvia', 'flag': '🇱🇻'}]}),
-            profile_grants=AsyncMock(return_value={'items': []}))
+            {'key': 'lv1', 'title': 'Latvia', 'flag': '🇱🇻', 'protocols': ['awg', 'xray']}]}),
+            profile_grants=AsyncMock(return_value={'items': []}),
+            request=AsyncMock(return_value={'desired_revision': 1}))
         self.state_data['draft_profile_name'] = 'Alice'
         with patch.object(admin_profiles, 'render', new_callable=AsyncMock) as draw:
             await admin_profiles.show_create_nodes(123, 123, 77, self.bot, backend, self.state)
-            self.assertEqual(draw.call_args.args[3][0][0].text, '○ 🇱🇻 Latvia')
+            self.assertEqual(draw.call_args.args[2].sections[1].sections[0].title, '🇱🇻 Latvia')
             await admin_profiles.show_grant_nodes(123, 123, 77, 'p1', self.bot, backend, self.state)
-            self.assertEqual(draw.call_args.args[3][0][0].text, '○ 🇱🇻 Latvia')
+            self.assertEqual(draw.call_args.args[2].sections[1].sections[0].title, '🇱🇻 Latvia')
 
     async def test_plain_config_fallback_preserves_downloads(self):
         backend = SimpleNamespace(
@@ -897,14 +928,15 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             profile_grants=AsyncMock(return_value={'items': [
                 {'node_key': 'lv1', 'protocol': 'awg'}]}),
             request=AsyncMock(return_value={'title': 'Latvia',
-                'protocols': ['awg', 'xray']}))
+                'desired_revision': 1, 'protocols': ['awg', 'xray']}))
         with patch.object(admin_profiles, 'render', new_callable=AsyncMock) as render:
             await admin_profiles.show_grant_protocols(123, 123, 77,
                 '00000000-0000-0000-0000-000000000001', 'lv1',
                 self.bot, backend, self.state)
         rows = render.call_args.args[3]
-        self.assertEqual(len(rows), 3)
-        self.assertTrue(all(len(row[0].callback_data.encode()) <= 64 for row in rows))
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(len(rows[0]), 2)
+        self.assertTrue(all(len(button.callback_data.encode()) <= 64 for row in rows for button in row))
 
     async def test_node_wizard_saves_then_queues_agent_from_persisted_connection(self):
         self.query.data = 'wizard_proto:done'
@@ -1110,8 +1142,8 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
                 admin_requests.DecideCallback(request_id='request-id',
                                               decision='approve'),
                 self.bot, backend, self.state)
-        self.assertEqual(render.call_args.args[2].title, 'Admin panel')
-        self.assertIn('Configured title', render.call_args.args[2].lines)
+        self.assertEqual(render.call_args.args[2].title, 'Admin panel · Configured title')
+        self.assertEqual(render.call_args.args[2].lines, ())
 
     async def test_access_approval_replaces_requester_screen_and_menu_edits_same_message(self):
         from aiogram.fsm.context import FSMContext
@@ -1278,7 +1310,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             self.assertEqual([button.callback_data for button in
                 render.call_args.args[3][0]],
                 ['profile_draft_nodes', 'profile_draft_save'])
-            self.assertIn('Node 1', ' '.join(render.call_args.args[2].lines))
+            self.assertIn('Node 1', render.call_args.args[2].plain())
 
     async def test_profile_wizard_first_back_clears_draft_at_account_card(self):
         self.state_data['locale'] = 'ru'

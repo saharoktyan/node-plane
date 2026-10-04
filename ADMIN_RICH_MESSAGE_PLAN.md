@@ -1,7 +1,9 @@
 # Administrator Rich Message UI plan
 
-Status: Phase 1 implemented and awaiting live mobile acceptance. Later phases
-remain planned.
+Status: Phase 1 published in `v0.4.3-alpha.28`; live acceptance is in progress.
+Phase 2 profile, access and creation screens are implemented after that tag.
+The administrator traffic summary described below still needs a dedicated
+authorized backend read; remaining phases are planned.
 
 Member UI baseline: commit `a68b2e2`, validated by 659 tests. This document
 defines an incremental presentation redesign, not a replacement for the
@@ -147,6 +149,22 @@ the migration so old screens remain navigable.
   and draft changes without an explicit explanation.
 - On save, report synchronization separately from saved desired access.
 - Back returns to the profile card with the correct search/page context intact.
+- Put Grant all / Revoke all above the server list, and Grant region / Revoke
+  region directly below each region heading. Both operations update only the
+  draft and require Save before affecting the nodes.
+- Grant is additive and idempotent. It selects every configured protocol on
+  currently enabled servers in the chosen scope, including other pages, while
+  preserving grants outside that scope. Revoke removes all grants in the scope,
+  including grants on disabled servers. Revoke all also clears stale grants
+  whose server is no longer in the registry.
+- These buttons are explicit snapshots, not persistent region subscriptions.
+  A server added later receives access only after another explicit Grant press
+  and Save. Resolve the current registry when the button is pressed rather than
+  using only the displayed page. The same behavior applies during creation.
+- Bind region callbacks to raw region names using short opaque tokens; never
+  serialize long/Unicode names into callback data or let stale region indexes
+  refer to a different region. Old tokens refresh the editor without changing
+  grants. Creation buttons are also bound to their creation session.
 
 ### Profile creation
 
@@ -281,5 +299,50 @@ For each phase:
 - Live Telegram mobile acceptance is still pending; automated tests validate
   structure, callbacks, localization, errors and fallback behavior.
 
-Next implementation scope: **Phase 2**, after review of the first block.
-Profiles and servers remain separate reviewable blocks.
+### Phase 2 implementation record
+
+- Profile list, card, identity forms, status, access, deletion confirmation and
+  creation wizard now use embedded Rich actions and English/Russian text.
+- The card exposes common actions directly; old Edit callbacks open the card.
+  IDs are collapsed, desired status and synchronization remain visible, and
+  operation details use a node/protocol/result table.
+- Access tables and editors load every backend server cursor page, sort by
+  region/name, and display 10 servers per UI page. No 20-grant truncation.
+- Grant/revoke all and regional buttons work in both creation and editing, with
+  explicit-save semantics. Page transitions retain the draft; leaving the
+  editor for the card discards it.
+- Save uses the revision captured at the beginning of editing. A revision
+  conflict preserves the draft for review and does not automatically replay it.
+- Active/Frozen choices set an explicit value; pressing the already selected
+  value does not toggle it. Deleting profiles expose no mutation actions.
+- Back/Next share a row with a single divider; primary Next/Create styling is
+  preserved when Back is rendered as a navigation link.
+- Administrator traffic display remains deferred: the existing member summary
+  endpoint deliberately permits only the owner. Do not bypass that check or
+  the global collection/member consent gates to fill an administrator table.
+- Live Telegram layout and real provisioning acceptance remain pending.
+
+Next remaining Phase 2 item is the gated administrator traffic read/display.
+Server screens form the next independent presentation block.
+
+### Review fixes after Phase 1 testing
+
+- Deleting a member's final VPN profile also changes their account approval to
+  pending in the same transaction. Administrators and owners of another live
+  profile retain their status. Startup repairs legacy approvals left behind by
+  earlier deletion commands; replaying a deletion does not repeat account changes.
+- The Telegram adapter clears the revoked member's cached home presentation and
+  replaces their existing control message with the access gate when delivery is
+  available. Backend authorization enforces the revocation independently.
+- Reapproval creates a fresh default profile when only deletion tombstones remain,
+  with a new runtime identity and no inherited grants or configurations.
+- Decorative emoji are removed from localized labels. Server flags remain;
+  selected options use button color rather than checkmark prefixes.
+- Admin home uses `Admin panel · Bot name` and
+  `Access management · Pending: count` headings, without the stored-state caption.
+- Request search appears only above five pending requests. The API exposes the
+  global pending count so pagination and filtering do not hide it incorrectly;
+  an existing search can always be cleared.
+
+- Language changes redraw settings and highlight the selected language without
+  adding a confirmation line.

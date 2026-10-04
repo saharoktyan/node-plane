@@ -86,7 +86,7 @@ class ProfileCommands:
                 if not isinstance(display_name, str) or not display_name.strip() or len(display_name) > 128:
                     raise AccessDenied('invalid_input', 422)
                 owner = values.get('owner_account_id')
-                if owner is not None and conn.execute('SELECT id FROM backend_accounts WHERE id = ?', (owner,)).fetchone() is None:
+                if owner is not None and conn.execute('UPDATE backend_accounts SET status = status WHERE id = ? RETURNING id', (owner,)).fetchone() is None:
                     raise AccessDenied('owner_not_found', 422)
                 grants = self.validate_grants(conn, values.get('grants', []))
                 profile_id = str(uuid4())
@@ -101,7 +101,7 @@ class ProfileCommands:
             else:
                 if revision is None:
                     raise AccessDenied('revision_required', 428)
-                row = conn.execute('''SELECT p.desired_revision, d.profile_id AS deleting
+                row = conn.execute('''SELECT p.desired_revision, p.owner_account_id, d.profile_id AS deleting
                     FROM backend_profiles p LEFT JOIN backend_profile_deletions d ON d.profile_id = p.id
                     WHERE p.id = ?''', (profile_id,)).fetchone()
                 if row is None:
@@ -115,6 +115,9 @@ class ProfileCommands:
                 if action == 'delete':
                     if values:
                         raise AccessDenied('invalid_input', 422)
+                    if row['owner_account_id']:
+                        conn.execute('UPDATE backend_accounts SET status = status WHERE id = ?',
+                                     (row['owner_account_id'],))
                     conn.execute('''INSERT INTO backend_profile_deletions(profile_id, requested_at)
                         VALUES (?, ?)''', (profile_id, datetime.now(timezone.utc).isoformat()))
                     conn.execute('DELETE FROM backend_grants WHERE profile_id = ?', (profile_id,))
@@ -151,6 +154,8 @@ class ProfileCommands:
                     cursor = conn.execute('UPDATE backend_profiles SET desired_revision = desired_revision + 1 WHERE id = ? AND desired_revision = ? RETURNING id', (profile_id, revision))
                 if cursor.fetchone() is None:
                     raise AccessDenied('revision_conflict', 412)
+                if action == 'delete' and row['owner_account_id']:
+                    ProfileRepository.revoke_orphaned_members(conn, row['owner_account_id'])
                 if action == 'grants':
                     conn.execute('DELETE FROM backend_grants WHERE profile_id = ?', (profile_id,))
                     for node_key, protocol in sorted(seen):

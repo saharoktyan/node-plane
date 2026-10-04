@@ -534,6 +534,7 @@ class AccessRequestOutput(BaseModel):
 
 
 class AccessRequestPage(BaseModel):
+    pending_total: int | None = None
     items: list[AccessRequestOutput]
     next_cursor: str | None
 

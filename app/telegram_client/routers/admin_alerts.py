@@ -102,10 +102,9 @@ async def alerts_cb(
             ],
             [
                 button(
-                    ("✅ " if value["interval_minutes"] == minutes else "")
-                    + tr(locale, "alerts.minutes", minutes=minutes),
+                    tr(locale, "alerts.minutes", minutes=minutes),
                     f"alert_pref:interval_minutes:{minutes}",
-                )
+                ).model_copy(update={"style": "primary" if value["interval_minutes"] == minutes else None})
                 for minutes in (5, 15)
             ],
             [

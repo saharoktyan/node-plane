@@ -17,6 +17,8 @@ class AccessRequestServiceTests(unittest.TestCase):
         self.addCleanup(self.db.connection.close)
         self.identities = SQLIdentityRepository(self.db)
         self.identities.initialize_schema()
+        from backend.profiles import ProfileRepository
+        ProfileRepository(self.db).initialize_schema()
         self.requests = AccessRequestService(self.db)
         self.requests.initialize_schema()
         self.system_settings = SystemSettingsService(self.db)
@@ -125,6 +127,7 @@ class AccessRequestServiceTests(unittest.TestCase):
                                            search='ALEX_')
         self.assertEqual([item['username'] for item in found['items']], ['alex_one'])
         self.assertIsNone(found['next_cursor'])
+        self.assertEqual([page['pending_total'] for page in (first, second, third, found)], [3, 3, 3, 3])
         with self.assertRaises(AccessDenied) as error:
             self.requests.list_pending(self.admin_actor, cursor=first['next_cursor'],
                                        search='different search')

@@ -102,3 +102,59 @@ class BackendProfileCommandTests(unittest.TestCase):
         response = self.client.patch(f'/api/v1/profiles/{profile_id}/grants', headers=self.headers_for(1), json={'grants': [grant, grant]})
         self.assertEqual(response.status_code, 422)
         self.assertEqual(self.db.connection.execute('SELECT desired_revision FROM backend_profiles').fetchone()[0], 1)
+
+    def test_deleting_last_member_profile_revokes_menu_and_allows_fresh_approval(self):
+        from backend.profiles import ProfileRepository
+        member = self.identities.resolve_telegram(102)
+        self.db.connection.execute("UPDATE backend_accounts SET status = 'approved' WHERE id = ?", (member.id,))
+        repo = ProfileRepository(self.db)
+        old_id = repo.ensure_account_profile(member.id)
+        old_runtime = self.db.connection.execute('SELECT runtime_name FROM backend_profiles WHERE id = ?', (old_id,)).fetchone()[0]
+        headers = self.headers_for(1)
+        path = f'/api/v1/profiles/{old_id}'
+        first = self.client.delete(path, headers=headers)
+        self.assertEqual(first.status_code, 200, first.text)
+        self.assertEqual(self.client.delete(path, headers=headers).json(), first.json())
+        member_headers = {**self.headers, 'X-Node-Plane-Telegram-User-ID': '102'}
+        me = self.client.get('/api/v1/me', headers=member_headers).json()
+        self.assertEqual(me['status'], 'pending')
+        self.assertNotIn('profiles.self.read', me['permissions'])
+        self.assertEqual(self.client.get('/api/v1/me/profiles', headers=member_headers).status_code, 403)
+        request = self.client.post('/api/v1/me/access-requests',
+            headers={**member_headers, 'Idempotency-Key': str(uuid4())}).json()
+        approved = self.client.post(f"/api/v1/access-requests/{request['id']}/decision",
+            headers=self.headers_for(), json={'decision': 'approve'})
+        self.assertEqual(approved.status_code, 200, approved.text)
+        new_id = repo.ensure_account_profile(member.id)
+        self.assertNotEqual(new_id, old_id)
+        self.assertEqual(repo.ensure_account_profile(member.id), new_id)
+        new_runtime = self.db.connection.execute('SELECT runtime_name FROM backend_profiles WHERE id = ?', (new_id,)).fetchone()[0]
+        self.assertNotEqual(new_runtime, old_runtime)
+        self.assertEqual(self.client.get('/api/v1/me', headers=member_headers).json()['status'], 'approved')
+        self.assertEqual(self.db.connection.execute('SELECT COUNT(*) FROM backend_grants WHERE profile_id = ?', (new_id,)).fetchone()[0], 0)
+
+    def test_deletion_preserves_admin_and_member_with_another_profile(self):
+        admin_profile = self.create().json()['profile']['id']
+        self.assertEqual(self.client.delete(f'/api/v1/profiles/{admin_profile}', headers=self.headers_for(1)).status_code, 200)
+        self.assertEqual(self.identities.get_account(self.admin.id).status, 'approved')
+        member = self.identities.resolve_telegram(102)
+        self.db.connection.execute("UPDATE backend_accounts SET status = 'approved' WHERE id = ?", (member.id,))
+        one = self.create(owner_account_id=member.id).json()['profile']['id']
+        two = self.create(owner_account_id=member.id).json()['profile']['id']
+        self.assertEqual(self.client.delete(f'/api/v1/profiles/{one}', headers=self.headers_for(1)).status_code, 200)
+        self.assertEqual(self.identities.get_account(member.id).status, 'approved')
+        self.assertEqual(self.client.delete(f'/api/v1/profiles/{two}', headers=self.headers_for(1)).status_code, 200)
+        self.assertEqual(self.identities.get_account(member.id).status, 'pending')
+
+    def test_schema_repairs_legacy_orphan_approval_once(self):
+        from backend.profiles import ProfileRepository
+        member = self.identities.resolve_telegram(102)
+        profile_id = self.create(owner_account_id=member.id).json()['profile']['id']
+        self.db.connection.execute("INSERT INTO backend_profile_deletions(profile_id, requested_at) VALUES (?, 'legacy')", (profile_id,))
+        self.db.connection.execute("UPDATE backend_accounts SET status = 'approved' WHERE id = ?", (member.id,))
+        ProfileRepository(self.db).initialize_schema()
+        self.assertEqual(self.identities.get_account(member.id).status, 'pending')
+        revision = self.db.connection.execute('SELECT revision FROM backend_accounts WHERE id = ?', (member.id,)).fetchone()[0]
+        ProfileRepository(self.db).initialize_schema()
+        self.assertEqual(self.db.connection.execute('SELECT revision FROM backend_accounts WHERE id = ?', (member.id,)).fetchone()[0], revision)
+        self.assertEqual(self.identities.get_account(self.admin.id).status, 'approved')

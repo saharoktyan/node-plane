@@ -159,6 +159,7 @@ class AccessRequestService:
         kind = 'access_requests_pending:' + term if term else 'access_requests_pending'
         after = _cursor(cursor, kind)
         with self.db.connect() as conn:
+            pending_total = conn.execute("SELECT COUNT(*) AS count FROM backend_access_requests WHERE status = 'pending'").fetchone()['count']
             if term is None:
                 rows = conn.execute(self._pending_query() + ''' WHERE r.status = 'pending'
                     AND r.id > ? ORDER BY r.id LIMIT ?''', (after, limit + 1)).fetchall()
@@ -181,7 +182,7 @@ class AccessRequestService:
                                 break
                     if len(rows) < 200:
                         break
-        return _page(matches, limit, kind, 'id')
+        return {**_page(matches, limit, kind, 'id'), 'pending_total': pending_total}
 
     def get_pending(self, actor, request_id):
         require_permission(actor, 'access_requests.manage')
@@ -219,5 +220,8 @@ class AccessRequestService:
                 (status, now, actor.account.id, key, request_id))
             conn.execute('UPDATE backend_accounts SET status = ?, revision = revision + 1 WHERE id = ?',
                          (status, row['account_id']))
+            if decision == 'approve':
+                from .profiles import ProfileRepository
+                ProfileRepository.ensure_account_profile_in_transaction(conn, row['account_id'])
             result = conn.execute('SELECT * FROM backend_access_requests WHERE id = ?', (request_id,)).fetchone()
             return self.public(result)

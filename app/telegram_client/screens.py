@@ -15,10 +15,14 @@ def server_label(node: dict) -> str:
     return f"{node.get('flag') or ''} {node['title']}".strip()
 
 
+BACK_LABELS = {'🔙 Back', '🔙 Назад', 'Back', 'Назад'}
+
+
 def rich_buttons(rows, *, navigation=False):
     return [InputRichBlockButtons(buttons=[RichMessageButton(
         text=button.text, callback_data=button.callback_data, url=button.url,
-        copy_text=button.copy_text, style='link' if navigation and button.callback_data else button.style)
+        copy_text=button.copy_text, style='link' if navigation and button.callback_data and
+            (len(row) == 1 or button.text in BACK_LABELS) else button.style)
         for button in row]) for row in rows if row]
 
 
@@ -48,6 +52,7 @@ class Section:
     heading_size: int = 3
     is_open: bool = False
     tables: tuple[Table, ...] = ()
+    heading_rows: tuple[tuple[InlineKeyboardButton, ...], ...] = ()
 
     def rich(self):
         blocks = [InputRichBlockParagraph(text=line) for line in self.lines if line]
@@ -56,8 +61,10 @@ class Section:
             blocks.extend(section.rich())
         blocks.extend(rich_buttons(self.rows))
         if self.collapsed:
-            return [InputRichBlockDetails(summary=self.title, blocks=blocks, is_open=self.is_open)]
-        return [InputRichBlockSectionHeading(text=self.title, size=self.heading_size), *blocks,
+            return [InputRichBlockDetails(summary=self.title,
+                blocks=[*rich_buttons(self.heading_rows), *blocks], is_open=self.is_open)]
+        return [InputRichBlockSectionHeading(text=self.title, size=self.heading_size),
+                *rich_buttons(self.heading_rows), *blocks,
                 *([InputRichBlockDivider()] if self.divider_after else [])]
 
 
@@ -100,12 +107,13 @@ class Screen:
                 blocks=[InputRichBlockParagraph(text=line) for line in self.details_lines]))
         if self.embedded_buttons:
             for index, row in enumerate(rows):
-                back = bool(row and len(row) == 1 and index == len(rows) - 1 and
-                            (self.navigation or row[0].text in {'🔙 Back', '🔙 Назад'}))
+                back = bool(row and index == len(rows) - 1 and
+                            ((self.navigation and len(row) == 1) or
+                             any(button.text in BACK_LABELS for button in row)))
                 if back and blocks[-1].type != 'divider':
                     blocks.append(InputRichBlockDivider())
                 blocks.extend(rich_buttons([row], navigation=back))
-        elif rows and len(rows[-1]) == 1 and rows[-1][0].text in {'🔙 Back', '🔙 Назад'} and blocks[-1].type != 'divider':
+        elif rows and len(rows[-1]) == 1 and rows[-1][0].text in BACK_LABELS and blocks[-1].type != 'divider':
             blocks.append(InputRichBlockDivider())
         return InputRichMessage(blocks=blocks, skip_entity_detection=True)
 
@@ -127,6 +135,7 @@ class Screen:
     def fallback_rows(self, rows):
         def section_rows(sections):
             for section in sections:
+                yield from (list(row) for row in section.heading_rows)
                 yield from section_rows(section.sections)
                 yield from (list(row) for row in section.rows)
         return [*section_rows(self.sections), *rows]

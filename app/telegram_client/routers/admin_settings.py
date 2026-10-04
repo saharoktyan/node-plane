@@ -354,12 +354,14 @@ async def show_update_branches(query: CallbackQuery, bot: Bot,
     locale = await _locale(state)
     overview = await backend.updates_overview(query.from_user.id)
     selected = overview.get('branch')
-    rows = [[InlineKeyboardButton(text=f"{'✅ ' if selected == branch else ''}{branch}",
-        callback_data=UpdateActionCallback(action=f'branch_{branch}').pack())]
+    rows = [[InlineKeyboardButton(text=branch,
+        callback_data=UpdateActionCallback(action=f'branch_{branch}').pack(),
+        style='primary' if selected == branch else None)]
         for branch in ('main', 'dev')]
     if selected == 'dev':
-        rows.append([InlineKeyboardButton(text=f"{'✅ ' if overview.get('dev_track') == track else ''}{track}",
-            callback_data=UpdateActionCallback(action=f'track_{track}').pack()) for track in ('tag', 'head')])
+        rows.append([InlineKeyboardButton(text=track,
+            callback_data=UpdateActionCallback(action=f'track_{track}').pack(),
+            style='primary' if overview.get('dev_track') == track else None) for track in ('tag', 'head')])
     rows.append([InlineKeyboardButton(text=tr(locale, 'back'),
         callback_data=UpdatesCallback().pack())])
     await render(bot, query.message.chat.id,
