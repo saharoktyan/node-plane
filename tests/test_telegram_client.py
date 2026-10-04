@@ -27,6 +27,12 @@ class RouterStartupTests(TestCase):
 
 
 class TelegramFlowTests(IsolatedAsyncioTestCase):
+    async def test_opening_empty_requests_has_an_explicit_screen(self):
+        backend = SimpleNamespace(pending_access_requests=AsyncMock(return_value={'items': [], 'next_cursor': None}))
+        with patch.object(admin_requests, 'render', new_callable=AsyncMock) as draw:
+            await admin_requests.requests_cb(self.query, self.bot, backend, self.state)
+        self.assertIn(user.tr('en', 'requests.empty'), draw.call_args.args[2].lines)
+
     async def test_admin_menu_has_profiles_without_separate_accounts(self):
         with patch.object(user, 'render', new_callable=AsyncMock) as draw:
             await user.show_admin_menu(1, 101, 5, self.bot,

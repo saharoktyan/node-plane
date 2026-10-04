@@ -652,8 +652,15 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
                 response = error(request,'system_cleanup_in_progress',409)
             else:
                 response = error(request,'restore_in_progress',409) if restoring else await call_next(request)
-        except Exception:
+        except Exception as exc:
             # Do not serialize DB exceptions, request bodies or credentials.
+            import logging
+            import traceback
+            frames = traceback.extract_tb(exc.__traceback__)
+            location = ' -> '.join(f'{Path(frame.filename).name}:{frame.lineno}:{frame.name}' for frame in frames[-8:])
+            logging.getLogger(__name__).error('Backend request failed: %s %s type=%s sqlstate=%s request_id=%s location=%s',
+                request.method, request.url.path, type(exc).__name__, getattr(exc, 'sqlstate', None),
+                request.state.request_id, location)
             response = error(request, 'internal_error', 500)
         response.headers['X-Request-ID'] = request.state.request_id
         response.headers['Cache-Control'] = 'no-store'

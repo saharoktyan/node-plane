@@ -845,3 +845,15 @@ The latter identifies deployed runtime assets; an absent runtime directory befor
 Bootstrap is expected and does not imply an unhealthy agent. Worker completion
 followed by another timer-triggered start is also expected: the worker is a
 oneshot service scheduled with OnUnitInactiveSec=5s.
+
+PostgreSQL placeholder translation also escapes literal percent signs before
+introducing `%s` bind markers. This is necessary for the protocol `LIKE` filter:
+psycopg parses percent placeholders even inside SQL string literals. A regression
+test uses psycopg's real parser, rather than the SQL fixture substitution.
+
+Opening Requests with no pending items now displays an explicit empty screen;
+deciding the last request still returns to the administration menu. Telegram
+screen rendering recreates a deleted control message and bounds Rich API calls,
+with plain-text fallback when the Rich API is rejected or unavailable. Backend
+errors log their class, SQLSTATE, stack locations and request ID without exposing
+exception messages, credentials, request bodies or SQL parameters.

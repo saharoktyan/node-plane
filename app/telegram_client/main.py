@@ -1,6 +1,7 @@
 import asyncio
 from contextlib import suppress
 import os
+import logging
 from pathlib import Path
 import aiohttp
 from aiogram import Bot, Dispatcher
@@ -15,6 +16,7 @@ from .routers.common import BackendMiddleware
 from .routers import user, admin_requests, admin_profiles, admin_nodes, admin_settings, admin_node_tools, admin_updates, admin_backups
 
 async def main() -> None:
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(levelname)s | %(name)s | %(message)s')
     token = os.environ['BOT_TOKEN']
     adapter_file = Path(os.environ['NODE_PLANE_BACKEND_ADAPTER_TOKEN_FILE'])
     adapter_token = adapter_file.read_text(encoding='utf-8').strip()
