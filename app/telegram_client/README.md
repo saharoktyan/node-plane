@@ -42,7 +42,19 @@ The simple-mode updater and health check recognize the active new service;
 updating it does not run the legacy registry-based agent rollout.
 
 The control message ID and callback tokens currently live in process memory.
-After a restart, old buttons expire safely and `/start` recreates the screen.
+Member navigation has no idle expiry and failed actions can be retried. Its
+token cache is bounded to 10,000 entries. After a restart or cache eviction,
+pressing an old button re-authorizes the caller and refreshes the current message
+with Home (or the language picker if needed), without replaying the lost action
+or requiring `/start`. Buttons from another account are rejected. Backend
+authorization and config-artifact expiry remain independent of navigation.
+Language selection acknowledges the chosen language immediately, reuses the
+account returned by the preference update and loads independent home reads in
+parallel. The language-to-home transition has a 12-second deadline and reports an error rather than
+waiting for multiple sequential HTTP timeouts. Callback acknowledgement has a
+three-second timeout and its failure does not prevent screen navigation. Logs
+report language-selection transition duration. The access gate uses a Rich
+section with an embedded primary Request access button and separate settings.
 Config screens contain collapsed QR, monospace import-link, and help blocks.
 AWG includes both downloadable `.vpn` and `.conf` files. Import labels use
 `Server name Protocol [Transport] · Profile name`; AWG passes this description

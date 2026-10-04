@@ -2,15 +2,17 @@
 from __future__ import annotations
 
 import asyncio
+from collections import OrderedDict
 from dataclasses import dataclass
 from io import BytesIO
 import secrets
 import time
+import logging
 
 from aiogram import Bot, F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.exceptions import TelegramAPIError
+from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramNetworkError
 from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardButton, Message
 import qrcode
 from qrcode.exceptions import DataOverflowError
@@ -29,10 +31,11 @@ class Action:
     owner_id: int
     name: str
     args: tuple[str, ...]
-    expires_at: float
 
 
-actions: dict[str, Action] = {}
+actions: OrderedDict[str, Action] = OrderedDict()
+MAX_ACTIONS = 10000
+ONBOARDING_TIMEOUT = 12
 SERVERS_PER_PAGE = 10
 
 
@@ -65,12 +68,10 @@ def server_pagination(user_id, locale, page, pages, action, *args):
 
 
 def button(owner_id: int, label: str, name: str, *args: str) -> InlineKeyboardButton:
-    now = time.monotonic()
-    if len(actions) > 1000:
-        for stale in [key for key, action in actions.items() if action.expires_at < now]:
-            actions.pop(stale, None)
     token = secrets.token_urlsafe(10)
-    actions[token] = Action(owner_id, name, args, now + 900)
+    actions[token] = Action(owner_id, name, args)
+    while len(actions) > MAX_ACTIONS:
+        actions.popitem(last=False)
     return InlineKeyboardButton(text=label, callback_data='u:' + token)
 
 
@@ -208,18 +209,27 @@ async def home_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
 
 
 async def show_home(chat_id: int, user_id: int, bot: Bot, backend: BackendClient,
-                    state: FSMContext, message_id: int | None = None) -> None:
+                    state: FSMContext, message_id: int | None = None, *,
+                    account: dict | None = None) -> None:
     locale = normalize_locale((await state.get_data()).get('locale'))
-    account = await backend.me(user_id)
-    bot_title = (await backend.bot_title(user_id))['title']
+    try:
+        async with asyncio.timeout(ONBOARDING_TIMEOUT):
+            if account is None:
+                account, title = await asyncio.gather(backend.me(user_id), backend.bot_title(user_id))
+            else:
+                title = await backend.bot_title(user_id)
+            if account['status'] != 'approved':
+                policy, requests = await asyncio.gather(backend.access_request_policy(user_id),
+                    backend.request('GET', '/api/v1/me/access-requests?limit=25', telegram_user_id=user_id))
+    except TimeoutError:
+        raise BackendError('backend_unavailable', 503) from None
+    bot_title = title['title']
     rows: list[list[InlineKeyboardButton]] = []
     if account['status'] != 'approved':
-        policy = await backend.access_request_policy(user_id)
-        requests = await backend.request('GET', '/api/v1/me/access-requests?limit=25',
-                                         telegram_user_id=user_id)
         pending = any(item['status'] == 'pending' for item in requests['items'])
         if policy['enabled'] and not pending:
-            rows.append([button(user_id, tr(locale, 'home.request_access'), 'request_access')])
+            rows.append([button(user_id, tr(locale, 'home.request_access'), 'request_access')
+                         .model_copy(update={'style': 'primary'})])
         if pending:
             lines = (tr(locale, 'home.waiting'),)
         elif policy['enabled']:
@@ -236,7 +246,13 @@ async def show_home(chat_id: int, user_id: int, bot: Bot, backend: BackendClient
         rows.append([button(user_id, tr(locale, 'home.settings'), 'member_settings')])
     if account['role'] == 'admin' and account['status'] == 'approved':
         rows.append([button(user_id, tr(locale, 'home.admin'), 'admin_menu')])
-    await render(bot, chat_id, Screen(bot_title, lines, embedded_buttons=True), rows, state, message_id)
+    if account['status'] != 'approved':
+        request_rows = tuple(tuple(row) for row in rows[:-1])
+        await render(bot, chat_id, Screen(bot_title,
+            sections=(Section(tr(locale, 'home.access_title'), lines, rows=request_rows),),
+            embedded_buttons=True, navigation=True), rows[-1:], state, message_id)
+    else:
+        await render(bot, chat_id, Screen(bot_title, lines, embedded_buttons=True), rows, state, message_id)
 
 
 async def show_language_picker(chat_id: int, user_id: int, bot: Bot,
@@ -630,15 +646,32 @@ async def user_action_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
         return
     token = (query.data or '')[2:]
     action = actions.get(token)
-    if action is None or action.owner_id != query.from_user.id or action.expires_at < time.monotonic():
+    if action is not None and action.owner_id != query.from_user.id:
         locale = normalize_locale((await state.get_data()).get('locale') or query.from_user.language_code)
         await query.answer(tr(locale, 'callback.stale'), show_alert=True)
         return
-    actions.pop(token, None)
+    if action is not None:
+        actions.move_to_end(token)
     await state.update_data(issuance_poll_token=None)
-    await query.answer()
+    try:
+        text = tr(action.args[0], 'language.saving') if action and action.name == 'first_locale' else None
+        await query.answer(text=text, request_timeout=3)
+    except (TelegramBadRequest, TelegramNetworkError):
+        logging.getLogger(__name__).warning('Callback acknowledgement unavailable; continuing screen navigation')
     chat_id, user_id, message_id = query.message.chat.id, query.from_user.id, query.message.message_id
     try:
+        if action is None:
+            # Lost on restart or evicted from the bounded cache: never replay an
+            # unknown command. Re-authorize and refresh this control message.
+            await clear_artifacts(bot, chat_id, state)
+            account = await backend.me(user_id)
+            await state.update_data(locale=normalize_locale(account.get('locale') or
+                                                            query.from_user.language_code))
+            if account.get('locale_selected') is False:
+                await show_language_picker(chat_id, user_id, bot, backend, state, message_id)
+            else:
+                await show_home(chat_id, user_id, bot, backend, state, message_id, account=account)
+            return
         if action.name == 'page_number':
             return
         if action.name != 'issuance':
@@ -646,9 +679,18 @@ async def user_action_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
         if action.name == 'home':
             await show_home(chat_id, user_id, bot, backend, state, message_id)
         elif action.name == 'first_locale':
-            await backend.set_locale(user_id, action.args[0])
-            await state.update_data(locale=action.args[0])
-            await show_home(chat_id, user_id, bot, backend, state, message_id)
+            started = time.monotonic()
+            logging.getLogger(__name__).info('Language selection received; saving preference and opening home')
+            try:
+                async with asyncio.timeout(ONBOARDING_TIMEOUT):
+                    account = await backend.set_locale(user_id, action.args[0])
+                    await state.update_data(locale=action.args[0])
+                    await show_home(chat_id, user_id, bot, backend, state, message_id, account=account)
+            except TimeoutError:
+                raise BackendError('backend_unavailable', 503) from None
+            finally:
+                logging.getLogger(__name__).info('Language selection transition finished in %.3fs',
+                                                time.monotonic() - started)
         elif action.name == 'profiles':
             await show_profiles(chat_id, user_id, message_id, bot, backend, state)
         elif action.name == 'profile':
@@ -705,7 +747,7 @@ async def user_action_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
             await show_admin_menu(chat_id, user_id, message_id, bot, backend, state)
     except BackendError as exc:
         locale = normalize_locale((await state.get_data()).get('locale'))
-        if exc.code == 'access_requests_disabled':
+        if exc.code in {'access_requests_disabled', 'request_already_pending'}:
             await show_home(chat_id, user_id, bot, backend, state, message_id)
             return
         if exc.code in {'profile_frozen', 'profile_expired', 'grant_revoked',
