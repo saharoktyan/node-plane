@@ -1995,6 +1995,14 @@ CATALOG['en'].update({
     'nodes.draft.conflict': 'Server settings changed elsewhere. Your draft is kept. Reset it to load current settings before editing again.',
     'nodes.rich.settings_note': 'Edits stay in a draft until Save and apply. Reset changes discards the draft.',
     'nodes.settings.apply_note': 'Edits stay in a draft until Save and apply.',
+    'announce.rich.message': 'Message', 'announce.rich.audience': 'Audience',
+    'announce.rich.draft': 'Current draft', 'announce.rich.delivery': 'Delivery',
+    'announce.rich.details': 'Delivery details', 'announce.rich.state': 'Status',
+    'announce.rich.count': 'Recipients', 'announce.rich.running': 'Delivery in progress',
+    'announce.rich.completed': 'Delivery finished', 'announce.rich.open_result': 'View result',
+    'announce.rich.queued': 'Waiting', 'announce.rich.claimed': 'Sending',
+    'announce.rich.sent': 'Sent', 'announce.rich.failed': 'Failed',
+    'announce.rich.unknown': 'Unconfirmed', 'announce.rich.skipped': 'Skipped',
 })
 CATALOG['ru'].update({
     'nodes.settings.title': 'Настройки сервера', 'nodes.card.back_to_settings': '← К настройкам',
@@ -2006,4 +2014,12 @@ CATALOG['ru'].update({
     'nodes.draft.conflict': 'Настройки сервера изменились в другом месте. Черновик сохранён. Сбросьте его, чтобы загрузить актуальные настройки перед редактированием.',
     'nodes.rich.settings_note': 'Изменения остаются в черновике до сохранения и применения. Сброс отменяет черновик.',
     'nodes.settings.apply_note': 'Изменения остаются в черновике до сохранения и применения.',
+    'announce.rich.message': 'Сообщение', 'announce.rich.audience': 'Получатели',
+    'announce.rich.draft': 'Текущий черновик', 'announce.rich.delivery': 'Доставка',
+    'announce.rich.details': 'Подробности доставки', 'announce.rich.state': 'Статус',
+    'announce.rich.count': 'Получателей', 'announce.rich.running': 'Идёт доставка',
+    'announce.rich.completed': 'Доставка завершена', 'announce.rich.open_result': 'Посмотреть результат',
+    'announce.rich.queued': 'Ожидают', 'announce.rich.claimed': 'Отправляются',
+    'announce.rich.sent': 'Отправлено', 'announce.rich.failed': 'Ошибка',
+    'announce.rich.unknown': 'Не подтверждено', 'announce.rich.skipped': 'Пропущено',
 })

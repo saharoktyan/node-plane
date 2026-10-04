@@ -81,10 +81,16 @@ class AdminNodeRichTests(IsolatedAsyncioTestCase):
 
     async def test_applied_card_has_no_permanent_success_notice(self):
         self.node['applied_revision'] = self.node['desired_revision']
+        self.overview['state'] = 'applied_unverified'
         with patch.object(nodes, 'render', new_callable=AsyncMock) as draw:
             await nodes.show_admin_node(123, 123, 77, 'msk1', self.bot, self.backend, self.state)
         self.assertNotIn(tr('en', 'nodes.rich.applied'), draw.call_args.args[2].plain())
         self.assertNotIn(tr('en', 'nodes.rich.pending'), draw.call_args.args[2].plain())
+        self.assertNotIn(tr('en', 'nodes.card.state.applied_unverified'), draw.call_args.args[2].plain())
+        with patch.object(nodes, 'render', new_callable=AsyncMock) as draw:
+            await nodes.show_admin_nodes(123, 123, 77, self.bot, self.backend, self.state)
+        labels = [b.text for row in draw.call_args.args[2].fallback_rows(draw.call_args.args[3]) for b in row]
+        self.assertIn('🇷🇺 Moscow #1', labels)
 
     async def test_protocol_settings_have_tables_and_all_existing_edit_actions(self):
         expected = {'general': {'title', 'flag', 'region', 'notes'}, 'connection': {'public_host'},

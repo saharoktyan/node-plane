@@ -492,6 +492,41 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             await admin_announcements.announcement_cb(self.query,self.bot,backend,self.state)
         self.assertEqual([b.callback_data for b in draw.call_args.args[3][0]],['announce_menu','announce_preview'])
 
+    async def test_announcement_rich_menu_preview_and_results_in_both_languages(self):
+        from telegram_client.routers import admin_announcements as announcements
+        counts = dict(queued=2, claimed=1, sent=3, failed=1, unknown=1, skipped=0)
+        job = {'id': 'j1', 'total': 8, 'status': 'running', 'counts': counts}
+        backend = SimpleNamespace(announcement_latest=AsyncMock(return_value={'last_job': job}),
+            announcement_preview=AsyncMock(return_value={'text': 'Hello', 'recipients': 8}),
+            announcement_status=AsyncMock(return_value=job))
+        self.state_data['announcement_draft'] = {'text': 'Hello', 'nonce': 'test', 'key': 'stable-key'}
+        for locale in ('en', 'ru'):
+            self.state_data['locale'] = locale
+            self.query.data = 'announce_menu'
+            with patch.object(announcements, 'render', new_callable=AsyncMock) as draw:
+                await announcements.announcement_cb(self.query, self.bot, backend, self.state)
+            screen, rows = draw.call_args.args[2:4]
+            self.assertTrue(screen.embedded_buttons)
+            callbacks = [b.callback_data for row in screen.fallback_rows(rows) for b in row]
+            self.assertIn('announce_compose', callbacks)
+            self.assertIn('announce_job:j1', callbacks)
+            self.assertEqual([b.type for b in screen.rich(rows).blocks[-2:]], ['divider', 'buttons'])
+            with patch.object(announcements, 'render', new_callable=AsyncMock) as draw:
+                await announcements.preview(123, 77, 123, self.bot, backend, self.state)
+            screen, rows = draw.call_args.args[2:4]
+            self.assertEqual(screen.sections[0].lines, ('Hello',))
+            self.assertEqual([b.callback_data for b in rows[0]], ['announce_edit', 'announce_send:test'])
+            self.assertEqual(rows[0][1].style, 'primary')
+            for status in ('running', 'completed'):
+                job['status'] = status
+                with patch.object(announcements, 'render', new_callable=AsyncMock) as draw:
+                    await announcements.result(self.query, self.bot, backend, self.state, 'j1')
+                screen, rows = draw.call_args.args[2:4]
+                self.assertEqual([r[1] for r in screen.sections[0].tables[0].rows], ['2', '1', '3', '1', '1', '0'])
+                self.assertTrue(screen.sections[-1].collapsed)
+                self.assertEqual(any(b.callback_data == 'announce_job:j1' for row in rows for b in row), status == 'running')
+                screen.rich(rows)
+
     async def test_announcement_transport_sends_silently_and_acknowledges(self):
         from telegram_client.announcement_delivery import deliver_one
         bot=SimpleNamespace(send_rich_message=AsyncMock())
