@@ -1,5 +1,6 @@
 import json
 import os
+from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import patch
 from uuid import uuid4
@@ -18,6 +19,15 @@ class BackendAgentRolloutTests(TestCase):
             conn.execute('''INSERT INTO backend_nodes(key, title, region, enabled,
                 protocols_json, xray_transports_json)
                 VALUES ('lv1', 'Latvia', 'EU', 0, '[]', '[]')''')
+
+    def test_ssh_prerequisite_failure_is_exposed_without_console_output(self):
+        service = AgentRolloutService(self.db)
+        with patch.dict(os.environ, {'NODE_PLANE_APP_DIR': '/opt/node-plane/current'}), \
+                patch('backend.agent_rollout.subprocess.run', return_value=SimpleNamespace(
+                    returncode=1, stdout='', stderr='SSH_PREREQUISITES_FAILED: lv1 requires root or passwordless sudo')):
+            self.assertFalse(service._execute({'node_key': 'lv1', 'intent_json': json.dumps({
+                'transport': 'ssh', 'ssh_target': 'root@lv1.example', 'ssh_port': 22})}))
+        self.assertEqual(service._failure_code, 'ssh_prerequisites')
 
     def test_rollout_is_queued_for_admin_and_executed_without_shell_input(self):
         self.node()

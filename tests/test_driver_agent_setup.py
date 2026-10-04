@@ -14,6 +14,28 @@ SETUP_SCRIPT = REPO_ROOT / "scripts" / "setup_driver_agents.sh"
 
 
 class DriverAgentSetupTests(unittest.TestCase):
+    def test_remote_wrapper_preserves_quoting_stdin_and_noninteractive_privileges(self):
+        helper = (REPO_ROOT / 'scripts/lib/agent_ssh.sh').read_text()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            ssh = root / 'ssh'
+            ssh.write_text('#!/bin/bash\nfor remote in "$@"; do :; done\nexec bash -c "$remote"\n')
+            ssh.chmod(0o755)
+            sudo = root / 'sudo'
+            sudo.write_text('#!/bin/bash\n[ "$1" = -n ] || exit 91\nshift\nexec "$@"\n')
+            sudo.chmod(0o755)
+            environment = {**os.environ, 'PATH': f'{root}:{os.environ["PATH"]}',
+                'REMOTE_COMMAND': "sudo printf '%s\\n' \"quoted ' value\"; bash -s"}
+            for root_branch in (False, True):
+                # Exercise both remote privilege branches without requiring a
+                # root shell or touching system files on the test machine.
+                source = helper.replace('"$EUID"', '"0"') if root_branch else helper
+                result = subprocess.run(['bash', '-c', source + '\nagent_ssh -p 2222 test-host "$REMOTE_COMMAND"'],
+                    env=environment, input="sudo printf '%s\\n' 'streamed script'\n",
+                    text=True, capture_output=True, timeout=10)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, "quoted ' value\nstreamed script\n")
+
     def test_backend_dry_run_uses_backend_draft_without_legacy_registry(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
@@ -58,6 +80,8 @@ def get_db():
             self.assertIn('Dry-run SSH check passed for lv1', result.stdout)
             self.assertIn('lv1=vpn.example.test:50061', result.stdout)
             self.assertIn('root@203.0.113.10', ssh_log.read_text(encoding='utf-8'))
+            self.assertIn('ConnectTimeout=15', ssh_log.read_text(encoding='utf-8'))
+            self.assertIn('ServerAliveCountMax=3', ssh_log.read_text(encoding='utf-8'))
             self.assertNotIn('vpn.example.test', ssh_log.read_text(encoding='utf-8'))
             self.assertEqual((shared_root / '.env').read_text(encoding='utf-8'), 'BOT_TOKEN=test\n')
             local = subprocess.run([str(SETUP_SCRIPT), '--dry-run', '--bin-source', 'build',

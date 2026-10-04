@@ -320,10 +320,12 @@ async def process_wizard_flag(message: Message, bot: Bot, state: FSMContext):
 
 async def render_wizard_transport(chat_id: int, bot: Bot, state: FSMContext, message_id: int | None = None):
     await state.set_state(NodeDraftState.waiting_for_transport)
-    locale = normalize_locale((await state.get_data()).get('locale'))
+    data = await state.get_data()
+    locale = normalize_locale(data.get('locale'))
+    selected = data.get('wizard_data', {}).get('transport')
     rows = [
-        [InlineKeyboardButton(text=tr(locale, 'node.wizard.transport.ssh'), callback_data="wizard_transport:ssh")],
-        [InlineKeyboardButton(text=tr(locale, 'node.wizard.transport.local'), callback_data="wizard_transport:local")],
+        [InlineKeyboardButton(text=tr(locale, 'node.wizard.transport.ssh'), callback_data="wizard_transport:ssh", style='primary' if selected == 'ssh' else None),
+         InlineKeyboardButton(text=tr(locale, 'node.wizard.transport.local'), callback_data="wizard_transport:local", style='primary' if selected == 'local' else None)],
         [InlineKeyboardButton(text=tr(locale, 'back'), callback_data='wizard_back:flag')]
     ]
     await render(bot, chat_id, Screen(tr(locale, 'node.wizard.transport.title'),
@@ -400,15 +402,11 @@ async def render_wizard_protocols(chat_id: int, bot: Bot, state: FSMContext, mes
     protocols = w.get('protocols', [])
     locale = normalize_locale(data.get('locale'))
     
-    def mark(code: str, label: str) -> str:
-        return f">{label}<" if code in protocols else label
-
-    rows = [
-        [InlineKeyboardButton(text=mark("xray", tr(locale, 'protocol.xray')), callback_data="wizard_proto:xray")],
-        [InlineKeyboardButton(text=mark("awg", tr(locale, 'protocol.awg')), callback_data="wizard_proto:awg")],
+    rows = [[InlineKeyboardButton(text=tr(locale, 'protocol.' + code),
+                callback_data='wizard_proto:' + code,
+                style='primary' if code in protocols else None) for code in ('xray', 'awg')],
         [InlineKeyboardButton(text=tr(locale, 'back'), callback_data='wizard_back:public_host'),
-         InlineKeyboardButton(text=tr(locale, 'node.wizard.review'), callback_data="wizard_proto:done")]
-    ]
+         InlineKeyboardButton(text=tr(locale, 'node.wizard.review'), callback_data='wizard_proto:done', style='primary')]]
     await render(bot, chat_id, Screen(tr(locale, 'node.wizard.protocols.title'),
         (tr(locale, 'node.wizard.protocols.prompt'),
          tr(locale, 'node.wizard.protocols.xray_default')), embedded_buttons=True, navigation=True), rows, state, message_id)
@@ -435,7 +433,23 @@ async def render_wizard_summary(chat_id: int, bot: Bot, state: FSMContext,
     )
     rows = [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data='wizard_proto:back'),
              InlineKeyboardButton(text=tr(locale, 'node.wizard.save'), callback_data='wizard_save')]]
-    await render(bot, chat_id, Screen(tr(locale, 'node.wizard.summary.title'), lines, embedded_buttons=True, navigation=True),
+    def summary_table(fields):
+        return Table((tr(locale, 'account.rich.field'), tr(locale, 'account.rich.value')),
+            tuple((tr(locale, 'nodes.settings.field.' + field), str(value or '—')) for field, value in fields))
+    sections = (
+        Section(tr(locale, 'nodes.rich.name_region'), tables=(summary_table((
+            ('title', w.get('title')), ('region', w.get('region')), ('flag', w.get('flag')))),)),
+        Section(tr(locale, 'nodes.rich.connection'), tables=(summary_table((
+            ('transport', tr(locale, 'node.wizard.transport.value.' + w['transport'])),
+            ('public_host', w.get('public_host')))),)),
+        Section(tr(locale, 'nodes.rich.services'), lines=(
+            ', '.join(tr(locale, 'protocol.' + code) for code in w.get('protocols', [])),
+            tr(locale, 'node.wizard.summary.xray_transports', value=transports)) if 'xray' in w.get('protocols', []) else (
+            ', '.join(tr(locale, 'protocol.' + code) for code in w.get('protocols', [])),)),
+        Section(tr(locale, 'nodes.rich.technical'), collapsed=True, lines=(lines[0], lines[4])),
+    )
+    await render(bot, chat_id, Screen(tr(locale, 'node.wizard.summary.title'),
+                 (tr(locale, 'node.wizard.summary.note'),), sections=sections, embedded_buttons=True, navigation=True),
                  rows, state, message_id)
 
 @router.callback_query(F.data.startswith("wizard_proto:"))
@@ -665,18 +679,23 @@ async def show_node_connection(chat_id, user_id, message_id, node_key, bot, back
     node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=user_id)
     transport = node.get('transport')
     rows = [[InlineKeyboardButton(text=tr(locale, 'nodes.connection.local'),
-        callback_data=f'node_connection_set:{node_key}:local')],
-        [InlineKeyboardButton(text=tr(locale, 'nodes.connection.ssh'),
-        callback_data=f'node_connection_set:{node_key}:ssh')]]
+        callback_data=f'node_connection_set:{node_key}:local', style='primary' if transport == 'local' else None),
+        InlineKeyboardButton(text=tr(locale, 'nodes.connection.ssh'),
+        callback_data=f'node_connection_set:{node_key}:ssh', style='primary' if transport == 'ssh' else None)]]
     if transport == 'ssh':
         rows.append([InlineKeyboardButton(text=tr(locale, 'nodes.connection.edit_target'),
             callback_data=EditNodeFieldCallback(node_key=node_key, field='ssh_target').pack())])
     rows.append([InlineKeyboardButton(text=tr(locale, 'back'),
-        callback_data=NodeSettingsCallback(node_key=node_key).pack())])
+        callback_data=f'node_section:connection:{node_key}')])
     await render(bot, chat_id, Screen(tr(locale, 'nodes.connection.title'),
-        (tr(locale, 'nodes.connection.current', value=transport or '—'),
-         tr(locale, 'nodes.connection.target', value=node.get('ssh_target') or '—'),
-         tr(locale, 'nodes.connection.note')), embedded_buttons=True, navigation=True), rows, state, message_id)
+        sections=(Section(tr(locale, 'nodes.rich.connection'), tables=(Table(
+            (tr(locale, 'account.rich.field'), tr(locale, 'account.rich.value')),
+            ((tr(locale, 'nodes.settings.field.transport'), tr(locale, 'node.wizard.transport.value.' + transport) if transport in {'ssh', 'local'} else '—'),
+             (tr(locale, 'nodes.settings.field.ssh_target'), node.get('ssh_target') or '—'))),),
+            rows=tuple(tuple(row) for row in rows[:-1])),
+            Section(tr(locale, 'nodes.rich.about_connection'), collapsed=True,
+                lines=(tr(locale, 'nodes.connection.note'),))),
+        embedded_buttons=True, navigation=True), rows[-1:], state, message_id)
 
 
 @router.callback_query(F.data.startswith('node_connection:'))
@@ -751,9 +770,11 @@ async def edit_node_field_cb(query: CallbackQuery, callback_data: EditNodeFieldC
     current = node.get(field) if field in {'title', 'region', 'flag', 'notes'} else node['settings'].get(field)
     locale = normalize_locale((await state.get_data()).get('locale'))
     if field == 'awg_i1_preset':
-        rows = [[InlineKeyboardButton(text=label,
-                    callback_data=f'node_awg_preset:{preset}:{node_key}')]
+        choices = [InlineKeyboardButton(text=label,
+                    callback_data=f'node_awg_preset:{preset}:{node_key}',
+                    style='primary' if preset == (current or 'quic') else None)
                 for preset, label in (('quic', 'QUIC'), ('dns', 'DNS'), ('chaos', 'Chaos'))]
+        rows = [choices[:2], choices[2:]]
         rows.append([InlineKeyboardButton(text=tr(locale, 'back'),
             callback_data=f'node_section:awg:{node_key}')])
         await render(bot, query.message.chat.id,
@@ -764,8 +785,10 @@ async def edit_node_field_cb(query: CallbackQuery, callback_data: EditNodeFieldC
     await render(bot, query.message.chat.id,
         Screen(tr(locale, 'nodes.settings.edit_title',
                 field=tr(locale, 'nodes.settings.field.' + field)),
-            (tr(locale, 'nodes.settings.current_value', value=current or '—'),
-             tr(locale, 'nodes.settings.send_value'), tr(locale, 'nodes.settings.apply_note')), embedded_buttons=True, navigation=True),
+            (tr(locale, 'nodes.settings.send_value'),), sections=(
+                Section(tr(locale, 'nodes.rich.current_value'), lines=(str(current or '—'),)),
+                Section(tr(locale, 'nodes.rich.about_setting'), collapsed=True,
+                    lines=(tr(locale, 'nodes.settings.apply_note'),))), embedded_buttons=True, navigation=True),
         [[InlineKeyboardButton(text=tr(locale, 'back'),
             callback_data=f'node_section:{(await state.get_data()).get("edit_section", "general")}:{node_key}')]],
         state, query.message.message_id)
@@ -920,7 +943,11 @@ async def probe_node_cb(query: CallbackQuery, callback_data: ProbeNodeCallback, 
                 'nodes.probe.present' if observation['awg_config_present'] else 'nodes.probe.missing')),
             tr(locale, 'nodes.probe.note'))
         await render(bot, query.message.chat.id,
-            Screen(tr(locale, 'nodes.probe.title'), lines, embedded_buttons=True, navigation=True),
+            Screen(tr(locale, 'nodes.probe.title'), (lines[0],), sections=(
+                Section(tr(locale, 'nodes.rich.services'), lines=lines[3:5]),
+                Section(tr(locale, 'nodes.rich.technical'), collapsed=True, lines=lines[1:3]),
+                Section(tr(locale, 'nodes.rich.about_check'), collapsed=True, lines=(lines[5],)),
+            ), embedded_buttons=True, navigation=True),
             [[InlineKeyboardButton(text=tr(locale, 'nodes.diagnostics.open'),
                 callback_data=f'node_diagnostics:{node_key}')], *back], state,
             query.message.message_id)
@@ -961,7 +988,10 @@ async def node_diagnostics_cb(query: CallbackQuery, bot: Bot,
         value=result.get('runtime_version') or '—'))
     lines.append(tr(locale, 'nodes.diagnostics.note'))
     await render(bot, query.message.chat.id,
-        Screen(tr(locale, 'nodes.diagnostics.title'), tuple(lines), embedded_buttons=True, navigation=True),
+        Screen(tr(locale, 'nodes.diagnostics.title'), sections=(
+            Section(tr(locale, 'nodes.rich.services'), lines=tuple(lines[:4])),
+            Section(tr(locale, 'nodes.rich.technical'), collapsed=True, lines=tuple(lines[4:])),
+        ), embedded_buttons=True, navigation=True),
         [[InlineKeyboardButton(text=tr(locale, 'nodes.diagnostics.refresh'),
             callback_data=f'node_diagnostics:{node_key}')], back],
         state, query.message.message_id)
@@ -1048,8 +1078,8 @@ async def show_node_maintenance(chat_id, user_id, message_id, node_key, bot, bac
     lines = [tr(locale, 'nodes.maintenance.state',
         value=tr(locale, 'nodes.maintenance.status.' + st['status']))]
     target = st.get('verification_target')
-    lines.append(tr(locale, 'nodes.maintenance.target',
-        value=target or tr(locale, 'nodes.maintenance.not_bound')))
+    target_line = tr(locale, 'nodes.maintenance.target',
+        value=target or tr(locale, 'nodes.maintenance.not_bound'))
     if st['status'] == 'draining':
         lines.extend((tr(locale, 'nodes.maintenance.pending', count=st['pending_tasks']),
             tr(locale, 'nodes.maintenance.blocked', count=st['blocked_tasks']),
@@ -1062,12 +1092,12 @@ async def show_node_maintenance(chat_id, user_id, message_id, node_key, bot, bac
         rows = [[InlineKeyboardButton(text=tr(locale, 'nodes.maintenance.refresh'), callback_data=f'remove_progress:{node_key}')]]
     if (await state.get_data()).get('unreachable_removal_node') == node_key:
         rows.append([InlineKeyboardButton(text=tr(locale, 'nodes.maintenance.registry_only'), callback_data=ConfirmRegistryRemovalCallback(node_key=node_key).pack())])
-    rows.append([InlineKeyboardButton(text=tr(locale, 'back'), callback_data=AdminNodeCallback(node_key=node_key).pack())])
+    rows.append([InlineKeyboardButton(text=tr(locale, 'back'), callback_data=f'node_manage:{node_key}')])
     await render(bot, chat_id, Screen(tr(locale, 'nodes.maintenance.title'), tuple(lines),
-        tr(locale, 'nodes.maintenance.details_title'),
-        (tr(locale, 'nodes.maintenance.binding_note'),
-         tr(locale, 'nodes.maintenance.verification_note'),
-         tr(locale, 'nodes.maintenance.registry_note')), embedded_buttons=True, navigation=True), rows, state, message_id)
+        sections=(Section(tr(locale, 'nodes.maintenance.details_title'), collapsed=True,
+            lines=(target_line, tr(locale, 'nodes.maintenance.binding_note'),
+                tr(locale, 'nodes.maintenance.verification_note'), tr(locale, 'nodes.maintenance.registry_note'))),),
+        embedded_buttons=True, navigation=True), rows, state, message_id)
 
 @router.callback_query(BindLocalCallback.filter())
 async def bind_local_cb(query: CallbackQuery, callback_data: BindLocalCallback, bot: Bot, backend: BackendClient, state: FSMContext):
@@ -1139,7 +1169,7 @@ async def confirm_node_drain_cb(query: CallbackQuery, callback_data: ConfirmNode
              tr(locale, 'nodes.maintenance.drain_runtime'),
              tr(locale, 'nodes.maintenance.drain_verify')), embedded_buttons=True, navigation=True),
         [[InlineKeyboardButton(text=tr(locale, 'nodes.maintenance.drain_confirm'),
-            callback_data=DrainNodeCallback(node_key=node_key).pack())],
+            callback_data=DrainNodeCallback(node_key=node_key).pack(), style='danger')],
          [InlineKeyboardButton(text=tr(locale, 'back'),
             callback_data=NodeMaintenanceCallback(node_key=node_key).pack())]],
         state, query.message.message_id)
@@ -1191,7 +1221,7 @@ async def confirm_registry_removal_cb(query: CallbackQuery, callback_data: Confi
              tr(locale, 'nodes.maintenance.registry_runtime'),
              tr(locale, 'nodes.maintenance.registry_use')), embedded_buttons=True, navigation=True),
         [[InlineKeyboardButton(text=tr(locale, 'nodes.maintenance.registry_confirm'),
-            callback_data=RetireRegistryCallback(node_key=node_key).pack())],
+            callback_data=RetireRegistryCallback(node_key=node_key).pack(), style='danger')],
          [InlineKeyboardButton(text=tr(locale, 'back'),
             callback_data=NodeMaintenanceCallback(node_key=node_key).pack())]],
         state, query.message.message_id)
@@ -1304,8 +1334,14 @@ async def show_rollout_status(chat_id, user_id, message_id, task_id, bot, backen
     lines = [tr(locale, 'nodes.rollout.' + status)]
     if task.get('failure_code') == 'build_resources':
         lines.append(tr(locale, 'nodes.rollout.build_resources'))
+    if task.get('failure_code') == 'ssh_prerequisites':
+        lines.append(tr(locale, 'nodes.rollout.ssh_prerequisites'))
+    if status in {'awaiting_executor', 'running'}:
+        lines.append(tr(locale, 'nodes.rich.independent'))
     await render(bot, chat_id, Screen(tr(locale, 'nodes.rollout.title'),
-        tuple(lines), embedded_buttons=True, navigation=True), rows, state, message_id)
+        tuple(lines), sections=(Section(tr(locale, 'nodes.rich.technical'), collapsed=True,
+            lines=(tr(locale, 'nodes.rich.operation_id', value=task_id),)),),
+        embedded_buttons=True, navigation=True), rows, state, message_id)
 
 
 @router.callback_query(F.data.startswith('rust_offer:'))

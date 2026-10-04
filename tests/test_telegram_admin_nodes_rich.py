@@ -128,3 +128,91 @@ class AdminNodeRichTests(IsolatedAsyncioTestCase):
         self.assertEqual(screen.sections[1].title, 'Europe')
         self.assertTrue(screen.sections[1].sections[0].rows[0][0].text.startswith('🇷🇺 Moscow #1'))
         self.assertEqual(rows[-1][0].callback_data, 'admin_menu')
+
+    async def test_wizard_choices_and_review_keep_draft_and_navigation(self):
+        self.data['wizard_data'] = {**self.node, 'public_host': 'node.example.test'}
+        for locale in ('en', 'ru'):
+            self.data['locale'] = locale
+            with patch.object(nodes, 'render', new_callable=AsyncMock) as draw:
+                await nodes.render_wizard_transport(123, self.bot, self.state, 77)
+            self.assertEqual([b.callback_data for b in draw.call_args.args[3][0]],
+                             ['wizard_transport:ssh', 'wizard_transport:local'])
+            with patch.object(nodes, 'render', new_callable=AsyncMock) as draw:
+                await nodes.render_wizard_protocols(123, self.bot, self.state, 77)
+            rows = draw.call_args.args[3]
+            self.assertEqual(len(rows[0]), 2)
+            self.assertTrue(all(b.style == 'primary' for b in rows[0]))
+            self.assertEqual([b.callback_data for b in rows[-1]], ['wizard_back:public_host', 'wizard_proto:done'])
+            with patch.object(nodes, 'render', new_callable=AsyncMock) as draw:
+                await nodes.render_wizard_summary(123, self.bot, self.state, 77)
+            screen, rows = draw.call_args.args[2:4]
+            self.assertEqual(len(screen.sections), 4)
+            self.assertTrue(screen.sections[-1].collapsed)
+            self.assertIn('private.example.test', screen.sections[-1].lines[-1])
+            self.assertEqual(rows[-1][-1].callback_data, 'wizard_save')
+            self.assertEqual(self.data['wizard_data']['key'], 'msk1')
+            screen.rich(rows)
+
+    async def test_port_result_has_table_and_collapsed_operation_identity(self):
+        job = {'id': 'job1', 'node_key': 'msk1', 'status': 'succeeded', 'action': 'check_ports',
+               'result': {'ports': [{'port': 443, 'protocol': 'tcp', 'status': 'free'}]}}
+        for locale in ('en', 'ru'):
+            self.data['locale'] = locale
+            with patch.object(tools, 'render', new_callable=AsyncMock) as draw:
+                await tools.show_job(123, 123, 77, job, self.bot, self.state)
+            screen, rows = draw.call_args.args[2:4]
+            self.assertEqual(screen.sections[0].tables[0].rows[0][:2], ('443', 'tcp'))
+            self.assertTrue(screen.sections[-1].collapsed)
+            self.assertIn('job1', screen.sections[-1].lines[0])
+            self.assertEqual(rows[-1][0].callback_data, 'admin_node:msk1')
+            screen.rich(rows)
+
+    async def test_rollout_progress_retains_refresh_and_collapses_identifier(self):
+        backend = SimpleNamespace(agent_rollout=AsyncMock(return_value={
+            'id': 'task1', 'node_key': 'msk1', 'status': 'running'}))
+        for locale in ('en', 'ru'):
+            self.data['locale'] = locale
+            with patch.object(nodes, 'render', new_callable=AsyncMock) as draw:
+                await nodes.show_rollout_status(123, 123, 77, 'task1', self.bot, backend, self.state)
+            screen, rows = draw.call_args.args[2:4]
+            self.assertIn(tr(locale, 'nodes.rich.independent'), screen.lines)
+            self.assertTrue(screen.sections[0].collapsed)
+            self.assertIn('rollout_status:task1', self.callbacks(draw))
+            screen.rich(rows)
+
+    async def test_unreachable_removal_keeps_recovery_and_registry_only_choice(self):
+        from telegram_client.backend import BackendError
+        backend = SimpleNamespace(remove_node_step=AsyncMock(side_effect=BackendError('node_agent_unavailable', 503)))
+        with patch.object(tools, 'render', new_callable=AsyncMock) as draw:
+            await tools.advance_removal(123, 123, 77, 'msk1', self.bot, backend, self.state)
+        screen, rows = draw.call_args.args[2:4]
+        self.assertIn(tr('en', 'node_tools.unreachable'), screen.lines)
+        self.assertIn('remove_retry:msk1', self.callbacks(draw))
+        self.assertTrue(any('registry' in value for value in self.callbacks(draw)))
+        self.assertEqual(self.data['unreachable_removal_node'], 'msk1')
+        screen.rich(rows)
+
+    async def test_connection_choices_return_to_connection_section(self):
+        with patch.object(nodes, 'render', new_callable=AsyncMock) as draw:
+            await nodes.show_node_connection(123, 123, 77, 'msk1', self.bot, self.backend, self.state)
+        screen, rows = draw.call_args.args[2:4]
+        choices = screen.sections[0].rows[0]
+        self.assertEqual(len(choices), 2)
+        self.assertEqual(choices[1].style, 'primary')
+        self.assertEqual(rows[-1][0].callback_data, 'node_section:connection:msk1')
+        self.assertTrue(screen.sections[1].collapsed)
+        screen.rich(rows)
+
+    async def test_runtime_view_keeps_versions_visible_and_commits_collapsed(self):
+        self.backend.node_services.return_value = {
+            'runtime_version': '0.4.3-alpha.30', 'runtime_commit': 'old1234',
+            'desired_runtime_version': '0.4.3-alpha.31', 'desired_runtime_commit': 'new1234',
+            'runtime_drift': True}
+        self.query.data = 'node_view:runtime:msk1'
+        with patch.object(tools, 'render', new_callable=AsyncMock) as draw:
+            await tools.view_cb(self.query, self.bot, self.backend, self.state)
+        screen, rows = draw.call_args.args[2:4]
+        self.assertEqual(screen.sections[0].tables[0].rows[0][1], '0.4.3-alpha.30')
+        self.assertTrue(screen.sections[1].collapsed)
+        self.assertIn('node_action:sync_runtime:msk1', self.callbacks(draw))
+        screen.rich(rows)

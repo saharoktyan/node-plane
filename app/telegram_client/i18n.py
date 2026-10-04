@@ -1957,3 +1957,27 @@ CATALOG['en'].update({'nodes.rich.installation': 'Installation and checks', 'nod
     'nodes.rich.pending_access': 'Pending', 'nodes.rich.failed': 'Needs attention', 'nodes.rich.identifiers': 'Identifiers'})
 CATALOG['ru'].update({'nodes.rich.installation': 'Установка и проверка', 'nodes.rich.ready': 'Готово',
     'nodes.rich.pending_access': 'В работе', 'nodes.rich.failed': 'Требуют внимания', 'nodes.rich.identifiers': 'Идентификаторы'})
+
+CATALOG['en'].update({'nodes.rich.port': 'Port', 'nodes.rich.protocol': 'Protocol',
+    'nodes.rich.result': 'Result', 'nodes.rich.operation_id': 'Operation ID: {value}'})
+CATALOG['ru'].update({'nodes.rich.port': 'Порт', 'nodes.rich.protocol': 'Протокол',
+    'nodes.rich.result': 'Результат', 'nodes.rich.operation_id': 'ID операции: {value}'})
+
+CATALOG['en'].update({'nodes.rich.about_check': 'About this check',
+    'nodes.rich.next_step': 'Next step',
+    'nodes.rich.independent': 'The operation continues when you leave this screen. Refresh to check progress.'})
+CATALOG['ru'].update({'nodes.rich.about_check': 'Об этой проверке',
+    'nodes.rich.next_step': 'Следующий шаг',
+    'nodes.rich.independent': 'Операция продолжится после выхода с экрана. Обновите экран, чтобы проверить ход выполнения.'})
+
+CATALOG['en'].update({'nodes.rich.about_connection': 'About the connection',
+    'nodes.rich.current_value': 'Current value', 'nodes.rich.about_setting': 'Applying this setting',
+    'nodes.rollout.ssh_prerequisites': 'The SSH host needs root access or passwordless sudo, systemd and sha256sum. Check the SSH user and permissions, then retry agent setup.'})
+CATALOG['ru'].update({'nodes.rich.about_connection': 'О подключении',
+    'nodes.rich.current_value': 'Текущее значение', 'nodes.rich.about_setting': 'Применение настройки',
+    'nodes.rollout.ssh_prerequisites': 'На SSH-ноде нужны root или sudo без пароля, systemd и sha256sum. Проверьте пользователя SSH и его права, затем повторите установку агента.'})
+
+CATALOG['en'].update({'nodes.rich.version': 'Version', 'nodes.rich.commit': 'Commit',
+    'nodes.rich.installed': 'Installed', 'nodes.rich.target': 'Target'})
+CATALOG['ru'].update({'nodes.rich.version': 'Версия', 'nodes.rich.commit': 'Коммит',
+    'nodes.rich.installed': 'Установлено', 'nodes.rich.target': 'Целевая версия'})
