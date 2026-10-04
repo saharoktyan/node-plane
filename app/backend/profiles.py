@@ -202,9 +202,9 @@ class ProfileRepository:
         with self.db.connect() as conn:
             profile = conn.execute('''SELECT id, display_name, frozen, expires_at, created_at
                 FROM backend_profiles WHERE id = ?''', (profile_id,)).fetchone()
-            rows = conn.execute('''SELECT n.key, n.title, n.flag, g.protocol
+            rows = conn.execute('''SELECT n.key, n.title, n.region, n.flag, g.protocol
                 FROM backend_grants g JOIN backend_nodes n ON n.key = g.node_key
-                WHERE g.profile_id = ? ORDER BY n.title, n.key, g.protocol''',
+                WHERE g.profile_id = ? ORDER BY n.region, n.title, n.key, g.protocol''',
                 (profile_id,)).fetchall()
             activity = conn.execute('''SELECT COUNT(*) AS issued_count,
                 MAX(created_at) AS last_issued_at FROM backend_config_issuances
@@ -213,7 +213,7 @@ class ProfileRepository:
         nodes = {}
         for row in rows:
             entry = nodes.setdefault(row['key'], {'key': row['key'], 'title': row['title'],
-                'flag': row['flag'], 'protocols': []})
+                'flag': row['flag'], 'region': row['region'], 'protocols': []})
             entry['protocols'].append(row['protocol'])
         return {'profile_id': profile_id, 'display_name': profile['display_name'],
             'frozen': bool(profile['frozen']), 'expires_at': profile['expires_at'],
@@ -230,7 +230,14 @@ class ProfileRepository:
         now = datetime.now(timezone.utc).isoformat()
         with self.db.connect() as conn:
             rows = conn.execute('''SELECT n.key, n.title, n.region, n.flag, n.protocols_json, n.xray_transports_json
-                FROM backend_nodes n WHERE n.enabled = 1 AND n.key > ? AND EXISTS (
+                FROM backend_nodes n WHERE n.enabled = 1 AND n.key > ?
+                AND n.desired_revision = n.applied_revision
+                AND NOT EXISTS (SELECT 1 FROM backend_node_drains d WHERE d.node_key = n.key)
+                AND NOT EXISTS (SELECT 1 FROM backend_node_jobs j WHERE j.node_key = n.key
+                    AND j.status IN ('awaiting_executor', 'running', 'blocked'))
+                AND NOT EXISTS (SELECT 1 FROM backend_node_settings_tasks t WHERE t.node_key = n.key
+                    AND t.status IN ('awaiting_executor', 'running', 'blocked'))
+                AND EXISTS (
                     SELECT 1 FROM backend_grants g JOIN backend_profiles p ON p.id = g.profile_id
                     WHERE g.node_key = n.key AND p.owner_account_id = ? AND p.frozen = 0
                     AND (CAST(? AS TEXT) IS NULL OR p.id = ?)

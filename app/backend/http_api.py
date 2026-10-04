@@ -149,6 +149,7 @@ class MemberProfileNode(BaseModel):
     key: str
     title: str
     flag: str
+    region: str
     protocols: list[Literal['awg', 'xray']]
 
 
@@ -160,9 +161,19 @@ class ProfileTrafficItem(BaseModel):
     last_sample_at: str
 
 
+class ProfileNodeTrafficItem(BaseModel):
+    node_key: str
+    protocol: Literal['awg', 'xray']
+    uplink_bytes: int
+    downlink_bytes: int
+    status: Literal['current', 'unknown']
+
+
 class ProfileTrafficSummary(BaseModel):
     status: Literal['consent_required', 'waiting', 'current', 'unknown']
     items: list[ProfileTrafficItem]
+    month: str | None = None
+    nodes: list[ProfileNodeTrafficItem] = []
 
 
 class MemberProfileSummary(BaseModel):

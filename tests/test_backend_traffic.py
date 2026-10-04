@@ -3,6 +3,7 @@
 import base64
 import json
 import unittest
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 from backend.authorization import (
@@ -91,6 +92,9 @@ class TrafficTests(unittest.TestCase):
         )
         self.assertEqual(summary.status_code, 200, summary.text)
         self.assertEqual(summary.json()["traffic"]["items"][0]["uplink_bytes"], 100)
+        self.assertEqual(summary.json()['traffic']['nodes'][0]['node_key'], 'n1')
+        self.assertEqual(summary.json()['traffic']['nodes'][0]['downlink_bytes'], 250)
+        self.assertEqual(summary.json()['traffic']['month'], datetime.now(timezone.utc).strftime('%Y-%m'))
 
     def test_restart_reset_in_each_direction_and_new_epoch(self):
         self.collect()
@@ -124,8 +128,47 @@ class TrafficTests(unittest.TestCase):
         self.driver.error = True
         self.collect()
         summary = self.service.summary(self.admin.id, self.profile_id)
-        self.assertEqual(summary, {"status": "unknown", "items": []})
+        self.assertEqual(summary['status'], 'unknown')
+        self.assertEqual(summary['items'], [])
+        self.assertEqual(summary['nodes'], [])
         self.assertIsNone(self.row()["last_sample_at"])
+
+    def test_month_rollover_excludes_old_totals_and_preserves_live_baseline(self):
+        self.collect()
+        self.driver.up, self.driver.down = 1100, 2250
+        self.collect()
+        self.db.connection.execute("UPDATE backend_traffic_usage SET period_month='2000-01'")
+        self.db.connection.commit()
+        summary = self.service.summary(self.admin.id, self.profile_id)
+        self.assertEqual(summary['month'], datetime.now(timezone.utc).strftime('%Y-%m'))
+        self.assertEqual(summary['items'][0]['uplink_bytes'], 0)
+        self.assertEqual(summary['nodes'][0]['status'], 'unknown')
+        self.driver.up, self.driver.down = 1150, 2300
+        self.collect()
+        self.assertEqual((self.row()['uplink_bytes'], self.row()['downlink_bytes']), (50, 50))
+        summary = self.service.summary(self.admin.id, self.profile_id)
+        self.assertEqual(summary['nodes'][0]['node_key'], 'n1')
+        self.assertEqual(summary['nodes'][0]['uplink_bytes'], 50)
+
+    def test_lifetime_migration_does_not_label_old_usage_as_monthly(self):
+        self.collect()
+        self.db.connection.execute("UPDATE backend_traffic_usage SET period_month=NULL,uplink_bytes=999999")
+        self.db.connection.commit()
+        self.driver.up = 1050
+        self.collect()
+        self.assertEqual(self.row()['uplink_bytes'], 50)
+
+    def test_both_permissions_are_required_for_collection_and_display(self):
+        self.settings.update_traffic_consent(self.actor, False)
+        self.collect()
+        self.assertEqual(self.driver.calls, [])
+        self.assertEqual(self.service.summary(self.admin.id, self.profile_id),
+                         {'status': 'consent_required', 'items': []})
+        self.settings.update_traffic_consent(self.actor, True)
+        self.settings.update_traffic_policy(self.actor, False)
+        self.collect()
+        self.assertEqual(self.driver.calls, [])
+        self.assertIsNone(self.service.summary(self.admin.id, self.profile_id))
 
     def test_opt_out_purges_history_and_an_in_flight_response_cannot_revive_it(self):
         self.collect()

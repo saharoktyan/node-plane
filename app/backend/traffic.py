@@ -39,7 +39,10 @@ class TrafficService:
                 uplink_bytes BIGINT NOT NULL DEFAULT 0, downlink_bytes BIGINT NOT NULL DEFAULT 0,
                 epoch TEXT, identity TEXT, last_uplink BIGINT, last_downlink BIGINT,
                 tracked_since TEXT, last_sample_at TEXT, status TEXT NOT NULL,
+                period_month TEXT,
                 PRIMARY KEY(profile_id,node_key,protocol))""")
+            if getattr(self.db, 'backend_name', '') == 'postgres':
+                conn.execute('ALTER TABLE backend_traffic_usage ADD COLUMN IF NOT EXISTS period_month TEXT')
 
     @staticmethod
     def _enabled(conn):
@@ -212,8 +215,10 @@ class TrafficService:
                     and value >= previous[field]
                     else value
                 )
-        up_total = (previous["uplink_bytes"] if previous else 0) + increments[0]
-        down_total = (previous["downlink_bytes"] if previous else 0) + increments[1]
+        month = timestamp[:7]
+        same_month = previous and previous['period_month'] == month
+        up_total = (previous["uplink_bytes"] if same_month else 0) + increments[0]
+        down_total = (previous["downlink_bytes"] if same_month else 0) + increments[1]
         if max(up_total, down_total) > MAX_COUNTER:
             conn.execute(
                 """UPDATE backend_traffic_usage SET status='unknown'
@@ -224,7 +229,7 @@ class TrafficService:
         conn.execute(
             """UPDATE backend_traffic_usage SET uplink_bytes=?,downlink_bytes=?,
             epoch=?,identity=?,last_uplink=?,last_downlink=?,
-            tracked_since=COALESCE(tracked_since,?),last_sample_at=?,status='current'
+            tracked_since=?,last_sample_at=?,status='current',period_month=?
             WHERE profile_id=? AND node_key=? AND protocol=?""",
             (
                 up_total,
@@ -233,8 +238,9 @@ class TrafficService:
                 observation["identity"],
                 up,
                 down,
+                previous['tracked_since'] if same_month and previous['tracked_since'] else timestamp,
                 timestamp,
-                timestamp,
+                month,
                 *key,
             ),
         )
@@ -339,6 +345,13 @@ class TrafficService:
                 WHERE u.profile_id=? AND u.account_id=? ORDER BY u.protocol,u.node_key""",
                 (profile_id, account_id),
             ).fetchall()
+            month = datetime.now(timezone.utc).strftime('%Y-%m')
+            # Historical lifetime totals cannot be attributed to a month. Keep
+            # baselines, but expose only counters collected for this UTC month.
+            rows = [dict(r) for r in rows]
+            for row in rows:
+                if row['period_month'] != month:
+                    row['uplink_bytes'] = row['downlink_bytes'] = 0
             items = []
             for protocol in ("awg", "xray"):
                 group = [
@@ -357,6 +370,7 @@ class TrafficService:
             stale = datetime.now(timezone.utc) - timedelta(minutes=15)
             unknown = any(
                 r["status"] != "current"
+                or r['period_month'] != month
                 or not r["last_sample_at"]
                 or datetime.fromisoformat(r["last_sample_at"]) < stale
                 for r in rows
@@ -364,4 +378,12 @@ class TrafficService:
             return {
                 "status": "unknown" if unknown else "current" if rows else "waiting",
                 "items": items,
+                "month": month,
+                "nodes": [{
+                    'node_key': r['node_key'], 'protocol': r['protocol'],
+                    'uplink_bytes': r['uplink_bytes'], 'downlink_bytes': r['downlink_bytes'],
+                    'status': 'current' if r['status'] == 'current' and r['last_sample_at']
+                        and datetime.fromisoformat(r['last_sample_at']) >= stale
+                        and r['period_month'] == month else 'unknown',
+                } for r in rows if r['tracked_since']],
             }

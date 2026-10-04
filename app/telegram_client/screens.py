@@ -7,7 +7,7 @@ from aiogram.types import (InputRichBlockDetails, InputRichBlockParagraph,
     InputRichBlockSectionHeading, InputRichMessage, InputRichBlockPhoto,
     InputRichBlockDocument, InputMediaPhoto, InputMediaDocument, BufferedInputFile,
     RichTextCode, MessageEntity)
-from aiogram.types import InputRichBlockButtons, RichMessageButton, InlineKeyboardButton
+from aiogram.types import InputRichBlockButtons, RichMessageButton, InlineKeyboardButton, InputRichBlockDivider
 
 
 def rich_buttons(rows, *, navigation=False):
@@ -23,13 +23,20 @@ class Section:
     lines: tuple[str, ...] = ()
     rows: tuple[tuple[InlineKeyboardButton, ...], ...] = ()
     collapsed: bool = False
+    divider_after: bool = False
+    sections: tuple['Section', ...] = ()
+    heading_size: int = 3
+    is_open: bool = False
 
     def rich(self):
         blocks = [InputRichBlockParagraph(text=line) for line in self.lines if line]
+        for section in self.sections:
+            blocks.extend(section.rich())
         blocks.extend(rich_buttons(self.rows))
         if self.collapsed:
-            return [InputRichBlockDetails(summary=self.title, blocks=blocks, is_open=False)]
-        return [InputRichBlockSectionHeading(text=self.title, size=3), *blocks]
+            return [InputRichBlockDetails(summary=self.title, blocks=blocks, is_open=self.is_open)]
+        return [InputRichBlockSectionHeading(text=self.title, size=self.heading_size), *blocks,
+                *([InputRichBlockDivider()] if self.divider_after else [])]
 
 
 @dataclass(frozen=True)
@@ -66,13 +73,23 @@ class Screen:
             blocks.append(InputRichBlockDetails(summary=self.details_title,
                 blocks=[InputRichBlockParagraph(text=line) for line in self.details_lines]))
         if self.embedded_buttons:
-            blocks.extend(rich_buttons(rows, navigation=self.navigation))
+            for index, row in enumerate(rows):
+                back = bool(row and len(row) == 1 and index == len(rows) - 1 and
+                            (self.navigation or row[0].text in {'🔙 Back', '🔙 Назад'}))
+                if back and blocks[-1].type != 'divider':
+                    blocks.append(InputRichBlockDivider())
+                blocks.extend(rich_buttons([row], navigation=back))
+        elif rows and len(rows[-1]) == 1 and rows[-1][0].text in {'🔙 Back', '🔙 Назад'}:
+            blocks.append(InputRichBlockDivider())
         return InputRichMessage(blocks=blocks, skip_entity_detection=True)
 
     def plain(self) -> str:
         lines = [self.title, *self.lines]
-        for section in self.sections:
-            lines.extend((section.title, *section.lines))
+        def append_sections(sections):
+            for section in sections:
+                lines.extend((section.title, *section.lines))
+                append_sections(section.sections)
+        append_sections(self.sections)
         if self.uri:
             lines.append(self.uri)
         if self.details_title and self.details_lines:
@@ -80,7 +97,11 @@ class Screen:
         return '\n\n'.join(line for line in lines if line)
 
     def fallback_rows(self, rows):
-        return [list(row) for section in self.sections for row in section.rows] + list(rows)
+        def section_rows(sections):
+            for section in sections:
+                yield from section_rows(section.sections)
+                yield from (list(row) for row in section.rows)
+        return [*section_rows(self.sections), *rows]
 
     def plain_entities(self) -> list[MessageEntity] | None:
         if not self.uri:

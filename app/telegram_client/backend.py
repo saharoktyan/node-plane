@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from uuid import uuid4
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import quote, urlencode, urlsplit
 
 import aiohttp
 import logging
@@ -179,8 +179,18 @@ class BackendClient:
         return await self.request('GET', '/api/v1/me/nodes?limit=100', telegram_user_id=telegram_user_id)
 
     async def profile_nodes(self, telegram_user_id: int, profile_id: str) -> dict:
-        return await self.request('GET', f'/api/v1/profiles/{profile_id}/nodes?limit=100',
-                                  telegram_user_id=telegram_user_id)
+        path = f'/api/v1/profiles/{profile_id}/nodes?limit=100'
+        page = await self.request('GET', path, telegram_user_id=telegram_user_id)
+        items = list(page['items'])
+        seen = set()
+        while cursor := page.get('next_cursor'):
+            if cursor in seen:
+                raise BackendError('invalid_node_pagination', 502)
+            seen.add(cursor)
+            page = await self.request('GET', path + '&cursor=' + quote(cursor, safe=''),
+                                      telegram_user_id=telegram_user_id)
+            items.extend(page['items'])
+        return {'items': items, 'next_cursor': None}
 
     async def request_access(self, telegram_user_id: int) -> dict:
         return await self.request('POST', '/api/v1/me/access-requests',

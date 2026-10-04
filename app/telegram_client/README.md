@@ -48,8 +48,19 @@ AWG includes both downloadable `.vpn` and `.conf` files. Import labels use
 `Server name Protocol [Transport] · Profile name`; AWG passes this description
 to the node's converter and VLESS stores it in the URI fragment.
 Server sections provide protocol buttons directly, without another selection
-screen. Settings place each action below its current value. Navigation sits at
-the bottom as link-style buttons. When Rich Message delivery is rejected by
+screen. Both Get config and Profile sort servers by region and name, and place
+each region above its servers as a heading. Server headings contain only names,
+with dividers between servers and before Back. Lists show ten servers per page;
+arrow-only navigation and the page number appear only with multiple pages.
+Profile pagination lives inside its server accordion, keeps it open after a page
+change, and retains the account/statistics section above it. Get config remembers
+the page when returning from a protocol or config screen. Backend cursor pages
+are combined before sorting so lists beyond 100 servers are not truncated.
+VLESS offers XHTTP and TCP in a single row. The Profile screen
+shows account details and full statistics immediately, followed by a collapsed
+read-only list of granted servers; config selection lives in Get config.
+Settings place each action below its current value. Navigation sits at
+the bottom as link-style buttons, separated from content by a divider. When Rich Message delivery is rejected by
 Telegram, the screen falls back to plain text with equivalent inline navigation;
 files and QR are then sent separately. All member text is localized in RU/EN.
 A real Telegram client acceptance pass on Android, iOS, and Desktop is still

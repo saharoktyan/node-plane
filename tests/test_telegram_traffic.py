@@ -81,6 +81,7 @@ class TelegramTrafficTests(IsolatedAsyncioTestCase):
             "last_issued_at": None,
             "traffic": {
                 "status": "unknown",
+                "month": "2026-09",
                 "items": [
                     {
                         "protocol": "xray",
@@ -107,10 +108,9 @@ class TelegramTrafficTests(IsolatedAsyncioTestCase):
             self.assertIn(
                 tr(
                     locale,
-                    "traffic.totals",
-                    protocol="Xray",
-                    upload="1.0 KiB",
-                    download="2.0 KiB",
+                    "traffic.month_total",
+                    month="2026-09",
+                    total="3.0 KiB",
                 ),
                 draw.call_args.args[2].lines,
             )

@@ -33,6 +33,35 @@ class Action:
 
 
 actions: dict[str, Action] = {}
+SERVERS_PER_PAGE = 10
+
+
+def server_page(nodes, page):
+    ordered = sorted(nodes, key=lambda node: (
+        node.get('region', '').casefold(), node['title'].casefold(), node['key']))
+    pages = max(1, (len(ordered) + SERVERS_PER_PAGE - 1) // SERVERS_PER_PAGE)
+    page = max(0, min(page, pages - 1))
+    return ordered[page * SERVERS_PER_PAGE:(page + 1) * SERVERS_PER_PAGE], page, pages
+
+
+def region_sections(nodes, locale, make_section):
+    groups = {}
+    for node in nodes:
+        region = node.get('region') or tr(locale, 'nodes.region_unknown')
+        groups.setdefault(region, []).append(make_section(node))
+    return tuple(Section(region, sections=tuple(sections)) for region, sections in groups.items())
+
+
+def server_pagination(user_id, locale, page, pages, action, *args):
+    if pages <= 1:
+        return ()
+    row = []
+    if page > 0:
+        row.append(button(user_id, tr(locale, 'pagination.previous'), action, *args, str(page - 1)))
+    row.append(button(user_id, tr(locale, 'pagination.page', page=page + 1, pages=pages), 'page_number'))
+    if page + 1 < pages:
+        row.append(button(user_id, tr(locale, 'pagination.next'), action, *args, str(page + 1)))
+    return (tuple(row),)
 
 
 def button(owner_id: int, label: str, name: str, *args: str) -> InlineKeyboardButton:
@@ -262,9 +291,11 @@ async def show_account_info(chat_id: int, user_id: int, message_id: int,
 async def show_account_profile(chat_id: int, user_id: int, message_id: int,
                                profile_id: str, bot: Bot, backend: BackendClient,
                                state: FSMContext, *, username: str | None = None,
-                               back_to: str = 'home') -> None:
+                               back_to: str = 'home', page_index: int = 0,
+                               servers_open: bool = False) -> None:
     locale = normalize_locale((await state.get_data()).get('locale'))
     summary = await backend.member_profile_summary(user_id, profile_id)
+    nodes, page_index, pages = server_page(summary['nodes'], page_index)
     status_key = ('profile.frozen' if summary['frozen'] else
                   'profile.expired' if summary['expired'] else 'profile.active')
     status = tr(locale, status_key)
@@ -272,22 +303,20 @@ async def show_account_profile(chat_id: int, user_id: int, message_id: int,
              tr(locale, 'account.status', status=status)]
     if summary.get('expires_at'):
         lines.append(tr(locale, 'account.profile_expires', value=summary['expires_at'][:10]))
-    sections = [Section(tr(locale, 'ui.account_details'),
-        (tr(locale, 'account.telegram_id', id=user_id),
-         tr(locale, 'account.username', value='@' + username if username else '—')), collapsed=True)]
-    for node in summary['nodes']:
-        sections.append(Section(f"{node['flag']} {node['title']}".strip(),
-            rows=(tuple(button(user_id, tr(locale, 'protocol.' + kind), 'protocol',
-                profile_id, node['key'], kind) for kind in node['protocols']),)))
-    if not summary['nodes']:
-        lines.append(tr(locale, 'account.access_empty'))
-    sections.append(Section(tr(locale, 'account.statistics'),
-        (tr(locale, 'account.stats_nodes', count=summary.get('node_count', len(summary['nodes']))),
-         tr(locale, 'account.stats_issued', count=summary.get('issued_count', 0))), rows=((
-        button(user_id, tr(locale, 'ui.statistics_details'), 'account_stats', profile_id, back_to),),),
-        collapsed=True))
+    lines.extend((tr(locale, 'account.telegram_id', id=user_id),
+                  tr(locale, 'account.username', value='@' + username if username else '—')))
+    sections = (
+        Section(tr(locale, 'account.statistics'), profile_statistics(summary, locale)),
+        Section(tr(locale, 'account.access_title'),
+            () if summary['nodes'] else (tr(locale, 'account.access_empty'),),
+            collapsed=True, is_open=servers_open,
+            sections=region_sections(nodes, locale, lambda node: Section(node['title'],
+                profile_node_traffic(summary, node, locale), divider_after=True, heading_size=4)),
+            rows=server_pagination(user_id, locale, page_index, pages,
+                'account_nodes_page', profile_id, back_to)),
+    )
     await render(bot, chat_id, Screen(tr(locale, 'account.profile_title'), tuple(lines),
-        sections=tuple(sections), embedded_buttons=True, navigation=True),
+        sections=sections, embedded_buttons=True, navigation=True),
         [[button(user_id, tr(locale, 'back'), back_to)]], state, message_id)
 
 
@@ -297,30 +326,52 @@ async def show_account_stats(chat_id: int, user_id: int, message_id: int,
                              state: FSMContext, *, back_to: str = 'home') -> None:
     locale = normalize_locale((await state.get_data()).get('locale'))
     summary = await backend.member_profile_summary(user_id, profile_id)
-    lines = (tr(locale, 'account.profile_name', name=summary['display_name']),
-             tr(locale, 'account.member_since',
+    lines = profile_statistics(summary, locale)
+    await render(bot, chat_id, Screen(tr(locale, 'account.stats_title'), lines, embedded_buttons=True, navigation=True),
+        [[button(user_id, tr(locale, 'back'), 'account_profile', profile_id, back_to)]],
+        state, message_id)
+
+
+def profile_statistics(summary: dict, locale: str) -> tuple[str, ...]:
+    lines = (tr(locale, 'account.member_since',
                 value=(summary.get('created_at') or '')[:10] or '—'),
-             tr(locale, 'account.stats_nodes', count=summary['node_count']),
-             tr(locale, 'account.stats_protocols', count=summary['protocol_count']),
-             tr(locale, 'account.stats_xray', count=summary['xray_count']),
-             tr(locale, 'account.stats_awg', count=summary['awg_count']),
-             tr(locale, 'account.stats_issued', count=summary['issued_count']),
+             tr(locale, 'account.stats_nodes', count=summary.get('node_count', len(summary.get('nodes', [])))),
+             tr(locale, 'account.stats_protocols', count=summary.get('protocol_count', 0)),
+             tr(locale, 'account.stats_xray', count=summary.get('xray_count', 0)),
+             tr(locale, 'account.stats_awg', count=summary.get('awg_count', 0)),
+             tr(locale, 'account.stats_issued', count=summary.get('issued_count', 0)),
              tr(locale, 'account.stats_last',
                 value=(summary.get('last_issued_at') or '')[:16].replace('T', ' ') or '—'))
     traffic = summary.get('traffic')
     if traffic:
         lines += (tr(locale, 'traffic.status.' + traffic['status']),)
-        for item in traffic['items']:
-            lines += (tr(locale, 'traffic.totals',
-                         protocol='AmneziaWG' if item['protocol'] == 'awg' else 'Xray',
-                         upload=_traffic_bytes(item['uplink_bytes']),
-                         download=_traffic_bytes(item['downlink_bytes'])),
-                      tr(locale, 'traffic.sample',
-                         since=item['tracked_since'][:16].replace('T', ' '),
-                         at=item['last_sample_at'][:16].replace('T', ' ')))
-    await render(bot, chat_id, Screen(tr(locale, 'account.stats_title'), lines, embedded_buttons=True, navigation=True),
-        [[button(user_id, tr(locale, 'back'), 'account_profile', profile_id, back_to)]],
-        state, message_id)
+        if traffic['items']:
+            lines += (tr(locale, 'traffic.month_total', month=traffic.get('month') or '—',
+                total=_traffic_bytes(sum(item['uplink_bytes'] + item['downlink_bytes']
+                    for item in traffic['items']))),)
+    return lines
+
+
+def profile_node_traffic(summary: dict, node: dict, locale: str) -> tuple[str, ...]:
+    traffic = summary.get('traffic')
+    lines = []
+    for protocol in node['protocols']:
+        label = tr(locale, 'protocol.' + protocol)
+        if not traffic or traffic['status'] == 'consent_required':
+            lines.append(label)
+            continue
+        item = next((item for item in traffic.get('nodes', [])
+                     if item['node_key'] == node['key'] and item['protocol'] == protocol), None)
+        if item is None:
+            lines.append(tr(locale, 'traffic.node_waiting', protocol=label))
+            continue
+        lines.append(tr(locale, 'traffic.node_month', protocol=label,
+            month=traffic.get('month') or '—',
+            total=_traffic_bytes(item['uplink_bytes'] + item['downlink_bytes']),
+            upload=_traffic_bytes(item['uplink_bytes']), download=_traffic_bytes(item['downlink_bytes'])))
+        if item['status'] != 'current':
+            lines.append(tr(locale, 'traffic.node_unknown'))
+    return tuple(lines)
 
 
 def _traffic_bytes(value: int) -> str:
@@ -334,22 +385,26 @@ def _traffic_bytes(value: int) -> str:
 
 async def show_profile(chat_id: int, user_id: int, message_id: int,
                        profile_id: str, bot: Bot, backend: BackendClient,
-                       state: FSMContext) -> None:
+                       state: FSMContext, *, page_index: int | None = None) -> None:
     locale = normalize_locale((await state.get_data()).get('locale'))
-    profile = await backend.member_profile_summary(user_id, profile_id)
     page = await backend.profile_nodes(user_id, profile_id)
-    sections = tuple(Section(f"{node['flag']} {node['title']}".strip(), (node['region'],),
-        (tuple(button(user_id, tr(locale, f"protocol.{protocol['kind']}"), 'protocol',
-            profile_id, node['key'], protocol['kind']) for protocol in node['protocols']),))
-        for node in page['items'])
+    data = await state.get_data()
+    saved = data.get('member_nodes_page', {})
+    if page_index is None:
+        page_index = saved.get('page', 0) if saved.get('profile_id') == profile_id else 0
+    nodes, page_index, pages = server_page(page['items'], page_index)
+    await state.update_data(member_nodes_page={'profile_id': profile_id, 'page': page_index})
+    sections = region_sections(nodes, locale, lambda node: Section(node['title'],
+        rows=(tuple(button(user_id, tr(locale, f"protocol.{protocol['kind']}"), 'protocol',
+            profile_id, node['key'], protocol['kind']) for protocol in node['protocols']),),
+        divider_after=True, heading_size=4))
     back = (await state.get_data()).get('member_profile_back', 'profiles')
-    status_key = ('profile.frozen' if profile['frozen'] else
-                  'profile.expired' if profile['expired'] else 'profile.active')
-    await render(bot, chat_id, Screen(profile['display_name'],
-        (tr(locale, 'account.status', status=tr(locale, status_key)),
-         tr(locale, 'nodes.choose' if page['items'] else 'nodes.empty')),
+    await render(bot, chat_id, Screen(tr(locale, 'home.get_config'),
+        () if page['items'] else (tr(locale, 'nodes.empty'),),
         sections=sections, embedded_buttons=True, navigation=True),
-        [[button(user_id, tr(locale, 'back'), back)]], state, message_id)
+        [*server_pagination(user_id, locale, page_index, pages, 'config_nodes_page', profile_id),
+         [button(user_id, tr(locale, 'back'), back)]], state, message_id)
+
 
 
 async def show_node(chat_id: int, user_id: int, message_id: int,
@@ -384,17 +439,14 @@ async def show_protocol(chat_id: int, user_id: int, message_id: int, profile_id:
         await issue(chat_id, user_id, message_id, profile_id, node_key, 'awg', 'vpn',
                     bot, backend, state)
         return
-    sections = tuple(Section(tr(locale, f'transport.{transport}'),
-        (tr(locale, f'ui.transport.{transport}'),),
-        ((button(user_id, tr(locale, 'ui.select_transport', transport=transport.upper()),
-            'issue', profile_id, node_key, 'xray', transport),),))
-        for transport in selected['transports'])
-    sections += (Section(tr(locale, 'ui.transport_help'),
-        (tr(locale, 'ui.transport_help_text'),), collapsed=True),)
+    transports = [kind for kind in ('xhttp', 'tcp') if kind in selected['transports']]
+    rows = [[button(user_id, tr(locale, f'transport.{kind}'), 'issue',
+                    profile_id, node_key, 'xray', kind) for kind in transports],
+            [button(user_id, tr(locale, 'back'), 'profile', profile_id)]]
     await render(bot, chat_id, Screen(tr(locale, 'xray.title', node=node['title']),
-        (tr(locale, 'transport.choose'),), sections=sections,
-        embedded_buttons=True, navigation=True),
-        [[button(user_id, tr(locale, 'back'), 'profile', profile_id)]], state, message_id)
+        (tr(locale, 'transport.choose'),), sections=(Section(tr(locale, 'ui.transport_help'),
+            (tr(locale, 'ui.transport_help_text'),), collapsed=True),),
+        embedded_buttons=True, navigation=True), rows, state, message_id)
 
 
 
@@ -587,6 +639,8 @@ async def user_action_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
     await query.answer()
     chat_id, user_id, message_id = query.message.chat.id, query.from_user.id, query.message.message_id
     try:
+        if action.name == 'page_number':
+            return
         if action.name != 'issuance':
             await clear_artifacts(bot, chat_id, state)
         if action.name == 'home':
@@ -599,6 +653,9 @@ async def user_action_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
             await show_profiles(chat_id, user_id, message_id, bot, backend, state)
         elif action.name == 'profile':
             await show_profile(chat_id, user_id, message_id, action.args[0], bot, backend, state)
+        elif action.name == 'config_nodes_page':
+            await show_profile(chat_id, user_id, message_id, action.args[0], bot, backend, state,
+                               page_index=int(action.args[1]))
         elif action.name == 'node':
             await show_node(chat_id, user_id, message_id, *action.args, bot, backend, state)
         elif action.name == 'protocol':
@@ -619,6 +676,10 @@ async def user_action_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
             await show_account_profile(chat_id, user_id, message_id, action.args[0],
                 bot, backend, state, username=query.from_user.username,
                 back_to=action.args[1])
+        elif action.name == 'account_nodes_page':
+            await show_account_profile(chat_id, user_id, message_id, action.args[0],
+                bot, backend, state, username=query.from_user.username,
+                back_to=action.args[1], page_index=int(action.args[2]), servers_open=True)
         elif action.name == 'account_stats':
             await show_account_stats(chat_id, user_id, message_id, action.args[0],
                 bot, backend, state, back_to=action.args[1])
