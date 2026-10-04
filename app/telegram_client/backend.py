@@ -293,9 +293,10 @@ class BackendClient:
                                         'grants': grants or []})
 
     async def edit_profile(self, telegram_user_id: int, profile_id: str,
-                           revision: int, changes: dict) -> dict:
+                           revision: int, changes: dict, *, command_key: str | None = None) -> dict:
         return await self.request('PATCH', f'/api/v1/profiles/{profile_id}',
-            telegram_user_id=telegram_user_id, command=True, revision=revision, body=changes)
+            telegram_user_id=telegram_user_id, command=True, command_key=command_key,
+            revision=revision, body=changes)
 
     async def replace_grants(self, telegram_user_id: int, profile_id: str,
                              revision: int, grants: list[dict]) -> dict:

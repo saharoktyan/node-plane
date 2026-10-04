@@ -55,6 +55,8 @@ class BackendProfileCommandTests(unittest.TestCase):
 
     def test_edit_rejects_ownership_runtime_and_invalid_expiry(self):
         profile_id = self.create().json()['profile']['id']
+        self.db.connection.execute('UPDATE backend_profiles SET owner_account_id = NULL WHERE id = ?', (profile_id,))
+        self.db.connection.commit()
         path = f'/api/v1/profiles/{profile_id}'
         for body in ({'owner_account_id': str(uuid4())}, {'runtime_name': 'another'}, {'frozen': 'true'},
                      {'expires_at': '2026-01-01T00:00:00'}, {'display_name': '   '}, {}, {'display_name': None}):
@@ -158,3 +160,28 @@ class BackendProfileCommandTests(unittest.TestCase):
         ProfileRepository(self.db).initialize_schema()
         self.assertEqual(self.db.connection.execute('SELECT revision FROM backend_accounts WHERE id = ?', (member.id,)).fetchone()[0], revision)
         self.assertEqual(self.identities.get_account(self.admin.id).status, 'approved')
+
+
+    def test_admin_duration_is_permanent_and_combined_edit_is_atomic(self):
+        blocked = self.create(expires_at='2099-01-01T00:00:00Z')
+        self.assertEqual(blocked.status_code, 422)
+        self.assertEqual(blocked.json()['error']['code'], 'admin_expiry_forbidden')
+        profile = self.create().json()['profile']['id']
+        path = f'/api/v1/profiles/{profile}'
+        blocked = self.client.patch(path, headers=self.headers_for(1), json={'expires_at': '2099-01-01T00:00:00Z'})
+        self.assertEqual(blocked.status_code, 422)
+        self.db.connection.execute('UPDATE backend_profiles SET owner_account_id = NULL WHERE id = ?', (profile,))
+        key = str(uuid4())
+        changed = self.client.patch(path, headers=self.headers_for(1, key),
+            json={'expires_at': '2099-01-01T00:00:00Z', 'grants': []})
+        self.assertEqual(changed.status_code, 200, changed.text)
+        self.assertEqual(changed.json()['profile']['desired_revision'], 2)
+        replay = self.client.patch(path, headers=self.headers_for(1, key),
+            json={'expires_at': '2099-01-01T00:00:00Z', 'grants': []})
+        self.assertEqual(changed.json(), replay.json())
+        failed = self.client.patch(path, headers=self.headers_for(2), json={'expires_at': None,
+            'grants': [{'node_key': 'missing', 'protocol': 'awg'}]})
+        self.assertEqual(failed.status_code, 422)
+        current = self.client.get(path, headers=self.headers_for()).json()
+        self.assertEqual(current['expires_at'], '2099-01-01T00:00:00+00:00')
+        self.assertEqual(current['desired_revision'], 2)

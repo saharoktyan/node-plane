@@ -123,6 +123,9 @@ class AccountService:
                     raise AccessDenied('request_pending', 409)
                 conn.execute('''UPDATE backend_accounts SET role = ?, status = ?, revision = revision + 1
                     WHERE id = ?''', (next_role, next_status, account_id))
+            if next_role == 'admin':
+                from .profile_commands import ProfileCommands
+                ProfileCommands.restore_admin_expiries(conn, actor, account_id)
             result = self.public(self._read(conn, account_id))
             conn.execute('''INSERT INTO backend_account_commands
                 (actor_account_id, command_key, target_account_id, input_json, result_json)

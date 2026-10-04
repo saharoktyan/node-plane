@@ -15,7 +15,7 @@ def server_label(node: dict) -> str:
     return f"{node.get('flag') or ''} {node['title']}".strip()
 
 
-BACK_LABELS = {'🔙 Back', '🔙 Назад', 'Back', 'Назад'}
+BACK_LABELS = {'← Back', '← Назад', 'Back', 'Назад'}
 
 
 def rich_buttons(rows, *, navigation=False):
@@ -49,21 +49,22 @@ class Section:
     collapsed: bool = False
     divider_after: bool = False
     sections: tuple['Section', ...] = ()
-    heading_size: int = 3
+    heading_size: int | None = None
     is_open: bool = False
     tables: tuple[Table, ...] = ()
     heading_rows: tuple[tuple[InlineKeyboardButton, ...], ...] = ()
 
-    def rich(self):
+    def rich(self, depth=2):
+        size = self.heading_size or min(depth, 6)
         blocks = [InputRichBlockParagraph(text=line) for line in self.lines if line]
         blocks.extend(table.rich() for table in self.tables)
         for section in self.sections:
-            blocks.extend(section.rich())
+            blocks.extend(section.rich(depth=size if self.collapsed or not self.title else size + 1))
         blocks.extend(rich_buttons(self.rows))
         if self.collapsed:
             return [InputRichBlockDetails(summary=self.title,
                 blocks=[*rich_buttons(self.heading_rows), *blocks], is_open=self.is_open)]
-        return [InputRichBlockSectionHeading(text=self.title, size=self.heading_size),
+        return [*([InputRichBlockSectionHeading(text=self.title, size=size)] if self.title else []),
                 *rich_buttons(self.heading_rows), *blocks,
                 *([InputRichBlockDivider()] if self.divider_after else [])]
 
@@ -85,7 +86,7 @@ class Screen:
     navigation: bool = False
 
     def rich(self, rows=()) -> InputRichMessage:
-        blocks = [InputRichBlockSectionHeading(text=self.title, size=2)]
+        blocks = [InputRichBlockSectionHeading(text=self.title, size=1)]
         blocks.extend(InputRichBlockParagraph(text=line) for line in self.lines if line)
         for section in self.sections:
             blocks.extend(section.rich())

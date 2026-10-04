@@ -25,6 +25,47 @@ class IntentExecutor:
             conn.execute("UPDATE backend_operation_tasks SET status = 'blocked' WHERE status = 'running'")
             conn.execute("UPDATE backend_operations SET status = 'blocked' WHERE status = 'running'")
 
+    def queue_expired_profiles(self):
+        """Turn reached expiries into durable revocations once per revision.
+
+        Keep grants and identities, so extending the expiry can restore access.
+        Reuse the account that requested the expiring revision for audit attribution;
+        no delegated permission or remote command runs inside this transaction.
+        """
+        from .authorization import Account, Actor, Principal, PrincipalKind
+        from .maintenance_gate import active
+        timestamp = datetime.now(timezone.utc)
+        queued = 0
+        with self.db.transaction() as conn:
+            conn.execute('UPDATE backend_account_guard SET revision = revision + 1 WHERE id = 1')
+            if active(conn):
+                return 0
+            from .profile_commands import ProfileCommands
+            ProfileCommands.restore_admin_expiries(conn)
+            rows = conn.execute("""SELECT p.id, p.desired_revision, p.expires_at,
+                o.actor_id FROM backend_profiles p JOIN backend_operations o
+                ON o.profile_id = p.id AND o.desired_revision = p.desired_revision
+                WHERE p.frozen = 0 AND p.expires_at IS NOT NULL AND p.expires_at <= ?
+                AND NOT EXISTS (SELECT 1 FROM backend_profile_deletions d WHERE d.profile_id = p.id)
+                AND EXISTS (SELECT 1 FROM backend_operation_tasks t
+                    WHERE t.operation_id = o.id AND t.action = 'ensure')
+                ORDER BY p.expires_at, p.id LIMIT 100""", (timestamp.isoformat(),)).fetchall()
+            for row in rows:
+                if datetime.fromisoformat(row['expires_at']) > timestamp:
+                    continue
+                changed = conn.execute("""UPDATE backend_profiles
+                    SET desired_revision = desired_revision + 1
+                    WHERE id = ? AND desired_revision = ? RETURNING id""",
+                    (row['id'], row['desired_revision'])).fetchone()
+                if changed is None:
+                    continue
+                actor = Actor(Principal('scheduled-profile-expiry', PrincipalKind.ACCOUNT,
+                    frozenset(), row['actor_id']), Account(row['actor_id']))
+                OperationRepository.record(conn, actor, row['id'],
+                    OperationRepository.targets(conn, row['id']))
+                queued += 1
+        return queued
+
     def refresh_operation(self, conn, operation_id):
         states = {r['status'] for r in conn.execute('SELECT status FROM backend_operation_tasks WHERE operation_id = ?', (operation_id,)).fetchall()}
         status = ('blocked' if 'blocked' in states else 'running' if 'running' in states else
@@ -231,6 +272,7 @@ def main():
             config_executor.recover()
             rollout_executor.recover()
             executor.reconcile_completed()
+            executor.queue_expired_profiles()
             node_executor.reconcile_completed()
             executor.inspect_blocked()
             while system_cleanup.run_one() or backup_executor.run_one() or update_executor.run_one() or rollout_executor.run_one() or removals.run_one() or node_jobs.run_one() or node_executor.run_one() or executor.run_one() or config_executor.run_one():

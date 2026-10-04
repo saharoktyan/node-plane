@@ -44,42 +44,66 @@ class ProfileRichTests(IsolatedAsyncioTestCase):
         screen, rows = draw.call_args.args[2:4]
         self.assertTrue(screen.embedded_buttons)
         self.assertIn('Search: alice', screen.plain())
-        self.assertEqual(screen.sections[1].title, 'Alice')
+        self.assertEqual(screen.sections[1].title, '')
+        self.assertEqual(screen.sections[1].rows[0][0].text, 'Alice · Active')
+        self.assertEqual([b.size for b in screen.rich(rows).blocks if b.type == 'heading'], [1])
         self.assertEqual([b.text for b in rows[0]], ['←', '→'])
         self.assertEqual(rows[-1][0].callback_data, 'admin_menu')
         self.assertEqual([b.type for b in screen.rich(rows).blocks[-2:]], ['divider', 'buttons'])
 
-    async def test_card_has_direct_actions_collapsed_details_and_all_grants_across_api_pages(self):
-        self.backend.admin_nodes.side_effect = [
-            {'items': self.nodes[:10], 'next_cursor': 'next'}, {'items': self.nodes[10:]},
-            {'items': self.nodes[:10], 'next_cursor': 'next'}, {'items': self.nodes[10:]}]
+    async def test_landing_card_contains_only_summary_primary_actions_and_management(self):
         for locale in ('ru', 'en'):
             self.data['locale'] = locale
             with patch.object(profiles, 'render', new_callable=AsyncMock) as draw:
                 await profiles.show_admin_profile(123, 123, 77, 'p1', self.bot, self.backend, self.state)
             screen, rows = draw.call_args.args[2:4]
             self.assertEqual(screen.title, 'Alice')
+            self.assertEqual(screen.sections, ())
+            self.assertIn('23', ' '.join(screen.lines))
             self.assertNotIn('p1', ' '.join(screen.lines))
-            access = next(s for s in screen.sections if s.title == profiles.tr(locale, 'profile.rich.access'))
-            details = access.sections[0]
-            self.assertTrue(details.collapsed)
-            self.assertFalse(details.is_open)
-            self.assertIn('23', details.lines[0])
-            self.assertEqual(sum(len(s.tables[0].rows) for s in details.sections), 10)
-            callbacks = [b.callback_data for row in screen.fallback_rows(rows) for b in row]
-            for callback in ('admin_profile_rename:p1', 'prof_state:p1:frozen', 'prof_del:p1', 'prof_op:p1'):
-                self.assertIn(callback, callbacks)
+            self.assertEqual(len(rows[0]), 2)
+            callbacks = [b.callback_data for row in rows for b in row]
+            self.assertIn('grant_nodes:p1', callbacks)
+            self.assertIn('admin_profile_edit:p1', callbacks)
+            self.assertIn('prof_manage:p1', callbacks)
+            for prefix in ('prof_del:', 'prof_op:', 'prof_state:', 'admin_profile_rename:'):
+                self.assertFalse(any(c.startswith(prefix) for c in callbacks))
             self.assertEqual(rows[-1][0].callback_data, AdminProfilesCallback().pack())
-        self.assertEqual(self.backend.admin_nodes.await_count, 4)
+            self.assertEqual([b.type for b in screen.rich(rows).blocks[-2:]], ['divider', 'buttons'])
+        self.backend.admin_nodes.assert_not_awaited()
 
-    async def test_card_access_last_page_remains_expanded_and_shows_every_grant(self):
+    async def test_access_editor_reads_all_registry_pages_and_preserves_server_paging(self):
+        self.backend.admin_nodes.side_effect = [
+            {'items': self.nodes[:10], 'next_cursor': 'next'}, {'items': self.nodes[10:]}]
         self.query.data = 'prof_access_page:p1:2'
         with patch.object(profiles, 'render', new_callable=AsyncMock) as draw:
             await profiles.profile_access_page_cb(self.query, self.bot, self.backend, self.state)
-        access = next(s for s in draw.call_args.args[2].sections if s.title == 'Access').sections[0]
-        self.assertTrue(access.is_open)
-        self.assertEqual(sum(len(s.tables[0].rows) for s in access.sections), 3)
-        self.assertTrue(any('Node 09' in row[0] for s in access.sections for row in s.tables[0].rows))
+        screen = draw.call_args.args[2]
+        groups = screen.sections[1:]
+        self.assertEqual(sum(len(g.sections) for g in groups), 3)
+        self.assertTrue(any('Node 09' in node.title for g in groups for node in g.sections))
+        self.assertEqual(self.data['grant_nodes_page'], 2)
+        self.assertEqual(self.backend.admin_nodes.await_count, 2)
+
+    async def test_operation_details_are_only_reachable_through_management_and_technical(self):
+        self.profile['owner_account_id'] = 'a1'
+        with patch.object(profiles, 'render', new_callable=AsyncMock) as draw:
+            await profiles.show_profile_management(123, 123, 77, 'p1', self.bot, self.backend, self.state)
+            screen, rows = draw.call_args.args[2:4]
+            callbacks = [b.callback_data for row in rows for b in row]
+            self.assertIn('prof_role:p1', callbacks)
+            self.assertIn('prof_del:p1', callbacks)
+            self.assertIn('prof_tech:p1', callbacks)
+            self.assertNotIn('prof_op:p1', callbacks)
+            self.assertEqual(rows[-1][0].callback_data, 'admin_profile:p1')
+            self.query.data = 'prof_tech:p1'
+            await profiles.profile_technical_cb(self.query, self.bot, self.backend, self.state)
+            rows = draw.call_args.args[3]
+            self.assertEqual(rows[0][0].callback_data, 'prof_op:p1')
+            self.assertEqual(rows[-1][0].callback_data, 'prof_manage:p1')
+            self.query.data = 'prof_op:p1'
+            await profiles.profile_operation_cb(self.query, self.bot, self.backend, self.state)
+        self.assertEqual(draw.call_args.args[3][-1][0].callback_data, 'prof_tech:p1')
 
     async def test_grant_editor_pages_preserve_draft_until_explicit_save(self):
         with patch.object(profiles, 'render', new_callable=AsyncMock) as draw:
@@ -112,7 +136,7 @@ class ProfileRichTests(IsolatedAsyncioTestCase):
         self.assertTrue(self.query.answer.call_args.kwargs['show_alert'])
 
     async def test_selected_active_button_is_idempotent_and_freeze_sets_explicit_value(self):
-        with patch.object(profiles, 'show_admin_profile', new_callable=AsyncMock):
+        with patch.object(profiles, 'show_profile_edit_menu', new_callable=AsyncMock):
             self.query.data = 'prof_state:p1:active'
             await profiles.set_profile_state_cb(self.query, self.bot, self.backend, self.state)
             self.backend.edit_profile.assert_not_awaited()
@@ -129,11 +153,18 @@ class ProfileRichTests(IsolatedAsyncioTestCase):
         self.assertFalse(any(c.startswith(('prof_state:', 'prof_del:', 'admin_profile_rename:', 'grant_nodes:'))
                              for c in callbacks))
 
-    async def test_old_edit_link_and_unsaved_back_open_card_and_discard_draft(self):
+    async def test_edit_link_opens_dedicated_editor_and_discards_old_grant_draft(self):
         self.data.update(edit_profile_id='p1', draft_grants=[{'node_key': 'n00', 'protocol': 'xray'}])
         with patch.object(profiles, 'render', new_callable=AsyncMock) as draw:
             await profiles.show_profile_edit_menu(123, 123, 77, 'p1', self.bot, self.backend, self.state)
-        self.assertEqual(draw.call_args.args[2].title, 'Alice')
+        screen, rows = draw.call_args.args[2:4]
+        self.assertEqual(screen.title, 'Edit')
+        callbacks = [b.callback_data for row in screen.fallback_rows(rows) for b in row]
+        self.assertIn('admin_profile_rename:p1', callbacks)
+        self.assertIn('prof_expiry:p1', callbacks)
+        self.assertIn('prof_state:p1:frozen', callbacks)
+        self.assertNotIn('prof_del:p1', callbacks)
+        self.assertEqual(rows[-1][0].callback_data, 'admin_profile:p1')
         self.assertIsNone(self.data['draft_grants'])
 
     async def test_repeating_node_cursor_is_rejected(self):
@@ -247,3 +278,81 @@ class ProfileRichTests(IsolatedAsyncioTestCase):
                 123, self.bot, backend, admin)
         home.assert_not_awaited()
         await storage.close()
+
+    async def test_successful_sync_does_not_add_routine_operation_information_to_card(self):
+        self.backend.profile_operation.return_value = {'status': 'succeeded', 'tasks': []}
+        self.profile['expires_at'] = '2099-01-01T12:00:00+00:00'
+        with patch.object(profiles, 'render', new_callable=AsyncMock) as draw:
+            await profiles.show_admin_profile(123, 123, 77, 'p1', self.bot, self.backend, self.state)
+        screen = draw.call_args.args[2]
+        self.assertEqual(len(screen.lines), 3)
+        self.assertIn('2099-01-01 12:00 UTC', screen.lines[1])
+        self.assertNotIn('operation', screen.plain().lower())
+
+    async def test_expiry_presets_capture_revision_and_save_once_then_return_to_edit(self):
+        self.query.data = 'prof_expiry:p1'
+        for locale in ('ru', 'en'):
+            self.data['locale'] = locale
+            with patch.object(profiles, 'render', new_callable=AsyncMock) as draw:
+                await profiles.profile_expiry_cb(self.query, self.bot, self.backend, self.state)
+            rows = draw.call_args.args[3]
+            self.assertEqual([len(row) for row in rows], [3, 2, 1])
+            self.assertEqual(rows[-1][0].callback_data, 'admin_profile_edit:p1')
+        draft = self.data['profile_expiry']
+        self.profile['desired_revision'] = 10
+        self.query.data = 'prof_exp_set:' + draft['nonce'] + ':30'
+        with patch.object(profiles, 'show_profile_edit_menu', new_callable=AsyncMock) as editor:
+            await profiles.profile_expiry_set_cb(self.query, self.bot, self.backend, self.state)
+        self.backend.edit_profile.assert_awaited_once_with(123, 'p1', 7,
+            {'expires_at': draft['values']['30']}, command_key=draft['command_key'])
+        self.assertEqual(editor.call_args.args[3], 'p1')
+        self.data['profile_expiry'] = None
+        self.backend.edit_profile.reset_mock()
+        await profiles.profile_expiry_set_cb(self.query, self.bot, self.backend, self.state)
+        self.backend.edit_profile.assert_not_awaited()
+
+    async def test_no_expiry_saves_null_and_revision_conflict_preserves_form(self):
+        self.query.data = 'prof_expiry:p1'
+        with patch.object(profiles, 'render', new_callable=AsyncMock):
+            await profiles.profile_expiry_cb(self.query, self.bot, self.backend, self.state)
+        draft = self.data['profile_expiry']
+        self.query.data = 'prof_exp_set:' + draft['nonce'] + ':none'
+        self.backend.edit_profile.side_effect = BackendError('revision_conflict', 412)
+        with patch.object(profiles, 'show_profile_edit_menu', new_callable=AsyncMock) as editor:
+            await profiles.profile_expiry_set_cb(self.query, self.bot, self.backend, self.state)
+        editor.assert_not_awaited()
+        self.assertEqual(self.backend.edit_profile.call_args.args[3], {'expires_at': None})
+        self.assertEqual(self.data['profile_expiry'], draft)
+        self.assertTrue(self.query.answer.call_args.kwargs['show_alert'])
+
+    async def test_custom_expiry_date_and_one_step_back(self):
+        self.query.data = 'prof_expiry:p1'
+        with patch.object(profiles, 'render', new_callable=AsyncMock):
+            await profiles.profile_expiry_cb(self.query, self.bot, self.backend, self.state)
+        draft = self.data['profile_expiry']
+        self.query.data = 'prof_exp_date:' + draft['nonce']
+        with patch.object(profiles, 'render', new_callable=AsyncMock) as draw:
+            await profiles.profile_expiry_date_cb(self.query, self.bot, self.state)
+        self.assertEqual(draw.call_args.args[3][-1][0].callback_data, 'prof_expiry:p1')
+        message = SimpleNamespace(text='2099-12-31', delete=AsyncMock(),
+            from_user=SimpleNamespace(id=123), chat=SimpleNamespace(id=123, type='private'))
+        with patch.object(profiles, 'show_profile_edit_menu', new_callable=AsyncMock):
+            await profiles.profile_expiry_message(message, self.bot, self.backend, self.state)
+        self.backend.edit_profile.assert_awaited_once_with(123, 'p1', 7,
+            {'expires_at': '2099-12-31T23:59:59+00:00'}, command_key=draft['command_key'])
+
+    async def test_invalid_expiry_dates_do_not_mutate_backend(self):
+        self.query.data = 'prof_expiry:p1'
+        with patch.object(profiles, 'render', new_callable=AsyncMock):
+            await profiles.profile_expiry_cb(self.query, self.bot, self.backend, self.state)
+            for value in ('2000-01-01', '2099-02-30', 'tomorrow', '2099-1-2'):
+                message = SimpleNamespace(text=value, delete=AsyncMock(),
+                    from_user=SimpleNamespace(id=123), chat=SimpleNamespace(id=123, type='private'))
+                await profiles.profile_expiry_message(message, self.bot, self.backend, self.state)
+        self.backend.edit_profile.assert_not_awaited()
+
+    async def test_delete_confirmation_back_returns_to_management(self):
+        self.query.data = 'prof_del:p1'
+        with patch.object(profiles, 'render', new_callable=AsyncMock) as draw:
+            await profiles.delete_profile_confirm_cb(self.query, self.bot, self.backend, self.state)
+        self.assertEqual(draw.call_args.args[3][-1][0].callback_data, 'prof_manage:p1')

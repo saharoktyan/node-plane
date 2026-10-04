@@ -2,6 +2,7 @@ from aiogram import BaseMiddleware, Bot
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, TelegramObject
 from aiogram.exceptions import TelegramBadRequest, TelegramNotFound, TelegramNetworkError
 import logging
+from dataclasses import replace
 from aiogram.fsm.context import FSMContext
 from typing import Callable, Dict, Any, Awaitable
 
@@ -47,6 +48,14 @@ async def render(bot: Bot, chat_id: int, screen: Screen, rows: list[list[InlineK
             text=screen.plain(), entities=screen.plain_entities(), reply_markup=fallback_markup, request_timeout=15)
             
     await state.update_data(control_message_id=sent.message_id)
+    if data.get('notification_session') and existing != sent.message_id:
+        # A missing notice may be recreated by the delivery fallback. Its new
+        # callbacks must still use an isolated FSM, never the main panel.
+        replacement = FSMContext(storage=state.storage,
+            key=replace(state.key, destiny=f'notification:{sent.message_id}'))
+        await replacement.set_data(await state.get_data())
+        await replacement.set_state(await state.get_state())
+        await state.update_data(notification_closed=True)
     return rich
 
 async def send_notice(bot: Bot, chat_id: int, screen: Screen, markup: InlineKeyboardMarkup | None = None) -> None:
@@ -70,4 +79,32 @@ class BackendMiddleware(BaseMiddleware):
         data: Dict[str, Any]
     ) -> Any:
         data["backend"] = self.backend
+        return await handler(event, data)
+
+
+class NotificationStateMiddleware(BaseMiddleware):
+    """Keep notification workflows separate from the user's main panel FSM."""
+
+    async def __call__(self, handler, event, data):
+        main = data.get('state')
+        query = getattr(event, 'callback_query', None)
+        message = getattr(event, 'message', None)
+        target = query.message if query else getattr(message, 'reply_to_message', None)
+        if main is not None and target is not None:
+            isolated = FSMContext(storage=main.storage,
+                key=replace(main.key, destiny=f'notification:{target.message_id}'))
+            values = await isolated.get_data()
+            initial = query and (query.data or '').startswith(('notification_',))
+            if initial and not values.get('notification_session'):
+                await isolated.update_data(notification_session=True,
+                    control_message_id=target.message_id,
+                    locale=(await main.get_data()).get('locale') or query.from_user.language_code)
+                values = await isolated.get_data()
+            if values.get('notification_session'):
+                if values.get('notification_closed'):
+                    if query:
+                        await query.answer()
+                    return
+                data['state'] = isolated
+                data['raw_state'] = await isolated.get_state()
         return await handler(event, data)

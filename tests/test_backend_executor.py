@@ -231,3 +231,46 @@ class BackendExecutorTests(unittest.TestCase):
         self.assertTrue(executor.run_one())
         self.assertEqual(driver.calls, [])
         self.assertFalse(executor.run_one())
+
+    def test_expiry_queues_durable_revocation_once_and_extension_restores_access(self):
+        from datetime import datetime, timedelta, timezone
+        profile = self.prepare()
+        self.db.connection.execute('UPDATE backend_profiles SET owner_account_id = NULL WHERE id = ?', (profile,))
+        self.grants(profile, 1, [{'node_key': 'node', 'protocol': 'awg'}])
+        future = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+        updated = self.client.patch(f'/api/v1/profiles/{profile}', headers=self.headers_for(2),
+                                    json={'expires_at': future})
+        self.assertEqual(updated.status_code, 200, updated.text)
+        driver = FakeDriver()
+        worker = IntentExecutor(self.db, driver)
+        self.assertEqual(worker.queue_expired_profiles(), 0)
+        while worker.run_one():
+            pass
+        self.assertEqual(driver.calls[-1][1]['action'], 'ensure')
+        past = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+        self.db.connection.execute('UPDATE backend_profiles SET expires_at = ? WHERE id = ?', (past, profile))
+        self.assertEqual(worker.queue_expired_profiles(), 1)
+        self.assertEqual(worker.queue_expired_profiles(), 0)
+        self.assertTrue(worker.run_one())
+        self.assertEqual(driver.calls[-1][1]['action'], 'delete')
+        self.assertEqual(driver.calls[-1][1]['desired_revision'], 4)
+        self.assertEqual(self.db.connection.execute('SELECT COUNT(*) FROM backend_grants WHERE profile_id = ?', (profile,)).fetchone()[0], 1)
+        extended = self.client.patch(f'/api/v1/profiles/{profile}', headers=self.headers_for(4),
+                                    json={'expires_at': None})
+        self.assertEqual(extended.status_code, 200, extended.text)
+        self.assertTrue(worker.run_one())
+        self.assertEqual(driver.calls[-1][1]['action'], 'ensure')
+        self.assertEqual(worker.queue_expired_profiles(), 0)
+
+    def test_expiry_without_targets_or_already_revoked_revision_does_not_loop(self):
+        profile = self.prepare()
+        self.db.connection.execute('UPDATE backend_profiles SET owner_account_id = NULL WHERE id = ?', (profile,))
+        worker = IntentExecutor(self.db, FakeDriver())
+        self.client.patch(f'/api/v1/profiles/{profile}', headers=self.headers_for(1),
+                          json={'expires_at': '2000-01-01T00:00:00Z'})
+        self.assertEqual(worker.queue_expired_profiles(), 0)
+        self.grants(profile, 2, [{'node_key': 'node', 'protocol': 'awg'}])
+        self.assertEqual(worker.queue_expired_profiles(), 0)
+        self.assertTrue(worker.run_one())
+        self.assertEqual(worker.driver.calls[-1][1]['action'], 'delete')
+        self.assertEqual(worker.queue_expired_profiles(), 0)

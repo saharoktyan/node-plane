@@ -247,6 +247,9 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             await user.show_admin_menu(123, 123, 77, self.bot, backend, self.state)
         self.assertFalse(any(section.title == user.tr('en', 'admin.rich.attention')
                              for section in draw.call_args.args[2].sections))
+        screen, rows = draw.call_args.args[2:4]
+        self.assertFalse(any(section.title.startswith(user.tr('en', 'admin.rich.access_management')) for section in screen.sections))
+        self.assertFalse(any(b.callback_data == admin_requests.RequestsCallback().pack() for row in screen.fallback_rows(rows) for b in row))
 
     async def test_slow_admin_overview_does_not_block_navigation(self):
         import asyncio
@@ -313,7 +316,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         backend = SimpleNamespace(resolve=AsyncMock(return_value={'id': 'account', 'status': 'pending'}),
             request=AsyncMock(return_value={'revision': 2}),
             profiles=AsyncMock(return_value={'items': [{'id': 'profile'}]}))
-        with patch.object(admin_profiles, 'show_admin_profile', new_callable=AsyncMock) as show:
+        with patch.object(admin_profiles, 'start_profile_setup', new_callable=AsyncMock) as show:
             await admin_profiles.add_profile_user_text(message, self.bot, backend, self.state)
         backend.resolve.assert_awaited_once_with(102, username='alice', first_name='Alice', last_name=None)
         change = backend.request.call_args
@@ -1123,6 +1126,70 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
              patch.object(admin_requests, 'send_notice', new_callable=AsyncMock) as send_notice:
             await admin_requests.notify_admins(self.bot, backend, 'request-id')
         send_notice.assert_not_awaited()
+
+    async def test_notification_decision_shows_result_and_preserves_admin_screen(self):
+        self.state_data['locale'] = 'en'
+        for decision in ('approve', 'reject'):
+            self.state_data.update(control_message_id=77, request_search='alice', request_page_index=2)
+            self.query.message.message_id = 99
+            self.bot.delete_message = AsyncMock()
+            backend = SimpleNamespace(
+                pending_access_request=AsyncMock(return_value={'locale': 'en'}),
+                request=AsyncMock(side_effect=[{'account_id': 'member'}, {'telegram_user_id': None}]))
+            with patch.object(admin_requests, 'render_request_page', new_callable=AsyncMock) as page, \
+                 patch.object(admin_requests, 'render', new_callable=AsyncMock) as draw:
+                await admin_requests.notification_decision_cb(self.query,
+                    admin_requests.NotificationDecisionCallback(request_id='request', decision=decision),
+                    self.bot, backend, self.state)
+            self.bot.delete_message.assert_not_awaited()
+            page.assert_not_awaited()
+            rows = draw.call_args.args[3]
+            callbacks = [b.callback_data for row in rows for b in row]
+            self.assertIn('notification_close', callbacks)
+            self.assertEqual(any(c.startswith('request_profile:') for c in callbacks), decision == 'approve')
+            self.assertEqual(self.state_data['control_message_id'], 77)
+            self.assertEqual(self.state_data['request_search'], 'alice')
+            self.assertEqual(self.state_data['request_page_index'], 2)
+            self.assertEqual(backend.request.call_args_list[0].kwargs['body'], {'decision': decision})
+
+    async def test_stale_notification_is_deleted_but_backend_failure_keeps_it(self):
+        self.state_data['locale'] = 'en'
+        self.query.message.message_id = 99
+        self.state_data['control_message_id'] = 77
+        self.bot.delete_message = AsyncMock()
+        backend = SimpleNamespace(pending_access_request=AsyncMock(
+            side_effect=BackendError('resource_not_found', 404)), request=AsyncMock())
+        with patch.object(admin_requests, 'render_request_page', new_callable=AsyncMock) as page:
+            await admin_requests.apply_decision(self.query, 'request', 'approve',
+                self.bot, backend, self.state, notification=True)
+        page.assert_not_awaited()
+        backend.request.assert_not_awaited()
+        self.bot.delete_message.assert_awaited_once_with(123, 99)
+        self.bot.delete_message.reset_mock()
+        backend.pending_access_request.side_effect = BackendError('backend_unavailable', 503)
+        with self.assertRaises(BackendError):
+            await admin_requests.apply_decision(self.query, 'request', 'approve',
+                self.bot, backend, self.state, notification=True)
+        self.bot.delete_message.assert_not_awaited()
+        self.assertEqual(self.state_data['control_message_id'], 77)
+
+    async def test_notification_review_keeps_notification_callbacks_and_main_control(self):
+        self.state_data['locale'] = 'en'
+        self.query.message.message_id = 99
+        self.state_data['control_message_id'] = 77
+        item = {'id': 'request', 'account_id': 'member', 'username': 'alice', 'created_at': ''}
+        backend = SimpleNamespace(pending_access_request=AsyncMock(return_value=item))
+        async def render_notice(*args):
+            await self.state.update_data(control_message_id=99)
+        with patch.object(admin_requests, 'render', new_callable=AsyncMock,
+                          side_effect=render_notice) as draw:
+            await admin_requests.notification_review_cb(self.query,
+                admin_requests.NotificationReviewCallback(request_id='request'),
+                self.bot, backend, self.state)
+        rows = draw.call_args.args[3]
+        self.assertTrue(all(b.callback_data.startswith('notification_decide:') for b in rows[0]))
+        self.assertEqual(rows[-1][0].callback_data, 'notification_close')
+        self.assertEqual(self.state_data['control_message_id'], 77)
 
     async def test_deciding_last_request_returns_to_admin_menu(self):
         self.state_data['locale'] = 'en'

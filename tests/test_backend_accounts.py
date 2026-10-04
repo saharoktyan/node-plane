@@ -70,3 +70,18 @@ class BackendAccountTests(unittest.TestCase):
             json={'status': 'approved'}).status_code, 428)
         self.assertEqual(self.patch_account(member['id'], 1, {}).status_code, 422)
         self.assertEqual(self.client.get('/api/v1/me', headers=self.headers_for(102)).json()['status'], 'pending')
+
+
+    def test_promotion_removes_profile_expiry_in_same_transaction(self):
+        member = self.register(102).json()
+        account = self.client.get(f"/api/v1/accounts/{member['id']}", headers=self.headers_for(101)).json()
+        approved = self.patch_account(member['id'], account['revision'], {'status': 'approved'}).json()
+        created = self.client.post('/api/v1/profiles', headers={**self.headers_for(101), 'Idempotency-Key': str(uuid4())},
+            json={'display_name': 'Member', 'owner_account_id': member['id'], 'expires_at': '2099-01-01T00:00:00Z'})
+        self.assertEqual(created.status_code, 201, created.text)
+        profile = created.json()['profile']['id']
+        promoted = self.patch_account(member['id'], approved['revision'], {'role': 'admin'})
+        self.assertEqual(promoted.status_code, 200, promoted.text)
+        row = self.db.connection.execute('SELECT expires_at, desired_revision FROM backend_profiles WHERE id = ?', (profile,)).fetchone()
+        self.assertIsNone(row['expires_at'])
+        self.assertEqual(row['desired_revision'], 2)

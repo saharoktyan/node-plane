@@ -110,34 +110,25 @@ list leads to an explicit review screen.
 ### Profiles list
 
 - Top controls: `[Add profile] [Search]`; show Clear only while filtering.
-- One compact section per profile: display name, Active/Frozen/Deleting and a
-  short synchronization issue if present, followed by `[Open]`.
+- One compact clickable row per profile: `display name · status`. No per-profile
+  heading, separate status paragraph or redundant Open row.
 - Do not fetch grants or live agent state individually for every list item.
 - Preserve search and position when returning from a card; arrow pagination
   and one final Back divider.
 
 ### Profile card
 
-1. Heading: profile display name.
-2. Visible summary: status and access synchronization result. Pending or blocked
-   synchronization stays visible and links to its operation details.
-3. Access section: concise server/protocol summary and `[Manage access]`.
-   A long server list is collapsed and paginated. No silent truncation at 20
-   grants and no missing names caused by loading only the first server page.
-4. Status section: `[Active] [Frozen]`, selected state highlighted. Explain
-   synchronization failures beside these controls; do not equate desired state
-   with confirmed removal of access on an unreachable node.
-5. Identity section: `[Rename]`; collapsed Details contains profile/account IDs,
-   Telegram binding and revision data. Profiles without Telegram remain valid.
-6. Traffic summary only under the existing admin collection and member consent
-   gates. Do not introduce additional collection as part of a UI redesign.
-7. Collapsed Management section: deletion entry and other uncommon existing
-   actions. Deletion opens a separate confirmation screen.
-8. `[Refresh]`, then divider and Back to Profiles.
-
-A separate generic Edit menu should become unnecessary for these frequent
-actions. Preserve its callbacks or route them to the new destinations during
-the migration so old screens remain navigable.
+1. Heading: profile display name (H1).
+2. Visible summary: status, expiry when set, and count of granted servers.
+3. Primary row: `[Access] [Edit]`, followed by a quiet Management entry.
+4. Access opens the regional grant editor; Edit contains name, expiry and
+   Active/Frozen controls. No editing controls or server tables on the landing card.
+5. Management contains account permissions, confirmed deletion, and Technical
+   details. Operations are reached from Technical details, one level deeper.
+6. Show only a short actionable warning for blocked synchronization; do not
+   equate desired state with verified removal of access on an unreachable node.
+7. One divider before Back, preserving the Profiles search/page context.
+8. Administrator traffic display remains pending a dedicated consent-gated read.
 
 ### Manage access
 
@@ -346,3 +337,103 @@ Server screens form the next independent presentation block.
 
 - Language changes redraw settings and highlight the selected language without
   adding a confirmation line.
+
+### Profile card simplification (implemented)
+
+Keep the landing card focused on the selected person: display name, profile
+status, expiry when set, and a compact count of accessible servers. Avoid inline
+editing controls and routine synchronization details on that screen.
+
+- **Access** opens the existing regional grant editor, including explicit grant
+  and revoke actions for all servers or a region. The full server list belongs
+  here rather than on the landing card.
+- **Edit** contains display name, expiry and profile freeze/unfreeze controls.
+  Each action returns to this screen, with Back returning to the profile card.
+- **Management** contains account permissions and profile deletion. Both are
+  sensitive actions with explicit, target-specific confirmation screens.
+- **Technical details**, reached from Management, contains identifiers and
+  revisions. The latest operation and per-node task details are one level deeper.
+- Surface a short actionable warning on the landing card only when recovery is
+  needed. Routine successful synchronization does not require its own section.
+
+Use one primary action row for Access and Edit, a quiet Management entry, then
+one divider before Back. This accepted redesign is implemented.
+
+### Notification decisions and administrator promotion
+
+Implemented before and retained in the accepted card redesign:
+
+- Approving or rejecting from a standalone notification replaces it with the decision
+  and Close; approval also offers Edit profile. This preserves the administrator's current control screen, wizard and list
+  filters. Reviewing a notification retains notification-specific decision
+  callbacks and does not replace the saved control-message identity. Stale
+  notifications are removed; transient backend errors do not discard the request.
+- Profile Management exposes Account permissions for owned, non-deleting
+  profiles. An approved member can be made an administrator from a separate
+  confirmation screen naming the exact account and warning about full node,
+  access, settings and destructive-operation permissions.
+- The confirmation is bound to the adapter user's FSM, target profile/account,
+  message, nonce, captured account revision and idempotency key. Going Back
+  discards it. Backend authorization and revision checks remain authoritative;
+  confirmations are never rebased automatically after an account change.
+- After promotion, the member's cached home presentation is invalidated so the
+  next home navigation reflects the new administrator role. Existing backend
+  protections against self-revocation and removal of the last administrator
+  continue to apply to account role mutations.
+
+### Profile list density and heading hierarchy (implemented)
+
+The user accepted this layout together with the profile-card redesign.
+
+- Use a single compact profile row: `username · status`, rather than a separate
+  heading and status line. Keep the profile-open action adjacent to its row.
+- Reserve Heading 1 for the screen title, Heading 2 for sections/regions, and
+  Heading 3 for nested server groups where a heading is useful. Profile rows
+  can use ordinary text instead of adding another heading level.
+- The hierarchy is verified against the installed Rich Message schema and
+  rendering tests. Telegram mobile appearance still requires a live UX check.
+
+The installed aiogram schema confirms heading sizes 1 through 6 (1 is largest).
+Screen titles now use size 1, sections use size 2, and nested server headings
+use size 3. Collapsed groups do not introduce an invisible extra heading level;
+compact profile rows have no headings.
+
+### Expiry editing and scheduled runtime revocation
+
+- Edit offers 7/30/90-day intervals, no expiry, or a specific YYYY-MM-DD date.
+  Custom dates end at 23:59:59 UTC on the chosen day. Past/invalid dates are
+  rejected without a mutation. Forms preserve their starting profile revision
+  and idempotency key; conflicts require returning to refresh the form.
+- The backend worker now detects reached expiries that still have an ensure
+  intent at the current revision. Under maintenance admission and a revision
+  guard, it records a fresh durable delete revision using the existing outbox.
+  This does not require Telegram activity and does not repeat on each timer run.
+- Audit attribution preserves the account that requested the expiring revision.
+  Grants and identities remain stored, allowing a later extension to restore
+  access. Remote calls remain outside DB transactions. Existing blocked-node
+  protections still apply: uncertain earlier work is not replayed automatically.
+- Revocation is processed on the worker timer, subject to agent availability;
+  the configuration API separately denies issuance as soon as expiry is reached.
+
+
+### Request visibility and isolated profile setup (implemented)
+
+- The administrator home shows the Requests entry and Access management section
+  only when the overview confirms at least one pending request.
+- Approve/reject edits the notification in place. Rejection offers Close;
+  approval offers Edit profile and Close. Close deletes this notification.
+- Edit profile opens a separate grants → duration → review wizard in the same
+  notification. After saving, the overview offers Edit and Close. Add user from
+  Profiles uses the same grants and duration setup for the automatic profile.
+- Each notification uses its own FSM storage destiny keyed by message ID.
+  The main panel's message identity, active wizard, filters and draft are retained.
+  Date input in a notification must be a reply to that message; unthreaded input
+  continues to belong to the main panel. Closed sessions reject stale callbacks.
+- A profile PATCH can atomically replace grants and expiry, with the captured
+  revision and an idempotency key. Validation failures do not partially save.
+- Member access may be permanent or expire after 7/30/90 days or on a custom
+  date. Administrators have permanent duration: finite expiry is rejected by the
+  backend, promotion clears existing expiry with a fresh runtime intent, and the
+  worker repairs old finite administrator expiries. Grants and freezing remain
+  independent controls; permanent duration does not grant access to every node.
+- Navigation arrows use Unicode text symbols rather than emoji.

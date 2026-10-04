@@ -15,7 +15,7 @@ from telegram_client.routers import user
 
 class RenderRecoveryTests(IsolatedAsyncioTestCase):
     async def test_wizard_back_and_next_share_row_without_losing_primary_action_style(self):
-        back = InlineKeyboardButton(text='🔙 Back', callback_data='back')
+        back = InlineKeyboardButton(text='← Back', callback_data='back')
         next_button = InlineKeyboardButton(text='Next', callback_data='next', style='primary')
         blocks = Screen('Create profile', ('Name: Alice',), embedded_buttons=True,
                         navigation=True).rich([[back, next_button]]).blocks
@@ -96,7 +96,7 @@ class RenderRecoveryTests(IsolatedAsyncioTestCase):
 
     async def test_inline_back_is_also_separated_from_screen_content(self):
         screen = Screen('Help', ('Instructions',))
-        for title in ('🔙 Back', '🔙 Назад'):
+        for title in ('← Back', '← Назад'):
             with self.subTest(title=title):
                 rows = [[InlineKeyboardButton(text=title, callback_data='back')]]
                 self.assertEqual(screen.rich(rows).blocks[-1].type, 'divider')
@@ -185,3 +185,21 @@ class RenderRecoveryTests(IsolatedAsyncioTestCase):
                 await command(message, self.bot, backend, self.state)
                 self.assertEqual(self.bot.send_rich_message.await_count, before + 1)
                 self.assertEqual(self.data['control_message_id'], 20)
+
+    async def test_heading_hierarchy_and_compact_unheaded_lists(self):
+        server = Section('Latvia #1', ('Traffic: 1 GiB',))
+        region = Section('Latvia', sections=(server,))
+        screen = Screen('Servers', sections=(region,))
+        headings = [b for b in screen.rich().blocks if b.type == 'heading']
+        self.assertEqual([(b.text, b.size) for b in headings],
+                         [('Servers', 1), ('Latvia', 2), ('Latvia #1', 3)])
+        collapsed = Screen('Profile', sections=(Section('Servers', collapsed=True,
+            sections=(region,)),))
+        details = collapsed.rich().blocks[1]
+        self.assertEqual([(b.text, b.size) for b in details.blocks if b.type == 'heading'],
+                         [('Latvia', 2), ('Latvia #1', 3)])
+        compact = Screen('Profiles', sections=(Section('', rows=((
+            InlineKeyboardButton(text='Alice · Active', callback_data='alice'),),)),))
+        blocks = compact.rich().blocks
+        self.assertEqual([b.type for b in blocks], ['heading', 'buttons'])
+        self.assertEqual(blocks[1].buttons[0].text, 'Alice · Active')

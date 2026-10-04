@@ -69,9 +69,9 @@ async def show_admin_nodes(chat_id, user_id, message_id, bot, backend, state, pa
         rows.append([InlineKeyboardButton(text=label, callback_data=AdminNodeCallback(node_key=node['key']).pack())])
     arrows = []
     if page_index > 0:
-        arrows.append(InlineKeyboardButton(text='◀️', callback_data=f'admin_node_page:{page_index - 1}'))
+        arrows.append(InlineKeyboardButton(text='←', callback_data=f'admin_node_page:{page_index - 1}'))
     if page.get('next_cursor'):
-        arrows.append(InlineKeyboardButton(text='▶️', callback_data=f'admin_node_page:{page_index + 1}'))
+        arrows.append(InlineKeyboardButton(text='→', callback_data=f'admin_node_page:{page_index + 1}'))
     if arrows:
         rows.append(arrows)
     rows.append([InlineKeyboardButton(text=tr(locale, 'nodes.admin.add'), callback_data=NewNodeCallback().pack())])
