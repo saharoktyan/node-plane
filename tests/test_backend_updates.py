@@ -13,6 +13,12 @@ class BackendUpdateTests(TestCase):
     setUp = BackendHTTPTests.setUp
 
     def service(self, **driver):
+        install_env = patch.dict('os.environ', {'NODE_PLANE_APP_DIR': '/opt/node-plane/current'})
+        install_env.start()
+        self.addCleanup(install_env.stop)
+        sleeper = patch('backend.updates.time.sleep')
+        sleeper.start()
+        self.addCleanup(sleeper.stop)
         self.actor = Actor(Principal('test', PrincipalKind.SERVICE, ADMIN_PERMISSIONS), self.admin)
         self.updater = SimpleNamespace(
             get_updates_overview=Mock(return_value={'branch': 'dev', 'update_supported': True}),
@@ -106,6 +112,31 @@ class BackendUpdateTests(TestCase):
         service.run_one()
         service.run_one()
         self.assertEqual(service.get(self.actor, job['id'])['status'], 'succeeded')
+
+    def test_agent_restart_verification_retries_reads_without_replaying_install(self):
+        service = self.service()
+        self.node()
+        service.driver.inspect_node_services.return_value = {'agent_commit': 'b' * 40}
+        with patch('config.APP_COMMIT', 'a' * 40):
+            job = service.queue(self.actor, str(uuid4()), 'agents')
+        service.run_one()
+        runner = Mock(return_value=True)
+        rollout = AgentRolloutService(self.db, runner)
+        with patch.dict('os.environ', {'NODE_PLANE_APP_DIR': '/opt/node-plane/current'}):
+            self.assertTrue(rollout.run_one())
+        service.driver.inspect_node_services.side_effect = [
+            RuntimeError('restart in progress'), {'agent_commit': 'b' * 40}, {'agent_commit': 'a' * 40}]
+        service.run_one()
+        service.run_one()
+        self.assertEqual(service.get(self.actor, job['id'])['status'], 'succeeded')
+        runner.assert_called_once()
+        self.assertFalse(rollout.run_one())
+
+    def test_agent_verification_remains_blocked_if_service_never_returns(self):
+        service = self.service()
+        verified, error = service._verify_commit(Mock(side_effect=RuntimeError()), 'agent_commit', 'a' * 40)
+        self.assertFalse(verified)
+        self.assertEqual(error, 'update_verification_unavailable')
 
     def test_current_components_do_not_offer_updates(self):
         service = self.service()

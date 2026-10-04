@@ -2,6 +2,7 @@
 import json
 import os
 import subprocess
+import time
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from uuid import UUID, uuid4, uuid5
@@ -22,6 +23,20 @@ class UpdateService:
         self.db, self.driver = db, driver
         self._updater = updater
         self.runner = runner
+
+    def _verify_commit(self, read, field, expected):
+        """Allow restarted services to become reachable; never replay installation."""
+        failure = 'update_version_mismatch'
+        for attempt in range(5):
+            try:
+                if same_commit(read().get(field), expected):
+                    return True, None
+                failure = 'update_version_mismatch'
+            except Exception:
+                failure = 'update_verification_unavailable'
+            if attempt < 4:
+                time.sleep(2)
+        return False, failure
 
     @property
     def updater(self):
@@ -239,7 +254,7 @@ class UpdateService:
                                 env={**os.environ, 'NODE_PLANE_INSTALL_RUST': 'no'}, capture_output=True,
                                 timeout=1200, check=False).returncode == 0)
                             if succeeded:
-                                succeeded = same_commit(self.driver.binary_info().get('commit'), intent['expected_commit'])
+                                succeeded, _ = self._verify_commit(self.driver.binary_info, 'commit', intent['expected_commit'])
                         except Exception:
                             succeeded = False
                         with self.db.transaction() as conn:
@@ -267,17 +282,17 @@ class UpdateService:
                              else NodeOperations(self.db).get(actor, item['child_id']))
                     if child['status'] in {'succeeded', 'blocked', 'superseded'}:
                         status = child['status']
+                        error_code = None
                         if status == 'succeeded':
-                            try:
-                                facts = self.driver.inspect_node_services(item['node_key'])
-                                field = 'agent_commit' if job['kind'] == 'agents' else 'runtime_commit'
-                                if not same_commit(facts.get(field), json.loads(item['intent_json'])['expected_commit']):
-                                    status = 'blocked'
-                            except Exception:
+                            field = 'agent_commit' if job['kind'] == 'agents' else 'runtime_commit'
+                            verified, error_code = self._verify_commit(
+                                lambda: self.driver.inspect_node_services(item['node_key']), field,
+                                json.loads(item['intent_json'])['expected_commit'])
+                            if not verified:
                                 status = 'blocked'
                         with self.db.transaction() as conn:
-                            conn.execute('UPDATE backend_update_items SET status=? WHERE job_id=? AND node_key=?',
-                                         (status, job['id'], item['node_key']))
+                            conn.execute('UPDATE backend_update_items SET status=?,error_code=? WHERE job_id=? AND node_key=?',
+                                         (status, error_code, job['id'], item['node_key']))
                         return True
             states = {i['status'] for i in items}
             if not states & {'running', 'awaiting_executor'}:
