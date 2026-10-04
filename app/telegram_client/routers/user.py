@@ -16,7 +16,7 @@ import qrcode
 from qrcode.exceptions import DataOverflowError
 
 from ..backend import BackendClient, BackendError
-from ..screens import Screen
+from ..screens import Screen, Section
 from ..i18n import normalize_locale, tr
 from .callbacks import HomeCallback
 from .common import render
@@ -198,13 +198,16 @@ async def show_home(chat_id: int, user_id: int, bot: Bot, backend: BackendClient
         else:
             lines = (policy['gate_message'],)
     else:
-        rows.append([button(user_id, tr(locale, 'home.get_config'), 'profiles')])
+        rows.append([button(user_id, tr(locale, 'home.get_config'), 'profiles').model_copy(update={'style': 'primary'})])
         rows.append([button(user_id, tr(locale, 'home.account'), 'account_info')])
         lines = (tr(locale, 'home.choose'),)
-    rows.append([button(user_id, tr(locale, 'home.settings'), 'member_settings')])
+    if account['status'] == 'approved':
+        rows[-1].append(button(user_id, tr(locale, 'home.settings'), 'member_settings'))
+    else:
+        rows.append([button(user_id, tr(locale, 'home.settings'), 'member_settings')])
     if account['role'] == 'admin' and account['status'] == 'approved':
         rows.append([button(user_id, tr(locale, 'home.admin'), 'admin_menu')])
-    await render(bot, chat_id, Screen(bot_title, lines), rows, state, message_id)
+    await render(bot, chat_id, Screen(bot_title, lines, embedded_buttons=True), rows, state, message_id)
 
 
 async def show_language_picker(chat_id: int, user_id: int, bot: Bot,
@@ -216,13 +219,14 @@ async def show_language_picker(chat_id: int, user_id: int, bot: Bot,
              button(user_id, tr(locale, 'settings.english'), 'first_locale', 'en')]]
     title = (await backend.bot_title(user_id))['title']
     await render(bot, chat_id, Screen(title,
-        (tr(locale, 'language.prompt'),)), rows, state, message_id)
+        (tr(locale, 'language.prompt'),), embedded_buttons=True), rows, state, message_id)
 
 
 async def show_profiles(chat_id: int, user_id: int, message_id: int, bot: Bot,
                         backend: BackendClient, state: FSMContext) -> None:
     locale = normalize_locale((await state.get_data()).get('locale'))
     page = await backend.profiles(user_id)
+    await state.update_data(member_profile_back='home' if len(page['items']) == 1 else 'profiles')
     if len(page['items']) == 1:
         await show_profile(chat_id, user_id, message_id, page['items'][0]['id'],
                            bot, backend, state)
@@ -231,7 +235,7 @@ async def show_profiles(chat_id: int, user_id: int, message_id: int, bot: Bot,
             for item in page['items']]
     rows.append([button(user_id, tr(locale, 'back'), 'home')])
     await render(bot, chat_id, Screen(tr(locale, 'profiles.title'),
-        (tr(locale, 'profiles.choose'),) if page['items'] else (tr(locale, 'profiles.empty'),)),
+        (tr(locale, 'profiles.choose'),) if page['items'] else (tr(locale, 'profiles.empty'),), embedded_buttons=True),
         rows, state, message_id)
 
 
@@ -251,7 +255,7 @@ async def show_account_info(chat_id: int, user_id: int, message_id: int,
     lines = (tr(locale, 'account.id', id=account['id']),
              tr(locale, 'account.status', status=tr(locale, f"status.{account['status']}")),
              tr(locale, 'account.profiles_choose' if page['items'] else 'account.profiles_empty'))
-    await render(bot, chat_id, Screen(tr(locale, 'account.title'), lines),
+    await render(bot, chat_id, Screen(tr(locale, 'account.title'), lines, embedded_buttons=True),
                  rows, state, message_id)
 
 
@@ -265,26 +269,27 @@ async def show_account_profile(chat_id: int, user_id: int, message_id: int,
                   'profile.expired' if summary['expired'] else 'profile.active')
     status = tr(locale, status_key)
     lines = [tr(locale, 'account.profile_name', name=summary['display_name']),
-             tr(locale, 'account.status', status=status),
-             tr(locale, 'account.telegram_id', id=user_id),
-             tr(locale, 'account.username', value='@' + username if username else '—')]
+             tr(locale, 'account.status', status=status)]
     if summary.get('expires_at'):
-        lines.append(tr(locale, 'account.profile_expires',
-            value=summary['expires_at'][:10]))
-    if summary['nodes']:
-        lines.append(tr(locale, 'account.access_title'))
-        for node in summary['nodes']:
-            protocols = ', '.join(tr(locale, 'protocol.' + kind)
-                                  for kind in node['protocols'])
-            lines.append(tr(locale, 'account.access_node',
-                node=f"{node['flag']} {node['title']}".strip(), protocols=protocols))
-    else:
+        lines.append(tr(locale, 'account.profile_expires', value=summary['expires_at'][:10]))
+    sections = [Section(tr(locale, 'ui.account_details'),
+        (tr(locale, 'account.telegram_id', id=user_id),
+         tr(locale, 'account.username', value='@' + username if username else '—')), collapsed=True)]
+    for node in summary['nodes']:
+        sections.append(Section(f"{node['flag']} {node['title']}".strip(),
+            rows=(tuple(button(user_id, tr(locale, 'protocol.' + kind), 'protocol',
+                profile_id, node['key'], kind) for kind in node['protocols']),)))
+    if not summary['nodes']:
         lines.append(tr(locale, 'account.access_empty'))
-    rows = [[button(user_id, tr(locale, 'account.statistics'), 'account_stats',
-                    profile_id, back_to)],
-            [button(user_id, tr(locale, 'back'), back_to)]]
-    await render(bot, chat_id, Screen(tr(locale, 'account.profile_title'), tuple(lines)),
-                 rows, state, message_id)
+    sections.append(Section(tr(locale, 'account.statistics'),
+        (tr(locale, 'account.stats_nodes', count=summary.get('node_count', len(summary['nodes']))),
+         tr(locale, 'account.stats_issued', count=summary.get('issued_count', 0))), rows=((
+        button(user_id, tr(locale, 'ui.statistics_details'), 'account_stats', profile_id, back_to),),),
+        collapsed=True))
+    await render(bot, chat_id, Screen(tr(locale, 'account.profile_title'), tuple(lines),
+        sections=tuple(sections), embedded_buttons=True, navigation=True),
+        [[button(user_id, tr(locale, 'back'), back_to)]], state, message_id)
+
 
 
 async def show_account_stats(chat_id: int, user_id: int, message_id: int,
@@ -313,7 +318,7 @@ async def show_account_stats(chat_id: int, user_id: int, message_id: int,
                       tr(locale, 'traffic.sample',
                          since=item['tracked_since'][:16].replace('T', ' '),
                          at=item['last_sample_at'][:16].replace('T', ' ')))
-    await render(bot, chat_id, Screen(tr(locale, 'account.stats_title'), lines),
+    await render(bot, chat_id, Screen(tr(locale, 'account.stats_title'), lines, embedded_buttons=True, navigation=True),
         [[button(user_id, tr(locale, 'back'), 'account_profile', profile_id, back_to)]],
         state, message_id)
 
@@ -333,16 +338,18 @@ async def show_profile(chat_id: int, user_id: int, message_id: int,
     locale = normalize_locale((await state.get_data()).get('locale'))
     profile = await backend.member_profile_summary(user_id, profile_id)
     page = await backend.profile_nodes(user_id, profile_id)
-    rows = [[button(user_id, f"{node['flag']} {node['title']}".strip(),
-                    'node', profile_id, node['key'])] for node in page['items']]
-    rows.append([button(user_id, tr(locale, 'back'), 'profiles')])
+    sections = tuple(Section(f"{node['flag']} {node['title']}".strip(), (node['region'],),
+        (tuple(button(user_id, tr(locale, f"protocol.{protocol['kind']}"), 'protocol',
+            profile_id, node['key'], protocol['kind']) for protocol in node['protocols']),))
+        for node in page['items'])
+    back = (await state.get_data()).get('member_profile_back', 'profiles')
     status_key = ('profile.frozen' if profile['frozen'] else
                   'profile.expired' if profile['expired'] else 'profile.active')
-    status = tr(locale, status_key)
     await render(bot, chat_id, Screen(profile['display_name'],
-        (tr(locale, 'account.status', status=status), tr(locale, 'nodes.choose')) if page['items'] else
-        (tr(locale, 'account.status', status=status), tr(locale, 'nodes.empty'))),
-        rows, state, message_id)
+        (tr(locale, 'account.status', status=tr(locale, status_key)),
+         tr(locale, 'nodes.choose' if page['items'] else 'nodes.empty')),
+        sections=sections, embedded_buttons=True, navigation=True),
+        [[button(user_id, tr(locale, 'back'), back)]], state, message_id)
 
 
 async def show_node(chat_id: int, user_id: int, message_id: int,
@@ -359,7 +366,7 @@ async def show_node(chat_id: int, user_id: int, message_id: int,
             for protocol in node['protocols']]
     rows.append([button(user_id, tr(locale, 'back'), 'profile', profile_id)])
     await render(bot, chat_id, Screen(node['title'],
-        (node['region'], tr(locale, 'node.choose_protocol'))),
+        (node['region'], tr(locale, 'node.choose_protocol')), embedded_buttons=True, navigation=True),
         rows, state, message_id)
 
 
@@ -377,13 +384,18 @@ async def show_protocol(chat_id: int, user_id: int, message_id: int, profile_id:
         await issue(chat_id, user_id, message_id, profile_id, node_key, 'awg', 'vpn',
                     bot, backend, state)
         return
-    rows = [[button(user_id, tr(locale, f'transport.{transport}'), 'issue',
-                    profile_id, node_key, 'xray', transport)]
-            for transport in selected['transports']]
-    title = tr(locale, 'xray.title', node=node['title'])
-    rows.append([button(user_id, tr(locale, 'back'), 'node', profile_id, node_key)])
-    prompt = tr(locale, 'transport.choose')
-    await render(bot, chat_id, Screen(title, (prompt,)), rows, state, message_id)
+    sections = tuple(Section(tr(locale, f'transport.{transport}'),
+        (tr(locale, f'ui.transport.{transport}'),),
+        ((button(user_id, tr(locale, 'ui.select_transport', transport=transport.upper()),
+            'issue', profile_id, node_key, 'xray', transport),),))
+        for transport in selected['transports'])
+    sections += (Section(tr(locale, 'ui.transport_help'),
+        (tr(locale, 'ui.transport_help_text'),), collapsed=True),)
+    await render(bot, chat_id, Screen(tr(locale, 'xray.title', node=node['title']),
+        (tr(locale, 'transport.choose'),), sections=sections,
+        embedded_buttons=True, navigation=True),
+        [[button(user_id, tr(locale, 'back'), 'profile', profile_id)]], state, message_id)
+
 
 
 async def show_issuance(chat_id: int, user_id: int, message_id: int,
@@ -408,8 +420,8 @@ async def _render_issuance(chat_id: int, user_id: int, message_id: int,
     profile_id, node_key = result['profile_id'], result['node_key']
     locale = normalize_locale((await state.get_data()).get('locale'))
     rows = [[button(user_id, tr(locale, 'back'),
-                    'node' if result['protocol'] == 'awg' else 'protocol',
-                    profile_id, node_key, *(() if result['protocol'] == 'awg' else ('xray',)))]]
+                    'profile' if result['protocol'] == 'awg' else 'protocol',
+                    profile_id, *(() if result['protocol'] == 'awg' else (node_key, 'xray')))]]
     if result['status'] == 'succeeded':
         artifact = await backend.artifact(user_id, issuance_id)
         if (await state.get_data()).get('issuance_poll_token') != view_token:
@@ -424,9 +436,12 @@ async def _render_issuance(chat_id: int, user_id: int, message_id: int,
             return
         import_hint = tr(locale, 'config.import_xray' if result['protocol'] == 'xray'
                          else 'config.import_awg_vpn' if uri else 'config.import_awg_conf')
-        screen = Screen(tr(locale, 'config.ready'), (import_hint,),
-            uri=uri, qr=image, qr_title=tr(locale, 'config.qr'),
-            files=tuple((item['filename'], item['content'].encode()) for item in files))
+        screen = Screen(artifact.get('display_name') or tr(locale, 'config.ready'),
+            (tr(locale, 'ui.config_intro'),),
+            uri=uri, uri_title=tr(locale, 'ui.config_link'), qr=image, qr_title=tr(locale, 'ui.config_qr'),
+            sections=(), details_title=tr(locale, 'ui.config_help'), details_lines=(import_hint,),
+            files=tuple((item['filename'], item['content'].encode()) for item in files),
+            embedded_buttons=True, navigation=True)
         rich = await render(bot, chat_id, screen, rows, state, message_id)
         # Older Telegram deployments may reject rich media. Preserve downloads
         # there, while supported deployments keep everything in the control message.
@@ -451,12 +466,12 @@ async def _render_issuance(chat_id: int, user_id: int, message_id: int,
                 await track_artifact(state, sent.message_id)
     elif result['status'] in {'blocked', 'superseded', 'failed'}:
         await render(bot, chat_id, Screen(tr(locale, 'config.not_ready'),
-            (tr(locale, 'config.unavailable'),)),
+            (tr(locale, 'config.unavailable'),), embedded_buttons=True, navigation=True),
             rows, state, message_id)
     else:
         rows.insert(0, [button(user_id, tr(locale, 'config.refresh'), 'issuance', issuance_id)])
         await render(bot, chat_id, Screen(tr(locale, 'config.preparing_title'),
-            (tr(locale, 'config.pending'),)), rows, state, message_id)
+            (tr(locale, 'config.pending'),), embedded_buttons=True), rows, state, message_id)
 
 
 async def issue(chat_id: int, user_id: int, message_id: int, profile_id: str,
@@ -471,10 +486,10 @@ async def issue(chat_id: int, user_id: int, message_id: int, profile_id: str,
 
     try:
         await render(bot, chat_id, Screen(tr(locale, 'config.preparing_title'),
-            (tr(locale, 'config.preparing'),)),
+            (tr(locale, 'config.preparing'),), embedded_buttons=True, navigation=True),
             [[button(user_id, tr(locale, 'back'),
-                     'node' if protocol == 'awg' else 'protocol', profile_id, node_key,
-                     *(() if protocol == 'awg' else (protocol,)))]], state, message_id)
+                     'profile' if protocol == 'awg' else 'protocol', profile_id,
+                     *(() if protocol == 'awg' else (node_key, protocol)))]], state, message_id)
         queued = await backend.issue(user_id, profile_id, node_key, protocol, transport)
         if not await owns_screen():
             return
@@ -735,23 +750,25 @@ async def show_member_settings(chat_id: int, user_id: int, message_id: int,
     locale = normalize_locale((await state.get_data()).get('locale'))
     current = await backend.me(user_id)
     silent = current.get('announcement_silent', False)
-    rows = [
-        [button(user_id, tr(locale, 'settings.russian'), 'set_locale', 'ru'),
-         button(user_id, tr(locale, 'settings.english'), 'set_locale', 'en')],
-        [button(user_id, tr(locale, 'announce.sound_off' if silent else 'announce.sound_on'),
-            'announcement_silent', 'false' if silent else 'true')],
-        [button(user_id, tr(locale, 'back'), 'home')],
-    ]
-    lines = [tr(locale, 'settings.locale')]
+    sections = [Section(tr(locale, 'settings.locale'),
+        (tr(locale, 'settings.russian' if locale == 'ru' else 'settings.english'),),
+        ((button(user_id, tr(locale, 'settings.russian'), 'set_locale', 'ru'),
+          button(user_id, tr(locale, 'settings.english'), 'set_locale', 'en')),)),
+        Section(tr(locale, 'ui.notifications'),
+            (tr(locale, 'announce.sound_off' if silent else 'announce.sound_on'),),
+            ((button(user_id, tr(locale, 'ui.enable_sound' if silent else 'ui.disable_sound'),
+                'announcement_silent', 'false' if silent else 'true'),),))]
     if current.get('traffic_available') or current.get('traffic_consent'):
         consent = current.get('traffic_consent', False)
-        rows.insert(-1, [button(user_id, tr(locale, 'traffic.consent_on' if consent else 'traffic.consent_off'),
-            'traffic_consent', 'false' if consent else 'true')])
-        lines.append(tr(locale, 'traffic.consent_description'))
-    if saved:
-        lines.insert(0, tr(locale, 'settings.locale_saved'))
-    await render(bot, chat_id, Screen(tr(locale, 'settings.title'), tuple(lines)),
-                 rows, state, message_id)
+        sections.append(Section(tr(locale, 'ui.traffic'),
+            (tr(locale, 'traffic.consent_on' if consent else 'traffic.consent_off'),
+             tr(locale, 'traffic.consent_description')),
+            ((button(user_id, tr(locale, 'ui.withdraw_consent' if consent else 'ui.give_consent'),
+                'traffic_consent', 'false' if consent else 'true'),),)))
+    lines = (tr(locale, 'settings.locale_saved'),) if saved else ()
+    await render(bot, chat_id, Screen(tr(locale, 'settings.title'), lines,
+        sections=tuple(sections), embedded_buttons=True, navigation=True),
+        [[button(user_id, tr(locale, 'back'), 'home')]], state, message_id)
 
 
 @router.callback_query(F.data == 'admin_menu')
