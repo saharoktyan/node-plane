@@ -65,8 +65,10 @@ review, search and notifications use embedded actions, collapsed identifiers,
 and localized empty/error states. Search Back retains filter/page context.
 Native tables retain labeled rows in the plain-text fallback. See
 `ADMIN_RICH_MESSAGE_PLAN.md` for the remaining administrator UI phases.
-Profile administration uses direct card actions, collapsed IDs and paginated
-region-grouped access tables. Access editors and creation load all registry
+Profile lists use one clickable `name · status` row per profile. Landing cards
+show a short summary and Access/Edit actions. Management contains account roles
+and deletion; Technical details and operations are nested further inside it.
+Screen/section/server headings use H1/H2/H3. Access tables live in the editor. Access editors and creation load all registry
 pages and display 10 servers per page. Grant/Revoke all and regional buttons
 modify only the draft, including other pages; Save is required. Region choices
 are explicit snapshots: future servers require another Grant press and Save.
@@ -111,3 +113,16 @@ Telegram, the screen falls back to plain text with equivalent inline navigation;
 files and QR are then sent separately. All member text is localized in RU/EN.
 A real Telegram client acceptance pass on Android, iOS, and Desktop is still
 required for rendering and document/QR behavior.
+
+Profile Edit also supports preset durations, an explicit UTC expiry date, and
+no expiry. The form uses a captured revision and idempotency key. The backend
+worker queues runtime revocations when expiry is reached, retaining grants and
+identities for later extensions and preserving blocked-node recovery rules.
+
+
+Access-decision notifications retain an isolated in-message setup wizard. Approval
+shows Edit profile and Close; rejection shows Close. The grants/duration review
+is saved atomically, and the resulting overview offers Edit and Close. Main-panel
+FSM state remains independent. Reply to the notification when entering a custom
+expiry date. Ordinary member profiles support finite or permanent duration;
+administrator profiles always have permanent duration enforced by the backend.

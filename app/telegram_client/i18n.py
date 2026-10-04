@@ -1305,7 +1305,7 @@ CATALOG['ru'].update({
     'update_tools.versions': 'Версии',
     'update_tools.driver_name': 'Драйвер',
     'update_tools.fleet': 'Драйвер, агенты и runtime',
-    'update_tools.catalog_hint': 'текущая · ⬆ обновление · ⬇ откат · недоступно',
+    'update_tools.catalog_hint': 'текущая · ↑ обновление · ↓ откат · недоступно',
     'update_tools.page': 'Страница {page} из {total}',
     'update_tools.catalog_failed': 'Не удалось загрузить список версий. Повторите позже.',
     'update_tools.empty': 'Доступных версий нет.',
@@ -1344,7 +1344,7 @@ CATALOG['en'].update({
     'update_tools.versions': 'Versions',
     'update_tools.driver_name': 'Driver',
     'update_tools.fleet': 'Driver, agents and runtime',
-    'update_tools.catalog_hint': 'current · ⬆ upgrade · ⬇ downgrade · unavailable',
+    'update_tools.catalog_hint': 'current · ↑ upgrade · ↓ downgrade · unavailable',
     'update_tools.page': 'Page {page} of {total}',
     'update_tools.catalog_failed': 'Could not load versions. Try again later.',
     'update_tools.empty': 'No versions available.',
@@ -1672,7 +1672,7 @@ CATALOG['ru'].update({
 })
 
 # PTB button wording, copied as data without importing monolithic services.
-CATALOG['en'].update({'back': '⬅ Back',
+CATALOG['en'].update({'back': '← Back',
  'admin.status': 'Status',
  'admin.requests': 'Requests',
  'admin.nodes': 'Servers',
@@ -1689,9 +1689,9 @@ CATALOG['en'].update({'back': '⬅ Back',
  'nodes.card.bootstrap': 'Bootstrap',
  'nodes.card.settings': 'Advanced & Runtime',
  'nodes.card.delete': 'Remove Node',
- 'nodes.card.to_list': '⬅ To Servers',
- 'nodes.card.back_to_server': '⬅ Back To Server',
- 'nodes.card.back_to_settings': '⬅ Back To Advanced & Runtime',
+ 'nodes.card.to_list': '← To Servers',
+ 'nodes.card.back_to_server': '← Back To Server',
+ 'nodes.card.back_to_settings': '← Back To Advanced & Runtime',
  'node_tools.general': 'Basic',
  'node_tools.maintenance': 'Maintenance',
  'node_tools.xray': 'Xray',
@@ -1716,7 +1716,7 @@ CATALOG['en'].update({'back': '⬅ Back',
  'updates.choose_branch': 'Branch',
  'updates.auto_on': 'Auto-check',
  'updates.auto_off': 'Auto-check',
- 'updates.run': '⬆ To Latest',
+ 'updates.run': '↑ To Latest',
  'updates.cleanup': 'Release Cleanup',
  'update_tools.versions': 'Versions',
  'backups.create': 'Create Backup',
@@ -1743,7 +1743,7 @@ CATALOG['en'].update({'back': '⬅ Back',
  'nodes.probe.state.running': 'available',
  'nodes.probe.state.degraded': 'needs attention',
  'nodes.probe.state.unknown': 'unknown'})
-CATALOG['ru'].update({'back': '⬅ Назад',
+CATALOG['ru'].update({'back': '← Назад',
  'admin.status': 'Статус',
  'admin.requests': 'Заявки',
  'admin.nodes': 'Серверы',
@@ -1760,9 +1760,9 @@ CATALOG['ru'].update({'back': '⬅ Назад',
  'nodes.card.bootstrap': 'Bootstrap',
  'nodes.card.settings': 'Advanced & Runtime',
  'nodes.card.delete': 'Удалить ноду',
- 'nodes.card.to_list': '⬅ К серверам',
- 'nodes.card.back_to_server': '⬅ К серверу',
- 'nodes.card.back_to_settings': '⬅ К Advanced & Runtime',
+ 'nodes.card.to_list': '← К серверам',
+ 'nodes.card.back_to_server': '← К серверу',
+ 'nodes.card.back_to_settings': '← К Advanced & Runtime',
  'node_tools.general': 'Базовые',
  'node_tools.maintenance': 'Обслуживание',
  'node_tools.xray': 'Xray',
@@ -1787,7 +1787,7 @@ CATALOG['ru'].update({'back': '⬅ Назад',
  'updates.choose_branch': 'Ветка',
  'updates.auto_on': 'Auto-check',
  'updates.auto_off': 'Auto-check',
- 'updates.run': '⬆ До последней',
+ 'updates.run': '↑ До последней',
  'updates.cleanup': 'Очистка релизов',
  'update_tools.versions': 'Версии',
  'backups.create': 'Создать копию',
@@ -1822,6 +1822,62 @@ CATALOG['ru']['profile.create.telegram_prompt'] = 'Отправьте Telegram I
 CATALOG['en']['profile.create.telegram_failed'] = 'Could not add the user. Check their ID and resolve any pending access request first.'
 CATALOG['ru']['profile.create.telegram_failed'] = 'Не удалось добавить пользователя. Проверьте ID и сначала обработайте его заявку, если она есть.'
 
+CATALOG['en'].update({
+    'profile.role.title': 'Account permissions',
+    'profile.role.account': 'Account: {name}',
+    'profile.role.promote': 'Make administrator',
+    'profile.role.confirm_title': 'Confirm administrator rights',
+    'profile.role.warning': 'Dangerous action: this account will receive full administration rights, including control of all nodes, user access, settings and destructive operations. Only grant this role to someone you trust.',
+    'profile.role.confirm': 'Confirm: grant full administrator rights',
+    'profile.role.approve_first': 'Approve access before granting administrator rights.',
+    'profile.role.unavailable': 'Administrator rights cannot be granted to this account in its current state.',
+    'profile.role.stale': 'This confirmation is no longer valid. Open account permissions again.',
+    'profile.role.promoted': 'Administrator rights granted.',
+})
+
+CATALOG['ru'].update({
+    'profile.role.title': 'Права аккаунта',
+    'profile.role.account': 'Аккаунт: {name}',
+    'profile.role.promote': 'Сделать администратором',
+    'profile.role.confirm_title': 'Подтверждение прав администратора',
+    'profile.role.warning': 'Опасное действие: аккаунт получит полные права администратора, включая управление всеми нодами, доступами пользователей, настройками и удалением данных. Выдавайте эту роль только тому, кому доверяете.',
+    'profile.role.confirm': 'Подтвердить: выдать полные права администратора',
+    'profile.role.approve_first': 'Сначала одобрите доступ, затем выдайте права администратора.',
+    'profile.role.unavailable': 'В текущем состоянии этому аккаунту нельзя выдать права администратора.',
+    'profile.role.stale': 'Подтверждение больше не действует. Откройте права аккаунта заново.',
+    'profile.role.promoted': 'Права администратора выданы.',
+})
+
+CATALOG['en'].update({
+    'profile.layout.access': 'Access',
+    'profile.layout.edit': 'Edit',
+    'profile.layout.management': 'Management',
+    'profile.layout.technical': 'Technical details',
+    'profile.layout.expiry': 'Access expiry',
+    'profile.layout.change_expiry': 'Change expiry',
+    'profile.layout.unlimited': 'No expiry',
+    'profile.layout.days': '{days} days',
+    'profile.layout.date': 'Specific date',
+    'profile.layout.date_prompt': 'Send a date as YYYY-MM-DD. Access will expire at 23:59:59 UTC on that date.',
+    'profile.layout.date_invalid': 'Enter a valid date, today or later, using YYYY-MM-DD.',
+    'profile.layout.attention': 'Some access changes need attention. Open Management → Technical details.',
+})
+
+CATALOG['ru'].update({
+    'profile.layout.access': 'Доступ',
+    'profile.layout.edit': 'Редактировать',
+    'profile.layout.management': 'Управление',
+    'profile.layout.technical': 'Технические сведения',
+    'profile.layout.expiry': 'Срок доступа',
+    'profile.layout.change_expiry': 'Изменить срок',
+    'profile.layout.unlimited': 'Бессрочно',
+    'profile.layout.days': '{days} дней',
+    'profile.layout.date': 'Конкретная дата',
+    'profile.layout.date_prompt': 'Отправьте дату в формате YYYY-MM-DD. Доступ закончится в 23:59:59 UTC указанного дня.',
+    'profile.layout.date_invalid': 'Укажите корректную дату, сегодня или позже, в формате YYYY-MM-DD.',
+    'profile.layout.attention': 'Некоторые изменения доступа требуют внимания. Откройте Управление → Технические сведения.',
+})
+
 def normalize_locale(value: str | None) -> str:
     return 'ru' if (value or '').lower().startswith('ru') else 'en'
 
@@ -1830,3 +1886,13 @@ def tr(locale: str | None, key: str, **values) -> str:
     language = normalize_locale(locale)
     template = CATALOG[language].get(key, CATALOG['en'].get(key, key))
     return template.format(**values) if values else template
+
+
+CATALOG['en'].update({'setup.next': 'Next', 'setup.close': 'Close', 'setup.review': 'Review profile',
+    'setup.admin_permanent': 'Administrators always have permanent access.',
+    'setup.reply_date': 'Reply to this message with YYYY-MM-DD. Access ends at 23:59:59 UTC on that date.',
+    'requests.edit_profile': 'Edit profile'})
+CATALOG['ru'].update({'setup.next': 'Далее', 'setup.close': 'Закрыть', 'setup.review': 'Проверка профиля',
+    'setup.admin_permanent': 'У администраторов всегда бессрочный доступ.',
+    'setup.reply_date': 'Ответьте на это сообщение датой YYYY-MM-DD. Доступ закончится в 23:59:59 UTC указанного дня.',
+    'requests.edit_profile': 'Редактировать профиль'})

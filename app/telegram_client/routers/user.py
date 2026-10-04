@@ -342,7 +342,7 @@ async def show_account_profile(chat_id: int, user_id: int, message_id: int,
             collapsed=True, is_open=servers_open,
             sections=region_sections(nodes, locale, lambda node: Section(server_label(node),
                 profile_node_traffic(summary, node, locale),
-                divider_after=node['key'] != nodes[-1]['key'], heading_size=4)),
+                divider_after=node['key'] != nodes[-1]['key'], heading_size=3)),
             rows=server_pagination(user_id, locale, page_index, pages,
                 'account_nodes_page', profile_id, back_to)),
     )
@@ -428,7 +428,7 @@ async def show_profile(chat_id: int, user_id: int, message_id: int,
     sections = region_sections(nodes, locale, lambda node: Section(server_label(node),
         rows=(tuple(button(user_id, tr(locale, f"protocol.{protocol['kind']}"), 'protocol',
             profile_id, node['key'], protocol['kind']) for protocol in node['protocols']),),
-        divider_after=True, heading_size=4))
+        divider_after=True, heading_size=3))
     back = (await state.get_data()).get('member_profile_back', 'profiles')
     await render(bot, chat_id, Screen(tr(locale, 'home.get_config'),
         () if page['items'] else (tr(locale, 'nodes.empty'),),
@@ -831,9 +831,10 @@ async def show_admin_menu(chat_id: int, user_id: int, message_id: int,
         Section(tr(locale, 'admin.rich.management'), rows=((
             InlineKeyboardButton(text=tr(locale, 'admin.profiles'), callback_data=AdminProfilesCallback().pack()),
             InlineKeyboardButton(text=tr(locale, 'admin.nodes'), callback_data=AdminNodesCallback().pack())),)),
-        Section(tr(locale, 'admin.rich.access_management') +
+        *((Section(tr(locale, 'admin.rich.access_management') +
             (' · ' + tr(locale, 'requests.pending_count', count=overview['pending_requests'])
-             if isinstance(overview, dict) else ''), rows=((requests_button,),)),
+             if isinstance(overview, dict) else ''), rows=((requests_button,),)),)
+          if isinstance(overview, dict) and overview['pending_requests'] else ()),
         Section(tr(locale, 'admin.rich.system'), rows=((
             InlineKeyboardButton(text=tr(locale, 'admin.status'), callback_data='admin_status'),
             InlineKeyboardButton(text=tr(locale, 'admin.settings'), callback_data=AdminSettingsCallback().pack())),

@@ -496,6 +496,7 @@ class ProfileCreateInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
     display_name: Annotated[str, Field(min_length=1, max_length=128)]
     owner_account_id: UUID | None = None
+    expires_at: str | None = None
     grants: Annotated[list[GrantInput], Field(max_length=100)] = Field(default_factory=list)
 
 
@@ -504,6 +505,7 @@ class ProfileEditInput(BaseModel):
     display_name: Annotated[str, Field(min_length=1, max_length=128)] | None = None
     frozen: bool | None = Field(default=None, strict=True)
     expires_at: str | None = None
+    grants: Annotated[list[GrantInput], Field(max_length=100)] | None = None
 
 
 class GrantsInput(BaseModel):

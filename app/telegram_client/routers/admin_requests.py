@@ -1,4 +1,5 @@
 import os
+import logging
 from dataclasses import replace
 
 from aiogram import F, Router, Bot
@@ -212,37 +213,49 @@ async def request_search_text(message: Message, bot: Bot, backend: BackendClient
 
 @router.callback_query(ReviewCallback.filter())
 async def review_cb(query: CallbackQuery, callback_data: ReviewCallback, bot: Bot,
-                    backend: BackendClient, state: FSMContext):
+                    backend: BackendClient, state: FSMContext, *, notification: bool = False):
     await query.answer()
     locale = normalize_locale((await state.get_data()).get('locale') or
                               query.from_user.language_code)
     try:
         item = await backend.pending_access_request(query.from_user.id,
                                                     callback_data.request_id)
-    except BackendError:
+    except BackendError as exc:
+        if notification:
+            if exc.code == 'resource_not_found':
+                await close_request_notification(query, bot, state)
+                return
+            raise
         await render_request_page(query.message.chat.id, query.from_user.id,
             query.message.message_id, bot, backend, state,
             (await state.get_data()).get('request_page_index', 0))
         return
+    decision_type = NotificationDecisionCallback if notification else DecideCallback
     name = _request_name(item, locale)
     rows = [
         [InlineKeyboardButton(text=tr(locale, 'requests.approve'),
-            callback_data=DecideCallback(request_id=item['id'], decision='approve').pack(), style='primary'),
+            callback_data=decision_type(request_id=item['id'], decision='approve').pack(), style='primary'),
          InlineKeyboardButton(text=tr(locale, 'requests.reject'),
-            callback_data=DecideCallback(request_id=item['id'], decision='reject').pack(), style='danger')],
+            callback_data=decision_type(request_id=item['id'], decision='reject').pack(), style='danger')],
         [InlineKeyboardButton(text=tr(locale, 'back'),
-            callback_data=f"request_page:{(await state.get_data()).get('request_page_index', 0)}")]
+            callback_data='notification_close' if notification else
+                f"request_page:{(await state.get_data()).get('request_page_index', 0)}")]
     ]
     lines = [tr(locale, 'requests.detail_name', name=name),
         tr(locale, 'requests.detail_username',
            username='@' + item['username'] if item.get('username') else '—'),
         tr(locale, 'requests.detail_date', date=_request_date(item)),
         tr(locale, 'requests.pending_state')]
-    await render(bot, query.message.chat.id,
-        Screen(tr(locale, 'requests.title'), tuple(lines),
-            sections=(Section(tr(locale, 'requests.details'), _request_details(item, locale),
-                              collapsed=True),), embedded_buttons=True, navigation=True), rows, state,
-        query.message.message_id)
+    control_id = (await state.get_data()).get('control_message_id')
+    try:
+        await render(bot, query.message.chat.id,
+            Screen(tr(locale, 'requests.title'), tuple(lines),
+                sections=(Section(tr(locale, 'requests.details'), _request_details(item, locale),
+                                  collapsed=True),), embedded_buttons=True, navigation=True), rows, state,
+            query.message.message_id)
+    finally:
+        if notification:
+            await state.update_data(control_message_id=control_id)
 
 
 @router.callback_query(DecideCallback.filter())
@@ -258,15 +271,13 @@ async def notification_decision_cb(query: CallbackQuery,
         callback_data: NotificationDecisionCallback, bot: Bot,
         backend: BackendClient, state: FSMContext):
     await query.answer()
-    await state.set_state(None)
-    await state.update_data(request_cursors=[None], request_page_index=0,
-                            request_search=None)
     await apply_decision(query, callback_data.request_id, callback_data.decision,
-                         bot, backend, state)
+                         bot, backend, state, notification=True)
 
 
 async def apply_decision(query: CallbackQuery, request_id: str, decision: str,
-                         bot: Bot, backend: BackendClient, state: FSMContext):
+                         bot: Bot, backend: BackendClient, state: FSMContext, *,
+                         notification: bool = False):
     user_id = query.from_user.id
     if decision not in {'approve', 'reject'}:
         return
@@ -274,7 +285,12 @@ async def apply_decision(query: CallbackQuery, request_id: str, decision: str,
                               query.from_user.language_code)
     try:
         request_info = await backend.pending_access_request(user_id, request_id)
-    except BackendError:
+    except BackendError as exc:
+        if notification:
+            if exc.code == 'resource_not_found':
+                await close_request_notification(query, bot, state)
+                return
+            raise
         await render_request_page(query.message.chat.id, user_id,
             query.message.message_id, bot, backend, state,
             (await state.get_data()).get('request_page_index', 0))
@@ -289,14 +305,21 @@ async def apply_decision(query: CallbackQuery, request_id: str, decision: str,
     except BackendError as exc:
         if exc.code not in {'request_already_decided', 'resource_not_found'}:
             raise
+        if notification:
+            await close_request_notification(query, bot, state)
+            return
         await render_request_page(query.message.chat.id, user_id,
             query.message.message_id, bot, backend, state,
             (await state.get_data()).get('request_page_index', 0))
         return
 
-    await render_request_page(query.message.chat.id, user_id,
-        query.message.message_id, bot, backend, state,
-        (await state.get_data()).get('request_page_index', 0), return_home_when_empty=True)
+    if notification:
+        await state.update_data(notification_result={'request_id': request_id, 'account_id': result['account_id'], 'decision': decision})
+        await show_decision_result(query, bot, state)
+    else:
+        await render_request_page(query.message.chat.id, user_id,
+            query.message.message_id, bot, backend, state,
+            (await state.get_data()).get('request_page_index', 0), return_home_when_empty=True)
     try:
         account = await backend.request('GET',
             f"/api/v1/accounts/{result['account_id']}", telegram_user_id=user_id)
@@ -304,7 +327,7 @@ async def apply_decision(query: CallbackQuery, request_id: str, decision: str,
         if recipient:
             requester_state = FSMContext(storage=state.storage,
                 key=replace(state.key, chat_id=recipient, user_id=recipient,
-                            thread_id=None, business_connection_id=None))
+                            thread_id=None, business_connection_id=None, destiny='default'))
             await requester_state.set_state(None)
             await requester_state.update_data(locale=requester_locale, issuance_poll_token=None,
                                               home_presentation=None)
@@ -322,7 +345,30 @@ async def notification_review_cb(query: CallbackQuery,
         callback_data: NotificationReviewCallback, bot: Bot,
         backend: BackendClient, state: FSMContext):
     await review_cb(query, ReviewCallback(request_id=callback_data.request_id),
-                    bot, backend, state)
+                    bot, backend, state, notification=True)
+
+
+async def close_request_notification(query, bot, state):
+    try:
+        await bot.delete_message(query.message.chat.id, query.message.message_id)
+    except TelegramAPIError:
+        logging.getLogger(__name__).warning('Could not delete decided access notification')
+        try:
+            await bot.edit_message_reply_markup(chat_id=query.message.chat.id,
+                message_id=query.message.message_id, reply_markup=None)
+        except TelegramAPIError:
+            pass
+    if (await state.get_data()).get('notification_session'):
+        await state.set_state(None)
+        await state.update_data(notification_closed=True)
+    if (await state.get_data()).get('control_message_id') == query.message.message_id:
+        await state.update_data(control_message_id=None)
+
+
+@router.callback_query(F.data == 'notification_close')
+async def notification_close_cb(query: CallbackQuery, bot: Bot, state: FSMContext):
+    await query.answer()
+    await close_request_notification(query, bot, state)
 
 
 async def notify_admins(bot: Bot, backend: BackendClient, request_id: str):
@@ -351,3 +397,34 @@ async def notify_admins(bot: Bot, backend: BackendClient, request_id: str):
             await send_notice(bot, admin_id, notice, markup)
         except (ValueError, BackendError, TelegramAPIError):
             continue
+
+
+async def show_decision_result(query, bot, state):
+    data = await state.get_data()
+    result = data['notification_result']
+    locale = normalize_locale(data.get('locale'))
+    rows = []
+    if result['decision'] == 'approve':
+        rows.append([InlineKeyboardButton(text=tr(locale, 'requests.edit_profile'),
+            callback_data=f"request_profile:{result['request_id']}")])
+    rows.append([InlineKeyboardButton(text=tr(locale, 'setup.close'), callback_data='notification_close')])
+    await render(bot, query.message.chat.id, Screen(tr(locale, 'requests.title'),
+        (tr(locale, 'requests.approved' if result['decision'] == 'approve' else 'requests.rejected'),),
+        embedded_buttons=True, navigation=True), rows, state, query.message.message_id)
+
+
+@router.callback_query(F.data.startswith('request_profile:'))
+async def request_profile_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
+    await query.answer()
+    result = (await state.get_data()).get('notification_result')
+    if not result or result['decision'] != 'approve' or result['request_id'] != query.data.split(':', 1)[1]:
+        return
+    account = await backend.request('GET', f"/api/v1/accounts/{result['account_id']}", telegram_user_id=query.from_user.id)
+    if account['status'] != 'approved' or not account.get('telegram_user_id'):
+        return
+    profiles = await backend.profiles(account['telegram_user_id'])
+    profile = next((p for p in profiles['items'] if p.get('owner_account_id') == account['id'] and not p.get('deleting')), None)
+    if profile:
+        from .admin_profiles import start_profile_setup
+        await start_profile_setup(query.message.chat.id, query.from_user.id, query.message.message_id,
+            profile['id'], bot, backend, state)

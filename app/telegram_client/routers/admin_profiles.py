@@ -5,7 +5,7 @@ import asyncio
 import secrets
 import logging
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from aiogram import Bot, F, Router
@@ -108,6 +108,10 @@ async def _locale(state: FSMContext) -> str:
 async def _clear_flow(state: FSMContext) -> None:
     data = await state.get_data()
     await state.clear()
+    if data.get('notification_session'):
+        await state.update_data(notification_session=True,
+            notification_result=data.get('notification_result'),
+            control_message_id=data.get('control_message_id'))
     if data.get('locale'):
         await state.update_data(locale=data['locale'])
 
@@ -124,6 +128,10 @@ def _profile_error(locale: str, error: BackendError) -> str:
 
 class ProfileSearchState(StatesGroup):
     waiting_for_query = State()
+
+
+class ProfileExpiryState(StatesGroup):
+    waiting_for_date = State()
 
 
 class ProfileRenameState(StatesGroup):
@@ -173,7 +181,7 @@ async def add_profile_user_text(message: Message, bot: Bot, backend: BackendClie
                 revision=current['revision'], body={'status': 'approved'})
         profiles = await backend.profiles(int(value))
         await _clear_flow(state)
-        await show_admin_profile(message.chat.id, message.from_user.id, data.get('control_message_id'),
+        await start_profile_setup(message.chat.id, message.from_user.id, data.get('control_message_id'),
             profiles['items'][0]['id'], bot, backend, state)
     except (BackendError, TelegramAPIError):
         await render(bot, message.chat.id, Screen(tr(locale, 'profile.create.title'),
@@ -278,7 +286,7 @@ async def show_create_nodes(chat_id: int, user_id: int, message_id: int,
         rows=((InlineKeyboardButton(text=tr(locale, 'profile.rich.select_protocols'),
             callback_data=f"profile_draft_node:{indices[node['key']]}",
             style='primary' if any(key == node['key'] for key, _ in grants) else None),),),
-        divider_after=node['key'] != visible[-1]['key'], heading_size=4)
+        divider_after=node['key'] != visible[-1]['key'], heading_size=3)
     nonce = data.get('draft_bulk_nonce') or secrets.token_urlsafe(6)
     scopes, groups = {}, {}
     for node in visible:
@@ -532,15 +540,13 @@ async def show_admin_profiles(chat_id: int, user_id: int, message_id: int,
     if search:
         controls.append(InlineKeyboardButton(text=tr(locale, 'profiles.admin.show_all'),
             callback_data='admin_profiles_all'))
-    sections = [Section(tr(locale, 'admin.rich.management'),
+    sections = [Section('',
         (tr(locale, 'requests.search_active', query=search),) if search else (),
         (tuple(controls[:2]), *(((controls[2],),) if search else ())))]
-    for index, item in enumerate(page['items']):
-        sections.append(Section(item['display_name'],
-            (tr(locale, 'profile.admin.status', status=_status(item, locale)),),
-            ((InlineKeyboardButton(text=tr(locale, 'profile.rich.open'),
-                callback_data=AdminProfileCallback(profile_id=item['id']).pack()),),),
-            divider_after=index < len(page['items']) - 1))
+    sections.append(Section('', rows=tuple((InlineKeyboardButton(
+        text=f"{item['display_name']} · {_status(item, locale)}",
+        callback_data=AdminProfileCallback(profile_id=item['id']).pack()),)
+        for item in page['items'])))
     rows = []
     arrows = []
     if page_index > 0:
@@ -632,79 +638,190 @@ async def admin_profile_cb(query: CallbackQuery, callback_data: AdminProfileCall
 
 async def show_admin_profile(chat_id: int, user_id: int, message_id: int,
                              profile_id: str, bot: Bot, backend: BackendClient,
-                             state: FSMContext, *, access_page: int = 0, access_open: bool = False) -> None:
-    profile, grant_page, nodes, operation = await asyncio.gather(
+                             state: FSMContext) -> None:
+    profile, grant_page, operation = await asyncio.gather(
         backend.request('GET', f'/api/v1/profiles/{profile_id}', telegram_user_id=user_id),
-        backend.profile_grants(user_id, profile_id), _all_nodes(backend, user_id),
-        backend.profile_operation(user_id, profile_id))
-    grants = grant_page['items']
-    node_names = {node['key']: node for node in nodes}
+        backend.profile_grants(user_id, profile_id), backend.profile_operation(user_id, profile_id))
     locale = await _locale(state)
     await state.set_state(None)
     await state.update_data(edit_profile_id=None, draft_grants=None,
-                            original_grants=None, edit_profile_revision=None, grant_nodes_page=0)
-    grouped = {}
-    for grant in grants:
-        grouped.setdefault(grant['node_key'], []).append(tr(locale, f"protocol.{grant['protocol']}"))
-    tasks = operation['tasks'] if operation else []
-    operation_status = operation['status'] if operation else 'no_targets'
-    lines = [tr(locale, 'profile.admin.status', status=_status(profile, locale)),
-             tr(locale, 'profile.admin.cleanup' if profile.get('deleting') else
-                'profile.admin.provision',
-                status=tr(locale, f'operation.{operation_status}'),
-                ready=sum(task['status'] == 'succeeded' for task in tasks), total=len(tasks))]
-    if profile.get('deleting') and operation_status == 'blocked':
-        lines.append(tr(locale, 'profile.admin.cleanup_blocked'))
-    from .user import server_page
-    access_nodes = [node_names.get(key, {'key': key, 'title': key, 'region': '', 'flag': ''})
-                    for key in grouped]
-    visible, access_page, pages = server_page(access_nodes, access_page)
-    region_groups = {}
-    for node in visible:
-        region_groups.setdefault(node.get('region') or tr(locale, 'nodes.region_unknown'), []).append(node)
-    tables = tuple(Section(region, tables=(Table(
-        (tr(locale, 'admin.nodes'), tr(locale, 'profile.rich.protocols')),
-        tuple((server_label(node), ', '.join(grouped[node['key']])) for node in items)),))
-        for region, items in region_groups.items())
-    pagination = []
-    if access_page:
-        pagination.append(InlineKeyboardButton(text='←', callback_data=f'prof_access_page:{profile_id}:{access_page - 1}'))
-    if access_page + 1 < pages:
-        pagination.append(InlineKeyboardButton(text='→', callback_data=f'prof_access_page:{profile_id}:{access_page + 1}'))
-    access_lines = (tr(locale, 'profile.rich.access_count', count=len(access_nodes)),)
-    if pages > 1:
-        access_lines += (tr(locale, 'pagination.page', page=access_page + 1, pages=pages),)
-    if not access_nodes:
-        access_lines = (tr(locale, 'profile.admin.no_grants'),)
-    sections = [Section(tr(locale, 'profile.rich.access'),
-        rows=((InlineKeyboardButton(text=tr(locale, 'profile.rich.manage_access'),
-            callback_data=GrantNodesCallback(profile_id=profile_id).pack()),),) if not profile.get('deleting') else (),
-        sections=(Section(tr(locale, 'profile.rich.servers'), access_lines,
-            (tuple(pagination),) if pagination else (), collapsed=True, is_open=access_open,
-            sections=tables),))]
+        original_grants=None, edit_profile_revision=None, grant_nodes_page=0,
+        admin_promotion=None, profile_expiry=None, delete_profile_id=None, profile_setup=None)
+    lines = [tr(locale, 'profile.admin.status', status=_status(profile, locale))]
+    lines.append(tr(locale, 'profile.rich.expires', value=_expiry_label(profile['expires_at']) if profile.get('expires_at') else tr(locale, 'profile.layout.unlimited')))
+    lines.append(tr(locale, 'profile.rich.access_count',
+        count=len({grant['node_key'] for grant in grant_page['items']})))
+    if operation and operation['status'] == 'blocked':
+        lines.append(tr(locale, 'profile.layout.attention'))
+    rows = []
     if not profile.get('deleting'):
-        sections.extend((Section(tr(locale, 'profile.admin.status_title'),
-            (tr(locale, 'profile.rich.sync_note'),), (_status_buttons(profile, locale),)),
-            Section(tr(locale, 'profile.rich.identity'), rows=((InlineKeyboardButton(
-                text=tr(locale, 'profile.admin.rename'), callback_data=f'admin_profile_rename:{profile_id}'),),)),
-            Section(tr(locale, 'profile.rich.management'), rows=((InlineKeyboardButton(
-                text=tr(locale, 'profile.admin.delete'), callback_data=f'prof_del:{profile_id}', style='danger'),),), collapsed=True)))
-    details = (tr(locale, 'profile.admin.id', id=profile['id']),
-        tr(locale, 'profile.rich.owner', value=profile.get('owner_account_id') or '—'),
-        tr(locale, 'profile.rich.revision', value=profile['desired_revision']),
-        tr(locale, 'profile.rich.expires', value=profile.get('expires_at') or '—'))
-    sections.append(Section(tr(locale, 'requests.details'), details, collapsed=True))
-    if operation:
-        sections.insert(0, Section(tr(locale, 'profile.rich.synchronization'), rows=((
-            InlineKeyboardButton(text=tr(locale, 'profile.rich.operation'),
-                callback_data=f'prof_op:{profile_id}'),),)))
-    rows = [[InlineKeyboardButton(text=tr(locale, 'profile.admin.refresh'),
-        callback_data=AdminProfileCallback(profile_id=profile_id).pack())],
-        [InlineKeyboardButton(text=tr(locale, 'back'),
-            callback_data=AdminProfilesCallback().pack())]]
+        rows.append([InlineKeyboardButton(text=tr(locale, 'profile.layout.access'),
+            callback_data=GrantNodesCallback(profile_id=profile_id).pack(), style='primary'),
+            InlineKeyboardButton(text=tr(locale, 'profile.layout.edit'),
+                callback_data=f'admin_profile_edit:{profile_id}')])
+    rows.append([InlineKeyboardButton(text=tr(locale, 'profile.layout.management'),
+        callback_data=f'prof_manage:{profile_id}', style='link')])
+    rows.append([InlineKeyboardButton(text=tr(locale, 'back'),
+        callback_data=AdminProfilesCallback().pack())])
     await render(bot, chat_id, Screen(profile['display_name'], tuple(lines),
-        sections=tuple(sections), embedded_buttons=True, navigation=True),
-        rows, state, message_id)
+        embedded_buttons=True, navigation=True), rows, state, message_id)
+
+
+def _expiry_label(value):
+    if not value:
+        return '—'
+    return datetime.fromisoformat(value).astimezone(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+
+
+@router.callback_query(F.data.startswith('prof_manage:'))
+async def profile_management_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
+                                 state: FSMContext):
+    await query.answer()
+    await show_profile_management(query.message.chat.id, query.from_user.id,
+        query.message.message_id, query.data.split(':', 1)[1], bot, backend, state)
+
+
+async def show_profile_management(chat_id, user_id, message_id, profile_id, bot, backend, state):
+    profile = await backend.request('GET', f'/api/v1/profiles/{profile_id}', telegram_user_id=user_id)
+    locale = await _locale(state)
+    await state.set_state(None)
+    await state.update_data(admin_promotion=None, delete_profile_id=None, profile_expiry=None)
+    rows = []
+    if not profile.get('deleting'):
+        if profile.get('owner_account_id'):
+            rows.append([InlineKeyboardButton(text=tr(locale, 'profile.role.title'),
+                callback_data=f'prof_role:{profile_id}')])
+        rows.append([InlineKeyboardButton(text=tr(locale, 'profile.admin.delete'),
+            callback_data=f'prof_del:{profile_id}', style='danger')])
+    rows.append([InlineKeyboardButton(text=tr(locale, 'profile.layout.technical'),
+        callback_data=f'prof_tech:{profile_id}', style='link')])
+    rows.append([InlineKeyboardButton(text=tr(locale, 'back'),
+        callback_data=AdminProfileCallback(profile_id=profile_id).pack())])
+    await render(bot, chat_id, Screen(tr(locale, 'profile.layout.management'),
+        (profile['display_name'],), embedded_buttons=True, navigation=True), rows, state, message_id)
+
+
+@router.callback_query(F.data.startswith('prof_tech:'))
+async def profile_technical_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
+                                state: FSMContext):
+    await query.answer()
+    profile_id = query.data.split(':', 1)[1]
+    profile, operation = await asyncio.gather(
+        backend.request('GET', f'/api/v1/profiles/{profile_id}', telegram_user_id=query.from_user.id),
+        backend.profile_operation(query.from_user.id, profile_id))
+    locale = await _locale(state)
+    lines = (profile['display_name'], tr(locale, 'profile.admin.id', id=profile['id']),
+        tr(locale, 'profile.rich.owner', value=profile.get('owner_account_id') or '—'),
+        tr(locale, 'profile.rich.revision', value=profile['desired_revision']))
+    rows = []
+    if operation:
+        rows.append([InlineKeyboardButton(text=tr(locale, 'profile.rich.operation'),
+            callback_data=f'prof_op:{profile_id}')])
+    rows.append([InlineKeyboardButton(text=tr(locale, 'back'), callback_data=f'prof_manage:{profile_id}')])
+    await render(bot, query.message.chat.id, Screen(tr(locale, 'profile.layout.technical'),
+        lines, embedded_buttons=True, navigation=True), rows, state, query.message.message_id)
+
+
+async def _profile_owner(backend, user_id, profile_id):
+    profile = await backend.request('GET', f'/api/v1/profiles/{profile_id}',
+                                    telegram_user_id=user_id)
+    owner = profile.get('owner_account_id')
+    if not owner or profile.get('deleting'):
+        raise BackendError('resource_not_found', 404)
+    account = await backend.request('GET', f'/api/v1/accounts/{owner}',
+                                    telegram_user_id=user_id)
+    return profile, account
+
+
+def _account_label(account):
+    name = account.get('username')
+    return '@' + name if name else (account.get('first_name') or
+                                    str(account.get('telegram_user_id') or account['id']))
+
+
+@router.callback_query(F.data.startswith('prof_role:'))
+async def profile_role_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
+                          state: FSMContext):
+    await query.answer()
+    await state.update_data(admin_promotion=None)
+    profile_id = query.data.split(':', 1)[1]
+    profile, account = await _profile_owner(backend, query.from_user.id, profile_id)
+    locale = await _locale(state)
+    rows = []
+    if account['role'] == 'member' and account['status'] == 'approved':
+        rows.append([InlineKeyboardButton(text=tr(locale, 'profile.role.promote'),
+            callback_data=f'prof_promote:{profile_id}', style='danger')])
+    lines = [tr(locale, 'profile.role.account', name=_account_label(account)),
+             tr(locale, 'requests.detail_id', id=account.get('telegram_user_id') or '—'),
+             tr(locale, 'accounts.role', role=tr(locale, 'role.' + account['role']))]
+    if account['status'] != 'approved':
+        lines.append(tr(locale, 'profile.role.approve_first'))
+    rows.append([InlineKeyboardButton(text=tr(locale, 'back'),
+        callback_data=f'prof_manage:{profile_id}')])
+    await render(bot, query.message.chat.id, Screen(tr(locale, 'profile.role.title'),
+        tuple(lines), embedded_buttons=True, navigation=True), rows, state, query.message.message_id)
+
+
+@router.callback_query(F.data.startswith('prof_promote:'))
+async def profile_promote_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
+                             state: FSMContext):
+    profile_id = query.data.split(':', 1)[1]
+    locale = await _locale(state)
+    profile, account = await _profile_owner(backend, query.from_user.id, profile_id)
+    if account['role'] != 'member' or account['status'] != 'approved':
+        await query.answer(tr(locale, 'profile.role.unavailable'), show_alert=True)
+        return
+    await query.answer()
+    nonce = secrets.token_hex(4)
+    await state.update_data(admin_promotion={'nonce': nonce, 'profile_id': profile_id,
+        'account_id': account['id'], 'revision': account['revision'],
+        'command_key': str(uuid4()), 'message_id': query.message.message_id})
+    await render(bot, query.message.chat.id, Screen(tr(locale, 'profile.role.confirm_title'),
+        (tr(locale, 'profile.role.account', name=_account_label(account)),
+         tr(locale, 'requests.detail_id', id=account.get('telegram_user_id') or '—'),
+         tr(locale, 'profile.role.warning')), embedded_buttons=True, navigation=True),
+        [[InlineKeyboardButton(text=tr(locale, 'profile.role.confirm'),
+            callback_data=f'promote_yes:{nonce}', style='danger')],
+         [InlineKeyboardButton(text=tr(locale, 'back'), callback_data=f'prof_role:{profile_id}')]],
+        state, query.message.message_id)
+
+
+@router.callback_query(F.data.startswith('promote_yes:'))
+async def profile_promote_confirm_cb(query: CallbackQuery, bot: Bot,
+                                     backend: BackendClient, state: FSMContext):
+    confirmation = (await state.get_data()).get('admin_promotion')
+    locale = await _locale(state)
+    if (not confirmation or confirmation['nonce'] != query.data.split(':', 1)[1]
+            or confirmation['message_id'] != query.message.message_id):
+        await query.answer(tr(locale, 'profile.role.stale'), show_alert=True)
+        return
+    try:
+        profile, account = await _profile_owner(backend, query.from_user.id, confirmation['profile_id'])
+        if account['id'] != confirmation['account_id']:
+            raise BackendError('revision_conflict', 412)
+        result = await backend.request('PATCH', f"/api/v1/accounts/{account['id']}",
+            telegram_user_id=query.from_user.id, command=True,
+            command_key=confirmation['command_key'], revision=confirmation['revision'],
+            body={'role': 'admin'})
+    except BackendError as exc:
+        if exc.status != 503:
+            await state.update_data(admin_promotion=None)
+        await query.answer(_profile_error(locale, exc), show_alert=True)
+        return
+    await state.update_data(admin_promotion=None)
+    await query.answer(tr(locale, 'profile.role.promoted'))
+    await render(bot, query.message.chat.id, Screen(tr(locale, 'profile.role.title'),
+        (tr(locale, 'profile.role.account', name=_account_label(result)),
+         tr(locale, 'profile.role.promoted')), embedded_buttons=True, navigation=True),
+        [[InlineKeyboardButton(text=tr(locale, 'back'),
+            callback_data=f"prof_role:{confirmation['profile_id']}")]],
+        state, query.message.message_id)
+    recipient = result.get('telegram_user_id')
+    if recipient:
+        member_state = FSMContext(storage=state.storage,
+            key=replace(state.key, chat_id=recipient, user_id=recipient,
+                        thread_id=None, business_connection_id=None, destiny='default'))
+        await member_state.update_data(home_presentation=None)
 
 
 @router.callback_query(F.data.startswith('prof_access_page:'))
@@ -712,8 +829,10 @@ async def profile_access_page_cb(query: CallbackQuery, bot: Bot, backend: Backen
                                   state: FSMContext):
     await query.answer()
     _, profile_id, page = query.data.split(':', 2)
-    await show_admin_profile(query.message.chat.id, query.from_user.id,
-        query.message.message_id, profile_id, bot, backend, state, access_page=int(page), access_open=True)
+    await _ensure_grant_draft(backend, query.from_user.id, profile_id, state)
+    await state.update_data(grant_nodes_page=int(page))
+    await show_grant_nodes(query.message.chat.id, query.from_user.id,
+        query.message.message_id, profile_id, bot, backend, state)
 
 
 @router.callback_query(F.data.startswith('prof_state:'))
@@ -733,7 +852,7 @@ async def set_profile_state_cb(query: CallbackQuery, bot: Bot, backend: BackendC
             await query.answer(_profile_error(await _locale(state), exc), show_alert=True)
             return
     await query.answer()
-    await show_admin_profile(query.message.chat.id, query.from_user.id,
+    await show_profile_edit_menu(query.message.chat.id, query.from_user.id,
         query.message.message_id, profile_id, bot, backend, state)
 
 
@@ -757,7 +876,7 @@ async def profile_operation_cb(query: CallbackQuery, bot: Bot, backend: BackendC
         (tr(locale, 'profile.rich.operation_state', value=tr(locale, 'operation.' + status)),
          tr(locale, 'profile.rich.sync_note')), sections=tuple(sections), embedded_buttons=True, navigation=True),
         [[InlineKeyboardButton(text=tr(locale, 'profile.admin.refresh'), callback_data=f'prof_op:{profile_id}')],
-         [InlineKeyboardButton(text=tr(locale, 'back'), callback_data=AdminProfileCallback(profile_id=profile_id).pack())]],
+         [InlineKeyboardButton(text=tr(locale, 'back'), callback_data=f'prof_tech:{profile_id}')]],
         state, query.message.message_id)
 
 
@@ -776,8 +895,29 @@ async def admin_profile_edit_cb(query: CallbackQuery, bot: Bot,
 async def show_profile_edit_menu(chat_id: int, user_id: int, message_id: int,
                                  profile_id: str, bot: Bot, backend: BackendClient,
                                  state: FSMContext) -> None:
-    # Old callbacks remain valid; editing now lives directly on the profile card.
-    await show_admin_profile(chat_id, user_id, message_id, profile_id, bot, backend, state)
+    profile = await backend.request('GET', f'/api/v1/profiles/{profile_id}', telegram_user_id=user_id)
+    if profile.get('deleting'):
+        await show_admin_profile(chat_id, user_id, message_id, profile_id, bot, backend, state)
+        return
+    locale = await _locale(state)
+    await state.set_state(None)
+    await state.update_data(admin_promotion=None, profile_expiry=None, delete_profile_id=None,
+        edit_profile_id=None, draft_grants=None, original_grants=None, edit_profile_revision=None)
+    owner_admin = await _owner_is_admin(backend, user_id, profile)
+    sections = (Section(tr(locale, 'profile.rich.identity'), (profile['display_name'],),
+        ((InlineKeyboardButton(text=tr(locale, 'profile.admin.rename'),
+            callback_data=f'admin_profile_rename:{profile_id}'),),)),
+        Section(tr(locale, 'profile.layout.expiry'),
+            (tr(locale, 'setup.admin_permanent') if owner_admin else _expiry_label(profile.get('expires_at')) if profile.get('expires_at') else
+                tr(locale, 'profile.layout.unlimited'),),
+            () if owner_admin else ((InlineKeyboardButton(text=tr(locale, 'profile.layout.change_expiry'),
+                callback_data=f'prof_expiry:{profile_id}'),),)),
+        Section(tr(locale, 'profile.admin.status_title'),
+            (tr(locale, 'profile.rich.sync_note'),), (_status_buttons(profile, locale),)))
+    await render(bot, chat_id, Screen(tr(locale, 'profile.layout.edit'), sections=sections,
+        embedded_buttons=True, navigation=True),
+        [[InlineKeyboardButton(text=tr(locale, 'back'),
+            callback_data=AdminProfileCallback(profile_id=profile_id).pack())]], state, message_id)
 
 
 @router.callback_query(F.data.startswith('prof_del:'))
@@ -799,7 +939,7 @@ async def delete_profile_confirm_cb(query: CallbackQuery, bot: Bot,
     rows = [[InlineKeyboardButton(text=tr(locale, 'profile.admin.delete_confirm'),
         callback_data=f'prof_del_go:{profile_id}', style='danger')],
         [InlineKeyboardButton(text=tr(locale, 'back'),
-        callback_data=f'admin_profile_edit:{profile_id}')]]
+        callback_data=f'prof_manage:{profile_id}')]]
     await render(bot, query.message.chat.id,
         Screen(tr(locale, 'profile.admin.delete_title'),
             (tr(locale, 'profile.admin.name', name=profile['display_name']),
@@ -853,13 +993,119 @@ async def refresh_deleted_owner(result, admin_id, bot, backend, state):
             return
         member_state = FSMContext(storage=state.storage,
             key=replace(state.key, chat_id=recipient, user_id=recipient,
-                        thread_id=None, business_connection_id=None))
+                        thread_id=None, business_connection_id=None, destiny='default'))
         await member_state.set_state(None)
         await member_state.update_data(home_presentation=None, issuance_poll_token=None)
         from .user import show_home
         await show_home(recipient, recipient, bot, backend, member_state, account=account)
     except (BackendError, TelegramAPIError):
         logging.getLogger(__name__).warning('Could not refresh revoked member screen', exc_info=True)
+
+
+@router.callback_query(F.data.startswith('prof_expiry:'))
+async def profile_expiry_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
+                             state: FSMContext):
+    await query.answer()
+    profile_id = query.data.split(':', 1)[1]
+    profile = await backend.request('GET', f'/api/v1/profiles/{profile_id}',
+                                    telegram_user_id=query.from_user.id)
+    if profile.get('deleting'):
+        await show_admin_profile(query.message.chat.id, query.from_user.id,
+            query.message.message_id, profile_id, bot, backend, state)
+        return
+    if await _owner_is_admin(backend, query.from_user.id, profile):
+        await show_profile_edit_menu(query.message.chat.id, query.from_user.id, query.message.message_id, profile_id, bot, backend, state)
+        return
+    locale = await _locale(state)
+    now = datetime.now(timezone.utc)
+    nonce = secrets.token_hex(4)
+    await state.set_state(None)
+    await state.update_data(profile_expiry={'profile_id': profile_id,
+        'revision': profile['desired_revision'], 'nonce': nonce, 'command_key': str(uuid4()),
+        'values': {str(days): (now + timedelta(days=days)).isoformat() for days in (7, 30, 90)}})
+    rows = [[InlineKeyboardButton(text=tr(locale, 'profile.layout.days', days=days),
+        callback_data=f'prof_exp_set:{nonce}:{days}') for days in (7, 30, 90)],
+        [InlineKeyboardButton(text=tr(locale, 'profile.layout.unlimited'),
+            callback_data=f'prof_exp_set:{nonce}:none'),
+         InlineKeyboardButton(text=tr(locale, 'profile.layout.date'),
+            callback_data=f'prof_exp_date:{nonce}')],
+        [InlineKeyboardButton(text=tr(locale, 'back'), callback_data=f'admin_profile_edit:{profile_id}')]]
+    await render(bot, query.message.chat.id, Screen(tr(locale, 'profile.layout.expiry'),
+        (profile['display_name'], _expiry_label(profile.get('expires_at')) if profile.get('expires_at') else
+         tr(locale, 'profile.layout.unlimited')), embedded_buttons=True, navigation=True),
+        rows, state, query.message.message_id)
+
+
+@router.callback_query(F.data.startswith('prof_exp_set:'))
+async def profile_expiry_set_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
+                                 state: FSMContext):
+    _, nonce, selected = query.data.split(':', 2)
+    draft = (await state.get_data()).get('profile_expiry')
+    if not draft or draft['nonce'] != nonce or selected not in {'7', '30', '90', 'none'}:
+        await query.answer()
+        return
+    try:
+        await backend.edit_profile(query.from_user.id, draft['profile_id'], draft['revision'],
+            {'expires_at': None if selected == 'none' else draft['values'][selected]},
+            command_key=draft['command_key'])
+    except BackendError as exc:
+        await query.answer(_profile_error(await _locale(state), exc), show_alert=True)
+        return
+    await query.answer()
+    await show_profile_edit_menu(query.message.chat.id, query.from_user.id,
+        query.message.message_id, draft['profile_id'], bot, backend, state)
+
+
+@router.callback_query(F.data.startswith('prof_exp_date:'))
+async def profile_expiry_date_cb(query: CallbackQuery, bot: Bot, state: FSMContext):
+    await query.answer()
+    draft = (await state.get_data()).get('profile_expiry')
+    if not draft or draft['nonce'] != query.data.split(':', 1)[1]:
+        return
+    await state.set_state(ProfileExpiryState.waiting_for_date)
+    locale = await _locale(state)
+    await render(bot, query.message.chat.id, Screen(tr(locale, 'profile.layout.expiry'),
+        (tr(locale, 'profile.layout.date_prompt'),), embedded_buttons=True, navigation=True),
+        [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data=f"prof_expiry:{draft['profile_id']}")]],
+        state, query.message.message_id)
+
+
+@router.message(ProfileExpiryState.waiting_for_date, F.text)
+async def profile_expiry_message(message: Message, bot: Bot, backend: BackendClient, state: FSMContext):
+    if message.from_user is None or message.chat.type != 'private':
+        return
+    try:
+        await message.delete()
+    except TelegramAPIError:
+        pass
+    data = await state.get_data()
+    draft = data.get('profile_expiry')
+    if not draft:
+        return
+    locale = await _locale(state)
+    error = None
+    try:
+        value = message.text.strip()
+        date = datetime.strptime(value, '%Y-%m-%d').date()
+        if date.isoformat() != value or date < datetime.now(timezone.utc).date():
+            raise ValueError()
+        expires = datetime(date.year, date.month, date.day, 23, 59, 59, tzinfo=timezone.utc).isoformat()
+    except ValueError:
+        error = tr(locale, 'profile.layout.date_invalid')
+    if not error:
+        try:
+            await backend.edit_profile(message.from_user.id, draft['profile_id'], draft['revision'],
+                {'expires_at': expires}, command_key=draft['command_key'])
+        except BackendError as exc:
+            error = _profile_error(locale, exc)
+    if error:
+        await render(bot, message.chat.id, Screen(tr(locale, 'profile.layout.expiry'),
+            (error, tr(locale, 'profile.layout.date_prompt')), embedded_buttons=True, navigation=True),
+            [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data=f"prof_expiry:{draft['profile_id']}")]],
+            state, data.get('control_message_id'))
+        return
+    await show_profile_edit_menu(message.chat.id, message.from_user.id, data.get('control_message_id'),
+                                 draft['profile_id'], bot, backend, state)
 
 
 @router.callback_query(F.data.startswith('admin_profile_rename:'))
@@ -960,7 +1206,7 @@ async def show_grant_nodes(chat_id: int, user_id: int, message_id: int,
     locale = await _locale(state)
     from .user import server_page
     visible, page, pages = server_page(nodes, data.get('grant_nodes_page', 0))
-    await state.update_data(grant_nodes_page=page, grant_inline=True)
+    await state.update_data(grant_nodes_page=page, grant_inline=True, grant_node_labels={node['key']: server_label(node) for node in nodes})
     granted = {(item['node_key'], item['protocol']) for item in data['draft_grants']}
     def node_section(node):
         buttons = []
@@ -974,7 +1220,7 @@ async def show_grant_nodes(chat_id: int, user_id: int, message_id: int,
                 callback_data=callback.pack(), style='primary' if selected else None))
         return Section(server_label(node), rows=(tuple(buttons),) if buttons else (),
             lines=() if buttons else (tr(locale, 'profile.rich.no_protocols'),),
-            divider_after=node['key'] != visible[-1]['key'], heading_size=4)
+            divider_after=node['key'] != visible[-1]['key'], heading_size=3)
     scopes, groups, with_controls = {}, {}, []
     for node in visible:
         groups.setdefault(node.get('region') or '', []).append(node)
@@ -1004,11 +1250,14 @@ async def show_grant_nodes(chat_id: int, user_id: int, message_id: int,
         arrows.append(InlineKeyboardButton(text='→', callback_data=f'grant_page:{profile_id}:{page + 1}'))
     if arrows:
         rows.append(arrows)
-    if changed:
+    setup = data.get('profile_setup')
+    if not setup and changed:
         rows.append([InlineKeyboardButton(text=tr(locale, 'profile.admin.save'),
             callback_data=f'admin_profile_grants_save:{profile_id}', style='primary')])
     rows.append([InlineKeyboardButton(text=tr(locale, 'back'),
-        callback_data=AdminProfileCallback(profile_id=profile_id).pack())])
+        callback_data='setup_overview' if setup else AdminProfileCallback(profile_id=profile_id).pack())])
+    if setup:
+        rows[-1].append(InlineKeyboardButton(text=tr(locale, 'setup.next'), callback_data='setup_time', style='primary'))
     await render(bot, chat_id, Screen(tr(locale, 'profile.admin.nodes_title'),
         tuple(lines), sections=sections, embedded_buttons=True, navigation=True), rows, state, message_id)
 
@@ -1149,3 +1398,180 @@ async def toggle_freeze_cb(query: CallbackQuery, callback_data: ToggleFreezeCall
         profile['desired_revision'], {'frozen': not profile['frozen']})
     await show_profile_status(query.message.chat.id, query.from_user.id,
         query.message.message_id, callback_data.profile_id, bot, backend, state)
+
+
+async def start_profile_setup(chat_id, user_id, message_id, profile_id, bot, backend, state):
+    profile = await backend.request('GET', f'/api/v1/profiles/{profile_id}', telegram_user_id=user_id)
+    owner = await backend.request('GET', f"/api/v1/accounts/{profile['owner_account_id']}", telegram_user_id=user_id) if profile.get('owner_account_id') else {}
+    grants = await backend.profile_grants(user_id, profile_id)
+    observed = await backend.request('GET', f'/api/v1/profiles/{profile_id}', telegram_user_id=user_id)
+    if observed['desired_revision'] != profile['desired_revision'] or observed.get('deleting'):
+        raise BackendError('revision_conflict', 412)
+    await state.set_state(None)
+    await state.update_data(profile_setup={'profile_id': profile_id,
+        'name': profile['display_name'], 'admin': owner.get('role') == 'admin',
+        'expires_at': None if owner.get('role') == 'admin' else profile.get('expires_at'),
+        'command_key': str(uuid4())}, edit_profile_id=profile_id,
+        edit_profile_revision=profile['desired_revision'],
+        draft_grants=[dict(item) for item in grants['items']],
+        original_grants=[dict(item) for item in grants['items']], grant_nodes_page=0)
+    await show_grant_nodes(chat_id, user_id, message_id, profile_id, bot, backend, state)
+
+
+@router.callback_query(F.data == 'setup_time')
+async def setup_time_cb(query: CallbackQuery, bot: Bot, state: FSMContext):
+    await query.answer()
+    data = await state.get_data()
+    setup = data.get('profile_setup')
+    if not setup:
+        return
+    await state.set_state(None)
+    locale = await _locale(state)
+    nonce = secrets.token_hex(4)
+    await state.update_data(setup_time_nonce=nonce)
+    rows = []
+    if not setup['admin']:
+        rows.append([InlineKeyboardButton(text=tr(locale, 'profile.layout.days', days=days),
+            callback_data=f'setup_exp:{nonce}:{days}') for days in (7, 30, 90)])
+        rows.append([InlineKeyboardButton(text=tr(locale, 'profile.layout.unlimited'),
+            callback_data=f'setup_exp:{nonce}:none'), InlineKeyboardButton(text=tr(locale, 'profile.layout.date'), callback_data=f'setup_date:{nonce}')])
+    rows.append([InlineKeyboardButton(text=tr(locale, 'back'), callback_data=GrantNodesCallback(profile_id=setup['profile_id']).pack()),
+        InlineKeyboardButton(text=tr(locale, 'setup.next'), callback_data='setup_review')])
+    await render(bot, query.message.chat.id, Screen(tr(locale, 'profile.layout.expiry'),
+        (setup['name'], tr(locale, 'setup.admin_permanent') if setup['admin'] else
+         _expiry_label(setup['expires_at']) if setup['expires_at'] else tr(locale, 'profile.layout.unlimited')),
+        embedded_buttons=True, navigation=True), rows, state, query.message.message_id)
+
+
+@router.callback_query(F.data.startswith('setup_exp:'))
+async def setup_exp_cb(query: CallbackQuery, bot: Bot, state: FSMContext):
+    _, nonce, choice = query.data.split(':', 2)
+    data = await state.get_data()
+    setup = data.get('profile_setup')
+    if not setup or setup['admin'] or data.get('setup_time_nonce') != nonce or choice not in {'7', '30', '90', 'none'}:
+        await query.answer()
+        return
+    setup = {**setup, 'expires_at': None if choice == 'none' else
+             (datetime.now(timezone.utc) + timedelta(days=int(choice))).isoformat()}
+    await state.update_data(profile_setup=setup)
+    await setup_review_cb(query, bot, state)
+
+
+class SetupDateState(StatesGroup):
+    waiting_for_date = State()
+
+
+@router.callback_query(F.data.startswith('setup_date:'))
+async def setup_date_cb(query: CallbackQuery, bot: Bot, state: FSMContext):
+    await query.answer()
+    data = await state.get_data()
+    if not data.get('profile_setup') or data['profile_setup']['admin'] or data.get('setup_time_nonce') != query.data.split(':', 1)[1]:
+        return
+    await state.set_state(SetupDateState.waiting_for_date)
+    locale = await _locale(state)
+    await render(bot, query.message.chat.id, Screen(tr(locale, 'profile.layout.expiry'),
+        (tr(locale, 'setup.reply_date' if data.get('notification_session') else 'profile.layout.date_prompt'),), embedded_buttons=True, navigation=True),
+        [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data='setup_time')]], state, query.message.message_id)
+
+
+@router.message(SetupDateState.waiting_for_date, F.text)
+async def setup_date_text(message: Message, bot: Bot, state: FSMContext):
+    data = await state.get_data()
+    setup = data.get('profile_setup')
+    if not setup or setup['admin']:
+        return
+    try:
+        value = datetime.strptime(message.text.strip(), '%Y-%m-%d').replace(hour=23, minute=59, second=59, tzinfo=timezone.utc)
+        if value <= datetime.now(timezone.utc):
+            raise ValueError()
+    except ValueError:
+        await render(bot, message.chat.id, Screen(tr(await _locale(state), 'profile.layout.expiry'),
+            (tr(await _locale(state), 'profile.layout.date_invalid'),), embedded_buttons=True, navigation=True),
+            [[InlineKeyboardButton(text=tr(await _locale(state), 'back'), callback_data='setup_time')]], state)
+        return
+    await state.update_data(profile_setup={**setup, 'expires_at': value.isoformat()})
+    await state.set_state(None)
+    try:
+        await message.delete()
+    except TelegramAPIError:
+        pass
+    await show_setup_review(message.chat.id, data['control_message_id'], bot, state)
+
+
+async def show_setup_review(chat_id, message_id, bot, state):
+    data = await state.get_data()
+    setup = data.get('profile_setup')
+    if not setup:
+        return
+    locale = await _locale(state)
+    await render(bot, chat_id, Screen(tr(locale, 'setup.review'),
+        (setup['name'], tr(locale, 'profile.rich.expires', value=_expiry_label(setup['expires_at']) if setup['expires_at'] else tr(locale, 'profile.layout.unlimited'))),
+        sections=(Section(tr(locale, 'profile.layout.access'), tuple(
+            f"{data.get('grant_node_labels', {}).get(item['node_key'], item['node_key'])} · {tr(locale, 'protocol.' + item['protocol'])}" for item in data.get('draft_grants', []))),),
+        embedded_buttons=True, navigation=True),
+        [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data='setup_time'),
+          InlineKeyboardButton(text=tr(locale, 'profile.admin.save'), callback_data='setup_save', style='primary')]], state, message_id)
+
+
+@router.callback_query(F.data == 'setup_review')
+async def setup_review_cb(query: CallbackQuery, bot: Bot, state: FSMContext):
+    await query.answer()
+    await show_setup_review(query.message.chat.id, query.message.message_id, bot, state)
+
+
+@router.callback_query(F.data == 'setup_save')
+async def setup_save_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
+    data = await state.get_data()
+    setup = data.get('profile_setup')
+    if not setup or data.get('edit_profile_id') != setup['profile_id']:
+        await query.answer()
+        return
+    try:
+        await backend.edit_profile(query.from_user.id, setup['profile_id'], data['edit_profile_revision'],
+            {'expires_at': setup['expires_at'], 'grants': data['draft_grants']}, command_key=setup['command_key'])
+    except BackendError as exc:
+        await query.answer(_profile_error(await _locale(state), exc), show_alert=True)
+        return
+    await query.answer()
+    await state.update_data(edit_profile_id=None, draft_grants=None, setup_saved=True)
+    await show_setup_overview(query.message.chat.id, query.from_user.id, query.message.message_id, bot, backend, state)
+
+
+async def show_setup_overview(chat_id, user_id, message_id, bot, backend, state):
+    data = await state.get_data()
+    setup = data.get('profile_setup')
+    if not setup:
+        return
+    await state.set_state(None)
+    profile = await backend.request('GET', f"/api/v1/profiles/{setup['profile_id']}", telegram_user_id=user_id)
+    grants = await backend.profile_grants(user_id, setup['profile_id'])
+    locale = await _locale(state)
+    rows = [[InlineKeyboardButton(text=tr(locale, 'profile.layout.edit'), callback_data='setup_edit'),
+        InlineKeyboardButton(text=tr(locale, 'setup.close') if data.get('notification_session') else tr(locale, 'requests.to_menu'),
+            callback_data='notification_close' if data.get('notification_session') else AdminProfileCallback(profile_id=setup['profile_id']).pack())]]
+    await render(bot, chat_id, Screen(profile['display_name'],
+        (_status(profile, locale), tr(locale, 'profile.rich.expires', value=_expiry_label(profile.get('expires_at')) if profile.get('expires_at') else tr(locale, 'profile.layout.unlimited'))),
+        sections=(Section(tr(locale, 'profile.layout.access'), tuple(f"{data.get('grant_node_labels', {}).get(item['node_key'], item['node_key'])} · {tr(locale, 'protocol.' + item['protocol'])}" for item in grants['items']), collapsed=True),),
+        embedded_buttons=True, navigation=True), rows, state, message_id)
+
+
+@router.callback_query(F.data == 'setup_overview')
+async def setup_overview_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
+    await query.answer()
+    await show_setup_overview(query.message.chat.id, query.from_user.id, query.message.message_id, bot, backend, state)
+
+
+@router.callback_query(F.data == 'setup_edit')
+async def setup_edit_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
+    await query.answer()
+    setup = (await state.get_data()).get('profile_setup')
+    if setup:
+        await start_profile_setup(query.message.chat.id, query.from_user.id, query.message.message_id,
+            setup['profile_id'], bot, backend, state)
+
+
+async def _owner_is_admin(backend, user_id, profile):
+    if not profile.get('owner_account_id'):
+        return False
+    owner = await backend.request('GET', f"/api/v1/accounts/{profile['owner_account_id']}", telegram_user_id=user_id)
+    return owner.get('role') == 'admin'
