@@ -57,6 +57,20 @@ waiting for multiple sequential HTTP timeouts. Callback acknowledgement has a
 three-second timeout and its failure does not prevent screen navigation. Logs
 report language-selection transition duration. The access gate uses a Rich
 section with an embedded primary Request access button and separate settings.
+The administration home shows a native compact table of stored counts with
+conditional attention actions and embedded Management, Requests and System
+buttons. Optional overview/title reads are concurrent and bounded at three
+seconds; unavailable summary data does not prevent navigation. Request list,
+review, search and notifications use embedded actions, collapsed identifiers,
+and localized empty/error states. Search Back retains filter/page context.
+Native tables retain labeled rows in the plain-text fallback. See
+`ADMIN_RICH_MESSAGE_PLAN.md` for the remaining administrator UI phases.
+Back-to-menu navigation reuses the last approved home presentation in the
+current user's FSM context instead of requesting account and bot title again.
+This is only a menu snapshot, never an authorization cache: opening destinations
+and issuing configs still use authenticated backend calls. `/start` reloads the
+menu, and access decisions invalidate the recipient's snapshot. Pending access
+screens and missing snapshots are always loaded from the backend.
 Config screens contain collapsed QR, monospace import-link, configuration-file,
 and help blocks. All downloadable files share one initially closed block.
 AWG includes both downloadable `.vpn` and `.conf` files. Import labels use

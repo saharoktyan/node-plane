@@ -7,13 +7,53 @@ from aiogram.exceptions import TelegramBadRequest, TelegramNotFound, TelegramNet
 from aiogram.methods import EditMessageText, SendRichMessage
 from aiogram import Bot
 import json
-from telegram_client.routers.common import render
-from telegram_client.screens import Screen, Section
-from aiogram.types import InlineKeyboardButton
+from telegram_client.routers.common import render, send_notice
+from telegram_client.screens import Screen, Section, Table
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram_client.routers import user
 
 
 class RenderRecoveryTests(IsolatedAsyncioTestCase):
+    async def test_notice_uses_embedded_buttons_and_preserves_them_in_plain_fallback(self):
+        screen = Screen('Request', ('Awaiting a decision',), embedded_buttons=True)
+        markup = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text='Approve', callback_data='approve', style='primary'),
+            InlineKeyboardButton(text='Reject', callback_data='reject', style='danger')]])
+        await send_notice(self.bot, 1, screen, markup)
+        args = self.bot.send_rich_message.call_args.kwargs
+        self.assertEqual(args['reply_markup'].inline_keyboard, [])
+        self.assertEqual([b.callback_data for b in args['rich_message'].blocks[-1].buttons],
+                         ['approve', 'reject'])
+        self.bot.send_rich_message.side_effect = TelegramNotFound(
+            method=SendRichMessage(chat_id=1, rich_message=screen.rich()), message='Not Found')
+        await send_notice(self.bot, 1, screen, markup)
+        self.assertEqual(self.bot.send_message.call_args.kwargs['reply_markup'], markup)
+
+    async def test_native_table_serialization_and_plain_fallback_preserve_labels(self):
+        table = Table(('Component', 'Version', 'State'),
+                      (('Agent', '1.2.3', 'Ready'), ('Runtime', '1.2.2', 'Update available')))
+        screen = Screen('Administration', sections=(Section('Versions', tables=(table,)),),
+                        embedded_buttons=True, navigation=True)
+        back = InlineKeyboardButton(text='Back', callback_data='back')
+        bot = Bot('123456:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi')
+        try:
+            payload = json.loads(bot.session.prepare_value(screen.rich([[back]]), bot=bot, files={}))
+            block = next(block for block in payload['blocks'] if block['type'] == 'table')
+            self.assertTrue(block['is_compact'])
+            self.assertTrue(all(cell['is_header'] for cell in block['cells'][0]))
+            self.assertFalse(block['cells'][1][0]['is_header'])
+            self.assertEqual(block['cells'][1][1]['text'], '1.2.3')
+        finally:
+            await bot.session.close()
+        self.bot.edit_message_text.side_effect = [TelegramBadRequest(
+            method=EditMessageText(chat_id=1, message_id=10, text='old'),
+            message='tables unsupported'), None]
+        self.assertFalse(await render(self.bot, 1, screen, [[back]], self.state))
+        arguments = self.bot.edit_message_text.call_args.kwargs
+        self.assertIn('Component: Agent · Version: 1.2.3 · State: Ready', arguments['text'])
+        self.assertIn('Component: Runtime · Version: 1.2.2 · State: Update available', arguments['text'])
+        self.assertEqual(arguments['reply_markup'].inline_keyboard[0][0].callback_data, 'back')
+
     def setUp(self):
         self.data = {'control_message_id': 10}
         async def get_data():

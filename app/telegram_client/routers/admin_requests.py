@@ -10,7 +10,7 @@ from aiogram.types import (CallbackQuery, InlineKeyboardButton,
 
 from ..backend import BackendClient, BackendError
 from ..i18n import normalize_locale, tr
-from ..screens import Screen
+from ..screens import Screen, Section
 from .common import render, send_notice
 from .callbacks import (RequestsCallback, ReviewCallback, DecideCallback,
                         NotificationReviewCallback, NotificationDecisionCallback, HomeCallback)
@@ -27,6 +27,16 @@ def _request_name(item, locale):
     return name or (tr(locale, 'requests.username', username=item['username'])
         if item.get('username') else
         tr(locale, 'requests.account', id=item['account_id'][:8]))
+
+
+def _request_date(item):
+    return (item.get('created_at') or '').replace('T', ' ').split('.')[0] or '—'
+
+
+def _request_details(item, locale):
+    return (tr(locale, 'requests.detail_id', id=item.get('telegram_user_id') or '—'),
+            tr(locale, 'requests.detail_request_id', id=item['id']),
+            tr(locale, 'requests.detail_account_id', id=item['account_id']))
 
 
 @router.callback_query(RequestsCallback.filter())
@@ -63,7 +73,8 @@ async def render_request_page(chat_id: int, user_id: int, message_id: int,
             [InlineKeyboardButton(text=tr(locale, 'back'),
                 callback_data='admin_menu')]]
         await render(bot, chat_id, Screen(tr(locale, 'requests.title'),
-            (tr(locale, 'requests.unavailable'),)), rows, state, message_id)
+            (tr(locale, 'requests.unavailable'),), embedded_buttons=True,
+            navigation=True), rows, state, message_id)
         return
     if not page['items'] and page_index > 0:
         await render_request_page(chat_id, user_id, message_id, bot, backend,
@@ -83,34 +94,42 @@ async def render_request_page(chat_id: int, user_id: int, message_id: int,
         await show_admin_menu(chat_id, user_id, message_id, bot, backend, state)
         return
 
-    rows = [[InlineKeyboardButton(text=tr(locale, 'requests.review',
-                name=_request_name(item, locale)),
-            callback_data=ReviewCallback(request_id=item['id']).pack())]
-            for item in page['items']]
-    if not page['items']:
-        lines = [tr(locale, 'requests.empty')]
-    else:
-        lines = [tr(locale, 'requests.count', count=len(page['items']))]
-    if page_index or page.get('next_cursor'):
-        lines.append(tr(locale, 'requests.page', number=page_index + 1))
-    navigation = []
-    if page_index > 0:
-        navigation.append(InlineKeyboardButton(text='◀️',
-            callback_data=f'request_page:{page_index - 1}'))
-    if page.get('next_cursor'):
-        navigation.append(InlineKeyboardButton(text='▶️',
-            callback_data=f'request_page:{page_index + 1}'))
-    if navigation:
-        rows.append(navigation)
     controls = [InlineKeyboardButton(text=tr(locale, 'requests.search'),
         callback_data='request_search')]
     if search:
         controls.append(InlineKeyboardButton(text=tr(locale, 'requests.clear_search'),
             callback_data='request_search_clear'))
-    rows.append(controls)
+    sections = [Section(tr(locale, 'requests.filters'),
+        (tr(locale, 'requests.search_active', query=search),) if search else (),
+        (tuple(controls),))]
+    for index, item in enumerate(page['items']):
+        sections.append(Section(_request_name(item, locale),
+            (tr(locale, 'requests.detail_date', date=_request_date(item)),),
+            ((InlineKeyboardButton(text=tr(locale, 'requests.review_button'),
+                callback_data=ReviewCallback(request_id=item['id']).pack()),),),
+            sections=(Section(tr(locale, 'requests.details'), _request_details(item, locale),
+                              collapsed=True),),
+            divider_after=index < len(page['items']) - 1))
+    if not page['items']:
+        lines = [tr(locale, 'requests.empty')]
+    else:
+        lines = [tr(locale, 'requests.page_count', count=len(page['items']))]
+    if page_index or page.get('next_cursor'):
+        lines.append(tr(locale, 'requests.page', number=page_index + 1))
+    navigation = []
+    if page_index > 0:
+        navigation.append(InlineKeyboardButton(text='←',
+            callback_data=f'request_page:{page_index - 1}'))
+    if page.get('next_cursor'):
+        navigation.append(InlineKeyboardButton(text='→',
+            callback_data=f'request_page:{page_index + 1}'))
+    rows = []
+    if navigation:
+        rows.append(navigation)
     rows.append([InlineKeyboardButton(text=tr(locale, 'back'),
         callback_data='admin_menu')])
-    await render(bot, chat_id, Screen(tr(locale, 'requests.title'), tuple(lines)),
+    await render(bot, chat_id, Screen(tr(locale, 'requests.title'), tuple(lines),
+        sections=tuple(sections), embedded_buttons=True, navigation=True),
                  rows, state, message_id)
 
 
@@ -118,6 +137,7 @@ async def render_request_page(chat_id: int, user_id: int, message_id: int,
 async def request_page_cb(query: CallbackQuery, bot: Bot,
                           backend: BackendClient, state: FSMContext):
     await query.answer()
+    await state.set_state(None)
     try:
         page_index = int(query.data.split(':', 1)[1])
     except ValueError:
@@ -142,9 +162,9 @@ async def request_search_cb(query: CallbackQuery, bot: Bot, state: FSMContext):
     await state.set_state(RequestSearchState.waiting_for_query)
     await render(bot, query.message.chat.id,
         Screen(tr(locale, 'requests.search_title'),
-               (tr(locale, 'requests.search_prompt'),)),
+               (tr(locale, 'requests.search_prompt'),), embedded_buttons=True, navigation=True),
         [[InlineKeyboardButton(text=tr(locale, 'back'),
-            callback_data=RequestsCallback().pack())]],
+            callback_data=f"request_page:{(await state.get_data()).get('request_page_index', 0)}")]],
         state, query.message.message_id)
 
 
@@ -173,9 +193,9 @@ async def request_search_text(message: Message, bot: Bot, backend: BackendClient
     if not search or len(search) > 128:
         await render(bot, message.chat.id,
             Screen(tr(locale, 'requests.search_title'),
-                (tr(locale, 'requests.search_invalid'),)),
+                (tr(locale, 'requests.search_invalid'),), embedded_buttons=True, navigation=True),
             [[InlineKeyboardButton(text=tr(locale, 'back'),
-                callback_data=RequestsCallback().pack())]],
+                callback_data=f"request_page:{(await state.get_data()).get('request_page_index', 0)}")]],
             state, (await state.get_data()).get('control_message_id'))
         return
     await state.set_state(None)
@@ -200,22 +220,23 @@ async def review_cb(query: CallbackQuery, callback_data: ReviewCallback, bot: Bo
             (await state.get_data()).get('request_page_index', 0))
         return
     name = _request_name(item, locale)
-    requested_at = item.get('created_at', '').replace('T', ' ').split('.')[0] or '—'
     rows = [
         [InlineKeyboardButton(text=tr(locale, 'requests.approve'),
-            callback_data=DecideCallback(request_id=item['id'], decision='approve').pack()),
+            callback_data=DecideCallback(request_id=item['id'], decision='approve').pack(), style='primary'),
          InlineKeyboardButton(text=tr(locale, 'requests.reject'),
-            callback_data=DecideCallback(request_id=item['id'], decision='reject').pack())],
+            callback_data=DecideCallback(request_id=item['id'], decision='reject').pack(), style='danger')],
         [InlineKeyboardButton(text=tr(locale, 'back'),
             callback_data=f"request_page:{(await state.get_data()).get('request_page_index', 0)}")]
     ]
     lines = [tr(locale, 'requests.detail_name', name=name),
-        tr(locale, 'requests.detail_id', id=item.get('telegram_user_id') or '—'),
         tr(locale, 'requests.detail_username',
            username='@' + item['username'] if item.get('username') else '—'),
-        tr(locale, 'requests.detail_date', date=requested_at)]
+        tr(locale, 'requests.detail_date', date=_request_date(item)),
+        tr(locale, 'requests.pending_state')]
     await render(bot, query.message.chat.id,
-        Screen(tr(locale, 'requests.title'), tuple(lines)), rows, state,
+        Screen(tr(locale, 'requests.title'), tuple(lines),
+            sections=(Section(tr(locale, 'requests.details'), _request_details(item, locale),
+                              collapsed=True),), embedded_buttons=True, navigation=True), rows, state,
         query.message.message_id)
 
 
@@ -280,7 +301,8 @@ async def apply_decision(query: CallbackQuery, request_id: str, decision: str,
                 key=replace(state.key, chat_id=recipient, user_id=recipient,
                             thread_id=None, business_connection_id=None))
             await requester_state.set_state(None)
-            await requester_state.update_data(locale=requester_locale, issuance_poll_token=None)
+            await requester_state.update_data(locale=requester_locale, issuance_poll_token=None,
+                                              home_presentation=None)
             await render(bot, recipient, Screen(tr(requester_locale, 'requests.title'),
                 (tr(requester_locale, 'requests.approved' if decision == 'approve' else 'requests.rejected'),),
                 embedded_buttons=True, navigation=True),
@@ -310,14 +332,14 @@ async def notify_admins(bot: Bot, backend: BackendClient, request_id: str):
                 continue
             locale = normalize_locale(admin.get('locale') or admin.get('language_code'))
             notice = Screen(tr(locale, 'requests.title'),
-                (tr(locale, 'requests.notification'),))
+                (tr(locale, 'requests.notification'),), embedded_buttons=True)
             markup = InlineKeyboardMarkup(inline_keyboard=[[
                 InlineKeyboardButton(text=tr(locale, 'requests.approve'),
                     callback_data=NotificationDecisionCallback(request_id=request_id,
-                        decision='approve').pack()),
+                        decision='approve').pack(), style='primary'),
                 InlineKeyboardButton(text=tr(locale, 'requests.reject'),
                     callback_data=NotificationDecisionCallback(request_id=request_id,
-                        decision='reject').pack())], [
+                        decision='reject').pack(), style='danger')], [
                 InlineKeyboardButton(text=tr(locale, 'requests.review_button'),
                     callback_data=NotificationReviewCallback(
                         request_id=request_id).pack())]])
