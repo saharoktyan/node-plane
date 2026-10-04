@@ -815,8 +815,12 @@ bot tables. AWG uses container `wg show <interface> transfer`; Xray uses a filte
 StatsService query with reset explicitly false. No private keys/config artifacts or
 other profiles' counters are returned by the snapshot.
 
-`backend_traffic_usage` retains only last cumulative counters, upload/download
-totals and timestamps per owned profile/node/protocol. The first sample excludes
+`backend_traffic_usage` retains only last cumulative counters, current UTC calendar
+month upload/download totals, the month identifier and timestamps per owned
+profile/node/protocol. A month change resets usage totals, preserving the live
+counter baseline. Reads hide previous-month totals even before the next sample.
+Existing lifetime totals have no reliable month attribution and are discarded;
+their baselines remain usable for subsequent samples. The first sample excludes
 prior traffic. Container/boot epochs and decreases detect resets. Failed reads
 preserve the previous baseline and mark unknown; they never simulate zero traffic.
 Profile/node deletion cascades usage deletion. Configuration snapshots preserve
@@ -825,9 +829,16 @@ availability/consent, but exclude usage, sampling times/cursors and generations.
 The owned profile summary includes optional `traffic`: absent when globally
 unavailable, `consent_required` without consent, `waiting` before sampling,
 `current` for recent measurements or `unknown` for unavailable/paused/stale
-measurements. Each protocol total includes tracking start and last sample times.
+measurements. `month` identifies the UTC calendar month; `items` contains protocol
+totals and `nodes` contains per-node/per-protocol byte counts and freshness status.
+Both global availability and owner consent gate all summary traffic data. The
+Telegram profile displays the monthly total above an expandable, text-only list
+of servers with protocol breakdowns and dividers. Each protocol total includes
+tracking start and last sample times.
 These are approximate diagnostics, not billing counters: unsampled traffic before
-an epoch ends cannot be recovered. Protocol-native byte counters can include
+an epoch ends cannot be recovered. An interval crossing a month boundary is
+attributed to the month of its ending sample; the counters do not provide exact
+timestamps for individual bytes. Protocol-native byte counters can include
 protocol overhead and AWG/Xray totals are not guaranteed directly comparable.
 
 Agent/parser, worker admission/accounting and localized UI tests pass with isolated

@@ -37,6 +37,7 @@ class RenderRecoveryTests(IsolatedAsyncioTestCase):
         self.assertEqual(blocks[2].buttons[0].callback_data, action.callback_data)
         self.assertEqual(blocks[-1].buttons[0].callback_data, back.callback_data)
         self.assertEqual(blocks[-1].buttons[0].style, 'link')
+        self.assertEqual(blocks[-2].type, 'divider')
         self.bot.edit_message_text.side_effect = [TelegramBadRequest(
             method=EditMessageText(chat_id=1, message_id=10, text='old'),
             message='rich buttons unsupported'), None]
@@ -44,6 +45,13 @@ class RenderRecoveryTests(IsolatedAsyncioTestCase):
         rows = self.bot.edit_message_text.call_args.kwargs['reply_markup'].inline_keyboard
         self.assertEqual([button.callback_data for row in rows for button in row],
                          [action.callback_data, back.callback_data])
+
+    async def test_inline_back_is_also_separated_from_screen_content(self):
+        screen = Screen('Help', ('Instructions',))
+        for title in ('🔙 Back', '🔙 Назад'):
+            with self.subTest(title=title):
+                rows = [[InlineKeyboardButton(text=title, callback_data='back')]]
+                self.assertEqual(screen.rich(rows).blocks[-1].type, 'divider')
 
     async def test_embedded_config_media_serializes_as_multipart_uploads(self):
         bot = Bot('123456:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi')

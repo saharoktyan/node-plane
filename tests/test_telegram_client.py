@@ -76,6 +76,23 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         self.assertTrue(client.request.call_args.kwargs['command'])
         self.assertEqual(client.request.call_args.kwargs['command_key'], 'stable-key')
 
+    async def test_member_node_transport_reads_all_backend_pages(self):
+        client = BackendClient.__new__(BackendClient)
+        client.request = AsyncMock(side_effect=[
+            {'items': [{'key': f'n{i}'} for i in range(100)], 'next_cursor': 'cursor+/='},
+            {'items': [{'key': 'n100'}], 'next_cursor': None}])
+        result = await client.profile_nodes(123, 'p1')
+        self.assertEqual(len(result['items']), 101)
+        self.assertIsNone(result['next_cursor'])
+        self.assertIn('cursor=cursor%2B%2F%3D', client.request.call_args.args[1])
+        self.assertEqual(client.request.call_args.kwargs['telegram_user_id'], 123)
+
+    async def test_member_nodes_reject_repeating_backend_cursor(self):
+        client = BackendClient.__new__(BackendClient)
+        client.request = AsyncMock(return_value={'items': [], 'next_cursor': 'same'})
+        with self.assertRaises(BackendError):
+            await client.profile_nodes(123, 'p1')
+
     async def test_backup_confirmation_preserves_key_and_action_label(self):
         from telegram_client.routers import admin_backups
         backend = SimpleNamespace(backup_command=AsyncMock(return_value={'id': 'job'}),
@@ -265,7 +282,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         summary = {'profile_id': 'p1', 'display_name': 'Personal',
             'frozen': False, 'expired': False, 'expires_at': None,
             'created_at': '2026-09-29T09:00:00+00:00',
-            'nodes': [{'key': 'lv1', 'title': 'Latvia', 'flag': '🇱🇻',
+            'nodes': [{'key': 'lv1', 'title': 'Latvia', 'flag': '🇱🇻', 'region': 'Europe',
                        'protocols': ['awg', 'xray']}],
             'node_count': 1, 'protocol_count': 2, 'awg_count': 1,
             'xray_count': 1, 'issued_count': 3,
@@ -279,11 +296,17 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             await user.show_account_info(123, 123, 77, self.bot, backend,
                                          self.state, username='alice')
             profile_screen = render.call_args.args[2]
-            self.assertIn('Telegram username: @alice', profile_screen.sections[0].lines)
-            self.assertTrue(profile_screen.sections[0].collapsed)
-            node_section = profile_screen.sections[1]
-            self.assertEqual(node_section.title, '🇱🇻 Latvia')
-            self.assertEqual([b.text for b in node_section.rows[0]], ['AmneziaWG', 'VLESS'])
+            self.assertIn('Telegram username: @alice', profile_screen.lines)
+            self.assertFalse(profile_screen.sections[0].collapsed)
+            self.assertIn('Configs issued: 3', profile_screen.sections[0].lines)
+            servers = profile_screen.sections[-1]
+            self.assertTrue(servers.collapsed)
+            self.assertEqual(servers.sections[0].title, 'Europe')
+            self.assertEqual(servers.sections[0].sections[0].title, 'Latvia')
+            self.assertEqual(servers.sections[0].sections[0].lines, ('AmneziaWG', 'VLESS'))
+            self.assertEqual(servers.rich()[0].blocks[-1].type, 'divider')
+            self.assertEqual(servers.rows, ())
+            self.assertEqual(len(render.call_args.args[3]), 1)
             await user.show_account_stats(123, 123, 77, 'p1', self.bot,
                                           backend, self.state)
             stats_screen = render.call_args.args[2]
@@ -295,6 +318,22 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
                                             backend, self.state)
         self.assertIn('Status: Expired', render.call_args.args[2].lines)
         backend.member_profile_summary.assert_awaited_with(123, 'p1')
+
+    def test_profile_monthly_traffic_totals_and_per_node_protocol_breakdown(self):
+        summary = {'nodes': [], 'traffic': {'status': 'current', 'month': '2026-10',
+            'items': [{'protocol': 'awg', 'uplink_bytes': 1024, 'downlink_bytes': 2048},
+                      {'protocol': 'xray', 'uplink_bytes': 1024, 'downlink_bytes': 0}],
+            'nodes': [{'node_key': 'lv1', 'protocol': 'awg', 'uplink_bytes': 1024,
+                       'downlink_bytes': 2048, 'status': 'current'}]}}
+        self.assertIn('Total for 2026-10: 4.0 KiB', user.profile_statistics(summary, 'en'))
+        node = {'key': 'lv1', 'protocols': ['awg', 'xray']}
+        lines = user.profile_node_traffic(summary, node, 'en')
+        self.assertIn('AmneziaWG · 2026-10: 3.0 KiB', lines[0])
+        self.assertIn('VLESS: waiting', lines[1])
+        for traffic in (None, {'status': 'consent_required', 'items': []}):
+            summary['traffic'] = traffic
+            self.assertEqual(user.profile_node_traffic(summary, node, 'en'), ('AmneziaWG', 'VLESS'))
+            self.assertFalse(any('KiB' in line for line in user.profile_statistics(summary, 'en')))
 
     async def test_awg_screen_embeds_collapsed_qr_monospace_uri_and_both_files(self):
         backend = SimpleNamespace(
@@ -316,7 +355,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
                          ['Latvia.vpn', 'Latvia.conf'])
         self.bot.send_document.assert_not_awaited()
         self.bot.send_photo.assert_not_awaited()
-        back = user.actions[draw.call_args.args[3][0][0].callback_data[2:]]
+        back = user.actions[draw.call_args.args[3][-1][0].callback_data[2:]]
         self.assertEqual((back.name, back.args), ('profile', ('p1',)))
 
     async def test_vless_screen_uses_same_qr_and_uri_layout(self):
@@ -331,7 +370,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         self.assertFalse(blocks[3].is_open)
         self.assertEqual(blocks[3].blocks[0].text.type, 'code')
         self.assertEqual(blocks[3].blocks[0].text.text, 'vless://test')
-        back = user.actions[draw.call_args.args[3][0][0].callback_data[2:]]
+        back = user.actions[draw.call_args.args[3][-1][0].callback_data[2:]]
         self.assertEqual((back.name, back.args), ('protocol', ('p1', 'lv1', 'xray')))
 
     async def test_awg_selection_issues_bundle_without_format_selector(self):
@@ -355,14 +394,76 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             await user.show_profiles(123, 123, 77, self.bot, backend, self.state)
         screen = draw.call_args.args[2]
         self.assertTrue(screen.embedded_buttons)
-        self.assertEqual([section.title for section in screen.sections], ['🇱🇻 Latvia', '🇷🇺 Moscow'])
+        self.assertEqual([section.title for section in screen.sections], ['EU', 'RU'])
+        self.assertEqual([section.sections[0].title for section in screen.sections], ['Latvia', 'Moscow'])
+        self.assertEqual(screen.lines, ())
+        self.assertEqual([block.type for block in screen.rich(draw.call_args.args[3]).blocks],
+            ['heading', 'heading', 'heading', 'buttons', 'divider', 'heading', 'heading', 'buttons', 'divider', 'buttons'])
+        backend.member_profile_summary.assert_not_awaited()
         for section, node_key in zip(screen.sections, ('lv1', 'msk1')):
-            for button in section.rows[0]:
+            for button in section.sections[0].rows[0]:
                 action = user.actions[button.callback_data[2:]]
                 self.assertEqual(action.name, 'protocol')
                 self.assertEqual(action.args[:2], ('p1', node_key))
-        back = user.actions[draw.call_args.args[3][0][0].callback_data[2:]]
+        back = user.actions[draw.call_args.args[3][-1][0].callback_data[2:]]
         self.assertEqual(back.name, 'home')
+
+    async def test_config_server_pages_group_regions_and_preserve_return_page(self):
+        nodes = [{'key': f'n{i:02}', 'title': f'Server {i:02}',
+                  'region': 'Europe' if i < 12 else 'Asia',
+                  'protocols': [{'kind': 'xray'}]} for i in range(23)]
+        backend = SimpleNamespace(profile_nodes=AsyncMock(return_value={'items': nodes[::-1]}))
+        seen = []
+        with patch.object(user, 'render', new_callable=AsyncMock) as draw:
+            for page in range(3):
+                await user.show_profile(123, 123, 77, 'p1', self.bot, backend, self.state,
+                                        page_index=page)
+                screen, rows = draw.call_args.args[2:4]
+                titles = [node.title for region in screen.sections for node in region.sections]
+                self.assertEqual(len(titles), 10 if page < 2 else 3)
+                seen.extend(titles)
+                self.assertIn(f'{page + 1} / 3', [b.text for b in rows[0]])
+                self.assertEqual([b.text for b in rows[0]],
+                    (['←'] if page else []) + [f'{page + 1} / 3'] + (['→'] if page < 2 else []))
+                for region in screen.sections:
+                    self.assertTrue(all(region.title not in node.title for node in region.sections))
+            await user.show_profile(123, 123, 77, 'p1', self.bot, backend, self.state)
+        self.assertEqual(len(set(seen)), 23)
+        self.assertEqual(seen, [f'Server {i:02}' for i in [*range(12, 23), *range(12)]])
+        self.assertIn('3 / 3', [b.text for b in draw.call_args.args[3][0]])
+
+    async def test_profile_pagination_keeps_statistics_and_expands_servers(self):
+        self.query.from_user.username = 'alice'
+        nodes = [{'key': f'n{i:02}', 'title': f'Server {i:02}', 'flag': '',
+                  'region': 'Europe', 'protocols': ['awg']} for i in range(11)]
+        summary = {'display_name': 'Alice', 'frozen': False, 'expired': False,
+                   'nodes': nodes, 'issued_count': 15, 'node_count': 11}
+        backend = SimpleNamespace(member_profile_summary=AsyncMock(return_value=summary))
+        with patch.object(user, 'render', new_callable=AsyncMock) as draw:
+            await user.show_account_profile(123, 123, 77, 'p1', self.bot, backend, self.state,
+                                            username='alice')
+            first = draw.call_args.args[2]
+            servers = first.sections[-1]
+            self.assertEqual(len(servers.sections[0].sections), 10)
+            self.assertFalse(servers.is_open)
+            self.query.data = servers.rows[0][-1].callback_data
+            await user.user_action_cb(self.query, self.bot, backend, self.state)
+            second = draw.call_args.args[2]
+            self.assertEqual(first.lines, second.lines)
+            self.assertEqual(first.sections[0], second.sections[0])
+            self.assertEqual(second.sections[-1].sections[0].sections[0].title, 'Server 10')
+            self.assertEqual(len(second.sections[-1].sections[0].sections), 1)
+            self.assertTrue(second.sections[-1].rich()[0].is_open)
+            self.assertEqual(draw.call_args.args[-1], 77)
+            backend.member_profile_summary.assert_awaited_with(123, 'p1')
+
+    async def test_server_pagination_hidden_at_ten_and_clamps_after_deletion(self):
+        for count in (0, 1, 10):
+            nodes, index, pages = user.server_page([
+                {'key': str(i), 'title': str(i), 'region': 'Europe'} for i in range(count)], 99)
+            self.assertEqual((index, pages), (0, 1))
+            self.assertEqual(user.server_pagination(123, 'en', index, pages, 'profile'), ())
+            self.assertEqual(len(nodes), count)
 
     async def test_transport_selection_goes_back_to_server_list(self):
         backend = SimpleNamespace(profile_nodes=AsyncMock(return_value={'items': [
@@ -371,10 +472,13 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         with patch.object(user, 'render', new_callable=AsyncMock) as draw:
             await user.show_protocol(123, 123, 77, 'p1', 'lv1', 'xray', self.bot, backend, self.state)
         screen = draw.call_args.args[2]
-        for section, transport in zip(screen.sections, ('tcp', 'xhttp')):
-            action = user.actions[section.rows[0][0].callback_data[2:]]
+        self.assertEqual(screen.lines, ('Choose a transport.',))
+        transport_row = draw.call_args.args[3][0]
+        self.assertEqual([button.text for button in transport_row], ['XHTTP', 'TCP'])
+        for button, transport in zip(transport_row, ('xhttp', 'tcp')):
+            action = user.actions[button.callback_data[2:]]
             self.assertEqual(action.args, ('p1', 'lv1', 'xray', transport))
-        back = user.actions[draw.call_args.args[3][0][0].callback_data[2:]]
+        back = user.actions[draw.call_args.args[3][-1][0].callback_data[2:]]
         self.assertEqual((back.name, back.args), ('profile', ('p1',)))
 
     async def test_member_settings_actions_describe_the_change_and_preserve_backend_values(self):

@@ -23,8 +23,20 @@ class BackendProfileTests(unittest.TestCase):
         self.unowned = self.repo.create_profile(runtime_name='unowned', display_name='Unowned')
 
     def node(self, key, *, enabled=1, protocols=('awg', 'xray')):
-        self.db.connection.execute('''INSERT INTO backend_nodes(key, title, region, flag, enabled, protocols_json, xray_transports_json)
-            VALUES (?, ?, 'test', '', ?, ?, ?)''', (key, key, enabled, json.dumps(protocols), json.dumps(['tcp', 'xhttp'])))
+        self.db.connection.execute('''INSERT INTO backend_nodes(key, title, region, flag, enabled, protocols_json, xray_transports_json, desired_revision, applied_revision)
+            VALUES (?, ?, 'test', '', ?, ?, ?, 1, 1)''', (key, key, enabled, json.dumps(protocols), json.dumps(['tcp', 'xhttp'])))
+
+    def test_pending_node_settings_and_draining_nodes_are_hidden(self):
+        self.prepare()
+        for key in ('ready', 'pending', 'draining'):
+            self.node(key)
+            self.grant(self.profile, key)
+        self.db.connection.execute("UPDATE backend_nodes SET desired_revision = 2 WHERE key = 'pending'")
+        self.db.connection.execute('INSERT INTO backend_node_drains(node_key, actor_id, operation_ids_json, started_at) VALUES (?, ?, ?, ?)',
+            ('draining', self.admin.id, '[]', datetime.now(timezone.utc).isoformat()))
+        response = self.get(f'/api/v1/profiles/{self.profile}/nodes')
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual([node['key'] for node in response.json()['items']], ['ready'])
 
     def grant(self, profile, node, kind='awg'):
         self.db.connection.execute('INSERT INTO backend_grants(profile_id, node_key, protocol) VALUES (?, ?, ?)', (profile, node, kind))

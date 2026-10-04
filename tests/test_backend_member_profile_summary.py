@@ -28,11 +28,13 @@ class MemberProfileSummaryTests(unittest.TestCase):
         db.backend_name = 'postgres'
         class MigrationConnection:
             def execute(self, sql, params=()):
-                if sql == 'ALTER TABLE backend_profiles ADD COLUMN IF NOT EXISTS created_at TEXT':
-                    columns = [r[0] for r in db.connection.execute('SELECT * FROM backend_profiles LIMIT 0').description]
-                    if 'created_at' in columns:
+                if sql.startswith('ALTER TABLE ') and ' ADD COLUMN IF NOT EXISTS ' in sql:
+                    table = sql.split()[2]
+                    column = sql.split()[8]
+                    columns = [r[0] for r in db.connection.execute(f'SELECT * FROM {table} LIMIT 0').description]
+                    if column in columns:
                         return db.connection.execute('SELECT 1')
-                    sql = 'ALTER TABLE backend_profiles ADD COLUMN created_at TEXT'
+                    sql = sql.replace(' IF NOT EXISTS', '')
                 return db.connection.execute(sql, params)
         @contextmanager
         def transaction():
@@ -89,6 +91,7 @@ class MemberProfileSummaryTests(unittest.TestCase):
         self.assertIsNotNone(summary['created_at'])
         self.assertFalse(summary['expired'])
         self.assertEqual(summary['nodes'][0]['protocols'], ['awg', 'xray'])
+        self.assertEqual(summary['nodes'][0]['region'], 'Europe')
         self.db.connection.execute('''UPDATE backend_profiles SET expires_at = ?
             WHERE id = ?''', ('2020-01-01T00:00:00+00:00', self.profile_id))
         self.assertTrue(ProfileService(self.repo).own_summary(
