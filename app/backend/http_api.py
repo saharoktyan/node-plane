@@ -461,10 +461,16 @@ class ConfigIssuanceOutput(BaseModel):
     expires_at: str
 
 
+class ConfigArtifactFile(BaseModel):
+    filename: str
+    content: str
+
+
 class ConfigArtifactOutput(BaseModel):
     filename: str | None
     media_type: str
     content: str
+    files: list[ConfigArtifactFile] = Field(default_factory=list)
 
 
 class GrantInput(BaseModel):
@@ -1301,9 +1307,15 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
               response_model=ConfigIssuanceOutput, status_code=202)
     def request_config(profile_id: UUID, body: ConfigIssuanceInput, request: Request,
                        command_key: Annotated[str, Header(alias='Idempotency-Key')],
-                       current=Depends(actor)):
-        return config_issuances.request(current, str(profile_id), body.node_key,
+                       current=Depends(actor), wait: bool = False):
+        queued = config_issuances.request(current, str(profile_id), body.node_key,
             body.protocol, body.transport, header(request, 'Idempotency-Key'))
+        if wait:
+            # This endpoint runs in FastAPI's thread pool. These are read-only
+            # live checks; mutations remain in the durable worker.
+            config_issuances.run_one(queued['id'])
+            return config_issuances.get(current, queued['id'])
+        return queued
 
     @app.get('/api/v1/config-issuances/{issuance_id}', response_model=ConfigIssuanceOutput)
     def get_config_issuance(issuance_id: UUID, current=Depends(actor)):

@@ -474,6 +474,16 @@ not the generated artifact. The successful AWG profile intent still retains
 its private client config in the backend task result. Real-node acceptance
 remains to be implemented.
 
+Clients may request `?wait=true` to perform the read-only issuance checks in the
+API thread pool immediately, without waiting for the worker timer. The durable
+issuance is claimed atomically; a concurrent worker cannot run the same check.
+Access, revision, and live-state checks still run again at artifact download.
+The AWG artifact response also includes a `files` array containing both `.vpn`
+and `.conf`, assembled from the same live refresh. The Telegram client embeds
+these files, a collapsed QR block, and a monospace URI in its control message.
+VLESS uses the same layout after selecting TCP or XHTTP. If rich media is not
+supported by the Telegram deployment, downloads and the QR are sent separately.
+
 Driver ProvisioningService.ApplyProfileIntent takes a single node/protocol,
 ensure/delete action, runtime name, desired revision and explicit Xray identity.
 It does not read or write legacy profile business tables. The command identity

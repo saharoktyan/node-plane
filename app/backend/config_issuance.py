@@ -5,6 +5,7 @@ from contextlib import contextmanager, nullcontext
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 import json
+import logging
 import re
 from urllib.parse import quote
 from uuid import UUID, uuid4
@@ -196,12 +197,16 @@ class ConfigIssuanceService:
             raise ValueError('Xray runtime differs from applied node settings')
         return metadata, None
 
-    def run_one(self):
+    def run_one(self, issuance_id=None):
         with self.db.transaction() as conn:
-            row = conn.execute("SELECT * FROM backend_config_issuances WHERE status = 'awaiting_executor' ORDER BY id LIMIT 1").fetchone()
+            row = conn.execute("SELECT * FROM backend_config_issuances WHERE status = 'awaiting_executor'" +
+                (" AND id = ?" if issuance_id else " ORDER BY id LIMIT 1"),
+                (issuance_id,) if issuance_id else ()).fetchone()
             if row is None:
                 return False
-            conn.execute("UPDATE backend_config_issuances SET status = 'running' WHERE id = ?", (row['id'],))
+            claimed = conn.execute("UPDATE backend_config_issuances SET status = 'running' WHERE id = ? AND status = 'awaiting_executor' RETURNING id", (row['id'],)).fetchone()
+            if claimed is None:
+                return False
         try:
             if datetime.fromisoformat(row['expires_at']) <= datetime.now(timezone.utc):
                 raise AccessDenied('config_expired', 410)
@@ -225,7 +230,10 @@ class ConfigIssuanceService:
             with self.db.transaction() as conn:
                 conn.execute("UPDATE backend_config_issuances SET status = 'superseded' WHERE id = ? AND status = 'running'",
                     (row['id'],))
-        except Exception:
+        except Exception as exc:
+            # Never log configs, keys, or the remote exception text.
+            logging.getLogger(__name__).warning('Config issuance failed: id=%s protocol=%s node=%s error=%s',
+                row['id'], row['protocol'], row['node_key'], type(exc).__name__)
             with self.db.transaction() as conn:
                 conn.execute("UPDATE backend_config_issuances SET status = 'blocked' WHERE id = ? AND status = 'running'",
                     (row['id'],))
@@ -270,7 +278,10 @@ class ConfigIssuanceService:
                             or 'Profile')
             return {'filename': f'AmneziaWG - {safe_title} - {safe_profile}.{extension}',
                     'media_type': 'text/plain',
-                    'content': refreshed['vpn_key'] if extension == 'vpn' else refreshed['wg_conf']}
+                    'content': refreshed['vpn_key'] if extension == 'vpn' else refreshed['wg_conf'],
+                    'files': [{'filename': f'AmneziaWG - {safe_title} - {safe_profile}.{ext}',
+                               'content': refreshed[key]} for ext, key in
+                              (('vpn', 'vpn_key'), ('conf', 'wg_conf'))]}
         settings = json.loads(node['settings_json'])
         host = settings.get('xray_host', settings['public_host'])
         port = metadata['tcp_port'] if row['transport'] == 'tcp' else metadata['xhttp_port']

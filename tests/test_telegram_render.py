@@ -5,6 +5,8 @@ from unittest.mock import AsyncMock
 
 from aiogram.exceptions import TelegramBadRequest, TelegramNotFound, TelegramNetworkError
 from aiogram.methods import EditMessageText, SendRichMessage
+from aiogram import Bot
+import json
 from telegram_client.routers.common import render
 from telegram_client.screens import Screen
 from telegram_client.routers import user
@@ -21,6 +23,35 @@ class RenderRecoveryTests(IsolatedAsyncioTestCase):
         self.bot = SimpleNamespace(edit_message_text=AsyncMock(),
             send_rich_message=AsyncMock(return_value=SimpleNamespace(message_id=20)),
             send_message=AsyncMock(return_value=SimpleNamespace(message_id=30)))
+
+    async def test_embedded_config_media_serializes_as_multipart_uploads(self):
+        bot = Bot('123456:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi')
+        try:
+            screen = Screen('Config', uri='vpn://fresh', qr=b'PNG', qr_title='QR',
+                files=(('node.vpn', b'vpn://fresh'), ('node.conf', b'[Interface]')))
+            files = {}
+            payload = json.loads(bot.session.prepare_value(screen.rich(), bot=bot, files=files))
+            self.assertEqual(len(files), 3)
+            self.assertFalse(payload['blocks'][1]['is_open'])
+            self.assertTrue(payload['blocks'][1]['blocks'][0]['photo']['media'].startswith('attach://'))
+            self.assertEqual(payload['blocks'][2]['text'], {'type': 'code', 'text': 'vpn://fresh'})
+            self.assertEqual({file.filename for file in files.values()},
+                             {'config.png', 'node.vpn', 'node.conf'})
+        finally:
+            await bot.session.close()
+
+    async def test_plain_fallback_keeps_uri_monospace_with_utf16_offsets(self):
+        screen = Screen('🔑 Конфиг', uri='vless://test')
+        self.bot.edit_message_text.side_effect = [TelegramBadRequest(
+            method=EditMessageText(chat_id=1, message_id=10, text='old'),
+            message='unsupported rich message'), None]
+        self.assertFalse(await render(self.bot, 1, screen, [], self.state))
+        arguments = self.bot.edit_message_text.call_args.kwargs
+        entity = arguments['entities'][0]
+        self.assertEqual(entity.type, 'code')
+        encoded = arguments['text'].encode('utf-16-le')
+        self.assertEqual(encoded[entity.offset * 2:(entity.offset + entity.length) * 2].decode('utf-16-le'),
+                         'vless://test')
 
     async def test_deleted_screen_is_recreated_for_both_telegram_error_codes(self):
         for error in (TelegramBadRequest, TelegramNotFound):
