@@ -225,12 +225,17 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             self.assertTrue(screen.sections[-1].collapsed)
             callbacks = [b.callback_data for row in screen.fallback_rows(rows) for b in row]
             self.assertIn('admin_problem_nodes', callbacks)
+            self.assertFalse(any(s.title == user.tr(locale, 'admin.rich.management') for s in screen.sections))
+            self.assertNotIn('admin_nodes:0', callbacks)
             self.assertEqual(rows[-1][0].callback_data, 'admin_menu')
             screen.rich(rows)
         overview.update(problem_nodes=[], pending_requests=0)
         with patch.object(user, 'render', new_callable=AsyncMock) as draw:
             await user.show_admin_status(123, 123, 77, self.bot, backend, self.state)
-        self.assertEqual(len(draw.call_args.args[2].sections), 3)
+        screen, rows = draw.call_args.args[2:4]
+        self.assertEqual(len(screen.sections), 2)
+        self.assertEqual([b.callback_data for row in screen.fallback_rows(rows) for b in row],
+                         ['admin_status', 'admin_menu'])
 
     async def test_problem_nodes_group_regions_and_clamp_page_after_recovery(self):
         affected = [{'key': f'n{i:02}', 'title': f'Node {i:02}', 'region': 'Europe', 'flag': '🌍'} for i in range(11)]
@@ -819,7 +824,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
     async def test_language_and_sound_choices_highlight_only_the_saved_value(self):
         for locale in ('ru', 'en'):
             for silent in (False, True):
-                self.state_data['locale'] = locale
+                self.state_data['locale'] = 'en' if locale == 'ru' else 'ru'
                 backend = SimpleNamespace(me=AsyncMock(return_value={
                     'locale': locale, 'announcement_silent': silent}))
                 with patch.object(user, 'render', new_callable=AsyncMock) as draw:

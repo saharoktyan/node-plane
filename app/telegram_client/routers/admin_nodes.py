@@ -674,7 +674,7 @@ async def show_admin_node(chat_id, user_id, message_id, node_key, bot, backend, 
     install_rows.append((InlineKeyboardButton(text=tr(locale, 'nodes.card.probe'), callback_data=ProbeNodeCallback(node_key=node_key).pack()),))
     sections.insert(0, Section(tr(locale, 'nodes.rich.installation'), rows=tuple(install_rows)))
     sections.insert(1, Section(tr(locale, 'nodes.rich.configuration'),
-        (tr(locale, 'nodes.rich.pending' if pending else 'nodes.rich.applied'),),
+        (tr(locale, 'nodes.rich.pending'),) if pending else (),
         rows=((InlineKeyboardButton(text=tr(locale, 'nodes.card.settings'), callback_data=NodeSettingsCallback(node_key=node_key).pack(), style='primary' if pending else None),),)))
     if node.get('notes'):
         sections.append(Section(tr(locale, 'nodes.settings.field.notes'), (node['notes'],), collapsed=True))
@@ -733,9 +733,9 @@ async def show_node_settings(chat_id, user_id, message_id, node_key, bot, backen
     await state.set_state(None)
     await state.update_data(node_settings_view='root')
     controls = await draft_controls(node, state, locale)
-    sections = [Section(tr(locale, 'nodes.rich.configuration'),
-        (tr(locale, 'nodes.rich.pending' if controls else 'nodes.rich.applied'),),
-        rows=tuple(tuple(row) for row in controls)),
+    sections = ([Section(tr(locale, 'nodes.rich.configuration'),
+        (tr(locale, 'nodes.rich.pending'),),
+        rows=tuple(tuple(row) for row in controls))] if controls else []) + [
         Section(tr(locale, 'node_tools.general'), rows=((InlineKeyboardButton(text=tr(locale, 'profile.layout.edit'), callback_data=f'node_section:general:{node_key}'),),)),
         Section(tr(locale, 'nodes.rich.connection'), rows=((InlineKeyboardButton(text=tr(locale, 'profile.layout.edit'), callback_data=f'node_section:connection:{node_key}'),),)),
         Section(tr(locale, 'nodes.draft.protocol_settings'), rows=(tuple(

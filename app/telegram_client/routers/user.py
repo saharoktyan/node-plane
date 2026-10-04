@@ -897,7 +897,7 @@ async def admin_status_cb(query: CallbackQuery, bot: Bot, backend: BackendClient
 
 async def show_admin_status(chat_id: int, user_id: int, message_id: int,
                             bot: Bot, backend: BackendClient, state: FSMContext) -> None:
-    from .callbacks import AdminNodesCallback, AdminProfilesCallback, RequestsCallback
+    from .callbacks import RequestsCallback
     locale = normalize_locale((await state.get_data()).get('locale'))
     overview = await backend.admin_overview(user_id)
     lines = [tr(locale, 'admin.status.version', version=overview['version']),
@@ -916,14 +916,10 @@ async def show_admin_status(chat_id: int, user_id: int, message_id: int,
     if overview['problem_nodes']:
         rows.append([InlineKeyboardButton(text=tr(locale, 'admin.status.open_problems'),
             callback_data='admin_problem_nodes')])
-    rows.extend([[InlineKeyboardButton(text=tr(locale, 'admin.nodes'),
-        callback_data=AdminNodesCallback().pack()),
-        InlineKeyboardButton(text=tr(locale, 'admin.profiles'),
-        callback_data=AdminProfilesCallback().pack())],
-        [InlineKeyboardButton(text=tr(locale, 'admin.status.refresh'),
+    attention = tuple(tuple(row) for row in rows)
+    rows = [[InlineKeyboardButton(text=tr(locale, 'admin.status.refresh'),
         callback_data='admin_status')],
-        [InlineKeyboardButton(text=tr(locale, 'back'), callback_data='admin_menu')]])
-    attention = tuple(tuple(row) for row in rows[:-3])
+        [InlineKeyboardButton(text=tr(locale, 'back'), callback_data='admin_menu')]]
     sections = [Section(tr(locale, 'admin.rich.overview'), tables=(Table(
         (tr(locale, 'admin.rich.item'), tr(locale, 'admin.rich.value')),
         ((tr(locale, 'admin.nodes'), f"{overview['nodes_enabled']}/{overview['nodes_total']}"),
@@ -933,8 +929,7 @@ async def show_admin_status(chat_id: int, user_id: int, message_id: int,
          (tr(locale, 'admin.status.open_problems'), str(len(overview['problem_nodes']))))),))]
     if attention:
         sections.append(Section(tr(locale, 'admin.rich.attention'), rows=attention))
-    sections.extend((Section(tr(locale, 'admin.rich.management'), rows=(tuple(rows[-3]),)),
-        Section(tr(locale, 'nodes.rich.technical'), collapsed=True, lines=(lines[0], lines[-1]))))
+    sections.append(Section(tr(locale, 'nodes.rich.technical'), collapsed=True, lines=(lines[0], lines[-1])))
     await render(bot, chat_id, Screen(tr(locale, 'admin.status.title'),
         sections=tuple(sections), embedded_buttons=True, navigation=True), rows[-2:], state, message_id)
 
@@ -994,8 +989,10 @@ async def show_member_settings(chat_id: int, user_id: int, message_id: int,
                                bot: Bot, backend: BackendClient, state: FSMContext) -> None:
     locale = normalize_locale((await state.get_data()).get('locale'))
     current = await backend.me(user_id)
+    locale = normalize_locale(current.get('locale') or locale)
+    await state.update_data(locale=locale, locale_restore_pending=False)
     silent = current.get('announcement_silent', False)
-    selected_locale = normalize_locale(current.get('locale') or locale)
+    selected_locale = locale
     sections = [Section(tr(locale, 'settings.locale'), rows=(tuple(
         button(user_id, tr(locale, 'settings.russian' if kind == 'ru' else 'settings.english'),
                'set_locale', kind).model_copy(update={'style': 'primary' if selected_locale == kind else None})

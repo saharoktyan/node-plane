@@ -1,4 +1,5 @@
 from aiogram import BaseMiddleware, Bot
+import asyncio
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, TelegramObject
 from aiogram.exceptions import TelegramBadRequest, TelegramNotFound, TelegramNetworkError
 import logging
@@ -7,7 +8,8 @@ from aiogram.fsm.context import FSMContext
 from typing import Callable, Dict, Any, Awaitable
 
 from ..screens import Screen
-from ..backend import BackendClient
+from ..backend import BackendClient, BackendError
+from ..i18n import normalize_locale
 
 async def render(bot: Bot, chat_id: int, screen: Screen, rows: list[list[InlineKeyboardButton]], state: FSMContext, message_id: int | None = None) -> bool:
     markup = InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
@@ -82,6 +84,29 @@ class BackendMiddleware(BaseMiddleware):
         return await handler(event, data)
 
 
+class LocaleMiddleware(BaseMiddleware):
+    """Restore the saved language before routing callbacks after a restart."""
+
+    async def __call__(self, handler, event, data):
+        state, backend = data.get('state'), data.get('backend')
+        source = getattr(event, 'callback_query', None) or getattr(event, 'message', None)
+        user = getattr(source, 'from_user', None)
+        if state is not None and backend is not None and user is not None:
+            values = await state.get_data()
+            if values.get('locale') not in {'en', 'ru'} or values.get('locale_restore_pending'):
+                try:
+                    account = await asyncio.wait_for(backend.me(user.id), timeout=3)
+                except (BackendError, TimeoutError):
+                    # Do not cache a fallback as the account's chosen language.
+                    # Retry restoration on the next update after backend recovery.
+                    await state.update_data(locale=normalize_locale(values.get('locale') or user.language_code),
+                                            locale_restore_pending=True)
+                else:
+                    await state.update_data(locale=normalize_locale(account.get('locale') or
+                        account.get('language_code') or user.language_code), locale_restore_pending=False)
+        return await handler(event, data)
+
+
 class NotificationStateMiddleware(BaseMiddleware):
     """Keep notification workflows separate from the user's main panel FSM."""
 
@@ -105,6 +130,9 @@ class NotificationStateMiddleware(BaseMiddleware):
                     if query:
                         await query.answer()
                     return
+                locale = (await main.get_data()).get('locale')
+                if locale:
+                    await isolated.update_data(locale=locale)
                 data['state'] = isolated
                 data['raw_state'] = await isolated.get_state()
         return await handler(event, data)

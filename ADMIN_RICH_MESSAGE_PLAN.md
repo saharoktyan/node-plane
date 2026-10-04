@@ -589,3 +589,16 @@ main-settings-only Apply rule.
   still determines whether preserving configs is offered.
 - Region editing uses the same globe-prefixed templates and custom Other option
   as creation, independently of the node flag.
+
+### Follow-up: alpha.34 presentation and locale recovery
+
+- Restore the persisted account locale before processing messages and callbacks
+  after a Telegram client restart, including isolated request notifications.
+  Settings text and selected language use the backend preference.
+- Remove permanent settings-applied notices from node cards and settings hubs;
+  pending changes remain visible with the existing save/apply controls.
+- Use H1 screen titles, H2 protocol settings groups and H3 connection, ports and
+  obfuscation subsections. Collapsed technical options remain collapsed.
+- Status contains summary information and conditional attention actions, with
+  refresh/back navigation. General Management links are removed.
+- Validation: 745 Python tests passed; mobile acceptance testing remains external.
