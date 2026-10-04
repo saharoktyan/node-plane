@@ -11,7 +11,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, Message
 
 from ..backend import BackendClient, BackendError
 from ..i18n import normalize_locale, tr
-from ..screens import Screen
+from ..screens import Screen, Section, Table
 from .common import render
 
 router = Router()
@@ -35,15 +35,15 @@ async def preview(chat_id, message_id, user_id, bot, backend, state):
         chat_id,
         Screen(
             tr(locale, "announce.preview"),
-            (
-                value["text"],
-                tr(locale, "announce.recipients", count=value["recipients"]),
-            ),
+            sections=(Section(tr(locale, 'announce.rich.message'), (value['text'],)),
+                Section(tr(locale, 'announce.rich.audience'),
+                    (tr(locale, 'announce.recipients', count=value['recipients']),))),
+            embedded_buttons=True, navigation=True,
         ),
         [
             [
                 button(locale, "back", "announce_edit"),
-                button(locale, "announce.send", f"announce_send:{draft['nonce']}"),
+                button(locale, "announce.send", f"announce_send:{draft['nonce']}").model_copy(update={'style': 'primary'}),
             ]
         ],
         state,
@@ -55,10 +55,7 @@ async def result(query, bot, backend, state, job_id):
     locale = normalize_locale((await state.get_data()).get("locale"))
     value = await backend.announcement_status(query.from_user.id, job_id)
     counts = value["counts"]
-    lines = [
-        tr(locale, "announce.counts", **counts),
-        tr(locale, "announce.delivery_note"),
-    ]
+    lines = [tr(locale, 'announce.rich.' + value['status'])]
     if not value["total"]:
         lines.insert(0, tr(locale, "announce.empty"))
     rows = []
@@ -68,7 +65,14 @@ async def result(query, bot, backend, state, job_id):
     await render(
         bot,
         query.message.chat.id,
-        Screen(tr(locale, "announce.result"), tuple(lines)),
+        Screen(tr(locale, "announce.result"), tuple(lines),
+            sections=(Section(tr(locale, 'announce.rich.delivery'), tables=(Table(
+                (tr(locale, 'announce.rich.state'), tr(locale, 'announce.rich.count')),
+                tuple((tr(locale, 'announce.rich.' + kind), str(counts.get(kind, 0)))
+                    for kind in ('queued', 'claimed', 'sent', 'failed', 'unknown', 'skipped'))),)),
+                Section(tr(locale, 'announce.rich.details'),
+                    (tr(locale, 'announce.delivery_note'),), collapsed=True)),
+            embedded_buttons=True, navigation=True),
         rows,
         state,
         query.message.message_id,
@@ -90,22 +94,23 @@ async def announcement_cb(
         if query.data == "announce_menu":
             await state.set_state(None)
             overview = await backend.announcement_latest(query.from_user.id)
-            rows = [[button(locale, "announce.compose", "announce_compose")]]
+            compose = button(locale, 'announce.compose', 'announce_compose').model_copy(update={'style': 'primary'})
+            sections = [Section(tr(locale, 'announce.rich.message'), rows=((compose,),))]
+            rows = []
             if overview["last_job"]:
-                rows.append(
-                    [
-                        button(
-                            locale,
-                            "announce.last",
-                            f"announce_job:{overview['last_job']['id']}",
-                        )
-                    ]
-                )
+                last = overview['last_job']
+                sections.append(Section(tr(locale, 'announce.last'),
+                    (tr(locale, 'announce.rich.' + last['status']),),
+                    rows=((button(locale, 'announce.rich.open_result', f"announce_job:{last['id']}"),),),
+                    tables=(Table((tr(locale, 'announce.rich.state'), tr(locale, 'announce.rich.count')),
+                        tuple((tr(locale, 'announce.rich.' + kind), str(last['counts'].get(kind, 0)))
+                              for kind in ('sent', 'failed', 'unknown'))),)))
             rows.append([button(locale, "back", "admin_menu")])
             await render(
                 bot,
                 query.message.chat.id,
-                Screen(tr(locale, "announce.title"), (tr(locale, "announce.prompt"),)),
+                Screen(tr(locale, "announce.title"), sections=tuple(sections),
+                    embedded_buttons=True, navigation=True),
                 rows,
                 state,
                 query.message.message_id,
@@ -134,7 +139,9 @@ async def announcement_cb(
                 query.message.chat.id,
                 Screen(
                     tr(locale, "announce.title"),
-                    (tr(locale, "announce.prompt"), draft["text"] if draft else ""),
+                    (tr(locale, "announce.prompt"),),
+                    sections=(Section(tr(locale, 'announce.rich.draft'), (draft['text'],)),) if draft else (),
+                    embedded_buttons=True, navigation=True,
                 ),
                 rows,
                 state,
@@ -165,7 +172,7 @@ async def announcement_cb(
         await render(
             bot,
             query.message.chat.id,
-            Screen(tr(locale, "announce.title"), (tr(locale, "announce.error"),)),
+            Screen(tr(locale, "announce.title"), (tr(locale, "announce.error"),), embedded_buttons=True, navigation=True),
             [[button(locale, "back", "admin_menu")]],
             state,
             query.message.message_id,
@@ -187,8 +194,8 @@ async def announcement_text(
         await render(
             bot,
             message.chat.id,
-            Screen(tr(locale, "announce.title"), (tr(locale, "announce.invalid"),)),
-            [[button(locale, "back", "admin_menu")]],
+            Screen(tr(locale, "announce.title"), (tr(locale, "announce.invalid"),), embedded_buttons=True, navigation=True),
+            [[button(locale, "back", "announce_menu")]],
             state,
             data.get("control_message_id"),
         )
@@ -210,7 +217,7 @@ async def announcement_text(
         await render(
             bot,
             message.chat.id,
-            Screen(tr(locale, "announce.title"), (tr(locale, "announce.error"),)),
+            Screen(tr(locale, "announce.title"), (tr(locale, "announce.error"),), embedded_buttons=True, navigation=True),
             [[button(locale, "back", "admin_menu")]],
             state,
             data.get("control_message_id"),

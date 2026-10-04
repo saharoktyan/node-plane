@@ -154,7 +154,7 @@ async def show_admin_nodes(chat_id, user_id, message_id, bot, backend, state, pa
         for node in items:
             summary = node.get('overview')
             label = server_label(node)
-            if summary:
+            if summary and summary['state'] != 'applied_unverified':
                 label += ' · ' + tr(locale, 'nodes.card.state.' + summary['state'])
             entries.append(Section('', rows=((InlineKeyboardButton(text=label,
                 callback_data=AdminNodeCallback(node_key=node['key']).pack()),),)))
@@ -658,7 +658,8 @@ async def show_admin_node(chat_id, user_id, message_id, node_key, bot, backend, 
     install_rows = []
     if overview:
         state_key = overview.get('state', 'unknown')
-        lines.append(tr(locale, 'nodes.card.state', value=tr(locale, 'nodes.card.state.' + state_key)))
+        if state_key != 'applied_unverified':
+            lines.append(tr(locale, 'nodes.card.state', value=tr(locale, 'nodes.card.state.' + state_key)))
         job = overview.get('last_job')
         if job and job['status'] in {'awaiting_executor', 'running', 'blocked'}:
             install_rows.append((InlineKeyboardButton(text=tr(locale, 'node_tools.last_operation'), callback_data='node_job:' + job['id'], style='primary'),))

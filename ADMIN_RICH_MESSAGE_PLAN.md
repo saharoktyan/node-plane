@@ -602,3 +602,18 @@ main-settings-only Apply rule.
 - Status contains summary information and conditional attention actions, with
   refresh/back navigation. General Management links are removed.
 - Validation: 745 Python tests passed; mobile acceptance testing remains external.
+
+### Phase 4: Announcements (alpha.35)
+
+- Landing screen embeds Compose and a conditional last-delivery summary with a
+  result link. Compose/edit retain the draft and paired Back/Preview navigation.
+- Preview separates the message from the backend-computed audience, with paired
+  Back/Send controls. Delivery remains an immutable backend job with its existing
+  idempotency key; uncertain sends are not replayed.
+- Result displays delivery counters in a compact table and collapses delivery
+  policy details. Refresh appears while delivery is running; Back returns to the
+  admin panel. English/Russian labels and plain-text fallback are preserved.
+- Recipient selection and delivery options remain governed by the existing
+  backend policy; no unsupported selectors or recipient-level detail view is added.
+- Node lists and cards omit the normal applied-unverified state label, while
+  pending, installation and error states remain visible.
