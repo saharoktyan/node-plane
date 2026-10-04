@@ -1504,6 +1504,8 @@ impl NodeService for NodeApi {
             runtime_commit: facts.commit,
             xray_config_present: facts.xray_config_present,
             awg_config_present: facts.awg_config_present,
+            agent_version: facts.binary_version,
+            agent_commit: facts.binary_commit,
         }))
     }
 

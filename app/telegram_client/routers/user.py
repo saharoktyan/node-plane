@@ -628,7 +628,7 @@ async def user_action_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
 async def show_admin_menu(chat_id: int, user_id: int, message_id: int,
                           bot: Bot, backend: BackendClient,
                           state: FSMContext) -> None:
-    from .callbacks import (AccountsCallback, AdminNodesCallback,
+    from .callbacks import (AdminNodesCallback,
                             AdminProfilesCallback, AdminSettingsCallback, RequestsCallback)
     locale = normalize_locale((await state.get_data()).get('locale'))
     try:
@@ -640,7 +640,6 @@ async def show_admin_menu(chat_id: int, user_id: int, message_id: int,
          InlineKeyboardButton(text=tr(locale, 'admin.requests'), callback_data=RequestsCallback().pack())],
         [InlineKeyboardButton(text=tr(locale, 'admin.nodes'), callback_data=AdminNodesCallback().pack()),
          InlineKeyboardButton(text=tr(locale, 'admin.profiles'), callback_data=AdminProfilesCallback().pack())],
-        [InlineKeyboardButton(text=tr(locale, 'admin.accounts'), callback_data=AccountsCallback().pack())],
         [InlineKeyboardButton(text=tr(locale, 'announce.title'), callback_data='announce_menu')],
         [InlineKeyboardButton(text=tr(locale, 'admin.settings'), callback_data=AdminSettingsCallback().pack())],
         [button(user_id, tr(locale, 'back'), 'home')],

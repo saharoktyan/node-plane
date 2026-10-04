@@ -1695,6 +1695,13 @@ CATALOG['ru'].update({'back': '⬅️ Назад',
  'nodes.probe.state.degraded': 'требует внимания',
  'nodes.probe.state.unknown': 'неизвестно'})
 
+CATALOG['en']['nodes.probe.agent_version'] = 'Agent version: {value}'
+CATALOG['ru']['nodes.probe.agent_version'] = 'Версия агента: {value}'
+CATALOG['en']['profile.create.telegram_prompt'] = 'Send the Telegram user ID. The user must have started this bot first.'
+CATALOG['ru']['profile.create.telegram_prompt'] = 'Отправьте Telegram ID пользователя. Сначала пользователь должен запустить этого бота.'
+CATALOG['en']['profile.create.telegram_failed'] = 'Could not add the user. Check their ID and resolve any pending access request first.'
+CATALOG['ru']['profile.create.telegram_failed'] = 'Не удалось добавить пользователя. Проверьте ID и сначала обработайте его заявку, если она есть.'
+
 def normalize_locale(value: str | None) -> str:
     return 'ru' if (value or '').lower().startswith('ru') else 'en'
 

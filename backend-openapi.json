@@ -7704,6 +7704,16 @@
             "type": "string",
             "title": "Runtime Commit"
           },
+          "agent_version": {
+            "type": "string",
+            "title": "Agent Version",
+            "default": ""
+          },
+          "agent_commit": {
+            "type": "string",
+            "title": "Agent Commit",
+            "default": ""
+          },
           "xray_config_present": {
             "type": "boolean",
             "title": "Xray Config Present"

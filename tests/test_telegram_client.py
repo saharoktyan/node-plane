@@ -27,6 +27,29 @@ class RouterStartupTests(TestCase):
 
 
 class TelegramFlowTests(IsolatedAsyncioTestCase):
+    async def test_admin_menu_has_profiles_without_separate_accounts(self):
+        with patch.object(user, 'render', new_callable=AsyncMock) as draw:
+            await user.show_admin_menu(1, 101, 5, self.bot,
+                SimpleNamespace(bot_title=AsyncMock(return_value={'title': 'Node Plane'})), self.state)
+        callbacks = [b.callback_data for row in draw.call_args.args[3] for b in row]
+        self.assertFalse(any(value.startswith('accounts') for value in callbacks))
+        self.assertTrue(any(value.startswith('admin_profiles') for value in callbacks))
+
+    async def test_add_user_uses_automatic_profile_and_revision_header(self):
+        message = SimpleNamespace(from_user=SimpleNamespace(id=101), chat=SimpleNamespace(id=1, type='private'),
+                                  text='102', delete=AsyncMock())
+        self.bot.get_chat = AsyncMock(return_value=SimpleNamespace(username='alice', first_name='Alice', last_name=None))
+        backend = SimpleNamespace(resolve=AsyncMock(return_value={'id': 'account', 'status': 'pending'}),
+            request=AsyncMock(return_value={'revision': 2}),
+            profiles=AsyncMock(return_value={'items': [{'id': 'profile'}]}))
+        with patch.object(admin_profiles, 'show_admin_profile', new_callable=AsyncMock) as show:
+            await admin_profiles.add_profile_user_text(message, self.bot, backend, self.state)
+        backend.resolve.assert_awaited_once_with(102, username='alice', first_name='Alice', last_name=None)
+        change = backend.request.call_args
+        self.assertEqual(change.kwargs['revision'], 2)
+        self.assertEqual(change.kwargs['body'], {'status': 'approved'})
+        self.assertEqual(show.call_args.args[3], 'profile')
+
     async def test_awg_preset_selection_updates_desired_settings_only(self):
         backend = SimpleNamespace(request=AsyncMock(return_value={
             'desired_revision': 4, 'settings': {'awg_port': 51820, 'awg_i1_preset': 'quic'}}),
@@ -498,6 +521,17 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         screen = render.call_args.args[2]
         self.assertIn('unreachable', ' '.join(screen.lines))
         self.assertNotIn('node_agent_unavailable', ' '.join(screen.lines))
+
+    async def test_probe_shows_agent_version_before_protocol_runtime_exists(self):
+        backend = SimpleNamespace(node_runtime=AsyncMock(return_value={
+            'health_state': 'running', 'agent_version': '0.4.3-alpha.20',
+            'runtime_version': '', 'xray_config_present': False, 'awg_config_present': False}))
+        with patch.object(admin_nodes, 'render', new_callable=AsyncMock) as draw:
+            await admin_nodes.probe_node_cb(self.query, ProbeNodeCallback(node_key='lv1'),
+                                            self.bot, backend, self.state)
+        lines = draw.call_args.args[2].lines
+        self.assertIn('Agent version: 0.4.3-alpha.20', lines)
+        self.assertIn('Runtime version: —', lines)
 
     async def test_node_diagnostics_displays_agent_status_without_paths(self):
         self.query.data = 'node_diagnostics:lv1'

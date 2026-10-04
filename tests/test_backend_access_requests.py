@@ -38,7 +38,9 @@ class BackendAccessRequestTests(unittest.TestCase):
         self.assertEqual(self.decision(request_id, 'approve', decision_key).status_code, 200)
         self.assertEqual(self.decision(request_id, 'reject').json()['error']['code'], 'request_already_decided')
         self.assertEqual(self.client.get('/api/v1/me', headers=self.member_headers(102)).json()['status'], 'approved')
-        self.assertEqual(self.client.get('/api/v1/me/profiles', headers=self.member_headers(102)).json()['items'], [])
+        profiles = self.client.get('/api/v1/me/profiles', headers=self.member_headers(102)).json()['items']
+        self.assertEqual(len(profiles), 1)
+        self.assertEqual(profiles[0]['display_name'], 'User 102')
         self.assertEqual(self.client.get('/api/v1/me/nodes', headers=self.member_headers(102)).json()['items'], [])
         self.assertEqual(self.client.get('/api/v1/access-requests', headers=self.member_headers(101)).json()['items'], [])
         self.assertEqual(self.client.get('/api/v1/me/access-requests', headers=self.member_headers(102)).json()['items'][0]['account_id'], account['id'])
