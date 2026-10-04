@@ -402,9 +402,11 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             servers = profile_screen.sections[-1]
             self.assertTrue(servers.collapsed)
             self.assertEqual(servers.sections[0].title, 'Europe')
-            self.assertEqual(servers.sections[0].sections[0].title, 'Latvia')
+            self.assertEqual(servers.sections[0].sections[0].title, '🇱🇻 Latvia')
             self.assertEqual(servers.sections[0].sections[0].lines, ('AmneziaWG', 'VLESS'))
-            self.assertEqual(servers.rich()[0].blocks[-1].type, 'divider')
+            self.assertNotEqual(servers.rich()[0].blocks[-1].type, 'divider')
+            blocks = profile_screen.rich(render.call_args.args[3]).blocks
+            self.assertEqual([block.type for block in blocks][-2:], ['divider', 'buttons'])
             self.assertEqual(servers.rows, ())
             self.assertEqual(len(render.call_args.args[3]), 1)
             await user.show_account_stats(123, 123, 77, 'p1', self.bot,
@@ -451,8 +453,12 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         self.assertFalse(blocks[3].is_open)
         self.assertEqual(blocks[3].blocks[0].text.type, 'code')
         self.assertEqual(blocks[3].blocks[0].text.text, 'vpn://fresh-config')
-        self.assertEqual([block.document.media.filename for block in blocks if block.type == 'document'],
+        files = next(block for block in blocks if block.type == 'details'
+                     and block.summary == 'Configuration files')
+        self.assertFalse(files.is_open)
+        self.assertEqual([block.document.media.filename for block in files.blocks],
                          ['Latvia.vpn', 'Latvia.conf'])
+        self.assertFalse(any(block.type == 'document' for block in blocks))
         self.bot.send_document.assert_not_awaited()
         self.bot.send_photo.assert_not_awaited()
         back = user.actions[draw.call_args.args[3][-1][0].callback_data[2:]]
@@ -469,6 +475,10 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         self.assertFalse(blocks[2].is_open)
         self.assertFalse(blocks[3].is_open)
         self.assertEqual(blocks[3].blocks[0].text.type, 'code')
+        files = next(block for block in blocks if block.type == 'details'
+                     and block.summary == 'Configuration files')
+        self.assertFalse(files.is_open)
+        self.assertEqual(files.blocks[0].document.media.filename, 'Latvia.txt')
         self.assertEqual(blocks[3].blocks[0].text.text, 'vless://test')
         back = user.actions[draw.call_args.args[3][-1][0].callback_data[2:]]
         self.assertEqual((back.name, back.args), ('protocol', ('p1', 'lv1', 'xray')))
@@ -495,7 +505,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         screen = draw.call_args.args[2]
         self.assertTrue(screen.embedded_buttons)
         self.assertEqual([section.title for section in screen.sections], ['EU', 'RU'])
-        self.assertEqual([section.sections[0].title for section in screen.sections], ['Latvia', 'Moscow'])
+        self.assertEqual([section.sections[0].title for section in screen.sections], ['🇱🇻 Latvia', '🇷🇺 Moscow'])
         self.assertEqual(screen.lines, ())
         self.assertEqual([block.type for block in screen.rich(draw.call_args.args[3]).blocks],
             ['heading', 'heading', 'heading', 'buttons', 'divider', 'heading', 'heading', 'buttons', 'divider', 'buttons'])
@@ -589,10 +599,44 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         sections = draw.call_args.args[2].sections
         sound = sections[1].rows[0][0]
         consent = sections[2].rows[0][0]
-        self.assertEqual(sound.text, 'Enable sound')
+        self.assertEqual(sound.text, 'Enable')
         self.assertEqual(user.actions[sound.callback_data[2:]].args, ('false',))
         self.assertEqual(consent.text, 'Withdraw consent')
         self.assertEqual(user.actions[consent.callback_data[2:]].args, ('false',))
+
+    async def test_language_and_sound_choices_highlight_only_the_saved_value(self):
+        for locale in ('ru', 'en'):
+            for silent in (False, True):
+                self.state_data['locale'] = locale
+                backend = SimpleNamespace(me=AsyncMock(return_value={
+                    'locale': locale, 'announcement_silent': silent}))
+                with patch.object(user, 'render', new_callable=AsyncMock) as draw:
+                    await user.show_member_settings(123, 123, 77, self.bot, backend, self.state)
+                language, sound = draw.call_args.args[2].sections
+                self.assertEqual((language.lines, sound.lines), ((), ()))
+                self.assertEqual(len(language.rows[0]), 2)
+                self.assertEqual(len(sound.rows[0]), 2)
+                self.assertEqual([b.text for b in sound.rows[0]],
+                    ['Включить', 'Выключить'] if locale == 'ru' else ['Enable', 'Disable'])
+                self.assertEqual([b.style for b in language.rows[0]],
+                    ['primary', None] if locale == 'ru' else [None, 'primary'])
+                self.assertEqual([b.style for b in sound.rows[0]],
+                    [None, 'primary'] if silent else ['primary', None])
+                self.assertEqual([user.actions[b.callback_data[2:]].args for b in sound.rows[0]],
+                                 [('false',), ('true',)])
+                self.assertEqual([b.style for b in sound.rich()[-1].buttons],
+                                 [b.style for b in sound.rows[0]])
+
+    async def test_admin_grant_server_lists_include_flags(self):
+        backend = SimpleNamespace(admin_nodes=AsyncMock(return_value={'items': [
+            {'key': 'lv1', 'title': 'Latvia', 'flag': '🇱🇻'}]}),
+            profile_grants=AsyncMock(return_value={'items': []}))
+        self.state_data['draft_profile_name'] = 'Alice'
+        with patch.object(admin_profiles, 'render', new_callable=AsyncMock) as draw:
+            await admin_profiles.show_create_nodes(123, 123, 77, self.bot, backend, self.state)
+            self.assertEqual(draw.call_args.args[3][0][0].text, '○ 🇱🇻 Latvia')
+            await admin_profiles.show_grant_nodes(123, 123, 77, 'p1', self.bot, backend, self.state)
+            self.assertEqual(draw.call_args.args[3][0][0].text, '○ 🇱🇻 Latvia')
 
     async def test_plain_config_fallback_preserves_downloads(self):
         backend = SimpleNamespace(
@@ -928,6 +972,65 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
                                               decision='approve'),
                 self.bot, backend, self.state)
         self.assertEqual(render.call_args.args[2].title, 'Configured title')
+
+    async def test_access_approval_replaces_requester_screen_and_menu_edits_same_message(self):
+        from aiogram.fsm.context import FSMContext
+        from aiogram.fsm.storage.base import StorageKey
+        from aiogram.fsm.storage.memory import MemoryStorage
+        storage = MemoryStorage()
+        admin_state = FSMContext(storage=storage, key=StorageKey(bot_id=1, chat_id=123, user_id=123))
+        member_state = FSMContext(storage=storage, key=StorageKey(bot_id=1, chat_id=456, user_id=456))
+        await admin_state.update_data(locale='en', control_message_id=77)
+        await member_state.update_data(locale='ru', control_message_id=88)
+        backend = SimpleNamespace(
+            pending_access_request=AsyncMock(return_value={'locale': 'ru'}),
+            request=AsyncMock(side_effect=[{'account_id': 'member'}, {'telegram_user_id': 456}]),
+            me=AsyncMock(return_value={'role': 'member', 'status': 'approved'}),
+            bot_title=AsyncMock(return_value={'title': 'Node Plane'}))
+        self.bot.edit_message_text = AsyncMock()
+        self.bot.send_rich_message = AsyncMock(return_value=SimpleNamespace(message_id=99))
+        self.bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=100))
+        with patch.object(admin_requests, 'render_request_page', new_callable=AsyncMock):
+            await admin_requests.apply_decision(self.query, 'request', 'approve',
+                                               self.bot, backend, admin_state)
+        edited = self.bot.edit_message_text.call_args.kwargs
+        self.assertEqual((edited['chat_id'], edited['message_id']), (456, 88))
+        blocks = edited['rich_message'].blocks
+        self.assertEqual(blocks[1].text, 'Ваш запрос доступа одобрен.')
+        self.assertEqual(blocks[-1].buttons[0].text, 'В меню')
+        self.assertEqual(blocks[-1].buttons[0].callback_data, user.HomeCallback().pack())
+        self.assertEqual((await admin_state.get_data())['control_message_id'], 77)
+        self.assertEqual((await member_state.get_data())['control_message_id'], 88)
+        query = SimpleNamespace(answer=AsyncMock(), message=SimpleNamespace(
+            chat=SimpleNamespace(id=456), message_id=88),
+            from_user=SimpleNamespace(id=456, language_code='ru'))
+        await user.home_cb(query, self.bot, backend, member_state)
+        self.assertEqual(self.bot.edit_message_text.call_args.kwargs['message_id'], 88)
+        self.bot.send_rich_message.assert_not_awaited()
+        self.bot.send_message.assert_not_awaited()
+        await storage.close()
+
+    async def test_access_decision_without_existing_screen_records_one_new_control_message(self):
+        from aiogram.fsm.context import FSMContext
+        from aiogram.fsm.storage.base import StorageKey
+        from aiogram.fsm.storage.memory import MemoryStorage
+        storage = MemoryStorage()
+        admin_state = FSMContext(storage=storage, key=StorageKey(bot_id=1, chat_id=123, user_id=123))
+        member_state = FSMContext(storage=storage, key=StorageKey(bot_id=1, chat_id=456, user_id=456))
+        await admin_state.update_data(locale='en')
+        backend = SimpleNamespace(
+            pending_access_request=AsyncMock(return_value={'locale': 'en'}),
+            request=AsyncMock(side_effect=[{'account_id': 'member'}, {'telegram_user_id': 456}]))
+        self.bot.send_rich_message = AsyncMock(return_value=SimpleNamespace(message_id=99))
+        self.bot.send_message = AsyncMock()
+        with patch.object(admin_requests, 'render_request_page', new_callable=AsyncMock):
+            await admin_requests.apply_decision(self.query, 'request', 'reject',
+                                               self.bot, backend, admin_state)
+        self.bot.send_rich_message.assert_awaited_once()
+        self.assertEqual((await member_state.get_data())['control_message_id'], 99)
+        blocks = self.bot.send_rich_message.call_args.kwargs['rich_message'].blocks
+        self.assertEqual(blocks[-1].buttons[0].text, 'To menu')
+        await storage.close()
 
     async def test_failed_node_cleanup_has_recoverable_screen(self):
         from telegram_client.routers.callbacks import CleanupStepCallback

@@ -57,13 +57,18 @@ class RenderRecoveryTests(IsolatedAsyncioTestCase):
         bot = Bot('123456:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi')
         try:
             screen = Screen('Config', uri='vpn://fresh', qr=b'PNG', qr_title='QR',
-                files=(('node.vpn', b'vpn://fresh'), ('node.conf', b'[Interface]')))
+                files=(('node.vpn', b'vpn://fresh'), ('node.conf', b'[Interface]')),
+                files_title='Configuration files')
             files = {}
             payload = json.loads(bot.session.prepare_value(screen.rich(), bot=bot, files=files))
             self.assertEqual(len(files), 3)
             self.assertFalse(payload['blocks'][1]['is_open'])
             self.assertTrue(payload['blocks'][1]['blocks'][0]['photo']['media'].startswith('attach://'))
             self.assertEqual(payload['blocks'][2]['text'], {'type': 'code', 'text': 'vpn://fresh'})
+            self.assertEqual(payload['blocks'][3]['type'], 'details')
+            self.assertFalse(payload['blocks'][3]['is_open'])
+            self.assertEqual([block['type'] for block in payload['blocks'][3]['blocks']],
+                             ['document', 'document'])
             self.assertEqual({file.filename for file in files.values()},
                              {'config.png', 'node.vpn', 'node.conf'})
         finally:

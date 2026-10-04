@@ -10,7 +10,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, Message
 
 from ..backend import BackendClient, BackendError
 from ..i18n import normalize_locale, tr
-from ..screens import Screen
+from ..screens import Screen, server_label
 from .callbacks import (AccountsCallback, AccountCallback, NewProfileCallback,
     AdminProfilesCallback, AdminProfileCallback, GrantNodesCallback,
     GrantProtocolsCallback, AddGrantCallback, RemoveGrantCallback,
@@ -190,7 +190,7 @@ async def show_create_nodes(chat_id: int, user_id: int, message_id: int,
     await state.update_data(draft_nodes=nodes)
     grants = {(item['node_key'], item['protocol']) for item in data.get('draft_grants', [])}
     rows = [[InlineKeyboardButton(
-        text=f"{'✅' if any(key == node['key'] for key, _ in grants) else '○'} {node['title']}",
+        text=f"{'✅' if any(key == node['key'] for key, _ in grants) else '○'} {server_label(node)}",
         callback_data=f'profile_draft_node:{index}')]
         for index, node in enumerate(nodes)]
     rows.append([InlineKeyboardButton(text=tr(locale, 'back'),
@@ -223,7 +223,7 @@ async def show_create_protocols(chat_id: int, user_id: int, message_id: int,
         callback_data='profile_draft_nodes'),
         InlineKeyboardButton(text=tr(locale, 'profile.create.next'),
         callback_data='profile_draft_review')])
-    await render(bot, chat_id, Screen(node['title'],
+    await render(bot, chat_id, Screen(server_label(node),
         (tr(locale, 'profile.create.choose_protocols'),)), rows, state, message_id)
 
 
@@ -276,7 +276,7 @@ async def show_create_review(chat_id: int, message_id: int, bot: Bot,
                              state: FSMContext, note: str | None = None) -> None:
     locale = await _locale(state)
     data = await state.get_data()
-    nodes = {node['key']: node['title'] for node in data.get('draft_nodes', [])}
+    nodes = {node['key']: server_label(node) for node in data.get('draft_nodes', [])}
     grouped = {}
     for grant in data.get('draft_grants', []):
         grouped.setdefault(grant['node_key'], []).append(tr(locale,
@@ -490,7 +490,7 @@ async def show_admin_profile(chat_id: int, user_id: int, message_id: int,
                                     telegram_user_id=user_id)
     grants = (await backend.profile_grants(user_id, profile_id))['items']
     node_page = await backend.admin_nodes(user_id)
-    node_names = {node['key']: node['title'] for node in node_page['items']}
+    node_names = {node['key']: server_label(node) for node in node_page['items']}
     operation = await backend.profile_operation(user_id, profile_id)
     locale = await _locale(state)
     grouped = {}
@@ -728,7 +728,7 @@ async def show_grant_nodes(chat_id: int, user_id: int, message_id: int,
     granted = {item['node_key'] for item in data['draft_grants']}
     locale = await _locale(state)
     rows = [[InlineKeyboardButton(
-        text=f"{'✅' if node['key'] in granted else '○'} {node['title']}",
+        text=f"{'✅' if node['key'] in granted else '○'} {server_label(node)}",
         callback_data=GrantProtocolsCallback(profile_id=profile_id,
                                              node_key=node['key']).pack())]
         for node in nodes['items']]
@@ -772,7 +772,7 @@ async def show_grant_protocols(chat_id: int, user_id: int, message_id: int,
     rows.append([InlineKeyboardButton(text=tr(locale, 'back'),
         callback_data=GrantNodesCallback(profile_id=profile_id).pack())])
     await render(bot, chat_id, Screen(tr(locale, 'profile.admin.protocols_title'),
-        (tr(locale, 'profile.admin.server', name=node['title']),
+        (tr(locale, 'profile.admin.server', name=server_label(node)),
          tr(locale, 'profile.admin.protocols_prompt'))),
         rows, state, message_id)
 

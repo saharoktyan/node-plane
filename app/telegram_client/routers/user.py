@@ -18,7 +18,7 @@ import qrcode
 from qrcode.exceptions import DataOverflowError
 
 from ..backend import BackendClient, BackendError
-from ..screens import Screen, Section
+from ..screens import Screen, Section, server_label
 from ..i18n import normalize_locale, tr
 from .callbacks import HomeCallback
 from .common import render
@@ -326,8 +326,9 @@ async def show_account_profile(chat_id: int, user_id: int, message_id: int,
         Section(tr(locale, 'account.access_title'),
             () if summary['nodes'] else (tr(locale, 'account.access_empty'),),
             collapsed=True, is_open=servers_open,
-            sections=region_sections(nodes, locale, lambda node: Section(node['title'],
-                profile_node_traffic(summary, node, locale), divider_after=True, heading_size=4)),
+            sections=region_sections(nodes, locale, lambda node: Section(server_label(node),
+                profile_node_traffic(summary, node, locale),
+                divider_after=node['key'] != nodes[-1]['key'], heading_size=4)),
             rows=server_pagination(user_id, locale, page_index, pages,
                 'account_nodes_page', profile_id, back_to)),
     )
@@ -410,7 +411,7 @@ async def show_profile(chat_id: int, user_id: int, message_id: int,
         page_index = saved.get('page', 0) if saved.get('profile_id') == profile_id else 0
     nodes, page_index, pages = server_page(page['items'], page_index)
     await state.update_data(member_nodes_page={'profile_id': profile_id, 'page': page_index})
-    sections = region_sections(nodes, locale, lambda node: Section(node['title'],
+    sections = region_sections(nodes, locale, lambda node: Section(server_label(node),
         rows=(tuple(button(user_id, tr(locale, f"protocol.{protocol['kind']}"), 'protocol',
             profile_id, node['key'], protocol['kind']) for protocol in node['protocols']),),
         divider_after=True, heading_size=4))
@@ -436,7 +437,7 @@ async def show_node(chat_id: int, user_id: int, message_id: int,
                     'protocol', profile_id, node_key, protocol['kind'])]
             for protocol in node['protocols']]
     rows.append([button(user_id, tr(locale, 'back'), 'profile', profile_id)])
-    await render(bot, chat_id, Screen(node['title'],
+    await render(bot, chat_id, Screen(server_label(node),
         (node['region'], tr(locale, 'node.choose_protocol')), embedded_buttons=True, navigation=True),
         rows, state, message_id)
 
@@ -459,7 +460,7 @@ async def show_protocol(chat_id: int, user_id: int, message_id: int, profile_id:
     rows = [[button(user_id, tr(locale, f'transport.{kind}'), 'issue',
                     profile_id, node_key, 'xray', kind) for kind in transports],
             [button(user_id, tr(locale, 'back'), 'profile', profile_id)]]
-    await render(bot, chat_id, Screen(tr(locale, 'xray.title', node=node['title']),
+    await render(bot, chat_id, Screen(tr(locale, 'xray.title', node=server_label(node)),
         (tr(locale, 'transport.choose'),), sections=(Section(tr(locale, 'ui.transport_help'),
             (tr(locale, 'ui.transport_help_text'),), collapsed=True),),
         embedded_buttons=True, navigation=True), rows, state, message_id)
@@ -509,6 +510,7 @@ async def _render_issuance(chat_id: int, user_id: int, message_id: int,
             uri=uri, uri_title=tr(locale, 'ui.config_link'), qr=image, qr_title=tr(locale, 'ui.config_qr'),
             sections=(), details_title=tr(locale, 'ui.config_help'), details_lines=(import_hint,),
             files=tuple((item['filename'], item['content'].encode()) for item in files),
+            files_title=tr(locale, 'ui.config_files'),
             embedded_buttons=True, navigation=True)
         rich = await render(bot, chat_id, screen, rows, state, message_id)
         # Older Telegram deployments may reject rich media. Preserve downloads
@@ -835,7 +837,7 @@ async def admin_problem_nodes_cb(query: CallbackQuery, bot: Bot,
     await query.answer()
     locale = normalize_locale((await state.get_data()).get('locale'))
     overview = await backend.admin_overview(query.from_user.id)
-    rows = [[InlineKeyboardButton(text=node['title'],
+    rows = [[InlineKeyboardButton(text=server_label(node),
         callback_data=AdminNodeCallback(node_key=node['key']).pack())]
         for node in overview['problem_nodes']]
     rows.append([InlineKeyboardButton(text=tr(locale, 'back'),
@@ -853,14 +855,16 @@ async def show_member_settings(chat_id: int, user_id: int, message_id: int,
     locale = normalize_locale((await state.get_data()).get('locale'))
     current = await backend.me(user_id)
     silent = current.get('announcement_silent', False)
-    sections = [Section(tr(locale, 'settings.locale'),
-        (tr(locale, 'settings.russian' if locale == 'ru' else 'settings.english'),),
-        ((button(user_id, tr(locale, 'settings.russian'), 'set_locale', 'ru'),
-          button(user_id, tr(locale, 'settings.english'), 'set_locale', 'en')),)),
-        Section(tr(locale, 'ui.notifications'),
-            (tr(locale, 'announce.sound_off' if silent else 'announce.sound_on'),),
-            ((button(user_id, tr(locale, 'ui.enable_sound' if silent else 'ui.disable_sound'),
-                'announcement_silent', 'false' if silent else 'true'),),))]
+    selected_locale = normalize_locale(current.get('locale') or locale)
+    sections = [Section(tr(locale, 'settings.locale'), rows=(tuple(
+        button(user_id, tr(locale, 'settings.russian' if kind == 'ru' else 'settings.english'),
+               'set_locale', kind).model_copy(update={'style': 'primary' if selected_locale == kind else None})
+        for kind in ('ru', 'en')),)),
+        Section(tr(locale, 'ui.notifications'), rows=((
+            button(user_id, tr(locale, 'ui.enable_sound'), 'announcement_silent', 'false')
+                .model_copy(update={'style': 'primary' if not silent else None}),
+            button(user_id, tr(locale, 'ui.disable_sound'), 'announcement_silent', 'true')
+                .model_copy(update={'style': 'primary' if silent else None}),),))]
     if current.get('traffic_available') or current.get('traffic_consent'):
         consent = current.get('traffic_consent', False)
         sections.append(Section(tr(locale, 'ui.traffic'),

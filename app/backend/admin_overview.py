@@ -13,7 +13,7 @@ class AdminOverviewService:
     def get(self, actor):
         require_permission(actor, 'profiles.manage')
         with self.db.connect() as conn:
-            nodes = conn.execute('SELECT key, title, enabled FROM backend_nodes ORDER BY key').fetchall()
+            nodes = conn.execute('SELECT key, title, flag, enabled FROM backend_nodes ORDER BY key').fetchall()
             profiles = conn.execute('''SELECT p.frozen, p.expires_at, d.profile_id AS deleting
                 FROM backend_profiles p LEFT JOIN backend_profile_deletions d ON d.profile_id = p.id''').fetchall()
             pending_requests = conn.execute("SELECT COUNT(*) AS n FROM backend_access_requests WHERE status = 'pending'").fetchone()['n']
@@ -37,6 +37,6 @@ class AdminOverviewService:
             'profiles_active': active,
             'profiles_frozen': sum(not p['deleting'] and bool(p['frozen']) for p in profiles),
             'pending_requests': pending_requests,
-            'problem_nodes': [{'key': node['key'], 'title': node['title']}
+            'problem_nodes': [{'key': node['key'], 'title': node['title'], 'flag': node['flag']}
                               for node in nodes if node['key'] in problem_keys],
         }

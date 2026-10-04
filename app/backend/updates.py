@@ -75,7 +75,7 @@ class UpdateService:
         require_permission(actor, 'settings.manage')
         from config import APP_COMMIT, APP_SEMVER
         with self.db.connect() as conn:
-            nodes = conn.execute('''SELECT n.key, n.title, n.desired_revision, c.transport, c.ssh_target
+            nodes = conn.execute('''SELECT n.key, n.title, n.flag, n.desired_revision, c.transport, c.ssh_target
                 FROM backend_nodes n LEFT JOIN backend_node_connections c ON c.node_key=n.key
                 WHERE NOT EXISTS (SELECT 1 FROM backend_node_drains d WHERE d.node_key=n.key)
                 ORDER BY n.key''').fetchall()
