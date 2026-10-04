@@ -150,26 +150,41 @@ class NodeService:
             LEFT JOIN backend_node_connections c ON c.node_key = n.key
             LEFT JOIN backend_node_notes m ON m.node_key = n.key'''
 
-    def list(self, actor, *, limit=25, cursor=None, search=None):
+    def list(self, actor, *, limit=25, cursor=None, search=None, order="key"):
         require_permission(actor, 'nodes.manage')
         if type(limit) is not int or not 1 <= limit <= 100:
             raise AccessDenied('invalid_input', 422)
         if search is not None and (not isinstance(search, str) or not 1 <= len(search.strip()) <= 128):
             raise AccessDenied('invalid_input', 422)
+        if order not in {'key', 'region'}:
+            raise AccessDenied('invalid_input', 422)
         term = search.strip().casefold() if search else None
         kind = 'admin_nodes_search:' + term if term else 'admin_nodes'
+        if order == 'region':
+            kind += ':region'
         after = _cursor(cursor, kind)
+        if order == 'region':
+            try:
+                after = json.loads(after) if after else ['', '', '']
+                if not isinstance(after, list) or len(after) != 3 or any(not isinstance(v, str) or len(v) > bound for v, bound in zip(after, (128, 128, 64))):
+                    raise ValueError()
+            except (ValueError, TypeError):
+                raise AccessDenied('invalid_cursor', 422) from None
+        columns = 'n.region, n.title, n.key' if order == 'region' else 'n.key'
+        condition = ' WHERE (n.region, n.title, n.key) > (?, ?, ?)' if order == 'region' else ' WHERE n.key > ?'
+        def parameters(position, count):
+            return (*position, count) if order == 'region' else (position, count)
         with self.db.connect() as conn:
             if term:
                 matches = []
                 current = after
                 while len(matches) < limit + 1:
-                    rows = conn.execute(self._select() + ' WHERE n.key > ? ORDER BY n.key LIMIT 200',
-                                        (current,)).fetchall()
+                    rows = conn.execute(self._select() + condition + ' ORDER BY ' + columns + ' LIMIT ?',
+                                        parameters(current, 200)).fetchall()
                     if not rows:
                         break
                     for row in rows:
-                        current = row['key']
+                        current = [row['region'], row['title'], row['key']] if order == 'region' else row['key']
                         if any(term in str(row[field]).casefold() for field in ('key', 'title', 'region')):
                             matches.append(row)
                             if len(matches) >= limit + 1:
@@ -178,9 +193,17 @@ class NodeService:
                         break
                 rows = matches
             else:
-                rows = conn.execute(self._select() + ' WHERE n.key > ? ORDER BY n.key LIMIT ?',
-                                    (after, limit + 1)).fetchall()
-        return _page([self.public(row) for row in rows], limit, kind, 'key')
+                rows = conn.execute(self._select() + condition + ' ORDER BY ' + columns + ' LIMIT ?',
+                                    parameters(after, limit + 1)).fetchall()
+        items = [self.public(row) for row in rows]
+        if order == 'region':
+            for item in items:
+                item['_position'] = json.dumps([item['region'], item['title'], item['key']])
+            page = _page(items, limit, kind, '_position')
+            for item in page['items']:
+                item.pop('_position')
+            return page
+        return _page(items, limit, kind, 'key')
 
     def get(self, actor, node_key):
         require_permission(actor, 'nodes.manage')

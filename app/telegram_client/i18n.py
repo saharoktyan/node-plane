@@ -1896,3 +1896,64 @@ CATALOG['ru'].update({'setup.next': 'Далее', 'setup.close': 'Закрыть
     'setup.admin_permanent': 'У администраторов всегда бессрочный доступ.',
     'setup.reply_date': 'Ответьте на это сообщение датой YYYY-MM-DD. Доступ закончится в 23:59:59 UTC указанного дня.',
     'requests.edit_profile': 'Редактировать профиль'})
+
+
+CATALOG['en'].update({
+    'account.rich.access': 'Access', 'account.rich.identity': 'Account',
+    'account.rich.field': 'Details', 'account.rich.value': 'Value',
+    'account.rich.status': 'Status', 'account.rich.expiry': 'Access duration',
+    'account.rich.username': 'Telegram username', 'account.rich.telegram_id': 'Telegram ID',
+    'account.rich.created': 'Created', 'account.rich.issued': 'Configs issued',
+    'account.rich.last': 'Last issuance', 'account.rich.traffic': 'Usage',
+    'account.rich.month': 'Usage · {month}', 'account.rich.waiting': 'Waiting',
+})
+CATALOG['ru'].update({
+    'account.rich.access': 'Доступ', 'account.rich.identity': 'Аккаунт',
+    'account.rich.field': 'Данные', 'account.rich.value': 'Значение',
+    'account.rich.status': 'Статус', 'account.rich.expiry': 'Срок доступа',
+    'account.rich.username': 'Имя в Telegram', 'account.rich.telegram_id': 'Telegram ID',
+    'account.rich.created': 'Создан', 'account.rich.issued': 'Выдано конфигов',
+    'account.rich.last': 'Последняя выдача', 'account.rich.traffic': 'Трафик',
+    'account.rich.month': 'Трафик · {month}', 'account.rich.waiting': 'Ожидание',
+})
+
+CATALOG['en']['account.rich.connections'] = 'Connections'
+CATALOG['ru']['account.rich.connections'] = 'Подключений'
+
+CATALOG['en']['account.rich.enable_traffic'] = 'Traffic statistics are unavailable. You can enable them in Settings.'
+CATALOG['ru']['account.rich.enable_traffic'] = 'Статистика трафика недоступна. Её можно включить в настройках.'
+
+
+CATALOG['en'].update({'region.europe': 'Europe', 'region.asia': 'Asia',
+    'region.north_america': 'North America', 'region.south_america': 'South America',
+    'region.africa': 'Africa', 'region.oceania': 'Oceania', 'region.other': 'Other',
+    'region.choose': 'Select a region.', 'region.custom': 'Send your region name.',
+    'nodes.rich.manage': 'Management', 'nodes.rich.technical': 'Technical details',
+    'nodes.rich.services': 'Services', 'nodes.rich.configuration': 'Configuration',
+    'nodes.rich.applied': 'Settings applied', 'nodes.rich.pending': 'Changes are waiting to be applied',
+    'nodes.rich.summary': 'Overview', 'nodes.rich.service': 'Service', 'nodes.rich.access': 'Access',
+    'nodes.rich.connection': 'Connection', 'nodes.rich.obscuration': 'Obfuscation',
+    'nodes.rich.protocol_options': 'Protocol options', 'nodes.rich.name_region': 'Name, region and display',
+    'nodes.rich.agent_note': 'Use Probe to check the agent and services.',
+    'nodes.rich.install_note': 'Install the agent and selected VPN protocols.',
+    'nodes.rich.advanced': 'Advanced options', 'nodes.rich.settings_note': 'Changes take effect after Apply changes.',
+})
+CATALOG['ru'].update({'region.europe': 'Европа', 'region.asia': 'Азия',
+    'region.north_america': 'Северная Америка', 'region.south_america': 'Южная Америка',
+    'region.africa': 'Африка', 'region.oceania': 'Океания', 'region.other': 'Другой',
+    'region.choose': 'Выберите регион.', 'region.custom': 'Отправьте название своего региона.',
+    'nodes.rich.manage': 'Управление', 'nodes.rich.technical': 'Технические сведения',
+    'nodes.rich.services': 'Сервисы', 'nodes.rich.configuration': 'Настройки',
+    'nodes.rich.applied': 'Настройки применены', 'nodes.rich.pending': 'Есть неприменённые изменения',
+    'nodes.rich.summary': 'Сводка', 'nodes.rich.service': 'Сервис', 'nodes.rich.access': 'Доступы',
+    'nodes.rich.connection': 'Подключение', 'nodes.rich.obscuration': 'Обфускация',
+    'nodes.rich.protocol_options': 'Выбор протоколов', 'nodes.rich.name_region': 'Название, регион и оформление',
+    'nodes.rich.agent_note': 'Нажмите Проверить, чтобы проверить агента и сервисы.',
+    'nodes.rich.install_note': 'Установка агента и выбранных VPN-протоколов.',
+    'nodes.rich.advanced': 'Дополнительные параметры', 'nodes.rich.settings_note': 'Изменения начинают действовать после применения настроек.',
+})
+
+CATALOG['en'].update({'nodes.rich.installation': 'Installation and checks', 'nodes.rich.ready': 'Ready',
+    'nodes.rich.pending_access': 'Pending', 'nodes.rich.failed': 'Needs attention', 'nodes.rich.identifiers': 'Identifiers'})
+CATALOG['ru'].update({'nodes.rich.installation': 'Установка и проверка', 'nodes.rich.ready': 'Готово',
+    'nodes.rich.pending_access': 'В работе', 'nodes.rich.failed': 'Требуют внимания', 'nodes.rich.identifiers': 'Идентификаторы'})

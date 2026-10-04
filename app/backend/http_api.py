@@ -1002,10 +1002,10 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
 
     @app.get('/api/v1/nodes', response_model=AdminNodePage)
     def list_nodes(current=Depends(actor), limit: Annotated[int, Query(ge=1, le=100)] = 25,
-                   cursor: Annotated[str | None, Query(max_length=512)] = None,
+                   cursor: Annotated[str | None, Query(max_length=8192)] = None,
                    search: Annotated[str | None, Query(max_length=128)] = None,
-                   include_summary: bool = False):
-        result = nodes.list(current, limit=limit, cursor=cursor, search=search)
+                   include_summary: bool = False, order: Literal['key', 'region'] = 'key'):
+        result = nodes.list(current, limit=limit, cursor=cursor, search=search, order=order)
         if include_summary:
             for node in result['items']:
                 node['overview'] = node_overview.get(current, node['key'])

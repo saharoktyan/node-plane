@@ -177,3 +177,28 @@ class BackendNodeTests(unittest.TestCase):
         result = self.client.get('/api/v1/nodes/lv1',headers=self.admin_headers()).json()
         self.assertEqual(result['settings']['xray_tcp_port'],443)
         self.assertEqual(result['applied_revision'],0)
+
+
+    def test_region_order_preserves_global_order_and_cursor_scope(self):
+        definitions = [('a1', 'Zulu', 'Europe'), ('z1', 'Alpha', 'Asia'), ('b1', 'Alpha', 'Europe'), ('b2', 'Alpha', 'Europe')]
+        for key, title, region in definitions:
+            response = self.create({'key': key, 'title': title, 'region': region, 'protocols': ['awg'], 'settings': {'public_host': key + '.test'}})
+            self.assertEqual(response.status_code, 201, response.text)
+        seen, cursor = [], None
+        while True:
+            params = {'order': 'region', 'limit': 1}
+            if cursor:
+                params['cursor'] = cursor
+            response = self.client.get('/api/v1/nodes', headers=self.admin_headers(), params=params)
+            self.assertEqual(response.status_code, 200, response.text)
+            page = response.json()
+            seen.extend(item['key'] for item in page['items'])
+            cursor = page['next_cursor']
+            if not cursor:
+                break
+            self.assertEqual(self.client.get('/api/v1/nodes', headers=self.admin_headers(), params={'cursor': cursor}).status_code, 422)
+        self.assertEqual(seen, ['z1', 'b1', 'b2', 'a1'])
+        first = self.client.get('/api/v1/nodes', headers=self.admin_headers(), params={'order': 'region', 'search': 'Alpha', 'limit': 1}).json()
+        second = self.client.get('/api/v1/nodes', headers=self.admin_headers(), params={'order': 'region', 'search': 'Alpha', 'cursor': first['next_cursor'], 'limit': 1}).json()
+        self.assertEqual([first['items'][0]['key'], second['items'][0]['key']], ['z1', 'b1'])
+        self.assertEqual(self.client.get('/api/v1/nodes', headers=self.admin_headers(), params={'order': 'region', 'search': 'Zulu', 'cursor': first['next_cursor']}).status_code, 422)
