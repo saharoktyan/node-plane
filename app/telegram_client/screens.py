@@ -7,7 +7,8 @@ from aiogram.types import (InputRichBlockDetails, InputRichBlockParagraph,
     InputRichBlockSectionHeading, InputRichMessage, InputRichBlockPhoto,
     InputRichBlockDocument, InputMediaPhoto, InputMediaDocument, BufferedInputFile,
     RichTextCode, MessageEntity)
-from aiogram.types import InputRichBlockButtons, RichMessageButton, InlineKeyboardButton, InputRichBlockDivider
+from aiogram.types import (InputRichBlockButtons, RichMessageButton, InlineKeyboardButton,
+    InputRichBlockDivider, InputRichBlockTable, RichBlockTableCell)
 
 
 def server_label(node: dict) -> str:
@@ -22,6 +23,21 @@ def rich_buttons(rows, *, navigation=False):
 
 
 @dataclass(frozen=True)
+class Table:
+    headers: tuple[str, ...]
+    rows: tuple[tuple[str, ...], ...]
+
+    def rich(self):
+        return InputRichBlockTable(is_compact=True, is_striped=True, cells=[
+            [RichBlockTableCell(text=value, align='left', valign='top', is_header=index == 0)
+             for value in row] for index, row in enumerate((self.headers, *self.rows))])
+
+    def plain(self):
+        return tuple(' · '.join(f'{label}: {value}' for label, value in zip(self.headers, row))
+                     for row in self.rows)
+
+
+@dataclass(frozen=True)
 class Section:
     title: str
     lines: tuple[str, ...] = ()
@@ -31,9 +47,11 @@ class Section:
     sections: tuple['Section', ...] = ()
     heading_size: int = 3
     is_open: bool = False
+    tables: tuple[Table, ...] = ()
 
     def rich(self):
         blocks = [InputRichBlockParagraph(text=line) for line in self.lines if line]
+        blocks.extend(table.rich() for table in self.tables)
         for section in self.sections:
             blocks.extend(section.rich())
         blocks.extend(rich_buttons(self.rows))
@@ -96,6 +114,8 @@ class Screen:
         def append_sections(sections):
             for section in sections:
                 lines.extend((section.title, *section.lines))
+                for table in section.tables:
+                    lines.extend(table.plain())
                 append_sections(section.sections)
         append_sections(self.sections)
         if self.uri:

@@ -50,10 +50,14 @@ async def render(bot: Bot, chat_id: int, screen: Screen, rows: list[list[InlineK
     return rich
 
 async def send_notice(bot: Bot, chat_id: int, screen: Screen, markup: InlineKeyboardMarkup | None = None) -> None:
+    rows = markup.inline_keyboard if markup else []
+    rich_markup = InlineKeyboardMarkup(inline_keyboard=[]) if screen.embedded_buttons else markup
     try:
-        await bot.send_rich_message(chat_id=chat_id, rich_message=screen.rich(), reply_markup=markup, request_timeout=10)
+        await bot.send_rich_message(chat_id=chat_id, rich_message=screen.rich(rows), reply_markup=rich_markup, request_timeout=10)
     except (TelegramBadRequest, TelegramNotFound, TelegramNetworkError):
-        await bot.send_message(chat_id=chat_id, text=screen.plain(), reply_markup=markup, request_timeout=15)
+        fallback_rows = screen.fallback_rows(rows)
+        fallback_markup = InlineKeyboardMarkup(inline_keyboard=fallback_rows) if fallback_rows else None
+        await bot.send_message(chat_id=chat_id, text=screen.plain(), reply_markup=fallback_markup, request_timeout=15)
 
 class BackendMiddleware(BaseMiddleware):
     def __init__(self, backend: BackendClient):

@@ -18,7 +18,7 @@ import qrcode
 from qrcode.exceptions import DataOverflowError
 
 from ..backend import BackendClient, BackendError
-from ..screens import Screen, Section, server_label
+from ..screens import Screen, Section, Table, server_label
 from ..i18n import normalize_locale, tr
 from .callbacks import HomeCallback
 from .common import render
@@ -36,6 +36,7 @@ class Action:
 actions: OrderedDict[str, Action] = OrderedDict()
 MAX_ACTIONS = 10000
 ONBOARDING_TIMEOUT = 12
+ADMIN_MENU_TIMEOUT = 3
 SERVERS_PER_PAGE = 10
 
 
@@ -203,26 +204,39 @@ async def home_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
         locale = old_data.get('locale') or query.from_user.language_code
         await clear_artifacts(bot, query.message.chat.id, state)
         await state.clear()
-        await state.update_data(locale=normalize_locale(locale))
+        await state.update_data(locale=normalize_locale(locale),
+                                home_presentation=old_data.get('home_presentation'))
         await show_home(query.message.chat.id, query.from_user.id, bot, backend,
-                        state, query.message.message_id)
+                        state, query.message.message_id, cached_navigation=True)
 
 
 async def show_home(chat_id: int, user_id: int, bot: Bot, backend: BackendClient,
                     state: FSMContext, message_id: int | None = None, *,
-                    account: dict | None = None) -> None:
-    locale = normalize_locale((await state.get_data()).get('locale'))
-    try:
-        async with asyncio.timeout(ONBOARDING_TIMEOUT):
-            if account is None:
-                account, title = await asyncio.gather(backend.me(user_id), backend.bot_title(user_id))
-            else:
-                title = await backend.bot_title(user_id)
-            if account['status'] != 'approved':
-                policy, requests = await asyncio.gather(backend.access_request_policy(user_id),
-                    backend.request('GET', '/api/v1/me/access-requests?limit=25', telegram_user_id=user_id))
-    except TimeoutError:
-        raise BackendError('backend_unavailable', 503) from None
+                    account: dict | None = None, cached_navigation: bool = False) -> None:
+    data = await state.get_data()
+    locale = normalize_locale(data.get('locale'))
+    presentation = data.get('home_presentation')
+    # Only reuse menu presentation for navigation, never as authorization.
+    # Every destination/action still makes its own authenticated backend calls.
+    if (cached_navigation and account is None and presentation and
+            presentation.get('user_id') == user_id and
+            presentation['account']['status'] == 'approved'):
+        account, title = presentation['account'], presentation['title']
+    else:
+        try:
+            async with asyncio.timeout(ONBOARDING_TIMEOUT):
+                if account is None:
+                    account, title = await asyncio.gather(backend.me(user_id), backend.bot_title(user_id))
+                else:
+                    title = await backend.bot_title(user_id)
+                if account['status'] != 'approved':
+                    policy, requests = await asyncio.gather(backend.access_request_policy(user_id),
+                        backend.request('GET', '/api/v1/me/access-requests?limit=25', telegram_user_id=user_id))
+        except TimeoutError:
+            raise BackendError('backend_unavailable', 503) from None
+        await state.update_data(home_presentation={'user_id': user_id,
+            'account': {'status': account['status'], 'role': account['role']},
+            'title': title})
     bot_title = title['title']
     rows: list[list[InlineKeyboardButton]] = []
     if account['status'] != 'approved':
@@ -679,7 +693,8 @@ async def user_action_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
         if action.name != 'issuance':
             await clear_artifacts(bot, chat_id, state)
         if action.name == 'home':
-            await show_home(chat_id, user_id, bot, backend, state, message_id)
+            await show_home(chat_id, user_id, bot, backend, state, message_id,
+                            cached_navigation=True)
         elif action.name == 'first_locale':
             started = time.monotonic()
             logging.getLogger(__name__).info('Language selection received; saving preference and opening home')
@@ -773,21 +788,61 @@ async def show_admin_menu(chat_id: int, user_id: int, message_id: int,
     from .callbacks import (AdminNodesCallback,
                             AdminProfilesCallback, AdminSettingsCallback, RequestsCallback)
     locale = normalize_locale((await state.get_data()).get('locale'))
-    try:
-        title = (await backend.bot_title(user_id))['title']
-    except BackendError:
-        title = tr(locale, 'admin.menu')
-    rows = [
-        [InlineKeyboardButton(text=tr(locale, 'admin.status'), callback_data='admin_status'),
-         InlineKeyboardButton(text=tr(locale, 'admin.requests'), callback_data=RequestsCallback().pack())],
-        [InlineKeyboardButton(text=tr(locale, 'admin.nodes'), callback_data=AdminNodesCallback().pack()),
-         InlineKeyboardButton(text=tr(locale, 'admin.profiles'), callback_data=AdminProfilesCallback().pack())],
-        [InlineKeyboardButton(text=tr(locale, 'announce.title'), callback_data='announce_menu')],
-        [InlineKeyboardButton(text=tr(locale, 'admin.settings'), callback_data=AdminSettingsCallback().pack())],
-        [button(user_id, tr(locale, 'back'), 'home')],
-    ]
-    await render(bot, chat_id, Screen(title, (tr(locale, 'admin.description'),)),
-                 rows, state, message_id)
+    async def optional_read(read):
+        try:
+            return await asyncio.wait_for(read, timeout=ADMIN_MENU_TIMEOUT)
+        except TimeoutError:
+            raise BackendError('backend_unavailable', 503) from None
+
+    title, overview = await asyncio.gather(optional_read(backend.bot_title(user_id)),
+        optional_read(backend.admin_overview(user_id)), return_exceptions=True)
+    # Authorization failures must never be disguised as an unavailable summary.
+    for result in (title, overview):
+        if isinstance(result, BackendError) and result.status in {401, 403}:
+            raise result
+        if isinstance(result, Exception) and not isinstance(result, BackendError):
+            raise result
+    bot_title = title['title'] if isinstance(title, dict) else tr(locale, 'home.title')
+    requests_button = InlineKeyboardButton(text=tr(locale, 'admin.requests'),
+        callback_data=RequestsCallback().pack())
+    sections = []
+    if isinstance(overview, dict):
+        sections.append(Section(tr(locale, 'admin.rich.overview'),
+            (tr(locale, 'admin.rich.stored_state'),), tables=(Table(
+                (tr(locale, 'admin.rich.item'), tr(locale, 'admin.rich.value')),
+                ((tr(locale, 'admin.nodes'), f"{overview['nodes_enabled']}/{overview['nodes_total']}"),
+                 (tr(locale, 'admin.profiles'), f"{overview['profiles_active']}/{overview['profiles_total']}"),
+                 (tr(locale, 'admin.requests'), str(overview['pending_requests'])),
+                 (tr(locale, 'admin.status.open_problems'), str(len(overview['problem_nodes']))))),)))
+        attention_lines, attention_buttons = [], []
+        if overview['pending_requests']:
+            attention_lines.append(tr(locale, 'admin.status.pending', count=overview['pending_requests']))
+            attention_buttons.append(requests_button.model_copy(update={'style': 'primary'}))
+        if overview['problem_nodes']:
+            attention_lines.append(tr(locale, 'admin.status.problems', count=len(overview['problem_nodes'])))
+            attention_buttons.append(InlineKeyboardButton(text=tr(locale, 'admin.status.open_problems'),
+                callback_data='admin_problem_nodes', style='primary'))
+        if attention_buttons:
+            sections.append(Section(tr(locale, 'admin.rich.attention'), tuple(attention_lines),
+                                    (tuple(attention_buttons),)))
+        requests_lines = (tr(locale, 'admin.status.pending', count=overview['pending_requests']),)
+    else:
+        sections.append(Section(tr(locale, 'admin.rich.overview'),
+                                (tr(locale, 'admin.rich.overview_unavailable'),)))
+        requests_lines = ()
+    sections.extend((
+        Section(tr(locale, 'admin.rich.management'), rows=((
+            InlineKeyboardButton(text=tr(locale, 'admin.profiles'), callback_data=AdminProfilesCallback().pack()),
+            InlineKeyboardButton(text=tr(locale, 'admin.nodes'), callback_data=AdminNodesCallback().pack())),)),
+        Section(tr(locale, 'requests.title'), requests_lines, ((requests_button,),)),
+        Section(tr(locale, 'admin.rich.system'), rows=((
+            InlineKeyboardButton(text=tr(locale, 'admin.status'), callback_data='admin_status'),
+            InlineKeyboardButton(text=tr(locale, 'admin.settings'), callback_data=AdminSettingsCallback().pack())),
+            (InlineKeyboardButton(text=tr(locale, 'announce.title'), callback_data='announce_menu'),))),
+    ))
+    await render(bot, chat_id, Screen(tr(locale, 'admin.menu'), (bot_title,),
+        sections=tuple(sections), embedded_buttons=True, navigation=True),
+        [[button(user_id, tr(locale, 'back'), 'home')]], state, message_id)
 
 
 @router.callback_query(F.data == 'admin_status')

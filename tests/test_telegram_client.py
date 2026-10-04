@@ -27,6 +27,53 @@ class RouterStartupTests(TestCase):
 
 
 class TelegramFlowTests(IsolatedAsyncioTestCase):
+    async def test_get_config_back_uses_home_presentation_without_backend_reads(self):
+        backend = SimpleNamespace(
+            me=AsyncMock(return_value={'role': 'member', 'status': 'approved'}),
+            bot_title=AsyncMock(return_value={'title': 'Node Plane'}),
+            profiles=AsyncMock(return_value={'items': []}))
+        with patch.object(user, 'render', new_callable=AsyncMock) as draw:
+            await user.show_home(123, 123, self.bot, backend, self.state, 77)
+            backend.me.reset_mock()
+            backend.bot_title.reset_mock()
+            self.query.data = user.button(123, 'Back', 'home').callback_data
+            await user.user_action_cb(self.query, self.bot, backend, self.state)
+            self.assertEqual(draw.call_args.args[2].title, 'Node Plane')
+            backend.me.assert_not_awaited()
+            backend.bot_title.assert_not_awaited()
+            # Menu presentation never supplies profile/access data.
+            self.query.data = user.button(123, 'Get config', 'profiles').callback_data
+            await user.user_action_cb(self.query, self.bot, backend, self.state)
+            backend.profiles.assert_awaited_once_with(123)
+
+    async def test_cached_home_is_not_reused_for_another_user_or_pending_account(self):
+        backend = SimpleNamespace(
+            me=AsyncMock(return_value={'role': 'member', 'status': 'approved'}),
+            bot_title=AsyncMock(return_value={'title': 'Fresh title'}))
+        for owner, status in ((999, 'approved'), (123, 'pending')):
+            self.state_data['home_presentation'] = {'user_id': owner,
+                'account': {'role': 'admin', 'status': status},
+                'title': {'title': 'Cached title'}}
+            with patch.object(user, 'render', new_callable=AsyncMock) as draw:
+                await user.show_home(123, 123, self.bot, backend, self.state, 77,
+                                     cached_navigation=True)
+            self.assertEqual(draw.call_args.args[2].title, 'Fresh title')
+        self.assertEqual(backend.me.await_count, 2)
+
+    async def test_normal_home_refresh_ignores_cached_presentation(self):
+        self.state_data['home_presentation'] = {'user_id': 123,
+            'account': {'role': 'admin', 'status': 'approved'},
+            'title': {'title': 'Old title'}}
+        backend = SimpleNamespace(
+            me=AsyncMock(return_value={'role': 'member', 'status': 'pending'}),
+            bot_title=AsyncMock(return_value={'title': 'Fresh title'}),
+            access_request_policy=AsyncMock(return_value={'enabled': True}),
+            request=AsyncMock(return_value={'items': []}))
+        with patch.object(user, 'render', new_callable=AsyncMock) as draw:
+            await user.show_home(123, 123, self.bot, backend, self.state, 77)
+        self.assertEqual(draw.call_args.args[2].title, 'Fresh title')
+        self.assertEqual(self.state_data['home_presentation']['account']['status'], 'pending')
+
     async def test_idle_member_navigation_is_reusable_without_start(self):
         self.query.data = user.button(123, 'Home', 'home').callback_data
         with patch.object(user, 'time', SimpleNamespace(monotonic=lambda: 10**12)), \
@@ -136,10 +183,101 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
     async def test_admin_menu_has_profiles_without_separate_accounts(self):
         with patch.object(user, 'render', new_callable=AsyncMock) as draw:
             await user.show_admin_menu(1, 101, 5, self.bot,
-                SimpleNamespace(bot_title=AsyncMock(return_value={'title': 'Node Plane'})), self.state)
-        callbacks = [b.callback_data for row in draw.call_args.args[3] for b in row]
+                SimpleNamespace(bot_title=AsyncMock(return_value={'title': 'Node Plane'}),
+                    admin_overview=AsyncMock(side_effect=BackendError('backend_unavailable', 503))), self.state)
+        screen, rows = draw.call_args.args[2:4]
+        callbacks = [b.callback_data for row in screen.fallback_rows(rows) for b in row]
         self.assertFalse(any(value.startswith('accounts') for value in callbacks))
         self.assertTrue(any(value.startswith('admin_profiles') for value in callbacks))
+
+    async def test_admin_home_table_attention_and_embedded_navigation_are_localized(self):
+        overview = {'nodes_enabled': 2, 'nodes_total': 3, 'profiles_active': 4,
+            'profiles_total': 5, 'pending_requests': 2,
+            'problem_nodes': [{'key': 'lv1', 'title': 'Latvia', 'flag': '🇱🇻'}]}
+        backend = SimpleNamespace(bot_title=AsyncMock(return_value={'title': 'Node Plane'}),
+                                  admin_overview=AsyncMock(return_value=overview))
+        for locale in ('ru', 'en'):
+            self.state_data['locale'] = locale
+            with patch.object(user, 'render', new_callable=AsyncMock) as draw:
+                await user.show_admin_menu(123, 123, 77, self.bot, backend, self.state)
+            screen, rows = draw.call_args.args[2:4]
+            blocks = screen.rich(rows).blocks
+            table = next(block for block in blocks if block.type == 'table')
+            self.assertEqual(table.cells[1][1].text, '2/3')
+            self.assertEqual(table.cells[3][1].text, '2')
+            self.assertEqual(table.cells[0][0].text, user.tr(locale, 'admin.rich.item'))
+            attention = next(section for section in screen.sections
+                if section.title == user.tr(locale, 'admin.rich.attention'))
+            self.assertEqual([button.style for button in attention.rows[0]], ['primary', 'primary'])
+            self.assertTrue(screen.embedded_buttons)
+            self.assertEqual([block.type for block in blocks[-2:]], ['divider', 'buttons'])
+            self.assertEqual(sum(block.type == 'divider' for block in blocks), 1)
+            callbacks = [b.callback_data for row in screen.fallback_rows(rows) for b in row]
+            for callback in ('admin_status', 'announce_menu', 'admin_problem_nodes'):
+                self.assertIn(callback, callbacks)
+        overview.update(pending_requests=0, problem_nodes=[])
+        with patch.object(user, 'render', new_callable=AsyncMock) as draw:
+            await user.show_admin_menu(123, 123, 77, self.bot, backend, self.state)
+        self.assertFalse(any(section.title == user.tr('en', 'admin.rich.attention')
+                             for section in draw.call_args.args[2].sections))
+
+    async def test_slow_admin_overview_does_not_block_navigation(self):
+        import asyncio
+        async def slow_overview(*args):
+            await asyncio.Event().wait()
+        backend = SimpleNamespace(bot_title=AsyncMock(return_value={'title': 'Node Plane'}),
+                                  admin_overview=slow_overview)
+        with patch.object(user, 'ADMIN_MENU_TIMEOUT', 0.01), \
+             patch.object(user, 'render', new_callable=AsyncMock) as draw:
+            await user.show_admin_menu(123, 123, 77, self.bot, backend, self.state)
+        screen, rows = draw.call_args.args[2:4]
+        self.assertIn(user.tr('en', 'admin.rich.overview_unavailable'), screen.plain())
+        self.assertTrue(any(b.callback_data.startswith('admin_nodes')
+            for row in screen.fallback_rows(rows) for b in row))
+
+    async def test_admin_summary_permission_failure_is_not_treated_as_optional(self):
+        backend = SimpleNamespace(bot_title=AsyncMock(return_value={'title': 'Node Plane'}),
+            admin_overview=AsyncMock(side_effect=BackendError('permission_denied', 403)))
+        with patch.object(user, 'render', new_callable=AsyncMock) as draw:
+            with self.assertRaises(BackendError):
+                await user.show_admin_menu(123, 123, 77, self.bot, backend, self.state)
+        draw.assert_not_awaited()
+
+    async def test_request_review_collapses_ids_and_keeps_decisions_beside_context(self):
+        item = {'id': 'request-1', 'account_id': 'account-1', 'telegram_user_id': 456,
+            'first_name': 'Alex', 'username': 'alex', 'created_at': '2026-10-04T12:00:00Z'}
+        self.state_data.update(request_page_index=2, request_search='alex')
+        backend = SimpleNamespace(pending_access_request=AsyncMock(return_value=item))
+        for locale in ('ru', 'en'):
+            self.state_data['locale'] = locale
+            with patch.object(admin_requests, 'render', new_callable=AsyncMock) as draw:
+                await admin_requests.review_cb(self.query,
+                    admin_requests.ReviewCallback(request_id='request-1'), self.bot, backend, self.state)
+            screen, rows = draw.call_args.args[2:4]
+            self.assertNotIn('456', ' '.join(screen.lines))
+            details = next(block for block in screen.rich(rows).blocks if block.type == 'details')
+            self.assertFalse(details.is_open)
+            self.assertIn('request-1', ' '.join(block.text for block in details.blocks))
+            self.assertEqual([b.style for b in rows[0]], ['primary', 'danger'])
+            self.assertEqual(rows[-1][0].callback_data, 'request_page:2')
+            self.assertEqual([b.type for b in screen.rich(rows).blocks[-2:]], ['divider', 'buttons'])
+
+    async def test_request_search_back_preserves_filter_and_page_and_exits_input(self):
+        self.state_data.update(request_page_index=1, request_cursors=[None, 'cursor'], request_search='alex')
+        with patch.object(admin_requests, 'render', new_callable=AsyncMock) as draw:
+            await admin_requests.request_search_cb(self.query, self.bot, self.state)
+        self.query.data = draw.call_args.args[3][-1][0].callback_data
+        self.assertEqual(self.query.data, 'request_page:1')
+        backend = SimpleNamespace(pending_access_requests=AsyncMock(return_value={
+            'items': [{'id': 'r', 'account_id': 'account', 'first_name': 'Alex'}], 'next_cursor': None}))
+        with patch.object(admin_requests, 'render', new_callable=AsyncMock) as draw:
+            await admin_requests.request_page_cb(self.query, self.bot, backend, self.state)
+        backend.pending_access_requests.assert_awaited_once_with(123, cursor='cursor', search='alex', limit=10)
+        self.assertIsNone(self.current_state)
+        screen, rows = draw.call_args.args[2:4]
+        self.assertEqual(rows[0][0].text, '←')
+        self.assertEqual(rows[0][0].callback_data, 'request_page:0')
+        self.assertIn('Search: alex', screen.plain())
 
     async def test_add_user_uses_automatic_profile_and_revision_header(self):
         message = SimpleNamespace(from_user=SimpleNamespace(id=101), chat=SimpleNamespace(id=1, type='private'),
@@ -920,8 +1058,8 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         with patch.object(admin_requests, 'render', new_callable=AsyncMock) as render:
             await admin_requests.render_request_page(123, 123, 77, self.bot,
                 backend, self.state, 0)
-        rows = render.call_args.args[3]
-        callbacks = [button.callback_data for row in rows for button in row]
+        screen, rows = render.call_args.args[2:4]
+        callbacks = [button.callback_data for row in screen.fallback_rows(rows) for button in row]
         self.assertIn('request_page:1', callbacks)
         self.assertIn('request_search', callbacks)
         backend.pending_access_requests.assert_awaited_once_with(123,
@@ -963,6 +1101,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             pending_access_requests=AsyncMock(return_value={
                 'items': [], 'next_cursor': None}),
             bot_title=AsyncMock(return_value={'title': 'Configured title'}),
+            admin_overview=AsyncMock(side_effect=BackendError('backend_unavailable', 503)),
             request=AsyncMock(side_effect=[{'account_id': 'account-id'},
                 BackendError('resource_not_found', 404)]))
         with patch.object(admin_requests, 'render', new_callable=AsyncMock), \
@@ -971,7 +1110,8 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
                 admin_requests.DecideCallback(request_id='request-id',
                                               decision='approve'),
                 self.bot, backend, self.state)
-        self.assertEqual(render.call_args.args[2].title, 'Configured title')
+        self.assertEqual(render.call_args.args[2].title, 'Admin panel')
+        self.assertIn('Configured title', render.call_args.args[2].lines)
 
     async def test_access_approval_replaces_requester_screen_and_menu_edits_same_message(self):
         from aiogram.fsm.context import FSMContext
