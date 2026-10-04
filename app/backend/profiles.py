@@ -37,6 +37,33 @@ class ProfileRepository:
     def __init__(self, db):
         self.db = db
 
+    def ensure_account_profile(self, account_id):
+        """Create the default VPN profile once, without replacing custom names."""
+        with self.db.transaction() as conn:
+            conn.execute('UPDATE backend_accounts SET revision = revision WHERE id = ?', (account_id,))
+            account = conn.execute('''SELECT a.role, i.subject, d.username
+                FROM backend_accounts a LEFT JOIN backend_external_identities i
+                ON i.account_id = a.id AND i.provider = 'telegram'
+                LEFT JOIN backend_telegram_identity_details d ON d.subject = i.subject
+                WHERE a.id = ?''', (account_id,)).fetchone()
+            if account is None:
+                raise AccessDenied('resource_not_found', 404)
+            fallback = f"{'Admin' if account['role'] == 'admin' else 'User'} {account['subject'] or account_id}"
+            name = account['username'] or fallback
+            existing = conn.execute('SELECT id, display_name FROM backend_profiles WHERE owner_account_id = ? ORDER BY id LIMIT 1',
+                                    (account_id,)).fetchone()
+            if existing:
+                automatic_names = {f'Admin {account["subject"]}', f'User {account["subject"]}'}
+                if account['username'] and existing['display_name'] in automatic_names:
+                    conn.execute('UPDATE backend_profiles SET display_name = ? WHERE id = ?', (name, existing['id']))
+                return existing['id']
+            profile_id = str(uuid4())
+            conn.execute('''INSERT INTO backend_profiles
+                (id, runtime_name, display_name, owner_account_id, created_at)
+                VALUES (?, ?, ?, ?, ?)''', (profile_id, 'account_' + account_id.replace('-', ''),
+                                          name, account_id, datetime.now(timezone.utc).isoformat()))
+            return profile_id
+
     def initialize_schema(self):
         from .alerts import AlertService
         AlertService(self.db).initialize_schema()
@@ -206,7 +233,7 @@ class ProfileRepository:
                 FROM backend_nodes n WHERE n.enabled = 1 AND n.key > ? AND EXISTS (
                     SELECT 1 FROM backend_grants g JOIN backend_profiles p ON p.id = g.profile_id
                     WHERE g.node_key = n.key AND p.owner_account_id = ? AND p.frozen = 0
-                    AND (? IS NULL OR p.id = ?)
+                    AND (CAST(? AS TEXT) IS NULL OR p.id = ?)
                     AND n.protocols_json LIKE ('%' || '"' || g.protocol || '"' || '%')
                     AND (p.expires_at IS NULL OR p.expires_at > ?)) ORDER BY n.key LIMIT ?''',
                                 (after, account_id, profile_id, profile_id, now, limit)).fetchall()
@@ -215,7 +242,7 @@ class ProfileRepository:
                 grants = conn.execute('''SELECT DISTINCT g.protocol FROM backend_grants g
                     JOIN backend_profiles p ON p.id = g.profile_id
                     WHERE g.node_key = ? AND p.owner_account_id = ? AND p.frozen = 0
-                    AND (? IS NULL OR p.id = ?)
+                    AND (CAST(? AS TEXT) IS NULL OR p.id = ?)
                     AND (p.expires_at IS NULL OR p.expires_at > ?)''',
                     (node['key'], account_id, profile_id, profile_id, now)).fetchall()
                 allowed = {row['protocol'] for row in grants} & set(json.loads(node['protocols_json']))

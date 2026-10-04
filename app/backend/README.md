@@ -822,3 +822,26 @@ protocol overhead and AWG/Xray totals are not guaranteed directly comparable.
 
 Agent/parser, worker admission/accounting and localized UI tests pass with isolated
 SQL fixtures. Real PostgreSQL locking and live VPS/Telegram acceptance are pending.
+
+### Installation acceptance fixes (2026-10-04)
+
+Telegram identity resolution now ensures one default VPN profile for each account,
+including the initial administrator. The profile uses the Telegram username when
+available, or `Admin <id>` / `User <id>` otherwise. Subsequent resolution replaces
+only these generated fallback names; custom profile names are preserved. Accounts
+and profiles keep independent UUIDs internally so non-Telegram clients remain
+possible. The Telegram administration menu exposes Profiles, without a separate
+Accounts tab. Adding a Telegram user opens their automatically created profile,
+where grants are managed through the existing profile commands.
+
+The PostgreSQL result adapter supports cursor iteration as well as fetch methods.
+This fixes access-request settings and traffic reads in member profile summaries.
+Optional profile filters explicitly cast null parameters to TEXT for PostgreSQL.
+The SSH-key endpoint uses actor permissions and writes a real trailing newline
+when recovering a missing public key from an existing private key.
+
+Probe distinguishes agent binary version/commit from protocol runtime version.
+The latter identifies deployed runtime assets; an absent runtime directory before
+Bootstrap is expected and does not imply an unhealthy agent. Worker completion
+followed by another timer-triggered start is also expected: the worker is a
+oneshot service scheduled with OnUnitInactiveSec=5s.

@@ -30,6 +30,10 @@ class PostgresResult:
     def fetchall(self) -> list[dict[str, Any]]:
         return [dict(row) for row in self._cursor.fetchall()]
 
+    def __iter__(self):
+        while (row := self.fetchone()) is not None:
+            yield row
+
 
 class PostgresConnectionAdapter:
     backend_name = "postgres"

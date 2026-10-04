@@ -49,6 +49,58 @@ class ProfileSearchState(StatesGroup):
 class ProfileRenameState(StatesGroup):
     waiting_for_name = State()
 
+class ProfileUserState(StatesGroup):
+    waiting_for_telegram_id = State()
+
+@router.callback_query(F.data == 'profile_add_user')
+async def add_profile_user_cb(query: CallbackQuery, bot: Bot, state: FSMContext):
+    await query.answer()
+    await _clear_flow(state)
+    await state.set_state(ProfileUserState.waiting_for_telegram_id)
+    await render(bot, query.message.chat.id,
+        Screen(tr(await _locale(state), 'profile.create.title'),
+               (tr(await _locale(state), 'profile.create.telegram_prompt'),)),
+        [[InlineKeyboardButton(text=tr(await _locale(state), 'back'),
+                              callback_data=AdminProfilesCallback().pack())]], state, query.message.message_id)
+
+@router.message(ProfileUserState.waiting_for_telegram_id, F.text)
+async def add_profile_user_text(message: Message, bot: Bot, backend: BackendClient, state: FSMContext):
+    if message.from_user is None or message.chat.type != 'private':
+        return
+    data = await state.get_data()
+    locale = await _locale(state)
+    value = message.text.strip()
+    try:
+        await message.delete()
+    except Exception:
+        pass
+    if not value.isascii() or not value.isdecimal() or not 0 < int(value) < 2**63:
+        await render(bot, message.chat.id, Screen(tr(locale, 'profile.create.title'),
+            (tr(locale, 'profile.create.telegram_prompt'),)),
+            [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data=AdminProfilesCallback().pack())]],
+            state, data.get('control_message_id'))
+        return
+    from aiogram.exceptions import TelegramAPIError
+    try:
+        person = await bot.get_chat(int(value))
+        account = await backend.resolve(int(value), username=person.username,
+            first_name=person.first_name, last_name=person.last_name)
+        if account['status'] != 'approved':
+            current = await backend.request('GET', f'/api/v1/accounts/{account["id"]}',
+                                            telegram_user_id=message.from_user.id)
+            await backend.request('PATCH', f'/api/v1/accounts/{account["id"]}',
+                telegram_user_id=message.from_user.id, command=True,
+                revision=current['revision'], body={'status': 'approved'})
+        profiles = await backend.profiles(int(value))
+        await _clear_flow(state)
+        await show_admin_profile(message.chat.id, message.from_user.id, data.get('control_message_id'),
+            profiles['items'][0]['id'], bot, backend, state)
+    except (BackendError, TelegramAPIError):
+        await render(bot, message.chat.id, Screen(tr(locale, 'profile.create.title'),
+            (tr(locale, 'profile.create.telegram_failed'),)),
+            [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data=AdminProfilesCallback().pack())]],
+            state, data.get('control_message_id'))
+
 
 @router.callback_query(AccountsCallback.filter())
 async def accounts_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
@@ -332,7 +384,7 @@ async def show_admin_profiles(chat_id: int, user_id: int, message_id: int,
     await state.update_data(admin_profile_cursors=cursors,
                             admin_profile_page=page_index)
     controls = [[InlineKeyboardButton(text=tr(locale, 'profiles.admin.new'),
-                callback_data=AccountsCallback().pack())],
+                callback_data='profile_add_user')],
             [InlineKeyboardButton(text=tr(locale, 'profiles.admin.search'),
                 callback_data='search_profile')]]
     if search:

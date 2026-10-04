@@ -333,6 +333,8 @@ class NodeRuntimeObservation(BaseModel):
     health_state: str
     runtime_version: str
     runtime_commit: str
+    agent_version: str = ''
+    agent_commit: str = ''
     xray_config_present: bool
     awg_config_present: bool
     desired_revision: int
@@ -749,9 +751,11 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
             key = str(UUID(raw_key))
         except (TypeError, ValueError, AttributeError):
             raise AccessDenied('invalid_idempotency_key', 422) from None
-        return service.resolve_telegram(principal, body.telegram_user_id, command_key=key,
+        account = service.resolve_telegram(principal, body.telegram_user_id, command_key=key,
             username=body.username, first_name=body.first_name, last_name=body.last_name,
             language_code=body.language_code)
+        ProfileRepository(db).ensure_account_profile(account.id)
+        return account
 
     @app.get('/api/v1/me', response_model=MeOutput)
     def me(current=Depends(actor)):
@@ -1311,8 +1315,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
         import subprocess
         import os
         import pathlib
-        if current.role != 'admin':
-            raise HTTPException(403)
+        require_permission(current, 'settings.manage')
         private_path = pathlib.Path(os.environ.get('SSH_KEY', '/opt/node-plane/shared/ssh/id_ed25519'))
         public_path = pathlib.Path(f"{private_path}.pub")
         private_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1321,7 +1324,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
         if private_path.exists() and not public_path.exists():
             proc = subprocess.run(["ssh-keygen", "-y", "-f", str(private_path)], capture_output=True, text=True)
             if proc.returncode == 0:
-                public_path.write_text((proc.stdout or "").strip() + "\\n", encoding="utf-8")
+                public_path.write_text((proc.stdout or "").strip() + "\n", encoding="utf-8")
                 os.chmod(public_path, 0o644)
         
         if not private_path.exists():

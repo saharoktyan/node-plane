@@ -21,6 +21,66 @@ from fastapi.testclient import TestClient
 
 
 class BackendHTTPTests(unittest.TestCase):
+    def test_registration_creates_one_default_profile_and_updates_only_automatic_names(self):
+        first = self.register(102, username='alice').json()
+        repo = ProfileRepository(self.db)
+        profiles = repo.owned(first['id'], after='', limit=10)
+        self.assertEqual(len(profiles), 1)
+        self.assertEqual(profiles[0]['display_name'], 'alice')
+        self.register(102, username='new_alice')
+        self.assertEqual(len(repo.owned(first['id'], after='', limit=10)), 1)
+        self.assertEqual(repo.owned(first['id'], after='', limit=10)[0]['display_name'], 'alice')
+        fallback = self.register(103).json()
+        self.assertEqual(repo.owned(fallback['id'], after='', limit=10)[0]['display_name'], 'User 103')
+        self.register(103, username='bob')
+        self.assertEqual(repo.owned(fallback['id'], after='', limit=10)[0]['display_name'], 'bob')
+        bootstrap_admin(self.identities, 101, self.db)
+        self.register(101, username='administrator')
+        self.assertEqual(repo.owned(self.admin.id, after='', limit=10)[0]['display_name'], 'administrator')
+
+    def test_ssh_key_endpoint_uses_actor_permission_and_recovers_public_key(self):
+        import os
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as directory:
+            private = Path(directory) / 'id_ed25519'
+            with patch.dict(os.environ, {'SSH_KEY': str(private)}):
+                headers = {**self.headers, 'X-Node-Plane-Telegram-User-ID': '101'}
+                first = self.client.get('/api/v1/system/ssh-key', headers=headers)
+                self.assertEqual(first.status_code, 200, first.text)
+                self.assertTrue(first.json()['public_key'].startswith('ssh-ed25519 '))
+                Path(str(private) + '.pub').unlink()
+                recovered = self.client.get('/api/v1/system/ssh-key', headers=headers)
+                self.assertEqual(recovered.json(), first.json())
+                self.assertTrue(Path(str(private) + '.pub').read_text().endswith('\n'))
+                self.assertNotIn('\\n', recovered.json()['public_key'])
+                self.register(102)
+                denied = self.client.get('/api/v1/system/ssh-key', headers={**self.headers,
+                    'X-Node-Plane-Telegram-User-ID': '102'})
+                self.assertEqual(denied.status_code, 403)
+
+    def test_settings_and_config_reads_use_production_result_adapter(self):
+        from contextlib import contextmanager
+        from db.postgres_db import PostgresResult
+        from unittest.mock import patch
+        bootstrap_admin(self.identities, 101, self.db)
+        profile = ProfileRepository(self.db).owned(self.admin.id, after='', limit=1)[0]
+        connection = self.db.connection
+        class Adapter:
+            def execute(self, sql, params=()):
+                return PostgresResult(connection.execute(sql, params))
+        @contextmanager
+        def adapted_connect():
+            yield Adapter()
+        with patch.object(self.db, 'connect', adapted_connect):
+            headers = {**self.headers, 'X-Node-Plane-Telegram-User-ID': '101'}
+            for route in ('/api/v1/system/access-requests',
+                          f'/api/v1/me/profiles/{profile["id"]}/summary',
+                          f'/api/v1/profiles/{profile["id"]}/nodes'):
+                response = self.client.get(route, headers=headers)
+                self.assertEqual(response.status_code, 200, response.text)
+
     def setUp(self):
         self.db = Database()
         self.addCleanup(self.db.connection.close)

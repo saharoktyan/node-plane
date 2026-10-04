@@ -893,6 +893,7 @@ async def probe_node_cb(query: CallbackQuery, callback_data: ProbeNodeCallback, 
         if agent_state not in {'running', 'degraded'}:
             agent_state = 'unknown'
         lines = (tr(locale, 'nodes.probe.agent', value=tr(locale, 'nodes.probe.state.' + agent_state)),
+            tr(locale, 'nodes.probe.agent_version', value=observation.get('agent_version') or '—'),
             tr(locale, 'nodes.probe.version', value=observation.get('runtime_version') or '—'),
             tr(locale, 'nodes.probe.xray', value=tr(locale,
                 'nodes.probe.present' if observation['xray_config_present'] else 'nodes.probe.missing')),

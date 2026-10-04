@@ -59,6 +59,7 @@ class GrpcIntentDriver:
             raise ValueError('driver returned a different node identity')
         return {'node_key': response.node_key, 'health_state': response.health_state,
                 'runtime_version': response.runtime_version, 'runtime_commit': response.runtime_commit,
+                'agent_version': response.agent_version, 'agent_commit': response.agent_commit,
                 'xray_config_present': response.xray_config_present,
                 'awg_config_present': response.awg_config_present}
 
