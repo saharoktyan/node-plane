@@ -753,8 +753,7 @@ async def user_action_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
         elif action.name == 'set_locale':
             await backend.set_locale(user_id, action.args[0])
             await state.update_data(locale=action.args[0])
-            await show_member_settings(chat_id, user_id, message_id, bot, backend, state,
-                                       saved=True)
+            await show_member_settings(chat_id, user_id, message_id, bot, backend, state)
         elif action.name == 'request_access':
             request = await backend.request_access(user_id)
             await show_home(chat_id, user_id, bot, backend, state, message_id)
@@ -808,7 +807,7 @@ async def show_admin_menu(chat_id: int, user_id: int, message_id: int,
     sections = []
     if isinstance(overview, dict):
         sections.append(Section(tr(locale, 'admin.rich.overview'),
-            (tr(locale, 'admin.rich.stored_state'),), tables=(Table(
+            tables=(Table(
                 (tr(locale, 'admin.rich.item'), tr(locale, 'admin.rich.value')),
                 ((tr(locale, 'admin.nodes'), f"{overview['nodes_enabled']}/{overview['nodes_total']}"),
                  (tr(locale, 'admin.profiles'), f"{overview['profiles_active']}/{overview['profiles_total']}"),
@@ -825,22 +824,22 @@ async def show_admin_menu(chat_id: int, user_id: int, message_id: int,
         if attention_buttons:
             sections.append(Section(tr(locale, 'admin.rich.attention'), tuple(attention_lines),
                                     (tuple(attention_buttons),)))
-        requests_lines = (tr(locale, 'admin.status.pending', count=overview['pending_requests']),)
     else:
         sections.append(Section(tr(locale, 'admin.rich.overview'),
                                 (tr(locale, 'admin.rich.overview_unavailable'),)))
-        requests_lines = ()
     sections.extend((
         Section(tr(locale, 'admin.rich.management'), rows=((
             InlineKeyboardButton(text=tr(locale, 'admin.profiles'), callback_data=AdminProfilesCallback().pack()),
             InlineKeyboardButton(text=tr(locale, 'admin.nodes'), callback_data=AdminNodesCallback().pack())),)),
-        Section(tr(locale, 'requests.title'), requests_lines, ((requests_button,),)),
+        Section(tr(locale, 'admin.rich.access_management') +
+            (' · ' + tr(locale, 'requests.pending_count', count=overview['pending_requests'])
+             if isinstance(overview, dict) else ''), rows=((requests_button,),)),
         Section(tr(locale, 'admin.rich.system'), rows=((
             InlineKeyboardButton(text=tr(locale, 'admin.status'), callback_data='admin_status'),
             InlineKeyboardButton(text=tr(locale, 'admin.settings'), callback_data=AdminSettingsCallback().pack())),
             (InlineKeyboardButton(text=tr(locale, 'announce.title'), callback_data='announce_menu'),))),
     ))
-    await render(bot, chat_id, Screen(tr(locale, 'admin.menu'), (bot_title,),
+    await render(bot, chat_id, Screen(f"{tr(locale, 'admin.menu')} · {bot_title}",
         sections=tuple(sections), embedded_buttons=True, navigation=True),
         [[button(user_id, tr(locale, 'back'), 'home')]], state, message_id)
 
@@ -905,8 +904,7 @@ async def admin_problem_nodes_cb(query: CallbackQuery, bot: Bot,
 
 
 async def show_member_settings(chat_id: int, user_id: int, message_id: int,
-                               bot: Bot, backend: BackendClient, state: FSMContext,
-                               saved: bool = False) -> None:
+                               bot: Bot, backend: BackendClient, state: FSMContext) -> None:
     locale = normalize_locale((await state.get_data()).get('locale'))
     current = await backend.me(user_id)
     silent = current.get('announcement_silent', False)
@@ -927,8 +925,7 @@ async def show_member_settings(chat_id: int, user_id: int, message_id: int,
              tr(locale, 'traffic.consent_description')),
             ((button(user_id, tr(locale, 'ui.withdraw_consent' if consent else 'ui.give_consent'),
                 'traffic_consent', 'false' if consent else 'true'),),)))
-    lines = (tr(locale, 'settings.locale_saved'),) if saved else ()
-    await render(bot, chat_id, Screen(tr(locale, 'settings.title'), lines,
+    await render(bot, chat_id, Screen(tr(locale, 'settings.title'),
         sections=tuple(sections), embedded_buttons=True, navigation=True),
         [[button(user_id, tr(locale, 'back'), 'home')]], state, message_id)
 

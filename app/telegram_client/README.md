@@ -65,6 +65,17 @@ review, search and notifications use embedded actions, collapsed identifiers,
 and localized empty/error states. Search Back retains filter/page context.
 Native tables retain labeled rows in the plain-text fallback. See
 `ADMIN_RICH_MESSAGE_PLAN.md` for the remaining administrator UI phases.
+Profile administration uses direct card actions, collapsed IDs and paginated
+region-grouped access tables. Access editors and creation load all registry
+pages and display 10 servers per page. Grant/Revoke all and regional buttons
+modify only the draft, including other pages; Save is required. Region choices
+are explicit snapshots: future servers require another Grant press and Save.
+Bulk Grant skips disabled servers, while bulk Revoke also removes disabled or
+obsolete grants in its scope. Opaque region tokens keep Unicode callbacks short
+and prevent stale buttons from selecting a different region. Edits preserve the
+starting profile revision; conflicts retain the draft instead of overwriting a
+concurrent change. Administrator traffic display is pending a dedicated read
+contract; member-only summary authorization and consent gates are unchanged.
 Back-to-menu navigation reuses the last approved home presentation in the
 current user's FSM context instead of requesting account and bot title again.
 This is only a menu snapshot, never an authorization cache: opening destinations

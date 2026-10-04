@@ -94,14 +94,19 @@ async def render_request_page(chat_id: int, user_id: int, message_id: int,
         await show_admin_menu(chat_id, user_id, message_id, bot, backend, state)
         return
 
-    controls = [InlineKeyboardButton(text=tr(locale, 'requests.search'),
-        callback_data='request_search')]
+    controls = []
+    pending_total = page.get('pending_total')
+    show_search = (pending_total > 5 if pending_total is not None else
+                   len(page['items']) > 5 or bool(page.get('next_cursor')) or page_index > 0)
+    if show_search:
+        controls.append(InlineKeyboardButton(text=tr(locale, 'requests.search'),
+            callback_data='request_search'))
     if search:
         controls.append(InlineKeyboardButton(text=tr(locale, 'requests.clear_search'),
             callback_data='request_search_clear'))
     sections = [Section(tr(locale, 'requests.filters'),
         (tr(locale, 'requests.search_active', query=search),) if search else (),
-        (tuple(controls),))]
+        (tuple(controls),))] if controls else []
     for index, item in enumerate(page['items']):
         sections.append(Section(_request_name(item, locale),
             (tr(locale, 'requests.detail_date', date=_request_date(item)),),

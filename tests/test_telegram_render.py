@@ -14,6 +14,14 @@ from telegram_client.routers import user
 
 
 class RenderRecoveryTests(IsolatedAsyncioTestCase):
+    async def test_wizard_back_and_next_share_row_without_losing_primary_action_style(self):
+        back = InlineKeyboardButton(text='🔙 Back', callback_data='back')
+        next_button = InlineKeyboardButton(text='Next', callback_data='next', style='primary')
+        blocks = Screen('Create profile', ('Name: Alice',), embedded_buttons=True,
+                        navigation=True).rich([[back, next_button]]).blocks
+        self.assertEqual([block.type for block in blocks[-2:]], ['divider', 'buttons'])
+        self.assertEqual([button.style for button in blocks[-1].buttons], ['link', 'primary'])
+
     async def test_notice_uses_embedded_buttons_and_preserves_them_in_plain_fallback(self):
         screen = Screen('Request', ('Awaiting a decision',), embedded_buttons=True)
         markup = InlineKeyboardMarkup(inline_keyboard=[[

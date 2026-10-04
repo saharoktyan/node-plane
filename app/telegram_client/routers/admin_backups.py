@@ -120,9 +120,9 @@ async def settings(query, bot, backend, state):
         rows.append(
             [
                 button(
-                    ("✅ " if value[field] == v else "") + str(v),
+                    str(v),
                     f"backup_pref:{field}:{v}",
-                )
+                ).model_copy(update={"style": "primary" if value[field] == v else None})
                 for v in values
             ]
         )

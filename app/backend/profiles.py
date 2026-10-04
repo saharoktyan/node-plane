@@ -40,29 +40,50 @@ class ProfileRepository:
     def ensure_account_profile(self, account_id):
         """Create the default VPN profile once, without replacing custom names."""
         with self.db.transaction() as conn:
-            conn.execute('UPDATE backend_accounts SET revision = revision WHERE id = ?', (account_id,))
-            account = conn.execute('''SELECT a.role, i.subject, d.username
-                FROM backend_accounts a LEFT JOIN backend_external_identities i
-                ON i.account_id = a.id AND i.provider = 'telegram'
-                LEFT JOIN backend_telegram_identity_details d ON d.subject = i.subject
-                WHERE a.id = ?''', (account_id,)).fetchone()
-            if account is None:
-                raise AccessDenied('resource_not_found', 404)
-            fallback = f"{'Admin' if account['role'] == 'admin' else 'User'} {account['subject'] or account_id}"
-            name = account['username'] or fallback
-            existing = conn.execute('SELECT id, display_name FROM backend_profiles WHERE owner_account_id = ? ORDER BY id LIMIT 1',
-                                    (account_id,)).fetchone()
-            if existing:
-                automatic_names = {f'Admin {account["subject"]}', f'User {account["subject"]}'}
-                if account['username'] and existing['display_name'] in automatic_names:
-                    conn.execute('UPDATE backend_profiles SET display_name = ? WHERE id = ?', (name, existing['id']))
-                return existing['id']
-            profile_id = str(uuid4())
-            conn.execute('''INSERT INTO backend_profiles
-                (id, runtime_name, display_name, owner_account_id, created_at)
-                VALUES (?, ?, ?, ?, ?)''', (profile_id, 'account_' + account_id.replace('-', ''),
-                                          name, account_id, datetime.now(timezone.utc).isoformat()))
-            return profile_id
+            return self.ensure_account_profile_in_transaction(conn, account_id)
+
+    @staticmethod
+    def ensure_account_profile_in_transaction(conn, account_id):
+        conn.execute('UPDATE backend_accounts SET revision = revision WHERE id = ?', (account_id,))
+        account = conn.execute('''SELECT a.role, i.subject, d.username
+            FROM backend_accounts a LEFT JOIN backend_external_identities i
+            ON i.account_id = a.id AND i.provider = 'telegram'
+            LEFT JOIN backend_telegram_identity_details d ON d.subject = i.subject
+            WHERE a.id = ?''', (account_id,)).fetchone()
+        if account is None:
+            raise AccessDenied('resource_not_found', 404)
+        fallback = f"{'Admin' if account['role'] == 'admin' else 'User'} {account['subject'] or account_id}"
+        name = account['username'] or fallback
+        existing = conn.execute('''SELECT p.id, p.display_name FROM backend_profiles p
+            WHERE p.owner_account_id = ? AND NOT EXISTS
+                (SELECT 1 FROM backend_profile_deletions d WHERE d.profile_id = p.id)
+            ORDER BY p.id LIMIT 1''',
+                                (account_id,)).fetchone()
+        if existing:
+            automatic_names = {f'Admin {account["subject"]}', f'User {account["subject"]}'}
+            if account['username'] and existing['display_name'] in automatic_names:
+                conn.execute('UPDATE backend_profiles SET display_name = ? WHERE id = ?', (name, existing['id']))
+            return existing['id']
+        profile_id = str(uuid4())
+        conn.execute('''INSERT INTO backend_profiles
+            (id, runtime_name, display_name, owner_account_id, created_at)
+            VALUES (?, ?, ?, ?, ?)''', (profile_id, 'account_' + profile_id.replace('-', ''),
+                                      name, account_id, datetime.now(timezone.utc).isoformat()))
+        return profile_id
+
+    @staticmethod
+    def revoke_orphaned_members(conn, account_id=None):
+        """Require approval again after a member's last profile is deleted."""
+        owner_filter = ' AND id = ?' if account_id else ''
+        conn.execute("""UPDATE backend_accounts SET status = 'pending', revision = revision + 1
+            WHERE role = 'member' AND status = 'approved'
+            AND EXISTS (SELECT 1 FROM backend_profiles p
+                JOIN backend_profile_deletions d ON d.profile_id = p.id
+                WHERE p.owner_account_id = backend_accounts.id)
+            AND NOT EXISTS (SELECT 1 FROM backend_profiles p
+                WHERE p.owner_account_id = backend_accounts.id AND NOT EXISTS
+                    (SELECT 1 FROM backend_profile_deletions d WHERE d.profile_id = p.id))"""
+            + owner_filter, (account_id,) if account_id else ())
 
     def initialize_schema(self):
         from .alerts import AlertService
@@ -105,6 +126,8 @@ class ProfileRepository:
                 operation_id TEXT
             )''')
             conn.execute('CREATE INDEX IF NOT EXISTS idx_backend_profile_owner ON backend_profiles(owner_account_id, id)')
+            # Repair accounts left approved by older profile-deletion commands.
+            self.revoke_orphaned_members(conn)
         from .node_lifecycle import NodeLifecycle
         NodeLifecycle(self.db).initialize_schema()
         from .node_operations import NodeOperations

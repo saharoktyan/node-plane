@@ -64,8 +64,8 @@ async def show_admin_nodes(chat_id, user_id, message_id, bot, backend, state, pa
         summary = node.get('overview')
         label = f"{node['flag']} {node['title']}".strip()
         if summary:
-            marker = '⚠️' if summary['state'] != 'applied_unverified' or summary['failed'] or summary['attention'] else '✅'
-            label = tr(locale, 'node_tools.list_row', marker=marker, name=label, ready=summary['ready'], total=summary['access_total'])
+            marker = tr(locale, 'nodes.card.state.needs_attention') if summary['state'] != 'applied_unverified' or summary['failed'] or summary['attention'] else ''
+            label = tr(locale, 'node_tools.list_row', marker=marker, name=label, ready=summary['ready'], total=summary['access_total']).strip()
         rows.append([InlineKeyboardButton(text=label, callback_data=AdminNodeCallback(node_key=node['key']).pack())])
     arrows = []
     if page_index > 0:

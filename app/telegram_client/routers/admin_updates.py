@@ -34,7 +34,7 @@ async def show_versions(query, bot, backend, state, offset=0):
     await state.update_data(update_catalog=page, update_catalog_nonce=nonce)
     rows = []
     for index, item in enumerate(page['items']):
-        marker = {'current': '✅', 'upgrade': '⬆️', 'downgrade': '⬇️'}.get(item['action'], '⛔')
+        marker = {'current': '=', 'upgrade': '↑', 'downgrade': '↓'}.get(item['action'], '–')
         rows.append([button(f"{marker} {item['version']}", f'uv_select:{nonce}:{index}')])
     navigation = []
     if offset:
