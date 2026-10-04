@@ -121,6 +121,8 @@ class AgentRolloutService:
             self._failure_code = 'rust_required'
         elif 'Not enough free memory' in output or 'too busy' in output:
             self._failure_code = 'build_resources'
+        elif 'SSH_PREREQUISITES_FAILED:' in output:
+            self._failure_code = 'ssh_prerequisites'
         return result.returncode == 0
 
     def run_one(self):

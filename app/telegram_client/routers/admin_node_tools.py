@@ -6,7 +6,7 @@ from aiogram.fsm.context import FSMContext
 
 from ..backend import BackendClient, BackendError
 from ..i18n import normalize_locale, tr
-from ..screens import Screen, Section, Table
+from ..screens import Screen, Section, Table, server_label
 from .common import render
 from .callbacks import AdminNodeCallback, NodeSettingsCallback, EditNodeFieldCallback
 
@@ -47,7 +47,10 @@ async def show_install(chat_id, user_id, message_id, node_key, bot, backend, sta
                 lines.append(tr(locale, 'node_tools.incomplete'))
                 rows.append([button(locale, 'nodes.card.settings', NodeSettingsCallback(node_key=node_key).pack())])
                 rows.append([button(locale, 'back', AdminNodeCallback(node_key=node_key).pack())])
-                await render(bot, chat_id, Screen(tr(locale, 'node_tools.install'), tuple(lines), embedded_buttons=True, navigation=True), rows, state, message_id)
+                await render(bot, chat_id, Screen(tr(locale, 'node_tools.install'),
+                    (server_label(node),), sections=(Section(tr(locale, 'nodes.rich.next_step'),
+                        lines=tuple(lines), rows=(tuple(rows[0]),)),),
+                    embedded_buttons=True, navigation=True), rows[-1:], state, message_id)
                 return
             present = any(facts[p + '_config_valid'] for p in node['protocols'])
             reusable = bool(node['protocols']) and all(facts[p + '_config_valid'] for p in node['protocols'])
@@ -66,7 +69,10 @@ async def show_install(chat_id, user_id, message_id, node_key, bot, backend, sta
         else:
             rows.append([button(locale, 'node_tools.refresh', f'bootstrap_menu:{node_key}')])
     rows.append([button(locale, 'back', AdminNodeCallback(node_key=node_key).pack())])
-    await render(bot, chat_id, Screen(tr(locale, 'node_tools.install'), tuple(lines), embedded_buttons=True, navigation=True), rows, state, message_id)
+    actions = tuple(tuple(row) for row in rows[:-1])
+    await render(bot, chat_id, Screen(tr(locale, 'node_tools.install'),
+        (server_label(node),), sections=(Section(tr(locale, 'nodes.rich.next_step'),
+            lines=tuple(lines), rows=actions),), embedded_buttons=True, navigation=True), rows[-1:], state, message_id)
 
 
 @router.callback_query(F.data.startswith('node_section:'))
@@ -139,7 +145,7 @@ async def view_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state:
     await query.answer()
     _, view, node_key = query.data.split(':', 2)
     locale = normalize_locale((await state.get_data()).get('locale'))
-    rows, lines = [], []
+    rows, lines, sections = [], [], []
     try:
         node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=query.from_user.id)
         if view in {'runtime', 'diagnostics', 'entropy'}:
@@ -147,29 +153,38 @@ async def view_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state:
             if view == 'entropy':
                 lines = facts['entropy'] or [tr(locale, 'node_tools.no_config')]
             elif view == 'runtime':
-                lines = [tr(locale, 'node_tools.runtime_version', version=facts['runtime_version'] or '—', commit=facts['runtime_commit'] or '—'),
-                         tr(locale, 'node_tools.runtime_target', version=facts['desired_runtime_version'], commit=facts['desired_runtime_commit']),
-                         tr(locale, 'node_tools.drift' if facts['runtime_drift'] else 'node_tools.current')]
+                lines = [tr(locale, 'node_tools.drift' if facts['runtime_drift'] else 'node_tools.current')]
+                sections = [Section(tr(locale, 'node_tools.runtime'), tables=(Table(
+                    (tr(locale, 'account.rich.field'), tr(locale, 'nodes.rich.version')),
+                    ((tr(locale, 'nodes.rich.installed'), facts['runtime_version'] or '—'),
+                     (tr(locale, 'nodes.rich.target'), facts['desired_runtime_version'] or '—'))),)),
+                    Section(tr(locale, 'nodes.rich.technical'), collapsed=True, tables=(Table(
+                        (tr(locale, 'account.rich.field'), tr(locale, 'nodes.rich.commit')),
+                        ((tr(locale, 'nodes.rich.installed'), facts['runtime_commit'] or '—'),
+                         (tr(locale, 'nodes.rich.target'), facts['desired_runtime_commit'] or '—'))),))]
                 if facts['runtime_drift']:
                     rows.append([button(locale, 'node_tools.sync_runtime', f'node_action:sync_runtime:{node_key}')])
             else:
-                lines = [tr(locale, 'node_tools.fact', name=tr(locale, 'node_tools.fact.' + key),
-                    value=tr(locale, 'node_tools.yes' if facts[key] else 'node_tools.no'))
+                entries = tuple((tr(locale, 'node_tools.fact.' + key),
+                    tr(locale, 'node_tools.yes' if facts[key] else 'node_tools.no'))
                     for key in ('docker', 'xray_config_valid', 'awg_config_valid', 'xray_running', 'awg_running')
-                    if not key.startswith(('xray', 'awg')) or key.split('_')[0] in node['protocols']]
+                    if not key.startswith(('xray', 'awg')) or key.split('_')[0] in node['protocols'])
+                sections = [Section(tr(locale, 'nodes.rich.services'), tables=(Table(
+                    (tr(locale, 'account.rich.field'), tr(locale, 'account.rich.value')), entries),))]
         elif view == 'ports':
             rows = [[button(locale, 'node_tools.' + action, f'node_action:{action}:{node_key}')
                     for action in ('check_ports', 'open_ports')]]
         elif view == 'repair':
             actions = ['sync_env'] + (['sync_xray'] if 'xray' in node['protocols'] else []) + ['reconcile_access']
-            rows = [[button(locale, 'node_tools.' + action, f'node_action:{action}:{node_key}')] for action in actions]
+            choices = [button(locale, 'node_tools.' + action, f'node_action:{action}:{node_key}') for action in actions]
+            rows = [choices[index:index + 2] for index in range(0, len(choices), 2)]
         else:
             return
     except BackendError as exc:
         lines = [error(locale, exc)]
         rows = [[button(locale, 'node_tools.refresh', query.data)]]
     rows.append([button(locale, 'back', f'node_section:awg:{node_key}' if view == 'entropy' else f'node_tools:{node_key}')])
-    await render(bot, query.message.chat.id, Screen(tr(locale, 'node_tools.' + view), tuple(lines), embedded_buttons=True, navigation=True), rows, state, query.message.message_id)
+    await render(bot, query.message.chat.id, Screen(tr(locale, 'node_tools.' + view), tuple(lines), sections=tuple(sections), embedded_buttons=True, navigation=True), rows, state, query.message.message_id)
 
 
 @router.callback_query(F.data.startswith('node_action:'))
@@ -188,6 +203,7 @@ async def action_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, stat
             'revision': node['desired_revision'], 'command_key': str(uuid4())})
         rows = [[button(locale, 'back', f'bootstrap_menu:{node_key}' if action in {'bootstrap', 'reinstall_clean', 'reinstall_keep', 'install_docker'} else f'node_tools:{node_key}'),
                  button(locale, 'node_tools.confirm', 'node_job_submit')]]
+        rows[0][-1].style = 'danger' if action in {'reinstall_clean', 'cleanup_runtime'} else 'primary'
         await render(bot, query.message.chat.id, Screen(tr(locale, 'node_tools.' + action), embedded_buttons=True, navigation=True, lines=
             (tr(locale, 'node_tools.confirm_note'),) + ((tr(locale, 'node_tools.clean_warning'),)
                 if action in {'reinstall_clean', 'cleanup_runtime'} else ())), rows, state, query.message.message_id)
@@ -225,12 +241,21 @@ async def show_job(chat_id, user_id, message_id, job, bot, state):
     elif job['status'] == 'blocked':
         lines.append(tr(locale, 'node_tools.blocked'))
     rows = []
+    sections = []
+    if result.get('ports') and job['status'] == 'succeeded':
+        lines = [lines[0]] + ([tr(locale, 'node_tools.firewall_unmanaged')] if result.get('firewall') == 'unmanaged' else [])
+        sections.append(Section(tr(locale, 'node_tools.ports'), tables=(Table(
+            (tr(locale, 'nodes.rich.port'), tr(locale, 'nodes.rich.protocol'), tr(locale, 'nodes.rich.result')),
+            tuple((str(item['port']), item['protocol'], tr(locale, 'node_tools.port.' + item['status']))
+                  for item in result['ports'])),)))
+    sections.append(Section(tr(locale, 'nodes.rich.technical'), collapsed=True,
+        lines=(tr(locale, 'nodes.rich.operation_id', value=job['id']),)))
     if job['status'] in {'awaiting_executor', 'running', 'blocked'}:
         rows.append([button(locale, 'node_tools.refresh', 'node_job:' + job['id'])])
     if job['status'] == 'blocked':
         rows.append([button(locale, 'node_tools.resolve', 'node_resolve:' + job['id'])])
     rows.append([button(locale, 'back', AdminNodeCallback(node_key=job['node_key']).pack())])
-    await render(bot, chat_id, Screen(tr(locale, 'node_tools.' + job['action']), tuple(lines), embedded_buttons=True, navigation=True), rows, state, message_id)
+    await render(bot, chat_id, Screen(tr(locale, 'node_tools.' + job['action']), tuple(lines), sections=tuple(sections), embedded_buttons=True, navigation=True), rows, state, message_id)
 
 
 @router.callback_query(F.data.startswith('node_job:'))
@@ -312,4 +337,7 @@ async def advance_removal(chat_id, user_id, message_id, node_key, bot, backend, 
         else:
             lines = [error(locale, exc)]
     rows.append([button(locale, 'back', AdminNodeCallback(node_key=node_key).pack())])
-    await render(bot, chat_id, Screen(tr(locale, 'nodes.card.delete'), tuple(lines), embedded_buttons=True, navigation=True), rows, state, message_id)
+    await render(bot, chat_id, Screen(tr(locale, 'nodes.card.delete'),
+        (lines[0],), sections=(Section(tr(locale, 'nodes.rich.next_step'),
+            lines=tuple(lines[1:]), rows=tuple(tuple(row) for row in rows[:-1])),),
+        embedded_buttons=True, navigation=True), rows[-1:], state, message_id)

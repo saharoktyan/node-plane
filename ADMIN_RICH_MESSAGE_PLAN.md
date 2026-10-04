@@ -486,3 +486,62 @@ compact profile rows have no headings.
   live mobile acceptance remain follow-up work.
 - Validation: 725 automated tests pass, including region cursor pagination,
   retained field actions, conditional Apply and region wizard navigation.
+
+### Wizard and diagnostics refinement (after alpha.31)
+
+- SSH/Local and protocol choices share compact rows. Existing selections use
+  primary color, including when returning to an earlier wizard step.
+- The creation review separates presentation, connection and services into
+  sections, with compact facts tables. Internal key and SSH target move into
+  collapsed technical details. Back/Create retains the existing draft and
+  explicit creation semantics.
+- Diagnostics uses a labeled service-facts table. Successful port checks use
+  port/protocol/result columns; unmanaged firewall warnings remain visible.
+  Operation identifiers are available in collapsed technical details, while
+  refresh and recovery actions remain next to the visible outcome.
+- Validation: 727 automated tests pass. Further installation, Probe, rollout
+  and removal presentation refinements and mobile acceptance remain pending.
+
+### Installation, Probe and removal refinement
+
+- Installation identifies the selected server and places its current prerequisite
+  or installation choice beside the Next step section. Existing Docker checks,
+  reusable-config validation and settings requirements remain authoritative.
+- Probe keeps agent state and config presence visible. Versions and explanatory
+  notes are collapsed; diagnostics separates service facts from technical context.
+  Missing configs are not described as running services.
+- Rollout progress explains that execution continues independently of navigation.
+  Task identifiers are collapsed; refresh, settings and Rust recovery actions
+  retain their existing status-specific availability.
+- Maintenance returns to Management. Verification targets and background safety
+  notes are collapsed, while cleanup state and pending/blocked work stay visible.
+  Full and registry-only removal confirmations use destructive button styling;
+  the remote-state uncertainty warning remains visible.
+- Removal progress groups refresh/retry and registry-only recovery in Next step.
+  No remote execution, authorization or deletion semantics have changed.
+- Validation: the full 727-test suite passes, plus two additional RU/EN rollout
+  and unreachable-removal presentation checks. Live Telegram acceptance remains
+  necessary; generic edit/input screens and deeper runtime/recovery tables can
+  receive further polish after feedback.
+
+### Edit forms, runtime details and SSH installation audit
+
+- Local/SSH choices share one row and highlight the current connection.
+  Connection facts use a native table; explanatory notes are collapsed. Back
+  returns to the Connection section rather than skipping directly to Settings.
+- Value editors separate the current value from the input prompt and collapse
+  application guidance. AWG preset choices use compact rows and selected styling.
+- Runtime shows installed/target versions in a table, with commit identifiers
+  collapsed. Recovery actions remain available; clean reinstall and runtime
+  cleanup confirmations use destructive styling without hiding warnings.
+- Remote agent installation no longer requires the sudo executable when logged
+  in as root. Other users use noninteractive sudo, with an explicit prerequisites
+  check before remote deployment. Bash streaming and command quoting are retained.
+- SSH/SCP use a 15-second connection timeout and keepalive failure detection.
+  Explicit identity files use IdentitiesOnly to avoid unrelated agent keys.
+  Prerequisite failures have a localized rollout recovery message rather than
+  exposing raw console output.
+- Validation: 733 tests pass, including simulated root/non-root remote privilege
+  branches, nested streamed scripts, quoting, SSH connection options and the
+  backend failure-code mapping. Shell syntax checks pass. No live SSH host was
+  contacted; cold-host installation still requires the user's acceptance test.

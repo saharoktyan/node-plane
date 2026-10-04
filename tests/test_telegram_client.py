@@ -1047,7 +1047,9 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         with patch.object(admin_nodes, 'render', new_callable=AsyncMock) as draw:
             await admin_nodes.probe_node_cb(self.query, ProbeNodeCallback(node_key='lv1'),
                                             self.bot, backend, self.state)
-        lines = draw.call_args.args[2].lines
+        screen = draw.call_args.args[2]
+        lines = screen.sections[1].lines
+        self.assertTrue(screen.sections[1].collapsed)
         self.assertIn('Agent version: 0.4.3-alpha.20', lines)
         self.assertIn('Runtime version: —', lines)
 
@@ -1060,9 +1062,9 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         with patch.object(admin_nodes, 'render', new_callable=AsyncMock) as render:
             await admin_nodes.node_diagnostics_cb(self.query, self.bot, backend, self.state)
         screen = render.call_args.args[2]
-        self.assertIn('Docker: ready', screen.lines)
-        self.assertIn('AWG config: missing', screen.lines)
-        self.assertNotIn('/opt/', ' '.join(screen.lines))
+        self.assertIn('Docker: ready', screen.sections[0].lines)
+        self.assertIn('AWG config: missing', screen.sections[0].lines)
+        self.assertNotIn('/opt/', screen.plain())
         backend.node_diagnostics.assert_awaited_once_with(123, 'lv1')
 
     async def test_node_diagnostics_unavailable_has_recovery(self):
@@ -1301,7 +1303,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
 
     async def test_install_menu_checks_docker_and_reusable_configs(self):
         from telegram_client.routers import admin_node_tools
-        node = {'key': 'lv1', 'transport': 'local', 'ssh_target': None, 'protocols': ['awg', 'xray']}
+        node = {'key': 'lv1', 'title': 'Latvia', 'transport': 'local', 'ssh_target': None, 'protocols': ['awg', 'xray']}
         facts = {'docker': False, 'awg_config_valid': False, 'xray_config_valid': False}
         backend = SimpleNamespace(request=AsyncMock(return_value=node),
             node_overview=AsyncMock(return_value={'settings_complete': True}),
@@ -1309,7 +1311,8 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         with patch.object(admin_node_tools, 'render', new_callable=AsyncMock) as render:
             async def buttons():
                 await admin_node_tools.show_install(123, 123, 77, 'lv1', self.bot, backend, self.state)
-                return [b.callback_data for row in render.call_args.args[3] for b in row]
+                screen, rows = render.call_args.args[2:4]
+                return [b.callback_data for row in screen.fallback_rows(rows) for b in row]
             self.assertIn('node_action:install_docker:lv1', await buttons())
             facts['docker'] = True
             self.assertIn('node_action:bootstrap:lv1', await buttons())
