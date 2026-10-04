@@ -1981,3 +1981,29 @@ CATALOG['en'].update({'nodes.rich.version': 'Version', 'nodes.rich.commit': 'Com
     'nodes.rich.installed': 'Installed', 'nodes.rich.target': 'Target'})
 CATALOG['ru'].update({'nodes.rich.version': 'Версия', 'nodes.rich.commit': 'Коммит',
     'nodes.rich.installed': 'Установлено', 'nodes.rich.target': 'Целевая версия'})
+
+CATALOG['en'].update({'admin.rich.frozen': 'Frozen profiles'})
+CATALOG['ru'].update({'admin.rich.frozen': 'Замороженные профили'})
+
+CATALOG['en'].update({
+    'nodes.settings.title': 'Server settings', 'nodes.card.back_to_settings': '← Back to settings',
+    'nodes.draft.protocol_settings': 'Protocol settings', 'nodes.draft.save': 'Save and apply',
+    'nodes.draft.reset': 'Reset changes', 'nodes.draft.reinstall': 'Reinstall protocols',
+    'nodes.draft.protocol_note': 'Choose the protocols and VLESS transports this server should offer. Highlighted buttons are selected. Save and apply to activate changes.',
+    'nodes.draft.transport_required': 'Keep at least one VLESS transport selected.',
+    'nodes.draft.in_use': 'A protocol you disabled is still granted to profiles. Revoke those grants first. Your draft is kept.',
+    'nodes.draft.conflict': 'Server settings changed elsewhere. Your draft is kept. Reset it to load current settings before editing again.',
+    'nodes.rich.settings_note': 'Edits stay in a draft until Save and apply. Reset changes discards the draft.',
+    'nodes.settings.apply_note': 'Edits stay in a draft until Save and apply.',
+})
+CATALOG['ru'].update({
+    'nodes.settings.title': 'Настройки сервера', 'nodes.card.back_to_settings': '← К настройкам',
+    'nodes.draft.protocol_settings': 'Настройки протоколов', 'nodes.draft.save': 'Сохранить и применить',
+    'nodes.draft.reset': 'Сбросить изменения', 'nodes.draft.reinstall': 'Переустановить протоколы',
+    'nodes.draft.protocol_note': 'Выберите протоколы и транспорты VLESS, доступные на сервере. Выбранные кнопки подсвечены. Сохраните и примените изменения для активации.',
+    'nodes.draft.transport_required': 'Оставьте выбранным хотя бы один транспорт VLESS.',
+    'nodes.draft.in_use': 'Отключаемый протокол ещё выдан профилям. Сначала отзовите эти доступы. Черновик сохранён.',
+    'nodes.draft.conflict': 'Настройки сервера изменились в другом месте. Черновик сохранён. Сбросьте его, чтобы загрузить актуальные настройки перед редактированием.',
+    'nodes.rich.settings_note': 'Изменения остаются в черновике до сохранения и применения. Сброс отменяет черновик.',
+    'nodes.settings.apply_note': 'Изменения остаются в черновике до сохранения и применения.',
+})

@@ -15,7 +15,9 @@ class AdminNodeRichTests(IsolatedAsyncioTestCase):
             return dict(self.data)
         async def update_data(**values):
             self.data.update(values)
-        self.state = SimpleNamespace(get_data=get_data, update_data=update_data, set_state=AsyncMock())
+        async def clear():
+            self.data.clear()
+        self.state = SimpleNamespace(get_data=get_data, update_data=update_data, clear=clear, set_state=AsyncMock())
         self.bot = SimpleNamespace()
         self.query = SimpleNamespace(data='', answer=AsyncMock(), from_user=SimpleNamespace(id=123),
             message=SimpleNamespace(message_id=77, chat=SimpleNamespace(id=123)))
@@ -39,15 +41,18 @@ class AdminNodeRichTests(IsolatedAsyncioTestCase):
             with patch.object(nodes, 'render', new_callable=AsyncMock) as draw:
                 await nodes.show_admin_node(123, 123, 77, 'msk1', self.bot, self.backend, self.state)
             screen, rows = draw.call_args.args[2:4]
-            self.assertEqual(screen.title, '🇷🇺 Moscow #1')
+            self.assertEqual(screen.title, 'Europe · 🇷🇺 Moscow #1')
             self.assertNotIn('private.example.test', screen.plain())
             self.assertNotIn('msk1', screen.plain())
             self.assertNotIn(tr(locale, 'nodes.rich.technical'), screen.plain())
             callbacks = self.callbacks(draw)
             self.assertIn('node_manage:msk1', callbacks)
-            self.assertIn('bootstrap_menu:msk1', callbacks)
-            self.assertIn('node_section:awg:msk1', callbacks)
-            self.assertIn('node_section:xray:msk1', callbacks)
+            self.assertNotIn('bootstrap_menu:msk1', callbacks)
+            self.assertNotIn('node_section:awg:msk1', callbacks)
+            self.assertNotIn('node_section:xray:msk1', callbacks)
+            settings_buttons = [b for row in screen.fallback_rows(rows) for b in row if b.callback_data == 'node_settings:msk1']
+            self.assertEqual(len(settings_buttons), 1)
+            self.assertEqual(settings_buttons[0].style, 'primary')
             self.assertFalse(any(c.startswith('apply_node:') for c in callbacks))
             self.assertFalse(any(c.startswith('node_maintenance:') for c in callbacks))
             self.assertEqual([b.type for b in screen.rich(rows).blocks[-2:]], ['divider', 'buttons'])
@@ -87,7 +92,7 @@ class AdminNodeRichTests(IsolatedAsyncioTestCase):
                 callbacks = self.callbacks(draw)
                 actual = {c.split(':')[-1] for c in callbacks if c.startswith('edit_node_field:')}
                 self.assertEqual(actual, fields)
-                self.assertFalse(any(c.startswith('apply_node:') for c in callbacks))
+                self.assertTrue(any(c.startswith('apply_node:') for c in callbacks))
                 self.assertTrue(any(s.tables for s in screen.sections))
                 self.assertEqual(rows[-1][0].callback_data, 'node_settings:msk1')
 
@@ -216,3 +221,82 @@ class AdminNodeRichTests(IsolatedAsyncioTestCase):
         self.assertTrue(screen.sections[1].collapsed)
         self.assertIn('node_action:sync_runtime:msk1', self.callbacks(draw))
         screen.rich(rows)
+
+    async def test_draft_survives_navigation_and_reset_does_not_write_backend(self):
+        self.backend.edit_node = AsyncMock()
+        await nodes.change_node_draft(123, 'msk1', {'settings': {**self.node['settings'], 'awg_port': 51821}}, self.backend, self.state)
+        await nodes._clear_node_flow(self.state)
+        with patch.object(tools, 'render', new_callable=AsyncMock) as draw:
+            await tools.show_section(123, 123, 77, 'awg', 'msk1', self.bot, self.backend, self.state)
+        self.assertIn('node_draft_save:msk1', self.callbacks(draw))
+        self.assertIn('node_draft_reset:msk1', self.callbacks(draw))
+        self.query.data = 'node_draft_reset:msk1'
+        with patch.object(tools, 'render', new_callable=AsyncMock) as draw:
+            await nodes.reset_node_draft_cb(self.query, self.bot, self.backend, self.state)
+        self.assertIsNone(self.data['node_settings_draft'])
+        self.assertNotIn('node_draft_save:msk1', self.callbacks(draw))
+        self.backend.edit_node.assert_not_awaited()
+
+    async def test_save_draft_uses_captured_revision_then_applies_once(self):
+        self.backend.edit_node = AsyncMock(return_value={**self.node, 'desired_revision': 4})
+        await nodes.change_node_draft(123, 'msk1', {'region': 'Asia'}, self.backend, self.state)
+        self.node['desired_revision'] = 9
+        self.query.data = 'node_draft_save:msk1'
+        with patch.object(nodes, 'apply_node', new_callable=AsyncMock) as apply:
+            await nodes.save_node_draft_cb(self.query, self.bot, self.backend, self.state)
+        self.assertEqual(self.backend.edit_node.await_args.args, (123, 'msk1', 3, {'region': 'Asia'}))
+        self.assertIsNone(self.data['node_settings_draft'])
+        apply.assert_awaited_once()
+        self.assertEqual(apply.await_args.kwargs['revision'], 4)
+
+    async def test_protocol_in_use_keeps_draft_and_explains_save_failure(self):
+        from telegram_client.backend import BackendError
+        self.backend.edit_node = AsyncMock(side_effect=BackendError('node_protocol_in_use', 409))
+        await nodes.change_node_draft(123, 'msk1', {'protocols': ['awg'], 'xray_transports': []}, self.backend, self.state)
+        self.query.data = 'node_draft_save:msk1'
+        with patch.object(nodes, 'render', new_callable=AsyncMock) as draw, patch.object(nodes, 'apply_node', new_callable=AsyncMock) as apply:
+            await nodes.save_node_draft_cb(self.query, self.bot, self.backend, self.state)
+        self.assertIn(tr('en', 'nodes.draft.in_use'), draw.call_args.args[2].lines)
+        self.assertEqual(self.data['node_settings_draft']['values']['protocols'], ['awg'])
+        apply.assert_not_awaited()
+
+    async def test_protocol_draft_is_selected_across_views_and_last_transport_is_required(self):
+        self.node['xray_transports'] = ['tcp', 'xhttp']
+        with patch.object(nodes, 'render', new_callable=AsyncMock) as draw:
+            await nodes.toggle_node_feature(123, 123, 77, 'msk1', 'tcp', True, self.bot, self.backend, self.state)
+        self.assertEqual(self.data['node_settings_draft']['values']['xray_transports'], ['xhttp'])
+        with patch.object(tools, 'render', new_callable=AsyncMock):
+            await tools.show_section(123, 123, 77, 'xray', 'msk1', self.bot, self.backend, self.state)
+        with patch.object(nodes, 'render', new_callable=AsyncMock) as draw:
+            await nodes.show_node_protocols(123, 123, 77, 'msk1', self.bot, self.backend, self.state)
+        transport_buttons = draw.call_args.args[3][1]
+        self.assertIsNone(transport_buttons[0].style)
+        self.assertEqual(transport_buttons[1].style, 'primary')
+        with patch.object(nodes, 'render', new_callable=AsyncMock) as draw:
+            await nodes.toggle_node_feature(123, 123, 77, 'msk1', 'xhttp', True, self.bot, self.backend, self.state)
+        self.assertEqual(self.data['node_settings_draft']['values']['xray_transports'], ['xhttp'])
+        self.assertIn(tr('en', 'nodes.draft.transport_required'), draw.call_args.args[2].lines)
+
+    async def test_existing_region_picker_updates_draft_only(self):
+        from telegram_client.routers.callbacks import EditNodeFieldCallback
+        self.backend.edit_node = AsyncMock()
+        with patch.object(nodes, 'render', new_callable=AsyncMock) as draw:
+            await nodes.edit_node_field_cb(self.query, EditNodeFieldCallback(node_key='msk1', field='region'), self.bot, self.backend, self.state)
+        self.assertTrue(draw.call_args.args[3][0][0].text.startswith('🌍'))
+        self.query.data = 'node_region:asia:msk1'
+        with patch.object(tools, 'render', new_callable=AsyncMock):
+            await nodes.edit_node_region_cb(self.query, self.bot, self.backend, self.state)
+        self.assertEqual(self.data['node_settings_draft']['values']['region'], 'Asia')
+        self.assertEqual(self.data['node_settings_draft']['values']['flag'], '🇷🇺')
+        self.backend.edit_node.assert_not_awaited()
+
+    async def test_reinstall_is_deeper_and_initial_bootstrap_stays_available(self):
+        self.query.data = 'node_manage:msk1'
+        with patch.object(nodes, 'render', new_callable=AsyncMock) as draw:
+            await nodes.node_manage_cb(self.query, self.bot, self.backend, self.state)
+        self.assertEqual(draw.call_args.args[3][0][0].text, tr('en', 'nodes.draft.reinstall'))
+        self.overview['state'] = 'not_installed'
+        self.node['applied_revision'] = 0
+        with patch.object(nodes, 'render', new_callable=AsyncMock) as draw:
+            await nodes.show_admin_node(123, 123, 77, 'msk1', self.bot, self.backend, self.state)
+        self.assertIn('bootstrap_menu:msk1', self.callbacks(draw))

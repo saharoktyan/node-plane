@@ -1,4 +1,5 @@
 import re
+from copy import deepcopy
 from uuid import uuid4
 from aiogram import Router, Bot, F
 from aiogram.types import CallbackQuery, InlineKeyboardButton, Message
@@ -33,7 +34,87 @@ async def _clear_node_flow(state: FSMContext) -> None:
     data = await state.get_data()
     await state.clear()
     await state.update_data(**{key: value for key, value in data.items()
-        if key in {'locale', 'admin_node_search', 'admin_node_cursors', 'admin_node_page'}})
+        if key in {'locale', 'admin_node_search', 'admin_node_cursors', 'admin_node_page', 'node_settings_draft', 'node_settings_view'}})
+
+
+_DRAFT_FIELDS = ('title', 'region', 'flag', 'notes', 'transport', 'ssh_target',
+                 'protocols', 'xray_transports', 'settings')
+
+
+async def editable_node(user_id, node_key, backend, state):
+    node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=user_id)
+    draft = (await state.get_data()).get('node_settings_draft')
+    if draft and draft['node_key'] == node_key:
+        node = {**node, **deepcopy(draft['values'])}
+    return node
+
+
+async def change_node_draft(user_id, node_key, values, backend, state, *, baseline_node=None):
+    data = await state.get_data()
+    draft = data.get('node_settings_draft')
+    if not draft or draft['node_key'] != node_key:
+        node = baseline_node or await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=user_id)
+        baseline = {field: deepcopy(node.get(field)) for field in _DRAFT_FIELDS}
+        baseline['notes'] = baseline['notes'] or ''
+        draft = {'node_key': node_key, 'revision': node['desired_revision'],
+                 'baseline': baseline, 'values': deepcopy(baseline), 'command_key': str(uuid4())}
+    draft = deepcopy(draft)
+    draft['values'].update(deepcopy(values))
+    await state.update_data(node_settings_draft=draft)
+
+
+async def draft_controls(node, state, locale):
+    draft = (await state.get_data()).get('node_settings_draft')
+    if draft and draft['node_key'] == node['key'] and draft['values'] != draft['baseline']:
+        return [[InlineKeyboardButton(text=tr(locale, 'nodes.draft.save'), callback_data=f'node_draft_save:{node["key"]}', style='primary'),
+                 InlineKeyboardButton(text=tr(locale, 'nodes.draft.reset'), callback_data=f'node_draft_reset:{node["key"]}')]]
+    if node['desired_revision'] > node['applied_revision']:
+        return [[InlineKeyboardButton(text=tr(locale, 'nodes.card.apply'), callback_data=ApplyNodeCallback(node_key=node['key']).pack(), style='primary')]]
+    return []
+
+
+@router.callback_query(F.data.startswith('node_draft_reset:'))
+async def reset_node_draft_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
+    await query.answer()
+    node_key = query.data.split(':', 1)[1]
+    data = await state.get_data()
+    draft = data.get('node_settings_draft')
+    if draft and draft['node_key'] == node_key:
+        await state.update_data(node_settings_draft=None)
+    view = data.get('node_settings_view', 'root')
+    args = (query.message.chat.id, query.from_user.id, query.message.message_id)
+    if view == 'protocols':
+        await show_node_protocols(*args, node_key, bot, backend, state)
+    elif view == 'channel':
+        await show_node_connection(*args, node_key, bot, backend, state)
+    elif view in {'awg', 'xray', 'general', 'connection'}:
+        from .admin_node_tools import show_section
+        await show_section(*args, view, node_key, bot, backend, state)
+    else:
+        await show_node_settings(*args, node_key, bot, backend, state)
+
+
+@router.callback_query(F.data.startswith('node_draft_save:'))
+async def save_node_draft_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
+    await query.answer()
+    data = await state.get_data()
+    draft = data.get('node_settings_draft')
+    node_key = query.data.split(':', 1)[1]
+    if not draft or draft['node_key'] != node_key or draft['values'] == draft['baseline']:
+        return
+    try:
+        values = {key: value for key, value in draft['values'].items() if value != draft['baseline'][key]}
+        node = await backend.edit_node(query.from_user.id, node_key, draft['revision'], values, command_key=draft['command_key'])
+    except BackendError as exc:
+        locale = normalize_locale(data.get('locale'))
+        message = tr(locale, 'nodes.draft.in_use' if exc.code == 'node_protocol_in_use' else
+                     'nodes.draft.conflict' if exc.code == 'revision_conflict' else 'nodes.settings.save_failed')
+        await render(bot, query.message.chat.id, Screen(tr(locale, 'nodes.settings.save_failed_title'),
+            (message,), embedded_buttons=True, navigation=True),
+            [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data=NodeSettingsCallback(node_key=node_key).pack())]], state, query.message.message_id)
+        return
+    await state.update_data(node_settings_draft=None)
+    await apply_node(query.message.chat.id, query.from_user.id, query.message.message_id, node_key, bot, backend, state, revision=node['desired_revision'])
 
 @router.callback_query(AdminNodesCallback.filter())
 async def admin_nodes_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
@@ -571,20 +652,18 @@ async def show_admin_node(chat_id, user_id, message_id, node_key, bot, backend, 
     except BackendError:
         overview = None
 
+    pending = bool(await draft_controls(node, state, locale))
+    lines = []
     sections = []
-    lines = [node.get('region') or '—']
+    install_rows = []
     if overview:
         state_key = overview.get('state', 'unknown')
         lines.append(tr(locale, 'nodes.card.state', value=tr(locale, 'nodes.card.state.' + state_key)))
         job = overview.get('last_job')
         if job and job['status'] in {'awaiting_executor', 'running', 'blocked'}:
-            primary = InlineKeyboardButton(text=tr(locale, 'node_tools.last_operation'), callback_data='node_job:' + job['id'], style='primary')
-        elif state_key == 'changes_pending':
-            primary = InlineKeyboardButton(text=tr(locale, 'nodes.card.settings'), callback_data=NodeSettingsCallback(node_key=node_key).pack(), style='primary')
-        else:
-            primary = InlineKeyboardButton(text=tr(locale, 'nodes.card.bootstrap'), callback_data=f'bootstrap_menu:{node_key}', style='primary' if state_key == 'not_installed' else None)
-        if not overview.get('settings_complete', True):
-            lines.append(tr(locale, 'nodes.card.settings_incomplete'))
+            install_rows.append((InlineKeyboardButton(text=tr(locale, 'node_tools.last_operation'), callback_data='node_job:' + job['id'], style='primary'),))
+        if state_key == 'not_installed':
+            install_rows.append((InlineKeyboardButton(text=tr(locale, 'nodes.card.bootstrap'), callback_data=f'bootstrap_menu:{node_key}', style='primary'),))
         sections.append(Section(tr(locale, 'nodes.rich.access'), tables=(Table(
             (tr(locale, 'admin.rich.item'), tr(locale, 'admin.rich.value')),
             ((tr(locale, 'nodes.rich.ready'), str(overview['ready'])),
@@ -592,33 +671,28 @@ async def show_admin_node(chat_id, user_id, message_id, node_key, bot, backend, 
              (tr(locale, 'nodes.rich.failed'), str(overview['failed'] + overview['attention'])))),)))
     else:
         lines.append(tr(locale, 'nodes.card.summary_unavailable'))
-        primary = InlineKeyboardButton(text=tr(locale, 'nodes.card.bootstrap'), callback_data=f'bootstrap_menu:{node_key}')
-    install_rows = [(primary, InlineKeyboardButton(text=tr(locale, 'nodes.card.probe'), callback_data=ProbeNodeCallback(node_key=node_key).pack()))]
-    if primary.callback_data != f'bootstrap_menu:{node_key}':
-        install_rows.append((InlineKeyboardButton(text=tr(locale, 'nodes.card.bootstrap'), callback_data=f'bootstrap_menu:{node_key}'),))
-    sections.insert(0, Section(tr(locale, 'nodes.rich.installation'),
-        (tr(locale, 'nodes.rich.agent_note'),), rows=tuple(install_rows)))
-    sections.insert(1, Section(tr(locale, 'nodes.rich.services'),
-        rows=(tuple(InlineKeyboardButton(text=tr(locale, 'protocol.' + protocol),
-            callback_data=f'node_section:{protocol}:{node_key}') for protocol in node['protocols']),)))
-    pending = node['desired_revision'] > node['applied_revision']
-    sections.insert(2, Section(tr(locale, 'nodes.rich.configuration'),
+    install_rows.append((InlineKeyboardButton(text=tr(locale, 'nodes.card.probe'), callback_data=ProbeNodeCallback(node_key=node_key).pack()),))
+    sections.insert(0, Section(tr(locale, 'nodes.rich.installation'), rows=tuple(install_rows)))
+    sections.insert(1, Section(tr(locale, 'nodes.rich.configuration'),
         (tr(locale, 'nodes.rich.pending' if pending else 'nodes.rich.applied'),),
-        rows=((InlineKeyboardButton(text=tr(locale, 'nodes.card.settings'), callback_data=NodeSettingsCallback(node_key=node_key).pack()),),)))
+        rows=((InlineKeyboardButton(text=tr(locale, 'nodes.card.settings'), callback_data=NodeSettingsCallback(node_key=node_key).pack(), style='primary' if pending else None),),)))
     if node.get('notes'):
         sections.append(Section(tr(locale, 'nodes.settings.field.notes'), (node['notes'],), collapsed=True))
-    await render(bot, chat_id, Screen(server_label(node), tuple(lines), sections=tuple(sections), embedded_buttons=True, navigation=True),
+    title = f"{node.get('region') or tr(locale, 'nodes.region_unknown')} · {server_label(node)}"
+    await render(bot, chat_id, Screen(title, tuple(lines), sections=tuple(sections), embedded_buttons=True, navigation=True),
         [[InlineKeyboardButton(text=tr(locale, 'nodes.rich.manage'), callback_data=f'node_manage:{node_key}', style='link')],
          [InlineKeyboardButton(text=tr(locale, 'nodes.card.to_list'), callback_data=AdminNodesCallback().pack())]], state, message_id)
 
 
 @router.callback_query(F.data.startswith('node_manage:'))
-async def node_manage_cb(query: CallbackQuery, bot: Bot, state: FSMContext):
+async def node_manage_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
     await query.answer()
     node_key = query.data.split(':', 1)[1]
     locale = normalize_locale((await state.get_data()).get('locale'))
+    node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=query.from_user.id)
     await render(bot, query.message.chat.id, Screen(tr(locale, 'nodes.rich.manage'), embedded_buttons=True, navigation=True),
-        [[InlineKeyboardButton(text=tr(locale, 'nodes.maintenance.title'), callback_data=NodeMaintenanceCallback(node_key=node_key).pack())],
+        [[InlineKeyboardButton(text=tr(locale, 'nodes.draft.reinstall' if node['applied_revision'] else 'nodes.card.bootstrap'), callback_data=f'bootstrap_menu:{node_key}')],
+         [InlineKeyboardButton(text=tr(locale, 'nodes.maintenance.title'), callback_data=NodeMaintenanceCallback(node_key=node_key).pack())],
          [InlineKeyboardButton(text=tr(locale, 'nodes.rich.technical'), callback_data=f'node_technical:{node_key}')],
          [InlineKeyboardButton(text=tr(locale, 'back'), callback_data=AdminNodeCallback(node_key=node_key).pack())]], state, query.message.message_id)
 
@@ -654,29 +728,27 @@ async def node_settings_cb(query: CallbackQuery, callback_data: NodeSettingsCall
     await show_node_settings(query.message.chat.id, query.from_user.id, query.message.message_id, callback_data.node_key, bot, backend, state)
 
 async def show_node_settings(chat_id, user_id, message_id, node_key, bot, backend, state):
-    node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=user_id)
-    settings = node['settings']
+    node = await editable_node(user_id, node_key, backend, state)
     locale = normalize_locale((await state.get_data()).get('locale'))
     await state.set_state(None)
-    pending = node['desired_revision'] > node['applied_revision']
+    await state.update_data(node_settings_view='root')
+    controls = await draft_controls(node, state, locale)
     sections = [Section(tr(locale, 'nodes.rich.configuration'),
-        (tr(locale, 'nodes.rich.pending' if pending else 'nodes.rich.applied'), tr(locale, 'nodes.rich.settings_note')),
-        rows=((InlineKeyboardButton(text=tr(locale, 'nodes.card.apply'), callback_data=ApplyNodeCallback(node_key=node_key).pack(), style='primary'),),) if pending else ()),
-        Section(tr(locale, 'node_tools.general'), (tr(locale, 'nodes.rich.name_region'),),
-            rows=((InlineKeyboardButton(text=tr(locale, 'profile.layout.edit'), callback_data=f'node_section:general:{node_key}'),),)),
-        Section(tr(locale, 'nodes.rich.connection'), (settings.get('public_host') or '—',),
-            rows=((InlineKeyboardButton(text=tr(locale, 'profile.layout.edit'), callback_data=f'node_section:connection:{node_key}'),),)),
-        Section(tr(locale, 'nodes.rich.services'), rows=((InlineKeyboardButton(text=tr(locale, 'nodes.rich.protocol_options'), callback_data=NodeProtocolsCallback(node_key=node_key).pack()),),))]
-    for protocol in node['protocols']:
-        sections.append(Section(tr(locale, 'protocol.' + protocol),
-            rows=((InlineKeyboardButton(text=tr(locale, 'nodes.card.settings'), callback_data=f'node_section:{protocol}:{node_key}'),),)))
+        (tr(locale, 'nodes.rich.pending' if controls else 'nodes.rich.applied'),),
+        rows=tuple(tuple(row) for row in controls)),
+        Section(tr(locale, 'node_tools.general'), rows=((InlineKeyboardButton(text=tr(locale, 'profile.layout.edit'), callback_data=f'node_section:general:{node_key}'),),)),
+        Section(tr(locale, 'nodes.rich.connection'), rows=((InlineKeyboardButton(text=tr(locale, 'profile.layout.edit'), callback_data=f'node_section:connection:{node_key}'),),)),
+        Section(tr(locale, 'nodes.draft.protocol_settings'), rows=(tuple(
+            InlineKeyboardButton(text=tr(locale, 'protocol.' + protocol), callback_data=f'node_section:{protocol}:{node_key}') for protocol in node['protocols']),
+            (InlineKeyboardButton(text=tr(locale, 'nodes.rich.protocol_options'), callback_data=NodeProtocolsCallback(node_key=node_key).pack()),)))]
     await render(bot, chat_id, Screen(tr(locale, 'nodes.settings.title'), sections=tuple(sections), embedded_buttons=True, navigation=True),
         [[InlineKeyboardButton(text=tr(locale, 'nodes.card.back_to_server'), callback_data=AdminNodeCallback(node_key=node_key).pack())]], state, message_id)
 
 
 async def show_node_connection(chat_id, user_id, message_id, node_key, bot, backend, state):
     locale = normalize_locale((await state.get_data()).get('locale'))
-    node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=user_id)
+    node = await editable_node(user_id, node_key, backend, state)
+    await state.update_data(node_settings_view='channel')
     transport = node.get('transport')
     rows = [[InlineKeyboardButton(text=tr(locale, 'nodes.connection.local'),
         callback_data=f'node_connection_set:{node_key}:local', style='primary' if transport == 'local' else None),
@@ -687,6 +759,7 @@ async def show_node_connection(chat_id, user_id, message_id, node_key, bot, back
             callback_data=EditNodeFieldCallback(node_key=node_key, field='ssh_target').pack())])
     rows.append([InlineKeyboardButton(text=tr(locale, 'back'),
         callback_data=f'node_section:connection:{node_key}')])
+    controls = await draft_controls(node, state, locale)
     await render(bot, chat_id, Screen(tr(locale, 'nodes.connection.title'),
         sections=(Section(tr(locale, 'nodes.rich.connection'), tables=(Table(
             (tr(locale, 'account.rich.field'), tr(locale, 'account.rich.value')),
@@ -695,7 +768,7 @@ async def show_node_connection(chat_id, user_id, message_id, node_key, bot, back
             rows=tuple(tuple(row) for row in rows[:-1])),
             Section(tr(locale, 'nodes.rich.about_connection'), collapsed=True,
                 lines=(tr(locale, 'nodes.connection.note'),))),
-        embedded_buttons=True, navigation=True), rows[-1:], state, message_id)
+        embedded_buttons=True, navigation=True), controls + rows[-1:], state, message_id)
 
 
 @router.callback_query(F.data.startswith('node_connection:'))
@@ -713,16 +786,14 @@ async def node_connection_set_cb(query: CallbackQuery, bot: Bot, backend: Backen
     _, node_key, transport = query.data.split(':', 2)
     if transport not in {'local', 'ssh'}:
         return
-    node = await backend.request('GET', f'/api/v1/nodes/{node_key}',
-                                 telegram_user_id=query.from_user.id)
+    node = await editable_node(query.from_user.id, node_key, backend, state)
     if transport == 'ssh' and not node.get('ssh_target'):
         await _prompt_node_ssh_target(query.message.chat.id, query.message.message_id,
             node_key, node, bot, state, switch_transport=True)
         return
     body = {'transport': transport, 'ssh_target': node['ssh_target'] if transport == 'ssh' else None}
     try:
-        await backend.edit_node(query.from_user.id, node_key, node['desired_revision'], body,
-                                command_key=str(uuid4()))
+        await change_node_draft(query.from_user.id, node_key, body, backend, state)
     except BackendError:
         locale = normalize_locale((await state.get_data()).get('locale'))
         await render(bot, query.message.chat.id, Screen(tr(locale, 'nodes.connection.title'),
@@ -757,7 +828,8 @@ async def edit_node_field_cb(query: CallbackQuery, callback_data: EditNodeFieldC
         await show_node_settings(query.message.chat.id, user_id, query.message.message_id, node_key, bot, backend, state)
         return
         
-    node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=user_id)
+    node = await editable_node(user_id, node_key, backend, state)
+    await change_node_draft(user_id, node_key, {}, backend, state, baseline_node=node)
     if field == 'ssh_target':
         await _prompt_node_ssh_target(query.message.chat.id, query.message.message_id,
             node_key, node, bot, state)
@@ -769,6 +841,17 @@ async def edit_node_field_cb(query: CallbackQuery, callback_data: EditNodeFieldC
     
     current = node.get(field) if field in {'title', 'region', 'flag', 'notes'} else node['settings'].get(field)
     locale = normalize_locale((await state.get_data()).get('locale'))
+    if field == 'region':
+        await state.set_state(None)
+        choices = [InlineKeyboardButton(text=f'{icon} {tr(locale, "region." + token)}',
+            callback_data=f'node_region:{token}:{node_key}', style='primary' if current == name else None)
+            for token, icon, name in REGION_PRESETS]
+        rows = [choices[index:index + 2] for index in range(0, len(choices), 2)]
+        rows += [[InlineKeyboardButton(text=tr(locale, 'region.other'), callback_data=f'node_region:other:{node_key}')],
+                 [InlineKeyboardButton(text=tr(locale, 'back'), callback_data=f'node_section:general:{node_key}')]]
+        await render(bot, query.message.chat.id, Screen(tr(locale, 'nodes.settings.field.region'),
+            (tr(locale, 'region.choose'),), embedded_buttons=True, navigation=True), rows, state, query.message.message_id)
+        return
     if field == 'awg_i1_preset':
         choices = [InlineKeyboardButton(text=label,
                     callback_data=f'node_awg_preset:{preset}:{node_key}',
@@ -793,15 +876,37 @@ async def edit_node_field_cb(query: CallbackQuery, callback_data: EditNodeFieldC
             callback_data=f'node_section:{(await state.get_data()).get("edit_section", "general")}:{node_key}')]],
         state, query.message.message_id)
 
+
+@router.callback_query(F.data.startswith('node_region:'))
+async def edit_node_region_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
+    await query.answer()
+    _, token, node_key = query.data.split(':', 2)
+    data = await state.get_data()
+    if data.get('edit_node_key') != node_key or data.get('edit_field') != 'region':
+        return
+    locale = normalize_locale(data.get('locale'))
+    if token == 'other':
+        await state.set_state(NodeEditState.waiting_for_value)
+        await render(bot, query.message.chat.id, Screen(tr(locale, 'nodes.settings.field.region'),
+            (tr(locale, 'region.custom'),), embedded_buttons=True, navigation=True),
+            [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data=EditNodeFieldCallback(node_key=node_key, field='region').pack())]], state, query.message.message_id)
+        return
+    name = next((name for code, _, name in REGION_PRESETS if code == token), None)
+    if name is None:
+        return
+    await change_node_draft(query.from_user.id, node_key, {'region': name}, backend, state)
+    from .admin_node_tools import show_section
+    await show_section(query.message.chat.id, query.from_user.id, query.message.message_id, 'general', node_key, bot, backend, state)
+
 @router.callback_query(F.data.startswith('node_awg_preset:'))
 async def select_awg_preset(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
     await query.answer()
     _, preset, node_key = query.data.split(':', 2)
     if preset not in {'quic', 'dns', 'chaos'}:
         return
-    node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=query.from_user.id)
-    await backend.edit_node(query.from_user.id, node_key, node['desired_revision'],
-        {'settings': {**node['settings'], 'awg_i1_preset': preset}}, command_key=str(uuid4()))
+    node = await editable_node(query.from_user.id, node_key, backend, state)
+    await change_node_draft(query.from_user.id, node_key,
+        {'settings': {**node['settings'], 'awg_i1_preset': preset}}, backend, state)
     await _clear_node_flow(state)
     from .admin_node_tools import show_section
     await show_section(query.message.chat.id, query.from_user.id, query.message.message_id,
@@ -845,8 +950,7 @@ async def process_node_edit(message: Message, bot: Bot, backend: BackendClient, 
     else:
         body = ({field: parsed} if field in {'title', 'region', 'flag', 'notes'} else {'settings': {**settings, field: parsed}})
     try:
-        await backend.edit_node(user_id, node_key, revision, body,
-                                command_key=data['edit_command_key'])
+        await change_node_draft(user_id, node_key, body, backend, state)
         await _clear_node_flow(state)
         if field == 'ssh_target':
             await show_node_connection(message.chat.id, user_id, message_id,
@@ -870,14 +974,20 @@ async def node_protocols_cb(query: CallbackQuery, callback_data: NodeProtocolsCa
 
 async def show_node_protocols(chat_id, user_id, message_id, node_key, bot, backend, state):
     locale = normalize_locale((await state.get_data()).get('locale'))
-    node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=user_id)
+    node = await editable_node(user_id, node_key, backend, state)
+    await state.set_state(None)
+    await state.update_data(node_settings_view='protocols')
     enabled, transports = set(node['protocols']), set(node['xray_transports'])
-    rows = [[InlineKeyboardButton(text=('✓ ' if kind in enabled else '+ ') + kind.upper(), callback_data=ToggleNodeProtocolCallback(node_key=node_key, kind=kind).pack())] for kind in ('awg', 'xray')]
+    rows = [[InlineKeyboardButton(text=tr(locale, 'protocol.' + kind), style='primary' if kind in enabled else None,
+        callback_data=ToggleNodeProtocolCallback(node_key=node_key, kind=kind).pack()) for kind in ('awg', 'xray')]]
     if 'xray' in enabled:
-        rows += [[InlineKeyboardButton(text=('✓ ' if kind in transports else '+ ') + kind.upper(), callback_data=ToggleNodeTransportCallback(node_key=node_key, kind=kind).pack())] for kind in ('tcp', 'xhttp')]
+        rows += [[InlineKeyboardButton(text=kind.upper(), style='primary' if kind in transports else None,
+            callback_data=ToggleNodeTransportCallback(node_key=node_key, kind=kind).pack()) for kind in ('tcp', 'xhttp')]]
+    rows.extend(await draft_controls(node, state, locale))
     rows.append([InlineKeyboardButton(text=tr(locale, 'back'), callback_data=NodeSettingsCallback(node_key=node_key).pack())])
     await render(bot, chat_id, Screen(tr(locale, 'nodes.protocols.title'),
-        (tr(locale, 'nodes.protocols.apply_note'), tr(locale, 'nodes.protocols.grants_note')), embedded_buttons=True, navigation=True),
+        (tr(locale, 'nodes.draft.protocol_note'),), details_title=tr(locale, 'nodes.rich.advanced'),
+        details_lines=(tr(locale, 'nodes.protocols.grants_note'),), embedded_buttons=True, navigation=True),
         rows, state, message_id)
 
 @router.callback_query(ToggleNodeProtocolCallback.filter())
@@ -892,7 +1002,7 @@ async def toggle_transport_cb(query: CallbackQuery, callback_data: ToggleNodeTra
 
 async def toggle_node_feature(chat_id, user_id, message_id, node_key, kind, transport, bot, backend, state):
     if kind not in ({'tcp', 'xhttp'} if transport else {'awg', 'xray'}): return
-    node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=user_id)
+    node = await editable_node(user_id, node_key, backend, state)
     protocols, transports = set(node['protocols']), set(node['xray_transports'])
     selected = transports if transport else protocols
     selected.symmetric_difference_update({kind})
@@ -905,7 +1015,12 @@ async def toggle_node_feature(chat_id, user_id, message_id, node_key, kind, tran
             state, message_id)
         return
     if 'xray' not in protocols: transports.clear()
-    elif not transports: transports.update({'tcp', 'xhttp'} if not transport else {'tcp'})
+    elif not transports:
+        if transport:
+            locale = normalize_locale((await state.get_data()).get('locale'))
+            await queryless_protocol_error(chat_id, message_id, node_key, bot, state, locale)
+            return
+        transports.update({'tcp', 'xhttp'})
     
     settings = dict(node['settings'])
     if 'awg' in protocols: settings.setdefault('awg_port', 51820)
@@ -913,10 +1028,16 @@ async def toggle_node_feature(chat_id, user_id, message_id, node_key, kind, tran
         for f, d in {'xray_sni': 'www.cloudflare.com', 'xray_tcp_port': 443, 'xray_xhttp_port': 8443, 'xray_xhttp_path': '/assets'}.items():
             settings.setdefault(f, d)
             
-    await backend.edit_node(user_id, node_key, node['desired_revision'],
+    await change_node_draft(user_id, node_key,
         {'protocols': sorted(protocols), 'xray_transports': sorted(transports),
-         'settings': settings}, command_key=str(uuid4()))
+         'settings': settings}, backend, state)
     await show_node_protocols(chat_id, user_id, message_id, node_key, bot, backend, state)
+
+
+async def queryless_protocol_error(chat_id, message_id, node_key, bot, state, locale):
+    await render(bot, chat_id, Screen(tr(locale, 'nodes.protocols.required_title'),
+        (tr(locale, 'nodes.draft.transport_required'),), embedded_buttons=True, navigation=True),
+        [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data=NodeProtocolsCallback(node_key=node_key).pack())]], state, message_id)
 
 @router.callback_query(ProbeNodeCallback.filter())
 async def probe_node_cb(query: CallbackQuery, callback_data: ProbeNodeCallback, bot: Bot, backend: BackendClient, state: FSMContext):

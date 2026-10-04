@@ -211,6 +211,45 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         self.assertFalse(any(value.startswith('accounts') for value in callbacks))
         self.assertTrue(any(value.startswith('admin_profiles') for value in callbacks))
 
+    async def test_status_uses_compact_table_and_conditional_attention(self):
+        overview = {'version': '0.4.3', 'nodes_enabled': 2, 'nodes_total': 3,
+            'profiles_active': 4, 'profiles_total': 5, 'profiles_frozen': 1,
+            'pending_requests': 2, 'problem_nodes': [{'key': 'lv1', 'title': 'Latvia'}]}
+        backend = SimpleNamespace(admin_overview=AsyncMock(return_value=overview))
+        for locale in ('en', 'ru'):
+            self.state_data['locale'] = locale
+            with patch.object(user, 'render', new_callable=AsyncMock) as draw:
+                await user.show_admin_status(123, 123, 77, self.bot, backend, self.state)
+            screen, rows = draw.call_args.args[2:4]
+            self.assertEqual(screen.sections[0].tables[0].rows[0][1], '2/3')
+            self.assertTrue(screen.sections[-1].collapsed)
+            callbacks = [b.callback_data for row in screen.fallback_rows(rows) for b in row]
+            self.assertIn('admin_problem_nodes', callbacks)
+            self.assertEqual(rows[-1][0].callback_data, 'admin_menu')
+            screen.rich(rows)
+        overview.update(problem_nodes=[], pending_requests=0)
+        with patch.object(user, 'render', new_callable=AsyncMock) as draw:
+            await user.show_admin_status(123, 123, 77, self.bot, backend, self.state)
+        self.assertEqual(len(draw.call_args.args[2].sections), 3)
+
+    async def test_problem_nodes_group_regions_and_clamp_page_after_recovery(self):
+        affected = [{'key': f'n{i:02}', 'title': f'Node {i:02}', 'region': 'Europe', 'flag': '🌍'} for i in range(11)]
+        backend = SimpleNamespace(admin_overview=AsyncMock(return_value={'problem_nodes': affected}))
+        with patch.object(user, 'render', new_callable=AsyncMock) as draw:
+            await user.show_admin_problem_nodes(123, 123, 77, self.bot, backend, self.state, 1)
+        screen, rows = draw.call_args.args[2:4]
+        self.assertEqual(screen.sections[0].title, 'Europe')
+        self.assertEqual(len(screen.sections[0].sections), 1)
+        self.assertEqual(rows[0][0].text, '←')
+        self.assertEqual(rows[0][1].text, '2/2')
+        self.assertEqual(screen.sections[0].sections[0].rows[0][0].text, '🌍 Node 10')
+        backend.admin_overview.return_value = {'problem_nodes': []}
+        with patch.object(user, 'render', new_callable=AsyncMock) as draw:
+            await user.show_admin_problem_nodes(123, 123, 77, self.bot, backend, self.state, 99)
+        screen, rows = draw.call_args.args[2:4]
+        self.assertEqual(len(rows), 2)
+        self.assertIn(user.tr('en', 'admin.status.no_problems'), screen.lines)
+
     async def test_admin_home_table_attention_and_embedded_navigation_are_localized(self):
         overview = {'nodes_enabled': 2, 'nodes_total': 3, 'profiles_active': 4,
             'profiles_total': 5, 'pending_requests': 2,
@@ -333,9 +372,9 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             self.query.data = f'node_awg_preset:{preset}:lv1'
             with patch.object(admin_node_tools, 'show_section', new_callable=AsyncMock):
                 await admin_nodes.select_awg_preset(self.query, self.bot, backend, self.state)
-            body = backend.edit_node.call_args.args[3]
+            body = self.state_data['node_settings_draft']['values']
             self.assertEqual(body['settings'], {'awg_port': 51820, 'awg_i1_preset': preset})
-        self.assertEqual(backend.request.call_count, 3)
+        backend.edit_node.assert_not_awaited()
 
     async def test_node_action_preserves_command_idempotency_header(self):
         client = BackendClient.__new__(BackendClient)
@@ -985,10 +1024,11 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             await admin_nodes.node_connection_set_cb(self.query, self.bot, backend, self.state)
             backend.edit_node.assert_not_awaited()
             await admin_nodes.process_node_edit(message, self.bot, backend, self.state)
-        backend.edit_node.assert_awaited_once()
-        self.assertEqual(backend.edit_node.await_args.args[:4],
-                         (123, 'lv1', 4, {'transport': 'ssh',
-                                        'ssh_target': 'root@lv1.example.com'}))
+        backend.edit_node.assert_not_awaited()
+        draft = self.state_data['node_settings_draft']
+        self.assertEqual(draft['revision'], 4)
+        self.assertEqual(draft['values']['transport'], 'ssh')
+        self.assertEqual(draft['values']['ssh_target'], 'root@lv1.example.com')
 
     async def test_protocol_toggle_uses_a_valid_idempotency_key(self):
         backend = SimpleNamespace(request=AsyncMock(return_value={
@@ -997,10 +1037,11 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         with patch.object(admin_nodes, 'show_node_protocols', new_callable=AsyncMock):
             await admin_nodes.toggle_node_feature(123, 123, 77, 'lv1', 'xhttp',
                                                   True, self.bot, backend, self.state)
-        args, kwargs = backend.edit_node.await_args
-        self.assertEqual(args[:3], (123, 'lv1', 3))
-        self.assertEqual(args[3]['xray_transports'], ['tcp', 'xhttp'])
-        UUID(kwargs['command_key'])
+        backend.edit_node.assert_not_awaited()
+        draft = self.state_data['node_settings_draft']
+        self.assertEqual(draft['revision'], 3)
+        self.assertEqual(draft['values']['xray_transports'], ['tcp', 'xhttp'])
+        UUID(draft['command_key'])
 
     async def test_apply_stays_in_settings_and_handles_backend_failure(self):
         node = {'key': 'lv1', 'title': 'Latvia', 'region': 'EU', 'flag': '🇱🇻',
