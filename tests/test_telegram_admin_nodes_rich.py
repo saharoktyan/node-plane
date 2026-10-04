@@ -77,6 +77,14 @@ class AdminNodeRichTests(IsolatedAsyncioTestCase):
             self.assertIn('node_section:general:msk1', callbacks)
             self.assertNotIn('node_tools:msk1', callbacks)
             self.assertNotIn('51820', draw.call_args.args[2].plain())
+            self.assertNotIn(tr('en', 'nodes.rich.applied'), draw.call_args.args[2].plain())
+
+    async def test_applied_card_has_no_permanent_success_notice(self):
+        self.node['applied_revision'] = self.node['desired_revision']
+        with patch.object(nodes, 'render', new_callable=AsyncMock) as draw:
+            await nodes.show_admin_node(123, 123, 77, 'msk1', self.bot, self.backend, self.state)
+        self.assertNotIn(tr('en', 'nodes.rich.applied'), draw.call_args.args[2].plain())
+        self.assertNotIn(tr('en', 'nodes.rich.pending'), draw.call_args.args[2].plain())
 
     async def test_protocol_settings_have_tables_and_all_existing_edit_actions(self):
         expected = {'general': {'title', 'flag', 'region', 'notes'}, 'connection': {'public_host'},
@@ -93,7 +101,13 @@ class AdminNodeRichTests(IsolatedAsyncioTestCase):
                 actual = {c.split(':')[-1] for c in callbacks if c.startswith('edit_node_field:')}
                 self.assertEqual(actual, fields)
                 self.assertTrue(any(c.startswith('apply_node:') for c in callbacks))
-                self.assertTrue(any(s.tables for s in screen.sections))
+                groups = screen.sections[0].sections if section in {'awg', 'xray'} else screen.sections
+                self.assertTrue(any(s.tables for s in groups))
+                headings = [b.size for b in screen.rich(rows).blocks if b.type == 'heading']
+                self.assertEqual(headings[0], 1)
+                self.assertIn(2, headings)
+                if section in {'awg', 'xray'}:
+                    self.assertIn(3, headings)
                 self.assertEqual(rows[-1][0].callback_data, 'node_settings:msk1')
 
     async def test_region_presets_and_other_keep_node_flag_and_draft(self):

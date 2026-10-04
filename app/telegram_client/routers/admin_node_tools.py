@@ -105,7 +105,7 @@ async def show_section(chat_id, user_id, message_id, section, node_key, bot, bac
         buttons = [field_button(field) for field in selected]
         rows = [tuple(buttons[index:index + 2]) for index in range(0, len(buttons), 2)]
         rows.extend(extra)
-        return Section(tr(locale, title), collapsed=collapsed,
+        return Section(tr(locale, title), collapsed=collapsed, heading_size=3 if section in {'awg', 'xray'} else 2,
             tables=(Table((tr(locale, 'account.rich.field'), tr(locale, 'account.rich.value')),
                 tuple((tr(locale, 'nodes.settings.field.' + field), str(node.get(field, node['settings'].get(field, defaults.get(field, '—'))) or '—')) for field in selected)),) if selected else (), rows=tuple(rows))
     if section == 'general':
@@ -124,6 +124,9 @@ async def show_section(chat_id, user_id, message_id, section, node_key, bot, bac
                 button(locale, 'node_tools.regenerate_entropy', f'node_action:regenerate_entropy:{node_key}'),),)),
             group('nodes.rich.advanced', ('awg_interface',), extra=((
                 button(locale, 'node_tools.entropy', f'node_view:entropy:{node_key}'),),), collapsed=True))
+    if section in {'awg', 'xray'}:
+        sections = (Section(tr(locale, 'nodes.draft.protocol_settings'),
+            heading_size=2, sections=sections),)
     await render(bot, chat_id, Screen(tr(locale, 'nodes.rich.connection' if section == 'connection' else 'node_tools.' + section),
         (tr(locale, 'nodes.rich.settings_note'),), sections=sections, embedded_buttons=True, navigation=True),
         await draft_controls(node, state, locale) +

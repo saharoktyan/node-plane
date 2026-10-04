@@ -12,7 +12,7 @@ from .announcement_delivery import delivery_loop
 from .routers import admin_announcements
 from .routers import admin_system_cleanup
 from .routers import admin_alerts
-from .routers.common import BackendMiddleware, NotificationStateMiddleware
+from .routers.common import BackendMiddleware, LocaleMiddleware, NotificationStateMiddleware
 from .routers import user, admin_requests, admin_profiles, admin_nodes, admin_settings, admin_node_tools, admin_updates, admin_backups
 
 async def main() -> None:
@@ -30,6 +30,7 @@ async def main() -> None:
             backend = BackendClient(session, base_url, adapter_token)
             dispatcher = Dispatcher()
             dispatcher.update.outer_middleware(BackendMiddleware(backend))
+            dispatcher.update.outer_middleware(LocaleMiddleware())
             dispatcher.update.outer_middleware(NotificationStateMiddleware())
             
             dispatcher.include_router(user.router)
