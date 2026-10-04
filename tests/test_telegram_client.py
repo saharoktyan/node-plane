@@ -27,6 +27,106 @@ class RouterStartupTests(TestCase):
 
 
 class TelegramFlowTests(IsolatedAsyncioTestCase):
+    async def test_idle_member_navigation_is_reusable_without_start(self):
+        self.query.data = user.button(123, 'Home', 'home').callback_data
+        with patch.object(user, 'time', SimpleNamespace(monotonic=lambda: 10**12)), \
+             patch.object(user, 'show_home', new_callable=AsyncMock) as home:
+            await user.user_action_cb(self.query, self.bot, SimpleNamespace(), self.state)
+            await user.user_action_cb(self.query, self.bot, SimpleNamespace(), self.state)
+        self.assertEqual(home.await_count, 2)
+        self.assertIn(self.query.data[2:], user.actions)
+
+    async def test_unknown_callback_recovers_home_after_restart_without_replaying(self):
+        self.query.data = 'u:lost-on-restart'
+        backend = SimpleNamespace(me=AsyncMock(return_value={
+            'locale': 'ru', 'locale_selected': True, 'status': 'approved', 'role': 'member'}))
+        with patch.object(user, 'show_home', new_callable=AsyncMock) as home:
+            await user.user_action_cb(self.query, self.bot, backend, self.state)
+        self.assertEqual(self.state_data['locale'], 'ru')
+        self.assertEqual(home.call_args.args[-1], 77)
+        backend.me.assert_awaited_once_with(123)
+        self.query.answer.assert_awaited_once_with(text=None, request_timeout=3)
+
+    async def test_unknown_callback_recovers_language_picker_for_new_user(self):
+        self.query.data = 'u:lost-language-button'
+        backend = SimpleNamespace(me=AsyncMock(return_value={'locale_selected': False, 'locale': 'en'}))
+        with patch.object(user, 'show_language_picker', new_callable=AsyncMock) as picker:
+            await user.user_action_cb(self.query, self.bot, backend, self.state)
+        self.assertEqual(picker.call_args.args[-1], 77)
+
+    async def test_other_user_cannot_replay_navigation(self):
+        self.query.from_user.language_code = 'en'
+        self.query.data = user.button(999, 'Profile', 'account_profile', 'private', 'home').callback_data
+        backend = SimpleNamespace(me=AsyncMock())
+        with patch.object(user, 'show_account_profile', new_callable=AsyncMock) as profile:
+            await user.user_action_cb(self.query, self.bot, backend, self.state)
+        profile.assert_not_awaited()
+        backend.me.assert_not_awaited()
+        self.assertTrue(self.query.answer.call_args.kwargs['show_alert'])
+
+    async def test_callback_acknowledgement_failure_does_not_block_navigation(self):
+        from aiogram.exceptions import TelegramNetworkError
+        from aiogram.methods import AnswerCallbackQuery
+        self.query.data = user.button(123, 'Home', 'home').callback_data
+        self.query.answer.side_effect = TelegramNetworkError(
+            method=AnswerCallbackQuery(callback_query_id='query'), message='timeout')
+        with patch.object(user, 'show_home', new_callable=AsyncMock) as home:
+            await user.user_action_cb(self.query, self.bot, SimpleNamespace(), self.state)
+        home.assert_awaited_once()
+
+    async def test_language_selection_reuses_saved_account_and_opens_rich_access_gate(self):
+        account = {'role': 'member', 'status': 'pending', 'locale': 'ru', 'locale_selected': True}
+        backend = SimpleNamespace(set_locale=AsyncMock(return_value=account), me=AsyncMock(),
+            bot_title=AsyncMock(return_value={'title': 'Node Plane'}),
+            access_request_policy=AsyncMock(return_value={'enabled': True}),
+            request=AsyncMock(return_value={'items': []}))
+        self.query.data = user.button(123, 'Русский', 'first_locale', 'ru').callback_data
+        with patch.object(user, 'render', new_callable=AsyncMock) as draw:
+            await user.user_action_cb(self.query, self.bot, backend, self.state)
+        backend.me.assert_not_awaited()
+        backend.set_locale.assert_awaited_once_with(123, 'ru')
+        self.query.answer.assert_awaited_once_with(text=user.tr('ru', 'language.saving'), request_timeout=3)
+        screen, rows = draw.call_args.args[2:4]
+        self.assertTrue(screen.embedded_buttons)
+        self.assertEqual(screen.sections[0].title, 'Доступ к сервису')
+        request = screen.sections[0].rows[0][0]
+        self.assertEqual(request.text, 'Запросить доступ')
+        self.assertEqual(request.style, 'primary')
+        self.assertEqual([b.type for b in screen.rich(rows).blocks][-2:], ['divider', 'buttons'])
+        self.assertEqual(draw.call_args.args[-1], 77)
+
+    async def test_language_selection_timeout_shows_error_and_keeps_retry_possible(self):
+        import asyncio
+        async def slow_save(*args):
+            await asyncio.Event().wait()
+        backend = SimpleNamespace(set_locale=AsyncMock(side_effect=slow_save))
+        self.query.data = user.button(123, 'English', 'first_locale', 'en').callback_data
+        with patch.object(user, 'ONBOARDING_TIMEOUT', 0.01), \
+             patch.object(user, 'render', new_callable=AsyncMock) as draw:
+            await user.user_action_cb(self.query, self.bot, backend, self.state)
+        self.assertIn(user.tr('en', 'action.error.service'), draw.call_args.args[2].lines)
+        self.assertIn(self.query.data[2:], user.actions)
+
+    async def test_pending_home_loads_policy_and_requests_concurrently(self):
+        import asyncio
+        policy_started, requests_started = asyncio.Event(), asyncio.Event()
+        async def policy(*args):
+            policy_started.set()
+            await requests_started.wait()
+            return {'enabled': True}
+        async def requests(*args, **kwargs):
+            requests_started.set()
+            await policy_started.wait()
+            return {'items': [{'status': 'pending'}]}
+        backend = SimpleNamespace(me=AsyncMock(return_value={'role': 'member', 'status': 'pending'}),
+            bot_title=AsyncMock(return_value={'title': 'Node Plane'}),
+            access_request_policy=policy, request=requests)
+        with patch.object(user, 'ONBOARDING_TIMEOUT', 0.1), \
+             patch.object(user, 'render', new_callable=AsyncMock) as draw:
+            await user.show_home(123, 123, self.bot, backend, self.state, 77)
+        self.assertIn(user.tr('en', 'home.waiting'), draw.call_args.args[2].sections[0].lines)
+        self.assertEqual(draw.call_args.args[2].sections[0].rows, ())
+
     async def test_opening_empty_requests_has_an_explicit_screen(self):
         backend = SimpleNamespace(pending_access_requests=AsyncMock(return_value={'items': [], 'next_cursor': None}))
         with patch.object(admin_requests, 'render', new_callable=AsyncMock) as draw:
