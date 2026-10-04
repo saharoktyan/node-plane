@@ -264,8 +264,10 @@ class BackendClient:
                                   telegram_user_id=telegram_user_id)
 
     async def admin_nodes(self, telegram_user_id: int, *, cursor: str | None = None,
-                          search: str | None = None, limit: int = 100) -> dict:
+                          search: str | None = None, limit: int = 100, order: str = 'key') -> dict:
         params = {'limit': limit, 'include_summary': 'true'}
+        if order != 'key':
+            params['order'] = order
         if cursor:
             params['cursor'] = cursor
         if search:

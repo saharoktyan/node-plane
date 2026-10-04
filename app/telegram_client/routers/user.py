@@ -329,26 +329,68 @@ async def show_account_profile(chat_id: int, user_id: int, message_id: int,
     status_key = ('profile.frozen' if summary['frozen'] else
                   'profile.expired' if summary['expired'] else 'profile.active')
     status = tr(locale, status_key)
-    lines = [tr(locale, 'account.profile_name', name=summary['display_name']),
-             tr(locale, 'account.status', status=status)]
-    if summary.get('expires_at'):
-        lines.append(tr(locale, 'account.profile_expires', value=summary['expires_at'][:10]))
-    lines.extend((tr(locale, 'account.telegram_id', id=user_id),
-                  tr(locale, 'account.username', value='@' + username if username else '—')))
-    sections = (
-        Section(tr(locale, 'account.statistics'), profile_statistics(summary, locale)),
-        Section(tr(locale, 'account.access_title'),
-            () if summary['nodes'] else (tr(locale, 'account.access_empty'),),
-            collapsed=True, is_open=servers_open,
-            sections=region_sections(nodes, locale, lambda node: Section(server_label(node),
-                profile_node_traffic(summary, node, locale),
-                divider_after=node['key'] != nodes[-1]['key'], heading_size=3)),
-            rows=server_pagination(user_id, locale, page_index, pages,
-                'account_nodes_page', profile_id, back_to)),
-    )
-    await render(bot, chat_id, Screen(tr(locale, 'account.profile_title'), tuple(lines),
-        sections=sections, embedded_buttons=True, navigation=True),
+    facts = (tr(locale, 'account.rich.field'), tr(locale, 'account.rich.value'))
+    access = Section(tr(locale, 'account.rich.access'), tables=(Table(facts, (
+        (tr(locale, 'account.rich.status'), status),
+        (tr(locale, 'account.rich.expiry'), summary['expires_at'][:10] + ' UTC' if summary.get('expires_at') else tr(locale, 'profile.layout.unlimited')))),))
+    identity = Section(tr(locale, 'account.rich.identity'), tables=(Table(facts, (
+        (tr(locale, 'account.rich.username'), '@' + username if username else '—'),
+        (tr(locale, 'account.rich.telegram_id'), str(user_id)),
+        (tr(locale, 'account.rich.created'), (summary.get('created_at') or '')[:10] or '—'))),))
+    statistics = Section(tr(locale, 'account.statistics'),
+        (tr(locale, 'account.rich.enable_traffic'),) if (summary.get('traffic') or {}).get('status') == 'consent_required' else (),
+        tables=(Table(facts, (
+        (tr(locale, 'admin.nodes'), str(summary.get('node_count', len(summary['nodes'])))),
+        (tr(locale, 'account.rich.connections'), str(summary.get('protocol_count', 0))),
+        (tr(locale, 'protocol.xray'), str(summary.get('xray_count', 0))),
+        (tr(locale, 'protocol.awg'), str(summary.get('awg_count', 0))),
+        (tr(locale, 'account.rich.issued'), str(summary.get('issued_count', 0))),
+        (tr(locale, 'account.rich.last'), (summary.get('last_issued_at') or '')[:16].replace('T', ' ') or '—'))),))
+    traffic = profile_traffic_section(summary, locale)
+    servers = Section(tr(locale, 'account.access_title'),
+        () if summary['nodes'] else (tr(locale, 'account.access_empty'),),
+        collapsed=True, is_open=servers_open,
+        sections=region_sections(nodes, locale, lambda node: profile_server_section(summary, node, locale,
+            divider_after=node['key'] != nodes[-1]['key'])),
+        rows=server_pagination(user_id, locale, page_index, pages,
+            'account_nodes_page', profile_id, back_to))
+    sections = (access, identity, statistics, *((traffic,) if traffic else ()), servers)
+    await render(bot, chat_id, Screen(tr(locale, 'account.profile_title'),
+        (summary['display_name'],), sections=sections, embedded_buttons=True, navigation=True),
         [[button(user_id, tr(locale, 'back'), back_to)]], state, message_id)
+
+
+def profile_traffic_section(summary, locale):
+    traffic = summary.get('traffic')
+    if not traffic or traffic['status'] == 'consent_required':
+        return None
+    lines = [tr(locale, 'traffic.status.' + traffic['status'])]
+    tables = ()
+    if traffic['status'] in {'current', 'unknown'} and traffic.get('items'):
+        items = traffic['items']
+        total = sum(item['uplink_bytes'] + item['downlink_bytes'] for item in items)
+        lines.append(tr(locale, 'traffic.month_total', month=traffic.get('month') or '—', total=_traffic_bytes(total)))
+        tables = (Table((tr(locale, 'profile.rich.protocols'), tr(locale, 'account.rich.traffic')),
+            tuple((tr(locale, 'protocol.' + item['protocol']), _traffic_bytes(item['uplink_bytes'] + item['downlink_bytes'])) for item in items)),)
+    return Section(tr(locale, 'traffic.title'), tuple(lines), tables=tables)
+
+
+def profile_server_section(summary, node, locale, *, divider_after=False):
+    traffic = summary.get('traffic')
+    if not traffic or traffic['status'] == 'consent_required':
+        return Section(server_label(node), tuple(tr(locale, 'protocol.' + protocol) for protocol in node['protocols']),
+            divider_after=divider_after, heading_size=3)
+    rows, stale = [], False
+    for protocol in node['protocols']:
+        item = next((item for item in traffic.get('nodes', [])
+            if item['node_key'] == node['key'] and item['protocol'] == protocol), None)
+        rows.append((tr(locale, 'protocol.' + protocol),
+            _traffic_bytes(item['uplink_bytes'] + item['downlink_bytes']) if item else tr(locale, 'account.rich.waiting')))
+        stale |= bool(item and item['status'] != 'current')
+    return Section(server_label(node), (tr(locale, 'traffic.node_unknown'),) if stale else (),
+        tables=(Table((tr(locale, 'profile.rich.protocols'),
+            tr(locale, 'account.rich.month', month=traffic.get('month') or '—')), tuple(rows)),),
+        divider_after=divider_after, heading_size=3)
 
 
 

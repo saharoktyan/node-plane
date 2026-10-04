@@ -6,7 +6,7 @@ from aiogram.fsm.context import FSMContext
 
 from ..backend import BackendClient, BackendError
 from ..i18n import normalize_locale, tr
-from ..screens import Screen
+from ..screens import Screen, Section, Table
 from .common import render
 from .callbacks import AdminNodeCallback, NodeSettingsCallback, EditNodeFieldCallback
 
@@ -47,7 +47,7 @@ async def show_install(chat_id, user_id, message_id, node_key, bot, backend, sta
                 lines.append(tr(locale, 'node_tools.incomplete'))
                 rows.append([button(locale, 'nodes.card.settings', NodeSettingsCallback(node_key=node_key).pack())])
                 rows.append([button(locale, 'back', AdminNodeCallback(node_key=node_key).pack())])
-                await render(bot, chat_id, Screen(tr(locale, 'node_tools.install'), tuple(lines)), rows, state, message_id)
+                await render(bot, chat_id, Screen(tr(locale, 'node_tools.install'), tuple(lines), embedded_buttons=True, navigation=True), rows, state, message_id)
                 return
             present = any(facts[p + '_config_valid'] for p in node['protocols'])
             reusable = bool(node['protocols']) and all(facts[p + '_config_valid'] for p in node['protocols'])
@@ -66,7 +66,7 @@ async def show_install(chat_id, user_id, message_id, node_key, bot, backend, sta
         else:
             rows.append([button(locale, 'node_tools.refresh', f'bootstrap_menu:{node_key}')])
     rows.append([button(locale, 'back', AdminNodeCallback(node_key=node_key).pack())])
-    await render(bot, chat_id, Screen(tr(locale, 'node_tools.install'), tuple(lines)), rows, state, message_id)
+    await render(bot, chat_id, Screen(tr(locale, 'node_tools.install'), tuple(lines), embedded_buttons=True, navigation=True), rows, state, message_id)
 
 
 @router.callback_query(F.data.startswith('node_section:'))
@@ -78,7 +78,8 @@ async def section_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, sta
 
 
 async def show_section(chat_id, user_id, message_id, section, node_key, bot, backend, state):
-    fields = {'general': ('title', 'flag', 'region', 'public_host', 'notes'),
+    fields = {'general': ('title', 'flag', 'region', 'notes'),
+              'connection': ('public_host',),
               'xray': ('xray_host', 'xray_sni', 'xray_fingerprint', 'xray_tcp_port', 'xray_xhttp_port', 'xray_xhttp_path'),
               'awg': ('awg_public_host', 'awg_interface', 'awg_port', 'awg_i1_preset')}
     if section not in fields:
@@ -92,32 +93,33 @@ async def show_section(chat_id, user_id, message_id, section, node_key, bot, bac
     def field_button(field):
         return button(locale, 'nodes.settings.field.' + field,
                       EditNodeFieldCallback(node_key=node_key, field=field).pack())
-    if section == 'general':
-        from .callbacks import NodeProtocolsCallback
-        connection = button(locale, 'nodes.settings.field.transport', f'node_connection:{node_key}')
-        target = button(locale, 'nodes.settings.field.ssh_target',
-            EditNodeFieldCallback(node_key=node_key, field='ssh_target').pack()
-            if node.get('transport') == 'ssh' else f'node_connection:{node_key}')
-        rows = [[field_button('title'), field_button('flag')],
-                [field_button('region'), connection],
-                [target, field_button('public_host')],
-                [button(locale, 'nodes.settings.protocols', NodeProtocolsCallback(node_key=node_key).pack()), field_button('notes')]]
-    elif section == 'xray':
-        rows = [[field_button('xray_host'), field_button('xray_sni')],
-                [field_button('xray_fingerprint')],
-                [field_button('xray_tcp_port'), field_button('xray_xhttp_port')],
-                [field_button('xray_xhttp_path')]]
-    else:
-        rows = [[field_button('awg_public_host'), field_button('awg_interface')],
-                [field_button('awg_port'), field_button('awg_i1_preset')],
-                [button(locale, 'node_tools.entropy', f'node_view:entropy:{node_key}'),
-                 button(locale, 'node_tools.regenerate_entropy', f'node_action:regenerate_entropy:{node_key}')]]
-    rows.append([button(locale, 'nodes.card.back_to_settings', NodeSettingsCallback(node_key=node_key).pack())])
     defaults = {'xray_fingerprint': 'chrome', 'awg_interface': 'wg0', 'awg_i1_preset': 'quic'}
-    lines = [tr(locale, 'nodes.settings.value', field=tr(locale, 'nodes.settings.field.' + field),
-                value=node.get(field, node['settings'].get(field, defaults.get(field, '—'))) or '—') for field in fields[section]]
-    lines.append(tr(locale, 'nodes.settings.apply_note'))
-    await render(bot, chat_id, Screen(tr(locale, 'node_tools.' + section), tuple(lines)), rows, state, message_id)
+    def group(title, selected, *, extra=(), collapsed=False):
+        buttons = [field_button(field) for field in selected]
+        rows = [tuple(buttons[index:index + 2]) for index in range(0, len(buttons), 2)]
+        rows.extend(extra)
+        return Section(tr(locale, title), collapsed=collapsed,
+            tables=(Table((tr(locale, 'account.rich.field'), tr(locale, 'account.rich.value')),
+                tuple((tr(locale, 'nodes.settings.field.' + field), str(node.get(field, node['settings'].get(field, defaults.get(field, '—'))) or '—')) for field in selected)),) if selected else (), rows=tuple(rows))
+    if section == 'general':
+        sections = (group('nodes.rich.name_region', ('title', 'region', 'flag')), group('nodes.settings.field.notes', ('notes',), collapsed=True))
+    elif section == 'connection':
+        sections = (group('nodes.rich.connection', ('public_host',)),
+            Section(tr(locale, 'nodes.rich.advanced'), collapsed=True,
+                rows=((button(locale, 'nodes.settings.field.transport', f'node_connection:{node_key}'),),)))
+    elif section == 'xray':
+        sections = (group('nodes.rich.connection', ('xray_host', 'xray_sni')),
+            group('node_tools.ports', ('xray_tcp_port', 'xray_xhttp_port')),
+            group('nodes.rich.advanced', ('xray_fingerprint', 'xray_xhttp_path'), collapsed=True))
+    else:
+        sections = (group('nodes.rich.connection', ('awg_public_host', 'awg_port')),
+            group('nodes.rich.obscuration', ('awg_i1_preset',), extra=((
+                button(locale, 'node_tools.regenerate_entropy', f'node_action:regenerate_entropy:{node_key}'),),)),
+            group('nodes.rich.advanced', ('awg_interface',), extra=((
+                button(locale, 'node_tools.entropy', f'node_view:entropy:{node_key}'),),), collapsed=True))
+    await render(bot, chat_id, Screen(tr(locale, 'nodes.rich.connection' if section == 'connection' else 'node_tools.' + section),
+        (tr(locale, 'nodes.rich.settings_note'),), sections=sections, embedded_buttons=True, navigation=True),
+        [[button(locale, 'nodes.card.back_to_settings', NodeSettingsCallback(node_key=node_key).pack())]], state, message_id)
 
 
 @router.callback_query(F.data.startswith('node_tools:'))
@@ -128,8 +130,8 @@ async def tools_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state
     rows = [[button(locale, 'node_tools.' + name, f'node_view:{name}:{node_key}') for name in names]
             for names in (('diagnostics', 'ports'), ('runtime', 'repair'))]
     rows += [[button(locale, 'node_tools.cleanup_runtime', f'node_action:cleanup_runtime:{node_key}')],
-             [button(locale, 'back', NodeSettingsCallback(node_key=node_key).pack())]]
-    await render(bot, query.message.chat.id, Screen(tr(locale, 'node_tools.maintenance'), ()), rows, state, query.message.message_id)
+             [button(locale, 'back', f'node_technical:{node_key}')]]
+    await render(bot, query.message.chat.id, Screen(tr(locale, 'nodes.rich.technical'), (), embedded_buttons=True, navigation=True), rows, state, query.message.message_id)
 
 
 @router.callback_query(F.data.startswith('node_view:'))
@@ -167,7 +169,7 @@ async def view_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state:
         lines = [error(locale, exc)]
         rows = [[button(locale, 'node_tools.refresh', query.data)]]
     rows.append([button(locale, 'back', f'node_section:awg:{node_key}' if view == 'entropy' else f'node_tools:{node_key}')])
-    await render(bot, query.message.chat.id, Screen(tr(locale, 'node_tools.' + view), tuple(lines)), rows, state, query.message.message_id)
+    await render(bot, query.message.chat.id, Screen(tr(locale, 'node_tools.' + view), tuple(lines), embedded_buttons=True, navigation=True), rows, state, query.message.message_id)
 
 
 @router.callback_query(F.data.startswith('node_action:'))
@@ -186,11 +188,11 @@ async def action_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, stat
             'revision': node['desired_revision'], 'command_key': str(uuid4())})
         rows = [[button(locale, 'back', f'bootstrap_menu:{node_key}' if action in {'bootstrap', 'reinstall_clean', 'reinstall_keep', 'install_docker'} else f'node_tools:{node_key}'),
                  button(locale, 'node_tools.confirm', 'node_job_submit')]]
-        await render(bot, query.message.chat.id, Screen(tr(locale, 'node_tools.' + action),
+        await render(bot, query.message.chat.id, Screen(tr(locale, 'node_tools.' + action), embedded_buttons=True, navigation=True, lines=
             (tr(locale, 'node_tools.confirm_note'),) + ((tr(locale, 'node_tools.clean_warning'),)
                 if action in {'reinstall_clean', 'cleanup_runtime'} else ())), rows, state, query.message.message_id)
     except BackendError as exc:
-        await render(bot, query.message.chat.id, Screen(tr(locale, 'node_tools.error_title'), (error(locale, exc),)),
+        await render(bot, query.message.chat.id, Screen(tr(locale, 'node_tools.error_title'), (error(locale, exc),), embedded_buttons=True, navigation=True),
             [[button(locale, 'back', AdminNodeCallback(node_key=node_key).pack())]], state, query.message.message_id)
 
 
@@ -206,7 +208,7 @@ async def submit_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, stat
         job = await backend.node_action(query.from_user.id, **draft)
         await show_job(query.message.chat.id, query.from_user.id, query.message.message_id, job, bot, state)
     except BackendError as exc:
-        await render(bot, query.message.chat.id, Screen(tr(locale, 'node_tools.error_title'), (error(locale, exc),)),
+        await render(bot, query.message.chat.id, Screen(tr(locale, 'node_tools.error_title'), (error(locale, exc),), embedded_buttons=True, navigation=True),
             [[button(locale, 'back', AdminNodeCallback(node_key=draft['node_key']).pack())]], state, query.message.message_id)
 
 
@@ -228,7 +230,7 @@ async def show_job(chat_id, user_id, message_id, job, bot, state):
     if job['status'] == 'blocked':
         rows.append([button(locale, 'node_tools.resolve', 'node_resolve:' + job['id'])])
     rows.append([button(locale, 'back', AdminNodeCallback(node_key=job['node_key']).pack())])
-    await render(bot, chat_id, Screen(tr(locale, 'node_tools.' + job['action']), tuple(lines)), rows, state, message_id)
+    await render(bot, chat_id, Screen(tr(locale, 'node_tools.' + job['action']), tuple(lines), embedded_buttons=True, navigation=True), rows, state, message_id)
 
 
 @router.callback_query(F.data.startswith('node_job:'))
@@ -239,7 +241,7 @@ async def job_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: 
         await show_job(query.message.chat.id, query.from_user.id, query.message.message_id, job, bot, state)
     except BackendError as exc:
         locale = normalize_locale((await state.get_data()).get('locale'))
-        await render(bot, query.message.chat.id, Screen(tr(locale, 'node_tools.error_title'), (error(locale, exc),)),
+        await render(bot, query.message.chat.id, Screen(tr(locale, 'node_tools.error_title'), (error(locale, exc),), embedded_buttons=True, navigation=True),
             [[button(locale, 'node_tools.refresh', query.data)]], state, query.message.message_id)
 
 
@@ -249,7 +251,7 @@ async def resolve_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, sta
     locale = normalize_locale((await state.get_data()).get('locale'))
     job_id = query.data.split(':', 1)[1]
     await render(bot, query.message.chat.id, Screen(tr(locale, 'node_tools.resolve'),
-        (tr(locale, 'node_tools.resolve_note'),)),
+        (tr(locale, 'node_tools.resolve_note'),), embedded_buttons=True, navigation=True),
         [[button(locale, 'back', 'node_job:' + job_id), button(locale, 'node_tools.confirm', 'node_resolve_do:' + job_id)]], state, query.message.message_id)
 
 
@@ -263,7 +265,7 @@ async def resolve_do_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, 
     except BackendError:
         locale = normalize_locale((await state.get_data()).get('locale'))
         await render(bot, query.message.chat.id, Screen(tr(locale, 'node_tools.error_title'),
-            (tr(locale, 'node_tools.resolve_failed'),)), [[button(locale, 'back', 'node_job:' + job_id)]], state, query.message.message_id)
+            (tr(locale, 'node_tools.resolve_failed'),), embedded_buttons=True, navigation=True), [[button(locale, 'back', 'node_job:' + job_id)]], state, query.message.message_id)
 
 
 @router.callback_query(F.data.startswith('remove_progress:'))
@@ -290,7 +292,7 @@ async def advance_removal(chat_id, user_id, message_id, node_key, bot, backend, 
             raise BackendError(result['error_code'], 409)
         if result['status'] in {'removed', 'removed_registry_only'}:
             await render(bot, chat_id, Screen(tr(locale, 'node_tools.removed'),
-                (tr(locale, 'node_tools.removed_note' if result['status'] == 'removed' else 'nodes.maintenance.registry_removed_note'),)),
+                (tr(locale, 'node_tools.removed_note' if result['status'] == 'removed' else 'nodes.maintenance.registry_removed_note'),), embedded_buttons=True, navigation=True),
                 [[button(locale, 'nodes.card.to_list', AdminNodesCallback().pack())]], state, message_id)
             return
         lines = [tr(locale, 'node_tools.removal_progress')]
@@ -310,4 +312,4 @@ async def advance_removal(chat_id, user_id, message_id, node_key, bot, backend, 
         else:
             lines = [error(locale, exc)]
     rows.append([button(locale, 'back', AdminNodeCallback(node_key=node_key).pack())])
-    await render(bot, chat_id, Screen(tr(locale, 'nodes.card.delete'), tuple(lines)), rows, state, message_id)
+    await render(bot, chat_id, Screen(tr(locale, 'nodes.card.delete'), tuple(lines), embedded_buttons=True, navigation=True), rows, state, message_id)

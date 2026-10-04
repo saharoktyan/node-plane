@@ -1,9 +1,10 @@
 # Administrator Rich Message UI plan
 
-Status: Phase 1 published in `v0.4.3-alpha.28`; live acceptance is in progress.
-Phase 2 profile, access and creation screens are implemented after that tag.
-The administrator traffic summary described below still needs a dedicated
-authorized backend read; remaining phases are planned.
+Status: Phase 1 and the core Phase 2 profile/access workflows are published in
+`v0.4.3-alpha.30` and accepted during user testing. Administrator traffic
+summary still needs a dedicated authorized backend read. Core Phase 3 server
+screens are implemented and awaiting live UX acceptance; Phase 4 destinations
+remain planned.
 
 Member UI baseline: commit `a68b2e2`, validated by 659 tests. This document
 defines an incremental presentation redesign, not a replacement for the
@@ -73,7 +74,7 @@ part of profile management rather than a separate top-level destination.
    and its relevant Requests or Affected servers button. Omit this section
    when empty. An unavailable overview must not prevent navigation.
 4. Management section: `[Profiles] [Servers]`.
-5. Requests section: pending count or a short empty state, then `[Requests]`.
+5. Access management section and `[Requests]` only when there are pending requests.
 6. System section: `[Status] [Settings]`, followed by `[Announcements]`.
 7. One divider and the Back link to the member menu.
 
@@ -119,7 +120,7 @@ list leads to an explicit review screen.
 ### Profile card
 
 1. Heading: profile display name (H1).
-2. Visible summary: status, expiry when set, and count of granted servers.
+2. Visible summary: status, permanent or finite duration, and count of granted servers.
 3. Primary row: `[Access] [Edit]`, followed by a quiet Management entry.
 4. Access opens the regional grant editor; Edit contains name, expiry and
    Active/Frozen controls. No editing controls or server tables on the landing card.
@@ -294,9 +295,9 @@ For each phase:
 
 - Profile list, card, identity forms, status, access, deletion confirmation and
   creation wizard now use embedded Rich actions and English/Russian text.
-- The card exposes common actions directly; old Edit callbacks open the card.
-  IDs are collapsed, desired status and synchronization remain visible, and
-  operation details use a node/protocol/result table.
+- The landing card exposes Access/Edit with Management below. Identity, expiry
+  and status controls live in Edit; IDs and operation details live in
+  Management → Technical details. Operations use a node/protocol/result table.
 - Access tables and editors load every backend server cursor page, sort by
   region/name, and display 10 servers per UI page. No 20-grant truncation.
 - Grant/revoke all and regional buttons work in both creation and editing, with
@@ -314,7 +315,7 @@ For each phase:
 - Live Telegram layout and real provisioning acceptance remain pending.
 
 Next remaining Phase 2 item is the gated administrator traffic read/display.
-Server screens form the next independent presentation block.
+Core server screens are implemented as described in the follow-up below.
 
 ### Review fixes after Phase 1 testing
 
@@ -437,3 +438,51 @@ compact profile rows have no headings.
   worker repairs old finite administrator expiries. Grants and freezing remain
   independent controls; permanent duration does not grant access to every node.
 - Navigation arrows use Unicode text symbols rather than emoji.
+
+
+### Member Profile presentation follow-up (implemented after alpha.30)
+
+- Keep the profile name directly below the title. Access contains visible
+  status and duration; Account contains Telegram identity and creation date.
+- Render summary statistics in a compact two-column native table, including
+  server/connection counts, protocol counts and config issuance activity.
+- Traffic is a separate visible section with the current UTC month total and
+  protocol table, only when the existing backend collection/consent gates allow
+  it. No new queries or permissions are introduced.
+- When global collection is enabled but member consent is missing, show a short
+  hint inside Statistics about enabling it in Settings. Hide that hint entirely
+  when the administrator has disabled collection globally.
+- The final Servers block remains collapsed, grouped by region with flags and
+  ten-server pagination. Paging retains the summary above it. Server traffic
+  uses compact protocol/usage tables; missing or stale samples remain explicit.
+- Member server lists remain informational, without config-selection actions.
+  Exactly one divider separates Back from the screen content. RU/EN and labeled
+  plain-message fallbacks are retained.
+
+### Server navigation and settings follow-up (implemented after alpha.30)
+
+- The landing card prioritizes installation, explicit Probe, services and pending
+  configuration. Opening it reads stored state without implicitly contacting an
+  agent. Installation remains reachable when settings are pending; active or
+  blocked operations expose a direct recovery entry.
+- Management contains Maintenance and Technical details. Diagnostics, runtime
+  and recovery tools sit behind Technical details rather than on the landing
+  card or the main settings screen. Full removal retains its maintenance path.
+- Settings separates General, Connection and protocol configuration. Compact
+  tables accompany related edit actions; advanced options are collapsed. Private
+  keys and entropy are not implicitly fetched into hidden blocks.
+- Apply changes appears only on the main Settings screen and only when there
+  are unapplied revisions. Existing field editors and confirmation flows remain
+  available, with Back returning to their owning section.
+- Server lists use backend region/title/key sorting with scoped composite cursors
+  so grouping remains consistent across pages. Search and page context survive
+  navigation; lists do not probe the fleet.
+- Creation offers two-column region presets with globe prefixes: Europe/Africa
+  use 🌍, Asia/Oceania use 🌏, and North/South America use 🌎. Other accepts a
+  custom region. Presets store canonical region names independently of the node
+  flag, and Back preserves the wizard draft.
+- Server screens use embedded Rich controls and navigation dividers with RU/EN
+  text and plain-message fallback. Detailed diagnostic/result presentation and
+  live mobile acceptance remain follow-up work.
+- Validation: 725 automated tests pass, including region cursor pagination,
+  retained field actions, conditional Apply and region wizard navigation.

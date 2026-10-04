@@ -566,9 +566,12 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             await user.show_account_info(123, 123, 77, self.bot, backend,
                                          self.state, username='alice')
             profile_screen = render.call_args.args[2]
-            self.assertIn('Telegram username: @alice', profile_screen.lines)
+            self.assertIn(('Telegram username', '@alice'), profile_screen.sections[1].tables[0].rows)
             self.assertFalse(profile_screen.sections[0].collapsed)
-            self.assertIn('Configs issued: 3', profile_screen.sections[0].lines)
+            self.assertIn(('Configs issued', '3'), profile_screen.sections[2].tables[0].rows)
+            self.assertEqual([section.title for section in profile_screen.sections[:3]], ['Access', 'Account', 'Statistics'])
+            self.assertEqual(len(profile_screen.lines), 1)
+            self.assertEqual(sum(block.type == 'table' for block in profile_screen.rich(render.call_args.args[3]).blocks), 3)
             servers = profile_screen.sections[-1]
             self.assertTrue(servers.collapsed)
             self.assertEqual(servers.sections[0].title, 'Europe')
@@ -588,7 +591,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         with patch.object(user, 'render', new_callable=AsyncMock) as render:
             await user.show_account_profile(123, 123, 77, 'p1', self.bot,
                                             backend, self.state)
-        self.assertIn('Status: Expired', render.call_args.args[2].lines)
+        self.assertEqual(render.call_args.args[2].sections[0].tables[0].rows[0], ('Status', 'Expired'))
         backend.member_profile_summary.assert_awaited_with(123, 'p1')
 
     def test_profile_monthly_traffic_totals_and_per_node_protocol_breakdown(self):
@@ -730,7 +733,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             await user.user_action_cb(self.query, self.bot, backend, self.state)
             second = draw.call_args.args[2]
             self.assertEqual(first.lines, second.lines)
-            self.assertEqual(first.sections[0], second.sections[0])
+            self.assertEqual(first.sections[:3], second.sections[:3])
             self.assertEqual(second.sections[-1].sections[0].sections[0].title, 'Server 10')
             self.assertEqual(len(second.sections[-1].sections[0].sections), 1)
             self.assertTrue(second.sections[-1].rich()[0].is_open)
@@ -1014,7 +1017,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         with patch.object(admin_nodes, 'render', new_callable=AsyncMock) as render:
             await admin_nodes.show_node_settings(123, 123, 77, 'lv1',
                                                  self.bot, backend, self.state)
-            settings_rows = render.call_args.args[3]
+            settings_rows = render.call_args.args[2].fallback_rows(render.call_args.args[3])
             self.assertTrue(any(button.callback_data.startswith('apply_node:')
                 for row in settings_rows for button in row))
             await admin_nodes.show_admin_node(123, 123, 77, 'lv1',
@@ -1393,3 +1396,41 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
                 self.bot, backend, self.state)
         self.assertEqual(self.state_data, {'locale': 'ru'})
         self.assertTrue(render.call_args.args[3][-1][0].callback_data.startswith('accounts'))
+
+
+    def test_member_profile_tables_preserve_localization_and_traffic_consent(self):
+        summary = {'nodes': [], 'traffic': {'status': 'current', 'month': '2026-10',
+            'items': [{'protocol': 'awg', 'uplink_bytes': 1024, 'downlink_bytes': 2048}],
+            'nodes': [{'node_key': 'lv1', 'protocol': 'awg', 'uplink_bytes': 1024,
+                       'downlink_bytes': 2048, 'status': 'current'}]}}
+        node = {'key': 'lv1', 'title': 'Latvia', 'flag': '🇱🇻', 'protocols': ['awg', 'xray']}
+        for locale in ('ru', 'en'):
+            section = user.profile_traffic_section(summary, locale)
+            self.assertFalse(section.collapsed)
+            self.assertEqual(section.tables[0].rows, (('AmneziaWG', '3.0 KiB'),))
+            server = user.profile_server_section(summary, node, locale)
+            self.assertEqual(server.title, '🇱🇻 Latvia')
+            self.assertEqual(server.tables[0].rows[0], ('AmneziaWG', '3.0 KiB'))
+            self.assertEqual(server.tables[0].rows[1], ('VLESS', user.tr(locale, 'account.rich.waiting')))
+            self.assertTrue(all('account.rich.' not in value for value in server.tables[0].headers))
+        summary['traffic']['status'] = 'consent_required'
+        self.assertIsNone(user.profile_traffic_section(summary, 'en'))
+        self.assertEqual(user.profile_server_section(summary, node, 'en').tables, ())
+        summary['traffic'] = None
+        self.assertIsNone(user.profile_traffic_section(summary, 'en'))
+
+
+    async def test_profile_traffic_hint_requires_global_collection_but_missing_member_consent(self):
+        summary = {'display_name': 'Alice', 'frozen': False, 'expired': False, 'nodes': []}
+        backend = SimpleNamespace(member_profile_summary=AsyncMock(return_value=summary))
+        for locale in ('ru', 'en'):
+            self.state_data['locale'] = locale
+            for traffic, expected in ((None, False), ({'status': 'consent_required', 'items': []}, True),
+                                      ({'status': 'waiting', 'items': []}, False)):
+                summary['traffic'] = traffic
+                with patch.object(user, 'render', new_callable=AsyncMock) as draw:
+                    await user.show_account_profile(123, 123, 77, 'p1', self.bot, backend, self.state)
+                screen = draw.call_args.args[2]
+                self.assertEqual(user.tr(locale, 'account.rich.enable_traffic') in screen.plain(), expected)
+                stats = next(s for s in screen.sections if s.title == user.tr(locale, 'account.statistics'))
+                self.assertEqual(bool(stats.lines), expected)
