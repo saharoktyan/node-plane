@@ -8,7 +8,8 @@ from aiogram.methods import EditMessageText, SendRichMessage
 from aiogram import Bot
 import json
 from telegram_client.routers.common import render
-from telegram_client.screens import Screen
+from telegram_client.screens import Screen, Section
+from aiogram.types import InlineKeyboardButton
 from telegram_client.routers import user
 
 
@@ -23,6 +24,26 @@ class RenderRecoveryTests(IsolatedAsyncioTestCase):
         self.bot = SimpleNamespace(edit_message_text=AsyncMock(),
             send_rich_message=AsyncMock(return_value=SimpleNamespace(message_id=20)),
             send_message=AsyncMock(return_value=SimpleNamespace(message_id=30)))
+
+    async def test_embedded_actions_and_navigation_keep_same_callbacks_in_fallback(self):
+        action = InlineKeyboardButton(text='AmneziaWG', callback_data='u:server-action')
+        back = InlineKeyboardButton(text='Back', callback_data='u:back')
+        screen = Screen('Servers', sections=(Section('Latvia', rows=((action,),)),),
+                        embedded_buttons=True, navigation=True)
+        self.assertTrue(await render(self.bot, 1, screen, [[back]], self.state))
+        arguments = self.bot.edit_message_text.call_args.kwargs
+        self.assertEqual(arguments['reply_markup'].inline_keyboard, [])
+        blocks = arguments['rich_message'].blocks
+        self.assertEqual(blocks[2].buttons[0].callback_data, action.callback_data)
+        self.assertEqual(blocks[-1].buttons[0].callback_data, back.callback_data)
+        self.assertEqual(blocks[-1].buttons[0].style, 'link')
+        self.bot.edit_message_text.side_effect = [TelegramBadRequest(
+            method=EditMessageText(chat_id=1, message_id=10, text='old'),
+            message='rich buttons unsupported'), None]
+        self.assertFalse(await render(self.bot, 1, screen, [[back]], self.state))
+        rows = self.bot.edit_message_text.call_args.kwargs['reply_markup'].inline_keyboard
+        self.assertEqual([button.callback_data for row in rows for button in row],
+                         [action.callback_data, back.callback_data])
 
     async def test_embedded_config_media_serializes_as_multipart_uploads(self):
         bot = Bot('123456:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi')

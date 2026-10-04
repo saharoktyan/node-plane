@@ -470,6 +470,7 @@ class ConfigArtifactOutput(BaseModel):
     filename: str | None
     media_type: str
     content: str
+    display_name: str | None = None
     files: list[ConfigArtifactFile] = Field(default_factory=list)
 
 

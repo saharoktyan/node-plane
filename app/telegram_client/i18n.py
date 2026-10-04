@@ -3,6 +3,21 @@ from __future__ import annotations
 
 CATALOG = {
     'ru': {
+        'ui.account_details': 'Данные аккаунта',
+        'ui.statistics_details': 'Подробная статистика',
+        'ui.transport.tcp': 'VLESS с REALITY и Vision через TCP.',
+        'ui.transport.xhttp': 'VLESS с REALITY через XHTTP.',
+        'ui.select_transport': 'Выбрать {transport}',
+        'ui.transport_help': 'Какой транспорт выбрать?',
+        'ui.transport_help_text': 'Если один вариант не подключается в вашем клиенте или сети, попробуйте другой. Параметры уже включены в конфиг.',
+        'ui.config_intro': 'Импортируйте файл в клиент или раскройте QR-код либо ссылку.',
+        'ui.config_link': 'Ссылка для импорта', 'ui.config_qr': 'QR-код',
+        'ui.config_help': 'Как подключиться',
+        'ui.notifications': 'Уведомления',
+        'ui.enable_sound': 'Включить звук', 'ui.disable_sound': 'Выключить звук',
+        'ui.traffic': 'Статистика трафика',
+        'ui.give_consent': 'Разрешить сбор статистики', 'ui.withdraw_consent': 'Отозвать согласие',
+
         'home.title': 'Node Plane', 'home.choose': 'Выберите действие.',
         'home.waiting': 'Заявка ожидает решения администратора.',
         'home.request_prompt': 'Запросите доступ, чтобы получать VPN-конфиги.',
@@ -492,6 +507,21 @@ CATALOG = {
         'role.member': 'пользователь', 'role.admin': 'администратор',
     },
     'en': {
+        'ui.account_details': 'Account details',
+        'ui.statistics_details': 'Detailed statistics',
+        'ui.transport.tcp': 'VLESS with REALITY and Vision over TCP.',
+        'ui.transport.xhttp': 'VLESS with REALITY over XHTTP.',
+        'ui.select_transport': 'Choose {transport}',
+        'ui.transport_help': 'Which transport should I choose?',
+        'ui.transport_help_text': 'If one option cannot connect in your client or network, try the other. The configuration already includes the required parameters.',
+        'ui.config_intro': 'Import a file into your client, or expand the QR code or link.',
+        'ui.config_link': 'Import link', 'ui.config_qr': 'QR code',
+        'ui.config_help': 'How to connect',
+        'ui.notifications': 'Notifications',
+        'ui.enable_sound': 'Enable sound', 'ui.disable_sound': 'Disable sound',
+        'ui.traffic': 'Traffic statistics',
+        'ui.give_consent': 'Allow statistics collection', 'ui.withdraw_consent': 'Withdraw consent',
+
         'home.title': 'Node Plane', 'home.choose': 'Choose an action.',
         'home.waiting': 'Your request is waiting for an administrator.',
         'home.request_prompt': 'Request access to receive VPN configurations.',

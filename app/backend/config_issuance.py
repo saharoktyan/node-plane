@@ -179,7 +179,8 @@ class ConfigIssuanceService:
             raise ValueError('profile is not live')
         if protocol == 'awg':
             stored = json.loads(latest['result_json'])['wg_conf']
-            refreshed = driver.refresh_awg_config(node_key, stored, profile['display_name'])
+            refreshed = driver.refresh_awg_config(node_key, stored,
+                f'{node["title"]} AmneziaWG · {profile["display_name"]}')
             settings = json.loads(node['settings_json'])
             expected_endpoint = settings.get('awg_public_host', settings['public_host'])
             expected_port = settings.get('awg_port', 51820)
@@ -277,6 +278,7 @@ class ConfigIssuanceService:
             safe_profile = (re.sub(r'[^\w .()#-]+', '', profile['display_name']).strip(' .')[:64]
                             or 'Profile')
             return {'filename': f'AmneziaWG - {safe_title} - {safe_profile}.{extension}',
+                    'display_name': f'{node["title"]} AmneziaWG · {profile["display_name"]}',
                     'media_type': 'text/plain',
                     'content': refreshed['vpn_key'] if extension == 'vpn' else refreshed['wg_conf'],
                     'files': [{'filename': f'AmneziaWG - {safe_title} - {safe_profile}.{ext}',
@@ -292,11 +294,12 @@ class ConfigIssuanceService:
         else:
             params += (f'&type=xhttp&path={quote(metadata["xhttp_path"], safe="")}&mode=auto'
                        '&extra=%7B%22xmux%22%3A%7B%22maxConcurrency%22%3A%2216-32%22%7D%7D')
-        label = quote(f'VLESS {node["title"]} · {profile["display_name"]} · {row["transport"].upper()}', safe='')
+        display_name = f'{node["title"]} VLESS {row["transport"].upper()} · {profile["display_name"]}'
+        label = quote(display_name, safe='')
         uri = f'vless://{identity["xray_uuid"]}@{host}:{port}?{params}#{label}'
         safe_title = (re.sub(r'[^\w .()#-]+', '', node['title']).strip(' .')[:64]
                       or row['node_key'])
         safe_profile = (re.sub(r'[^\w .()#-]+', '', profile['display_name']).strip(' .')[:64]
                         or 'Profile')
         return {'filename': f'VLESS - {safe_title} - {safe_profile} - {row["transport"].upper()}.txt',
-                'media_type': 'text/uri-list', 'content': uri}
+                'media_type': 'text/uri-list', 'content': uri, 'display_name': display_name}

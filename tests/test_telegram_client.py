@@ -279,8 +279,11 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             await user.show_account_info(123, 123, 77, self.bot, backend,
                                          self.state, username='alice')
             profile_screen = render.call_args.args[2]
-            self.assertIn('Telegram username: @alice', profile_screen.lines)
-            self.assertIn('🇱🇻 Latvia: AmneziaWG, VLESS', profile_screen.lines)
+            self.assertIn('Telegram username: @alice', profile_screen.sections[0].lines)
+            self.assertTrue(profile_screen.sections[0].collapsed)
+            node_section = profile_screen.sections[1]
+            self.assertEqual(node_section.title, '🇱🇻 Latvia')
+            self.assertEqual([b.text for b in node_section.rows[0]], ['AmneziaWG', 'VLESS'])
             await user.show_account_stats(123, 123, 77, 'p1', self.bot,
                                           backend, self.state)
             stats_screen = render.call_args.args[2]
@@ -306,14 +309,15 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         blocks = screen.rich().blocks
         self.assertFalse(blocks[2].is_open)
         self.assertEqual(blocks[2].blocks[0].type, 'photo')
-        self.assertEqual(blocks[3].text.type, 'code')
-        self.assertEqual(blocks[3].text.text, 'vpn://fresh-config')
-        self.assertEqual([block.document.media.filename for block in blocks[4:]],
+        self.assertFalse(blocks[3].is_open)
+        self.assertEqual(blocks[3].blocks[0].text.type, 'code')
+        self.assertEqual(blocks[3].blocks[0].text.text, 'vpn://fresh-config')
+        self.assertEqual([block.document.media.filename for block in blocks if block.type == 'document'],
                          ['Latvia.vpn', 'Latvia.conf'])
         self.bot.send_document.assert_not_awaited()
         self.bot.send_photo.assert_not_awaited()
         back = user.actions[draw.call_args.args[3][0][0].callback_data[2:]]
-        self.assertEqual((back.name, back.args), ('node', ('p1', 'lv1')))
+        self.assertEqual((back.name, back.args), ('profile', ('p1',)))
 
     async def test_vless_screen_uses_same_qr_and_uri_layout(self):
         backend = SimpleNamespace(
@@ -324,8 +328,9 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             await user.show_issuance(123, 123, 77, 'issuance1', self.bot, backend, self.state)
         blocks = draw.call_args.args[2].rich().blocks
         self.assertFalse(blocks[2].is_open)
-        self.assertEqual(blocks[3].text.type, 'code')
-        self.assertEqual(blocks[3].text.text, 'vless://test')
+        self.assertFalse(blocks[3].is_open)
+        self.assertEqual(blocks[3].blocks[0].text.type, 'code')
+        self.assertEqual(blocks[3].blocks[0].text.text, 'vless://test')
         back = user.actions[draw.call_args.args[3][0][0].callback_data[2:]]
         self.assertEqual((back.name, back.args), ('protocol', ('p1', 'lv1', 'xray')))
 
@@ -335,6 +340,55 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         with patch.object(user, 'issue', new_callable=AsyncMock) as issue:
             await user.show_protocol(123, 123, 77, 'p1', 'lv1', 'awg', self.bot, backend, self.state)
         self.assertEqual(issue.call_args.args[3:7], ('p1', 'lv1', 'awg', 'vpn'))
+
+    async def test_server_sections_bind_protocol_buttons_to_the_correct_node(self):
+        backend = SimpleNamespace(
+            profiles=AsyncMock(return_value={'items': [{'id': 'p1'}]}),
+            member_profile_summary=AsyncMock(return_value={'display_name': 'Alice',
+                'frozen': False, 'expired': False}),
+            profile_nodes=AsyncMock(return_value={'items': [
+                {'key': 'lv1', 'title': 'Latvia', 'flag': '🇱🇻', 'region': 'EU',
+                 'protocols': [{'kind': 'awg'}, {'kind': 'xray'}]},
+                {'key': 'msk1', 'title': 'Moscow', 'flag': '🇷🇺', 'region': 'RU',
+                 'protocols': [{'kind': 'xray'}]}]}))
+        with patch.object(user, 'render', new_callable=AsyncMock) as draw:
+            await user.show_profiles(123, 123, 77, self.bot, backend, self.state)
+        screen = draw.call_args.args[2]
+        self.assertTrue(screen.embedded_buttons)
+        self.assertEqual([section.title for section in screen.sections], ['🇱🇻 Latvia', '🇷🇺 Moscow'])
+        for section, node_key in zip(screen.sections, ('lv1', 'msk1')):
+            for button in section.rows[0]:
+                action = user.actions[button.callback_data[2:]]
+                self.assertEqual(action.name, 'protocol')
+                self.assertEqual(action.args[:2], ('p1', node_key))
+        back = user.actions[draw.call_args.args[3][0][0].callback_data[2:]]
+        self.assertEqual(back.name, 'home')
+
+    async def test_transport_selection_goes_back_to_server_list(self):
+        backend = SimpleNamespace(profile_nodes=AsyncMock(return_value={'items': [
+            {'key': 'lv1', 'title': 'Latvia', 'protocols': [
+                {'kind': 'xray', 'transports': ['tcp', 'xhttp']}]}]}))
+        with patch.object(user, 'render', new_callable=AsyncMock) as draw:
+            await user.show_protocol(123, 123, 77, 'p1', 'lv1', 'xray', self.bot, backend, self.state)
+        screen = draw.call_args.args[2]
+        for section, transport in zip(screen.sections, ('tcp', 'xhttp')):
+            action = user.actions[section.rows[0][0].callback_data[2:]]
+            self.assertEqual(action.args, ('p1', 'lv1', 'xray', transport))
+        back = user.actions[draw.call_args.args[3][0][0].callback_data[2:]]
+        self.assertEqual((back.name, back.args), ('profile', ('p1',)))
+
+    async def test_member_settings_actions_describe_the_change_and_preserve_backend_values(self):
+        backend = SimpleNamespace(me=AsyncMock(return_value={
+            'announcement_silent': True, 'traffic_available': True, 'traffic_consent': True}))
+        with patch.object(user, 'render', new_callable=AsyncMock) as draw:
+            await user.show_member_settings(123, 123, 77, self.bot, backend, self.state)
+        sections = draw.call_args.args[2].sections
+        sound = sections[1].rows[0][0]
+        consent = sections[2].rows[0][0]
+        self.assertEqual(sound.text, 'Enable sound')
+        self.assertEqual(user.actions[sound.callback_data[2:]].args, ('false',))
+        self.assertEqual(consent.text, 'Withdraw consent')
+        self.assertEqual(user.actions[consent.callback_data[2:]].args, ('false',))
 
     async def test_plain_config_fallback_preserves_downloads(self):
         backend = SimpleNamespace(

@@ -77,6 +77,7 @@ class BackendConfigIssuanceTests(unittest.TestCase):
 
             def refresh_awg_config(self, node_key, wg_conf, profile_name):
                 assert wg_conf.startswith('[Interface]')
+                assert profile_name == 'Latvia #1 AmneziaWG · Alice'
                 return {'wg_conf': '[Interface]\nPrivateKey = private\n\n[Peer]\nEndpoint = node.example:51820\n',
                         'vpn_key': 'vpn://encoded'}
         return Driver()
@@ -106,6 +107,10 @@ class BackendConfigIssuanceTests(unittest.TestCase):
             self.assertIn('pbk=' + 'a' * 43, artifact.json()['content'])
             self.assertIn('type=xhttp', artifact.json()['content'])
             self.assertIn('Latvia%20%231', artifact.json()['content'])
+            from urllib.parse import unquote, urlsplit
+            self.assertEqual(unquote(urlsplit(artifact.json()['content']).fragment),
+                             'Latvia #1 VLESS XHTTP · Alice')
+            self.assertEqual(artifact.json()['display_name'], 'Latvia #1 VLESS XHTTP · Alice')
             self.assertEqual(artifact.headers['Cache-Control'], 'no-store')
             self.db.connection.execute('UPDATE backend_nodes SET desired_revision = 2 WHERE key = ?', ('n1',))
             stale = client.get(f'/api/v1/config-issuances/{task_id}/artifact', headers=headers)
@@ -143,6 +148,7 @@ class BackendConfigIssuanceTests(unittest.TestCase):
                 artifact = client.get(f'/api/v1/config-issuances/{queued.json()["id"]}/artifact',
                     headers=headers)
                 self.assertEqual(artifact.status_code, 200, artifact.text)
+                self.assertEqual(artifact.json()['display_name'], 'Latvia #1 AmneziaWG · Alice')
                 self.assertEqual([item['filename'].rsplit('.', 1)[1] for item in artifact.json()['files']],
                                  ['vpn', 'conf'])
                 self.assertEqual(artifact.json()['filename'],

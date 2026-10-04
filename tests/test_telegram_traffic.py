@@ -33,9 +33,10 @@ class TelegramTrafficTests(IsolatedAsyncioTestCase):
                     await user.show_member_settings(
                         123, 123, 77, self.bot, backend, self.state
                     )
-                labels = [b.text for row in draw.call_args.args[3] for b in row]
+                screen = draw.call_args.args[2]
+                labels = [b.text for row in screen.fallback_rows(draw.call_args.args[3]) for b in row]
                 expected = tr(
-                    locale, "traffic.consent_on" if consent else "traffic.consent_off"
+                    locale, "ui.withdraw_consent" if consent else "ui.give_consent"
                 )
                 self.assertEqual(expected in labels, visible)
                 self.assertEqual(draw.call_args.args[-1], 77)
