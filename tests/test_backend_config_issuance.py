@@ -15,6 +15,27 @@ from tests.test_backend_http import BackendHTTPTests
 class BackendConfigIssuanceTests(unittest.TestCase):
     setUp = BackendHTTPTests.setUp
 
+    def test_wait_completes_live_checks_without_waiting_for_worker(self):
+        profile_id = self.setup_ready_profile()
+        driver = self.driver()
+        service = ConfigIssuanceService(self.db, driver)
+        headers = {**self.headers, 'X-Node-Plane-Telegram-User-ID': '101',
+                   'Idempotency-Key': str(uuid4())}
+        with TestClient(create_app(self.db, node_driver=driver)) as client:
+            response = client.post(f'/api/v1/profiles/{profile_id}/config-issuances?wait=true',
+                headers=headers, json={'node_key': 'n1', 'protocol': 'xray', 'transport': 'tcp'})
+            self.assertEqual(response.status_code, 202, response.text)
+            self.assertEqual(response.json()['status'], 'succeeded')
+            self.assertFalse(service.run_one(response.json()['id']))
+            artifact = client.get(f'/api/v1/config-issuances/{response.json()["id"]}/artifact', headers=headers)
+            self.assertEqual(artifact.status_code, 200, artifact.text)
+            self.assertIn('type=tcp', artifact.json()['content'])
+            # Issuance success never bypasses live checks at download time.
+            driver.inspect = lambda intent: {key: False for key in
+                ('disk_present', 'live_present', 'identity_matches', 'config_available')}
+            self.assertEqual(client.get(f'/api/v1/config-issuances/{response.json()["id"]}/artifact',
+                headers=headers).status_code, 503)
+
     def setup_ready_profile(self, protocol='xray'):
         profile_id = ProfileRepository(self.db).create_profile(runtime_name='alice',
             display_name='Alice', owner_account_id=self.admin.id)
@@ -122,6 +143,8 @@ class BackendConfigIssuanceTests(unittest.TestCase):
                 artifact = client.get(f'/api/v1/config-issuances/{queued.json()["id"]}/artifact',
                     headers=headers)
                 self.assertEqual(artifact.status_code, 200, artifact.text)
+                self.assertEqual([item['filename'].rsplit('.', 1)[1] for item in artifact.json()['files']],
+                                 ['vpn', 'conf'])
                 self.assertEqual(artifact.json()['filename'],
                                  f'AmneziaWG - Latvia #1 - Alice.{extension}')
                 self.assertIn('vpn://' if extension == 'vpn' else '[Interface]',

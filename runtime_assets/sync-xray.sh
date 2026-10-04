@@ -48,10 +48,17 @@ if not private_key:
     raise SystemExit("privateKey is missing in Xray config")
 
 res = subprocess.run(
-    ["docker", "run", "--rm", image, "x25519", "-i", private_key],
+    ["docker", "exec", os.environ.get("XRAY_CONTAINER_NAME", "xray"), "xray", "x25519", "-i", private_key],
     capture_output=True,
     text=True,
 )
+if res.returncode != 0:
+    # Preserve offline synchronization, but config issuance should reuse the
+    # running container instead of starting a new one for every public-key read.
+    res = subprocess.run(
+        ["docker", "run", "--rm", image, "x25519", "-i", private_key],
+        capture_output=True, text=True,
+    )
 if res.returncode != 0:
     raise SystemExit((res.stderr or res.stdout or "xray x25519 -i failed").strip())
 

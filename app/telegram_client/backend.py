@@ -226,7 +226,7 @@ class BackendClient:
 
     async def issue(self, telegram_user_id: int, profile_id: str, node_key: str,
                     protocol: str, transport: str) -> dict:
-        return await self.request('POST', f'/api/v1/profiles/{profile_id}/config-issuances',
+        return await self.request('POST', f'/api/v1/profiles/{profile_id}/config-issuances?wait=true',
             telegram_user_id=telegram_user_id, command=True,
             body={'node_key': node_key, 'protocol': protocol, 'transport': transport})
 

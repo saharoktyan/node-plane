@@ -293,23 +293,57 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         self.assertIn('Status: Expired', render.call_args.args[2].lines)
         backend.member_profile_summary.assert_awaited_with(123, 'p1')
 
-    async def test_successful_issuance_sends_the_actual_config_file(self):
+    async def test_awg_screen_embeds_collapsed_qr_monospace_uri_and_both_files(self):
         backend = SimpleNamespace(
             issuance=AsyncMock(return_value={'status': 'succeeded',
-                'profile_id': 'p1', 'node_key': 'lv1', 'protocol': 'awg',
-                'transport': 'vpn'}),
-            artifact=AsyncMock(return_value={'filename': 'Latvia.vpn',
-                'content': 'vpn://fresh-config'}))
-        with patch.object(user, 'render', new_callable=AsyncMock) as render:
-            await user.show_issuance(123, 123, 77, 'issuance1',
-                                     self.bot, backend, self.state)
-        attachment = self.bot.send_document.call_args.args[1]
-        self.assertEqual(attachment.filename, 'Latvia.vpn')
-        self.assertEqual(attachment.data, b'vpn://fresh-config')
-        screen = render.call_args.args[2]
-        self.assertEqual(screen.details_title, 'AmneziaWG link')
-        self.assertEqual(screen.details_lines, ('vpn://fresh-config',))
-        self.assertIn('Import the .vpn file', screen.lines[0])
+                'profile_id': 'p1', 'node_key': 'lv1', 'protocol': 'awg', 'transport': 'vpn'}),
+            artifact=AsyncMock(return_value={'filename': 'Latvia.vpn', 'content': 'vpn://fresh-config',
+                'files': [{'filename': 'Latvia.vpn', 'content': 'vpn://fresh-config'},
+                          {'filename': 'Latvia.conf', 'content': '[Interface]\nPrivateKey = test'}]}))
+        with patch.object(user, 'render', new_callable=AsyncMock, return_value=True) as draw:
+            await user.show_issuance(123, 123, 77, 'issuance1', self.bot, backend, self.state)
+        screen = draw.call_args.args[2]
+        blocks = screen.rich().blocks
+        self.assertFalse(blocks[2].is_open)
+        self.assertEqual(blocks[2].blocks[0].type, 'photo')
+        self.assertEqual(blocks[3].text.type, 'code')
+        self.assertEqual(blocks[3].text.text, 'vpn://fresh-config')
+        self.assertEqual([block.document.media.filename for block in blocks[4:]],
+                         ['Latvia.vpn', 'Latvia.conf'])
+        self.bot.send_document.assert_not_awaited()
+        self.bot.send_photo.assert_not_awaited()
+        back = user.actions[draw.call_args.args[3][0][0].callback_data[2:]]
+        self.assertEqual((back.name, back.args), ('node', ('p1', 'lv1')))
+
+    async def test_vless_screen_uses_same_qr_and_uri_layout(self):
+        backend = SimpleNamespace(
+            issuance=AsyncMock(return_value={'status': 'succeeded',
+                'profile_id': 'p1', 'node_key': 'lv1', 'protocol': 'xray', 'transport': 'tcp'}),
+            artifact=AsyncMock(return_value={'filename': 'Latvia.txt', 'content': 'vless://test'}))
+        with patch.object(user, 'render', new_callable=AsyncMock, return_value=True) as draw:
+            await user.show_issuance(123, 123, 77, 'issuance1', self.bot, backend, self.state)
+        blocks = draw.call_args.args[2].rich().blocks
+        self.assertFalse(blocks[2].is_open)
+        self.assertEqual(blocks[3].text.type, 'code')
+        self.assertEqual(blocks[3].text.text, 'vless://test')
+        back = user.actions[draw.call_args.args[3][0][0].callback_data[2:]]
+        self.assertEqual((back.name, back.args), ('protocol', ('p1', 'lv1', 'xray')))
+
+    async def test_awg_selection_issues_bundle_without_format_selector(self):
+        backend = SimpleNamespace(profile_nodes=AsyncMock(return_value={'items': [
+            {'key': 'lv1', 'title': 'Latvia', 'protocols': [{'kind': 'awg'}]}]}))
+        with patch.object(user, 'issue', new_callable=AsyncMock) as issue:
+            await user.show_protocol(123, 123, 77, 'p1', 'lv1', 'awg', self.bot, backend, self.state)
+        self.assertEqual(issue.call_args.args[3:7], ('p1', 'lv1', 'awg', 'vpn'))
+
+    async def test_plain_config_fallback_preserves_downloads(self):
+        backend = SimpleNamespace(
+            issuance=AsyncMock(return_value={'status': 'succeeded', 'profile_id': 'p1',
+                'node_key': 'lv1', 'protocol': 'awg', 'transport': 'vpn'}),
+            artifact=AsyncMock(return_value={'filename': 'Latvia.vpn', 'content': 'vpn://test'}))
+        with patch.object(user, 'render', new_callable=AsyncMock, return_value=False):
+            await user.show_issuance(123, 123, 77, 'issuance1', self.bot, backend, self.state)
+        self.assertEqual(self.bot.send_document.call_args.args[1].filename, 'Latvia.vpn')
 
     async def test_issuance_poll_does_not_replace_screen_after_navigation(self):
         async def completed_after_back(*args):

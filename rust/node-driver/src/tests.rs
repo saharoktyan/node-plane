@@ -1,6 +1,26 @@
 use super::*;
 use tokio_stream::StreamExt;
 
+#[test]
+fn agent_public_xray_response_does_not_require_backend_owned_host() {
+    let value = serde_json::json!({
+        "xray_sni": "www.cloudflare.com", "xray_pbk": "a".repeat(43),
+        "xray_sid": "0123456789abcdef", "xray_short_id": "0123456789abcdef",
+        "xray_flow": "xtls-rprx-vision", "xray_fp": "chrome",
+        "xray_tcp_port": 443, "xray_xhttp_port": 8443,
+        "xray_xhttp_path_prefix": "/assets"
+    });
+    assert!(XraySyncGenerated::parse(&value.to_string()).is_err());
+    let public = XraySyncGenerated::parse_public(&value.to_string()).unwrap();
+    assert_eq!(public.xray_pbk, "a".repeat(43));
+    assert_eq!(public.xray_tcp_port, 443);
+    let mut invalid = value.clone();
+    invalid["xray_pbk"] = serde_json::json!("(Public Key): broken");
+    assert!(XraySyncGenerated::parse_public(&invalid.to_string()).is_err());
+    invalid.as_object_mut().unwrap().remove("xray_sid");
+    assert!(XraySyncGenerated::parse_public(&invalid.to_string()).is_err());
+}
+
 fn context() -> DriverContext {
     DriverContext {
         state: DriverState::default(),

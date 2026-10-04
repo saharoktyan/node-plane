@@ -87,6 +87,18 @@ struct XraySyncGenerated {
 }
 
 impl XraySyncGenerated {
+    fn parse_public(raw: &str) -> Result<Self, Status> {
+        // Agents deliberately omit the host: the backend owns the public
+        // endpoint. Keep this public RPC compatible with those agents without
+        // relaxing the full synchronization response contract.
+        let mut value: serde_json::Value = serde_json::from_str(raw)
+            .map_err(|_| Status::internal("invalid Xray public metadata"))?;
+        let object = value.as_object_mut()
+            .ok_or_else(|| Status::internal("invalid Xray public metadata"))?;
+        object.insert("xray_host".into(), serde_json::json!("localhost"));
+        Self::parse(&value.to_string())
+    }
+
     fn parse(raw: &str) -> Result<Self, Status> {
         let generated: Self = serde_json::from_str(raw)
             .map_err(|err| Status::internal(format!("invalid Xray sync result: {err}")))?;
@@ -2632,7 +2644,7 @@ impl RuntimeService for RuntimeApi {
             return Err(Status::failed_precondition("agent node identity mismatch"));
         }
         let response = transport.get_backend_xray_public().await?;
-        let metadata = XraySyncGenerated::parse(&response.metadata_json)?;
+        let metadata = XraySyncGenerated::parse_public(&response.metadata_json)?;
         if metadata.xray_short_id.len() != 16
             || !metadata
                 .xray_short_id

@@ -374,18 +374,15 @@ async def show_protocol(chat_id: int, user_id: int, message_id: int, profile_id:
         await show_node(chat_id, user_id, message_id, profile_id, node_key, bot, backend, state)
         return
     if protocol == 'awg':
-        rows = [
-            [button(user_id, tr(locale, 'awg.get_vpn'), 'issue', profile_id, node_key, 'awg', 'vpn')],
-            [button(user_id, tr(locale, 'awg.get_conf'), 'issue', profile_id, node_key, 'awg', 'conf')],
-        ]
-        title = tr(locale, 'awg.title', node=node['title'])
-    else:
-        rows = [[button(user_id, tr(locale, f'transport.{transport}'), 'issue',
-                        profile_id, node_key, 'xray', transport)]
-                for transport in selected['transports']]
-        title = tr(locale, 'xray.title', node=node['title'])
+        await issue(chat_id, user_id, message_id, profile_id, node_key, 'awg', 'vpn',
+                    bot, backend, state)
+        return
+    rows = [[button(user_id, tr(locale, f'transport.{transport}'), 'issue',
+                    profile_id, node_key, 'xray', transport)]
+            for transport in selected['transports']]
+    title = tr(locale, 'xray.title', node=node['title'])
     rows.append([button(user_id, tr(locale, 'back'), 'node', profile_id, node_key)])
-    prompt = tr(locale, 'awg.choose_format' if protocol == 'awg' else 'transport.choose')
+    prompt = tr(locale, 'transport.choose')
     await render(bot, chat_id, Screen(title, (prompt,)), rows, state, message_id)
 
 
@@ -410,43 +407,48 @@ async def _render_issuance(chat_id: int, user_id: int, message_id: int,
         return
     profile_id, node_key = result['profile_id'], result['node_key']
     locale = normalize_locale((await state.get_data()).get('locale'))
-    rows = [[button(user_id, tr(locale, 'back'), 'protocol', profile_id, node_key,
-                    result['protocol'])]]
+    rows = [[button(user_id, tr(locale, 'back'),
+                    'node' if result['protocol'] == 'awg' else 'protocol',
+                    profile_id, node_key, *(() if result['protocol'] == 'awg' else ('xray',)))]]
     if result['status'] == 'succeeded':
         artifact = await backend.artifact(user_id, issuance_id)
         if (await state.get_data()).get('issuance_poll_token') != view_token:
             return
         content = artifact['content']
         filename = artifact['filename'] or f"{result['protocol']}-{node_key}.txt"
-        data = await state.get_data()
-        delivered = set(data.get('delivered_issuances', []))
-        if issuance_id not in delivered:
-            sent = await bot.send_document(chat_id, BufferedInputFile(content.encode(), filename))
-            if (await state.get_data()).get('issuance_poll_token') != view_token:
-                try:
-                    await bot.delete_message(chat_id, sent.message_id)
-                except TelegramAPIError:
-                    pass
-                return
-            await track_artifact(state, sent.message_id)
-            delivered.add(issuance_id)
-            await state.update_data(delivered_issuances=list(delivered))
-        if (result['protocol'] == 'xray' or result.get('transport') == 'vpn') and len(content.encode()) <= 2500:
-            rows.insert(0, [button(user_id, tr(locale, 'config.qr'), 'qr', issuance_id)])
-        if result['protocol'] == 'xray':
-            details_title = tr(locale, 'config.vless_link')
-            details = (content,)
-            import_hint = tr(locale, 'config.import_xray')
-        elif result['transport'] == 'vpn':
-            details_title = tr(locale, 'config.awg_uri')
-            details = (content,)
-            import_hint = tr(locale, 'config.import_awg_vpn')
-        else:
-            details_title = None
-            details = ()
-            import_hint = tr(locale, 'config.import_awg_conf')
-        await render(bot, chat_id, Screen(tr(locale, 'config.ready'),
-            (import_hint,), details_title, details), rows, state, message_id)
+        files = artifact.get('files') or [{'filename': filename, 'content': content}]
+        uri = content if result['protocol'] == 'xray' or result['transport'] == 'vpn' else None
+        image = await asyncio.to_thread(config_qr,
+            qr_payload(result['protocol'], result['transport'], uri)) if uri else None
+        if (await state.get_data()).get('issuance_poll_token') != view_token:
+            return
+        import_hint = tr(locale, 'config.import_xray' if result['protocol'] == 'xray'
+                         else 'config.import_awg_vpn' if uri else 'config.import_awg_conf')
+        screen = Screen(tr(locale, 'config.ready'), (import_hint,),
+            uri=uri, qr=image, qr_title=tr(locale, 'config.qr'),
+            files=tuple((item['filename'], item['content'].encode()) for item in files))
+        rich = await render(bot, chat_id, screen, rows, state, message_id)
+        # Older Telegram deployments may reject rich media. Preserve downloads
+        # there, while supported deployments keep everything in the control message.
+        if rich is False and (await state.get_data()).get('issuance_poll_token') == view_token:
+            for name, body in screen.files:
+                sent = await bot.send_document(chat_id, BufferedInputFile(body, name))
+                if (await state.get_data()).get('issuance_poll_token') != view_token:
+                    try:
+                        await bot.delete_message(chat_id, sent.message_id)
+                    except TelegramAPIError:
+                        pass
+                    return
+                await track_artifact(state, sent.message_id)
+            if image:
+                sent = await bot.send_photo(chat_id, BufferedInputFile(image, 'config.png'))
+                if (await state.get_data()).get('issuance_poll_token') != view_token:
+                    try:
+                        await bot.delete_message(chat_id, sent.message_id)
+                    except TelegramAPIError:
+                        pass
+                    return
+                await track_artifact(state, sent.message_id)
     elif result['status'] in {'blocked', 'superseded', 'failed'}:
         await render(bot, chat_id, Screen(tr(locale, 'config.not_ready'),
             (tr(locale, 'config.unavailable'),)),
@@ -468,12 +470,17 @@ async def issue(chat_id: int, user_id: int, message_id: int, profile_id: str,
         return (await state.get_data()).get('issuance_poll_token') == poll_token
 
     try:
+        await render(bot, chat_id, Screen(tr(locale, 'config.preparing_title'),
+            (tr(locale, 'config.preparing'),)),
+            [[button(user_id, tr(locale, 'back'),
+                     'node' if protocol == 'awg' else 'protocol', profile_id, node_key,
+                     *(() if protocol == 'awg' else (protocol,)))]], state, message_id)
         queued = await backend.issue(user_id, profile_id, node_key, protocol, transport)
         if not await owns_screen():
             return
-        await render(bot, chat_id, Screen(tr(locale, 'config.preparing_title'),
-            (tr(locale, 'config.preparing'),)),
-            [[button(user_id, tr(locale, 'back'), 'protocol', profile_id, node_key, protocol)]], state, message_id)
+        if queued.get('status') in {'succeeded', 'blocked', 'superseded', 'failed'}:
+            await show_issuance(chat_id, user_id, message_id, queued['id'], bot, backend, state)
+            return
         for _ in range(15):
             if not await owns_screen():
                 return
@@ -528,6 +535,21 @@ async def show_qr(chat_id: int, user_id: int, message_id: int, issuance_id: str,
     await track_artifact(state, sent.message_id)
     await render(bot, chat_id, Screen(tr(locale, 'qr.ready'), (tr(locale, 'qr.scan'),)),
                  rows, state, message_id)
+
+
+def config_qr(content: str) -> bytes | None:
+    if len(content.encode()) > 2500:
+        return None
+    code = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_L,
+                         box_size=6, border=4)
+    code.add_data(content)
+    try:
+        code.make(fit=True)
+    except DataOverflowError:
+        return None
+    image = BytesIO()
+    code.make_image(fill_color='black', back_color='white').save(image, format='PNG')
+    return image.getvalue()
 
 
 def qr_payload(protocol: str, transport: str, content: str) -> str:
