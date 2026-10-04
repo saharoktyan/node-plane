@@ -1,4 +1,5 @@
 import os
+from dataclasses import replace
 
 from aiogram import F, Router, Bot
 from aiogram.exceptions import TelegramAPIError
@@ -12,7 +13,7 @@ from ..i18n import normalize_locale, tr
 from ..screens import Screen
 from .common import render, send_notice
 from .callbacks import (RequestsCallback, ReviewCallback, DecideCallback,
-                        NotificationReviewCallback, NotificationDecisionCallback)
+                        NotificationReviewCallback, NotificationDecisionCallback, HomeCallback)
 
 router = Router()
 
@@ -275,10 +276,16 @@ async def apply_decision(query: CallbackQuery, request_id: str, decision: str,
             f"/api/v1/accounts/{result['account_id']}", telegram_user_id=user_id)
         recipient = account.get('telegram_user_id')
         if recipient:
-            await send_notice(bot, recipient, Screen(tr(requester_locale,
-                'requests.title'), (tr(requester_locale,
-                'requests.approved' if decision == 'approve' else
-                'requests.rejected'),)))
+            requester_state = FSMContext(storage=state.storage,
+                key=replace(state.key, chat_id=recipient, user_id=recipient,
+                            thread_id=None, business_connection_id=None))
+            await requester_state.set_state(None)
+            await requester_state.update_data(locale=requester_locale, issuance_poll_token=None)
+            await render(bot, recipient, Screen(tr(requester_locale, 'requests.title'),
+                (tr(requester_locale, 'requests.approved' if decision == 'approve' else 'requests.rejected'),),
+                embedded_buttons=True, navigation=True),
+                [[InlineKeyboardButton(text=tr(requester_locale, 'requests.to_menu'),
+                                       callback_data=HomeCallback().pack())]], requester_state)
     except (BackendError, TelegramAPIError):
         pass
 

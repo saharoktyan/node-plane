@@ -10,6 +10,10 @@ from aiogram.types import (InputRichBlockDetails, InputRichBlockParagraph,
 from aiogram.types import InputRichBlockButtons, RichMessageButton, InlineKeyboardButton, InputRichBlockDivider
 
 
+def server_label(node: dict) -> str:
+    return f"{node.get('flag') or ''} {node['title']}".strip()
+
+
 def rich_buttons(rows, *, navigation=False):
     return [InputRichBlockButtons(buttons=[RichMessageButton(
         text=button.text, callback_data=button.callback_data, url=button.url,
@@ -49,6 +53,7 @@ class Screen:
     qr: bytes | None = None
     qr_title: str | None = None
     files: tuple[tuple[str, bytes], ...] = ()
+    files_title: str | None = None
     uri_title: str | None = None
     sections: tuple[Section, ...] = ()
     embedded_buttons: bool = False
@@ -67,8 +72,11 @@ class Screen:
             uri = InputRichBlockParagraph(text=RichTextCode(text=self.uri))
             blocks.append(InputRichBlockDetails(summary=self.uri_title, blocks=[uri], is_open=False)
                           if self.uri_title else uri)
-        blocks.extend(InputRichBlockDocument(document=InputMediaDocument(
-            media=BufferedInputFile(content, filename))) for filename, content in self.files)
+        documents = [InputRichBlockDocument(document=InputMediaDocument(
+            media=BufferedInputFile(content, filename))) for filename, content in self.files]
+        if documents:
+            blocks.extend([InputRichBlockDetails(summary=self.files_title, blocks=documents, is_open=False)]
+                          if self.files_title else documents)
         if self.details_title and self.details_lines:
             blocks.append(InputRichBlockDetails(summary=self.details_title,
                 blocks=[InputRichBlockParagraph(text=line) for line in self.details_lines]))
@@ -79,7 +87,7 @@ class Screen:
                 if back and blocks[-1].type != 'divider':
                     blocks.append(InputRichBlockDivider())
                 blocks.extend(rich_buttons([row], navigation=back))
-        elif rows and len(rows[-1]) == 1 and rows[-1][0].text in {'🔙 Back', '🔙 Назад'}:
+        elif rows and len(rows[-1]) == 1 and rows[-1][0].text in {'🔙 Back', '🔙 Назад'} and blocks[-1].type != 'divider':
             blocks.append(InputRichBlockDivider())
         return InputRichMessage(blocks=blocks, skip_entity_detection=True)
 

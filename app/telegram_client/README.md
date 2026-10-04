@@ -25,8 +25,10 @@ the remote files were removed. The update screen compares the node runtime
 version with this release and can stage the current runtime. Agent binary
 reinstallation remains on the node card. Config issuance embeds files and,
 when it fits, a collapsed QR image in the control message. Admins listed in `ADMIN_IDS` receive a
-best-effort Rich Message when a user requests access; a decision notifies the
-requester. These notifications are not durable across bot crashes.
+best-effort Rich Message when a user requests access. A decision updates the
+requester's existing control message with the result and a To menu button,
+which opens the menu in the same message. If there is no tracked message,
+the client creates and tracks one. These notifications are not durable across bot crashes.
 
 In simple mode, `scripts/install.sh` initializes the backend schema, bootstraps
 each Telegram administrator listed in `ADMIN_IDS`, creates an adapter credential
@@ -55,14 +57,17 @@ waiting for multiple sequential HTTP timeouts. Callback acknowledgement has a
 three-second timeout and its failure does not prevent screen navigation. Logs
 report language-selection transition duration. The access gate uses a Rich
 section with an embedded primary Request access button and separate settings.
-Config screens contain collapsed QR, monospace import-link, and help blocks.
+Config screens contain collapsed QR, monospace import-link, configuration-file,
+and help blocks. All downloadable files share one initially closed block.
 AWG includes both downloadable `.vpn` and `.conf` files. Import labels use
 `Server name Protocol [Transport] · Profile name`; AWG passes this description
 to the node's converter and VLESS stores it in the URI fragment.
 Server sections provide protocol buttons directly, without another selection
 screen. Both Get config and Profile sort servers by region and name, and place
-each region above its servers as a heading. Server headings contain only names,
-with dividers between servers and before Back. Lists show ten servers per page;
+each region above its servers as a heading. Server headings prefix names with
+their configured flags, without repeating the region. Administrator grant,
+problem-node, rollout and active-alert lists use the same flag/name formatter.
+Member lists have dividers between servers and before Back, and show ten servers per page;
 arrow-only navigation and the page number appear only with multiple pages.
 Profile pagination lives inside its server accordion, keeps it open after a page
 change, and retains the account/statistics section above it. Get config remembers
@@ -71,7 +76,11 @@ are combined before sorting so lists beyond 100 servers are not truncated.
 VLESS offers XHTTP and TCP in a single row. The Profile screen
 shows account details and full statistics immediately, followed by a collapsed
 read-only list of granted servers; config selection lives in Get config.
-Settings place each action below its current value. Navigation sits at
+Language and announcement sound settings use a pair of buttons in one row;
+only the selected value has the primary color, without a separate value label.
+The final server in the Profile accordion has no trailing divider; one divider
+outside the accordion separates Back from the rest of the screen.
+Navigation sits at
 the bottom as link-style buttons, separated from content by a divider. When Rich Message delivery is rejected by
 Telegram, the screen falls back to plain text with equivalent inline navigation;
 files and QR are then sent separately. All member text is localized in RU/EN.

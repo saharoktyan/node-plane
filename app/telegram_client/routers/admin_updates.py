@@ -5,7 +5,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from ..backend import BackendClient, BackendError
 from ..i18n import tr, normalize_locale
-from ..screens import Screen
+from ..screens import Screen, server_label
 from .common import render
 from .callbacks import UpdatesCallback, AdminNodeCallback
 
@@ -83,7 +83,7 @@ async def show_fleet(query, bot, backend, state):
         tr(lang, 'update_tools.driver', status=tr(lang, 'update_tools.' + value['driver_status']),
            commit=str(value['driver'].get('commit') or '—')[:12])]
     for node in value['nodes']:
-        lines.append(tr(lang, 'update_tools.node', title=node['title'],
+        lines.append(tr(lang, 'update_tools.node', title=server_label(node),
             agent=tr(lang, 'update_tools.' + node['agent_status']),
             runtime=tr(lang, 'update_tools.' + node['runtime_status'])))
     rows = []

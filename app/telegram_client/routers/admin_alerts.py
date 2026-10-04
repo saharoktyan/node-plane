@@ -6,7 +6,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton
 
 from ..backend import BackendClient, BackendError
 from ..i18n import normalize_locale, tr
-from ..screens import Screen
+from ..screens import Screen, server_label
 from .callbacks import AdminSettingsCallback
 from .common import render
 
@@ -43,7 +43,7 @@ async def alerts_cb(
                 tr(
                     locale,
                     "alerts.active_item",
-                    title=item["title"],
+                    title=server_label(item),
                     condition=tr(locale, "alerts.condition." + item["kind"]),
                 )
                 for item in items

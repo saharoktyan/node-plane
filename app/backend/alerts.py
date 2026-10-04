@@ -80,7 +80,7 @@ class AlertService:
             row = conn.execute(
                 "SELECT value FROM backend_system_settings WHERE key='alert_last_scan'"
             ).fetchone()
-            state = conn.execute("""SELECT s.node_key,s.kind,s.first_seen_at,s.last_seen_at,n.title
+            state = conn.execute("""SELECT s.node_key,s.kind,s.first_seen_at,s.last_seen_at,n.title,n.flag
                 FROM backend_alert_state s JOIN backend_nodes n ON n.key=s.node_key
                 WHERE n.enabled=1 ORDER BY s.node_key,s.kind""").fetchall()
             counts = {
