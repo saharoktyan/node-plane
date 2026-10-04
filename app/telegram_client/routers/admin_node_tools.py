@@ -84,6 +84,7 @@ async def section_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, sta
 
 
 async def show_section(chat_id, user_id, message_id, section, node_key, bot, backend, state):
+    from .admin_nodes import editable_node, draft_controls
     fields = {'general': ('title', 'flag', 'region', 'notes'),
               'connection': ('public_host',),
               'xray': ('xray_host', 'xray_sni', 'xray_fingerprint', 'xray_tcp_port', 'xray_xhttp_port', 'xray_xhttp_path'),
@@ -91,11 +92,11 @@ async def show_section(chat_id, user_id, message_id, section, node_key, bot, bac
     if section not in fields:
         return
     locale = normalize_locale((await state.get_data()).get('locale'))
-    node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=user_id)
+    node = await editable_node(user_id, node_key, backend, state)
     if section in {'awg', 'xray'} and section not in node['protocols']:
         return
     await state.set_state(None)
-    await state.update_data(edit_section=section)
+    await state.update_data(edit_section=section, node_settings_view=section)
     def field_button(field):
         return button(locale, 'nodes.settings.field.' + field,
                       EditNodeFieldCallback(node_key=node_key, field=field).pack())
@@ -125,6 +126,7 @@ async def show_section(chat_id, user_id, message_id, section, node_key, bot, bac
                 button(locale, 'node_tools.entropy', f'node_view:entropy:{node_key}'),),), collapsed=True))
     await render(bot, chat_id, Screen(tr(locale, 'nodes.rich.connection' if section == 'connection' else 'node_tools.' + section),
         (tr(locale, 'nodes.rich.settings_note'),), sections=sections, embedded_buttons=True, navigation=True),
+        await draft_controls(node, state, locale) +
         [[button(locale, 'nodes.card.back_to_settings', NodeSettingsCallback(node_key=node_key).pack())]], state, message_id)
 
 

@@ -923,8 +923,20 @@ async def show_admin_status(chat_id: int, user_id: int, message_id: int,
         [InlineKeyboardButton(text=tr(locale, 'admin.status.refresh'),
         callback_data='admin_status')],
         [InlineKeyboardButton(text=tr(locale, 'back'), callback_data='admin_menu')]])
-    await render(bot, chat_id, Screen(tr(locale, 'admin.status.title'), tuple(lines)),
-                 rows, state, message_id)
+    attention = tuple(tuple(row) for row in rows[:-3])
+    sections = [Section(tr(locale, 'admin.rich.overview'), tables=(Table(
+        (tr(locale, 'admin.rich.item'), tr(locale, 'admin.rich.value')),
+        ((tr(locale, 'admin.nodes'), f"{overview['nodes_enabled']}/{overview['nodes_total']}"),
+         (tr(locale, 'admin.profiles'), f"{overview['profiles_active']}/{overview['profiles_total']}"),
+         (tr(locale, 'admin.rich.frozen'), str(overview['profiles_frozen'])),
+         (tr(locale, 'admin.requests'), str(overview['pending_requests'])),
+         (tr(locale, 'admin.status.open_problems'), str(len(overview['problem_nodes']))))),))]
+    if attention:
+        sections.append(Section(tr(locale, 'admin.rich.attention'), rows=attention))
+    sections.extend((Section(tr(locale, 'admin.rich.management'), rows=(tuple(rows[-3]),)),
+        Section(tr(locale, 'nodes.rich.technical'), collapsed=True, lines=(lines[0], lines[-1]))))
+    await render(bot, chat_id, Screen(tr(locale, 'admin.status.title'),
+        sections=tuple(sections), embedded_buttons=True, navigation=True), rows[-2:], state, message_id)
 
 
 @router.callback_query(F.data == 'admin_problem_nodes')
@@ -932,18 +944,50 @@ async def admin_problem_nodes_cb(query: CallbackQuery, bot: Bot,
                                  backend: BackendClient, state: FSMContext) -> None:
     from .callbacks import AdminNodeCallback
     await query.answer()
+    await show_admin_problem_nodes(query.message.chat.id, query.from_user.id,
+        query.message.message_id, bot, backend, state)
+
+
+@router.callback_query(F.data.startswith('admin_problem_page:'))
+async def admin_problem_page_cb(query: CallbackQuery, bot: Bot,
+                                backend: BackendClient, state: FSMContext) -> None:
+    await query.answer()
+    page = query.data.split(':', 1)[1]
+    if not page.isdecimal() or len(page) > 6:
+        return
+    await show_admin_problem_nodes(query.message.chat.id, query.from_user.id,
+        query.message.message_id, bot, backend, state, int(page))
+
+
+async def show_admin_problem_nodes(chat_id, user_id, message_id, bot, backend, state, page=0):
+    from .callbacks import AdminNodeCallback
     locale = normalize_locale((await state.get_data()).get('locale'))
-    overview = await backend.admin_overview(query.from_user.id)
-    rows = [[InlineKeyboardButton(text=server_label(node),
-        callback_data=AdminNodeCallback(node_key=node['key']).pack())]
-        for node in overview['problem_nodes']]
+    overview = await backend.admin_overview(user_id)
+    affected = sorted(overview['problem_nodes'], key=lambda node: (
+        node.get('region') or '', node['title'], node['key']))
+    pages = max(1, (len(affected) + 9) // 10)
+    page = min(max(0, page), pages - 1)
+    sections = region_sections(affected[page * 10:(page + 1) * 10], locale,
+        lambda node: Section('', rows=((InlineKeyboardButton(text=server_label(node),
+            callback_data=AdminNodeCallback(node_key=node['key']).pack()),),)))
+    rows = []
+    if pages > 1:
+        navigation = []
+        if page:
+            navigation.append(InlineKeyboardButton(text='←', callback_data=f'admin_problem_page:{page - 1}'))
+        navigation.append(InlineKeyboardButton(text=f'{page + 1}/{pages}', callback_data=f'admin_problem_page:{page}'))
+        if page + 1 < pages:
+            navigation.append(InlineKeyboardButton(text='→', callback_data=f'admin_problem_page:{page + 1}'))
+        rows.append(navigation)
+    rows.append([InlineKeyboardButton(text=tr(locale, 'admin.status.refresh'),
+        callback_data=f'admin_problem_page:{page}')])
     rows.append([InlineKeyboardButton(text=tr(locale, 'back'),
         callback_data='admin_status')])
-    lines = (tr(locale, 'admin.status.problem_nodes_hint'),) if rows[:-1] else (
+    lines = (tr(locale, 'admin.status.problem_nodes_hint'),) if affected else (
         tr(locale, 'admin.status.no_problems'),)
-    await render(bot, query.message.chat.id,
-        Screen(tr(locale, 'admin.status.problem_nodes'), lines),
-        rows, state, query.message.message_id)
+    await render(bot, chat_id,
+        Screen(tr(locale, 'admin.status.problem_nodes'), lines, sections=tuple(sections),
+            embedded_buttons=True, navigation=True), rows, state, message_id)
 
 
 async def show_member_settings(chat_id: int, user_id: int, message_id: int,

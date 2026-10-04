@@ -196,6 +196,7 @@ class MemberProfileSummary(BaseModel):
 class ProblemNodeOutput(BaseModel):
     key: str
     title: str
+    region: str = ''
     flag: str = ''
 
 

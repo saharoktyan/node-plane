@@ -114,7 +114,7 @@ class ProfileCreationWithGrantsTests(unittest.TestCase):
         overview = AdminOverviewService(self.db).get(self.actor)
         self.assertEqual(overview['nodes_enabled'], 1)
         self.assertEqual(overview['profiles_active'], 1)
-        self.assertEqual(overview['problem_nodes'], [{'key': 'n1', 'title': 'Node 1', 'flag': ''}])
+        self.assertEqual(overview['problem_nodes'], [{'key': 'n1', 'title': 'Node 1', 'region': 'test', 'flag': ''}])
 
     def test_node_overview_distinguishes_saved_state_from_live_health(self):
         overview = NodeOverviewService(self.db)

@@ -4,7 +4,8 @@ Status: Phase 1 and the core Phase 2 profile/access workflows are published in
 `v0.4.3-alpha.30` and accepted during user testing. Administrator traffic
 summary still needs a dedicated authorized backend read. Core Phase 3 server
 screens are implemented and awaiting live UX acceptance; Phase 4 destinations
-remain planned.
+are being migrated, starting with Status. Server refinements and the SSH audit
+are published in `v0.4.3-alpha.32`; the Status changes below are not in that tag.
 
 Member UI baseline: commit `a68b2e2`, validated by 659 tests. This document
 defines an incremental presentation redesign, not a replacement for the
@@ -545,3 +546,46 @@ compact profile rows have no headings.
   branches, nested streamed scripts, quoting, SSH connection options and the
   backend failure-code mapping. Shell syntax checks pass. No live SSH host was
   contacted; cold-host installation still requires the user's acceptance test.
+
+### Phase 4: Status and affected nodes (implemented after alpha.32)
+
+- Status uses a compact counts table for servers, profiles, frozen profiles,
+  pending requests and affected nodes. Requests and affected-node actions appear
+  only when relevant; management links and explicit Refresh remain available.
+- Version and the stored-state/live-runtime explanation are in collapsed
+  technical details. The screen reads the authorized overview without agent RPCs.
+- The backend overview now includes each affected node's region in its typed
+  response. The affected list groups nodes by region, prefixes configured flags
+  and shows ten items per page with arrow navigation only when needed.
+- Refresh reevaluates current affected nodes and clamps the page after recovery,
+  including a proper empty state. Node cards remain accessible from each row.
+- Both screens use embedded controls, the shared heading hierarchy, RU/EN text
+  and one final Back divider. Announcements and the remaining Phase 4 settings
+  destinations are the next independent blocks.
+
+### Server UX corrections after alpha.32 testing
+
+These changes supersede the earlier multiple protocol-entry paths and the
+main-settings-only Apply rule.
+
+- The landing card uses `region · flag/name`. A single existing Advanced & Runtime
+  entry is highlighted when edits are pending; no duplicate settings entry is
+  inserted above it. Protocol editing is reached through this settings hub only.
+- The hub groups protocol-name buttons under Protocol settings. Its screen title
+  and ordinary settings/back labels no longer reuse Advanced & Runtime.
+- Edits use one revision-bound adapter draft across settings subpages. Protocol
+  and transport selections use colored buttons and remain selected when returning
+  from another screen. At least one protocol and one VLESS transport must remain.
+- Save and apply and Reset changes appear beside the edited settings, including
+  the protocol selection screen. Save sends only changed fields with the captured
+  revision and idempotency key before queuing explicit application. Reset discards
+  the adapter draft and reloads backend values in the current settings section;
+  it does not roll back previously committed changes or an executing operation.
+- Backend rejection of protocol removal with existing grants is explained and
+  preserves the draft. Revision conflicts likewise preserve edits for review,
+  without silently rebasing them on concurrent changes.
+- Bootstrap appears on the landing card for an uninstalled node. Once installed,
+  reinstall is reached through Management. Existing configuration validation
+  still determines whether preserving configs is offered.
+- Region editing uses the same globe-prefixed templates and custom Other option
+  as creation, independently of the node flag.
