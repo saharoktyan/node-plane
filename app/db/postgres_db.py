@@ -10,7 +10,9 @@ def _translate_query(query: str, params: object | None) -> str:
     if params is None:
         return query
     
-    parts = query.split("'")
+    # psycopg parses percent placeholders even inside SQL string literals.
+    # Escape literal percent signs before introducing our positional %s markers.
+    parts = query.replace('%', '%%').split("'")
     for i in range(0, len(parts), 2):
         parts[i] = parts[i].replace("?", "%s")
         

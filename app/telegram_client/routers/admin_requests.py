@@ -46,7 +46,7 @@ async def show_requests(query: CallbackQuery, bot: Bot, backend: BackendClient,
 
 async def render_request_page(chat_id: int, user_id: int, message_id: int,
                               bot: Bot, backend: BackendClient, state: FSMContext,
-                              page_index: int):
+                              page_index: int, *, return_home_when_empty: bool = False):
     locale = normalize_locale((await state.get_data()).get('locale'))
     data = await state.get_data()
     cursors = list(data.get('request_cursors') or [None])
@@ -66,7 +66,7 @@ async def render_request_page(chat_id: int, user_id: int, message_id: int,
         return
     if not page['items'] and page_index > 0:
         await render_request_page(chat_id, user_id, message_id, bot, backend,
-                                  state, page_index - 1)
+                                  state, page_index - 1, return_home_when_empty=return_home_when_empty)
         return
     if page.get('next_cursor'):
         if len(cursors) == page_index + 1:
@@ -77,7 +77,7 @@ async def render_request_page(chat_id: int, user_id: int, message_id: int,
         cursors = cursors[:page_index + 1]
     await state.update_data(request_cursors=cursors,
                             request_page_index=page_index)
-    if not page['items'] and not search:
+    if not page['items'] and not search and return_home_when_empty:
         from .user import show_admin_menu
         await show_admin_menu(chat_id, user_id, message_id, bot, backend, state)
         return
@@ -269,7 +269,7 @@ async def apply_decision(query: CallbackQuery, request_id: str, decision: str,
 
     await render_request_page(query.message.chat.id, user_id,
         query.message.message_id, bot, backend, state,
-        (await state.get_data()).get('request_page_index', 0))
+        (await state.get_data()).get('request_page_index', 0), return_home_when_empty=True)
     try:
         account = await backend.request('GET',
             f"/api/v1/accounts/{result['account_id']}", telegram_user_id=user_id)

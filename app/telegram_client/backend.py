@@ -5,6 +5,7 @@ from uuid import uuid4
 from urllib.parse import urlencode, urlsplit
 
 import aiohttp
+import logging
 
 
 class BackendError(Exception):
@@ -110,6 +111,9 @@ class BackendClient:
                 data = await response.json()
                 if response.status >= 400:
                     error = data.get('error', {}) if isinstance(data, dict) else {}
+                    logging.getLogger(__name__).warning('Backend request failed: %s %s status=%s code=%s request_id=%s',
+                        method, path.split('?')[0], response.status, error.get('code', 'backend_unavailable'),
+                        response.headers.get('X-Request-ID', 'unknown'))
                     raise BackendError(error.get('code', 'backend_unavailable'), response.status)
                 return data
         except (aiohttp.ClientError, TimeoutError, ValueError) as exc:
