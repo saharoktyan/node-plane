@@ -472,3 +472,34 @@ async fn backend_mutations_reject_execution_when_journal_cannot_be_written() {
     drop((runtime, provisioning, ctx));
     std::fs::remove_dir_all(directory).unwrap();
 }
+
+#[test]
+fn decommission_missing_ssh_key_is_allowed_only_for_loopback_agents() {
+    for target in [
+        "127.0.0.1:50061",
+        "http://127.0.0.1:50061",
+        "[::1]:50061",
+        "localhost:50061",
+    ] {
+        assert_eq!(
+            decommission_public_key(target, Err(Status::failed_precondition("missing key")))
+                .unwrap(),
+            ""
+        );
+    }
+    for target in [
+        "node.example:50061",
+        "10.0.0.1:50061",
+        "localhost.evil:50061",
+        "localhost:invalid",
+    ] {
+        assert!(
+            decommission_public_key(target, Err(Status::failed_precondition("missing key")))
+                .is_err()
+        );
+    }
+    assert_eq!(
+        decommission_public_key("127.0.0.1:50061", Ok("existing key".into())).unwrap(),
+        "existing key"
+    );
+}

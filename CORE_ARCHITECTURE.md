@@ -98,6 +98,12 @@ The reader supports the flat TOML string format written by the rollout script;
 arbitrary manually rewritten TOML and nonstandard agent config-file locations
 are not silently treated as equivalent to a standard installation.
 
+Local decommissioning verifies the host directly and does not require SSH
+credentials. If a bot public key is available, its authorized-key entry is
+removed and checked too. SSH nodes still require the original bot public key
+and a separate verification identity; missing credentials block remote removal.
+The driver permits a missing public key only for loopback agent endpoints.
+
 Pre-existing removals without a captured inventory cannot claim verified
 retirement. An active node can bind its inventory before draining; an already
 uncertain uninstall requires explicit recovery or registry-only retirement.

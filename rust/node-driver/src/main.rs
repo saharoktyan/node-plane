@@ -92,6 +92,26 @@ impl XrayPublicMetadata {
     }
 }
 
+// Only a loopback agent can be removed without an SSH public key.
+fn decommission_public_key(target: &str, key: Result<String, Status>) -> Result<String, Status> {
+    let endpoint = target
+        .strip_prefix("http://")
+        .or_else(|| target.strip_prefix("https://"))
+        .unwrap_or(target);
+    let local = endpoint
+        .parse::<std::net::SocketAddr>()
+        .map(|address| address.ip().is_loopback())
+        .unwrap_or(false)
+        || endpoint
+            .strip_prefix("localhost:")
+            .and_then(|port| port.parse::<u16>().ok())
+            .is_some();
+    match key {
+        Err(_) if local => Ok(String::new()),
+        other => other,
+    }
+}
+
 impl DriverContext {
     fn runtime_assets_dir(&self) -> PathBuf {
         let app_root = env::var_os("NODE_PLANE_APP_DIR").map(PathBuf::from);
@@ -930,7 +950,7 @@ impl RuntimeService for RuntimeApi {
                 "runtime cleanup verified by agent"
             }
             "uninstall" => {
-                let public_key = self.ctx.bot_public_key()?;
+                let public_key = decommission_public_key(target, self.ctx.bot_public_key())?;
                 transport
                     .uninstall_agent_for_decommission(&req.command_id, &public_key)
                     .await?;

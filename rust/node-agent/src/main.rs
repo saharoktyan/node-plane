@@ -2190,12 +2190,10 @@ impl NodeAgentService for NodeAgentApi {
                 "runtime cleanup is not complete",
             ));
         }
-        if req.bot_public_key.trim().is_empty() {
-            return Err(Status::invalid_argument("bot SSH public key is required"));
-        }
-        Ok(Response::new(
-            self.schedule_uninstall(Some(&req.bot_public_key))?,
-        ))
+        // Local installations need no SSH key. Remote removal is verified by
+        // the controller with an independent SSH identity and the original key.
+        let key = (!req.bot_public_key.trim().is_empty()).then_some(req.bot_public_key.as_str());
+        Ok(Response::new(self.schedule_uninstall(key)?))
     }
 
     async fn delete_runtime(

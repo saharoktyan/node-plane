@@ -51,9 +51,9 @@ class NodeRemovalService:
             return self.verifier_factory(target, final)
         local = target == 'local'
         bot_key_path = os.environ.get('NODE_PLANE_BOT_PUBLIC_KEY_FILE') or (os.environ.get('SSH_KEY', '') + '.pub')
-        if not Path(bot_key_path).is_file():
+        bot_key = Path(bot_key_path).read_text().strip() if Path(bot_key_path).is_file() else None
+        if not local and bot_key is None:
             raise AccessDenied('verification_key_unavailable', 503)
-        bot_key = Path(bot_key_path).read_text().strip()
         if local:
             return RemovalVerifier(local=True, bot_public_key=bot_key)
         independent = os.environ.get('NODE_PLANE_REMOVAL_SSH_KEY')
