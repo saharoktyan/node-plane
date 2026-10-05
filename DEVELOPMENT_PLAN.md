@@ -64,6 +64,12 @@ fix is implemented and tested and included in the `0.4.3-alpha.39` release.
 
 ### Execution and ownership cleanup
 
+Protocol-only cleanup now verifies the configuration bind mount before deleting
+containers, plans every candidate before mutation, removes by immutable ID and
+includes matching `-previous-<pid>` leftovers. Regression tests cover rejection
+of an unrelated container without partial deletion. Agent decommissioning and
+independent final verification still need the same ownership guarantees.
+
 - [x] Inventory and remove legacy Rust driver RPCs and PostgreSQL business-table
   paths. Removed TelemetryService, legacy NodeService methods and old
   ProvisioningService/RuntimeService methods together with protobuf messages,

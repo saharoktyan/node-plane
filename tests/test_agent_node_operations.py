@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import os
 from pathlib import Path
 import tempfile
@@ -71,7 +72,7 @@ class AgentNodeOperationTests(unittest.TestCase):
         self.path.write_text('journal')
         with patch.object(MODULE, 'ROOT', root), patch.object(MODULE, 'environment',
                 return_value=[str(root/'xray/config.json'), str(root/'amnezia-awg/data/wg0.conf'), 'xray', 'amnezia-awg']), \
-             patch.object(MODULE.subprocess, 'run') as inspect, patch.object(MODULE, 'command'):
+             patch.object(MODULE.subprocess, 'run') as inspect, patch.object(MODULE, 'command', return_value=''):
             inspect.return_value.returncode = 1
             MODULE.remove_protocol_runtime(0)
         self.assertFalse((root / 'awg-clients').exists())
@@ -79,6 +80,31 @@ class AgentNodeOperationTests(unittest.TestCase):
         self.assertFalse((root / 'amnezia-awg').exists())
         self.assertTrue(self.path.exists())
         self.assertTrue((root / 'helper.py').exists())
+
+    def test_cleanup_plans_current_and_previous_containers_by_mount_and_id(self):
+        records = [{'Name': '/' + name, 'Id': digit * 64,
+                    'Mounts': [{'Type': 'bind', 'Source': '/runtime/xray', 'Destination': '/etc/xray'}]}
+                   for name, digit in [('xray', 'a'), ('xray-previous-123', 'b')]]
+        records.append({'Name': '/unrelated', 'Id': 'c' * 64, 'Mounts': []})
+        with patch.object(MODULE, 'command', side_effect=['a\nb\nc', json.dumps(records)]):
+            self.assertEqual(MODULE.owned_protocol_containers('/runtime/xray/config.json',
+                '/runtime/amnezia-awg/data/wg0.conf', 'xray', 'amnezia-awg'), ['a' * 64, 'b' * 64])
+
+    def test_unowned_second_container_aborts_before_any_removal(self):
+        root = Path(self.temp.name)
+        (root / 'xray').mkdir()
+        sentinel = root / 'xray/config.json'
+        sentinel.write_text('keep')
+        records = [{'Name': '/xray', 'Id': 'a' * 64, 'Mounts': [
+            {'Type': 'bind', 'Source': str(root/'xray'), 'Destination': '/etc/xray'}]},
+            {'Name': '/amnezia-awg', 'Id': 'b' * 64, 'Mounts': []}]
+        with patch.object(MODULE, 'ROOT', root), patch.object(MODULE, 'environment', return_value=[
+                str(sentinel), str(root/'amnezia-awg/data/wg0.conf'), 'xray', 'amnezia-awg']), \
+             patch.object(MODULE, 'command', side_effect=['a\nb', json.dumps(records)]) as command:
+            with self.assertRaisesRegex(ValueError, 'ownership'):
+                MODULE.remove_protocol_runtime(0)
+            self.assertEqual(command.call_count, 2)
+        self.assertEqual(sentinel.read_text(), 'keep')
 
     def test_invalid_second_directory_does_not_remove_first_or_stop_containers(self):
         root = Path(self.temp.name)

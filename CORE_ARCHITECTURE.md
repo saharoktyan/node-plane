@@ -82,7 +82,9 @@ results rather than inferring them from unit tests or stale migration boxes.
 | Docker images | Shared host cache, not exclusive ownership evidence. Try removing current configured images without force; retain images used by other containers. Do not remove historical global image tags merely because Node Plane once used that version. |
 | Host packages, Docker daemon and firewall | Shared host facilities. Do not uninstall or broadly prune them during node removal. Existing firewall rules are not tracked as exclusively owned and remain. |
 
-Container-name ownership and orphan discovery still need hardening: a matching
+Protocol-only cleanup checks configuration bind mounts and deletes by immutable
+container ID, including matching previous-container leftovers. Full agent
+decommissioning ownership and orphan discovery still need hardening: a matching
 name alone does not prove a container belongs to Node Plane. Final verification
 currently covers standard paths/container names, not arbitrary custom runtime
 locations. Do not claim that it certifies removal of every custom or historical

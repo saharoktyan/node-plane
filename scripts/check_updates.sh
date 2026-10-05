@@ -164,7 +164,7 @@ if [[ $LIST_MODE -eq 1 ]]; then
   while IFS= read -r tag; do
     [[ -z "$tag" ]] && continue
     if [[ "$tag" =~ $tag_regex ]]; then
-      echo "version_item: ${tag#v}|${tag}|tag|$(git rev-parse --short "${tag}")"
+      echo "version_item: ${tag#v}|${tag}|tag|$(git rev-parse "${tag}^{commit}")"
     fi
   done < <(git tag --merged "${BRANCH_REF}" --sort=-version:refname)
   exit 0
