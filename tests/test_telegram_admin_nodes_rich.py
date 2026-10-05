@@ -320,3 +320,40 @@ class AdminNodeRichTests(IsolatedAsyncioTestCase):
         with patch.object(nodes, 'render', new_callable=AsyncMock) as draw:
             await nodes.show_admin_node(123, 123, 77, 'msk1', self.bot, self.backend, self.state)
         self.assertIn('bootstrap_menu:msk1', self.callbacks(draw))
+
+    async def test_new_node_settings_and_stale_apply_button_lead_to_bootstrap(self):
+        self.node['applied_revision'] = 0
+        self.overview['state'] = 'applying'
+        with patch.object(nodes, 'render', new_callable=AsyncMock) as draw:
+            await nodes.show_admin_node(123, 123, 77, 'msk1', self.bot, self.backend, self.state)
+        self.assertIn('bootstrap_menu:msk1', self.callbacks(draw))
+        self.assertFalse(any(c.startswith('apply_node:') for c in self.callbacks(draw)))
+        controls = await nodes.draft_controls(self.node, self.state, 'en')
+        self.assertEqual(controls[0][0].callback_data, 'bootstrap_menu:msk1')
+        self.backend.apply_node_settings = AsyncMock()
+        with patch.object(tools, 'show_install', new_callable=AsyncMock) as install:
+            await nodes.apply_node(123, 123, 77, 'msk1', self.bot, self.backend, self.state)
+        install.assert_awaited_once()
+        self.backend.apply_node_settings.assert_not_awaited()
+
+    async def test_initial_bootstrap_only_offers_unfinished_installation_steps(self):
+        self.node['applied_revision'] = 0
+        for docker in (False, True):
+            self.backend.node_services.return_value = {'docker': docker,
+                'awg_config_valid': False, 'xray_config_valid': False}
+            with patch.object(tools, 'render', new_callable=AsyncMock) as draw:
+                await tools.show_install(123, 123, 77, 'msk1', self.bot, self.backend, self.state)
+            callbacks = self.callbacks(draw)
+            if docker:
+                self.assertIn('node_action:bootstrap:msk1', callbacks)
+                self.assertNotIn('node_action:install_docker:msk1', callbacks)
+            else:
+                self.assertIn('node_action:install_docker:msk1', callbacks)
+
+    async def test_unstarted_initial_apply_result_offers_installation_instead_of_spinner(self):
+        self.backend.node_settings_operation = AsyncMock(return_value={'status': 'superseded',
+            'error_code': 'node_installation_required'})
+        with patch.object(nodes, 'render', new_callable=AsyncMock) as draw:
+            await nodes.show_node_apply_status(123, 123, 77, 'task', 'msk1', self.bot, self.backend, self.state)
+        self.assertIn('bootstrap_menu:msk1', self.callbacks(draw))
+        self.assertIn(tr('en', 'nodes.apply.installation_required'), draw.call_args.args[2].lines)

@@ -2096,6 +2096,8 @@ CATALOG['en'].update({
     'cleanup.rich.removable': 'Releases to remove', 'command.rich.telegram_id': 'Telegram ID',
     'command.rich.username': 'Username', 'command.rich.command': 'Command',
     'command.rich.description': 'Description',
+    'nodes.draft.save_only': 'Save settings',
+    'nodes.apply.installation_required': 'The node has not been installed. Open Bootstrap to install the missing components first.',
 })
 CATALOG['ru'].update({
     'maintenance.rich.field': 'Пункт', 'maintenance.rich.value': 'Значение',
@@ -2113,4 +2115,6 @@ CATALOG['ru'].update({
     'cleanup.rich.removable': 'Релизы для удаления', 'command.rich.telegram_id': 'Telegram ID',
     'command.rich.username': 'Имя пользователя', 'command.rich.command': 'Команда',
     'command.rich.description': 'Описание',
+    'nodes.draft.save_only': 'Сохранить настройки',
+    'nodes.apply.installation_required': 'Нода ещё не установлена. Откройте Bootstrap, чтобы сначала установить недостающие компоненты.',
 })

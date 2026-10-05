@@ -99,7 +99,7 @@ class BackendNodeSettingsTests(unittest.TestCase):
         self.assertEqual(self.client.get(f'/api/v1/node-settings-operations/{next_id}', headers=self.admin_headers()).json()['status'], 'blocked')
         self.assertEqual(self.db.connection.execute('SELECT applied_revision FROM backend_nodes WHERE key = ?', ('n1',)).fetchone()[0], 0)
 
-    def test_absent_agent_does_not_turn_queued_apply_into_uncertain_result(self):
+    def test_initial_apply_without_agent_retires_safely_for_bootstrap(self):
         self.assertEqual(self.create().status_code, 201)
         task_id = self.queue().json()['id']
 
@@ -110,12 +110,16 @@ class BackendNodeSettingsTests(unittest.TestCase):
             def apply_node_settings(self, command_id, intent):
                 raise AssertionError('mutation must not start')
 
-        self.assertFalse(NodeSettingsExecutor(self.db, Driver()).run_one())
-        self.assertEqual(self.client.get(f'/api/v1/node-settings-operations/{task_id}', headers=self.admin_headers()).json()['status'], 'awaiting_executor')
+        self.assertTrue(NodeSettingsExecutor(self.db, Driver()).run_one())
+        result = self.client.get(f'/api/v1/node-settings-operations/{task_id}', headers=self.admin_headers()).json()
+        self.assertEqual(result['status'], 'superseded')
+        self.assertEqual(result['error_code'], 'node_installation_required')
 
     def test_clean_agent_is_prepared_before_settings_command(self):
         self.assertEqual(self.create().status_code, 201)
-        task_id = self.queue().json()['id']
+        self.db.connection.execute("UPDATE backend_nodes SET applied_revision=1, desired_revision=2 WHERE key='n1'")
+        self.db.connection.commit()
+        task_id = self.queue(2).json()['id']
         calls = []
 
         class Driver:
@@ -130,17 +134,19 @@ class BackendNodeSettingsTests(unittest.TestCase):
             def apply_node_settings(self, command_id, intent):
                 calls.append('apply')
                 assert command_id == task_id
-                return json.dumps({'node_key': 'n1', 'revision': 1,
+                return json.dumps({'node_key': 'n1', 'revision': 2,
                                    'settings_sha256': _digest(intent)})
 
         self.assertTrue(NodeSettingsExecutor(self.db, Driver()).run_one())
         self.assertEqual(calls, ['inspect', 'prepare', 'apply'])
         self.assertEqual(self.db.connection.execute('SELECT applied_revision FROM backend_nodes WHERE key = ?',
-            ('n1',)).fetchone()['applied_revision'], 1)
+            ('n1',)).fetchone()['applied_revision'], 2)
 
     def test_failed_preparation_leaves_command_queued(self):
         self.assertEqual(self.create().status_code, 201)
-        task_id = self.queue().json()['id']
+        self.db.connection.execute("UPDATE backend_nodes SET applied_revision=1, desired_revision=2 WHERE key='n1'")
+        self.db.connection.commit()
+        task_id = self.queue(2).json()['id']
 
         class Driver:
             def inspect_node(self, node_key):

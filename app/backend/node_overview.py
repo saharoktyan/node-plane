@@ -39,7 +39,7 @@ class NodeOverviewService:
             settings_complete = True
         except AccessDenied:
             settings_complete = False
-        if node['applied_revision'] == 0 and not settings_tasks:
+        if node['applied_revision'] == 0 and current_settings not in {'running', 'blocked'}:
             state = 'not_installed'
         elif current_settings in {'awaiting_executor', 'running'}:
             state = 'applying'

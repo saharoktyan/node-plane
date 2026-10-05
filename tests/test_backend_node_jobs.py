@@ -41,6 +41,24 @@ class BackendNodeJobTests(unittest.TestCase):
     def queue(self, action='reinstall_clean', key=None):
         return self.jobs.queue(self.actor, 'n1', action, revision=1, command_key=key or str(uuid4()))
 
+    def test_unstarted_initial_settings_task_does_not_block_bootstrap_forever(self):
+        from backend.node_settings import NodeSettingsExecutor
+        from backend.node_overview import NodeOverviewService
+        self.db.connection.execute("UPDATE backend_nodes SET applied_revision=0,enabled=0 WHERE key='n1'")
+        self.db.connection.commit()
+        task = NodeSettingsService(self.db).queue(self.actor, 'n1', revision=1, command_key=str(uuid4()))
+        class Driver:
+            def inspect_node(self, node_key):
+                return {'health_state': 'degraded', 'xray_config_present': False, 'awg_config_present': False}
+            def prepare_node(self, node_key):
+                raise AssertionError('Initial installation must use Bootstrap')
+            def apply_node_settings(self, command_id, intent):
+                raise AssertionError('No settings mutation may start')
+        self.assertEqual(NodeOverviewService(self.db).get(self.actor, 'n1')['state'], 'not_installed')
+        self.assertTrue(NodeSettingsExecutor(self.db, Driver()).run_one())
+        self.assertEqual(NodeSettingsService(self.db).get(self.actor, task['id'])['error_code'], 'node_installation_required')
+        self.assertEqual(self.queue('bootstrap')['status'], 'awaiting_executor')
+
     def test_reinstall_fences_config_issuance_and_reprovisions_with_new_revision(self):
         profile = ProfileRepository(self.db).create_profile(runtime_name='alice', display_name='Alice', owner_account_id=self.actor.account.id)
         self.db.connection.execute('INSERT INTO backend_grants VALUES (?, ?, ?)', (profile, 'n1', 'awg'))

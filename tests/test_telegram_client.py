@@ -1058,7 +1058,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         self.query.data = 'node_connection_set:lv1:ssh'
         backend = SimpleNamespace(request=AsyncMock(return_value={
             'key': 'lv1', 'transport': 'local', 'ssh_target': None,
-            'desired_revision': 4, 'settings': {}}), edit_node=AsyncMock())
+            'desired_revision': 4, 'applied_revision': 3, 'settings': {}}), edit_node=AsyncMock())
         message = SimpleNamespace(from_user=SimpleNamespace(id=123), text='root@lv1.example.com',
             chat=SimpleNamespace(id=123, type='private'), delete=AsyncMock())
         with patch.object(admin_nodes, 'render', new_callable=AsyncMock):
