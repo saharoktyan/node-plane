@@ -106,6 +106,32 @@ def ports(intent):
             [('udp', settings['awg_port'])] if 'awg' in intent['protocols'] else [])
 
 
+def owned_protocol_containers(xray, awg, xc, ac):
+    """Plan deletion by mount ownership and immutable ID, including crash leftovers."""
+    ids = command(['docker', 'ps', '-aq']).splitlines()
+    if not ids:
+        return []
+    records = json.loads(command(['docker', 'container', 'inspect', *ids]))
+    owned = []
+    for record in records:
+        name = record['Name'].lstrip('/')
+        for configured, source, destination in (
+                (xc, Path(xray).parent, '/etc/xray'),
+                (ac, Path(awg).parent, '/opt/amnezia/awg')):
+            if name != configured and not re.fullmatch(re.escape(configured) + r'-previous-\d+', name):
+                continue
+            mounts = record.get('Mounts', [])
+            if not any(mount.get('Type') == 'bind'
+                       and mount.get('Source') == str(source)
+                       and mount.get('Destination') == destination for mount in mounts):
+                raise ValueError('container ownership could not be verified: ' + name)
+            identity = record['Id']
+            if not re.fullmatch(r'[a-f0-9]{64}', identity):
+                raise ValueError('invalid container identity')
+            owned.append(identity)
+    return list(dict.fromkeys(owned))
+
+
 def remove_protocol_runtime(lock_fd):
     xray, awg, xc, ac = environment()
     if any(path.is_symlink() for path in (ROOT, *ROOT.parents)):
@@ -118,9 +144,9 @@ def remove_protocol_runtime(lock_fd):
     for directory, owned in zip(directories, expected):
         if directory.is_symlink() or directory.resolve() != owned:
             raise ValueError('runtime cleanup path is outside managed directories')
-    for name in (xc, ac):
-        if subprocess.run(['docker', 'container', 'inspect', name], capture_output=True).returncode == 0:
-            command(['docker', 'rm', '-f', name], lock_fd)
+    containers = owned_protocol_containers(xray, awg, xc, ac)
+    for identity in containers:
+        command(['docker', 'rm', '-f', identity], lock_fd)
     # Only protocol-owned directories; never agent identity, journal or scripts.
     for directory in directories:
         if directory.exists():
