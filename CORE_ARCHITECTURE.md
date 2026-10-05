@@ -82,13 +82,28 @@ results rather than inferring them from unit tests or stale migration boxes.
 | Docker images | Shared host cache, not exclusive ownership evidence. Try removing current configured images without force; retain images used by other containers. Do not remove historical global image tags merely because Node Plane once used that version. |
 | Host packages, Docker daemon and firewall | Shared host facilities. Do not uninstall or broadly prune them during node removal. Existing firewall rules are not tracked as exclusively owned and remain. |
 
-Protocol-only cleanup checks configuration bind mounts and deletes by immutable
-container ID, including matching previous-container leftovers. Full agent
-decommissioning ownership and orphan discovery still need hardening: a matching
-name alone does not prove a container belongs to Node Plane. Final verification
-currently covers standard paths/container names, not arbitrary custom runtime
-locations. Do not claim that it certifies removal of every custom or historical
-artifact. These limitations remain in the active backlog.
+Protocol-only cleanup and full agent decommissioning check configuration bind
+mounts and delete by immutable container ID, including matching previous-container
+leftovers. A matching name alone does not prove a container belongs to Node Plane.
+Full decommissioning preserves graceful AWG shutdown and reads the remaining
+container inventory before deleting configs. Before draining, the controller
+captures the agent executable, configured runtime/state/log/TLS/config paths,
+node.env path overrides, named config backups and configured container names
+through the independently authenticated host connection. This inventory is
+stored with the bound host identity. Final verification checks those paths and
+current/previous container names and returns the inventory digest as evidence.
+Node environment files are parsed as data, never sourced. Unsupported dynamic
+shell values or agent config syntax block inventory capture before revocation.
+The reader supports the flat TOML string format written by the rollout script;
+arbitrary manually rewritten TOML and nonstandard agent config-file locations
+are not silently treated as equivalent to a standard installation.
+
+Pre-existing removals without a captured inventory cannot claim verified
+retirement. An active node can bind its inventory before draining; an already
+uncertain uninstall requires explicit recovery or registry-only retirement.
+Untracked historical artifacts outside the captured runtime/config locations
+and new external backup paths created after capture remain audit limitations.
+Disposable-node end-to-end evidence is still required before closing this block.
 
 Recovery of an interrupted removal uses the stored command and phase. Observe
 the host first; an uncertain agent uninstall requires independent verification,

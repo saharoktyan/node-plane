@@ -66,9 +66,14 @@ fix is implemented and tested and included in the `0.4.3-alpha.39` release.
 
 Protocol-only cleanup now verifies the configuration bind mount before deleting
 containers, plans every candidate before mutation, removes by immutable ID and
-includes matching `-previous-<pid>` leftovers. Regression tests cover rejection
-of an unrelated container without partial deletion. Agent decommissioning and
-independent final verification still need the same ownership guarantees.
+includes matching `-previous-<pid>` leftovers. Agent decommissioning now uses
+the same mount checks, previous-container discovery and immutable IDs, preserves
+graceful AWG shutdown and refuses to erase files if Docker inventory cannot be
+read or managed containers remain. Regression tests cover unrelated mounts and
+malformed inventory. Independent verification now persists a pre-drain inventory
+of configured paths, current backups and container names, ties it to the host
+fingerprint, and validates the digest of that same inventory before retirement.
+Shell-level tests verify custom config leftovers and previous-container names.
 
 - [x] Inventory and remove legacy Rust driver RPCs and PostgreSQL business-table
   paths. Removed TelemetryService, legacy NodeService methods and old
@@ -85,9 +90,12 @@ independent final verification still need the same ownership guarantees.
   Inventory and recovery boundaries are recorded in CORE_ARCHITECTURE.md.
   Implemented preflight validation before any runtime cleanup, refusal of
   recursive deletion outside the managed root/symlinked paths, and non-forced
-  image cleanup without deleting global historical tags. Remaining: prove
-  container ownership before deletion, handle orphan/previous containers and
-  independently verify custom paths rather than only standard artifacts.
+  image cleanup without deleting global historical tags. Both protocol-only
+  cleanup and agent decommissioning verify container mounts and include previous
+  containers. Independent final verification now checks captured custom paths
+  and container names. Remaining: disposable-node evidence for the complete
+  removal saga, historical artifacts outside the captured locations, and backup
+  artifacts created outside the runtime root after the inventory was captured.
 - [x] Document operation/artifact retention, journal growth and cleanup rules.
   Keep node-agent SQLite command journals; their replacement is not planned.
   Never remove duplicate-protection records while commands can still be replayed.
@@ -95,6 +103,48 @@ independent final verification still need the same ownership guarantees.
   growth, backup/release rules and the prerequisites for future payload pruning.
 
 ### Focused integration evidence
+
+Manual acceptance for v0.4.3-alpha.42 (use disposable nodes):
+
+1. Update to the tagged release through Updates. Core components become current;
+   reachable agents update, and failed agents are listed as partial failures.
+2. Open member/admin profile cards on a fresh installation with traffic collection
+   enabled and no samples. Both cards load without PostgreSQL datatype errors.
+3. Install local agent and both protocols, grant two profiles different protocol
+   combinations, save working configs, then remove the node. All grants disappear,
+   issued tunnels stop, and unrelated nodes/grants keep working. Refresh member
+   Profile/Get config and the admin grant editor; the removed node must be absent.
+4. Keep an old config screen open during removal. Its buttons must not issue a
+   stale config or recreate the node/access after removal.
+5. Remove an installed node with no profile grants, then an agent-only node without
+   protocol runtime. Both must complete without requiring nonexistent configs.
+6. Leave the removal screen before completion and revisit it. Backend workers
+   continue; refreshing does not launch another destructive operation.
+7. Stop the agent before removal. Full removal cannot claim success. Registry-only
+   removal removes node/grants from the bot and explicitly leaves remote state
+   unverified. It cannot promise that downloaded configs stopped working remotely.
+8. Interrupt agent connectivity during revocation. Runtime cleanup must wait for
+   revocations; uncertain outcomes require recovery, not a blind repeat.
+9. After successful full removal, independently check agent unit/process/binary,
+   runtime/config/journal/state/log paths, current and previous containers, and the
+   exact bot authorized-key entry. Controller services, Docker and unrelated
+   authorized keys/files/containers must remain.
+10. Create a stopped `<xray-name>-previous-<pid>` fixture with the same config bind
+    mount on a disposable node. Full removal must also delete this leftover.
+11. On a separate disposable node with no grants, substitute an unrelated container
+    under the configured protocol name. Ownership validation must prevent deletion
+    of that container and runtime files; no successful retirement is allowed.
+12. Recreate the removed node under the same key. Only newly granted profiles get
+    access; old grants/configs must not return automatically.
+13. When an SSH test node is available, repeat full removal with a separate root
+    verification key and a pinned host key. Without that independent credential,
+    removal must block before revoking profiles. Never use production nodes for
+    ownership fixtures or connectivity interruption.
+
+Configured-path capture, malformed inventories, shell-value injection rejection
+and literal custom container-name matching also have automated regression tests.
+Record actual node results separately; unit fixtures do not prove end-to-end
+host uninstall or PostgreSQL concurrency behavior.
 
 Use isolated PostgreSQL databases, local fixtures and disposable nodes. Record
 the tested release and result; SQL fakes do not prove PostgreSQL lock semantics.
