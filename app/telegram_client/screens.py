@@ -21,8 +21,8 @@ BACK_LABELS = {'← Back', '← Назад', 'Back', 'Назад'}
 def rich_buttons(rows, *, navigation=False):
     return [InputRichBlockButtons(buttons=[RichMessageButton(
         text=button.text, callback_data=button.callback_data, url=button.url,
-        copy_text=button.copy_text, style='link' if navigation and button.callback_data and
-            (len(row) == 1 or button.text in BACK_LABELS) else button.style)
+        copy_text=button.copy_text, style=button.style or ('link' if navigation and button.callback_data and
+            (len(row) == 1 or button.text in BACK_LABELS) else None))
         for button in row]) for row in rows if row]
 
 

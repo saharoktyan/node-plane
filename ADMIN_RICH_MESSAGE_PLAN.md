@@ -673,3 +673,16 @@ main-settings-only Apply rule.
   Real-host systemd rollback and interrupted updates still need deployment tests.
 - Remaining Rich presentation work: Backups, controller cleanup and command
   screens, plus refinement of secondary update tools.
+
+### Updates overview refinement (implemented after alpha.36)
+
+- Installed version is always visible; an available newer version is displayed
+  beside the summary. Check is always available beside the primary action.
+- To latest appears only when a new stack version is available. An active job
+  replaces it with persistent progress navigation.
+- Automatic checks, version/branch selection, components/results and destructive
+  actions are separate visible groups. Cleanup actions use the danger style.
+- The overview's server list contains only agents known to require an update;
+  unknown and current agents are excluded. Full job results still list all nodes.
+- Current component status reads Up to date in English. Region grouping and
+  ten-node pagination are preserved for the outdated-agent list.
