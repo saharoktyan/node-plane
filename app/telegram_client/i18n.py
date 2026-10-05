@@ -2123,3 +2123,15 @@ CATALOG['ru'].update({
     'config.link.show': 'Показать ссылку конфигурации',
     'config.link.hide': 'Скрыть ссылку конфигурации',
 })
+
+CATALOG["en"].update({
+    "node_tools.cleanup_failed": "Node cleanup stopped. Check the backend worker log and retry after resolving the cause.",
+    "node_tools.verification_failed": "Removal could not be confirmed on the node. Check the backend worker log before retrying.",
+})
+CATALOG["ru"].update({
+    "node_tools.cleanup_failed": "Очистка ноды остановилась. Проверьте журнал backend worker и повторите после устранения причины.",
+    "node_tools.verification_failed": "Удаление на ноде не удалось подтвердить. Проверьте журнал backend worker перед повторной попыткой.",
+})
+
+CATALOG["en"]["nodes.rollout.journal_archived"] = "Previous installation journals were archived to: {path}"
+CATALOG["ru"]["nodes.rollout.journal_archived"] = "Журналы предыдущей установки сохранены в архиве: {path}"

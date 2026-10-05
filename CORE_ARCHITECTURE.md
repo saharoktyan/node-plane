@@ -133,3 +133,21 @@ retention later, separate payloads from durable identity/fingerprint/tombstones,
 prove recovery and stale-request rejection, then introduce explicit retention.
 Backing up and restoring controller configuration does not reset remote command
 history; preserve node fences and reconcile before provisioning again.
+
+Agent onboarding binds its journals to a controller installation UUID stored in
+`backend_installation_identity`. Upgrades and backups preserve this identity;
+a new database produces a new one. When a different controller onboards the
+host, the installer stops the previous agent before moving the profile journal,
+SQLite sidecars, lock and decommission marker to
+`/var/lib/node-plane-agent/journal-archives/previous-controller-<old-id>-<UTC>-<suffix>/`.
+The private archive includes a manifest and is reported in installer output and
+the rollout result. It remains on the node until full agent removal deletes its
+owned state directory. Do not restore an old journal into a new controller's
+active path without explicit reconciliation. Archival does not remove protocol
+containers, configs or existing VPN access.
+
+Legacy agents without an installation marker adopt the new UUID while retaining
+journals if their installed CA matches the current controller CA. A different
+CA is treated as a previous installation. If the old owner cannot be identified
+(journals exist but no installed CA or controller marker), onboarding refuses to
+guess. Ordinary updates under the same installation never rotate journals.

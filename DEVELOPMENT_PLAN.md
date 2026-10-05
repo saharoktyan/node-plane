@@ -96,6 +96,26 @@ Shell-level tests verify custom config leftovers and previous-container names.
   and container names. Remaining: disposable-node evidence for the complete
   removal saga, historical artifacts outside the captured locations, and backup
   artifacts created outside the runtime root after the inventory was captured.
+  Alpha.43 manual testing found local removal blocked at `preparing` while the
+  agent remains active. Diagnosis confirmed a commands-only bootstrap journal
+  and historical successful `ensure` fences absent from the new backend's DB.
+  Preparation now accepts a valid commands-only journal and durably revokes all
+  remaining historical targets before fencing cleanup. Interrupted commands
+  still block removal; failed historical revocation is not replayed blindly.
+  The old generic error incorrectly described every cleanup failure as
+  connectivity loss. Worker phase/error logging and
+  distinct cleanup/verification messages have been added. A separate later-step
+  defect was fixed: systemd agent uninstall must not require HOME. Explicitly
+  rejected uninstall RPCs remain retryable; ambiguous transport failures remain
+  fenced. Do not require a fresh installation to investigate an existing blocked
+  operation or claim full-removal acceptance from unit tests alone.
+  Agent onboarding now binds command journals to the controller's persistent
+  database UUID. New-controller onboarding quiesces the previous agent and
+  archives SQLite files, sidecars and removal fences with a manifest, reporting
+  the archive path in installer output and the Telegram rollout result. Same-
+  controller updates retain active journals; legacy adoption uses the installed
+  CA as conservative ownership evidence. Actual SSH archival still needs a
+  disposable-node acceptance run.
 - [x] Document operation/artifact retention, journal growth and cleanup rules.
   Keep node-agent SQLite command journals; their replacement is not planned.
   Never remove duplicate-protection records while commands can still be replayed.

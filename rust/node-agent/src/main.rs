@@ -933,14 +933,26 @@ impl AgentState {
                 .map_err(|_| Status::failed_precondition("cannot persist decommission fence"))?;
             return Ok(());
         }
-        let output = Command::new(&helper)
-            .args(["prepare-decommission", command_id])
+        // A draining node cannot bootstrap again to replace its old helper.
+        // Use this agent's journal implementation, retaining the deployed path
+        // solely to locate the protocol deletion scripts invoked by run().
+        let code = format!(
+            "import sys\n__file__ = sys.argv[1]\nsys.argv = sys.argv[1:]\n{}",
+            include_str!("../../../runtime_assets/apply-profile-intent.py")
+        );
+        let output = Command::new("python3")
+            .args(["-c", &code, &helper, "prepare-decommission", command_id])
+            .env("NODE_PLANE_AGENT_INSTANCE_ID", &self.instance_id)
             .output()
             .map_err(|_| Status::failed_precondition("decommission helper unavailable"))?;
         if !output.status.success() {
-            return Err(Status::failed_precondition(
-                "profile revocations are not confirmed; decommission refused",
-            ));
+            // This helper only validates journal/fence state. Preserve its
+            // reason in server diagnostics instead of claiming transport loss.
+            let reason = String::from_utf8_lossy(&output.stderr);
+            return Err(Status::failed_precondition(format!(
+                "profile revocations are not confirmed; decommission refused: {}",
+                reason.chars().take(2048).collect::<String>().trim()
+            )));
         }
         Ok(())
     }
@@ -1042,9 +1054,7 @@ impl AgentState {
     }
 
     fn authorized_keys_path(&self) -> Result<PathBuf, Status> {
-        let home = env::var("HOME")
-            .map_err(|_| Status::failed_precondition("HOME is not set for node agent"))?;
-        Ok(Path::new(&home).join(".ssh").join("authorized_keys"))
+        agent_authorized_keys_path(env::var("HOME").ok().as_deref())
     }
 
     fn remove_authorized_key(
@@ -2296,6 +2306,20 @@ impl NodeAgentService for NodeAgentApi {
     }
 }
 
+fn agent_authorized_keys_path(home: Option<&str>) -> Result<PathBuf, Status> {
+    // The supported systemd agent runs as root without User=, so HOME is
+    // normally absent. Never require a login-shell environment for removal.
+    let path = Path::new(home.filter(|value| !value.is_empty()).unwrap_or("/root"));
+    if !path.is_absolute()
+        || path
+            .components()
+            .any(|part| matches!(part, std::path::Component::ParentDir))
+    {
+        return Err(Status::failed_precondition("invalid agent home directory"));
+    }
+    Ok(path.join(".ssh").join("authorized_keys"))
+}
+
 fn print_startup(config: &AgentConfig) {
     println!("node-plane-agent starting");
     println!("node_key={}", config.node_key);
@@ -2357,6 +2381,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::{AgentConfig, AgentState, awg_config_uses_port, xray_config_uses_port};
+
+    #[test]
+    fn service_removal_does_not_require_a_login_home() {
+        assert_eq!(
+            super::agent_authorized_keys_path(None).unwrap(),
+            std::path::PathBuf::from("/root/.ssh/authorized_keys")
+        );
+        assert_eq!(
+            super::agent_authorized_keys_path(Some("")).unwrap(),
+            std::path::PathBuf::from("/root/.ssh/authorized_keys")
+        );
+        assert!(super::agent_authorized_keys_path(Some("relative")).is_err());
+        assert!(super::agent_authorized_keys_path(Some("/root/../etc")).is_err());
+    }
 
     #[test]
     fn container_cleanup_uses_mount_ownership_and_includes_previous_instances() {

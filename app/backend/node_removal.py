@@ -1,10 +1,14 @@
 """Worker-driven full removal using the independently verified lifecycle saga."""
 import os
+import logging
+import grpc
 from pathlib import Path
 
 from .authorization import Actor, Account, Principal, PrincipalKind, ADMIN_PERMISSIONS, require_permission, AccessDenied
 from .node_lifecycle import NodeLifecycle
-from .removal_verifier import RemovalVerifier
+from .removal_verifier import RemovalVerifier, RemovalVerificationError
+
+logger = logging.getLogger(__name__)
 
 
 class NodeRemovalService:
@@ -74,6 +78,7 @@ class NodeRemovalService:
             actor = Actor(Principal('node-removal-worker', PrincipalKind.SERVICE, ADMIN_PERMISSIONS),
                           Account(row['actor_id'], account['role'], account['status']))
             lifecycle = NodeLifecycle(self.db)
+            phase = 'verify_identity'
             try:
                 if node is None:
                     raise AccessDenied('verification_target_required', 409)
@@ -81,6 +86,7 @@ class NodeRemovalService:
                 # Verify credentials before revoking access or removing anything.
                 verifier = self.verifier(target)
                 state = lifecycle.overview(actor, key)
+                phase = state['cleanup_phase'] or 'start_drain'
                 if state['status'] == 'active':
                     lifecycle.bind_verification_target(actor, key, verifier)
                     lifecycle.start_drain(actor, key)
@@ -97,7 +103,17 @@ class NodeRemovalService:
                     lifecycle.cleanup(actor, key, self.driver, expected_phase=state['cleanup_phase'] or 'not_started')
                 return True
             except Exception as exc:
-                code = exc.code if isinstance(exc, AccessDenied) else 'node_cleanup_unavailable'
+                if isinstance(exc, AccessDenied):
+                    code = exc.code
+                elif isinstance(exc, RemovalVerificationError):
+                    code = 'host_verification_failed'
+                elif isinstance(exc, grpc.RpcError):
+                    code = ('node_agent_unavailable' if exc.code() in {
+                        grpc.StatusCode.UNAVAILABLE, grpc.StatusCode.DEADLINE_EXCEEDED}
+                        else 'node_cleanup_failed')
+                else:
+                    code = 'node_cleanup_failed'
+                logger.exception('Node removal blocked: node=%s phase=%s code=%s', key, phase, code)
                 with self.db.transaction() as conn:
                     conn.execute("UPDATE backend_node_removals SET status = 'blocked', error_code = ? WHERE node_key = ?", (code, key))
         return False

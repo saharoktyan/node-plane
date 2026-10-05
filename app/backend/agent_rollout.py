@@ -29,6 +29,8 @@ class AgentRolloutService:
             )''')
             conn.execute('CREATE INDEX IF NOT EXISTS idx_backend_agent_rollouts_work ON backend_agent_rollouts(status, id)')
             conn.execute('CREATE TABLE IF NOT EXISTS backend_agent_rollout_failures (task_id TEXT PRIMARY KEY, code TEXT NOT NULL)')
+            conn.execute('''CREATE TABLE IF NOT EXISTS backend_agent_rollout_archives (
+                task_id TEXT NOT NULL, path TEXT NOT NULL, PRIMARY KEY(task_id, path))''')
 
     @staticmethod
     def public(row):
@@ -94,9 +96,11 @@ class AgentRolloutService:
         with self.db.connect() as conn:
             row = conn.execute('SELECT * FROM backend_agent_rollouts WHERE id = ?', (task_id,)).fetchone()
             failure = conn.execute('SELECT code FROM backend_agent_rollout_failures WHERE task_id = ?', (task_id,)).fetchone()
+            archives = conn.execute('SELECT path FROM backend_agent_rollout_archives WHERE task_id=? ORDER BY path', (task_id,)).fetchall()
         if row is None:
             raise AccessDenied('resource_not_found', 404)
-        return {**self.public(row), 'failure_code': failure['code'] if failure else None}
+        return {**self.public(row), 'failure_code': failure['code'] if failure else None,
+                'journal_archives': [item['path'] for item in archives]}
 
     def recover(self):
         with self.db.transaction() as conn:
@@ -121,6 +125,15 @@ class AgentRolloutService:
             env={**os.environ, 'NODE_PLANE_INSTALL_RUST': 'yes' if intent.get('install_rust') else 'no'},
             timeout=1200, check=False)
         output = result.stdout + result.stderr
+        for line in output.splitlines():
+            parts = line.split('|', 2)
+            if (len(parts) == 3 and parts[0] == 'AGENT_JOURNAL_ARCHIVE'
+                    and parts[1] == row['node_key'] and parts[2].startswith('/')
+                    and '/journal-archives/previous-controller-' in parts[2]
+                    and len(parts[2]) <= 4096 and not any(c in parts[2] for c in '\r\0')):
+                with self.db.transaction() as conn:
+                    conn.execute('''INSERT INTO backend_agent_rollout_archives VALUES (?, ?)
+                        ON CONFLICT(task_id, path) DO NOTHING''', (row['id'], parts[2]))
         if 'RUST_INSTALL_REQUIRED:' in output:
             self._failure_code = 'rust_required'
         elif 'Not enough free memory' in output or 'too busy' in output:

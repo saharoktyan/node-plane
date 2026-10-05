@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
+import grpc
 from uuid import uuid4
 
 from .authorization import AccessDenied, require_permission
@@ -242,7 +243,18 @@ class NodeLifecycle:
                     WHERE node_key = ? AND phase = 'runtime_deleted' RETURNING node_key""", (node_key,)).fetchone()
                 if changed is None:
                     raise AccessDenied('cleanup_phase_conflict', 409)
-            driver.decommission(node_key, command_id, 'uninstall')
+            try:
+                driver.decommission(node_key, command_id, 'uninstall')
+            except grpc.RpcError as exc:
+                # These responses explicitly reject the request before the
+                # agent schedules removal. Timeouts/transport loss stay uncertain.
+                if exc.code() in {grpc.StatusCode.FAILED_PRECONDITION, grpc.StatusCode.INVALID_ARGUMENT,
+                                   grpc.StatusCode.UNIMPLEMENTED}:
+                    with self.db.transaction() as conn:
+                        conn.execute("""UPDATE backend_node_cleanup SET phase = 'runtime_deleted'
+                            WHERE node_key = ? AND command_id = ? AND phase = 'uninstall_uncertain'""",
+                            (node_key, command_id))
+                raise
             next_phase = 'uninstall_scheduled'
         with self.db.transaction() as conn:
             changed = conn.execute('''UPDATE backend_node_cleanup SET phase = ?

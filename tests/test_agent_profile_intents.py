@@ -89,6 +89,52 @@ class AgentProfileIntentTests(unittest.TestCase):
         self.assertEqual(MODULE.prepare_decommission(self.path, command)['kind'], 'decommission')
         self.assertFalse(self.path.exists())
 
+    def test_node_operation_journal_without_profiles_can_be_removed(self):
+        with sqlite3.connect(self.path) as conn:
+            conn.execute('''CREATE TABLE commands (
+                id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, status TEXT NOT NULL,
+                response TEXT, instance_id TEXT NOT NULL)''')
+            conn.execute("INSERT INTO commands VALUES ('docker-install', 'hash', 'succeeded', '{}', 'agent')")
+        self.assertEqual(MODULE.prepare_decommission(self.path, str(uuid4()))['kind'], 'decommission')
+
+    def test_decommission_revokes_historical_profiles_not_known_to_backend(self):
+        MODULE.apply(self.intent(), self.path, self.mutate)
+        second = self.intent(1, 'second', runtime_name='old_profile', protocol='xray',
+                             uuid=str(uuid4()), short_id='0123456789abcdef')
+        MODULE.apply(second, self.path, self.mutate)
+        command = str(uuid4())
+        MODULE.prepare_decommission(self.path, command, self.mutate)
+        self.assertEqual([(i['runtime_name'], i['action']) for i in self.calls[-2:]],
+                         [('p_test', 'delete'), ('old_profile', 'delete')])
+        MODULE.prepare_decommission(self.path, command, self.mutate)
+        self.assertEqual(len(self.calls), 4)
+        with sqlite3.connect(self.path) as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM fences WHERE action!='delete'").fetchone()[0], 0)
+        with self.assertRaises(ValueError):
+            MODULE.apply(self.intent(3, 'late'), self.path, self.mutate)
+
+    def test_historical_revocation_failure_stays_uncertain_and_does_not_fence_cleanup(self):
+        MODULE.apply(self.intent(), self.path, self.mutate)
+        def failed(intent, fd):
+            raise TimeoutError('uncertain remote delete')
+        command = str(uuid4())
+        with self.assertRaises(TimeoutError):
+            MODULE.prepare_decommission(self.path, command, failed)
+        self.assertFalse(Path(str(self.path) + '.disabled').exists())
+        with self.assertRaisesRegex(ValueError, 'unfinished'):
+            MODULE.prepare_decommission(self.path, command, self.mutate)
+        self.assertEqual(len(self.calls), 1)
+
+    def test_unfinished_node_operation_blocks_removal_even_without_profiles(self):
+        with sqlite3.connect(self.path) as conn:
+            conn.execute('''CREATE TABLE commands (
+                id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, status TEXT NOT NULL,
+                response TEXT, instance_id TEXT NOT NULL)''')
+            conn.execute("INSERT INTO commands VALUES ('bootstrap', 'hash', 'running', NULL, 'agent')")
+        with self.assertRaisesRegex(ValueError, 'unfinished'):
+            MODULE.prepare_decommission(self.path, str(uuid4()))
+        self.assertFalse(Path(str(self.path) + '.disabled').exists())
+
     def test_old_journal_requires_new_delete_before_decommission(self):
         command = str(uuid4())
         with sqlite3.connect(self.path) as conn:

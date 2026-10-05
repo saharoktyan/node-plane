@@ -1,4 +1,5 @@
 import unittest
+import grpc
 from uuid import uuid4
 
 from backend.authorization import Actor, Principal, PrincipalKind
@@ -69,6 +70,32 @@ class BackendNodeLifecycleTests(unittest.TestCase):
                                       expected_phase='prepared')
         self.assertEqual(next_step['phase'], 'runtime_deleted')
         self.assertEqual(calls, ['prepare', 'delete_runtime'])
+
+    def test_rejected_uninstall_can_retry_but_transport_failure_stays_uncertain(self):
+        self.prepare()
+        lifecycle = NodeLifecycle(self.db)
+        lifecycle.start_drain(self.actor(), 'node')
+        class Driver:
+            failure = None
+            def decommission(self, *args):
+                if self.failure:
+                    raise self.failure
+        class Rejected(grpc.RpcError):
+            def __init__(self, code):
+                self.status = code
+            def code(self):
+                return self.status
+        driver = Driver()
+        lifecycle.cleanup(self.actor(), 'node', driver)
+        lifecycle.cleanup(self.actor(), 'node', driver)
+        driver.failure = Rejected(grpc.StatusCode.FAILED_PRECONDITION)
+        with self.assertRaises(grpc.RpcError):
+            lifecycle.cleanup(self.actor(), 'node', driver)
+        self.assertEqual(lifecycle.overview(self.actor(), 'node')['cleanup_phase'], 'runtime_deleted')
+        driver.failure = Rejected(grpc.StatusCode.UNAVAILABLE)
+        with self.assertRaises(grpc.RpcError):
+            lifecycle.cleanup(self.actor(), 'node', driver)
+        self.assertEqual(lifecycle.overview(self.actor(), 'node')['cleanup_phase'], 'uninstall_uncertain')
 
     def test_drain_waits_for_active_agent_rollout(self):
         self.prepare()
