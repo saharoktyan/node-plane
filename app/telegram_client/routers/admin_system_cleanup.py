@@ -11,7 +11,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, Message
 
 from ..backend import BackendClient, BackendError
 from ..i18n import normalize_locale, tr
-from ..screens import Screen
+from ..screens import Screen, Section, Table
 from .callbacks import AdminSettingsCallback
 from .common import render
 
@@ -75,6 +75,7 @@ async def show_root(chat_id, user_id, message_id, bot, backend, state):
                             f"system_cleanup.{action}_{'nodes' if nodes else 'local'}",
                         ),
                         callback_data=f"sc_plan:{action}:{int(nodes)}",
+                        style='danger',
                     )
                 ]
             )
@@ -99,11 +100,24 @@ async def show_root(chat_id, user_id, message_id, bot, backend, state):
             if reason == "installation_manifest_required"
             else tr(locale, "system_cleanup.unsupported"),
         )
+    sections = [Section(tr(locale, 'maintenance.rich.inventory'), tables=(Table(
+        (tr(locale, 'maintenance.rich.field'), tr(locale, 'maintenance.rich.value')),
+        tuple((tr(locale, 'maintenance.rich.' + key), str(value['counts'][key]))
+            for key in ('accounts', 'profiles', 'nodes'))),))]
+    if value['supported'] and not running:
+        sections.extend((
+            Section(tr(locale, 'system_cleanup.rich.reset'), (tr(locale, 'system_cleanup.reset_warning'),),
+                rows=(tuple(rows[0] + rows[1]),)),
+            Section(tr(locale, 'system_cleanup.rich.remove'), (tr(locale, 'system_cleanup.remove_warning'),),
+                rows=(tuple(rows[2] + rows[3]),))))
+    if latest:
+        sections.append(Section(tr(locale, 'system_cleanup.result'), rows=(tuple(rows[-2]),)))
     await render(
         bot,
         chat_id,
-        Screen(tr(locale, "system_cleanup.title"), lines),
-        rows,
+        Screen(tr(locale, "system_cleanup.title"), (lines[0], *lines[2:]),
+            sections=tuple(sections), embedded_buttons=True, navigation=True),
+        [rows[-1]],
         state,
         message_id,
     )
@@ -135,7 +149,9 @@ async def show_plan(chat_id, user_id, message_id, bot, state, error=None):
     await render(
         bot,
         chat_id,
-        Screen(tr(locale, "system_cleanup.confirm"), tuple(lines)),
+        Screen(tr(locale, "system_cleanup.confirm"), tuple(lines[:2] + lines[3:]),
+            sections=(Section(tr(locale, 'nodes.rich.technical'), (lines[2],), collapsed=True),),
+            embedded_buttons=True, navigation=True),
         [[back(locale)]],
         state,
         message_id,
@@ -154,15 +170,17 @@ async def show_job(
     ]
     if value.get("backup_id"):
         lines.append(tr(locale, "system_cleanup.backup", id=value["backup_id"]))
-    for item in value["items"]:
-        lines.append(
-            tr(
-                locale,
-                "system_cleanup.node",
-                key=item["node_key"],
-                status=tr(locale, "system_cleanup.item." + item["status"]),
-            )
-        )
+    sections = [Section(tr(locale, 'maintenance.rich.progress'), tables=(Table(
+        (tr(locale, 'maintenance.rich.field'), tr(locale, 'maintenance.rich.value')),
+        ((tr(locale, 'announce.rich.state'), lines[0]),
+         (tr(locale, 'maintenance.rich.phase'), lines[1]))),))]
+    if value['items']:
+        sections.append(Section(tr(locale, 'admin.nodes'), tables=(Table(
+            (tr(locale, 'admin.nodes'), tr(locale, 'announce.rich.state')),
+            tuple((item['node_key'], tr(locale, 'system_cleanup.item.' + item['status']))
+                for item in value['items'])),), collapsed=True))
+    details = tuple(lines[2:])
+    lines = []
     if value.get("error_code"):
         lines.append(friendly(locale, BackendError(value["error_code"], 409)))
     if error:
@@ -201,23 +219,27 @@ async def show_job(
     if value["status"] == "awaiting_shutdown":
         lines += [
             tr(locale, "system_cleanup.shutdown_note"),
-            tr(locale, "system_cleanup.unit", unit="node-plane-uninstall-" + job_id),
         ]
+        details += (tr(locale, 'system_cleanup.unit', unit='node-plane-uninstall-' + job_id),)
         rows.append(
             [
                 back(locale),
                 InlineKeyboardButton(
                     text=tr(locale, "system_cleanup.shutdown"),
                     callback_data="sc_shutdown:" + job_id,
+                    style='danger',
                 ),
             ]
         )
     else:
         rows.append([back(locale)])
+    if details:
+        sections.append(Section(tr(locale, 'nodes.rich.technical'), details, collapsed=True))
     await render(
         bot,
         chat_id,
-        Screen(tr(locale, "system_cleanup.title"), tuple(lines)),
+        Screen(tr(locale, "system_cleanup.title"), tuple(lines), sections=tuple(sections),
+            embedded_buttons=True, navigation=True),
         rows,
         state,
         message_id,
@@ -243,7 +265,7 @@ async def cleanup_root(
         await render(
             bot,
             query.message.chat.id,
-            Screen(tr(locale, "system_cleanup.title"), (friendly(locale, exc),)),
+            Screen(tr(locale, "system_cleanup.title"), (friendly(locale, exc),), embedded_buttons=True, navigation=True),
             [[back(locale, AdminSettingsCallback().pack())]],
             state,
             query.message.message_id,
@@ -304,7 +326,7 @@ async def cleanup_action(
                             unit="node-plane-uninstall-" + args[0],
                         ),
                     ),
-                ),
+                 embedded_buttons=True, navigation=True),
                 [],
                 state,
                 message_id,
@@ -314,7 +336,7 @@ async def cleanup_action(
         await render(
             bot,
             chat_id,
-            Screen(tr(locale, "system_cleanup.title"), (friendly(locale, exc),)),
+            Screen(tr(locale, "system_cleanup.title"), (friendly(locale, exc),), embedded_buttons=True, navigation=True),
             [[back(locale)]],
             state,
             message_id,

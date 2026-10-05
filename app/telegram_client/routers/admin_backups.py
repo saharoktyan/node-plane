@@ -8,7 +8,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton
 
 from ..backend import BackendClient, BackendError
 from ..i18n import normalize_locale, tr
-from ..screens import Screen
+from ..screens import Screen, Section, Table
 from .callbacks import AdminSettingsCallback
 from .common import render
 
@@ -19,12 +19,12 @@ def button(text, data):
     return InlineKeyboardButton(text=text, callback_data=data)
 
 
-async def draw(query, bot, state, title, lines, rows):
+async def draw(query, bot, state, title, lines, rows, sections=()):
     lang = normalize_locale((await state.get_data()).get("locale"))
     await render(
         bot,
         query.message.chat.id,
-        Screen(tr(lang, title), tuple(lines)),
+        Screen(tr(lang, title), tuple(lines), sections=tuple(sections), embedded_buttons=True, navigation=True),
         rows,
         state,
         query.message.message_id,
@@ -71,7 +71,17 @@ async def overview(query, bot, backend, state):
             ]
         )
     rows.append([button(tr(lang, "back"), AdminSettingsCallback().pack())])
-    await draw(query, bot, state, "backups.title", lines, rows)
+    summary = Table((tr(lang, 'maintenance.rich.field'), tr(lang, 'maintenance.rich.value')), (
+        (tr(lang, 'backups.rich.count'), str(value['count'])),
+        (tr(lang, 'backups.rich.size'), f"{value['size_bytes'] / 1048576:.1f} MiB"),
+        (tr(lang, 'backups.rich.latest'), value['latest']['created_at'][:19] if value['latest'] else '—')))
+    sections = [Section(tr(lang, 'backups.rich.storage'), tables=(summary,), rows=(tuple(rows[0]),)),
+        Section(tr(lang, 'backups.settings'), (tr(lang, 'backups.policy', hours=value['interval_hours'], keep=value['keep_count']),),
+            rows=(tuple(rows[1]),)),
+        Section(tr(lang, 'backups.rich.scope'), (tr(lang, 'backups.scope'),), collapsed=True)]
+    if value.get('last_job'):
+        sections.insert(2, Section(tr(lang, 'backups.result'), (lines[-1],), rows=(tuple(rows[2]),)))
+    await draw(query, bot, state, 'backups.title', [], [rows[-1]], sections)
 
 
 async def catalog(query, bot, backend, state, offset):
@@ -88,19 +98,23 @@ async def catalog(query, bot, backend, state, offset):
     ]
     nav = []
     if offset:
-        nav.append(button("‹", f"backup_list:{max(0, offset - 8)}"))
+        nav.append(button("←", f"backup_list:{max(0, offset - 8)}"))
     if page["next_offset"] is not None:
-        nav.append(button("›", f"backup_list:{page['next_offset']}"))
+        nav.append(button("→", f"backup_list:{page['next_offset']}"))
     if nav:
         rows.append(nav)
     rows.append([button(tr(lang, "back"), "backups")])
     await state.update_data(backup_offset=offset)
+    lines = [tr(lang, 'backups.choose') if page['items'] else tr(lang, 'backups.empty')]
+    if page.get('total', 0) > 8:
+        lines.append(tr(lang, 'pagination.page', page=offset // 8 + 1,
+            pages=max(1, (page['total'] + 7) // 8)))
     await draw(
         query,
         bot,
         state,
         "backups.restore",
-        [tr(lang, "backups.choose") if page["items"] else tr(lang, "backups.empty")],
+        lines,
         rows,
     )
 
@@ -108,14 +122,10 @@ async def catalog(query, bot, backend, state, offset):
 async def settings(query, bot, backend, state):
     lang = normalize_locale((await state.get_data()).get("locale"))
     value = await backend.backups_overview(query.from_user.id)
-    rows = [
-        [
-            button(
-                tr(lang, "backups.enabled" if value["enabled"] else "backups.disabled"),
-                "backup_pref:enabled",
-            )
-        ]
-    ]
+    rows = [[button(tr(lang, 'settings.rich.enable'), 'backup_pref:enabled:1').model_copy(
+        update={'style': 'primary' if value['enabled'] else None}),
+        button(tr(lang, 'settings.rich.disable'), 'backup_pref:enabled:0').model_copy(
+        update={'style': 'primary' if not value['enabled'] else None})]]
     for field, values in (("interval_hours", (6, 12, 24)), ("keep_count", (5, 10, 20))):
         rows.append(
             [
@@ -132,15 +142,10 @@ async def settings(query, bot, backend, state):
         bot,
         state,
         "backups.settings",
-        [
-            tr(
-                lang,
-                "backups.policy",
-                hours=value["interval_hours"],
-                keep=value["keep_count"],
-            )
-        ],
-        rows,
+        [], [rows[-1]], sections=(
+            Section(tr(lang, 'backups.rich.automatic'), rows=(tuple(rows[0]),)),
+            Section(tr(lang, 'backups.rich.interval'), rows=(tuple(rows[1]),)),
+            Section(tr(lang, 'backups.rich.retention'), rows=(tuple(rows[2]),))),
     )
 
 
@@ -162,7 +167,12 @@ async def result(query, bot, backend, state, job_id):
     if job["status"] in {"awaiting_executor", "running"}:
         rows.append([button(tr(lang, "updates.refresh"), f"backup_job:{job_id}")])
     rows.append([button(tr(lang, "back"), "backups")])
-    await draw(query, bot, state, "backups.result", lines, rows)
+    sections = (Section(tr(lang, 'maintenance.rich.progress'), tables=(Table(
+        (tr(lang, 'maintenance.rich.field'), tr(lang, 'maintenance.rich.value')),
+        ((tr(lang, 'announce.rich.state'), lines[0]),
+         (tr(lang, 'command.rich.description'), tr(lang,
+            'backups.create' if job['action'] == 'create' else 'backups.restore')))),)),)
+    await draw(query, bot, state, "backups.result", lines[1:], rows, sections)
 
 
 @router.callback_query(F.data == "backups")
@@ -189,31 +199,26 @@ async def backup_cb(
             await catalog(query, bot, backend, state, max(0, int(action.split(":")[1])))
         elif action.startswith("backup_detail:"):
             info = await backend.backup_detail(query.from_user.id, action.split(":")[1])
-            lines = [
-                tr(
-                    lang,
-                    "backups.metadata",
-                    date=info["created_at"][:19],
-                    version=info["app_version"],
-                    profiles=info["profiles"],
-                    nodes=info["nodes"],
-                ),
-                tr(lang, "backups.scope"),
-            ]
             rows = []
             if info["compatible"]:
                 rows.append(
                     [
                         button(
                             tr(lang, "backups.restore"), f"backup_restore:{info['id']}"
-                        )
+                        ).model_copy(update={'style': 'danger'})
                     ]
                 )
-            else:
-                lines.append(tr(lang, "backups.incompatible"))
             offset = (await state.get_data()).get("backup_offset", 0)
             rows.append([button(tr(lang, "back"), f"backup_list:{offset}")])
-            await draw(query, bot, state, "backups.details", lines, rows)
+            metadata = Table((tr(lang, 'maintenance.rich.field'), tr(lang, 'maintenance.rich.value')), (
+                (tr(lang, 'backups.rich.created'), info['created_at'][:19]),
+                (tr(lang, 'backups.rich.version'), info['app_version']),
+                (tr(lang, 'profiles.title'), str(info['profiles'])),
+                (tr(lang, 'admin.nodes'), str(info['nodes']))))
+            await draw(query, bot, state, 'backups.details',
+                [] if info['compatible'] else [tr(lang, 'backups.incompatible')], rows,
+                sections=(Section(tr(lang, 'backups.rich.contents'), tables=(metadata,)),
+                    Section(tr(lang, 'backups.rich.scope'), (tr(lang, 'backups.scope'),), collapsed=True)))
         elif action == "backup_create" or action.startswith("backup_restore:"):
             body = {"action": "create"}
             if action.startswith("backup_restore:"):
@@ -260,7 +265,7 @@ async def backup_cb(
                                 else "backups.restore",
                             ),
                             f"backup_submit:{nonce}",
-                        ),
+                        ).model_copy(update={'style': 'danger' if body['action'] == 'restore' else 'primary'}),
                     ]
                 ],
             )
@@ -277,8 +282,13 @@ async def backup_cb(
         elif action.startswith("backup_pref:"):
             parts = action.split(":")
             field = parts[1]
+            allowed = {'enabled': {0, 1}, 'interval_hours': {6, 12, 24}, 'keep_count': {5, 10, 20}}
+            if field not in allowed or len(parts) not in {2, 3} or len(parts) == 2 and field != 'enabled':
+                raise ValueError('Invalid backup preference')
+            if len(parts) == 3 and int(parts[2]) not in allowed[field]:
+                raise ValueError('Invalid backup preference value')
             changes = (
-                {field: int(parts[2])}
+                {field: bool(int(parts[2])) if field == 'enabled' else int(parts[2])}
                 if len(parts) == 3
                 else {
                     "enabled": not (await backend.backups_overview(query.from_user.id))[

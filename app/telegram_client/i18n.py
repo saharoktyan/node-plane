@@ -2079,3 +2079,38 @@ CATALOG['ru'].update({
     'update_tools.status.partial': 'Частично успешно', 'update_tools.status.rolled_back': 'Выполнен откат',
     'update_tools.status.skipped': 'Пропущено',
 })
+
+CATALOG['en'].update({
+    'maintenance.rich.field': 'Item', 'maintenance.rich.value': 'Value',
+    'maintenance.rich.inventory': 'Overview', 'maintenance.rich.progress': 'Progress',
+    'maintenance.rich.phase': 'Stage', 'maintenance.rich.accounts': 'Accounts',
+    'maintenance.rich.profiles': 'Profiles', 'maintenance.rich.nodes': 'Servers',
+    'backups.rich.count': 'Backups', 'backups.rich.size': 'Size',
+    'backups.rich.latest': 'Latest backup', 'backups.rich.storage': 'Backup storage',
+    'backups.rich.scope': 'What is included', 'backups.rich.automatic': 'Automatic backups',
+    'backups.rich.interval': 'Interval (hours)', 'backups.rich.retention': 'Backups to keep',
+    'backups.rich.created': 'Created', 'backups.rich.version': 'Version',
+    'backups.rich.contents': 'Contents', 'system_cleanup.rich.reset': 'Reset data',
+    'system_cleanup.rich.remove': 'Remove installation', 'updates.rich.dev_track': 'Development updates',
+    'cleanup.rich.total': 'Stored releases', 'cleanup.rich.kept': 'Protected releases',
+    'cleanup.rich.removable': 'Releases to remove', 'command.rich.telegram_id': 'Telegram ID',
+    'command.rich.username': 'Username', 'command.rich.command': 'Command',
+    'command.rich.description': 'Description',
+})
+CATALOG['ru'].update({
+    'maintenance.rich.field': 'Пункт', 'maintenance.rich.value': 'Значение',
+    'maintenance.rich.inventory': 'Сводка', 'maintenance.rich.progress': 'Выполнение',
+    'maintenance.rich.phase': 'Этап', 'maintenance.rich.accounts': 'Аккаунты',
+    'maintenance.rich.profiles': 'Профили', 'maintenance.rich.nodes': 'Серверы',
+    'backups.rich.count': 'Резервные копии', 'backups.rich.size': 'Размер',
+    'backups.rich.latest': 'Последняя копия', 'backups.rich.storage': 'Хранилище копий',
+    'backups.rich.scope': 'Что включено', 'backups.rich.automatic': 'Автоматические копии',
+    'backups.rich.interval': 'Интервал (часы)', 'backups.rich.retention': 'Хранить копий',
+    'backups.rich.created': 'Создана', 'backups.rich.version': 'Версия',
+    'backups.rich.contents': 'Содержимое', 'system_cleanup.rich.reset': 'Сброс данных',
+    'system_cleanup.rich.remove': 'Удаление установки', 'updates.rich.dev_track': 'Обновления разработки',
+    'cleanup.rich.total': 'Сохранённые релизы', 'cleanup.rich.kept': 'Защищённые релизы',
+    'cleanup.rich.removable': 'Релизы для удаления', 'command.rich.telegram_id': 'Telegram ID',
+    'command.rich.username': 'Имя пользователя', 'command.rich.command': 'Команда',
+    'command.rich.description': 'Описание',
+})

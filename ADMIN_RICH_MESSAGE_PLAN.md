@@ -1,11 +1,12 @@
 # Administrator Rich Message UI plan
 
-Status: Phase 1 and the core Phase 2 profile/access workflows are published in
-`v0.4.3-alpha.30` and accepted during user testing. Administrator traffic
-summary still needs a dedicated authorized backend read. Core Phase 3 server
-screens are implemented and awaiting live UX acceptance; Phase 4 destinations
-are being migrated, starting with Status. Server refinements and the SSH audit
-are published in `v0.4.3-alpha.32`; the Status changes below are not in that tag.
+Status: The presentation migration across Phases 1–4 and the supported command
+screens is implemented. Updates overview refinements are published in
+`v0.4.3-alpha.37`; the final maintenance/command migration described below is
+implemented after that tag and awaits live UX acceptance. Earlier entries are
+historical implementation checkpoints. Administrator traffic summary still
+needs a dedicated authorized backend read; that backend feature is separate
+from the completed presentation migration.
 
 Member UI baseline: commit `a68b2e2`, validated by 659 tests. This document
 defines an incremental presentation redesign, not a replacement for the
@@ -686,3 +687,34 @@ main-settings-only Apply rule.
   unknown and current agents are excluded. Full job results still list all nodes.
 - Current component status reads Up to date in English. Region grouping and
   ten-node pagination are preserved for the outdated-agent list.
+
+### Final maintenance and command migration (implemented after alpha.37)
+
+- Backups show storage in a compact table, with actions beside it, a separate
+  scheduling section and collapsed scope details. The catalog retains existing
+  eight-entry backend paging with Unicode arrows. Snapshot metadata stays visible;
+  restore incompatibility suppresses the action and restore confirmation remains
+  explicit with danger styling.
+- Automatic backups use explicit Enable/Disable values, selected interval and
+  retention controls. Repeated choices do not invert preferences; invalid field
+  names and unsupported values never reach backend writes. Existing queued-job
+  idempotency and restore eligibility checks remain unchanged.
+- Controller cleanup separates inventory, data reset and installation removal.
+  Destructive choices are styled red. Exact phrase confirmation, affected-node
+  warnings, retry/abort restrictions and the final delivered-screen-before-shutdown
+  acknowledgment are preserved. Job progress is visible; paths, backup IDs and
+  systemd diagnostics are collapsed.
+- Secondary update screens use embedded navigation: branch/track choices are
+  grouped, and release cleanup shows an inventory table with visible result and
+  eligibility information. Protected/current releases retain backend safeguards.
+- Help lists the five supported commands in a table, ID uses a compact identity
+  table, Version uses its existing authoritative backend read, and Status reuses
+  the administrator Rich overview. Start retains the existing Rich home flow.
+- Remaining error and compatibility QR screens now embed navigation as well.
+  H1 screen titles, section headings, Back dividers, English/Russian labels and
+  plain fallback are preserved. No new legacy keyboard destinations remain.
+- Local regression tests cover presentation, recovery, incompatible restores,
+  explicit preferences and command screens. Live Telegram/mobile acceptance of
+  these final screens remains external; no presentation destination is deferred.
+- Final validation: all 780 Python tests passed; Telegram modules compile and
+  the patch passes whitespace checks.
