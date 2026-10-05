@@ -537,8 +537,8 @@ if [[ -n "$BACKEND_NODE_KEY" || -n "$BACKEND_NODE_MODE" || -n "$BACKEND_SSH_TARG
     echo "Choose exactly one backend transport: --backend-local or --backend-ssh-target." >&2
     exit 1
   fi
-  if [[ -n "$ONLY_NODE_KEY" || $SKIP_AGENTS -eq 1 || $SKIP_DRIVER -eq 1 ]]; then
-    echo "Backend onboarding cannot combine with --node-key, --skip-agents, or --skip-driver." >&2
+  if [[ -n "$ONLY_NODE_KEY" || $SKIP_AGENTS -eq 1 ]]; then
+    echo "Backend onboarding cannot combine with --node-key or --skip-agents." >&2
     exit 1
   fi
   if [[ "$BACKEND_NODE_MODE" == local ]]; then

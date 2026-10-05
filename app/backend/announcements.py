@@ -11,6 +11,13 @@ from uuid import UUID, uuid4
 from .authorization import AccessDenied, PrincipalKind, require_permission
 
 
+# Accounts and Telegram identities are retained for audit and reapproval. They
+# are not recipients unless they still own a profile visible in the bot.
+RECIPIENT_PROFILE = """EXISTS (SELECT 1 FROM backend_profiles p
+    WHERE p.owner_account_id = a.id AND NOT EXISTS
+        (SELECT 1 FROM backend_profile_deletions d WHERE d.profile_id = p.id))"""
+
+
 class AnnouncementService:
     def __init__(self, db):
         self.db = db
@@ -43,9 +50,10 @@ class AnnouncementService:
     @staticmethod
     def _recipients(conn, sender):
         return conn.execute(
-            """SELECT a.id,i.subject FROM backend_accounts a
+            f"""SELECT a.id,i.subject FROM backend_accounts a
             JOIN backend_external_identities i ON i.account_id=a.id AND i.provider='telegram'
-            WHERE a.status='approved' AND a.id<>? ORDER BY a.id,i.subject""",
+            WHERE a.status='approved' AND a.id<>? AND {RECIPIENT_PROFILE}
+            ORDER BY a.id,i.subject""",
             (sender,),
         ).fetchall()
 
@@ -197,12 +205,13 @@ class AnnouncementService:
                 "SELECT * FROM backend_announcement_deliveries WHERE status='queued' ORDER BY announcement_id,id"
             ).fetchall():
                 eligible = conn.execute(
-                    """SELECT 1 FROM backend_accounts a
+                    f"""SELECT 1 FROM backend_accounts a
                     JOIN backend_external_identities i ON i.account_id=a.id AND i.provider='telegram'
                     JOIN backend_announcements c ON c.id=?
                     JOIN backend_accounts sender ON sender.id=c.actor_id
                     WHERE a.id=? AND a.status='approved' AND i.subject=?
-                    AND sender.status='approved' AND sender.role='admin' """,
+                    AND sender.status='approved' AND sender.role='admin'
+                    AND a.id<>sender.id AND {RECIPIENT_PROFILE} """,
                     (
                         row["announcement_id"],
                         row["account_id"],

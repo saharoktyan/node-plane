@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 source "${SCRIPT_DIR}/postgres_runtime.sh"
 source "${SCRIPT_DIR}/python_runtime.sh"
+source "${SCRIPT_DIR}/lib/stack_update.sh"
 
 MODE="${MODE:-auto}"
 TARGET_BRANCH="${NODE_PLANE_UPDATE_BRANCH:-}"
@@ -17,6 +18,9 @@ CURRENT_STEP="startup"
 AUTO_SETUP_DRIVER_AGENTS="${NODE_PLANE_AUTO_SETUP_DRIVER_AGENTS:-1}"
 PYTHON_BIN=""
 SIMPLE_BOT_SERVICE="node-plane.service"
+STACK_JOB=""
+CORE_ARMED=0
+STACK_COMPONENT="backend"
 
 set_step() {
   CURRENT_STEP="$1"
@@ -28,6 +32,25 @@ on_error() {
   echo "Update failed during step: ${CURRENT_STEP}" >&2
   echo "Failing command: ${BASH_COMMAND}" >&2
   echo "Exit code: ${exit_code}" >&2
+  if [[ -n "$STACK_JOB" ]]; then
+    stack_progress "$STACK_COMPONENT" failed || true
+    stack_progress status failed || true
+    stack_progress error_code core_update_failed || true
+    if [[ "$CORE_ARMED" == 1 ]]; then
+      rollback_simple "$STACK_PREVIOUS_RELEASE" "$STACK_CURRENT_LINK" "$STACK_NEW_RELEASE"
+    else
+      if [[ -n "${STACK_SNAPSHOT:-}" ]]; then
+        if stack_restore; then
+          stack_progress rollback_status succeeded || true
+          sudo rm -rf "$STACK_SNAPSHOT"
+        else
+          stack_progress rollback_status failed || true
+        fi
+      else
+        stack_progress rollback_status succeeded || true
+      fi
+    fi
+  fi
 }
 
 trap 'on_error $?' ERR
@@ -45,6 +68,14 @@ while [[ $# -gt 0 ]]; do
     --skip-pull)
       SKIP_PULL=1
       shift
+      ;;
+    --stack-job)
+      STACK_JOB="${2:-}"
+      if [[ ! "$STACK_JOB" =~ ^[0-9a-fA-F-]{36}$ ]]; then
+        echo "Invalid stack update job ID" >&2
+        exit 2
+      fi
+      shift 2
       ;;
     --branch)
       TARGET_BRANCH="${2:-}"
@@ -316,9 +347,23 @@ simple_paths() {
 wait_for_service() {
   local timeout="$1"
   local elapsed=0
+  local stable=0
   while (( elapsed < timeout )); do
     if sudo systemctl is-active --quiet "$SIMPLE_BOT_SERVICE"; then
-      return 0
+      if [[ -z "$STACK_JOB" ]]; then
+        return 0
+      fi
+      if sudo systemctl is-active --quiet node-plane-driver.service node-plane-backend.service node-plane-backend-worker.timer \
+          && "${STACK_CURRENT_LINK}/.venv/bin/python" -c 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8080/health/ready", timeout=2).read()' >/dev/null 2>&1; then
+        stable=$((stable + 1))
+        if [[ "$stable" -ge 3 ]]; then
+          return 0
+        fi
+      else
+        stable=0
+      fi
+    else
+      stable=0
     fi
     sleep 2
     elapsed=$((elapsed + 2))
@@ -410,6 +455,13 @@ rollback_portable() {
 }
 
 rollback_simple() {
+  trap - ERR
+  CORE_ARMED=0
+  if [[ -n "$STACK_JOB" ]]; then
+    stack_progress "$STACK_COMPONENT" failed
+    stack_progress status failed
+    stack_progress error_code core_update_failed
+  fi
   local previous_release="$1"
   local current_link="$2"
   local failed_release="$3"
@@ -425,22 +477,45 @@ rollback_simple() {
   echo "Rolling back to previous release:"
   echo "  ${previous_release}"
   ln -sfn "$previous_release" "$current_link"
+  local restored=1
+  if [[ -n "$STACK_JOB" ]]; then
+    stack_restore || restored=0
+  fi
   sudo systemctl daemon-reload
   sudo systemctl restart "$SIMPLE_BOT_SERVICE"
+  if [[ -n "$STACK_JOB" ]]; then
+    sudo systemctl restart node-plane-driver.service || restored=0
+    sudo systemctl start node-plane-backend-worker.timer || restored=0
+  fi
   if sudo systemctl list-unit-files node-plane-backend.service --no-legend 2>/dev/null | grep -q node-plane-backend.service; then
     if [[ -f "${previous_release}/app/backend/http_api.py" ]]; then
-      sudo systemctl restart node-plane-backend.service || true
+      sudo systemctl restart node-plane-backend.service || restored=0
     else
       sudo systemctl stop node-plane-backend-worker.timer node-plane-backend.service || true
     fi
   fi
-  if wait_for_service "$HEALTH_TIMEOUT"; then
+  if wait_for_service "$HEALTH_TIMEOUT" && [[ "$restored" == 1 ]]; then
+    if [[ -n "$STACK_JOB" ]]; then
+      stack_progress rollback_status succeeded
+      stack_progress status failed
+      local component
+      for component in backend worker driver telegram; do
+        if [[ "$component" != "$STACK_COMPONENT" ]]; then
+          stack_progress "$component" rolled_back
+        fi
+      done
+      sudo rm -rf "$STACK_SNAPSHOT"
+    fi
     echo "Rollback completed."
     echo "Failed release remains at: ${failed_release}"
     exit 1
   fi
 
   echo "Rollback failed. Inspect the service manually." >&2
+  if [[ -n "$STACK_JOB" ]]; then
+    stack_progress rollback_status failed
+    stack_progress status failed
+  fi
   sudo systemctl status node-plane --no-pager || true
   sudo journalctl -u "$SIMPLE_BOT_SERVICE" -n 80 --no-pager || true
   exit 1
@@ -468,13 +543,22 @@ update_simple() {
   current_link="${_paths[4]}"
   local runtime_env_file db_backend postgres_dsn
   runtime_env_file="${shared_dir}/.env"
+  if [[ -n "$STACK_JOB" ]]; then
+    STACK_PROGRESS_FILE="${shared_dir}/data/updates/${STACK_JOB}.json"
+    stack_progress status running
+    stack_progress backend running
+    stack_snapshot "$runtime_env_file"
+  fi
 
   local previous_release new_release_name new_release_dir
   local target_ref
   previous_release="$(readlink -f "$current_link" 2>/dev/null || true)"
+  STACK_PREVIOUS_RELEASE="$previous_release"
+  STACK_CURRENT_LINK="$current_link"
   target_ref="$(resolve_target_ref)"
   new_release_name="$(unique_release_id "$releases_dir" "$target_ref")"
   new_release_dir="${releases_dir}/${new_release_name}"
+  STACK_NEW_RELEASE="$new_release_dir"
 
   mkdir -p "$releases_dir" "${shared_dir}/data" "${shared_dir}/ssh"
   sync_shared_env "$shared_dir"
@@ -545,9 +629,36 @@ update_simple() {
     exit 0
   fi
 
+  if [[ -n "$STACK_JOB" ]]; then
+    STACK_COMPONENT=worker
+    stack_progress worker running
+    NODE_PLANE_APP_DIR="$new_release_dir" NODE_PLANE_SHARED_DIR="$shared_dir" \
+      PYTHONPATH="${new_release_dir}/app" "${new_release_dir}/.venv/bin/python" \
+      -c 'import backend.executor; import telegram_client.main'
+    sudo systemctl stop node-plane-backend-worker.timer
+    CORE_ARMED=1
+  fi
+
   echo "Switching current release..."
   set_step "activate new release"
   ln -sfn "$new_release_dir" "$current_link"
+  if [[ -n "$STACK_JOB" ]]; then
+    STACK_COMPONENT=driver
+    stack_progress driver running
+    NODE_PLANE_BASE_DIR="$base_dir" NODE_PLANE_APP_DIR="$current_link" \
+      NODE_PLANE_SHARED_DIR="$shared_dir" NODE_PLANE_INSTALL_RUST=no \
+      bash "${current_link}/scripts/setup_driver_agents.sh" --skip-agents --strict --bin-source release
+    NODE_PLANE_APP_DIR="$current_link" NODE_PLANE_SHARED_DIR="$shared_dir" \
+      PYTHONPATH="${current_link}/app" "${current_link}/.venv/bin/python" - <<'PYDRIVER'
+from services.node_driver import get_node_driver
+from config import APP_COMMIT
+actual = get_node_driver().binary_info().get('commit') or ''
+if len(actual) < 7 or APP_COMMIT == 'unknown' or not (APP_COMMIT.startswith(actual) or actual.startswith(APP_COMMIT)):
+    raise SystemExit('Controller driver version verification failed')
+PYDRIVER
+    stack_progress driver succeeded
+    STACK_COMPONENT=backend
+  fi
 
   # Fallback: if shared env still has DB_BACKEND=postgres without POSTGRES_DSN,
   # auto-provision PostgreSQL runtime before service restart.
@@ -580,6 +691,12 @@ update_simple() {
   fi
 
   echo "Restarting ${SIMPLE_BOT_SERVICE}..."
+  if [[ -n "$STACK_JOB" ]]; then
+    stack_progress backend succeeded
+    stack_progress worker succeeded
+    STACK_COMPONENT=telegram
+    stack_progress telegram running
+  fi
   set_step "restart ${SIMPLE_BOT_SERVICE}"
   sudo systemctl daemon-reload
   if ! sudo systemctl restart "$SIMPLE_BOT_SERVICE"; then
@@ -588,6 +705,12 @@ update_simple() {
   fi
 
   if wait_for_service "$HEALTH_TIMEOUT"; then
+    if [[ -n "$STACK_JOB" ]]; then
+      stack_progress telegram succeeded
+      stack_progress status succeeded
+      CORE_ARMED=0
+      sudo rm -rf "$STACK_SNAPSHOT"
+    fi
     echo "New release is healthy."
     sudo systemctl status "$SIMPLE_BOT_SERVICE" --no-pager || true
     return 0

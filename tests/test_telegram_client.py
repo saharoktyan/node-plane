@@ -459,7 +459,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         backend = SimpleNamespace(update_rollout=AsyncMock(return_value={
             'desired_version': '0.4.3', 'desired_commit': 'a' * 40,
             'driver_status': 'current', 'driver': {'commit': 'a' * 40},
-            'nodes': [{'title': 'Latvia', 'agent_status': 'current', 'runtime_status': 'current'}],
+            'nodes': [{'key': 'lv1', 'title': 'Latvia', 'region': 'Europe', 'agent_status': 'current', 'runtime_status': 'current'}],
             'agents_required': False, 'runtimes_required': False, 'latest_job': None}))
         with patch.object(admin_updates, 'render', new_callable=AsyncMock) as draw:
             await admin_updates.show_fleet(self.query, self.bot, backend, self.state)
@@ -557,10 +557,11 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         self.state_data['locale']='en'
         with patch.object(admin_alerts,'render',new_callable=AsyncMock) as draw:
             await admin_alerts.alerts_cb(self.query,self.bot,backend,self.state)
-        rows=draw.call_args.args[3]
-        self.assertEqual(rows[1][1].text,'15 min')
-        self.assertEqual(rows[1][1].style, 'primary')
-        self.assertIsNone(rows[1][0].style)
+        screen, rows=draw.call_args.args[2:4]
+        intervals = screen.sections[1].rows[0]
+        self.assertEqual(intervals[1].text,'15 min')
+        self.assertEqual(intervals[1].style, 'primary')
+        self.assertIsNone(intervals[0].style)
         self.assertTrue(rows[-1][0].callback_data.startswith('admin_settings'))
 
     async def test_active_alert_pagination_and_localized_transport(self):

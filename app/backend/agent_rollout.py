@@ -34,9 +34,9 @@ class AgentRolloutService:
     def public(row):
         return {key: row[key] for key in ('id', 'node_key', 'status')}
 
-    def request(self, actor, node_key, command_key, *, transport, ssh_target=None, ssh_port=22, install_rust=False):
+    def request(self, actor, node_key, command_key, *, transport, ssh_target=None, ssh_port=22, install_rust=False, skip_driver=False):
         require_permission(actor, 'nodes.manage')
-        if type(install_rust) is not bool:
+        if type(install_rust) is not bool or type(skip_driver) is not bool:
             raise AccessDenied('invalid_input', 422)
         try:
             key = str(UUID(command_key))
@@ -52,6 +52,8 @@ class AgentRolloutService:
         intent = {'transport': transport, 'ssh_target': ssh_target, 'ssh_port': ssh_port}
         if install_rust:
             intent['install_rust'] = True
+        if skip_driver:
+            intent['skip_driver'] = True
         encoded = json.dumps(intent, sort_keys=True, separators=(',', ':'))
         with self.db.transaction() as conn:
             from .maintenance_gate import admit
@@ -106,6 +108,8 @@ class AgentRolloutService:
         script = root / 'scripts' / 'setup_driver_agents.sh'
         args = ['bash', str(script), '--backend-node-key', row['node_key'],
                 '--bin-source', 'auto']
+        if intent.get('skip_driver'):
+            args.append('--skip-driver')
         if intent['transport'] == 'local':
             args.append('--backend-local')
         else:

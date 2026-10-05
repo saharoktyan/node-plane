@@ -353,7 +353,7 @@ def refresh_update_run_state(timeout: int = 20) -> Dict[str, str]:
         return state
 
 
-def schedule_update(timeout: int = 30, branch: str | None = None, target_ref: str | None = None) -> Dict[str, str]:
+def schedule_update(timeout: int = 30, branch: str | None = None, target_ref: str | None = None, stack_job_id: str | None = None) -> Dict[str, str]:
     with _update_run_lock:
         state = refresh_update_run_state()
         if str(state.get("last_run_status") or "") == "running":
@@ -387,6 +387,9 @@ def schedule_update(timeout: int = 30, branch: str | None = None, target_ref: st
             )
             if target_ref:
                 cmd.extend(["--to", target_ref])
+            if stack_job_id:
+                from uuid import UUID
+                cmd.extend(["--stack-job", str(UUID(stack_job_id))])
             proc = _run_cmd(cmd, cwd=source_root, timeout=timeout)
             output = ((proc.stdout or "").strip() + "\n" + (proc.stderr or "").strip()).strip()
             if backup_result.get("status") == "failed":
