@@ -113,6 +113,8 @@ class BackendAgentRolloutTests(TestCase):
                                          headers=headers).status_code, 404)
 
     def test_verified_cleanup_routes_preserve_host_verification_gate(self):
+        from backend.removal_inventory import inventory_digest
+        resources = {'paths': ['/opt/custom-runtime'], 'containers': ['custom-xray', 'custom-awg']}
         self.node()
         self.db.connection.execute("UPDATE backend_nodes SET enabled = 1 WHERE key = 'lv1'")
         headers = {**self.headers, 'X-Node-Plane-Telegram-User-ID': '101'}
@@ -127,7 +129,8 @@ class BackendAgentRolloutTests(TestCase):
                     headers=headers).json()['error']['code'],
                     'verification_target_required')
                 with patch('backend.removal_verifier.RemovalVerifier.capture_identity',
-                           return_value='a' * 64):
+                           return_value='a' * 64), patch('backend.removal_verifier.RemovalVerifier.capture_resources',
+                           return_value=resources):
                     bound = self.client.post(base + '/bind-verification-target',
                         headers=headers, json={'transport': 'local'})
                 self.assertEqual(bound.status_code, 200, bound.text)
@@ -147,6 +150,7 @@ class BackendAgentRolloutTests(TestCase):
                     (self.admin.id, str(uuid4())))
                 with patch('backend.removal_verifier.RemovalVerifier.verify',
                            return_value={'method': 'local', 'target': 'local',
+                               'inventory_digest': inventory_digest(resources),
                                'host_fingerprint': 'a' * 64, 'checked_at': 'now',
                                'result': 'agent_and_standard_artifacts_absent'}):
                     result = self.client.post(base + '/verify-and-retire', headers=headers)

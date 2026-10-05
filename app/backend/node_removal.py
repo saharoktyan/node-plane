@@ -82,8 +82,7 @@ class NodeRemovalService:
                 verifier = self.verifier(target)
                 state = lifecycle.overview(actor, key)
                 if state['status'] == 'active':
-                    if not state['verification_target']:
-                        lifecycle.bind_verification_target(actor, key, verifier)
+                    lifecycle.bind_verification_target(actor, key, verifier)
                     lifecycle.start_drain(actor, key)
                     with self.db.transaction() as conn:
                         conn.execute("UPDATE backend_node_removals SET status = 'running' WHERE node_key = ?", (key,))

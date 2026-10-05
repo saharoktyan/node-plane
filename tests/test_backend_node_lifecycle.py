@@ -261,11 +261,15 @@ class BackendNodeLifecycleTests(unittest.TestCase):
             fingerprint = 'a' * 64
             def capture_identity(self, node_key):
                 return self.fingerprint
-            def verify(self, node_key, expected_fingerprint):
+            def capture_resources(self, node_key, expected_fingerprint):
+                return {'paths': ['/opt/custom-runtime'], 'containers': ['custom-xray', 'custom-awg']}
+            def verify(self, node_key, expected_fingerprint, resources):
+                from backend.removal_inventory import inventory_digest
                 self.calls += 1
                 if self.fail:
                     raise TimeoutError('host unreachable')
                 return {'method': 'ssh', 'target': 'root@node.example',
+                    'inventory_digest': inventory_digest(resources),
                     'host_fingerprint': expected_fingerprint,
                     'checked_at': '2026-09-28T00:00:00+00:00',
                     'result': 'agent_and_standard_artifacts_absent'}

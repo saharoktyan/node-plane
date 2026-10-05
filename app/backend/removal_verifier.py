@@ -7,9 +7,13 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import hashlib
+import json
+from pathlib import Path
 import re
 import shlex
 import subprocess
+
+from .removal_inventory import validate_inventory, inventory_digest
 
 
 class RemovalVerificationError(ValueError):
@@ -42,10 +46,17 @@ class RemovalVerifier:
         self.bot_public_key = bot_public_key.strip() if bot_public_key is not None else None
         self.runner = runner
 
-    def script(self):
+    def script(self, resources=None):
         if self.bot_public_key is None:
             raise ValueError('bot SSH public key is required for final verification')
         key = shlex.quote(self.bot_public_key)
+        resource_checks = ''
+        containers = ['xray', 'amnezia-awg']
+        if resources is not None:
+            resources = validate_inventory(resources)
+            containers = resources['containers']
+            resource_checks = '\n'.join('check_absent ' + shlex.quote(path) + ' managed_path'
+                                         for path in resources['paths'])
         return f'''set -eu
 if [ "$(id -u)" -ne 0 ] || ! command -v systemctl >/dev/null 2>&1; then
     printf '%s\\n' 'verification_unavailable' >&2
@@ -72,6 +83,7 @@ check_absent /etc/node-plane agent_config
 check_absent /opt/node-plane-runtime runtime
 check_absent /var/lib/node-plane-agent agent_state
 check_absent /var/log/node-plane-agent agent_logs
+{resource_checks}
 for proc in /proc/[0-9]*/comm; do
     [ -r "$proc" ] || continue
     if [ "$(cat "$proc")" = node-plane-agen ]; then
@@ -92,8 +104,9 @@ if command -v docker >/dev/null 2>&1; then
         printf '%s\\n' 'docker_unavailable' >&2
         exit 25
     fi
-    for container in xray amnezia-awg; do
-        if docker container inspect "$container" >/dev/null 2>&1; then
+    names="$(docker ps -a --format '{{{{.Names}}}}')" || exit 25
+    for pattern in {' '.join(shlex.quote('^' + re.escape(name) + '(-previous-[0-9]+)?$') for name in containers)}; do
+        if printf '%s\\n' "$names" | grep -Eq "$pattern"; then
             printf '%s\\n' 'managed_container_present' >&2
             exit 26
         fi
@@ -151,10 +164,33 @@ printf 'NODE_PLANE_HOST_ID:%s\\n' "$(cat /etc/machine-id)"
             raise RemovalVerificationError('agent identity unavailable')
         return self._fingerprint(output[len(prefix):])
 
-    def verify(self, node_key, expected_fingerprint):
+    def capture_resources(self, node_key, expected_fingerprint):
+        # Read directly through the independently authenticated host connection,
+        # while the agent and its configuration still exist. Never execute env.
+        reader = Path(__file__).with_name('removal_inventory.py').read_text()
+        script = self.identity_script(node_key) + '''
+pid="$(systemctl show node-plane-agent.service --property=MainPID --value)"
+binary="$(readlink "/proc/$pid/exe")"
+python3 - "$binary" <<'NODE_PLANE_INVENTORY_PY'
+''' + reader + '''
+import sys
+print('NODE_PLANE_RESOURCES:' + json.dumps(read_inventory('/etc/node-plane/agent.toml', sys.argv[1]), sort_keys=True))
+NODE_PLANE_INVENTORY_PY
+'''
+        output = self._run(script).splitlines()
+        if (len(output) != 2 or not output[0].startswith('NODE_PLANE_HOST_ID:')
+                or self._fingerprint(output[0].partition(':')[2]) != expected_fingerprint
+                or not output[1].startswith('NODE_PLANE_RESOURCES:')):
+            raise RemovalVerificationError('resource inventory unavailable')
+        try:
+            return validate_inventory(json.loads(output[1].partition(':')[2]))
+        except (ValueError, TypeError) as error:
+            raise RemovalVerificationError('invalid resource inventory') from error
+
+    def verify(self, node_key, expected_fingerprint, resources=None):
         if not re.fullmatch(r'[0-9a-f]{64}', expected_fingerprint):
             raise ValueError('invalid expected host fingerprint')
-        output = self._run(self.script())
+        output = self._run(self.script(resources))
         prefix = self.SUCCESS + ':'
         if not output.startswith(prefix):
             raise RemovalVerificationError('node verification failed')
@@ -165,4 +201,5 @@ printf 'NODE_PLANE_HOST_ID:%s\\n' "$(cat /etc/machine-id)"
                 'target': 'local' if self.local else self.ssh_target,
                 'host_fingerprint': fingerprint,
                 'checked_at': datetime.now(timezone.utc).isoformat(),
+                'inventory_digest': inventory_digest(resources) if resources is not None else None,
                 'result': 'agent_and_standard_artifacts_absent'}

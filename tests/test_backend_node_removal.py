@@ -7,6 +7,9 @@ from backend.executor import IntentExecutor
 from backend.profiles import ProfileRepository
 from backend.node_removal import NodeRemovalService
 from backend.authorization import AccessDenied
+from backend.removal_inventory import inventory_digest
+
+RESOURCES = {'paths': ['/opt/node-plane-runtime'], 'containers': ['xray', 'amnezia-awg']}
 
 
 class BackendNodeRemovalTests(unittest.TestCase):
@@ -15,7 +18,9 @@ class BackendNodeRemovalTests(unittest.TestCase):
     def verifier(self, target, final=False):
         return SimpleNamespace(local=True, ssh_target=None,
             capture_identity=lambda key: 'a' * 64,
-            verify=lambda key, expected: {'result': 'agent_and_standard_artifacts_absent',
+            capture_resources=lambda key, expected: RESOURCES,
+            verify=lambda key, expected, resources: {'result': 'agent_and_standard_artifacts_absent',
+                'inventory_digest': inventory_digest(resources),
                 'method': 'local', 'target': 'local', 'host_fingerprint': expected,
                 'checked_at': '2026-09-30T12:00:00+00:00'})
 
@@ -58,3 +63,20 @@ class BackendNodeRemovalTests(unittest.TestCase):
         self.assertTrue(self.db.connection.execute('SELECT enabled FROM backend_nodes WHERE key=?', ('n1',)).fetchone()[0])
         self.assertEqual(worker.request(self.actor, 'n1')['removal_status'], 'blocked')
         self.assertEqual(worker.request(self.actor, 'n1', retry=True)['removal_status'], 'queued')
+
+    def test_unavailable_inventory_prevents_drain_and_cleanup(self):
+        phases = []
+        def unavailable_inventory(target, final=False):
+            verifier = self.verifier(target, final)
+            def fail(*args):
+                raise ValueError('inventory unavailable')
+            verifier.capture_resources = fail
+            return verifier
+        worker = NodeRemovalService(self.db, SimpleNamespace(
+            decommission=lambda *args: phases.append(args)), unavailable_inventory)
+        worker.request(self.actor, 'n1')
+        self.assertFalse(worker.run_one())
+        self.assertEqual(worker.get(self.actor, 'n1')['removal_status'], 'blocked')
+        self.assertTrue(self.db.connection.execute('SELECT enabled FROM backend_nodes WHERE key=?', ('n1',)).fetchone()[0])
+        self.assertIsNone(self.db.connection.execute('SELECT * FROM backend_node_drains WHERE node_key=?', ('n1',)).fetchone())
+        self.assertEqual(phases, [])

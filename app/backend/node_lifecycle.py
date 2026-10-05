@@ -54,12 +54,19 @@ class NodeLifecycle:
                 node_key TEXT PRIMARY KEY REFERENCES backend_nodes(key),
                 fingerprint TEXT NOT NULL
             )''')
+            conn.execute('''CREATE TABLE IF NOT EXISTS backend_node_removal_inventories (
+                node_key TEXT PRIMARY KEY REFERENCES backend_nodes(key),
+                resources_json TEXT NOT NULL
+            )''')
 
     def bind_verification_target(self, actor, node_key, verifier):
         """Bind an active agent and its host fingerprint before draining."""
         require_permission(actor, 'maintenance.manage')
         target = 'local' if verifier.local else verifier.ssh_target
         fingerprint = verifier.capture_identity(node_key)
+        resources = verifier.capture_resources(node_key, fingerprint)
+        from .removal_inventory import validate_inventory
+        encoded = json.dumps(validate_inventory(resources), sort_keys=True)
         with self.db.transaction() as conn:
             node = conn.execute('''UPDATE backend_nodes SET enabled = enabled
                 WHERE key = ? RETURNING enabled''', (node_key,)).fetchone()
@@ -78,6 +85,11 @@ class NodeLifecycle:
                 conn.execute('INSERT INTO backend_node_verification_targets(node_key, target) VALUES (?, ?)', (node_key, target))
             if identity is None:
                 conn.execute('INSERT INTO backend_node_host_identities(node_key, fingerprint) VALUES (?, ?)', (node_key, fingerprint))
+            inventory = conn.execute('SELECT resources_json FROM backend_node_removal_inventories WHERE node_key=?', (node_key,)).fetchone()
+            if inventory is not None and inventory['resources_json'] != encoded:
+                raise AccessDenied('verification_inventory_conflict', 409)
+            if inventory is None:
+                conn.execute('INSERT INTO backend_node_removal_inventories VALUES (?,?)', (node_key, encoded))
             return {'node_key': node_key, 'target': target, 'host_fingerprint': fingerprint}
 
     def start_drain(self, actor, node_key, *, abandon_uncertain_settings=False):
@@ -287,6 +299,7 @@ class NodeLifecycle:
             conn.execute('DELETE FROM backend_node_drains WHERE node_key = ?', (node_key,))
             conn.execute('DELETE FROM backend_node_verification_targets WHERE node_key = ?', (node_key,))
             conn.execute('DELETE FROM backend_node_host_identities WHERE node_key = ?', (node_key,))
+            conn.execute('DELETE FROM backend_node_removal_inventories WHERE node_key = ?', (node_key,))
             conn.execute("UPDATE backend_node_removals SET status = 'abandoned' WHERE node_key = ?", (node_key,))
             from .alerts import AlertService
             AlertService.retire_node(conn, node_key)
@@ -315,8 +328,14 @@ class NodeLifecycle:
             requested_target = 'local' if verifier.local else verifier.ssh_target
             if bound is None or bound['target'] != requested_target or identity is None:
                 raise AccessDenied('verification_target_mismatch', 409)
-        evidence = verifier.verify(node_key, identity['fingerprint'])
+            inventory = conn.execute('SELECT resources_json FROM backend_node_removal_inventories WHERE node_key=?', (node_key,)).fetchone()
+            if inventory is None:
+                raise AccessDenied('verification_inventory_required', 409)
+            resources = json.loads(inventory['resources_json'])
+        evidence = verifier.verify(node_key, identity['fingerprint'], resources)
+        from .removal_inventory import inventory_digest
         if (not isinstance(evidence, dict) or evidence.get('result') != 'agent_and_standard_artifacts_absent'
+                or evidence.get('inventory_digest') != inventory_digest(resources)
                 or evidence.get('method') not in {'local', 'ssh'}
                 or not isinstance(evidence.get('target'), str)
                 or evidence.get('host_fingerprint') != identity['fingerprint']
@@ -348,6 +367,7 @@ class NodeLifecycle:
             conn.execute('DELETE FROM backend_node_drains WHERE node_key = ?', (node_key,))
             conn.execute('DELETE FROM backend_node_verification_targets WHERE node_key = ?', (node_key,))
             conn.execute('DELETE FROM backend_node_host_identities WHERE node_key = ?', (node_key,))
+            conn.execute('DELETE FROM backend_node_removal_inventories WHERE node_key = ?', (node_key,))
             from .alerts import AlertService
             AlertService.retire_node(conn, node_key)
             conn.execute('DELETE FROM backend_nodes WHERE key = ?', (node_key,))
