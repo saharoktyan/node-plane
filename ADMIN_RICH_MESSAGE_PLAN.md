@@ -3,7 +3,7 @@
 Status: The presentation migration across Phases 1–4 and the supported command
 screens is implemented. Updates overview refinements are published in
 `v0.4.3-alpha.37`; the final maintenance/command migration described below is
-implemented after that tag and awaits live UX acceptance. Earlier entries are
+included in `v0.4.3-alpha.38` and awaits live UX acceptance. Earlier entries are
 historical implementation checkpoints. Administrator traffic summary still
 needs a dedicated authorized backend read; that backend feature is separate
 from the completed presentation migration.
@@ -718,3 +718,18 @@ main-settings-only Apply rule.
   these final screens remains external; no presentation destination is deferred.
 - Final validation: all 780 Python tests passed; Telegram modules compile and
   the patch passes whitespace checks.
+
+### Initial node installation recovery (alpha.38)
+
+- A node with no applied revision uses Bootstrap instead of Apply settings,
+  including stale Apply callbacks. Saving its draft saves configuration without
+  trying to apply changes to protocols that have not been installed.
+- Bootstrap retains its explicit prerequisite flow: install/configure an agent,
+  install Docker only when missing, then install selected protocols. Existing
+  installed-node settings changes and deeper reinstall controls remain separate.
+- Unclaimed settings tasks created for a new node are retired as superseded when
+  agent/protocol prerequisites are missing, with `node_installation_required`.
+  No settings mutation or implicit Docker preparation is started. This frees
+  Bootstrap admission and replaces indefinite waiting with an installation link.
+- Running or blocked commands remain uncertain and are never silently retired.
+  Preparation retry behavior for already installed nodes is preserved.

@@ -74,8 +74,9 @@ class NodeSettingsService:
 
     @staticmethod
     def public(row):
+        result = json.loads(row['result_json']) if row['result_json'] else {}
         return {'id': row['id'], 'node_key': row['node_key'], 'revision': row['revision'],
-                'status': row['status']}
+                'status': row['status'], **({'error_code': result['error_code']} if 'error_code' in result else {})}
 
     def get(self, actor, task_id):
         require_permission(actor, 'nodes.manage')
@@ -236,7 +237,7 @@ class NodeSettingsExecutor:
         row = None
         for candidate in rows:
             with self.db.connect() as conn:
-                node = conn.execute('SELECT desired_revision FROM backend_nodes WHERE key = ?', (candidate['node_key'],)).fetchone()
+                node = conn.execute('SELECT desired_revision,applied_revision FROM backend_nodes WHERE key = ?', (candidate['node_key'],)).fetchone()
             if node is None or node['desired_revision'] != candidate['revision']:
                 with self.db.transaction() as conn:
                     conn.execute("UPDATE backend_node_settings_tasks SET status = 'superseded' WHERE id = ? AND status = 'awaiting_executor'", (candidate['id'],))
@@ -247,10 +248,16 @@ class NodeSettingsExecutor:
                 if (observation['health_state'] != 'running' or
                     ('xray' in protocols and not observation['xray_config_present']) or
                     ('awg' in protocols and not observation['awg_config_present'])):
+                    if not node['applied_revision']:
+                        self._retire_uninstalled(candidate)
+                        return True
                     # Preparation is repeatable and occurs before the durable
                     # settings mutation. No command is claimed on failure.
                     self.driver.prepare_node(candidate['node_key'])
             except Exception:
+                if not node['applied_revision']:
+                    self._retire_uninstalled(candidate)
+                    return True
                 # An absent agent or incomplete preparation leaves the task
                 # queued; the settings command was not started.
                 continue
@@ -279,3 +286,9 @@ class NodeSettingsExecutor:
             if current is not None:
                 self._finish(conn, current, result)
         return True
+
+    def _retire_uninstalled(self, candidate):
+        # No settings mutation was claimed. Bootstrap can safely take over.
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_node_settings_tasks SET status='superseded', result_json=? WHERE id=? AND status='awaiting_executor'",
+                (json.dumps({'error_code': 'node_installation_required'}), candidate['id']))

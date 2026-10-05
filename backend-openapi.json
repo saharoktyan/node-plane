@@ -7895,31 +7895,43 @@
       "NodeSettingsTaskOutput": {
         "properties": {
           "id": {
-            "type": "string",
             "format": "uuid",
-            "title": "Id"
+            "title": "Id",
+            "type": "string"
           },
           "node_key": {
-            "type": "string",
-            "title": "Node Key"
+            "title": "Node Key",
+            "type": "string"
           },
           "revision": {
-            "type": "integer",
-            "title": "Revision"
+            "title": "Revision",
+            "type": "integer"
           },
           "status": {
-            "type": "string",
-            "title": "Status"
+            "title": "Status",
+            "type": "string"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Error Code"
           }
         },
-        "type": "object",
         "required": [
           "id",
           "node_key",
           "revision",
           "status"
         ],
-        "title": "NodeSettingsTaskOutput"
+        "title": "NodeSettingsTaskOutput",
+        "type": "object"
       },
       "OperationOutput": {
         "properties": {

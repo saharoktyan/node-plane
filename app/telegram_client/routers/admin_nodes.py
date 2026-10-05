@@ -66,8 +66,10 @@ async def change_node_draft(user_id, node_key, values, backend, state, *, baseli
 async def draft_controls(node, state, locale):
     draft = (await state.get_data()).get('node_settings_draft')
     if draft and draft['node_key'] == node['key'] and draft['values'] != draft['baseline']:
-        return [[InlineKeyboardButton(text=tr(locale, 'nodes.draft.save'), callback_data=f'node_draft_save:{node["key"]}', style='primary'),
+        return [[InlineKeyboardButton(text=tr(locale, 'nodes.draft.save_only' if not node['applied_revision'] else 'nodes.draft.save'), callback_data=f'node_draft_save:{node["key"]}', style='primary'),
                  InlineKeyboardButton(text=tr(locale, 'nodes.draft.reset'), callback_data=f'node_draft_reset:{node["key"]}')]]
+    if not node['applied_revision']:
+        return [[InlineKeyboardButton(text=tr(locale, 'nodes.card.bootstrap'), callback_data=f'bootstrap_menu:{node["key"]}', style='primary')]]
     if node['desired_revision'] > node['applied_revision']:
         return [[InlineKeyboardButton(text=tr(locale, 'nodes.card.apply'), callback_data=ApplyNodeCallback(node_key=node['key']).pack(), style='primary')]]
     return []
@@ -114,6 +116,10 @@ async def save_node_draft_cb(query: CallbackQuery, bot: Bot, backend: BackendCli
             [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data=NodeSettingsCallback(node_key=node_key).pack())]], state, query.message.message_id)
         return
     await state.update_data(node_settings_draft=None)
+    if not node['applied_revision']:
+        await show_admin_node(query.message.chat.id, query.from_user.id, query.message.message_id,
+            node_key, bot, backend, state)
+        return
     await apply_node(query.message.chat.id, query.from_user.id, query.message.message_id, node_key, bot, backend, state, revision=node['desired_revision'])
 
 @router.callback_query(AdminNodesCallback.filter())
@@ -652,7 +658,9 @@ async def show_admin_node(chat_id, user_id, message_id, node_key, bot, backend, 
     except BackendError:
         overview = None
 
-    pending = bool(await draft_controls(node, state, locale))
+    draft = (await state.get_data()).get('node_settings_draft')
+    pending = bool(node['applied_revision'] and node['desired_revision'] > node['applied_revision'] or
+        draft and draft['node_key'] == node_key and draft['values'] != draft['baseline'])
     lines = []
     sections = []
     install_rows = []
@@ -663,7 +671,7 @@ async def show_admin_node(chat_id, user_id, message_id, node_key, bot, backend, 
         job = overview.get('last_job')
         if job and job['status'] in {'awaiting_executor', 'running', 'blocked'}:
             install_rows.append((InlineKeyboardButton(text=tr(locale, 'node_tools.last_operation'), callback_data='node_job:' + job['id'], style='primary'),))
-        if state_key == 'not_installed':
+        if not node['applied_revision']:
             install_rows.append((InlineKeyboardButton(text=tr(locale, 'nodes.card.bootstrap'), callback_data=f'bootstrap_menu:{node_key}', style='primary'),))
         sections.append(Section(tr(locale, 'nodes.rich.access'), tables=(Table(
             (tr(locale, 'admin.rich.item'), tr(locale, 'admin.rich.value')),
@@ -1125,8 +1133,12 @@ async def apply_node_cb(query: CallbackQuery, callback_data: ApplyNodeCallback, 
 
 async def apply_node(chat_id, user_id, message_id, node_key, bot, backend, state, revision=None):
     locale = normalize_locale((await state.get_data()).get('locale'))
+    node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=user_id)
+    if not node['applied_revision']:
+        from .admin_node_tools import show_install
+        await show_install(chat_id, user_id, message_id, node_key, bot, backend, state)
+        return False
     if revision is None:
-        node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=user_id)
         revision = node['desired_revision']
     try:
         operation = await backend.apply_node_settings(user_id, node_key, revision)
@@ -1180,6 +1192,13 @@ async def show_node_apply_status(chat_id, user_id, message_id, operation_id, nod
         return
     rows = [[InlineKeyboardButton(text=tr(locale, 'back'),
         callback_data=NodeSettingsCallback(node_key=node_key).pack())]]
+    if s.get('error_code') == 'node_installation_required':
+        rows.insert(0, [InlineKeyboardButton(text=tr(locale, 'nodes.card.bootstrap'),
+            callback_data=f'bootstrap_menu:{node_key}', style='primary')])
+        await render(bot, chat_id, Screen(tr(locale, 'node_tools.install'),
+            (tr(locale, 'nodes.apply.installation_required'),), embedded_buttons=True, navigation=True),
+            rows, state, message_id)
+        return
     if s['status'] in {'blocked', 'superseded'}:
         await render(bot, chat_id, Screen(tr(locale, 'nodes.apply.blocked_title'),
             (tr(locale, 'nodes.apply.blocked'),), embedded_buttons=True, navigation=True), rows, state, message_id)
