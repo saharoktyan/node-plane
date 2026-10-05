@@ -617,3 +617,59 @@ main-settings-only Apply rule.
   backend policy; no unsupported selectors or recipient-level detail view is added.
 - Node lists and cards omit the normal applied-unverified state label, while
   pending, installation and error states remain visible.
+
+### Phase 4: core global settings (implemented, not yet released)
+
+- Settings hub groups access/identity, monitoring and maintenance actions.
+  Destructive actions are collapsed; all existing destination links remain.
+- Bot-title editing, request-policy views and their input/error screens embed
+  navigation in the Rich message. Requests and administrator notifications use
+  explicit Enable/Disable choices highlighting saved values; repeated clicks set
+  the same value rather than toggling it back.
+- Traffic collection follows the same explicit-choice layout. Sampling status
+  is separate from collection policy and the user-consent explanation is retained.
+- SSH screen shows the public-key fingerprint, a collapsed copyable key and a
+  downloadable public `.pub` file. The private key is never included.
+- Updates, alerts, backups and controller cleanup still need their dedicated
+  presentation migration, followed by command screens.
+- Announcement eligibility now requires an undeleted owned profile at preview,
+  queue creation and delivery claim. Retained orphan accounts are excluded.
+
+### Phase 4: Alerts (implemented, not yet released)
+
+- Monitoring, interval and recovery-notification controls are embedded beside
+  their sections. Boolean controls set explicit values and highlight the saved
+  choice; invalid callback preferences do not reach backend writes.
+- Active-condition navigation appears only when conditions exist. Conditions
+  are grouped by node within each page, with flagged names and node-card links.
+  Observation timestamps are collapsed; eight conditions remain the page size.
+- Pagination uses arrows and clamps stale pages when conditions resolve. An
+  empty list shows a clear message with Back rather than a dead page.
+- Threshold/unknown-measurement policy and delivery counters are collapsed.
+  Refresh reads stored monitoring state; it does not trigger an agent scan.
+- Remaining presentation work: Updates, Backups, controller cleanup and command
+  screens. Existing monitoring and delivery authorization remains unchanged.
+
+### Phase 4: Updates (implemented in v0.4.3-alpha.36)
+
+- The primary action updates the whole stack. An ordered controller status table
+  precedes the action; servers are collapsed, grouped by region and paginated
+  at ten entries. Individual component actions remain under Update options.
+- While a persisted job is active, its progress button replaces To latest.
+  Returning to Updates restores that button independently of client screen state.
+- Core update admission blocks concurrent mutations. The installer prepares the
+  release, checks Python imports, installs the driver, verifies its commit, and
+  checks API readiness and stable service health before admitting agent work.
+- Core failure restores the previous release symlink, driver binary, units and
+  environment. Agent updates have not started at this point. Database schema
+  changes must remain backward compatible; this is a code/configuration rollback,
+  not a database restore. An unverified rollback blocks further mutation and
+  requires operator recovery rather than replaying uncertain work.
+- After core success, each node updates its agent without reinstalling the
+  controller driver, then its installed runtime. Node failures do not abort the
+  remaining fleet and produce a partial result with affected node links.
+- Local tests cover persisted progress, mutation admission, agent failures,
+  durable phase transitions, and restoration after each core component failure.
+  Real-host systemd rollback and interrupted updates still need deployment tests.
+- Remaining Rich presentation work: Backups, controller cleanup and command
+  screens, plus refinement of secondary update tools.

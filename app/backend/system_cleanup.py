@@ -39,6 +39,8 @@ class SystemCleanupService:
 
     def initialize_schema(self):
         with self.db.transaction() as conn:
+            conn.execute('''CREATE TABLE IF NOT EXISTS backend_controller_update_gate (
+                id INTEGER PRIMARY KEY, job_id TEXT NOT NULL)''')
             conn.execute("""CREATE TABLE IF NOT EXISTS backend_system_cleanup_plans (
                 id TEXT PRIMARY KEY, actor_id TEXT NOT NULL, principal_id TEXT NOT NULL,
                 intent_json TEXT NOT NULL, expires_at TEXT NOT NULL)""")

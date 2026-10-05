@@ -8589,6 +8589,7 @@
             "type": "string",
             "enum": [
               "version",
+              "stack",
               "agents",
               "runtimes"
             ],

@@ -63,10 +63,12 @@ class TelegramTrafficTests(IsolatedAsyncioTestCase):
                     self.query, self.bot, backend, self.state
                 )
             backend.update_traffic_policy.assert_awaited_with(123, True)
-            self.assertEqual(draw.call_args.args[3][0][0].callback_data, "traffic:off")
+            screen = draw.call_args.args[2]
+            self.assertEqual([b.callback_data for b in screen.sections[0].rows[0]], ["traffic:on", "traffic:off"])
+            self.assertEqual([b.style for b in screen.sections[0].rows[0]], ['primary', None])
             self.assertIn(
                 tr(locale, "traffic.scan", at="2026-09-30 12:00", checked=3, unknown=1),
-                draw.call_args.args[2].lines,
+                screen.sections[1].lines,
             )
 
     async def test_member_stats_keep_last_totals_and_mark_unknown_in_both_locales(self):

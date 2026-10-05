@@ -220,7 +220,7 @@ class UpdatePreferencesInput(BaseModel):
 
 class UpdateRunInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    kind: Literal['version', 'agents', 'runtimes']
+    kind: Literal['version', 'stack', 'agents', 'runtimes']
     target_ref: StrictStr | None = None
     branch: Literal['main', 'dev'] | None = None
 
