@@ -177,12 +177,9 @@ async def show_overview(query, bot, backend, state, page=0, opened=False):
         action_rows.append((check,))
     sections.append(Section('', rows=tuple(action_rows)))
     nodes = [n for n in fleet.get('nodes', []) if n.get('agent_status') == 'required']
-    servers = server_sections(lang, nodes, page, 'updates_nodes', opened=opened,
-        title_key='updates.rich.outdated_servers')
-    if not nodes:
-        servers = Section(tr(lang, 'updates.rich.outdated_servers'),
-            (tr(lang, 'updates.rich.no_outdated_servers'),))
-    sections.append(servers)
+    if nodes:
+        sections.append(server_sections(lang, nodes, page, 'updates_nodes', opened=opened,
+            title_key='updates.rich.outdated_servers'))
     sections.append(Section(tr(lang, 'updates.rich.checks'), rows=((
         button(tr(lang, 'updates.auto_on' if overview.get('auto_check_enabled') else 'updates.auto_off'),
             UpdateActionCallback(action='auto_check').pack()),),)))

@@ -81,6 +81,8 @@ class UpdatesRichTests(IsolatedAsyncioTestCase):
         self.assertNotIn('upd_act:run', callbacks)
         self.assertIn('upd_act:check', callbacks)
         self.assertIn('ufleet', callbacks)
+        self.assertNotIn(updates.tr('en', 'updates.rich.outdated_servers'),
+            [section.title for section in screen.sections])
 
     async def test_returning_to_updates_restores_persisted_progress_button(self):
         job = dict(id='persisted-job', kind='stack', status='running', items=[], result={})

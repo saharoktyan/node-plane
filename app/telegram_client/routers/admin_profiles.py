@@ -639,11 +639,18 @@ async def admin_profile_cb(query: CallbackQuery, callback_data: AdminProfileCall
 async def show_admin_profile(chat_id: int, user_id: int, message_id: int,
                              profile_id: str, bot: Bot, backend: BackendClient,
                              state: FSMContext) -> None:
-    profile, grant_page, operation, summary = await asyncio.gather(
-        backend.request('GET', f'/api/v1/profiles/{profile_id}', telegram_user_id=user_id),
-        backend.profile_grants(user_id, profile_id), backend.profile_operation(user_id, profile_id),
-        backend.request('GET', f'/api/v1/profiles/{profile_id}/summary', telegram_user_id=user_id))
     locale = await _locale(state)
+    try:
+        profile, grant_page, operation, summary = await asyncio.gather(
+            backend.request('GET', f'/api/v1/profiles/{profile_id}', telegram_user_id=user_id),
+            backend.profile_grants(user_id, profile_id), backend.profile_operation(user_id, profile_id),
+            backend.request('GET', f'/api/v1/profiles/{profile_id}/summary', telegram_user_id=user_id))
+    except BackendError:
+        await render(bot, chat_id, Screen(tr(locale, 'profiles.admin.title'),
+            (tr(locale, 'profile.admin.error_loading'),), embedded_buttons=True, navigation=True),
+            [[InlineKeyboardButton(text=tr(locale, 'back'),
+                callback_data=AdminProfilesCallback().pack())]], state, message_id)
+        return
     await state.set_state(None)
     await state.update_data(edit_profile_id=None, draft_grants=None,
         original_grants=None, edit_profile_revision=None, grant_nodes_page=0,

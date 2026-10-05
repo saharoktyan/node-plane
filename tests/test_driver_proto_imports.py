@@ -28,13 +28,11 @@ class DriverProtoImportTests(unittest.TestCase):
             "driver.v1.node_service_pb2",
             "driver.v1.provisioning_service_pb2",
             "driver.v1.runtime_service_pb2",
-            "driver.v1.telemetry_service_pb2",
             "driver.v1.operation_service_pb2",
             "driver.v1.types_pb2_grpc",
             "driver.v1.node_service_pb2_grpc",
             "driver.v1.provisioning_service_pb2_grpc",
             "driver.v1.runtime_service_pb2_grpc",
-            "driver.v1.telemetry_service_pb2_grpc",
             "driver.v1.operation_service_pb2_grpc",
         )
 

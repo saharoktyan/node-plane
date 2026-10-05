@@ -862,8 +862,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         sound = sections[1].rows[0][0]
         self.assertEqual(sound.text, 'Enable')
         self.assertEqual(user.actions[sound.callback_data[2:]].args, ('false',))
-        self.assertEqual(sections[2].rows, ())
-        self.assertIn('enabled by the administrator', sections[2].lines[0])
+        self.assertEqual(len(sections), 2)
 
     async def test_language_and_sound_choices_highlight_only_the_saved_value(self):
         for locale in ('ru', 'en'):

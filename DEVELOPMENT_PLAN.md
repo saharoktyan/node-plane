@@ -44,7 +44,9 @@ file with implementation and verification results as each item is closed.
   features when off; when on, collect statistics for all profiles without a
   member opt-in. Remove member consent controls and consent gates consistently
   from collectors, APIs and UI; migrate existing preferences and test both
-  transitions. Show members whether accounting is enabled. Implemented with obsolete preference cleanup and global generation fencing.
+  transitions. Member settings do not show this admin-only policy; enabled
+  accounting is visible through profile statistics. Implemented with obsolete
+  preference cleanup and global generation fencing.
 - [x] Add an authorized administrator profile traffic read and compact UI under
   that global policy. Report monthly totals and per-node/protocol usage, and
   distinguish unavailable from zero. Totals appear on the admin profile card;
@@ -62,22 +64,39 @@ fix is implemented and tested and included in the `0.4.3-alpha.39` release.
 
 ### Execution and ownership cleanup
 
-- [ ] Inventory retained legacy Rust RPCs and PostgreSQL business-table paths.
-  Trace callers before removing unused paths; keep backend-owned policy and
-  explicit intents as the sole normal mutation contract. Update protobufs,
-  generated stubs and component references together where removal is safe.
+- [x] Inventory and remove legacy Rust driver RPCs and PostgreSQL business-table
+  paths. Removed TelemetryService, legacy NodeService methods and old
+  ProvisioningService/RuntimeService methods together with protobuf messages,
+  generated clients and unused transport helpers. The driver no longer depends
+  on `tokio-postgres`, database credentials, registry rows or legacy profile
+  tables. Supported backend intents, inspection, recovery, decommissioning and
+  operation lookup remain. Agent-side maintenance guards and SQLite journals
+  are retained; their presence does not reintroduce driver business policy.
 - [ ] Review orphan-runtime cleanup and controller-owned resource inventories.
   Define the supported recovery path without deleting unrelated services,
   packages, containers or credentials. Registry-only removal cannot guarantee
   remote deletion.
-- [ ] Document operation/artifact retention, journal growth and cleanup rules.
+  Inventory and recovery boundaries are recorded in CORE_ARCHITECTURE.md.
+  Implemented preflight validation before any runtime cleanup, refusal of
+  recursive deletion outside the managed root/symlinked paths, and non-forced
+  image cleanup without deleting global historical tags. Remaining: prove
+  container ownership before deletion, handle orphan/previous containers and
+  independently verify custom paths rather than only standard artifacts.
+- [x] Document operation/artifact retention, journal growth and cleanup rules.
   Keep node-agent SQLite command journals; their replacement is not planned.
   Never remove duplicate-protection records while commands can still be replayed.
+  CORE_ARCHITECTURE.md records actual expiry versus physical retention, journal
+  growth, backup/release rules and the prerequisites for future payload pruning.
 
 ### Focused integration evidence
 
 Use isolated PostgreSQL databases, local fixtures and disposable nodes. Record
 the tested release and result; SQL fakes do not prove PostgreSQL lock semantics.
+
+Unreleased regression evidence: two tests on disposable PostgreSQL 16 verify
+fresh profile traffic summaries and nullable-owner isolation. Fixed the `42P18`
+untyped-null-parameter failure affecting both member/admin profile summaries.
+This does not close the concurrency, restore or node-removal integration items.
 
 - [ ] Test concurrent worker claims, expected-revision conflicts and competing
   mutations, including traffic-policy changes during collection and recipient eligibility

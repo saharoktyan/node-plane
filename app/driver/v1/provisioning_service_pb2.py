@@ -25,7 +25,7 @@ _sym_db = _symbol_database.Default()
 from driver.v1 import types_pb2 as driver_dot_v1_dot_types__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n$driver/v1/provisioning_service.proto\x12\x13nodeplane.driver.v1\x1a\x15\x64river/v1/types.proto\"4\n\x1cRecoverProfileIntentResponse\x12\x14\n\x0cpayload_json\x18\x01 \x01(\t\"s\n\x11ProfileInspection\x12\x14\n\x0c\x64isk_present\x18\x01 \x01(\x08\x12\x14\n\x0clive_present\x18\x02 \x01(\x08\x12\x18\n\x10identity_matches\x18\x03 \x01(\x08\x12\x18\n\x10\x63onfig_available\x18\x04 \x01(\x08\"\xb1\x01\n\x19\x41pplyProfileIntentRequest\x12\x10\n\x08node_key\x18\x01 \x01(\t\x12\x14\n\x0cruntime_name\x18\x02 \x01(\t\x12\x15\n\rprotocol_kind\x18\x03 \x01(\t\x12\x0e\n\x06\x61\x63tion\x18\x04 \x01(\t\x12\x18\n\x10\x64\x65sired_revision\x18\x05 \x01(\x04\x12+\n\x04xray\x18\x06 \x01(\x0b\x32\x1d.nodeplane.driver.v1.XraySpec\"a\n\x1a\x45nsureProfileOnNodeRequest\x12\x10\n\x08node_key\x18\x01 \x01(\t\x12\x31\n\x07profile\x18\x02 \x01(\x0b\x32 .nodeplane.driver.v1.ProfileSpec\"^\n\x1c\x44\x65leteProfileFromNodeRequest\x12\x10\n\x08node_key\x18\x01 \x01(\t\x12\x14\n\x0cprofile_name\x18\x02 \x01(\t\x12\x16\n\x0eprotocol_kinds\x18\x03 \x03(\t\"(\n\x14ReconcileNodeRequest\x12\x10\n\x08node_key\x18\x01 \x01(\t\"/\n\x17ReconcileProfileRequest\x12\x14\n\x0cprofile_name\x18\x01 \x01(\t\"D\n\x19ListRemoteProfilesRequest\x12\x10\n\x08node_key\x18\x01 \x01(\t\x12\x15\n\rprotocol_kind\x18\x02 \x01(\t\"U\n\x1aListRemoteProfilesResponse\x12\x37\n\x05items\x18\x01 \x03(\x0b\x32(.nodeplane.driver.v1.RemoteProfileRecord2\xa0\x08\n\x13ProvisioningService\x12n\n\x14ResolveProfileIntent\x12..nodeplane.driver.v1.ApplyProfileIntentRequest\x1a&.nodeplane.driver.v1.ProfileInspection\x12y\n\x14RecoverProfileIntent\x12..nodeplane.driver.v1.ApplyProfileIntentRequest\x1a\x31.nodeplane.driver.v1.RecoverProfileIntentResponse\x12n\n\x14InspectProfileIntent\x12..nodeplane.driver.v1.ApplyProfileIntentRequest\x1a&.nodeplane.driver.v1.ProfileInspection\x12q\n\x12\x41pplyProfileIntent\x12..nodeplane.driver.v1.ApplyProfileIntentRequest\x1a+.nodeplane.driver.v1.StartOperationResponse\x12s\n\x13\x45nsureProfileOnNode\x12/.nodeplane.driver.v1.EnsureProfileOnNodeRequest\x1a+.nodeplane.driver.v1.StartOperationResponse\x12w\n\x15\x44\x65leteProfileFromNode\x12\x31.nodeplane.driver.v1.DeleteProfileFromNodeRequest\x1a+.nodeplane.driver.v1.StartOperationResponse\x12g\n\rReconcileNode\x12).nodeplane.driver.v1.ReconcileNodeRequest\x1a+.nodeplane.driver.v1.StartOperationResponse\x12m\n\x10ReconcileProfile\x12,.nodeplane.driver.v1.ReconcileProfileRequest\x1a+.nodeplane.driver.v1.StartOperationResponse\x12u\n\x12ListRemoteProfiles\x12..nodeplane.driver.v1.ListRemoteProfilesRequest\x1a/.nodeplane.driver.v1.ListRemoteProfilesResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n$driver/v1/provisioning_service.proto\x12\x13nodeplane.driver.v1\x1a\x15\x64river/v1/types.proto\"4\n\x1cRecoverProfileIntentResponse\x12\x14\n\x0cpayload_json\x18\x01 \x01(\t\"s\n\x11ProfileInspection\x12\x14\n\x0c\x64isk_present\x18\x01 \x01(\x08\x12\x14\n\x0clive_present\x18\x02 \x01(\x08\x12\x18\n\x10identity_matches\x18\x03 \x01(\x08\x12\x18\n\x10\x63onfig_available\x18\x04 \x01(\x08\"\xb1\x01\n\x19\x41pplyProfileIntentRequest\x12\x10\n\x08node_key\x18\x01 \x01(\t\x12\x14\n\x0cruntime_name\x18\x02 \x01(\t\x12\x15\n\rprotocol_kind\x18\x03 \x01(\t\x12\x0e\n\x06\x61\x63tion\x18\x04 \x01(\t\x12\x18\n\x10\x64\x65sired_revision\x18\x05 \x01(\x04\x12+\n\x04xray\x18\x06 \x01(\x0b\x32\x1d.nodeplane.driver.v1.XraySpec2\xe3\x03\n\x13ProvisioningService\x12n\n\x14ResolveProfileIntent\x12..nodeplane.driver.v1.ApplyProfileIntentRequest\x1a&.nodeplane.driver.v1.ProfileInspection\x12y\n\x14RecoverProfileIntent\x12..nodeplane.driver.v1.ApplyProfileIntentRequest\x1a\x31.nodeplane.driver.v1.RecoverProfileIntentResponse\x12n\n\x14InspectProfileIntent\x12..nodeplane.driver.v1.ApplyProfileIntentRequest\x1a&.nodeplane.driver.v1.ProfileInspection\x12q\n\x12\x41pplyProfileIntent\x12..nodeplane.driver.v1.ApplyProfileIntentRequest\x1a+.nodeplane.driver.v1.StartOperationResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -38,18 +38,6 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_PROFILEINSPECTION']._serialized_end=253
   _globals['_APPLYPROFILEINTENTREQUEST']._serialized_start=256
   _globals['_APPLYPROFILEINTENTREQUEST']._serialized_end=433
-  _globals['_ENSUREPROFILEONNODEREQUEST']._serialized_start=435
-  _globals['_ENSUREPROFILEONNODEREQUEST']._serialized_end=532
-  _globals['_DELETEPROFILEFROMNODEREQUEST']._serialized_start=534
-  _globals['_DELETEPROFILEFROMNODEREQUEST']._serialized_end=628
-  _globals['_RECONCILENODEREQUEST']._serialized_start=630
-  _globals['_RECONCILENODEREQUEST']._serialized_end=670
-  _globals['_RECONCILEPROFILEREQUEST']._serialized_start=672
-  _globals['_RECONCILEPROFILEREQUEST']._serialized_end=719
-  _globals['_LISTREMOTEPROFILESREQUEST']._serialized_start=721
-  _globals['_LISTREMOTEPROFILESREQUEST']._serialized_end=789
-  _globals['_LISTREMOTEPROFILESRESPONSE']._serialized_start=791
-  _globals['_LISTREMOTEPROFILESRESPONSE']._serialized_end=876
-  _globals['_PROVISIONINGSERVICE']._serialized_start=879
-  _globals['_PROVISIONINGSERVICE']._serialized_end=1935
+  _globals['_PROVISIONINGSERVICE']._serialized_start=436
+  _globals['_PROVISIONINGSERVICE']._serialized_end=919
 # @@protoc_insertion_point(module_scope)

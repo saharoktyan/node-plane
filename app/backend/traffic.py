@@ -334,12 +334,16 @@ class TrafficService:
         with self.db.connect() as conn:
             if not self._enabled(conn):
                 return None
+            # A standalone parameter in "? IS NULL" has no inferable type in
+            # PostgreSQL. Build the nullable-owner predicate without one.
+            owner_filter = 'u.account_id IS NULL' if account_id is None else 'u.account_id=?'
+            params = (profile_id,) if account_id is None else (profile_id, account_id)
             rows = conn.execute(
-                """SELECT u.* FROM backend_traffic_usage u
+                f"""SELECT u.* FROM backend_traffic_usage u
                 JOIN backend_profiles p ON p.id=u.profile_id
                     AND (p.owner_account_id=u.account_id OR (p.owner_account_id IS NULL AND u.account_id IS NULL))
-                WHERE u.profile_id=? AND (u.account_id=? OR (u.account_id IS NULL AND ? IS NULL)) ORDER BY u.protocol,u.node_key""",
-                (profile_id, account_id, account_id),
+                WHERE u.profile_id=? AND {owner_filter} ORDER BY u.protocol,u.node_key""",
+                params,
             ).fetchall()
             month = datetime.now(timezone.utc).strftime('%Y-%m')
             # Historical lifetime totals cannot be attributed to a month. Keep

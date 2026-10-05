@@ -4,7 +4,6 @@ import grpc
 import warnings
 
 from driver.v1 import node_service_pb2 as driver_dot_v1_dot_node__service__pb2
-from driver.v1 import types_pb2 as driver_dot_v1_dot_types__pb2
 
 GRPC_GENERATED_VERSION = '1.74.0'
 GRPC_VERSION = grpc.__version__
@@ -35,16 +34,6 @@ class NodeServiceStub(object):
         Args:
             channel: A grpc.Channel.
         """
-        self.GetNode = channel.unary_unary(
-                '/nodeplane.driver.v1.NodeService/GetNode',
-                request_serializer=driver_dot_v1_dot_node__service__pb2.GetNodeRequest.SerializeToString,
-                response_deserializer=driver_dot_v1_dot_types__pb2.Node.FromString,
-                _registered_method=True)
-        self.ListNodes = channel.unary_unary(
-                '/nodeplane.driver.v1.NodeService/ListNodes',
-                request_serializer=driver_dot_v1_dot_node__service__pb2.ListNodesRequest.SerializeToString,
-                response_deserializer=driver_dot_v1_dot_node__service__pb2.ListNodesResponse.FromString,
-                _registered_method=True)
         self.GetNodeDiagnostics = channel.unary_unary(
                 '/nodeplane.driver.v1.NodeService/GetNodeDiagnostics',
                 request_serializer=driver_dot_v1_dot_node__service__pb2.GetNodeDiagnosticsRequest.SerializeToString,
@@ -55,52 +44,10 @@ class NodeServiceStub(object):
                 request_serializer=driver_dot_v1_dot_node__service__pb2.InspectBackendNodeRequest.SerializeToString,
                 response_deserializer=driver_dot_v1_dot_node__service__pb2.BackendNodeObservation.FromString,
                 _registered_method=True)
-        self.WatchNodeHealth = channel.unary_stream(
-                '/nodeplane.driver.v1.NodeService/WatchNodeHealth',
-                request_serializer=driver_dot_v1_dot_node__service__pb2.WatchNodeHealthRequest.SerializeToString,
-                response_deserializer=driver_dot_v1_dot_node__service__pb2.NodeHealthEvent.FromString,
-                _registered_method=True)
-        self.SyncNodeEnv = channel.unary_unary(
-                '/nodeplane.driver.v1.NodeService/SyncNodeEnv',
-                request_serializer=driver_dot_v1_dot_node__service__pb2.SyncNodeEnvRequest.SerializeToString,
-                response_deserializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
-                _registered_method=True)
-        self.ProbeNode = channel.unary_unary(
-                '/nodeplane.driver.v1.NodeService/ProbeNode',
-                request_serializer=driver_dot_v1_dot_node__service__pb2.ProbeNodeRequest.SerializeToString,
-                response_deserializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
-                _registered_method=True)
-        self.CheckPorts = channel.unary_unary(
-                '/nodeplane.driver.v1.NodeService/CheckPorts',
-                request_serializer=driver_dot_v1_dot_node__service__pb2.CheckPortsRequest.SerializeToString,
-                response_deserializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
-                _registered_method=True)
-        self.OpenPorts = channel.unary_unary(
-                '/nodeplane.driver.v1.NodeService/OpenPorts',
-                request_serializer=driver_dot_v1_dot_node__service__pb2.OpenPortsRequest.SerializeToString,
-                response_deserializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
-                _registered_method=True)
-        self.InstallDocker = channel.unary_unary(
-                '/nodeplane.driver.v1.NodeService/InstallDocker',
-                request_serializer=driver_dot_v1_dot_node__service__pb2.InstallDockerRequest.SerializeToString,
-                response_deserializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
-                _registered_method=True)
 
 
 class NodeServiceServicer(object):
     """Missing associated documentation comment in .proto file."""
-
-    def GetNode(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def ListNodes(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
 
     def GetNodeDiagnostics(self, request, context):
         """Missing associated documentation comment in .proto file."""
@@ -115,55 +62,9 @@ class NodeServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def WatchNodeHealth(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def SyncNodeEnv(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def ProbeNode(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def CheckPorts(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def OpenPorts(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def InstallDocker(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
 
 def add_NodeServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
-            'GetNode': grpc.unary_unary_rpc_method_handler(
-                    servicer.GetNode,
-                    request_deserializer=driver_dot_v1_dot_node__service__pb2.GetNodeRequest.FromString,
-                    response_serializer=driver_dot_v1_dot_types__pb2.Node.SerializeToString,
-            ),
-            'ListNodes': grpc.unary_unary_rpc_method_handler(
-                    servicer.ListNodes,
-                    request_deserializer=driver_dot_v1_dot_node__service__pb2.ListNodesRequest.FromString,
-                    response_serializer=driver_dot_v1_dot_node__service__pb2.ListNodesResponse.SerializeToString,
-            ),
             'GetNodeDiagnostics': grpc.unary_unary_rpc_method_handler(
                     servicer.GetNodeDiagnostics,
                     request_deserializer=driver_dot_v1_dot_node__service__pb2.GetNodeDiagnosticsRequest.FromString,
@@ -173,36 +74,6 @@ def add_NodeServiceServicer_to_server(servicer, server):
                     servicer.InspectBackendNode,
                     request_deserializer=driver_dot_v1_dot_node__service__pb2.InspectBackendNodeRequest.FromString,
                     response_serializer=driver_dot_v1_dot_node__service__pb2.BackendNodeObservation.SerializeToString,
-            ),
-            'WatchNodeHealth': grpc.unary_stream_rpc_method_handler(
-                    servicer.WatchNodeHealth,
-                    request_deserializer=driver_dot_v1_dot_node__service__pb2.WatchNodeHealthRequest.FromString,
-                    response_serializer=driver_dot_v1_dot_node__service__pb2.NodeHealthEvent.SerializeToString,
-            ),
-            'SyncNodeEnv': grpc.unary_unary_rpc_method_handler(
-                    servicer.SyncNodeEnv,
-                    request_deserializer=driver_dot_v1_dot_node__service__pb2.SyncNodeEnvRequest.FromString,
-                    response_serializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.SerializeToString,
-            ),
-            'ProbeNode': grpc.unary_unary_rpc_method_handler(
-                    servicer.ProbeNode,
-                    request_deserializer=driver_dot_v1_dot_node__service__pb2.ProbeNodeRequest.FromString,
-                    response_serializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.SerializeToString,
-            ),
-            'CheckPorts': grpc.unary_unary_rpc_method_handler(
-                    servicer.CheckPorts,
-                    request_deserializer=driver_dot_v1_dot_node__service__pb2.CheckPortsRequest.FromString,
-                    response_serializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.SerializeToString,
-            ),
-            'OpenPorts': grpc.unary_unary_rpc_method_handler(
-                    servicer.OpenPorts,
-                    request_deserializer=driver_dot_v1_dot_node__service__pb2.OpenPortsRequest.FromString,
-                    response_serializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.SerializeToString,
-            ),
-            'InstallDocker': grpc.unary_unary_rpc_method_handler(
-                    servicer.InstallDocker,
-                    request_deserializer=driver_dot_v1_dot_node__service__pb2.InstallDockerRequest.FromString,
-                    response_serializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -214,60 +85,6 @@ def add_NodeServiceServicer_to_server(servicer, server):
  # This class is part of an EXPERIMENTAL API.
 class NodeService(object):
     """Missing associated documentation comment in .proto file."""
-
-    @staticmethod
-    def GetNode(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/nodeplane.driver.v1.NodeService/GetNode',
-            driver_dot_v1_dot_node__service__pb2.GetNodeRequest.SerializeToString,
-            driver_dot_v1_dot_types__pb2.Node.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def ListNodes(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/nodeplane.driver.v1.NodeService/ListNodes',
-            driver_dot_v1_dot_node__service__pb2.ListNodesRequest.SerializeToString,
-            driver_dot_v1_dot_node__service__pb2.ListNodesResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
 
     @staticmethod
     def GetNodeDiagnostics(request,
@@ -313,168 +130,6 @@ class NodeService(object):
             '/nodeplane.driver.v1.NodeService/InspectBackendNode',
             driver_dot_v1_dot_node__service__pb2.InspectBackendNodeRequest.SerializeToString,
             driver_dot_v1_dot_node__service__pb2.BackendNodeObservation.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def WatchNodeHealth(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_stream(
-            request,
-            target,
-            '/nodeplane.driver.v1.NodeService/WatchNodeHealth',
-            driver_dot_v1_dot_node__service__pb2.WatchNodeHealthRequest.SerializeToString,
-            driver_dot_v1_dot_node__service__pb2.NodeHealthEvent.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def SyncNodeEnv(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/nodeplane.driver.v1.NodeService/SyncNodeEnv',
-            driver_dot_v1_dot_node__service__pb2.SyncNodeEnvRequest.SerializeToString,
-            driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def ProbeNode(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/nodeplane.driver.v1.NodeService/ProbeNode',
-            driver_dot_v1_dot_node__service__pb2.ProbeNodeRequest.SerializeToString,
-            driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def CheckPorts(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/nodeplane.driver.v1.NodeService/CheckPorts',
-            driver_dot_v1_dot_node__service__pb2.CheckPortsRequest.SerializeToString,
-            driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def OpenPorts(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/nodeplane.driver.v1.NodeService/OpenPorts',
-            driver_dot_v1_dot_node__service__pb2.OpenPortsRequest.SerializeToString,
-            driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def InstallDocker(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/nodeplane.driver.v1.NodeService/InstallDocker',
-            driver_dot_v1_dot_node__service__pb2.InstallDockerRequest.SerializeToString,
-            driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
             options,
             channel_credentials,
             insecure,

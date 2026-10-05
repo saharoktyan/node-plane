@@ -506,6 +506,7 @@ CATALOG = {
         'profile.admin.open_status': 'Состояние удаления',
         'profile.admin.error_changed': 'Профиль уже изменился. Откройте его заново и повторите действие.',
         'profile.admin.error_unavailable': 'Backend недоступен. Повторите действие позже.',
+        'profile.admin.error_loading': 'Не удалось загрузить профиль. Повторите действие позже.',
         'profile.admin.error_node': 'Один из выбранных серверов сейчас недоступен для выдачи доступа.',
         'profile.admin.error_generic': 'Не удалось изменить профиль. Обновите экран и повторите действие.',
         'profile.admin.status_title': 'Статус профиля',
@@ -1046,6 +1047,7 @@ CATALOG = {
         'profile.admin.open_status': 'Deletion status',
         'profile.admin.error_changed': 'The profile has changed. Reopen it and try again.',
         'profile.admin.error_unavailable': 'The backend is unavailable. Try again later.',
+        'profile.admin.error_loading': 'Could not load the profile. Try again later.',
         'profile.admin.error_node': 'One selected node is unavailable for new access.',
         'profile.admin.error_generic': 'Could not update the profile. Refresh the screen and try again.',
         'profile.admin.status_title': 'Profile status',
@@ -2110,8 +2112,6 @@ CATALOG['ru'].update({
 CATALOG['en'].update({
     'traffic.description': 'The administrator controls traffic accounting for all profiles.',
     'traffic.collection_note': 'Only byte counters are collected, not browsing history. The first sample establishes a baseline; paused periods are excluded.',
-    'traffic.member.enabled': 'Traffic accounting is enabled by the administrator.',
-    'traffic.member.disabled': 'Traffic accounting is disabled by the administrator.',
     'traffic.servers': 'Traffic by server',
     'config.link.show': 'Show configuration link',
     'config.link.hide': 'Hide configuration link',
@@ -2119,8 +2119,6 @@ CATALOG['en'].update({
 CATALOG['ru'].update({
     'traffic.description': 'Администратор управляет учётом трафика для всех профилей.',
     'traffic.collection_note': 'Собираются только счётчики байтов, не история посещений. Первый замер задаёт исходную точку; периоды отключённого учёта исключаются.',
-    'traffic.member.enabled': 'Учёт трафика включён администратором.',
-    'traffic.member.disabled': 'Учёт трафика выключен администратором.',
     'traffic.servers': 'Трафик по серверам',
     'config.link.show': 'Показать ссылку конфигурации',
     'config.link.hide': 'Скрыть ссылку конфигурации',

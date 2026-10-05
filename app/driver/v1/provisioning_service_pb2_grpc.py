@@ -55,31 +55,6 @@ class ProvisioningServiceStub(object):
                 request_serializer=driver_dot_v1_dot_provisioning__service__pb2.ApplyProfileIntentRequest.SerializeToString,
                 response_deserializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
                 _registered_method=True)
-        self.EnsureProfileOnNode = channel.unary_unary(
-                '/nodeplane.driver.v1.ProvisioningService/EnsureProfileOnNode',
-                request_serializer=driver_dot_v1_dot_provisioning__service__pb2.EnsureProfileOnNodeRequest.SerializeToString,
-                response_deserializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
-                _registered_method=True)
-        self.DeleteProfileFromNode = channel.unary_unary(
-                '/nodeplane.driver.v1.ProvisioningService/DeleteProfileFromNode',
-                request_serializer=driver_dot_v1_dot_provisioning__service__pb2.DeleteProfileFromNodeRequest.SerializeToString,
-                response_deserializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
-                _registered_method=True)
-        self.ReconcileNode = channel.unary_unary(
-                '/nodeplane.driver.v1.ProvisioningService/ReconcileNode',
-                request_serializer=driver_dot_v1_dot_provisioning__service__pb2.ReconcileNodeRequest.SerializeToString,
-                response_deserializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
-                _registered_method=True)
-        self.ReconcileProfile = channel.unary_unary(
-                '/nodeplane.driver.v1.ProvisioningService/ReconcileProfile',
-                request_serializer=driver_dot_v1_dot_provisioning__service__pb2.ReconcileProfileRequest.SerializeToString,
-                response_deserializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
-                _registered_method=True)
-        self.ListRemoteProfiles = channel.unary_unary(
-                '/nodeplane.driver.v1.ProvisioningService/ListRemoteProfiles',
-                request_serializer=driver_dot_v1_dot_provisioning__service__pb2.ListRemoteProfilesRequest.SerializeToString,
-                response_deserializer=driver_dot_v1_dot_provisioning__service__pb2.ListRemoteProfilesResponse.FromString,
-                _registered_method=True)
 
 
 class ProvisioningServiceServicer(object):
@@ -111,36 +86,6 @@ class ProvisioningServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def EnsureProfileOnNode(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def DeleteProfileFromNode(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def ReconcileNode(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def ReconcileProfile(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def ListRemoteProfiles(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
 
 def add_ProvisioningServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -163,31 +108,6 @@ def add_ProvisioningServiceServicer_to_server(servicer, server):
                     servicer.ApplyProfileIntent,
                     request_deserializer=driver_dot_v1_dot_provisioning__service__pb2.ApplyProfileIntentRequest.FromString,
                     response_serializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.SerializeToString,
-            ),
-            'EnsureProfileOnNode': grpc.unary_unary_rpc_method_handler(
-                    servicer.EnsureProfileOnNode,
-                    request_deserializer=driver_dot_v1_dot_provisioning__service__pb2.EnsureProfileOnNodeRequest.FromString,
-                    response_serializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.SerializeToString,
-            ),
-            'DeleteProfileFromNode': grpc.unary_unary_rpc_method_handler(
-                    servicer.DeleteProfileFromNode,
-                    request_deserializer=driver_dot_v1_dot_provisioning__service__pb2.DeleteProfileFromNodeRequest.FromString,
-                    response_serializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.SerializeToString,
-            ),
-            'ReconcileNode': grpc.unary_unary_rpc_method_handler(
-                    servicer.ReconcileNode,
-                    request_deserializer=driver_dot_v1_dot_provisioning__service__pb2.ReconcileNodeRequest.FromString,
-                    response_serializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.SerializeToString,
-            ),
-            'ReconcileProfile': grpc.unary_unary_rpc_method_handler(
-                    servicer.ReconcileProfile,
-                    request_deserializer=driver_dot_v1_dot_provisioning__service__pb2.ReconcileProfileRequest.FromString,
-                    response_serializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.SerializeToString,
-            ),
-            'ListRemoteProfiles': grpc.unary_unary_rpc_method_handler(
-                    servicer.ListRemoteProfiles,
-                    request_deserializer=driver_dot_v1_dot_provisioning__service__pb2.ListRemoteProfilesRequest.FromString,
-                    response_serializer=driver_dot_v1_dot_provisioning__service__pb2.ListRemoteProfilesResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -298,141 +218,6 @@ class ProvisioningService(object):
             '/nodeplane.driver.v1.ProvisioningService/ApplyProfileIntent',
             driver_dot_v1_dot_provisioning__service__pb2.ApplyProfileIntentRequest.SerializeToString,
             driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def EnsureProfileOnNode(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/nodeplane.driver.v1.ProvisioningService/EnsureProfileOnNode',
-            driver_dot_v1_dot_provisioning__service__pb2.EnsureProfileOnNodeRequest.SerializeToString,
-            driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def DeleteProfileFromNode(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/nodeplane.driver.v1.ProvisioningService/DeleteProfileFromNode',
-            driver_dot_v1_dot_provisioning__service__pb2.DeleteProfileFromNodeRequest.SerializeToString,
-            driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def ReconcileNode(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/nodeplane.driver.v1.ProvisioningService/ReconcileNode',
-            driver_dot_v1_dot_provisioning__service__pb2.ReconcileNodeRequest.SerializeToString,
-            driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def ReconcileProfile(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/nodeplane.driver.v1.ProvisioningService/ReconcileProfile',
-            driver_dot_v1_dot_provisioning__service__pb2.ReconcileProfileRequest.SerializeToString,
-            driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def ListRemoteProfiles(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/nodeplane.driver.v1.ProvisioningService/ListRemoteProfiles',
-            driver_dot_v1_dot_provisioning__service__pb2.ListRemoteProfilesRequest.SerializeToString,
-            driver_dot_v1_dot_provisioning__service__pb2.ListRemoteProfilesResponse.FromString,
             options,
             channel_credentials,
             insecure,

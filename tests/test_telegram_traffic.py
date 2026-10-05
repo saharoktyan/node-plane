@@ -13,7 +13,7 @@ from tests import test_telegram_client as fixture
 class TelegramTrafficTests(IsolatedAsyncioTestCase):
     setUp = fixture.TelegramFlowTests.setUp
 
-    async def test_member_settings_report_global_policy_without_opt_in(self):
+    async def test_member_settings_do_not_show_admin_only_traffic_policy(self):
         for locale in ('ru', 'en'):
             self.state_data['locale'] = locale
             for available in (False, True):
@@ -21,7 +21,7 @@ class TelegramTrafficTests(IsolatedAsyncioTestCase):
                 with patch.object(user, 'render', new_callable=AsyncMock) as draw:
                     await user.show_member_settings(123, 123, 77, self.bot, backend, self.state)
                 screen = draw.call_args.args[2]
-                self.assertIn(tr(locale, 'traffic.member.enabled' if available else 'traffic.member.disabled'), screen.plain())
+                self.assertNotIn(tr(locale, 'ui.traffic'), [section.title for section in screen.sections])
                 labels = [b.text for row in screen.fallback_rows(draw.call_args.args[3]) for b in row]
                 self.assertNotIn(tr(locale, 'ui.give_consent'), labels)
                 self.assertNotIn(tr(locale, 'ui.withdraw_consent'), labels)

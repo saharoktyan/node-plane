@@ -11,11 +11,6 @@ service ProvisioningService {
   // Explicit backend-owned intent. Never reads legacy business tables.
   // x-node-plane-command-id is mandatory and must remain stable on retries.
   rpc ApplyProfileIntent(ApplyProfileIntentRequest) returns (StartOperationResponse);
-  rpc EnsureProfileOnNode(EnsureProfileOnNodeRequest) returns (StartOperationResponse);
-  rpc DeleteProfileFromNode(DeleteProfileFromNodeRequest) returns (StartOperationResponse);
-  rpc ReconcileNode(ReconcileNodeRequest) returns (StartOperationResponse);
-  rpc ReconcileProfile(ReconcileProfileRequest) returns (StartOperationResponse);
-  rpc ListRemoteProfiles(ListRemoteProfilesRequest) returns (ListRemoteProfilesResponse);
 }
 
 message RecoverProfileIntentResponse {
@@ -36,32 +31,4 @@ message ApplyProfileIntentRequest {
   string action = 4; // ensure or delete
   uint64 desired_revision = 5;
   XraySpec xray = 6; // required for xray ensure, absent otherwise
-}
-
-message EnsureProfileOnNodeRequest {
-  string node_key = 1;
-  ProfileSpec profile = 2;
-}
-
-message DeleteProfileFromNodeRequest {
-  string node_key = 1;
-  string profile_name = 2;
-  repeated string protocol_kinds = 3;
-}
-
-message ReconcileNodeRequest {
-  string node_key = 1;
-}
-
-message ReconcileProfileRequest {
-  string profile_name = 1;
-}
-
-message ListRemoteProfilesRequest {
-  string node_key = 1;
-  string protocol_kind = 2;
-}
-
-message ListRemoteProfilesResponse {
-  repeated RemoteProfileRecord items = 1;
 }
