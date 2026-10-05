@@ -1389,7 +1389,12 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
                      for button in row]
         self.assertFalse(any(value.startswith('node_settings:') for value in callbacks))
         self.assertTrue(any(value.startswith('admin_node:') for value in callbacks))
-        self.assertTrue(any(user.actions[value.split(':', 1)[1]].name == 'home' for value in callbacks if value.startswith('u:')))
+        self.assertTrue(callbacks[0].startswith('admin_node:'))
+        self.assertEqual(user.actions[callbacks[-1].split(':', 1)[1]].name, 'admin_menu')
+        self.assertEqual(render.call_args.args[3][-1][0].text, 'Main menu')
+        blocks = render.call_args.args[2].rich(render.call_args.args[3]).blocks
+        self.assertEqual(sum(block.type == 'divider' for block in blocks), 1)
+        self.assertEqual([block.type for block in blocks[-3:]], ['buttons', 'divider', 'buttons'])
         self.assertFalse(any(value.startswith('refresh_runtime:') for value in callbacks))
 
     async def test_install_menu_checks_docker_and_reusable_configs(self):

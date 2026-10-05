@@ -90,3 +90,11 @@ class RemovalInventoryTests(unittest.TestCase):
             self.assertEqual(run('custom.xray-previous-123').returncode, 26)
             # A dot in a configured name must match literally, not as a regex wildcard.
             self.assertEqual(run('customXxray').returncode, 0)
+            # A clean local installation has no bot SSH key, but all artifact
+            # and container checks must still run.
+            verifier.bot_public_key = None
+            self.assertEqual(run().returncode, 0)
+            leftover.write_text('private')
+            self.assertEqual(run().returncode, 22)
+            leftover.unlink()
+            self.assertEqual(run('custom.xray').returncode, 26)

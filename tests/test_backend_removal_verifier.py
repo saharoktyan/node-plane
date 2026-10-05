@@ -32,6 +32,14 @@ class RemovalVerifierTests(unittest.TestCase):
         self.assertIn('bot_ssh_key_present', calls[1][1]['input'])
         self.assertEqual(evidence['target'], 'root@node.example')
 
+    def test_only_local_verification_can_omit_ssh_key(self):
+        verifier = RemovalVerifier(local=True, runner=lambda command, **kwargs:
+            subprocess.CompletedProcess(command, 0, 'NODE_PLANE_REMOVED_OK:' + self.MACHINE_ID + '\n', ''))
+        self.assertIn("key=''", verifier.script())
+        self.assertEqual(verifier.verify('node', self.FINGERPRINT)['target'], 'local')
+        with self.assertRaisesRegex(ValueError, 'public key is required'):
+            RemovalVerifier(ssh_target='root@node.example').script()
+
     def test_unavailable_or_failed_host_check_never_succeeds(self):
         def failed(command, **kwargs):
             return subprocess.CompletedProcess(command, 22, '', 'artifact_present:agent_binary\n')

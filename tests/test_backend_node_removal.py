@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 from tests import test_backend_node_jobs
 from tests.test_backend_executor import FakeDriver
@@ -14,6 +15,16 @@ RESOURCES = {'paths': ['/opt/node-plane-runtime'], 'containers': ['xray', 'amnez
 
 class BackendNodeRemovalTests(unittest.TestCase):
     setUp = test_backend_node_jobs.BackendNodeJobTests.setUp
+
+    def test_local_cleanup_without_ssh_credentials(self):
+        with patch.dict('os.environ', {'NODE_PLANE_BOT_PUBLIC_KEY_FILE': '/nonexistent/bot-key.pub'}, clear=True):
+            worker = NodeRemovalService(self.db)
+            verifier = worker.verifier('local')
+            self.assertTrue(verifier.local)
+            self.assertIsNone(verifier.bot_public_key)
+            self.assertIn('agent_binary', verifier.script())
+            with self.assertRaisesRegex(AccessDenied, 'verification_key_unavailable'):
+                worker.verifier('root@node.example')
 
     def verifier(self, target, final=False):
         return SimpleNamespace(local=True, ssh_target=None,

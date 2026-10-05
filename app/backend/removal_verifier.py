@@ -47,9 +47,9 @@ class RemovalVerifier:
         self.runner = runner
 
     def script(self, resources=None):
-        if self.bot_public_key is None:
+        if self.bot_public_key is None and not self.local:
             raise ValueError('bot SSH public key is required for final verification')
-        key = shlex.quote(self.bot_public_key)
+        key = shlex.quote(self.bot_public_key or '')
         resource_checks = ''
         containers = ['xray', 'amnezia-awg']
         if resources is not None:
@@ -92,6 +92,7 @@ for proc in /proc/[0-9]*/comm; do
     fi
 done
 key={key}
+if [ -n "$key" ]; then
 for file in /root/.ssh/authorized_keys /home/*/.ssh/authorized_keys; do
     [ -f "$file" ] || continue
     if grep -Fqx -- "$key" "$file"; then
@@ -99,6 +100,7 @@ for file in /root/.ssh/authorized_keys /home/*/.ssh/authorized_keys; do
         exit 24
     fi
 done
+fi
 if command -v docker >/dev/null 2>&1; then
     if ! docker info >/dev/null 2>&1; then
         printf '%s\\n' 'docker_unavailable' >&2

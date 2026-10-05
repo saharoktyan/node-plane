@@ -116,6 +116,10 @@ Shell-level tests verify custom config leftovers and previous-container names.
   controller updates retain active journals; legacy adoption uses the installed
   CA as conservative ownership evidence. Actual SSH archival still needs a
   disposable-node acceptance run.
+  Clean local installations can now decommission without generating an SSH key;
+  host identity, inventory, service and container verification remain mandatory.
+  The rollout success screen returns to the admin menu, and unbootstrapped nodes
+  have a separate status. Real clean-VPS removal acceptance remains pending.
 - [x] Document operation/artifact retention, journal growth and cleanup rules.
   Keep node-agent SQLite command journals; their replacement is not planned.
   Never remove duplicate-protection records while commands can still be replayed.
