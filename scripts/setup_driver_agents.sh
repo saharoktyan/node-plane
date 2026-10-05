@@ -66,6 +66,8 @@ CURRENT_STEP="startup"
 DRIVER_BIN_CHANGED=0
 DRIVER_UNIT_CHANGED=0
 ENV_CHANGED=0
+CONTROLLER_ID=""
+JOURNAL_ARCHIVE_NOTICES=()
 
 set_step() {
   CURRENT_STEP="$1"
@@ -892,10 +894,13 @@ PY
 install_local_agent() {
   local server_key="$1" expected_sum="$2" current_sum="" changed=0
   local config_tmp unit_tmp
-  if [[ -n "$BACKEND_NODE_KEY" ]] && sudo test -f /etc/node-plane/agent.toml \
-    && ! sudo grep -Fxq "node_key = \"${server_key}\"" /etc/node-plane/agent.toml; then
-    echo "A different local agent already owns this host; refusing to replace it." >&2
-    return 1
+  local archive_notice
+  set_step "check previous controller journals for local node ${server_key}"
+  archive_notice="$(sudo python3 "${SCRIPT_DIR}/lib/archive_agent_journals.py" \
+    "$CONTROLLER_ID" "$(sha256_of_file "$TLS_CA_CERT")" "$server_key")" || return 1
+  if [[ -n "$archive_notice" ]]; then
+    JOURNAL_ARCHIVE_NOTICES+=("$archive_notice")
+    echo "$archive_notice"
   fi
   set_step "prepare mutual TLS certificate for local node ${server_key}"
   prepare_node_tls "$server_key" "127.0.0.1" || return 1
@@ -992,6 +997,13 @@ deploy_agents() {
   if [[ $DRY_RUN -eq 0 ]]; then
     set_step "prepare driver-agent mutual TLS certificates"
     prepare_driver_agent_tls
+    CONTROLLER_ID="$(PYTHONPATH="${APP_ROOT}/app" NODE_PLANE_APP_DIR="${APP_ROOT}" \
+      NODE_PLANE_SHARED_DIR="${SHARED_ROOT}" "$PYTHON_BIN" - <<'PY'
+from db import get_db
+from backend.installation_identity import controller_identity
+print(controller_identity(get_db()))
+PY
+    )" || return 1
   fi
 
   local failed=0
@@ -1097,10 +1109,17 @@ deploy_agents() {
       continue
     fi
 
-    if [[ -n "$BACKEND_NODE_KEY" ]] && ! agent_ssh "${ssh_opts[@]}" "$target" \
-      "if sudo test -f /etc/node-plane/agent.toml && ! sudo grep -Fxq 'node_key = \"${server_key}\"' /etc/node-plane/agent.toml; then echo 'A different agent already owns this host' >&2; exit 1; fi"; then
+    set_step "check previous controller journals for ${server_key}"
+    local archive_notice
+    if ! archive_notice="$(agent_ssh "${ssh_opts[@]}" "$target" \
+      "sudo python3 - '${CONTROLLER_ID}' '$(sha256_of_file "$TLS_CA_CERT")' '${server_key}'" \
+      < "${SCRIPT_DIR}/lib/archive_agent_journals.py")"; then
       failed=$((failed + 1))
       continue
+    fi
+    if [[ -n "$archive_notice" ]]; then
+      JOURNAL_ARCHIVE_NOTICES+=("$archive_notice")
+      echo "$archive_notice"
     fi
 
     set_step "prepare mutual TLS certificate for ${server_key}"
@@ -1366,4 +1385,9 @@ if [[ $DRY_RUN -eq 1 ]]; then
   echo "Driver/agent dry-run finished."
 else
   echo "Driver/agent setup finished."
+  for notice in "${JOURNAL_ARCHIVE_NOTICES[@]}"; do
+    echo "$notice"
+    IFS='|' read -r _archive_marker archive_node archive_path <<< "$notice"
+    echo "Previous installation journals on ${archive_node} were archived to ${archive_path}."
+  done
 fi

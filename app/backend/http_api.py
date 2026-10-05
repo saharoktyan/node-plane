@@ -396,6 +396,7 @@ class AgentRolloutOutput(BaseModel):
     node_key: str
     status: str
     failure_code: str | None = None
+    journal_archives: list[str] = Field(default_factory=list)
 
 
 class NodeMaintenanceOutput(BaseModel):

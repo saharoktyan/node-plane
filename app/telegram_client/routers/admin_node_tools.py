@@ -327,17 +327,21 @@ async def advance_removal(chat_id, user_id, message_id, node_key, bot, backend, 
                 [[button(locale, 'nodes.card.to_list', AdminNodesCallback().pack())]], state, message_id)
             return
         lines = [tr(locale, 'node_tools.removal_progress')]
-        if not result['revocations_complete']:
+        if not result['revocations_complete'] and result['pending_tasks']:
             lines.append(tr(locale, 'nodes.maintenance.pending', count=result['pending_tasks']))
-        else:
+        elif result['revocations_complete']:
             lines.append(tr(locale, 'nodes.maintenance.phase', value=tr(locale,
                 'nodes.maintenance.phase.' + (result['cleanup_phase'] or 'not_started'))))
     except BackendError as exc:
         rows = [[button(locale, 'node_tools.retry', f'remove_retry:{node_key}')]]
-        if exc.code in {'node_cleanup_unavailable', 'node_agent_unavailable', 'node_agent_unconfigured', 'host_verification_failed'}:
+        if exc.code in {'node_agent_unavailable', 'node_agent_unconfigured'}:
             lines = [tr(locale, 'node_tools.unreachable')]
             await state.update_data(unreachable_removal_node=node_key)
             rows.append([button(locale, 'nodes.maintenance.registry_only', ConfirmRegistryRemovalCallback(node_key=node_key).pack())])
+        elif exc.code == 'host_verification_failed':
+            lines = [tr(locale, 'node_tools.verification_failed')]
+        elif exc.code in {'node_cleanup_failed', 'node_cleanup_unavailable'}:
+            lines = [tr(locale, 'node_tools.cleanup_failed')]
         elif exc.code in {'independent_verification_key_required', 'verification_key_unavailable'}:
             lines = [tr(locale, 'node_tools.verification_key')]
         else:

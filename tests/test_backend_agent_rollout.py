@@ -14,6 +14,22 @@ from tests.test_backend_http import BackendHTTPTests
 class BackendAgentRolloutTests(TestCase):
     setUp = BackendHTTPTests.setUp
 
+    def test_archived_journal_notice_survives_rollout_and_reaches_api(self):
+        self.node()
+        headers = {**self.headers, 'X-Node-Plane-Telegram-User-ID': '101',
+                   'Idempotency-Key': str(uuid4())}
+        queued = self.client.post('/api/v1/nodes/lv1/agent-rollouts', headers=headers,
+                                 json={'transport': 'local'}).json()
+        archive = '/var/lib/node-plane-agent/journal-archives/previous-controller-legacy-20261005T170000Z-abcd1234'
+        output = f'AGENT_JOURNAL_ARCHIVE|lv1|{archive}\nAGENT_JOURNAL_ARCHIVE|lv1|{archive}\n'
+        with patch.dict(os.environ, {'NODE_PLANE_APP_DIR': '/opt/node-plane/current'}), \
+                patch('backend.agent_rollout.subprocess.run', return_value=SimpleNamespace(
+                    returncode=0, stdout=output, stderr='')):
+            self.assertTrue(AgentRolloutService(self.db).run_one())
+        result = self.client.get(f'/api/v1/agent-rollouts/{queued["id"]}', headers=headers).json()
+        self.assertEqual(result['journal_archives'], [archive])
+        self.assertEqual(result['status'], 'succeeded')
+
     def node(self):
         with self.db.transaction() as conn:
             conn.execute('''INSERT INTO backend_nodes(key, title, region, enabled,

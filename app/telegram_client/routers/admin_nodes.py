@@ -1465,14 +1465,16 @@ async def show_rollout_status(chat_id, user_id, message_id, task_id, bot, backen
         [InlineKeyboardButton(text=tr(locale, 'nodes.rollout.refresh'),
             callback_data=RolloutStatusCallback(task_id=task_id).pack())]]
     if status == 'succeeded':
-        rows.append([InlineKeyboardButton(text=tr(locale, 'nodes.rollout.open_settings'),
-            callback_data=NodeSettingsCallback(node_key=task['node_key']).pack())])
+        from .user import button
+        rows.append([button(user_id, tr(locale, 'requests.to_menu'), 'home')])
     if status == 'blocked' and task.get('failure_code') == 'rust_required':
         rows.append([InlineKeyboardButton(text=tr(locale, 'nodes.rollout.install_rust'),
             callback_data=f"rust_offer:{task_id}")])
     rows.append([InlineKeyboardButton(text=tr(locale, 'nodes.rollout.card'),
         callback_data=AdminNodeCallback(node_key=task['node_key']).pack())])
     lines = [tr(locale, 'nodes.rollout.' + status)]
+    for path in task.get('journal_archives', []):
+        lines.append(tr(locale, 'nodes.rollout.journal_archived', path=path))
     if task.get('failure_code') == 'build_resources':
         lines.append(tr(locale, 'nodes.rollout.build_resources'))
     if task.get('failure_code') == 'ssh_prerequisites':

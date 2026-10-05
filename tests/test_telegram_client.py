@@ -1379,7 +1379,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         self.assertNotIn('node_agent_unavailable', ' '.join(screen.lines))
         self.assertTrue(any(value.startswith('node_maintenance:') for value in callbacks))
 
-    async def test_agent_setup_success_links_to_settings_without_dead_runtime_button(self):
+    async def test_agent_setup_success_links_to_card_and_main_menu(self):
         backend = SimpleNamespace(agent_rollout=AsyncMock(return_value={
             'id': 'task1', 'node_key': 'lv1', 'status': 'succeeded'}))
         with patch.object(admin_nodes, 'render', new_callable=AsyncMock) as render:
@@ -1387,7 +1387,9 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
                                                   self.bot, backend, self.state)
         callbacks = [button.callback_data for row in render.call_args.args[3]
                      for button in row]
-        self.assertTrue(any(value.startswith('node_settings:') for value in callbacks))
+        self.assertFalse(any(value.startswith('node_settings:') for value in callbacks))
+        self.assertTrue(any(value.startswith('admin_node:') for value in callbacks))
+        self.assertTrue(any(user.actions[value.split(':', 1)[1]].name == 'home' for value in callbacks if value.startswith('u:')))
         self.assertFalse(any(value.startswith('refresh_runtime:') for value in callbacks))
 
     async def test_install_menu_checks_docker_and_reusable_configs(self):

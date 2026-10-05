@@ -6,6 +6,7 @@ have an unknown outcome. Higher revisions require a completed predecessor.
 No mutation is launched for duplicate, stale or conflicting commands.
 """
 import fcntl
+from contextlib import closing
 import hashlib
 import json
 import os
@@ -433,7 +434,58 @@ def verify_decommission(path, command_id):
     return record
 
 
-def prepare_decommission(path, command_id):
+def revoke_journal_profiles(path, command_id, runner, lock_fd):
+    """Durably revoke historical targets under the existing node-wide lock."""
+    with closing(sqlite3.connect(path)) as connection:
+        connection.execute('PRAGMA synchronous=FULL')
+        tables = {row[0] for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        if 'commands' not in tables:
+            raise ValueError('invalid command journal; decommission refused')
+        if connection.execute("SELECT 1 FROM commands WHERE status = 'running' LIMIT 1").fetchone():
+            raise ValueError('unfinished profile command blocks decommission')
+        if 'fences' not in tables:
+            return
+        if 'action' not in {row[1] for row in connection.execute('PRAGMA table_info(fences)')}:
+            connection.execute('ALTER TABLE fences ADD COLUMN action TEXT')
+        targets = connection.execute('''SELECT f.protocol, f.profile, f.revision, f.action, c.status
+            FROM fences f LEFT JOIN commands c ON c.id=f.command_id
+            ORDER BY f.protocol, f.profile''').fetchall()
+        intents = []
+        for protocol, profile, revision, action, status in targets:
+            if action == 'delete' and status == 'succeeded':
+                continue
+            if status != 'succeeded':
+                raise ValueError('unconfirmed historical profile blocks decommission')
+            intent = {'command_id': f'{command_id}:{protocol}:{profile}',
+                      'protocol': protocol, 'runtime_name': profile,
+                      'revision': revision + 1, 'action': 'delete', 'uuid': '', 'short_id': ''}
+            validate(intent)
+            intents.append(intent)
+        # Validate every candidate before the first mutation.
+        connection.commit()
+        for intent in intents:
+            encoded = json.dumps(intent, sort_keys=True, separators=(',', ':'))
+            fingerprint = hashlib.sha256(encoded.encode()).hexdigest()
+            with connection:
+                connection.execute("""INSERT INTO commands(id, fingerprint, status, response, instance_id)
+                    VALUES (?, ?, 'running', NULL, ?)""",
+                    (intent['command_id'], fingerprint,
+                     os.environ.get('NODE_PLANE_AGENT_INSTANCE_ID', 'standalone')))
+                connection.execute('''UPDATE fences SET revision=?, command_id=?, action='delete'
+                    WHERE protocol=? AND profile=?''', (intent['revision'], intent['command_id'],
+                                                        intent['protocol'], intent['runtime_name']))
+            # Any failure leaves a durable running command, never a guessed success.
+            response = runner(intent, lock_fd)
+            if (not isinstance(response, dict) or set(response) != {'summary', 'payload_json'}
+                    or any(not isinstance(value, str) for value in response.values())):
+                raise ValueError('invalid runtime result')
+            with connection:
+                connection.execute("UPDATE commands SET status='succeeded', response=? WHERE id=?",
+                                   (json.dumps(response), intent['command_id']))
+
+
+def prepare_decommission(path, command_id, runner=None):
     """Fence all mutations only after every known profile is durably deleted.
 
     A pre-upgrade journal without an action column must receive a new delete
@@ -449,16 +501,26 @@ def prepare_decommission(path, command_id):
         if marker.exists():
             return verify_decommission(path, command_id)
         if path.exists():
+            if runner is not None:
+                revoke_journal_profiles(path, command_id, runner, lock.fileno())
             connection = sqlite3.connect(path.resolve().as_uri() + '?mode=ro', uri=True, timeout=2)
             try:
-                if 'action' not in {row[1] for row in connection.execute('PRAGMA table_info(fences)')}:
-                    raise ValueError('profile journal needs a fresh delete revision')
+                tables = {row[0] for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'")}
+                if 'commands' not in tables:
+                    raise ValueError('invalid command journal; decommission refused')
                 if connection.execute("SELECT 1 FROM commands WHERE status = 'running' LIMIT 1").fetchone():
                     raise ValueError('unfinished profile command blocks decommission')
-                if connection.execute('''SELECT 1 FROM fences f LEFT JOIN commands c ON c.id = f.command_id
-                    WHERE f.action IS NULL OR f.action != 'delete' OR c.status IS NULL OR c.status != 'succeeded'
-                    LIMIT 1''').fetchone():
-                    raise ValueError('managed profiles remain on the node')
+                # Docker/bootstrap uses the shared commands journal before any
+                # profile has existed. Absence of profile fences is not a pending
+                # revocation. Old nonempty fences still require a fresh delete.
+                if 'fences' in tables and connection.execute('SELECT 1 FROM fences LIMIT 1').fetchone():
+                    if 'action' not in {row[1] for row in connection.execute('PRAGMA table_info(fences)')}:
+                        raise ValueError('profile journal needs a fresh delete revision')
+                    if connection.execute('''SELECT 1 FROM fences f LEFT JOIN commands c ON c.id = f.command_id
+                        WHERE f.action IS NULL OR f.action != 'delete' OR c.status IS NULL OR c.status != 'succeeded'
+                        LIMIT 1''').fetchone():
+                        raise ValueError('managed profiles remain on the node')
             finally:
                 connection.close()
         record = {'kind': 'decommission', 'command_id': command_id}
@@ -607,7 +669,7 @@ if __name__ == '__main__':
             print(json.dumps(result))
             sys.exit(0)
         if len(sys.argv) == 3 and sys.argv[1] == 'prepare-decommission':
-            result = prepare_decommission('/etc/node-plane/profile-intents.sqlite3', sys.argv[2])
+            result = prepare_decommission('/etc/node-plane/profile-intents.sqlite3', sys.argv[2], run)
             print(json.dumps(result))
             sys.exit(0)
         if len(sys.argv) == 3 and sys.argv[1] == 'verify-decommission':
