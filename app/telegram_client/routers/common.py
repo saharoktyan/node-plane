@@ -3,6 +3,7 @@ import asyncio
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, TelegramObject
 from aiogram.exceptions import TelegramBadRequest, TelegramNotFound, TelegramNetworkError
 import logging
+import hashlib
 from dataclasses import replace
 from aiogram.fsm.context import FSMContext
 from typing import Callable, Dict, Any, Awaitable
@@ -10,6 +11,52 @@ from typing import Callable, Dict, Any, Awaitable
 from ..screens import Screen
 from ..backend import BackendClient, BackendError
 from ..i18n import normalize_locale
+
+
+def media_blocks(rich):
+    if rich is None or not isinstance(getattr(rich, 'blocks', None), (list, tuple)):
+        return
+    for block in rich.blocks:
+        if getattr(block, 'type', None) in {'document', 'photo'}:
+            yield block
+        yield from media_blocks(block)
+
+
+def reuse_media(rich, cache):
+    uploads = []
+    def rebuild(container):
+        blocks = []
+        for block in container.blocks:
+            if block.type in {'document', 'photo'}:
+                item = getattr(block, block.type)
+                media = item.media
+                if hasattr(media, 'data'):
+                    digest = hashlib.sha256(block.type.encode() + media.filename.encode() + media.data).hexdigest()
+                    uploads.append((block.type, digest))
+                    if digest in cache:
+                        block = block.model_copy(update={block.type:
+                            item.model_copy(update={'media': cache[digest]})})
+            if isinstance(getattr(block, 'blocks', None), (list, tuple)):
+                block = rebuild(block)
+            blocks.append(block)
+        return container.model_copy(update={'blocks': blocks})
+    return rebuild(rich), uploads
+
+
+async def remember_media(state, result, uploads, cache):
+    returned = list(media_blocks(getattr(result, 'rich_message', None)))
+    if len(returned) != len(uploads):
+        return
+    for block, (kind, digest) in zip(returned, uploads):
+        if block.type != kind:
+            return
+        item = getattr(block, kind)
+        if kind == 'photo':
+            item = item[-1] if item else None
+        file_id = getattr(item, 'file_id', None)
+        if isinstance(file_id, str):
+            cache[digest] = file_id
+    await state.update_data(rich_media_cache=dict(list(cache.items())[-30:]))
 
 async def render(bot: Bot, chat_id: int, screen: Screen, rows: list[list[InlineKeyboardButton]], state: FSMContext, message_id: int | None = None) -> bool:
     markup = InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
@@ -21,11 +68,15 @@ async def render(bot: Bot, chat_id: int, screen: Screen, rows: list[list[InlineK
     
     data = await state.get_data()
     existing = message_id or data.get('control_message_id')
+    rich_content = screen.rich(rows)
+    cache = dict(data.get('rich_media_cache', {}))
+    rich_content, uploads = reuse_media(rich_content, cache)
     
     if existing:
         try:
-            await bot.edit_message_text(chat_id=chat_id, message_id=existing,
-                rich_message=screen.rich(rows), reply_markup=rich_markup, request_timeout=10)
+            edited = await bot.edit_message_text(chat_id=chat_id, message_id=existing,
+                rich_message=rich_content, reply_markup=rich_markup, request_timeout=10)
+            await remember_media(state, edited, uploads, cache)
             await state.update_data(control_message_id=existing)
             return True
         except (TelegramBadRequest, TelegramNotFound, TelegramNetworkError) as exc:
@@ -42,7 +93,8 @@ async def render(bot: Bot, chat_id: int, screen: Screen, rows: list[list[InlineK
     rich = True
     try:
         sent = await bot.send_rich_message(chat_id=chat_id,
-            rich_message=screen.rich(rows), reply_markup=rich_markup, request_timeout=10)
+            rich_message=rich_content, reply_markup=rich_markup, request_timeout=10)
+        await remember_media(state, sent, uploads, cache)
     except (TelegramBadRequest, TelegramNotFound, TelegramNetworkError) as exc:
         rich = False
         logging.getLogger(__name__).warning('Rich screen delivery failed (%s); using plain text', type(exc).__name__)

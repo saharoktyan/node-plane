@@ -1874,7 +1874,7 @@ def normalize_locale(value: str | None) -> str:
     return 'ru' if (value or '').lower().startswith('ru') else 'en'
 
 
-def tr(locale: str | None, key: str, **values) -> str:
+def tr(locale: str | None, key: str, /, **values) -> str:
     language = normalize_locale(locale)
     template = CATALOG[language].get(key, CATALOG['en'].get(key, key))
     return template.format(**values) if values else template
