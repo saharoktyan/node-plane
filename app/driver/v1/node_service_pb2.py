@@ -25,41 +25,21 @@ _sym_db = _symbol_database.Default()
 from driver.v1 import types_pb2 as driver_dot_v1_dot_types__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1c\x64river/v1/node_service.proto\x12\x13nodeplane.driver.v1\x1a\x15\x64river/v1/types.proto\"\"\n\x0eGetNodeRequest\x12\x10\n\x08node_key\x18\x01 \x01(\t\",\n\x10ListNodesRequest\x12\x18\n\x10include_disabled\x18\x01 \x01(\x08\"=\n\x11ListNodesResponse\x12(\n\x05items\x18\x01 \x03(\x0b\x32\x19.nodeplane.driver.v1.Node\"-\n\x19GetNodeDiagnosticsRequest\x12\x10\n\x08node_key\x18\x01 \x01(\t\"s\n\x1aGetNodeDiagnosticsResponse\x12\x10\n\x08node_key\x18\x01 \x01(\t\x12\x0f\n\x07summary\x18\x02 \x01(\t\x12\x32\n\x05items\x18\x03 \x03(\x0b\x32#.nodeplane.driver.v1.DiagnosticItem\"-\n\x19InspectBackendNodeRequest\x12\x10\n\x08node_key\x18\x01 \x01(\t\"\xd7\x01\n\x16\x42\x61\x63kendNodeObservation\x12\x10\n\x08node_key\x18\x01 \x01(\t\x12\x14\n\x0chealth_state\x18\x02 \x01(\t\x12\x17\n\x0fruntime_version\x18\x03 \x01(\t\x12\x16\n\x0eruntime_commit\x18\x04 \x01(\t\x12\x1b\n\x13xray_config_present\x18\x05 \x01(\x08\x12\x1a\n\x12\x61wg_config_present\x18\x06 \x01(\x08\x12\x15\n\ragent_version\x18\x07 \x01(\t\x12\x14\n\x0c\x61gent_commit\x18\x08 \x01(\t\"+\n\x16WatchNodeHealthRequest\x12\x11\n\tnode_keys\x18\x01 \x03(\t\"T\n\x0fNodeHealthEvent\x12\x10\n\x08node_key\x18\x01 \x01(\t\x12/\n\x06health\x18\x02 \x01(\x0b\x32\x1f.nodeplane.driver.v1.NodeHealth\"&\n\x12SyncNodeEnvRequest\x12\x10\n\x08node_key\x18\x01 \x01(\t\"$\n\x10ProbeNodeRequest\x12\x10\n\x08node_key\x18\x01 \x01(\t\"%\n\x11\x43heckPortsRequest\x12\x10\n\x08node_key\x18\x01 \x01(\t\"$\n\x10OpenPortsRequest\x12\x10\n\x08node_key\x18\x01 \x01(\t\"(\n\x14InstallDockerRequest\x12\x10\n\x08node_key\x18\x01 \x01(\t2\xf9\x07\n\x0bNodeService\x12I\n\x07GetNode\x12#.nodeplane.driver.v1.GetNodeRequest\x1a\x19.nodeplane.driver.v1.Node\x12Z\n\tListNodes\x12%.nodeplane.driver.v1.ListNodesRequest\x1a&.nodeplane.driver.v1.ListNodesResponse\x12u\n\x12GetNodeDiagnostics\x12..nodeplane.driver.v1.GetNodeDiagnosticsRequest\x1a/.nodeplane.driver.v1.GetNodeDiagnosticsResponse\x12q\n\x12InspectBackendNode\x12..nodeplane.driver.v1.InspectBackendNodeRequest\x1a+.nodeplane.driver.v1.BackendNodeObservation\x12\x66\n\x0fWatchNodeHealth\x12+.nodeplane.driver.v1.WatchNodeHealthRequest\x1a$.nodeplane.driver.v1.NodeHealthEvent0\x01\x12\x63\n\x0bSyncNodeEnv\x12\'.nodeplane.driver.v1.SyncNodeEnvRequest\x1a+.nodeplane.driver.v1.StartOperationResponse\x12_\n\tProbeNode\x12%.nodeplane.driver.v1.ProbeNodeRequest\x1a+.nodeplane.driver.v1.StartOperationResponse\x12\x61\n\nCheckPorts\x12&.nodeplane.driver.v1.CheckPortsRequest\x1a+.nodeplane.driver.v1.StartOperationResponse\x12_\n\tOpenPorts\x12%.nodeplane.driver.v1.OpenPortsRequest\x1a+.nodeplane.driver.v1.StartOperationResponse\x12g\n\rInstallDocker\x12).nodeplane.driver.v1.InstallDockerRequest\x1a+.nodeplane.driver.v1.StartOperationResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1c\x64river/v1/node_service.proto\x12\x13nodeplane.driver.v1\x1a\x15\x64river/v1/types.proto\"-\n\x19GetNodeDiagnosticsRequest\x12\x10\n\x08node_key\x18\x01 \x01(\t\"s\n\x1aGetNodeDiagnosticsResponse\x12\x10\n\x08node_key\x18\x01 \x01(\t\x12\x0f\n\x07summary\x18\x02 \x01(\t\x12\x32\n\x05items\x18\x03 \x03(\x0b\x32#.nodeplane.driver.v1.DiagnosticItem\"-\n\x19InspectBackendNodeRequest\x12\x10\n\x08node_key\x18\x01 \x01(\t\"\xd7\x01\n\x16\x42\x61\x63kendNodeObservation\x12\x10\n\x08node_key\x18\x01 \x01(\t\x12\x14\n\x0chealth_state\x18\x02 \x01(\t\x12\x17\n\x0fruntime_version\x18\x03 \x01(\t\x12\x16\n\x0eruntime_commit\x18\x04 \x01(\t\x12\x1b\n\x13xray_config_present\x18\x05 \x01(\x08\x12\x1a\n\x12\x61wg_config_present\x18\x06 \x01(\x08\x12\x15\n\ragent_version\x18\x07 \x01(\t\x12\x14\n\x0c\x61gent_commit\x18\x08 \x01(\t2\xf7\x01\n\x0bNodeService\x12u\n\x12GetNodeDiagnostics\x12..nodeplane.driver.v1.GetNodeDiagnosticsRequest\x1a/.nodeplane.driver.v1.GetNodeDiagnosticsResponse\x12q\n\x12InspectBackendNode\x12..nodeplane.driver.v1.InspectBackendNodeRequest\x1a+.nodeplane.driver.v1.BackendNodeObservationb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'driver.v1.node_service_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
-  _globals['_GETNODEREQUEST']._serialized_start=76
-  _globals['_GETNODEREQUEST']._serialized_end=110
-  _globals['_LISTNODESREQUEST']._serialized_start=112
-  _globals['_LISTNODESREQUEST']._serialized_end=156
-  _globals['_LISTNODESRESPONSE']._serialized_start=158
-  _globals['_LISTNODESRESPONSE']._serialized_end=219
-  _globals['_GETNODEDIAGNOSTICSREQUEST']._serialized_start=221
-  _globals['_GETNODEDIAGNOSTICSREQUEST']._serialized_end=266
-  _globals['_GETNODEDIAGNOSTICSRESPONSE']._serialized_start=268
-  _globals['_GETNODEDIAGNOSTICSRESPONSE']._serialized_end=383
-  _globals['_INSPECTBACKENDNODEREQUEST']._serialized_start=385
-  _globals['_INSPECTBACKENDNODEREQUEST']._serialized_end=430
-  _globals['_BACKENDNODEOBSERVATION']._serialized_start=433
-  _globals['_BACKENDNODEOBSERVATION']._serialized_end=648
-  _globals['_WATCHNODEHEALTHREQUEST']._serialized_start=650
-  _globals['_WATCHNODEHEALTHREQUEST']._serialized_end=693
-  _globals['_NODEHEALTHEVENT']._serialized_start=695
-  _globals['_NODEHEALTHEVENT']._serialized_end=779
-  _globals['_SYNCNODEENVREQUEST']._serialized_start=781
-  _globals['_SYNCNODEENVREQUEST']._serialized_end=819
-  _globals['_PROBENODEREQUEST']._serialized_start=821
-  _globals['_PROBENODEREQUEST']._serialized_end=857
-  _globals['_CHECKPORTSREQUEST']._serialized_start=859
-  _globals['_CHECKPORTSREQUEST']._serialized_end=896
-  _globals['_OPENPORTSREQUEST']._serialized_start=898
-  _globals['_OPENPORTSREQUEST']._serialized_end=934
-  _globals['_INSTALLDOCKERREQUEST']._serialized_start=936
-  _globals['_INSTALLDOCKERREQUEST']._serialized_end=976
-  _globals['_NODESERVICE']._serialized_start=979
-  _globals['_NODESERVICE']._serialized_end=1996
+  _globals['_GETNODEDIAGNOSTICSREQUEST']._serialized_start=76
+  _globals['_GETNODEDIAGNOSTICSREQUEST']._serialized_end=121
+  _globals['_GETNODEDIAGNOSTICSRESPONSE']._serialized_start=123
+  _globals['_GETNODEDIAGNOSTICSRESPONSE']._serialized_end=238
+  _globals['_INSPECTBACKENDNODEREQUEST']._serialized_start=240
+  _globals['_INSPECTBACKENDNODEREQUEST']._serialized_end=285
+  _globals['_BACKENDNODEOBSERVATION']._serialized_start=288
+  _globals['_BACKENDNODEOBSERVATION']._serialized_end=503
+  _globals['_NODESERVICE']._serialized_start=506
+  _globals['_NODESERVICE']._serialized_end=753
 # @@protoc_insertion_point(module_scope)

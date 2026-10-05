@@ -1216,7 +1216,76 @@ impl AgentState {
             .unwrap_or(false)
     }
 
+    fn runtime_cleanup_directories(&self) -> Result<Vec<std::path::PathBuf>, Status> {
+        let root = Path::new(&self.config.runtime_root);
+        let valid_path = |path: &Path| {
+            path.is_absolute()
+                && path.components().count() >= 3
+                && !path.components().any(|part| {
+                    matches!(
+                        part,
+                        std::path::Component::ParentDir | std::path::Component::CurDir
+                    )
+                })
+                && !path.ancestors().any(|ancestor| {
+                    fs::symlink_metadata(ancestor)
+                        .map(|metadata| metadata.file_type().is_symlink())
+                        .unwrap_or(false)
+                })
+        };
+        if !valid_path(root)
+            || root.parent() == Some(Path::new("/home"))
+            || matches!(
+                self.config.runtime_root.as_str(),
+                "/usr/local" | "/var/lib" | "/var/log"
+            )
+        {
+            return Err(Status::failed_precondition(
+                "refusing invalid runtime cleanup root",
+            ));
+        }
+        let directories = vec![
+            self.node_env_value(
+                "AWG_CLIENTS_DIR",
+                &format!("{}/awg-clients", self.config.runtime_root),
+            ),
+            self.node_env_value(
+                "XRAY_DOCKER_DIR",
+                &format!("{}/xray", self.config.runtime_root),
+            ),
+            self.node_env_value(
+                "AWG_DOCKER_DIR",
+                &format!("{}/amnezia-awg", self.config.runtime_root),
+            ),
+            self.config.runtime_root.clone(),
+        ]
+        .into_iter()
+        .map(std::path::PathBuf::from)
+        .collect::<Vec<_>>();
+        for path in &directories {
+            if !valid_path(path) || !path.starts_with(root) {
+                return Err(Status::failed_precondition(
+                    "runtime cleanup directory is outside the managed root",
+                ));
+            }
+        }
+        for value in [
+            self.node_env_value("XRAY_CONFIG", &self.config.xray_config_path),
+            self.node_env_value("AWG_CONFIG", &self.config.awg_config_path),
+            self.config.node_env_path.clone(),
+        ] {
+            let path = Path::new(&value);
+            if !valid_path(path) || path.is_dir() {
+                return Err(Status::failed_precondition(
+                    "refusing invalid runtime cleanup file",
+                ));
+            }
+        }
+        Ok(directories)
+    }
+
     fn remove_runtime_files(&self) -> Result<(), Status> {
+        let directories = self.runtime_cleanup_directories()?;
         // Capture overrides before deleting node.env. Only delete individual
         // config files outside owned runtime directories, never their parents.
         let configs = [
@@ -1251,27 +1320,9 @@ impl AgentState {
                 }
             }
         }
-        let clients = self.node_env_value(
-            "AWG_CLIENTS_DIR",
-            &format!("{}/awg-clients", self.config.runtime_root),
-        );
-        let xray_dir = self.node_env_value(
-            "XRAY_DOCKER_DIR",
-            &format!("{}/xray", self.config.runtime_root),
-        );
-        let awg_dir = self.node_env_value(
-            "AWG_DOCKER_DIR",
-            &format!("{}/amnezia-awg", self.config.runtime_root),
-        );
-        for directory in [clients, xray_dir, awg_dir, self.config.runtime_root.clone()] {
-            let path = Path::new(&directory);
-            if !path.is_absolute() || path.parent().is_none() {
-                return Err(Status::failed_precondition(
-                    "refusing invalid runtime cleanup directory",
-                ));
-            }
+        for path in directories {
             if path.exists() {
-                fs::remove_dir_all(path).map_err(|err| {
+                fs::remove_dir_all(&path).map_err(|err| {
                     Status::internal(format!("failed to remove runtime directory: {err}"))
                 })?;
             }
@@ -1302,6 +1353,10 @@ impl AgentState {
         &self,
         preserve_config: bool,
     ) -> Result<DeleteRuntimeResponse, Status> {
+        // Validate every file/directory before touching containers as well.
+        if !preserve_config {
+            self.runtime_cleanup_directories()?;
+        }
         let xray_container = self.node_env_value("XRAY_CONTAINER_NAME", "xray");
         let awg_container = self.node_env_value("AWG_CONTAINER_NAME", "amnezia-awg");
         let xray_image = self.node_env_value("XRAY_DOCKER_IMAGE", "ghcr.io/xtls/xray-core:26.3.27");
@@ -1324,10 +1379,11 @@ impl AgentState {
             // Give the AWG entrypoint time to remove its interface/NAT rules.
             self.docker_best_effort(&["stop", "--time", "10", &awg_container]);
             self.docker_best_effort(&["rm", "-f", &awg_container]);
-            self.docker_best_effort(&["rmi", "-f", &xray_image]);
-            self.docker_best_effort(&["rmi", "-f", &awg_image]);
-            self.docker_best_effort(&["rmi", "-f", "amneziavpn/amneziawg-go:3.1.20260828"]);
-            self.docker_best_effort(&["rmi", "-f", "amneziavpn/amneziawg-go:0.2.16"]);
+            // Images are a host-wide cache, possibly shared by other services.
+            // Docker refuses removal while any container uses them; never force
+            // removal or delete unrelated historical tags by name alone.
+            self.docker_best_effort(&["rmi", &xray_image]);
+            self.docker_best_effort(&["rmi", &awg_image]);
         }
 
         let mut leftovers = Vec::new();
@@ -1337,22 +1393,6 @@ impl AgentState {
             }
             if self.docker_inspect_exists(&["container", "inspect", &awg_container]) {
                 leftovers.push("awg container still present".to_string());
-            }
-            if self.docker_inspect_exists(&["image", "inspect", &xray_image]) {
-                leftovers.push("xray image still present".to_string());
-            }
-            if self.docker_inspect_exists(&["image", "inspect", &awg_image]) {
-                leftovers.push("awg image still present".to_string());
-            }
-            if self.docker_inspect_exists(&[
-                "image",
-                "inspect",
-                "amneziavpn/amneziawg-go:3.1.20260828",
-            ]) {
-                leftovers.push("amneziavpn/amneziawg-go:3.1.20260828 still present".to_string());
-            }
-            if self.docker_inspect_exists(&["image", "inspect", "amneziavpn/amneziawg-go:0.2.16"]) {
-                leftovers.push("amneziavpn/amneziawg-go:0.2.16 still present".to_string());
             }
         }
         if !leftovers.is_empty() {
@@ -2230,8 +2270,12 @@ mod tests {
     #[test]
     fn agent_health_does_not_require_provisioned_runtime() {
         let root = std::env::temp_dir().join(format!(
-            "node-plane-health-{}-{}", process::id(),
-            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+            "node-plane-health-{}-{}",
+            process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         ));
         let state = AgentState::new(AgentConfig {
             runtime_root: root.display().to_string(),
@@ -2254,7 +2298,7 @@ mod tests {
             std::env::temp_dir().join(format!("node-plane-cleanup-{}-{nonce}", process::id()));
         let runtime = root.join("runtime");
         let external = root.join("external");
-        let clients = root.join("clients");
+        let clients = runtime.join("clients");
         fs::create_dir_all(&runtime).unwrap();
         fs::create_dir_all(&external).unwrap();
         fs::create_dir_all(&clients).unwrap();
@@ -2292,6 +2336,64 @@ mod tests {
         assert!(!external.join("xray.json.bak.20260101").exists());
         assert!(!external.join("wg.conf.lock").exists());
         assert!(external.join("unrelated.txt").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn cleanup_refuses_external_directories_before_deleting_any_config() {
+        let root = std::env::temp_dir().join(format!(
+            "node-plane-unsafe-cleanup-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let runtime = root.join("runtime");
+        let external = root.join("external");
+        fs::create_dir_all(&runtime).unwrap();
+        fs::create_dir_all(&external).unwrap();
+        let config = external.join("xray.json");
+        fs::write(&config, "keep").unwrap();
+        let node_env = root.join("node.env");
+        fs::write(
+            &node_env,
+            format!(
+                "XRAY_CONFIG={}\nAWG_CLIENTS_DIR={}\n",
+                config.display(),
+                external.display()
+            ),
+        )
+        .unwrap();
+        let state = AgentState::new(AgentConfig {
+            runtime_root: runtime.display().to_string(),
+            node_env_path: node_env.display().to_string(),
+            ..AgentConfig::default()
+        });
+        assert!(state.remove_runtime_files().is_err());
+        assert_eq!(fs::read_to_string(&config).unwrap(), "keep");
+        assert!(node_env.exists());
+        assert!(runtime.exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn cleanup_refuses_symlinked_runtime_even_when_it_points_to_a_real_directory() {
+        let root = std::env::temp_dir().join(format!(
+            "node-plane-symlink-cleanup-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let external = root.join("external");
+        fs::create_dir_all(&external).unwrap();
+        std::os::unix::fs::symlink(&external, root.join("runtime")).unwrap();
+        let state = AgentState::new(AgentConfig {
+            runtime_root: root.join("runtime").display().to_string(),
+            ..AgentConfig::default()
+        });
+        assert!(state.runtime_cleanup_directories().is_err());
+        assert!(external.exists());
         fs::remove_dir_all(root).unwrap();
     }
 

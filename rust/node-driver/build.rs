@@ -4,7 +4,6 @@ fn main() {
     println!("cargo:rerun-if-changed=../../proto/driver/v1/node_service.proto");
     println!("cargo:rerun-if-changed=../../proto/driver/v1/provisioning_service.proto");
     println!("cargo:rerun-if-changed=../../proto/driver/v1/runtime_service.proto");
-    println!("cargo:rerun-if-changed=../../proto/driver/v1/telemetry_service.proto");
     println!("cargo:rerun-if-changed=../../proto/driver/v1/operation_service.proto");
     println!("cargo:rerun-if-changed=../../proto/agent/v1/types.proto");
     println!("cargo:rerun-if-changed=../../proto/agent/v1/agent_service.proto");
@@ -18,7 +17,6 @@ fn main() {
                 "../../proto/driver/v1/node_service.proto",
                 "../../proto/driver/v1/provisioning_service.proto",
                 "../../proto/driver/v1/runtime_service.proto",
-                "../../proto/driver/v1/telemetry_service.proto",
                 "../../proto/driver/v1/operation_service.proto",
                 "../../proto/agent/v1/types.proto",
                 "../../proto/agent/v1/agent_service.proto",

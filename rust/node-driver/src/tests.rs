@@ -10,21 +10,20 @@ fn agent_public_xray_response_does_not_require_backend_owned_host() {
         "xray_tcp_port": 443, "xray_xhttp_port": 8443,
         "xray_xhttp_path_prefix": "/assets"
     });
-    assert!(XraySyncGenerated::parse(&value.to_string()).is_err());
-    let public = XraySyncGenerated::parse_public(&value.to_string()).unwrap();
+    let public = XrayPublicMetadata::parse_public(&value.to_string()).unwrap();
     assert_eq!(public.xray_pbk, "a".repeat(43));
     assert_eq!(public.xray_tcp_port, 443);
     let mut invalid = value.clone();
     invalid["xray_pbk"] = serde_json::json!("(Public Key): broken");
-    assert!(XraySyncGenerated::parse_public(&invalid.to_string()).is_err());
+    assert!(XrayPublicMetadata::parse_public(&invalid.to_string()).is_err());
     invalid.as_object_mut().unwrap().remove("xray_sid");
-    assert!(XraySyncGenerated::parse_public(&invalid.to_string()).is_err());
+    assert!(XrayPublicMetadata::parse_public(&invalid.to_string()).is_err());
 }
 
 fn context() -> DriverContext {
     DriverContext {
         state: DriverState::default(),
-        postgres_dsn: None,
+
         app_semver: "test".into(),
         app_commit: "test".into(),
         agent_targets: HashMap::new(),
@@ -104,6 +103,19 @@ async fn backend_node_inspection_does_not_fall_back_to_legacy_server_rows() {
 }
 
 #[tokio::test]
+async fn diagnostics_without_agent_do_not_read_legacy_database() {
+    let api = NodeApi { ctx: context() };
+    let error = api
+        .get_node_diagnostics(Request::new(GetNodeDiagnosticsRequest {
+            node_key: "test-node".into(),
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), tonic::Code::FailedPrecondition);
+    assert_eq!(error.message(), "no node-agent target configured");
+}
+
+#[tokio::test]
 async fn backend_settings_apply_requires_identity_and_never_uses_legacy_server_rows() {
     let ctx = context();
     let api = RuntimeApi { ctx: ctx.clone() };
@@ -142,118 +154,6 @@ fn typed_cleanup_failure_is_available_to_backend() {
 
 // Missing transport must never create a phantom queued operation, including
 // destructive RPCs. No database, node, or shell execution is needed here.
-#[tokio::test]
-async fn node_actions_without_agent_fail_explicitly() {
-    let ctx = context();
-    let api = NodeApi { ctx: ctx.clone() };
-    macro_rules! check {
-        ($method:ident, $request:ident) => {
-            assert_missing_agent(
-                &ctx,
-                api.$method(Request::new($request {
-                    node_key: "test-node".into(),
-                    ..Default::default()
-                }))
-                .await
-                .unwrap(),
-            );
-        };
-    }
-    check!(sync_node_env, SyncNodeEnvRequest);
-    check!(probe_node, ProbeNodeRequest);
-    check!(check_ports, CheckPortsRequest);
-    check!(open_ports, OpenPortsRequest);
-    check!(install_docker, InstallDockerRequest);
-}
-
-#[tokio::test]
-async fn runtime_actions_without_agent_fail_explicitly() {
-    let ctx = context();
-    let api = RuntimeApi { ctx: ctx.clone() };
-    macro_rules! check {
-        ($method:ident, $request:ident) => {
-            assert_missing_agent(
-                &ctx,
-                api.$method(Request::new($request {
-                    node_key: "test-node".into(),
-                    ..Default::default()
-                }))
-                .await
-                .unwrap(),
-            );
-        };
-    }
-    check!(bootstrap_node, BootstrapNodeRequest);
-    check!(reinstall_node, ReinstallNodeRequest);
-    check!(delete_runtime, DeleteRuntimeRequest);
-    check!(full_cleanup_node, FullCleanupNodeRequest);
-    check!(regenerate_awg_entropy, RegenerateAwgEntropyRequest);
-    check!(sync_runtime, SyncRuntimeRequest);
-    check!(sync_xray, SyncXrayRequest);
-}
-
-#[tokio::test]
-async fn awg_entropy_read_without_agent_is_rejected() {
-    let api = RuntimeApi { ctx: context() };
-    let err = api
-        .get_awg_entropy(Request::new(GetAwgEntropyRequest {
-            node_key: "test-node".into(),
-        }))
-        .await
-        .unwrap_err();
-    assert_eq!(err.code(), tonic::Code::FailedPrecondition);
-}
-
-#[tokio::test]
-async fn profile_actions_without_agent_fail_explicitly() {
-    let ctx = context();
-    let api = ProvisioningApi { ctx: ctx.clone() };
-    let response = api
-        .ensure_profile_on_node(Request::new(driver::v1::EnsureProfileOnNodeRequest {
-            node_key: "test-node".into(),
-            profile: Some(ProfileSpec {
-                profile_name: "alice".into(),
-                ..Default::default()
-            }),
-        }))
-        .await
-        .unwrap();
-    let op = ctx
-        .state
-        .get_operation(&response.get_ref().operation_id)
-        .unwrap();
-    assert_eq!(op.profile_name, "alice");
-    assert_missing_agent(&ctx, response);
-    assert_missing_agent(
-        &ctx,
-        api.delete_profile_from_node(Request::new(DeleteProfileFromNodeRequest {
-            node_key: "test-node".into(),
-            profile_name: "alice".into(),
-            ..Default::default()
-        }))
-        .await
-        .unwrap(),
-    );
-}
-
-#[tokio::test]
-async fn unsupported_telemetry_does_not_enqueue_work() {
-    let ctx = context();
-    let api = TelemetryApi { ctx: ctx.clone() };
-    let err = api
-        .collect_traffic_snapshot(Request::new(Default::default()))
-        .await
-        .unwrap_err();
-    assert_eq!(err.code(), tonic::Code::Unimplemented);
-    assert!(ctx.state.list_operations("", "", "", 20).is_empty());
-    let api = NodeApi { ctx };
-    let err = api
-        .watch_node_health(Request::new(Default::default()))
-        .await
-        .unwrap_err();
-    assert_eq!(err.code(), tonic::Code::Unimplemented);
-}
-
 #[tokio::test]
 async fn watch_returns_terminal_result_and_closes() {
     let ctx = context();
@@ -484,8 +384,49 @@ fn history_allows_only_one_driver_until_every_clone_is_dropped() {
     std::fs::remove_dir_all(directory).unwrap();
 }
 
+fn keyed_request<T>(body: T, command_id: &str) -> Request<T> {
+    let mut request = Request::new(body);
+    request
+        .metadata_mut()
+        .insert("x-node-plane-command-id", command_id.parse().unwrap());
+    request
+}
+
 #[tokio::test]
-async fn every_action_rejects_execution_when_journal_cannot_be_written() {
+async fn profile_intents_without_agent_fail_for_both_protocols_and_actions() {
+    let ctx = context();
+    let api = ProvisioningApi { ctx: ctx.clone() };
+    for protocol in ["awg", "xray"] {
+        for action in ["ensure", "delete"] {
+            let body = driver::v1::ApplyProfileIntentRequest {
+                node_key: "test-node".into(),
+                runtime_name: "p_test".into(),
+                protocol_kind: protocol.into(),
+                action: action.into(),
+                desired_revision: 1,
+                xray: if protocol == "xray" && action == "ensure" {
+                    Some(driver::v1::XraySpec {
+                        profile_name: "p_test".into(),
+                        uuid: "01234567-89ab-cdef-0123-456789abcdef".into(),
+                        short_id: "0123456789abcdef".into(),
+                    })
+                } else {
+                    None
+                },
+            };
+            assert_missing_agent(
+                &ctx,
+                api.apply_profile_intent(keyed_request(body, &format!("{protocol}-{action}")))
+                    .await
+                    .unwrap(),
+            );
+        }
+    }
+    assert_eq!(ctx.state.list_operations("", "", "", 10).len(), 4);
+}
+
+#[tokio::test]
+async fn backend_mutations_reject_execution_when_journal_cannot_be_written() {
     let directory =
         std::env::temp_dir().join(format!("node-plane-journal-{}", uuid::Uuid::new_v4()));
     let parent = directory.join("data");
@@ -495,133 +436,39 @@ async fn every_action_rejects_execution_when_journal_cannot_be_written() {
         .insert("node".into(), "127.0.0.1:1".into());
     std::fs::rename(&parent, directory.join("moved")).unwrap();
     std::fs::write(&parent, b"").unwrap();
-    let node = NodeApi { ctx: ctx.clone() };
     let runtime = RuntimeApi { ctx: ctx.clone() };
     let provisioning = ProvisioningApi { ctx: ctx.clone() };
-    macro_rules! check {
-        ($api:ident, $method:ident, $request:expr) => {
-            let error = $api.$method(Request::new($request)).await.unwrap_err();
-            assert_eq!(error.code(), tonic::Code::Internal, stringify!($method));
-            assert!(
-                error.message().starts_with("failed to persist operation:"),
-                "{}: {error}",
-                stringify!($method)
-            );
-        };
+    let settings = runtime
+        .apply_backend_node_settings(keyed_request(
+            ApplyBackendNodeSettingsRequest {
+                node_key: "node".into(),
+                desired_revision: 1,
+                protocols_json: "[\"awg\"]".into(),
+                settings_json: "{}".into(),
+            },
+            "settings",
+        ))
+        .await
+        .unwrap_err();
+    let profile = provisioning
+        .apply_profile_intent(keyed_request(
+            driver::v1::ApplyProfileIntentRequest {
+                node_key: "node".into(),
+                runtime_name: "p_test".into(),
+                protocol_kind: "awg".into(),
+                action: "ensure".into(),
+                desired_revision: 1,
+                xray: None,
+            },
+            "profile",
+        ))
+        .await
+        .unwrap_err();
+    for error in [settings, profile] {
+        assert_eq!(error.code(), tonic::Code::Internal);
+        assert!(error.message().starts_with("failed to persist operation:"));
     }
-    macro_rules! check_node {
-        ($api:ident, $method:ident, $request:ident) => {
-            check!(
-                $api,
-                $method,
-                $request {
-                    node_key: "node".into(),
-                    ..Default::default()
-                }
-            );
-        };
-    }
-    check_node!(node, sync_node_env, SyncNodeEnvRequest);
-    check_node!(node, probe_node, ProbeNodeRequest);
-    check_node!(node, check_ports, CheckPortsRequest);
-    check_node!(node, open_ports, OpenPortsRequest);
-    check_node!(node, install_docker, InstallDockerRequest);
-    check_node!(runtime, bootstrap_node, BootstrapNodeRequest);
-    check_node!(runtime, reinstall_node, ReinstallNodeRequest);
-    check_node!(runtime, delete_runtime, DeleteRuntimeRequest);
-    check_node!(runtime, full_cleanup_node, FullCleanupNodeRequest);
-    check_node!(runtime, regenerate_awg_entropy, RegenerateAwgEntropyRequest);
-    check_node!(runtime, sync_runtime, SyncRuntimeRequest);
-    check_node!(runtime, sync_xray, SyncXrayRequest);
-    check_node!(provisioning, reconcile_node, ReconcileNodeRequest);
-    check!(
-        provisioning,
-        reconcile_profile,
-        ReconcileProfileRequest {
-            profile_name: "alice".into()
-        }
-    );
-    check!(
-        provisioning,
-        ensure_profile_on_node,
-        driver::v1::EnsureProfileOnNodeRequest {
-            node_key: "node".into(),
-            profile: Some(ProfileSpec {
-                profile_name: "alice".into(),
-                ..Default::default()
-            }),
-        }
-    );
-    check!(
-        provisioning,
-        delete_profile_from_node,
-        DeleteProfileFromNodeRequest {
-            node_key: "node".into(),
-            profile_name: "alice".into(),
-            protocol_kinds: vec!["awg".into()],
-        }
-    );
-    assert!(ctx.state.list_operations("", "", "", 100).is_empty());
-    drop((node, runtime, provisioning, ctx));
+    assert!(ctx.state.list_operations("", "", "", 10).is_empty());
+    drop((runtime, provisioning, ctx));
     std::fs::remove_dir_all(directory).unwrap();
-}
-
-#[tokio::test]
-async fn reconcile_early_errors_leave_terminal_records() {
-    let ctx = context();
-    let api = ProvisioningApi { ctx: ctx.clone() };
-    assert!(
-        api.reconcile_node(Request::new(ReconcileNodeRequest {
-            node_key: "node".into()
-        }))
-        .await
-        .is_err()
-    );
-    assert!(
-        api.reconcile_profile(Request::new(ReconcileProfileRequest {
-            profile_name: "alice".into()
-        }))
-        .await
-        .is_err()
-    );
-    let items = ctx.state.list_operations("", "", "", 10);
-    assert_eq!(items.len(), 2);
-    for operation in items {
-        assert_eq!(operation.status, "FAILED");
-        assert!(!operation.finished_at.is_empty());
-        assert_eq!(operation.error.unwrap().code, "execution_interrupted");
-    }
-}
-
-#[tokio::test]
-async fn reinstall_and_nested_bootstrap_finish_their_own_records() {
-    let mut ctx = context();
-    ctx.agent_targets
-        .insert("node".into(), "127.0.0.1:1".into());
-    let api = RuntimeApi { ctx: ctx.clone() };
-    // Missing database fails bootstrap before any remote request. Reinstall
-    // must complete its own record using that child result, with no RUNNING leak.
-    let response = api
-        .reinstall_node(Request::new(ReinstallNodeRequest {
-            node_key: "node".into(),
-            preserve_config: true,
-        }))
-        .await
-        .unwrap()
-        .into_inner();
-    let parent = ctx.state.get_operation(&response.operation_id).unwrap();
-    assert_eq!(parent.kind, "reinstall_node");
-    assert_eq!(parent.status, "FAILED");
-    let records = ctx.state.list_operations("node", "", "", 10);
-    assert_eq!(records.len(), 2);
-    assert!(
-        records
-            .iter()
-            .all(|operation| operation.status == "FAILED" && operation.error.is_none())
-    );
-    assert!(
-        records
-            .iter()
-            .any(|operation| operation.kind == "bootstrap_node")
-    );
 }

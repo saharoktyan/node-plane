@@ -79,3 +79,48 @@ class AgentNodeOperationTests(unittest.TestCase):
         self.assertFalse((root / 'amnezia-awg').exists())
         self.assertTrue(self.path.exists())
         self.assertTrue((root / 'helper.py').exists())
+
+    def test_invalid_second_directory_does_not_remove_first_or_stop_containers(self):
+        root = Path(self.temp.name)
+        (root / 'xray').mkdir()
+        sentinel = root / 'xray/config.json'
+        sentinel.write_text('keep')
+        with patch.object(MODULE, 'ROOT', root), patch.object(MODULE, 'environment',
+                return_value=[str(sentinel), str(root/'unrelated/data/wg0.conf'), 'xray', 'amnezia-awg']), \
+             patch.object(MODULE.subprocess, 'run') as inspect, patch.object(MODULE, 'command') as command:
+            with self.assertRaises(ValueError):
+                MODULE.remove_protocol_runtime(0)
+            inspect.assert_not_called()
+            command.assert_not_called()
+        self.assertEqual(sentinel.read_text(), 'keep')
+
+    def test_symlinked_clients_refuse_entire_cleanup_before_container_changes(self):
+        root = Path(self.temp.name)
+        external = root / 'external'
+        external.mkdir()
+        sentinel = external / 'private.conf'
+        sentinel.write_text('keep')
+        (root / 'awg-clients').symlink_to(external, target_is_directory=True)
+        with patch.object(MODULE, 'ROOT', root), patch.object(MODULE, 'environment',
+                return_value=[str(root/'xray/config.json'), str(root/'amnezia-awg/data/wg0.conf'), 'xray', 'amnezia-awg']), \
+             patch.object(MODULE.subprocess, 'run') as inspect:
+            with self.assertRaises(ValueError):
+                MODULE.remove_protocol_runtime(0)
+            inspect.assert_not_called()
+        self.assertEqual(sentinel.read_text(), 'keep')
+
+    def test_symlinked_runtime_root_does_not_make_external_directories_owned(self):
+        root = Path(self.temp.name)
+        external = root / 'external'
+        (external / 'xray').mkdir(parents=True)
+        sentinel = external / 'xray/config.json'
+        sentinel.write_text('keep')
+        alias = root / 'runtime'
+        alias.symlink_to(external, target_is_directory=True)
+        with patch.object(MODULE, 'ROOT', alias), patch.object(MODULE, 'environment',
+                return_value=[str(alias/'xray/config.json'), str(alias/'amnezia-awg/data/wg0.conf'), 'xray', 'amnezia-awg']), \
+             patch.object(MODULE.subprocess, 'run') as inspect:
+            with self.assertRaises(ValueError):
+                MODULE.remove_protocol_runtime(0)
+            inspect.assert_not_called()
+        self.assertEqual(sentinel.read_text(), 'keep')

@@ -264,9 +264,9 @@ version/commit, and whether Xray/AWG config files exist. The driver verifies
 the agent's reported node key and never reads the legacy `servers` table for
 this call. An unconfigured or unreachable agent produces a typed, redacted
 error. `settings_verified` remains false: this read-only observation reports
-file presence and health, not a fresh comparison with desired settings. The
-legacy `ApplyNodeSettings` RPC still reads `servers` and is not used by the
-backend settings worker.
+file presence and health, not a fresh comparison with desired settings. Legacy
+driver settings/registry/provisioning RPCs have been removed; the driver no
+longer accesses business tables or requires PostgreSQL credentials.
 
 ## Account access requests
 
@@ -346,8 +346,8 @@ the node for new grants, removes its grants and queues delete intents for every
 profile that ever targeted it. Old queued ensures are superseded before any RPC.
 Repeating drain returns the original operation IDs. A blocked or pending task
 keeps `revocations_complete` false. Drain itself does **not** delete the node
-record, runtime, credentials or agent. Do not run legacy FullCleanupNode against
-a fenced node.
+record, runtime, credentials or agent. Full removal uses the backend-owned
+decommission phases below; the legacy driver FullCleanupNode RPC was removed.
 
 After all revocations are confirmed, an approved administrator can advance
 backend-owned cleanup one phase at a time, using the same lock file:
@@ -616,11 +616,11 @@ in that gap. The marker is removed only after the service and children stop.
 A failed uninstall schedule leaves a fail-closed marker for manual recovery.
 
 This is a transition guard, not a replacement for backend-owned node maintenance.
-A node with fenced profiles must be decommissioned through that future path;
-legacy full cleanup now refuses it instead of silently discarding the journal.
+A node with fenced profiles must use the backend-owned drain/decommission path;
+legacy agent cleanup refuses it instead of silently discarding the journal.
 Direct root/operator changes to Docker, config files, or the journal remain
-outside this RPC boundary. A controlled repair/decommission contract for
-actually interrupted commands is still pending. Existing deployments are not
+outside this RPC boundary. Deliberate repair of interrupted commands uses the
+inspection/recovery contracts described below. Existing deployments are not
 changed until rebuilt driver/agent and runtime assets are installed together.
 
 ## Deliberate repair of interrupted work

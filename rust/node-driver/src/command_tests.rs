@@ -93,16 +93,19 @@ fn keyed<T>(message: T, key: &str) -> Request<T> {
     request
 }
 
-fn install_request(key: &str) -> Request<InstallDockerRequest> {
+fn install_request(key: &str) -> Request<ApplyBackendNodeSettingsRequest> {
     keyed(
-        InstallDockerRequest {
+        ApplyBackendNodeSettingsRequest {
             node_key: "node".into(),
+            desired_revision: 1,
+            protocols_json: "[\"awg\"]".into(),
+            settings_json: "{}".into(),
         },
         key,
     )
 }
 
-fn start(state: &DriverState, request: &Request<InstallDockerRequest>) -> CommandStart {
+fn start(state: &DriverState, request: &Request<ApplyBackendNodeSettingsRequest>) -> CommandStart {
     state
         .begin_command(
             "install_docker",
@@ -141,15 +144,16 @@ fn duplicate_returns_same_id_during_execution_and_after_completion() {
 fn different_payload_or_method_cannot_reuse_command_key() {
     let state = DriverState::default();
     let original = keyed(
-        DeleteRuntimeRequest {
+        ApplyBackendNodeSettingsRequest {
             node_key: "node".into(),
-            preserve_config: true,
+            desired_revision: 1,
+            ..Default::default()
         },
-        "delete-1",
+        "settings-1",
     );
     let CommandStart::New(execution) = state
         .begin_command(
-            "delete_runtime",
+            "apply_backend_node_settings",
             "node",
             "",
             CommandIdentity::from_request(&original).unwrap(),
@@ -160,13 +164,17 @@ fn different_payload_or_method_cannot_reuse_command_key() {
     };
     execution.finish("SUCCEEDED", "done").unwrap();
     let changed = keyed(
-        DeleteRuntimeRequest {
+        ApplyBackendNodeSettingsRequest {
             node_key: "node".into(),
-            preserve_config: false,
+            desired_revision: 2,
+            ..Default::default()
         },
-        "delete-1",
+        "settings-1",
     );
-    for (kind, request) in [("delete_runtime", &changed), ("bootstrap_node", &original)] {
+    for (kind, request) in [
+        ("apply_backend_node_settings", &changed),
+        ("apply_profile_intent", &original),
+    ] {
         let result = state.begin_command(
             kind,
             "node",
@@ -290,7 +298,7 @@ fn invalid_or_repeated_metadata_is_rejected() {
         .append("x-node-plane-command-id", "second".parse().unwrap());
     assert!(CommandIdentity::from_request(&request).is_err());
     assert!(
-        CommandIdentity::from_request(&Request::new(InstallDockerRequest::default()))
+        CommandIdentity::from_request(&Request::new(ApplyBackendNodeSettingsRequest::default()))
             .unwrap()
             .is_none()
     );
@@ -299,8 +307,9 @@ fn invalid_or_repeated_metadata_is_rejected() {
 #[test]
 fn anonymous_requests_remain_independent() {
     let state = DriverState::default();
-    let request = Request::new(InstallDockerRequest {
+    let request = Request::new(ApplyBackendNodeSettingsRequest {
         node_key: "node".into(),
+        ..Default::default()
     });
     let CommandStart::New(first) = start(&state, &request) else {
         panic!()
@@ -316,17 +325,17 @@ fn anonymous_requests_remain_independent() {
 
 #[tokio::test]
 async fn failed_command_is_not_reexecuted_after_configuration_changes() {
-    let mut api = NodeApi {
+    let mut api = RuntimeApi {
         ctx: DriverContext {
             state: DriverState::default(),
-            postgres_dsn: None,
+
             app_semver: "test".into(),
             app_commit: "test".into(),
             agent_targets: HashMap::new(),
         },
     };
     let first = api
-        .install_docker(install_request("failed-1"))
+        .apply_backend_node_settings(install_request("failed-1"))
         .await
         .unwrap()
         .into_inner();
@@ -334,7 +343,7 @@ async fn failed_command_is_not_reexecuted_after_configuration_changes() {
         .agent_targets
         .insert("node".into(), "127.0.0.1:1".into());
     let repeated = api
-        .install_docker(install_request("failed-1"))
+        .apply_backend_node_settings(install_request("failed-1"))
         .await
         .unwrap()
         .into_inner();
@@ -356,12 +365,11 @@ async fn failed_command_is_not_reexecuted_after_configuration_changes() {
 async fn every_rpc_returns_existing_command_without_execution() {
     let ctx = DriverContext {
         state: DriverState::default(),
-        postgres_dsn: None,
+
         app_semver: "test".into(),
         app_commit: "test".into(),
         agent_targets: HashMap::new(),
     };
-    let node = NodeApi { ctx: ctx.clone() };
     let runtime = RuntimeApi { ctx: ctx.clone() };
     let provisioning = ProvisioningApi { ctx: ctx.clone() };
     macro_rules! check {
@@ -394,65 +402,24 @@ async fn every_rpc_returns_existing_command_without_execution() {
             );
         }};
     }
-    macro_rules! check_node {
-        ($api:ident, $method:ident, $body:ident) => {
-            check!(
-                $api,
-                $method,
-                "node",
-                "",
-                $body {
-                    node_key: "node".into(),
-                    ..Default::default()
-                }
-            );
-        };
-    }
-    check_node!(node, sync_node_env, SyncNodeEnvRequest);
-    check_node!(node, probe_node, ProbeNodeRequest);
-    check_node!(node, check_ports, CheckPortsRequest);
-    check_node!(node, open_ports, OpenPortsRequest);
-    check_node!(node, install_docker, InstallDockerRequest);
-    check_node!(runtime, bootstrap_node, BootstrapNodeRequest);
-    check_node!(runtime, reinstall_node, ReinstallNodeRequest);
-    check_node!(runtime, delete_runtime, DeleteRuntimeRequest);
-    check_node!(runtime, full_cleanup_node, FullCleanupNodeRequest);
-    check_node!(runtime, regenerate_awg_entropy, RegenerateAwgEntropyRequest);
-    check_node!(runtime, sync_runtime, SyncRuntimeRequest);
-    check_node!(runtime, sync_xray, SyncXrayRequest);
-    check_node!(provisioning, reconcile_node, ReconcileNodeRequest);
     check!(
-        provisioning,
-        reconcile_profile,
+        runtime,
+        apply_backend_node_settings,
+        "node",
         "",
-        "alice",
-        ReconcileProfileRequest {
-            profile_name: "alice".into()
+        ApplyBackendNodeSettingsRequest {
+            node_key: "node".into(),
+            desired_revision: 1,
+            protocols_json: "[\"awg\"]".into(),
+            settings_json: "{}".into(),
         }
     );
     check!(
         provisioning,
-        ensure_profile_on_node,
+        apply_profile_intent,
         "node",
-        "alice",
-        driver::v1::EnsureProfileOnNodeRequest {
-            node_key: "node".into(),
-            profile: Some(ProfileSpec {
-                profile_name: "alice".into(),
-                ..Default::default()
-            }),
-        }
+        "p_test",
+        explicit_intent()
     );
-    check!(
-        provisioning,
-        delete_profile_from_node,
-        "node",
-        "alice",
-        DeleteProfileFromNodeRequest {
-            node_key: "node".into(),
-            profile_name: "alice".into(),
-            ..Default::default()
-        }
-    );
-    assert_eq!(ctx.state.list_operations("", "", "", 100).len(), 16);
+    assert_eq!(ctx.state.list_operations("", "", "", 100).len(), 2);
 }

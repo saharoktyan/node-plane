@@ -40,55 +40,10 @@ class RuntimeServiceStub(object):
                 request_serializer=driver_dot_v1_dot_runtime__service__pb2.BackendNodeActionRequest.SerializeToString,
                 response_deserializer=driver_dot_v1_dot_runtime__service__pb2.BackendNodeSettingsResult.FromString,
                 _registered_method=True)
-        self.BootstrapNode = channel.unary_unary(
-                '/nodeplane.driver.v1.RuntimeService/BootstrapNode',
-                request_serializer=driver_dot_v1_dot_runtime__service__pb2.BootstrapNodeRequest.SerializeToString,
-                response_deserializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
-                _registered_method=True)
-        self.ReinstallNode = channel.unary_unary(
-                '/nodeplane.driver.v1.RuntimeService/ReinstallNode',
-                request_serializer=driver_dot_v1_dot_runtime__service__pb2.ReinstallNodeRequest.SerializeToString,
-                response_deserializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
-                _registered_method=True)
-        self.DeleteRuntime = channel.unary_unary(
-                '/nodeplane.driver.v1.RuntimeService/DeleteRuntime',
-                request_serializer=driver_dot_v1_dot_runtime__service__pb2.DeleteRuntimeRequest.SerializeToString,
-                response_deserializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
-                _registered_method=True)
-        self.FullCleanupNode = channel.unary_unary(
-                '/nodeplane.driver.v1.RuntimeService/FullCleanupNode',
-                request_serializer=driver_dot_v1_dot_runtime__service__pb2.FullCleanupNodeRequest.SerializeToString,
-                response_deserializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
-                _registered_method=True)
         self.DecommissionNode = channel.unary_unary(
                 '/nodeplane.driver.v1.RuntimeService/DecommissionNode',
                 request_serializer=driver_dot_v1_dot_runtime__service__pb2.DecommissionNodeRequest.SerializeToString,
                 response_deserializer=driver_dot_v1_dot_runtime__service__pb2.DecommissionNodeResponse.FromString,
-                _registered_method=True)
-        self.GetAwgEntropy = channel.unary_unary(
-                '/nodeplane.driver.v1.RuntimeService/GetAwgEntropy',
-                request_serializer=driver_dot_v1_dot_runtime__service__pb2.GetAwgEntropyRequest.SerializeToString,
-                response_deserializer=driver_dot_v1_dot_runtime__service__pb2.GetAwgEntropyResponse.FromString,
-                _registered_method=True)
-        self.RegenerateAwgEntropy = channel.unary_unary(
-                '/nodeplane.driver.v1.RuntimeService/RegenerateAwgEntropy',
-                request_serializer=driver_dot_v1_dot_runtime__service__pb2.RegenerateAwgEntropyRequest.SerializeToString,
-                response_deserializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
-                _registered_method=True)
-        self.SyncRuntime = channel.unary_unary(
-                '/nodeplane.driver.v1.RuntimeService/SyncRuntime',
-                request_serializer=driver_dot_v1_dot_runtime__service__pb2.SyncRuntimeRequest.SerializeToString,
-                response_deserializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
-                _registered_method=True)
-        self.SyncXray = channel.unary_unary(
-                '/nodeplane.driver.v1.RuntimeService/SyncXray',
-                request_serializer=driver_dot_v1_dot_runtime__service__pb2.SyncXrayRequest.SerializeToString,
-                response_deserializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
-                _registered_method=True)
-        self.ApplyNodeSettings = channel.unary_unary(
-                '/nodeplane.driver.v1.RuntimeService/ApplyNodeSettings',
-                request_serializer=driver_dot_v1_dot_runtime__service__pb2.ApplyNodeSettingsRequest.SerializeToString,
-                response_deserializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
                 _registered_method=True)
         self.ApplyBackendNodeSettings = channel.unary_unary(
                 '/nodeplane.driver.v1.RuntimeService/ApplyBackendNodeSettings',
@@ -120,16 +75,6 @@ class RuntimeServiceStub(object):
                 request_serializer=driver_dot_v1_dot_runtime__service__pb2.RefreshAwgConfigRequest.SerializeToString,
                 response_deserializer=driver_dot_v1_dot_runtime__service__pb2.RefreshAwgConfigResponse.FromString,
                 _registered_method=True)
-        self.GetRuntimeStatus = channel.unary_unary(
-                '/nodeplane.driver.v1.RuntimeService/GetRuntimeStatus',
-                request_serializer=driver_dot_v1_dot_runtime__service__pb2.GetRuntimeStatusRequest.SerializeToString,
-                response_deserializer=driver_dot_v1_dot_runtime__service__pb2.GetRuntimeStatusResponse.FromString,
-                _registered_method=True)
-        self.ListNodesNeedingRuntimeSync = channel.unary_unary(
-                '/nodeplane.driver.v1.RuntimeService/ListNodesNeedingRuntimeSync',
-                request_serializer=driver_dot_v1_dot_runtime__service__pb2.ListNodesNeedingRuntimeSyncRequest.SerializeToString,
-                response_deserializer=driver_dot_v1_dot_runtime__service__pb2.ListNodesNeedingRuntimeSyncResponse.FromString,
-                _registered_method=True)
 
 
 class RuntimeServiceServicer(object):
@@ -141,63 +86,9 @@ class RuntimeServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def BootstrapNode(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def ReinstallNode(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def DeleteRuntime(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def FullCleanupNode(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
     def DecommissionNode(self, request, context):
         """Explicit backend-owned path; does not access legacy server/profile tables.
         """
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def GetAwgEntropy(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def RegenerateAwgEntropy(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def SyncRuntime(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def SyncXray(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def ApplyNodeSettings(self, request, context):
-        """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
@@ -239,18 +130,6 @@ class RuntimeServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def GetRuntimeStatus(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def ListNodesNeedingRuntimeSync(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
 
 def add_RuntimeServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -259,55 +138,10 @@ def add_RuntimeServiceServicer_to_server(servicer, server):
                     request_deserializer=driver_dot_v1_dot_runtime__service__pb2.BackendNodeActionRequest.FromString,
                     response_serializer=driver_dot_v1_dot_runtime__service__pb2.BackendNodeSettingsResult.SerializeToString,
             ),
-            'BootstrapNode': grpc.unary_unary_rpc_method_handler(
-                    servicer.BootstrapNode,
-                    request_deserializer=driver_dot_v1_dot_runtime__service__pb2.BootstrapNodeRequest.FromString,
-                    response_serializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.SerializeToString,
-            ),
-            'ReinstallNode': grpc.unary_unary_rpc_method_handler(
-                    servicer.ReinstallNode,
-                    request_deserializer=driver_dot_v1_dot_runtime__service__pb2.ReinstallNodeRequest.FromString,
-                    response_serializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.SerializeToString,
-            ),
-            'DeleteRuntime': grpc.unary_unary_rpc_method_handler(
-                    servicer.DeleteRuntime,
-                    request_deserializer=driver_dot_v1_dot_runtime__service__pb2.DeleteRuntimeRequest.FromString,
-                    response_serializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.SerializeToString,
-            ),
-            'FullCleanupNode': grpc.unary_unary_rpc_method_handler(
-                    servicer.FullCleanupNode,
-                    request_deserializer=driver_dot_v1_dot_runtime__service__pb2.FullCleanupNodeRequest.FromString,
-                    response_serializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.SerializeToString,
-            ),
             'DecommissionNode': grpc.unary_unary_rpc_method_handler(
                     servicer.DecommissionNode,
                     request_deserializer=driver_dot_v1_dot_runtime__service__pb2.DecommissionNodeRequest.FromString,
                     response_serializer=driver_dot_v1_dot_runtime__service__pb2.DecommissionNodeResponse.SerializeToString,
-            ),
-            'GetAwgEntropy': grpc.unary_unary_rpc_method_handler(
-                    servicer.GetAwgEntropy,
-                    request_deserializer=driver_dot_v1_dot_runtime__service__pb2.GetAwgEntropyRequest.FromString,
-                    response_serializer=driver_dot_v1_dot_runtime__service__pb2.GetAwgEntropyResponse.SerializeToString,
-            ),
-            'RegenerateAwgEntropy': grpc.unary_unary_rpc_method_handler(
-                    servicer.RegenerateAwgEntropy,
-                    request_deserializer=driver_dot_v1_dot_runtime__service__pb2.RegenerateAwgEntropyRequest.FromString,
-                    response_serializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.SerializeToString,
-            ),
-            'SyncRuntime': grpc.unary_unary_rpc_method_handler(
-                    servicer.SyncRuntime,
-                    request_deserializer=driver_dot_v1_dot_runtime__service__pb2.SyncRuntimeRequest.FromString,
-                    response_serializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.SerializeToString,
-            ),
-            'SyncXray': grpc.unary_unary_rpc_method_handler(
-                    servicer.SyncXray,
-                    request_deserializer=driver_dot_v1_dot_runtime__service__pb2.SyncXrayRequest.FromString,
-                    response_serializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.SerializeToString,
-            ),
-            'ApplyNodeSettings': grpc.unary_unary_rpc_method_handler(
-                    servicer.ApplyNodeSettings,
-                    request_deserializer=driver_dot_v1_dot_runtime__service__pb2.ApplyNodeSettingsRequest.FromString,
-                    response_serializer=driver_dot_v1_dot_types__pb2.StartOperationResponse.SerializeToString,
             ),
             'ApplyBackendNodeSettings': grpc.unary_unary_rpc_method_handler(
                     servicer.ApplyBackendNodeSettings,
@@ -338,16 +172,6 @@ def add_RuntimeServiceServicer_to_server(servicer, server):
                     servicer.RefreshAwgConfig,
                     request_deserializer=driver_dot_v1_dot_runtime__service__pb2.RefreshAwgConfigRequest.FromString,
                     response_serializer=driver_dot_v1_dot_runtime__service__pb2.RefreshAwgConfigResponse.SerializeToString,
-            ),
-            'GetRuntimeStatus': grpc.unary_unary_rpc_method_handler(
-                    servicer.GetRuntimeStatus,
-                    request_deserializer=driver_dot_v1_dot_runtime__service__pb2.GetRuntimeStatusRequest.FromString,
-                    response_serializer=driver_dot_v1_dot_runtime__service__pb2.GetRuntimeStatusResponse.SerializeToString,
-            ),
-            'ListNodesNeedingRuntimeSync': grpc.unary_unary_rpc_method_handler(
-                    servicer.ListNodesNeedingRuntimeSync,
-                    request_deserializer=driver_dot_v1_dot_runtime__service__pb2.ListNodesNeedingRuntimeSyncRequest.FromString,
-                    response_serializer=driver_dot_v1_dot_runtime__service__pb2.ListNodesNeedingRuntimeSyncResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -388,114 +212,6 @@ class RuntimeService(object):
             _registered_method=True)
 
     @staticmethod
-    def BootstrapNode(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/nodeplane.driver.v1.RuntimeService/BootstrapNode',
-            driver_dot_v1_dot_runtime__service__pb2.BootstrapNodeRequest.SerializeToString,
-            driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def ReinstallNode(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/nodeplane.driver.v1.RuntimeService/ReinstallNode',
-            driver_dot_v1_dot_runtime__service__pb2.ReinstallNodeRequest.SerializeToString,
-            driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def DeleteRuntime(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/nodeplane.driver.v1.RuntimeService/DeleteRuntime',
-            driver_dot_v1_dot_runtime__service__pb2.DeleteRuntimeRequest.SerializeToString,
-            driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def FullCleanupNode(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/nodeplane.driver.v1.RuntimeService/FullCleanupNode',
-            driver_dot_v1_dot_runtime__service__pb2.FullCleanupNodeRequest.SerializeToString,
-            driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
     def DecommissionNode(request,
             target,
             options=(),
@@ -512,141 +228,6 @@ class RuntimeService(object):
             '/nodeplane.driver.v1.RuntimeService/DecommissionNode',
             driver_dot_v1_dot_runtime__service__pb2.DecommissionNodeRequest.SerializeToString,
             driver_dot_v1_dot_runtime__service__pb2.DecommissionNodeResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def GetAwgEntropy(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/nodeplane.driver.v1.RuntimeService/GetAwgEntropy',
-            driver_dot_v1_dot_runtime__service__pb2.GetAwgEntropyRequest.SerializeToString,
-            driver_dot_v1_dot_runtime__service__pb2.GetAwgEntropyResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def RegenerateAwgEntropy(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/nodeplane.driver.v1.RuntimeService/RegenerateAwgEntropy',
-            driver_dot_v1_dot_runtime__service__pb2.RegenerateAwgEntropyRequest.SerializeToString,
-            driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def SyncRuntime(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/nodeplane.driver.v1.RuntimeService/SyncRuntime',
-            driver_dot_v1_dot_runtime__service__pb2.SyncRuntimeRequest.SerializeToString,
-            driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def SyncXray(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/nodeplane.driver.v1.RuntimeService/SyncXray',
-            driver_dot_v1_dot_runtime__service__pb2.SyncXrayRequest.SerializeToString,
-            driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def ApplyNodeSettings(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/nodeplane.driver.v1.RuntimeService/ApplyNodeSettings',
-            driver_dot_v1_dot_runtime__service__pb2.ApplyNodeSettingsRequest.SerializeToString,
-            driver_dot_v1_dot_types__pb2.StartOperationResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -809,60 +390,6 @@ class RuntimeService(object):
             '/nodeplane.driver.v1.RuntimeService/RefreshAwgConfig',
             driver_dot_v1_dot_runtime__service__pb2.RefreshAwgConfigRequest.SerializeToString,
             driver_dot_v1_dot_runtime__service__pb2.RefreshAwgConfigResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def GetRuntimeStatus(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/nodeplane.driver.v1.RuntimeService/GetRuntimeStatus',
-            driver_dot_v1_dot_runtime__service__pb2.GetRuntimeStatusRequest.SerializeToString,
-            driver_dot_v1_dot_runtime__service__pb2.GetRuntimeStatusResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def ListNodesNeedingRuntimeSync(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/nodeplane.driver.v1.RuntimeService/ListNodesNeedingRuntimeSync',
-            driver_dot_v1_dot_runtime__service__pb2.ListNodesNeedingRuntimeSyncRequest.SerializeToString,
-            driver_dot_v1_dot_runtime__service__pb2.ListNodesNeedingRuntimeSyncResponse.FromString,
             options,
             channel_credentials,
             insecure,

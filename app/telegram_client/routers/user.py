@@ -1012,8 +1012,6 @@ async def show_member_settings(chat_id: int, user_id: int, message_id: int,
                 .model_copy(update={'style': 'primary' if not silent else None}),
             button(user_id, tr(locale, 'ui.disable_sound'), 'announcement_silent', 'true')
                 .model_copy(update={'style': 'primary' if silent else None}),),))]
-    sections.append(Section(tr(locale, 'ui.traffic'),
-        (tr(locale, 'traffic.member.enabled' if current.get('traffic_available') else 'traffic.member.disabled'),)))
     await render(bot, chat_id, Screen(tr(locale, 'settings.title'),
         sections=tuple(sections), embedded_buttons=True, navigation=True),
         [[button(user_id, tr(locale, 'back'), 'home')]], state, message_id)

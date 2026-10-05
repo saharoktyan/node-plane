@@ -5,29 +5,9 @@ package nodeplane.driver.v1;
 import "driver/v1/types.proto";
 
 service NodeService {
-  rpc GetNode(GetNodeRequest) returns (Node);
-  rpc ListNodes(ListNodesRequest) returns (ListNodesResponse);
   rpc GetNodeDiagnostics(GetNodeDiagnosticsRequest) returns (GetNodeDiagnosticsResponse);
   // Backend-owned read path: only the configured agent target is consulted.
   rpc InspectBackendNode(InspectBackendNodeRequest) returns (BackendNodeObservation);
-  rpc WatchNodeHealth(WatchNodeHealthRequest) returns (stream NodeHealthEvent);
-  rpc SyncNodeEnv(SyncNodeEnvRequest) returns (StartOperationResponse);
-  rpc ProbeNode(ProbeNodeRequest) returns (StartOperationResponse);
-  rpc CheckPorts(CheckPortsRequest) returns (StartOperationResponse);
-  rpc OpenPorts(OpenPortsRequest) returns (StartOperationResponse);
-  rpc InstallDocker(InstallDockerRequest) returns (StartOperationResponse);
-}
-
-message GetNodeRequest {
-  string node_key = 1;
-}
-
-message ListNodesRequest {
-  bool include_disabled = 1;
-}
-
-message ListNodesResponse {
-  repeated Node items = 1;
 }
 
 message GetNodeDiagnosticsRequest {
@@ -53,33 +33,4 @@ message BackendNodeObservation {
   bool awg_config_present = 6;
   string agent_version = 7;
   string agent_commit = 8;
-}
-
-message WatchNodeHealthRequest {
-  repeated string node_keys = 1;
-}
-
-message NodeHealthEvent {
-  string node_key = 1;
-  NodeHealth health = 2;
-}
-
-message SyncNodeEnvRequest {
-  string node_key = 1;
-}
-
-message ProbeNodeRequest {
-  string node_key = 1;
-}
-
-message CheckPortsRequest {
-  string node_key = 1;
-}
-
-message OpenPortsRequest {
-  string node_key = 1;
-}
-
-message InstallDockerRequest {
-  string node_key = 1;
 }

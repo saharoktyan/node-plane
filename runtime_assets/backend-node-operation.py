@@ -108,21 +108,23 @@ def ports(intent):
 
 def remove_protocol_runtime(lock_fd):
     xray, awg, xc, ac = environment()
+    if any(path.is_symlink() for path in (ROOT, *ROOT.parents)):
+        raise ValueError('runtime cleanup root must not contain symlinks')
+    directories = (Path(xray).parent, Path(awg).parent.parent, ROOT / 'awg-clients')
+    # Validate the whole deletion plan before stopping containers or removing
+    # the first directory. A later invalid path must not leave partial cleanup.
+    expected = (ROOT.resolve() / 'xray', ROOT.resolve() / 'amnezia-awg',
+                ROOT.resolve() / 'awg-clients')
+    for directory, owned in zip(directories, expected):
+        if directory.is_symlink() or directory.resolve() != owned:
+            raise ValueError('runtime cleanup path is outside managed directories')
     for name in (xc, ac):
         if subprocess.run(['docker', 'container', 'inspect', name], capture_output=True).returncode == 0:
             command(['docker', 'rm', '-f', name], lock_fd)
     # Only protocol-owned directories; never agent identity, journal or scripts.
-    for directory in (Path(xray).parent, Path(awg).parent.parent):
-        resolved = directory.resolve()
-        if resolved not in {ROOT.resolve() / 'xray', ROOT.resolve() / 'amnezia-awg'}:
-            raise ValueError('runtime cleanup path is outside managed directories')
+    for directory in directories:
         if directory.exists():
             shutil.rmtree(directory)
-    clients = ROOT / 'awg-clients'
-    if clients.exists():
-        if clients.is_symlink():
-            raise ValueError('client directory must not be a symlink')
-        shutil.rmtree(clients)
 
 
 def run(action, intent, lock_fd):

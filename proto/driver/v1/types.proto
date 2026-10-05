@@ -13,65 +13,10 @@ message StartOperationResponse {
   string operation_id = 1;
 }
 
-message NodeCapabilities {
-  bool supports_awg = 1;
-  bool supports_xray = 2;
-  bool supports_telemetry = 3;
-  bool supports_bootstrap = 4;
-}
-
-message NodeHealth {
-  string connectivity = 1;
-  string last_seen_at = 2;
-  string summary = 3;
-}
-
-message Node {
-  string node_key = 1;
-  string transport = 2;
-  string version = 3;
-  string state = 4;
-  string title = 5;
-  string flag = 6;
-  string region = 7;
-  string public_host = 8;
-  NodeCapabilities capabilities = 9;
-  NodeHealth health = 10;
-}
-
-message ProfileSpec {
-  string profile_name = 1;
-  repeated string protocol_kinds = 2;
-  AwgSpec awg = 3;
-  XraySpec xray = 4;
-}
-
-message AwgSpec {
-  string profile_name = 1;
-  string peer_name = 2;
-}
-
 message XraySpec {
   string profile_name = 1;
   string uuid = 2;
   string short_id = 3;
-}
-
-message RemoteProfileRecord {
-  string profile_name = 1;
-  string protocol_kind = 2;
-  string remote_id = 3;
-  string status = 4;
-}
-
-message ProfileUsage {
-  string profile_name = 1;
-  string protocol_kind = 2;
-  uint64 rx_bytes = 3;
-  uint64 tx_bytes = 4;
-  uint64 total_bytes = 5;
-  uint32 samples = 6;
-  uint32 peers = 7;
 }
 
 message DiagnosticItem {
@@ -79,22 +24,6 @@ message DiagnosticItem {
   string status = 2;
   string summary = 3;
   string detail = 4;
-}
-
-message RuntimeStatus {
-  string node_key = 1;
-  string state = 2;
-  string version = 3;
-  string commit = 4;
-  string expected_version = 5;
-  string expected_commit = 6;
-  string message = 7;
-}
-
-message ServiceStatus {
-  string service_name = 1;
-  string state = 2;
-  string summary = 3;
 }
 
 message Operation {

@@ -6,17 +6,8 @@ import "driver/v1/types.proto";
 
 service RuntimeService {
   rpc BackendNodeAction(BackendNodeActionRequest) returns (BackendNodeSettingsResult);
-  rpc BootstrapNode(BootstrapNodeRequest) returns (StartOperationResponse);
-  rpc ReinstallNode(ReinstallNodeRequest) returns (StartOperationResponse);
-  rpc DeleteRuntime(DeleteRuntimeRequest) returns (StartOperationResponse);
-  rpc FullCleanupNode(FullCleanupNodeRequest) returns (StartOperationResponse);
   // Explicit backend-owned path; does not access legacy server/profile tables.
   rpc DecommissionNode(DecommissionNodeRequest) returns (DecommissionNodeResponse);
-  rpc GetAwgEntropy(GetAwgEntropyRequest) returns (GetAwgEntropyResponse);
-  rpc RegenerateAwgEntropy(RegenerateAwgEntropyRequest) returns (StartOperationResponse);
-  rpc SyncRuntime(SyncRuntimeRequest) returns (StartOperationResponse);
-  rpc SyncXray(SyncXrayRequest) returns (StartOperationResponse);
-  rpc ApplyNodeSettings(ApplyNodeSettingsRequest) returns (StartOperationResponse);
   rpc ApplyBackendNodeSettings(ApplyBackendNodeSettingsRequest) returns (StartOperationResponse);
   // Idempotent preparation of an already installed agent; no legacy registry read.
   rpc PrepareBackendNode(PrepareBackendNodeRequest) returns (BackendNodeSettingsResult);
@@ -24,8 +15,6 @@ service RuntimeService {
   rpc ResolveBackendNodeSettings(ApplyBackendNodeSettingsRequest) returns (BackendNodeSettingsResult);
   rpc GetBackendXrayPublic(GetBackendXrayPublicRequest) returns (BackendXrayPublicResult);
   rpc RefreshAwgConfig(RefreshAwgConfigRequest) returns (RefreshAwgConfigResponse);
-  rpc GetRuntimeStatus(GetRuntimeStatusRequest) returns (GetRuntimeStatusResponse);
-  rpc ListNodesNeedingRuntimeSync(ListNodesNeedingRuntimeSyncRequest) returns (ListNodesNeedingRuntimeSyncResponse);
 }
 
 message BackendNodeActionRequest {
@@ -34,26 +23,6 @@ message BackendNodeActionRequest {
   string action = 3;
   string intent_json = 4;
   bool recover = 5;
-}
-
-message BootstrapNodeRequest {
-  string node_key = 1;
-  bool preserve_config = 2;
-}
-
-message ReinstallNodeRequest {
-  string node_key = 1;
-  bool preserve_config = 2;
-}
-
-message DeleteRuntimeRequest {
-  string node_key = 1;
-  bool preserve_config = 2;
-}
-
-message FullCleanupNodeRequest {
-  string node_key = 1;
-  bool remove_ssh_key = 2;
 }
 
 message DecommissionNodeRequest {
@@ -65,31 +34,6 @@ message DecommissionNodeRequest {
 message DecommissionNodeResponse {
   string phase = 1;
   string summary = 2;
-}
-
-message GetAwgEntropyRequest {
-  string node_key = 1;
-}
-
-message GetAwgEntropyResponse {
-  string node_key = 1;
-  string summary = 2;
-}
-
-message RegenerateAwgEntropyRequest {
-  string node_key = 1;
-}
-
-message SyncRuntimeRequest {
-  string node_key = 1;
-}
-
-message SyncXrayRequest {
-  string node_key = 1;
-}
-
-message ApplyNodeSettingsRequest {
-  string node_key = 1;
 }
 
 message ApplyBackendNodeSettingsRequest {
@@ -125,19 +69,4 @@ message RefreshAwgConfigRequest {
 message RefreshAwgConfigResponse {
   string wg_conf = 1;
   string vpn_key = 2;
-}
-
-message GetRuntimeStatusRequest {
-  string node_key = 1;
-}
-
-message GetRuntimeStatusResponse {
-  RuntimeStatus runtime = 1;
-  repeated ServiceStatus services = 2;
-}
-
-message ListNodesNeedingRuntimeSyncRequest {}
-
-message ListNodesNeedingRuntimeSyncResponse {
-  repeated Node items = 1;
 }
