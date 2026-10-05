@@ -119,7 +119,7 @@ async def start_cmd(message: Message, bot: Bot, backend: BackendClient,
     except BackendError:
         await render(bot, message.chat.id,
             Screen(tr(message.from_user.language_code, 'home.title'),
-                   (tr(message.from_user.language_code, 'home.service_unavailable'),)),
+                   (tr(message.from_user.language_code, 'home.service_unavailable'),), embedded_buttons=True, navigation=True),
             [], state)
 
 
@@ -130,9 +130,12 @@ async def id_cmd(message: Message, bot: Bot, backend: BackendClient,
         return
     locale = await prepare_command(message, bot, state)
     username = '@' + message.from_user.username if message.from_user.username else ''
-    lines = (tr(locale, 'command.whoami.id', value=message.from_user.id),
-             tr(locale, 'command.whoami.username', value=username))
-    await render(bot, message.chat.id, Screen(tr(locale, 'command.whoami.title'), lines),
+    await render(bot, message.chat.id, Screen(tr(locale, 'command.whoami.title'),
+        sections=(Section('', tables=(Table(
+            (tr(locale, 'maintenance.rich.field'), tr(locale, 'maintenance.rich.value')),
+            ((tr(locale, 'command.rich.telegram_id'), str(message.from_user.id)),
+             (tr(locale, 'command.rich.username'), username or '—'))),)),),
+        embedded_buttons=True, navigation=True),
         [[button(message.from_user.id, tr(locale, 'back'), 'home')]], state)
 
 
@@ -148,10 +151,10 @@ async def version_cmd(message: Message, bot: Bot, backend: BackendClient,
             language_code=message.from_user.language_code)
         version = (await backend.system_version(message.from_user.id))['version']
         screen = Screen(tr(locale, 'command.version.title'),
-                        (tr(locale, 'command.version.value', value=version),))
+                        (tr(locale, 'command.version.value', value=version),), embedded_buttons=True, navigation=True)
     except BackendError:
         screen = Screen(tr(locale, 'command.error_title'),
-                        (tr(locale, 'home.service_unavailable'),))
+                        (tr(locale, 'home.service_unavailable'),), embedded_buttons=True, navigation=True)
     await render(bot, message.chat.id, screen,
         [[button(message.from_user.id, tr(locale, 'back'), 'home')]], state)
 
@@ -173,8 +176,12 @@ async def help_cmd(message: Message, bot: Bot, backend: BackendClient,
     if message.from_user is None or message.chat.type != 'private':
         return
     locale = await prepare_command(message, bot, state)
+    from ..commands import COMMANDS
     await render(bot, message.chat.id, Screen(tr(locale, 'command.help.title'),
-        (tr(locale, 'command.help.body'),)),
+        sections=(Section('', tables=(Table(
+            (tr(locale, 'command.rich.command'), tr(locale, 'command.rich.description')),
+            tuple(('/' + command, tr(locale, 'command.menu.' + command)) for command in COMMANDS)),)),),
+        embedded_buttons=True, navigation=True),
         [[button(message.from_user.id, tr(locale, 'back'), 'home')]], state)
 
 
@@ -191,7 +198,7 @@ async def status_cmd(message: Message, bot: Bot, backend: BackendClient,
     except BackendError as exc:
         key = 'command.status.denied' if exc.status in {401,403} else 'home.service_unavailable'
         await render(bot, message.chat.id, Screen(tr(locale, 'command.error_title'),
-            (tr(locale, key),)),
+            (tr(locale, key),), embedded_buttons=True, navigation=True),
             [[button(message.from_user.id, tr(locale, 'back'), 'home')]], state)
 
 
@@ -653,7 +660,7 @@ async def show_qr(chat_id: int, user_id: int, message_id: int, issuance_id: str,
     rows = [[button(user_id, tr(locale, 'back'), 'qr_back', issuance_id)]]
     if len(content.encode()) > 2500:
         await render(bot, chat_id, Screen(tr(locale, 'qr.unavailable'),
-            (tr(locale, 'qr.too_long'),)), rows, state, message_id)
+            (tr(locale, 'qr.too_long'),), embedded_buttons=True, navigation=True), rows, state, message_id)
         return
     code = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_L,
                          box_size=6, border=4)
@@ -662,7 +669,7 @@ async def show_qr(chat_id: int, user_id: int, message_id: int, issuance_id: str,
         code.make(fit=True)
     except DataOverflowError:
         await render(bot, chat_id, Screen(tr(locale, 'qr.unavailable'),
-            (tr(locale, 'qr.too_long'),)), rows, state, message_id)
+            (tr(locale, 'qr.too_long'),), embedded_buttons=True, navigation=True), rows, state, message_id)
         return
     image = BytesIO()
     code.make_image(fill_color='black', back_color='white').save(image, format='PNG')
@@ -674,7 +681,7 @@ async def show_qr(chat_id: int, user_id: int, message_id: int, issuance_id: str,
             pass
         return
     await track_artifact(state, sent.message_id)
-    await render(bot, chat_id, Screen(tr(locale, 'qr.ready'), (tr(locale, 'qr.scan'),)),
+    await render(bot, chat_id, Screen(tr(locale, 'qr.ready'), (tr(locale, 'qr.scan'),), embedded_buttons=True, navigation=True),
                  rows, state, message_id)
 
 
@@ -818,7 +825,7 @@ async def user_action_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
         else:
             cause = 'retry'
         await render(bot, chat_id, Screen(tr(locale, 'action.unavailable'),
-            (tr(locale, 'action.error.' + cause),)),
+            (tr(locale, 'action.error.' + cause),), embedded_buttons=True, navigation=True),
             [[button(user_id, tr(locale, 'home.title'), 'home')]],
             state, message_id)
 

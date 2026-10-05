@@ -10,7 +10,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardButton, Message
 
 from ..backend import BackendClient, BackendError
-from ..screens import Screen, Section
+from ..screens import Screen, Section, Table
 from ..i18n import normalize_locale, tr
 from .callbacks import AdminSettingsCallback, RequestPolicyCallback, UpdatesCallback
 from .common import render
@@ -341,10 +341,13 @@ async def show_update_branches(query: CallbackQuery, bot: Bot,
             style='primary' if overview.get('dev_track') == track else None) for track in ('tag', 'head')])
     rows.append([InlineKeyboardButton(text=tr(locale, 'back'),
         callback_data=UpdatesCallback().pack())])
+    sections = [Section(tr(locale, 'updates.branch_title'), rows=(tuple(rows[0] + rows[1]),))]
+    if selected == 'dev':
+        sections.append(Section(tr(locale, 'updates.rich.dev_track'), rows=(tuple(rows[2]),)))
     await render(bot, query.message.chat.id,
         Screen(tr(locale, 'updates.branch_title'),
-            (tr(locale, 'updates.branch_hint'),)),
-        rows, state, query.message.message_id)
+            (tr(locale, 'updates.branch_hint'),), sections=tuple(sections), embedded_buttons=True, navigation=True),
+        [rows[-1]], state, query.message.message_id)
 
 
 @router.callback_query(UpdatesCallback.filter())
@@ -356,7 +359,7 @@ async def updates_menu_cb(query: CallbackQuery, bot: Bot,
         await show_updates(query, bot, backend, state)
     except BackendError as exc:
         await render(bot, query.message.chat.id,
-            Screen(tr(locale, 'updates.unavailable'), (_friendly_error(locale, exc),)),
+            Screen(tr(locale, 'updates.unavailable'), (_friendly_error(locale, exc),), embedded_buttons=True, navigation=True),
             [[InlineKeyboardButton(text=tr(locale, 'back'),
                 callback_data=AdminSettingsCallback().pack())]], state,
             query.message.message_id)
@@ -391,7 +394,20 @@ async def show_release_cleanup(query: CallbackQuery, bot: Bot,
         [InlineKeyboardButton(text=tr(locale, 'back'),
         callback_data=UpdatesCallback().pack())]])
     await render(bot, query.message.chat.id,
-        Screen(tr(locale, 'cleanup.title'), tuple(lines)),
+        Screen(tr(locale, 'cleanup.title'), tuple(([tr(locale, 'cleanup.result',
+            status=_update_status(locale, result_status))] if result_status else []) +
+            ([tr(locale, 'cleanup.unsupported')] if not overview.get('supported') else
+             [tr(locale, 'cleanup.nothing')] if not overview.get('removable_releases') else [])), sections=(
+            Section(tr(locale, 'maintenance.rich.inventory'), tables=(Table(
+                (tr(locale, 'maintenance.rich.field'), tr(locale, 'maintenance.rich.value')),
+                ((tr(locale, 'cleanup.rich.total'), str(overview.get('total_releases', 0))),
+                 (tr(locale, 'cleanup.rich.kept'), str(overview.get('kept_releases', 0))),
+                 (tr(locale, 'cleanup.rich.removable'), str(overview.get('removable_releases', 0))),
+                 (tr(locale, 'backups.rich.size'), f"{overview.get('removable_size_bytes', 0) / 1048576:.1f} MiB"))),)),
+            Section(tr(locale, 'nodes.rich.technical'),
+                (tr(locale, 'cleanup.mode', value=overview.get('install_mode') or '—'),
+                 tr(locale, 'cleanup.current', value=overview.get('current_target') or '—')), collapsed=True)),
+            embedded_buttons=True, navigation=True),
         rows, state, query.message.message_id)
 
 
@@ -435,7 +451,7 @@ async def update_action_cb(query: CallbackQuery, callback_data: UpdateActionCall
                 result_status=result.get('status'))
     except BackendError as exc:
         await render(bot, query.message.chat.id,
-            Screen(tr(locale, 'updates.unavailable'), (_friendly_error(locale, exc),)),
+            Screen(tr(locale, 'updates.unavailable'), (_friendly_error(locale, exc),), embedded_buttons=True, navigation=True),
             [[InlineKeyboardButton(text=tr(locale, 'back'),
                 callback_data=UpdatesCallback().pack())]],
             state, query.message.message_id)
