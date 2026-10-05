@@ -1228,11 +1228,11 @@ async def show_node_maintenance(chat_id, user_id, message_id, node_key, bot, bac
                 'nodes.maintenance.phase.' + (st['cleanup_phase'] or 'not_started')))))
     
     if st['status'] == 'active':
-        rows = [[InlineKeyboardButton(text=tr(locale, 'nodes.maintenance.start'), callback_data=ConfirmNodeDrainCallback(node_key=node_key).pack())]]
+        rows = [[InlineKeyboardButton(text=tr(locale, 'nodes.maintenance.start'), callback_data=ConfirmNodeDrainCallback(node_key=node_key).pack(), style="danger")]]
     else:
         rows = [[InlineKeyboardButton(text=tr(locale, 'nodes.maintenance.refresh'), callback_data=f'remove_progress:{node_key}')]]
     if (await state.get_data()).get('unreachable_removal_node') == node_key:
-        rows.append([InlineKeyboardButton(text=tr(locale, 'nodes.maintenance.registry_only'), callback_data=ConfirmRegistryRemovalCallback(node_key=node_key).pack())])
+        rows.append([InlineKeyboardButton(text=tr(locale, 'nodes.maintenance.registry_only'), callback_data=ConfirmRegistryRemovalCallback(node_key=node_key).pack(), style="danger")])
     rows.append([InlineKeyboardButton(text=tr(locale, 'back'), callback_data=f'node_manage:{node_key}')])
     await render(bot, chat_id, Screen(tr(locale, 'nodes.maintenance.title'), tuple(lines),
         sections=(Section(tr(locale, 'nodes.maintenance.details_title'), collapsed=True,

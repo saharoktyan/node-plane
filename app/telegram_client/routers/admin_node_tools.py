@@ -58,7 +58,8 @@ async def show_install(chat_id, user_id, message_id, node_key, bot, backend, sta
             if reusable:
                 rows.append([button(locale, 'node_tools.reinstall_keep', f'node_action:reinstall_keep:{node_key}')])
             rows.append([button(locale, 'node_tools.reinstall_clean' if present else 'node_tools.bootstrap',
-                                f'node_action:{"reinstall_clean" if present else "bootstrap"}:{node_key}')])
+                                f'node_action:{"reinstall_clean" if present else "bootstrap"}:{node_key}')
+                         .model_copy(update={'style': 'danger' if present else 'primary'})])
     except BackendError as exc:
         lines.append(error(locale, exc))
         if exc.code == 'node_agent_unconfigured':
@@ -140,7 +141,7 @@ async def tools_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state
     locale = normalize_locale((await state.get_data()).get('locale'))
     rows = [[button(locale, 'node_tools.' + name, f'node_view:{name}:{node_key}') for name in names]
             for names in (('diagnostics', 'ports'), ('runtime', 'repair'))]
-    rows += [[button(locale, 'node_tools.cleanup_runtime', f'node_action:cleanup_runtime:{node_key}')],
+    rows += [[button(locale, 'node_tools.cleanup_runtime', f'node_action:cleanup_runtime:{node_key}').model_copy(update={'style': 'danger'})],
              [button(locale, 'back', f'node_technical:{node_key}')]]
     await render(bot, query.message.chat.id, Screen(tr(locale, 'nodes.rich.technical'), (), embedded_buttons=True, navigation=True), rows, state, query.message.message_id)
 
