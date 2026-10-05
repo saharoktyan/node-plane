@@ -66,35 +66,16 @@ APP_DIR = f"{APP_ROOT}/app"
 DATA_DIR = f"{SHARED_ROOT}/data"
 SSH_DIR = f"{SHARED_ROOT}/ssh"
 
-PROFILE_STATE_JSON_PATH = _env_str("PROFILE_STATE_JSON_PATH", _env_str("SUBS_DB_PATH", f"{DATA_DIR}/profile_state.json"))
-TELEGRAM_USERS_JSON_PATH = _env_str("TELEGRAM_USERS_JSON_PATH", _env_str("USERS_DB_PATH", f"{DATA_DIR}/telegram_users.json"))
-AWG_JSON_PATH = _env_str("AWG_JSON_PATH", _env_str("WG_DB_PATH", f"{DATA_DIR}/awg.json"))
 DB_BACKEND = _env_str("DB_BACKEND", "postgres").lower()
 POSTGRES_DSN = _env_str("POSTGRES_DSN")
 
 if DB_BACKEND != "postgres":
     raise ValueError(f"Unsupported DB_BACKEND: {DB_BACKEND}")
 
-# Legacy aliases kept only so the one-time JSON migration script can still consume
-# older env files and paths without changes.
-SUBS_DB_PATH = PROFILE_STATE_JSON_PATH
-USERS_DB_PATH = TELEGRAM_USERS_JSON_PATH
-WG_DB_PATH = AWG_JSON_PATH
-
 SSH_KEY = _env_str("SSH_KEY")
 SSH_STRICT_HOST_KEY_CHECKING = _env_str("SSH_STRICT_HOST_KEY_CHECKING", "yes")
 SSH_KNOWN_HOSTS_PATH = _env_str("SSH_KNOWN_HOSTS_PATH", f"{SSH_DIR}/known_hosts")
 
-PARSE_MODE = _env_str("PARSE_MODE", "Markdown")
-MENU_TITLE = _env_str("MENU_TITLE", "Node Plane")
-CB_MENU = "menu:"
-CB_GETKEY = "getkey:"
-CB_CFG = "cfg:"
-CB_SRV = "srv:"
-LIST_PAGE_SIZE = _env_int("LIST_PAGE_SIZE", 12)
-BOT_WORKERS = max(1, _env_int("BOT_WORKERS", 4))
-UPDATE_CHECK_INTERVAL_SECONDS = max(300, _env_int("UPDATE_CHECK_INTERVAL_SECONDS", 10800))
-UPDATE_CHECK_FIRST_DELAY_SECONDS = max(30, _env_int("UPDATE_CHECK_FIRST_DELAY_SECONDS", 300))
 NODE_DRIVER_GRPC_TARGET = _env_str("NODE_DRIVER_GRPC_TARGET", "127.0.0.1:50051")
 NODE_DRIVER_GRPC_TIMEOUT_SECONDS = max(1, _env_int("NODE_DRIVER_GRPC_TIMEOUT_SECONDS", 30))
 

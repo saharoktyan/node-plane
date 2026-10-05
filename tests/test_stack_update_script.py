@@ -61,6 +61,6 @@ rollback_simple {shlex.quote(str(previous))} {shlex.quote(str(link))} {shlex.quo
         source = (ROOT / 'scripts/update.sh').read_text()
         self.assertIn('setup_driver_agents.sh" --skip-agents --strict --bin-source release', source)
         self.assertIn('import backend.executor; import telegram_client.main', source)
-        self.assertIn("get_node_driver().binary_info()", source)
+        self.assertIn("GrpcIntentDriver(channel).binary_info()", source)
         self.assertIn('/health/ready', source)
         self.assertIn('node-plane-backend-worker.timer', source)

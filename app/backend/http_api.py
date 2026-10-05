@@ -59,7 +59,6 @@ class AccountOutput(BaseModel):
 
 class MeOutput(AccountOutput):
     announcement_silent: bool = False
-    traffic_consent: bool = False
     traffic_available: bool = False
     permissions: list[str]
     language_code: str | None = None
@@ -93,7 +92,6 @@ class AccountPreferencesInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
     locale: Literal['ru', 'en'] | None = None
     announcement_silent: StrictBool | None = None
-    traffic_consent: StrictBool | None = None
 
 
 class TrafficPolicyInput(BaseModel):
@@ -170,7 +168,7 @@ class ProfileNodeTrafficItem(BaseModel):
 
 
 class ProfileTrafficSummary(BaseModel):
-    status: Literal['consent_required', 'waiting', 'current', 'unknown']
+    status: Literal['waiting', 'current', 'unknown']
     items: list[ProfileTrafficItem]
     month: str | None = None
     nodes: list[ProfileNodeTrafficItem] = []
@@ -810,8 +808,6 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
             raise AccessDenied('invalid_input', 422)
         if body.locale is not None:
             identities.set_telegram_locale_for_account(current.account.id, body.locale)
-        if body.traffic_consent is not None:
-            system_settings.update_traffic_consent(current, body.traffic_consent)
         if body.announcement_silent is not None:
             system_settings.update_member_preferences(current, body.announcement_silent)
         permissions = []
@@ -961,6 +957,10 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     def own_profiles(current=Depends(actor), limit: Annotated[int, Query(ge=1, le=100)] = 25,
                      cursor: Annotated[str | None, Query(max_length=512)] = None):
         return profiles.list_owned(current, limit=limit, cursor=cursor)
+
+    @app.get('/api/v1/profiles/{profile_id}/summary', response_model=MemberProfileSummary)
+    def admin_profile_summary(profile_id: UUID, current=Depends(actor)):
+        return profiles.admin_summary(current, str(profile_id))
 
     @app.get('/api/v1/me/profiles/{profile_id}/summary', response_model=MemberProfileSummary)
     def own_profile_summary(profile_id: UUID, current=Depends(actor)):

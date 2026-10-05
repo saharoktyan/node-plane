@@ -1,13 +1,13 @@
 # Install
 
-This guide covers installation and operational basics for both supported Node Plane deployment modes.
+This guide covers the supported systemd stack: backend, worker, aiogram client,
+Rust driver and managed node agents. The old PTB bot is removed.
 
 ## Before You Start
 
-- decide whether this host will run the bot directly (`Simple Mode`) or only act as the bot control plane for remote nodes (`Portable Mode`)
+- use `Simple Mode` on the controller host for both local and remote nodes
 - make sure you have a valid Telegram bot token and know the numeric Telegram user id that should become the first admin
 - if you plan to manage remote nodes, verify SSH access before touching Node Plane
-- if you use `Portable Mode`, decide which published GHCR tag you want to run
 - keep the source checkout separate from the runtime install root in `Simple Mode`
 
 ## Requirements
@@ -31,17 +31,8 @@ Use this when you want the shortest path to a working deployment.
 - can also manage additional remote nodes over `ssh`
 - best fit for a single VPS
 
-### Portable Mode
-
-Use this when the bot should run separately and manage nodes remotely.
-
-- bot runs in Docker via `docker compose`
-- all managed nodes are connected over `ssh`
-- runtime images are pulled from `ghcr.io/saharoktyan/node-plane`
-- best fit for multi-node setups
-
-Important constraint:
-`local` node deployment is supported only in `Simple Mode`. If the bot runs in Docker, managed nodes must be added via `ssh`.
+Controller Docker/Compose installation is unsupported. Docker is still used
+for managed VPN protocols and optional local PostgreSQL provisioning.
 
 ## Simple Mode
 
@@ -115,16 +106,15 @@ Then in Telegram:
 1. Open the bot from the account listed in `ADMIN_IDS`
 2. Send `/start`
 3. Add a local or SSH node, then install its agent
-4. Apply node settings to deploy the selected VPN protocols
+4. Open Bootstrap, install Docker if needed, and deploy the selected VPN protocols
 5. Create a profile, grant access, and issue a config
 
 You can later add more remote nodes over `ssh` from the same bot.
 
 ### Testing from the development branch
 
-The stable `v0.4.2` release predates the full aiogram installation flow. To test
-the current stack before the next release, select the development branch and
-its head explicitly:
+Use a current aiogram/backend release. PTB-only releases are unsupported by
+the current installer and rollback workflow. To test development releases:
 
 ```bash
 ./scripts/install.sh --mode simple --branch dev
@@ -144,15 +134,11 @@ Key variables:
 - `NODE_PLANE_APP_DIR`: active app path, usually `/opt/node-plane/current`
 - `NODE_PLANE_SHARED_DIR`: shared state path, usually `/opt/node-plane/shared`
 - `NODE_PLANE_SOURCE_DIR`: source checkout path
-- `NODE_PLANE_INSTALL_MODE`: `simple` or `portable`
+- `NODE_PLANE_INSTALL_MODE`: `simple`
 - `NODE_PLANE_INSTALL_REF`: records the tag/ref selected at the last installation; the next run fetches tags and defaults to the latest release tag for `NODE_PLANE_UPDATE_BRANCH`. Use `--ref <tag>` (or an exported `NODE_PLANE_INSTALL_REF`) to pin a specific version.
 - `DB_BACKEND`: should be `postgres` for `0.4`
 - `POSTGRES_DSN`: PostgreSQL DSN used for runtime storage; optional if you let the installer/update path auto-provision PostgreSQL
 - `SSH_KEY`: SSH private key used for remote node management
-- `NODE_PLANE_IMAGE_REPO`: GHCR image repo for `Portable Mode`
-- `NODE_PLANE_IMAGE_TAG`: image tag for `Portable Mode`
-- `UPDATE_CHECK_INTERVAL_SECONDS`: periodic update check interval
-- `UPDATE_CHECK_FIRST_DELAY_SECONDS`: initial delay before the first update check
 
 See [.env.example](.env.example) for the full template.
 
@@ -163,7 +149,6 @@ Inspect the current setup:
 ```bash
 ./scripts/healthcheck.sh
 ./scripts/healthcheck.sh --mode simple
-./scripts/healthcheck.sh --mode portable
 ```
 
 Update an existing deployment:
@@ -171,7 +156,6 @@ Update an existing deployment:
 ```bash
 ./scripts/update.sh
 ./scripts/update.sh --mode simple
-./scripts/update.sh --mode portable
 ```
 
 Driver/agent rollout (the only driver mode is gRPC):
@@ -181,7 +165,7 @@ Driver/agent rollout (the only driver mode is gRPC):
 ./scripts/setup_driver_agents.sh --dry-run
 ```
 
-- `update.sh --mode simple` now runs `setup_driver_agents.sh` automatically by default (`NODE_PLANE_AUTO_SETUP_DRIVER_AGENTS=1`).
+- The backend coordinates driver and agent rollout during stack updates. The standalone controller updater does not independently schedule a second agent rollout.
 - A node registered with `transport=local` gets a node-agent systemd service on
   the controller itself. It listens only on `127.0.0.1` with mutual TLS; the
   driver target is recorded as `<node-key>=127.0.0.1:50061`. Use **Set up agent**
@@ -235,11 +219,9 @@ Maintenance:
 ## Common Pitfalls
 
 - do not place the git checkout inside `NODE_PLANE_BASE_DIR` in `Simple Mode`; the installer expects a separate source checkout and release root
-- do not try to register the current Docker host as a `local` node in `Portable Mode`; use `ssh`
 - do not leave `BOT_TOKEN=replace_me` or `ADMIN_IDS=123456789` in `.env`
 - if `POSTGRES_DSN` is empty, make sure the host allows `install.sh` or `update.sh` to install Docker and start the runtime PostgreSQL container
 - make sure the SSH key in `SSH_KEY` is readable by the process that runs the bot
-- if `Portable Mode` uses GHCR images, confirm that `NODE_PLANE_IMAGE_TAG` actually exists before running updates
 - if first bootstrap fails, rerun `Probe` and fix the reported host issues before retrying `Bootstrap`
 
 ## Development

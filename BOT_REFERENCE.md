@@ -230,44 +230,13 @@ The `Details` screen is mainly useful when you need to:
 - understand where it should be installed
 - avoid opening a shell just to inspect the key
 
-## Useful Slash Commands
+## Supported Slash Commands
 
-Only a few slash commands are worth keeping in regular operational use.
+- `/start`: open or refresh the current control message.
+- `/help`: show localized usage help.
+- `/id`: show the current Telegram identity.
+- `/version`: show the installed stack version.
+- `/status`: open administrator status, subject to backend authorization.
 
-### `/version`
-
-Shows the current bot version.
-
-Useful when:
-- checking what build is currently running
-- verifying that a deploy actually reached production
-
-### `/diag`
-
-Supported forms:
-
-```text
-/diag
-/diag awg <server_key>
-/diag xray <server_key>
-/diag traffic <profile_name> <awg|xray>
-```
-
-Practical use:
-- `/diag`
-  Quick general diagnostics.
-- `/diag awg spb1`
-  Inspect the AWG side of a node.
-- `/diag xray spb1`
-  Inspect Xray status, telemetry, and stats.
-- `/diag traffic alice xray`
-  Check how a specific profile is matched by the traffic collector.
-
-### `/collecttraffic`
-
-Run the traffic collector manually.
-
-Useful when:
-- testing a collector fix
-- checking whether traffic samples are being written
-- getting an immediate AWG/Xray summary without waiting for the scheduled job
+Legacy operational commands are removed. Provisioning, diagnostics, access,
+updates and maintenance use the same backend-backed Telegram screens.

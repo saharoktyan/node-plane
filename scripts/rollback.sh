@@ -54,6 +54,10 @@ if [[ -z "$TARGET_RELEASE" ]]; then
   echo "--to <release-id> is required." >&2
   exit 1
 fi
+if [[ ! "$TARGET_RELEASE" =~ ^[A-Za-z0-9._-]+$ || "$TARGET_RELEASE" == . || "$TARGET_RELEASE" == .. ]]; then
+  echo "Invalid release ID." >&2
+  exit 1
+fi
 
 BASE_DIR="$(read_env_value NODE_PLANE_BASE_DIR)"
 APP_DIR="$(read_env_value NODE_PLANE_APP_DIR)"
@@ -69,11 +73,17 @@ if [[ ! -d "$RELEASE_DIR" ]]; then
   echo "Release not found: ${RELEASE_DIR}" >&2
   exit 1
 fi
+if [[ ! -f "${RELEASE_DIR}/app/backend/http_api.py" || ! -f "${RELEASE_DIR}/app/telegram_client/main.py" ]]; then
+  echo "Rollback requires a standalone backend and aiogram release; PTB releases are unsupported." >&2
+  exit 1
+fi
 
 echo "Rolling back to release:"
 echo "  ${RELEASE_DIR}"
 
+sudo systemctl stop node-plane-backend-worker.timer node-plane-backend-worker.service
 ln -sfn "$RELEASE_DIR" "$APP_DIR"
 sudo systemctl daemon-reload
-sudo systemctl restart node-plane
-sudo systemctl status node-plane --no-pager || true
+sudo systemctl restart node-plane-backend.service node-plane-telegram.service
+sudo systemctl start node-plane-backend-worker.timer
+sudo systemctl status node-plane-backend.service node-plane-telegram.service --no-pager || true

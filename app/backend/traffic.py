@@ -1,4 +1,4 @@
-"""Consent-bound, cumulative traffic accounting from native agent counters.
+"""Administrator-enabled, cumulative traffic accounting from native agent counters.
 
 First observations are baselines, not usage. Resets/restarts add only the new
 epoch's counters; outages retain the last baseline and never become zeroes.
@@ -33,7 +33,7 @@ class TrafficService:
         with self.db.transaction() as conn:
             conn.execute("""CREATE TABLE IF NOT EXISTS backend_traffic_usage (
                 profile_id TEXT NOT NULL REFERENCES backend_profiles(id) ON DELETE CASCADE,
-                account_id TEXT NOT NULL REFERENCES backend_accounts(id) ON DELETE CASCADE,
+                account_id TEXT REFERENCES backend_accounts(id) ON DELETE CASCADE,
                 node_key TEXT NOT NULL REFERENCES backend_nodes(key) ON DELETE CASCADE,
                 protocol TEXT NOT NULL CHECK(protocol IN ('awg','xray')),
                 uplink_bytes BIGINT NOT NULL DEFAULT 0, downlink_bytes BIGINT NOT NULL DEFAULT 0,
@@ -43,25 +43,22 @@ class TrafficService:
                 PRIMARY KEY(profile_id,node_key,protocol))""")
             if getattr(self.db, 'backend_name', '') == 'postgres':
                 conn.execute('ALTER TABLE backend_traffic_usage ADD COLUMN IF NOT EXISTS period_month TEXT')
+                conn.execute('ALTER TABLE backend_traffic_usage ALTER COLUMN account_id DROP NOT NULL')
 
     @staticmethod
     def _enabled(conn):
         return setting(conn, "traffic_enabled", False) is True
 
     @staticmethod
-    def _token(conn, account_id):
-        return (
-            setting(conn, "traffic_generation"),
-            setting(conn, "traffic_consent_generation:" + account_id),
-        )
+    def _token(conn):
+        return setting(conn, "traffic_generation")
 
     @staticmethod
     def _targets(conn):
         rows = conn.execute("""SELECT p.id,p.owner_account_id,g.node_key,g.protocol
             FROM backend_profiles p JOIN backend_grants g ON g.profile_id=p.id
-            JOIN backend_accounts a ON a.id=p.owner_account_id
-            JOIN backend_system_settings s ON s.key=('traffic_consent:' || a.id)
-            WHERE a.status='approved' AND s.value='true'
+            LEFT JOIN backend_accounts a ON a.id=p.owner_account_id
+            WHERE (p.owner_account_id IS NULL OR a.status='approved')
             AND NOT EXISTS (SELECT 1 FROM backend_profile_deletions d WHERE d.profile_id=p.id)
             ORDER BY p.id,g.node_key,g.protocol""").fetchall()
         targets = []
@@ -120,7 +117,7 @@ class TrafficService:
                     "account_id": row["owner_account_id"],
                     "profile_revision": profile["desired_revision"],
                     "node_revision": node["desired_revision"],
-                    "token": TrafficService._token(conn, row["owner_account_id"]),
+                    "token": TrafficService._token(conn),
                     "intent": {
                         "node_key": row["node_key"],
                         "protocol": row["protocol"],
@@ -133,13 +130,13 @@ class TrafficService:
 
     @staticmethod
     def _prune(conn, targets):
-        # Ownership transfer, deletion, account suspension and consent withdrawal
+        # Ownership transfer, deletion, account suspension
         # must not expose history to a different owner or resurrect it later.
         conn.execute("""DELETE FROM backend_traffic_usage WHERE NOT EXISTS (
-            SELECT 1 FROM backend_profiles p JOIN backend_accounts a ON a.id=p.owner_account_id
-            JOIN backend_system_settings s ON s.key=('traffic_consent:' || a.id)
-            WHERE p.id=backend_traffic_usage.profile_id AND a.id=backend_traffic_usage.account_id
-            AND a.status='approved' AND s.value='true'
+            SELECT 1 FROM backend_profiles p LEFT JOIN backend_accounts a ON a.id=p.owner_account_id
+            WHERE p.id=backend_traffic_usage.profile_id
+            AND (a.id=backend_traffic_usage.account_id OR (p.owner_account_id IS NULL AND backend_traffic_usage.account_id IS NULL))
+            AND (p.owner_account_id IS NULL OR a.status='approved')
             AND NOT EXISTS (SELECT 1 FROM backend_profile_deletions d WHERE d.profile_id=p.id))""")
         active = {target["key"] for target in targets}
         for row in conn.execute(
@@ -337,13 +334,12 @@ class TrafficService:
         with self.db.connect() as conn:
             if not self._enabled(conn):
                 return None
-            if setting(conn, "traffic_consent:" + account_id, False) is not True:
-                return {"status": "consent_required", "items": []}
             rows = conn.execute(
                 """SELECT u.* FROM backend_traffic_usage u
-                JOIN backend_profiles p ON p.id=u.profile_id AND p.owner_account_id=u.account_id
-                WHERE u.profile_id=? AND u.account_id=? ORDER BY u.protocol,u.node_key""",
-                (profile_id, account_id),
+                JOIN backend_profiles p ON p.id=u.profile_id
+                    AND (p.owner_account_id=u.account_id OR (p.owner_account_id IS NULL AND u.account_id IS NULL))
+                WHERE u.profile_id=? AND (u.account_id=? OR (u.account_id IS NULL AND ? IS NULL)) ORDER BY u.protocol,u.node_key""",
+                (profile_id, account_id, account_id),
             ).fetchall()
             month = datetime.now(timezone.utc).strftime('%Y-%m')
             # Historical lifetime totals cannot be attributed to a month. Keep

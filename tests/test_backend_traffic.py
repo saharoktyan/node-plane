@@ -1,4 +1,4 @@
-"""Real backend admission/consent with native-counter transport test doubles."""
+"""Real backend global policy with native-counter transport test doubles."""
 
 import base64
 import json
@@ -57,7 +57,6 @@ class TrafficTests(unittest.TestCase):
         )
         self.settings = SystemSettingsService(self.db)
         self.settings.update_traffic_policy(self.actor, True)
-        self.settings.update_traffic_consent(self.actor, True)
         self.driver = Driver()
         self.service = TrafficService(self.db, self.driver)
 
@@ -72,6 +71,24 @@ class TrafficTests(unittest.TestCase):
         return self.db.connection.execute(
             "SELECT * FROM backend_traffic_usage"
         ).fetchone()
+
+    def test_admin_summary_authorizes_management_but_member_cannot_read_admin_route(self):
+        self.collect()
+        self.driver.up = 1100
+        self.collect()
+        member = fixture.BackendHTTPTests.register(self, 102).json()
+        self.db.connection.execute("UPDATE backend_accounts SET status='approved' WHERE id=?", (member['id'],))
+        self.db.connection.commit()
+        endpoint = f'/api/v1/profiles/{self.profile_id}/summary'
+        self.assertEqual(self.client.get(endpoint, headers={**self.headers,
+            'X-Node-Plane-Telegram-User-ID': '102'}).status_code, 403)
+        response = self.client.get(endpoint, headers={**self.headers,
+            'X-Node-Plane-Telegram-User-ID': '101'})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()['traffic']['items'][0]['uplink_bytes'], 100)
+        self.settings.update_traffic_policy(self.actor, False)
+        self.assertIsNone(self.client.get(endpoint, headers={**self.headers,
+            'X-Node-Plane-Telegram-User-ID': '101'}).json()['traffic'])
 
     def test_first_sample_excludes_previous_traffic_and_repeated_counters_do_not_double_count(
         self,
@@ -158,41 +175,34 @@ class TrafficTests(unittest.TestCase):
         self.collect()
         self.assertEqual(self.row()['uplink_bytes'], 50)
 
-    def test_both_permissions_are_required_for_collection_and_display(self):
-        self.settings.update_traffic_consent(self.actor, False)
+    def test_global_switch_alone_controls_collection_and_display(self):
         self.collect()
-        self.assertEqual(self.driver.calls, [])
-        self.assertEqual(self.service.summary(self.admin.id, self.profile_id),
-                         {'status': 'consent_required', 'items': []})
-        self.settings.update_traffic_consent(self.actor, True)
+        self.assertEqual(len(self.driver.calls), 1)
+        self.assertEqual(self.service.summary(self.admin.id, self.profile_id)['status'], 'current')
         self.settings.update_traffic_policy(self.actor, False)
-        self.collect()
+        self.driver.calls.clear()
+        self.assertFalse(self.collect())
         self.assertEqual(self.driver.calls, [])
         self.assertIsNone(self.service.summary(self.admin.id, self.profile_id))
 
-    def test_opt_out_purges_history_and_an_in_flight_response_cannot_revive_it(self):
+    def test_global_disable_fences_in_flight_response(self):
         self.collect()
-        self.driver.hook = lambda: self.settings.update_traffic_consent(
-            self.actor, False
-        )
-        self.collect()
-        self.assertIsNone(self.row())
-        self.assertEqual(
-            self.service.summary(self.admin.id, self.profile_id)["status"],
-            "consent_required",
-        )
+        self.driver.up = 1100
+        self.driver.hook = lambda: self.settings.update_traffic_policy(self.actor, False)
+        self.assertFalse(self.collect())
+        self.assertEqual(self.row()['uplink_bytes'], 0)
+        self.assertIsNone(self.service.summary(self.admin.id, self.profile_id))
         self.driver.calls.clear()
         self.driver.hook = None
-        self.collect()
+        self.assertFalse(self.collect())
         self.assertEqual(self.driver.calls, [])
 
-    def test_off_on_consent_race_is_fenced_even_when_final_value_matches(self):
-        def revoke_and_regrant():
-            self.settings.update_traffic_consent(self.actor, False)
-            self.settings.update_traffic_consent(self.actor, True)
-
-        self.driver.hook = revoke_and_regrant
-        self.collect()
+    def test_off_on_policy_race_is_fenced_even_when_final_value_matches(self):
+        def off_on():
+            self.settings.update_traffic_policy(self.actor, False)
+            self.settings.update_traffic_policy(self.actor, True)
+        self.driver.hook = off_on
+        self.assertFalse(self.collect())
         self.assertIsNone(self.row())
 
     def test_global_pause_keeps_totals_but_does_not_count_paused_traffic(self):
@@ -213,7 +223,6 @@ class TrafficTests(unittest.TestCase):
     def test_repeated_enable_does_not_reset_baseline(self):
         self.collect()
         self.settings.update_traffic_policy(self.actor, True)
-        self.settings.update_traffic_consent(self.actor, True)
         self.driver.up = 1100
         self.collect()
         self.assertEqual(self.row()["uplink_bytes"], 100)
@@ -255,15 +264,13 @@ class TrafficTests(unittest.TestCase):
         self.collect()
         self.assertIsNone(self.row())
 
-    def test_unconsenting_and_orphan_profiles_have_no_reads(self):
-        self.settings.update_traffic_consent(self.actor, False)
-        self.collect()
-        self.assertEqual(self.driver.calls, [])
-        self.settings.update_traffic_consent(self.actor, True)
-        self.db.connection.execute("UPDATE backend_profiles SET owner_account_id=NULL")
+    def test_profiles_without_owner_are_also_collected(self):
+        self.db.connection.execute('UPDATE backend_profiles SET owner_account_id=NULL')
         self.db.connection.commit()
         self.collect()
-        self.assertEqual(self.driver.calls, [])
+        self.assertEqual(len(self.driver.calls), 1)
+        self.assertIsNone(self.row()['account_id'])
+        self.assertEqual(self.service.summary(None, self.profile_id)['status'], 'current')
 
     def test_identity_mismatch_negative_and_boolean_counters_are_unknown(self):
         for field, value in (
@@ -303,7 +310,8 @@ class TrafficTests(unittest.TestCase):
         )
         self.db.connection.commit()
         self.collect()
-        self.assertIsNone(self.row())
+        self.assertEqual(self.row()['account_id'], member['id'])
+        self.assertEqual(self.row()['uplink_bytes'], 0)
         headers = {**self.headers, "X-Node-Plane-Telegram-User-ID": "101"}
         self.assertEqual(
             self.client.get(

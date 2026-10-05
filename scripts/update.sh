@@ -15,9 +15,8 @@ SKIP_DEPS=0
 SKIP_RESTART=0
 HEALTH_TIMEOUT=30
 CURRENT_STEP="startup"
-AUTO_SETUP_DRIVER_AGENTS="${NODE_PLANE_AUTO_SETUP_DRIVER_AGENTS:-1}"
 PYTHON_BIN=""
-SIMPLE_BOT_SERVICE="node-plane.service"
+SIMPLE_BOT_SERVICE="node-plane-telegram.service"
 STACK_JOB=""
 CORE_ARMED=0
 STACK_COMPONENT="backend"
@@ -117,15 +116,15 @@ Usage:
 Modes:
   auto      Detect update mode from local environment
   simple    Update the host/systemd deployment with rollback support
-  portable  Update the Docker Compose deployment
+  portable  Unsupported; use systemd/simple mode
 
 Flags:
   --branch           Branch to use as the update source
   --to               Explicit git ref or tag to install
   --skip-pull        Do not run git pull --ff-only
-  --skip-deps        Skip dependency reinstall in portable mode. Not supported in simple mode.
+  --skip-deps        Unsupported in release-based systemd updates.
   --skip-restart     Do not restart the service/container after applying changes
-  --health-timeout   Seconds to wait for node-plane.service to become active after restart
+  --health-timeout   Seconds to wait for node-plane-telegram.service to become active after restart
 EOF
       exit 0
       ;;
@@ -177,7 +176,7 @@ detect_mode() {
     return 0
   fi
 
-  if has_cmd systemctl && { systemctl list-unit-files node-plane.service >/dev/null 2>&1 || systemctl list-unit-files node-plane-telegram.service >/dev/null 2>&1; }; then
+  if has_cmd systemctl && systemctl list-unit-files node-plane-telegram.service >/dev/null 2>&1; then
     MODE="simple"
     return 0
   fi
@@ -399,61 +398,6 @@ ensure_venv_python_has_pip() {
   exit 1
 }
 
-portable_compose() {
-  if docker compose version >/dev/null 2>&1; then
-    docker compose "$@"
-    return 0
-  fi
-  if has_cmd docker-compose; then
-    docker-compose "$@"
-    return 0
-  fi
-  echo "Docker Compose is required for portable mode." >&2
-  exit 1
-}
-
-wait_for_container() {
-  local timeout="$1"
-  local elapsed=0
-  while (( elapsed < timeout )); do
-    local status restart_count
-    status="$(docker inspect -f '{{.State.Status}}' node-plane 2>/dev/null || true)"
-    restart_count="$(docker inspect -f '{{.RestartCount}}' node-plane 2>/dev/null || echo "0")"
-    if [[ "$status" == "running" && "$restart_count" == "0" ]]; then
-      return 0
-    fi
-    sleep 2
-    elapsed=$((elapsed + 2))
-  done
-  return 1
-}
-
-rollback_portable() {
-  local previous_tag="$1"
-  local image_repo="$2"
-
-  if [[ -z "$previous_tag" ]]; then
-    echo "No previous portable image tag is available for rollback." >&2
-    docker ps -a --filter "name=node-plane" || true
-    docker logs --tail 100 node-plane || true
-    exit 1
-  fi
-
-  echo "Rolling back portable deployment to ${image_repo}:${previous_tag} ..."
-  set_env_value_in_file ".env" "NODE_PLANE_IMAGE_REPO" "$image_repo"
-  set_env_value_in_file ".env" "NODE_PLANE_IMAGE_TAG" "$previous_tag"
-  portable_compose up -d
-  if wait_for_container "$HEALTH_TIMEOUT"; then
-    echo "Portable rollback completed."
-    exit 1
-  fi
-
-  echo "Portable rollback failed. Inspect the container manually." >&2
-  docker ps -a --filter "name=node-plane" || true
-  docker logs --tail 100 node-plane || true
-  exit 1
-}
-
 rollback_simple() {
   trap - ERR
   CORE_ARMED=0
@@ -516,16 +460,13 @@ rollback_simple() {
     stack_progress rollback_status failed
     stack_progress status failed
   fi
-  sudo systemctl status node-plane --no-pager || true
+  sudo systemctl status "$SIMPLE_BOT_SERVICE" --no-pager || true
   sudo journalctl -u "$SIMPLE_BOT_SERVICE" -n 80 --no-pager || true
   exit 1
 }
 
 update_simple() {
   need_cmd sudo
-  if systemctl list-unit-files node-plane-telegram.service >/dev/null 2>&1; then
-    SIMPLE_BOT_SERVICE="node-plane-telegram.service"
-  fi
   PYTHON_BIN="$(select_python_runtime)"
   echo "Using Python runtime: ${PYTHON_BIN}"
 
@@ -603,14 +544,6 @@ update_simple() {
     fi
   fi
 
-  NODE_PLANE_BASE_DIR="${base_dir}" \
-  NODE_PLANE_APP_DIR="${new_release_dir}" \
-  NODE_PLANE_SHARED_DIR="${shared_dir}" \
-  DB_BACKEND="${db_backend}" \
-  POSTGRES_DSN="${postgres_dsn}" \
-  "${new_release_dir}/.venv/bin/python" "${new_release_dir}/app/manage_db.py" init
-
-
   if [[ -f "${new_release_dir}/app/backend/admin_cli.py" ]]; then
     set_step "initialize backend schema"
     NODE_PLANE_BASE_DIR="${base_dir}" \
@@ -650,9 +583,12 @@ update_simple() {
       bash "${current_link}/scripts/setup_driver_agents.sh" --skip-agents --strict --bin-source release
     NODE_PLANE_APP_DIR="$current_link" NODE_PLANE_SHARED_DIR="$shared_dir" \
       PYTHONPATH="${current_link}/app" "${current_link}/.venv/bin/python" - <<'PYDRIVER'
-from services.node_driver import get_node_driver
+import grpc
+from backend.driver_transport import GrpcIntentDriver
 from config import APP_COMMIT
-actual = get_node_driver().binary_info().get('commit') or ''
+from config import NODE_DRIVER_GRPC_TARGET
+with grpc.insecure_channel(NODE_DRIVER_GRPC_TARGET) as channel:
+    actual = GrpcIntentDriver(channel).binary_info().get('commit') or ''
 if len(actual) < 7 or APP_COMMIT == 'unknown' or not (APP_COMMIT.startswith(actual) or actual.startswith(APP_COMMIT)):
     raise SystemExit('Controller driver version verification failed')
 PYDRIVER
@@ -680,7 +616,8 @@ PYDRIVER
     NODE_PLANE_SHARED_DIR="${shared_dir}" \
     DB_BACKEND="${db_backend}" \
     POSTGRES_DSN="${postgres_dsn}" \
-    "${new_release_dir}/.venv/bin/python" "${new_release_dir}/app/manage_db.py" init
+    PYTHONPATH="${new_release_dir}/app" \
+    "${new_release_dir}/.venv/bin/python" -m backend.admin_cli init-schema
   fi
 
   if [[ -f "${new_release_dir}/scripts/install_backend_systemd.sh" ]]; then
@@ -722,74 +659,6 @@ PYDRIVER
   rollback_simple "$previous_release" "$current_link" "$new_release_dir"
 }
 
-update_portable() {
-  set_step "ensure docker is installed"
-  install_docker_if_missing
-  set_step "ensure docker compose is installed"
-  install_docker_compose_if_missing
-  set_step "normalize portable database runtime configuration"
-  ensure_portable_postgres_env ".env"
-
-  local image_repo image_tag previous_tag new_tag
-  image_repo="$(read_env_value NODE_PLANE_IMAGE_REPO)"
-  image_tag="$(read_env_value NODE_PLANE_IMAGE_TAG)"
-  previous_tag="${image_tag:-local}"
-
-  if [[ -z "$image_repo" ]]; then
-    image_repo="node-plane"
-  fi
-  if [[ -z "$image_tag" ]]; then
-    image_tag="local"
-  fi
-
-  if [[ "$image_repo" == "node-plane" && "$image_tag" == "local" ]]; then
-    if [[ $SKIP_RESTART -eq 0 ]]; then
-      echo "Rebuilding and restarting local Docker Compose deployment..."
-      set_step "docker compose build and restart"
-      portable_compose up -d --build
-      if wait_for_container "$HEALTH_TIMEOUT"; then
-        echo "Portable local-build deployment is healthy."
-        return 0
-      fi
-      echo "Portable local-build deployment did not become healthy within ${HEALTH_TIMEOUT}s." >&2
-      docker logs --tail 100 node-plane || true
-      exit 1
-    fi
-    echo "Skipping Docker Compose restart"
-    return 0
-  fi
-
-  new_tag="$(release_id_base)"
-  echo "Portable registry update target: ${image_repo}:${new_tag}"
-  set_env_value_in_file ".env" "NODE_PLANE_PREVIOUS_IMAGE_TAG" "$previous_tag"
-  set_env_value_in_file ".env" "NODE_PLANE_IMAGE_REPO" "$image_repo"
-  set_env_value_in_file ".env" "NODE_PLANE_IMAGE_TAG" "$new_tag"
-
-  set_step "pull portable image"
-  if ! docker pull "${image_repo}:${new_tag}"; then
-    echo "Failed to pull ${image_repo}:${new_tag}" >&2
-    set_env_value_in_file ".env" "NODE_PLANE_IMAGE_TAG" "$previous_tag"
-    exit 1
-  fi
-
-  if [[ $SKIP_RESTART -ne 0 ]]; then
-    echo "Skipping Docker Compose restart"
-    return 0
-  fi
-
-  echo "Restarting portable Docker Compose deployment..."
-  set_step "restart portable docker compose deployment"
-  portable_compose up -d
-  if wait_for_container "$HEALTH_TIMEOUT"; then
-    echo "Portable registry deployment is healthy."
-    return 0
-  fi
-
-  echo "Portable registry deployment did not become healthy within ${HEALTH_TIMEOUT}s." >&2
-  docker logs --tail 100 node-plane || true
-  rollback_portable "$previous_tag" "$image_repo"
-}
-
 main() {
   detect_mode
   echo "Detected update mode: ${MODE}"
@@ -800,27 +669,7 @@ main() {
   case "$MODE" in
     simple)
       update_simple
-      if [[ "$AUTO_SETUP_DRIVER_AGENTS" == "1" && "$SIMPLE_BOT_SERVICE" == "node-plane.service" ]]; then
-        local base_dir current_link shared_dir
-        local -a rollout_paths
-        mapfile -t rollout_paths < <(simple_paths)
-        base_dir="${rollout_paths[0]}"
-        shared_dir="${rollout_paths[2]}"
-        current_link="${rollout_paths[4]}"
-        echo
-        echo "Running post-update driver/agent setup..."
-        if ! NODE_PLANE_BASE_DIR="${base_dir}" \
-          NODE_PLANE_APP_DIR="${current_link}" \
-          NODE_PLANE_SHARED_DIR="${shared_dir}" \
-          "${current_link}/scripts/setup_driver_agents.sh" --strict; then
-          echo "Bot release is active, but driver/agent rollout failed. Retry Set up agent from Updates after resolving the error." >&2
-          return 1
-        elif [[ $SKIP_RESTART -eq 0 ]]; then
-          sudo systemctl restart "$SIMPLE_BOT_SERVICE"
-        fi
-      elif [[ "$SIMPLE_BOT_SERVICE" == "node-plane-telegram.service" ]]; then
-        echo "Backend nodes use their own agent rollout; refresh each changed node from the Telegram Updates screen."
-      fi
+      echo "Backend nodes use their own agent rollout; refresh changed nodes from the Telegram Updates screen."
       ;;
     portable)
       echo "Portable Docker updates are temporarily unsupported; use a systemd installation." >&2

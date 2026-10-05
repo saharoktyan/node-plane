@@ -6,7 +6,12 @@ It is built for operators who want one interface for node setup, runtime bootstr
 
 Instead of juggling shell scripts, scattered configs, and ad-hoc server notes, you manage the full lifecycle from a Telegram admin flow: register a node, validate it with `Probe`, deploy runtime with `Bootstrap`, create profiles, and deliver connection configs to users.
 
-The recommended way to deploy Node Plane is through the bundled `install.sh` workflow, which prepares the runtime for either `Simple Mode` or `Portable Mode`.
+The supported deployment is the bundled `install.sh` systemd workflow: a
+standalone backend, worker, aiogram Telegram client and Rust driver.
+
+Development priorities and remaining work: [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md).
+Architecture: [CORE_ARCHITECTURE.md](CORE_ARCHITECTURE.md).
+Protocol configuration: [PROTOCOL_REFERENCE.md](PROTOCOL_REFERENCE.md).
 
 ## Why Node Plane
 
@@ -33,34 +38,16 @@ The recommended way to deploy Node Plane is through the bundled `install.sh` wor
 
 Use this when you want the shortest path to a working deployment.
 
-- bot runs directly on the host
+- backend, worker and aiogram client run directly on the host
 - intended for `systemd` + Python venv setup
 - supports same-host runtime deployment
 - can also manage additional remote nodes over `ssh`
 - best fit for a single VPS
 
-### Portable Mode
-
-Use this when the bot should manage remote nodes over SSH.
-
-- bot runs in Docker via `docker compose`
-- nodes are managed remotely over `ssh`
-- runtime images are pulled from `ghcr.io/saharoktyan/node-plane`
-- better fit for multi-node setups
-
-Important constraint:
-`local` node deployment is supported only in `Simple Mode`. If the bot runs inside Docker, managed nodes should be added via `ssh`.
-
-## Feature Matrix
-
-| Capability | Simple Mode | Portable Mode |
-| --- | --- | --- |
-| Bot runtime | Host + `systemd` | Docker + `docker compose` |
-| Same-host `local` node | Yes | No |
-| Remote `ssh` nodes | Yes | Yes |
-| Single-server setup | Excellent fit | Possible, but not the main target |
-| Multi-node setup | Good fit | Excellent fit |
-| Best for | Fastest self-hosted start | Separated bot host and remote node fleet |
+Controller Docker/Compose installation is unsupported. The retired PTB bot
+and its Docker entrypoint have been removed. Managed VPN protocols and the
+optional installer-managed PostgreSQL runtime still use Docker; the container
+used to build compatible release binaries is also retained.
 
 ## Supported Runtime
 
@@ -80,11 +67,11 @@ issued `.conf` or `vpn://` key; previously downloaded configs can stop working.
 
 ## Main Workflow
 
-1. Deploy the bot in `Simple Mode` or `Portable Mode`.
+1. Deploy the systemd stack in `Simple Mode`.
 2. Open the bot from the Telegram admin account.
 3. Send `/start` and create the first managed server.
-4. Run `Probe` to validate host readiness.
-5. Run `Bootstrap` to install and configure runtime.
+4. Install the local or SSH node agent, then use `Probe` to check readiness.
+5. Use `Bootstrap` to install Docker when needed and deploy protocols.
 6. Create one or more profiles.
 7. Let users request or receive connection configs through the bot.
 8. Use sync, diagnostics, telemetry, update, and rollback flows for ongoing operations.
@@ -131,12 +118,12 @@ git clone git@github.com:saharoktyan/node-plane.git node-plane-src
 
 - issue connection material through Telegram
 - provide `Xray` links and QR output
-- provide `AWG` direct links, QR, and `.conf` fallback
+- provide `AWG` direct links, QR, `.vpn`, and `.conf` files
 
 ### Operations And Maintenance
 
 - node health checks and diagnostics through the Rust driver
-- traffic usage reporting and alerting are reserved for future Pro modules
+- administrator-controlled monthly traffic usage reporting and configurable alerts
 - scripted updates with rollback support
 - automatic Docker and PostgreSQL runtime provisioning during install/update
 - release cleanup helpers
@@ -155,9 +142,14 @@ That makes it useful not just as a deploy-once tool, but as an ongoing control p
 ## Project Layout
 
 ```text
-app/       Bot code, handlers, services, storage, and runtime integration
+app/backend/          Business API, authorization and durable worker scenarios
+app/telegram_client/  aiogram client, RU/EN catalog and Rich Message presentation
+app/db/               PostgreSQL adapter and schema helpers
+app/services/         Shared controller update and release-maintenance helpers
+rust/                 Central driver and node-local agent
+runtime_assets/       VPN configuration and runtime adapters
 scripts/   Install, healthcheck, update, rollback, and release helpers
-tests/     Unit tests for bot flows, migration, and runtime behavior
+tests/     Backend, aiogram, installation and runtime tests
 ```
 
 Installation, environment configuration, updates, and maintenance commands are documented in [INSTALL.md](INSTALL.md).

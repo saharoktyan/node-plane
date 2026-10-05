@@ -72,6 +72,20 @@ class BackendBackupsTests(unittest.TestCase):
             self.actor, result["backup_id"]
         )["checksum"]
 
+    def test_overview_reports_actual_nonzero_file_sizes_after_profile_changes(self):
+        first_id, _ = self.snapshot()
+        first_size = self.service._path(first_id).stat().st_size
+        self.assertGreater(first_size, 0)
+        self.assertEqual(self.service.overview(self.actor)['size_bytes'], first_size)
+        ProfileRepository(self.db).create_profile(runtime_name='size_test', display_name='Size Test')
+        second_id, _ = self.snapshot()
+        self.assertNotEqual(first_id, second_id)
+        total = first_size + self.service._path(second_id).stat().st_size
+        overview = self.service.overview(self.actor)
+        self.assertEqual(overview['count'], 2)
+        self.assertEqual(overview['size_bytes'], total)
+        self.assertEqual(self.service.catalog(self.actor, limit=1)['total_size_bytes'], total)
+
     def test_private_snapshot_deduplicates_and_excludes_credentials(self):
         backup_id, _ = self.snapshot()
         path = self.service._path(backup_id)

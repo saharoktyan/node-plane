@@ -333,6 +333,13 @@ class ProfileService:
         return {**self.repository.summary(profile_id),
                 'traffic': TrafficService(self.repository.db).summary(actor.account.id, profile_id)}
 
+    def admin_summary(self, actor, profile_id):
+        require_permission(actor, 'profiles.manage')
+        profile = self.get(actor, profile_id)
+        from .traffic import TrafficService
+        return {**self.repository.summary(profile_id),
+                'traffic': TrafficService(self.repository.db).summary(profile['owner_account_id'], profile_id)}
+
     def available_nodes(self, actor, *, limit=25, cursor=None):
         require_permission(actor, 'nodes.available.read')
         after = self.page_input(limit, cursor, 'nodes')

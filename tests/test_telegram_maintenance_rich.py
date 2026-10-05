@@ -40,6 +40,19 @@ class MaintenanceRichTests(IsolatedAsyncioTestCase):
             self.assertNotIn('backups.rich.', screen.plain())
             screen.rich(rows)
 
+    async def test_small_backup_sizes_are_nonzero_in_rich_and_plain_views(self):
+        for lang in ('en', 'ru'):
+            self.state_data['locale'] = lang
+            for size, label in ((0, '0 B'), (900, '900 B'), (8192, '8.0 KiB'),
+                    (1048576, '1.0 MiB'), (1073741824, '1.0 GiB')):
+                backend = SimpleNamespace(backups_overview=AsyncMock(return_value={**self.value(), 'size_bytes': size}))
+                with patch.object(backups, 'render', AsyncMock()) as draw:
+                    await backups.overview(self.query, self.bot, backend, self.state)
+                screen, rows = draw.call_args.args[2:4]
+                self.assertEqual(screen.sections[0].tables[0].rows[1][1], label)
+                self.assertIn(label, screen.plain())
+                screen.rich(rows)
+
     async def test_backup_preferences_set_explicit_value_and_reject_invalid_callbacks(self):
         backend = SimpleNamespace(backups_overview=AsyncMock(return_value=self.value()),
             backup_preferences=AsyncMock())

@@ -378,7 +378,7 @@ class BackupService:
                     rows = [r for r in rows if r["key"] not in {
                         "backup_last_scheduled", "traffic_last_scan", "traffic_cursor",
                         "traffic_generation"
-                    } and not r["key"].startswith("traffic_consent_generation:")]
+                    } and not r["key"].startswith(("traffic_consent:", "traffic_consent_generation:"))]
                 rows.sort(key=lambda row: encoded(row))
                 tables[table] = {"columns": columns, "rows": rows}
         checksum = hashlib.sha256(encoded(tables)).hexdigest()

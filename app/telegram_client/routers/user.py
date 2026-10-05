@@ -345,7 +345,6 @@ async def show_account_profile(chat_id: int, user_id: int, message_id: int,
         (tr(locale, 'account.rich.telegram_id'), str(user_id)),
         (tr(locale, 'account.rich.created'), (summary.get('created_at') or '')[:10] or '—'))),))
     statistics = Section(tr(locale, 'account.statistics'),
-        (tr(locale, 'account.rich.enable_traffic'),) if (summary.get('traffic') or {}).get('status') == 'consent_required' else (),
         tables=(Table(facts, (
         (tr(locale, 'admin.nodes'), str(summary.get('node_count', len(summary['nodes'])))),
         (tr(locale, 'account.rich.connections'), str(summary.get('protocol_count', 0))),
@@ -369,7 +368,7 @@ async def show_account_profile(chat_id: int, user_id: int, message_id: int,
 
 def profile_traffic_section(summary, locale):
     traffic = summary.get('traffic')
-    if not traffic or traffic['status'] == 'consent_required':
+    if not traffic:
         return None
     lines = [tr(locale, 'traffic.status.' + traffic['status'])]
     tables = ()
@@ -384,7 +383,7 @@ def profile_traffic_section(summary, locale):
 
 def profile_server_section(summary, node, locale, *, divider_after=False):
     traffic = summary.get('traffic')
-    if not traffic or traffic['status'] == 'consent_required':
+    if not traffic:
         return Section(server_label(node), tuple(tr(locale, 'protocol.' + protocol) for protocol in node['protocols']),
             divider_after=divider_after, heading_size=3)
     rows, stale = [], False
@@ -394,9 +393,8 @@ def profile_server_section(summary, node, locale, *, divider_after=False):
         rows.append((tr(locale, 'protocol.' + protocol),
             _traffic_bytes(item['uplink_bytes'] + item['downlink_bytes']) if item else tr(locale, 'account.rich.waiting')))
         stale |= bool(item and item['status'] != 'current')
-    return Section(server_label(node), (tr(locale, 'traffic.node_unknown'),) if stale else (),
-        tables=(Table((tr(locale, 'profile.rich.protocols'),
-            tr(locale, 'account.rich.month', month=traffic.get('month') or '—')), tuple(rows)),),
+    compact = ' · '.join(f'{label}: {value}' for label, value in rows)
+    return Section(server_label(node), (compact, *((tr(locale, 'traffic.node_unknown'),) if stale else ())),
         divider_after=divider_after, heading_size=3)
 
 
@@ -437,7 +435,7 @@ def profile_node_traffic(summary: dict, node: dict, locale: str) -> tuple[str, .
     lines = []
     for protocol in node['protocols']:
         label = tr(locale, 'protocol.' + protocol)
-        if not traffic or traffic['status'] == 'consent_required':
+        if not traffic:
             lines.append(label)
             continue
         item = next((item for item in traffic.get('nodes', [])
@@ -532,12 +530,12 @@ async def show_protocol(chat_id: int, user_id: int, message_id: int, profile_id:
 
 async def show_issuance(chat_id: int, user_id: int, message_id: int,
                         issuance_id: str, bot: Bot, backend: BackendClient,
-                        state: FSMContext) -> None:
+                        state: FSMContext, *, show_uri: bool = False) -> None:
     view_token = secrets.token_urlsafe(16)
     await state.update_data(issuance_poll_token=view_token)
     try:
         await _render_issuance(chat_id, user_id, message_id, issuance_id,
-                               bot, backend, state, view_token)
+                               bot, backend, state, view_token, show_uri=show_uri)
     except BackendError:
         if (await state.get_data()).get('issuance_poll_token') == view_token:
             raise
@@ -545,7 +543,7 @@ async def show_issuance(chat_id: int, user_id: int, message_id: int,
 
 async def _render_issuance(chat_id: int, user_id: int, message_id: int,
                            issuance_id: str, bot: Bot, backend: BackendClient,
-                           state: FSMContext, view_token: str) -> None:
+                           state: FSMContext, view_token: str, *, show_uri: bool = False) -> None:
     result = await backend.issuance(user_id, issuance_id)
     if (await state.get_data()).get('issuance_poll_token') != view_token:
         return
@@ -570,15 +568,18 @@ async def _render_issuance(chat_id: int, user_id: int, message_id: int,
                          else 'config.import_awg_vpn' if uri else 'config.import_awg_conf')
         screen = Screen(artifact.get('display_name') or tr(locale, 'config.ready'),
             (tr(locale, 'ui.config_intro'),),
-            uri=uri, uri_title=tr(locale, 'ui.config_link'), qr=image, qr_title=tr(locale, 'ui.config_qr'),
+            uri=uri if show_uri else None, uri_title=tr(locale, 'ui.config_link'), qr=image, qr_title=tr(locale, 'ui.config_qr'),
             sections=(), details_title=tr(locale, 'ui.config_help'), details_lines=(import_hint,),
             files=tuple((item['filename'], item['content'].encode()) for item in files),
             files_title=tr(locale, 'ui.config_files'),
+            uri_rows=((button(user_id, tr(locale, 'config.link.hide' if show_uri else 'config.link.show'),
+                'issuance_uri', issuance_id, 'false' if show_uri else 'true'),),) if uri else (),
             embedded_buttons=True, navigation=True)
         rich = await render(bot, chat_id, screen, rows, state, message_id)
         # Older Telegram deployments may reject rich media. Preserve downloads
         # there, while supported deployments keep everything in the control message.
-        if rich is False and (await state.get_data()).get('issuance_poll_token') == view_token:
+        data = await state.get_data()
+        if rich is False and data.get('issuance_poll_token') == view_token and issuance_id not in data.get('delivered_issuances', []):
             for name, body in screen.files:
                 sent = await bot.send_document(chat_id, BufferedInputFile(body, name))
                 if (await state.get_data()).get('issuance_poll_token') != view_token:
@@ -597,6 +598,8 @@ async def _render_issuance(chat_id: int, user_id: int, message_id: int,
                         pass
                     return
                 await track_artifact(state, sent.message_id)
+            data = await state.get_data()
+            await state.update_data(delivered_issuances=[*data.get('delivered_issuances', []), issuance_id][-20:])
     elif result['status'] in {'blocked', 'superseded', 'failed'}:
         await render(bot, chat_id, Screen(tr(locale, 'config.not_ready'),
             (tr(locale, 'config.unavailable'),), embedded_buttons=True, navigation=True),
@@ -739,7 +742,7 @@ async def user_action_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
             return
         if action.name == 'page_number':
             return
-        if action.name != 'issuance':
+        if action.name not in {'issuance', 'issuance_uri'}:
             await clear_artifacts(bot, chat_id, state)
         if action.name == 'home':
             await show_home(chat_id, user_id, bot, backend, state, message_id,
@@ -772,6 +775,9 @@ async def user_action_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
             await issue(chat_id, user_id, message_id, *action.args, bot, backend, state)
         elif action.name == 'issuance':
             await show_issuance(chat_id, user_id, message_id, action.args[0], bot, backend, state)
+        elif action.name == 'issuance_uri':
+            await show_issuance(chat_id, user_id, message_id, action.args[0], bot, backend, state,
+                show_uri=action.args[1] == 'true')
         elif action.name == 'qr':
             await show_qr(chat_id, user_id, message_id, action.args[0], bot, backend, state)
         elif action.name == 'qr_back':
@@ -792,9 +798,6 @@ async def user_action_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
             await show_account_stats(chat_id, user_id, message_id, action.args[0],
                 bot, backend, state, back_to=action.args[1])
         elif action.name == 'member_settings':
-            await show_member_settings(chat_id, user_id, message_id, bot, backend, state)
-        elif action.name == 'traffic_consent':
-            await backend.set_traffic_consent(user_id, action.args[0] == 'true')
             await show_member_settings(chat_id, user_id, message_id, bot, backend, state)
         elif action.name == 'announcement_silent':
             await backend.set_announcement_silent(user_id, action.args[0] == 'true')
@@ -1009,13 +1012,8 @@ async def show_member_settings(chat_id: int, user_id: int, message_id: int,
                 .model_copy(update={'style': 'primary' if not silent else None}),
             button(user_id, tr(locale, 'ui.disable_sound'), 'announcement_silent', 'true')
                 .model_copy(update={'style': 'primary' if silent else None}),),))]
-    if current.get('traffic_available') or current.get('traffic_consent'):
-        consent = current.get('traffic_consent', False)
-        sections.append(Section(tr(locale, 'ui.traffic'),
-            (tr(locale, 'traffic.consent_on' if consent else 'traffic.consent_off'),
-             tr(locale, 'traffic.consent_description')),
-            ((button(user_id, tr(locale, 'ui.withdraw_consent' if consent else 'ui.give_consent'),
-                'traffic_consent', 'false' if consent else 'true'),),)))
+    sections.append(Section(tr(locale, 'ui.traffic'),
+        (tr(locale, 'traffic.member.enabled' if current.get('traffic_available') else 'traffic.member.disabled'),)))
     await render(bot, chat_id, Screen(tr(locale, 'settings.title'),
         sections=tuple(sections), embedded_buttons=True, navigation=True),
         [[button(user_id, tr(locale, 'back'), 'home')]], state, message_id)

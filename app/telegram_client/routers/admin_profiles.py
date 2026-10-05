@@ -639,9 +639,10 @@ async def admin_profile_cb(query: CallbackQuery, callback_data: AdminProfileCall
 async def show_admin_profile(chat_id: int, user_id: int, message_id: int,
                              profile_id: str, bot: Bot, backend: BackendClient,
                              state: FSMContext) -> None:
-    profile, grant_page, operation = await asyncio.gather(
+    profile, grant_page, operation, summary = await asyncio.gather(
         backend.request('GET', f'/api/v1/profiles/{profile_id}', telegram_user_id=user_id),
-        backend.profile_grants(user_id, profile_id), backend.profile_operation(user_id, profile_id))
+        backend.profile_grants(user_id, profile_id), backend.profile_operation(user_id, profile_id),
+        backend.request('GET', f'/api/v1/profiles/{profile_id}/summary', telegram_user_id=user_id))
     locale = await _locale(state)
     await state.set_state(None)
     await state.update_data(edit_profile_id=None, draft_grants=None,
@@ -659,11 +660,54 @@ async def show_admin_profile(chat_id: int, user_id: int, message_id: int,
             callback_data=GrantNodesCallback(profile_id=profile_id).pack(), style='primary'),
             InlineKeyboardButton(text=tr(locale, 'profile.layout.edit'),
                 callback_data=f'admin_profile_edit:{profile_id}')])
+    from .user import profile_traffic_section
+    traffic = profile_traffic_section(summary, locale)
+    if traffic:
+        rows.append([InlineKeyboardButton(text=tr(locale, 'traffic.servers'),
+            callback_data=f'prof_traffic:{profile_id}:0')])
     rows.append([InlineKeyboardButton(text=tr(locale, 'profile.layout.management'),
         callback_data=f'prof_manage:{profile_id}', style='link')])
     rows.append([InlineKeyboardButton(text=tr(locale, 'back'),
         callback_data=AdminProfilesCallback().pack())])
     await render(bot, chat_id, Screen(profile['display_name'], tuple(lines),
+        sections=(traffic,) if traffic else (),
+        embedded_buttons=True, navigation=True), rows, state, message_id)
+
+
+@router.callback_query(F.data.startswith('prof_traffic:'))
+async def profile_traffic_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
+                             state: FSMContext):
+    await query.answer()
+    _, profile_id, page = query.data.split(':')
+    await show_profile_traffic(query.message.chat.id, query.from_user.id,
+        query.message.message_id, profile_id, int(page), bot, backend, state)
+
+
+async def show_profile_traffic(chat_id, user_id, message_id, profile_id, page,
+                               bot, backend, state):
+    from .user import server_page, region_sections, profile_server_section
+    summary = await backend.request('GET', f'/api/v1/profiles/{profile_id}/summary',
+        telegram_user_id=user_id)
+    locale = await _locale(state)
+    nodes, page, pages = server_page(summary['nodes'], page)
+    rows = []
+    if pages > 1:
+        navigation = []
+        if page > 0:
+            navigation.append(InlineKeyboardButton(text='←', callback_data=f'prof_traffic:{profile_id}:{page-1}'))
+        navigation.append(InlineKeyboardButton(text=f'{page+1}/{pages}', callback_data=f'prof_traffic:{profile_id}:{page}'))
+        if page + 1 < pages:
+            navigation.append(InlineKeyboardButton(text='→', callback_data=f'prof_traffic:{profile_id}:{page+1}'))
+        rows.append(navigation)
+    rows.append([InlineKeyboardButton(text=tr(locale, 'back'),
+        callback_data=AdminProfileCallback(profile_id=profile_id).pack())])
+    traffic = summary.get('traffic')
+    lines = (summary['display_name'],
+        tr(locale, 'account.rich.month', month=traffic.get('month') or '—') if traffic else
+        tr(locale, 'traffic.member.disabled'))
+    await render(bot, chat_id, Screen(tr(locale, 'traffic.servers'), lines,
+        sections=region_sections(nodes, locale, lambda node: profile_server_section(summary, node,
+            locale, divider_after=node['key'] != nodes[-1]['key'])),
         embedded_buttons=True, navigation=True), rows, state, message_id)
 
 

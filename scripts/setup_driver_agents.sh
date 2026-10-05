@@ -854,28 +854,34 @@ PY
     return
   fi
   PYTHONPATH="${APP_ROOT}/app" NODE_PLANE_APP_DIR="${APP_ROOT}" NODE_PLANE_SHARED_DIR="${SHARED_ROOT}" "$PYTHON_BIN" - <<'PY'
-from services.server_registry import list_servers
+import json
+from db import get_db
 
-servers = list_servers(include_disabled=False)
-if sum(server.transport == "local" for server in servers) > 1:
+with get_db().connect() as conn:
+    servers = conn.execute('''SELECT n.key, n.settings_json, c.transport, c.ssh_target
+        FROM backend_nodes n JOIN backend_node_connections c ON c.node_key = n.key
+        WHERE n.enabled = 1 AND NOT EXISTS (
+            SELECT 1 FROM backend_node_drains d WHERE d.node_key = n.key)
+        ORDER BY n.key''').fetchall()
+if sum(server['transport'] == "local" for server in servers) > 1:
     raise SystemExit("Only one local node can use the controller's node-agent service.")
 for srv in servers:
-    if srv.transport == "local":
-        print("\x1f".join([srv.key, "local", "", "", "", "", "", ""]))
+    if srv['transport'] == "local":
+        print("\x1f".join([srv['key'], "local", "", "", "", "", ""]))
         continue
-    if not srv.ssh_target:
+    if not srv['ssh_target']:
         continue
-    ssh_host = (srv.ssh_host or "").strip()
-    ssh_user = (srv.ssh_user or "").strip()
-    ssh_key = (srv.ssh_key_path or "").strip()
-    public_host = (srv.public_host or ssh_host or "").strip()
+    ssh_host = srv['ssh_target'].strip()
+    ssh_user = ""
+    ssh_key = ""
+    public_host = json.loads(srv['settings_json']).get('public_host') or ssh_host.rsplit('@', 1)[-1]
     if not ssh_host:
         continue
     print("\x1f".join([
-    srv.key,
+    srv['key'],
     "ssh",
         ssh_host,
-        str(srv.ssh_port or 22),
+        "22",
         ssh_user,
         ssh_key,
         public_host,

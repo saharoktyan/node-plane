@@ -14,6 +14,30 @@ SETUP_SCRIPT = REPO_ROOT / "scripts" / "setup_driver_agents.sh"
 
 
 class DriverAgentSetupTests(unittest.TestCase):
+    @staticmethod
+    def write_backend_registry(app_root, rows):
+        package = app_root / 'app/db'
+        package.mkdir(parents=True, exist_ok=True)
+        (package / '__init__.py').write_text(f'''ROWS = {rows!r}
+class Result:
+    def fetchall(self):
+        return ROWS
+class Connection:
+    def __enter__(self):
+        return self
+    def __exit__(self, *args):
+        pass
+    def execute(self, query):
+        assert 'backend_nodes' in query and 'backend_node_connections' in query
+        assert 'backend_node_drains' in query and 'n.enabled = 1' in query
+        return Result()
+class DB:
+    def connect(self):
+        return Connection()
+def get_db():
+    return DB()
+''', encoding='utf-8')
+
     def test_remote_wrapper_preserves_quoting_stdin_and_noninteractive_privileges(self):
         helper = (REPO_ROOT / 'scripts/lib/agent_ssh.sh').read_text()
         with tempfile.TemporaryDirectory() as temporary:
@@ -266,7 +290,7 @@ esac
             self.assertIn("fake HTTP 404", result.stderr)
             self.assertNotIn("mv: cannot stat", result.stderr)
 
-    def test_dry_run_uses_installed_registry_and_preserves_empty_ssh_fields(self):
+    def test_dry_run_uses_installed_backend_registry_and_preserves_empty_ssh_fields(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
             app_root = root / "current"
@@ -280,25 +304,8 @@ esac
                 fake_bin,
             ):
                 directory.mkdir(parents=True, exist_ok=True)
-            (app_root / "app" / "services" / "server_registry.py").write_text(
-                """from dataclasses import dataclass
-
-@dataclass
-class Server:
-    key: str = 'node-one'
-    transport: str = 'ssh'
-    ssh_target: str = '203.0.113.10'
-    ssh_host: str = '203.0.113.10'
-    ssh_port: int = 2222
-    ssh_user: str = ''
-    ssh_key_path: str = ''
-    public_host: str = 'vpn.example.test'
-
-def list_servers(include_disabled=False):
-    return [Server()]
-""",
-                encoding="utf-8",
-            )
+            self.write_backend_registry(app_root, [{'key': 'node-one', 'transport': 'ssh',
+                'ssh_target': '203.0.113.10', 'settings_json': '{"public_host":"vpn.example.test"}'}])
             (shared_root / ".env").write_text("BOT_TOKEN=test\n", encoding="utf-8")
             ssh_log = root / "ssh.log"
             for command in ("ssh", "scp", "sudo"):
@@ -338,12 +345,8 @@ def list_servers(include_disabled=False):
             fake_bin = root / "bin"
             for directory in (app_root / "rust" / "node-driver", app_root / "rust" / "node-agent", app_root / "app" / "services", shared_root, fake_bin):
                 directory.mkdir(parents=True, exist_ok=True)
-            (app_root / "app" / "services" / "server_registry.py").write_text(
-                """from types import SimpleNamespace
-def list_servers(include_disabled=False):
-    return [SimpleNamespace(key='home', transport='local')]
-""", encoding="utf-8",
-            )
+            self.write_backend_registry(app_root, [{'key': 'home', 'transport': 'local',
+                'ssh_target': None, 'settings_json': '{}'}])
             (shared_root / ".env").write_text("BOT_TOKEN=test\n", encoding="utf-8")
             for command in ("ssh", "scp", "sudo"):
                 path = fake_bin / command
@@ -372,17 +375,11 @@ def list_servers(include_disabled=False):
             fake_bin = root / "bin"
             for directory in (app_root / "rust" / "node-driver", app_root / "rust" / "node-agent", app_root / "app" / "services", shared_root, fake_bin):
                 directory.mkdir(parents=True, exist_ok=True)
-            (app_root / "app" / "services" / "server_registry.py").write_text(
-                """from types import SimpleNamespace
-def list_servers(include_disabled=False):
-    return [
-        SimpleNamespace(key='msk1', transport='local'),
-        SimpleNamespace(key='lv1', transport='ssh', ssh_target='root@lv1.example.test',
-                        ssh_host='lv1.example.test', ssh_port=22, ssh_user='root',
-                        ssh_key_path='', public_host='lv1.example.test'),
-    ]
-""", encoding="utf-8",
-            )
+            self.write_backend_registry(app_root, [
+                {'key': 'msk1', 'transport': 'local', 'ssh_target': None, 'settings_json': '{}'},
+                {'key': 'lv1', 'transport': 'ssh', 'ssh_target': 'root@lv1.example.test',
+                 'settings_json': '{"public_host":"lv1.example.test"}'},
+            ])
             (shared_root / ".env").write_text(
                 "BOT_TOKEN=test\nNODE_AGENT_TARGETS=legacy=legacy.example.test:50061\n", encoding="utf-8",
             )

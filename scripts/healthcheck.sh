@@ -29,7 +29,7 @@ Usage:
 Modes:
   auto      Detect mode from local environment
   simple    Check host/systemd-oriented setup
-  portable  Check Docker-oriented setup
+  portable  Unsupported; use systemd/simple mode
 EOF
       exit 0
       ;;
@@ -157,9 +157,6 @@ check_repo_basics() {
   section "Repository"
   check_file_exists "app/telegram_client/main.py" "Telegram client entrypoint"
   check_file_exists "requirements.txt" "Requirements file"
-  if [[ "$MODE" == "portable" ]]; then
-    check_file_exists "docker-compose.yml" "Compose file"
-  fi
   check_file_exists ".env.example" "Environment template"
 
   if [[ -f "$ENV_FILE" ]]; then
@@ -334,7 +331,7 @@ check_simple_mode() {
     add_remediation "Set POSTGRES_DSN in ${shared_dir}/.env and rerun installation/update"
   else
     warn "No PostgreSQL configuration was detected"
-    add_remediation "Set POSTGRES_DSN in ${shared_dir}/.env and initialize the database: .venv/bin/python app/manage_db.py init"
+    add_remediation "Set POSTGRES_DSN in ${shared_dir}/.env and initialize the database: PYTHONPATH=app .venv/bin/python -m backend.admin_cli init-schema"
   fi
 
   if has_cmd systemctl; then
@@ -404,87 +401,14 @@ check_simple_mode() {
   fi
 }
 
-check_portable_mode() {
-  section "Portable Mode"
-
-  local docker_ok=0
-  local compose_ok=0
-  local container_ok=0
-  local ssh_dir_ok=0
-
-  if has_cmd docker; then
-    ok "docker is available"
-  else
-    fail "docker is missing"
-    add_remediation "Install Docker on the bot host"
-    return 0
-  fi
-
-  if docker info >/dev/null 2>&1; then
-    ok "Docker daemon is reachable"
-    docker_ok=1
-  else
-    fail "Docker daemon is not reachable"
-    add_remediation "Start Docker and ensure the current user can access the daemon"
-  fi
-
-  if docker compose version >/dev/null 2>&1; then
-    ok "docker compose plugin is available"
-    compose_ok=1
-  elif has_cmd docker-compose; then
-    ok "docker-compose is available"
-    compose_ok=1
-  else
-    fail "Docker Compose is missing"
-    add_remediation "Install the docker compose plugin or docker-compose"
-  fi
-
-  if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx 'node-plane'; then
-    ok "node-plane container is running"
-    container_ok=1
-  else
-    warn "node-plane container is not running"
-    add_remediation "Start the bot container: ./scripts/install.sh --mode portable"
-  fi
-
-  if [[ -d data ]]; then
-    ok "data/ directory exists"
-  else
-    warn "data/ directory is missing"
-    add_remediation "Create runtime directories: mkdir -p data ssh"
-  fi
-
-  if [[ -d ssh ]]; then
-    ok "ssh/ directory exists"
-    ssh_dir_ok=1
-  else
-    warn "ssh/ directory is missing"
-    add_remediation "Create the ssh/ directory: mkdir -p ssh"
-  fi
-
-  if [[ $docker_ok -eq 1 && $compose_ok -eq 1 && $container_ok -eq 1 && $ssh_dir_ok -eq 1 ]]; then
-    PORTABLE_REMOTE_READY=1
-  fi
-}
-
 print_mode_readiness() {
   section "Readiness"
-  if [[ "$MODE" == "simple" ]]; then
-    if [[ $SIMPLE_LOCAL_READY -eq 1 ]]; then
-      ok "This host is ready for Simple Mode and local node deployment"
-      info "Next: open the bot as admin, send /start, choose 'Set up this server', then run Probe and Bootstrap"
-    else
-      warn "This host is not fully ready for local node deployment yet"
-      info "Goal: active systemd service, reachable Docker daemon, and /dev/net/tun on the same host"
-    fi
+  if [[ $SIMPLE_LOCAL_READY -eq 1 ]]; then
+    ok "This host is ready for Simple Mode and local node deployment"
+    info "Next: open the bot as admin, add a node, install its agent, then open Bootstrap"
   else
-    if [[ $PORTABLE_REMOTE_READY -eq 1 ]]; then
-      ok "This host is ready for Portable Mode and remote SSH-managed nodes"
-      info "Next: open the bot as admin, send /start, choose 'Set up over SSH', add the SSH key, then run Probe and Bootstrap"
-    else
-      warn "This host is not fully ready for Portable Mode yet"
-      info "Goal: running bot container, working Docker Compose, and ssh/ available for generated keys"
-    fi
+    warn "This host is not fully ready for local node deployment yet"
+    info "Goal: active systemd services, reachable Docker daemon, and /dev/net/tun on the same host"
   fi
 }
 
@@ -525,7 +449,11 @@ fi
 
 detect_mode
 case "$MODE" in
-  simple|portable) ;;
+  simple) ;;
+  portable)
+    echo "Portable Docker installation is unsupported; use --mode simple." >&2
+    exit 1
+    ;;
   *)
     echo "Unsupported mode: ${MODE}. Use auto, simple, or portable." >&2
     exit 1
@@ -535,11 +463,7 @@ esac
 check_repo_basics
 check_env
 
-if [[ "$MODE" == "simple" ]]; then
-  check_simple_mode
-else
-  check_portable_mode
-fi
+check_simple_mode
 
 print_mode_readiness
 print_summary

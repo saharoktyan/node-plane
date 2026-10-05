@@ -685,56 +685,65 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         lines = user.profile_node_traffic(summary, node, 'en')
         self.assertIn('AmneziaWG · 2026-10: 3.0 KiB', lines[0])
         self.assertIn('VLESS: waiting', lines[1])
-        for traffic in (None, {'status': 'consent_required', 'items': []}):
+        for traffic in (None,):
             summary['traffic'] = traffic
             self.assertEqual(user.profile_node_traffic(summary, node, 'en'), ('AmneziaWG', 'VLESS'))
             self.assertFalse(any('KiB' in line for line in user.profile_statistics(summary, 'en')))
 
-    async def test_awg_screen_embeds_collapsed_qr_monospace_uri_and_both_files(self):
-        backend = SimpleNamespace(
-            issuance=AsyncMock(return_value={'status': 'succeeded',
-                'profile_id': 'p1', 'node_key': 'lv1', 'protocol': 'awg', 'transport': 'vpn'}),
-            artifact=AsyncMock(return_value={'filename': 'Latvia.vpn', 'content': 'vpn://fresh-config',
-                'files': [{'filename': 'Latvia.vpn', 'content': 'vpn://fresh-config'},
-                          {'filename': 'Latvia.conf', 'content': '[Interface]\nPrivateKey = test'}]}))
-        with patch.object(user, 'render', new_callable=AsyncMock, return_value=True) as draw:
-            await user.show_issuance(123, 123, 77, 'issuance1', self.bot, backend, self.state)
-        screen = draw.call_args.args[2]
-        blocks = screen.rich().blocks
-        self.assertFalse(blocks[2].is_open)
-        self.assertEqual(blocks[2].blocks[0].type, 'photo')
-        self.assertFalse(blocks[3].is_open)
-        self.assertEqual(blocks[3].blocks[0].text.type, 'code')
-        self.assertEqual(blocks[3].blocks[0].text.text, 'vpn://fresh-config')
-        files = next(block for block in blocks if block.type == 'details'
-                     and block.summary == 'Configuration files')
-        self.assertFalse(files.is_open)
-        self.assertEqual([block.document.media.filename for block in files.blocks],
-                         ['Latvia.vpn', 'Latvia.conf'])
-        self.assertFalse(any(block.type == 'document' for block in blocks))
-        self.bot.send_document.assert_not_awaited()
-        self.bot.send_photo.assert_not_awaited()
-        back = user.actions[draw.call_args.args[3][-1][0].callback_data[2:]]
-        self.assertEqual((back.name, back.args), ('profile', ('p1',)))
+    async def test_config_artifacts_remain_interactive_outside_details_for_both_protocols(self):
+        for protocol, transport, uri, files in (
+            ('awg', 'vpn', 'vpn://fresh-config', [{'filename': 'Latvia.vpn', 'content': 'vpn://fresh-config'},
+                {'filename': 'Latvia.conf', 'content': '[Interface]'}]),
+            ('xray', 'tcp', 'vless://test', [{'filename': 'Latvia.txt', 'content': 'vless://test'}])):
+            backend = SimpleNamespace(
+                issuance=AsyncMock(return_value={'status': 'succeeded', 'profile_id': 'p1',
+                    'node_key': 'lv1', 'protocol': protocol, 'transport': transport}),
+                artifact=AsyncMock(return_value={'filename': files[0]['filename'], 'content': uri, 'files': files}))
+            for visible in (False, True):
+                with patch.object(user, 'render', new_callable=AsyncMock, return_value=True) as draw:
+                    await user.show_issuance(123, 123, 77, 'issuance1', self.bot, backend, self.state,
+                        show_uri=visible)
+                screen, rows = draw.call_args.args[2:4]
+                blocks = screen.rich(rows).blocks
+                toggle = next(i for i, block in enumerate(blocks) if block.type == 'buttons'
+                    and block.buttons[0].text in ('Show configuration link', 'Hide configuration link'))
+                self.assertTrue(all(i < toggle for i, block in enumerate(blocks) if block.type == 'details'))
+                code = [block for block in blocks if block.type == 'paragraph' and not isinstance(block.text, str)
+                    and block.text.type == 'code']
+                self.assertEqual([block.text.text for block in code], [uri] if visible else [])
+                if visible:
+                    self.assertEqual(blocks.index(code[0]), toggle + 1)
+                    self.assertEqual(screen.plain_entities()[0].type, 'code')
+                documents = [block for block in blocks if block.type == 'document']
+                self.assertEqual([block.document.media.filename for block in documents],
+                    [item['filename'] for item in files])
+                self.assertTrue(all(blocks.index(block) > toggle for block in documents))
+                for block in blocks:
+                    if block.type == 'details':
+                        self.assertFalse(any(child.type == 'document' or
+                            (child.type == 'paragraph' and not isinstance(child.text, str) and child.text.type == 'code')
+                            for child in block.blocks))
+                action = user.actions[screen.uri_rows[0][0].callback_data[2:]]
+                self.assertEqual((action.name, action.args), ('issuance_uri', ('issuance1', 'false' if visible else 'true')))
+                self.assertIn(screen.uri_rows[0][0], screen.fallback_rows(rows)[0])
+                self.assertEqual(blocks[-2].type, 'divider')
+                self.bot.send_document.assert_not_awaited()
 
-    async def test_vless_screen_uses_same_qr_and_uri_layout(self):
+    async def test_uri_toggle_does_not_duplicate_plain_fallback_documents(self):
         backend = SimpleNamespace(
-            issuance=AsyncMock(return_value={'status': 'succeeded',
-                'profile_id': 'p1', 'node_key': 'lv1', 'protocol': 'xray', 'transport': 'tcp'}),
+            issuance=AsyncMock(return_value={'status': 'succeeded', 'profile_id': 'p1',
+                'node_key': 'lv1', 'protocol': 'xray', 'transport': 'tcp'}),
             artifact=AsyncMock(return_value={'filename': 'Latvia.txt', 'content': 'vless://test'}))
-        with patch.object(user, 'render', new_callable=AsyncMock, return_value=True) as draw:
-            await user.show_issuance(123, 123, 77, 'issuance1', self.bot, backend, self.state)
-        blocks = draw.call_args.args[2].rich().blocks
-        self.assertFalse(blocks[2].is_open)
-        self.assertFalse(blocks[3].is_open)
-        self.assertEqual(blocks[3].blocks[0].text.type, 'code')
-        files = next(block for block in blocks if block.type == 'details'
-                     and block.summary == 'Configuration files')
-        self.assertFalse(files.is_open)
-        self.assertEqual(files.blocks[0].document.media.filename, 'Latvia.txt')
-        self.assertEqual(blocks[3].blocks[0].text.text, 'vless://test')
-        back = user.actions[draw.call_args.args[3][-1][0].callback_data[2:]]
-        self.assertEqual((back.name, back.args), ('protocol', ('p1', 'lv1', 'xray')))
+        self.bot.send_document.return_value = SimpleNamespace(message_id=101)
+        self.bot.send_photo.return_value = SimpleNamespace(message_id=102)
+        with patch.object(user, 'render', new_callable=AsyncMock, return_value=False):
+            for show_uri in (False, True, False):
+                await user.show_issuance(123, 123, 77, 'issuance1', self.bot, backend, self.state,
+                    show_uri=show_uri)
+        self.bot.send_document.assert_awaited_once()
+        self.bot.send_photo.assert_awaited_once()
+        self.assertEqual(self.state_data['delivered_issuances'], ['issuance1'])
+        self.assertEqual(backend.artifact.await_count, 3)
 
     async def test_awg_selection_issues_bundle_without_format_selector(self):
         backend = SimpleNamespace(profile_nodes=AsyncMock(return_value={'items': [
@@ -846,16 +855,15 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
 
     async def test_member_settings_actions_describe_the_change_and_preserve_backend_values(self):
         backend = SimpleNamespace(me=AsyncMock(return_value={
-            'announcement_silent': True, 'traffic_available': True, 'traffic_consent': True}))
+            'announcement_silent': True, 'traffic_available': True}))
         with patch.object(user, 'render', new_callable=AsyncMock) as draw:
             await user.show_member_settings(123, 123, 77, self.bot, backend, self.state)
         sections = draw.call_args.args[2].sections
         sound = sections[1].rows[0][0]
-        consent = sections[2].rows[0][0]
         self.assertEqual(sound.text, 'Enable')
         self.assertEqual(user.actions[sound.callback_data[2:]].args, ('false',))
-        self.assertEqual(consent.text, 'Withdraw consent')
-        self.assertEqual(user.actions[consent.callback_data[2:]].args, ('false',))
+        self.assertEqual(sections[2].rows, ())
+        self.assertIn('enabled by the administrator', sections[2].lines[0])
 
     async def test_language_and_sound_choices_highlight_only_the_saved_value(self):
         for locale in ('ru', 'en'):
@@ -866,7 +874,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
                 with patch.object(user, 'render', new_callable=AsyncMock) as draw:
                     await user.show_member_settings(123, 123, 77, self.bot, backend, self.state)
                 self.assertEqual(draw.call_args.args[2].lines, ())
-                language, sound = draw.call_args.args[2].sections
+                language, sound = draw.call_args.args[2].sections[:2]
                 self.assertEqual((language.lines, sound.lines), ((), ()))
                 self.assertEqual(len(language.rows[0]), 2)
                 self.assertEqual(len(sound.rows[0]), 2)
@@ -1483,7 +1491,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         self.assertTrue(render.call_args.args[3][-1][0].callback_data.startswith('accounts'))
 
 
-    def test_member_profile_tables_preserve_localization_and_traffic_consent(self):
+    def test_member_profile_traffic_has_compact_localized_server_rows(self):
         summary = {'nodes': [], 'traffic': {'status': 'current', 'month': '2026-10',
             'items': [{'protocol': 'awg', 'uplink_bytes': 1024, 'downlink_bytes': 2048}],
             'nodes': [{'node_key': 'lv1', 'protocol': 'awg', 'uplink_bytes': 1024,
@@ -1495,23 +1503,18 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             self.assertEqual(section.tables[0].rows, (('AmneziaWG', '3.0 KiB'),))
             server = user.profile_server_section(summary, node, locale)
             self.assertEqual(server.title, '🇱🇻 Latvia')
-            self.assertEqual(server.tables[0].rows[0], ('AmneziaWG', '3.0 KiB'))
-            self.assertEqual(server.tables[0].rows[1], ('VLESS', user.tr(locale, 'account.rich.waiting')))
-            self.assertTrue(all('account.rich.' not in value for value in server.tables[0].headers))
-        summary['traffic']['status'] = 'consent_required'
-        self.assertIsNone(user.profile_traffic_section(summary, 'en'))
-        self.assertEqual(user.profile_server_section(summary, node, 'en').tables, ())
+            self.assertEqual(server.tables, ())
+            self.assertEqual(server.lines[0], 'AmneziaWG: 3.0 KiB · VLESS: ' + user.tr(locale, 'account.rich.waiting'))
         summary['traffic'] = None
         self.assertIsNone(user.profile_traffic_section(summary, 'en'))
 
 
-    async def test_profile_traffic_hint_requires_global_collection_but_missing_member_consent(self):
+    async def test_profile_has_no_member_consent_prompt(self):
         summary = {'display_name': 'Alice', 'frozen': False, 'expired': False, 'nodes': []}
         backend = SimpleNamespace(member_profile_summary=AsyncMock(return_value=summary))
         for locale in ('ru', 'en'):
             self.state_data['locale'] = locale
-            for traffic, expected in ((None, False), ({'status': 'consent_required', 'items': []}, True),
-                                      ({'status': 'waiting', 'items': []}, False)):
+            for traffic, expected in ((None, False), ({'status': 'waiting', 'items': []}, False)):
                 summary['traffic'] = traffic
                 with patch.object(user, 'render', new_callable=AsyncMock) as draw:
                     await user.show_account_profile(123, 123, 77, 'p1', self.bot, backend, self.state)

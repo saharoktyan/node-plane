@@ -10,7 +10,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardButton, Message
 
 from ..backend import BackendClient, BackendError
-from ..screens import Screen, Section, Table
+from ..screens import Screen, Section, Table, format_size
 from ..i18n import normalize_locale, tr
 from .callbacks import AdminSettingsCallback, RequestPolicyCallback, UpdatesCallback
 from .common import render
@@ -403,7 +403,7 @@ async def show_release_cleanup(query: CallbackQuery, bot: Bot,
                 ((tr(locale, 'cleanup.rich.total'), str(overview.get('total_releases', 0))),
                  (tr(locale, 'cleanup.rich.kept'), str(overview.get('kept_releases', 0))),
                  (tr(locale, 'cleanup.rich.removable'), str(overview.get('removable_releases', 0))),
-                 (tr(locale, 'backups.rich.size'), f"{overview.get('removable_size_bytes', 0) / 1048576:.1f} MiB"))),)),
+                 (tr(locale, 'backups.rich.size'), format_size(overview.get('removable_size_bytes', 0))))),)),
             Section(tr(locale, 'nodes.rich.technical'),
                 (tr(locale, 'cleanup.mode', value=overview.get('install_mode') or '—'),
                  tr(locale, 'cleanup.current', value=overview.get('current_target') or '—')), collapsed=True)),

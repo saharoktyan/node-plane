@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.3-alpha.39 - 2026-10-05
+
+- Remove the retired PTB monolith, dependency and obsolete controller Docker entrypoint.
+- Consolidate development work into one plan and refresh architecture/API references.
+- Make traffic accounting an administrator-controlled installation policy for all profiles.
+- Add monthly admin profile totals and a separate regional, paginated server traffic view.
+- Show protocol usage in compact bullet-separated rows.
+- Put config help/QR above Show/Hide URI controls, with copyable text and downloadable
+  files outside collapsible blocks for the reported Telegram iOS interaction issue.
+- Compact AWG URI encoding without changing its compressed wire format.
+- Parse local-agent discovery config as TOML and retain explicit target precedence.
+- Display small backup sizes accurately and keep installation/update paths on the new stack.
+
+
 ## 0.4.3-alpha.19
 
 - Complete native backend/aiogram administration: node maintenance and removal,
