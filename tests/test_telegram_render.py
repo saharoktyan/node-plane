@@ -118,9 +118,8 @@ class RenderRecoveryTests(IsolatedAsyncioTestCase):
             self.assertFalse(payload['blocks'][1]['is_open'])
             self.assertTrue(payload['blocks'][1]['blocks'][0]['photo']['media'].startswith('attach://'))
             self.assertEqual(payload['blocks'][2]['text'], {'type': 'code', 'text': 'vpn://fresh'})
-            self.assertEqual(payload['blocks'][3]['type'], 'details')
-            self.assertFalse(payload['blocks'][3]['is_open'])
-            self.assertEqual([block['type'] for block in payload['blocks'][3]['blocks']],
+            self.assertEqual(payload['blocks'][3]['type'], 'heading')
+            self.assertEqual([block['type'] for block in payload['blocks'][4:]],
                              ['document', 'document'])
             self.assertEqual({file.filename for file in files.values()},
                              {'config.png', 'node.vpn', 'node.conf'})

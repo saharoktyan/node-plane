@@ -13,10 +13,8 @@ from services import app_settings
 from services.backups import maybe_create_pre_action_backup
 
 UPDATE_UNIT_PREFIX = "node-plane-update"
-DRIVER_AGENTS_UNIT_PREFIX = "node-plane-driver-agents-setup"
 _log = logging.getLogger("updates")
 _update_run_lock = threading.Lock()
-_driver_agents_run_lock = threading.Lock()
 
 
 def _utcnow_iso() -> str:
@@ -405,152 +403,8 @@ def schedule_update(timeout: int = 30, branch: str | None = None, target_ref: st
             return {"status": "failed", "message": str(exc)}
 
 
-def _last_driver_agents_run_status_from_show(payload: Dict[str, str], fallback: str) -> str:
-    return _last_run_status_from_show(payload, fallback)
-
-
 def is_driver_agents_setup_supported() -> bool:
     return detect_install_mode() == "simple" and os.path.isfile(_script_path("setup_driver_agents.sh"))
-
-
-def is_driver_agents_update_needed() -> bool:
-    if not is_driver_agents_setup_supported():
-        return False
-    if not os.path.isfile("/usr/local/bin/node-plane-driver") or not os.path.isfile("/etc/systemd/system/node-plane-driver.service"):
-        return True
-    state = app_settings.get_driver_agents_state()
-    successful_commit = str(state.get("last_successful_commit") or "").strip()
-    if successful_commit:
-        return not APP_COMMIT or APP_COMMIT == "unknown" or not successful_commit.startswith(APP_COMMIT)
-    try:
-        with open(f"{SHARED_ROOT}/driver-agent-installed-commit", encoding="utf-8") as marker:
-            installed_commit = marker.read().strip()
-    except OSError:
-        return True
-    return not APP_COMMIT or APP_COMMIT == "unknown" or not installed_commit.startswith(APP_COMMIT)
-
-
-def refresh_driver_agents_run_state(timeout: int = 20) -> Dict[str, str]:
-    state = app_settings.get_driver_agents_state()
-    unit_name = str(state.get("last_run_unit") or "").strip()
-    if not unit_name:
-        return state
-    try:
-        show_proc = _run_cmd(
-            _system_cmd(
-                "systemctl",
-                "show",
-                f"{unit_name}.service",
-                "--property=LoadState,ActiveState,SubState,Result,ExecMainStatus",
-                "--no-pager",
-            ),
-            timeout=timeout,
-        )
-        show_payload = _parse_show_output((show_proc.stdout or "").strip())
-        if show_proc.returncode == 0:
-            status = _last_driver_agents_run_status_from_show(show_payload, str(state.get("last_run_status") or "never"))
-        else:
-            status = str(state.get("last_run_status") or "never")
-        journal_proc = _run_cmd(
-            _system_cmd("journalctl", "-u", f"{unit_name}.service", "-n", "40", "--no-pager"),
-            timeout=timeout,
-        )
-        log_tail = _trim_log_tail((journal_proc.stdout or "").strip())
-        if status == "running":
-            if log_tail:
-                app_settings.set_driver_agents_run_log_tail(log_tail)
-            state = app_settings.get_driver_agents_state()
-            state["last_run_status"] = status
-            state["last_run_log_tail"] = log_tail or str(state.get("last_run_log_tail") or "")
-            return state
-        if status in {"success", "failed"} and state.get("last_run_status") != status:
-            app_settings.record_driver_agents_run_finished(status, _utcnow_iso(), log_tail if status == "failed" else "")
-            state = app_settings.get_driver_agents_state()
-            state["last_run_unit"] = unit_name
-            return state
-        if status == "failed" and log_tail and state.get("last_run_log_tail") != log_tail:
-            app_settings.set_driver_agents_run_log_tail(log_tail)
-            state = app_settings.get_driver_agents_state()
-            state["last_run_unit"] = unit_name
-        return state
-    except Exception as exc:
-        if str(state.get("last_run_status") or "") == "running":
-            app_settings.record_driver_agents_run_finished("failed", _utcnow_iso(), str(exc))
-            state = app_settings.get_driver_agents_state()
-        return state
-
-
-def schedule_driver_agents_setup(timeout: int = 30) -> Dict[str, str]:
-    with _driver_agents_run_lock:
-        state = refresh_driver_agents_run_state()
-        if str(state.get("last_run_status") or "") == "running":
-            return {"status": "running", "unit_name": str(state.get("last_run_unit") or "")}
-        if not is_driver_agents_setup_supported():
-            app_settings.record_driver_agents_run_finished("failed", _utcnow_iso(), "driver/agent setup is only available in simple mode")
-            state = app_settings.get_driver_agents_state()
-            return {"status": "failed", "message": str(state.get("last_run_log_tail") or "")}
-        source_root = _effective_source_root()
-        started_at = _utcnow_iso()
-        unit_name = f"{DRIVER_AGENTS_UNIT_PREFIX}-{started_at.replace(':', '').replace('-', '').replace('T', '-').replace('Z', '').lower()}"
-        try:
-            cmd = _system_cmd(
-                "systemd-run",
-                "--unit",
-                unit_name,
-                "--collect",
-                "--working-directory",
-                source_root,
-                "--setenv",
-                f"NODE_PLANE_SOURCE_DIR={source_root}",
-                "--setenv",
-                f"NODE_PLANE_APP_DIR={APP_ROOT}",
-                "--setenv",
-                f"NODE_PLANE_BASE_DIR={BASE_DIR}",
-                "--setenv",
-                f"NODE_PLANE_SHARED_DIR={SHARED_ROOT}",
-                f"{source_root}/scripts/setup_driver_agents.sh",
-                "--strict",
-            )
-            proc = _run_cmd(cmd, cwd=source_root, timeout=timeout)
-            output = ((proc.stdout or "").strip() + "\n" + (proc.stderr or "").strip()).strip()
-            if proc.returncode != 0:
-                message = output or f"failed to start driver/agent setup job (exit {proc.returncode})"
-                app_settings.record_driver_agents_run_finished("failed", _utcnow_iso(), message)
-                return {"status": "failed", "message": message}
-            app_settings.record_driver_agents_run_started(started_at, unit_name, APP_COMMIT)
-            return {"status": "running", "unit_name": unit_name}
-        except Exception as exc:
-            app_settings.record_driver_agents_run_finished("failed", _utcnow_iso(), str(exc))
-            return {"status": "failed", "message": str(exc)}
-
-
-def get_driver_agents_setup_overview() -> Dict[str, str | bool]:
-    state = refresh_driver_agents_run_state()
-    return {
-        "supported": is_driver_agents_setup_supported(),
-        "update_needed": is_driver_agents_update_needed(),
-        "last_run_started_at": state.get("last_run_started_at", ""),
-        "last_run_finished_at": state.get("last_run_finished_at", ""),
-        "last_run_status": state.get("last_run_status", "never"),
-        "last_run_log_tail": state.get("last_run_log_tail", ""),
-        "last_run_unit": state.get("last_run_unit", ""),
-    }
-
-
-def auto_check_job(context: object | None = None) -> None:
-    if not app_settings.is_updates_auto_check_enabled():
-        return
-    try:
-        result = check_for_updates(branch=app_settings.get_updates_branch())
-        status = str(result.get("status") or "error")
-        if status == "available":
-            _log.info("Auto-check found an available update: %s", result.get("remote_label") or result.get("remote_version") or "unknown")
-        elif status == "error":
-            _log.warning("Auto-check failed: %s", result.get("message") or "unknown error")
-        else:
-            _log.info("Auto-check completed: %s", status)
-    except Exception:
-        _log.exception("Auto-check job failed")
 
 
 def get_updates_overview() -> Dict[str, str | bool]:
@@ -609,17 +463,3 @@ def get_updates_overview() -> Dict[str, str | bool]:
         "local_commit": local_commit,
         "remote_commit": remote_commit,
     }
-
-
-def get_updates_menu_emoji(overview: Dict[str, str | bool] | None = None) -> str:
-    overview = overview or get_updates_overview()
-    last_run_status = str(overview.get("last_run_status") or "")
-    if last_run_status == "running":
-        return "⏳"
-    if last_run_status == "failed":
-        return "⚠️"
-    if bool(overview.get("update_available")):
-        return "🆕"
-    if str(overview.get("last_status") or "") == "up_to_date":
-        return "🟢"
-    return "📦"

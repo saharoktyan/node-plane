@@ -73,42 +73,24 @@ if [[ "$activate" -eq 0 ]]; then
   echo "node-plane-telegram.service installed but inactive. Run with --activate after testing the backend." >&2
   exit 0
 fi
-legacy_was_active=0
-legacy_was_enabled=0
+# Retire an installed old polling unit without retaining a PTB fallback.
+# The previous aiogram release remains available through normal stack rollback.
 if systemctl is-enabled --quiet node-plane.service; then
-  legacy_was_enabled=1
-fi
-if systemctl is-active --quiet node-plane.service; then
-  legacy_was_active=1
-fi
-if [[ "$legacy_was_enabled" -eq 1 ]]; then
   systemctl disable node-plane.service
 fi
-if [[ "$legacy_was_active" -eq 1 ]]; then
-  if ! systemctl stop node-plane.service; then
-    if [[ "$legacy_was_enabled" -eq 1 ]]; then systemctl enable node-plane.service; fi
-    exit 1
-  fi
+if systemctl is-active --quiet node-plane.service; then
+  systemctl stop node-plane.service
 fi
-restore_legacy() {
-  if [[ "$legacy_was_enabled" -eq 1 ]]; then systemctl enable node-plane.service; fi
-  if [[ "$legacy_was_active" -eq 1 ]]; then systemctl start node-plane.service; fi
-}
 if ! systemctl enable node-plane-telegram.service; then
-  restore_legacy
   exit 1
 fi
 if ! systemctl restart node-plane-telegram.service; then
-  systemctl disable node-plane-telegram.service || true
-  restore_legacy
-  echo "New client failed to start; previous bot was restored if it was active" >&2
+  echo "Telegram client failed to start; inspect journalctl -u node-plane-telegram" >&2
   exit 1
 fi
 sleep 2
 if ! systemctl is-active --quiet node-plane-telegram.service; then
   systemctl stop node-plane-telegram.service || true
-  systemctl disable node-plane-telegram.service || true
-  restore_legacy
   echo "New client stopped after startup; inspect journalctl -u node-plane-telegram" >&2
   exit 1
 fi

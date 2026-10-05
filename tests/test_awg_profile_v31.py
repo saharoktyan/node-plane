@@ -181,6 +181,20 @@ PersistentKeepalive = 25
             self.assertEqual(payload["I5"], "<r 1000>")
             self.assertEqual(json.loads(payload["last_config"])["RandomTrailers"], "on")
 
+    def test_compact_uri_preserves_json_and_legacy_decoding(self):
+        spec = importlib.util.spec_from_file_location('awg_codec', ASSETS / 'amnezia-config-decoder.py')
+        codec = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(codec)
+        config = json.loads((ASSETS / 'awg-template.json').read_text())
+        config['description'] = 'Латвия #1 AmneziaWG · alice'
+        config['containers'][0]['awg'].update(awg_profile.new_profile('quic'))
+        old_json = json.dumps(config, indent=4).encode()
+        old_uri = 'vpn://' + base64.urlsafe_b64encode(len(old_json).to_bytes(4, 'big') + zlib.compress(old_json)).decode().rstrip('=')
+        compact_uri = codec.encode_config(config)
+        self.assertEqual(codec.decode_config(compact_uri), config)
+        self.assertEqual(codec.decode_config(old_uri), config)
+        self.assertLess(len(compact_uri), len(old_uri))
+
     def test_rejects_invalid_header_and_cps(self):
         profile = awg_profile.new_profile("quic")
         profile["S4"] = "8"

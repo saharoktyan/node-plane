@@ -300,15 +300,6 @@ validate_install_ref() {
   echo "$ref"
 }
 
-ref_supports_manage_db_command() {
-  local ref="$1"
-  local command_name="$2"
-  local manage_db_source
-
-  manage_db_source="$(git show "${ref}:app/manage_db.py" 2>/dev/null || true)"
-  [[ -n "$manage_db_source" ]] || return 1
-  printf '%s\n' "$manage_db_source" | grep -Fq "\"${command_name}\""
-}
 
 resolve_install_ref() {
   local branch="$1"
@@ -679,6 +670,8 @@ ensure_release_python_runtime() {
   "$python_bin" -m pip install --upgrade pip setuptools wheel
   set_step "install python dependencies"
   "$python_bin" -m pip install -r "${release_dir}/requirements.txt"
+  # A reused release may still contain the retired PTB runtime.
+  "$python_bin" -m pip uninstall -y python-telegram-bot
 }
 
 run_simple_install() {
@@ -750,13 +743,6 @@ run_simple_install() {
     echo "POSTGRES_DSN is required." >&2
     exit 1
   fi
-  NODE_PLANE_BASE_DIR="${base_dir}" \
-  NODE_PLANE_APP_DIR="${new_release_dir}" \
-  NODE_PLANE_SHARED_DIR="${shared_dir}" \
-  DB_BACKEND=postgres \
-  POSTGRES_DSN="${postgres_dsn}" \
-  "${new_release_dir}/.venv/bin/python" "${new_release_dir}/app/manage_db.py" init
-
   if [[ -f "${new_release_dir}/app/backend/admin_cli.py" ]]; then
     set_step "initialize backend schema"
     NODE_PLANE_BASE_DIR="${base_dir}" \
@@ -845,77 +831,6 @@ install_systemd_stack() {
   AUTO_INSTALL_SYSTEMD=1
 }
 
-run_portable_install() {
-  set_step "ensure docker is installed"
-  install_docker_if_missing
-  set_step "ensure docker compose is installed"
-  install_docker_compose_if_missing
-  local image_repo image_tag current_container current_image_ref current_repo current_tag
-  image_repo="$(read_env_value NODE_PLANE_IMAGE_REPO)"
-  image_tag="$(read_env_value NODE_PLANE_IMAGE_TAG)"
-  current_container=""
-  if docker compose version >/dev/null 2>&1; then
-    current_container="$(docker compose ps -q node-plane 2>/dev/null | tail -n 1 || true)"
-  elif command -v docker-compose >/dev/null 2>&1; then
-    current_container="$(docker-compose ps -q node-plane 2>/dev/null | tail -n 1 || true)"
-  fi
-  current_image_ref=""
-  if [[ -n "$current_container" ]]; then
-    current_image_ref="$(docker inspect -f '{{.Config.Image}}' "$current_container" 2>/dev/null || true)"
-  fi
-  current_repo="${current_image_ref%:*}"
-  current_tag="${current_image_ref##*:}"
-  if [[ "$current_image_ref" == "$current_repo" ]]; then
-    current_tag=""
-  fi
-  if [[ $FORCE_REINSTALL -eq 0 ]] \
-    && [[ "${image_repo:-node-plane}" != "node-plane" || "${image_tag:-local}" != "local" ]] \
-    && [[ -n "$current_repo" ]] \
-    && [[ "$current_repo" == "$image_repo" ]] \
-    && [[ "$current_tag" == "$image_tag" ]]; then
-    echo
-    echo "Portable mode install is already on the target image; skipping container redeploy."
-    echo "Configured image:"
-    echo "  ${image_repo}:${image_tag}"
-    return 0
-  fi
-  if docker compose version >/dev/null 2>&1; then
-    if [[ "${image_repo:-node-plane}" == "node-plane" && "${image_tag:-local}" == "local" ]]; then
-      set_step "docker compose build and start"
-      docker compose up -d --build
-    else
-      set_step "docker compose pull and start"
-      docker compose pull
-      docker compose up -d
-    fi
-  elif command -v docker-compose >/dev/null 2>&1; then
-    if [[ "${image_repo:-node-plane}" == "node-plane" && "${image_tag:-local}" == "local" ]]; then
-      set_step "docker-compose build and start"
-      docker-compose up -d --build
-    else
-      set_step "docker-compose pull and start"
-      docker-compose pull
-      docker-compose up -d
-    fi
-  else
-    echo "Docker Compose is required. Install docker compose plugin or docker-compose." >&2
-    exit 1
-  fi
-
-  echo
-  echo "Portable mode bot container is starting."
-  echo
-  echo "First-run path:"
-  echo "  1. Verify the container-oriented setup:"
-  echo "     ./scripts/healthcheck.sh --mode portable"
-  echo "  2. Open the bot from the Telegram account listed in ADMIN_IDS"
-  echo "  3. Send /start once"
-  echo "     The bot will create the admin profile automatically and show first-run setup"
-  echo "  4. Choose: Set up over SSH"
-  echo "  5. Open Admin -> SSH Key"
-  echo "  6. Add the generated public key to a remote server"
-  echo "  7. Open the new server card and run Probe, then Bootstrap"
-}
 
 choose_mode
 case "$MODE" in
@@ -933,8 +848,4 @@ esac
 configure_env
 print_repo_location_note
 
-if [[ "$MODE" == "simple" ]]; then
-  run_simple_install
-else
-  run_portable_install
-fi
+run_simple_install

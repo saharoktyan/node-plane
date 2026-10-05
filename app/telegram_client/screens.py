@@ -15,6 +15,18 @@ def server_label(node: dict) -> str:
     return f"{node.get('flag') or ''} {node['title']}".strip()
 
 
+def format_size(size_bytes: int) -> str:
+    """Display nonempty small files without rounding them to zero MiB."""
+    if size_bytes < 1024:
+        return f'{size_bytes} B'
+    amount = float(size_bytes)
+    for unit in ('KiB', 'MiB', 'GiB', 'TiB', 'PiB', 'EiB'):
+        amount /= 1024
+        if amount < 1024 or unit == 'EiB':
+            return f'{amount:.1f} {unit}'
+    raise ValueError('invalid size')
+
+
 BACK_LABELS = {'← Back', '← Назад', 'Back', 'Назад'}
 
 
@@ -81,6 +93,7 @@ class Screen:
     files: tuple[tuple[str, bytes], ...] = ()
     files_title: str | None = None
     uri_title: str | None = None
+    uri_rows: tuple[tuple[InlineKeyboardButton, ...], ...] = ()
     sections: tuple[Section, ...] = ()
     embedded_buttons: bool = False
     navigation: bool = False
@@ -90,22 +103,25 @@ class Screen:
         blocks.extend(InputRichBlockParagraph(text=line) for line in self.lines if line)
         for section in self.sections:
             blocks.extend(section.rich())
+        if self.details_title and self.details_lines:
+            blocks.append(InputRichBlockDetails(summary=self.details_title,
+                blocks=[InputRichBlockParagraph(text=line) for line in self.details_lines]))
         if self.qr and self.qr_title:
             blocks.append(InputRichBlockDetails(summary=self.qr_title, is_open=False,
                 blocks=[InputRichBlockPhoto(photo=InputMediaPhoto(
                     media=BufferedInputFile(self.qr, 'config.png')))]))
+        blocks.extend(rich_buttons(self.uri_rows))
         if self.uri:
             uri = InputRichBlockParagraph(text=RichTextCode(text=self.uri))
-            blocks.append(InputRichBlockDetails(summary=self.uri_title, blocks=[uri], is_open=False)
-                          if self.uri_title else uri)
+            if self.uri_title and not self.uri_rows:
+                blocks.append(InputRichBlockSectionHeading(text=self.uri_title, size=2))
+            blocks.append(uri)
         documents = [InputRichBlockDocument(document=InputMediaDocument(
             media=BufferedInputFile(content, filename))) for filename, content in self.files]
         if documents:
-            blocks.extend([InputRichBlockDetails(summary=self.files_title, blocks=documents, is_open=False)]
-                          if self.files_title else documents)
-        if self.details_title and self.details_lines:
-            blocks.append(InputRichBlockDetails(summary=self.details_title,
-                blocks=[InputRichBlockParagraph(text=line) for line in self.details_lines]))
+            if self.files_title:
+                blocks.append(InputRichBlockSectionHeading(text=self.files_title, size=2))
+            blocks.extend(documents)
         if self.embedded_buttons:
             for index, row in enumerate(rows):
                 back = bool(row and index == len(rows) - 1 and
@@ -139,7 +155,7 @@ class Screen:
                 yield from (list(row) for row in section.heading_rows)
                 yield from section_rows(section.sections)
                 yield from (list(row) for row in section.rows)
-        return [*section_rows(self.sections), *rows]
+        return [*section_rows(self.sections), *(list(row) for row in self.uri_rows), *rows]
 
     def plain_entities(self) -> list[MessageEntity] | None:
         if not self.uri:

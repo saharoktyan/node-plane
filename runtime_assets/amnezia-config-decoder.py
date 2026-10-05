@@ -5,8 +5,8 @@ import json
 import zlib
 
 def encode_config(config):
-    json_str = json.dumps(config, indent=4).encode()
-    compressed_data = zlib.compress(json_str)
+    json_str = json.dumps(config, ensure_ascii=False, separators=(",", ":")).encode()
+    compressed_data = zlib.compress(json_str, level=9)
     original_data_len = len(json_str)
     header = original_data_len.to_bytes(4, byteorder='big')
     encoded_data = base64.urlsafe_b64encode(header + compressed_data).decode().rstrip("=")

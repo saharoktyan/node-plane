@@ -36,6 +36,34 @@ class ProfileRichTests(IsolatedAsyncioTestCase):
                 'tasks': [{'node_key': 'n00', 'protocol': 'awg', 'status': 'blocked'}]}),
             edit_profile=AsyncMock(), replace_grants=AsyncMock())
 
+    async def test_profile_card_traffic_and_separate_region_paged_server_view(self):
+        from telegram_client.i18n import tr
+        summary = {'display_name': 'Alice', 'nodes': self.nodes,
+            'traffic': {'status': 'current', 'month': '2026-10',
+                'items': [{'protocol': 'awg', 'uplink_bytes': 1024, 'downlink_bytes': 2048}],
+                'nodes': [{'node_key': node['key'], 'protocol': 'awg', 'status': 'current',
+                    'uplink_bytes': 1024, 'downlink_bytes': 2048} for node in self.nodes]}}
+        async def request(method, path, **kwargs):
+            return summary if path.endswith('/summary') else self.profile
+        self.backend.request.side_effect = request
+        for locale in ('ru', 'en'):
+            self.data['locale'] = locale
+            with patch.object(profiles, 'render', new_callable=AsyncMock) as draw:
+                await profiles.show_admin_profile(123, 123, 77, 'p1', self.bot, self.backend, self.state)
+            screen, rows = draw.call_args.args[2:4]
+            self.assertEqual(len(screen.sections), 1)
+            self.assertIn('3.0 KiB', screen.plain())
+            self.assertNotIn('Node 00', screen.plain())
+            self.assertIn('prof_traffic:p1:0', [b.callback_data for row in rows for b in row])
+            with patch.object(profiles, 'render', new_callable=AsyncMock) as draw:
+                await profiles.show_profile_traffic(123, 123, 77, 'p1', 1, self.bot, self.backend, self.state)
+            screen, rows = draw.call_args.args[2:4]
+            self.assertEqual(sum(len(s.sections) for s in screen.sections), 10)
+            self.assertEqual([b.text for b in rows[0]], ['←', '2/3', '→'])
+            self.assertTrue(all('AmneziaWG: 3.0 KiB · VLESS:' in s.lines[0]
+                for group in screen.sections for s in group.sections))
+            self.assertEqual(screen.title, tr(locale, 'traffic.servers'))
+
     async def test_list_retains_search_page_with_embedded_record_actions(self):
         self.backend.admin_profiles = AsyncMock(return_value={'items': [self.profile], 'next_cursor': 'next'})
         with patch.object(profiles, 'render', new_callable=AsyncMock) as draw:

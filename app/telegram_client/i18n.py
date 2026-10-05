@@ -17,7 +17,6 @@ CATALOG = {
         'ui.notifications': 'Звук объявлений',
         'ui.enable_sound': 'Включить', 'ui.disable_sound': 'Выключить',
         'ui.traffic': 'Статистика трафика',
-        'ui.give_consent': 'Разрешить сбор статистики', 'ui.withdraw_consent': 'Отозвать согласие',
 
         'home.title': 'Node Plane', 'home.choose': 'Выберите действие.',
         'home.waiting': 'Заявка ожидает решения администратора.',
@@ -558,7 +557,6 @@ CATALOG = {
         'ui.notifications': 'Announcement sound',
         'ui.enable_sound': 'Enable', 'ui.disable_sound': 'Disable',
         'ui.traffic': 'Traffic statistics',
-        'ui.give_consent': 'Allow statistics collection', 'ui.withdraw_consent': 'Withdraw consent',
 
         'home.title': 'Node Plane', 'home.choose': 'Choose an action.',
         'home.waiting': 'Your request is waiting for an administrator.',
@@ -1488,13 +1486,11 @@ CATALOG['en'].update({
     'nodes.region_unknown': 'Other regions',
     'traffic.enabled': 'Available to members: yes',
     'traffic.disabled': 'Available to members: no',
-    'traffic.description': 'Traffic statistics require separate consent from each account owner. Enabling availability does not opt members in.',
-    'traffic.collection_note': 'Only synced profiles with owner consent are queried. The first sample is a baseline; container resets are accounted for. No browsing history is collected.',
-    'traffic.consent_description': 'Consent covers byte counters only. Withdrawing consent deletes your stored traffic statistics. The first sample excludes earlier traffic.',
+    'traffic.description': 'The administrator controls traffic accounting for all profiles.',
+    'traffic.collection_note': 'Only synced profiles are queried when accounting is enabled. The first sample is a baseline; container resets are accounted for. No browsing history is collected.',
     'traffic.interval': 'Sampling interval: {minutes} minutes; up to 32 profile/node/protocol pairs per batch.',
     'traffic.scan': 'Last batch: {at} UTC · Checked: {checked} · Unknown: {unknown}',
     'traffic.not_checked': 'No traffic samples collected yet.',
-    'traffic.status.consent_required': 'Traffic statistics are disabled. You can grant consent in Settings.',
     'traffic.status.waiting': 'Waiting for the first traffic sample.',
     'traffic.status.current': 'Traffic this month (UTC):',
     'traffic.month_total': 'Total for {month}: {total}',
@@ -1504,8 +1500,6 @@ CATALOG['en'].update({
     'traffic.status.unknown': 'Some counters are unavailable or paused. The last recorded totals are shown; they may be incomplete.',
     'traffic.totals': '{protocol}: upload {upload} · download {download}',
     'traffic.sample': 'Tracked since {since} UTC · Last sample {at} UTC',
-    'traffic.consent_on': 'Traffic statistics consent: granted',
-    'traffic.consent_off': 'Traffic statistics consent: not granted',
 })
 CATALOG['ru'].update({
     'traffic.title': 'Статистика трафика',
@@ -1515,13 +1509,11 @@ CATALOG['ru'].update({
     'nodes.region_unknown': 'Другие регионы',
     'traffic.enabled': 'Доступна пользователям: да',
     'traffic.disabled': 'Доступна пользователям: нет',
-    'traffic.description': 'Для статистики нужно отдельное согласие владельца аккаунта. Включение доступности не включает сбор для пользователей автоматически.',
-    'traffic.collection_note': 'Опрашиваются только синхронизированные профили с согласием владельца. Первый замер — исходная точка; сбросы при рестартах учитываются. История посещений не собирается.',
-    'traffic.consent_description': 'Согласие касается только счётчиков байтов. Отзыв согласия удаляет сохранённую статистику вашего трафика. Первый замер исключает прежний трафик.',
+    'traffic.description': 'Администратор управляет учётом трафика для всех профилей.',
+    'traffic.collection_note': 'Опрашиваются только синхронизированные профили при включённом учёте. Первый замер — исходная точка; сбросы при рестартах учитываются. История посещений не собирается.',
     'traffic.interval': 'Интервал: {minutes} минут; до 32 пар профиль/нода/протокол за один проход.',
     'traffic.scan': 'Последний проход: {at} UTC · Проверено: {checked} · Неизвестно: {unknown}',
     'traffic.not_checked': 'Замеры трафика ещё не выполнялись.',
-    'traffic.status.consent_required': 'Статистика трафика выключена. Согласие можно дать в настройках.',
     'traffic.status.waiting': 'Ожидается первый замер трафика.',
     'traffic.status.current': 'Трафик за текущий месяц (UTC):',
     'traffic.month_total': 'Всего за {month}: {total}',
@@ -1531,8 +1523,6 @@ CATALOG['ru'].update({
     'traffic.status.unknown': 'Часть счётчиков недоступна или сбор приостановлен. Показаны последние итоги; они могут быть неполными.',
     'traffic.totals': '{protocol}: отправлено {upload} · получено {download}',
     'traffic.sample': 'Учёт с {since} UTC · Последний замер {at} UTC',
-    'traffic.consent_on': 'Согласие на статистику трафика: дано',
-    'traffic.consent_off': 'Согласие на статистику трафика: не дано',
 })
 
 CATALOG['en'].update({
@@ -1920,8 +1910,6 @@ CATALOG['ru'].update({
 CATALOG['en']['account.rich.connections'] = 'Connections'
 CATALOG['ru']['account.rich.connections'] = 'Подключений'
 
-CATALOG['en']['account.rich.enable_traffic'] = 'Traffic statistics are unavailable. You can enable them in Settings.'
-CATALOG['ru']['account.rich.enable_traffic'] = 'Статистика трафика недоступна. Её можно включить в настройках.'
 
 
 CATALOG['en'].update({'region.europe': 'Europe', 'region.asia': 'Asia',
@@ -2117,4 +2105,23 @@ CATALOG['ru'].update({
     'command.rich.description': 'Описание',
     'nodes.draft.save_only': 'Сохранить настройки',
     'nodes.apply.installation_required': 'Нода ещё не установлена. Откройте Bootstrap, чтобы сначала установить недостающие компоненты.',
+})
+
+CATALOG['en'].update({
+    'traffic.description': 'The administrator controls traffic accounting for all profiles.',
+    'traffic.collection_note': 'Only byte counters are collected, not browsing history. The first sample establishes a baseline; paused periods are excluded.',
+    'traffic.member.enabled': 'Traffic accounting is enabled by the administrator.',
+    'traffic.member.disabled': 'Traffic accounting is disabled by the administrator.',
+    'traffic.servers': 'Traffic by server',
+    'config.link.show': 'Show configuration link',
+    'config.link.hide': 'Hide configuration link',
+})
+CATALOG['ru'].update({
+    'traffic.description': 'Администратор управляет учётом трафика для всех профилей.',
+    'traffic.collection_note': 'Собираются только счётчики байтов, не история посещений. Первый замер задаёт исходную точку; периоды отключённого учёта исключаются.',
+    'traffic.member.enabled': 'Учёт трафика включён администратором.',
+    'traffic.member.disabled': 'Учёт трафика выключен администратором.',
+    'traffic.servers': 'Трафик по серверам',
+    'config.link.show': 'Показать ссылку конфигурации',
+    'config.link.hide': 'Скрыть ссылку конфигурации',
 })

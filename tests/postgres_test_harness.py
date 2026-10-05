@@ -64,8 +64,5 @@ def configure_postgres_test_env(base_dir: str, db_name: str = "bot.pg.sqlite3") 
     os.environ["NODE_PLANE_BASE_DIR"] = base_dir
     os.environ["DB_BACKEND"] = "postgres"
     os.environ["POSTGRES_DSN"] = os.path.join(base_dir, db_name)
-    os.environ.setdefault("SUBS_DB_PATH", os.path.join(base_dir, "subs.json"))
-    os.environ.setdefault("USERS_DB_PATH", os.path.join(base_dir, "users.json"))
-    os.environ.setdefault("WG_DB_PATH", os.path.join(base_dir, "wg_db.json"))
     install_fake_psycopg()
     return os.environ["POSTGRES_DSN"]

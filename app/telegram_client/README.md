@@ -1,4 +1,4 @@
-# New Telegram client (early slice)
+# Telegram client
 
 This aiogram 3 client calls the standalone backend over its loopback HTTP API.
 It does not import backend business repositories, the driver, or the legacy
@@ -33,8 +33,9 @@ the client creates and tracks one. These notifications are not durable across bo
 In simple mode, `scripts/install.sh` initializes the backend schema, bootstraps
 each Telegram administrator listed in `ADMIN_IDS`, creates an adapter credential
 on first install, and starts the backend, worker timer, and aiogram client.
-It disables the old `node-plane.service` when activating
-`node-plane-telegram.service`; startup failure restores an active old service.
+It disables an existing retired `node-plane.service` when activating
+`node-plane-telegram.service`. There is no PTB runtime or fallback in this
+repository; rollback targets must contain the backend and aiogram client.
 The adapter credential path is stored in the shared `.env` and preserved across
 reinstalls. `NODE_PLANE_BACKEND_URL` defaults to `http://127.0.0.1:8080`.
 For a manual installation, the individual unit installer remains available:
@@ -64,7 +65,7 @@ seconds; unavailable summary data does not prevent navigation. Request list,
 review, search and notifications use embedded actions, collapsed identifiers,
 and localized empty/error states. Search Back retains filter/page context.
 Native tables retain labeled rows in the plain-text fallback. See
-`ADMIN_RICH_MESSAGE_PLAN.md` for the remaining administrator UI phases.
+[DEVELOPMENT_PLAN.md](../../DEVELOPMENT_PLAN.md) for remaining development work.
 Profile lists use one clickable `name · status` row per profile. Landing cards
 show a short summary and Access/Edit actions. Management contains account roles
 and deletion; Technical details and operations are nested further inside it.
@@ -76,16 +77,18 @@ Bulk Grant skips disabled servers, while bulk Revoke also removes disabled or
 obsolete grants in its scope. Opaque region tokens keep Unicode callbacks short
 and prevent stale buttons from selecting a different region. Edits preserve the
 starting profile revision; conflicts retain the draft instead of overwriting a
-concurrent change. Administrator traffic display is pending a dedicated read
-contract; member-only summary authorization and consent gates are unchanged.
+concurrent change. Administrator profile traffic uses a dedicated management-authorized summary
+and a separate regional server view. Global admin policy controls collection
+and visibility; member opt-ins have been removed.
 Back-to-menu navigation reuses the last approved home presentation in the
 current user's FSM context instead of requesting account and bot title again.
 This is only a menu snapshot, never an authorization cache: opening destinations
 and issuing configs still use authenticated backend calls. `/start` reloads the
 menu, and access decisions invalidate the recipient's snapshot. Pending access
 screens and missing snapshots are always loaded from the backend.
-Config screens contain collapsed QR, monospace import-link, configuration-file,
-and help blocks. All downloadable files share one initially closed block.
+Config screens put collapsed QR/help blocks above a Show/Hide URI button.
+The full monospace URI appears below its button outside details; downloadable
+files follow outside details for iOS compatibility.
 AWG includes both downloadable `.vpn` and `.conf` files. Import labels use
 `Server name Protocol [Transport] · Profile name`; AWG passes this description
 to the node's converter and VLESS stores it in the URI fragment.
@@ -126,3 +129,17 @@ is saved atomically, and the resulting overview offers Edit and Close. Main-pane
 FSM state remains independent. Reply to the notification when entering a custom
 expiry date. Ordinary member profiles support finite or permanent duration;
 administrator profiles always have permanent duration enforced by the backend.
+
+## Presentation invariants
+
+Keep a single edited control message for normal navigation. Use H1/H2/H3 for
+screen, section and item hierarchy; short native tables for comparable facts;
+collapsed technical details and artifact groups; monospace copyable URIs.
+Hidden content is not an authorization boundary. Keep status, failures and
+required decisions visible, with destructive confirmation where applicable.
+
+Use exactly one divider before Back, return to the actual parent and preserve
+search/page state. Pair related short actions in rows, including wizard Back
+with Next/Skip. Group flagged servers by region and paginate at 10 items with
+arrow-only navigation shown only when needed. Keep complete RU/EN coverage and
+labeled plain-text fallback. Do not make ordinary navigation run fleet probes.

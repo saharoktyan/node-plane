@@ -420,7 +420,3 @@ class BackendClient:
     async def update_traffic_policy(self, telegram_user_id, enabled):
         return await self.request('PATCH', '/api/v1/system/traffic/preferences',
                                   telegram_user_id=telegram_user_id, body={'enabled': enabled})
-
-    async def set_traffic_consent(self, telegram_user_id, consent):
-        return await self.request('PATCH', '/api/v1/me/preferences',
-                                  telegram_user_id=telegram_user_id, body={'traffic_consent': consent})

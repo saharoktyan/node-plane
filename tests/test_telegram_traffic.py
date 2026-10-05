@@ -13,33 +13,18 @@ from tests import test_telegram_client as fixture
 class TelegramTrafficTests(IsolatedAsyncioTestCase):
     setUp = fixture.TelegramFlowTests.setUp
 
-    async def test_member_consent_hidden_when_unavailable_but_still_revocable(self):
-        for locale in ("ru", "en"):
-            self.state_data["locale"] = locale
-            for available, consent, visible in (
-                (False, False, False),
-                (True, False, True),
-                (False, True, True),
-            ):
-                backend = SimpleNamespace(
-                    me=AsyncMock(
-                        return_value={
-                            "traffic_available": available,
-                            "traffic_consent": consent,
-                        }
-                    )
-                )
-                with patch.object(user, "render", new_callable=AsyncMock) as draw:
-                    await user.show_member_settings(
-                        123, 123, 77, self.bot, backend, self.state
-                    )
+    async def test_member_settings_report_global_policy_without_opt_in(self):
+        for locale in ('ru', 'en'):
+            self.state_data['locale'] = locale
+            for available in (False, True):
+                backend = SimpleNamespace(me=AsyncMock(return_value={'traffic_available': available}))
+                with patch.object(user, 'render', new_callable=AsyncMock) as draw:
+                    await user.show_member_settings(123, 123, 77, self.bot, backend, self.state)
                 screen = draw.call_args.args[2]
+                self.assertIn(tr(locale, 'traffic.member.enabled' if available else 'traffic.member.disabled'), screen.plain())
                 labels = [b.text for row in screen.fallback_rows(draw.call_args.args[3]) for b in row]
-                expected = tr(
-                    locale, "ui.withdraw_consent" if consent else "ui.give_consent"
-                )
-                self.assertEqual(expected in labels, visible)
-                self.assertEqual(draw.call_args.args[-1], 77)
+                self.assertNotIn(tr(locale, 'ui.give_consent'), labels)
+                self.assertNotIn(tr(locale, 'ui.withdraw_consent'), labels)
 
     async def test_admin_toggle_sets_explicit_value_and_shows_sampling_status(self):
         backend = SimpleNamespace(

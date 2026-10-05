@@ -57,6 +57,25 @@ fn local_agent_config_recovers_missing_target_without_routing_remote_agents_loca
     assert_eq!(local_agent_target_from_config_content(remote), None);
 }
 
+#[test]
+fn local_target_uses_toml_syntax_and_rejects_invalid_addresses() {
+    assert_eq!(
+        local_agent_target_from_config_content(
+            "node_key = 'msk1' # local node\nlisten_addr = '[::1]:50061' # listener\n[extra]\nvalue = 1\n"
+        ),
+        Some(("msk1".into(), "[::1]:50061".into()))
+    );
+    for value in [
+        "node_key = 'x'\nlisten_addr = '127.0.0.1:abc'",
+        "node_key = ''\nlisten_addr = '127.0.0.1:50061'",
+        "node_key = 'x'\nlisten_addr = '127.0.0.1:0'",
+        "node_key = 'x'\nlisten_addr = '127.0.0.1:50061'\nnode_key = 'y'",
+        "node_key = 'x'\nlisten_addr = '127.0.0.1:50061'\nbroken = [",
+    ] {
+        assert_eq!(local_agent_target_from_config_content(value), None);
+    }
+}
+
 fn assert_missing_agent(ctx: &DriverContext, response: Response<StartOperationResponse>) {
     let op = ctx
         .state

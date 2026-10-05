@@ -1,4 +1,4 @@
-"""PostgreSQL table inventory for the retained monolithic reference services."""
+"""Legacy PostgreSQL table inventory retained for schema compatibility and cleanup."""
 TABLE_COLUMNS: list[tuple[str, list[str]]] = [
     ("schema_meta", ["key", "value"]),
     ("profiles", ["name", "created_at", "updated_at"]),

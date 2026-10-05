@@ -93,7 +93,8 @@ impl XraySyncGenerated {
         // relaxing the full synchronization response contract.
         let mut value: serde_json::Value = serde_json::from_str(raw)
             .map_err(|_| Status::internal("invalid Xray public metadata"))?;
-        let object = value.as_object_mut()
+        let object = value
+            .as_object_mut()
             .ok_or_else(|| Status::internal("invalid Xray public metadata"))?;
         object.insert("xray_host".into(), serde_json::json!("localhost"));
         Self::parse(&value.to_string())
@@ -1079,21 +1080,19 @@ fn local_agent_target_from_config(path: &Path) -> Option<(String, String)> {
 }
 
 fn local_agent_target_from_config_content(content: &str) -> Option<(String, String)> {
-    let field = |name: &str| {
-        content.lines().find_map(|line| {
-            let (key, value) = line.trim().split_once('=')?;
-            (key.trim() == name)
-                .then(|| value.trim().trim_matches('"').to_string())
-                .filter(|value| !value.is_empty())
-        })
-    };
-    let node_key = field("node_key")?;
-    let target = field("listen_addr")?;
-    if target.starts_with("127.0.0.1:") || target.starts_with("[::1]:") {
-        Some((node_key, target))
-    } else {
-        None
+    #[derive(serde::Deserialize)]
+    struct LocalTarget {
+        node_key: String,
+        listen_addr: std::net::SocketAddr,
     }
+    let config: LocalTarget = toml::from_str(content).ok()?;
+    if config.node_key.trim().is_empty()
+        || !config.listen_addr.ip().is_loopback()
+        || config.listen_addr.port() == 0
+    {
+        return None;
+    }
+    Some((config.node_key, config.listen_addr.to_string()))
 }
 
 #[derive(Clone)]

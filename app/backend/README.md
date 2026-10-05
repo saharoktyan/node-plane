@@ -1,5 +1,12 @@
 # Backend application layer
 
+Current stack checkpoint — 2026-10-05: the PTB monolith is removed. Backend,
+worker, aiogram client and Rust execution services are the supported stack.
+The user reports successful functional testing with PostgreSQL; SSH agent
+installation is provisionally accepted from earlier tests rather than a new
+clean-host run. Historical checkpoints below do not reopen completed migration
+work. Shared update metadata and release-maintenance helpers are retained.
+
 Status: identity/authorization/opaque credentials and initial HTTP API implemented.
 The new Telegram adapter is not connected. The systemd installer now initializes
 the backend schema and installs separate API and worker units.
@@ -444,7 +451,8 @@ needed to revoke it. Frozen or already expired profiles produce delete intents;
 active grants produce ensure intents. Stable task UUIDs are reserved for driver
 idempotency. The executor must process revisions in order or supersede obsolete
 intents safely, serialize conflicting work on each node, and reconcile uncertain
-outcomes before retrying. Future expiry scheduling is still pending.
+outcomes before retrying. Expiry scheduling is implemented by the worker,
+which queues profile revocations while retaining grants and identities.
 
 GET /api/v1/operations/{id} requires operations.read. The initiating actor can
 inspect it; another actor additionally requires profiles.manage. Responses expose
@@ -794,55 +802,39 @@ PostgreSQL locking, VPS resource collection and live Telegram delivery still
 require integration acceptance.
 
 
-## Opt-in traffic statistics
+## Administrator-controlled traffic statistics
 
 `GET /api/v1/system/traffic` and `PATCH /api/v1/system/traffic/preferences`
-require `settings.manage`. Availability defaults off. Owners separately set the
-strict boolean `traffic_consent` through `/me/preferences`; `/me` reports both
-consent and availability. Consent is bound to the backend account, not Telegram.
-Revocation deletes account traffic rows immediately and changes a generation
-fence, so a delayed snapshot cannot restore them. Global pauses preserve totals
-but clear baselines. Repeating the same setting does not reset accounting.
+require `settings.manage`. Collection defaults off. One installation-wide
+switch enables accounting for all eligible profiles, including ownerless admin
+profiles; member consent is no longer accepted by `/me/preferences`. `/me`
+reports `traffic_available`. Schema initialization removes obsolete consent
+preferences. Global pauses preserve totals but clear baselines; resuming excludes
+traffic from the paused period. Repeating the same policy does not reset totals.
 
-The worker calls the native driver/agent read-only `traffic` action every five
-minutes, with batches of 32 profile/node/protocol pairs, four concurrent requests
-and a ten-second RPC timeout. Larger sets rotate. Admission requires approved
-owners with consent, active grants, synchronized profiles and applied nodes;
-maintenance, restore, drains and cleanup exclude collection. A final transaction
-rechecks generations and revisions before accepting observations. Agent helpers
-need runtime synchronization; reads never deploy runtime files or query the old
-bot tables. AWG uses container `wg show <interface> transfer`; Xray uses a filtered
-StatsService query with reset explicitly false. No private keys/config artifacts or
-other profiles' counters are returned by the snapshot.
+The worker samples native driver/agent byte counters every five minutes, with
+batches of 32 pairs and four concurrent requests. Active grants, synced profiles,
+applied nodes and approved owners (where present) are required. Maintenance,
+restore, drains and cleanup exclude collection. A final transaction rechecks the
+global policy generation and resource revisions before recording observations;
+an off/on race discards the in-flight batch. Counters are never reset by reads.
 
-`backend_traffic_usage` retains only last cumulative counters, current UTC calendar
-month upload/download totals, the month identifier and timestamps per owned
-profile/node/protocol. A month change resets usage totals, preserving the live
-counter baseline. Reads hide previous-month totals even before the next sample.
-Existing lifetime totals have no reliable month attribution and are discarded;
-their baselines remain usable for subsequent samples. The first sample excludes
-prior traffic. Container/boot epochs and decreases detect resets. Failed reads
-preserve the previous baseline and mark unknown; they never simulate zero traffic.
-Profile/node deletion cascades usage deletion. Configuration snapshots preserve
-availability/consent, but exclude usage, sampling times/cursors and generations.
+Usage is per profile/node/protocol and UTC calendar month. First observations
+baseline earlier traffic; month changes clear monthly totals while retaining
+counter baselines. Epoch/counter resets are handled explicitly. Failed/stale
+reads remain unknown rather than fabricated zero usage. Owner changes never
+expose the previous owner's history. Configuration snapshots include collection
+policy but exclude usage and sampling state. No browsing history is collected.
 
-The owned profile summary includes optional `traffic`: absent when globally
-unavailable, `consent_required` without consent, `waiting` before sampling,
-`current` for recent measurements or `unknown` for unavailable/paused/stale
-measurements. `month` identifies the UTC calendar month; `items` contains protocol
-totals and `nodes` contains per-node/per-protocol byte counts and freshness status.
-Both global availability and owner consent gate all summary traffic data. The
-Telegram profile displays the monthly total above an expandable, text-only list
-of servers with protocol breakdowns and dividers. Each protocol total includes
-tracking start and last sample times.
-These are approximate diagnostics, not billing counters: unsampled traffic before
-an epoch ends cannot be recovered. An interval crossing a month boundary is
-attributed to the month of its ending sample; the counters do not provide exact
-timestamps for individual bytes. Protocol-native byte counters can include
-protocol overhead and AWG/Xray totals are not guaranteed directly comparable.
+`GET /api/v1/me/profiles/{id}/summary` checks ownership.
+`GET /api/v1/profiles/{id}/summary` requires `profiles.manage` and supports
+administrator reads of another or ownerless profile. Both hide traffic when the
+global switch is off. Otherwise traffic is `waiting`, `current` or `unknown`,
+with monthly protocol totals and node/protocol breakdowns. The admin profile
+shows totals with a separate region-grouped, paginated server view. Protocol
+breakdowns use compact bullet-separated rows. This sampled accounting remains
+approximate; it is not yet billing or traffic-limit enforcement.
 
-Agent/parser, worker admission/accounting and localized UI tests pass with isolated
-SQL fixtures. Real PostgreSQL locking and live VPS/Telegram acceptance are pending.
 
 ### Installation acceptance fixes (2026-10-04)
 

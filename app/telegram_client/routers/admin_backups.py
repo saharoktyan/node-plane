@@ -8,7 +8,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton
 
 from ..backend import BackendClient, BackendError
 from ..i18n import normalize_locale, tr
-from ..screens import Screen, Section, Table
+from ..screens import Screen, Section, Table, format_size
 from .callbacks import AdminSettingsCallback
 from .common import render
 
@@ -34,20 +34,7 @@ async def draw(query, bot, state, title, lines, rows, sections=()):
 async def overview(query, bot, backend, state):
     lang = normalize_locale((await state.get_data()).get("locale"))
     value = await backend.backups_overview(query.from_user.id)
-    lines = [
-        tr(
-            lang,
-            "backups.count",
-            count=value["count"],
-            size=round(value["size_bytes"] / 1048576, 1),
-        ),
-        tr(
-            lang,
-            "backups.latest",
-            date=value["latest"]["created_at"][:19] if value["latest"] else "—",
-        ),
-        tr(lang, "backups.scope"),
-    ]
+    lines = []
     rows = [
         [
             button(tr(lang, "backups.create"), "backup_create"),
@@ -73,7 +60,7 @@ async def overview(query, bot, backend, state):
     rows.append([button(tr(lang, "back"), AdminSettingsCallback().pack())])
     summary = Table((tr(lang, 'maintenance.rich.field'), tr(lang, 'maintenance.rich.value')), (
         (tr(lang, 'backups.rich.count'), str(value['count'])),
-        (tr(lang, 'backups.rich.size'), f"{value['size_bytes'] / 1048576:.1f} MiB"),
+        (tr(lang, 'backups.rich.size'), format_size(value['size_bytes'])),
         (tr(lang, 'backups.rich.latest'), value['latest']['created_at'][:19] if value['latest'] else '—')))
     sections = [Section(tr(lang, 'backups.rich.storage'), tables=(summary,), rows=(tuple(rows[0]),)),
         Section(tr(lang, 'backups.settings'), (tr(lang, 'backups.policy', hours=value['interval_hours'], keep=value['keep_count']),),
