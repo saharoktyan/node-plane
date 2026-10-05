@@ -10,7 +10,7 @@ from tests import test_telegram_client as fixture
 class UpdatesRichTests(IsolatedAsyncioTestCase):
     setUp = fixture.TelegramFlowTests.setUp
 
-    async def test_main_updates_keeps_advanced_actions_collapsed_and_paginates_servers(self):
+    async def test_main_updates_groups_visible_actions_and_paginates_outdated_agents(self):
         fleet = {'nodes': [dict(key=f'n{i:02}', title=f'Node {i:02}', region='Europe', flag='🇱🇻',
             agent_status='required', runtime_status='current') for i in range(11)],
             'driver_status': 'current', 'agents_required': True}
@@ -26,10 +26,14 @@ class UpdatesRichTests(IsolatedAsyncioTestCase):
             self.assertEqual(len(screen.sections[0].tables[0].rows), 4)
             self.assertTrue(screen.sections[2].collapsed)
             self.assertEqual(len(screen.sections[2].sections[0].sections), 10)
-            self.assertTrue(screen.sections[-1].collapsed)
+            self.assertTrue(all(not section.collapsed for section in screen.sections[3:]))
+            self.assertIn(updates.tr(lang, 'updates.current', value='old'), screen.lines)
+            self.assertIn(updates.tr(lang, 'updates.available', value='new'), screen.lines)
             callbacks = [b.callback_data for row in screen.fallback_rows(rows) for b in row]
-            for action in ('ufleet', 'uv_page:0', 'upd_act:branch_menu', 'upd_act:cleanup_menu', 'upd_act:run'):
+            for action in ('ufleet', 'uv_page:0', 'upd_act:branch_menu', 'upd_act:cleanup_menu', 'upd_act:run', 'upd_act:check'):
                 self.assertIn(action, callbacks)
+            self.assertEqual(screen.sections[-1].rows[0][0].style, 'danger')
+            self.assertIn('upd_act:check', [b.callback_data for b in screen.sections[1].rows[0]])
             self.assertEqual([b.size for b in screen.rich(rows).blocks if b.type == 'heading'][0], 1)
             with patch.object(updates, 'render', new_callable=AsyncMock) as draw:
                 await updates.show_overview(self.query, self.bot, backend, self.state, 1, opened=True)
@@ -39,6 +43,23 @@ class UpdatesRichTests(IsolatedAsyncioTestCase):
             self.assertEqual(servers.rows[0][0].text, '←')
             self.assertEqual(servers.sections[0].sections[0].heading_size, 3)
 
+    async def test_outdated_list_excludes_current_and_unknown_agents_and_old_job_nodes(self):
+        fleet = {'nodes': [dict(key=key, title=key, agent_status=status) for key, status in
+            [('old', 'required'), ('new', 'current'), ('offline', 'unknown')]], 'driver_status': 'current'}
+        overview = {'current_version': '0.4.3', 'latest_job': dict(kind='stack', id='previous',
+            status='succeeded', result={}, items=[dict(node_key='removed', status='succeeded')])}
+        backend = SimpleNamespace(updates_overview=AsyncMock(return_value=overview),
+            update_rollout=AsyncMock(return_value=fleet))
+        with patch.object(updates, 'render', new_callable=AsyncMock) as draw:
+            await updates.show_overview(self.query, self.bot, backend, self.state)
+        screen = draw.call_args.args[2]
+        servers = screen.sections[2]
+        self.assertEqual(servers.title, updates.tr('en', 'updates.rich.outdated_servers'))
+        self.assertEqual(len(servers.sections[0].sections), 1)
+        self.assertEqual(servers.sections[0].sections[0].rows[0][0].callback_data, 'admin_node:old')
+        self.assertEqual(len(screen.lines), 1)
+        self.assertEqual(updates.state_label('en', 'current'), 'Up to date')
+
     async def test_latest_action_queues_whole_stack(self):
         backend = SimpleNamespace(updates_overview=AsyncMock(return_value={'update_available': True, 'remote_version': '0.4.3-alpha.36'}),
             update_versions=AsyncMock(return_value={'branch': 'dev', 'items': [dict(allowed=True,
@@ -47,6 +68,19 @@ class UpdatesRichTests(IsolatedAsyncioTestCase):
             await updates.confirm_latest(self.query, self.bot, backend, self.state)
         self.assertEqual(self.state_data['update_draft']['body'],
             {'kind': 'stack', 'target_ref': 'v0.4.3-alpha.36', 'branch': 'dev'})
+
+    async def test_latest_action_hidden_without_new_stack_version_even_with_outdated_agents(self):
+        backend = SimpleNamespace(updates_overview=AsyncMock(return_value={
+            'update_supported': True, 'update_available': False, 'current_version': '0.4.3'}),
+            update_rollout=AsyncMock(return_value={'nodes': [], 'driver_status': 'required',
+                'agents_required': True, 'runtimes_required': True}))
+        with patch.object(updates, 'render', new_callable=AsyncMock) as draw:
+            await updates.show_overview(self.query, self.bot, backend, self.state)
+        screen, rows = draw.call_args.args[2:4]
+        callbacks = [b.callback_data for row in screen.fallback_rows(rows) for b in row]
+        self.assertNotIn('upd_act:run', callbacks)
+        self.assertIn('upd_act:check', callbacks)
+        self.assertIn('ufleet', callbacks)
 
     async def test_returning_to_updates_restores_persisted_progress_button(self):
         job = dict(id='persisted-job', kind='stack', status='running', items=[], result={})

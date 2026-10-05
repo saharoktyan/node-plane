@@ -63,7 +63,7 @@ async def admin_settings_cb(query: CallbackQuery, bot: Bot,
         [InlineKeyboardButton(text=tr(locale, 'alerts.title'), callback_data='alerts'),
          InlineKeyboardButton(text=tr(locale, 'traffic.title'), callback_data='traffic')],
         [InlineKeyboardButton(text=tr(locale, 'settings.admin.ssh_key'), callback_data=SshKeyCallback().pack())],
-        [InlineKeyboardButton(text=tr(locale, 'system_cleanup.title'), callback_data='system_cleanup')],
+        [InlineKeyboardButton(text=tr(locale, 'system_cleanup.title'), callback_data='system_cleanup', style='danger')],
         [InlineKeyboardButton(text=tr(locale, 'back'), callback_data='admin_menu')],
     ]
     sections = (
@@ -385,7 +385,7 @@ async def show_release_cleanup(query: CallbackQuery, bot: Bot,
     rows = []
     if overview.get('supported') and overview.get('removable_releases'):
         rows.append([InlineKeyboardButton(text=tr(locale, 'cleanup.run'),
-            callback_data=UpdateActionCallback(action='cleanup_run').pack())])
+            callback_data=UpdateActionCallback(action='cleanup_run').pack(), style='danger')])
     rows.extend([[InlineKeyboardButton(text=tr(locale, 'updates.refresh'),
         callback_data=UpdateActionCallback(action='cleanup_menu').pack())],
         [InlineKeyboardButton(text=tr(locale, 'back'),

@@ -116,7 +116,7 @@ def state_label(lang, status):
     return tr(lang, 'update_tools.status.' + status)
 
 
-def server_sections(lang, nodes, page, action, *, opened=False):
+def server_sections(lang, nodes, page, action, *, opened=False, title_key='updates.rich.servers'):
     from .user import region_sections, server_pagination
     ordered = sorted(nodes, key=lambda n: (n.get('region') or '', n.get('title') or n.get('node_key') or n.get('key') or ''))
     pages = max(1, (len(ordered) + 9) // 10)
@@ -139,7 +139,7 @@ def server_sections(lang, nodes, page, action, *, opened=False):
             nav.append(button('←', f'{action}:{page - 1}'))
         if page + 1 < pages:
             nav.append(button('→', f'{action}:{page + 1}'))
-    return Section(tr(lang, 'updates.rich.servers'),
+    return Section(tr(lang, title_key),
         (tr(lang, 'pagination.page', page=page + 1, pages=pages),) if pages > 1 else (),
         collapsed=True, is_open=opened, sections=sections, rows=(tuple(nav),) if nav else ())
 
@@ -168,27 +168,39 @@ async def show_overview(query, bot, backend, state, page=0, opened=False):
     action_rows = []
     if active:
         action_rows.append((button(tr(lang, 'update_tools.progress'), f"update_job:{latest['id']}"),))
-    elif overview.get('update_supported') and (overview.get('update_available') or fleet.get('agents_required') or fleet.get('runtimes_required')):
+    elif overview.get('update_supported') and overview.get('update_available'):
         action_rows.append((button(tr(lang, 'updates.run'), UpdateActionCallback(action='run').pack()).model_copy(update={'style': 'primary'}),))
+    check = button(tr(lang, 'updates.check'), UpdateActionCallback(action='check').pack())
+    if action_rows:
+        action_rows[0] += (check,)
+    else:
+        action_rows.append((check,))
     sections.append(Section('', rows=tuple(action_rows)))
-    nodes = fleet.get('nodes', [])
-    if latest and latest['kind'] == 'stack':
-        nodes = [i for i in latest['items'] if not i['node_key'].startswith('@')]
-    sections.append(server_sections(lang, nodes, page, 'updates_nodes', opened=opened))
-    advanced_rows = ((button(tr(lang, 'updates.check'), UpdateActionCallback(action='check').pack()),
-        button(tr(lang, 'updates.auto_on' if overview.get('auto_check_enabled') else 'updates.auto_off'), UpdateActionCallback(action='auto_check').pack())),
-        (button(tr(lang, 'updates.choose_branch'), UpdateActionCallback(action='branch_menu').pack()),
-         button(tr(lang, 'update_tools.versions'), 'uv_page:0')),
-        (button(tr(lang, 'update_tools.fleet'), 'ufleet'),
-         button(tr(lang, 'updates.cleanup'), UpdateActionCallback(action='cleanup_menu').pack())))
+    nodes = [n for n in fleet.get('nodes', []) if n.get('agent_status') == 'required']
+    servers = server_sections(lang, nodes, page, 'updates_nodes', opened=opened,
+        title_key='updates.rich.outdated_servers')
+    if not nodes:
+        servers = Section(tr(lang, 'updates.rich.outdated_servers'),
+            (tr(lang, 'updates.rich.no_outdated_servers'),))
+    sections.append(servers)
+    sections.append(Section(tr(lang, 'updates.rich.checks'), rows=((
+        button(tr(lang, 'updates.auto_on' if overview.get('auto_check_enabled') else 'updates.auto_off'),
+            UpdateActionCallback(action='auto_check').pack()),),)))
+    sections.append(Section(tr(lang, 'updates.rich.selection'), rows=((
+        button(tr(lang, 'updates.choose_branch'), UpdateActionCallback(action='branch_menu').pack()),
+        button(tr(lang, 'update_tools.versions'), 'uv_page:0')),)))
+    component_actions = [(button(tr(lang, 'update_tools.fleet'), 'ufleet'),)]
     if latest and not active:
-        advanced_rows += ((button(tr(lang, 'update_tools.result'), f"update_job:{latest['id']}"),),)
-    sections.append(Section(tr(lang, 'updates.rich.options'), collapsed=True, rows=advanced_rows,
-        lines=(tr(lang, 'updates.current', value=overview.get('current_label') or overview.get('current_version') or '—'),
-               tr(lang, 'updates.available', value=overview.get('remote_label') or tr(lang, 'updates.not_checked')))))
-    lines = ()
+        component_actions.append((button(tr(lang, 'update_tools.result'), f"update_job:{latest['id']}"),))
+    sections.append(Section(tr(lang, 'updates.rich.component_actions'), rows=tuple(component_actions)))
+    sections.append(Section(tr(lang, 'settings.rich.danger'), rows=((
+        button(tr(lang, 'updates.cleanup'), UpdateActionCallback(action='cleanup_menu').pack())
+            .model_copy(update={'style': 'danger'}),),)))
+    lines = (tr(lang, 'updates.current', value=overview.get('current_label') or overview.get('current_version') or '—'),)
+    if overview.get('update_available'):
+        lines += (tr(lang, 'updates.available', value=overview.get('remote_label') or overview.get('remote_version') or '—'),)
     if latest and latest['status'] in {'partial', 'rolled_back', 'blocked'}:
-        lines = (state_label(lang, latest['status']),)
+        lines += (state_label(lang, latest['status']),)
     await render(bot, query.message.chat.id, Screen(tr(lang, 'updates.title'), lines,
         sections=tuple(sections), embedded_buttons=True, navigation=True),
         [[button(tr(lang, 'updates.refresh'), UpdatesCallback().pack())],

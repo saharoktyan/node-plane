@@ -14,6 +14,11 @@ from telegram_client.routers import user
 
 
 class RenderRecoveryTests(IsolatedAsyncioTestCase):
+    async def test_single_destructive_action_remains_red_in_navigation_screen(self):
+        cleanup = InlineKeyboardButton(text='Cleanup', callback_data='cleanup', style='danger')
+        blocks = Screen('Maintenance', embedded_buttons=True, navigation=True).rich([[cleanup]]).blocks
+        self.assertEqual(blocks[-1].buttons[0].style, 'danger')
+
     async def test_wizard_back_and_next_share_row_without_losing_primary_action_style(self):
         back = InlineKeyboardButton(text='← Back', callback_data='back')
         next_button = InlineKeyboardButton(text='Next', callback_data='next', style='primary')
