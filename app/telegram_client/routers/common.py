@@ -13,6 +13,33 @@ from ..backend import BackendClient, BackendError
 from ..i18n import normalize_locale
 
 
+def log_rich_failure(stage, exc):
+    # Do not log the exception/request object: it may contain config URIs,
+    # file uploads or bot credentials. Emit only recognized error categories.
+    message = exc.message.lower()
+    reason = 'bad_request'
+    if isinstance(exc, TelegramNetworkError):
+        reason = 'network_timeout' if 'timeout' in message else 'network_error'
+    elif isinstance(exc, TelegramNotFound):
+        reason = 'not_found'
+    else:
+        for fragment, category in (
+            ('message to edit not found', 'message_missing'),
+            ("message can't be edited", 'message_not_editable'),
+            ('message is too long', 'message_too_long'),
+            ('button_data_invalid', 'invalid_callback'),
+            ('button_type_invalid', 'invalid_button'),
+            ('unsupported', 'unsupported_content'),
+            ('rich', 'invalid_rich_content'),
+            ("can't parse", 'invalid_content')):
+            if fragment in message:
+                reason = category
+                break
+    logging.getLogger(__name__).warning(
+        'Rich screen delivery failed: stage=%s type=%s reason=%s; using fallback',
+        stage, type(exc).__name__, reason)
+
+
 def media_blocks(rich):
     if rich is None or not isinstance(getattr(rich, 'blocks', None), (list, tuple)):
         return
@@ -82,6 +109,7 @@ async def render(bot: Bot, chat_id: int, screen: Screen, rows: list[list[InlineK
         except (TelegramBadRequest, TelegramNotFound, TelegramNetworkError) as exc:
             if 'message is not modified' in str(exc).lower():
                 return True
+            log_rich_failure('edit', exc)
             try:
                 await bot.edit_message_text(chat_id=chat_id,
                     message_id=existing, text=screen.plain(), entities=screen.plain_entities(), reply_markup=fallback_markup, request_timeout=15)
@@ -97,7 +125,7 @@ async def render(bot: Bot, chat_id: int, screen: Screen, rows: list[list[InlineK
         await remember_media(state, sent, uploads, cache)
     except (TelegramBadRequest, TelegramNotFound, TelegramNetworkError) as exc:
         rich = False
-        logging.getLogger(__name__).warning('Rich screen delivery failed (%s); using plain text', type(exc).__name__)
+        log_rich_failure('send', exc)
         sent = await bot.send_message(chat_id=chat_id,
             text=screen.plain(), entities=screen.plain_entities(), reply_markup=fallback_markup, request_timeout=15)
             
@@ -117,7 +145,8 @@ async def send_notice(bot: Bot, chat_id: int, screen: Screen, markup: InlineKeyb
     rich_markup = InlineKeyboardMarkup(inline_keyboard=[]) if screen.embedded_buttons else markup
     try:
         await bot.send_rich_message(chat_id=chat_id, rich_message=screen.rich(rows), reply_markup=rich_markup, request_timeout=10)
-    except (TelegramBadRequest, TelegramNotFound, TelegramNetworkError):
+    except (TelegramBadRequest, TelegramNotFound, TelegramNetworkError) as exc:
+        log_rich_failure('notice', exc)
         fallback_rows = screen.fallback_rows(rows)
         fallback_markup = InlineKeyboardMarkup(inline_keyboard=fallback_rows) if fallback_rows else None
         await bot.send_message(chat_id=chat_id, text=screen.plain(), reply_markup=fallback_markup, request_timeout=15)

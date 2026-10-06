@@ -144,6 +144,17 @@ inline monowidth text. The show/hide button, collapsed QR and visible files
 remain unchanged. This is an iOS copying workaround candidate; copying the full
 AWG/VLESS URI on an actual iPhone still requires manual acceptance.
 
+Rich fallback investigation on 2026-10-06: the user reported repeatable plain
+rendering for update progress and the saved notification profile overview.
+Existing logs do not expose failed Rich edits, so the Telegram rejection is not
+yet confirmed. These screens could emit empty details blocks for no server
+items or no grants. Update progress now omits the empty server list; profile
+overview shows a localized no-access message; the shared builder suppresses
+empty details blocks. Edit/send/notice failures now log a sanitized category
+without message contents or credentials. Regression tests cover both empty
+screens and recovery from a per-message fallback on the next render. Live
+acceptance and the actual Telegram error remain outstanding.
+
 Registry entries with no applied runtime, rollout attempts, mutation jobs,
 settings tasks, profile commands/grants or bound cleanup target can now be
 removed without contacting a nonexistent agent. This is explicitly metadata-only
@@ -232,6 +243,10 @@ and administrator login preservation. RU/EN backup screens now distinguish
 admission refusal from failed revocation. Worker failure logs record phase,
 sanitized error code/type and SQLSTATE without backup contents. This evidence
 does not close restore validation, revocation failures or concurrency coverage.
+The user confirmed successful backup restoration on v0.4.3-alpha.47 on
+2026-10-06. The reported admission defect and ordinary restore path are closed;
+failure, checksum, incompatible-schema and maintenance-concurrency checks remain
+separate validation items.
 
 - [ ] Test concurrent worker claims, expected-revision conflicts and competing
   mutations, including traffic-policy changes during collection and recipient eligibility

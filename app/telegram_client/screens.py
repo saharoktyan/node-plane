@@ -74,8 +74,11 @@ class Section:
             blocks.extend(section.rich(depth=size if self.collapsed or not self.title else size + 1))
         blocks.extend(rich_buttons(self.rows))
         if self.collapsed:
+            content = [*rich_buttons(self.heading_rows), *blocks]
+            if not content:
+                return []
             return [InputRichBlockDetails(summary=self.title,
-                blocks=[*rich_buttons(self.heading_rows), *blocks], is_open=self.is_open)]
+                blocks=content, is_open=self.is_open)]
         return [*([InputRichBlockSectionHeading(text=self.title, size=size)] if self.title else []),
                 *rich_buttons(self.heading_rows), *blocks,
                 *([InputRichBlockDivider()] if self.divider_after else [])]

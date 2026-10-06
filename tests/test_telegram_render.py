@@ -14,6 +14,15 @@ from telegram_client.routers import user
 
 
 class RenderRecoveryTests(IsolatedAsyncioTestCase):
+    async def test_empty_collapsed_sections_do_not_emit_empty_rich_details(self):
+        screen = Screen('Progress', sections=(Section('Servers', collapsed=True,
+            sections=(Section('Empty region', collapsed=True),)),))
+        self.assertEqual([block.type for block in screen.rich().blocks], ['heading'])
+        action = InlineKeyboardButton(text='Edit', callback_data='edit')
+        populated = Screen('Profile', sections=(Section('Access', collapsed=True,
+            heading_rows=((action,),)),))
+        self.assertEqual(populated.rich().blocks[1].blocks[0].type, 'buttons')
+
     async def test_single_destructive_action_remains_red_in_navigation_screen(self):
         cleanup = InlineKeyboardButton(text='Cleanup', callback_data='cleanup', style='danger')
         blocks = Screen('Maintenance', embedded_buttons=True, navigation=True).rich([[cleanup]]).blocks
@@ -170,6 +179,24 @@ class RenderRecoveryTests(IsolatedAsyncioTestCase):
             method=EditMessageText(chat_id=1, message_id=10, text='old'), message='message is not modified')
         await render(self.bot, 1, Screen('ID'), [], self.state)
         self.bot.send_rich_message.assert_not_awaited()
+        self.bot.send_message.assert_not_awaited()
+
+    async def test_edit_fallback_is_logged_without_content_and_next_screen_retries_rich(self):
+        self.bot.edit_message_text.side_effect = [TelegramNetworkError(
+            method=EditMessageText(chat_id=1, message_id=10, text='private'),
+            message='timeout https://api.telegram.org/botSECRET'), None, None]
+        back = InlineKeyboardButton(text='Back', callback_data='back')
+        with self.assertLogs('telegram_client.routers.common', level='WARNING') as logs:
+            self.assertFalse(await render(self.bot, 1,
+                Screen('Private profile', uri='vless://SECRET', embedded_buttons=True), [[back]], self.state))
+        output = '\n'.join(logs.output)
+        self.assertIn('stage=edit', output)
+        self.assertIn('reason=network_timeout', output)
+        self.assertNotIn('SECRET', output)
+        self.assertNotIn('Private profile', output)
+        self.assertTrue(await render(self.bot, 1, Screen('Menu', embedded_buttons=True), [[back]], self.state))
+        self.assertIn('rich_message', self.bot.edit_message_text.call_args.kwargs)
+        self.assertEqual(self.data['control_message_id'], 10)
         self.bot.send_message.assert_not_awaited()
 
     async def test_commands_recreate_deleted_control_screen(self):

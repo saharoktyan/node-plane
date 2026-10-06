@@ -10,6 +10,19 @@ from tests import test_telegram_client as fixture
 class UpdatesRichTests(IsolatedAsyncioTestCase):
     setUp = fixture.TelegramFlowTests.setUp
 
+    async def test_controller_only_progress_has_no_empty_server_details(self):
+        for lang in ('en', 'ru'):
+            self.state_data['locale'] = lang
+            job = dict(id='j1', kind='stack', status='succeeded', items=[], result={})
+            backend = SimpleNamespace(update_job=AsyncMock(return_value=job))
+            with patch.object(updates, 'render', new_callable=AsyncMock) as draw:
+                await updates.show_job(self.query, self.bot, backend, self.state, 'j1')
+            screen, rows = draw.call_args.args[2:4]
+            self.assertFalse(any(block.type == 'details' for block in screen.rich(rows).blocks))
+            self.assertTrue(screen.embedded_buttons)
+            self.assertEqual(rows[-1][0].callback_data, 'updates')
+
+
     async def test_main_updates_groups_visible_actions_and_paginates_outdated_agents(self):
         fleet = {'nodes': [dict(key=f'n{i:02}', title=f'Node {i:02}', region='Europe', flag='🇱🇻',
             agent_status='required', runtime_status='current') for i in range(11)],

@@ -225,8 +225,10 @@ async def show_job(query, bot, backend, state, job_id, page=0, opened=False):
             (tr(lang, 'updates.rich.failed_nodes', count=len(failed)),),
             rows=tuple((button(server_label({**i, 'title': i.get('title') or i['node_key']}),
                 AdminNodeCallback(node_key=i['node_key']).pack()),) for i in failed if i['node_key'] != '@driver')))
-    sections.append(server_sections(lang, [i for i in job['items'] if i['node_key'] != '@driver'], page,
-        'update_nodes:' + job_id, opened=opened))
+    nodes = [i for i in job['items'] if i['node_key'] != '@driver']
+    if nodes:
+        sections.append(server_sections(lang, nodes, page,
+            'update_nodes:' + job_id, opened=opened))
     rows = []
     if job['status'] in {'awaiting_executor', 'running'}:
         rows.append([button(tr(lang, 'updates.refresh'), f'update_job:{job_id}')])
