@@ -100,8 +100,15 @@ are not silently treated as equivalent to a standard installation.
 
 Local decommissioning verifies the host directly and does not require SSH
 credentials. If a bot public key is available, its authorized-key entry is
-removed and checked too. SSH nodes still require the original bot public key
-and a separate verification identity; missing credentials block remote removal.
+removed and checked too. SSH removal uses a separate verification identity.
+The worker prepares an operation-owned key through the existing bot SSH connection before draining,
+checks it against the same node/host identity, and retains it across worker
+steps. Final host verification removes that exact temporary authorized-key entry
+in the same SSH session, after checking all managed artifacts; successful
+retirement then discards its controller-side key files. An explicitly configured
+`NODE_PLANE_REMOVAL_SSH_KEY` still overrides automatic preparation. Lost responses
+after the temporary key was removed require explicit recovery with another SSH
+identity; they never certify removal or trigger a blind replay.
 The driver permits a missing public key only for loopback agent endpoints.
 
 Pre-existing removals without a captured inventory cannot claim verified
@@ -109,7 +116,9 @@ retirement. An active node can bind its inventory before draining; an already
 uncertain uninstall requires explicit recovery or registry-only retirement.
 Untracked historical artifacts outside the captured runtime/config locations
 and new external backup paths created after capture remain audit limitations.
-Disposable-node end-to-end evidence is still required before closing this block.
+Local clean-VPS removal passed manual testing on v0.4.3-alpha.45. SSH removal
+and exhaustive leftover-artifact acceptance are still required before closing
+this block.
 
 Recovery of an interrupted removal uses the stored command and phase. Observe
 the host first; an uncertain agent uninstall requires independent verification,

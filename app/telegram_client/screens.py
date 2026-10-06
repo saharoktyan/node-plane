@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from aiogram.types import (InputRichBlockDetails, InputRichBlockParagraph,
     InputRichBlockSectionHeading, InputRichMessage, InputRichBlockPhoto,
     InputRichBlockDocument, InputMediaPhoto, InputMediaDocument, BufferedInputFile,
-    RichTextCode, MessageEntity)
+    InputRichBlockPreformatted, MessageEntity)
 from aiogram.types import (InputRichBlockButtons, RichMessageButton, InlineKeyboardButton,
     InputRichBlockDivider, InputRichBlockTable, RichBlockTableCell)
 
@@ -112,7 +112,7 @@ class Screen:
                     media=BufferedInputFile(self.qr, 'config.png')))]))
         blocks.extend(rich_buttons(self.uri_rows))
         if self.uri:
-            uri = InputRichBlockParagraph(text=RichTextCode(text=self.uri))
+            uri = InputRichBlockPreformatted(text=self.uri)
             if self.uri_title and not self.uri_rows:
                 blocks.append(InputRichBlockSectionHeading(text=self.uri_title, size=2))
             blocks.append(uri)

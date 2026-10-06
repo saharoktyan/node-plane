@@ -190,9 +190,12 @@ NODE_PLANE_INVENTORY_PY
             raise RemovalVerificationError('invalid resource inventory') from error
 
     def verify(self, node_key, expected_fingerprint, resources=None):
+        return self._verify_script(node_key, expected_fingerprint, resources, self.script(resources))
+
+    def _verify_script(self, node_key, expected_fingerprint, resources, script):
         if not re.fullmatch(r'[0-9a-f]{64}', expected_fingerprint):
             raise ValueError('invalid expected host fingerprint')
-        output = self._run(self.script(resources))
+        output = self._run(script)
         prefix = self.SUCCESS + ':'
         if not output.startswith(prefix):
             raise RemovalVerificationError('node verification failed')

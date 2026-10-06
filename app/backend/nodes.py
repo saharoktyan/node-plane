@@ -119,6 +119,8 @@ class NodeService:
         UpdateService(self.db, updater=False).initialize_schema()
         from .node_operations import NodeOperations
         NodeOperations(self.db).initialize_schema()
+        from .node_removal import NodeRemovalService
+        NodeRemovalService(self.db).initialize_schema()
         with self.db.transaction() as conn:
             conn.execute('CREATE TABLE IF NOT EXISTS backend_node_notes (node_key TEXT PRIMARY KEY REFERENCES backend_nodes(key) ON DELETE CASCADE, notes TEXT NOT NULL)')
             conn.execute('''CREATE TABLE IF NOT EXISTS backend_node_connections (

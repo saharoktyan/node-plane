@@ -119,16 +119,40 @@ Shell-level tests verify custom config leftovers and previous-container names.
   Clean local installations can now decommission without generating an SSH key;
   host identity, inventory, service and container verification remain mandatory.
   The rollout success screen returns to the admin menu, and unbootstrapped nodes
-  have a separate status. Real clean-VPS removal acceptance remains pending.
+  have a separate status. Local clean-VPS removal passed manual acceptance on
+  v0.4.3-alpha.45; SSH removal acceptance remains pending.
 - [x] Document operation/artifact retention, journal growth and cleanup rules.
   Keep node-agent SQLite command journals; their replacement is not planned.
   Never remove duplicate-protection records while commands can still be replayed.
   CORE_ARCHITECTURE.md records actual expiry versus physical retention, journal
   growth, backup/release rules and the prerequisites for future payload pruning.
 
+SSH installation passed manual testing on 2026-10-06. Removal was blocked before
+draining because it required a separately configured verification key. The
+worker now automatically provisions an independent temporary key, verifies the
+host before draining, and removes the temporary authorized-key entry after the
+final artifact check. Configured independent keys remain supported. Automated
+coverage includes credential reuse, failed-check fencing and preservation of
+unrelated authorized keys; actual SSH removal acceptance is still pending.
+Node lists and cards expose deletion progress and blocked deletion separately,
+with a direct entry back into the removal screen.
+
+Configuration links now use a top-level preformatted Rich block instead of
+inline monowidth text. The show/hide button, collapsed QR and visible files
+remain unchanged. This is an iOS copying workaround candidate; copying the full
+AWG/VLESS URI on an actual iPhone still requires manual acceptance.
+
 ### Focused integration evidence
 
-Manual acceptance for v0.4.3-alpha.42 (use disposable nodes):
+Manual result reported on 2026-10-05, v0.4.3-alpha.45, clean local VPS:
+full removal completed without errors; the node disappeared from every profile;
+returning to an old screen did not allow new configuration retrieval; protocol
+containers were stopped and the agent systemd service was removed. This report
+does not independently establish absence of every binary, volume or historical
+artifact. SSH installation/removal testing is pending before continuing the
+remaining work in this block.
+
+Manual acceptance checklist (use disposable nodes; apply to the current release):
 
 1. Update to the tagged release through Updates. Core components become current;
    reachable agents update, and failed agents are listed as partial failures.
@@ -160,9 +184,11 @@ Manual acceptance for v0.4.3-alpha.42 (use disposable nodes):
     of that container and runtime files; no successful retirement is allowed.
 12. Recreate the removed node under the same key. Only newly granted profiles get
     access; old grants/configs must not return automatically.
-13. When an SSH test node is available, repeat full removal with a separate root
-    verification key and a pinned host key. Without that independent credential,
-    removal must block before revoking profiles. Never use production nodes for
+13. Repeat full SSH removal with only the normal bot key and a pinned host key.
+    The worker must prepare and verify its temporary identity before revocation,
+    remove both bot and temporary keys at completion, and retain unrelated keys.
+    A separate configured verification key remains an optional override. Failed
+    preparation must block before revocation. Never use production nodes for
     ownership fixtures or connectivity interruption.
 
 Configured-path capture, malformed inventories, shell-value injection rejection

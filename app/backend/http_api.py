@@ -337,6 +337,7 @@ class AdminNodeOverviewOutput(BaseModel):
     failed: int
     attention: int
     last_job: dict | None = None
+    removal_status: str | None = None
 
 
 class NodeRuntimeObservation(BaseModel):
