@@ -13,6 +13,20 @@ from telegram_client.backend import BackendError
 
 
 class RequestSetupTests(IsolatedAsyncioTestCase):
+    async def test_saved_notification_profile_without_grants_has_nonempty_rich_access_block(self):
+        self.backend.profile_grants.return_value = {'items': []}
+        for locale in ('en', 'ru'):
+            await self.notice.update_data(locale=locale, notification_session=True,
+                profile_setup={'profile_id': 'p1'})
+            with patch.object(profiles, 'render', new_callable=AsyncMock) as draw:
+                await profiles.show_setup_overview(123, 123, 99, self.bot, self.backend, self.notice)
+            screen, rows = draw.call_args.args[2:4]
+            details = next(block for block in screen.rich(rows).blocks if block.type == 'details')
+            self.assertEqual(details.blocks[0].text, profiles.tr(locale, 'account.access_empty'))
+            self.assertEqual([button.callback_data for row in rows for button in row],
+                             ['setup_edit', 'notification_close'])
+            await self.assert_main_unchanged()
+
     async def asyncSetUp(self):
         self.main = FSMContext(MemoryStorage(), StorageKey(bot_id=1, chat_id=123, user_id=123))
         await self.main.set_state('main:wizard')

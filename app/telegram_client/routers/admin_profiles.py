@@ -1602,7 +1602,8 @@ async def show_setup_overview(chat_id, user_id, message_id, bot, backend, state)
             callback_data='notification_close' if data.get('notification_session') else AdminProfileCallback(profile_id=setup['profile_id']).pack())]]
     await render(bot, chat_id, Screen(profile['display_name'],
         (_status(profile, locale), tr(locale, 'profile.rich.expires', value=_expiry_label(profile.get('expires_at')) if profile.get('expires_at') else tr(locale, 'profile.layout.unlimited'))),
-        sections=(Section(tr(locale, 'profile.layout.access'), tuple(f"{data.get('grant_node_labels', {}).get(item['node_key'], item['node_key'])} · {tr(locale, 'protocol.' + item['protocol'])}" for item in grants['items']), collapsed=True),),
+        sections=(Section(tr(locale, 'profile.layout.access'), tuple(f"{data.get('grant_node_labels', {}).get(item['node_key'], item['node_key'])} · {tr(locale, 'protocol.' + item['protocol'])}" for item in grants['items'])
+            or (tr(locale, 'account.access_empty'),), collapsed=True),),
         embedded_buttons=True, navigation=True), rows, state, message_id)
 
 
