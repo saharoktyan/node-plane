@@ -117,7 +117,8 @@ class RenderRecoveryTests(IsolatedAsyncioTestCase):
             self.assertEqual(len(files), 3)
             self.assertFalse(payload['blocks'][1]['is_open'])
             self.assertTrue(payload['blocks'][1]['blocks'][0]['photo']['media'].startswith('attach://'))
-            self.assertEqual(payload['blocks'][2]['text'], {'type': 'code', 'text': 'vpn://fresh'})
+            self.assertEqual(payload['blocks'][2]['type'], 'pre')
+            self.assertEqual(payload['blocks'][2]['text'], 'vpn://fresh')
             self.assertEqual(payload['blocks'][3]['type'], 'heading')
             self.assertEqual([block['type'] for block in payload['blocks'][4:]],
                              ['document', 'document'])

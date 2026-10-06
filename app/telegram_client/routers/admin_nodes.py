@@ -658,6 +658,17 @@ async def show_admin_node(chat_id, user_id, message_id, node_key, bot, backend, 
     except BackendError:
         overview = None
 
+    if overview and overview.get('removal_status') in {'queued', 'running', 'blocked'}:
+        title = f"{node.get('region') or tr(locale, 'nodes.region_unknown')} · {server_label(node)}"
+        await render(bot, chat_id, Screen(title,
+            (tr(locale, 'nodes.card.state', value=tr(locale, 'nodes.card.state.' + overview['state'])),),
+            embedded_buttons=True, navigation=True),
+            [[InlineKeyboardButton(text=tr(locale, 'nodes.card.deletion_status'),
+                callback_data=f'remove_progress:{node_key}', style='primary')],
+             [InlineKeyboardButton(text=tr(locale, 'nodes.card.to_list'),
+                callback_data=AdminNodesCallback().pack())]], state, message_id)
+        return
+
     draft = (await state.get_data()).get('node_settings_draft')
     pending = bool(node['applied_revision'] and node['desired_revision'] > node['applied_revision'] or
         draft and draft['node_key'] == node_key and draft['values'] != draft['baseline'])

@@ -16,6 +16,18 @@ from backend.node_operations import NodeOperations
 
 
 class BackendNodeJobTests(unittest.TestCase):
+    def test_removal_status_overrides_installation_and_settings_state(self):
+        from backend.node_removal import NodeRemovalService
+        from backend.node_overview import NodeOverviewService
+        NodeRemovalService(self.db).request(self.actor, 'n1')
+        for status, expected in [('queued', 'deleting'), ('running', 'deleting'),
+                                 ('blocked', 'deletion_blocked')]:
+            self.db.connection.execute('UPDATE backend_node_removals SET status=? WHERE node_key=?', (status, 'n1'))
+            self.db.connection.commit()
+            overview = NodeOverviewService(self.db).get(self.actor, 'n1')
+            self.assertEqual(overview['state'], expected)
+            self.assertEqual(overview['removal_status'], status)
+
     def setUp(self):
         self.db = Database()
         self.addCleanup(self.db.connection.close)

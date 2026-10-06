@@ -31,6 +31,7 @@ class NodeOverviewService:
                 ORDER BY o.desired_revision DESC, o.created_at DESC, t.id DESC''',
                 (node_key,)).fetchall()
             job = conn.execute('SELECT id, action, revision, status FROM backend_node_jobs WHERE node_key = ? ORDER BY revision DESC, id DESC LIMIT 1', (node_key,)).fetchone()
+            removal = conn.execute('SELECT status FROM backend_node_removals WHERE node_key = ?', (node_key,)).fetchone()
 
         current_settings = next((task['status'] for task in settings_tasks
             if task['revision'] == node['desired_revision']), None)
@@ -53,6 +54,9 @@ class NodeOverviewService:
             state = 'applied_unverified'
         if job and job['status'] in {'awaiting_executor', 'running', 'blocked'}:
             state = 'needs_attention' if job['status'] == 'blocked' else 'applying'
+        removal_status = removal['status'] if removal else None
+        if removal_status in {'queued', 'running', 'blocked'}:
+            state = 'deletion_blocked' if removal_status == 'blocked' else 'deleting'
 
         latest = {}
         for task in tasks:
@@ -83,5 +87,6 @@ class NodeOverviewService:
                 'state': state, 'desired_revision': node['desired_revision'],
                 'applied_revision': node['applied_revision'],
                 'settings_task_status': current_settings,
+                'removal_status': removal_status,
                 'settings_complete': settings_complete,
                 'access_total': len(grants), 'last_job': dict(job) if job else None, **counts}

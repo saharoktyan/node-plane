@@ -166,6 +166,9 @@ CATALOG = {
         'nodes.card.ssh_target': 'SSH-адрес: {value}',
         'nodes.card.state': 'Сохранённое состояние: {value}',
         'nodes.card.state.not_installed': 'протоколы ещё не установлены',
+        'nodes.card.state.deleting': 'удаляется',
+        'nodes.card.state.deletion_blocked': 'удаление требует внимания',
+        'nodes.card.deletion_status': 'Статус удаления',
         'nodes.card.state.applying': 'настройки применяются',
         'nodes.card.state.needs_attention': 'требует внимания',
         'nodes.card.state.changes_pending': 'есть неприменённые изменения',
@@ -708,6 +711,9 @@ CATALOG = {
         'nodes.card.ssh_target': 'SSH target: {value}',
         'nodes.card.state': 'Saved state: {value}',
         'nodes.card.state.not_installed': 'not bootstrapped',
+        'nodes.card.state.deleting': 'deleting',
+        'nodes.card.state.deletion_blocked': 'deletion needs attention',
+        'nodes.card.deletion_status': 'Deletion status',
         'nodes.card.state.applying': 'applying settings',
         'nodes.card.state.needs_attention': 'needs attention',
         'nodes.card.state.changes_pending': 'unapplied changes',
@@ -1183,10 +1189,7 @@ CATALOG['ru'].update({'node_tools.general': 'Основные настройки
  'node_tools.removed': 'Нода удалена',
  'node_tools.removed_note': 'Удалены контейнеры, конфиги, агент и его systemd-служба. Отсутствие компонентов '
                             'проверено; нода удалена из реестра.',
- 'node_tools.verification_key': 'Для полной очистки нужен ключ проверки хоста: NODE_PLANE_REMOVAL_SSH_KEY '
-                                'для SSH-ноды и публичный ключ бота через SSH_KEY или '
-                                'NODE_PLANE_BOT_PUBLIC_KEY_FILE. Ключ проверки SSH должен отличаться от '
-                                'удаляемого ключа бота и иметь доступ к ноде.',
+ 'node_tools.verification_key': 'Не удалось подготовить SSH-проверку удаления. Проверьте ключ бота и доступ к ноде; если задан отдельный ключ проверки, он должен отличаться от ключа бота.',
  'node_tools.retry': 'Повторить после устранения причины',
  'nodes.settings.send_value': 'Пришлите новое значение или «.», чтобы оставить текущее.'})
 CATALOG['en'].update({'node_tools.general': 'General settings',
@@ -1276,10 +1279,7 @@ CATALOG['en'].update({'node_tools.general': 'General settings',
  'node_tools.removed': 'Node removed',
  'node_tools.removed_note': 'Containers, configs, agent and its systemd service have been removed. Their '
                             'absence was verified; the node was removed from the registry.',
- 'node_tools.verification_key': 'Full cleanup requires host verification credentials: '
-                                'NODE_PLANE_REMOVAL_SSH_KEY for SSH nodes, and the bot public key through '
-                                'SSH_KEY or NODE_PLANE_BOT_PUBLIC_KEY_FILE. The SSH verification key must '
-                                'differ from the removed bot key and have access to the node.',
+ 'node_tools.verification_key': 'Could not prepare SSH verification. Check the bot SSH key and node access; a configured verification key must differ from the bot key.',
  'node_tools.retry': 'Retry after resolving the cause',
  'nodes.settings.send_value': 'Send a new value or “.” to keep the current value.'})
 

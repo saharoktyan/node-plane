@@ -227,8 +227,8 @@ runtime and standard artifacts are absent before removing the node record.
 Remote final verification requires `NODE_PLANE_REMOVAL_SSH_KEY`, an independent
 root SSH key distinct from `SSH_KEY`, and a pinned known_hosts entry. Set
 `NODE_PLANE_BOT_PUBLIC_KEY_FILE` to the bot SSH public key file, or the API
-uses `SSH_KEY.pub`. Local final verification needs the public key but no second
-private key. Every remote check fails closed if it cannot verify the host.
+uses `SSH_KEY.pub`. The low-level endpoint requires a public key for local verification too; the
+worker-driven local removal path does not require SSH credentials. Every remote check fails closed if it cannot verify the host.
 `POST /api/v1/nodes/{key}/retire-registry-only` requires explicit acceptance
 that remote artifacts may remain; it is for a lost or expired VPS and never
 reports a verified full cleanup. These HTTP mutations enforce the same file
@@ -705,11 +705,18 @@ without replaying an uncertain mutation.
 `POST /api/v1/nodes/{key}/remove-step` queues full worker-driven removal;
 `GET /api/v1/nodes/{key}/removal` reports progress. An explicit `retry: true` retries
 a blocked saga. Full removal revokes access before runtime/agent cleanup and only
-retires the registry after independent host verification. For SSH nodes configure
-`NODE_PLANE_REMOVAL_SSH_KEY` with root access, distinct from `SSH_KEY`; supply the
-bot public key via `SSH_KEY` or `NODE_PLANE_BOT_PUBLIC_KEY_FILE`. Verification
-credentials are checked before destructive steps. Local verification uses that
-public key without an independent SSH connection. Runtime-only cleanup preserves
+retires the registry after independent host verification. For SSH nodes the
+worker uses `SSH_KEY` to prepare a temporary root verification key automatically,
+checks it before revocation, and retains it between worker runs. Final checks
+remove the temporary authorized-key entry before returning success; successful
+retirement discards its private/public key files on the controller. The existing
+bot public key is supplied by `SSH_KEY.pub` or `NODE_PLANE_BOT_PUBLIC_KEY_FILE`.
+An explicitly configured `NODE_PLANE_REMOVAL_SSH_KEY` remains an optional override
+and must differ from the bot key. Pinned host keys are mandatory. Interrupted
+final checks after SSH key removal require explicit recovery with another key.
+Local worker-driven removal needs no SSH credentials. Node overview exposes
+`removal_status` and states `deleting` / `deletion_blocked`; these are persisted
+progress, not a live agent probe. Runtime-only cleanup preserves
 the node and agent and must not be reported as full removal.
 
 ## Backend backups and database support

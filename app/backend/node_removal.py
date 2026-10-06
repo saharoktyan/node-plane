@@ -57,9 +57,17 @@ class NodeRemovalService:
         if local:
             return RemovalVerifier(local=True, bot_public_key=bot_key)
         independent = os.environ.get('NODE_PLANE_REMOVAL_SSH_KEY')
-        if not independent or not Path(independent).is_file():
-            raise AccessDenied('independent_verification_key_required', 503)
         original = os.environ.get('SSH_KEY')
+        if not independent:
+            if not original or not Path(original).is_file():
+                raise AccessDenied('verification_key_unavailable', 503)
+            from .installation_identity import controller_identity
+            from .removal_credentials import ManagedRemovalVerifier, credential_directory
+            return ManagedRemovalVerifier(original_key=original,
+                directory=credential_directory(original, controller_identity(self.db), target),
+                ssh_target=target, bot_public_key=bot_key)
+        if not Path(independent).is_file():
+            raise AccessDenied('independent_verification_key_required', 503)
         if original and Path(original).is_file() and os.path.samefile(independent, original):
             raise AccessDenied('independent_verification_key_required', 503)
         return RemovalVerifier(ssh_target=target, ssh_identity_file=independent,
@@ -88,6 +96,8 @@ class NodeRemovalService:
                 state = lifecycle.overview(actor, key)
                 phase = state['cleanup_phase'] or 'start_drain'
                 if state['status'] == 'active':
+                    if hasattr(verifier, 'prepare'):
+                        verifier.prepare(key)
                     lifecycle.bind_verification_target(actor, key, verifier)
                     lifecycle.start_drain(actor, key)
                     with self.db.transaction() as conn:
@@ -96,9 +106,15 @@ class NodeRemovalService:
                 if not state['revocations_complete']:
                     continue
                 if state['cleanup_phase'] in {'uninstall_uncertain', 'uninstall_scheduled'}:
-                    lifecycle.retire_verified(actor, key, self.verifier(target, final=True))
+                    final_verifier = self.verifier(target, final=True)
+                    lifecycle.retire_verified(actor, key, final_verifier)
                     with self.db.transaction() as conn:
                         conn.execute("UPDATE backend_node_removals SET status = 'succeeded' WHERE node_key = ?", (key,))
+                    if hasattr(final_verifier, 'discard'):
+                        try:
+                            final_verifier.discard()
+                        except OSError:
+                            logger.exception('Could not discard verification credentials: node=%s', key)
                 else:
                     lifecycle.cleanup(actor, key, self.driver, expected_phase=state['cleanup_phase'] or 'not_started')
                 return True

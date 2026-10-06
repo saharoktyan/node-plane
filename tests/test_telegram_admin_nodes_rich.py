@@ -9,6 +9,23 @@ from telegram_client.i18n import tr
 
 
 class AdminNodeRichTests(IsolatedAsyncioTestCase):
+    async def test_deleting_card_exposes_progress_instead_of_mutation_controls(self):
+        for locale in ('ru', 'en'):
+            self.data['locale'] = locale
+            for status in ('queued', 'running', 'blocked'):
+                self.overview.update(removal_status=status,
+                    state='deletion_blocked' if status == 'blocked' else 'deleting')
+                with patch.object(nodes, 'render', new_callable=AsyncMock) as draw:
+                    await nodes.show_admin_node(123, 123, 77, 'msk1', self.bot, self.backend, self.state)
+                callbacks = self.callbacks(draw)
+                self.assertIn('remove_progress:msk1', callbacks)
+                self.assertFalse(any(c.startswith(('node_settings:', 'bootstrap_menu:', 'node_manage:')) for c in callbacks))
+                self.assertIn(tr(locale, 'nodes.card.state.' + self.overview['state']), draw.call_args.args[2].plain())
+                with patch.object(nodes, 'render', new_callable=AsyncMock) as draw:
+                    await nodes.show_admin_nodes(123, 123, 77, self.bot, self.backend, self.state)
+                labels = [button.text for row in draw.call_args.args[2].fallback_rows(draw.call_args.args[3]) for button in row]
+                self.assertTrue(any(tr(locale, 'nodes.card.state.' + self.overview['state']) in label for label in labels))
+
     def setUp(self):
         self.data = {'locale': 'en', 'control_message_id': 77}
         async def get_data():

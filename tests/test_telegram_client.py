@@ -708,9 +708,8 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
                 toggle = next(i for i, block in enumerate(blocks) if block.type == 'buttons'
                     and block.buttons[0].text in ('Show configuration link', 'Hide configuration link'))
                 self.assertTrue(all(i < toggle for i, block in enumerate(blocks) if block.type == 'details'))
-                code = [block for block in blocks if block.type == 'paragraph' and not isinstance(block.text, str)
-                    and block.text.type == 'code']
-                self.assertEqual([block.text.text for block in code], [uri] if visible else [])
+                code = [block for block in blocks if block.type == 'pre']
+                self.assertEqual([block.text for block in code], [uri] if visible else [])
                 if visible:
                     self.assertEqual(blocks.index(code[0]), toggle + 1)
                     self.assertEqual(screen.plain_entities()[0].type, 'code')
@@ -721,7 +720,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
                 for block in blocks:
                     if block.type == 'details':
                         self.assertFalse(any(child.type == 'document' or
-                            (child.type == 'paragraph' and not isinstance(child.text, str) and child.text.type == 'code')
+                            child.type == 'pre'
                             for child in block.blocks))
                 action = user.actions[screen.uri_rows[0][0].callback_data[2:]]
                 self.assertEqual((action.name, action.args), ('issuance_uri', ('issuance1', 'false' if visible else 'true')))
