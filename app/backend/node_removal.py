@@ -41,8 +41,10 @@ class NodeRemovalService:
             row = conn.execute('SELECT * FROM backend_node_removals WHERE node_key = ?', (node_key,)).fetchone()
         if row is None:
             raise AccessDenied('resource_not_found', 404)
-        if row['status'] in {'succeeded', 'abandoned'}:
-            return {'node_key': node_key, 'status': 'removed' if row['status'] == 'succeeded' else 'removed_registry_only'}
+        if row['status'] in {'succeeded', 'abandoned', 'unprovisioned'}:
+            return {'node_key': node_key, 'status': {
+                'succeeded': 'removed', 'abandoned': 'removed_registry_only',
+                'unprovisioned': 'removed_unprovisioned'}[row['status']]}
         return {**NodeLifecycle(self.db).overview(actor, node_key),
                 'removal_status': row['status'], 'error_code': row['error_code']}
 
@@ -88,6 +90,8 @@ class NodeRemovalService:
             lifecycle = NodeLifecycle(self.db)
             phase = 'verify_identity'
             try:
+                if self.retire_unprovisioned(actor, key):
+                    return True
                 if node is None:
                     raise AccessDenied('verification_target_required', 409)
                 target = 'local' if node['transport'] == 'local' else node['ssh_target']
@@ -104,6 +108,8 @@ class NodeRemovalService:
                         conn.execute("UPDATE backend_node_removals SET status = 'running' WHERE node_key = ?", (key,))
                     return True
                 if not state['revocations_complete']:
+                    if state['blocked_tasks']:
+                        raise AccessDenied('node_revocations_blocked', 409)
                     continue
                 if state['cleanup_phase'] in {'uninstall_uncertain', 'uninstall_scheduled'}:
                     final_verifier = self.verifier(target, final=True)
@@ -133,3 +139,31 @@ class NodeRemovalService:
                 with self.db.transaction() as conn:
                     conn.execute("UPDATE backend_node_removals SET status = 'blocked', error_code = ? WHERE node_key = ?", (code, key))
         return False
+
+    def retire_unprovisioned(self, actor, node_key):
+        """Remove only a registry entry with no possibly executed mutations.
+
+        The caller holds the worker lock. This is not proof about an arbitrary
+        VPS: no remote cleanup is attempted or reported as verified.
+        """
+        with self.db.transaction() as conn:
+            node = conn.execute('''SELECT applied_revision FROM backend_nodes
+                WHERE key = ?''', (node_key,)).fetchone()
+            if node is None or node['applied_revision'] != 0:
+                return False
+            checks = (
+                'SELECT 1 FROM backend_agent_rollouts WHERE node_key = ?',
+                "SELECT 1 FROM backend_node_jobs WHERE node_key = ? AND action != 'check_ports'",
+                'SELECT 1 FROM backend_node_settings_tasks WHERE node_key = ?',
+                'SELECT 1 FROM backend_operation_tasks WHERE node_key = ?',
+                'SELECT 1 FROM backend_grants WHERE node_key = ?',
+                'SELECT 1 FROM backend_node_cleanup WHERE node_key = ?',
+                'SELECT 1 FROM backend_node_verification_targets WHERE node_key = ?',
+            )
+            if any(conn.execute(query, (node_key,)).fetchone() for query in checks):
+                return False
+        NodeLifecycle(self.db).retire_registry_only(actor, node_key,
+            'Unprovisioned registry entry: no installation or mutation history.')
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_node_removals SET status = 'unprovisioned' WHERE node_key = ?", (node_key,))
+        return True

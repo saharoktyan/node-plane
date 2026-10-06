@@ -138,6 +138,10 @@ class AgentRolloutService:
             self._failure_code = 'rust_required'
         elif 'Not enough free memory' in output or 'too busy' in output:
             self._failure_code = 'build_resources'
+        elif 'Permission denied (publickey' in output:
+            self._failure_code = 'ssh_authentication'
+        elif 'Host key verification failed' in output or 'REMOTE HOST IDENTIFICATION HAS CHANGED' in output:
+            self._failure_code = 'ssh_host_key'
         elif 'SSH_PREREQUISITES_FAILED:' in output:
             self._failure_code = 'ssh_prerequisites'
         return result.returncode == 0

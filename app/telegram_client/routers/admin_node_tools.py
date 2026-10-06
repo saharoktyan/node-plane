@@ -321,9 +321,12 @@ async def advance_removal(chat_id, user_id, message_id, node_key, bot, backend, 
         result = await backend.remove_node_step(user_id, node_key, retry=retry)
         if result.get('error_code'):
             raise BackendError(result['error_code'], 409)
-        if result['status'] in {'removed', 'removed_registry_only'}:
+        if result['status'] in {'removed', 'removed_registry_only', 'removed_unprovisioned'}:
+            note = ('node_tools.unprovisioned_removed' if result['status'] == 'removed_unprovisioned'
+                    else 'node_tools.removed_note' if result['status'] == 'removed'
+                    else 'nodes.maintenance.registry_removed_note')
             await render(bot, chat_id, Screen(tr(locale, 'node_tools.removed'),
-                (tr(locale, 'node_tools.removed_note' if result['status'] == 'removed' else 'nodes.maintenance.registry_removed_note'),), embedded_buttons=True, navigation=True),
+                (tr(locale, note),), embedded_buttons=True, navigation=True),
                 [[button(locale, 'nodes.card.to_list', AdminNodesCallback().pack())]], state, message_id)
             return
         lines = [tr(locale, 'node_tools.removal_progress')]
@@ -340,6 +343,8 @@ async def advance_removal(chat_id, user_id, message_id, node_key, bot, backend, 
             rows.append([button(locale, 'nodes.maintenance.registry_only', ConfirmRegistryRemovalCallback(node_key=node_key).pack())])
         elif exc.code == 'host_verification_failed':
             lines = [tr(locale, 'node_tools.verification_failed')]
+        elif exc.code == 'node_revocations_blocked':
+            lines = [tr(locale, 'node_tools.revocations_blocked')]
         elif exc.code in {'node_cleanup_failed', 'node_cleanup_unavailable'}:
             lines = [tr(locale, 'node_tools.cleanup_failed')]
         elif exc.code in {'independent_verification_key_required', 'verification_key_unavailable'}:

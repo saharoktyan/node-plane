@@ -1,6 +1,6 @@
 # Development plan
 
-Updated: 2026-10-05. This is the only active development backlog. It replaces
+Updated: 2026-10-06. This is the only active development backlog. It replaces
 the historical roadmap, migration/parity maps, Rich UI plans, protocol upgrade
 plans and the implementation audit. Architecture and operator references are
 separate documents, not competing task lists.
@@ -25,8 +25,8 @@ in an environment without PTB. This is automated evidence, not live acceptance
 of every failure scenario.
 
 The user reports successful current-functionality testing with PostgreSQL.
-Fresh SSH agent installation has not been repeated because other servers run
-unrelated projects; it is provisionally accepted from earlier successful tests.
+Fresh SSH agent installation and full SSH removal passed user testing on
+2026-10-06; local full removal passed earlier clean-VPS testing.
 Do not reopen the completed migration or demand unrelated servers for testing.
 
 ## 1. Close the current core cycle
@@ -120,7 +120,7 @@ Shell-level tests verify custom config leftovers and previous-container names.
   host identity, inventory, service and container verification remain mandatory.
   The rollout success screen returns to the admin menu, and unbootstrapped nodes
   have a separate status. Local clean-VPS removal passed manual acceptance on
-  v0.4.3-alpha.45; SSH removal acceptance remains pending.
+  v0.4.3-alpha.45; SSH removal passed user testing on 2026-10-06.
 - [x] Document operation/artifact retention, journal growth and cleanup rules.
   Keep node-agent SQLite command journals; their replacement is not planned.
   Never remove duplicate-protection records while commands can still be replayed.
@@ -133,7 +133,9 @@ worker now automatically provisions an independent temporary key, verifies the
 host before draining, and removes the temporary authorized-key entry after the
 final artifact check. Configured independent keys remain supported. Automated
 coverage includes credential reuse, failed-check fencing and preservation of
-unrelated authorized keys; actual SSH removal acceptance is still pending.
+unrelated authorized keys. The user subsequently confirmed successful SSH
+removal on 2026-10-06; this does not independently verify every historical
+artifact or failure scenario.
 Node lists and cards expose deletion progress and blocked deletion separately,
 with a direct entry back into the removal screen.
 
@@ -142,6 +144,19 @@ inline monowidth text. The show/hide button, collapsed QR and visible files
 remain unchanged. This is an iOS copying workaround candidate; copying the full
 AWG/VLESS URI on an actual iPhone still requires manual acceptance.
 
+Registry entries with no applied runtime, rollout attempts, mutation jobs,
+settings tasks, profile commands/grants or bound cleanup target can now be
+removed without contacting a nonexistent agent. This is explicitly metadata-only
+retirement, not verified host cleanup; even a failed rollout prevents the fast
+path. Blocked revocations now stop the removal saga with an explicit attention
+state instead of showing a pending count indefinitely. The latest SSH setup
+failure was reported alongside a missing bot authorized-key entry; installation
+was resolved after restoring that key; the user confirmed SSH removal works.
+Regression coverage also verifies removal with both protocol grants queued and
+with one already applied: remaining ensures are superseded, both targets are
+revoked, and runtime cleanup waits for confirmation. The focused lifecycle,
+removal and executor suite passes 38 tests; this is automated fixture evidence.
+
 ### Focused integration evidence
 
 Manual result reported on 2026-10-05, v0.4.3-alpha.45, clean local VPS:
@@ -149,8 +164,9 @@ full removal completed without errors; the node disappeared from every profile;
 returning to an old screen did not allow new configuration retrieval; protocol
 containers were stopped and the agent systemd service was removed. This report
 does not independently establish absence of every binary, volume or historical
-artifact. SSH installation/removal testing is pending before continuing the
-remaining work in this block.
+artifact. SSH installation/removal also passed user testing on 2026-10-06. Continue the
+remaining failure, ownership and integration checks without repeating clean
+installation tests unnecessarily.
 
 Manual acceptance checklist (use disposable nodes; apply to the current release):
 
@@ -182,8 +198,9 @@ Manual acceptance checklist (use disposable nodes; apply to the current release)
 11. On a separate disposable node with no grants, substitute an unrelated container
     under the configured protocol name. Ownership validation must prevent deletion
     of that container and runtime files; no successful retirement is allowed.
-12. Recreate the removed node under the same key. Only newly granted profiles get
-    access; old grants/configs must not return automatically.
+12. Confirm the retired node key cannot be reused: permanent retirement fencing
+    rejects it. Create a replacement under a new key; only newly granted profiles
+    get access, and old grants/configs must not return automatically.
 13. Repeat full SSH removal with only the normal bot key and a pinned host key.
     The worker must prepare and verify its temporary identity before revocation,
     remove both bot and temporary keys at completion, and retain unrelated keys.
@@ -203,6 +220,18 @@ Unreleased regression evidence: two tests on disposable PostgreSQL 16 verify
 fresh profile traffic summaries and nullable-owner isolation. Fixed the `42P18`
 untyped-null-parameter failure affecting both member/admin profile summaries.
 This does not close the concurrency, restore or node-removal integration items.
+
+Restore admission regression fixed on 2026-10-06: historical blocked agent
+rollouts for a node already removed with verified host cleanup incorrectly
+caused `maintenance_busy`. Those audit records no longer block restoration;
+pending/running rollouts, failed rollouts for existing nodes and unverified
+retirements still do. The user confirmed all three blocking attempts belonged
+to the verified retirement of `spb1`. A real disposable PostgreSQL 16 test
+restores a configuration snapshot with that history and verifies profile data
+and administrator login preservation. RU/EN backup screens now distinguish
+admission refusal from failed revocation. Worker failure logs record phase,
+sanitized error code/type and SQLSTATE without backup contents. This evidence
+does not close restore validation, revocation failures or concurrency coverage.
 
 - [ ] Test concurrent worker claims, expected-revision conflicts and competing
   mutations, including traffic-policy changes during collection and recipient eligibility
