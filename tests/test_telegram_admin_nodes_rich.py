@@ -234,6 +234,22 @@ class AdminNodeRichTests(IsolatedAsyncioTestCase):
         self.assertEqual(self.data['unreachable_removal_node'], 'msk1')
         screen.rich(rows)
 
+    async def test_unused_card_removal_does_not_claim_verified_remote_cleanup(self):
+        backend = SimpleNamespace(remove_node_step=AsyncMock(return_value={'status': 'removed_unprovisioned'}))
+        for locale in ('en', 'ru'):
+            self.data['locale'] = locale
+            with patch.object(tools, 'render', new_callable=AsyncMock) as draw:
+                await tools.advance_removal(123, 123, 77, 'msk1', self.bot, backend, self.state)
+            self.assertIn(tr(locale, 'node_tools.unprovisioned_removed'), draw.call_args.args[2].lines)
+            self.assertNotIn(tr(locale, 'node_tools.removed_note'), draw.call_args.args[2].lines)
+
+    async def test_uncertain_revocation_screen_explains_the_pause(self):
+        backend = SimpleNamespace(remove_node_step=AsyncMock(return_value={
+            'status': 'draining', 'error_code': 'node_revocations_blocked'}))
+        with patch.object(tools, 'render', new_callable=AsyncMock) as draw:
+            await tools.advance_removal(123, 123, 77, 'msk1', self.bot, backend, self.state)
+        self.assertIn(tr('en', 'node_tools.revocations_blocked'), draw.call_args.args[2].lines)
+
     async def test_connection_choices_return_to_connection_section(self):
         with patch.object(nodes, 'render', new_callable=AsyncMock) as draw:
             await nodes.show_node_connection(123, 123, 77, 'msk1', self.bot, self.backend, self.state)

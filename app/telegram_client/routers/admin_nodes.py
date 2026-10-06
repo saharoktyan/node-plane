@@ -1490,6 +1490,8 @@ async def show_rollout_status(chat_id, user_id, message_id, task_id, bot, backen
         lines.append(tr(locale, 'nodes.rollout.build_resources'))
     if task.get('failure_code') == 'ssh_prerequisites':
         lines.append(tr(locale, 'nodes.rollout.ssh_prerequisites'))
+    if task.get('failure_code') in {'ssh_authentication', 'ssh_host_key'}:
+        lines.append(tr(locale, 'nodes.rollout.' + task['failure_code']))
     if status in {'awaiting_executor', 'running'}:
         lines.append(tr(locale, 'nodes.rich.independent'))
     await render(bot, chat_id, Screen(tr(locale, 'nodes.rollout.title'),

@@ -11,12 +11,53 @@ from backend.profiles import ProfileRepository
 from backend.node_removal import NodeRemovalService
 from backend.authorization import AccessDenied
 from backend.removal_inventory import inventory_digest
+from backend.operations import OperationRepository
 
 RESOURCES = {'paths': ['/opt/node-plane-runtime'], 'containers': ['xray', 'amnezia-awg']}
 
 
 class BackendNodeRemovalTests(unittest.TestCase):
     setUp = test_backend_node_jobs.BackendNodeJobTests.setUp
+
+    def test_unprovisioned_card_removal_needs_no_host_connection_or_verifier(self):
+        self.db.connection.execute("UPDATE backend_nodes SET applied_revision=0 WHERE key='n1'")
+        self.db.connection.execute("DELETE FROM backend_node_connections WHERE node_key='n1'")
+        self.db.connection.commit()
+        def forbidden(*args):
+            raise AssertionError('No remote verification should run for an unused card')
+        worker = NodeRemovalService(self.db, verifier_factory=forbidden)
+        worker.request(self.actor, 'n1')
+        self.assertTrue(worker.run_one())
+        self.assertEqual(worker.get(self.actor, 'n1')['status'], 'removed_unprovisioned')
+        self.assertIsNone(self.db.connection.execute("SELECT key FROM backend_nodes WHERE key='n1'").fetchone())
+        retirement = self.db.connection.execute("SELECT mode,evidence_json FROM backend_node_retirements WHERE node_key='n1'").fetchone()
+        self.assertEqual(retirement['mode'], 'registry_only')
+        self.assertIsNone(retirement['evidence_json'])
+
+    def test_failed_agent_installation_is_not_treated_as_an_unused_card(self):
+        from uuid import uuid4
+        from backend.agent_rollout import AgentRolloutService
+        self.db.connection.execute("UPDATE backend_nodes SET applied_revision=0 WHERE key='n1'")
+        self.db.connection.commit()
+        rollout = AgentRolloutService(self.db).request(self.actor, 'n1', str(uuid4()), transport='local')
+        self.db.connection.execute("UPDATE backend_agent_rollouts SET status='blocked' WHERE id=?", (rollout['id'],))
+        self.db.connection.commit()
+        self.assertFalse(NodeRemovalService(self.db).retire_unprovisioned(self.actor, 'n1'))
+        self.assertIsNotNone(self.db.connection.execute("SELECT key FROM backend_nodes WHERE key='n1'").fetchone())
+
+    def test_uncertain_revocation_reports_blocked_instead_of_waiting_forever(self):
+        profile = ProfileRepository(self.db).create_profile(runtime_name='alice', display_name='Alice')
+        self.db.connection.execute('INSERT INTO backend_grants VALUES (?, ?, ?)', (profile, 'n1', 'awg'))
+        worker = NodeRemovalService(self.db, verifier_factory=self.verifier)
+        worker.request(self.actor, 'n1')
+        self.assertTrue(worker.run_one())
+        self.db.connection.execute("UPDATE backend_operation_tasks SET status='blocked' WHERE node_key='n1'")
+        self.db.connection.commit()
+        self.assertFalse(worker.run_one())
+        result = worker.get(self.actor, 'n1')
+        self.assertEqual(result['removal_status'], 'blocked')
+        self.assertEqual(result['error_code'], 'node_revocations_blocked')
+        self.assertFalse(result['revocations_complete'])
 
     def test_remote_cleanup_automatically_selects_managed_verification_key(self):
         from backend.removal_credentials import ManagedRemovalVerifier
@@ -94,6 +135,52 @@ class BackendNodeRemovalTests(unittest.TestCase):
             pass
         self.assertTrue(worker.run_one())
         self.assertEqual(phases, ['prepare'])
+
+    def test_removal_with_pending_access_never_applies_remaining_grants(self):
+        for partially_applied in (False, True):
+            with self.subTest(partially_applied=partially_applied):
+                if partially_applied:
+                    self.setUp()
+                profile = ProfileRepository(self.db).create_profile(
+                    runtime_name='alice', display_name='Alice')
+                with self.db.transaction() as conn:
+                    for protocol in ('awg', 'xray'):
+                        conn.execute('INSERT INTO backend_grants VALUES (?, ?, ?)',
+                                     (profile, 'n1', protocol))
+                    operation = OperationRepository.record(conn, self.actor, profile, set())
+                driver = FakeDriver()
+                executor = IntentExecutor(self.db, driver)
+                if partially_applied:
+                    self.assertTrue(executor.run_one())
+                    self.assertEqual(len(driver.calls), 1)
+                    self.assertEqual(driver.calls[0][1]['action'], 'ensure')
+                phases = []
+                worker = NodeRemovalService(self.db, SimpleNamespace(
+                    decommission=lambda key, command, phase: phases.append(phase)), self.verifier)
+                worker.request(self.actor, 'n1')
+                self.assertTrue(worker.run_one())
+                self.assertFalse(worker.run_one())
+                self.assertEqual(phases, [])
+                before = len(driver.calls)
+                while executor.run_one():
+                    pass
+                self.assertEqual(sorted(intent['protocol'] for _, intent in driver.calls[before:]),
+                                 ['awg', 'xray'])
+                self.assertTrue(all(intent['action'] == 'delete'
+                                    for _, intent in driver.calls[before:]))
+                states = self.db.connection.execute(
+                    'SELECT status FROM backend_operation_tasks WHERE operation_id=?',
+                    (operation['id'],)).fetchall()
+                self.assertEqual(sorted(row['status'] for row in states),
+                                 ['succeeded', 'superseded'] if partially_applied
+                                 else ['superseded', 'superseded'])
+                for _ in range(4):
+                    self.assertTrue(worker.run_one())
+                self.assertEqual(worker.get(self.actor, 'n1')['status'], 'removed')
+                self.assertEqual(phases, ['prepare', 'delete_runtime', 'uninstall'])
+                self.assertIsNone(self.db.connection.execute(
+                    'SELECT 1 FROM backend_grants WHERE node_key=?', ('n1',)).fetchone())
+                self.assertFalse(executor.run_one())
 
     def test_verification_credentials_checked_before_any_destruction(self):
         def unavailable(*args):

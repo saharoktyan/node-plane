@@ -1187,6 +1187,8 @@ CATALOG['ru'].update({'node_tools.general': 'Основные настройки
  'node_tools.removal_progress': 'Удаление выполняется в worker: отключение доступов → очистка контейнеров и '
                                 'конфигов → удаление агента → проверка хоста. Можно уйти с этого экрана.',
  'node_tools.removed': 'Нода удалена',
+ 'node_tools.unprovisioned_removed': 'Карточка сервера удалена. В истории нет установок или изменений на ноде; удалённая очистка не выполнялась.',
+ 'node_tools.revocations_blocked': 'Отзыв доступа требует внимания: есть команда с неподтверждённым результатом. Удаление приостановлено; переустановка VPS не подтверждает выполнение старой команды.',
  'node_tools.removed_note': 'Удалены контейнеры, конфиги, агент и его systemd-служба. Отсутствие компонентов '
                             'проверено; нода удалена из реестра.',
  'node_tools.verification_key': 'Не удалось подготовить SSH-проверку удаления. Проверьте ключ бота и доступ к ноде; если задан отдельный ключ проверки, он должен отличаться от ключа бота.',
@@ -1277,6 +1279,8 @@ CATALOG['en'].update({'node_tools.general': 'General settings',
  'node_tools.removal_progress': 'The worker is removing access, containers/configs and the agent, then '
                                 'verifying the host. You can leave this screen.',
  'node_tools.removed': 'Node removed',
+ 'node_tools.unprovisioned_removed': 'The server entry was removed. No installation or node mutation is recorded; no remote cleanup was performed.',
+ 'node_tools.revocations_blocked': 'Access revocation needs attention: a command has an unconfirmed result. Removal is paused; reinstalling the VPS does not confirm the old command.',
  'node_tools.removed_note': 'Containers, configs, agent and its systemd service have been removed. Their '
                             'absence was verified; the node was removed from the registry.',
  'node_tools.verification_key': 'Could not prepare SSH verification. Check the bot SSH key and node access; a configured verification key must differ from the bot key.',
@@ -2137,3 +2141,33 @@ CATALOG["ru"].update({
 
 CATALOG["en"]["nodes.rollout.journal_archived"] = "Previous installation journals were archived to: {path}"
 CATALOG["ru"]["nodes.rollout.journal_archived"] = "Журналы предыдущей установки сохранены в архиве: {path}"
+
+CATALOG['en'].update({
+    'nodes.rollout.ssh_authentication': 'The node rejected the bot SSH key. Check the SSH user and add the bot public key to authorized_keys on the node.',
+    'nodes.rollout.ssh_host_key': 'The SSH host key is missing or has changed. Verify the node fingerprint and update the controller known_hosts entry before retrying.'})
+CATALOG['ru'].update({
+    'nodes.rollout.ssh_authentication': 'Нода отклонила SSH-ключ бота. Проверьте пользователя SSH и добавьте публичный ключ бота в authorized_keys на ноде.',
+    'nodes.rollout.ssh_host_key': 'SSH-ключ хоста отсутствует или изменился. Проверьте отпечаток ноды и обновите запись known_hosts на контроллере перед повторной установкой.'})
+
+CATALOG['en'].update({
+    'backups.error.maintenance_busy': 'Restore has not started: unfinished operations are present. Wait for pending work to finish or resolve operations that need attention, then retry.',
+    'backups.error.backup_incompatible': 'Restore has not started: this backup does not match the current database schema or its checksum has changed.',
+    'backups.error.backup_invalid': 'The backup is damaged or has an unsupported format. Choose another backup.',
+    'backups.error.backup_pending': 'Another backup or restore is already in progress. Open its result and wait for completion.',
+    'backups.error.backup_revocations_failed': 'Restore stopped because access revocation could not be confirmed. Profiles remain frozen; resolve the affected operations before retrying.',
+    'backups.error.resource_not_found': 'The requested backup or operation no longer exists. Refresh the backup list.',
+    'backups.error.update_pending': 'Restore has not started: a stack update is in progress. Wait for it to finish.',
+    'backups.error.system_cleanup_in_progress': 'Restore has not started: controller cleanup is active or needs attention. Finish or resolve it first.',
+    'backups.error.restore_in_progress': 'Database restore is already in progress. Open its result to check progress.',
+})
+CATALOG['ru'].update({
+    'backups.error.maintenance_busy': 'Восстановление не началось: есть незавершённые операции. Дождитесь выполнения ожидающих задач или разберите операции, требующие внимания, затем повторите попытку.',
+    'backups.error.backup_incompatible': 'Восстановление не началось: копия не соответствует текущей схеме БД или её контрольная сумма изменилась.',
+    'backups.error.backup_invalid': 'Копия повреждена или имеет неподдерживаемый формат. Выберите другую копию.',
+    'backups.error.backup_pending': 'Другое резервное копирование или восстановление уже выполняется. Откройте его результат и дождитесь завершения.',
+    'backups.error.backup_revocations_failed': 'Восстановление остановлено: отзыв доступа не подтверждён. Профили остаются замороженными; разберите соответствующие операции перед повторной попыткой.',
+    'backups.error.resource_not_found': 'Копия или операция больше не существует. Обновите список резервных копий.',
+    'backups.error.update_pending': 'Восстановление не началось: выполняется обновление стека. Дождитесь его завершения.',
+    'backups.error.system_cleanup_in_progress': 'Восстановление не началось: очистка контроллера выполняется или требует внимания. Сначала завершите её или устраните проблему.',
+    'backups.error.restore_in_progress': 'Восстановление БД уже выполняется. Откройте его результат для проверки прогресса.',
+})

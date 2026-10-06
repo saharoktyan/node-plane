@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import logging
 import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -260,8 +261,17 @@ class BackupService:
             return True
         if conn.execute("SELECT 1 FROM backend_announcement_deliveries WHERE status IN ('queued','claimed') LIMIT 1").fetchone():
             return True
+        # Retain failed installation attempts for audit. A verified retirement
+        # proves their node has been cleaned up; they are no longer unfinished
+        # maintenance. Registry-only retirement does not provide that evidence.
+        if conn.execute("""SELECT 1 FROM backend_agent_rollouts a
+            WHERE a.status IN ('awaiting_executor','running','blocked')
+            AND NOT (a.status='blocked'
+                AND NOT EXISTS (SELECT 1 FROM backend_nodes n WHERE n.key=a.node_key)
+                AND EXISTS (SELECT 1 FROM backend_node_retirements r
+                    WHERE r.node_key=a.node_key AND r.mode='verified')) LIMIT 1""").fetchone():
+            return True
         for table in (
-            "backend_agent_rollouts",
             "backend_node_jobs",
             "backend_node_settings_tasks",
             "backend_operation_tasks",
@@ -603,6 +613,10 @@ class BackupService:
             return True
         except Exception as exc:  # noqa: BLE001 -- persist a sanitized worker failure
             code = exc.code if isinstance(exc, AccessDenied) else "backup_failed"
+            logging.getLogger(__name__).error(
+                'Backup operation blocked: job=%s action=%s phase=%s code=%s type=%s sqlstate=%s',
+                job['id'], job['action'], job['phase'], code, type(exc).__name__,
+                getattr(exc, 'sqlstate', None))
             with self.db.transaction() as conn:
                 conn.execute(
                     "UPDATE backend_backup_jobs SET status='blocked',result_json=? WHERE id=?",

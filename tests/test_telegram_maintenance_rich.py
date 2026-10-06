@@ -8,11 +8,40 @@ from unittest.mock import AsyncMock, patch
 from telegram_client.routers import admin_backups as backups, admin_system_cleanup as cleanup
 from telegram_client.routers import admin_settings as settings
 from telegram_client.i18n import CATALOG, tr
+from telegram_client.backend import BackendError
 from tests import test_telegram_client as fixture
 
 
 class MaintenanceRichTests(IsolatedAsyncioTestCase):
     setUp = fixture.TelegramFlowTests.setUp
+
+    async def test_restore_admission_failure_shows_specific_reason_without_freeze_warning(self):
+        for lang in ('en', 'ru'):
+            self.state_data.update(locale=lang, backup_draft={
+                'nonce': 'test', 'key': 'command', 'body': {'action': 'restore'}})
+            self.query.data = 'backup_submit:test'
+            for code in ('maintenance_busy', 'backup_incompatible', 'backup_pending'):
+                backend = SimpleNamespace(backup_command=AsyncMock(
+                    side_effect=BackendError(code, 409)))
+                with patch.object(backups, 'render', AsyncMock()) as draw:
+                    await backups.backup_cb(self.query, self.bot, backend, self.state)
+                screen, rows = draw.call_args.args[2:4]
+                self.assertIn(tr(lang, 'backups.error.' + code), screen.plain())
+                self.assertNotIn(tr(lang, 'backups.failed_note'), screen.plain())
+                self.assertEqual(rows[-1][0].callback_data, 'backups')
+                screen.rich(rows)
+
+    async def test_restore_revocation_failure_keeps_specific_freeze_warning(self):
+        backend = SimpleNamespace(backup_job=AsyncMock(return_value={
+            'status': 'blocked', 'action': 'restore', 'phase': 'revoking',
+            'result': {'status': 'failed', 'code': 'backup_revocations_failed'}}))
+        for lang in ('en', 'ru'):
+            self.state_data['locale'] = lang
+            with patch.object(backups, 'render', AsyncMock()) as draw:
+                await backups.result(self.query, self.bot, backend, self.state, 'job')
+            screen, rows = draw.call_args.args[2:4]
+            self.assertIn(tr(lang, 'backups.error.backup_revocations_failed'), screen.plain())
+            screen.rich(rows)
 
     def value(self):
         return dict(count=3, size_bytes=1048576, latest={'created_at': '2026-10-05T10:00:00'},

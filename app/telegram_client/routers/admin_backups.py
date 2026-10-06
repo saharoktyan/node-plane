@@ -19,6 +19,13 @@ def button(text, data):
     return InlineKeyboardButton(text=text, callback_data=data)
 
 
+def failure_note(lang, code):
+    known = {'maintenance_busy', 'backup_incompatible', 'backup_invalid',
+             'backup_pending', 'backup_revocations_failed', 'resource_not_found',
+             'update_pending', 'system_cleanup_in_progress', 'restore_in_progress'}
+    return tr(lang, 'backups.error.' + code if code in known else 'backups.failed_note')
+
+
 async def draw(query, bot, state, title, lines, rows, sections=()):
     lang = normalize_locale((await state.get_data()).get("locale"))
     await render(
@@ -149,7 +156,7 @@ async def result(query, bot, backend, state, job_id):
         elif job["action"] == "restore" and status == "success":
             lines.append(tr(lang, "backups.restored"))
         elif status == "failed":
-            lines.append(tr(lang, "backups.failed"))
+            lines.append(failure_note(lang, job['result'].get('code')))
     rows = []
     if job["status"] in {"awaiting_executor", "running"}:
         rows.append([button(tr(lang, "updates.refresh"), f"backup_job:{job_id}")])
@@ -285,12 +292,12 @@ async def backup_cb(
             )
             await backend.backup_preferences(query.from_user.id, changes)
             await settings(query, bot, backend, state)
-    except (BackendError, ValueError, KeyError):
+    except (BackendError, ValueError, KeyError) as exc:
         await draw(
             query,
             bot,
             state,
             "backups.failed",
-            [tr(lang, "backups.failed_note")],
+            [failure_note(lang, exc.code if isinstance(exc, BackendError) else None)],
             [[button(tr(lang, "back"), "backups")]],
         )

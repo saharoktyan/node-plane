@@ -557,7 +557,7 @@ class SystemCleanupService:
                                     ),
                                 )
                             raise AccessDenied("node_cleanup_unverified", 409)
-                        if status == "removed":
+                        if status in {"removed", "removed_unprovisioned"}:
                             with self.db.transaction() as conn:
                                 conn.execute(
                                     "UPDATE backend_system_cleanup_items SET status='succeeded',error_code=NULL WHERE job_id=? AND node_key=?",

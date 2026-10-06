@@ -111,6 +111,12 @@ after the temporary key was removed require explicit recovery with another SSH
 identity; they never certify removal or trigger a blind replay.
 The driver permits a missing public key only for loopback agent endpoints.
 
+An unused node card with no possibly executed provisioning/mutation history can
+be retired without a host connection. The result is `removed_unprovisioned`,
+with an unverified registry-only tombstone; it never claims that an arbitrary VPS
+was cleaned. Failed installation attempts do not qualify. Blocked access
+revocations place full removal in an explicit attention state until recovery.
+
 Pre-existing removals without a captured inventory cannot claim verified
 retirement. An active node can bind its inventory before draining; an already
 uncertain uninstall requires explicit recovery or registry-only retirement.

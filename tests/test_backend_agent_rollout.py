@@ -45,6 +45,20 @@ class BackendAgentRolloutTests(TestCase):
                 'transport': 'ssh', 'ssh_target': 'root@lv1.example', 'ssh_port': 22})}))
         self.assertEqual(service._failure_code, 'ssh_prerequisites')
 
+    def test_ssh_access_failures_are_not_mislabeled_as_host_prerequisites(self):
+        for detail, expected in (
+            ('Permission denied (publickey,password).', 'ssh_authentication'),
+            ('Host key verification failed.', 'ssh_host_key'),
+            ('REMOTE HOST IDENTIFICATION HAS CHANGED!', 'ssh_host_key'),
+        ):
+            service = AgentRolloutService(self.db)
+            with patch.dict(os.environ, {'NODE_PLANE_APP_DIR': '/opt/node-plane/current'}), \
+                    patch('backend.agent_rollout.subprocess.run', return_value=SimpleNamespace(
+                        returncode=1, stdout='', stderr=detail + '\nSSH_PREREQUISITES_FAILED: lv1')):
+                self.assertFalse(service._execute({'node_key': 'lv1', 'intent_json': json.dumps({
+                    'transport': 'ssh', 'ssh_target': 'root@lv1.example', 'ssh_port': 22})}))
+            self.assertEqual(service._failure_code, expected)
+
     def test_rollout_is_queued_for_admin_and_executed_without_shell_input(self):
         self.node()
         key = str(uuid4())
