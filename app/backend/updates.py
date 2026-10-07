@@ -225,6 +225,58 @@ class UpdateService:
             conn.execute("UPDATE backend_update_jobs SET status='blocked' WHERE kind IN ('version','stack') AND status='running' AND result_json IS NULL")
             conn.execute("UPDATE backend_update_items SET status='blocked',error_code='execution_interrupted' WHERE node_key='@driver' AND status='running'")
 
+    def cancel(self, actor, job_id):
+        """Cancel only work that has not crossed any execution boundary.
+
+        The caller holds the worker lock. Never clear an uncertain launch or
+        installation merely because the operator requests cancellation.
+        """
+        require_permission(actor, 'maintenance.manage')
+        with self.db.transaction() as conn:
+            conn.execute('UPDATE backend_account_guard SET revision=revision+1 WHERE id=1')
+            self._fresh_admin(conn, actor)
+            job = conn.execute('SELECT * FROM backend_update_jobs WHERE id=?', (job_id,)).fetchone()
+            if not job:
+                raise AccessDenied('resource_not_found', 404)
+            if job['status'] == 'cancelled':
+                return self.get(actor, job_id)
+            if job['status'] != 'awaiting_executor' or conn.execute("""SELECT 1 FROM backend_update_items
+                    WHERE job_id=? AND (status!='awaiting_executor' OR child_id IS NOT NULL)""", (job_id,)).fetchone():
+                raise AccessDenied('update_cancel_unsafe', 409)
+            result = json.loads(job['result_json'] or '{}')
+            result.update(cancelled_by=actor.account.id, cancelled_at=datetime.now(timezone.utc).isoformat())
+            conn.execute("UPDATE backend_update_jobs SET status='cancelled',result_json=? WHERE id=?", (json.dumps(result), job_id))
+            conn.execute("UPDATE backend_update_items SET status='skipped' WHERE job_id=?", (job_id,))
+            conn.execute('DELETE FROM backend_controller_update_gate WHERE job_id=?', (job_id,))
+        return self.get(actor, job_id)
+
+    @staticmethod
+    def _fresh_admin(conn, actor):
+        account = conn.execute('SELECT role,status FROM backend_accounts WHERE id=?', (actor.account.id,)).fetchone()
+        if not account or account['role'] != 'admin' or account['status'] != 'approved':
+            raise AccessDenied('permission_denied')
+
+    def recheck(self, actor, job_id):
+        """Re-read an uncertain core outcome without repeating the installation.
+
+        Failed rollback or missing evidence keeps the gate. Restored durable
+        health/rollback evidence can release it after manual host recovery.
+        """
+        require_permission(actor, 'maintenance.manage')
+        with self.db.transaction() as conn:
+            conn.execute('UPDATE backend_account_guard SET revision=revision+1 WHERE id=1')
+            self._fresh_admin(conn, actor)
+            row = conn.execute('SELECT * FROM backend_update_jobs WHERE id=?', (job_id,)).fetchone()
+            if not row:
+                raise AccessDenied('resource_not_found', 404)
+            if row['status'] != 'blocked' or row['kind'] != 'stack':
+                raise AccessDenied('update_recovery_unavailable', 409)
+            plan = json.loads(row['result_json'] or '{}')
+            if not plan.get('unit_name') or plan.get('phase') != 'core':
+                raise AccessDenied('update_recovery_unconfirmed', 409)
+        self._run_stack_core(dict(row), actor)
+        return self.get(actor, job_id)
+
     def run_one(self):
         with self.db.connect() as conn:
             jobs = conn.execute("SELECT * FROM backend_update_jobs WHERE status IN ('awaiting_executor','running') ORDER BY created_at").fetchall()
@@ -362,6 +414,13 @@ class UpdateService:
             return True
         progress = self._stack_progress(job['id'])
         state = self.updater.refresh_update_run_state()
+        # systemctl/journal reads can outlast the final script steps. A progress
+        # snapshot taken before those reads can still say "running" after the
+        # unit has finished. Confirm terminal evidence after observing the unit,
+        # including rollback markers; never reject a completed update using the
+        # earlier snapshot and never replay the installation.
+        if state.get('last_run_status') in {'success', 'failed'}:
+            progress = self._stack_progress(job['id'])
         if progress.get('components'):
             plan['components'] = progress['components']
         if state.get('last_run_unit') != plan.get('unit_name'):
@@ -379,6 +438,8 @@ class UpdateService:
                 self._finish(job['id'], 'blocked', {**plan, 'error_code': 'update_verification_unavailable'})
             else:
                 plan['phase'] = 'agents'
+                plan.pop('error_code', None)
+                plan.pop('rollback_status', None)
                 self._finish(job['id'], 'running', plan)
             return True
         return False
@@ -387,7 +448,7 @@ class UpdateService:
         with self.db.transaction() as conn:
             conn.execute('UPDATE backend_update_jobs SET status=?, result_json=COALESCE(?,result_json) WHERE id=?',
                          (status, json.dumps(result) if result is not None else None, job_id))
-            if status in {'succeeded', 'partial', 'rolled_back'} or result and result.get('phase') == 'agents':
+            if status in {'succeeded', 'partial', 'rolled_back', 'cancelled'} or result and result.get('phase') == 'agents':
                 conn.execute('DELETE FROM backend_controller_update_gate WHERE job_id=?', (job_id,))
 
     def auto_check(self):

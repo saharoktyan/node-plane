@@ -136,6 +136,7 @@ class RequestSetupTests(IsolatedAsyncioTestCase):
         screen, rows = draw.call_args.args[2:4]
         self.assertIn('Administrators always have permanent access.', screen.plain())
         self.assertEqual(len(rows), 1)
+        self.assertEqual([b.style for b in rows[0]], [None, 'primary'])
         self.assertFalse(any(b.callback_data.startswith('setup_exp:') for row in rows for b in row))
 
 

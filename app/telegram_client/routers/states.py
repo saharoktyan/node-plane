@@ -9,6 +9,7 @@ class NodeDraftState(StatesGroup):
     waiting_for_region = State()
     waiting_for_flag = State()
     waiting_for_transport = State()
+    waiting_for_template = State()
     waiting_for_target = State()
     waiting_for_public_host = State()
     waiting_for_protocols = State()

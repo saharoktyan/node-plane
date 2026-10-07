@@ -12,8 +12,8 @@ from .callbacks import UpdatesCallback, AdminNodeCallback, AdminSettingsCallback
 router = Router()
 
 
-def button(text, data):
-    return InlineKeyboardButton(text=text, callback_data=data)
+def button(text, data, *, style=None):
+    return InlineKeyboardButton(text=text, callback_data=data, style=style)
 
 
 async def locale(state):
@@ -60,7 +60,7 @@ async def confirm(query, bot, state, body, lines):
     await state.update_data(update_draft={'nonce': nonce, 'body': body, 'key': str(uuid4())})
     await render(bot, query.message.chat.id, Screen(tr(lang, 'update_tools.confirm'), tuple(lines), embedded_buttons=True, navigation=True), [[
         button(tr(lang, 'back'), 'uv_page:0' if body['kind'] == 'version' else UpdatesCallback().pack() if body['kind'] == 'stack' else 'ufleet'),
-        button(tr(lang, 'update_tools.install'), f'update_submit:{nonce}')]], state, query.message.message_id)
+        button(tr(lang, 'update_tools.install'), f'update_submit:{nonce}', style='primary')]], state, query.message.message_id)
 
 
 async def confirm_latest(query, bot, backend, state):
@@ -94,9 +94,9 @@ async def show_fleet(query, bot, backend, state, page=0, opened=False):
         rows.append([button(tr(lang, 'update_tools.progress'), f"update_job:{latest['id']}")])
     else:
         if value['agents_required']:
-            rows.append([button(tr(lang, 'update_tools.agents'), 'ufleet_confirm:agents')])
+            rows.append([button(tr(lang, 'update_tools.agents'), 'ufleet_confirm:agents', style='primary')])
         if value['runtimes_required']:
-            rows.append([button(tr(lang, 'update_tools.runtimes'), 'ufleet_confirm:runtimes')])
+            rows.append([button(tr(lang, 'update_tools.runtimes'), 'ufleet_confirm:runtimes', style='primary')])
     if latest and not pending:
         lines.append(tr(lang, 'update_tools.last_batch', status=tr(lang, 'update_tools.status.' + latest['status'])
             if latest['status'] in {'succeeded', 'blocked', 'running', 'awaiting_executor', 'superseded'} else latest['status']))
@@ -232,6 +232,10 @@ async def show_job(query, bot, backend, state, job_id, page=0, opened=False):
     rows = []
     if job['status'] in {'awaiting_executor', 'running'}:
         rows.append([button(tr(lang, 'updates.refresh'), f'update_job:{job_id}')])
+    if job['status'] == 'awaiting_executor':
+        rows.append([button(tr(lang, 'updates.recovery.cancel'), f'update_cancel:{job_id}')])
+    if job['status'] == 'blocked' and job['kind'] == 'stack':
+        rows.append([button(tr(lang, 'updates.recovery.recheck'), f'update_recheck:{job_id}')])
     rows.append([button(tr(lang, 'back'), UpdatesCallback().pack())])
     lines = [state_label(lang, job['status'])]
     if job.get('target_ref'):
@@ -251,6 +255,9 @@ async def show_job(query, bot, backend, state, job_id, page=0, opened=False):
 @router.callback_query(F.data.startswith('ufleet_confirm:'))
 @router.callback_query(F.data.startswith('update_submit:'))
 @router.callback_query(F.data.startswith('update_job:'))
+@router.callback_query(F.data.startswith('update_cancel:'))
+@router.callback_query(F.data.startswith('update_cancel_do:'))
+@router.callback_query(F.data.startswith('update_recheck:'))
 @router.callback_query(F.data == 'ufleet')
 @router.callback_query(F.data.startswith('fleet_nodes:'))
 @router.callback_query(F.data.startswith('updates_nodes:'))
@@ -299,7 +306,27 @@ async def update_tools_cb(query: CallbackQuery, bot: Bot, backend: BackendClient
                 return await show_versions(query, bot, backend, state)
             job = await backend.run_update(query.from_user.id, draft['body'], draft['key'])
             await show_job(query, bot, backend, state, job['id'])
+        elif query.data.startswith('update_cancel:'):
+            job_id = query.data.split(':')[1]
+            await render(bot, query.message.chat.id, Screen(tr(lang, 'updates.recovery.cancel'),
+                (tr(lang, 'updates.recovery.cancel_note'),), embedded_buttons=True, navigation=True),
+                [[button(tr(lang, 'back'), f'update_job:{job_id}'),
+                  button(tr(lang, 'updates.recovery.cancel'), f'update_cancel_do:{job_id}').model_copy(update={'style': 'danger'})]],
+                state, query.message.message_id)
+        elif query.data.startswith('update_cancel_do:') or query.data.startswith('update_recheck:'):
+            action, job_id = query.data.split(':')
+            await backend.request('POST', f'/api/v1/system/updates/jobs/{job_id}/' +
+                ('cancel' if action == 'update_cancel_do' else 'recheck'), telegram_user_id=query.from_user.id)
+            await show_job(query, bot, backend, state, job_id)
         elif query.data.startswith('update_job:'):
             await show_job(query, bot, backend, state, query.data.split(':')[1])
-    except (BackendError, ValueError, IndexError, KeyError):
+    except BackendError as exc:
+        if exc.code in {'update_cancel_unsafe', 'update_recovery_unconfirmed', 'update_recovery_unavailable'}:
+            await render(bot, query.message.chat.id, Screen(tr(lang, 'update_tools.result'),
+                (tr(lang, 'updates.recovery.unsafe' if exc.code == 'update_cancel_unsafe' else 'updates.recovery.unconfirmed'),),
+                embedded_buttons=True, navigation=True),
+                [[button(tr(lang, 'back'), 'update_job:' + query.data.split(':')[-1])]], state, query.message.message_id)
+        else:
+            await failure(query, bot, state)
+    except (ValueError, IndexError, KeyError):
         await failure(query, bot, state)

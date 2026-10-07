@@ -1921,6 +1921,67 @@
         }
       }
     },
+    "/api/v1/profiles/{profile_id}/summary": {
+      "get": {
+        "summary": "Admin Profile Summary",
+        "operationId": "admin_profile_summary_api_v1_profiles__profile_id__summary_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Profile Id"
+            }
+          },
+          {
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberProfileSummary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/me/profiles/{profile_id}/summary": {
       "get": {
         "summary": "Own Profile Summary",
@@ -2861,7 +2922,7 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "maxLength": 512
+                  "maxLength": 8192
                 },
                 {
                   "type": "null"
@@ -2895,6 +2956,20 @@
               "type": "boolean",
               "default": false,
               "title": "Include Summary"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "key",
+                "region"
+              ],
+              "type": "string",
+              "default": "key",
+              "title": "Order"
             }
           },
           {
@@ -4716,6 +4791,16 @@
             }
           },
           {
+            "name": "wait",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Wait"
+            }
+          },
+          {
             "name": "Idempotency-Key",
             "in": "header",
             "required": true,
@@ -5273,10 +5358,254 @@
         }
       }
     },
+    "/api/v1/system/recovery": {
+      "get": {
+        "summary": "Recovery Overview",
+        "operationId": "recovery_overview_api_v1_system_recovery_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000000,
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecoveryOverviewOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/system/workstation-audit": {
+      "get": {
+        "summary": "Workstation Audit",
+        "operationId": "workstation_audit_api_v1_system_workstation_audit_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000000,
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkstationAuditPageOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/system/updates/jobs/{job_id}": {
       "get": {
         "summary": "Update Job",
         "operationId": "update_job_api_v1_system_updates_jobs__job_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/system/updates/jobs/{job_id}/cancel": {
+      "post": {
+        "summary": "Cancel Update",
+        "operationId": "cancel_update_api_v1_system_updates_jobs__job_id__cancel_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/system/updates/jobs/{job_id}/recheck": {
+      "post": {
+        "summary": "Recheck Update",
+        "operationId": "recheck_update_api_v1_system_updates_jobs__job_id__recheck_post",
         "security": [
           {
             "HTTPBearer": []
@@ -5870,6 +6199,17 @@
       },
       "AccessRequestPage": {
         "properties": {
+          "pending_total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pending Total"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/AccessRequestOutput"
@@ -6083,17 +6423,6 @@
               }
             ],
             "title": "Announcement Silent"
-          },
-          "traffic_consent": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Traffic Consent"
           }
         },
         "additionalProperties": false,
@@ -6381,6 +6710,17 @@
               }
             ],
             "title": "Last Job"
+          },
+          "removal_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Removal Status"
           }
         },
         "type": "object",
@@ -6543,6 +6883,13 @@
               }
             ],
             "title": "Failure Code"
+          },
+          "journal_archives": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Journal Archives"
           }
         },
         "type": "object",
@@ -6853,6 +7200,24 @@
         ],
         "title": "CleanupStepOutput"
       },
+      "ConfigArtifactFile": {
+        "properties": {
+          "filename": {
+            "type": "string",
+            "title": "Filename"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          }
+        },
+        "type": "object",
+        "required": [
+          "filename",
+          "content"
+        ],
+        "title": "ConfigArtifactFile"
+      },
       "ConfigArtifactOutput": {
         "properties": {
           "filename": {
@@ -6873,6 +7238,24 @@
           "content": {
             "type": "string",
             "title": "Content"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/ConfigArtifactFile"
+            },
+            "type": "array",
+            "title": "Files"
           }
         },
         "type": "object",
@@ -7077,11 +7460,6 @@
             "title": "Announcement Silent",
             "default": false
           },
-          "traffic_consent": {
-            "type": "boolean",
-            "title": "Traffic Consent",
-            "default": false
-          },
           "traffic_available": {
             "type": "boolean",
             "title": "Traffic Available",
@@ -7145,6 +7523,10 @@
             "type": "string",
             "title": "Flag"
           },
+          "region": {
+            "type": "string",
+            "title": "Region"
+          },
           "protocols": {
             "items": {
               "type": "string",
@@ -7162,6 +7544,7 @@
           "key",
           "title",
           "flag",
+          "region",
           "protocols"
         ],
         "title": "MemberProfileNode"
@@ -7895,21 +8278,21 @@
       "NodeSettingsTaskOutput": {
         "properties": {
           "id": {
+            "type": "string",
             "format": "uuid",
-            "title": "Id",
-            "type": "string"
+            "title": "Id"
           },
           "node_key": {
-            "title": "Node Key",
-            "type": "string"
+            "type": "string",
+            "title": "Node Key"
           },
           "revision": {
-            "title": "Revision",
-            "type": "integer"
+            "type": "integer",
+            "title": "Revision"
           },
           "status": {
-            "title": "Status",
-            "type": "string"
+            "type": "string",
+            "title": "Status"
           },
           "error_code": {
             "anyOf": [
@@ -7920,18 +8303,17 @@
                 "type": "null"
               }
             ],
-            "default": null,
             "title": "Error Code"
           }
         },
+        "type": "object",
         "required": [
           "id",
           "node_key",
           "revision",
           "status"
         ],
-        "title": "NodeSettingsTaskOutput",
-        "type": "object"
+        "title": "NodeSettingsTaskOutput"
       },
       "OperationOutput": {
         "properties": {
@@ -8040,6 +8422,16 @@
           "title": {
             "type": "string",
             "title": "Title"
+          },
+          "region": {
+            "type": "string",
+            "title": "Region",
+            "default": ""
+          },
+          "flag": {
+            "type": "string",
+            "title": "Flag",
+            "default": ""
           }
         },
         "type": "object",
@@ -8100,6 +8492,17 @@
             ],
             "title": "Owner Account Id"
           },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
           "grants": {
             "items": {
               "$ref": "#/components/schemas/GrantInput"
@@ -8152,6 +8555,21 @@
               }
             ],
             "title": "Expires At"
+          },
+          "grants": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/GrantInput"
+                },
+                "type": "array",
+                "maxItems": 100
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Grants"
           }
         },
         "additionalProperties": false,
@@ -8214,6 +8632,47 @@
           "available"
         ],
         "title": "ProfileInspectionOutput"
+      },
+      "ProfileNodeTrafficItem": {
+        "properties": {
+          "node_key": {
+            "type": "string",
+            "title": "Node Key"
+          },
+          "protocol": {
+            "type": "string",
+            "enum": [
+              "awg",
+              "xray"
+            ],
+            "title": "Protocol"
+          },
+          "uplink_bytes": {
+            "type": "integer",
+            "title": "Uplink Bytes"
+          },
+          "downlink_bytes": {
+            "type": "integer",
+            "title": "Downlink Bytes"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "current",
+              "unknown"
+            ],
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "node_key",
+          "protocol",
+          "uplink_bytes",
+          "downlink_bytes",
+          "status"
+        ],
+        "title": "ProfileNodeTrafficItem"
       },
       "ProfileOutput": {
         "properties": {
@@ -8344,7 +8803,6 @@
           "status": {
             "type": "string",
             "enum": [
-              "consent_required",
               "waiting",
               "current",
               "unknown"
@@ -8357,6 +8815,25 @@
             },
             "type": "array",
             "title": "Items"
+          },
+          "month": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Month"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/ProfileNodeTrafficItem"
+            },
+            "type": "array",
+            "title": "Nodes",
+            "default": []
           }
         },
         "type": "object",
@@ -8365,6 +8842,96 @@
           "items"
         ],
         "title": "ProfileTrafficSummary"
+      },
+      "RecoveryItemOutput": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "update",
+              "node",
+              "agent",
+              "profile",
+              "removal",
+              "backup"
+            ],
+            "title": "Kind"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "node_key": {
+            "type": "string",
+            "title": "Node Key"
+          },
+          "error_code": {
+            "type": "string",
+            "title": "Error Code"
+          },
+          "actions": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "cancel",
+                "recheck",
+                "resolve"
+              ]
+            },
+            "type": "array",
+            "title": "Actions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "status",
+          "node_key",
+          "error_code",
+          "actions"
+        ],
+        "title": "RecoveryItemOutput"
+      },
+      "RecoveryOverviewOutput": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RecoveryItemOutput"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "maintenance_active": {
+            "type": "boolean",
+            "title": "Maintenance Active"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "offset",
+          "page_size",
+          "total",
+          "maintenance_active"
+        ],
+        "title": "RecoveryOverviewOutput"
       },
       "RegistryRetirementInput": {
         "properties": {
@@ -8771,6 +9338,165 @@
           "version"
         ],
         "title": "VersionOutput"
+      },
+      "WorkstationAuditItemOutput": {
+        "properties": {
+          "occurred_at": {
+            "type": "string",
+            "title": "Occurred At"
+          },
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          },
+          "account_id": {
+            "type": "string",
+            "title": "Account Id"
+          },
+          "account_label": {
+            "type": "string",
+            "title": "Account Label"
+          },
+          "ssh_user": {
+            "type": "string",
+            "title": "Ssh User"
+          },
+          "device_fingerprint": {
+            "type": "string",
+            "title": "Device Fingerprint"
+          },
+          "action": {
+            "type": "string",
+            "title": "Action"
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "issued",
+              "revoked",
+              "admitted",
+              "completed"
+            ],
+            "title": "Phase"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id"
+          },
+          "command_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Command Id"
+          },
+          "http_status": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Http Status"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target"
+          },
+          "key_fingerprint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Fingerprint"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "admitted",
+                  "succeeded",
+                  "unconfirmed"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcome"
+          }
+        },
+        "type": "object",
+        "required": [
+          "occurred_at",
+          "session_id",
+          "account_id",
+          "account_label",
+          "ssh_user",
+          "device_fingerprint",
+          "action",
+          "phase",
+          "request_id",
+          "command_id",
+          "http_status"
+        ],
+        "title": "WorkstationAuditItemOutput"
+      },
+      "WorkstationAuditPageOutput": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WorkstationAuditItemOutput"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "offset",
+          "page_size",
+          "total"
+        ],
+        "title": "WorkstationAuditPageOutput"
       }
     },
     "securitySchemes": {

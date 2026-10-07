@@ -231,8 +231,84 @@ class AdminNodeRichTests(IsolatedAsyncioTestCase):
         self.assertIn(tr('en', 'node_tools.unreachable'), screen.lines)
         self.assertIn('remove_retry:msk1', self.callbacks(draw))
         self.assertTrue(any('registry' in value for value in self.callbacks(draw)))
-        self.assertEqual(self.data['unreachable_removal_node'], 'msk1')
+        registry = [b for row in screen.fallback_rows(rows) for b in row if 'registry' in b.callback_data]
+        self.assertEqual(registry[0].style, 'danger')
         screen.rich(rows)
+
+    async def test_maintenance_always_exposes_explicit_registry_only_confirmation(self):
+        for locale in ('ru', 'en'):
+            self.data['locale'] = locale
+            for status in ('active', 'draining'):
+                backend = SimpleNamespace(node_maintenance=AsyncMock(return_value={
+                    'status': status, 'verification_target': None, 'pending_tasks': 1,
+                    'blocked_tasks': 1, 'cleanup_phase': 'preparing'}))
+                with patch.object(nodes, 'render', new_callable=AsyncMock) as draw:
+                    await nodes.show_node_maintenance(123, 123, 77, 'msk1', self.bot, backend, self.state)
+                screen, rows = draw.call_args.args[2:4]
+                choices = [b for row in screen.fallback_rows(rows) for b in row if 'registry' in b.callback_data]
+                self.assertEqual(len(choices), 1)
+                self.assertEqual(choices[0].style, 'danger')
+                self.assertIsNone(self.data['registry_removal_confirmation'])
+                screen.rich(rows)
+
+    async def test_every_removal_failure_offers_registry_only_without_connectivity_flag(self):
+        for code in ('node_agent_unavailable', 'host_verification_failed', 'node_revocations_blocked',
+                     'node_cleanup_failed', 'verification_key_unavailable'):
+            from telegram_client.backend import BackendError
+            backend = SimpleNamespace(remove_node_step=AsyncMock(side_effect=BackendError(code, 409)))
+            with patch.object(tools, 'render', new_callable=AsyncMock) as draw:
+                await tools.advance_removal(123, 123, 77, 'msk1', self.bot, backend, self.state)
+            screen, rows = draw.call_args.args[2:4]
+            choices = [b for row in screen.fallback_rows(rows) for b in row if 'registry' in b.callback_data]
+            self.assertEqual(len(choices), 1, code)
+            self.assertEqual(choices[0].style, 'danger')
+        for code in ('resource_not_found', 'permission_denied'):
+            backend.remove_node_step.side_effect = BackendError(code, 404)
+            with patch.object(tools, 'render', new_callable=AsyncMock) as draw:
+                await tools.advance_removal(123, 123, 77, 'msk1', self.bot, backend, self.state)
+            self.assertFalse(any('registry' in value for value in self.callbacks(draw)))
+
+    async def test_in_progress_removal_keeps_registry_only_and_success_omits_it(self):
+        backend = SimpleNamespace(remove_node_step=AsyncMock(return_value={
+            'status': 'draining', 'revocations_complete': False, 'pending_tasks': 1}))
+        with patch.object(tools, 'render', new_callable=AsyncMock) as draw:
+            await tools.advance_removal(123, 123, 77, 'msk1', self.bot, backend, self.state)
+        self.assertTrue(any('registry' in value for value in self.callbacks(draw)))
+        backend.remove_node_step.return_value = {'status': 'removed_registry_only'}
+        with patch.object(tools, 'render', new_callable=AsyncMock) as draw:
+            await tools.advance_removal(123, 123, 77, 'msk1', self.bot, backend, self.state)
+        self.assertFalse(any('registry' in value for value in self.callbacks(draw)))
+
+    async def test_registry_confirmation_requires_fresh_screen_and_explains_remote_uncertainty(self):
+        from telegram_client.routers.callbacks import ConfirmRegistryRemovalCallback, RetireRegistryCallback
+        self.backend.retire_node_registry_only = AsyncMock(return_value={'node_key': 'msk1'})
+        for locale in ('ru', 'en'):
+            self.data['locale'] = locale
+            self.data['registry_removal_confirmation'] = None
+            with patch.object(nodes, 'render', new_callable=AsyncMock) as draw:
+                await nodes.retire_registry_cb(self.query, RetireRegistryCallback(node_key='msk1'),
+                    self.bot, self.backend, self.state)
+            self.backend.retire_node_registry_only.assert_not_awaited()
+            text = draw.call_args.args[2].plain()
+            self.assertIn('🇷🇺 Moscow #1', text)
+            self.assertIn(tr(locale, 'nodes.maintenance.registry_runtime'), text)
+            self.assertIn(tr(locale, 'nodes.maintenance.registry_tunnels'), text)
+            self.assertEqual(draw.call_args.args[3][0][0].style, 'danger')
+        with patch.object(nodes, 'render', new_callable=AsyncMock) as draw:
+            await nodes.retire_registry_cb(self.query, RetireRegistryCallback(node_key='msk1'),
+                self.bot, self.backend, self.state)
+        self.backend.retire_node_registry_only.assert_awaited_once_with(123, 'msk1')
+        self.assertIsNone(self.data['registry_removal_confirmation'])
+        self.assertIn(tr('en', 'nodes.maintenance.registry_tunnels'), draw.call_args.args[2].plain())
+
+    async def test_registry_confirmation_for_another_message_cannot_remove_node(self):
+        from telegram_client.routers.callbacks import RetireRegistryCallback
+        self.data['registry_removal_confirmation'] = {'node_key': 'msk1', 'message_id': 999}
+        self.backend.retire_node_registry_only = AsyncMock()
+        with patch.object(nodes, 'render', new_callable=AsyncMock):
+            await nodes.retire_registry_cb(self.query, RetireRegistryCallback(node_key='msk1'),
+                self.bot, self.backend, self.state)
+        self.backend.retire_node_registry_only.assert_not_awaited()
 
     async def test_unused_card_removal_does_not_claim_verified_remote_cleanup(self):
         backend = SimpleNamespace(remove_node_step=AsyncMock(return_value={'status': 'removed_unprovisioned'}))

@@ -11,7 +11,7 @@ from .backend import BackendClient
 from .announcement_delivery import delivery_loop
 from .routers import admin_announcements
 from .routers import admin_system_cleanup
-from .routers import admin_alerts
+from .routers import admin_alerts, admin_recovery
 from .routers.common import BackendMiddleware, LocaleMiddleware, NotificationStateMiddleware
 from .routers import user, admin_requests, admin_profiles, admin_nodes, admin_settings, admin_node_tools, admin_updates, admin_backups
 
@@ -39,6 +39,7 @@ async def main() -> None:
             dispatcher.include_router(admin_node_tools.router)
             dispatcher.include_router(admin_nodes.router)
             dispatcher.include_router(admin_settings.router)
+            dispatcher.include_router(admin_recovery.router)
             dispatcher.include_router(admin_updates.router)
             dispatcher.include_router(admin_backups.router)
             dispatcher.include_router(admin_announcements.router)

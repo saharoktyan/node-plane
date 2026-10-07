@@ -294,9 +294,25 @@ export_release_tree() {
 sync_shared_env() {
   local shared_dir="$1"
   mkdir -p "$shared_dir"
-  set_env_value_in_file ".env" "NODE_PLANE_SOURCE_DIR" "$REPO_ROOT"
-  set_env_value_in_file ".env" "NODE_PLANE_INSTALL_MODE" "$MODE"
-  cp .env "${shared_dir}/.env"
+  # Installed shared state is authoritative: the checkout's bootstrap .env can
+  # predate generated PostgreSQL credentials, adapter identity and node targets.
+  # Build a private replacement and rename it so worker timer ticks cannot read
+  # a truncated environment during update preparation.
+  local runtime_env="${shared_dir}/.env" temporary
+  temporary="$(mktemp "${shared_dir}/.env-update.XXXXXX")"
+  chmod 600 "$temporary"
+  if [[ -f "$runtime_env" ]]; then
+    cat "$runtime_env" > "$temporary"
+  elif [[ -f .env ]]; then
+    cat .env > "$temporary"
+  else
+    rm -f "$temporary"
+    echo "No runtime environment found for the update" >&2
+    return 1
+  fi
+  set_env_value_in_file "$temporary" "NODE_PLANE_SOURCE_DIR" "$REPO_ROOT"
+  set_env_value_in_file "$temporary" "NODE_PLANE_INSTALL_MODE" "$MODE"
+  mv -f "$temporary" "$runtime_env"
 }
 
 fetch_code() {

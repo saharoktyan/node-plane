@@ -96,7 +96,7 @@ def _bulk_grants(nodes, grants, region, add):
 
 def _bulk_buttons(profile_id, scope, locale, *, region=False, prefix='grant_bulk'):
     return (InlineKeyboardButton(text=tr(locale, 'profile.rich.grant_region' if region else 'profile.rich.grant_all'),
-                callback_data=f'{prefix}:{profile_id}:add:{scope}'),
+                callback_data=f'{prefix}:{profile_id}:add:{scope}', style='primary'),
             InlineKeyboardButton(text=tr(locale, 'profile.rich.revoke_region' if region else 'profile.rich.revoke_all'),
                 callback_data=f'{prefix}:{profile_id}:del:{scope}', style='danger'))
 
@@ -217,7 +217,7 @@ async def account_cb(query: CallbackQuery, callback_data: AccountCallback,
                                     telegram_user_id=query.from_user.id)
     locale = await _locale(state)
     rows = [[InlineKeyboardButton(text=tr(locale, 'accounts.new_profile'),
-        callback_data=NewProfileCallback(account_id=account['id']).pack())],
+        callback_data=NewProfileCallback(account_id=account['id']).pack(), style='primary')],
         [InlineKeyboardButton(text=tr(locale, 'back'), callback_data=AccountsCallback().pack())]]
     await render(bot, query.message.chat.id,
         Screen(tr(locale, 'accounts.card', name=account.get('telegram_user_id') or account['id'][:8]),
@@ -311,7 +311,7 @@ async def show_create_nodes(chat_id: int, user_id: int, message_id: int,
     rows.append([InlineKeyboardButton(text=tr(locale, 'back'),
         callback_data='profile_draft_name'),
         InlineKeyboardButton(text=tr(locale, 'profile.create.review'),
-        callback_data='profile_draft_review')])
+        callback_data='profile_draft_review', style='primary')])
     lines = [tr(locale, 'profile.create.selected_name', name=data['draft_profile_name']),
              tr(locale, 'profile.create.choose_nodes')]
     if note:
@@ -369,7 +369,7 @@ async def show_create_protocols(chat_id: int, user_id: int, message_id: int,
     rows.append([InlineKeyboardButton(text=tr(locale, 'back'),
         callback_data='profile_draft_nodes'),
         InlineKeyboardButton(text=tr(locale, 'profile.create.next'),
-        callback_data='profile_draft_review')])
+        callback_data='profile_draft_review', style='primary')])
     await render(bot, chat_id, Screen(server_label(node),
         (tr(locale, 'profile.create.choose_protocols'),), embedded_buttons=True, navigation=True), rows, state, message_id)
 
@@ -534,7 +534,7 @@ async def show_admin_profiles(chat_id: int, user_id: int, message_id: int,
     await state.update_data(admin_profile_cursors=cursors,
                             admin_profile_page=page_index)
     controls = [InlineKeyboardButton(text=tr(locale, 'profiles.admin.new'),
-                callback_data='profile_add_user'),
+                callback_data='profile_add_user', style='primary'),
                 InlineKeyboardButton(text=tr(locale, 'profiles.admin.search'),
                 callback_data='search_profile')]
     if search:
@@ -1487,7 +1487,7 @@ async def setup_time_cb(query: CallbackQuery, bot: Bot, state: FSMContext):
         rows.append([InlineKeyboardButton(text=tr(locale, 'profile.layout.unlimited'),
             callback_data=f'setup_exp:{nonce}:none'), InlineKeyboardButton(text=tr(locale, 'profile.layout.date'), callback_data=f'setup_date:{nonce}')])
     rows.append([InlineKeyboardButton(text=tr(locale, 'back'), callback_data=GrantNodesCallback(profile_id=setup['profile_id']).pack()),
-        InlineKeyboardButton(text=tr(locale, 'setup.next'), callback_data='setup_review')])
+        InlineKeyboardButton(text=tr(locale, 'setup.next'), callback_data='setup_review', style='primary')])
     await render(bot, query.message.chat.id, Screen(tr(locale, 'profile.layout.expiry'),
         (setup['name'], tr(locale, 'setup.admin_permanent') if setup['admin'] else
          _expiry_label(setup['expires_at']) if setup['expires_at'] else tr(locale, 'profile.layout.unlimited')),

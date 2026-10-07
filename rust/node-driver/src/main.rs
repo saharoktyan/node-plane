@@ -136,6 +136,8 @@ impl DriverContext {
 
     fn from_env() -> std::io::Result<Self> {
         Self::load_runtime_env_file();
+        let (app_semver, app_commit) =
+            runtime_release_identity(env::var("APP_SEMVER").ok(), env::var("APP_COMMIT").ok());
         let operations_path = env::var("NODE_DRIVER_OPERATIONS_PATH")
             .ok()
             .map(|value| value.trim().to_string())
@@ -146,16 +148,8 @@ impl DriverContext {
             });
         Ok(Self {
             state: DriverState::open(operations_path)?,
-            app_semver: env::var("APP_SEMVER")
-                .ok()
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty())
-                .unwrap_or_else(|| "0.1.0".to_string()),
-            app_commit: env::var("APP_COMMIT")
-                .ok()
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty())
-                .unwrap_or_else(|| "unknown".to_string()),
+            app_semver,
+            app_commit,
             agent_targets: Self::parse_agent_targets(),
         })
     }
@@ -343,6 +337,19 @@ impl DriverContext {
         });
         Ok(files)
     }
+}
+
+fn runtime_release_identity(version: Option<String>, commit: Option<String>) -> (String, String) {
+    let resolve = |value: Option<String>, fallback: &str| {
+        value
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty() && v != "unknown")
+            .unwrap_or_else(|| fallback.to_string())
+    };
+    (
+        resolve(version, env!("NODE_PLANE_BINARY_VERSION")),
+        resolve(commit, env!("NODE_PLANE_BINARY_COMMIT")),
+    )
 }
 
 fn runtime_assets_dir_from(app_root: Option<PathBuf>, manifest_dir: &Path) -> PathBuf {

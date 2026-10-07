@@ -94,6 +94,10 @@ async def render(bot: Bot, chat_id: int, screen: Screen, rows: list[list[InlineK
     rich_markup = InlineKeyboardMarkup(inline_keyboard=[]) if screen.embedded_buttons else markup
     
     data = await state.get_data()
+    # A delayed destructive callback from the previous screen must require a
+    # new confirmation, even when navigation edits the same control message.
+    if data.get('registry_removal_confirmation') is not None:
+        await state.update_data(registry_removal_confirmation=None)
     existing = message_id or data.get('control_message_id')
     rich_content = screen.rich(rows)
     cache = dict(data.get('rich_media_cache', {}))

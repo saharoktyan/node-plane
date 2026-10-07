@@ -1,0 +1,2 @@
+# Linux host scripts are also embedded in the native Windows assistant.
+*.sh text eol=lf

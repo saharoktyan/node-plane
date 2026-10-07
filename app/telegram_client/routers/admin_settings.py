@@ -14,6 +14,7 @@ from ..screens import Screen, Section, Table, format_size
 from ..i18n import normalize_locale, tr
 from .callbacks import AdminSettingsCallback, RequestPolicyCallback, UpdatesCallback
 from .common import render
+from .admin_recovery import RecoveryPage
 
 router = Router()
 
@@ -62,7 +63,8 @@ async def admin_settings_cb(query: CallbackQuery, bot: Bot,
          InlineKeyboardButton(text=tr(locale, 'backups.title'), callback_data='backups')],
         [InlineKeyboardButton(text=tr(locale, 'alerts.title'), callback_data='alerts'),
          InlineKeyboardButton(text=tr(locale, 'traffic.title'), callback_data='traffic')],
-        [InlineKeyboardButton(text=tr(locale, 'settings.admin.ssh_key'), callback_data=SshKeyCallback().pack())],
+        [InlineKeyboardButton(text=tr(locale, 'settings.admin.ssh_key'), callback_data=SshKeyCallback().pack()),
+         InlineKeyboardButton(text=tr(locale, 'recovery.title'), callback_data=RecoveryPage().pack())],
         [InlineKeyboardButton(text=tr(locale, 'system_cleanup.title'), callback_data='system_cleanup', style='danger')],
         [InlineKeyboardButton(text=tr(locale, 'back'), callback_data='admin_menu')],
     ]

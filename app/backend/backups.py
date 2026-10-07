@@ -58,6 +58,7 @@ CLEAR = (
     "backend_node_drains",
     "backend_node_verification_targets",
     "backend_node_host_identities",
+    "backend_node_removal_inventories",
     "backend_node_retirements",
     "backend_node_jobs",
     "backend_node_removals",
@@ -142,6 +143,8 @@ class BackupService:
         ):
             raise AccessDenied("invalid_input", 422)
         with self.db.transaction() as conn:
+            from .maintenance_gate import admit
+            admit(conn)
             row = conn.execute(
                 "SELECT value FROM backend_system_settings WHERE key='backup_policy'"
             ).fetchone()
@@ -262,14 +265,14 @@ class BackupService:
         if conn.execute("SELECT 1 FROM backend_announcement_deliveries WHERE status IN ('queued','claimed') LIMIT 1").fetchone():
             return True
         # Retain failed installation attempts for audit. A verified retirement
-        # proves their node has been cleaned up; they are no longer unfinished
-        # maintenance. Registry-only retirement does not provide that evidence.
+        # confirms host cleanup; registry-only retirement explicitly abandons
+        # that certainty and prevents replay. Neither is active controller work.
         if conn.execute("""SELECT 1 FROM backend_agent_rollouts a
             WHERE a.status IN ('awaiting_executor','running','blocked')
             AND NOT (a.status='blocked'
                 AND NOT EXISTS (SELECT 1 FROM backend_nodes n WHERE n.key=a.node_key)
                 AND EXISTS (SELECT 1 FROM backend_node_retirements r
-                    WHERE r.node_key=a.node_key AND r.mode='verified')) LIMIT 1""").fetchone():
+                    WHERE r.node_key=a.node_key AND r.mode IN ('verified','registry_only'))) LIMIT 1""").fetchone():
             return True
         for table in (
             "backend_node_jobs",
@@ -300,11 +303,9 @@ class BackupService:
             raise AccessDenied("invalid_input", 422)
         with self.db.transaction() as conn:
             from .maintenance_gate import admit
-            admit(conn)
-            # Lock the global account guard to serialize admission against commands.
-            conn.execute(
-                "UPDATE backend_account_guard SET revision=revision+1 WHERE id=1"
-            )
+            # This endpoint checks its own pending job below, allowing a retry
+            # with the same idempotency key to return the existing restore.
+            admit(conn, allow_restore=True)
             prior = conn.execute(
                 "SELECT * FROM backend_backup_jobs WHERE actor_id=? AND command_key=?",
                 (actor.account.id, key),

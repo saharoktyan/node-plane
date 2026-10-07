@@ -10,6 +10,40 @@ from tests import test_telegram_client as fixture
 class UpdatesRichTests(IsolatedAsyncioTestCase):
     setUp = fixture.TelegramFlowTests.setUp
 
+    async def test_update_recovery_actions_match_state_in_both_languages(self):
+        for lang in ('en', 'ru'):
+            self.state_data['locale'] = lang
+            for status, expected in (('awaiting_executor', 'update_cancel:j1'),
+                                     ('blocked', 'update_recheck:j1'), ('running', None)):
+                backend = SimpleNamespace(update_job=AsyncMock(return_value=dict(
+                    id='j1', kind='stack', status=status, items=[], result={})))
+                with patch.object(updates, 'render', new_callable=AsyncMock) as draw:
+                    await updates.show_job(self.query, self.bot, backend, self.state, 'j1')
+                screen, rows = draw.call_args.args[2:4]
+                callbacks = [b.callback_data for row in screen.fallback_rows(rows) for b in row]
+                if expected:
+                    self.assertIn(expected, callbacks)
+                else:
+                    self.assertNotIn('update_cancel:j1', callbacks)
+                self.assertTrue(screen.rich(rows).blocks)
+
+    async def test_update_cancel_requires_confirmation_and_calls_only_cancel_endpoint(self):
+        for lang in ('en', 'ru'):
+            self.state_data['locale'] = lang
+            self.query.data = 'update_cancel:j1'
+            backend = SimpleNamespace(request=AsyncMock())
+            with patch.object(updates, 'render', new_callable=AsyncMock) as draw:
+                await updates.update_tools_cb(self.query, self.bot, backend, self.state)
+            rows = draw.call_args.args[3]
+            self.assertEqual(rows[0][1].style, 'danger')
+            self.assertEqual(rows[0][1].callback_data, 'update_cancel_do:j1')
+            backend.request.assert_not_called()
+            self.query.data = 'update_cancel_do:j1'
+            with patch.object(updates, 'show_job', new_callable=AsyncMock):
+                await updates.update_tools_cb(self.query, self.bot, backend, self.state)
+            backend.request.assert_awaited_once_with('POST', '/api/v1/system/updates/jobs/j1/cancel',
+                telegram_user_id=self.query.from_user.id)
+
     async def test_controller_only_progress_has_no_empty_server_details(self):
         for lang in ('en', 'ru'):
             self.state_data['locale'] = lang

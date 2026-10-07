@@ -14,6 +14,12 @@ from telegram_client.routers import user
 
 
 class RenderRecoveryTests(IsolatedAsyncioTestCase):
+    async def test_navigation_invalidates_registry_removal_confirmation_on_same_message(self):
+        self.data['registry_removal_confirmation'] = {'node_key': 'node', 'message_id': 10}
+        await render(self.bot, 1, Screen('Main menu'), [], self.state)
+        self.assertIsNone(self.data['registry_removal_confirmation'])
+        self.assertEqual(self.data['control_message_id'], 10)
+
     async def test_empty_collapsed_sections_do_not_emit_empty_rich_details(self):
         screen = Screen('Progress', sections=(Section('Servers', collapsed=True,
             sections=(Section('Empty region', collapsed=True),)),))

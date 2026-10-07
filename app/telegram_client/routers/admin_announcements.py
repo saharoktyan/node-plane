@@ -21,8 +21,8 @@ class Compose(StatesGroup):
     text = State()
 
 
-def button(locale, key, data):
-    return InlineKeyboardButton(text=tr(locale, key), callback_data=data)
+def button(locale, key, data, *, style=None):
+    return InlineKeyboardButton(text=tr(locale, key), callback_data=data, style=style)
 
 
 async def preview(chat_id, message_id, user_id, bot, backend, state):
@@ -131,7 +131,7 @@ async def announcement_cb(
             navigation = [button(locale, "back", "announce_menu")]
             if draft:
                 navigation.append(
-                    button(locale, "announce.preview", "announce_preview")
+                    button(locale, "announce.preview", "announce_preview", style='primary')
                 )
             rows = [navigation]
             await render(

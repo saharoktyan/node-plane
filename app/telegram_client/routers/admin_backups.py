@@ -15,8 +15,8 @@ from .common import render
 router = Router()
 
 
-def button(text, data):
-    return InlineKeyboardButton(text=text, callback_data=data)
+def button(text, data, *, style=None):
+    return InlineKeyboardButton(text=text, callback_data=data, style=style)
 
 
 def failure_note(lang, code):
@@ -44,7 +44,7 @@ async def overview(query, bot, backend, state):
     lines = []
     rows = [
         [
-            button(tr(lang, "backups.create"), "backup_create"),
+            button(tr(lang, "backups.create"), "backup_create", style='primary'),
             button(tr(lang, "backups.restore"), "backup_list:0"),
         ],
         [button(tr(lang, "backups.settings"), "backup_settings")],

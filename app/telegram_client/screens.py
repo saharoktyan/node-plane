@@ -97,6 +97,7 @@ class Screen:
     files_title: str | None = None
     uri_title: str | None = None
     uri_rows: tuple[tuple[InlineKeyboardButton, ...], ...] = ()
+    uri_collapsed: bool = False
     sections: tuple[Section, ...] = ()
     embedded_buttons: bool = False
     navigation: bool = False
@@ -113,8 +114,12 @@ class Screen:
             blocks.append(InputRichBlockDetails(summary=self.qr_title, is_open=False,
                 blocks=[InputRichBlockPhoto(photo=InputMediaPhoto(
                     media=BufferedInputFile(self.qr, 'config.png')))]))
-        blocks.extend(rich_buttons(self.uri_rows))
-        if self.uri:
+        if self.uri and self.uri_collapsed:
+            blocks.append(InputRichBlockDetails(summary=self.uri_title or '', is_open=False,
+                blocks=[InputRichBlockPreformatted(text=self.uri), *rich_buttons(self.uri_rows)]))
+        else:
+            blocks.extend(rich_buttons(self.uri_rows))
+        if self.uri and not self.uri_collapsed:
             uri = InputRichBlockPreformatted(text=self.uri)
             if self.uri_title and not self.uri_rows:
                 blocks.append(InputRichBlockSectionHeading(text=self.uri_title, size=2))

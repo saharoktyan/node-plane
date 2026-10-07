@@ -103,6 +103,14 @@ class NodeLifecycle:
         if not isinstance(node_key, str) or not node_key or len(node_key) > 128:
             raise AccessDenied('invalid_input', 422)
         with self.db.transaction() as conn:
+            # Profile commands take this guard before profile/node row locks.
+            # Draining must use the same order, otherwise an in-flight edit
+            # can hold the profile while drain holds its node and each waits
+            # for the other. Internal cleanup is allowed during maintenance.
+            conn.execute('UPDATE backend_account_guard SET revision=revision+1 WHERE id=1')
+            current = conn.execute('SELECT role,status FROM backend_accounts WHERE id=?', (actor.account.id,)).fetchone()
+            if current is None or current['role'] != 'admin' or current['status'] != 'approved':
+                raise AccessDenied('permission_denied')
             node = conn.execute('SELECT key FROM backend_nodes WHERE key = ?', (node_key,)).fetchone()
             if node is None:
                 raise AccessDenied('resource_not_found', 404)
@@ -110,7 +118,7 @@ class NodeLifecycle:
             if previous is not None:
                 return {'node_key': node_key, 'status': 'draining',
                         'operation_ids': json.loads(previous['operation_ids_json'])}
-            if conn.execute('''SELECT 1 FROM backend_agent_rollouts WHERE node_key = ?
+            if not abandon_uncertain_settings and conn.execute('''SELECT 1 FROM backend_agent_rollouts WHERE node_key = ?
                 AND status IN ('awaiting_executor', 'running')''',
                 (node_key,)).fetchone():
                 raise AccessDenied('agent_rollout_uncertain', 409)
@@ -277,6 +285,11 @@ class NodeLifecycle:
             raise AccessDenied('retirement_reason_required', 422)
         reason = reason.strip()
         with self.db.transaction() as conn:
+            from .maintenance_gate import admit
+            admit(conn)
+            current = conn.execute('SELECT role,status FROM backend_accounts WHERE id=?', (actor.account.id,)).fetchone()
+            if current is None or current['role'] != 'admin' or current['status'] != 'approved':
+                raise AccessDenied('permission_denied')
             existing = conn.execute('SELECT mode, reason, unfinished_tasks FROM backend_node_retirements WHERE node_key = ?', (node_key,)).fetchone()
             if existing is not None:
                 if existing['mode'] != 'registry_only' or existing['reason'] != reason:
@@ -287,11 +300,21 @@ class NodeLifecycle:
         # remote profiles, containers, or a delayed command may still exist.
         self.start_drain(actor, node_key, abandon_uncertain_settings=True)
         with self.db.transaction() as conn:
+            admit(conn)
+            current = conn.execute('SELECT role,status FROM backend_accounts WHERE id=?', (actor.account.id,)).fetchone()
+            if current is None or current['role'] != 'admin' or current['status'] != 'approved':
+                raise AccessDenied('permission_denied')
             node = conn.execute('''UPDATE backend_nodes SET enabled = 0
                 WHERE key = ? RETURNING key''', (node_key,)).fetchone()
             if node is None:
                 raise AccessDenied('resource_not_found', 404)
             cleanup = conn.execute('SELECT phase FROM backend_node_cleanup WHERE node_key = ?', (node_key,)).fetchone()
+            # The exclusive worker lock excludes a live local rollout. Keep
+            # uncertain outcomes for audit, but fence queued installs so a lost
+            # VPS is never touched again after explicit registry retirement.
+            conn.execute("UPDATE backend_agent_rollouts SET status='blocked' WHERE node_key=? AND status IN ('awaiting_executor','running')", (node_key,))
+            for table in ('backend_node_jobs', 'backend_node_settings_tasks', 'backend_config_issuances'):
+                conn.execute(f"UPDATE {table} SET status='superseded' WHERE node_key=? AND status IN ('awaiting_executor','running','blocked')", (node_key,))
             affected = conn.execute('''SELECT DISTINCT operation_id FROM backend_operation_tasks
                 WHERE node_key = ? AND status IN ('awaiting_executor', 'running', 'blocked')''', (node_key,)).fetchall()
             changed = conn.execute('''UPDATE backend_operation_tasks SET status = 'superseded'

@@ -1412,11 +1412,15 @@ impl AgentState {
                     let name = entry.file_name().to_string_lossy().into_owned();
                     if name == filename
                         || name == format!("{filename}.lock")
+                        || name == format!("{filename}.bak")
+                        || name == format!("{filename}.node-plane-settings.bak")
+                        || name == format!("{filename}.node-plane-settings.bak.absent")
                         || name.starts_with(&format!("{filename}.bak."))
                         || name.starts_with(".awg-deploy-backup-")
                         || name.starts_with(".awg-config-backup-")
                         || name.starts_with(".awg-regenerate-backup-")
-                        || name.starts_with(".xray-config-backup-")
+                        || name.starts_with(".xray-config-")
+                        || name.starts_with(".xray-user-")
                     {
                         fs::remove_file(entry.path()).map_err(|err| {
                             Status::internal(format!("failed to remove config artifact: {err}"))
@@ -2499,7 +2503,12 @@ mod tests {
         fs::create_dir_all(&clients).unwrap();
         for name in [
             "xray.json",
+            "xray.json.bak",
             "xray.json.bak.20260101",
+            "xray.json.node-plane-settings.bak",
+            "xray.json.node-plane-settings.bak.absent",
+            ".xray-config-interrupted.json",
+            ".xray-user-interrupted.json",
             "wg.conf",
             "wg.conf.lock",
             "unrelated.txt",
@@ -2529,6 +2538,15 @@ mod tests {
         assert!(!node_env.exists());
         assert!(!external.join("xray.json").exists());
         assert!(!external.join("xray.json.bak.20260101").exists());
+        for name in [
+            "xray.json.bak",
+            "xray.json.node-plane-settings.bak",
+            "xray.json.node-plane-settings.bak.absent",
+            ".xray-config-interrupted.json",
+            ".xray-user-interrupted.json",
+        ] {
+            assert!(!external.join(name).exists(), "artifact remains: {name}");
+        }
         assert!(!external.join("wg.conf.lock").exists());
         assert!(external.join("unrelated.txt").exists());
         fs::remove_dir_all(root).unwrap();

@@ -1,0 +1,69 @@
+name: Workstation assistant
+
+on:
+  push:
+    paths:
+      - 'rust/node-plane-cli/**'
+      - 'scripts/install.sh'
+      - 'scripts/postgres_runtime.sh'
+      - 'scripts/python_runtime.sh'
+      - 'scripts/lib/install_progress.sh'
+      - 'app/backend/workstation_cli.py'
+      - 'app/config.py'
+      - 'scripts/setup_driver_agents.sh'
+      - '.gitattributes'
+      - '.github/workflows/workstation.yml'
+  pull_request:
+    paths:
+      - 'rust/node-plane-cli/**'
+      - 'scripts/install.sh'
+      - 'scripts/postgres_runtime.sh'
+      - 'scripts/python_runtime.sh'
+      - 'scripts/lib/install_progress.sh'
+      - 'app/backend/workstation_cli.py'
+      - 'app/config.py'
+      - 'scripts/setup_driver_agents.sh'
+      - '.gitattributes'
+      - '.github/workflows/workstation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: rust/node-plane-cli
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Rust toolchain
+        run: rustup toolchain install 1.89.0 --profile minimal --component rustfmt --component clippy
+      - name: Format
+        run: cargo +1.89.0 fmt --check
+      - name: Lint
+        run: cargo +1.89.0 clippy --locked --all-targets -- -D warnings
+      - name: Tests
+        run: cargo +1.89.0 test --locked
+      - name: Linux binary
+        if: runner.os == 'Linux'
+        run: cargo +1.89.0 build --locked --release
+      - name: Windows binary with static CRT
+        if: runner.os == 'Windows'
+        env:
+          RUSTFLAGS: '-C target-feature=+crt-static'
+        run: cargo +1.89.0 build --locked --release
+      - name: Linux command smoke test
+        if: runner.os == 'Linux'
+        run: ./target/release/node-plane --help
+      - name: Windows command smoke test
+        if: runner.os == 'Windows'
+        run: .\target\release\node-plane.exe --help

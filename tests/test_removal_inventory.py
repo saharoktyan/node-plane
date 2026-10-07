@@ -22,8 +22,19 @@ class RemovalInventoryTests(unittest.TestCase):
             (root / 'custom').mkdir()
             backup = root / 'custom/config.json.bak.123'
             backup.write_text('private')
+            temporary = [root / 'custom' / name for name in
+                         ('.xray-config-interrupted.json', '.xray-user-interrupted.json')]
+            for path in temporary:
+                path.write_text('private')
+            legacy_directory = root / 'custom/config.json.dirbak.20261006'
+            legacy_directory.mkdir()
             resources = read_inventory(str(config), str(root / 'agent'))
             self.assertIn(str(backup), resources['paths'])
+            for path in temporary:
+                self.assertIn(str(path), resources['paths'])
+            # A formerly miscreated config directory outside the runtime must
+            # be detected, not silently treated as verified absence.
+            self.assertIn(str(legacy_directory), resources['paths'])
             self.assertIn(str(root / 'runtime'), resources['paths'])
             self.assertIn(str(root / 'custom/config.json.lock'), resources['paths'])
             self.assertEqual(resources['containers'], ['custom.xray', 'custom-awg'])

@@ -1,5 +1,10 @@
 import unittest
 import grpc
+import fcntl
+import os
+import tempfile
+from pathlib import Path
+from unittest.mock import patch
 from uuid import uuid4
 
 from backend.authorization import Actor, Principal, PrincipalKind
@@ -276,6 +281,30 @@ class BackendNodeLifecycleTests(unittest.TestCase):
         with self.assertRaises(Exception):
             lifecycle.retire_registry_only(actor, 'node', 'Agent unavailable after VPS expiration')
         self.assertIsNotNone(self.db.connection.execute('SELECT key FROM backend_nodes WHERE key = ?', ('node',)).fetchone())
+
+    def test_registry_retirement_http_uses_worker_lock_and_explicit_confirmation(self):
+        self.prepare()
+        payload = {'reason': 'Hosting expired; explicitly leave remote runtime unverified.',
+                   'accept_unverified_runtime': True}
+        with tempfile.TemporaryDirectory() as shared, patch.dict(os.environ, {'NODE_PLANE_SHARED_DIR': shared}):
+            data = Path(shared) / 'data'
+            data.mkdir()
+            with (data / 'backend-worker.lock').open('a') as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                result = self.client.post('/api/v1/nodes/node/retire-registry-only',
+                    headers=self.headers_for(), json=payload)
+                self.assertEqual(result.status_code, 409, result.text)
+                self.assertEqual(result.json()['error']['code'], 'maintenance_busy')
+                self.assertIsNone(self.db.connection.execute('SELECT 1 FROM backend_node_drains').fetchone())
+            invalid = self.client.post('/api/v1/nodes/node/retire-registry-only',
+                headers=self.headers_for(), json={**payload, 'accept_unverified_runtime': False})
+            self.assertEqual(invalid.status_code, 422, invalid.text)
+            result = self.client.post('/api/v1/nodes/node/retire-registry-only',
+                headers=self.headers_for(), json=payload)
+            self.assertEqual(result.status_code, 200, result.text)
+            self.assertEqual(result.json()['mode'], 'registry_only')
+            self.assertEqual(self.client.post('/api/v1/nodes/node/retire-registry-only',
+                headers=self.headers_for(), json=payload).json(), result.json())
 
     def test_verified_retirement_requires_uninstall_and_host_evidence(self):
         self.prepare()

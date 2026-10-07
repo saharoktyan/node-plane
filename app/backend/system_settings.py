@@ -57,10 +57,10 @@ class SystemSettingsService:
 
     def update_traffic_policy(self, actor, enabled):
         require_permission(actor, "settings.manage")
-        self._store_boolean("traffic_enabled", enabled)
+        self._store_boolean(actor, "traffic_enabled", enabled)
         return self.traffic_policy(actor)
 
-    def _store_boolean(self, key, value):
+    def _store_boolean(self, actor, key, value):
         if type(value) is not bool:
             raise AccessDenied("invalid_input", 422)
         with self.db.transaction() as conn:
@@ -69,6 +69,12 @@ class SystemSettingsService:
             conn.execute(
                 "UPDATE backend_account_guard SET revision=revision+1 WHERE id=1"
             )
+            account = conn.execute(
+                "SELECT role, status FROM backend_accounts WHERE id=?",
+                (actor.account.id,),
+            ).fetchone()
+            if not account or account["role"] != "admin" or account["status"] != "approved":
+                raise AccessDenied("permission_denied", 403)
             previous = conn.execute(
                 "SELECT value FROM backend_system_settings WHERE key=?", (key,)
             ).fetchone()
