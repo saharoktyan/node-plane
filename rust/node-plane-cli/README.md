@@ -83,6 +83,25 @@ work, and no new confirmation is accepted after the interface closes.
 
 ### Install and update the workstation itself (Linux)
 
+Install directly without manually downloading/extracting an archive:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/saharoktyan/node-plane/dev/scripts/install_workstation.sh | bash
+```
+
+The download wrapper requires Bash, curl, tar and sha256sum. It checks archive
+contents, SHA256 and the executable version before invoking `self install`.
+The default `dev` channel includes published alpha releases. To pin a release:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/saharoktyan/node-plane/dev/scripts/install_workstation.sh | bash -s -- --tag v0.4.3-alpha.50
+```
+
+Use `--channel stable` instead when stable releases are published. To inspect
+the installer first, download the script to a file and read it before running
+`bash install_workstation.sh`. The bootstrap wrapper affects the local
+workstation only and preserves saved state.
+
 After extracting the Linux release archive, run the binary once:
 
 ```sh
