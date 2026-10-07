@@ -34,6 +34,23 @@ Protocol configuration: [PROTOCOL_REFERENCE.md](PROTOCOL_REFERENCE.md).
 
 ## Deployment Modes
 
+### Workstation quick start (Linux x86_64)
+
+Run this on your own computer to install the workstation TUI, then use it to
+install/manage a VPS over SSH:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/saharoktyan/node-plane/dev/scripts/install_workstation.sh | bash
+```
+
+The installer downloads the latest published alpha/stable workstation, verifies
+SHA256 and its version, and runs `self install` without sudo. Open a new terminal
+after installation and run `node-plane`. No Python or external SSH client is
+needed on the workstation; the download script requires Bash, curl, tar and
+sha256sum. For a pinned release, add `bash -s -- --tag v0.4.3-alpha.50` after the
+pipe. The script installs the local assistant; it does not install a controller
+on your computer. Details: [workstation guide](rust/node-plane-cli/README.md).
+
 ### Simple Mode
 
 Use this when you want the shortest path to a working deployment.
