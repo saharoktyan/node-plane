@@ -232,4 +232,3 @@ class WorkstationProtocolTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertEqual(result['error']['code'], 'workstation_unavailable')
         self.assertNotIn('private', json.dumps(result))
-
