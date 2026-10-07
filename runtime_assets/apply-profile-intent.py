@@ -8,6 +8,7 @@ No mutation is launched for duplicate, stale or conflicting commands.
 import fcntl
 from contextlib import closing
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -136,7 +137,7 @@ def validate_node_settings(intent):
     settings = intent['settings']
     fields = {'public_host', 'xray_host', 'xray_sni', 'xray_tcp_port', 'xray_xhttp_port',
               'xray_xhttp_path', 'awg_public_host', 'awg_port',
-              'xray_fingerprint', 'awg_interface', 'awg_i1_preset'}
+              'xray_fingerprint', 'awg_interface', 'awg_i1_preset', 'awg_port_mode'}
     if not isinstance(settings, dict) or set(settings) - fields:
         raise ValueError('invalid settings')
     required = {'public_host'}
@@ -163,6 +164,8 @@ def validate_node_settings(intent):
             raise ValueError('invalid AWG interface')
         if field == 'awg_i1_preset' and value not in {'quic', 'dns', 'chaos'}:
             raise ValueError('invalid AWG preset')
+        if field == 'awg_port_mode' and value not in {'auto', 'manual'}:
+            raise ValueError('invalid AWG port mode')
         if field == 'xray_fingerprint' and value not in {'chrome', 'firefox', 'safari', 'ios', 'android', 'edge', 'random', 'randomized'}:
             raise ValueError('invalid fingerprint')
     if 'xray' in protocols and (settings['xray_tcp_port'] == settings['xray_xhttp_port']
@@ -217,8 +220,22 @@ def apply_node_settings(intent, path, runner):
                     or any(not isinstance(value, str) for value in response.values())):
                 raise ValueError('invalid node settings result')
             payload = json.loads(response['payload_json'])
-            if payload != {'node_key': intent['node_key'], 'revision': intent['revision'],
-                           'settings_sha256': node_settings_digest(intent)}:
+            effective = intent
+            if isinstance(payload, dict) and 'awg_port' in payload:
+                spec = importlib.util.spec_from_file_location('awg_ports', Path(__file__).parent / 'awg_ports.py')
+                ports = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(ports)
+                settings = intent['settings']
+                if ('awg' not in intent['protocols'] or settings.get('awg_port_mode') != 'auto'
+                        or type(payload['awg_port']) is not int
+                        or payload['awg_port'] not in ports.candidates(settings.get('awg_i1_preset', 'quic'), settings['awg_port'])):
+                    raise ValueError('invalid selected AWG port')
+                effective = dict(intent, settings=dict(settings, awg_port=payload['awg_port']))
+            expected = {'node_key': intent['node_key'], 'revision': intent['revision'],
+                        'settings_sha256': node_settings_digest(effective)}
+            if isinstance(payload, dict) and 'awg_port' in payload:
+                expected['awg_port'] = payload['awg_port']
+            if payload != expected:
                 raise ValueError('node settings verification mismatch')
             with connection:
                 connection.execute("UPDATE commands SET status = 'succeeded', response = ? WHERE id = ?",
@@ -333,6 +350,15 @@ def run_node_settings(intent, lock_fd, *, env_path=Path('/etc/node-plane/node.en
     if len(paths) != 4:
         raise ValueError('invalid node environment')
     xray_path, awg_path = map(Path, paths[:2])
+    selected_port = None
+    if 'awg' in intent['protocols'] and settings.get('awg_port_mode') == 'auto':
+        spec = importlib.util.spec_from_file_location('awg_ports', root / 'awg_ports.py')
+        ports = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(ports)
+        selected_port = ports.select_port(settings.get('awg_i1_preset', 'quic'),
+            settings['awg_port'], awg_path, paths[3])
+        settings = dict(settings, awg_port=selected_port)
+        intent = dict(intent, settings=settings)
     # Existing environment remains intact. Replace only backend-owned public
     # settings, using the same shell quoting as the legacy env renderer.
     replacements = {
@@ -409,6 +435,8 @@ def run_node_settings(intent, lock_fd, *, env_path=Path('/etc/node-plane/node.en
             raise ValueError('managed protocol container is not running')
     payload = {'node_key': intent['node_key'], 'revision': intent['revision'],
                'settings_sha256': node_settings_digest(intent)}
+    if selected_port is not None:
+        payload['awg_port'] = selected_port
     return {'summary': 'node settings applied and verified', 'payload_json': json.dumps(payload, sort_keys=True)}
 
 

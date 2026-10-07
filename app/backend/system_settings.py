@@ -95,6 +95,8 @@ class SystemSettingsService:
             # Pausing collection keeps totals but excludes the paused period.
             conn.execute("""UPDATE backend_traffic_usage SET epoch=NULL,identity=NULL,
                 last_uplink=NULL,last_downlink=NULL,status='paused' """)
+            conn.execute('''UPDATE backend_traffic_peers SET epoch=NULL,identity=NULL,
+                last_uplink=NULL,last_downlink=NULL,status='paused' ''')
 
     def update_member_preferences(self, actor, silent):
         require_permission(actor, "account.self.preferences.write")

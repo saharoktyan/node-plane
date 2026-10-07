@@ -128,20 +128,6 @@ class MaintenanceRichTests(IsolatedAsyncioTestCase):
         self.assertEqual(self.state_data['backup_offset'], 8)
         screen.rich(rows)
 
-    async def test_release_cleanup_inventory_keeps_visible_result_and_red_action(self):
-        backend = SimpleNamespace(cleanup_overview=AsyncMock(return_value=dict(supported=True,
-            install_mode='simple', current_target='/opt/node-plane/releases/current',
-            total_releases=5, kept_releases=2, removable_releases=3, removable_size_bytes=1048576)))
-        with patch.object(settings, 'render', AsyncMock()) as draw:
-            await settings.show_release_cleanup(self.query, self.bot, backend, self.state, result_status='success')
-        screen, rows = draw.call_args.args[2:4]
-        self.assertEqual(len(screen.sections[0].tables[0].rows), 4)
-        self.assertEqual(rows[0][0].style, 'danger')
-        self.assertTrue(screen.sections[-1].collapsed)
-        self.assertTrue(screen.lines)
-        self.assertNotIn('/opt/node-plane', str(screen.lines))
-        screen.rich(rows)
-
     async def test_cleanup_root_separates_reset_and_remove_and_preserves_all_actions(self):
         backend = SimpleNamespace(system_cleanup_overview=AsyncMock(return_value=dict(
             supported=True, counts=dict(accounts=2, profiles=2, nodes=3), latest_job=None)))
@@ -177,6 +163,6 @@ class MaintenanceRichTests(IsolatedAsyncioTestCase):
                 if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'Screen':
                     keywords = {k.arg: k.value for k in node.keywords}
                     self.assertIn('embedded_buttons', keywords, f'{path.name}:{node.lineno}')
-        prefixes = ('maintenance.rich.', 'backups.rich.', 'cleanup.rich.', 'command.rich.', 'system_cleanup.rich.')
+        prefixes = ('maintenance.rich.', 'backups.rich.', 'command.rich.', 'system_cleanup.rich.')
         self.assertEqual({k for k in CATALOG['en'] if k.startswith(prefixes)},
             {k for k in CATALOG['ru'] if k.startswith(prefixes)})

@@ -599,10 +599,6 @@ fi
 export SSH_KEY
 
 APP_ROOT="$(cd "$APP_ROOT" && pwd)"
-if [[ ! -d "${APP_ROOT}/rust/node-driver" || ! -d "${APP_ROOT}/rust/node-agent" ]]; then
-  echo "Rust driver/agent sources are not present under APP_ROOT=${APP_ROOT}" >&2
-  exit 1
-fi
 
 PYTHON_BIN="python3"
 if [[ -x "${APP_ROOT}/.venv/bin/python" ]]; then
@@ -673,6 +669,10 @@ download_release_binaries() {
 }
 
 build_local_binaries() {
+  if [[ ! -d "${APP_ROOT}/rust/node-driver" || ! -d "${APP_ROOT}/rust/node-agent" ]]; then
+    echo "This controller archive contains no Rust sources. Use published release binaries." >&2
+    return 1
+  fi
   need_cmd cargo
   need_cmd protoc
   check_local_build_resources
@@ -738,6 +738,10 @@ resolve_binaries() {
       build_local_binaries
       ;;
     auto)
+      if [[ -f "${APP_ROOT}/CONTROLLER_PACKAGE.json" ]]; then
+        download_release_binaries
+        return
+      fi
       if download_release_binaries; then
         echo "Using release binaries from GitHub."
       elif has_cmd cargo && has_cmd protoc; then

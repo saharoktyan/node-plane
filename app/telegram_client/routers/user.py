@@ -102,6 +102,7 @@ async def start_cmd(message: Message, bot: Bot, backend: BackendClient,
     if message.from_user is None or message.chat.type != 'private':
         return
     await state.set_state(None)
+    await state.update_data(device_delete_confirmation=None)
     try:
         await message.delete()
     except TelegramAPIError:
@@ -268,6 +269,8 @@ async def show_home(chat_id: int, user_id: int, bot: Bot, backend: BackendClient
         rows.append([button(user_id, tr(locale, 'home.settings'), 'member_settings')])
     if account['role'] == 'admin' and account['status'] == 'approved':
         rows.append([button(user_id, tr(locale, 'home.admin'), 'admin_menu')])
+    if account['status'] == 'approved':
+        rows.insert(2, [button(user_id, tr(locale, 'devices.title'), 'device_profiles')])
     if account['status'] != 'approved':
         request_rows = tuple(tuple(row) for row in rows[:-1])
         await render(bot, chat_id, Screen(bot_title,
@@ -515,8 +518,9 @@ async def show_protocol(chat_id: int, user_id: int, message_id: int, profile_id:
         await show_node(chat_id, user_id, message_id, profile_id, node_key, bot, backend, state)
         return
     if protocol == 'awg':
-        await issue(chat_id, user_id, message_id, profile_id, node_key, 'awg', 'vpn',
-                    bot, backend, state)
+        from .user_devices import show_picker
+        await show_picker(chat_id, user_id, message_id, profile_id, node_key,
+                          bot, backend, state)
         return
     transports = [kind for kind in ('xhttp', 'tcp') if kind in selected['transports']]
     rows = [[button(user_id, tr(locale, f'transport.{kind}'), 'issue',
@@ -550,9 +554,10 @@ async def _render_issuance(chat_id: int, user_id: int, message_id: int,
         return
     profile_id, node_key = result['profile_id'], result['node_key']
     locale = normalize_locale((await state.get_data()).get('locale'))
+    device_back = result['protocol'] == 'awg' and result.get('device_id')
     rows = [[button(user_id, tr(locale, 'back'),
-                    'profile' if result['protocol'] == 'awg' else 'protocol',
-                    profile_id, *(() if result['protocol'] == 'awg' else (node_key, 'xray')))]]
+                    'device_picker' if device_back else ('profile' if result['protocol'] == 'awg' else 'protocol'),
+                    profile_id, *((node_key,) if device_back else (() if result['protocol'] == 'awg' else (node_key, 'xray'))) )]]
     if result['status'] == 'succeeded':
         artifact = await backend.artifact(user_id, issuance_id)
         if (await state.get_data()).get('issuance_poll_token') != view_token:
@@ -612,7 +617,7 @@ async def _render_issuance(chat_id: int, user_id: int, message_id: int,
 
 async def issue(chat_id: int, user_id: int, message_id: int, profile_id: str,
                 node_key: str, protocol: str, transport: str, bot: Bot,
-                backend: BackendClient, state: FSMContext) -> None:
+                backend: BackendClient, state: FSMContext, *, device_id: str | None = None) -> None:
     locale = normalize_locale((await state.get_data()).get('locale'))
     poll_token = secrets.token_urlsafe(16)
     await state.update_data(issuance_poll_token=poll_token)
@@ -624,9 +629,10 @@ async def issue(chat_id: int, user_id: int, message_id: int, profile_id: str,
         await render(bot, chat_id, Screen(tr(locale, 'config.preparing_title'),
             (tr(locale, 'config.preparing'),), embedded_buttons=True, navigation=True),
             [[button(user_id, tr(locale, 'back'),
-                     'profile' if protocol == 'awg' else 'protocol', profile_id,
-                     *(() if protocol == 'awg' else (node_key, protocol)))]], state, message_id)
-        queued = await backend.issue(user_id, profile_id, node_key, protocol, transport)
+                     'device_picker' if device_id else ('profile' if protocol == 'awg' else 'protocol'), profile_id,
+                     *((node_key,) if device_id else (() if protocol == 'awg' else (node_key, protocol))))]], state, message_id)
+        queued = await backend.issue(user_id, profile_id, node_key, protocol, transport,
+            **({'device_id': device_id} if device_id else {}))
         if not await owns_screen():
             return
         if queued.get('status') in {'succeeded', 'blocked', 'superseded', 'failed'}:
@@ -793,9 +799,15 @@ async def user_action_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
             return
         if action.name == 'page_number':
             return
+        await state.set_state(None)
+        if action.name != 'device_delete_confirm':
+            await state.update_data(device_delete_confirmation=None)
         if action.name not in {'issuance', 'issuance_plain'}:
             await clear_artifacts(bot, chat_id, state)
-        if action.name == 'home':
+        if action.name.startswith('device_'):
+            from .user_devices import handle_action
+            await handle_action(action, query, bot, backend, state)
+        elif action.name == 'home':
             await show_home(chat_id, user_id, bot, backend, state, message_id,
                             cached_navigation=True)
         elif action.name == 'first_locale':

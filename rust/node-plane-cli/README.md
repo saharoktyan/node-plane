@@ -44,12 +44,17 @@ Modal dialogs ignore background clicks and host trust defaults to Cancel.
 Mouse support requires a terminal that forwards mouse events; keyboard navigation
 remains available. Manual Windows mouse acceptance is still pending.
 
-Settings is anchored at the bottom of the sidebar; hovering or clicking it opens
-the saved installation list. Use selects a connection, Edit updates it, and New
-creates one. A quick profile switcher directly above Settings supports clickable
+Settings is anchored at the bottom of the sidebar; clicking it or selecting it
+with the keyboard opens the saved installation list. Hovering does not open it. Use selects a connection, Edit updates it, and New
+creates one. New profiles default to the `dev` channel rather than inheriting
+the previous connection. Session opens read-only information about the current
+TUI launch UUID, local installation UUID, administrator selector, SSH endpoint,
+workstation public-key fingerprint and state directory. The launch UUID is local
+to the interface; backend audit sessions are created per operation. Viewing this
+screen does not create keys or expose passwords or tokens. A quick profile switcher directly above Settings supports clickable
 arrows and Left/Right when focused. It cycles through saved installations and
 New profile. Clicking the selected New profile again, or pressing Enter, opens
-creation. Actions are disabled until a saved profile is selected; this also
+creation. Actions are dimmed and disabled until a saved profile is selected; this also
 applies on first launch and while New profile is selected. Completed connection
 fields are hidden from action forms; release
 tags, bot tokens and target-node inputs remain action-specific. The last selected
@@ -75,6 +80,42 @@ dialog instructs. Closing the interface does not request cancellation of server
 work, and no new confirmation is accepted after the interface closes.
 
 ## Build and run
+
+### Install and update the workstation itself (Linux)
+
+After extracting the Linux release archive, run the binary once:
+
+```sh
+./node-plane-cli-linux-amd64 self install
+```
+
+This explicitly installs `node-plane` in `~/.local/bin` and adds a marked PATH
+block to `.profile` and existing Bash/Zsh startup files (creating `.zshrc` when
+Zsh is the selected shell). Open a new terminal afterwards. No root privileges
+are needed. Installation refuses to replace an unrelated or externally modified
+binary. Run these separate commands to manage the workstation:
+
+```sh
+node-plane self update
+node-plane self update --yes
+node-plane self uninstall
+```
+
+Uninstall removes the managed executable and its PATH blocks; saved profiles,
+SSH keys, operation records and VPS installations remain. Updates download the
+published Linux x86_64 archive over HTTPS, verify its SHA256 checksum and expected
+archive member, then replace the executable atomically. Restart the running TUI
+to use the replacement. Concurrent local installations are refused.
+
+Every TUI launch checks GitHub releases in the background. Stable binaries check
+stable releases; alpha binaries also include prereleases. A newer usable release
+opens a confirmation only when no server workflow or other dialog is active.
+Declining does not update anything. Offline/rate-limited checks are shown in
+Settings without interrupting server work. Settings always displays the running
+version and check result; when an update exists it offers Update TUI (U).
+These updates are independent of controller update channels and saved VPS profiles.
+Self-installation and published self-update assets currently support Linux only;
+the existing Windows source build remains available.
 
 Rust 1.89 or newer is required to build from source. It is not required on the
 machine running the resulting binary.
@@ -119,9 +160,13 @@ key presence (never their values), release metadata, disk space, PostgreSQL and
 maintenance schema, controller services, worker timer/last result, API readiness
 and blocked operation counts. A successful inactive oneshot worker is normal.
 The summary stays above the scrollable report. Use arrows, Page Up/Down,
-Home/End or the mouse wheel; Close never overlaps script output. Successful
-results are not printed again after leaving the TUI; errors remain visible in
-the terminal. Command mode still prints its result.
+Home/End or the mouse wheel; Close never overlaps script output. Close, Enter and
+Esc on a completed result return to the action screen with the selected
+installation preserved. The next action retains the state directory and uses
+a fresh operation identity; previous progress and secrets are cleared. Ctrl+C
+still opens the exit confirmation. Successful results are not printed again
+after leaving the TUI; exiting directly from an error result reports it in the
+terminal. Command mode still prints its result.
 
 Service recovery is disabled by default. Enable its selector in the diagnostic
 form (or pass `diagnose --repair` in command mode) to offer individual confirmed
@@ -175,18 +220,23 @@ persisted; the SSH library necessarily makes transient authentication copies.
 
 ## Installation and progress
 
-Automatic prerequisites currently support Debian/Ubuntu with systemd and a
-distribution-provided Python 3.11/3.12 (for example Debian 12 or Ubuntu 24.04).
+Automatic prerequisites support Debian/Ubuntu with systemd, using host
+Python 3.11/3.12 when available. On Ubuntu 22.04, Ubuntu 26.04,
+or other supported hosts without these versions, the installer uses uv to
+provision private Python 3.12 without third-party apt repositories or changes to
+system Python. Host tools, uv and Docker/PostgreSQL are installed automatically.
 SSH must give root access or passwordless sudo. No third-party package repository
 is added. The supported controller root is `/opt/node-plane`.
 
-The assistant prepares a private checkout under `/opt/node-plane-assistant`,
-uploads the embedded installer plus a mode 0600 temporary configuration over
+The assistant downloads and verifies the controller-only release archive under
+`/opt/node-plane-assistant`; it does not clone the repository. Release selection
+requires published controller/checksum assets. The assistant prepares a private directory,
+uploads the archive bootstrap helper plus a mode 0600 temporary configuration over
 SSH stdin, and runs `scripts/install.sh --non-interactive --mode simple
 --install-systemd --progress-json --env-file PATH`. It does not duplicate backend
 schema, systemd, driver or PostgreSQL provisioning policy. The runtime comes from
-the selected release tag; newer embedded installer helpers supply progress even
-when an older release lacks that protocol. Shell line endings are normalized
+the selected release archive, including its installer. Releases without controller
+archives are not offered by the workstation installer. Shell line endings are normalized
 for Linux regardless of which workstation built the binary.
 
 The UI shows the current phase and **X/7 completed steps**, not a time estimate:
@@ -220,6 +270,10 @@ Use `--tag VERSION` to select an exact allowed release, including a downgrade
 with explicit confirmation. When the installed controller is current but agents
 or runtimes are outdated, the existing release can be applied to the entire
 stack. An unreachable agent is reported as unknown rather than confirmed current.
+An already installed release is not submitted again when the driver, agents and
+runtimes are confirmed current, including when an explicit tag was supplied or
+the update overview still reports that release as available. Unfinished
+operations retain their recovery identity and are checked before release discovery.
 
 The assistant provisions a one-hour, scoped **account credential** through a
 root-only helper on the installed controller. `--account` accepts an approved

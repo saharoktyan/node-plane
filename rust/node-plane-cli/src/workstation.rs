@@ -250,6 +250,30 @@ async fn prepare_node(
     result
 }
 
+fn rollout_needs_update(rollout: &serde_json::Value) -> Result<bool> {
+    let agents = rollout["agents_required"]
+        .as_bool()
+        .context("Backend did not report whether agent updates are required")?;
+    let runtimes = rollout["runtimes_required"]
+        .as_bool()
+        .context("Backend did not report whether runtime updates are required")?;
+    if agents || runtimes || rollout["driver_status"] == "required" {
+        return Ok(true);
+    }
+    let nodes = rollout["nodes"]
+        .as_array()
+        .context("Backend did not report node versions")?;
+    let known = rollout["driver_status"] == "current"
+        && nodes
+            .iter()
+            .all(|node| node["agent_status"] == "current" && node["runtime_status"] == "current");
+    ensure!(
+        known,
+        "The controller is up to date, but agent/runtime versions could not be verified. Check node connectivity in the bot; no update was submitted."
+    );
+    Ok(false)
+}
+
 async fn discover(
     request: &Request,
     session: &SshSession,
@@ -308,17 +332,7 @@ async fn discover(
                 None,
             )
             .await?;
-            if rollout["agents_required"] != true && rollout["runtimes_required"] != true {
-                let unknown = rollout["driver_status"] == "unknown"
-                    || rollout["nodes"].as_array().is_some_and(|nodes| {
-                        nodes.iter().any(|node| {
-                            node["agent_status"] == "unknown" || node["runtime_status"] == "unknown"
-                        })
-                    });
-                ensure!(
-                    !unknown,
-                    "The controller is up to date, but agent/runtime versions could not be verified. Check node connectivity in the bot; no update was submitted."
-                );
+            if !rollout_needs_update(&rollout)? {
                 return Ok(None);
             }
             String::new()
@@ -355,6 +369,22 @@ async fn discover(
                         "Selected release is blocked: {}",
                         text(&item["reason"])
                     );
+                    // The catalog is authoritative even when the overview is stale
+                    // or the user explicitly supplied the installed release tag.
+                    if item["action"] == "current" {
+                        let rollout = backend::request(
+                            session,
+                            credential,
+                            Method::GET,
+                            "/api/v1/system/updates/rollout",
+                            None,
+                            None,
+                        )
+                        .await?;
+                        if !rollout_needs_update(&rollout)? {
+                            return Ok(None);
+                        }
+                    }
                     let target_ref = text(&item["ref"]);
                     ensure!(
                         !target_ref.is_empty(),
@@ -773,6 +803,28 @@ fn resume_message(request: &Request, record: &UpdateRecord, reason: &str) -> Str
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn current_release_is_not_reinstalled_when_all_components_are_current() {
+        let current = serde_json::json!({"agents_required": false, "runtimes_required": false,
+            "driver_status": "current", "nodes": []});
+        assert!(!super::rollout_needs_update(&current).unwrap());
+        let mut nodes = current.clone();
+        nodes["nodes"] =
+            serde_json::json!([{"agent_status": "current", "runtime_status": "current"}]);
+        assert!(!super::rollout_needs_update(&nodes).unwrap());
+        nodes["nodes"][0]["agent_status"] = "unknown".into();
+        assert!(super::rollout_needs_update(&nodes).is_err());
+        assert!(super::rollout_needs_update(&serde_json::json!({})).is_err());
+        for field in ["agents_required", "runtimes_required"] {
+            let mut required = current.clone();
+            required[field] = true.into();
+            assert!(super::rollout_needs_update(&required).unwrap());
+        }
+        let mut driver = current;
+        driver["driver_status"] = "required".into();
+        assert!(super::rollout_needs_update(&driver).unwrap());
+    }
+
     #[test]
     fn recovery_routes_preserve_identity_and_reject_unknown_actions_or_injection() {
         let id = uuid::Uuid::new_v4().to_string();

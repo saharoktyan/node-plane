@@ -24,7 +24,8 @@ class NodeOverviewService:
                 FROM backend_grants g JOIN backend_profiles p ON p.id = g.profile_id
                 LEFT JOIN backend_profile_deletions d ON d.profile_id = p.id
                 WHERE g.node_key = ?''', (node_key,)).fetchall()
-            tasks = conn.execute('''SELECT o.profile_id, o.desired_revision, t.protocol,
+            devices = conn.execute("SELECT profile_id,id FROM backend_devices WHERE status='active'").fetchall()
+            tasks = conn.execute('''SELECT o.profile_id, o.desired_revision, t.protocol,t.device_id,
                 t.action, t.status FROM backend_operation_tasks t
                 JOIN backend_operations o ON o.id = t.operation_id
                 WHERE t.node_key = ?
@@ -60,25 +61,27 @@ class NodeOverviewService:
 
         latest = {}
         for task in tasks:
-            latest.setdefault((task['profile_id'], task['protocol']), task)
+            latest.setdefault((task['profile_id'], task['protocol'],task['device_id']), task)
         now = datetime.now(timezone.utc)
         counts = {'ready': 0, 'pending': 0, 'failed': 0, 'attention': 0}
         for grant in grants:
-            task = latest.get((grant['profile_id'], grant['protocol']))
+            peers = ([d['id'] for d in devices if d['profile_id']==grant['profile_id']]
+                     if grant['protocol']=='awg' else [''])
+            peer_tasks = [latest.get((grant['profile_id'],grant['protocol'],peer)) for peer in peers]
             expires_at = grant['expires_at']
             active = not grant['frozen'] and not grant['deleting'] and (
                 expires_at is None or datetime.fromisoformat(expires_at) > now)
             if not active:
                 counts['attention'] += 1
-            elif task is None or task['desired_revision'] != grant['desired_revision']:
+            elif not peer_tasks or any(task is None or task['desired_revision'] != grant['desired_revision'] for task in peer_tasks):
                 counts['attention'] += 1
-            elif task['action'] != 'ensure':
+            elif any(task['action'] != 'ensure' for task in peer_tasks):
                 counts['attention'] += 1
-            elif task['status'] == 'blocked':
+            elif any(task['status'] == 'blocked' for task in peer_tasks):
                 counts['failed'] += 1
-            elif task['status'] in {'awaiting_executor', 'running'}:
+            elif any(task['status'] in {'awaiting_executor', 'running'} for task in peer_tasks):
                 counts['pending'] += 1
-            elif task['status'] == 'succeeded' and state == 'applied_unverified':
+            elif all(task['status'] == 'succeeded' for task in peer_tasks) and state == 'applied_unverified':
                 counts['ready'] += 1
             else:
                 counts['attention'] += 1

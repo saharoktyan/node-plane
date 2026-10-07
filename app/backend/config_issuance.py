@@ -35,20 +35,30 @@ class ConfigIssuanceService:
                 id TEXT PRIMARY KEY, actor_account_id TEXT NOT NULL REFERENCES backend_accounts(id),
                 command_key TEXT NOT NULL, profile_id TEXT NOT NULL REFERENCES backend_profiles(id),
                 node_key TEXT NOT NULL, protocol TEXT NOT NULL, transport TEXT NOT NULL,
+                device_id TEXT NOT NULL DEFAULT '', device_revision INTEGER NOT NULL DEFAULT 0,
                 profile_revision INTEGER NOT NULL, node_revision INTEGER NOT NULL,
                 status TEXT NOT NULL CHECK(status IN ('awaiting_executor', 'running', 'blocked', 'succeeded', 'superseded')),
                 result_json TEXT, created_at TEXT NOT NULL, expires_at TEXT NOT NULL,
                 UNIQUE(actor_account_id, command_key)
             )''')
+            if getattr(self.db, 'backend_name', '') == 'postgres':
+                conn.execute("ALTER TABLE backend_config_issuances ADD COLUMN IF NOT EXISTS device_id TEXT NOT NULL DEFAULT ''")
+                conn.execute('ALTER TABLE backend_config_issuances ADD COLUMN IF NOT EXISTS device_revision INTEGER NOT NULL DEFAULT 0')
+            conn.execute('''UPDATE backend_config_issuances SET device_id=(
+                SELECT d.id FROM backend_devices d JOIN backend_profiles p ON p.id=d.profile_id
+                WHERE p.id=backend_config_issuances.profile_id AND d.runtime_name=p.runtime_name),device_revision=1
+                WHERE protocol='awg' AND device_id='' AND EXISTS (
+                    SELECT 1 FROM backend_devices d JOIN backend_profiles p ON p.id=d.profile_id
+                    WHERE p.id=backend_config_issuances.profile_id AND d.runtime_name=p.runtime_name)''')
             conn.execute('CREATE INDEX IF NOT EXISTS idx_backend_config_issuances_work ON backend_config_issuances(status, id)')
 
     @staticmethod
     def public(row):
         return {key: row[key] for key in ('id', 'profile_id', 'node_key', 'protocol',
-            'transport', 'status', 'expires_at')}
+            'transport', 'status', 'expires_at')} | {'device_id': row['device_id'] or None}
 
     @staticmethod
-    def _current(conn, profile_id, node_key, protocol, transport):
+    def _current(conn, profile_id, node_key, protocol, transport, device_id=None):
         if conn.execute("SELECT 1 FROM backend_backup_jobs WHERE action='restore' AND status IN ('awaiting_executor','running') LIMIT 1").fetchone():
             raise AccessDenied('restore_in_progress',409)
         profile = conn.execute('SELECT * FROM backend_profiles WHERE id = ?', (profile_id,)).fetchone()
@@ -75,11 +85,15 @@ class ConfigIssuanceService:
         if conn.execute('''SELECT 1 FROM backend_node_settings_tasks WHERE node_key = ?
             AND status IN ('awaiting_executor', 'running', 'blocked')''', (node_key,)).fetchone():
             raise AccessDenied('node_settings_pending', 409)
+        from .devices import DeviceRepository
+        device = DeviceRepository.select_active(conn,profile_id,device_id) if protocol=='awg' else None
+        if protocol != 'awg' and device_id:
+            raise AccessDenied('config_not_supported',422)
         latest = conn.execute('''SELECT t.action, t.status, t.result_json, o.desired_revision FROM backend_operation_tasks t
             JOIN backend_operations o ON o.id = t.operation_id
-            WHERE o.profile_id = ? AND t.node_key = ? AND t.protocol = ?
+            WHERE o.profile_id = ? AND t.node_key = ? AND t.protocol = ? AND t.device_id = ?
             ORDER BY o.desired_revision DESC, o.created_at DESC LIMIT 1''',
-            (profile_id, node_key, protocol)).fetchone()
+            (profile_id, node_key, protocol,device['id'] if device else '')).fetchone()
         if latest is None or latest['desired_revision'] != profile['desired_revision'] or (
                 latest['action'], latest['status']) != ('ensure', 'succeeded'):
             raise AccessDenied('profile_not_synced', 409)
@@ -87,6 +101,10 @@ class ConfigIssuanceService:
             (profile_id,)).fetchone()
         if identity is None:
             raise AccessDenied('profile_not_synced', 409)
+        identity = dict(identity)
+        if device:
+            identity.update(device_id=device['id'],device_revision=device['revision'],
+                device_name=device['display_name'],runtime_name=device['runtime_name'])
         if protocol == 'awg':
             try:
                 if not json.loads(latest['result_json'])['wg_conf'].startswith('[Interface]'):
@@ -95,7 +113,7 @@ class ConfigIssuanceService:
                 raise AccessDenied('profile_not_synced', 409) from None
         return profile, node, identity, latest
 
-    def request(self, actor, profile_id, node_key, protocol, transport, command_key):
+    def request(self, actor, profile_id, node_key, protocol, transport, command_key, device_id=None):
         key = _command_key(command_key)
         if (protocol, transport) not in {('xray', 'tcp'), ('xray', 'xhttp'),
                                           ('awg', 'vpn'), ('awg', 'conf')}:
@@ -115,23 +133,28 @@ class ConfigIssuanceService:
                 AND protocol = ?''', (profile_id, node_key, protocol)).fetchone()
             require_profile(current_actor, _profile_resource(profile), action='issue_config',
                 administrative=profile['owner_account_id'] != actor.account.id, grant_active=grant is not None)
+            from .devices import DeviceRepository
+            device = DeviceRepository.select_active(conn,profile_id,device_id) if protocol=='awg' else None
+            if protocol!='awg' and device_id:
+                raise AccessDenied('config_not_supported',422)
+            selected_device_id = device['id'] if device else ''
             previous = conn.execute('''SELECT * FROM backend_config_issuances
                 WHERE actor_account_id = ? AND command_key = ?''', (actor.account.id, key)).fetchone()
             if previous is not None:
-                if (previous['profile_id'], previous['node_key'], previous['protocol'], previous['transport']) != (
-                        profile_id, node_key, protocol, transport):
+                if (previous['profile_id'], previous['node_key'], previous['protocol'], previous['transport'],previous['device_id']) != (
+                        profile_id, node_key, protocol, transport,selected_device_id):
                     raise AccessDenied('idempotency_conflict', 409)
                 return self.public(previous)
-            _, node, _, _ = self._current(conn, profile_id, node_key, protocol, transport)
+            _, node, _, _ = self._current(conn, profile_id, node_key, protocol, transport,selected_device_id)
             now = datetime.now(timezone.utc)
             issuance_id = str(uuid4())
             conn.execute('''INSERT INTO backend_config_issuances (id, actor_account_id, command_key,
                 profile_id, node_key, protocol, transport, profile_revision, node_revision,
-                status, created_at, expires_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'awaiting_executor', ?, ?)''',
+                status, created_at, expires_at,device_id,device_revision)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'awaiting_executor', ?, ?,?,?)''',
                 (issuance_id, actor.account.id, key, profile_id, node_key, protocol, transport,
                  profile['desired_revision'], node['desired_revision'], now.isoformat(),
-                 (now + timedelta(minutes=15)).isoformat()))
+                 (now + timedelta(minutes=15)).isoformat(),selected_device_id,device['revision'] if device else 0))
             row = conn.execute('SELECT * FROM backend_config_issuances WHERE id = ?', (issuance_id,)).fetchone()
             return self.public(row)
 
@@ -146,7 +169,19 @@ class ConfigIssuanceService:
             AND protocol = ?''', (row['profile_id'], row['node_key'], row['protocol'])).fetchone()
         require_profile(actor, _profile_resource(profile), action='read_config',
             administrative=profile['owner_account_id'] != actor.account.id, grant_active=grant is not None)
+        if row['protocol']=='awg':
+            from .devices import DeviceRepository
+            device = DeviceRepository.select_active(conn,row['profile_id'],row['device_id'])
+            if device['revision'] != row['device_revision']:
+                raise AccessDenied('config_stale',409)
         return row
+
+    @staticmethod
+    def _check_revisions(profile,node,identity,row):
+        if (profile['desired_revision'] != row['profile_revision']
+                or node['desired_revision'] != row['node_revision']
+                or identity.get('device_revision',0) != row['device_revision']):
+            raise AccessDenied('config_stale',409)
 
     def get(self, actor, issuance_id):
         with self.db.connect() as conn:
@@ -169,7 +204,7 @@ class ConfigIssuanceService:
         config_present = 'xray_config_present' if protocol == 'xray' else 'awg_config_present'
         if (observation['health_state'] != 'running' or not observation[config_present]):
             raise ValueError('protocol runtime is not ready')
-        intent = {'node_key': node_key, 'runtime_name': profile['runtime_name'],
+        intent = {'node_key': node_key, 'runtime_name': identity.get('runtime_name',profile['runtime_name']),
                   'protocol': protocol, 'action': 'ensure', 'desired_revision': profile['desired_revision']}
         if protocol == 'xray':
             intent['xray'] = {'uuid': identity['xray_uuid'], 'short_id': identity['xray_short_id']}
@@ -180,7 +215,7 @@ class ConfigIssuanceService:
         if protocol == 'awg':
             stored = json.loads(latest['result_json'])['wg_conf']
             refreshed = driver.refresh_awg_config(node_key, stored,
-                f'{node["title"]} AmneziaWG · {profile["display_name"]}')
+                f'{node["title"]} AmneziaWG · {profile["display_name"]} · {identity["device_name"]}')
             settings = json.loads(node['settings_json'])
             expected_endpoint = settings.get('awg_public_host', settings['public_host'])
             expected_port = settings.get('awg_port', 51820)
@@ -213,18 +248,14 @@ class ConfigIssuanceService:
                 raise AccessDenied('config_expired', 410)
             with self.db.connect() as conn:
                 profile, node, identity, latest = self._current(conn, row['profile_id'], row['node_key'],
-                    row['protocol'], row['transport'])
-                if (profile['desired_revision'] != row['profile_revision'] or
-                    node['desired_revision'] != row['node_revision']):
-                    raise AccessDenied('config_stale', 409)
+                    row['protocol'], row['transport'],row['device_id'])
+                self._check_revisions(profile,node,identity,row)
             with self._driver() as driver:
                 metadata, _ = self._live(driver, profile, node, identity, latest, row['protocol'])
             with self.db.transaction() as conn:
-                profile, node, _, _ = self._current(conn, row['profile_id'], row['node_key'],
-                    row['protocol'], row['transport'])
-                if (profile['desired_revision'] != row['profile_revision'] or
-                    node['desired_revision'] != row['node_revision']):
-                    raise AccessDenied('config_stale', 409)
+                profile, node, identity, _ = self._current(conn, row['profile_id'], row['node_key'],
+                    row['protocol'], row['transport'],row['device_id'])
+                self._check_revisions(profile,node,identity,row)
                 conn.execute("UPDATE backend_config_issuances SET status = 'succeeded', result_json = ? WHERE id = ? AND status = 'running'",
                     (json.dumps(metadata, sort_keys=True), row['id']))
         except AccessDenied:
@@ -252,10 +283,8 @@ class ConfigIssuanceService:
             if datetime.fromisoformat(row['expires_at']) <= datetime.now(timezone.utc):
                 raise AccessDenied('config_expired', 410)
             profile, node, identity, latest = self._current(conn, row['profile_id'], row['node_key'],
-                row['protocol'], row['transport'])
-            if (profile['desired_revision'] != row['profile_revision'] or
-                node['desired_revision'] != row['node_revision']):
-                raise AccessDenied('config_stale', 409)
+                row['protocol'], row['transport'],row['device_id'])
+            self._check_revisions(profile,node,identity,row)
         try:
             with self._driver() as driver:
                 metadata, refreshed = self._live(driver, profile, node, identity, latest, row['protocol'])
@@ -266,22 +295,21 @@ class ConfigIssuanceService:
         # Recheck after the remote read; a grant or revision may have changed.
         with self.db.connect() as conn:
             self._authorized(conn, actor, issuance_id)
-            current_profile, current_node, _, _ = self._current(conn, row['profile_id'], row['node_key'],
-                row['protocol'], row['transport'])
-            if (current_profile['desired_revision'] != row['profile_revision'] or
-                current_node['desired_revision'] != row['node_revision']):
-                raise AccessDenied('config_stale', 409)
+            current_profile, current_node, current_identity, _ = self._current(conn, row['profile_id'], row['node_key'],
+                row['protocol'], row['transport'],row['device_id'])
+            self._check_revisions(current_profile,current_node,current_identity,row)
         if row['protocol'] == 'awg':
             extension = row['transport']
             safe_title = (re.sub(r'[^\w .()#-]+', '', node['title']).strip(' .')[:64]
                           or row['node_key'])
             safe_profile = (re.sub(r'[^\w .()#-]+', '', profile['display_name']).strip(' .')[:64]
                             or 'Profile')
-            return {'filename': f'AmneziaWG - {safe_title} - {safe_profile}.{extension}',
-                    'display_name': f'{node["title"]} AmneziaWG · {profile["display_name"]}',
+            safe_device = re.sub(r'[^\w .()#-]+','',identity['device_name']).strip(' .')[:64] or 'Device'
+            return {'filename': f'AmneziaWG - {safe_title} - {safe_profile} - {safe_device}.{extension}',
+                    'display_name': f'{node["title"]} AmneziaWG · {profile["display_name"]} · {identity["device_name"]}',
                     'media_type': 'text/plain',
                     'content': refreshed['vpn_key'] if extension == 'vpn' else refreshed['wg_conf'],
-                    'files': [{'filename': f'AmneziaWG - {safe_title} - {safe_profile}.{ext}',
+                    'files': [{'filename': f'AmneziaWG - {safe_title} - {safe_profile} - {safe_device}.{ext}',
                                'content': refreshed[key]} for ext, key in
                               (('vpn', 'vpn_key'), ('conf', 'wg_conf'))]}
         settings = json.loads(node['settings_json'])

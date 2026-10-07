@@ -19,7 +19,7 @@ Usage:
 
 Options:
   --skip-tests         Do not run preflight checks (python tests + cargo check)
-  --no-build           Do not build/package rust artifacts
+  --no-build           Do not build/package release artifacts
   --no-tag             Do not create a git tag (prep-only mode)
   --publish            Publish GitHub release with artifacts via gh CLI
   --no-draft           When used with --publish, create non-draft release
@@ -156,6 +156,13 @@ fi
 # Keep this check even in --skip-tests mode: a broken Telegram module must
 # never be tagged or published merely because runtime dependencies are absent.
 set_step "compile Telegram client"
+python3 - "$VERSION" <<'PY'
+import pathlib, re, sys
+manifest = pathlib.Path('rust/node-plane-cli/Cargo.toml').read_text()
+match = re.search(r'^version\s*=\s*"([^"]+)"', manifest, re.M)
+if not match or match.group(1) != sys.argv[1]:
+    raise SystemExit('Workstation Cargo package version must match VERSION before release.')
+PY
 python3 -m compileall -q app/telegram_client
 
 run_preflight_checks() {
@@ -165,9 +172,15 @@ run_preflight_checks() {
   (cd rust/node-driver && cargo check)
   set_step "cargo check node-agent"
   (cd rust/node-agent && cargo check)
+  set_step "cargo test workstation assistant"
+  (cd rust/node-plane-cli && cargo test --locked)
 }
 
 build_release_artifacts() {
+  [[ "$(uname -s)" == Linux && "$(uname -m)" == x86_64 ]] || {
+    echo "Release packaging currently requires Linux x86_64; refusing mislabeled binaries." >&2
+    return 1
+  }
   need_cmd cargo
   need_cmd tar
   need_cmd readelf
@@ -202,6 +215,7 @@ build_release_artifacts() {
   local agent_name="node-plane-agent-linux-amd64"
   local workstation_name="node-plane-cli-linux-amd64"
   local checksums_file="SHA256SUMS.txt"
+  local controller_name="node-plane-controller.tar.gz"
 
   cp "$driver_bin" "${tmp_dir}/${driver_name}"
   cp "$agent_bin" "${tmp_dir}/${agent_name}"
@@ -216,9 +230,13 @@ build_release_artifacts() {
   set_step "package workstation artifact"
   tar -C "$tmp_dir" -czf "${release_dir}/${workstation_name}.tar.gz" "$workstation_name"
 
+  set_step "package controller runtime"
+  python3 scripts/controller_release.py build --root "$ROOT_DIR" \
+    --archive "${release_dir}/${controller_name}" --ref "$tag" --commit "$(git rev-parse HEAD)"
+
   (
     cd "$release_dir"
-    sha256sum "${driver_name}.tar.gz" "${agent_name}.tar.gz" "${workstation_name}.tar.gz" > "$checksums_file"
+    sha256sum "${driver_name}.tar.gz" "${agent_name}.tar.gz" "${workstation_name}.tar.gz" "$controller_name" > "$checksums_file"
   )
 
   cat > "${release_dir}/RELEASE_METADATA.txt" <<EOF
@@ -276,6 +294,8 @@ publish_github_release() {
     fi
   done
   rm -rf "$verify_dir"
+  python3 scripts/controller_release.py verify --archive "${release_dir}/node-plane-controller.tar.gz" \
+    --ref "$tag" --commit "$(git rev-parse "${tag}^{commit}")"
   (cd "$release_dir" && sha256sum -c SHA256SUMS.txt)
 
   local -a flags

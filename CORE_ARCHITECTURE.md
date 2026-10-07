@@ -157,7 +157,7 @@ operational history; snapshots are not removal-evidence archives.
 | Config issuance records | Authorization expires after 15 minutes; this is access expiry, not deletion. The record remains for idempotent lookup. AWG credentials are generated/refreshed at delivery; issuance metadata stores a digest, while provisioning results/journals can still contain private configs. |
 | Issued Telegram artifacts | Delivered messages/files belong to the client conversation, not a server-side expiring download cache. Revocation disables runtime access but cannot erase copies already saved by a user. |
 | Backend configuration backups | Configurable keep count (5/10/20, default 10). Pre-restore and pre-reset/removal snapshots bypass pruning for recovery. Snapshots can contain sensitive provisioning results and must be protected. |
-| Release directories | Explicit release cleanup with protected active/rollback targets; never treat shared state or journals as disposable release contents. |
+| Release directories | Automatic retention after verified activation; keep current and actual previous working release |
 
 There is currently no defined maximum retry/delivery horizon that makes command
 identity deletion safe. Therefore a storage-pressure fix must not truncate

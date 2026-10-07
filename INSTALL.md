@@ -8,12 +8,12 @@ Rust driver and managed node agents. The old PTB bot is removed.
 - use `Simple Mode` on the controller host for both local and remote nodes
 - make sure you have a valid Telegram bot token and know the numeric Telegram user id that should become the first admin
 - if you plan to manage remote nodes, verify SSH access before touching Node Plane
-- keep the source checkout separate from the runtime install root in `Simple Mode`
+- keep the temporary installer directory separate from the runtime install root
 
 ## Requirements
 
 - Python `3.11` or `3.12`
-- `Simple Mode` automatically picks `python3.12` or `python3.11` even when the system `python3` is newer. Install the matching `python3.12-venv` or `python3.11-venv` package as well; set `NODE_PLANE_PYTHON_BIN=/path/to/python3.12` to choose a specific interpreter.
+- `Simple Mode` automatically picks `python3.12` or `python3.11` even when the system `python3` is newer. set `NODE_PLANE_PYTHON_BIN=/path/to/python3.12` to choose a specific interpreter.
 - Telegram bot token
 - your Telegram numeric user id in `ADMIN_IDS`
 - Docker will be installed automatically on supported Linux hosts when Node Plane needs it for runtime PostgreSQL
@@ -46,17 +46,27 @@ It is under development; complete VPS and manual
 Windows acceptance remain pending. The direct script workflow below remains
 supported.
 
+The controller is distributed as `node-plane-controller.tar.gz`. Download the
+small stdlib-only bootstrap helper, then let it select and verify the release:
+
 ```bash
-git clone https://github.com/saharoktyan/node-plane.git node-plane-src
-cd node-plane-src
+curl -fsSL https://raw.githubusercontent.com/saharoktyan/node-plane/dev/scripts/controller_release.py -o /tmp/node-plane-controller-release.py
+python3 /tmp/node-plane-controller-release.py download --branch dev --destination /opt/node-plane-install
+cd /opt/node-plane-install
 ./scripts/install.sh --mode simple
 ```
 
-If you prefer SSH cloning, add a GitHub SSH key to the host first and then use:
+Use `--branch main` for stable releases, or add `--ref vX.Y.Z[-alpha.N]` for an
+exact published release. Python, Git (remote ref metadata only) and CA
+certificates must be installed. No repository clone is needed. The helper checks
+the archive checksum, tag, full commit and file manifest before extraction.
+Only releases containing the controller archive and checksum asset are admitted.
 
-```bash
-git clone git@github.com:saharoktyan/node-plane.git node-plane-src
-```
+A developer checkout remains supported: use `scripts/install.sh --from-source`
+to export its selected Git ref. This explicit mode can include development files
+and is not the normal distribution path. Older releases without the controller
+asset require this mode; missing or invalid archives never trigger a silent
+full-source download.
 
 To start the full stack without an interactive systemd prompt:
 
@@ -65,7 +75,8 @@ To start the full stack without an interactive systemd prompt:
 ```
 
 The script will prompt for missing values and prepare the release layout for you.
-It also asks which git tag/ref to install, with the default set to the latest release tag for the selected branch.
+It selects a published controller archive in the chosen update channel. A downloaded
+controller package can be reused without another download.
 
 For a predictable non-interactive setup, configure `.env` first with at least:
 
@@ -82,10 +93,18 @@ DB_BACKEND=postgres
 
 Recommended layout:
 
-- source checkout: `/opt/node-plane-src`
+- temporary installer directory: `/opt/node-plane-install`
 - install root: `/opt/node-plane`
 
-Do not place the git checkout inside the install root. `Simple Mode` exports releases under `NODE_PLANE_BASE_DIR/releases` and maintains the active app under `NODE_PLANE_BASE_DIR/current`.
+Keep the installer directory outside the install root. `Simple Mode` stores verified
+controller releases under `NODE_PLANE_BASE_DIR/releases` and maintains the active
+app under `NODE_PLANE_BASE_DIR/current`. The archive contains Python runtime
+modules, requirement files, the license and operational scripts; Rust sources,
+workstation sources, tests, documentation and build tools are excluded.
+Updates run from the active controller and use release archives, preserving the
+existing health verification and rollback flow. Source checkouts are unnecessary
+after installation. Unpublished dev HEAD updates require `--from-source` and a
+development checkout; archive installations offer published releases only.
 
 ### What the installer prepares
 
@@ -141,7 +160,7 @@ Key variables:
 - `NODE_PLANE_BASE_DIR`: install root, usually `/opt/node-plane`
 - `NODE_PLANE_APP_DIR`: active app path, usually `/opt/node-plane/current`
 - `NODE_PLANE_SHARED_DIR`: shared state path, usually `/opt/node-plane/shared`
-- `NODE_PLANE_SOURCE_DIR`: source checkout path
+- `NODE_PLANE_SOURCE_DIR`: active controller path for archive installations; source checkout in development mode
 - `NODE_PLANE_INSTALL_MODE`: `simple`
 - `NODE_PLANE_INSTALL_REF`: records the tag/ref selected at the last installation; the next run fetches tags and defaults to the latest release tag for `NODE_PLANE_UPDATE_BRANCH`. Use `--ref <tag>` (or an exported `NODE_PLANE_INSTALL_REF`) to pin a specific version.
 - `DB_BACKEND`: should be `postgres` for `0.4`
@@ -219,14 +238,35 @@ Maintenance:
 
 ```bash
 ./scripts/rollback.sh --to <release-id>
-./scripts/cleanup_releases.sh --dry-run
-./scripts/cleanup_releases.sh
 ./scripts/check_updates.sh
 ```
 
+Release retention is automatic after successful activation and health checks.
+Only the active release and the actual previous working release remain. The
+`previous` symlink records the rollback target; ordering by directory timestamps
+does not determine protection. Failed updates and `--skip-restart` preparation
+never prune releases. Manual release cleanup has been removed from the bot and
+API. Backups and node command journals have separate retention policies.
+
+The installer downloads a pinned standalone uv binary, compatible with Debian
+12 and Ubuntu 22.04 or newer. Existing Python 3.11/3.12 is preferred; when neither
+is available (for example, Ubuntu 22.04 or 26.04), uv provisions a private Python 3.12
+under `${NODE_PLANE_SHARED_DIR}/tools/python`, leaving system Python unchanged.
+Explicit `NODE_PLANE_PYTHON_BIN` choices are validated rather than replaced.
+The installer also provisions missing download, SSH, certificate, systemd and
+basic host utilities; Docker/PostgreSQL provisioning remains automatic.
+uv creates environments and installs dependencies without pip/setuptools.
+uv lives under `${NODE_PLANE_SHARED_DIR}/tools/`; its shared package cache is
+`${NODE_PLANE_SHARED_DIR}/cache/uv`. Separate release environments use hardlinks
+from this cache (with copying when the filesystem cannot link), so identical
+dependencies do not require another physical copy for each release. Do not
+modify installed package files in place. Cache pruning follows successful
+release retention. `NODE_PLANE_UV_BIN` can select a pre-provisioned uv executable
+for offline deployments and tests.
+
 ## Common Pitfalls
 
-- do not place the git checkout inside `NODE_PLANE_BASE_DIR` in `Simple Mode`; the installer expects a separate source checkout and release root
+- keep the temporary installer directory (or development checkout) outside `NODE_PLANE_BASE_DIR`
 - do not leave `BOT_TOKEN=replace_me` or `ADMIN_IDS=123456789` in `.env`
 - if `POSTGRES_DSN` is empty, make sure the host allows `install.sh` or `update.sh` to install Docker and start the runtime PostgreSQL container
 - make sure the SSH key in `SSH_KEY` is readable by the process that runs the bot

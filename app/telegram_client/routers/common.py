@@ -98,6 +98,8 @@ async def render(bot: Bot, chat_id: int, screen: Screen, rows: list[list[InlineK
     # new confirmation, even when navigation edits the same control message.
     if data.get('registry_removal_confirmation') is not None:
         await state.update_data(registry_removal_confirmation=None)
+    if data.get('device_delete_confirmation') is not None:
+        await state.update_data(device_delete_confirmation=None)
     existing = message_id or data.get('control_message_id')
     rich_content = screen.rich(rows)
     cache = dict(data.get('rich_media_cache', {}))

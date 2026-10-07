@@ -188,7 +188,7 @@ async fn run(
     }
     stage("Checking installation paths and preparing prerequisites");
     checked(&mut session, PREPARE_HOST, None, journal, false, tx).await?;
-    stage("Fetching the selected release into a private checkout");
+    stage("Preparing a private controller archive installation");
     let prepare = format!(
         "{}\nbranch={}\ntag={}\n{}",
         PREPARE_SOURCE_PREFIX,
@@ -224,9 +224,11 @@ async fn run(
     )
     .await?;
     let command = format!(
-        "set -eu\ncd {}\n{}\ntrap 'rm -f -- installer.env' EXIT\nexport GIT_TERMINAL_PROMPT=0\nbash source/scripts/install.sh --progress-json --non-interactive --mode simple --install-systemd --branch {} {} --env-file \"$PWD/installer.env\"",
+        "set -eu\ncd {}\n{}\ntrap 'rm -f -- installer.env' EXIT\nexport GIT_TERMINAL_PROMPT=0\npython3 source/scripts/controller_release.py download --branch {} --ref {} --destination controller\nbash controller/scripts/install.sh --progress-json --non-interactive --mode simple --install-systemd --branch {} {} --env-file \"$PWD/installer.env\"",
         shell_quote(work),
         CHECK_WORK_OWNER,
+        shell_quote(&request.branch),
+        shell_quote(&request.tag),
         shell_quote(&request.branch),
         if request.tag.is_empty() {
             String::new()
@@ -324,27 +326,13 @@ fn privileged(script: &str) -> String {
 
 fn bundle(request: &Request) -> Result<zeroize::Zeroizing<Vec<u8>>> {
     let mut tar = tar::Builder::new(Vec::new());
-    for (path, contents) in [
-        (
-            "source/scripts/install.sh",
-            include_bytes!("../../../scripts/install.sh").as_slice(),
-        ),
-        (
-            "source/scripts/postgres_runtime.sh",
-            include_bytes!("../../../scripts/postgres_runtime.sh").as_slice(),
-        ),
-        (
-            "source/scripts/python_runtime.sh",
-            include_bytes!("../../../scripts/python_runtime.sh").as_slice(),
-        ),
-        (
-            "source/scripts/lib/install_progress.sh",
-            include_bytes!("../../../scripts/lib/install_progress.sh").as_slice(),
-        ),
-    ] {
-        let contents = normalize_shell(contents)?;
-        append(&mut tar, path, contents.as_bytes(), 0o700)?;
-    }
+    let contents = normalize_shell(include_bytes!("../../../scripts/controller_release.py"))?;
+    append(
+        &mut tar,
+        "source/scripts/controller_release.py",
+        contents.as_bytes(),
+        0o600,
+    )?;
     append(
         &mut tar,
         "installer.env",
@@ -426,18 +414,21 @@ else
 fi
 export DEBIAN_FRONTEND=noninteractive
 timeout 600 apt-get update
-timeout 600 apt-get install -y git ca-certificates curl
+timeout 600 apt-get install -y git ca-certificates curl python3 openssl openssh-client sudo util-linux systemd tar gzip coreutils findutils
 selected=''
 for candidate in python3.12 python3.11; do
     if command -v "$candidate" >/dev/null 2>&1; then selected="$candidate"; break; fi
 done
 if [ -z "$selected" ]; then
     for candidate in python3.12 python3.11; do
-        if apt-cache show "$candidate-venv" >/dev/null 2>&1; then selected="$candidate"; break; fi
+        if apt-cache show "$candidate" >/dev/null 2>&1; then selected="$candidate"; break; fi
     done
 fi
-[ -n "$selected" ] || { echo 'The distribution repositories do not provide Python 3.11/3.12. Use Debian 12 or Ubuntu 24.04; no third-party repository was added.'; exit 16; }
-timeout 600 apt-get install -y "$selected" "$selected-venv"
+if [ -n "$selected" ]; then
+    timeout 600 apt-get install -y "$selected"
+else
+    echo 'uv will provision an isolated Python 3.12 runtime; system Python remains unchanged'
+fi
 echo 'Host prerequisites are ready'
 "#;
 
@@ -445,14 +436,7 @@ const PREPARE_SOURCE_PREFIX: &str = "set -eu\numask 077\nexport GIT_TERMINAL_PRO
 const PREPARE_SOURCE_SUFFIX: &str = r#"
 work=$(mktemp -d /opt/node-plane-assistant/run-XXXXXXXX)
 printf '%s\n' node-plane-workstation-v1 > "$work/.owner"
-timeout 300 git clone --quiet --branch "$branch" https://github.com/saharoktyan/node-plane.git "$work/source"
-cd "$work/source"
-if [ -n "$tag" ]; then
-    timeout 300 git fetch --quiet origin "refs/tags/$tag:refs/tags/$tag"
-    git rev-parse --verify "refs/tags/$tag^{commit}" >/dev/null
-    git merge-base --is-ancestor "refs/tags/$tag^{commit}" "origin/$branch"
-    git checkout --quiet --detach "refs/tags/$tag"
-fi
+mkdir -p "$work/source/scripts"
 printf 'NODE_PLANE_WORK_DIR %s\n' "$work"
 "#;
 const CHECK_WORK_OWNER: &str = r#"
@@ -641,8 +625,9 @@ mod tests {
                 path
             })
             .collect();
-        assert_eq!(paths.len(), 5);
+        assert_eq!(paths.len(), 2);
         assert!(paths.contains(&"installer.env".to_owned()));
+        assert!(paths.contains(&"source/scripts/controller_release.py".to_owned()));
         assert!(paths.iter().all(|p| !p.contains("id_ed25519")));
     }
     #[test]

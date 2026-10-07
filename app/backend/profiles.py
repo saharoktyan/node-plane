@@ -126,6 +126,10 @@ class ProfileRepository:
                 operation_id TEXT
             )''')
             conn.execute('CREATE INDEX IF NOT EXISTS idx_backend_profile_owner ON backend_profiles(owner_account_id, id)')
+            from .devices import DeviceRepository
+            DeviceRepository.create_schema(conn)
+            from .grant_policies import create_schema
+            create_schema(conn)
             # Repair accounts left approved by older profile-deletion commands.
             self.revoke_orphaned_members(conn)
         from .node_lifecycle import NodeLifecycle
@@ -319,6 +323,11 @@ class ProfileService:
         rows = (self.repository.search_profiles(term, after=after, limit=limit + 1)
                 if term else self.repository.all_profiles(after=after, limit=limit + 1))
         return _page(rows, limit, kind, 'id')
+
+    def devices(self, actor, profile_id):
+        self.get(actor, profile_id)
+        from .devices import DeviceRepository
+        return {'items': DeviceRepository(self.repository.db).list_for_profile(profile_id)}
 
     def grants(self, actor, profile_id):
         self.get(actor, profile_id)

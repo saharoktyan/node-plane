@@ -27,8 +27,36 @@ def _valid_result(intent, raw):
         result = json.loads(raw)
     except (TypeError, ValueError):
         return False
-    return result == {'node_key': intent['node_key'], 'revision': intent['revision'],
-                      'settings_sha256': _digest(intent)}
+    effective = effective_port_intent(intent, result)
+    if effective is None:
+        return False
+    expected = {'node_key': intent['node_key'], 'revision': intent['revision'],
+                'settings_sha256': _digest(effective)}
+    if 'awg_port' in result:
+        expected['awg_port'] = result['awg_port']
+    return result == expected
+
+
+def effective_port_intent(intent, result):
+    if not isinstance(result, dict):
+        return None
+    if 'awg_port' not in result:
+        return intent
+    from .awg_ports import allowed_port
+    settings = intent['settings']
+    if ('awg' not in intent['protocols'] or settings.get('awg_port_mode') != 'auto'
+            or not allowed_port(settings.get('awg_i1_preset', 'quic'), settings['awg_port'], result['awg_port'])):
+        return None
+    return dict(intent, settings=dict(settings, awg_port=result['awg_port']))
+
+
+def persist_selected_port(conn, node_key, revision, intent, result):
+    effective = effective_port_intent(intent, result)
+    if effective is None or result.get('settings_sha256') != _digest(effective):
+        raise ValueError('invalid selected AWG port result')
+    if 'awg_port' in result:
+        conn.execute('UPDATE backend_nodes SET settings_json=? WHERE key=? AND desired_revision=?',
+            (json.dumps(effective['settings'], sort_keys=True), node_key, revision))
 
 
 def _snapshot(node):
@@ -203,6 +231,7 @@ class NodeSettingsExecutor:
             return False
         conn.execute("UPDATE backend_node_settings_tasks SET status = 'succeeded', result_json = ? WHERE id = ?",
                      (result, row['id']))
+        persist_selected_port(conn, row['node_key'], row['revision'], intent, json.loads(result))
         conn.execute('''UPDATE backend_nodes SET applied_revision = ?,
             enabled = CASE WHEN desired_revision = ? THEN 1 ELSE enabled END
             WHERE key = ? AND applied_revision < ? AND desired_revision >= ?

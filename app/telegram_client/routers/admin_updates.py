@@ -190,9 +190,6 @@ async def show_overview(query, bot, backend, state, page=0, opened=False):
     if latest and not active:
         component_actions.append((button(tr(lang, 'update_tools.result'), f"update_job:{latest['id']}"),))
     sections.append(Section(tr(lang, 'updates.rich.component_actions'), rows=tuple(component_actions)))
-    sections.append(Section(tr(lang, 'settings.rich.danger'), rows=((
-        button(tr(lang, 'updates.cleanup'), UpdateActionCallback(action='cleanup_menu').pack())
-            .model_copy(update={'style': 'danger'}),),)))
     lines = (tr(lang, 'updates.current', value=overview.get('current_label') or overview.get('current_version') or '—'),)
     if overview.get('update_available'):
         lines += (tr(lang, 'updates.available', value=overview.get('remote_label') or overview.get('remote_version') or '—'),)

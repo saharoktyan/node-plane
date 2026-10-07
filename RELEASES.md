@@ -2,6 +2,46 @@
 
 This document defines the release and versioning policy for Node Plane.
 
+## Controller runtime artifact
+
+Each release now includes `node-plane-controller.tar.gz` alongside the driver,
+agent and workstation binaries. `scripts/tag_release.sh` builds it automatically
+from an explicit allowlist of tracked Python/runtime files and operational
+scripts. It excludes Rust sources, documentation, tests, development tools,
+virtual environments, local configuration and caches. `CONTROLLER_PACKAGE.json`
+records the release tag, version, full commit and SHA-256 of every included file.
+`BUILD_COMMIT` is packaged with the same full commit.
+
+The controller archive is included in `SHA256SUMS.txt`; publishing verifies its
+manifest and its identity against the release tag. Installation and update reject
+missing/corrupt archives and never fall back to full-source downloads. Ordinary
+archive installations need no checkout; release discovery fetches public release
+metadata and remote tag refs only. Unpublished dev HEAD remains a development
+checkout workflow using `--from-source`.
+
+## v0.4.3-alpha.50
+
+- Named device management with independent AWG peers, device-aware revocations
+  and per-device traffic accounting. VLESS remains profile-based. Separate plain
+  configuration links preserve the iOS copy workaround.
+- Preset-aware automatic AWG UDP port selection, exactly one local node,
+  installation defaults and persistent all-server/regional access rules with
+  exclusions, atomic access wizards and region-change confirmation.
+- Slim controller runtime archives, managed Python 3.12 through uv, and automatic
+  release retention of the active and previous installations.
+- Explicit workstation self-install/update/uninstall commands, shell PATH setup,
+  background update discovery and version/update controls in TUI Settings.
+  Linux x86_64 self-updates verify checksums and replace the binary atomically.
+- Configuration backups include device identities, stable regions and access
+  policies. Legacy validated backups are converted; live old peer migration is
+  not required for this alpha development release.
+- Real multi-device AWG connections, iOS copy behavior and production installation
+  acceptance remain manual checks.
+- Preflight: Python discovery ran 985 tests with 99 environment-dependent skips;
+  workstation 69, driver 34 and agent 12 Rust tests passed. Workstation Clippy
+  and formatting checks passed. Separate disposable PostgreSQL runs cover policy,
+  device, defaults and traffic transactions.
+
 ## v0.4.3-alpha.49
 
 - First packaged Rust workstation TUI: SSH key enrollment, saved installation
@@ -433,7 +473,7 @@ tool, independent of the supported installation mode.
    Linux amd64 on Debian 12. This delegates packaging to `tag_release.sh`.
    The archives must contain executable driver/agent ELF binaries requiring
    glibc no newer than 2.36. Other architectures are not currently published.
-4. Verify both `*.tar.gz` assets against `SHA256SUMS.txt` and the release metadata
+4. Verify all controller and binary `*.tar.gz` assets against `SHA256SUMS.txt` and the release metadata
    against the tag, `VERSION` and commit. Publishing rechecks checksums and ELF
    compatibility; checksums detect corruption, they are not artifact signatures.
 5. On a disposable clean host, verify installation creates backend, worker

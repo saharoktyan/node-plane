@@ -21,6 +21,14 @@ from fastapi.testclient import TestClient
 
 
 class BackendHTTPTests(unittest.TestCase):
+    def test_api_routes_are_unique_and_manual_release_cleanup_is_removed(self):
+        pairs = [(method, route.path) for route in self.client.app.routes
+                 for method in getattr(route, 'methods', ())]
+        self.assertEqual(len(pairs), len(set(pairs)))
+        self.assertFalse(any('/system/releases/cleanup' in path for _, path in pairs))
+        self.assertNotIn(('POST', '/api/v1/system/cleanup/run'), pairs)
+        self.assertIn(('GET', '/api/v1/system/cleanup'), pairs)
+
     def test_registration_creates_one_default_profile_and_updates_only_automatic_names(self):
         first = self.register(102, username='alice').json()
         repo = ProfileRepository(self.db)

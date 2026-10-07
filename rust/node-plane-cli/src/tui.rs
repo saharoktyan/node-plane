@@ -36,6 +36,8 @@ use zeroize::{Zeroize, Zeroizing};
 enum Screen {
     Form,
     Settings,
+    SessionInfo,
+    WorkstationUpdates,
     EditInstallation,
     Confirm,
     Running,
@@ -47,6 +49,9 @@ enum Control {
     QuickProfile,
     CycleProfile(bool),
     Settings,
+    SessionInfo,
+    WorkstationUpdates,
+    SelfUpdate,
     Installation(usize),
     UseInstallation,
     EditInstallation,
@@ -239,6 +244,9 @@ impl Drop for Form {
 }
 
 struct App {
+    self_release: Option<crate::self_manage::Release>,
+    self_status: String,
+    self_requested: bool,
     form: Form,
     screen: Screen,
     error: String,
@@ -255,6 +263,7 @@ struct App {
     confirm: bool,
     connections: Connections,
     state_dir: std::path::PathBuf,
+    session_id: uuid::Uuid,
     settings_selected: usize,
     settings_profile: usize,
     editor: Option<(Option<uuid::Uuid>, Vec<String>, usize)>,
@@ -268,6 +277,9 @@ struct App {
 impl App {
     fn new(r: &Request) -> Self {
         Self {
+            self_release: None,
+            self_status: "Checking for workstation updates…".into(),
+            self_requested: false,
             form: Form::new(r),
             screen: Screen::Form,
             error: String::new(),
@@ -284,6 +296,7 @@ impl App {
             confirm: true,
             connections: Connections::default(),
             state_dir: r.state_dir.clone(),
+            session_id: uuid::Uuid::new_v4(),
             settings_selected: 0,
             settings_profile: 0,
             editor: None,
@@ -339,7 +352,10 @@ impl App {
     fn navigate(&mut self, backwards: bool) {
         let current = if self.quick_focus {
             4
-        } else if matches!(self.screen, Screen::Settings | Screen::EditInstallation) {
+        } else if matches!(
+            self.screen,
+            Screen::Settings | Screen::SessionInfo | Screen::EditInstallation
+        ) {
             5
         } else {
             Action::ALL
@@ -438,7 +454,7 @@ impl App {
             };
             profile.clone()
         };
-        let (id, fields) = if new && self.form.saved.is_some() {
+        let (id, mut fields) = if new && self.form.saved.is_some() {
             (
                 None,
                 vec![
@@ -465,6 +481,9 @@ impl App {
                 ],
             )
         };
+        if new {
+            fields[4] = "dev".into();
+        }
         self.editor = Some((id, fields, 0));
         if new {
             self.form.saved = None;
@@ -635,18 +654,56 @@ impl App {
                 .min(self.result_max_scroll.get())
         };
     }
-    fn mouse(&mut self, event: MouseEvent) -> Option<KeyEvent> {
-        if event.kind == MouseEventKind::Moved
-            && self.hits.iter().any(|hit| {
-                matches!(hit.control, Control::Settings)
-                    && hit.area.contains((event.column, event.row).into())
-            })
-        {
-            if matches!(self.screen, Screen::Form) {
-                self.open_settings();
-            }
-            return None;
+    fn close_result(&mut self, key: KeyEvent) -> bool {
+        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            self.exit = true;
+            self.exit_confirm = false;
+            return false;
         }
+        if !matches!(key.code, KeyCode::Enter | KeyCode::Esc) {
+            return false;
+        }
+        self.screen = Screen::Form;
+        self.form.selected = 0;
+        self.quick_focus = !self.actions_enabled();
+        self.outcome = None;
+        self.update = None;
+        self.stage.clear();
+        self.error.clear();
+        self.tracker = Tracker::default();
+        self.node_page = 0;
+        self.result_scroll = 0;
+        self.result_max_scroll.set(0);
+        self.result_page_size.set(1);
+        self.prompt = None;
+        self.password.zeroize();
+        self.form.fields[6].zeroize();
+        self.hits.clear();
+        self.trust = false;
+        self.exit = false;
+        self.exit_confirm = false;
+        self.stop.store(false, Ordering::Relaxed);
+        true
+    }
+
+    fn next_request(&self) -> Request {
+        Request {
+            action: self.form.action,
+            host: String::new(),
+            port: 22,
+            user: String::new(),
+            state_dir: self.state_dir.clone(),
+            tag: String::new(),
+            branch: String::new(),
+            admin_ids: String::new(),
+            bot_token: Zeroizing::new(String::new()),
+            workflow: WorkflowOptions {
+                stop: self.stop.clone(),
+                ..WorkflowOptions::default()
+            },
+        }
+    }
+    fn mouse(&mut self, event: MouseEvent) -> Option<KeyEvent> {
         if matches!(self.screen, Screen::Finished) && !self.exit && self.prompt.is_none() {
             match event.kind {
                 MouseEventKind::ScrollUp => {
@@ -693,6 +750,18 @@ impl App {
             }
             Control::Settings => {
                 self.open_settings();
+                return None;
+            }
+            Control::SessionInfo => {
+                self.screen = Screen::SessionInfo;
+                return None;
+            }
+            Control::WorkstationUpdates => {
+                self.screen = Screen::WorkstationUpdates;
+                return None;
+            }
+            Control::SelfUpdate => {
+                self.self_requested = true;
                 return None;
             }
             Control::Installation(index) => {
@@ -851,11 +920,92 @@ pub fn run(mut request: Request) -> Result<()> {
     app.load_connections(&request)?;
     let mut receiver: Option<mpsc::Receiver<Event>> = None;
     let mut worker = None;
+    let (check_tx, check_rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = check_tx.send(crate::self_manage::discover());
+    });
+    let mut offer = false;
+    let mut self_confirmation: Option<mpsc::Receiver<Answer>> = None;
+    let mut self_updating = false;
     loop {
+        if let Ok(result) = check_rx.try_recv() {
+            match result {
+                Ok(release) => {
+                    app.self_status = release
+                        .as_ref()
+                        .map(|r| format!("Available: {}", r.tag_name))
+                        .unwrap_or_else(|| "Workstation is up to date.".into());
+                    offer = release.is_some();
+                    app.self_release = release;
+                }
+                Err(error) => app.self_status = format!("Update check unavailable: {error}"),
+            }
+        }
+        if (offer || app.self_requested)
+            && app.prompt.is_none()
+            && !app.exit
+            && matches!(
+                app.screen,
+                Screen::Form | Screen::Settings | Screen::WorkstationUpdates
+            )
+        {
+            offer = false;
+            app.self_requested = false;
+            if let Some(release) = &app.self_release {
+                let (reply, answer) = mpsc::channel();
+                app.prompt = Some((
+                    Prompt::ConfirmAction {
+                        title: "Update workstation?".into(),
+                        description: format!(
+                            "{} → {}\nOnly the local managed binary is replaced. Restart TUI afterwards. Server installations and saved profiles are retained.\nIf not installed yet, run `node-plane self install` first.",
+                            env!("CARGO_PKG_VERSION"),
+                            release.tag_name
+                        ),
+                    },
+                    reply,
+                ));
+                app.trust = false;
+                self_confirmation = Some(answer);
+            }
+        }
+        if let Some(answer) = &self_confirmation
+            && let Ok(value) = answer.try_recv()
+        {
+            self_confirmation = None;
+            if matches!(value, Answer::Confirm(true))
+                && let Some(release) = app.self_release.clone()
+            {
+                let (tx, rx) = mpsc::channel();
+                receiver = Some(rx);
+                app.stage = "Downloading and verifying workstation update".into();
+                app.screen = Screen::Running;
+                app.tracker = Tracker::default();
+                app.update = None;
+                worker = Some(std::thread::spawn(move || {
+                    let result = crate::self_manage::update(&release).map_err(|e| format!("{e:#}"));
+                    let _ = tx.send(Event::Finished(result));
+                }));
+                self_updating = true;
+                app.self_status = "Updating workstation…".into();
+            }
+        }
         if let Some(rx) = &receiver {
             loop {
                 match rx.try_recv() {
-                    Ok(value) => app.event(value),
+                    Ok(value) => {
+                        if self_updating && let Event::Finished(result) = &value {
+                            self_updating = false;
+                            if result.is_ok() {
+                                app.self_release = None;
+                                app.self_status =
+                                    "Updated; restart TUI to use the new version.".into();
+                            } else {
+                                app.self_status =
+                                    "Workstation update failed; retry from Settings.".into();
+                            }
+                        }
+                        app.event(value);
+                    }
                     Err(mpsc::TryRecvError::Empty) => break,
                     Err(mpsc::TryRecvError::Disconnected) => {
                         if !matches!(app.screen, Screen::Finished) {
@@ -946,6 +1096,11 @@ pub fn run(mut request: Request) -> Result<()> {
                     continue;
                 }
                 match app.screen {
+                    Screen::WorkstationUpdates => match key.code {
+                        KeyCode::Esc => app.open_settings(),
+                        KeyCode::Enter | KeyCode::Char('u') => app.self_requested = true,
+                        _ => {}
+                    },
                     Screen::Form => {
                         if !app.actions_enabled() {
                             app.quick_focus = true;
@@ -1014,6 +1169,14 @@ pub fn run(mut request: Request) -> Result<()> {
                             _ => {}
                         }
                     }
+                    Screen::SessionInfo => match key.code {
+                        KeyCode::Esc | KeyCode::Enter => app.open_settings(),
+                        _ if quit => {
+                            app.exit = true;
+                            app.exit_confirm = false;
+                        }
+                        _ => {}
+                    },
                     Screen::Settings => {
                         let count = app.connections.installations.len();
                         if quit {
@@ -1033,27 +1196,45 @@ pub fn run(mut request: Request) -> Result<()> {
                             }
                             KeyCode::Tab | KeyCode::Down => {
                                 app.settings_selected = if count == 0 {
-                                    if app.settings_selected == 0 { 3 } else { 0 }
+                                    match app.settings_selected {
+                                        0 => 3,
+                                        3 => 4,
+                                        _ => 0,
+                                    }
                                 } else {
-                                    (app.settings_selected + 1) % (count + 4)
+                                    (app.settings_selected + 1) % (count + 5)
                                 };
                             }
                             KeyCode::BackTab | KeyCode::Up => {
                                 app.settings_selected = if count == 0 {
-                                    if app.settings_selected == 0 { 3 } else { 0 }
+                                    match app.settings_selected {
+                                        0 => 4,
+                                        4 => 3,
+                                        _ => 0,
+                                    }
                                 } else {
-                                    (app.settings_selected + count + 3) % (count + 4)
+                                    (app.settings_selected + count + 4) % (count + 5)
                                 };
                             }
                             KeyCode::Enter => {
                                 if app.settings_selected == 0 {
                                     app.settings_selected = if count == 0 { 3 } else { 1 };
+                                } else if app.settings_selected == count + 4 {
+                                    app.screen = Screen::SessionInfo;
                                 } else if app.settings_selected == count + 3 || count == 0 {
                                     app.begin_edit(true);
                                 } else if app.settings_selected == count + 2 {
                                     app.begin_edit(false);
                                 } else if let Err(error) = app.use_selected() {
                                     app.error = error.to_string();
+                                }
+                            }
+                            KeyCode::Char('i') => app.screen = Screen::SessionInfo,
+                            KeyCode::Char('u') => {
+                                if app.self_release.is_some() {
+                                    app.self_requested = true;
+                                } else {
+                                    app.screen = Screen::WorkstationUpdates;
                                 }
                             }
                             KeyCode::Char('n') => app.begin_edit(true),
@@ -1151,18 +1332,7 @@ pub fn run(mut request: Request) -> Result<()> {
                             receiver = Some(rx);
                             app.screen = Screen::Running;
                             // The request has moved into the worker and is never logged/debugged.
-                            request = Request {
-                                action: Action::Diagnose,
-                                host: String::new(),
-                                port: 22,
-                                user: String::new(),
-                                state_dir: std::path::PathBuf::new(),
-                                tag: String::new(),
-                                branch: "dev".into(),
-                                admin_ids: String::new(),
-                                bot_token: Zeroizing::new(String::new()),
-                                workflow: WorkflowOptions::default(),
-                            };
+                            request = app.next_request();
                             app.form.fields[6].zeroize();
                         }
                     }
@@ -1193,8 +1363,15 @@ pub fn run(mut request: Request) -> Result<()> {
                             KeyCode::End => app.result_scroll = app.result_max_scroll.get(),
                             _ => {}
                         }
-                        if quit || key.code == KeyCode::Enter {
-                            break;
+                        if app.close_result(key) {
+                            receiver = None;
+                            if let Some(finished) = worker.take()
+                                && finished.join().is_err()
+                            {
+                                app.error =
+                                    "Operation worker failed; diagnose the server before retrying."
+                                        .into();
+                            }
                         }
                     }
                 }
@@ -1257,6 +1434,28 @@ fn draw(frame: &mut Frame, app: &App) -> Vec<Hit> {
     match app.screen {
         Screen::Form => draw_form(frame, app, rows[1], &mut hits),
         Screen::Settings => draw_settings(frame, app, rows[1], &mut hits),
+        Screen::SessionInfo => draw_session_info(frame, app, rows[1], &mut hits),
+        Screen::WorkstationUpdates => {
+            let right = draw_navigation(frame, app, rows[1], &mut hits);
+            let sections = dialog(frame, right, " Workstation updates ");
+            frame.render_widget(
+                Paragraph::new(format!(
+                    "Installed: {}\n{}\n\nUpdates affect this workstation only.",
+                    env!("CARGO_PKG_VERSION"),
+                    app.self_status
+                ))
+                .wrap(Wrap { trim: false }),
+                sections[0],
+            );
+            if app.self_release.is_some() {
+                let rect = centered(sections[1], 20, 3);
+                draw_button(frame, rect, "Update", true);
+                hits.push(Hit {
+                    area: rect,
+                    control: Control::SelfUpdate,
+                });
+            }
+        }
         Screen::EditInstallation => draw_editor(frame, app, rows[1], &mut hits),
         Screen::Confirm => {
             let action = app.form.action.label();
@@ -1379,8 +1578,10 @@ fn draw(frame: &mut Frame, app: &App) -> Vec<Hit> {
             Screen::Form => {
                 "Click: select   Tab: move   Arrows: actions / fields   Enter: next / continue   Esc: sidebar / exit"
             }
+            Screen::SessionInfo => "Enter / Esc: back   Ctrl+C: exit",
+            Screen::WorkstationUpdates => "Enter / U: update   Esc: settings",
             Screen::Settings => {
-                "Tab / arrows: move   Enter: select   N: new   E: edit   Esc: sidebar / exit"
+                "Tab / arrows: move   Enter: select   N: new   E: edit   I: session info   Esc: sidebar / exit"
             }
             Screen::EditInstallation => {
                 "Tab / arrows: move   Enter: next / save   Esc: sidebar / exit"
@@ -1813,12 +2014,8 @@ fn draw_channel(
         parts[0],
     );
     frame.render_widget(
-        Paragraph::new(if value.is_empty() {
-            "Installed channel (new install: dev)"
-        } else {
-            value
-        })
-        .alignment(ratatui::layout::Alignment::Center),
+        Paragraph::new(if value.is_empty() { "Installed" } else { value })
+            .alignment(ratatui::layout::Alignment::Center),
         parts[1],
     );
     frame.render_widget(
@@ -1972,19 +2169,18 @@ fn draw_navigation(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>
                 control: Control::Action(action),
             });
         } else {
-            let block = Block::bordered().border_style(Style::default().fg(Color::DarkGray));
+            let disabled = Style::default().fg(Color::DarkGray);
+            let block = Block::bordered().border_style(disabled);
             let text = Paragraph::new(if action_height < 3 {
                 ""
             } else {
                 action.label()
             })
             .alignment(ratatui::layout::Alignment::Center)
-            .style(Style::default().fg(Color::DarkGray));
+            .style(disabled);
             frame.render_widget(
                 text.block(if action_height < 3 {
-                    block
-                        .title(action.label())
-                        .title_style(Style::default().fg(Color::DarkGray))
+                    block.title(action.label()).title_style(disabled)
                 } else {
                     block
                 }),
@@ -2025,7 +2221,10 @@ fn draw_navigation(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>
         frame,
         settings,
         "Settings",
-        matches!(app.screen, Screen::Settings | Screen::EditInstallation),
+        matches!(
+            app.screen,
+            Screen::Settings | Screen::SessionInfo | Screen::EditInstallation
+        ),
     );
     hits.push(Hit {
         area: settings,
@@ -2069,7 +2268,37 @@ fn draw_field(frame: &mut Frame, rect: Rect, label: &str, value: &str, selected:
 }
 fn draw_settings(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
     let right = draw_navigation(frame, app, area, hits);
-    let sections = dialog(frame, right, " Saved installations ");
+    let layout = Layout::vertical([Constraint::Length(3), Constraint::Min(4)]).split(right);
+    let top = Layout::horizontal([Constraint::Min(10), Constraint::Length(22)]).split(layout[0]);
+    frame.render_widget(
+        Paragraph::new(format!(
+            "Workstation {} · {}",
+            env!("CARGO_PKG_VERSION"),
+            app.self_status
+        ))
+        .wrap(Wrap { trim: false }),
+        top[0],
+    );
+    let available = app.self_release.is_some();
+    draw_button(
+        frame,
+        top[1],
+        if available {
+            "Update TUI (U)"
+        } else {
+            "Updates (U)"
+        },
+        false,
+    );
+    hits.push(Hit {
+        area: top[1],
+        control: if available {
+            Control::SelfUpdate
+        } else {
+            Control::WorkstationUpdates
+        },
+    });
+    let sections = dialog(frame, layout[1], " Saved installations ");
     let count = app.connections.installations.len();
     if count == 0 {
         frame.render_widget(Paragraph::new("No saved installations yet.\nCreate one here, or fill an action form; its connection will be remembered when you continue.\n\nPasswords and bot tokens are not saved.").wrap(Wrap { trim: false }), sections[0]);
@@ -2120,14 +2349,17 @@ fn draw_settings(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) 
         Constraint::Fill(1),
         Constraint::Length(1),
         Constraint::Fill(1),
+        Constraint::Length(1),
+        Constraint::Fill(1),
     ])
-    .split(centered(sections[1], 54, 3));
+    .split(centered(sections[1], 72, 3));
     for (offset, label, control) in [
         (0, "Use", Control::UseInstallation),
         (2, "Edit", Control::EditInstallation),
         (4, "New", Control::NewInstallation),
+        (6, "Session", Control::SessionInfo),
     ] {
-        if count == 0 && offset != 4 {
+        if count == 0 && offset < 4 {
             continue;
         }
         draw_button(
@@ -2141,6 +2373,42 @@ fn draw_settings(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) 
             control,
         });
     }
+}
+fn draw_session_info(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
+    let right = draw_navigation(frame, app, area, hits);
+    let sections = dialog(frame, right, " Workstation session ");
+    let profile = app.form.saved.as_ref();
+    let profile_id = profile
+        .map(|p| p.id.to_string())
+        .unwrap_or_else(|| "None".into());
+    let connection = profile
+        .map(|p| format!("{}@{}:{}", p.user, p.host, p.port))
+        .unwrap_or_else(|| "No installation selected".into());
+    let account = profile
+        .filter(|p| !p.account.is_empty())
+        .map(|p| p.account.as_str())
+        .unwrap_or("Automatic selection on connection");
+    let fingerprint = std::fs::read_to_string(app.state_dir.join("id_ed25519.pub"))
+        .ok()
+        .and_then(|value| russh::keys::PublicKey::from_openssh(value.trim()).ok())
+        .map(|key| key.fingerprint(russh::keys::HashAlg::Sha256).to_string())
+        .unwrap_or_else(|| "Not available (key is created on first connection)".into());
+    let text = format!(
+        "TUI session UUID: {}\nLocal installation UUID: {}\nConnection: {}\nAdministrator selector: {}\nWorkstation key: {}\nState directory: {}\n\nThe local installation UUID is independent of the backend administrator UUID. Backend audit sessions are created for each operation; this UUID identifies only this TUI launch.",
+        app.session_id,
+        profile_id,
+        connection,
+        account,
+        fingerprint,
+        app.state_dir.display()
+    );
+    frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: false }), sections[0]);
+    let button = centered(sections[1], 18, 3);
+    draw_button(frame, button, "Back", true);
+    hits.push(Hit {
+        area: button,
+        control: Control::Settings,
+    });
 }
 fn draw_editor(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
     let right = draw_navigation(frame, app, area, hits);
@@ -2196,6 +2464,33 @@ fn draw_editor(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn workstation_settings_offer_update_without_starting_server_work() {
+        let mut app = App::new(&test_request());
+        app.open_settings();
+        app.self_status = "Available: v9.0.0".into();
+        app.self_release = Some(
+            serde_json::from_value(serde_json::json!({
+                "tag_name":"v9.0.0", "draft":false, "prerelease":false, "assets":[]
+            }))
+            .unwrap(),
+        );
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+        terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+        let content = format!("{:?}", terminal.backend().buffer());
+        assert!(content.contains(env!("CARGO_PKG_VERSION")));
+        assert!(content.contains("v9.0.0"));
+        let button = app
+            .hits
+            .iter()
+            .find(|h| matches!(h.control, Control::SelfUpdate))
+            .unwrap()
+            .area;
+        assert!(click(&mut app, (button.x + 1, button.y + 1)).is_none());
+        assert!(app.self_requested);
+        assert!(matches!(app.screen, Screen::Settings));
+        assert!(app.outcome.is_none());
+    }
     #[test]
     fn finished_diagnostics_keep_summary_and_buttons_outside_scrollable_output() {
         let mut app = test_profile_app();
@@ -2458,6 +2753,78 @@ mod tests {
         app
     }
     #[test]
+    fn result_close_returns_to_actions_for_success_and_failure_and_preserves_profile() {
+        for action in Action::ALL {
+            for outcome in [Ok("Done".into()), Err("Unconfirmed operation".into())] {
+                let mut app = test_profile_app();
+                app.form.select_action(action);
+                let profile_id = app.connections.selected;
+                let saved = app.form.saved.clone();
+                app.stage = "Previous step".into();
+                app.error = "Previous error".into();
+                app.result_scroll = 12;
+                app.password.push_str("SECRET_PASSWORD");
+                app.form.fields[6] = "SECRET_TOKEN".into();
+                app.event(Event::Finished(outcome));
+                let mut terminal =
+                    Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+                terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+                let close = app
+                    .hits
+                    .iter()
+                    .find(|hit| matches!(hit.control, Control::Close))
+                    .unwrap()
+                    .area;
+                let key = click(&mut app, (close.x + 1, close.y + 1)).unwrap();
+                assert!(app.close_result(key));
+                assert!(matches!(app.screen, Screen::Form));
+                assert!(!app.exit && !app.quick_focus);
+                assert_eq!(app.connections.selected, profile_id);
+                assert_eq!(app.form.saved, saved);
+                assert_eq!(app.form.selected, 0);
+                assert!(app.outcome.is_none() && app.update.is_none());
+                assert!(app.stage.is_empty() && app.error.is_empty());
+                assert!(app.password.is_empty() && app.form.fields[6].is_empty());
+                assert_eq!(app.result_scroll, 0);
+                terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+                assert!(
+                    app.hits
+                        .iter()
+                        .any(|hit| matches!(hit.control, Control::Action(_)))
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn result_escape_returns_home_and_ctrl_c_requires_exit_confirmation() {
+        let mut app = test_profile_app();
+        app.event(Event::Finished(Ok("Done".into())));
+        assert!(!app.close_result(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)));
+        assert!(app.exit && !app.exit_confirm && matches!(app.screen, Screen::Finished));
+        app.exit = false;
+        assert!(app.close_result(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
+        assert!(matches!(app.screen, Screen::Form) && !app.exit);
+    }
+
+    #[test]
+    fn subsequent_actions_keep_state_directory_and_stop_signal_without_reusing_operation() {
+        let mut app = test_profile_app();
+        let directory = tempfile::tempdir().unwrap();
+        app.state_dir = directory.path().into();
+        app.event(Event::Finished(Ok("Done".into())));
+        app.close_result(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        app.form.select_action(Action::Diagnose);
+        let mut request = app.next_request();
+        app.form.apply(&mut request).unwrap();
+        assert_eq!(request.state_dir, directory.path());
+        assert!(Arc::ptr_eq(&request.workflow.stop, &app.stop));
+        assert!(request.workflow.operation.is_none());
+        assert!(request.bot_token.is_empty());
+        assert_eq!(request.host, "controller.example");
+        assert!(!request.workflow.stop.load(Ordering::Relaxed));
+    }
+    #[test]
     fn mouse_selects_sidebar_and_fields_and_preserves_hidden_credentials() {
         let mut app = test_profile_app();
         let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
@@ -2636,6 +3003,13 @@ mod tests {
         let buffer = terminal.backend().buffer();
         assert_eq!(buffer[(action.x, action.y)].fg, Color::Cyan);
         assert_eq!(buffer[(action.x + 1, action.y + 1)].bg, Color::Reset);
+        app.mouse(MouseEvent {
+            kind: MouseEventKind::Moved,
+            column: settings.x + 1,
+            row: settings.y + 1,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert!(matches!(app.screen, Screen::Form));
         assert!(click(&mut app, (settings.x + 1, settings.y + 1)).is_none());
         assert!(matches!(app.screen, Screen::Settings));
         app.navigate(false);
@@ -2681,6 +3055,74 @@ mod tests {
         app.activate_profile();
         assert!(matches!(app.screen, Screen::EditInstallation));
         assert!(app.editor.as_ref().unwrap().0.is_none());
+    }
+    #[test]
+    fn session_information_is_read_only_and_distinguishes_local_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = test_profile_app();
+        app.state_dir = dir.path().into();
+        app.form.fields[6] = "SECRET_TOKEN".into();
+        app.password = Zeroizing::new("SECRET_PASSWORD".into());
+        app.open_settings();
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+        terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+        let info = app
+            .hits
+            .iter()
+            .find(|hit| matches!(hit.control, Control::SessionInfo))
+            .unwrap()
+            .area;
+        click(&mut app, (info.x + 1, info.y + 1));
+        assert!(matches!(app.screen, Screen::SessionInfo));
+        terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+        let text: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|c| c.symbol())
+            .collect();
+        assert!(text.contains(&app.session_id.to_string()));
+        assert!(text.contains(&app.form.saved.as_ref().unwrap().id.to_string()));
+        assert!(text.contains("Administrator selector"));
+        assert!(!text.contains("SECRET_TOKEN") && !text.contains("SECRET_PASSWORD"));
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+        let back = app
+            .hits
+            .iter()
+            .rev()
+            .find(|hit| matches!(hit.control, Control::Settings))
+            .unwrap()
+            .area;
+        click(&mut app, (back.x + 1, back.y + 1));
+        assert!(matches!(app.screen, Screen::Settings));
+    }
+    #[test]
+    fn new_profile_defaults_to_dev_and_disabled_actions_are_dimmed() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = test_profile_app();
+        app.state_dir = dir.path().into();
+        app.form.fields[3] = "main".into();
+        app.begin_edit(true);
+        assert_eq!(app.editor.as_ref().unwrap().1[4], "dev");
+        app.screen = Screen::Form;
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+        terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+        assert!(
+            terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .any(|c| c.fg == Color::DarkGray)
+        );
+        assert!(
+            !app.hits
+                .iter()
+                .any(|hit| matches!(hit.control, Control::Action(_)))
+        );
+        app.begin_edit(true);
+        assert_eq!(app.editor.as_ref().unwrap().1[4], "dev");
     }
     #[test]
     fn quick_switcher_wraps_profiles_and_new_selection_survives_restart() {

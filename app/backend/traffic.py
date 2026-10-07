@@ -44,6 +44,13 @@ class TrafficService:
             if getattr(self.db, 'backend_name', '') == 'postgres':
                 conn.execute('ALTER TABLE backend_traffic_usage ADD COLUMN IF NOT EXISTS period_month TEXT')
                 conn.execute('ALTER TABLE backend_traffic_usage ALTER COLUMN account_id DROP NOT NULL')
+            conn.execute('''CREATE TABLE IF NOT EXISTS backend_traffic_peers (
+                profile_id TEXT NOT NULL REFERENCES backend_profiles(id) ON DELETE CASCADE,
+                node_key TEXT NOT NULL REFERENCES backend_nodes(key) ON DELETE CASCADE,
+                device_id TEXT NOT NULL REFERENCES backend_devices(id) ON DELETE CASCADE,
+                epoch TEXT, identity TEXT, last_uplink BIGINT, last_downlink BIGINT,
+                last_sample_at TEXT,status TEXT NOT NULL,
+                PRIMARY KEY(profile_id,node_key,device_id))''')
 
     @staticmethod
     def _enabled(conn):
@@ -54,13 +61,27 @@ class TrafficService:
         return setting(conn, "traffic_generation")
 
     @staticmethod
+    def _adopt_baselines(conn):
+        # Seed the original peer before any new device can write aggregate
+        # fields. Device order must not decide which counter is adopted.
+        conn.execute('''INSERT INTO backend_traffic_peers
+            (profile_id,node_key,device_id,epoch,identity,last_uplink,last_downlink,last_sample_at,status)
+            SELECT u.profile_id,u.node_key,d.id,u.epoch,u.identity,u.last_uplink,u.last_downlink,u.last_sample_at,u.status
+            FROM backend_traffic_usage u JOIN backend_profiles p ON p.id=u.profile_id
+            JOIN backend_devices d ON d.profile_id=p.id AND d.runtime_name=p.runtime_name
+            WHERE u.protocol='awg'
+            ON CONFLICT(profile_id,node_key,device_id) DO NOTHING''')
+
+    @staticmethod
     def _targets(conn):
-        rows = conn.execute("""SELECT p.id,p.owner_account_id,g.node_key,g.protocol
+        rows = conn.execute("""SELECT p.id,p.owner_account_id,g.node_key,g.protocol,d.id AS device_id
             FROM backend_profiles p JOIN backend_grants g ON g.profile_id=p.id
             LEFT JOIN backend_accounts a ON a.id=p.owner_account_id
+            LEFT JOIN backend_devices d ON d.profile_id=p.id AND g.protocol='awg' AND d.status='active'
             WHERE (p.owner_account_id IS NULL OR a.status='approved')
             AND NOT EXISTS (SELECT 1 FROM backend_profile_deletions d WHERE d.profile_id=p.id)
-            ORDER BY p.id,g.node_key,g.protocol""").fetchall()
+            AND (g.protocol!='awg' OR d.id IS NOT NULL)
+            ORDER BY p.id,g.node_key,g.protocol,d.id""").fetchall()
         targets = []
         for row in rows:
             try:
@@ -70,6 +91,7 @@ class TrafficService:
                     row["node_key"],
                     row["protocol"],
                     "tcp" if row["protocol"] == "xray" else "vpn",
+                    row['device_id'],
                 )
             except AccessDenied as exc:
                 # XHTTP-only nodes still have the same email traffic counters.
@@ -113,7 +135,7 @@ class TrafficService:
                     continue
             targets.append(
                 {
-                    "key": (row["id"], row["node_key"], row["protocol"]),
+                    "key": (row["id"], row["node_key"], row["protocol"], row['device_id'] or ''),
                     "account_id": row["owner_account_id"],
                     "profile_revision": profile["desired_revision"],
                     "node_revision": node["desired_revision"],
@@ -121,7 +143,7 @@ class TrafficService:
                     "intent": {
                         "node_key": row["node_key"],
                         "protocol": row["protocol"],
-                        "runtime_name": profile["runtime_name"],
+                        "runtime_name": identity.get('runtime_name',profile["runtime_name"]),
                         "identity": expected,
                     },
                 }
@@ -138,7 +160,17 @@ class TrafficService:
             AND (a.id=backend_traffic_usage.account_id OR (p.owner_account_id IS NULL AND backend_traffic_usage.account_id IS NULL))
             AND (p.owner_account_id IS NULL OR a.status='approved')
             AND NOT EXISTS (SELECT 1 FROM backend_profile_deletions d WHERE d.profile_id=p.id))""")
-        active = {target["key"] for target in targets}
+        conn.execute('''DELETE FROM backend_traffic_peers WHERE NOT EXISTS (
+            SELECT 1 FROM backend_traffic_usage u WHERE u.profile_id=backend_traffic_peers.profile_id
+                AND u.node_key=backend_traffic_peers.node_key AND u.protocol='awg')''')
+        active_peers = {(t['key'][0],t['key'][1],t['key'][3]) for t in targets if t['key'][2]=='awg'}
+        for row in conn.execute('SELECT profile_id,node_key,device_id FROM backend_traffic_peers').fetchall():
+            key = (row['profile_id'],row['node_key'],row['device_id'])
+            if key not in active_peers:
+                conn.execute('''UPDATE backend_traffic_peers SET epoch=NULL,identity=NULL,
+                    last_uplink=NULL,last_downlink=NULL,status='paused'
+                    WHERE profile_id=? AND node_key=? AND device_id=?''',key)
+        active = {target["key"][:3] for target in targets}
         for row in conn.execute(
             "SELECT profile_id,node_key,protocol FROM backend_traffic_usage"
         ).fetchall():
@@ -174,16 +206,28 @@ class TrafficService:
 
     @staticmethod
     def _record(conn, target, observation, timestamp):
-        key = target["key"]
+        key = target["key"][:3]
         previous = conn.execute(
             """SELECT * FROM backend_traffic_usage
             WHERE profile_id=? AND node_key=? AND protocol=?""",
             key,
         ).fetchone()
+        baseline = previous
+        peer_key = None
+        if key[2]=='awg':
+            peer_key = (key[0],key[1],target['key'][3])
+            baseline = conn.execute('''SELECT * FROM backend_traffic_peers
+                WHERE profile_id=? AND node_key=? AND device_id=?''',peer_key).fetchone()
+            if baseline is None:
+                conn.execute('''INSERT INTO backend_traffic_peers
+                    (profile_id,node_key,device_id,epoch,identity,last_uplink,last_downlink,last_sample_at,status)
+                    VALUES (?,?,?,?,?,?,?,?,?)''',(*peer_key,
+                        *(baseline[field] if baseline else None for field in ('epoch','identity','last_uplink','last_downlink','last_sample_at')),
+                        baseline['status'] if baseline else 'unknown'))
         if (
-            previous
-            and previous["last_sample_at"]
-            and previous["last_sample_at"] >= timestamp
+            baseline
+            and baseline["last_sample_at"]
+            and baseline["last_sample_at"] >= timestamp
         ):
             return
         if not previous:
@@ -193,6 +237,8 @@ class TrafficService:
                 (*key, target["account_id"]),
             )
         if observation is None:
+            if peer_key:
+                conn.execute("UPDATE backend_traffic_peers SET status='unknown' WHERE profile_id=? AND node_key=? AND device_id=?",peer_key)
             conn.execute(
                 """UPDATE backend_traffic_usage SET status='unknown'
                 WHERE profile_id=? AND node_key=? AND protocol=?""",
@@ -201,15 +247,15 @@ class TrafficService:
             return
         up, down = observation["uplink_bytes"], observation["downlink_bytes"]
         increments = [0, 0]
-        if previous and previous["epoch"] is not None:
+        if baseline and baseline["epoch"] is not None:
             for index, (value, field) in enumerate(
                 ((up, "last_uplink"), (down, "last_downlink"))
             ):
                 increments[index] = (
-                    value - previous[field]
-                    if previous["epoch"] == observation["epoch"]
-                    and previous["identity"] == observation["identity"]
-                    and value >= previous[field]
+                    value - baseline[field]
+                    if baseline["epoch"] == observation["epoch"]
+                    and baseline["identity"] == observation["identity"]
+                    and value >= baseline[field]
                     else value
                 )
         month = timestamp[:7]
@@ -217,16 +263,29 @@ class TrafficService:
         up_total = (previous["uplink_bytes"] if same_month else 0) + increments[0]
         down_total = (previous["downlink_bytes"] if same_month else 0) + increments[1]
         if max(up_total, down_total) > MAX_COUNTER:
+            if peer_key:
+                conn.execute("UPDATE backend_traffic_peers SET status='unknown' WHERE profile_id=? AND node_key=? AND device_id=?",peer_key)
             conn.execute(
                 """UPDATE backend_traffic_usage SET status='unknown'
                 WHERE profile_id=? AND node_key=? AND protocol=?""",
                 key,
             )
             return
+        peer_status = 'current'
+        if peer_key:
+            conn.execute('''UPDATE backend_traffic_peers SET epoch=?,identity=?,last_uplink=?,last_downlink=?,
+                last_sample_at=?,status='current' WHERE profile_id=? AND node_key=? AND device_id=?''',
+                (observation['epoch'],observation['identity'],up,down,timestamp,*peer_key))
+            peers = conn.execute('''SELECT b.status,b.last_sample_at FROM backend_devices d
+                LEFT JOIN backend_traffic_peers b ON b.device_id=d.id AND b.node_key=?
+                WHERE d.profile_id=? AND d.status='active' ''',(key[1],key[0])).fetchall()
+            stale = (datetime.fromisoformat(timestamp)-timedelta(minutes=15)).isoformat()
+            if any(p['status']!='current' or not p['last_sample_at'] or p['last_sample_at']<stale for p in peers):
+                peer_status = 'unknown'
         conn.execute(
             """UPDATE backend_traffic_usage SET uplink_bytes=?,downlink_bytes=?,
             epoch=?,identity=?,last_uplink=?,last_downlink=?,
-            tracked_since=?,last_sample_at=?,status='current',period_month=?
+            tracked_since=?,last_sample_at=?,status=?,period_month=?
             WHERE profile_id=? AND node_key=? AND protocol=?""",
             (
                 up_total,
@@ -237,6 +296,7 @@ class TrafficService:
                 down,
                 previous['tracked_since'] if same_month and previous['tracked_since'] else timestamp,
                 timestamp,
+                peer_status,
                 month,
                 *key,
             ),
@@ -266,6 +326,7 @@ class TrafficService:
                 minutes=INTERVAL_MINUTES
             ):
                 return False
+            self._adopt_baselines(conn)
             targets = self._targets(conn)
             self._prune(conn, targets)
             cursor = setting(conn, "traffic_cursor", [])

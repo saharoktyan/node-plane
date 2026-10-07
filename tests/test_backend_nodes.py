@@ -38,7 +38,8 @@ class BackendNodeTests(unittest.TestCase):
         self.assertEqual(node['settings']['xray_tcp_port'], 443)
         self.assertEqual(node['settings']['xray_sni'], 'www.cloudflare.com')
         self.assertEqual(node['settings']['xray_xhttp_port'], 8443)
-        self.assertEqual(node['settings']['awg_port'], 51820)
+        self.assertEqual(node['settings']['awg_port'], 443)
+        self.assertEqual(node['settings']['awg_port_mode'], 'auto')
         self.assertEqual(created.headers['ETag'], '"1"')
         listed = self.client.get('/api/v1/nodes', headers=self.admin_headers())
         self.assertEqual(listed.json()['items'], [node])
@@ -163,6 +164,7 @@ class BackendNodeTests(unittest.TestCase):
             actor = Actor(self.credentials.authenticate(self.headers['Authorization']), self.admin)
             self.assertTrue(NodeOverviewService(self.db).get(actor, key)['settings_complete'])
         custom = self.create({'key':'custom','title':'Custom','region':'EU','protocols':['awg','xray'],
+            'transport': 'ssh', 'ssh_target': 'root@custom.example',
             'settings':{'public_host':'node.example','awg_port':51111,'awg_i1_preset':'dns',
                         'xray_sni':'example.com','xray_xhttp_path':'/custom'}}).json()['settings']
         self.assertEqual((custom['awg_port'],custom['awg_i1_preset'],custom['xray_sni'],custom['xray_xhttp_path']), (51111,'dns','example.com','/custom'))
@@ -182,7 +184,8 @@ class BackendNodeTests(unittest.TestCase):
     def test_region_order_preserves_global_order_and_cursor_scope(self):
         definitions = [('a1', 'Zulu', 'Europe'), ('z1', 'Alpha', 'Asia'), ('b1', 'Alpha', 'Europe'), ('b2', 'Alpha', 'Europe')]
         for key, title, region in definitions:
-            response = self.create({'key': key, 'title': title, 'region': region, 'protocols': ['awg'], 'settings': {'public_host': key + '.test'}})
+            response = self.create({'key': key, 'title': title, 'region': region, 'protocols': ['awg'],
+                'transport': 'ssh', 'ssh_target': 'root@' + key + '.test', 'settings': {'public_host': key + '.test'}})
             self.assertEqual(response.status_code, 201, response.text)
         seen, cursor = [], None
         while True:

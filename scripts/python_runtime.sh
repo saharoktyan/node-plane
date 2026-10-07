@@ -33,7 +33,7 @@ select_python_runtime() {
     if command -v python3 >/dev/null 2>&1; then
       python3 --version >&2 || true
     fi
-    echo "Install python3.12 and python3.12-venv (or their 3.11 equivalents); python3 may remain at its system version." >&2
+    echo "Install Python 3.11 or 3.12; python3 may remain at its system version." >&2
   fi
   return 1
 }

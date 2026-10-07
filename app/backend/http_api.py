@@ -25,6 +25,8 @@ from .identity import IdentityService
 from .identity_repository import SQLIdentityRepository
 from .profiles import ProfileRepository, ProfileService
 from .profile_commands import ProfileCommands
+from .device_commands import DeviceCommands
+from .installation_defaults import InstallationDefaults
 from .operations import OperationRepository
 from .access_requests import AccessRequestService
 from .accounts import AccountService
@@ -141,6 +143,31 @@ class ProfileOutput(BaseModel):
 class ProfilePage(BaseModel):
     items: list[ProfileOutput]
     next_cursor: str | None
+
+
+class DeviceOutput(BaseModel):
+    id: UUID
+    profile_id: UUID
+    display_name: str
+    status: Literal['active', 'deleting', 'retired']
+    revision: int
+    created_at: str
+
+
+class DeviceList(BaseModel):
+    items: list[DeviceOutput]
+
+
+class DeviceNameInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    display_name: Annotated[StrictStr, Field(min_length=1, max_length=256)]
+
+
+class DeviceCommandOutput(BaseModel):
+    device: DeviceOutput
+    profile_revision: int
+    operation_id: UUID | None
+    runtime_status: str
 
 
 class MemberProfileNode(BaseModel):
@@ -310,6 +337,7 @@ class NodeSettingsInput(BaseModel):
     xray_xhttp_path: StrictStr | None = None
     awg_public_host: StrictStr | None = None
     awg_port: StrictInt | None = None
+    awg_port_mode: Literal['auto', 'manual'] | None = None
     xray_fingerprint: Literal['chrome', 'firefox', 'safari', 'ios', 'android', 'edge', 'random', 'randomized'] | None = None
     awg_interface: StrictStr | None = None
     awg_i1_preset: Literal['quic', 'dns', 'chaos'] | None = None
@@ -329,6 +357,27 @@ class NodeCreateInput(BaseModel):
     notes: StrictStr = ''
 
 
+class InstallationDefaultsInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    protocols: list[Literal['awg', 'xray']]
+    xray_transports: list[Literal['tcp', 'xhttp']]
+    settings: NodeSettingsInput
+
+
+class GrantPolicyRuleInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    scope: Literal['all', 'region']
+    region_id: UUID | None = None
+    protocols: list[Literal['awg', 'xray']]
+
+
+class GrantPolicyInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    explicit_grants: list[dict[str, StrictStr]]
+    rules: list[GrantPolicyRuleInput]
+    exclusions: list[dict[str, StrictStr]]
+
+
 class NodeEditInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
     title: StrictStr | None = None
@@ -340,14 +389,17 @@ class NodeEditInput(BaseModel):
     transport: Literal['local', 'ssh'] | None = None
     ssh_target: StrictStr | None = None
     notes: StrictStr | None = None
+    confirm_access_change: StrictBool = False
 
 
 class AdminNodeOutput(BaseModel):
     key: str
     title: str
     region: str
+    region_id: str | None = None
     flag: str
     enabled: bool
+    policy_eligible: bool = False
     protocols: list[str]
     xray_transports: list[str]
     desired_revision: int
@@ -504,6 +556,7 @@ class ConfigIssuanceInput(BaseModel):
     node_key: Annotated[str, Field(min_length=1, max_length=64)]
     protocol: Literal['xray', 'awg']
     transport: Literal['tcp', 'xhttp', 'vpn', 'conf']
+    device_id: UUID | None = None
 
 
 class ConfigIssuanceOutput(BaseModel):
@@ -514,6 +567,7 @@ class ConfigIssuanceOutput(BaseModel):
     transport: str
     status: str
     expires_at: str
+    device_id: UUID | None = None
 
 
 class ConfigArtifactFile(BaseModel):
@@ -541,6 +595,7 @@ class ProfileCreateInput(BaseModel):
     owner_account_id: UUID | None = None
     expires_at: str | None = None
     grants: Annotated[list[GrantInput], Field(max_length=100)] = Field(default_factory=list)
+    access_policy: GrantPolicyInput | None = None
 
 
 class ProfileEditInput(BaseModel):
@@ -549,6 +604,7 @@ class ProfileEditInput(BaseModel):
     frozen: bool | None = Field(default=None, strict=True)
     expires_at: str | None = None
     grants: Annotated[list[GrantInput], Field(max_length=100)] | None = None
+    access_policy: GrantPolicyInput | None = None
 
 
 class GrantsInput(BaseModel):
@@ -631,6 +687,7 @@ class OperationTaskOutput(BaseModel):
     status: str
     inspected_at: str | None = None
     inspection: ProfileInspectionOutput | None = None
+    device_id: UUID | None = None
 
 
 class OperationOutput(BaseModel):
@@ -648,6 +705,8 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     credentials = CredentialService(db)
     service = IdentityService(identities)
     profiles = ProfileService(ProfileRepository(db))
+    device_commands = DeviceCommands(db)
+    installation_defaults = InstallationDefaults(db)
     profile_commands = ProfileCommands(db)
     operations = OperationRepository(db)
     admin_overview = AdminOverviewService(db)
@@ -814,11 +873,12 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
                 conn.execute('SELECT account_id FROM backend_external_identities LIMIT 1').fetchone()
                 conn.execute('SELECT account_id FROM backend_identity_commands LIMIT 1').fetchone()
                 conn.execute('SELECT id FROM backend_profiles LIMIT 1').fetchone()
+                conn.execute('SELECT id FROM backend_devices LIMIT 1').fetchone()
                 conn.execute('SELECT key FROM backend_nodes LIMIT 1').fetchone()
                 conn.execute('SELECT profile_id FROM backend_grants LIMIT 1').fetchone()
                 conn.execute('SELECT command_key FROM backend_profile_commands LIMIT 1').fetchone()
                 conn.execute('SELECT id FROM backend_operations LIMIT 1').fetchone()
-                conn.execute('SELECT id FROM backend_operation_tasks LIMIT 1').fetchone()
+                conn.execute('SELECT id,device_id FROM backend_operation_tasks LIMIT 1').fetchone()
                 conn.execute('SELECT profile_id FROM backend_profile_identities LIMIT 1').fetchone()
                 conn.execute('SELECT task_id FROM backend_repairs LIMIT 1').fetchone()
                 conn.execute('SELECT node_key FROM backend_node_drains LIMIT 1').fetchone()
@@ -829,12 +889,13 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
                 conn.execute('SELECT id FROM backend_access_requests LIMIT 1').fetchone()
                 conn.execute('SELECT key FROM backend_system_settings LIMIT 1').fetchone()
                 conn.execute('SELECT profile_id FROM backend_traffic_usage LIMIT 1').fetchone()
+                conn.execute('SELECT device_id FROM backend_traffic_peers LIMIT 1').fetchone()
                 conn.execute('SELECT id FROM backend_system_cleanup_jobs LIMIT 1').fetchone()
                 conn.execute('SELECT actor_account_id FROM backend_account_commands LIMIT 1').fetchone()
                 conn.execute('SELECT id FROM backend_account_guard LIMIT 1').fetchone()
                 conn.execute('SELECT actor_account_id FROM backend_node_commands LIMIT 1').fetchone()
                 conn.execute('SELECT id FROM backend_node_settings_tasks LIMIT 1').fetchone()
-                conn.execute('SELECT id FROM backend_config_issuances LIMIT 1').fetchone()
+                conn.execute('SELECT id,device_id,device_revision FROM backend_config_issuances LIMIT 1').fetchone()
                 conn.execute('SELECT id FROM backend_agent_rollouts LIMIT 1').fetchone()
                 conn.execute('SELECT id FROM backend_update_jobs LIMIT 1').fetchone()
                 conn.execute('SELECT job_id FROM backend_update_items LIMIT 1').fetchone()
@@ -1062,6 +1123,40 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     def profile_grants(profile_id: UUID, current=Depends(actor)):
         return profiles.grants(current, str(profile_id))
 
+    @app.get('/api/v1/profiles/{profile_id}/devices', response_model=DeviceList)
+    def profile_devices(profile_id: UUID, current=Depends(actor)):
+        return profiles.devices(current, str(profile_id))
+
+    @app.post('/api/v1/profiles/{profile_id}/devices', response_model=DeviceCommandOutput, status_code=201)
+    def create_device(profile_id: UUID, body: DeviceNameInput, request: Request,
+                      response: Response, command_key: Annotated[str, Header(alias='Idempotency-Key')],
+                      current=Depends(actor)):
+        result = device_commands.execute(current, header(request, 'Idempotency-Key'),
+            action='create', profile_id=str(profile_id), revision=revision_header(request),
+            display_name=body.display_name)
+        response.headers['ETag'] = '"' + str(result['device']['revision']) + '"'
+        return result
+
+    @app.patch('/api/v1/profiles/{profile_id}/devices/{device_id}', response_model=DeviceCommandOutput)
+    def rename_device(profile_id: UUID, device_id: UUID, body: DeviceNameInput, request: Request,
+                      response: Response, command_key: Annotated[str, Header(alias='Idempotency-Key')],
+                      current=Depends(actor)):
+        result = device_commands.execute(current, header(request, 'Idempotency-Key'),
+            action='rename', profile_id=str(profile_id), device_id=str(device_id),
+            revision=revision_header(request), display_name=body.display_name)
+        response.headers['ETag'] = '"' + str(result['device']['revision']) + '"'
+        return result
+
+    @app.delete('/api/v1/profiles/{profile_id}/devices/{device_id}', response_model=DeviceCommandOutput, status_code=202)
+    def delete_device(profile_id: UUID, device_id: UUID, request: Request,
+                      response: Response, command_key: Annotated[str, Header(alias='Idempotency-Key')],
+                      current=Depends(actor)):
+        result = device_commands.execute(current, header(request, 'Idempotency-Key'),
+            action='delete', profile_id=str(profile_id), device_id=str(device_id),
+            revision=revision_header(request))
+        response.headers['ETag'] = '"' + str(result['device']['revision']) + '"'
+        return result
+
     @app.get('/api/v1/profiles/{profile_id}/operation', response_model=OperationOutput | None)
     def latest_profile_operation(profile_id: UUID, current=Depends(actor)):
         profiles.get(current, str(profile_id))
@@ -1087,6 +1182,23 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
         if include_summary:
             for node in result['items']:
                 node['overview'] = node_overview.get(current, node['key'])
+        return result
+
+    @app.get('/api/v1/nodes/creation-options')
+    def node_creation_options(current=Depends(actor)):
+        return installation_defaults.creation_options(current)
+
+    @app.get('/api/v1/system/installation-defaults')
+    def get_installation_defaults(response: Response, current=Depends(actor)):
+        result = installation_defaults.get(current)
+        response.headers['ETag'] = '"' + str(result['revision']) + '"'
+        return result
+
+    @app.put('/api/v1/system/installation-defaults')
+    def put_installation_defaults(body: InstallationDefaultsInput, request: Request,
+                                  response: Response, current=Depends(actor)):
+        result = installation_defaults.update(current, body.model_dump(exclude_unset=True), revision_header(request))
+        response.headers['ETag'] = '"' + str(result['revision']) + '"'
         return result
 
     @app.get('/api/v1/nodes/{node_key}', response_model=AdminNodeOutput)
@@ -1361,6 +1473,34 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
         response.headers['ETag'] = '"' + str(result['profile']['desired_revision']) + '"'
         return result
 
+    @app.get('/api/v1/regions')
+    def grant_regions(current=Depends(actor), limit: Annotated[int, Query(ge=1, le=100)] = 100,
+                      cursor: Annotated[str | None, Query(max_length=512)] = None):
+        from .grant_policies import GrantPolicies
+        return GrantPolicies(db).regions(current, limit=limit, cursor=cursor)
+
+    @app.get('/api/v1/nodes/{node_key}/region-access-preview')
+    def preview_region_access(node_key: str, region: Annotated[str, Query(min_length=1, max_length=128)],
+                              current=Depends(actor)):
+        from .grant_policies import GrantPolicies
+        return GrantPolicies(db).preview_region(current, node_key, region)
+
+    @app.get('/api/v1/profiles/{profile_id}/access-policy')
+    def get_access_policy(profile_id: UUID, response: Response, current=Depends(actor)):
+        from .grant_policies import GrantPolicies
+        result = GrantPolicies(db).get(current, str(profile_id))
+        response.headers['ETag'] = '"' + str(result['revision']) + '"'
+        return result
+
+    @app.put('/api/v1/profiles/{profile_id}/access-policy', response_model=ProfileCommandOutput)
+    def replace_access_policy(profile_id: UUID, body: GrantPolicyInput, request: Request, response: Response,
+                              command_key: Annotated[str, Header(alias='Idempotency-Key')],
+                              if_match: Annotated[str | None, Header(alias='If-Match')] = None,
+                              current=Depends(actor)):
+        result = profile_commands.execute(current, header(request, 'Idempotency-Key'), action='policy',
+            profile_id=str(profile_id), revision=revision_header(request), values=body.model_dump(mode='json'))
+        return mutation_response(response, result)
+
     @app.post('/api/v1/profiles', response_model=ProfileCommandOutput, status_code=201)
     def create_profile(body: ProfileCreateInput, request: Request, response: Response,
                        command_key: Annotated[str, Header(alias='Idempotency-Key')], current=Depends(actor)):
@@ -1373,7 +1513,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
                      command_key: Annotated[str, Header(alias='Idempotency-Key')],
                      if_match: Annotated[str | None, Header(alias='If-Match')] = None, current=Depends(actor)):
         result = profile_commands.execute(current, header(request, 'Idempotency-Key'), action='edit',
-            profile_id=str(profile_id), revision=revision_header(request), values=body.model_dump(exclude_unset=True))
+            profile_id=str(profile_id), revision=revision_header(request), values=body.model_dump(mode='json', exclude_unset=True))
         return mutation_response(response, result)
 
     @app.patch('/api/v1/profiles/{profile_id}/grants', response_model=ProfileCommandOutput)
@@ -1403,7 +1543,8 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
                        command_key: Annotated[str, Header(alias='Idempotency-Key')],
                        current=Depends(actor), wait: bool = False):
         queued = config_issuances.request(current, str(profile_id), body.node_key,
-            body.protocol, body.transport, header(request, 'Idempotency-Key'))
+            body.protocol, body.transport, header(request, 'Idempotency-Key'),
+            device_id=str(body.device_id) if body.device_id else None)
         if wait:
             # This endpoint runs in FastAPI's thread pool. These are read-only
             # live checks; mutations remain in the durable worker.
@@ -1543,18 +1684,6 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     @app.get('/api/v1/system/backups/jobs/{job_id}')
     def backup_job(job_id:UUID,current=Depends(actor)):
         return backup_service.get(current,str(job_id))
-
-    @app.get('/api/v1/system/cleanup')
-    def get_cleanup(current=Depends(actor)):
-        require_permission(current, 'settings.manage')
-        from app.services.release_cleanup import get_release_cleanup_overview
-        return get_release_cleanup_overview()
-
-    @app.post('/api/v1/system/cleanup/run')
-    def run_cleanup(current=Depends(actor)):
-        require_permission(current, 'settings.manage')
-        from app.services.release_cleanup import run_release_cleanup
-        return run_release_cleanup()
 
     return app
 

@@ -339,6 +339,7 @@ class TrafficTests(unittest.TestCase):
             ),
         )
         self.db.connection.commit()
+        OperationRepository(self.db).initialize_schema()
         self.collect()
         self.assertEqual(self.driver.calls[0]["identity"], pub)
         self.assertEqual(self.row()["protocol"], "awg")

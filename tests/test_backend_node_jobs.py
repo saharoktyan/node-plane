@@ -16,6 +16,29 @@ from backend.node_operations import NodeOperations
 
 
 class BackendNodeJobTests(unittest.TestCase):
+    def test_bootstrap_records_selected_auto_port_before_reconciling_profiles(self):
+        from backend.node_settings import _digest
+        with self.db.transaction() as conn:
+            settings = dict(self.settings, awg_port=443, awg_port_mode='auto', awg_i1_preset='quic')
+            conn.execute("UPDATE backend_nodes SET settings_json=? WHERE key='n1'", (json.dumps(settings),))
+        job = self.queue('bootstrap')
+
+        class Driver:
+            def node_action(self, task_id, action, intent):
+                effective = dict(intent, settings=dict(intent['settings'], awg_port=8443))
+                return {'node_key': 'n1', 'action': action, 'revision': intent['revision'],
+                    'result': {'node_key': 'n1', 'revision': intent['revision'], 'awg_port': 8443,
+                        'settings_sha256': _digest(effective)}}
+
+        self.assertTrue(NodeOperations(self.db, Driver()).run_one())
+        with self.db.connect() as conn:
+            row = conn.execute('SELECT status,intent_json FROM backend_node_jobs WHERE id=?', (job['id'],)).fetchone()
+            self.assertEqual(row['status'], 'succeeded')
+            self.assertEqual(json.loads(row['intent_json'])['settings']['awg_port'], 443)
+            node = conn.execute("SELECT settings_json,desired_revision,applied_revision FROM backend_nodes WHERE key='n1'").fetchone()
+            self.assertEqual(json.loads(node['settings_json'])['awg_port'], 8443)
+            self.assertEqual(node['desired_revision'], node['applied_revision'])
+
     def test_removal_status_overrides_installation_and_settings_state(self):
         from backend.node_removal import NodeRemovalService
         from backend.node_overview import NodeOverviewService

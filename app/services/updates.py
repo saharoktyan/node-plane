@@ -8,7 +8,7 @@ import threading
 from datetime import datetime, timezone
 from typing import Dict, List
 
-from config import APP_COMMIT, APP_ROOT, APP_SEMVER, APP_VERSION, BASE_DIR, INSTALL_MODE, SHARED_ROOT, SOURCE_ROOT
+from config import APP_COMMIT, APP_ROOT, APP_SEMVER, APP_VERSION, BASE_DIR, INSTALL_MODE, SHARED_ROOT, SOURCE_ROOT, INSTALL_ROOT
 from services import app_settings
 from services.backups import maybe_create_pre_action_backup
 
@@ -31,6 +31,8 @@ def detect_install_mode() -> str:
 
 
 def _effective_source_root() -> str:
+    if os.path.isfile(f"{APP_ROOT}/CONTROLLER_PACKAGE.json"):
+        return os.path.realpath(APP_ROOT)
     source = SOURCE_ROOT
     if detect_install_mode() == "simple" and source == APP_ROOT:
         sibling = f"{BASE_DIR}-src"
@@ -376,8 +378,14 @@ def schedule_update(timeout: int = 30, branch: str | None = None, target_ref: st
                 "--setenv",
                 f"NODE_PLANE_SOURCE_DIR={source_root}",
                 "--setenv",
+                f"NODE_PLANE_APP_DIR={APP_ROOT}",
+                "--setenv",
+                f"NODE_PLANE_SHARED_DIR={SHARED_ROOT}",
+                "--setenv",
+                f"NODE_PLANE_BASE_DIR={INSTALL_ROOT}",
+                "--setenv",
                 "NODE_PLANE_INSTALL_MODE=simple",
-                f"{source_root}/scripts/update.sh",
+                _script_path("update.sh"),
                 "--mode",
                 "simple",
                 "--branch",
@@ -385,6 +393,9 @@ def schedule_update(timeout: int = 30, branch: str | None = None, target_ref: st
             )
             if target_ref:
                 cmd.extend(["--to", target_ref])
+                # Unpublished dev heads are available only from development checkouts.
+                if len(target_ref) == 40 and os.path.isdir(f"{source_root}/.git"):
+                    cmd.append("--from-source")
             if stack_job_id:
                 from uuid import UUID
                 cmd.extend(["--stack-job", str(UUID(stack_job_id))])

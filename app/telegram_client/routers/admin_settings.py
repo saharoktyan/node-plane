@@ -71,7 +71,8 @@ async def admin_settings_cb(query: CallbackQuery, bot: Bot,
     sections = (
         Section(tr(locale, 'settings.rich.access'), rows=(tuple(rows[0]),)),
         Section(tr(locale, 'settings.rich.monitoring'), rows=(tuple(rows[2]),)),
-        Section(tr(locale, 'settings.rich.maintenance'), rows=(tuple(rows[1]), tuple(rows[3]))),
+        Section(tr(locale, 'settings.rich.maintenance'), rows=(tuple(rows[1]), tuple(rows[3]),
+            (InlineKeyboardButton(text=tr(locale, 'defaults.title'), callback_data='idefault:open'),))),
         Section(tr(locale, 'settings.rich.danger'), collapsed=True, rows=(tuple(rows[4]),)))
     await render(bot, query.message.chat.id, Screen(tr(locale, 'settings.admin.title'),
         sections=sections, embedded_buttons=True, navigation=True), rows[-1:], state, query.message.message_id)
@@ -367,52 +368,6 @@ async def updates_menu_cb(query: CallbackQuery, bot: Bot,
             query.message.message_id)
 
 
-async def show_release_cleanup(query: CallbackQuery, bot: Bot,
-                               backend: BackendClient, state: FSMContext,
-                               result_status: str | None = None) -> None:
-    locale = await _locale(state)
-    overview = await backend.cleanup_overview(query.from_user.id)
-    lines = [
-        tr(locale, 'cleanup.mode', value=overview.get('install_mode') or '—'),
-        tr(locale, 'cleanup.current', value=overview.get('current_target') or '—'),
-        tr(locale, 'cleanup.total', count=overview.get('total_releases', 0)),
-        tr(locale, 'cleanup.kept', count=overview.get('kept_releases', 0)),
-        tr(locale, 'cleanup.removable', count=overview.get('removable_releases', 0)),
-        tr(locale, 'cleanup.size', size=round(overview.get('removable_size_bytes', 0) / 1048576, 1)),
-    ]
-    if not overview.get('supported'):
-        lines.append(tr(locale, 'cleanup.unsupported'))
-    elif not overview.get('removable_releases'):
-        lines.append(tr(locale, 'cleanup.nothing'))
-    if result_status:
-        lines.insert(0, tr(locale, 'cleanup.result',
-                           status=_update_status(locale, result_status)))
-    rows = []
-    if overview.get('supported') and overview.get('removable_releases'):
-        rows.append([InlineKeyboardButton(text=tr(locale, 'cleanup.run'),
-            callback_data=UpdateActionCallback(action='cleanup_run').pack(), style='danger')])
-    rows.extend([[InlineKeyboardButton(text=tr(locale, 'updates.refresh'),
-        callback_data=UpdateActionCallback(action='cleanup_menu').pack())],
-        [InlineKeyboardButton(text=tr(locale, 'back'),
-        callback_data=UpdatesCallback().pack())]])
-    await render(bot, query.message.chat.id,
-        Screen(tr(locale, 'cleanup.title'), tuple(([tr(locale, 'cleanup.result',
-            status=_update_status(locale, result_status))] if result_status else []) +
-            ([tr(locale, 'cleanup.unsupported')] if not overview.get('supported') else
-             [tr(locale, 'cleanup.nothing')] if not overview.get('removable_releases') else [])), sections=(
-            Section(tr(locale, 'maintenance.rich.inventory'), tables=(Table(
-                (tr(locale, 'maintenance.rich.field'), tr(locale, 'maintenance.rich.value')),
-                ((tr(locale, 'cleanup.rich.total'), str(overview.get('total_releases', 0))),
-                 (tr(locale, 'cleanup.rich.kept'), str(overview.get('kept_releases', 0))),
-                 (tr(locale, 'cleanup.rich.removable'), str(overview.get('removable_releases', 0))),
-                 (tr(locale, 'backups.rich.size'), format_size(overview.get('removable_size_bytes', 0))))),)),
-            Section(tr(locale, 'nodes.rich.technical'),
-                (tr(locale, 'cleanup.mode', value=overview.get('install_mode') or '—'),
-                 tr(locale, 'cleanup.current', value=overview.get('current_target') or '—')), collapsed=True)),
-            embedded_buttons=True, navigation=True),
-        rows, state, query.message.message_id)
-
-
 @router.callback_query(UpdateActionCallback.filter())
 async def update_action_cb(query: CallbackQuery, callback_data: UpdateActionCallback,
                            bot: Bot, backend: BackendClient,
@@ -441,16 +396,6 @@ async def update_action_cb(query: CallbackQuery, callback_data: UpdateActionCall
         elif action == 'run':
             from .admin_updates import confirm_latest
             await confirm_latest(query, bot, backend, state)
-        elif action == 'cleanup_menu':
-            await show_release_cleanup(query, bot, backend, state)
-        elif action == 'cleanup_run':
-            overview = await backend.cleanup_overview(query.from_user.id)
-            if not overview.get('supported') or not overview.get('removable_releases'):
-                await show_release_cleanup(query, bot, backend, state)
-                return
-            result = await backend.run_cleanup(query.from_user.id)
-            await show_release_cleanup(query, bot, backend, state,
-                result_status=result.get('status'))
     except BackendError as exc:
         await render(bot, query.message.chat.id,
             Screen(tr(locale, 'updates.unavailable'), (_friendly_error(locale, exc),), embedded_buttons=True, navigation=True),

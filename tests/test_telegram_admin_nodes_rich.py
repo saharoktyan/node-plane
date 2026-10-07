@@ -188,7 +188,7 @@ class AdminNodeRichTests(IsolatedAsyncioTestCase):
             with patch.object(nodes, 'render', new_callable=AsyncMock) as draw:
                 await nodes.render_wizard_summary(123, self.bot, self.state, 77)
             screen, rows = draw.call_args.args[2:4]
-            self.assertEqual(len(screen.sections), 4)
+            self.assertEqual(len(screen.sections), 5)
             self.assertTrue(screen.sections[-1].collapsed)
             self.assertIn('private.example.test', screen.sections[-1].lines[-1])
             self.assertEqual(rows[-1][-1].callback_data, 'wizard_save')
@@ -369,6 +369,7 @@ class AdminNodeRichTests(IsolatedAsyncioTestCase):
     async def test_save_draft_uses_captured_revision_then_applies_once(self):
         self.backend.edit_node = AsyncMock(return_value={**self.node, 'desired_revision': 4})
         await nodes.change_node_draft(123, 'msk1', {'region': 'Asia'}, self.backend, self.state)
+        self.backend.request.return_value = {'affected_profiles': 0, 'profiles': []}
         self.node['desired_revision'] = 9
         self.query.data = 'node_draft_save:msk1'
         with patch.object(nodes, 'apply_node', new_callable=AsyncMock) as apply:
