@@ -52,6 +52,8 @@ class SQLIdentityRepository:
 
         from .system_cleanup import SystemCleanupService
         SystemCleanupService(self.db).initialize_schema()
+        from .backups import BackupService
+        BackupService(self.db).initialize_schema()
 
     @staticmethod
     def _account(row) -> Account | None:

@@ -44,8 +44,8 @@ def read_inventory(config_path, binary_path):
                       path + '.node-plane-settings.bak.absent'])
         parent = Path(path).parent
         if parent.exists():
-            prefixes = (Path(path).name + '.bak.', '.awg-deploy-backup-',
-                        '.awg-config-backup-', '.awg-regenerate-backup-', '.xray-config-backup-')
+            prefixes = (Path(path).name + '.bak.', Path(path).name + '.dirbak.', '.awg-deploy-backup-',
+                        '.awg-config-backup-', '.awg-regenerate-backup-', '.xray-config-', '.xray-user-')
             paths.extend(str(entry) for entry in parent.iterdir()
                          if entry.name.startswith(prefixes))
     return validate_inventory({'paths': sorted(set(paths)),

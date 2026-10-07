@@ -39,7 +39,7 @@ from .node_overview import NodeOverviewService
 from .system_settings import SystemSettingsService
 from .updates import UpdateService
 from .backups import BackupService
-from config import APP_VERSION
+from config import APP_VERSION, SSH_KEY
 
 
 class ResolveInput(BaseModel):
@@ -214,6 +214,47 @@ class UpdatePreferencesInput(BaseModel):
     auto_check_enabled: bool | None = Field(default=None, strict=True)
     branch: Literal['main', 'dev'] | None = None
     dev_track: Literal['tag', 'head'] | None = None
+
+
+class RecoveryItemOutput(BaseModel):
+    id: str
+    kind: Literal['update', 'node', 'agent', 'profile', 'removal', 'backup']
+    status: str
+    node_key: str
+    error_code: str
+    actions: list[Literal['cancel', 'recheck', 'resolve']]
+
+
+class RecoveryOverviewOutput(BaseModel):
+    items: list[RecoveryItemOutput]
+    offset: int
+    page_size: int
+    total: int
+    maintenance_active: bool
+
+
+class WorkstationAuditItemOutput(BaseModel):
+    occurred_at: str
+    session_id: str
+    account_id: str
+    account_label: str
+    ssh_user: str
+    device_fingerprint: str
+    action: str
+    phase: Literal['issued', 'revoked', 'admitted', 'completed']
+    request_id: str | None
+    command_id: str | None
+    http_status: int | None
+    target: str | None = None
+    key_fingerprint: str | None = None
+    outcome: Literal['admitted', 'succeeded', 'unconfirmed'] | None = None
+
+
+class WorkstationAuditPageOutput(BaseModel):
+    items: list[WorkstationAuditItemOutput]
+    offset: int
+    page_size: int
+    total: int
 
 
 class UpdateRunInput(BaseModel):
@@ -660,11 +701,33 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     @app.middleware('http')
     async def request_context(request: Request, call_next):
         request.state.request_id = str(uuid4())
+        audit_context = None
+        audit_action = None
+        audit_command = None
         try:
+            if request.method not in {'GET', 'HEAD', 'OPTIONS'}:
+                from .workstation_audit import WorkstationAudit
+                try:
+                    audit_principal = credentials.authenticate(request.headers.get('Authorization'))
+                except AccessDenied:
+                    pass
+                else:
+                    audit_context = WorkstationAudit(db).context(audit_principal.id)
+                    if audit_context:
+                        audit_action = request.method + ' ' + request.url.path
+                        raw_command = request.headers.get('Idempotency-Key')
+                        try:
+                            audit_command = str(UUID(raw_command)) if raw_command else None
+                        except ValueError:
+                            pass
+                        WorkstationAudit(db).record(audit_context, audit_action, 'admitted',
+                            request_id=request.state.request_id, command_id=audit_command)
             restoring = False
             cleaning = False
             if request.method not in {'GET','HEAD','OPTIONS'}:
-                allowed = request.url.path.startswith('/api/v1/system/cleanup/') or request.url.path.endswith('/ack')
+                import re
+                update_recovery = bool(re.fullmatch(r'/api/v1/system/updates/jobs/[0-9a-fA-F-]{36}/(cancel|recheck)', request.url.path))
+                allowed = request.url.path.startswith('/api/v1/system/cleanup/') or request.url.path.endswith('/ack') or update_recovery
                 if not allowed:
                     from .maintenance_gate import active
                     with db.connect() as conn:
@@ -688,6 +751,17 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
             response = error(request, 'internal_error', 500)
         response.headers['X-Request-ID'] = request.state.request_id
         response.headers['Cache-Control'] = 'no-store'
+        if audit_context and audit_action:
+            from .workstation_audit import WorkstationAudit
+            try:
+                WorkstationAudit(db).record(audit_context, audit_action, 'completed',
+                    request_id=request.state.request_id, command_id=audit_command,
+                    http_status=response.status_code)
+            except Exception:
+                # The admitted event survives; do not pretend a committed action
+                # failed and invite replay just because result auditing failed.
+                import logging
+                logging.getLogger(__name__).error('Workstation audit outcome unconfirmed request_id=%s', request.state.request_id)
         return response
 
     @app.exception_handler(AccessDenied)
@@ -1166,7 +1240,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
         try:
             verifier = RemovalVerifier(local=body.transport == 'local',
                 ssh_target=body.ssh_target,
-                ssh_identity_file=os.environ.get('SSH_KEY') if body.transport == 'ssh' else None,
+                ssh_identity_file=(os.environ.get('SSH_KEY') or SSH_KEY) if body.transport == 'ssh' else None,
                 ssh_port=body.ssh_port)
         except ValueError:
             raise AccessDenied('invalid_input', 422) from None
@@ -1355,7 +1429,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
         import os
         import pathlib
         require_permission(current, 'settings.manage')
-        private_path = pathlib.Path(os.environ.get('SSH_KEY', '/opt/node-plane/shared/ssh/id_ed25519'))
+        private_path = pathlib.Path(os.environ.get('SSH_KEY') or SSH_KEY)
         public_path = pathlib.Path(f"{private_path}.pub")
         private_path.parent.mkdir(parents=True, exist_ok=True)
         os.chmod(private_path.parent, 0o700)
@@ -1421,9 +1495,29 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
         with live_updates() as service:
             return service.rollout_overview(current)
 
+    @app.get('/api/v1/system/recovery', response_model=RecoveryOverviewOutput)
+    def recovery_overview(offset: int = Query(default=0, ge=0, le=1000000), current=Depends(actor)):
+        from .recovery import overview
+        return overview(db, current, offset)
+
+    @app.get('/api/v1/system/workstation-audit', response_model=WorkstationAuditPageOutput)
+    def workstation_audit(offset: int = Query(default=0, ge=0, le=1000000), current=Depends(actor)):
+        from .workstation_audit import WorkstationAudit
+        return WorkstationAudit(db).page(current, offset)
+
     @app.get('/api/v1/system/updates/jobs/{job_id}')
     def update_job(job_id: UUID, current=Depends(actor)):
         return update_service.get(current, str(job_id))
+
+    @app.post('/api/v1/system/updates/jobs/{job_id}/cancel')
+    def cancel_update(job_id: UUID, current=Depends(actor)):
+        with maintenance_lock(current), live_updates() as service:
+            return service.cancel(current, str(job_id))
+
+    @app.post('/api/v1/system/updates/jobs/{job_id}/recheck')
+    def recheck_update(job_id: UUID, current=Depends(actor)):
+        with maintenance_lock(current), live_updates() as service:
+            return service.recheck(current, str(job_id))
 
     @app.get('/api/v1/system/backups')
     def get_backups(current=Depends(actor)):

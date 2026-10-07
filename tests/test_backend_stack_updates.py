@@ -86,6 +86,31 @@ class StackUpdateTests(TestCase):
         self.assertEqual(service.get(self.actor, job['id'])['status'], 'blocked')
         self.assertEqual(self.db.connection.execute('SELECT COUNT(*) FROM backend_agent_rollouts').fetchone()[0], 0)
 
+    def test_unit_finishing_during_observation_uses_fresh_completion_evidence(self):
+        service = self.service()
+        job = self.queue(service)
+        service.run_one()
+        with patch.object(service, '_stack_progress', side_effect=[
+                {'status': 'running', 'components': {'telegram': 'running'}},
+                {'status': 'succeeded', 'components': {'telegram': 'succeeded'}}]):
+            service.run_one()
+        result = service.get(self.actor, job['id'])
+        self.assertEqual(result['status'], 'running')
+        self.assertEqual(result['result']['phase'], 'agents')
+        service.updater.schedule_update.assert_called_once()
+
+    def test_unit_finishing_rollback_during_observation_uses_final_proof(self):
+        service = self.service()
+        job = self.queue(service)
+        service.run_one()
+        service.updater.refresh_update_run_state.return_value['last_run_status'] = 'failed'
+        with patch.object(service, '_stack_progress', side_effect=[
+                {'status': 'running'},
+                {'status': 'failed', 'rollback_status': 'succeeded'}]):
+            service.run_one()
+        self.assertEqual(service.get(self.actor, job['id'])['status'], 'rolled_back')
+        service.updater.schedule_update.assert_called_once()
+
     def test_agent_then_runtime_are_separate_durable_steps(self):
         service = self.service()
         self.node()

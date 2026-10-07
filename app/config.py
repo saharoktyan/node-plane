@@ -72,7 +72,7 @@ POSTGRES_DSN = _env_str("POSTGRES_DSN")
 if DB_BACKEND != "postgres":
     raise ValueError(f"Unsupported DB_BACKEND: {DB_BACKEND}")
 
-SSH_KEY = _env_str("SSH_KEY")
+SSH_KEY = _env_str("SSH_KEY") or f"{SSH_DIR}/id_ed25519"
 SSH_STRICT_HOST_KEY_CHECKING = _env_str("SSH_STRICT_HOST_KEY_CHECKING", "yes")
 SSH_KNOWN_HOSTS_PATH = _env_str("SSH_KNOWN_HOSTS_PATH", f"{SSH_DIR}/known_hosts")
 

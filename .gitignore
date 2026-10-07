@@ -29,6 +29,8 @@ pip-wheel-metadata/
 logs/
 rust/node-driver/target/
 rust/node-agent/target/
+rust/node-plane-cli/target/
+!rust/node-plane-cli/Cargo.lock
 
 .env
 .env.*

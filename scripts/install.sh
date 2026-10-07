@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 source "${SCRIPT_DIR}/postgres_runtime.sh"
 source "${SCRIPT_DIR}/python_runtime.sh"
+source "${SCRIPT_DIR}/lib/install_progress.sh"
 
 MODE="${MODE:-}"
 NON_INTERACTIVE=0
@@ -15,20 +16,29 @@ FORCE_REINSTALL=0
 CURRENT_STEP="startup"
 AUTO_SETUP_DRIVER_AGENTS_ON_INSTALL="${NODE_PLANE_AUTO_SETUP_DRIVER_AGENTS_ON_INSTALL:-1}"
 PYTHON_BIN=""
+CONFIG_ENV_FILE="${NODE_PLANE_INSTALL_ENV_FILE:-${REPO_ROOT}/.env}"
+EXPLICIT_CONFIG_FILE=0
+WORKSTATION_INSTALL_MARKER=""
 
 set_step() {
   CURRENT_STEP="$1"
+  install_progress_detail "$1"
 }
 
 on_error() {
   local exit_code="$1"
   echo >&2
   echo "Install failed during step: ${CURRENT_STEP}" >&2
-  echo "Failing command: ${BASH_COMMAND}" >&2
+  # Shell commands may contain DSNs or credentials. Never expose them through
+  # the workstation protocol or its accompanying error output.
+  if [[ "${NODE_PLANE_INSTALL_EVENTS:-0}" != "1" ]]; then
+    echo "Failing command: ${BASH_COMMAND}" >&2
+  fi
   echo "Exit code: ${exit_code}" >&2
 }
 
 trap 'on_error $?' ERR
+trap 'install_exit_status=$?; if [[ $install_exit_status -ne 0 ]]; then install_progress_fail; fi' EXIT
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -42,6 +52,28 @@ while [[ $# -gt 0 ]]; do
       ;;
     --non-interactive)
       NON_INTERACTIVE=1
+      shift
+      ;;
+    --progress-json)
+      NODE_PLANE_INSTALL_EVENTS=1
+      shift
+      ;;
+    --env-file)
+      if [[ $# -lt 2 || -z "$2" ]]; then
+        echo "--env-file requires a configuration file path." >&2
+        exit 1
+      fi
+      CONFIG_ENV_FILE="$2"
+      EXPLICIT_CONFIG_FILE=1
+      shift 2
+      ;;
+    --env-file=*)
+      CONFIG_ENV_FILE="${1#*=}"
+      EXPLICIT_CONFIG_FILE=1
+      if [[ -z "$CONFIG_ENV_FILE" ]]; then
+        echo "--env-file requires a configuration file path." >&2
+        exit 1
+      fi
       shift
       ;;
     --branch)
@@ -71,7 +103,7 @@ while [[ $# -gt 0 ]]; do
     -h|--help)
       cat <<'EOF'
 Usage:
-  scripts/install.sh [--mode simple] [--branch main|dev] [--ref <git-ref>] [--non-interactive] [--install-systemd] [--force]
+  scripts/install.sh [--mode simple] [--branch main|dev] [--ref <git-ref>] [--non-interactive] [--install-systemd] [--force] [--env-file <path>] [--progress-json]
 
 Modes:
   simple    Host install via venv + systemd. Supports same-host runtime deployment.
@@ -83,6 +115,9 @@ Flags:
   --non-interactive   Fail instead of prompting for missing values
   --install-systemd   In simple mode, start backend, worker, and aiogram client automatically
   --force             Reinstall even if the target release is already active
+  --env-file          Read and update this private installer config instead of the checkout .env
+  --progress-json     Emit NODE_PLANE_EVENT JSON progress for workstation clients
+                      Existing active installs are refused; use the update workflow
 EOF
       exit 0
       ;;
@@ -93,6 +128,24 @@ EOF
   esac
 done
 
+if [[ "$CONFIG_ENV_FILE" != /* ]]; then
+  CONFIG_ENV_FILE="${PWD}/${CONFIG_ENV_FILE}"
+fi
+if [[ -n "${NODE_PLANE_INSTALL_ENV_FILE:-}" ]]; then
+  EXPLICIT_CONFIG_FILE=1
+fi
+install_progress_init
+install_progress_begin configuration
+if [[ "${NODE_PLANE_INSTALL_EVENTS:-0}" == "1" ]]; then
+  if [[ $NON_INTERACTIVE -ne 1 ]]; then
+    echo "Machine-readable progress requires --non-interactive; collect configuration before running the installer." >&2
+    exit 1
+  fi
+  if [[ "$AUTO_SETUP_DRIVER_AGENTS_ON_INSTALL" != "1" ]]; then
+    echo "Workstation installation requires driver setup. Unset NODE_PLANE_AUTO_SETUP_DRIVER_AGENTS_ON_INSTALL or set it to 1." >&2
+    exit 1
+  fi
+fi
 cd "$REPO_ROOT"
 
 need_cmd() {
@@ -160,15 +213,30 @@ prompt_value() {
 }
 
 ensure_env_file() {
-  if [[ ! -f .env ]]; then
-    cp .env.example .env
+  if [[ "${NODE_PLANE_INSTALL_EVENTS:-0}" == "1" && -L "$CONFIG_ENV_FILE" ]]; then
+    echo "Installer configuration must be a regular file, not a symlink." >&2
+    exit 1
+  fi
+  if [[ ! -f "$CONFIG_ENV_FILE" ]]; then
+    if [[ $EXPLICIT_CONFIG_FILE -eq 1 ]]; then
+      echo "Installer configuration file is missing. Supply a readable file with --env-file." >&2
+      exit 1
+    fi
+    cp .env.example "$CONFIG_ENV_FILE"
     echo "Created .env from .env.example"
+  fi
+  if [[ ! -r "$CONFIG_ENV_FILE" || ! -w "$CONFIG_ENV_FILE" ]]; then
+    echo "Installer configuration file must be readable and writable." >&2
+    exit 1
+  fi
+  if [[ "${NODE_PLANE_INSTALL_EVENTS:-0}" == "1" ]]; then
+    chmod 600 "$CONFIG_ENV_FILE"
   fi
 }
 
 read_env_value() {
   local key="$1"
-  local file="${2:-.env}"
+  local file="${2:-$CONFIG_ENV_FILE}"
   if [[ ! -f "$file" ]]; then
     return 0
   fi
@@ -178,7 +246,7 @@ read_env_value() {
 set_env_value() {
   local key="$1"
   local value="$2"
-  local file="${3:-.env}"
+  local file="${3:-$CONFIG_ENV_FILE}"
   if [[ ! -f "$file" ]]; then
     touch "$file"
   fi
@@ -223,7 +291,12 @@ fetch_origin_refs() {
     echo "The installer source checkout is not a git repository." >&2
     exit 1
   fi
-  git fetch --quiet --prune --tags origin
+  if [[ "${NODE_PLANE_INSTALL_EVENTS:-0}" == "1" ]]; then
+    need_cmd timeout
+    GIT_TERMINAL_PROMPT=0 timeout 300 git fetch --quiet --prune --tags origin
+  else
+    git fetch --quiet --prune --tags origin
+  fi
 }
 
 print_repo_location_note() {
@@ -350,6 +423,15 @@ release_matches_target() {
   [[ "$(read_release_commit "$release_dir")" == "$target_commit" ]] || return 1
 }
 
+workstation_target_is_partial() {
+  local base_dir="$1" ref="$2" expected
+  local marker="${base_dir}/shared/data/workstation-install.incomplete"
+  [[ -f "$marker" && ! -L "$marker" ]] || return 1
+  expected="node-plane-workstation-install-v1 $(current_semver "$ref") $(current_git_commit "$ref")"
+  [[ "$(cat "$marker")" == "$expected" ]] || return 1
+  release_matches_target "${base_dir}/current" "$(current_semver "$ref")" "$(current_git_commit "$ref")"
+}
+
 export_release_tree() {
   local destination="$1"
   local ref="${2:-HEAD}"
@@ -374,13 +456,36 @@ sync_shared_env() {
   local shared_dir="$1"
   local existing_token_file=""
   mkdir -p "$shared_dir"
+  if [[ "${NODE_PLANE_INSTALL_EVENTS:-0}" == "1" \
+    && ( -L "${shared_dir}/.env" || ( -e "${shared_dir}/.env" && ! -f "${shared_dir}/.env" ) ) ]]; then
+    echo "Shared runtime configuration must be a regular file, not a symlink." >&2
+    exit 1
+  fi
   if [[ -f "${shared_dir}/.env" ]]; then
     existing_token_file="$(read_env_value NODE_PLANE_BACKEND_ADAPTER_TOKEN_FILE "${shared_dir}/.env")"
   fi
-  cp .env "${shared_dir}/.env"
-  if [[ -z "$(read_env_value NODE_PLANE_BACKEND_ADAPTER_TOKEN_FILE .env)" \
+  if [[ "${NODE_PLANE_INSTALL_EVENTS:-0}" == "1" && -f "${shared_dir}/.env" ]]; then
+    # A retry can encounter a partially provisioned database/adapter credential.
+    # Preserve that state; fill only missing values from the uploaded config.
+    local line key value
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      [[ "$line" =~ ^([A-Z][A-Z0-9_]*)=(.*)$ ]] || continue
+      key="${BASH_REMATCH[1]}"
+      value="${BASH_REMATCH[2]}"
+      if [[ -z "$(read_env_value "$key" "${shared_dir}/.env")" ]]; then
+        set_env_value_in_file "${shared_dir}/.env" "$key" "$value"
+      fi
+    done < "$CONFIG_ENV_FILE"
+    set_env_value_in_file "${shared_dir}/.env" NODE_PLANE_INSTALL_REF "$(read_env_value NODE_PLANE_INSTALL_REF)"
+  else
+    cp "$CONFIG_ENV_FILE" "${shared_dir}/.env"
+  fi
+  if [[ -z "$(read_env_value NODE_PLANE_BACKEND_ADAPTER_TOKEN_FILE)" \
     && -n "$existing_token_file" && -f "$existing_token_file" && -r "$existing_token_file" ]]; then
     set_env_value_in_file "${shared_dir}/.env" NODE_PLANE_BACKEND_ADAPTER_TOKEN_FILE "$existing_token_file"
+  fi
+  if [[ "${NODE_PLANE_INSTALL_EVENTS:-0}" == "1" ]]; then
+    chmod 600 "${shared_dir}/.env"
   fi
 }
 
@@ -496,6 +601,10 @@ configure_env() {
     echo "ADMIN_IDS is required." >&2
     exit 1
   fi
+  if [[ ! "$admin_ids" =~ ^[[:space:]]*[0-9]+[[:space:]]*(,[[:space:]]*[0-9]+[[:space:]]*)*$ ]]; then
+    echo "ADMIN_IDS must contain comma-separated numeric Telegram user IDs." >&2
+    exit 1
+  fi
 
   if [[ $NON_INTERACTIVE -eq 0 ]]; then
     update_branch="$(prompt_value "Enter default update branch (main or dev)" "$update_branch")"
@@ -563,6 +672,26 @@ configure_env() {
       echo "  install root:    ${base_dir}" >&2
       echo "Then rerun ./scripts/install.sh from the source checkout." >&2
       exit 1
+    fi
+    if [[ "$base_dir" != /* ]]; then
+      echo "NODE_PLANE_BASE_DIR must be an absolute path." >&2
+      exit 1
+    fi
+    if [[ "${NODE_PLANE_INSTALL_EVENTS:-0}" == "1" \
+      && ( -e "${base_dir}/current" || -L "${base_dir}/current" ) ]] \
+      && ! workstation_target_is_partial "$base_dir" "$install_ref"; then
+      echo "An active installation already exists. Use the update workflow; workstation installs never replace it." >&2
+      exit 1
+    fi
+    if [[ "${NODE_PLANE_INSTALL_EVENTS:-0}" == "1" && -f "${shared_dir}/.env" ]]; then
+      local previous_token previous_admin_ids
+      previous_token="$(read_env_value BOT_TOKEN "${shared_dir}/.env")"
+      previous_admin_ids="$(read_env_value ADMIN_IDS "${shared_dir}/.env")"
+      if [[ ( -n "$previous_token" && "$previous_token" != "$bot_token" ) \
+        || ( -n "$previous_admin_ids" && "$previous_admin_ids" != "$admin_ids" ) ]]; then
+        echo "A previous partial installation has different bot or administrator credentials. Reuse its configuration; shared state was not changed." >&2
+        exit 1
+      fi
     fi
     set_env_value NODE_PLANE_BASE_DIR "$base_dir"
     set_env_value NODE_PLANE_APP_DIR "$app_dir"
@@ -706,29 +835,66 @@ run_simple_install() {
   new_release_dir="${releases_dir}/${release_name}"
   reused_release=0
 
+  install_progress_begin release
   set_step "validate python version"
   PYTHON_BIN="$(select_python_runtime)"
   echo "Using Python runtime: ${PYTHON_BIN}"
 
   mkdir -p "${releases_dir}" "${shared_dir}/data" "${shared_dir}/ssh"
+  if [[ "${NODE_PLANE_INSTALL_EVENTS:-0}" == "1" ]]; then
+    need_cmd flock
+    local install_lock_fd
+    exec {install_lock_fd}>"${shared_dir}/data/workstation-install.lock"
+    if ! flock -n "$install_lock_fd"; then
+      echo "Another workstation installation is running. Wait for it to finish before retrying." >&2
+      exit 1
+    fi
+    # Recheck after taking the lock, before synchronizing configuration.
+    if [[ ( -e "$current_link" || -L "$current_link" ) ]] \
+      && ! workstation_target_is_partial "$base_dir" "$install_ref"; then
+      echo "An active installation already exists. Use the update workflow; workstation installs never replace it." >&2
+      exit 1
+    fi
+    WORKSTATION_INSTALL_MARKER="${shared_dir}/data/workstation-install.incomplete"
+    if [[ -L "$WORKSTATION_INSTALL_MARKER" || ( -e "$WORKSTATION_INSTALL_MARKER" && ! -f "$WORKSTATION_INSTALL_MARKER" ) ]]; then
+      echo "The incomplete-install marker is not a regular file. Shared state was not changed." >&2
+      exit 1
+    fi
+    local marker_temporary
+    marker_temporary="$(mktemp "${WORKSTATION_INSTALL_MARKER}.XXXXXX")"
+    chmod 600 "$marker_temporary"
+    printf 'node-plane-workstation-install-v1 %s %s\n' "$install_version" "$install_commit" > "$marker_temporary"
+    mv -f "$marker_temporary" "$WORKSTATION_INSTALL_MARKER"
+  fi
   sync_shared_env "$shared_dir"
   runtime_env_file="${shared_dir}/.env"
   if [[ $FORCE_REINSTALL -eq 0 ]] && release_matches_target "$current_link" "$install_version" "$install_commit"; then
-    new_release_dir="$(cd "$current_link" && pwd)"
+    # The physical directory avoids replacing current with a symlink to itself
+    # when retrying a partially activated installation.
+    new_release_dir="$(cd "$current_link" && pwd -P)"
     reused_release=1
   elif [[ $FORCE_REINSTALL -eq 0 ]] && release_matches_target "$new_release_dir" "$install_version" "$install_commit"; then
     reused_release=1
   else
+    if [[ "${NODE_PLANE_INSTALL_EVENTS:-0}" == "1" \
+      && ( -e "$new_release_dir" || -L "$new_release_dir" ) ]]; then
+      echo "The target release directory contains unrecognized files. Workstation installs will not delete them." >&2
+      exit 1
+    fi
     rm -rf "$new_release_dir"
     set_step "export release tree"
     export_release_tree "$new_release_dir" "$install_ref"
   fi
 
+  install_progress_done
+  install_progress_begin python
   ensure_release_python_runtime "$new_release_dir"
+  install_progress_done
 
   # DB runtime init must run even when we reuse an existing release tree.
   # Otherwise a previous partial install can leave DB_BACKEND=postgres without
   # POSTGRES_DSN and the service will fail at import-time.
+  install_progress_begin database
   set_step "load database runtime configuration"
   db_backend="$(read_env_value DB_BACKEND "$runtime_env_file")"
   db_backend="${db_backend:-postgres}"
@@ -752,10 +918,17 @@ run_simple_install() {
     POSTGRES_DSN="$(read_env_value POSTGRES_DSN "$runtime_env_file")" \
     PYTHONPATH="${new_release_dir}/app" \
     "${new_release_dir}/.venv/bin/python" -m backend.admin_cli init-schema
+    install_progress_done
+    install_progress_begin identity
     set_step "prepare Telegram administrators and adapter credential"
     prepare_telegram_identity "$new_release_dir" "$base_dir" "$shared_dir"
+  else
+    echo "This release does not contain the separate backend installer. Select a supported release." >&2
+    exit 1
   fi
+  install_progress_done
 
+  install_progress_begin services
   ln -sfn "$new_release_dir" "$current_link"
 
   validate_simple_layout "$current_link" "$shared_dir"
@@ -791,7 +964,9 @@ run_simple_install() {
       install_systemd_stack "$current_link" "$base_dir" "$shared_dir"
     fi
   fi
+  install_progress_done
 
+  install_progress_begin driver
   if [[ "$AUTO_SETUP_DRIVER_AGENTS_ON_INSTALL" == "1" ]]; then
     echo
     echo "Running post-install driver/agent setup (best-effort)..."
@@ -799,9 +974,17 @@ run_simple_install() {
       NODE_PLANE_APP_DIR="${current_link}" \
       NODE_PLANE_SHARED_DIR="${shared_dir}" \
       "${current_link}/scripts/setup_driver_agents.sh"; then
+      if [[ "${NODE_PLANE_INSTALL_EVENTS:-0}" == "1" ]]; then
+        echo "Driver/agent setup failed. The services may be installed, but setup is incomplete; inspect the setup log." >&2
+        exit 1
+      fi
       echo "Driver/agent setup reported issues. Continuing because best-effort is enabled." >&2
     fi
   fi
+  if [[ -n "$WORKSTATION_INSTALL_MARKER" ]]; then
+    rm -f "$WORKSTATION_INSTALL_MARKER"
+  fi
+  install_progress_done
 
   echo
   echo "First-run path:"
@@ -846,6 +1029,7 @@ case "$MODE" in
 esac
 
 configure_env
+install_progress_done
 print_repo_location_note
 
 run_simple_install

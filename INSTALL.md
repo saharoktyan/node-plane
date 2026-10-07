@@ -38,6 +38,14 @@ for managed VPN protocols and optional local PostgreSQL provisioning.
 
 ### Recommended path: install with `install.sh`
 
+An initial native [workstation CLI/TUI](rust/node-plane-cli/README.md) can now
+drive this systemd installation over embedded SSH with masked password/token
+input and seven-step progress. It also supports coordinated backend-owned updates,
+basic diagnostics and controller public-key enrollment on target nodes.
+It is under development; complete VPS and manual
+Windows acceptance remain pending. The direct script workflow below remains
+supported.
+
 ```bash
 git clone https://github.com/saharoktyan/node-plane.git node-plane-src
 cd node-plane-src

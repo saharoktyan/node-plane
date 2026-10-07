@@ -68,6 +68,9 @@ changes; configuration snapshots do not replace complete disaster recovery.
 Test concurrency on actual PostgreSQL, failure/ambiguous recovery with isolated
 fixtures, and node lifecycle on disposable hosts. Preserve explicit acceptance
 results rather than inferring them from unit tests or stale migration boxes.
+Supported combinations, concrete enforcement limits, database rollback scope,
+certificate/trust recovery and the systemd release checklist are defined in
+[RELEASES.md](RELEASES.md#supported-stack-and-compatibility).
 
 ## Resource lifecycle and cleanup inventory
 
@@ -133,6 +136,16 @@ keeps a retirement record and explicitly leaves remote state unverified. If the
 host later returns, treat its journals/configs as existing state and inspect or
 finish decommissioning before enrolling a fresh agent. No automatic orphan
 garbage collector or host-wide Docker prune is supported.
+
+Telegram offers registry-only removal in Maintenance and unfinished removal
+screens, including blocked revocations and failed verification. A node-specific
+danger confirmation explicitly warns that old tunnels may continue working;
+navigation invalidates that confirmation. Removal holds the worker lock,
+rechecks administrator privileges and fences pending node jobs, settings,
+configuration issuances and rollouts. Uncertain rollouts remain blocked audit
+history, but cannot dispatch or block configuration restoration once the node
+has an explicit retirement tombstone. Configuration restoration resets this
+operational history; snapshots are not removal-evidence archives.
 
 ## Retention and journal growth
 

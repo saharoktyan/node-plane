@@ -172,6 +172,19 @@ class AnnouncementService:
         ):
             raise AccessDenied("permission_denied")
 
+    @staticmethod
+    def _eligible(conn, row):
+        return conn.execute(
+            f"""SELECT 1 FROM backend_accounts a
+            JOIN backend_external_identities i ON i.account_id=a.id AND i.provider='telegram'
+            JOIN backend_announcements c ON c.id=?
+            JOIN backend_accounts sender ON sender.id=c.actor_id
+            WHERE a.id=? AND a.status='approved' AND i.subject=?
+            AND sender.status='approved' AND sender.role='admin'
+            AND a.id<>sender.id AND {RECIPIENT_PROFILE} """,
+            (row["announcement_id"], row["account_id"], row["telegram_subject"]),
+        ).fetchone()
+
     def claim(self, principal, key):
         self._transport(principal)
         try:
@@ -185,6 +198,10 @@ class AnnouncementService:
             if active(conn):
                 return None
             self._expire(conn, timestamp)
+            if conn.execute(
+                "SELECT 1 FROM backend_backup_jobs WHERE action='restore' AND status IN ('awaiting_executor','running')"
+            ).fetchone():
+                return None
             previous = conn.execute(
                 "SELECT * FROM backend_announcement_deliveries WHERE claim_id=? AND adapter_id=?",
                 (key, principal.id),
@@ -192,33 +209,21 @@ class AnnouncementService:
             if previous:
                 # Lost claim response cannot cause duplicate work: a caller may
                 # repeat only the initial claim, never a completed send.
-                return (
-                    self._delivery(conn, previous)
-                    if previous["status"] == "claimed"
-                    else None
-                )
-            if conn.execute(
-                "SELECT 1 FROM backend_backup_jobs WHERE action='restore' AND status IN ('awaiting_executor','running')"
-            ).fetchone():
-                return None
+                if previous["status"] != "claimed":
+                    return None
+                if not self._eligible(conn, previous):
+                    # The earlier claim may already have reached Telegram.
+                    # Preserve that uncertainty instead of marking it unsent.
+                    conn.execute(
+                        "UPDATE backend_announcement_deliveries SET status='unknown' WHERE id=?",
+                        (previous["id"],),
+                    )
+                    return None
+                return self._delivery(conn, previous)
             for row in conn.execute(
                 "SELECT * FROM backend_announcement_deliveries WHERE status='queued' ORDER BY announcement_id,id"
             ).fetchall():
-                eligible = conn.execute(
-                    f"""SELECT 1 FROM backend_accounts a
-                    JOIN backend_external_identities i ON i.account_id=a.id AND i.provider='telegram'
-                    JOIN backend_announcements c ON c.id=?
-                    JOIN backend_accounts sender ON sender.id=c.actor_id
-                    WHERE a.id=? AND a.status='approved' AND i.subject=?
-                    AND sender.status='approved' AND sender.role='admin'
-                    AND a.id<>sender.id AND {RECIPIENT_PROFILE} """,
-                    (
-                        row["announcement_id"],
-                        row["account_id"],
-                        row["telegram_subject"],
-                    ),
-                ).fetchone()
-                if not eligible:
+                if not self._eligible(conn, row):
                     conn.execute(
                         "UPDATE backend_announcement_deliveries SET status='skipped' WHERE id=?",
                         (row["id"],),

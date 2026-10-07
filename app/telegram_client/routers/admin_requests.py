@@ -406,7 +406,7 @@ async def show_decision_result(query, bot, state):
     rows = []
     if result['decision'] == 'approve':
         rows.append([InlineKeyboardButton(text=tr(locale, 'requests.edit_profile'),
-            callback_data=f"request_profile:{result['request_id']}")])
+            callback_data=f"request_profile:{result['request_id']}", style='primary')])
     rows.append([InlineKeyboardButton(text=tr(locale, 'setup.close'), callback_data='notification_close')])
     await render(bot, query.message.chat.id, Screen(tr(locale, 'requests.title'),
         (tr(locale, 'requests.approved' if result['decision'] == 'approve' else 'requests.rejected'),),

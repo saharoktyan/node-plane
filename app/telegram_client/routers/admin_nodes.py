@@ -1,6 +1,7 @@
 import re
 from copy import deepcopy
 from uuid import uuid4
+from urllib.parse import urlencode
 from aiogram import Router, Bot, F
 from aiogram.types import CallbackQuery, InlineKeyboardButton, Message
 from aiogram.fsm.context import FSMContext
@@ -9,6 +10,7 @@ from aiogram.fsm.state import State, StatesGroup
 from ..backend import BackendClient, BackendError
 from ..screens import Screen, Section, Table, server_label
 from ..i18n import normalize_locale, tr
+from ..node_templates import NODE_TEMPLATES
 from .common import render
 from .states import NodeDraftState, NodeEditState, MaintenanceState, AgentDraftState
 from .callbacks import (
@@ -150,7 +152,7 @@ async def show_admin_nodes(chat_id, user_id, message_id, bot, backend, state, pa
     for node in page['items']:
         groups.setdefault(node.get('region') or tr(locale, 'nodes.region_unknown'), []).append(node)
     sections = []
-    controls = [InlineKeyboardButton(text=tr(locale, 'nodes.admin.add'), callback_data=NewNodeCallback().pack()),
+    controls = [InlineKeyboardButton(text=tr(locale, 'nodes.admin.add'), callback_data=NewNodeCallback().pack(), style='primary'),
         InlineKeyboardButton(text=tr(locale, 'nodes.admin.search'), callback_data='admin_node_search')]
     if search:
         controls.append(InlineKeyboardButton(text=tr(locale, 'nodes.admin.show_all'), callback_data='admin_node_all'))
@@ -249,8 +251,8 @@ async def new_node_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, st
     await query.answer()
     await state.update_data(wizard_data={}, create_node_command_key=str(uuid4()),
                             rollout_command_key=str(uuid4()), wizard_saved=False)
-    await render_wizard_step(query.message.chat.id, bot, state, 'key',
-                             query.message.message_id)
+    await render_wizard_transport(query.message.chat.id, bot, state,
+                                  query.message.message_id)
 
 
 _WIZARD_TEXT_STATES = {
@@ -262,9 +264,8 @@ _WIZARD_TEXT_STATES = {
     'public_host': NodeDraftState.waiting_for_public_host,
 }
 _WIZARD_PREVIOUS = {
-    'title': 'key', 'region': 'title', 'flag': 'region',
-    'transport': 'flag', 'target': 'transport',
-    'public_host': 'transport', 'protocols': 'public_host',
+    'key': 'template', 'title': 'key', 'region': 'title', 'flag': 'region',
+    'target': 'template', 'public_host': 'template', 'protocols': 'public_host',
 }
 
 
@@ -285,6 +286,8 @@ async def render_wizard_step(chat_id: int, bot: Bot, state: FSMContext,
         lines.insert(0, tr(locale, f'node.wizard.{step}.invalid'))
     navigation = []
     previous = _WIZARD_PREVIOUS.get(step)
+    if step in {'target', 'public_host'} and data.get('wizard_data', {}).get('template') == 'custom':
+        previous = 'flag'
     if step == 'public_host' and data.get('wizard_data', {}).get('transport') == 'ssh':
         previous = 'target'
     if previous:
@@ -297,7 +300,7 @@ async def render_wizard_step(chat_id: int, bot: Bot, state: FSMContext,
         navigation[0] = InlineKeyboardButton(text=tr(locale, 'back'), callback_data='wizard_back:region')
     if step == 'flag':
         navigation.append(InlineKeyboardButton(text=tr(locale, 'node.wizard.skip'),
-            callback_data='wizard_skip_flag'))
+            callback_data='wizard_skip_flag', style='primary'))
     rows = [navigation]
     await render(bot, chat_id, Screen(tr(locale, f'node.wizard.{step}.title'),
                                        tuple(lines), embedded_buttons=True, navigation=True), rows, state, message_id)
@@ -312,6 +315,9 @@ async def wizard_back_cb(query: CallbackQuery, bot: Bot, state: FSMContext):
                                  query.message.message_id)
     elif step == 'transport':
         await render_wizard_transport(query.message.chat.id, bot, state,
+                                      query.message.message_id)
+    elif step == 'template':
+        await render_wizard_templates(query.message.chat.id, bot, state,
                                       query.message.message_id)
     elif step == 'protocols':
         await render_wizard_protocols(query.message.chat.id, bot, state,
@@ -383,7 +389,7 @@ async def wizard_skip_flag_cb(query: CallbackQuery, bot: Bot, state: FSMContext)
     w = dict(data.get('wizard_data', {}))
     w['flag'] = ''
     await state.update_data(wizard_data=w)
-    await render_wizard_transport(query.message.chat.id, bot, state, query.message.message_id)
+    await render_wizard_address(query.message.chat.id, bot, state, query.message.message_id)
 
 @router.message(NodeDraftState.waiting_for_flag, F.text)
 async def process_wizard_flag(message: Message, bot: Bot, state: FSMContext):
@@ -402,8 +408,8 @@ async def process_wizard_flag(message: Message, bot: Bot, state: FSMContext):
     w = dict(data.get('wizard_data', {}))
     w['flag'] = value
     await state.update_data(wizard_data=w)
-    await render_wizard_transport(message.chat.id, bot, state,
-                                  data.get('control_message_id'))
+    await render_wizard_address(message.chat.id, bot, state,
+                                data.get('control_message_id'))
 
 async def render_wizard_transport(chat_id: int, bot: Bot, state: FSMContext, message_id: int | None = None):
     await state.set_state(NodeDraftState.waiting_for_transport)
@@ -413,7 +419,7 @@ async def render_wizard_transport(chat_id: int, bot: Bot, state: FSMContext, mes
     rows = [
         [InlineKeyboardButton(text=tr(locale, 'node.wizard.transport.ssh'), callback_data="wizard_transport:ssh", style='primary' if selected == 'ssh' else None),
          InlineKeyboardButton(text=tr(locale, 'node.wizard.transport.local'), callback_data="wizard_transport:local", style='primary' if selected == 'local' else None)],
-        [InlineKeyboardButton(text=tr(locale, 'back'), callback_data='wizard_back:flag')]
+        [InlineKeyboardButton(text=tr(locale, 'back'), callback_data=AdminNodesCallback().pack())]
     ]
     await render(bot, chat_id, Screen(tr(locale, 'node.wizard.transport.title'),
         (tr(locale, 'node.wizard.transport.prompt'),), embedded_buttons=True, navigation=True), rows, state, message_id)
@@ -421,22 +427,94 @@ async def render_wizard_transport(chat_id: int, bot: Bot, state: FSMContext, mes
 @router.callback_query(F.data.startswith("wizard_transport:"))
 async def wizard_transport_cb(query: CallbackQuery, bot: Bot, state: FSMContext):
     await query.answer()
+    if await state.get_state() != NodeDraftState.waiting_for_transport.state:
+        return
     transport = query.data.split(":")[1]
     if transport not in {'local', 'ssh'}:
         return
     data = await state.get_data()
+    if data.get('wizard_saved'):
+        return
     w = dict(data.get('wizard_data', {}))
     w['transport'] = transport
     await state.update_data(wizard_data=w)
     
-    if transport == "ssh":
-        await render_wizard_step(query.message.chat.id, bot, state, 'target',
-                                 query.message.message_id)
-    else:
+    if transport == 'local':
         w['ssh_target'] = None
         await state.update_data(wizard_data=w)
-        await render_wizard_step(query.message.chat.id, bot, state, 'public_host',
-                                 query.message.message_id)
+    await render_wizard_templates(query.message.chat.id, bot, state, query.message.message_id)
+
+
+async def render_wizard_templates(chat_id, bot, state, message_id=None):
+    await state.set_state(NodeDraftState.waiting_for_template)
+    data = await state.get_data()
+    locale = normalize_locale(data.get('locale'))
+    selected = data.get('wizard_data', {}).get('template')
+    sections = []
+    for region_token, _, region_name in REGION_PRESETS:
+        buttons = [InlineKeyboardButton(
+            text=f"{template.flag} {tr(locale, 'node.template.' + template.code)}",
+            callback_data='wizard_template:' + template.code,
+            style='primary' if selected == template.code else None)
+            for template in NODE_TEMPLATES if template.region == region_name]
+        if buttons:
+            sections.append(Section(tr(locale, 'region.' + region_token), rows=tuple(
+                tuple(buttons[index:index + 2]) for index in range(0, len(buttons), 2))))
+    rows = [[InlineKeyboardButton(text=tr(locale, 'node.wizard.template.custom'),
+                callback_data='wizard_template:custom')],
+            [InlineKeyboardButton(text=tr(locale, 'back'), callback_data='wizard_back:transport')]]
+    await render(bot, chat_id, Screen(tr(locale, 'node.wizard.template.title'),
+        (tr(locale, 'node.wizard.template.prompt'),), sections=tuple(sections),
+        embedded_buttons=True, navigation=True), rows, state, message_id)
+
+
+async def render_wizard_address(chat_id, bot, state, message_id=None):
+    data = await state.get_data()
+    step = 'target' if data.get('wizard_data', {}).get('transport') == 'ssh' else 'public_host'
+    await render_wizard_step(chat_id, bot, state, step, message_id)
+
+
+@router.callback_query(F.data.startswith('wizard_template:'))
+async def wizard_template_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
+    await query.answer()
+    if await state.get_state() != NodeDraftState.waiting_for_template.state:
+        return
+    data = await state.get_data()
+    w = dict(data.get('wizard_data', {}))
+    token = query.data.split(':', 1)[1]
+    if w.get('transport') not in {'local', 'ssh'} or data.get('wizard_saved'):
+        return
+    if token == 'custom':
+        w['template'] = 'custom'
+        await state.update_data(wizard_data=w)
+        await render_wizard_step(query.message.chat.id, bot, state, 'key', query.message.message_id)
+        return
+    template = next((item for item in NODE_TEMPLATES if item.code == token), None)
+    if template is None:
+        return
+    if w.get('template') != token:
+        keys = []
+        cursor = None
+        try:
+            while True:
+                params = {'search': template.code, 'limit': 100, **({'cursor': cursor} if cursor else {})}
+                page = await backend.request('GET', '/api/v1/nodes?' + urlencode(params),
+                    telegram_user_id=query.from_user.id)
+                keys.extend(item['key'] for item in page['items'])
+                cursor = page.get('next_cursor')
+                if not cursor:
+                    break
+        except BackendError:
+            locale = normalize_locale(data.get('locale'))
+            await render(bot, query.message.chat.id,
+                Screen(tr(locale, 'node.wizard.template.title'),
+                    (tr(locale, 'node.wizard.unavailable'),), embedded_buttons=True, navigation=True),
+                [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data='wizard_back:template')]],
+                state, query.message.message_id)
+            return
+        w.update(template.draft(keys))
+        await state.update_data(wizard_data=w)
+    await render_wizard_address(query.message.chat.id, bot, state, query.message.message_id)
 
 @router.message(NodeDraftState.waiting_for_target, F.text)
 async def process_wizard_target(message: Message, bot: Bot, state: FSMContext):
@@ -519,7 +597,7 @@ async def render_wizard_summary(chat_id: int, bot: Bot, state: FSMContext,
         tr(locale, 'node.wizard.summary.note'),
     )
     rows = [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data='wizard_proto:back'),
-             InlineKeyboardButton(text=tr(locale, 'node.wizard.save'), callback_data='wizard_save')]]
+             InlineKeyboardButton(text=tr(locale, 'node.wizard.save'), callback_data='wizard_save', style='primary')]]
     def summary_table(fields):
         return Table((tr(locale, 'account.rich.field'), tr(locale, 'account.rich.value')),
             tuple((tr(locale, 'nodes.settings.field.' + field), str(value or '—')) for field, value in fields))
@@ -615,7 +693,7 @@ async def wizard_save_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
     await state.set_state(None)
     await state.update_data(wizard_saved=True)
     rows = [[InlineKeyboardButton(text=tr(locale, 'node.wizard.setup_agent'),
-        callback_data='wizard_setup_agent')],
+        callback_data='wizard_setup_agent', style='primary')],
         [InlineKeyboardButton(text=tr(locale, 'node.wizard.open_card'),
         callback_data=AdminNodeCallback(node_key=w['key']).pack())],
         [InlineKeyboardButton(text=tr(locale, 'nodes.card.to_list'),
@@ -711,7 +789,7 @@ async def node_manage_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
     locale = normalize_locale((await state.get_data()).get('locale'))
     node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=query.from_user.id)
     await render(bot, query.message.chat.id, Screen(tr(locale, 'nodes.rich.manage'), embedded_buttons=True, navigation=True),
-        [[InlineKeyboardButton(text=tr(locale, 'nodes.draft.reinstall' if node['applied_revision'] else 'nodes.card.bootstrap'), callback_data=f'bootstrap_menu:{node_key}')],
+        [[InlineKeyboardButton(text=tr(locale, 'nodes.draft.reinstall' if node['applied_revision'] else 'nodes.card.bootstrap'), callback_data=f'bootstrap_menu:{node_key}', style='primary')],
          [InlineKeyboardButton(text=tr(locale, 'nodes.maintenance.title'), callback_data=NodeMaintenanceCallback(node_key=node_key).pack())],
          [InlineKeyboardButton(text=tr(locale, 'nodes.rich.technical'), callback_data=f'node_technical:{node_key}')],
          [InlineKeyboardButton(text=tr(locale, 'back'), callback_data=AdminNodeCallback(node_key=node_key).pack())]], state, query.message.message_id)
@@ -1225,6 +1303,7 @@ async def node_maintenance_cb(query: CallbackQuery, callback_data: NodeMaintenan
     await show_node_maintenance(query.message.chat.id, query.from_user.id, query.message.message_id, callback_data.node_key, bot, backend, state)
 
 async def show_node_maintenance(chat_id, user_id, message_id, node_key, bot, backend, state):
+    await state.update_data(registry_removal_confirmation=None)
     locale = normalize_locale((await state.get_data()).get('locale'))
     st = await backend.node_maintenance(user_id, node_key)
     lines = [tr(locale, 'nodes.maintenance.state',
@@ -1242,8 +1321,8 @@ async def show_node_maintenance(chat_id, user_id, message_id, node_key, bot, bac
         rows = [[InlineKeyboardButton(text=tr(locale, 'nodes.maintenance.start'), callback_data=ConfirmNodeDrainCallback(node_key=node_key).pack(), style="danger")]]
     else:
         rows = [[InlineKeyboardButton(text=tr(locale, 'nodes.maintenance.refresh'), callback_data=f'remove_progress:{node_key}')]]
-    if (await state.get_data()).get('unreachable_removal_node') == node_key:
-        rows.append([InlineKeyboardButton(text=tr(locale, 'nodes.maintenance.registry_only'), callback_data=ConfirmRegistryRemovalCallback(node_key=node_key).pack(), style="danger")])
+    rows.append([InlineKeyboardButton(text=tr(locale, 'nodes.maintenance.registry_only'),
+        callback_data=ConfirmRegistryRemovalCallback(node_key=node_key).pack(), style='danger')])
     rows.append([InlineKeyboardButton(text=tr(locale, 'back'), callback_data=f'node_manage:{node_key}')])
     await render(bot, chat_id, Screen(tr(locale, 'nodes.maintenance.title'), tuple(lines),
         sections=(Section(tr(locale, 'nodes.maintenance.details_title'), collapsed=True,
@@ -1364,35 +1443,68 @@ async def verify_retirement_cb(query: CallbackQuery, callback_data: VerifyRetire
 @router.callback_query(ConfirmRegistryRemovalCallback.filter())
 async def confirm_registry_removal_cb(query: CallbackQuery, callback_data: ConfirmRegistryRemovalCallback, bot: Bot, backend: BackendClient, state: FSMContext):
     await query.answer()
-    node_key = callback_data.node_key
+    await show_registry_confirmation(query.message.chat.id, query.from_user.id,
+        query.message.message_id, callback_data.node_key, bot, backend, state)
+
+
+async def show_registry_confirmation(chat_id, user_id, message_id, node_key, bot, backend, state):
     locale = normalize_locale((await state.get_data()).get('locale'))
-    await render(bot, query.message.chat.id,
+    try:
+        node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=user_id)
+    except BackendError as exc:
+        await state.update_data(registry_removal_confirmation=None)
+        if exc.status == 404:
+            await render(bot, chat_id, Screen(tr(locale, 'nodes.card.unavailable'),
+                embedded_buttons=True, navigation=True),
+                [[InlineKeyboardButton(text=tr(locale, 'nodes.card.to_list'), callback_data=AdminNodesCallback().pack())]],
+                state, message_id)
+        else:
+            await show_node_maintenance_error(chat_id, message_id, node_key, bot, state)
+        return
+    await render(bot, chat_id,
         Screen(tr(locale, 'nodes.maintenance.registry_only'),
-            (tr(locale, 'nodes.maintenance.node', key=node_key),
+            (server_label(node),
              tr(locale, 'nodes.maintenance.registry_grants'),
              tr(locale, 'nodes.maintenance.registry_runtime'),
+             tr(locale, 'nodes.maintenance.registry_tunnels'),
              tr(locale, 'nodes.maintenance.registry_use')), embedded_buttons=True, navigation=True),
         [[InlineKeyboardButton(text=tr(locale, 'nodes.maintenance.registry_confirm'),
             callback_data=RetireRegistryCallback(node_key=node_key).pack(), style='danger')],
          [InlineKeyboardButton(text=tr(locale, 'back'),
             callback_data=NodeMaintenanceCallback(node_key=node_key).pack())]],
-        state, query.message.message_id)
+        state, message_id)
+    await state.update_data(registry_removal_confirmation={
+        'node_key': node_key,
+        'message_id': (await state.get_data()).get('control_message_id') or message_id})
 
 @router.callback_query(RetireRegistryCallback.filter())
 async def retire_registry_cb(query: CallbackQuery, callback_data: RetireRegistryCallback, bot: Bot, backend: BackendClient, state: FSMContext):
     await query.answer()
+    confirmation = (await state.get_data()).get('registry_removal_confirmation')
+    if confirmation != {'node_key': callback_data.node_key, 'message_id': query.message.message_id}:
+        await show_registry_confirmation(query.message.chat.id, query.from_user.id,
+            query.message.message_id, callback_data.node_key, bot, backend, state)
+        return
     try:
         result = await backend.retire_node_registry_only(query.from_user.id,
                                                          callback_data.node_key)
-    except BackendError:
-        await show_node_maintenance_error(query.message.chat.id, query.message.message_id,
-            callback_data.node_key, bot, state)
+    except BackendError as exc:
+        locale = normalize_locale((await state.get_data()).get('locale'))
+        await render(bot, query.message.chat.id,
+            Screen(tr(locale, 'nodes.maintenance.error_title'),
+                (tr(locale, 'nodes.maintenance.registry_busy' if exc.code == 'maintenance_busy'
+                    else 'nodes.maintenance.registry_failed'),), embedded_buttons=True, navigation=True),
+            [[InlineKeyboardButton(text=tr(locale, 'back'),
+                callback_data=NodeMaintenanceCallback(node_key=callback_data.node_key).pack())]],
+            state, query.message.message_id)
         return
+    await state.update_data(registry_removal_confirmation=None)
     locale = normalize_locale((await state.get_data()).get('locale'))
     await render(bot, query.message.chat.id,
         Screen(tr(locale, 'nodes.maintenance.registry_removed_title'),
             (tr(locale, 'nodes.maintenance.node', key=result['node_key']),
-             tr(locale, 'nodes.maintenance.registry_removed_note')), embedded_buttons=True, navigation=True),
+             tr(locale, 'nodes.maintenance.registry_removed_note'),
+             tr(locale, 'nodes.maintenance.registry_tunnels')), embedded_buttons=True, navigation=True),
         [[InlineKeyboardButton(text=tr(locale, 'nodes.maintenance.nodes'),
             callback_data=AdminNodesCallback().pack())]], state, query.message.message_id)
 
@@ -1477,7 +1589,7 @@ async def show_rollout_status(chat_id, user_id, message_id, task_id, bot, backen
             callback_data=RolloutStatusCallback(task_id=task_id).pack())]]
     if status == 'blocked' and task.get('failure_code') == 'rust_required':
         rows.append([InlineKeyboardButton(text=tr(locale, 'nodes.rollout.install_rust'),
-            callback_data=f"rust_offer:{task_id}")])
+            callback_data=f"rust_offer:{task_id}", style='primary')])
     rows.append([InlineKeyboardButton(text=tr(locale, 'nodes.rollout.card'),
         callback_data=AdminNodeCallback(node_key=task['node_key']).pack())])
     if status == 'succeeded':
@@ -1513,7 +1625,7 @@ async def rust_offer_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, 
     await render(bot, query.message.chat.id, Screen(tr(locale, 'nodes.rollout.install_rust'),
         (tr(locale, 'nodes.rollout.rust_note'),), embedded_buttons=True, navigation=True), [[
         InlineKeyboardButton(text=tr(locale, 'back'), callback_data=RolloutStatusCallback(task_id=task_id).pack()),
-        InlineKeyboardButton(text=tr(locale, 'nodes.rollout.install_rust'), callback_data=f'rust_confirm:{task_id}')]], state, query.message.message_id)
+        InlineKeyboardButton(text=tr(locale, 'nodes.rollout.install_rust'), callback_data=f'rust_confirm:{task_id}', style='primary')]], state, query.message.message_id)
 
 
 @router.callback_query(F.data.startswith('rust_confirm:'))

@@ -31,6 +31,37 @@ fn context() -> DriverContext {
 }
 
 #[test]
+fn runtime_bundle_without_environment_identity_uses_installed_binary_release() {
+    for (version, commit) in [(None, None), (Some(" ".into()), Some("unknown".into()))] {
+        let (version, commit) = runtime_release_identity(version, commit);
+        let mut ctx = context();
+        ctx.app_semver = version;
+        ctx.app_commit = commit;
+        let files = ctx.runtime_file_bundle("test-node").unwrap();
+        let find = |path: &str| {
+            files
+                .iter()
+                .find(|file| file.path == path)
+                .unwrap()
+                .content
+                .trim()
+        };
+        assert_eq!(
+            find("/opt/node-plane-runtime/VERSION"),
+            env!("NODE_PLANE_BINARY_VERSION")
+        );
+        assert_eq!(
+            find("/opt/node-plane-runtime/BUILD_COMMIT"),
+            env!("NODE_PLANE_BINARY_COMMIT")
+        );
+    }
+    assert_eq!(
+        runtime_release_identity(Some(" 1.2.3 ".into()), Some(" abcdef0 ".into())),
+        ("1.2.3".into(), "abcdef0".into())
+    );
+}
+
+#[test]
 fn runtime_assets_use_active_app_root_when_configured() {
     let app_root = std::path::PathBuf::from("/opt/node-plane/current");
     let manifest_dir = std::path::Path::new("/build/rust/node-driver");

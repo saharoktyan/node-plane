@@ -111,25 +111,21 @@ class BackendBackupsTests(unittest.TestCase):
             self.service.get(self.actor, first["id"])["status"], "succeeded"
         )
 
-    def test_failed_installation_history_only_stops_blocking_after_verified_retirement(self):
+    def test_failed_installation_history_stops_blocking_after_explicit_retirement(self):
         backup_id, checksum = self.snapshot()
         with self.db.transaction() as conn:
             conn.execute("""INSERT INTO backend_agent_rollouts
                 (id,node_key,actor_account_id,command_key,intent_json,status)
                 VALUES (?,'retired',?,?,'{}','blocked')""",
                 (str(uuid4()), self.admin.id, str(uuid4())))
-        # Missing registry metadata alone is not evidence of host cleanup.
-        for mode in (None, 'registry_only'):
-            if mode:
-                with self.db.transaction() as conn:
-                    conn.execute("""INSERT INTO backend_node_retirements
-                        VALUES ('retired',?,'registry_only','unverified',NULL,0,NULL,'2026-10-06')""",
-                        (self.admin.id,))
-            with self.assertRaises(AccessDenied) as error:
-                self.service.queue(self.actor, str(uuid4()), 'restore', backup_id, checksum)
-            self.assertEqual(error.exception.code, 'maintenance_busy')
+        # Missing metadata alone is not proof of retirement. Explicit
+        # abandonment is terminal but does not assert remote cleanup.
+        with self.assertRaises(AccessDenied) as error:
+            self.service.queue(self.actor, str(uuid4()), 'restore', backup_id, checksum)
+        self.assertEqual(error.exception.code, 'maintenance_busy')
         with self.db.transaction() as conn:
-            conn.execute("UPDATE backend_node_retirements SET mode='verified' WHERE node_key='retired'")
+            conn.execute("""INSERT INTO backend_node_retirements
+                VALUES ('retired',?,'registry_only','unverified',NULL,0,NULL,'2026-10-06')""", (self.admin.id,))
         job = self.service.queue(self.actor, str(uuid4()), 'restore', backup_id, checksum)
         self.assertEqual(job['status'], 'awaiting_executor')
         self.assertTrue(self.service.run_one())

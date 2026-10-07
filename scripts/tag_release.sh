@@ -185,30 +185,40 @@ build_release_artifacts() {
   (cd rust/node-driver && cargo build --release)
   set_step "cargo build --release node-agent"
   (cd rust/node-agent && cargo build --release)
+  set_step "cargo build --release workstation assistant"
+  (cd rust/node-plane-cli && cargo build --release --locked)
 
   local driver_bin="rust/node-driver/target/release/node-plane-driver"
   local agent_bin="rust/node-agent/target/release/node-plane-agent"
+  local workstation_bin="rust/node-plane-cli/target/release/node-plane"
   [[ -x "$driver_bin" ]] || { echo "Missing built driver binary: $driver_bin" >&2; exit 1; }
   [[ -x "$agent_bin" ]] || { echo "Missing built agent binary: $agent_bin" >&2; exit 1; }
+  [[ -x "$workstation_bin" ]] || { echo "Missing built workstation binary: $workstation_bin" >&2; exit 1; }
   check_glibc_compatibility "$driver_bin"
   check_glibc_compatibility "$agent_bin"
+  check_glibc_compatibility "$workstation_bin"
 
   local driver_name="node-plane-driver-linux-amd64"
   local agent_name="node-plane-agent-linux-amd64"
+  local workstation_name="node-plane-cli-linux-amd64"
   local checksums_file="SHA256SUMS.txt"
 
   cp "$driver_bin" "${tmp_dir}/${driver_name}"
   cp "$agent_bin" "${tmp_dir}/${agent_name}"
+  cp "$workstation_bin" "${tmp_dir}/${workstation_name}"
   chmod +x "${tmp_dir}/${driver_name}" "${tmp_dir}/${agent_name}"
+  chmod +x "${tmp_dir}/${workstation_name}"
 
   set_step "package driver artifact"
   tar -C "$tmp_dir" -czf "${release_dir}/${driver_name}.tar.gz" "$driver_name"
   set_step "package agent artifact"
   tar -C "$tmp_dir" -czf "${release_dir}/${agent_name}.tar.gz" "$agent_name"
+  set_step "package workstation artifact"
+  tar -C "$tmp_dir" -czf "${release_dir}/${workstation_name}.tar.gz" "$workstation_name"
 
   (
     cd "$release_dir"
-    sha256sum "${driver_name}.tar.gz" "${agent_name}.tar.gz" > "$checksums_file"
+    sha256sum "${driver_name}.tar.gz" "${agent_name}.tar.gz" "${workstation_name}.tar.gz" > "$checksums_file"
   )
 
   cat > "${release_dir}/RELEASE_METADATA.txt" <<EOF
@@ -254,7 +264,7 @@ publish_github_release() {
   need_cmd tar
   local verify_dir
   verify_dir="$(mktemp -d)"
-  for name in node-plane-driver-linux-amd64 node-plane-agent-linux-amd64; do
+  for name in node-plane-driver-linux-amd64 node-plane-agent-linux-amd64 node-plane-cli-linux-amd64; do
     if ! tar -xOzf "${release_dir}/${name}.tar.gz" "$name" > "${verify_dir}/${name}"; then
       rm -rf "$verify_dir"
       echo "Invalid release archive: ${name}.tar.gz" >&2

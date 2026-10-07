@@ -34,6 +34,11 @@ Do not reopen the completed migration or demand unrelated servers for testing.
 Work through these items before starting the workstation assistant. Update this
 file with implementation and verification results as each item is closed.
 
+Four automatic reliability blocks are recorded below, using isolated PostgreSQL,
+worker/driver fixtures and disposable protocol containers. Continue only the
+remaining host/client-dependent and release/recovery contract items. Do not
+require repeated user VPS reinstallations for cases reproduced automatically.
+
 ### Small implementation gaps
 
 - [x] Replace manual local-agent TOML parsing in the Rust driver with a real
@@ -55,12 +60,44 @@ file with implementation and verification results as each item is closed.
 - [x] Include the existing backup-size fix in `0.4.3-alpha.39`: small backups must display B/KiB
   instead of rounding to `0.0 MiB`.
 
-Implementation follow-up: config screens use a Show/Hide URI action, with
-QR/instructions above it and directly accessible files below it. Code and files
-are no longer nested in details blocks, avoiding the user-reported iOS issue.
+Implementation follow-up: config screens have collapsed QR/instructions and
+URI blocks, followed by directly accessible configuration files.
 AWG encoding uses compact JSON and maximum zlib compression with the same wire
-format; real iOS interaction still requires user verification. The backup-size
+format; user testing confirmed that standalone Rich code blocks still cannot be
+copied in Telegram for iOS. The URI block now offers **Send link separately (iOS)**
+directly below the monospace URI inside the same collapsed block,
+which reads the currently authorized artifact and sends a regular Telegram
+message with a code entity and Close button. This auxiliary message does not
+replace the Rich control panel and is cleaned up on navigation. Actual iOS
+clipboard behavior still requires user verification. The backup-size
 fix is implemented and tested and included in the `0.4.3-alpha.39` release.
+
+### Current quality-of-life work
+
+- [x] Highlight forward wizard actions and action confirmations consistently.
+  Start/create, Next, Skip, Review, Save and safe install/update confirmations use
+  `primary`; destructive cleanup, restore and privilege changes retain `danger`.
+  Back/Close remain neutral, and paired navigation rows are preserved. Explicit
+  button styles carry through both Rich blocks and inline fallback. All 228
+  Telegram workflow tests passed, including forward-row and update-confirmation
+  style assertions; parameter-selection controls still highlight only selection.
+- [x] Node creation starts with Local/SSH, followed by a small location template
+  catalog (Latvia, Germany, Netherlands, Finland, United States and Singapore).
+  Templates fill name, region, country flag and a fresh node key. SSH needs the
+  SSH target and public address; Local needs only the public address. Protocol
+  choices, review and manual custom creation remain available. Back preserves
+  entered addresses and returns one step. Fresh key suffixes prevent reuse of
+  retired identities; protocol defaults remain backend-generated. All 222
+  Telegram tests passed, including template creation/back navigation and the
+  regular-message URI action. The tests verify fresh artifact authorization,
+  stale-delivery suppression and preservation of the main panel on Close.
+- [ ] Device identities: issue independent VPN credentials per registered
+  device, with optional platform metadata and individual revocation. Telegram's
+  normal Bot API does not expose the user's OS; Mini Apps expose platform only
+  after opening a web app. A requested device's OS also need not match the
+  Telegram client used to obtain its config. Keep the regular-message URI action
+  available even when platform-specific defaults are introduced. This is a
+  future feature, not a prerequisite for the clipboard compatibility action.
 
 ### Execution and ownership cleanup
 
@@ -126,6 +163,24 @@ Shell-level tests verify custom config leftovers and previous-container names.
   Never remove duplicate-protection records while commands can still be replayed.
   CORE_ARCHITECTURE.md records actual expiry versus physical retention, journal
   growth, backup/release rules and the prerequisites for future payload pruning.
+- [x] Make registry-only node removal reliably accessible when VPS access is
+  permanently lost, for example an expired hosting subscription. Telegram now
+  provides a danger-styled action in Maintenance and unfinished/blocked removal
+  screens, with confirmation naming the node and warning that downloaded tunnels
+  may still work. Navigation invalidates confirmation; a stale callback requires
+  confirmation again. The API serializes against the worker and rechecks current
+  administrator privileges. Retirement removes all grants and list entries,
+  supersedes unfinished work and blocks queued/running agent rollouts without
+  inventing a successful remote result. The audit tombstone retains the reason
+  and uncertainty; abandoned installation history no longer blocks restoration.
+  Automated coverage includes a held worker lock, demoted administrators,
+  pending/uncertain rollout retirement, stale config screens and restoring a
+  post-retirement snapshot. All 76 PostgreSQL reliability tests passed on a
+  disposable PostgreSQL 16 instance; no user VPS reinstallation was required.
+  The final Python discovery run passed 692 tests with 86 environment-gated
+  skips, including invalidation of confirmation on same-message navigation.
+  Configuration restoration deliberately resets operational history, including
+  retirement tombstones; it is not an archive of removal evidence.
 
 SSH installation passed manual testing on 2026-10-06. Removal was blocked before
 draining because it required a separately configured verification key. The
@@ -139,10 +194,10 @@ artifact or failure scenario.
 Node lists and cards expose deletion progress and blocked deletion separately,
 with a direct entry back into the removal screen.
 
-Configuration links now use a top-level preformatted Rich block instead of
-inline monowidth text. The show/hide button, collapsed QR and visible files
-remain unchanged. This is an iOS copying workaround candidate; copying the full
-AWG/VLESS URI on an actual iPhone still requires manual acceptance.
+Configuration links use a collapsed preformatted Rich block with **Send link
+separately (iOS)** directly below the URI. QR/instructions remain collapsed and
+files remain directly accessible. The separate message uses ordinary Telegram
+code formatting; actual iPhone clipboard acceptance remains user-dependent.
 
 Rich fallback investigation on 2026-10-06: the user reported repeatable plain
 rendering for update progress and the saved notification profile overview.
@@ -154,6 +209,9 @@ empty details blocks. Edit/send/notice failures now log a sanitized category
 without message contents or credentials. Regression tests cover both empty
 screens and recovery from a per-message fallback on the next render. Live
 acceptance and the actual Telegram error remain outstanding.
+The user confirmed on 2026-10-06 after v0.4.3-alpha.48 that both screens now
+render as Rich UI on an installation with no nodes. The reported empty-list
+fallback case is closed; diagnostics remain for future unrelated failures.
 
 Registry entries with no applied runtime, rollout attempts, mutation jobs,
 settings tasks, profile commands/grants or bound cleanup target can now be
@@ -248,12 +306,152 @@ The user confirmed successful backup restoration on v0.4.3-alpha.47 on
 failure, checksum, incompatible-schema and maintenance-concurrency checks remain
 separate validation items.
 
-- [ ] Test concurrent worker claims, expected-revision conflicts and competing
-  mutations, including traffic-policy changes during collection and recipient eligibility
-  changes during delivery.
-- [ ] Test crashes and timeouts before dispatch, after remote mutation and before
+First automatic reliability block, 2026-10-06 (unreleased):
+`tests/test_core_reliability_postgres.py` and `tests/test_backups_postgres.py`
+pass 21 checks in a separate process using disposable PostgreSQL 16. Twenty
+exercise real transactions; one launches a second worker process and confirms
+that the shared process lock rejects it before database access. Production
+hosts, agents and VPN runtimes were not touched.
+Full Python discovery also passes: 692 tests, 22 skipped (including the real
+PostgreSQL checks run separately above). Changes are not yet tagged/released.
+
+Covered cases:
+
+- Competing expected revisions and duplicate idempotency keys; two executors
+  claiming the same task; in-flight work excluding another profile on that node.
+- Grant versus node drain, and profile edit versus drain. Fixed the reversed
+  profile/node lock order by taking the command guard before drain row locks.
+- Injected termination before dispatch, after durable remote success, and
+  result-transaction failure. Recovery confirms the driver journal once;
+  absent/failed evidence remains blocked and prevents later conflicting work.
+- Restore checksum/schema rejection, idempotent admission, concurrent command
+  exclusion, failed revocation, partial transaction rollback and interrupted
+  replacement followed by completion. The restoring administrator retains login.
+- Restore with a saved node resource inventory. Fixed the missing transient
+  inventory cleanup that previously caused a PostgreSQL foreign-key failure.
+- Fixed restore exclusion inside the command transaction, closing the race
+  after HTTP preflight. Backup policy writes use the same guard; a duplicate
+  restore request can still retrieve its original job.
+
+Run these integration modules separately from discovery: other modules install
+database doubles. Set `NODE_PLANE_TEST_POSTGRES_DSN` to a disposable database
+and `PYTHONPATH=app`, then run
+`python -m unittest tests.test_core_reliability_postgres tests.test_backups_postgres -v`.
+Each test creates and drops its own schema. Injected termination uses a
+`BaseException` fault boundary; it does not prove OS kill, network partition or
+real agent journal durability. Coordinated update rollback, traffic/delivery
+races, full host ownership checks and protocol fault tests remain below.
+
+Second automatic block, 2026-10-06 (unreleased): ten additional disposable
+PostgreSQL checks cover coordinated controller rollback, failed rollback,
+late health confirmation, unrelated-unit rejection, an interrupted launch,
+agent-only partial failure with another node completing, queued cancellation,
+fresh administrator authorization and recovery-route access behind the gate.
+Shell fixtures execute the actual rollback function for failures in each of
+backend/worker/driver/Telegram, with both healthy and unhealthy restored services;
+they restore temporary binaries, units, environment and release symlink.
+No host services were started/stopped by these fixtures.
+Combined isolated modules pass 31 tests. Full Python discovery passes 704
+tests with 32 skipped; PostgreSQL integrations are executed separately.
+
+Updates now supports administrator-only cancellation before any dispatch and
+read-only rechecking of a blocked coordinated core result. Both are available
+on the Rich progress screen, in English and Russian, and use the worker lock.
+A failed/unknown rollback or missing launch identity does not release the gate.
+Rechecking never schedules another installation. A healthy durable outcome can
+resume agent updates; failed agents remain a partial result and do not roll
+back the confirmed controller. The local repair examples now use the installed
+worker's actual lock path, `/opt/node-plane/shared/data/backend-worker.lock`.
+
+Third automatic block, 2026-10-06 (unreleased):
+`tests/test_policy_delivery_postgres.py` passes 30 additional checks using
+disposable PostgreSQL 16 and paused/failing counter fixtures. All four isolated
+reliability modules together pass 61 checks.
+Full Python discovery passes 734 tests with 62 skipped; the PostgreSQL modules
+are run separately rather than replaced with database doubles.
+
+- Traffic collection drops samples when policy changes, grants are revoked,
+  profiles are frozen/deleted, nodes drain, restore starts or ownership changes
+  during the read. Disabling collection prevents agent calls and hides summaries;
+  re-enabling establishes a new baseline without counting the disabled period.
+- Counter timeouts preserve the baseline; epoch changes, monthly rollover,
+  AWG counter identity and BIGINT overflow have explicit regression coverage.
+  Ownership transfer is a guarded SQL fixture, not a new transfer API.
+- Announcement preview/queue/claim excludes the sender, pending accounts,
+  missing profiles and non-Telegram identities. Concurrent deletion and claims
+  serialize; duplicate queue requests produce one delivery, and competing
+  adapters cannot acquire the same recipient with different claim IDs.
+- Fixed repeat-claim authorization: a lost-response retry now rechecks recipient
+  eligibility, sender privileges and restore exclusion. Previously issued claims
+  that lose eligibility become unknown instead of being returned or replayed.
+  Restore retry coverage includes a synthetic stale claimed row; normal restore
+  admission still excludes active delivery work.
+- Fixed traffic-policy writes using cached administrator privileges: the account
+  must still be approved and an administrator inside the guarded transaction.
+
+Delivery authorization is checked at claim time. These tests do not cancel a
+Telegram request already submitted after a claim, prove external exactly-once
+delivery or exercise real network partitions. No messages were sent and no VPS
+was modified. Real protocol counters and host ownership/removal remain separate
+checks. Run the integration modules separately from normal discovery:
+`python -m unittest tests.test_core_reliability_postgres tests.test_backups_postgres tests.test_update_recovery_postgres tests.test_policy_delivery_postgres -v`
+with a disposable `NODE_PLANE_TEST_POSTGRES_DSN` and `PYTHONPATH=app`.
+
+- [ ] Add a dedicated **Diagnostics & Recovery** menu in the Telegram admin UI.
+  Deferred on 2026-10-06 and activated with workstation recovery on 2026-10-07. List
+  blocked operations by node/profile/controller, explain the cause and show
+  applicable actions: queued cancellation, safe retry, journal confirmation,
+  audited retirement after agent restart, and explicit registry-only removal
+  for permanently inaccessible VPSs. Reuse backend repair contracts instead
+  of deleting fences or journals. Surface actions currently available only in
+  trusted local admin commands. Include an emergency controller recovery path
+  for missing launch identity and failed rollback: quiesce the old update
+  process and establish the repaired stack state before releasing its gate.
+  Preserve uncertainty and audit history; never present force-unlock as success.
+
+  Workstation-first implementation started on 2026-10-07. The embedded
+  `scripts/installation_diagnostics.py` returns versioned secret-free observations
+  for files/configuration presence, release, disk, PostgreSQL/maintenance,
+  controller systemd units, worker/API readiness and blocked operation counts.
+  TUI diagnostics include an opt-in selector for per-unit confirmed recovery:
+  start installed inactive/failed controller units, recheck maintenance under the
+  existing account guard, and rerun observations. No gate/journal removal or
+  replay is performed. Unit fixtures cover maintenance/missing guard/active unit
+  refusal and allowlisted dispatch. Subsequent operation recovery and Telegram
+  integration are described below; live VPS acceptance is not yet established.
+
+Follow-up: the read-only `/api/v1/system/recovery` inventory now paginates
+  unfinished updates, node jobs, agent rollouts, profile tasks, removals and
+  backups without exporting intent/result payloads. TUI diagnostics use it when
+  the API is healthy; recovery mode confirms applicable existing cancel/recheck
+  actions and retains the exact operation identity after an unconfirmed result.
+  Telegram Settings now exposes a RU/EN Rich recovery inventory and confirmations
+  for existing update cancel/recheck and node journal resolution routes. Missing
+  evidence never becomes a force unlock. Additional operation-specific repairs,
+  controller launch/rollback emergencies and Telegram host diagnostics remain
+unfinished. The original full recovery-menu checkbox therefore stays open.
+
+Workstation attribution (2026-10-07): credentials bind the selected admin name,
+SSH username and workstation key fingerprint. Secret-free API admission/HTTP
+completion events are available in a paginated Rich audit viewer. Installer and
+offline diagnostic/recovery steps use the host journal. Account deletion and
+configuration restore retain the backend audit history. Root SSH is the trust
+boundary, not an independent identity proof. SSH key enrollment now has host
+admission/completion records for both workstation and controller keys. Controller
+key preparation also records the selected admin, target, key fingerprint and
+verified/unconfirmed outcome in backend audit, sharing the target's operation ID.
+Follow-up: linking asynchronous terminal job outcomes directly into the audit viewer.
+
+- [x] Test concurrent worker claims, expected-revision conflicts and competing
+  mutations, including traffic-policy changes during collection and recipient
+  eligibility changes before delivery claims. See the isolated PostgreSQL
+  evidence above and below; external sends already submitted are outside this
+  transaction boundary.
+- [x] Test crashes and timeouts before dispatch, after remote mutation and before
   result persistence. Unknown outcomes must remain inspectable/blocked rather
-  than trigger blind automatic replay.
+  than trigger blind automatic replay. Actual SIGKILL, disconnected gRPC and
+  durable helper journal coverage is recorded below; external host scheduling
+  and long-lived network partitions remain separate acceptance boundaries.
 - [ ] Test core update failure and rollback, rollback failure, and agent-only
   partial failure. Verify progress survives leaving the screen and restarts.
 - [ ] Restore a real PostgreSQL configuration snapshot; verify scope, checksum,
@@ -262,7 +460,7 @@ separate validation items.
 - [ ] Test full node/controller removal with owned configs, credentials, agent
   binary/unit/process and bindings; preserve unrelated resources. Include
   inaccessible nodes and partial cleanup/recovery.
-- [ ] Verify queued announcements recheck recipient eligibility and exclude
+- [x] Verify queued announcements recheck recipient eligibility and exclude
   the sender and deleted profiles.
 - [ ] Extend protocol checks where evidence is missing: Xray API user persistence
   across restart and partial API failure; AWG idle/keepalive, MTU/large packets,
@@ -276,16 +474,80 @@ becomes available. This is an explicit environment-dependent validation item,
 not evidence of a known SSH defect. TCP troubleshooting specific to iOS/v2rayBox
 is deferred: the same config works on Android and Linux NekoBox.
 
+Fourth automatic block, 2026-10-06 (unreleased): process faults, removal and
+actual protocol runtimes are now covered by three additional modules:
+
+- `tests/test_process_faults_postgres.py`: five checks use real SIGKILL before
+  dispatch, inside an agent-helper mutation, after the durable helper journal
+  commit and inside a PostgreSQL result transaction. They verify flock release,
+  transaction rollback, blocked uncertainty and read-only success recovery.
+  A gRPC server process is killed after mutation but before replying; a restarted
+  server confirms the exact journal entry without a second mutation. Server and
+  mutation effects are fixtures; the production durable helper is used.
+- `tests/test_removal_saga_postgres.py`: six checks cover unprovisioned retirement,
+  pending grants revoked before cleanup, preservation of other nodes/grants,
+  registry-only retirement of blocked work, failed final host verification, and
+  controller reset/removal. Real PostgreSQL transactions preserve unrelated
+  application tables, keep the operator on reset and require shutdown acknowledgment
+  before full removal. Driver and host outcomes are explicit fixtures.
+- `tests/test_runtime_docker.py`: nine opt-in checks use the production Xray
+  26.3.27 and pinned AWG 3.1 images in isolated namespaces. Xray API add/revoke
+  does not restart the process; actual restarts retain additions and revocations.
+  Injected second-inbound API failures retain durable, repairable state. This
+  tests live HandlerService users, not REALITY/TLS handshakes or client behavior.
+  AWG quic/dns/chaos presets carry small packets, 1100-byte payloads at MTU 1280
+  and short parallel bursts without loss. One-second keepalive, peer revocation
+  and restoration with unchanged credentials are exercised. These are local
+  functional checks, not Internet PMTU, long-idle/NAT or capacity benchmarks.
+  Real Docker inventory/removal deletes owned current/previous containers and
+  refuses an unrelated mount before any deletion. The actual agent uninstall
+  shell and generated controller uninstall shell execute in disposable containers,
+  checking processes, units, binaries, journals/archives, credentials, exact SSH
+  key removal and preservation of unrelated resources. Process-backed systemctl
+  fixtures model service stops; real systemd-run scheduling is not tested here.
+
+Fixed a reproduced native-agent cleanup defect: custom config locations could
+retain exact `.bak`/settings backups and interrupted `.xray-config-*` or
+`.xray-user-*` files. Agent cleanup now removes these individual artifacts and
+the independent inventory includes temporary Xray files. Legacy `.dirbak.*`
+directories are captured for verification; directories outside the managed root
+are not recursively erased, so a remaining directory prevents verified retirement.
+Arbitrary historical artifacts outside known locations still require inspection.
+
+All six isolated PostgreSQL reliability modules pass 72 checks. The Docker module
+passes nine checks; native Rust suites pass 12 agent and 33 driver tests. Full
+Python discovery passes 754 tests with 82 skipped, including opt-in integration
+checks executed separately. Product Docker images were neither built nor published;
+production hosts and actual Telegram delivery were not used. Disposable containers,
+networks and test schemas are cleaned up after the run.
+
+Run PostgreSQL integrations separately with a disposable
+`NODE_PLANE_TEST_POSTGRES_DSN` and `PYTHONPATH=app`:
+`python -m unittest tests.test_core_reliability_postgres tests.test_backups_postgres tests.test_update_recovery_postgres tests.test_policy_delivery_postgres tests.test_process_faults_postgres tests.test_removal_saga_postgres -v`.
+Run runtimes only on a disposable Docker host with the referenced Xray/AWG images,
+`postgres:16-alpine` and the existing `node-plane-release-builder:bookworm` image
+cached: `NODE_PLANE_TEST_DOCKER=1 PYTHONPATH=app python -m unittest tests.test_runtime_docker -v`.
+AWG fixtures grant NET_ADMIN only inside their container namespaces; they do not
+use host networking or publish VPN ports. Normal discovery skips these fixtures.
+
 ### Release and recovery contract
 
-- [ ] Document supported backend/client/driver/agent combinations and rejection
+- [x] Document supported backend/client/driver/agent combinations and rejection
   of incompatible mixes; API/protobuf versioning alone is not a compatibility
-  guarantee.
-- [ ] Define schema downgrade limits, manual recovery, certificate renewal and
-  CA rotation/revocation procedures. Automatic CA rotation is not assumed.
-- [ ] Update the release checklist for the complete systemd stack, clean and
+  guarantee. RELEASES.md specifies a coherent release commit, temporary rollout
+  mixes and actual enforcement boundaries; a universal startup version handshake
+  and arbitrary mixed-version support are explicitly deferred.
+- [x] Define schema downgrade limits, manual recovery, certificate renewal and
+  CA rotation/revocation procedures. RELEASES.md distinguishes version policy
+  from schema compatibility, complete-stack recovery from the partial rollback
+  helper, and rollout-triggered leaf renewal from deliberate trust rotation.
+  Fine-grained revocation/automatic CA rotation are deferred; actual trust-rotation
+  acceptance remains a disposable-host check, not claimed from documentation.
+- [x] Update the release checklist for the complete systemd stack, clean and
   upgraded hosts, release asset checksums and Debian-compatible binary ABI.
-  Record unpublished cleanup/backup changes in release notes when released.
+  RELEASES.md follows the existing tag/build/publish scripts and glibc 2.36 gate.
+  Record unpublished cleanup/backup changes in release notes when released;
+  writing this checklist does not claim a release or new host acceptance occurred.
 
 Closure means these tasks are completed or explicitly scoped/deferred with a
 reason. It does not require implementing every historical idea or every upstream
@@ -293,7 +555,8 @@ protocol option. Future feature proposals stay below, outside this closure gate.
 
 ## 2. Next: workstation installation assistant
 
-Build a small CLI first; a TUI is optional. It runs on the user's local computer
+Build a native Rust CLI/TUI, as selected on 2026-10-06. It runs on the user's
+local Linux or Windows 10/11 computer without Python or an external SSH client,
 and supports installing the controller, updating the complete stack, basic
 diagnostics and preparing target nodes without routine interactive server shells.
 
@@ -303,17 +566,99 @@ enrollment. Bootstrap must work before a backend API exists; use the supported
 installer and release tooling rather than duplicating orchestration policy.
 Subsequent business actions use backend authorization and operation contracts.
 
-Acceptance for the first slice:
+Current implementation and remaining acceptance:
 
-- Connect with existing SSH credentials and verify the host identity.
-- Check prerequisites, install the systemd stack and report understandable
-  progress and next steps. Resume safely after a partial installation.
-- Update through the coordinated stack flow and expose rollback/partial failure.
-- Collect useful diagnostics with credentials and config secrets redacted.
-- Install the controller's public SSH key into a target node's authorized keys
+- [x] Implement embedded SSH with explicit host trust and a workstation-owned
+  Ed25519 key. First-password login appends its public key without replacing
+  existing keys, then verifies an independent key login. Subsequent connections
+  use the key. External key import/ssh-agent/MFA remain a separate increment.
+- [x] Implement the install form, masked credentials, X/7 stage progress, bounded
+  logs and failure reporting around the supported installer. Check host paths,
+  prerequisites and final controller readiness. Marked same-target partial
+  installs preserve generated configuration on an explicit retry.
+- [x] Implement basic read-only installation checks and private local logs with
+  submitted bot tokens/PostgreSQL URLs redacted.
+- [ ] Validate a full assistant-driven install/retry on a disposable VPS and
+  manually exercise Windows 10/11 terminals. Native Windows/Linux CI is added;
+  a configured workflow is not evidence of a successful remote CI run.
+- [x] Update through the coordinated stack flow and expose rollback/partial failure.
+  Persist exact command identity before dispatch; reconcile a lost response by
+  account and command, with detach/resume rather than uncertain replay.
+- [x] Install the controller's public SSH key into a target node's authorized keys
   without replacing unrelated keys or copying private keys between machines.
   Repeated setup must be safe; initial SSH authentication and sufficient
   privileges are still required.
+  Verify a real controller-to-node key login with the workstation-confirmed host
+  pin before claiming success. Registry creation and agent installation stay in
+  the bot; live end-to-end acceptance remains pending.
+
+The first implementation is in `rust/node-plane-cli`; see its English README
+for usage, platform limits and credential handling. It embeds the installer
+progress adapter while exporting the selected tag's runtime. Product Docker
+installation remains unsupported. No release/tag or production VPS operation
+was performed as part of this implementation.
+
+Initial local evidence (2026-10-06): 24 Rust tests pass, including disposable
+loopback SSH enrollment/reuse and uncertain-result cases; Clippy is clean with
+warnings denied. Twenty-nine related Python installer/shell regression checks
+pass. A native Linux pseudo-terminal smoke test renders the form and exits
+cleanly without connecting to a VPS. The Linux release binary builds locally;
+Windows CI configuration and full live installation remain unverified.
+
+Update/enrollment increment evidence (2026-10-07): 40 Rust tests pass, including
+HTTP account/idempotency headers, lost response classification, exact intent/job
+binding, distinct rollback/partial outcomes and regional TUI pagination. Sixty-five
+Python tests cover the scoped account bridge, update API contract, controller
+login/known-host merging, SSH identity defaults and installer progress. Clippy
+passes with warnings denied. The Linux release builds; native pseudo-terminal
+smoke checks open install/update/node-preparation forms and exit cleanly without
+connecting to a host. These are isolated fixtures, not a live VPS update
+or a Windows terminal acceptance run.
+
+Update verification follow-up (2026-10-07): 41 Rust tests pass, including a
+centered progress window with a single stage label and step counter. Twenty-one
+targeted Python checks cover final progress rereading after systemd completion,
+rechecking the existing job, and atomic preservation of the shared runtime
+environment during updates. A live report exposed a stale completion snapshot
+and a transient missing PostgreSQL DSN. Both paths are fixed locally; recovery
+of the existing production job requires administrator approval. The assistant
+does not repeat controller installation to recover an uncertain result.
+
+Workstation UI follow-up (2026-10-07): the form now uses an action sidebar and
+editable fields with mouse hit targets alongside keyboard navigation. Rectangular
+confirmation buttons are shared by action, host trust and password dialogs;
+modal hit targets isolate background controls. Update node statuses include the
+agent/runtime phase to distinguish failures. A live follow-up confirmed the agent
+commit was current while runtime identity remained `0.1.0 / unknown`; the driver
+now falls back to its compiled release identity when environment metadata is
+absent or unknown. A runtime bundle regression covers these version markers.
+Validation: 45 CLI tests and 34 driver tests pass. CLI Clippy is clean with
+warnings denied. A native Linux pseudo-terminal check clicks Continue and Cancel
+and verifies mouse capture is restored on exit, without connecting to a VPS.
+Windows mouse acceptance and installation of the driver fix remain pending.
+
+Connection memory and navigation follow-up (2026-10-07): the active sidebar item
+uses an outlined cyan border/text instead of a filled background. Settings is
+anchored at the bottom and supports creating, editing and selecting private
+nonsecret installation preferences. Known connection fields are omitted from
+action forms. Preferences survive restart and can be seeded from existing update
+records; switching controllers clears secrets, target-node fields and an explicit
+operation identity belonging to a different SSH connection. Conflicting preference
+writes are refused. Esc returns focus to the sidebar and then opens an exit
+confirmation with Cancel selected. Active update observation detaches; other SSH
+workflows retain their connection until completion after the TUI closes.
+Validation: 52 Rust tests and CLI Clippy pass. A native Linux pseudo-terminal
+check creates/saves/reuses a profile after restart, exercises mouse controls and
+verifies sidebar focus and cancel/confirm exit, without connecting to a VPS.
+
+Quick profile switching follow-up (2026-10-07): a persistent selector above
+Settings cycles saved installations and New profile via keyboard or clickable
+arrows. Re-selecting New profile or pressing Enter opens creation; all action
+controls and submission are disabled until a saved profile is selected. New
+profile selection survives restart, and switching clears connection-specific
+secrets and target fields. Compact sidebars retain all four actions. Regression
+checks cover disabled hit targets, wrapping/persistence, creation, compact layout
+and focus transfer from the switcher to action controls.
 
 ## 3. Preserved ideas, outside the current delivery gate
 

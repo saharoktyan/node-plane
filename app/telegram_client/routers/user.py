@@ -13,7 +13,8 @@ from aiogram import Bot, F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramNetworkError
-from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardButton, Message
+from aiogram.types import (BufferedInputFile, CallbackQuery, InlineKeyboardButton,
+                           InlineKeyboardMarkup, LinkPreviewOptions, Message, MessageEntity)
 import qrcode
 from qrcode.exceptions import DataOverflowError
 
@@ -84,7 +85,7 @@ async def clear_artifacts(bot: Bot, chat_id: int, state: FSMContext) -> None:
         except TelegramAPIError:
             pass
     await state.update_data(artifact_message_ids=[], delivered_issuances=[],
-                            issuance_poll_token=None)
+                            issuance_poll_token=None, plain_uri_message_id=None)
 
 
 async def track_artifact(state: FSMContext, message_id: int) -> None:
@@ -530,12 +531,12 @@ async def show_protocol(chat_id: int, user_id: int, message_id: int, profile_id:
 
 async def show_issuance(chat_id: int, user_id: int, message_id: int,
                         issuance_id: str, bot: Bot, backend: BackendClient,
-                        state: FSMContext, *, show_uri: bool = False) -> None:
+                        state: FSMContext) -> None:
     view_token = secrets.token_urlsafe(16)
     await state.update_data(issuance_poll_token=view_token)
     try:
         await _render_issuance(chat_id, user_id, message_id, issuance_id,
-                               bot, backend, state, view_token, show_uri=show_uri)
+                               bot, backend, state, view_token)
     except BackendError:
         if (await state.get_data()).get('issuance_poll_token') == view_token:
             raise
@@ -543,7 +544,7 @@ async def show_issuance(chat_id: int, user_id: int, message_id: int,
 
 async def _render_issuance(chat_id: int, user_id: int, message_id: int,
                            issuance_id: str, bot: Bot, backend: BackendClient,
-                           state: FSMContext, view_token: str, *, show_uri: bool = False) -> None:
+                           state: FSMContext, view_token: str) -> None:
     result = await backend.issuance(user_id, issuance_id)
     if (await state.get_data()).get('issuance_poll_token') != view_token:
         return
@@ -568,12 +569,11 @@ async def _render_issuance(chat_id: int, user_id: int, message_id: int,
                          else 'config.import_awg_vpn' if uri else 'config.import_awg_conf')
         screen = Screen(artifact.get('display_name') or tr(locale, 'config.ready'),
             (tr(locale, 'ui.config_intro'),),
-            uri=uri if show_uri else None, uri_title=tr(locale, 'ui.config_link'), qr=image, qr_title=tr(locale, 'ui.config_qr'),
+            uri=uri, uri_collapsed=True, uri_title=tr(locale, 'ui.config_link'), qr=image, qr_title=tr(locale, 'ui.config_qr'),
             sections=(), details_title=tr(locale, 'ui.config_help'), details_lines=(import_hint,),
             files=tuple((item['filename'], item['content'].encode()) for item in files),
             files_title=tr(locale, 'ui.config_files'),
-            uri_rows=((button(user_id, tr(locale, 'config.link.hide' if show_uri else 'config.link.show'),
-                'issuance_uri', issuance_id, 'false' if show_uri else 'true'),),) if uri else (),
+            uri_rows=((button(user_id, tr(locale, 'config.link.send'), 'issuance_plain', issuance_id),),) if uri else (),
             embedded_buttons=True, navigation=True)
         rich = await render(bot, chat_id, screen, rows, state, message_id)
         # Older Telegram deployments may reject rich media. Preserve downloads
@@ -707,6 +707,57 @@ def qr_payload(protocol: str, transport: str, content: str) -> str:
     return content.removeprefix('vpn://') if protocol == 'awg' and transport == 'vpn' else content
 
 
+async def send_plain_uri(chat_id, user_id, issuance_id, bot, backend, state):
+    view_token = secrets.token_urlsafe(16)
+    await state.update_data(issuance_poll_token=view_token)
+    result = await backend.issuance(user_id, issuance_id)
+    if result['status'] != 'succeeded' or not (result['protocol'] == 'xray' or result['transport'] == 'vpn'):
+        raise BackendError('configuration_unavailable', 409)
+    artifact = await backend.artifact(user_id, issuance_id)
+    data = await state.get_data()
+    if data.get('issuance_poll_token') != view_token:
+        return
+    uri = artifact['content']
+    locale = normalize_locale(data.get('locale'))
+    sent = await bot.send_message(chat_id=chat_id, text=uri, parse_mode=None,
+        entities=[MessageEntity(type='code', offset=0, length=len(uri.encode('utf-16-le')) // 2)],
+        link_preview_options=LinkPreviewOptions(is_disabled=True),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text=tr(locale, 'setup.close'), callback_data='config_uri_close')]]))
+    if (await state.get_data()).get('issuance_poll_token') != view_token:
+        try:
+            await bot.delete_message(chat_id, sent.message_id)
+        except TelegramAPIError:
+            pass
+        return
+    # A compatibility message is an artifact, never the main control panel.
+    previous = data.get('plain_uri_message_id')
+    if previous and previous != sent.message_id:
+        try:
+            await bot.delete_message(chat_id, previous)
+        except TelegramAPIError:
+            pass
+    await track_artifact(state, sent.message_id)
+    await state.update_data(plain_uri_message_id=sent.message_id)
+
+
+@router.callback_query(F.data == 'config_uri_close')
+async def close_plain_uri_cb(query: CallbackQuery, bot: Bot, state: FSMContext):
+    if query.message is None or query.from_user is None or query.message.chat.type != 'private' or query.message.chat.id != query.from_user.id:
+        return
+    await query.answer()
+    data = await state.get_data()
+    message_id = query.message.message_id
+    if message_id == data.get('control_message_id'):
+        return
+    try:
+        await bot.delete_message(query.message.chat.id, message_id)
+    except TelegramAPIError:
+        pass
+    await state.update_data(artifact_message_ids=[item for item in data.get('artifact_message_ids', []) if item != message_id],
+        plain_uri_message_id=None if message_id == data.get('plain_uri_message_id') else data.get('plain_uri_message_id'))
+
+
 @router.callback_query(F.data.startswith('u:'))
 async def user_action_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
                          state: FSMContext) -> None:
@@ -742,7 +793,7 @@ async def user_action_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
             return
         if action.name == 'page_number':
             return
-        if action.name not in {'issuance', 'issuance_uri'}:
+        if action.name not in {'issuance', 'issuance_plain'}:
             await clear_artifacts(bot, chat_id, state)
         if action.name == 'home':
             await show_home(chat_id, user_id, bot, backend, state, message_id,
@@ -775,9 +826,8 @@ async def user_action_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
             await issue(chat_id, user_id, message_id, *action.args, bot, backend, state)
         elif action.name == 'issuance':
             await show_issuance(chat_id, user_id, message_id, action.args[0], bot, backend, state)
-        elif action.name == 'issuance_uri':
-            await show_issuance(chat_id, user_id, message_id, action.args[0], bot, backend, state,
-                show_uri=action.args[1] == 'true')
+        elif action.name == 'issuance_plain':
+            await send_plain_uri(chat_id, user_id, action.args[0], bot, backend, state)
         elif action.name == 'qr':
             await show_qr(chat_id, user_id, message_id, action.args[0], bot, backend, state)
         elif action.name == 'qr_back':

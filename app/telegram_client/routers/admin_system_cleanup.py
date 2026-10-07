@@ -201,6 +201,7 @@ async def show_job(
                 InlineKeyboardButton(
                     text=tr(locale, "system_cleanup.retry"),
                     callback_data="sc_retry:" + job_id,
+                    style='danger',
                 )
             ]
         )

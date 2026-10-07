@@ -583,9 +583,13 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         from telegram_client.routers import admin_updates
         backend = SimpleNamespace(run_update=AsyncMock(return_value={'id': 'job'}),
             update_job=AsyncMock(return_value={'id': 'job', 'status': 'awaiting_executor', 'items': []}))
-        with patch.object(admin_updates, 'render', new_callable=AsyncMock):
+        with patch.object(admin_updates, 'render', new_callable=AsyncMock) as draw:
             await admin_updates.confirm(self.query, self.bot, self.state,
                 {'kind': 'version', 'branch': 'dev', 'target_ref': 'v0.4.3'}, ['Confirm'])
+            screen, rows = draw.call_args.args[2:4]
+            self.assertEqual([button.style for button in rows[0]], [None, 'primary'])
+            self.assertEqual([button.style for button in screen.rich(rows).blocks[-1].buttons],
+                             ['link', 'primary'])
             draft = self.state_data['update_draft']
             self.query.data = 'update_submit:' + draft['nonce']
             await admin_updates.update_tools_cb(self.query, self.bot, backend, self.state)
@@ -690,7 +694,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             self.assertEqual(user.profile_node_traffic(summary, node, 'en'), ('AmneziaWG', 'VLESS'))
             self.assertFalse(any('KiB' in line for line in user.profile_statistics(summary, 'en')))
 
-    async def test_config_artifacts_remain_interactive_outside_details_for_both_protocols(self):
+    async def test_config_uri_is_collapsed_with_ios_action_and_files_stay_accessible(self):
         for protocol, transport, uri, files in (
             ('awg', 'vpn', 'vpn://fresh-config', [{'filename': 'Latvia.vpn', 'content': 'vpn://fresh-config'},
                 {'filename': 'Latvia.conf', 'content': '[Interface]'}]),
@@ -699,36 +703,32 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
                 issuance=AsyncMock(return_value={'status': 'succeeded', 'profile_id': 'p1',
                     'node_key': 'lv1', 'protocol': protocol, 'transport': transport}),
                 artifact=AsyncMock(return_value={'filename': files[0]['filename'], 'content': uri, 'files': files}))
-            for visible in (False, True):
+            for locale in ('ru', 'en'):
+                self.state_data['locale'] = locale
                 with patch.object(user, 'render', new_callable=AsyncMock, return_value=True) as draw:
-                    await user.show_issuance(123, 123, 77, 'issuance1', self.bot, backend, self.state,
-                        show_uri=visible)
+                    await user.show_issuance(123, 123, 77, 'issuance1', self.bot, backend, self.state)
                 screen, rows = draw.call_args.args[2:4]
                 blocks = screen.rich(rows).blocks
-                toggle = next(i for i, block in enumerate(blocks) if block.type == 'buttons'
-                    and block.buttons[0].text in ('Show configuration link', 'Hide configuration link'))
-                self.assertTrue(all(i < toggle for i, block in enumerate(blocks) if block.type == 'details'))
-                code = [block for block in blocks if block.type == 'pre']
-                self.assertEqual([block.text for block in code], [uri] if visible else [])
-                if visible:
-                    self.assertEqual(blocks.index(code[0]), toggle + 1)
-                    self.assertEqual(screen.plain_entities()[0].type, 'code')
+                link = next(block for block in blocks if block.type == 'details' and block.summary == screen.uri_title)
+                self.assertFalse(link.is_open)
+                self.assertEqual([block.type for block in link.blocks], ['pre', 'buttons'])
+                self.assertEqual(link.blocks[0].text, uri)
+                self.assertIn('(iOS)', link.blocks[1].buttons[0].text)
+                self.assertEqual(screen.plain_entities()[0].type, 'code')
                 documents = [block for block in blocks if block.type == 'document']
                 self.assertEqual([block.document.media.filename for block in documents],
                     [item['filename'] for item in files])
-                self.assertTrue(all(blocks.index(block) > toggle for block in documents))
+                self.assertTrue(all(blocks.index(block) > blocks.index(link) for block in documents))
                 for block in blocks:
                     if block.type == 'details':
-                        self.assertFalse(any(child.type == 'document' or
-                            child.type == 'pre'
-                            for child in block.blocks))
+                        self.assertFalse(any(child.type == 'document' for child in block.blocks))
                 action = user.actions[screen.uri_rows[0][0].callback_data[2:]]
-                self.assertEqual((action.name, action.args), ('issuance_uri', ('issuance1', 'false' if visible else 'true')))
+                self.assertEqual((action.name, action.args), ('issuance_plain', ('issuance1',)))
                 self.assertIn(screen.uri_rows[0][0], screen.fallback_rows(rows)[0])
                 self.assertEqual(blocks[-2].type, 'divider')
                 self.bot.send_document.assert_not_awaited()
 
-    async def test_uri_toggle_does_not_duplicate_plain_fallback_documents(self):
+    async def test_config_refresh_does_not_duplicate_plain_fallback_documents(self):
         backend = SimpleNamespace(
             issuance=AsyncMock(return_value={'status': 'succeeded', 'profile_id': 'p1',
                 'node_key': 'lv1', 'protocol': 'xray', 'transport': 'tcp'}),
@@ -736,9 +736,8 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         self.bot.send_document.return_value = SimpleNamespace(message_id=101)
         self.bot.send_photo.return_value = SimpleNamespace(message_id=102)
         with patch.object(user, 'render', new_callable=AsyncMock, return_value=False):
-            for show_uri in (False, True, False):
-                await user.show_issuance(123, 123, 77, 'issuance1', self.bot, backend, self.state,
-                    show_uri=show_uri)
+            for _ in range(3):
+                await user.show_issuance(123, 123, 77, 'issuance1', self.bot, backend, self.state)
         self.bot.send_document.assert_awaited_once()
         self.bot.send_photo.assert_awaited_once()
         self.assertEqual(self.state_data['delivered_issuances'], ['issuance1'])
@@ -1428,11 +1427,12 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         with patch.object(admin_nodes, 'render', new_callable=AsyncMock) as render:
             await admin_nodes.render_wizard_step(123, self.bot, self.state, 'key', 77)
             self.assertEqual([[button.callback_data for button in row]
-                for row in render.call_args.args[3]], [['admin_nodes']])
+                for row in render.call_args.args[3]], [['wizard_back:template']])
             await admin_nodes.render_wizard_step(123, self.bot, self.state, 'flag', 77)
             self.assertEqual([[button.callback_data for button in row]
                 for row in render.call_args.args[3]],
                 [['wizard_back:region', 'wizard_skip_flag']])
+            self.assertEqual([button.style for button in render.call_args.args[3][0]], [None, 'primary'])
             await admin_nodes.render_wizard_step(123, self.bot, self.state, 'public_host', 77)
             self.assertEqual(render.call_args.args[3][0][0].callback_data,
                              'wizard_back:target')
@@ -1443,6 +1443,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             await admin_nodes.render_wizard_summary(123, self.bot, self.state, 77)
             self.assertEqual([button.callback_data for button in
                 render.call_args.args[3][0]], ['wizard_proto:back', 'wizard_save'])
+            self.assertEqual([button.style for button in render.call_args.args[3][0]], [None, 'primary'])
 
     async def test_profile_wizard_back_keeps_draft_and_next_opens_review(self):
         backend = SimpleNamespace(admin_nodes=AsyncMock(return_value={'items': [
@@ -1460,11 +1461,13 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             self.assertEqual([button.callback_data for button in
                 render.call_args.args[3][-1]],
                 ['profile_draft_name', 'profile_draft_review'])
+            self.assertEqual([button.style for button in render.call_args.args[3][-1]], [None, 'primary'])
             self.query.data = 'profile_draft_node:0'
             await admin_profiles.draft_node_cb(self.query, self.bot, self.state)
             self.assertEqual([button.callback_data for button in
                 render.call_args.args[3][-1]],
                 ['profile_draft_nodes', 'profile_draft_review'])
+            self.assertEqual([button.style for button in render.call_args.args[3][-1]], [None, 'primary'])
             self.query.data = 'profile_draft_toggle:xray'
             await admin_profiles.draft_toggle_cb(self.query, self.bot, self.state)
             self.query.data = 'profile_draft_nodes'

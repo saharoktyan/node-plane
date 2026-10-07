@@ -587,6 +587,17 @@ if [[ -f "$ENV_FILE" ]]; then
   set +a
 fi
 
+# Use the same controller identity as config.SSH_KEY and the backend key endpoint.
+# Older installations can have no SSH_KEY entry, or an empty one. Persist only
+# that default so the driver's EnvironmentFile cannot blank its unit fallback.
+if [[ -z "${SSH_KEY:-}" ]]; then
+  SSH_KEY="${SHARED_ROOT}/ssh/id_ed25519"
+  if [[ $DRY_RUN -eq 0 ]]; then
+    if set_env_value_if_changed "$ENV_FILE" "SSH_KEY" "$SSH_KEY"; then ENV_CHANGED=1; fi
+  fi
+fi
+export SSH_KEY
+
 APP_ROOT="$(cd "$APP_ROOT" && pwd)"
 if [[ ! -d "${APP_ROOT}/rust/node-driver" || ! -d "${APP_ROOT}/rust/node-agent" ]]; then
   echo "Rust driver/agent sources are not present under APP_ROOT=${APP_ROOT}" >&2
@@ -804,6 +815,7 @@ WorkingDirectory=${APP_ROOT}
 Environment=NODE_PLANE_BASE_DIR=${NODE_PLANE_BASE_DIR:-/opt/node-plane}
 Environment=NODE_PLANE_APP_DIR=${APP_ROOT}
 Environment=NODE_PLANE_SHARED_DIR=${NODE_PLANE_SHARED_DIR:-${SHARED_ROOT}}
+Environment=SSH_KEY=${SSH_KEY}
 EnvironmentFile=${ENV_FILE}
 ExecStart=/usr/local/bin/node-plane-driver
 Restart=always

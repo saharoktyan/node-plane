@@ -35,6 +35,8 @@ class CredentialService:
                 expires_at TEXT NOT NULL,
                 revoked_at TEXT
             )''')
+        from .workstation_audit import WorkstationAudit
+        WorkstationAudit(self.db).initialize_schema()
 
     def issue(self, kind: PrincipalKind, scopes: frozenset[str], *, account_id: str | None = None,
               ttl: timedelta = timedelta(days=30), now: datetime | None = None) -> tuple[str, str]:

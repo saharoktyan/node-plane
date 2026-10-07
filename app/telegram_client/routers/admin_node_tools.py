@@ -13,8 +13,8 @@ from .callbacks import AdminNodeCallback, NodeSettingsCallback, EditNodeFieldCal
 router = Router()
 
 
-def button(locale, key, callback):
-    return InlineKeyboardButton(text=tr(locale, key), callback_data=callback)
+def button(locale, key, callback, *, style=None):
+    return InlineKeyboardButton(text=tr(locale, key), callback_data=callback, style=style)
 
 
 def error(locale, exc):
@@ -41,7 +41,7 @@ async def show_install(chat_id, user_id, message_id, node_key, bot, backend, sta
             rows.append([button(locale, 'node_tools.refresh', 'node_job:' + job['id'])])
         elif not facts['docker']:
             lines.append(tr(locale, 'node_tools.docker_missing'))
-            rows.append([button(locale, 'node_tools.install_docker', f'node_action:install_docker:{node_key}')])
+            rows.append([button(locale, 'node_tools.install_docker', f'node_action:install_docker:{node_key}', style='primary')])
         else:
             if not overview['settings_complete']:
                 lines.append(tr(locale, 'node_tools.incomplete'))
@@ -56,7 +56,7 @@ async def show_install(chat_id, user_id, message_id, node_key, bot, backend, sta
             reusable = bool(node['protocols']) and all(facts[p + '_config_valid'] for p in node['protocols'])
             lines.append(tr(locale, 'node_tools.reinstall_note' if present else 'node_tools.bootstrap_note'))
             if reusable:
-                rows.append([button(locale, 'node_tools.reinstall_keep', f'node_action:reinstall_keep:{node_key}')])
+                rows.append([button(locale, 'node_tools.reinstall_keep', f'node_action:reinstall_keep:{node_key}', style='primary')])
             rows.append([button(locale, 'node_tools.reinstall_clean' if present else 'node_tools.bootstrap',
                                 f'node_action:{"reinstall_clean" if present else "bootstrap"}:{node_key}')
                          .model_copy(update={'style': 'danger' if present else 'primary'})])
@@ -66,7 +66,7 @@ async def show_install(chat_id, user_id, message_id, node_key, bot, backend, sta
             target = (f'rollout_saved:{node_key}' if node.get('transport') == 'ssh' and node.get('ssh_target') else
                       RolloutLocalCallback(node_key=node_key).pack() if node.get('transport') == 'local' else
                       RolloutSshCallback(node_key=node_key).pack())
-            rows.append([button(locale, 'node_tools.setup_agent', target)])
+            rows.append([button(locale, 'node_tools.setup_agent', target, style='primary')])
         else:
             rows.append([button(locale, 'node_tools.refresh', f'bootstrap_menu:{node_key}')])
     rows.append([button(locale, 'back', AdminNodeCallback(node_key=node_key).pack())])
@@ -208,8 +208,8 @@ async def action_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, stat
         await state.update_data(node_job_draft={'node_key': node_key, 'action': action,
             'revision': node['desired_revision'], 'command_key': str(uuid4())})
         rows = [[button(locale, 'back', f'bootstrap_menu:{node_key}' if action in {'bootstrap', 'reinstall_clean', 'reinstall_keep', 'install_docker'} else f'node_tools:{node_key}'),
-                 button(locale, 'node_tools.confirm', 'node_job_submit')]]
-        rows[0][-1].style = 'danger' if action in {'reinstall_clean', 'cleanup_runtime'} else 'primary'
+                 button(locale, 'node_tools.confirm', 'node_job_submit',
+                    style='danger' if action in {'reinstall_clean', 'cleanup_runtime'} else 'primary')]]
         await render(bot, query.message.chat.id, Screen(tr(locale, 'node_tools.' + action), embedded_buttons=True, navigation=True, lines=
             (tr(locale, 'node_tools.confirm_note'),) + ((tr(locale, 'node_tools.clean_warning'),)
                 if action in {'reinstall_clean', 'cleanup_runtime'} else ())), rows, state, query.message.message_id)
@@ -283,7 +283,7 @@ async def resolve_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, sta
     job_id = query.data.split(':', 1)[1]
     await render(bot, query.message.chat.id, Screen(tr(locale, 'node_tools.resolve'),
         (tr(locale, 'node_tools.resolve_note'),), embedded_buttons=True, navigation=True),
-        [[button(locale, 'back', 'node_job:' + job_id), button(locale, 'node_tools.confirm', 'node_resolve_do:' + job_id)]], state, query.message.message_id)
+        [[button(locale, 'back', 'node_job:' + job_id), button(locale, 'node_tools.confirm', 'node_resolve_do:' + job_id, style='primary')]], state, query.message.message_id)
 
 
 @router.callback_query(F.data.startswith('node_resolve_do:'))
@@ -317,6 +317,7 @@ async def advance_removal(chat_id, user_id, message_id, node_key, bot, backend, 
     from .callbacks import AdminNodesCallback, ConfirmRegistryRemovalCallback
     locale = normalize_locale((await state.get_data()).get('locale'))
     rows = [[button(locale, 'node_tools.refresh', f'remove_progress:{node_key}')]]
+    allow_registry = True
     try:
         result = await backend.remove_node_step(user_id, node_key, retry=retry)
         if result.get('error_code'):
@@ -326,7 +327,8 @@ async def advance_removal(chat_id, user_id, message_id, node_key, bot, backend, 
                     else 'node_tools.removed_note' if result['status'] == 'removed'
                     else 'nodes.maintenance.registry_removed_note')
             await render(bot, chat_id, Screen(tr(locale, 'node_tools.removed'),
-                (tr(locale, note),), embedded_buttons=True, navigation=True),
+                (tr(locale, note),) + ((tr(locale, 'nodes.maintenance.registry_tunnels'),)
+                    if result['status'] == 'removed_registry_only' else ()), embedded_buttons=True, navigation=True),
                 [[button(locale, 'nodes.card.to_list', AdminNodesCallback().pack())]], state, message_id)
             return
         lines = [tr(locale, 'node_tools.removal_progress')]
@@ -336,11 +338,10 @@ async def advance_removal(chat_id, user_id, message_id, node_key, bot, backend, 
             lines.append(tr(locale, 'nodes.maintenance.phase', value=tr(locale,
                 'nodes.maintenance.phase.' + (result['cleanup_phase'] or 'not_started'))))
     except BackendError as exc:
-        rows = [[button(locale, 'node_tools.retry', f'remove_retry:{node_key}')]]
+        allow_registry = exc.code not in {'resource_not_found', 'permission_denied', 'account_disabled'}
+        rows = [[button(locale, 'node_tools.retry', f'remove_retry:{node_key}', style='danger')]]
         if exc.code in {'node_agent_unavailable', 'node_agent_unconfigured'}:
             lines = [tr(locale, 'node_tools.unreachable')]
-            await state.update_data(unreachable_removal_node=node_key)
-            rows.append([button(locale, 'nodes.maintenance.registry_only', ConfirmRegistryRemovalCallback(node_key=node_key).pack())])
         elif exc.code == 'host_verification_failed':
             lines = [tr(locale, 'node_tools.verification_failed')]
         elif exc.code == 'node_revocations_blocked':
@@ -351,6 +352,9 @@ async def advance_removal(chat_id, user_id, message_id, node_key, bot, backend, 
             lines = [tr(locale, 'node_tools.verification_key')]
         else:
             lines = [error(locale, exc)]
+    if allow_registry:
+        rows.append([InlineKeyboardButton(text=tr(locale, 'nodes.maintenance.registry_only'),
+            callback_data=ConfirmRegistryRemovalCallback(node_key=node_key).pack(), style='danger')])
     rows.append([button(locale, 'back', AdminNodeCallback(node_key=node_key).pack())])
     await render(bot, chat_id, Screen(tr(locale, 'nodes.card.delete'),
         (lines[0],), sections=(Section(tr(locale, 'nodes.rich.next_step'),

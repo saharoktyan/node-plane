@@ -106,13 +106,57 @@ Implemented routes:
 - GET /api/v1/me: account token, or delegated adapter token with
   X-Node-Plane-Telegram-User-ID. Role and effective permissions come from backend.
 - GET /openapi.json: generated schema; backend-openapi.json is its checked-in
-  snapshot. No deployment credentials are embedded.
+snapshot. No deployment credentials are embedded.
+
+- GET `/api/v1/system/recovery?offset=0`: requires `maintenance.manage` and returns
+  a bounded inventory of queued/running/blocked controller updates, node actions,
+  agent rollouts, profile intent tasks, removals and backups. Pages contain ten
+  items, operation identity/status/node and applicable action codes, never intent
+  JSON, credentials or driver payloads. Reads remain available during maintenance.
+  Existing update cancel/recheck and node resolve routes perform the actual
+  recovery and revalidate its preconditions. The inventory is a hint, not an
+  authorization or guarantee that a later mutation will succeed.
 
 All responses have a backend-generated X-Request-ID and Cache-Control: no-store.
 Validation errors do not echo submitted values. Duplicate authorization or actor
 headers are rejected. Identity registration stores command identity and account
 link atomically; replay cannot change the target user. This journal is specific
 to registration and is not the executor for future node/config operations.
+
+### Workstation audit
+
+`GET /api/v1/system/workstation-audit?offset=0` requires `maintenance.manage`
+and returns ten events per page. The Telegram Diagnostics & recovery screen
+provides a localized Rich audit viewer with collapsed attribution details.
+
+The privileged SSH bootstrap binds each new workstation credential to a selected
+approved admin account, an account-name snapshot, the SSH login, and the SHA256
+fingerprint of the workstation public key. API mutations record admission and
+HTTP completion with UTC time, request ID, optional UUID command ID, method/path
+and HTTP status. Credential issuance/revocation is also recorded. Request bodies,
+query strings, bearer tokens, SSH private keys and operation output are excluded.
+HTTP completion means the request finished; a 202 response does not establish
+that its background operation succeeded. Follow the command/job journal for that.
+An admitted event without completion has an unknown outcome and is not permission
+to replay the action. A result-journal failure preserves the committed HTTP result.
+
+Audit/context tables have no foreign keys to accounts or credentials and are not
+configuration snapshot tables: deleting an account or restoring configuration
+does not erase its historical attribution. Older assistants without attribution
+continue to work but are not retrospectively identifiable through this journal.
+The chosen admin is an attribution label asserted through privileged SSH, not an
+independent proof of the operator's identity. Root can change labels or journals.
+
+Controller key enrollment is recorded through the root-only workstation helper
+(`audit-enrollment`), never through an anonymous public endpoint. It requires a
+live session belonging to a currently approved admin with recorded attribution.
+The bounded payload contains a UUID command ID, target login/address, SHA256 key
+fingerprint and an allowlisted outcome: admitted, succeeded or unconfirmed.
+Enrollment details and the audit event commit atomically. The target host journal
+shares this command ID, while backend success requires controller-to-node login
+verification. Actual public keys, passwords and free-form error messages are not
+accepted into this audit payload. Initial password-based workstation enrollment
+is logged on the host before a backend account is available.
 
 Token header contents must be injected by the API client, not placed in a URL
 or a shell command. Public binding/TLS and production systemd integration will
@@ -231,8 +275,16 @@ uses `SSH_KEY.pub`. The low-level endpoint requires a public key for local verif
 worker-driven local removal path does not require SSH credentials. Every remote check fails closed if it cannot verify the host.
 `POST /api/v1/nodes/{key}/retire-registry-only` requires explicit acceptance
 that remote artifacts may remain; it is for a lost or expired VPS and never
-reports a verified full cleanup. These HTTP mutations enforce the same file
-lock as the worker and trusted local CLI.
+reports a verified full cleanup or promises that downloaded tunnels stop working.
+Telegram exposes this action in Maintenance and removal progress, including
+blocked revocations and failed host verification. Its confirmation is specific
+to the node and control message and is invalidated by navigation. The backend
+rechecks the administrator's current role and approval, removes grants and
+supersedes unfinished node work. Queued/running installation attempts become
+blocked audit history; after explicit registry retirement they cannot dispatch
+or prevent backup restoration. These HTTP mutations enforce the same file lock
+as the worker and trusted local CLI. A busy worker must finish before removal
+can be confirmed; this action does not forcibly cancel remote commands.
 The worker first performs a read-only agent probe. If runtime files or protocol
 configs are missing, the driver prepares this unmanaged agent: it copies the
 versioned runtime bundle, preserves any existing node.env, and installs Docker.
@@ -247,8 +299,8 @@ restart the node agent first, then retire that exact command through the
 trusted local CLI while holding the worker lock:
 
 ```sh
-PYTHONPATH=app .venv/bin/python -m backend.admin_cli resolve-blocked-node-settings --task-id TASK_UUID --admin-account-id ACCOUNT_UUID --lock-file /opt/node-plane/shared/backend-worker.lock
-PYTHONPATH=app .venv/bin/python -m backend.executor --lock-file /opt/node-plane/shared/backend-worker.lock
+PYTHONPATH=app .venv/bin/python -m backend.admin_cli resolve-blocked-node-settings --task-id TASK_UUID --admin-account-id ACCOUNT_UUID --lock-file /opt/node-plane/shared/data/backend-worker.lock
+PYTHONPATH=app .venv/bin/python -m backend.executor --lock-file /opt/node-plane/shared/data/backend-worker.lock
 ```
 
 The agent inspects live config and containers, marks the old command
@@ -329,15 +381,15 @@ stores a hash of the host's machine ID. It refuses an unreachable agent or
 a different node at the supplied address:
 
 ```sh
-PYTHONPATH=app .venv/bin/python -m backend.admin_cli bind-node-verification-target --node-key NODE --admin-account-id ACCOUNT_UUID --lock-file /opt/node-plane/shared/backend-worker.lock --ssh-target root@node.example --ssh-identity-file /path/to/admin-key
+PYTHONPATH=app .venv/bin/python -m backend.admin_cli bind-node-verification-target --node-key NODE --admin-account-id ACCOUNT_UUID --lock-file /opt/node-plane/shared/data/backend-worker.lock --ssh-target root@node.example --ssh-identity-file /path/to/admin-key
 ```
 
 Use `--local` for the bot host instead of `--ssh-target`. The first
 node-retirement phase is available to a trusted local administrator:
 
 ```sh
-PYTHONPATH=app .venv/bin/python -m backend.admin_cli drain-node --node-key NODE --admin-account-id ACCOUNT_UUID --lock-file /opt/node-plane/shared/backend-worker.lock
-PYTHONPATH=app .venv/bin/python -m backend.executor --lock-file /opt/node-plane/shared/backend-worker.lock
+PYTHONPATH=app .venv/bin/python -m backend.admin_cli drain-node --node-key NODE --admin-account-id ACCOUNT_UUID --lock-file /opt/node-plane/shared/data/backend-worker.lock
+PYTHONPATH=app .venv/bin/python -m backend.executor --lock-file /opt/node-plane/shared/data/backend-worker.lock
 PYTHONPATH=app .venv/bin/python -m backend.admin_cli node-drain-status --node-key NODE --admin-account-id ACCOUNT_UUID
 ```
 
@@ -353,7 +405,7 @@ After all revocations are confirmed, an approved administrator can advance
 backend-owned cleanup one phase at a time, using the same lock file:
 
 ```sh
-PYTHONPATH=app .venv/bin/python -m backend.admin_cli cleanup-node-step --node-key NODE --admin-account-id ACCOUNT_UUID --lock-file /opt/node-plane/shared/backend-worker.lock
+PYTHONPATH=app .venv/bin/python -m backend.admin_cli cleanup-node-step --node-key NODE --admin-account-id ACCOUNT_UUID --lock-file /opt/node-plane/shared/data/backend-worker.lock
 ```
 
 The three calls prepare a durable agent mutation fence, remove runtime/configs
@@ -375,7 +427,7 @@ record. Remote verification requires a separate root SSH identity with a pinned
 known_hosts entry; the bot's SSH key should have been deleted by then:
 
 ```sh
-PYTHONPATH=app .venv/bin/python -m backend.admin_cli verify-and-remove-node --node-key NODE --admin-account-id ACCOUNT_UUID --lock-file /opt/node-plane/shared/backend-worker.lock --bot-public-key-file /path/to/bot-key.pub --ssh-target root@node.example --ssh-identity-file /path/to/admin-key
+PYTHONPATH=app .venv/bin/python -m backend.admin_cli verify-and-remove-node --node-key NODE --admin-account-id ACCOUNT_UUID --lock-file /opt/node-plane/shared/data/backend-worker.lock --bot-public-key-file /path/to/bot-key.pub --ssh-target root@node.example --ssh-identity-file /path/to/admin-key
 ```
 
 For a local node, use `--local` instead of the SSH arguments. Verification
@@ -393,7 +445,7 @@ When the VPS cannot be checked, an administrator can explicitly remove only
 the backend record and abandon all pending work for that node:
 
 ```sh
-PYTHONPATH=app .venv/bin/python -m backend.admin_cli remove-node-registry-only --node-key NODE --admin-account-id ACCOUNT_UUID --lock-file /opt/node-plane/shared/backend-worker.lock --reason 'VPS expired and agent is unreachable' --accept-unverified-runtime
+PYTHONPATH=app .venv/bin/python -m backend.admin_cli remove-node-registry-only --node-key NODE --admin-account-id ACCOUNT_UUID --lock-file /opt/node-plane/shared/data/backend-worker.lock --reason 'VPS expired and agent is unreachable' --accept-unverified-runtime
 ```
 
 This does not claim that remote users, containers or files were removed. A
@@ -505,7 +557,7 @@ After initializing a **fresh development database** and starting the rebuilt
 driver, run a finite drain of the queue:
 
 ```sh
-PYTHONPATH=app .venv/bin/python -m backend.executor --lock-file /opt/node-plane/shared/backend-worker.lock
+PYTHONPATH=app .venv/bin/python -m backend.executor --lock-file /opt/node-plane/shared/data/backend-worker.lock
 ```
 
 Use exactly the same lock path for every invocation. This implementation supports
@@ -625,6 +677,15 @@ changed until rebuilt driver/agent and runtime assets are installed together.
 
 ## Deliberate repair of interrupted work
 
+Queued coordinated updates can be cancelled using
+`POST /api/v1/system/updates/jobs/{job_id}/cancel`; a started/uncertain update
+cannot. `POST /api/v1/system/updates/jobs/{job_id}/recheck` re-reads a blocked
+core outcome without launching another installation. Both require an approved
+administrator with `maintenance.manage` and take the installed worker lock.
+These routes remain accessible behind the update gate, while other mutations
+stay blocked. Only durable successful health/rollback evidence releases that
+gate; missing launch identity and failed rollback still require host recovery.
+
 If a blocked task is not confirmed successful in either journal, stop at the
 block. Restart node-plane-agent.service on that node to stop its previous
 systemd process group. Do not delete the agent journal or call the old profile
@@ -635,9 +696,9 @@ worker and an approved backend administrator account:
 ```sh
 PYTHONPATH=app .venv/bin/python -m backend.admin_cli resolve-blocked \
   --task-id TASK_UUID --admin-account-id ADMIN_ACCOUNT_UUID \
-  --lock-file /opt/node-plane/shared/backend-worker.lock
+  --lock-file /opt/node-plane/shared/data/backend-worker.lock
 PYTHONPATH=app .venv/bin/python -m backend.executor \
-  --lock-file /opt/node-plane/shared/backend-worker.lock
+  --lock-file /opt/node-plane/shared/data/backend-worker.lock
 ```
 
 ResolveProfileIntent checks the full original payload and requires the agent
@@ -743,6 +804,10 @@ the restoring administrator, revokes account credentials and clears operational
 caches. Restored nodes are disabled and unapplied; enable them and apply their
 settings explicitly before issuing fresh configurations. Revisions advance beyond
 the current state so agent fences cannot reject the restored configuration.
+Operational history includes node retirement tombstones and installation attempts:
+they are retained during normal operation, but excluded from configuration
+snapshots and cleared by explicit restoration. A snapshot taken after node
+retirement cannot resurrect its removed grants or node entry.
 
 This is a configuration backup, not a host/filesystem or PostgreSQL disaster
 recovery backup. PostgreSQL snapshot isolation and locking still require deployment
