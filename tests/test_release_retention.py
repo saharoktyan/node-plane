@@ -74,4 +74,3 @@ fixture() {
                 self.assertEqual('retained new old' in result.stdout, healthy)
                 self.assertEqual('rolled-back' in result.stdout, not healthy)
         self.assertLess(text.index('if [[ $SKIP_RESTART -eq 1 ]]', text.index('update_simple()')), start)
-
