@@ -77,7 +77,7 @@ class BackendConfigIssuanceTests(unittest.TestCase):
 
             def refresh_awg_config(self, node_key, wg_conf, profile_name):
                 assert wg_conf.startswith('[Interface]')
-                assert profile_name == 'Latvia #1 AmneziaWG · Alice'
+                assert profile_name == 'Latvia #1 AmneziaWG · Alice · Device 1'
                 return {'wg_conf': '[Interface]\nPrivateKey = private\n\n[Peer]\nEndpoint = node.example:51820\n',
                         'vpn_key': 'vpn://encoded'}
         return Driver()
@@ -148,11 +148,11 @@ class BackendConfigIssuanceTests(unittest.TestCase):
                 artifact = client.get(f'/api/v1/config-issuances/{queued.json()["id"]}/artifact',
                     headers=headers)
                 self.assertEqual(artifact.status_code, 200, artifact.text)
-                self.assertEqual(artifact.json()['display_name'], 'Latvia #1 AmneziaWG · Alice')
+                self.assertEqual(artifact.json()['display_name'], 'Latvia #1 AmneziaWG · Alice · Device 1')
                 self.assertEqual([item['filename'].rsplit('.', 1)[1] for item in artifact.json()['files']],
                                  ['vpn', 'conf'])
                 self.assertEqual(artifact.json()['filename'],
-                                 f'AmneziaWG - Latvia #1 - Alice.{extension}')
+                                 f'AmneziaWG - Latvia #1 - Alice - Device 1.{extension}')
                 self.assertIn('vpn://' if extension == 'vpn' else '[Interface]',
                     artifact.json()['content'])
             self.db.connection.execute('DELETE FROM backend_grants WHERE profile_id = ?', (profile_id,))

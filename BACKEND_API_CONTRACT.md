@@ -1,6 +1,6 @@
 # Backend API and authorization reference
 
-Updated: 2026-10-05. This reference retains the identity, trust and command
+Updated: 2026-10-07. This reference retains the identity, trust and command
 contracts from the original API design; migration logs and obsolete next-step
 lists have been removed. The implemented routes and payloads are authoritative
 in `app/backend/http_api.py` and [backend reference](app/backend/README.md).
@@ -65,6 +65,84 @@ Actual PostgreSQL concurrency evidence is separate from policy tests using SQL
 fakes. Independent component compatibility, retention and recovery limits are
 open closure tasks, not implied by the API version number.
 
+## Node creation and installation defaults
+
+`GET /api/v1/nodes/creation-options` requires `nodes.manage` and returns
+`local_available` and the portable installation defaults. Creating a node or
+changing its connection to local enforces the single-local-node rule inside
+the serialized maintenance transaction. Disabled and deleting nodes retain
+the slot until their registry record is removed. An omitted connection type
+counts as local; SSH nodes do not occupy the local slot. Conflicts return
+`409 local_node_exists`, including concurrent requests.
+
+`GET /api/v1/system/installation-defaults` and `PUT` on the same resource
+require `settings.manage`. Responses include a revision and its quoted ETag;
+PUT requires `If-Match`. The payload contains `protocols`, `xray_transports`
+and `settings`. At least one protocol must remain enabled, and enabled Xray
+requires at least one transport. Settings accept the AWG preset, automatic or
+manual port policy, manual port and interface, plus VLESS SNI, fingerprint,
+TCP/XHTTP ports and XHTTP path. Host addresses, generated keys and other
+node-specific values are not portable defaults. Manual AWG mode requires a
+port; automatic mode must omit a fixed port.
+
+PUT replaces the policy without modifying existing nodes. An identical retry
+against the immediately previous revision returns the stored result; a
+conflicting stale edit returns `412 revision_conflict`. Defaults are included
+in configuration backups. Node creation inherits portable settings, with
+explicit node values taking precedence. API clients still supply their chosen
+protocols. The Telegram wizard reads defaults at entry, presents the effective
+choices in its review and submits those choices as explicit overrides.
+
+## Persistent access to future servers
+
+Regions are catalog records with stable UUIDs, separate from node display labels.
+`GET /api/v1/regions` requires `grants.manage` and supports cursor pagination.
+Admin node representations include `region_id` and `policy_eligible`. The latter
+is the authoritative eligibility flag for client-side access previews, including
+maintenance and removal state. Removing the last node in a
+region preserves the region and its policies for future installations. Creation
+and region edits resolve the supplied label using Unicode normalization, case
+folding and whitespace normalization.
+
+`GET /api/v1/profiles/{id}/access-policy` requires `grants.manage`. It returns
+the profile revision/ETag, `explicit_grants`, `rules`, `exclusions` and computed
+`inherited_grants`. Existing grants remain explicit until a policy is configured.
+`PUT` on the same path replaces explicit sources and policy together, requiring
+`If-Match` and a UUID `Idempotency-Key`. It returns the normal profile command
+result with the effective grants and durable operation ID.
+
+Profile creation and profile `PATCH` also accept an `access_policy` object with
+the same explicit sources, rules and exclusions. This allows creation/approval
+wizards to save access and `expires_at` in one transaction and one profile
+revision. Combining `grants` with `access_policy` is rejected (creation permits
+an empty default grants list). Invalid profile fields roll back policy changes.
+These commands additionally require `grants.manage` and an approved administrator.
+
+A rule contains `scope` (`all` or `region`), `region_id` (null for `all`, a catalog
+UUID for `region`) and a nonempty selection of `awg`/`xray` protocols. Only one
+rule per scope/region is allowed. Explicit grants and exclusions contain
+`node_key` and `protocol`. Exclusions remove inherited access only; independent
+explicit access still wins. Effective access is the union of manual grants and
+matching rules, so removing one overlapping source does not revoke another.
+The existing snapshot grants endpoint replaces manual sources while retaining
+the policy; clients editing policy-enabled profiles must read the sources rather
+than copying the effective list back as manual grants.
+
+New nodes gain derived access after confirmed bootstrap, for the protocols they
+actually provide. Previously installed nodes retain desired access while runtime
+maintenance temporarily disables issuance. Freeze and expiry gate execution and
+issuance; deletion removes the policy. Changes use the existing profile revision
+fences, device-aware outbox and uncertain-outcome recovery. Node drain removes
+its concrete manual sources and prevents policy re-enrollment while retaining
+all-server and regional rules.
+
+`GET /api/v1/nodes/{key}/region-access-preview?region=...` requires `nodes.manage`
+and `grants.manage`. It reports profiles whose policy access would change,
+including future activation of an unbootstrapped node. A region edit affecting
+access requires `grants.manage` and `confirm_access_change: true`; otherwise it
+returns `409 region_policy_review_required`. The command recomputes the effect
+inside the serialized transaction rather than trusting a prior preview.
+
 ## Traffic accounting
 
 An admin-only global switch controls collection and every traffic read. Members
@@ -104,3 +182,75 @@ administrator and active credential; one pre-reset snapshot remains on disk.
 Full removal clears controller data, including an external PostgreSQL deployment,
 and deletes only installer-owned resources. See [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) for remaining retention and
 independent node verification work.
+
+Release history retention is automatic after verified controller activation.
+The current and actual previous working release are retained; manual release
+cleanup routes and Telegram actions have been removed. Full installation
+cleanup remains under `/api/v1/system/cleanup` with `maintenance.manage`.
+
+## Device identity foundation (2026-10-07)
+
+GET `/api/v1/profiles/{profile_id}/devices` uses the same parent-profile read
+authorization as the profile endpoint. It returns `items` with device UUID,
+profile UUID, display name, lifecycle status, revision and creation timestamp;
+internal runtime identities and peer credentials are excluded.
+
+POST the same path to create a named device; PATCH or DELETE
+`/api/v1/profiles/{profile_id}/devices/{device_id}` to rename or revoke it.
+Creation and rename accept `display_name`. All mutations require a UUID
+`Idempotency-Key` and a quoted integer `If-Match`: the profile desired revision
+for creation, the device revision for rename/delete. Creation returns 201,
+rename 200 and deletion 202. Results contain the device, `profile_revision`,
+nullable `operation_id` and `runtime_status`; ETag is the device revision.
+
+Names contain 1–64 normalized characters and are unique within the profile,
+ignoring case and repeated whitespace. Duplicate names return
+`device_name_conflict` (409); invalid names return `invalid_device_name` (422).
+Deleting devices reserve their names until confirmed retirement. Rename is a
+metadata-only change. Create/delete increment the parent revision and use the
+durable profile outbox. Deletion prevents issuance immediately and remains
+`deleting` while remote revocations are uncertain; it becomes `retired` after
+confirmation. A never-provisioned device can retire immediately. Authorization
+is `configs.self.issue` for the owner and `profiles.manage` for administrators
+managing another profile. Foreign devices are hidden with 404.
+
+Existing AWG profile identities are adopted into a default Device 1 without
+changing remote peers or queued intent payloads. New configuration snapshots use
+`node-plane-backend-v3` and include devices, region identities and access sources.
+Validated v1/v2 snapshots are converted in memory while keeping the original
+checksum for restore confirmation; their grants remain manual. See
+[DEVICES_AND_PROVISIONING_PLAN.md](DEVICES_AND_PROVISIONING_PLAN.md) for the
+remaining device-aware execution, issuance and interface work.
+
+The execution slice now distinguishes AWG tasks by device UUID without altering
+legacy command identities. Operation task representations include nullable
+`device_id`; VLESS remains profile-based. Node retirement requires confirmation
+for every device peer, and node readiness considers all active devices.
+
+POST `/api/v1/profiles/{profile_id}/config-issuances` accepts optional `device_id`
+for AWG and returns the selected device UUID. Omission selects the sole active
+device; ambiguity returns `device_required`, and inactive devices return
+`device_unavailable`. A foreign device is hidden with `resource_not_found`.
+Passing a device to a VLESS request is unsupported. AWG artifacts bind to the
+device revision as well as the existing profile/node revisions; peer deletion
+and renaming invalidate stale artifacts. AWG labels and filenames include the
+device display name.
+
+Traffic collection uses private per-device AWG baselines and the existing
+aggregate monthly response. Unknown peer observations never become zero usage,
+and admin policy changes reset all peer baselines to exclude the paused period.
+These accounting baselines are not configuration snapshot data.
+
+## Automatic AWG ports (2026-10-07)
+
+Node settings accept `awg_port_mode` (`auto` or `manual`). Omitted ports use
+automatic preset defaults: QUIC UDP/443, DNS UDP/53, Chaos a random UDP port in
+1024–9999. An explicit port with no mode defaults to manual. The target agent
+checks UDP listeners and Docker publications, then chooses a bounded fallback
+when needed. Routine apply tries the stored port first and does not randomize
+an available port. Manual ports are not replaced by a fallback.
+
+Verified runtime results include `awg_port` and a digest of the effective
+settings. The controller validates the candidate policy and digest before
+persisting the actual port, keeping the original durable command unchanged.
+An uncertain deployment or a late bind failure remains blocked for recovery.

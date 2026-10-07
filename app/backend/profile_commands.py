@@ -58,8 +58,8 @@ class ProfileCommands:
             key = str(UUID(key))
         except (TypeError, ValueError, AttributeError):
             raise AccessDenied('invalid_idempotency_key', 422) from None
-        require_permission(actor, 'grants.manage' if action == 'grants' else 'profiles.manage')
-        if action not in {'create', 'edit', 'grants', 'delete'}:
+        require_permission(actor, 'grants.manage' if action in {'grants', 'policy'} else 'profiles.manage')
+        if action not in {'create', 'edit', 'grants', 'policy', 'delete'}:
             raise ValueError('unknown profile command')
         values = values or {}
         fingerprint = hashlib.sha256(json.dumps({'action': action, 'profile_id': profile_id,
@@ -68,6 +68,10 @@ class ProfileCommands:
         with self.db.transaction() as conn:
             from .maintenance_gate import admit
             admit(conn)
+            if action == 'policy' or values.get('access_policy') is not None:
+                account = conn.execute('SELECT role,status FROM backend_accounts WHERE id=?', (actor.account.id,)).fetchone()
+                if not account or account['role'] != 'admin' or account['status'] != 'approved':
+                    raise AccessDenied('permission_denied')
             conn.execute('''INSERT INTO backend_profile_commands(principal_id, actor_id, command_key, fingerprint)
                 VALUES (?, ?, ?, ?) ON CONFLICT(principal_id, actor_id, command_key) DO NOTHING''', (*identity, fingerprint))
             record = conn.execute('''SELECT fingerprint, result_json FROM backend_profile_commands
@@ -80,7 +84,7 @@ class ProfileCommands:
             if profile_id is not None:
                 previous_targets = OperationRepository.targets(conn, profile_id)
             if action == 'create':
-                if set(values) - {'display_name', 'owner_account_id', 'grants', 'expires_at'}:
+                if set(values) - {'display_name', 'owner_account_id', 'grants', 'expires_at', 'access_policy'}:
                     raise AccessDenied('invalid_input', 422)
                 display_name = values.get('display_name')
                 if not isinstance(display_name, str) or not display_name.strip() or len(display_name) > 128:
@@ -88,6 +92,13 @@ class ProfileCommands:
                 owner = values.get('owner_account_id')
                 if owner is not None and conn.execute('UPDATE backend_accounts SET status = status WHERE id = ? RETURNING id', (owner,)).fetchone() is None:
                     raise AccessDenied('owner_not_found', 422)
+                policy = values.get('access_policy')
+                if policy is not None:
+                    require_permission(actor, 'grants.manage')
+                    if values.get('grants'):
+                        raise AccessDenied('invalid_input', 422)
+                    from .grant_policies import validate
+                    policy = validate(conn, policy)
                 grants = self.validate_grants(conn, values.get('grants', []))
                 expires_at = self.expiry(conn, owner, values.get('expires_at'))
                 profile_id = str(uuid4())
@@ -99,6 +110,10 @@ class ProfileCommands:
                 for node_key, protocol in sorted(grants):
                     conn.execute('INSERT INTO backend_grants(profile_id, node_key, protocol) VALUES (?, ?, ?)',
                                  (profile_id, node_key, protocol))
+                if policy is not None:
+                    from .grant_policies import store, materialize
+                    store(conn, profile_id, policy)
+                    materialize(conn, profile_id)
             else:
                 if revision is None:
                     raise AccessDenied('revision_required', 428)
@@ -122,12 +137,22 @@ class ProfileCommands:
                     conn.execute('''INSERT INTO backend_profile_deletions(profile_id, requested_at)
                         VALUES (?, ?)''', (profile_id, datetime.now(timezone.utc).isoformat()))
                     conn.execute('DELETE FROM backend_grants WHERE profile_id = ?', (profile_id,))
+                    conn.execute('DELETE FROM backend_grant_policies WHERE profile_id = ?', (profile_id,))
                     cursor = conn.execute('''UPDATE backend_profiles
                         SET frozen = 1, desired_revision = desired_revision + 1
                         WHERE id = ? AND desired_revision = ? RETURNING id''', (profile_id, revision))
                 elif action == 'edit':
-                    if not values or set(values) - {'display_name', 'frozen', 'expires_at', 'grants'}:
+                    if not values or set(values) - {'display_name', 'frozen', 'expires_at', 'grants', 'access_policy'}:
                         raise AccessDenied('invalid_input', 422)
+                    if 'access_policy' in values:
+                        require_permission(actor, 'grants.manage')
+                        if 'grants' in values:
+                            raise AccessDenied('invalid_input', 422)
+                        from .grant_policies import validate, store, materialize
+                        policy = validate(conn, values['access_policy'])
+                        store(conn, profile_id, policy)
+                        materialize(conn, profile_id)
+                        values = {k: v for k, v in values.items() if k != 'access_policy'}
                     editing_grants = 'grants' in values
                     if editing_grants:
                         require_permission(actor, 'grants.manage')
@@ -147,6 +172,12 @@ class ProfileCommands:
                     parameters = [int(values[field]) if field == 'frozen' else values[field] for field in sorted(values)]
                     cursor = conn.execute(f'UPDATE backend_profiles SET {assignments}desired_revision = desired_revision + 1 WHERE id = ? AND desired_revision = ? RETURNING id',
                                          (*parameters, profile_id, revision))
+                elif action == 'policy':
+                    from .grant_policies import validate, store, materialize
+                    policy = validate(conn, values)
+                    store(conn, profile_id, policy)
+                    materialize(conn, profile_id)
+                    cursor = conn.execute('UPDATE backend_profiles SET desired_revision = desired_revision + 1 WHERE id = ? AND desired_revision = ? RETURNING id', (profile_id, revision))
                 else:
                     grants = values.get('grants')
                     if set(values) != {'grants'}:
@@ -158,9 +189,8 @@ class ProfileCommands:
                 if action == 'delete' and row['owner_account_id']:
                     ProfileRepository.revoke_orphaned_members(conn, row['owner_account_id'])
                 if action == 'grants' or (action == 'edit' and editing_grants):
-                    conn.execute('DELETE FROM backend_grants WHERE profile_id = ?', (profile_id,))
-                    for node_key, protocol in sorted(seen):
-                        conn.execute('INSERT INTO backend_grants(profile_id, node_key, protocol) VALUES (?, ?, ?)', (profile_id, node_key, protocol))
+                    from .grant_policies import replace_explicit
+                    replace_explicit(conn, profile_id, seen)
             result = self.result(conn, profile_id)
             operation = OperationRepository.record(conn, actor, profile_id, previous_targets)
             if action == 'delete':

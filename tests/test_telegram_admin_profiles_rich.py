@@ -31,10 +31,12 @@ class ProfileRichTests(IsolatedAsyncioTestCase):
         self.backend = SimpleNamespace(
             request=AsyncMock(return_value=self.profile),
             profile_grants=AsyncMock(return_value={'items': self.grants}),
+            profile_access_policy=AsyncMock(side_effect=lambda *_: {'revision': self.profile['desired_revision'],
+                'explicit_grants': self.grants, 'rules': [], 'exclusions': []}),
             admin_nodes=AsyncMock(return_value={'items': self.nodes}),
             profile_operation=AsyncMock(return_value={'status': 'blocked',
                 'tasks': [{'node_key': 'n00', 'protocol': 'awg', 'status': 'blocked'}]}),
-            edit_profile=AsyncMock(), replace_grants=AsyncMock())
+            edit_profile=AsyncMock(), replace_grants=AsyncMock(), replace_access_policy=AsyncMock())
 
     async def test_profile_card_traffic_and_separate_region_paged_server_view(self):
         from telegram_client.i18n import tr
@@ -149,12 +151,12 @@ class ProfileRichTests(IsolatedAsyncioTestCase):
         self.query.data = 'admin_profile_grants_save:p1'
         with patch.object(profiles, 'show_admin_profile', new_callable=AsyncMock):
             await profiles.save_grants_cb(self.query, self.bot, self.backend, self.state)
-        self.assertEqual(self.backend.replace_grants.call_args.args[2], 7)
+        self.assertEqual(self.backend.replace_access_policy.call_args.args[2], 7)
 
     async def test_revision_conflict_preserves_unsaved_grants_for_review(self):
         await profiles._ensure_grant_draft(self.backend, 123, 'p1', self.state)
         self.data['draft_grants'].append({'node_key': 'n00', 'protocol': 'xray'})
-        self.backend.replace_grants.side_effect = BackendError('revision_conflict', 412)
+        self.backend.replace_access_policy.side_effect = BackendError('revision_conflict', 412)
         self.query.data = 'admin_profile_grants_save:p1'
         with patch.object(profiles, 'show_admin_profile', new_callable=AsyncMock) as card:
             await profiles.save_grants_cb(self.query, self.bot, self.backend, self.state)

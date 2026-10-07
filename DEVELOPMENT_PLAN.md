@@ -1,9 +1,14 @@
 # Development plan
 
-Updated: 2026-10-06. This is the only active development backlog. It replaces
+Updated: 2026-10-07. This is the main active development backlog. It replaces
 the historical roadmap, migration/parity maps, Rich UI plans, protocol upgrade
 plans and the implementation audit. Architecture and operator references are
 separate documents, not competing task lists.
+
+The next AWG/device and provisioning work package is specified in
+[DEVICES_AND_PROVISIONING_PLAN.md](DEVICES_AND_PROVISIONING_PLAN.md). Follow its
+delivery order: preserve existing peer identities before enabling additional
+devices, then address port policies, defaults and access to future servers.
 
 ## Baseline and completed work
 

@@ -88,6 +88,9 @@ class SystemCleanupService:
             "backend_accounts",
             "backend_profiles",
             "backend_grants",
+            "backend_grant_policies",
+            "backend_regions",
+            "backend_node_regions",
             "backend_nodes",
             "backend_node_connections",
         ):

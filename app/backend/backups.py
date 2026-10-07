@@ -27,17 +27,22 @@ TABLES = (
     "backend_telegram_identity_details",
     "backend_system_settings",
     "backend_nodes",
+    "backend_regions",
+    "backend_node_regions",
     "backend_node_connections",
     "backend_node_notes",
     "backend_profiles",
+    "backend_devices",
     "backend_profile_identities",
     "backend_grants",
+    "backend_grant_policies",
     "backend_access_requests",
 )
 CLEAR = (
     "backend_system_cleanup_items",
     "backend_system_cleanup_jobs",
     "backend_system_cleanup_plans",
+    "backend_traffic_peers",
     "backend_traffic_usage",
     "backend_alert_deliveries",
     "backend_alert_events",
@@ -50,6 +55,7 @@ CLEAR = (
     "backend_operations",
     "backend_profile_deletions",
     "backend_profile_commands",
+    "backend_device_commands",
     "backend_node_settings_tasks",
     "backend_node_commands",
     "backend_agent_rollout_failures",
@@ -173,9 +179,11 @@ class BackupService:
             raise AccessDenied("resource_not_found", 404)
         try:
             payload = json.loads(path.read_bytes())
-            if payload["format"] != "node-plane-backend-v1" or set(
-                payload["tables"]
-            ) != set(TABLES):
+            legacy = payload['format'] == 'node-plane-backend-v1'
+            from .grant_policies import TABLE_COLUMNS, canonical_region
+            old_policy = payload['format'] in ('node-plane-backend-v1', 'node-plane-backend-v2')
+            expected_tables = set(TABLES) - (set(TABLE_COLUMNS) if old_policy else set()) - ({'backend_devices'} if legacy else set())
+            if payload['format'] not in ('node-plane-backend-v1', 'node-plane-backend-v2', 'node-plane-backend-v3') or set(payload['tables']) != expected_tables:
                 raise ValueError()
             if (
                 hashlib.sha256(encoded(payload["tables"])).hexdigest()
@@ -192,6 +200,30 @@ class BackupService:
                     for row in data["rows"]
                 ):
                     raise ValueError()
+            if legacy:
+                # Verify the original snapshot checksum before conversion.
+                # Keep that checksum as the restore confirmation identity.
+                from .devices import DEVICE_COLUMNS, default_device
+                awg_profiles = {row['profile_id'] for row in payload['tables']['backend_grants']['rows'] if row['protocol'] == 'awg'}
+                payload['tables']['backend_devices'] = {
+                    'columns': list(DEVICE_COLUMNS),
+                    'rows': [default_device(row, payload['created_at'])
+                             for row in payload['tables']['backend_profiles']['rows']
+                             if row['id'] in awg_profiles],
+                }
+            if old_policy:
+                from uuid import NAMESPACE_URL, uuid5
+                regions = {}
+                links = []
+                for node in payload['tables']['backend_nodes']['rows']:
+                    canonical = canonical_region(node['region'])
+                    region_id = str(uuid5(NAMESPACE_URL, 'node-plane:region:' + canonical))
+                    regions.setdefault(canonical, {'id': region_id, 'title': node['region'], 'canonical': canonical})
+                    links.append({'node_key': node['key'], 'region_id': region_id})
+                rows = {'backend_regions': list(regions.values()), 'backend_node_regions': links,
+                        'backend_grant_policies': []}
+                for table, columns in TABLE_COLUMNS.items():
+                    payload['tables'][table] = {'columns': columns, 'rows': rows[table]}
             return payload
         except (ValueError, KeyError, TypeError):
             raise AccessDenied("backup_invalid", 409) from None
@@ -404,7 +436,7 @@ class BackupService:
                 pass
         backup_id = str(uuid4())
         payload = {
-            "format": "node-plane-backend-v1",
+            "format": "node-plane-backend-v3",
             "created_at": now(),
             "trigger": trigger,
             "app_version": APP_VERSION,

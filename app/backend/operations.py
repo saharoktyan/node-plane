@@ -27,12 +27,17 @@ class OperationRepository:
             conn.execute("""CREATE TABLE IF NOT EXISTS backend_operation_tasks (
                 id TEXT PRIMARY KEY, operation_id TEXT NOT NULL REFERENCES backend_operations(id),
                 node_key TEXT NOT NULL, protocol TEXT NOT NULL CHECK(protocol IN ('awg', 'xray')),
+                device_id TEXT NOT NULL DEFAULT '',
                 action TEXT NOT NULL CHECK(action IN ('ensure', 'delete')),
                 status TEXT NOT NULL CHECK(status IN ('awaiting_executor', 'running', 'succeeded', 'blocked', 'superseded')),
                 intent_json TEXT NOT NULL, result_json TEXT, driver_operation_id TEXT,
-                inspection_json TEXT, inspected_at TEXT,
-                UNIQUE(operation_id, node_key, protocol)
+                inspection_json TEXT, inspected_at TEXT
             )""")
+            if getattr(self.db, 'backend_name', '') == 'postgres':
+                conn.execute("ALTER TABLE backend_operation_tasks ADD COLUMN IF NOT EXISTS device_id TEXT NOT NULL DEFAULT ''")
+                conn.execute('ALTER TABLE backend_operation_tasks DROP CONSTRAINT IF EXISTS backend_operation_tasks_operation_id_node_key_protocol_key')
+            conn.execute('''CREATE UNIQUE INDEX IF NOT EXISTS backend_operation_task_target
+                ON backend_operation_tasks(operation_id,node_key,protocol,device_id)''')
             conn.execute("""CREATE TABLE IF NOT EXISTS backend_profile_identities (
                 profile_id TEXT PRIMARY KEY REFERENCES backend_profiles(id),
                 xray_uuid TEXT NOT NULL, xray_short_id TEXT NOT NULL
@@ -45,6 +50,18 @@ class OperationRepository:
                 created_at TEXT NOT NULL
             )""")
             conn.execute('CREATE INDEX IF NOT EXISTS backend_operations_profile ON backend_operations(profile_id, desired_revision)')
+            from .devices import DeviceRepository
+            DeviceRepository.adopt_existing(conn)
+            # Only metadata changes: existing command IDs and immutable intent
+            # payloads still match the driver/agent journals during recovery.
+            conn.execute('''UPDATE backend_operation_tasks SET device_id=(
+                SELECT d.id FROM backend_devices d JOIN backend_operations o ON o.profile_id=d.profile_id
+                JOIN backend_profiles p ON p.id=o.profile_id
+                WHERE o.id=backend_operation_tasks.operation_id AND d.runtime_name=p.runtime_name)
+                WHERE protocol='awg' AND device_id='' AND EXISTS (
+                    SELECT 1 FROM backend_devices d JOIN backend_operations o ON o.profile_id=d.profile_id
+                    JOIN backend_profiles p ON p.id=o.profile_id
+                    WHERE o.id=backend_operation_tasks.operation_id AND d.runtime_name=p.runtime_name)''')
 
     @staticmethod
     def targets(conn, profile_id):
@@ -61,6 +78,9 @@ class OperationRepository:
         grants = conn.execute('SELECT node_key, protocol FROM backend_grants WHERE profile_id = ?', (profile_id,)).fetchall()
         current_targets = {(r['node_key'], r['protocol']) for r in grants}
         targets = previous_targets | current_targets
+        if any(protocol == 'awg' for _, protocol in targets):
+            from .devices import DeviceRepository
+            DeviceRepository.ensure_default(conn, profile)
         now = datetime.now(timezone.utc)
         active = not profile['frozen'] and (profile['expires_at'] is None or datetime.fromisoformat(profile['expires_at']) > now)
         conn.execute("""INSERT INTO backend_profile_identities(profile_id, xray_uuid, xray_short_id)
@@ -82,13 +102,19 @@ class OperationRepository:
         for node_key, protocol in actionable_targets:
             node = conn.execute('SELECT enabled FROM backend_nodes WHERE key = ?', (node_key,)).fetchone()
             action = 'ensure' if active and node is not None and node['enabled'] and (node_key, protocol) in current_targets else 'delete'
-            intent = {'version': 1, 'profile_id': profile_id, 'runtime_name': profile['runtime_name'],
-                      'desired_revision': profile['desired_revision'], 'node_key': node_key,
-                      'protocol': protocol, 'action': action, 'expires_at': profile['expires_at']}
-            if protocol == 'xray' and action == 'ensure':
-                intent['xray'] = {'uuid': identity['xray_uuid'], 'short_id': identity['xray_short_id']}
-            conn.execute("""INSERT INTO backend_operation_tasks(id, operation_id, node_key, protocol, action, status, intent_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?)""", (str(uuid4()), operation_id, node_key, protocol, action, 'awaiting_executor', json.dumps(intent, sort_keys=True)))
+            peers = (conn.execute('SELECT * FROM backend_devices WHERE profile_id=? ORDER BY id', (profile_id,)).fetchall()
+                     if protocol == 'awg' else [{'id': '', 'runtime_name': profile['runtime_name'], 'status': 'active'}])
+            for peer in peers:
+                peer_action = action if peer['status'] == 'active' else 'delete'
+                intent = {'version': 1, 'profile_id': profile_id, 'runtime_name': peer['runtime_name'],
+                          'desired_revision': profile['desired_revision'], 'node_key': node_key,
+                          'protocol': protocol, 'action': peer_action, 'expires_at': profile['expires_at']}
+                if protocol == 'xray' and peer_action == 'ensure':
+                    intent['xray'] = {'uuid': identity['xray_uuid'], 'short_id': identity['xray_short_id']}
+                conn.execute('''INSERT INTO backend_operation_tasks
+                    (id,operation_id,node_key,protocol,device_id,action,status,intent_json)
+                    VALUES (?,?,?,?,?,?,?,?)''', (str(uuid4()),operation_id,node_key,protocol,peer['id'],
+                        peer_action,'awaiting_executor',json.dumps(intent,sort_keys=True)))
         return {'id': operation_id, 'status': status}
 
     def get(self, actor, operation_id):
@@ -102,8 +128,8 @@ class OperationRepository:
                     require_permission(actor, 'profiles.manage')
                 except AccessDenied:
                     raise AccessDenied('resource_not_found', 404) from None
-            tasks = conn.execute('SELECT id, node_key, protocol, action, status, inspection_json, inspected_at FROM backend_operation_tasks WHERE operation_id = ? ORDER BY node_key, protocol', (operation_id,)).fetchall()
-            return {field: row[field] for field in ('id', 'profile_id', 'desired_revision', 'status', 'created_at')} | {'tasks': [{**{key: t[key] for key in ('id', 'node_key', 'protocol', 'action', 'status', 'inspected_at')}, 'inspection': json.loads(t['inspection_json']) if t['inspection_json'] else None} for t in tasks]}
+            tasks = conn.execute('SELECT id, node_key, protocol, device_id, action, status, inspection_json, inspected_at FROM backend_operation_tasks WHERE operation_id = ? ORDER BY node_key, protocol, device_id', (operation_id,)).fetchall()
+            return {field: row[field] for field in ('id', 'profile_id', 'desired_revision', 'status', 'created_at')} | {'tasks': [{**{key: t[key] for key in ('id', 'node_key', 'protocol', 'action', 'status', 'inspected_at')}, 'device_id': t['device_id'] or None, 'inspection': json.loads(t['inspection_json']) if t['inspection_json'] else None} for t in tasks]}
 
     def latest_for_profile(self, actor, profile_id):
         require_permission(actor, 'operations.read')

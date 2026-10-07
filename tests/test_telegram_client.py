@@ -378,7 +378,9 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             with patch.object(admin_node_tools, 'show_section', new_callable=AsyncMock):
                 await admin_nodes.select_awg_preset(self.query, self.bot, backend, self.state)
             body = self.state_data['node_settings_draft']['values']
-            self.assertEqual(body['settings'], {'awg_port': 51820, 'awg_i1_preset': preset})
+            self.assertEqual(body['settings']['awg_i1_preset'], preset)
+            self.assertEqual(body['settings']['awg_port_mode'], 'auto')
+            self.assertNotIn('awg_port', body['settings'])
         backend.edit_node.assert_not_awaited()
 
     async def test_node_action_preserves_command_idempotency_header(self):
@@ -745,10 +747,12 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
 
     async def test_awg_selection_issues_bundle_without_format_selector(self):
         backend = SimpleNamespace(profile_nodes=AsyncMock(return_value={'items': [
-            {'key': 'lv1', 'title': 'Latvia', 'protocols': [{'kind': 'awg'}]}]}))
+            {'key': 'lv1', 'title': 'Latvia', 'protocols': [{'kind': 'awg'}]}]}),
+            request=AsyncMock(return_value={'items': [{'id': 'phone', 'display_name': 'Phone', 'status': 'active'}]}))
         with patch.object(user, 'issue', new_callable=AsyncMock) as issue:
             await user.show_protocol(123, 123, 77, 'p1', 'lv1', 'awg', self.bot, backend, self.state)
         self.assertEqual(issue.call_args.args[3:7], ('p1', 'lv1', 'awg', 'vpn'))
+        self.assertEqual(issue.call_args.kwargs['device_id'], 'phone')
 
     async def test_server_sections_bind_protocol_buttons_to_the_correct_node(self):
         backend = SimpleNamespace(
@@ -890,13 +894,14 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         backend = SimpleNamespace(admin_nodes=AsyncMock(return_value={'items': [
             {'key': 'lv1', 'title': 'Latvia', 'flag': '🇱🇻', 'protocols': ['awg', 'xray']}]}),
             profile_grants=AsyncMock(return_value={'items': []}),
+            profile_access_policy=AsyncMock(return_value={'revision': 1, 'explicit_grants': [], 'rules': [], 'exclusions': []}),
             request=AsyncMock(return_value={'desired_revision': 1}))
         self.state_data['draft_profile_name'] = 'Alice'
         with patch.object(admin_profiles, 'render', new_callable=AsyncMock) as draw:
             await admin_profiles.show_create_nodes(123, 123, 77, self.bot, backend, self.state)
-            self.assertEqual(draw.call_args.args[2].sections[1].sections[0].title, '🇱🇻 Latvia')
+            self.assertEqual(next(s for s in draw.call_args.args[2].sections if s.sections).sections[0].title, '🇱🇻 Latvia')
             await admin_profiles.show_grant_nodes(123, 123, 77, 'p1', self.bot, backend, self.state)
-            self.assertEqual(draw.call_args.args[2].sections[1].sections[0].title, '🇱🇻 Latvia')
+            self.assertEqual(next(s for s in draw.call_args.args[2].sections if s.sections).sections[0].title, '🇱🇻 Latvia')
 
     async def test_plain_config_fallback_preserves_downloads(self):
         backend = SimpleNamespace(
@@ -996,10 +1001,13 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
 
     async def test_grants_are_saved_together_with_profile_revision(self):
         backend = SimpleNamespace(
+            profile_access_policy=AsyncMock(return_value={'revision': 7, 'explicit_grants': [
+                {'node_key': 'lv1', 'protocol': 'awg'}], 'rules': [], 'exclusions': []}),
+            admin_nodes=AsyncMock(return_value={'items': [{'key': 'lv1', 'title': 'Latvia', 'protocols': ['awg', 'xray']}]}),
             profile_grants=AsyncMock(return_value={'items': [
                 {'node_key': 'lv1', 'protocol': 'awg'}]}),
             request=AsyncMock(return_value={'desired_revision': 7}),
-            replace_grants=AsyncMock())
+            replace_grants=AsyncMock(), replace_access_policy=AsyncMock())
         with patch.object(admin_profiles, 'show_grant_protocols', new_callable=AsyncMock):
             await admin_profiles.change_grant(self.query, 'p1', 'lv1', 'xray',
                 True, self.bot, backend, self.state)
@@ -1010,12 +1018,15 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         self.query.data = 'admin_profile_grants_save:p1'
         with patch.object(admin_profiles, 'show_admin_profile', new_callable=AsyncMock):
             await admin_profiles.save_grants_cb(self.query, self.bot, backend, self.state)
-        backend.replace_grants.assert_awaited_once_with(123, 'p1', 7,
-            [{'node_key': 'lv1', 'protocol': 'awg'},
-             {'node_key': 'lv1', 'protocol': 'xray'}])
+        self.assertEqual(backend.replace_access_policy.call_args.args[:4], (123, 'p1', 7,
+            {'explicit_grants': [{'node_key': 'lv1', 'protocol': 'awg'},
+             {'node_key': 'lv1', 'protocol': 'xray'}], 'rules': [], 'exclusions': []}))
 
     async def test_protocol_buttons_pack_required_callback_fields(self):
         backend = SimpleNamespace(
+            profile_access_policy=AsyncMock(return_value={'revision': 1, 'explicit_grants': [
+                {'node_key': 'lv1', 'protocol': 'awg'}], 'rules': [], 'exclusions': []}),
+            admin_nodes=AsyncMock(return_value={'items': [{'key': 'lv1', 'title': 'Latvia', 'protocols': ['awg', 'xray']}]}),
             profile_grants=AsyncMock(return_value={'items': [
                 {'node_key': 'lv1', 'protocol': 'awg'}]}),
             request=AsyncMock(return_value={'title': 'Latvia',

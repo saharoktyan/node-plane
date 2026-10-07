@@ -24,7 +24,6 @@ import backend.admin_cli
 import telegram_client.main
 import services.updates
 import services.backups
-import services.release_cleanup
 '''
             result = subprocess.run([sys.executable, '-c', program],
                 cwd=Path(__file__).resolve().parents[1],

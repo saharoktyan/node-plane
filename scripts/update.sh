@@ -3,9 +3,23 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+if [[ -f "${REPO_ROOT}/CONTROLLER_PACKAGE.json" && -z "${NODE_PLANE_SHARED_DIR:-}" ]]; then
+  if [[ "$REPO_ROOT" == */current ]]; then
+    NODE_PLANE_BASE_DIR="${REPO_ROOT%/current}"
+  elif [[ "$(basename "$(dirname "$REPO_ROOT")")" == releases ]]; then
+    NODE_PLANE_BASE_DIR="$(dirname "$(dirname "$REPO_ROOT")")"
+  fi
+  if [[ -n "${NODE_PLANE_BASE_DIR:-}" ]]; then
+    NODE_PLANE_SHARED_DIR="${NODE_PLANE_BASE_DIR}/shared"
+    NODE_PLANE_APP_DIR="${NODE_PLANE_BASE_DIR}/current"
+  fi
+fi
 source "${SCRIPT_DIR}/postgres_runtime.sh"
 source "${SCRIPT_DIR}/python_runtime.sh"
+source "${SCRIPT_DIR}/uv_runtime.sh"
 source "${SCRIPT_DIR}/lib/stack_update.sh"
+source "${SCRIPT_DIR}/lib/controller_archive.sh"
+FROM_SOURCE=0
 
 MODE="${MODE:-auto}"
 TARGET_BRANCH="${NODE_PLANE_UPDATE_BRANCH:-}"
@@ -53,6 +67,7 @@ on_error() {
 }
 
 trap 'on_error $?' ERR
+trap cleanup_controller_archive EXIT
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -62,6 +77,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --mode=*)
       MODE="${1#*=}"
+      shift
+      ;;
+    --from-source)
+      FROM_SOURCE=1
       shift
       ;;
     --skip-pull)
@@ -120,8 +139,9 @@ Modes:
 
 Flags:
   --branch           Branch to use as the update source
-  --to               Explicit git ref or tag to install
-  --skip-pull        Do not run git pull --ff-only
+  --to               Published release tag; Git refs are available with --from-source
+  --from-source      Development only: export a Git checkout instead of downloading an archive
+  --skip-pull        Skip fetching Git refs in --from-source mode
   --skip-deps        Unsupported in release-based systemd updates.
   --skip-restart     Do not restart the service/container after applying changes
   --health-timeout   Seconds to wait for node-plane-telegram.service to become active after restart
@@ -135,6 +155,9 @@ EOF
   esac
 done
 
+if [[ "$FROM_SOURCE" == 1 && -n "${NODE_PLANE_SOURCE_DIR:-}" ]]; then
+  REPO_ROOT="$NODE_PLANE_SOURCE_DIR"
+fi
 cd "$REPO_ROOT"
 
 need_cmd() {
@@ -151,6 +174,7 @@ has_cmd() {
 read_env_value() {
   local key="$1"
   local file="${2:-.env}"
+  if [[ "$file" == .env && -n "${NODE_PLANE_SHARED_DIR:-}" ]]; then file="${NODE_PLANE_SHARED_DIR}/.env"; fi
   if [[ ! -f "$file" ]]; then
     return 0
   fi
@@ -227,6 +251,7 @@ print_version() {
 
 current_git_commit() {
   local ref="${1:-HEAD}"
+  if [[ -n "${CONTROLLER_COMMIT:-}" ]]; then echo "$CONTROLLER_COMMIT"; return; fi
   if git rev-parse --short "$ref" >/dev/null 2>&1; then
     git rev-parse --short "$ref"
   else
@@ -237,6 +262,7 @@ current_git_commit() {
 read_version_at_ref() {
   local ref="${1:-HEAD}"
   local value
+  if [[ -n "${CONTROLLER_VERSION:-}" ]]; then echo "$CONTROLLER_VERSION"; return; fi
   value="$(git show "${ref}:VERSION" 2>/dev/null | tr -d '\n' || true)"
   if [[ -n "$value" ]]; then
     echo "$value"
@@ -274,6 +300,10 @@ unique_release_id() {
 export_release_tree() {
   local destination="$1"
   local ref="${2:-HEAD}"
+  if [[ -n "${CONTROLLER_STAGE_DIR:-}" ]]; then
+    cp -a "$CONTROLLER_STAGE_DIR" "$destination"
+    return
+  fi
   mkdir -p "$destination"
   if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     git archive "$ref" | tar -xf - -C "$destination"
@@ -310,12 +340,23 @@ sync_shared_env() {
     echo "No runtime environment found for the update" >&2
     return 1
   fi
-  set_env_value_in_file "$temporary" "NODE_PLANE_SOURCE_DIR" "$REPO_ROOT"
+  if [[ "${FROM_SOURCE:-1}" == 0 ]]; then
+    set_env_value_in_file "$temporary" "NODE_PLANE_SOURCE_DIR" "$(read_env_value NODE_PLANE_APP_DIR "$temporary")"
+  else
+    set_env_value_in_file "$temporary" "NODE_PLANE_SOURCE_DIR" "$REPO_ROOT"
+  fi
   set_env_value_in_file "$temporary" "NODE_PLANE_INSTALL_MODE" "$MODE"
   mv -f "$temporary" "$runtime_env"
 }
 
 fetch_code() {
+  if [[ "$FROM_SOURCE" == 0 ]]; then
+    local archive_branch="${TARGET_BRANCH:-$(read_env_value NODE_PLANE_UPDATE_BRANCH)}"
+    set_step "download and verify controller archive"
+    prepare_controller_archive "${archive_branch:-main}" "$TARGET_REF"
+    TARGET_REF="$CONTROLLER_REF"
+    return
+  fi
   if [[ $SKIP_PULL -eq 1 ]]; then
     echo "Skipping git fetch"
     return 0
@@ -384,34 +425,6 @@ wait_for_service() {
     elapsed=$((elapsed + 2))
   done
   return 1
-}
-
-print_python_runtime_help() {
-  cat >&2 <<'EOF'
-Python runtime is incomplete for Node Plane simple mode.
-Required: Python 3.11 or 3.12 with working venv + pip.
-
-Debian/Ubuntu:
-  apt-get update
-  apt-get install -y python3.12-venv
-
-RHEL/Fedora:
-  dnf install -y python3.12 python3.12-pip
-EOF
-}
-
-ensure_venv_python_has_pip() {
-  local python_bin="$1"
-  if "$python_bin" -m pip --version >/dev/null 2>&1; then
-    return 0
-  fi
-  set_step "bootstrap pip in virtualenv"
-  if "$python_bin" -m ensurepip --upgrade >/dev/null 2>&1; then
-    return 0
-  fi
-  echo "Virtualenv python has no pip: ${python_bin}" >&2
-  print_python_runtime_help
-  exit 1
 }
 
 rollback_simple() {
@@ -483,9 +496,6 @@ rollback_simple() {
 
 update_simple() {
   need_cmd sudo
-  PYTHON_BIN="$(select_python_runtime)"
-  echo "Using Python runtime: ${PYTHON_BIN}"
-
   if [[ $SKIP_DEPS -eq 1 ]]; then
     echo "--skip-deps is not supported in simple mode with release-based updates." >&2
     exit 1
@@ -498,6 +508,8 @@ update_simple() {
   shared_dir="${_paths[2]}"
   releases_dir="${_paths[3]}"
   current_link="${_paths[4]}"
+  PYTHON_BIN="$(select_controller_python "$shared_dir")"
+  echo "Using Python runtime: ${PYTHON_BIN}"
   local runtime_env_file db_backend postgres_dsn
   runtime_env_file="${shared_dir}/.env"
   if [[ -n "$STACK_JOB" ]]; then
@@ -528,16 +540,8 @@ update_simple() {
   export_release_tree "$new_release_dir" "$target_ref"
 
   echo "Installing Python runtime for new release..."
-  set_step "create virtualenv"
-  if ! "$PYTHON_BIN" -m venv "${new_release_dir}/.venv"; then
-    print_python_runtime_help
-    return 1
-  fi
-  ensure_venv_python_has_pip "${new_release_dir}/.venv/bin/python"
-  set_step "install python build tooling"
-  "${new_release_dir}/.venv/bin/python" -m pip install --upgrade pip setuptools wheel
-  set_step "install python dependencies"
-  "${new_release_dir}/.venv/bin/python" -m pip install -r "${new_release_dir}/requirements.txt"
+  set_step "install python dependencies with uv"
+  install_release_dependencies "$new_release_dir" "$shared_dir"
 
   echo "Applying database/schema init..."
   set_step "load database runtime configuration"
@@ -666,6 +670,7 @@ PYDRIVER
     fi
     echo "New release is healthy."
     sudo systemctl status "$SIMPLE_BOT_SERVICE" --no-pager || true
+    retain_successful_releases "$base_dir" "$new_release_dir" "$previous_release" "$shared_dir"
     return 0
   fi
 
@@ -677,6 +682,13 @@ PYDRIVER
 
 main() {
   detect_mode
+  # Download errors also need a durable receipt, before any host change.
+  if [[ -n "$STACK_JOB" ]]; then
+    mapfile -t _initial_paths < <(simple_paths)
+    STACK_PROGRESS_FILE="${_initial_paths[2]}/data/updates/${STACK_JOB}.json"
+    stack_progress status running
+    stack_progress backend running
+  fi
   echo "Detected update mode: ${MODE}"
   echo "Current checkout version: $(print_version)"
   fetch_code

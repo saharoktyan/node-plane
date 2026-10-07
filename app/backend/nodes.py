@@ -16,7 +16,7 @@ from .profiles import _cursor, _page
 _KEY = re.compile(r'[A-Za-z0-9][A-Za-z0-9_-]{0,63}\Z')
 _SETTINGS = frozenset({'public_host', 'xray_host', 'xray_sni', 'xray_tcp_port',
                        'xray_xhttp_port', 'xray_xhttp_path', 'awg_public_host', 'awg_port',
-                       'xray_fingerprint', 'awg_interface', 'awg_i1_preset'})
+                       'xray_fingerprint', 'awg_interface', 'awg_i1_preset', 'awg_port_mode'})
 _PORTS = frozenset({'xray_tcp_port', 'xray_xhttp_port', 'awg_port'})
 _SSH_TARGET = re.compile(r'(?:[A-Za-z_][A-Za-z0-9._-]*@)?(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:]+\])\Z')
 
@@ -33,7 +33,11 @@ def protocol_defaults(settings, protocols):
         if host:
             defaults['xray_host'] = host
     if 'awg' in protocols:
-        defaults.update(awg_port=51820, awg_interface='wg0', awg_i1_preset='quic')
+        from .awg_ports import preferred_port
+        defaults.update(awg_interface='wg0', awg_i1_preset='quic',
+            awg_port_mode='manual' if 'awg_port' in result else 'auto')
+        if 'awg_port' not in result:
+            defaults['awg_port'] = preferred_port(result.get('awg_i1_preset', 'quic'))
         if host:
             defaults['awg_public_host'] = host
     for field, value in defaults.items():
@@ -51,7 +55,7 @@ def _command_key(value):
 def _validate(values, *, create):
     allowed = {'key', 'title', 'region', 'flag', 'protocols', 'xray_transports', 'settings',
                'transport', 'ssh_target', 'notes'} if create else {
-        'title', 'region', 'flag', 'protocols', 'xray_transports', 'settings', 'transport', 'ssh_target', 'notes'}
+        'title', 'region', 'flag', 'protocols', 'xray_transports', 'settings', 'transport', 'ssh_target', 'notes', 'confirm_access_change'}
     if not values or set(values) - allowed:
         raise AccessDenied('invalid_input', 422)
     if create and (set(values) < {'key', 'title', 'region', 'protocols'}):
@@ -67,6 +71,8 @@ def _validate(values, *, create):
     if 'flag' in values and (not isinstance(values['flag'], str) or len(values['flag']) > 16):
         raise AccessDenied('invalid_input', 422)
     if 'notes' in values and (not isinstance(values['notes'], str) or len(values['notes']) > 2000):
+        raise AccessDenied('invalid_input', 422)
+    if 'confirm_access_change' in values and type(values['confirm_access_change']) is not bool:
         raise AccessDenied('invalid_input', 422)
     for field, options in (('protocols', {'awg', 'xray'}), ('xray_transports', {'tcp', 'xhttp'})):
         if field in values:
@@ -89,6 +95,8 @@ def _validate(values, *, create):
             if field == 'awg_interface' and not re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]{0,14}', value):
                 raise AccessDenied('invalid_input', 422)
             if field == 'awg_i1_preset' and value not in {'quic', 'dns', 'chaos'}:
+                raise AccessDenied('invalid_input', 422)
+            if field == 'awg_port_mode' and value not in {'auto', 'manual'}:
                 raise AccessDenied('invalid_input', 422)
             if field == 'xray_fingerprint' and value not in {'chrome', 'firefox', 'safari', 'ios', 'android', 'edge', 'random', 'randomized'}:
                 raise AccessDenied('invalid_input', 422)
@@ -138,8 +146,9 @@ class NodeService:
 
     @staticmethod
     def public(row):
-        return {'key': row['key'], 'title': row['title'], 'region': row['region'],
+        return {'key': row['key'], 'title': row['title'], 'region': row['region'], 'region_id': row['region_id'],
                 'flag': row['flag'], 'enabled': bool(row['enabled']),
+                'policy_eligible': bool(row['policy_eligible']),
                 'protocols': json.loads(row['protocols_json']),
                 'xray_transports': json.loads(row['xray_transports_json']),
                 'desired_revision': row['desired_revision'], 'applied_revision': row['applied_revision'],
@@ -148,9 +157,14 @@ class NodeService:
 
     @staticmethod
     def _select():
-        return '''SELECT n.*, c.transport, c.ssh_target, m.notes FROM backend_nodes n
+        return '''SELECT n.*, c.transport, c.ssh_target, m.notes, r.region_id,
+            CASE WHEN (n.enabled=1 OR n.applied_revision>0)
+                AND NOT EXISTS (SELECT 1 FROM backend_node_drains d WHERE d.node_key=n.key)
+                AND NOT EXISTS (SELECT 1 FROM backend_node_retirements t WHERE t.node_key=n.key)
+                THEN 1 ELSE 0 END AS policy_eligible FROM backend_nodes n
             LEFT JOIN backend_node_connections c ON c.node_key = n.key
-            LEFT JOIN backend_node_notes m ON m.node_key = n.key'''
+            LEFT JOIN backend_node_notes m ON m.node_key = n.key
+            LEFT JOIN backend_node_regions r ON r.node_key = n.key'''
 
     def list(self, actor, *, limit=25, cursor=None, search=None, order="key"):
         require_permission(actor, 'nodes.manage')
@@ -249,8 +263,18 @@ class NodeService:
                     raise AccessDenied('node_key_retired', 409)
                 if conn.execute('SELECT 1 FROM backend_nodes WHERE key = ?', (node_key,)).fetchone():
                     raise AccessDenied('node_key_conflict', 409)
-                values['settings'] = protocol_defaults(values.get('settings', {}), values['protocols'])
-                values.setdefault('xray_transports', ['tcp', 'xhttp'] if 'xray' in values['protocols'] else [])
+                from .installation_defaults import local_available, read_defaults
+                if values.get('transport', 'local') == 'local' and not local_available(conn):
+                    raise AccessDenied('local_node_exists', 409)
+                defaults = read_defaults(conn)
+                supplied = values.get('settings', {})
+                inherited = dict(defaults['settings'])
+                if 'awg_port' in supplied and 'awg_port_mode' not in supplied:
+                    inherited['awg_port_mode'] = 'manual'
+                if supplied.get('awg_port_mode') == 'auto':
+                    inherited.pop('awg_port', None)
+                values['settings'] = protocol_defaults({**inherited, **supplied}, values['protocols'])
+                values.setdefault('xray_transports', (defaults['xray_transports'] or ['tcp', 'xhttp']) if 'xray' in values['protocols'] else [])
                 inserted = conn.execute('''INSERT INTO backend_nodes
                     (key, title, region, flag, enabled, protocols_json, xray_transports_json, settings_json)
                     VALUES (?, ?, ?, ?, 0, ?, ?, ?) ON CONFLICT(key) DO NOTHING RETURNING key''',
@@ -275,8 +299,17 @@ class NodeService:
                 if conn.execute("SELECT 1 FROM backend_node_jobs WHERE node_key = ? AND status IN ('awaiting_executor', 'running', 'blocked')", (node_key,)).fetchone():
                     raise AccessDenied('node_operation_pending', 409)
                 connection = conn.execute(self._select() + ' WHERE n.key = ?', (node_key,)).fetchone()
+                from .grant_policies import canonical_region, region_preview
+                if ('region' in values and canonical_region(values['region']) != canonical_region(connection['region'])
+                        and region_preview(conn, node_key, values['region'])['affected_profiles']):
+                    require_permission(actor, 'grants.manage')
+                    if not values.get('confirm_access_change'):
+                        raise AccessDenied('region_policy_review_required', 409)
                 next_values = self.public(connection)
                 next_values.update(values)
+                from .installation_defaults import local_available
+                if next_values['transport'] in {None, 'local'} and not local_available(conn, node_key):
+                    raise AccessDenied('local_node_exists', 409)
                 next_values['settings'] = protocol_defaults(next_values['settings'], next_values['protocols'])
                 if 'protocols' in values and 'xray_transports' not in values and 'xray' in values['protocols'] and not next_values['xray_transports']:
                     next_values['xray_transports'] = ['tcp', 'xhttp']
@@ -305,6 +338,10 @@ class NodeService:
                             VALUES (?, ?, ?) ON CONFLICT(node_key) DO UPDATE SET
                             transport = excluded.transport, ssh_target = excluded.ssh_target''',
                             (node_key, next_values['transport'], next_values['ssh_target']))
+            from .grant_policies import assign_region, reconcile
+            if action == 'create' or 'region' in values:
+                assign_region(conn, node_key, values['region'])
+                reconcile(conn, actor)
             row = conn.execute(self._select() + ' WHERE n.key = ?', (node_key,)).fetchone()
             if 'notes' in values:
                 conn.execute('INSERT INTO backend_node_notes(node_key, notes) VALUES (?, ?) ON CONFLICT(node_key) DO UPDATE SET notes = excluded.notes', (node_key, values['notes']))

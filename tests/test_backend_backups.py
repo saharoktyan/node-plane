@@ -4,6 +4,7 @@ These exercise policy and transactions, not PostgreSQL integration semantics.
 """
 
 import json
+import hashlib
 import os
 import tempfile
 import unittest
@@ -17,7 +18,8 @@ from backend.authorization import (
     Principal,
     PrincipalKind,
 )
-from backend.backups import BackupService
+from backend.backups import BackupService, encoded
+from backend.devices import DeviceRepository, default_device
 from backend.profiles import ProfileRepository
 
 from tests import test_backend_http as http_fixture
@@ -96,6 +98,73 @@ class BackendBackupsTests(unittest.TestCase):
             self.service.create_snapshot(),
             {"status": "duplicate", "backup_id": backup_id},
         )
+
+    def device_profile(self):
+        profile_id = ProfileRepository(self.db).create_profile(runtime_name='existing_awg', display_name='Alice')
+        with self.db.transaction() as conn:
+            conn.execute("INSERT INTO backend_nodes(key,title,region,protocols_json) VALUES ('n1','Node','Europe','[\"awg\"]')")
+            conn.execute("INSERT INTO backend_grants(profile_id,node_key,protocol) VALUES (?,'n1','awg')", (profile_id,))
+            profile = conn.execute('SELECT * FROM backend_profiles WHERE id=?', (profile_id,)).fetchone()
+            DeviceRepository.ensure_default(conn, profile)
+        return profile_id
+
+    def test_device_snapshot_preserves_identity_name_and_tombstone(self):
+        profile_id = self.device_profile()
+        self.db.connection.execute("UPDATE backend_devices SET display_name='Phone',status='retired',revision=3")
+        backup_id, _ = self.snapshot()
+        payload = self.service._load(backup_id)
+        self.assertEqual(payload['format'], 'node-plane-backend-v3')
+        saved = payload['tables']['backend_devices']['rows'][0]
+        self.assertEqual(saved['profile_id'], profile_id)
+        self.assertEqual(saved['runtime_name'], 'existing_awg')
+        self.assertEqual((saved['display_name'], saved['status'], saved['revision']), ('Phone', 'retired', 3))
+        self.assertTrue(self.service.detail(self.actor, backup_id)['compatible'])
+
+    def test_v2_snapshot_gains_regions_without_adopting_policy_access(self):
+        self.device_profile()
+        backup_id, _ = self.snapshot()
+        path = self.service._path(backup_id)
+        payload = json.loads(path.read_bytes())
+        from backend.grant_policies import TABLE_COLUMNS
+        for table in TABLE_COLUMNS:
+            del payload['tables'][table]
+        payload['format'] = 'node-plane-backend-v2'
+        payload['checksum'] = hashlib.sha256(encoded(payload['tables'])).hexdigest()
+        path.write_bytes(encoded(payload))
+        converted = self.service._load(backup_id)
+        self.assertEqual(converted['checksum'], payload['checksum'])
+        self.assertEqual(len(converted['tables']['backend_node_regions']['rows']), 1)
+        self.assertEqual(converted['tables']['backend_grant_policies']['rows'], [])
+        self.assertEqual(converted['tables']['backend_devices'], payload['tables']['backend_devices'])
+        self.assertTrue(self.service.detail(self.actor, backup_id)['compatible'])
+
+    def test_legacy_snapshot_conversion_keeps_original_checksum_and_peer(self):
+        profile_id = self.device_profile()
+        backup_id, _ = self.snapshot()
+        path = self.service._path(backup_id)
+        payload = json.loads(path.read_bytes())
+        payload['format'] = 'node-plane-backend-v1'
+        del payload['tables']['backend_devices']
+        from backend.grant_policies import TABLE_COLUMNS
+        for table in TABLE_COLUMNS:
+            del payload['tables'][table]
+        payload['checksum'] = hashlib.sha256(encoded(payload['tables'])).hexdigest()
+        path.write_bytes(encoded(payload))
+        converted = self.service._load(backup_id)
+        device = converted['tables']['backend_devices']['rows'][0]
+        self.assertEqual(device['profile_id'], profile_id)
+        self.assertEqual(device['runtime_name'], 'existing_awg')
+        self.assertEqual(converted['checksum'], payload['checksum'])
+        self.assertEqual(self.service._load(backup_id)['tables']['backend_devices'], converted['tables']['backend_devices'])
+        self.assertTrue(self.service.detail(self.actor, backup_id)['compatible'])
+        profile = payload['tables']['backend_profiles']['rows'][0]
+        self.assertEqual(device['id'], default_device(profile)['id'])
+        # A tampered old snapshot must fail before device conversion.
+        payload['tables']['backend_profiles']['rows'][0]['runtime_name'] = 'tampered'
+        path.write_bytes(encoded(payload))
+        with self.assertRaises(AccessDenied) as error:
+            self.service._load(backup_id)
+        self.assertEqual(error.exception.code, 'backup_invalid')
 
     def test_queue_is_idempotent_and_rejects_payload_reuse(self):
         key = str(uuid4())

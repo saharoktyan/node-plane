@@ -5,7 +5,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 source "${SCRIPT_DIR}/postgres_runtime.sh"
 source "${SCRIPT_DIR}/python_runtime.sh"
+source "${SCRIPT_DIR}/uv_runtime.sh"
 source "${SCRIPT_DIR}/lib/install_progress.sh"
+source "${SCRIPT_DIR}/lib/controller_archive.sh"
+FROM_SOURCE=0
 
 MODE="${MODE:-}"
 NON_INTERACTIVE=0
@@ -38,7 +41,7 @@ on_error() {
 }
 
 trap 'on_error $?' ERR
-trap 'install_exit_status=$?; if [[ $install_exit_status -ne 0 ]]; then install_progress_fail; fi' EXIT
+trap 'install_exit_status=$?; if [[ $install_exit_status -ne 0 ]]; then install_progress_fail; fi; cleanup_controller_archive' EXIT
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -96,6 +99,10 @@ while [[ $# -gt 0 ]]; do
       AUTO_INSTALL_SYSTEMD=1
       shift
       ;;
+    --from-source)
+      FROM_SOURCE=1
+      shift
+      ;;
     --force)
       FORCE_REINSTALL=1
       shift
@@ -111,9 +118,10 @@ Modes:
 
 Flags:
   --branch            Default update branch for this installation
-  --ref, --tag        Git tag/ref to install, defaults to the latest release tag for the selected branch
+  --ref, --tag        Published release tag; Git refs are available with --from-source
   --non-interactive   Fail instead of prompting for missing values
   --install-systemd   In simple mode, start backend, worker, and aiogram client automatically
+  --from-source       Development only: export a Git checkout instead of downloading a release archive
   --force             Reinstall even if the target release is already active
   --env-file          Read and update this private installer config instead of the checkout .env
   --progress-json     Emit NODE_PLANE_EVENT JSON progress for workstation clients
@@ -161,36 +169,6 @@ read_version() {
   else
     echo "0.1.0"
   fi
-}
-
-print_python_runtime_help() {
-  cat >&2 <<'EOF'
-Python runtime is incomplete for Node Plane simple mode.
-Required: Python 3.11 or 3.12 with working venv + pip.
-
-Debian/Ubuntu:
-  apt-get update
-  apt-get install -y python3.12-venv
-
-RHEL/Fedora:
-  dnf install -y python3.12 python3.12-pip
-
-Then rerun scripts/install.sh.
-EOF
-}
-
-ensure_venv_python_has_pip() {
-  local python_bin="$1"
-  if "$python_bin" -m pip --version >/dev/null 2>&1; then
-    return 0
-  fi
-  set_step "bootstrap pip in virtualenv"
-  if "$python_bin" -m ensurepip --upgrade >/dev/null 2>&1; then
-    return 0
-  fi
-  echo "Virtualenv python has no pip: ${python_bin}" >&2
-  print_python_runtime_help
-  exit 1
 }
 
 prompt_value() {
@@ -313,6 +291,7 @@ path_is_within() {
 
 current_git_commit() {
   local ref="${1:-HEAD}"
+  if [[ -n "${CONTROLLER_COMMIT:-}" ]]; then echo "$CONTROLLER_COMMIT"; return; fi
   if command -v git >/dev/null 2>&1 && git rev-parse --short "$ref" >/dev/null 2>&1; then
     git rev-parse --short "$ref"
   else
@@ -323,6 +302,7 @@ current_git_commit() {
 current_semver() {
   local ref="${1:-HEAD}"
   local value
+  if [[ -n "${CONTROLLER_VERSION:-}" ]]; then echo "$CONTROLLER_VERSION"; return; fi
   if [[ "$ref" == "HEAD" && -f "${REPO_ROOT}/VERSION" ]]; then
     tr -d '\n' < "${REPO_ROOT}/VERSION"
     return 0
@@ -337,6 +317,7 @@ current_semver() {
 
 latest_release_tag_for_branch() {
   local branch="$1"
+  if [[ -n "${CONTROLLER_REF:-}" ]]; then echo "$CONTROLLER_REF"; return; fi
   local regex
   case "$branch" in
     main) regex='^v?[0-9]+\.[0-9]+\.[0-9]+$' ;;
@@ -357,6 +338,11 @@ latest_release_tag_for_branch() {
 validate_install_ref() {
   local branch="$1"
   local ref="$2"
+  if [[ -n "${CONTROLLER_REF:-}" ]]; then
+    [[ "${ref#v}" == "${CONTROLLER_REF#v}" ]] || { echo "Selected archive does not match install ref" >&2; return 1; }
+    echo "$CONTROLLER_REF"
+    return
+  fi
 
   if [[ -z "$ref" ]]; then
     echo "Install ref cannot be empty." >&2
@@ -435,6 +421,10 @@ workstation_target_is_partial() {
 export_release_tree() {
   local destination="$1"
   local ref="${2:-HEAD}"
+  if [[ -n "${CONTROLLER_STAGE_DIR:-}" ]]; then
+    cp -a "$CONTROLLER_STAGE_DIR" "$destination"
+    return
+  fi
   mkdir -p "$destination"
   if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     git archive "$ref" | tar -xf - -C "$destination"
@@ -610,9 +600,16 @@ configure_env() {
     update_branch="$(prompt_value "Enter default update branch (main or dev)" "$update_branch")"
     update_branch="$(normalize_update_branch "$update_branch")"
   fi
-  echo "Refreshing release tags from origin..."
+  echo "Selecting controller release..."
+  set_step "prepare controller host prerequisites"
+  ensure_controller_host_tools
   set_step "fetch release tags"
-  fetch_origin_refs
+  if [[ "$FROM_SOURCE" == 1 ]]; then
+    fetch_origin_refs
+  else
+    set_step "download and verify controller archive"
+    prepare_controller_archive "$update_branch" "$install_ref" 1
+  fi
   set_step "select install ref"
   latest_install_ref="$(latest_release_tag_for_branch "$update_branch")"
   if [[ -z "$install_ref" ]]; then
@@ -620,6 +617,10 @@ configure_env() {
   fi
   if [[ $NON_INTERACTIVE -eq 0 ]]; then
     install_ref="$(prompt_value "Enter install tag/ref (default: latest tag for ${update_branch})" "$install_ref")"
+  fi
+  if [[ "$FROM_SOURCE" == 0 && "${install_ref#v}" != "${CONTROLLER_REF#v}" ]]; then
+    cleanup_controller_archive
+    prepare_controller_archive "$update_branch" "$install_ref" 1
   fi
   install_ref="$(resolve_install_ref "$update_branch" "$install_ref")"
 
@@ -696,7 +697,11 @@ configure_env() {
     set_env_value NODE_PLANE_BASE_DIR "$base_dir"
     set_env_value NODE_PLANE_APP_DIR "$app_dir"
     set_env_value NODE_PLANE_SHARED_DIR "$shared_dir"
-    set_env_value NODE_PLANE_SOURCE_DIR "$REPO_ROOT"
+    if [[ "$FROM_SOURCE" == 0 ]]; then
+      set_env_value NODE_PLANE_SOURCE_DIR "$app_dir"
+    else
+      set_env_value NODE_PLANE_SOURCE_DIR "$REPO_ROOT"
+    fi
     set_env_value NODE_PLANE_INSTALL_MODE "$install_mode"
     set_env_value NODE_PLANE_UPDATE_BRANCH "$update_branch"
     set_env_value NODE_PLANE_INSTALL_REF "$install_ref"
@@ -780,31 +785,12 @@ validate_simple_layout() {
 }
 
 ensure_release_python_runtime() {
-  local release_dir="$1"
-  local python_bin="${release_dir}/.venv/bin/python"
-
-  if [[ ! -x "$python_bin" ]]; then
-    set_step "create virtualenv"
-    if ! "$PYTHON_BIN" -m venv "${release_dir}/.venv"; then
-      print_python_runtime_help
-      return 1
-    fi
-  fi
-
-  ensure_venv_python_has_pip "$python_bin"
-
-  # Keep this idempotent: upgrade tooling and reinstall runtime deps so reused
-  # releases cannot keep a partially provisioned virtualenv.
-  set_step "install python build tooling"
-  "$python_bin" -m pip install --upgrade pip setuptools wheel
-  set_step "install python dependencies"
-  "$python_bin" -m pip install -r "${release_dir}/requirements.txt"
-  # A reused release may still contain the retired PTB runtime.
-  "$python_bin" -m pip uninstall -y python-telegram-bot
+  set_step "install python dependencies with uv"
+  install_release_dependencies "$1" "$2"
 }
 
 run_simple_install() {
-  local base_dir app_dir shared_dir releases_dir current_link new_release_dir release_name install_ref install_version install_commit reused_release
+  local base_dir app_dir shared_dir releases_dir current_link new_release_dir release_name install_ref install_version install_commit reused_release previous_release driver_ready=1
   local runtime_env_file db_backend postgres_dsn
   base_dir="$(read_env_value NODE_PLANE_BASE_DIR)"
   app_dir="$(read_env_value NODE_PLANE_APP_DIR)"
@@ -824,6 +810,10 @@ run_simple_install() {
   fi
   releases_dir="${base_dir}/releases"
   current_link="${base_dir}/current"
+  previous_release=""
+  if [[ -d "$current_link" ]]; then
+    previous_release="$(readlink -f "$current_link")"
+  fi
   install_ref="$(
     resolve_install_ref \
       "$(normalize_update_branch "$(read_env_value NODE_PLANE_UPDATE_BRANCH)")" \
@@ -836,10 +826,6 @@ run_simple_install() {
   reused_release=0
 
   install_progress_begin release
-  set_step "validate python version"
-  PYTHON_BIN="$(select_python_runtime)"
-  echo "Using Python runtime: ${PYTHON_BIN}"
-
   mkdir -p "${releases_dir}" "${shared_dir}/data" "${shared_dir}/ssh"
   if [[ "${NODE_PLANE_INSTALL_EVENTS:-0}" == "1" ]]; then
     need_cmd flock
@@ -888,7 +874,10 @@ run_simple_install() {
 
   install_progress_done
   install_progress_begin python
-  ensure_release_python_runtime "$new_release_dir"
+  set_step "select python runtime"
+  PYTHON_BIN="$(select_controller_python "$shared_dir")"
+  echo "Using Python runtime: ${PYTHON_BIN}"
+  ensure_release_python_runtime "$new_release_dir" "$shared_dir"
   install_progress_done
 
   # DB runtime init must run even when we reuse an existing release tree.
@@ -979,6 +968,7 @@ run_simple_install() {
         exit 1
       fi
       echo "Driver/agent setup reported issues. Continuing because best-effort is enabled." >&2
+      driver_ready=0
     fi
   fi
   if [[ -n "$WORKSTATION_INSTALL_MARKER" ]]; then
@@ -986,9 +976,13 @@ run_simple_install() {
   fi
   install_progress_done
 
+  if [[ $AUTO_INSTALL_SYSTEMD -eq 1 && $driver_ready -eq 1 ]]; then
+    retain_successful_releases "$base_dir" "$new_release_dir" "$previous_release" "$shared_dir"
+  fi
+
   echo
   echo "First-run path:"
-  echo "  1. This checkout has been exported to:"
+  echo "  1. Controller release is installed at:"
   echo "     ${new_release_dir}"
   echo "     Shared runtime state lives under ${shared_dir}"
   if [[ $AUTO_INSTALL_SYSTEMD -eq 1 ]]; then

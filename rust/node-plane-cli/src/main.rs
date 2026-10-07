@@ -7,6 +7,7 @@ mod events;
 mod installer;
 mod operation_store;
 mod progress;
+mod self_manage;
 mod ssh;
 mod tui;
 mod workstation;
@@ -49,6 +50,12 @@ struct Connection {
 }
 #[derive(Subcommand)]
 enum Command {
+    /// Manage this workstation binary locally; never modifies a VPS.
+    #[command(name = "self")]
+    SelfManage {
+        #[command(subcommand)]
+        command: self_manage::Command,
+    },
     /// Install the systemd backend, worker, Telegram client and driver.
     Install {
         #[command(flatten)]
@@ -112,6 +119,9 @@ fn main() {
 }
 fn entry() -> Result<()> {
     let cli = Cli::parse();
+    if let Some(Command::SelfManage { command }) = &cli.command {
+        return self_manage::execute(command);
+    }
     let state = cli.state_dir.unwrap_or(
         dirs::data_local_dir()
             .ok_or_else(|| {
@@ -192,6 +202,7 @@ fn entry() -> Result<()> {
             request.workflow.yes = yes;
         }
         None => {}
+        Some(Command::SelfManage { .. }) => unreachable!(),
     }
     if !cli.no_tui && io::stdin().is_terminal() && io::stdout().is_terminal() {
         return tui::run(request);

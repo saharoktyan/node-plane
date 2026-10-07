@@ -13,6 +13,32 @@ from tests.test_backend_http import BackendHTTPTests
 class BackendNodeSettingsTests(unittest.TestCase):
     setUp = BackendHTTPTests.setUp
 
+    def test_verified_auto_fallback_is_persisted_without_rewriting_command(self):
+        self.create()
+        with self.db.transaction() as conn:
+            settings = json.loads(conn.execute("SELECT settings_json FROM backend_nodes WHERE key='n1'").fetchone()[0])
+            settings.update(awg_port=443, awg_port_mode='auto', awg_i1_preset='quic')
+            conn.execute("UPDATE backend_nodes SET settings_json=? WHERE key='n1'", (json.dumps(settings),))
+        queued = self.queue().json()
+
+        class Driver:
+            def inspect_node(self, node_key):
+                return {'health_state': 'running', 'xray_config_present': True, 'awg_config_present': True}
+
+            def apply_node_settings(self, command_id, intent):
+                effective = dict(intent, settings=dict(intent['settings'], awg_port=8443))
+                return json.dumps({'node_key': 'n1', 'revision': 1, 'awg_port': 8443,
+                    'settings_sha256': _digest(effective)})
+
+        self.assertTrue(NodeSettingsExecutor(self.db, Driver()).run_one())
+        with self.db.connect() as conn:
+            task = conn.execute('SELECT intent_json,status FROM backend_node_settings_tasks WHERE id=?', (queued['id'],)).fetchone()
+            self.assertEqual(task['status'], 'succeeded')
+            self.assertEqual(json.loads(task['intent_json'])['settings']['awg_port'], 443)
+            node = conn.execute("SELECT settings_json,applied_revision FROM backend_nodes WHERE key='n1'").fetchone()
+            self.assertEqual(json.loads(node['settings_json'])['awg_port'], 8443)
+            self.assertEqual(node['applied_revision'], 1)
+
     def admin_headers(self, **extra):
         return {**self.headers, 'X-Node-Plane-Telegram-User-ID': '101', **extra}
 

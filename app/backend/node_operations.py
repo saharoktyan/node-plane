@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 from .authorization import AccessDenied, require_permission
-from .node_settings import _key, _snapshot
+from .node_settings import _key, _snapshot, persist_selected_port
 from .operations import OperationRepository
 
 ACTIONS = {'bootstrap', 'reinstall_keep', 'reinstall_clean', 'cleanup_runtime',
@@ -114,21 +114,29 @@ class NodeOperations:
                 or result.get('action') != row['action'] or result.get('revision') != row['revision']):
             raise ValueError('invalid node operation result')
         with self.db.transaction() as conn:
+            conn.execute('UPDATE backend_account_guard SET revision=revision+1 WHERE id=1')
             current = conn.execute('SELECT status FROM backend_node_jobs WHERE id = ?', (row['id'],)).fetchone()
             if current is None or current['status'] not in {'running', 'blocked'}:
                 return
+            if 'awg_port' in result['result']:
+                persist_selected_port(conn, row['node_key'], row['revision'],
+                    json.loads(row['intent_json']), result['result'])
             conn.execute("UPDATE backend_node_jobs SET status = 'succeeded', result_json = ? WHERE id = ?",
                          (json.dumps(result['result']), row['id']))
             if row['action'] in INVALIDATE and row['action'] != 'cleanup_runtime':
                 conn.execute('UPDATE backend_nodes SET applied_revision = ?, enabled = 1 WHERE key = ? AND desired_revision = ?',
                              (row['revision'], row['node_key'], row['revision']))
             if row['action'] in INVALIDATE | {'reconcile_access'} and row['action'] != 'cleanup_runtime':
+                actor = SimpleNamespace(account=SimpleNamespace(id=row['actor_id']))
+                from .grant_policies import reconcile
+                changed = reconcile(conn, actor)
                 # Increment profile revisions so the agent cannot return an old
                 # completed ensure from its journal after clean reinstall.
                 profiles = conn.execute('''SELECT DISTINCT p.id FROM backend_profiles p
                     JOIN backend_grants g ON g.profile_id = p.id WHERE g.node_key = ?''', (row['node_key'],)).fetchall()
-                actor = SimpleNamespace(account=SimpleNamespace(id=row['actor_id']))
                 for profile in profiles:
+                    if profile['id'] in changed:
+                        continue
                     previous = OperationRepository.targets(conn, profile['id'])
                     conn.execute('UPDATE backend_profiles SET desired_revision = desired_revision + 1 WHERE id = ?', (profile['id'],))
                     OperationRepository.record(conn, actor, profile['id'], previous)

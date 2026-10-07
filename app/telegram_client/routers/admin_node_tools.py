@@ -102,6 +102,8 @@ async def show_section(chat_id, user_id, message_id, section, node_key, bot, bac
         return button(locale, 'nodes.settings.field.' + field,
                       EditNodeFieldCallback(node_key=node_key, field=field).pack())
     defaults = {'xray_fingerprint': 'chrome', 'awg_interface': 'wg0', 'awg_i1_preset': 'quic'}
+    if node['settings'].get('awg_port_mode') == 'auto':
+        defaults['awg_port'] = tr(locale, 'nodes.awg.port_automatic')
     def group(title, selected, *, extra=(), collapsed=False):
         buttons = [field_button(field) for field in selected]
         rows = [tuple(buttons[index:index + 2]) for index in range(0, len(buttons), 2)]
@@ -125,6 +127,10 @@ async def show_section(chat_id, user_id, message_id, section, node_key, bot, bac
                 button(locale, 'node_tools.regenerate_entropy', f'node_action:regenerate_entropy:{node_key}'),),)),
             group('nodes.rich.advanced', ('awg_interface',), extra=((
                 button(locale, 'node_tools.entropy', f'node_view:entropy:{node_key}'),),), collapsed=True))
+        preferred = {'quic': 443, 'dns': 53}.get(node['settings'].get('awg_i1_preset', 'quic'))
+        actual = node['settings'].get('awg_port')
+        if node['settings'].get('awg_port_mode') == 'auto' and actual and preferred and actual != preferred:
+            sections = (Section('', (tr(locale, 'nodes.awg.port_fallback', port=actual, preferred=preferred),)), *sections)
     if section in {'awg', 'xray'}:
         sections = (Section(tr(locale, 'nodes.draft.protocol_settings'),
             heading_size=2, sections=sections),)

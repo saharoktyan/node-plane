@@ -24,7 +24,9 @@ class NodeTemplateTests(IsolatedAsyncioTestCase):
         self.query = SimpleNamespace(data='', answer=AsyncMock(), from_user=SimpleNamespace(id=123),
             message=SimpleNamespace(message_id=77, chat=SimpleNamespace(id=123)))
         self.backend = SimpleNamespace(request=AsyncMock(return_value={'items': [], 'next_cursor': None}),
-            create_node=AsyncMock())
+            create_node=AsyncMock(), node_creation_options=AsyncMock(return_value={
+                'local_available': True, 'defaults': {'revision': 1, 'protocols': ['awg', 'xray'],
+                    'xray_transports': ['tcp', 'xhttp'], 'settings': {'awg_i1_preset': 'quic', 'awg_port_mode': 'auto'}}}))
         self.drawer = patch.object(nodes, 'render', new_callable=AsyncMock)
         self.draw = self.drawer.start()
         self.addCleanup(self.drawer.stop)
@@ -50,7 +52,7 @@ class NodeTemplateTests(IsolatedAsyncioTestCase):
         self.assertEqual(await self.state.get_state(), NodeDraftState.waiting_for_target.state)
         await nodes.process_wizard_target(self.message('root@node.example.test:22'), self.bot, self.state)
         await nodes.process_wizard_host(self.message('vpn.example.test'), self.bot, self.backend, self.state)
-        self.query.data = 'wizard_proto:awg'
+        self.query.data = 'wizard_proto:xray'
         await nodes.wizard_proto_cb(self.query, self.bot, self.backend, self.state)
         self.query.data = 'wizard_proto:done'
         await nodes.wizard_proto_cb(self.query, self.bot, self.backend, self.state)
@@ -58,7 +60,7 @@ class NodeTemplateTests(IsolatedAsyncioTestCase):
         body = self.backend.create_node.call_args.args[1]
         self.assertEqual((body['title'], body['region'], body['flag']), ('Latvia #1', 'Europe', '🇱🇻'))
         self.assertEqual(body['ssh_target'], 'root@node.example.test')
-        self.assertEqual(body['settings'], {'public_host': 'vpn.example.test'})
+        self.assertEqual(body['settings'], {'public_host': 'vpn.example.test', 'awg_i1_preset': 'quic', 'awg_port_mode': 'auto'})
         self.assertEqual(body['protocols'], ['awg'])
         self.assertRegex(body['key'], r'^lv1-[a-f0-9]{8}$')
         self.assertTrue((await self.state.get_data())['wizard_saved'])

@@ -14,6 +14,8 @@ from .routers import admin_system_cleanup
 from .routers import admin_alerts, admin_recovery
 from .routers.common import BackendMiddleware, LocaleMiddleware, NotificationStateMiddleware
 from .routers import user, admin_requests, admin_profiles, admin_nodes, admin_settings, admin_node_tools, admin_updates, admin_backups
+from .routers import user_devices
+from .routers import admin_installation_defaults
 
 async def main() -> None:
     logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(levelname)s | %(name)s | %(message)s')
@@ -34,6 +36,8 @@ async def main() -> None:
             dispatcher.update.outer_middleware(NotificationStateMiddleware())
             
             dispatcher.include_router(user.router)
+            dispatcher.include_router(user_devices.router)
+            dispatcher.include_router(admin_installation_defaults.router)
             dispatcher.include_router(admin_requests.router)
             dispatcher.include_router(admin_profiles.router)
             dispatcher.include_router(admin_node_tools.router)

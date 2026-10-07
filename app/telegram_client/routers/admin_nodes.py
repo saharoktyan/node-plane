@@ -1,4 +1,5 @@
 import re
+import secrets
 from copy import deepcopy
 from uuid import uuid4
 from urllib.parse import urlencode
@@ -62,7 +63,7 @@ async def change_node_draft(user_id, node_key, values, backend, state, *, baseli
                  'baseline': baseline, 'values': deepcopy(baseline), 'command_key': str(uuid4())}
     draft = deepcopy(draft)
     draft['values'].update(deepcopy(values))
-    await state.update_data(node_settings_draft=draft)
+    await state.update_data(node_settings_draft=draft, node_region_confirmation=None)
 
 
 async def draft_controls(node, state, locale):
@@ -101,13 +102,36 @@ async def reset_node_draft_cb(query: CallbackQuery, bot: Bot, backend: BackendCl
 @router.callback_query(F.data.startswith('node_draft_save:'))
 async def save_node_draft_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
     await query.answer()
+    await _save_node_draft(query, bot, backend, state, query.data.split(':', 1)[1])
+
+
+async def _save_node_draft(query, bot, backend, state, node_key, *, confirmed=False):
     data = await state.get_data()
     draft = data.get('node_settings_draft')
-    node_key = query.data.split(':', 1)[1]
     if not draft or draft['node_key'] != node_key or draft['values'] == draft['baseline']:
         return
     try:
         values = {key: value for key, value in draft['values'].items() if value != draft['baseline'][key]}
+        if 'region' in values and not confirmed:
+            preview = await backend.request('GET', f'/api/v1/nodes/{node_key}/region-access-preview?' +
+                urlencode({'region': values['region']}), telegram_user_id=query.from_user.id)
+            if preview['affected_profiles']:
+                locale = normalize_locale(data.get('locale'))
+                nonce = secrets.token_urlsafe(6)
+                await state.update_data(node_region_confirmation={'nonce': nonce, 'node_key': node_key,
+                    'values': deepcopy(values), 'revision': draft['revision'], 'command_key': draft['command_key'],
+                    'user_id': query.from_user.id, 'message_id': query.message.message_id})
+                await render(bot, query.message.chat.id, Screen(tr(locale, 'policy.region_confirm'),
+                    (tr(locale, 'policy.region_move', old=draft['baseline']['region'], new=values['region']),
+                     tr(locale, 'policy.region_affected', count=preview['affected_profiles']),
+                     tr(locale, 'policy.region_warning')), embedded_buttons=True, navigation=True),
+                    [[InlineKeyboardButton(text=tr(locale, 'policy.confirm'),
+                        callback_data=f'node_region_yes:{nonce}', style='primary')],
+                     [InlineKeyboardButton(text=tr(locale, 'back'),
+                        callback_data=NodeSettingsCallback(node_key=node_key).pack())]], state, query.message.message_id)
+                return
+        if confirmed:
+            values['confirm_access_change'] = True
         node = await backend.edit_node(query.from_user.id, node_key, draft['revision'], values, command_key=draft['command_key'])
     except BackendError as exc:
         locale = normalize_locale(data.get('locale'))
@@ -117,12 +141,30 @@ async def save_node_draft_cb(query: CallbackQuery, bot: Bot, backend: BackendCli
             (message,), embedded_buttons=True, navigation=True),
             [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data=NodeSettingsCallback(node_key=node_key).pack())]], state, query.message.message_id)
         return
-    await state.update_data(node_settings_draft=None)
+    await state.update_data(node_settings_draft=None, node_region_confirmation=None)
     if not node['applied_revision']:
         await show_admin_node(query.message.chat.id, query.from_user.id, query.message.message_id,
             node_key, bot, backend, state)
         return
     await apply_node(query.message.chat.id, query.from_user.id, query.message.message_id, node_key, bot, backend, state, revision=node['desired_revision'])
+
+
+@router.callback_query(F.data.startswith('node_region_yes:'))
+async def confirm_node_region_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
+    await query.answer()
+    data = await state.get_data()
+    confirmation, draft = data.get('node_region_confirmation'), data.get('node_settings_draft')
+    if not confirmation or not draft:
+        return
+    values = {k: v for k, v in draft['values'].items() if v != draft['baseline'][k]}
+    if (confirmation['nonce'] != query.data.split(':', 1)[1]
+            or confirmation['message_id'] != query.message.message_id
+            or confirmation['user_id'] != query.from_user.id
+            or data.get('control_message_id') != query.message.message_id
+            or confirmation['values'] != values or confirmation['revision'] != draft['revision']
+            or confirmation['command_key'] != draft['command_key'] or confirmation['node_key'] != draft['node_key']):
+        return
+    await _save_node_draft(query, bot, backend, state, draft['node_key'], confirmed=True)
 
 @router.callback_query(AdminNodesCallback.filter())
 async def admin_nodes_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
@@ -249,7 +291,18 @@ async def admin_node_search_message(message: Message, bot: Bot,
 @router.callback_query(NewNodeCallback.filter())
 async def new_node_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
     await query.answer()
-    await state.update_data(wizard_data={}, create_node_command_key=str(uuid4()),
+    try:
+        options = await backend.node_creation_options(query.from_user.id)
+    except BackendError:
+        locale = normalize_locale((await state.get_data()).get('locale'))
+        await render(bot, query.message.chat.id, Screen(tr(locale, 'node.wizard.summary.title'),
+            (tr(locale, 'node.wizard.unavailable'),), embedded_buttons=True, navigation=True),
+            [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data=AdminNodesCallback().pack())]], state, query.message.message_id)
+        return
+    defaults = options['defaults']
+    await state.update_data(wizard_data={'protocols': list(defaults['protocols']),
+        'xray_transports': list(defaults['xray_transports']), 'settings': dict(defaults['settings'])},
+        wizard_local_available=options['local_available'], create_node_command_key=str(uuid4()),
                             rollout_command_key=str(uuid4()), wizard_saved=False)
     await render_wizard_transport(query.message.chat.id, bot, state,
                                   query.message.message_id)
@@ -421,8 +474,12 @@ async def render_wizard_transport(chat_id: int, bot: Bot, state: FSMContext, mes
          InlineKeyboardButton(text=tr(locale, 'node.wizard.transport.local'), callback_data="wizard_transport:local", style='primary' if selected == 'local' else None)],
         [InlineKeyboardButton(text=tr(locale, 'back'), callback_data=AdminNodesCallback().pack())]
     ]
+    if data.get('wizard_local_available') is False:
+        rows[0] = rows[0][:1]
     await render(bot, chat_id, Screen(tr(locale, 'node.wizard.transport.title'),
-        (tr(locale, 'node.wizard.transport.prompt'),), embedded_buttons=True, navigation=True), rows, state, message_id)
+        (tr(locale, 'node.wizard.transport.prompt'),) +
+        ((tr(locale, 'node.wizard.local_exists'),) if data.get('wizard_local_available') is False else ()),
+        embedded_buttons=True, navigation=True), rows, state, message_id)
 
 @router.callback_query(F.data.startswith("wizard_transport:"))
 async def wizard_transport_cb(query: CallbackQuery, bot: Bot, state: FSMContext):
@@ -434,6 +491,9 @@ async def wizard_transport_cb(query: CallbackQuery, bot: Bot, state: FSMContext)
         return
     data = await state.get_data()
     if data.get('wizard_saved'):
+        return
+    if transport == 'local' and data.get('wizard_local_available') is False:
+        await render_wizard_transport(query.message.chat.id, bot, state, query.message.message_id)
         return
     w = dict(data.get('wizard_data', {}))
     w['transport'] = transport
@@ -583,7 +643,7 @@ async def render_wizard_summary(chat_id: int, bot: Bot, state: FSMContext,
     data = await state.get_data()
     w = data.get('wizard_data', {})
     locale = normalize_locale(data.get('locale'))
-    transports = ', '.join(('tcp', 'xhttp')) if 'xray' in w.get('protocols', []) else '—'
+    transports = ', '.join(w.get('xray_transports') or ['tcp', 'xhttp']) if 'xray' in w.get('protocols', []) else '—'
     lines = (
         tr(locale, 'node.wizard.summary.key', value=w.get('key', '—')),
         tr(locale, 'node.wizard.summary.name', value=w.get('title', '—')),
@@ -613,6 +673,11 @@ async def render_wizard_summary(chat_id: int, bot: Bot, state: FSMContext,
             ', '.join(tr(locale, 'protocol.' + code) for code in w.get('protocols', [])),)),
         Section(tr(locale, 'nodes.rich.technical'), collapsed=True, lines=(lines[0], lines[4])),
     )
+    if 'awg' in w.get('protocols', []):
+        settings = w.get('settings', {})
+        sections = (*sections[:-1], Section(tr(locale, 'protocol.awg'), tables=(summary_table((
+            ('awg_i1_preset', settings.get('awg_i1_preset', 'quic')),
+            ('awg_port', settings.get('awg_port') or tr(locale, 'nodes.awg.port_automatic')))),)), sections[-1])
     await render(bot, chat_id, Screen(tr(locale, 'node.wizard.summary.title'),
                  (tr(locale, 'node.wizard.summary.note'),), sections=sections, embedded_buttons=True, navigation=True),
                  rows, state, message_id)
@@ -676,12 +741,16 @@ async def wizard_save_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
         await backend.create_node(query.from_user.id, {
             'key': w['key'], 'title': w['title'], 'region': w['region'],
             'flag': w['flag'], 'protocols': w['protocols'],
-            'xray_transports': ['tcp', 'xhttp'] if 'xray' in w['protocols'] else [],
-            'settings': {'public_host': w['public_host']},
+            'xray_transports': (w.get('xray_transports') or ['tcp', 'xhttp']) if 'xray' in w['protocols'] else [],
+            'settings': {**w.get('settings', {}), 'public_host': w['public_host']},
             'transport': w['transport'], 'ssh_target': w.get('ssh_target'),
         }, command_key=data['create_node_command_key'])
     except BackendError as exc:
-        error_key = ('node.wizard.duplicate' if exc.status == 409 else
+        if exc.code == 'local_node_exists':
+            await state.update_data(wizard_local_available=False)
+            await render_wizard_transport(query.message.chat.id, bot, state, query.message.message_id)
+            return
+        error_key = ('node.wizard.local_exists' if exc.code == 'local_node_exists' else 'node.wizard.duplicate' if exc.status == 409 else
                      'node.wizard.unavailable' if exc.status == 503 else
                      'node.wizard.save_failed')
         await render(bot, query.message.chat.id,
@@ -1003,8 +1072,11 @@ async def select_awg_preset(query: CallbackQuery, bot: Bot, backend: BackendClie
     if preset not in {'quic', 'dns', 'chaos'}:
         return
     node = await editable_node(query.from_user.id, node_key, backend, state)
+    settings = {**node['settings'], 'awg_i1_preset': preset, 'awg_port_mode': 'auto'}
+    if preset != node['settings'].get('awg_i1_preset') or node['settings'].get('awg_port_mode') != 'auto':
+        settings.pop('awg_port', None)
     await change_node_draft(query.from_user.id, node_key,
-        {'settings': {**node['settings'], 'awg_i1_preset': preset}}, backend, state)
+        {'settings': settings}, backend, state)
     await _clear_node_flow(state)
     from .admin_node_tools import show_section
     await show_section(query.message.chat.id, query.from_user.id, query.message.message_id,
@@ -1047,6 +1119,8 @@ async def process_node_edit(message: Message, bot: Bot, backend: BackendClient, 
             body['transport'] = 'ssh'
     else:
         body = ({field: parsed} if field in {'title', 'region', 'flag', 'notes'} else {'settings': {**settings, field: parsed}})
+        if field == 'awg_port':
+            body['settings']['awg_port_mode'] = 'manual'
     try:
         await change_node_draft(user_id, node_key, body, backend, state)
         await _clear_node_flow(state)

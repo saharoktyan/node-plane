@@ -58,9 +58,6 @@ class BackendClient:
     async def update_job(self, user_id: int, job_id: str):
         return await self.request('GET', f'/api/v1/system/updates/jobs/{job_id}', telegram_user_id=user_id)
 
-    async def cleanup_overview(self, telegram_user_id: int):
-        return await self.request('GET', '/api/v1/system/cleanup', telegram_user_id=telegram_user_id)
-
     async def backups_overview(self, user_id):
         return await self.request('GET','/api/v1/system/backups',telegram_user_id=user_id)
 
@@ -79,9 +76,6 @@ class BackendClient:
 
     async def backup_job(self,user_id,job_id):
         return await self.request('GET',f'/api/v1/system/backups/jobs/{job_id}',telegram_user_id=user_id)
-
-    async def run_cleanup(self, telegram_user_id: int):
-        return await self.request('POST', '/api/v1/system/cleanup/run', telegram_user_id=telegram_user_id, command=True)
 
     def __init__(self, session: aiohttp.ClientSession, base_url: str, adapter_token: str):
         parsed = urlsplit(base_url)
@@ -235,10 +229,16 @@ class BackendClient:
                                   telegram_user_id=telegram_user_id)
 
     async def issue(self, telegram_user_id: int, profile_id: str, node_key: str,
-                    protocol: str, transport: str) -> dict:
+                    protocol: str, transport: str, *, device_id: str | None = None) -> dict:
+        body = {'node_key': node_key, 'protocol': protocol, 'transport': transport}
+        if device_id is not None:
+            body['device_id'] = device_id
         return await self.request('POST', f'/api/v1/profiles/{profile_id}/config-issuances?wait=true',
             telegram_user_id=telegram_user_id, command=True,
-            body={'node_key': node_key, 'protocol': protocol, 'transport': transport})
+            body=body)
+
+    async def node_creation_options(self, telegram_user_id: int) -> dict:
+        return await self.request('GET', '/api/v1/nodes/creation-options', telegram_user_id=telegram_user_id)
 
     async def issuance(self, telegram_user_id: int, issuance_id: str) -> dict:
         return await self.request('GET', f'/api/v1/config-issuances/{issuance_id}',
@@ -288,11 +288,22 @@ class BackendClient:
                                   telegram_user_id=telegram_user_id)
 
     async def create_profile(self, telegram_user_id: int, account_id: str, name: str,
-                             command_key: str, grants: list[dict] | None = None) -> dict:
+                             command_key: str, grants: list[dict] | None = None,
+                             access_policy: dict | None = None) -> dict:
         return await self.request('POST', '/api/v1/profiles', telegram_user_id=telegram_user_id,
                                   command=True, command_key=command_key,
                                   body={'display_name': name, 'owner_account_id': account_id,
-                                        'grants': grants or []})
+                  'grants': grants or [], **({'access_policy': access_policy} if access_policy is not None else {})})
+
+    async def profile_access_policy(self, telegram_user_id: int, profile_id: str) -> dict:
+        return await self.request('GET', f'/api/v1/profiles/{profile_id}/access-policy',
+                                  telegram_user_id=telegram_user_id)
+
+    async def replace_access_policy(self, telegram_user_id: int, profile_id: str,
+                                    revision: int, values: dict, command_key: str) -> dict:
+        return await self.request('PUT', f'/api/v1/profiles/{profile_id}/access-policy',
+            telegram_user_id=telegram_user_id, command=True, command_key=command_key,
+            revision=revision, body=values)
 
     async def edit_profile(self, telegram_user_id: int, profile_id: str,
                            revision: int, changes: dict, *, command_key: str | None = None) -> dict:

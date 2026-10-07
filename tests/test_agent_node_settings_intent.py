@@ -15,6 +15,54 @@ SPEC.loader.exec_module(MODULE)
 
 
 class AgentNodeSettingsIntentTests(unittest.TestCase):
+    def test_selected_fallback_port_is_durable_and_recovered_without_replay(self):
+        intent = self.intent()
+        intent['settings'].update(awg_port=443, awg_i1_preset='quic', awg_port_mode='auto')
+        calls = []
+
+        def runner(original, lock_fd):
+            calls.append(True)
+            effective = dict(original, settings=dict(original['settings'], awg_port=8443))
+            payload = {'node_key': 'n1', 'revision': 1, 'awg_port': 8443,
+                'settings_sha256': MODULE.node_settings_digest(effective)}
+            return {'summary': 'verified', 'payload_json': json.dumps(payload)}
+
+        first = MODULE.apply_node_settings(intent, self.journal, runner)
+        self.assertEqual(first, MODULE.lookup_node_settings(intent, self.journal))
+        self.assertEqual(first, MODULE.apply_node_settings(intent, self.journal, runner))
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(intent['settings']['awg_port'], 443)
+
+    def test_selected_port_reaches_environment_config_and_verified_result(self):
+        root = Path(self.temp.name)
+        env = root / 'node.env'
+        awg = root / 'wg0.conf'
+        env.write_text(f'XRAY_CONFIG={root / "xray.json"}\nAWG_CONFIG={awg}\nXRAY_CONTAINER_NAME=xray\nAWG_CONTAINER_NAME=awg\n')
+        (root / 'awg_ports.py').write_text('def select_port(*args):\n    return 8443\n')
+        (root / 'init-awg.sh').write_text(f'#!/bin/bash\nsource "{env}"\nprintf "[Interface]\\nListenPort = %s\\n" "$AWG_SERVER_PORT" > "{awg}"\n')
+        (root / 'apply-node-settings.sh').write_text('#!/bin/sh\nexit 0\n')
+        for name in ('init-awg.sh', 'apply-node-settings.sh'):
+            (root / name).chmod(0o755)
+        intent = self.intent()
+        intent['protocols'] = ['awg']
+        intent['settings'].update(awg_port=443, awg_port_mode='auto', awg_i1_preset='quic')
+        real_run = subprocess.run
+
+        def run(args, **kwargs):
+            if args[0] in {'ufw', 'docker'}:
+                return subprocess.CompletedProcess(args, 0, 'true\n' if args[0] == 'docker' else '')
+            return real_run(args, **kwargs)
+
+        with patch.object(MODULE.subprocess, 'run', side_effect=run):
+            result = MODULE.run_node_settings(intent, 0, env_path=env, root=root)
+        self.assertIn("AWG_SERVER_PORT=8443", env.read_text())
+        self.assertIn('ListenPort = 8443', awg.read_text())
+        payload = json.loads(result['payload_json'])
+        effective = dict(intent, settings=dict(intent['settings'], awg_port=8443))
+        self.assertEqual(payload['settings_sha256'], MODULE.node_settings_digest(effective))
+        self.assertEqual(payload['awg_port'], 8443)
+        self.assertEqual(intent['settings']['awg_port'], 443)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

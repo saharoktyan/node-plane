@@ -50,6 +50,8 @@ class RequestSetupTests(IsolatedAsyncioTestCase):
             pending_access_request=AsyncMock(return_value={'locale': 'en'}),
             profiles=AsyncMock(return_value={'items': [self.profile]}),
             profile_grants=AsyncMock(return_value={'items': [{'node_key': 'n1', 'protocol': 'awg'}]}),
+            profile_access_policy=AsyncMock(side_effect=lambda *_: {'revision': self.profile['desired_revision'],
+                'explicit_grants': [{'node_key': 'n1', 'protocol': 'awg'}], 'rules': [], 'exclusions': []}),
             admin_nodes=AsyncMock(return_value={'items': [{'key': 'n1', 'title': 'Latvia', 'region': 'EU', 'protocols': ['awg', 'xray']}]}),
             edit_profile=AsyncMock())
 
@@ -86,7 +88,8 @@ class RequestSetupTests(IsolatedAsyncioTestCase):
             self.query.data = 'setup_save'
             await self.dispatch(lambda state: profiles.setup_save_cb(self.query, self.bot, self.backend, state))
             self.backend.edit_profile.assert_awaited_once_with(123, 'p1', 4,
-                {'expires_at': draft['expires_at'], 'grants': [{'node_key': 'n1', 'protocol': 'awg'}]}, command_key=draft['command_key'])
+                {'expires_at': draft['expires_at'], 'access_policy': {
+                    'explicit_grants': [{'node_key': 'n1', 'protocol': 'awg'}], 'rules': [], 'exclusions': []}}, command_key=draft['command_key'])
             await self.assert_main_unchanged()
             self.query.data = 'setup_edit'
             await self.dispatch(lambda state: profiles.setup_edit_cb(self.query, self.bot, self.backend, state))

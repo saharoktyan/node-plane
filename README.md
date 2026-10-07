@@ -29,7 +29,7 @@ Protocol configuration: [PROTOCOL_REFERENCE.md](PROTOCOL_REFERENCE.md).
 - creates and maintains user profiles with access control
 - delivers connection material to end users through the bot
 - stores control-plane state in PostgreSQL
-- includes diagnostics, telemetry, updates, rollback, and release cleanup
+- includes diagnostics, telemetry, updates, rollback, and automatic release retention
 - supports Russian and English UI
 
 ## Deployment Modes
@@ -126,7 +126,7 @@ git clone git@github.com:saharoktyan/node-plane.git node-plane-src
 - administrator-controlled monthly traffic usage reporting and configurable alerts
 - scripted updates with rollback support
 - automatic Docker and PostgreSQL runtime provisioning during install/update
-- release cleanup helpers
+- automatic release retention
 
 ## Operator Experience
 

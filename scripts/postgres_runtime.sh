@@ -49,7 +49,7 @@ install_packages_if_needed() {
       echo "Failed to refresh apt package metadata." >&2
       return 1
     }
-    run_as_root apt-get install -y "$@" || {
+    run_as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y "$@" || {
       echo "Failed to install packages via apt: $*" >&2
       return 1
     }

@@ -139,6 +139,21 @@ class UpdatesTests(unittest.TestCase):
         self.assertEqual(state["last_run_status"], "running")
         self.assertTrue(str(state["last_run_unit"]).startswith("node-plane-update-"))
 
+    def test_archive_updates_run_active_script_without_a_source_checkout(self) -> None:
+        proc = SimpleNamespace(returncode=0, stdout="Started", stderr="")
+        with patch("services.updates.subprocess.run", return_value=proc) as run, \
+             patch("services.updates.maybe_create_pre_action_backup", return_value={"status": "success"}), \
+             patch("services.updates.is_manual_update_supported", return_value=True), \
+             patch("services.updates.os.path.isfile", side_effect=lambda p: str(p).endswith("CONTROLLER_PACKAGE.json")):
+            result = self.updates.schedule_update(branch="dev", target_ref="v0.4.3-alpha.50")
+        self.assertEqual(result["status"], "running")
+        command = run.call_args.args[0]
+        self.assertIn(self.updates.APP_ROOT + "/scripts/update.sh", command)
+        self.assertIn("NODE_PLANE_SHARED_DIR=" + self.updates.SHARED_ROOT, command)
+        self.assertIn("NODE_PLANE_BASE_DIR=" + self.updates.INSTALL_ROOT, command)
+        self.assertNotIn("--from-source", command)
+        self.assertEqual(run.call_args.kwargs["cwd"], os.path.realpath(self.updates.APP_ROOT))
+
     def test_list_available_versions_parses_tags_and_actions(self) -> None:
         proc = SimpleNamespace(
             returncode=0,

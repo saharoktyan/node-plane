@@ -77,9 +77,9 @@ class UpdatesRichTests(IsolatedAsyncioTestCase):
             self.assertIn(updates.tr(lang, 'updates.current', value='old'), screen.lines)
             self.assertIn(updates.tr(lang, 'updates.available', value='new'), screen.lines)
             callbacks = [b.callback_data for row in screen.fallback_rows(rows) for b in row]
-            for action in ('ufleet', 'uv_page:0', 'upd_act:branch_menu', 'upd_act:cleanup_menu', 'upd_act:run', 'upd_act:check'):
+            for action in ('ufleet', 'uv_page:0', 'upd_act:branch_menu', 'upd_act:run', 'upd_act:check'):
                 self.assertIn(action, callbacks)
-            self.assertEqual(screen.sections[-1].rows[0][0].style, 'danger')
+            self.assertNotIn('upd_act:cleanup_menu', callbacks)
             self.assertIn('upd_act:check', [b.callback_data for b in screen.sections[1].rows[0]])
             self.assertEqual([b.size for b in screen.rich(rows).blocks if b.type == 'heading'][0], 1)
             with patch.object(updates, 'render', new_callable=AsyncMock) as draw:

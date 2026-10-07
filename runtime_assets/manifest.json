@@ -1,5 +1,10 @@
 [
   {
+    "target_path": "/opt/node-plane-runtime/awg_ports.py",
+    "asset_path": "awg_ports.py",
+    "mode": "0644"
+  },
+  {
     "target_path": "/etc/node-plane/node.env.example",
     "asset_path": "node.env.example",
     "mode": "0644"

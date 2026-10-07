@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import secrets
 import logging
+import json
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
@@ -17,6 +18,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, Message
 from ..backend import BackendClient, BackendError
 from ..i18n import normalize_locale, tr
 from ..screens import Screen, Section, Table, server_label
+from .. import access_policy as policy_ui
 from .callbacks import (AccountsCallback, AccountCallback, NewProfileCallback,
     AdminProfilesCallback, AdminProfileCallback, GrantNodesCallback,
     GrantProtocolsCallback, AddGrantCallback, RemoveGrantCallback,
@@ -44,13 +46,133 @@ async def _ensure_grant_draft(backend, user_id, profile_id, state):
     data = await state.get_data()
     if data.get('edit_profile_id') == profile_id:
         return data
-    page, profile = await asyncio.gather(backend.profile_grants(user_id, profile_id),
+    policy, profile = await asyncio.gather(backend.profile_access_policy(user_id, profile_id),
         backend.request('GET', f'/api/v1/profiles/{profile_id}', telegram_user_id=user_id))
+    if policy['revision'] != profile['desired_revision']:
+        raise BackendError('revision_conflict', 412)
+    regions = await _all_policy_regions(backend, user_id) if any(r['scope'] == 'region' for r in policy['rules']) else []
     await state.update_data(edit_profile_id=profile_id,
-        draft_grants=[dict(item) for item in page['items']],
-        original_grants=[dict(item) for item in page['items']],
+        draft_grants=[dict(item) for item in policy['explicit_grants']],
+        original_grants=[dict(item) for item in policy['explicit_grants']],
+        draft_rules=policy['rules'], original_rules=policy['rules'],
+        draft_exclusions=policy['exclusions'], original_exclusions=policy['exclusions'],
+        policy_region_labels={r['id']: r['title'] for r in regions},
         edit_profile_revision=profile['desired_revision'], grant_nodes_page=0)
     return await state.get_data()
+
+
+async def _all_policy_regions(backend, user_id):
+    from urllib.parse import urlencode
+    result, cursor, seen = [], None, set()
+    while True:
+        path = '/api/v1/regions?' + urlencode({'limit': 100, **({'cursor': cursor} if cursor else {})})
+        page = await backend.request('GET', path, telegram_user_id=user_id)
+        result.extend(page['items'])
+        cursor = page.get('next_cursor')
+        if not cursor:
+            return sorted(result, key=lambda r: (r['title'].casefold(), r['id']))
+        if cursor in seen:
+            raise BackendError('backend_unavailable', 503)
+        seen.add(cursor)
+
+
+async def show_future_rules(chat_id, user_id, message_id, bot, backend, state, mode, profile_id=None, page_index=0):
+    if mode == 'edit':
+        await _ensure_grant_draft(backend, user_id, profile_id, state)
+    data = await state.get_data()
+    if mode == 'create' and not data.get('draft_profile_name'):
+        return
+    regions = await _all_policy_regions(backend, user_id)
+    # This view pages regions, not node snapshots; empty regions remain selectable.
+    pages = max(1, (len(regions) + 9) // 10)
+    page_index = max(0, min(page_index, pages - 1))
+    visible = regions[page_index * 10:(page_index + 1) * 10]
+    nonce = secrets.token_urlsafe(6)
+    scopes = {'all': {'scope': 'all', 'region_id': None}}
+    for index, region in enumerate(visible):
+        scopes[str(index)] = {'scope': 'region', 'region_id': region['id']}
+    await state.update_data(future_rules_context={'nonce': nonce, 'mode': mode,
+        'profile_id': profile_id, 'message_id': message_id, 'user_id': user_id, 'scopes': scopes, 'page': page_index},
+        policy_region_labels={r['id']: r['title'] for r in regions})
+    locale = await _locale(state)
+    def section(token, title):
+        scope = scopes[token]
+        rule = next((r for r in data.get('draft_rules') or [] if
+                     (r['scope'], r['region_id']) == (scope['scope'], scope['region_id'])), {})
+        return Section(title, rows=(tuple(InlineKeyboardButton(text=tr(locale, 'protocol.' + p),
+            callback_data=f'future_toggle:{nonce}:{token}:{p}',
+            style='primary' if p in rule.get('protocols', []) else None) for p in ('awg', 'xray')),))
+    sections = (section('all', tr(locale, 'policy.all')),
+                *(section(str(index), region['title']) for index, region in enumerate(visible)))
+    rows = []
+    if pages > 1:
+        arrows = []
+        if page_index:
+            arrows.append(InlineKeyboardButton(text='←', callback_data=f'future_page:{nonce}:{page_index - 1}'))
+        arrows.append(InlineKeyboardButton(text=f'{page_index + 1}/{pages}', callback_data=f'future_page:{nonce}:{page_index}'))
+        if page_index + 1 < pages:
+            arrows.append(InlineKeyboardButton(text='→', callback_data=f'future_page:{nonce}:{page_index + 1}'))
+        rows.append(arrows)
+    rows.append([InlineKeyboardButton(text=tr(locale, 'back'), callback_data=
+        'profile_draft_nodes' if mode == 'create' else GrantNodesCallback(profile_id=profile_id).pack())])
+    await render(bot, chat_id, Screen(tr(locale, 'policy.title'), (tr(locale, 'policy.note'),),
+        sections=sections, embedded_buttons=True, navigation=True), rows, state, message_id)
+
+
+@router.callback_query(F.data.startswith('future_open:'))
+async def future_open_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
+    await query.answer()
+    parts = query.data.split(':')
+    if parts[1] == 'create' and len(parts) == 2:
+        await show_future_rules(query.message.chat.id, query.from_user.id, query.message.message_id,
+                                bot, backend, state, 'create')
+    elif parts[1] == 'edit' and len(parts) == 3:
+        await show_future_rules(query.message.chat.id, query.from_user.id, query.message.message_id,
+                                bot, backend, state, 'edit', parts[2])
+
+
+def _future_context(data, query, nonce):
+    context = data.get('future_rules_context')
+    if (not context or context['nonce'] != nonce or context['message_id'] != query.message.message_id
+            or context['user_id'] != query.from_user.id or data.get('control_message_id') != query.message.message_id):
+        return None
+    if context['mode'] == 'edit' and data.get('edit_profile_id') != context['profile_id']:
+        return None
+    if context['mode'] == 'create' and not data.get('draft_profile_name'):
+        return None
+    return context
+
+
+@router.callback_query(F.data.startswith('future_toggle:'))
+async def future_toggle_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
+    await query.answer()
+    _, nonce, token, protocol = query.data.split(':', 3)
+    data = await state.get_data()
+    context = _future_context(data, query, nonce)
+    if not context or token not in context['scopes'] or protocol not in {'awg', 'xray'}:
+        return
+    scope = context['scopes'][token]
+    rules = [dict(r, protocols=list(r['protocols'])) for r in data.get('draft_rules') or []]
+    current = next((r for r in rules if (r['scope'], r['region_id']) == (scope['scope'], scope['region_id'])), None)
+    selected = set(current['protocols'] if current else [])
+    selected.symmetric_difference_update({protocol})
+    rules = [r for r in rules if (r['scope'], r['region_id']) != (scope['scope'], scope['region_id'])]
+    if selected:
+        rules.append({**scope, 'protocols': sorted(selected)})
+    await state.update_data(draft_rules=sorted(rules, key=lambda r: (r['scope'], r['region_id'] or '')))
+    await show_future_rules(query.message.chat.id, query.from_user.id, query.message.message_id,
+        bot, backend, state, context['mode'], context['profile_id'], context['page'])
+
+
+@router.callback_query(F.data.startswith('future_page:'))
+async def future_page_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
+    await query.answer()
+    _, nonce, page = query.data.split(':', 2)
+    context = _future_context(await state.get_data(), query, nonce)
+    if not context or not page.isdigit():
+        return
+    await show_future_rules(query.message.chat.id, query.from_user.id, query.message.message_id,
+        bot, backend, state, context['mode'], context['profile_id'], int(page))
 
 
 def _status(profile, locale):
@@ -75,23 +197,6 @@ def _task_status(status, locale):
     key = {'pending': 'awaiting_executor', 'dispatched': 'running', 'running': 'running',
         'succeeded': 'succeeded', 'blocked': 'blocked', 'superseded': 'superseded'}.get(status)
     return tr(locale, 'operation.' + key) if key else tr(locale, 'profile.rich.unknown')
-
-
-def _bulk_grants(nodes, grants, region, add):
-    scoped = [node for node in nodes if region is None or (node.get('region') or '') == region]
-    if not add:
-        keys = {node['key'] for node in scoped}
-        return [] if region is None else [grant for grant in grants if grant['node_key'] not in keys]
-    updated = [dict(grant) for grant in grants]
-    seen = {(grant['node_key'], grant['protocol']) for grant in updated}
-    for node in scoped:
-        if not node.get('enabled', True):
-            continue
-        for protocol in node['protocols']:
-            if (node['key'], protocol) not in seen:
-                updated.append({'node_key': node['key'], 'protocol': protocol})
-                seen.add((node['key'], protocol))
-    return updated
 
 
 def _bulk_buttons(profile_id, scope, locale, *, region=False, prefix='grant_bulk'):
@@ -275,8 +380,8 @@ async def show_create_nodes(chat_id: int, user_id: int, message_id: int,
     locale = await _locale(state)
     data = await state.get_data()
     nodes = await _all_nodes(backend, user_id)
-    await state.update_data(draft_nodes=nodes)
-    grants = {(item['node_key'], item['protocol']) for item in data.get('draft_grants', [])}
+    await state.update_data(draft_nodes=nodes, future_rules_context=None)
+    grants = policy_ui.effective(data, nodes)
     from .user import server_page
     visible, page, pages = server_page(nodes, data.get('draft_nodes_page', 0))
     await state.update_data(draft_nodes_page=page)
@@ -293,7 +398,9 @@ async def show_create_nodes(chat_id: int, user_id: int, message_id: int,
         groups.setdefault(node.get('region') or '', []).append(node)
     sections = [Section(tr(locale, 'profile.rich.bulk'),
         (tr(locale, 'profile.rich.bulk_note'),),
-        heading_rows=(_bulk_buttons(nonce, 'all', locale, prefix='draft_bulk'),))]
+        heading_rows=(_bulk_buttons(nonce, 'all', locale, prefix='draft_bulk'),)),
+        Section(tr(locale, 'policy.title'), rows=((InlineKeyboardButton(
+            text=tr(locale, 'policy.configure'), callback_data='future_open:create'),),))]
     for region, items in groups.items():
         token = secrets.token_urlsafe(6)
         scopes[token] = region
@@ -348,7 +455,7 @@ async def draft_bulk_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, 
         return
     nodes = await _all_nodes(backend, query.from_user.id)
     region = None if scope == 'all' else data['draft_bulk_regions'][scope]
-    await state.update_data(draft_grants=_bulk_grants(nodes, data.get('draft_grants', []), region, action == 'add'))
+    await state.update_data(**policy_ui.bulk(data, nodes, region, action == 'add'))
     await show_create_nodes(query.message.chat.id, query.from_user.id,
         query.message.message_id, bot, backend, state)
 
@@ -361,8 +468,7 @@ async def show_create_protocols(chat_id: int, user_id: int, message_id: int,
                  if item['key'] == data.get('draft_node_key')), None)
     if node is None:
         return
-    enabled = {item['protocol'] for item in data.get('draft_grants', [])
-               if item['node_key'] == node['key']}
+    enabled = {p for n, p in policy_ui.effective(data, data.get('draft_nodes', [])) if n == node['key']}
     rows = [[InlineKeyboardButton(text=tr(locale, f'protocol.{protocol}'),
         callback_data=f'profile_draft_toggle:{protocol}',
         style='primary' if protocol in enabled else None) for protocol in node['protocols']]]
@@ -399,11 +505,8 @@ async def draft_toggle_cb(query: CallbackQuery, bot: Bot, state: FSMContext) -> 
     protocol = query.data.split(':', 1)[1]
     if node is None or protocol not in node['protocols']:
         return
-    grant = {'node_key': node['key'], 'protocol': protocol}
-    grants = [item for item in data.get('draft_grants', []) if item != grant]
-    if grant not in data.get('draft_grants', []):
-        grants.append(grant)
-    await state.update_data(draft_grants=grants)
+    selected = (node['key'], protocol) in policy_ui.effective(data, data.get('draft_nodes', []))
+    await state.update_data(**policy_ui.toggle(data, data.get('draft_nodes', []), node['key'], protocol, not selected))
     await show_create_protocols(query.message.chat.id, query.from_user.id,
                                 query.message.message_id, bot, state)
 
@@ -438,11 +541,12 @@ async def show_create_review(chat_id: int, message_id: int, bot: Bot,
                 tuple((nodes.get(key, key), ', '.join(protocols)) for key, protocols in grouped.items())),)),)
     if note:
         lines.insert(0, note)
-    if not grouped:
+    sections = (*sections, *policy_ui.summary(data, locale))
+    if not grouped and not data.get('draft_rules'):
         lines.append(tr(locale, 'profile.create.choose_one'))
     rows = [[InlineKeyboardButton(text=tr(locale, 'back'),
         callback_data='profile_draft_nodes')]]
-    if grouped:
+    if grouped or data.get('draft_rules'):
         rows[0].append(InlineKeyboardButton(text=tr(locale, 'profile.create.save'),
             callback_data='profile_draft_save', style='primary'))
     await render(bot, chat_id, Screen(tr(locale, 'profile.create.review_title'),
@@ -484,7 +588,7 @@ async def draft_save_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
         return
     locale = await _locale(state)
     grants = data.get('draft_grants', [])
-    if not grants:
+    if not grants and not data.get('draft_rules'):
         await show_create_nodes(query.message.chat.id, query.from_user.id,
             query.message.message_id, bot, backend, state,
             note=tr(locale, 'profile.create.choose_one'))
@@ -492,7 +596,7 @@ async def draft_save_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
     try:
         result = await backend.create_profile(query.from_user.id,
             data['profile_account_id'], data['draft_profile_name'],
-            data['profile_command_key'], grants)
+            data['profile_command_key'], [], access_policy=policy_ui.values(data))
     except BackendError as exc:
         await show_create_review(query.message.chat.id,
             query.message.message_id, bot, state, note=_profile_error(locale, exc))
@@ -1257,8 +1361,13 @@ async def show_grant_nodes(chat_id: int, user_id: int, message_id: int,
     locale = await _locale(state)
     from .user import server_page
     visible, page, pages = server_page(nodes, data.get('grant_nodes_page', 0))
-    await state.update_data(grant_nodes_page=page, grant_inline=True, grant_node_labels={node['key']: server_label(node) for node in nodes})
-    granted = {(item['node_key'], item['protocol']) for item in data['draft_grants']}
+    await state.update_data(grant_nodes_page=page, grant_inline=True, future_rules_context=None,
+        grant_node_labels={node['key']: server_label(node) for node in nodes})
+    granted = policy_ui.effective(data, nodes)
+    inherited = policy_ui.inherited(policy_ui.values(data), nodes)
+    await state.update_data(grant_draft_nodes=nodes, policy_region_labels={
+        **(data.get('policy_region_labels') or {}),
+        **{node['region_id']: node['region'] for node in nodes if node.get('region_id')}})
     def node_section(node):
         buttons = []
         for protocol in node['protocols']:
@@ -1269,8 +1378,10 @@ async def show_grant_nodes(chat_id: int, user_id: int, message_id: int,
                 profile_id=profile_id, node_key=node['key'], protocol=protocol)
             buttons.append(InlineKeyboardButton(text=tr(locale, 'protocol.' + protocol),
                 callback_data=callback.pack(), style='primary' if selected else None))
+        derived_protocols = [tr(locale, 'protocol.' + p) for n, p in sorted(inherited) if n == node['key']]
         return Section(server_label(node), rows=(tuple(buttons),) if buttons else (),
-            lines=() if buttons else (tr(locale, 'profile.rich.no_protocols'),),
+            lines=(tr(locale, 'policy.inherited', protocols=' · '.join(derived_protocols)),) if derived_protocols else
+                  () if buttons else (tr(locale, 'profile.rich.no_protocols'),),
             divider_after=node['key'] != visible[-1]['key'], heading_size=3)
     scopes, groups, with_controls = {}, {}, []
     for node in visible:
@@ -1286,8 +1397,12 @@ async def show_grant_nodes(chat_id: int, user_id: int, message_id: int,
     await state.update_data(grant_bulk_regions=scopes)
     sections = (Section(tr(locale, 'profile.rich.bulk'),
         (tr(locale, 'profile.rich.bulk_note'),),
-        heading_rows=(_bulk_buttons(profile_id, 'all', locale),)), *with_controls)
-    changed = set(granted) != {(item['node_key'], item['protocol']) for item in data['original_grants']}
+        heading_rows=(_bulk_buttons(profile_id, 'all', locale),)),
+        Section(tr(locale, 'policy.title'),
+            (tr(locale, 'policy.count', count=len(data.get('draft_rules') or [])),),
+            rows=((InlineKeyboardButton(text=tr(locale, 'policy.configure'),
+                callback_data=f'future_open:edit:{profile_id}'),),)), *with_controls)
+    changed = policy_ui.changed(data)
     lines = [tr(locale, 'profile.rich.draft_note'),
              tr(locale, 'profile.rich.unsaved' if changed else 'profile.rich.no_changes')]
     if pages > 1:
@@ -1342,7 +1457,7 @@ async def grant_bulk_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, 
         return
     region = None if scope == 'all' else data['grant_bulk_regions'][scope]
     nodes = await _all_nodes(backend, query.from_user.id)
-    await state.update_data(draft_grants=_bulk_grants(nodes, data['draft_grants'], region, action == 'add'))
+    await state.update_data(**policy_ui.bulk(data, nodes, region, action == 'add'))
     await show_grant_nodes(query.message.chat.id, query.from_user.id,
         query.message.message_id, profile_id, bot, backend, state)
 
@@ -1361,7 +1476,8 @@ async def show_grant_protocols(chat_id: int, user_id: int, message_id: int,
                                backend: BackendClient, state: FSMContext) -> None:
     data = await _ensure_grant_draft(backend, user_id, profile_id, state)
     await state.update_data(grant_inline=False)
-    enabled = {item['protocol'] for item in data['draft_grants'] if item['node_key'] == node_key}
+    nodes = await _all_nodes(backend, user_id)
+    enabled = {p for n, p in policy_ui.effective(data, nodes) if n == node_key}
     locale = await _locale(state)
     node = await backend.request('GET', f'/api/v1/nodes/{node_key}',
                                  telegram_user_id=user_id)
@@ -1386,13 +1502,11 @@ async def change_grant(query: CallbackQuery, profile_id: str, node_key: str,
                        backend: BackendClient, state: FSMContext) -> None:
     user_id = query.from_user.id
     data = await _ensure_grant_draft(backend, user_id, profile_id, state)
-    grants = list(data['draft_grants'])
-    target = {'node_key': node_key, 'protocol': protocol}
-    if add and target not in grants:
-        grants.append(target)
-    elif not add:
-        grants = [item for item in grants if item != target]
-    await state.update_data(edit_profile_id=profile_id, draft_grants=grants)
+    nodes = await _all_nodes(backend, user_id)
+    node = next((n for n in nodes if n['key'] == node_key), None)
+    if not node or protocol not in node['protocols'] or (add and not node.get('enabled', True)):
+        return
+    await state.update_data(edit_profile_id=profile_id, **policy_ui.toggle(data, nodes, node_key, protocol, add))
     if data.get('grant_inline'):
         await show_grant_nodes(query.message.chat.id, user_id,
             query.message.message_id, profile_id, bot, backend, state)
@@ -1412,8 +1526,14 @@ async def save_grants_cb(query: CallbackQuery, bot: Bot,
                                query.message.message_id, profile_id, bot, backend, state)
         return
     try:
-        await backend.replace_grants(query.from_user.id, profile_id,
-                                     data['edit_profile_revision'], data['draft_grants'])
+        values = policy_ui.values(data)
+        fingerprint = json.dumps(values, sort_keys=True)
+        identity = data.get('grant_save_identity') or {}
+        if identity.get('fingerprint') != fingerprint:
+            identity = {'fingerprint': fingerprint, 'key': str(uuid4())}
+            await state.update_data(grant_save_identity=identity)
+        await backend.replace_access_policy(query.from_user.id, profile_id,
+            data['edit_profile_revision'], values, identity['key'])
     except BackendError as exc:
         await query.answer(_profile_error(await _locale(state), exc), show_alert=True)
         return
@@ -1454,18 +1574,22 @@ async def toggle_freeze_cb(query: CallbackQuery, callback_data: ToggleFreezeCall
 async def start_profile_setup(chat_id, user_id, message_id, profile_id, bot, backend, state):
     profile = await backend.request('GET', f'/api/v1/profiles/{profile_id}', telegram_user_id=user_id)
     owner = await backend.request('GET', f"/api/v1/accounts/{profile['owner_account_id']}", telegram_user_id=user_id) if profile.get('owner_account_id') else {}
-    grants = await backend.profile_grants(user_id, profile_id)
+    policy = await backend.profile_access_policy(user_id, profile_id)
     observed = await backend.request('GET', f'/api/v1/profiles/{profile_id}', telegram_user_id=user_id)
-    if observed['desired_revision'] != profile['desired_revision'] or observed.get('deleting'):
+    if observed['desired_revision'] != profile['desired_revision'] or policy['revision'] != profile['desired_revision'] or observed.get('deleting'):
         raise BackendError('revision_conflict', 412)
+    regions = await _all_policy_regions(backend, user_id) if any(r['scope'] == 'region' for r in policy['rules']) else []
     await state.set_state(None)
     await state.update_data(profile_setup={'profile_id': profile_id,
         'name': profile['display_name'], 'admin': owner.get('role') == 'admin',
         'expires_at': None if owner.get('role') == 'admin' else profile.get('expires_at'),
         'command_key': str(uuid4())}, edit_profile_id=profile_id,
         edit_profile_revision=profile['desired_revision'],
-        draft_grants=[dict(item) for item in grants['items']],
-        original_grants=[dict(item) for item in grants['items']], grant_nodes_page=0)
+        draft_grants=[dict(item) for item in policy['explicit_grants']],
+        original_grants=[dict(item) for item in policy['explicit_grants']],
+        draft_rules=policy['rules'], original_rules=policy['rules'],
+        draft_exclusions=policy['exclusions'], original_exclusions=policy['exclusions'], grant_nodes_page=0,
+        policy_region_labels={r['id']: r['title'] for r in regions})
     await show_grant_nodes(chat_id, user_id, message_id, profile_id, bot, backend, state)
 
 
@@ -1558,7 +1682,8 @@ async def show_setup_review(chat_id, message_id, bot, state):
     await render(bot, chat_id, Screen(tr(locale, 'setup.review'),
         (setup['name'], tr(locale, 'profile.rich.expires', value=_expiry_label(setup['expires_at']) if setup['expires_at'] else tr(locale, 'profile.layout.unlimited'))),
         sections=(Section(tr(locale, 'profile.layout.access'), tuple(
-            f"{data.get('grant_node_labels', {}).get(item['node_key'], item['node_key'])} · {tr(locale, 'protocol.' + item['protocol'])}" for item in data.get('draft_grants', []))),),
+            f"{data.get('grant_node_labels', {}).get(item['node_key'], item['node_key'])} · {tr(locale, 'protocol.' + item['protocol'])}" for item in data.get('draft_grants', []))),
+            *policy_ui.summary(data, locale)),
         embedded_buttons=True, navigation=True),
         [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data='setup_time'),
           InlineKeyboardButton(text=tr(locale, 'profile.admin.save'), callback_data='setup_save', style='primary')]], state, message_id)
@@ -1579,7 +1704,7 @@ async def setup_save_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, 
         return
     try:
         await backend.edit_profile(query.from_user.id, setup['profile_id'], data['edit_profile_revision'],
-            {'expires_at': setup['expires_at'], 'grants': data['draft_grants']}, command_key=setup['command_key'])
+            {'expires_at': setup['expires_at'], 'access_policy': policy_ui.values(data)}, command_key=setup['command_key'])
     except BackendError as exc:
         await query.answer(_profile_error(await _locale(state), exc), show_alert=True)
         return
@@ -1596,6 +1721,7 @@ async def show_setup_overview(chat_id, user_id, message_id, bot, backend, state)
     await state.set_state(None)
     profile = await backend.request('GET', f"/api/v1/profiles/{setup['profile_id']}", telegram_user_id=user_id)
     grants = await backend.profile_grants(user_id, setup['profile_id'])
+    policy = await backend.profile_access_policy(user_id, setup['profile_id'])
     locale = await _locale(state)
     rows = [[InlineKeyboardButton(text=tr(locale, 'profile.layout.edit'), callback_data='setup_edit'),
         InlineKeyboardButton(text=tr(locale, 'setup.close') if data.get('notification_session') else tr(locale, 'requests.to_menu'),
@@ -1603,7 +1729,8 @@ async def show_setup_overview(chat_id, user_id, message_id, bot, backend, state)
     await render(bot, chat_id, Screen(profile['display_name'],
         (_status(profile, locale), tr(locale, 'profile.rich.expires', value=_expiry_label(profile.get('expires_at')) if profile.get('expires_at') else tr(locale, 'profile.layout.unlimited'))),
         sections=(Section(tr(locale, 'profile.layout.access'), tuple(f"{data.get('grant_node_labels', {}).get(item['node_key'], item['node_key'])} · {tr(locale, 'protocol.' + item['protocol'])}" for item in grants['items'])
-            or (tr(locale, 'account.access_empty'),), collapsed=True),),
+            or (tr(locale, 'account.access_empty'),), collapsed=True),
+            *policy_ui.summary({**data, 'draft_rules': policy['rules'], 'draft_exclusions': policy['exclusions']}, locale)),
         embedded_buttons=True, navigation=True), rows, state, message_id)
 
 

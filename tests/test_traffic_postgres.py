@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from backend.traffic import TrafficService
+from backend.devices import DeviceRepository
 from db.postgres_db import PostgresDB
 
 
@@ -33,6 +34,7 @@ class TrafficPostgresTests(unittest.TestCase):
             conn.execute('CREATE TABLE backend_accounts (id TEXT PRIMARY KEY)')
             conn.execute('CREATE TABLE backend_nodes (key TEXT PRIMARY KEY)')
             conn.execute('CREATE TABLE backend_profiles (id TEXT PRIMARY KEY, owner_account_id TEXT)')
+            DeviceRepository.create_schema(conn)
             conn.execute('CREATE TABLE backend_system_settings (key TEXT PRIMARY KEY, value TEXT)')
             conn.execute("INSERT INTO backend_accounts VALUES ('admin')")
             conn.execute("INSERT INTO backend_nodes VALUES ('node')")

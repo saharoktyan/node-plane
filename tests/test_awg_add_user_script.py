@@ -113,6 +113,27 @@ class AwgAddUserScriptTests(unittest.TestCase):
             self.assertEqual(config.read_text().count("# msk1-alice"), 1)
             self.assertNotIn("restart amnezia-awg", docker_log.read_text())
 
+            # The same runtime used by device intents must reserve a different
+            # address and keep independent cached credentials for another peer.
+            docker.write_text(docker.read_text().replace(
+                "echo 'private public preshared'", "echo 'phoneprivate phonepublic phonepreshared'"))
+            phone = subprocess.run(["bash", str(runnable), "phone_peer"], env=env,
+                                   text=True, capture_output=True, check=True)
+            self.assertIn("PrivateKey = phoneprivate", phone.stdout)
+            self.assertIn("Address = 10.8.1.3/32", phone.stdout)
+            self.assertIn("# msk1-phone_peer", config.read_text())
+            alice_again = subprocess.run(["bash", str(runnable), "alice"], env=env,
+                                         text=True, capture_output=True, check=True)
+            self.assertEqual(alice_again.stdout, restored.stdout)
+            phone_again = subprocess.run(["bash", str(runnable), "phone_peer"], env=env,
+                                         text=True, capture_output=True, check=True)
+            self.assertEqual(phone_again.stdout, phone.stdout)
+            subprocess.run(["bash", str(delete), "alice"], env=env,
+                           text=True, capture_output=True, check=True)
+            self.assertNotIn("# msk1-alice", config.read_text())
+            self.assertIn("# msk1-phone_peer", config.read_text())
+            self.assertEqual((root / "clients" / "msk1-phone_peer.txt").read_text(),phone.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -133,6 +133,8 @@ class NodeLifecycle:
                 AND status IN ('awaiting_executor', 'running', 'blocked')""" if abandon_uncertain_settings else
                 "UPDATE backend_node_settings_tasks SET status = 'superseded' WHERE node_key = ? AND status = 'awaiting_executor'", (node_key,))
             conn.execute('UPDATE backend_nodes SET enabled = 0 WHERE key = ?', (node_key,))
+            from .grant_policies import forget_node
+            forget_node(conn, node_key)
             # Include historical targets even when their grant was removed: an
             # earlier ensure may have run, timed out, or remained queued.
             profiles = conn.execute('''SELECT DISTINCT profile_id FROM backend_grants WHERE node_key = ?
@@ -200,6 +202,7 @@ class NodeLifecycle:
                 SELECT 1 FROM backend_operation_tasks newer
                 JOIN backend_operations no ON no.id = newer.operation_id
                 WHERE newer.node_key = t.node_key AND newer.protocol = t.protocol
+                  AND newer.device_id = t.device_id
                   AND no.profile_id = o.profile_id AND no.desired_revision > o.desired_revision
             )''', (node_key,)).fetchall()
         ready = pending == 0 and blocked == 0 and all(

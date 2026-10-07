@@ -72,6 +72,8 @@ class IntentExecutor:
                   'awaiting_executor' if 'awaiting_executor' in states else
                   'superseded' if 'superseded' in states else 'succeeded')
         conn.execute('UPDATE backend_operations SET status = ? WHERE id = ?', (status, operation_id))
+        from .devices import DeviceRepository
+        DeviceRepository.settle_deletions(conn)
 
     def resolve_blocked(self, actor, task_id):
         """Trusted admin repair after agent restart; serialized by worker flock.
@@ -190,7 +192,9 @@ class IntentExecutor:
             if row is None:
                 return False
             node = conn.execute('SELECT enabled FROM backend_nodes WHERE key = ?', (row['node_key'],)).fetchone()
-            if row['action'] == 'ensure' and (node is None or not node['enabled']):
+            device = conn.execute('SELECT status FROM backend_devices WHERE id=?', (row['device_id'],)).fetchone() if row['device_id'] else None
+            device_inactive = bool(row['device_id']) and (device is None or device['status'] != 'active')
+            if row['action'] == 'ensure' and (node is None or not node['enabled'] or device_inactive):
                 # A drain may leave earlier ensures queued. Retire them before
                 # sending any remote mutation, then let the delete revision run.
                 conn.execute("UPDATE backend_operation_tasks SET status = 'superseded' WHERE id = ?", (row['id'],))
@@ -273,6 +277,9 @@ def main():
             rollout_executor.recover()
             executor.reconcile_completed()
             executor.queue_expired_profiles()
+            from .devices import DeviceRepository
+            with executor.db.transaction() as conn:
+                DeviceRepository.settle_deletions(conn)
             node_executor.reconcile_completed()
             executor.inspect_blocked()
             while system_cleanup.run_one() or backup_executor.run_one() or update_executor.run_one() or rollout_executor.run_one() or removals.run_one() or node_jobs.run_one() or node_executor.run_one() or executor.run_one() or config_executor.run_one():

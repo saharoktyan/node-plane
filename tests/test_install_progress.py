@@ -26,7 +26,7 @@ class InstallProgressTests(unittest.TestCase):
         self.log = self.root / 'host-actions.log'
         (self.scripts / 'lib').mkdir(parents=True)
         self.binaries.mkdir()
-        for relative in ('install.sh', 'lib/install_progress.sh'):
+        for relative in ('install.sh', 'lib/install_progress.sh', 'lib/controller_archive.sh', 'controller_release.py', 'uv_runtime.sh', 'release_retention.py'):
             shutil.copyfile(ROOT / 'scripts' / relative, self.scripts / relative)
         (self.source / '.env.example').write_text('BOT_TOKEN=replace_me\nADMIN_IDS=123456789\n')
         self.config.write_text(
@@ -69,6 +69,11 @@ if [[ "$*" == *backend.admin_cli* && "${IDENTITY_FAILURE:-0}" != 0 && "$*" != *i
   exit 17
 fi
 ''')
+        self.executable(self.binaries / 'uv', '''#!/bin/bash
+printf 'uv %s\\n' "$*" >> "$COMMAND_LOG"
+if [[ "$1" == --version ]]; then printf 'uv fixture\\n'; fi
+if [[ "$1" == venv ]]; then "$FAKE_PYTHON" -m venv "${@: -1}"; fi
+''')
         self.executable(self.binaries / 'git', '''#!/bin/bash
 case "$1" in
   fetch) printf 'fetch\\n' >> "$COMMAND_LOG" ;;
@@ -86,6 +91,7 @@ esac
             **os.environ,
             'PATH': f'{self.binaries}:{os.environ["PATH"]}',
             'FAKE_PYTHON': str(self.binaries / 'python'),
+            'NODE_PLANE_UV_BIN': str(self.binaries / 'uv'),
             'FAKE_RELEASE': str(self.release),
             'COMMAND_LOG': str(self.log),
             'NODE_PLANE_AUTO_SETUP_DRIVER_AGENTS_ON_INSTALL': '1',
@@ -100,10 +106,12 @@ esac
         path.write_text(source)
         path.chmod(0o755)
 
-    def run_install(self, *extra, progress=True, environment=None):
+    def run_install(self, *extra, progress=True, environment=None, from_source=True):
         command = ['bash', str(self.scripts / 'install.sh'), '--non-interactive',
                    '--mode', 'simple', '--env-file', str(self.config),
                    '--branch', 'dev', '--ref', 'v0.4.3-alpha.99']
+        if from_source:
+            command.append("--from-source")
         if progress:
             command.append('--progress-json')
         return subprocess.run(command + list(extra),
@@ -113,6 +121,32 @@ esac
     def events(self, result):
         return [json.loads(line[len('NODE_PLANE_EVENT '):])
                 for line in result.stdout.splitlines() if line.startswith('NODE_PLANE_EVENT ')]
+
+    def test_archive_install_has_all_seven_steps_without_source_checkout(self):
+        from tests.test_controller_release import release
+        for name in release.REQUIRED:
+            path = self.source / name
+            if not path.exists():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(ROOT / name, path)
+        shutil.copytree(self.release, self.source, dirs_exist_ok=True)
+        subprocess.run(['git', 'init', '-q', str(self.source)], check=True)
+        subprocess.run(['git', '-C', str(self.source), 'add', '-f', '.'], check=True)
+        archive = self.root / release.ASSET
+        release.build(self.source, archive, 'v0.4.3-alpha.99', 'a' * 40)
+        archive_source = self.root / 'controller'
+        release.extract(archive, archive_source)
+        self.source = archive_source
+        self.scripts = archive_source / 'scripts'
+        result = self.run_install(from_source=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.events(result)[-1]['completed'], 7)
+        self.assertNotIn('fetch', self.log.read_text())
+        active = self.base / 'current'
+        self.assertTrue((active / 'CONTROLLER_PACKAGE.json').is_file())
+        self.assertFalse((active / '.git').exists())
+        self.assertFalse((active / 'rust').exists())
+        self.assertIn(f'NODE_PLANE_SOURCE_DIR={active}', (self.base / 'shared/.env').read_text())
 
     def test_complete_install_has_fixed_phases_and_no_secrets_in_events(self):
         result = self.run_install()
@@ -255,7 +289,7 @@ esac
         self.environment['NODE_PLANE_INSTALL_EVENTS'] = '1'
         self.environment['NODE_PLANE_INSTALL_EVENT_FD'] = '3'
         result = subprocess.run(['bash', '-c', 'exec 3>&1; exec bash "$@"', 'bash',
-            str(self.scripts / 'install.sh'), '--non-interactive', '--mode', 'simple',
+            str(self.scripts / 'install.sh'), '--non-interactive', '--mode', 'simple', '--from-source',
             '--branch', 'dev', '--ref', 'v0.4.3-alpha.99', '--env-file', str(self.config)],
             env=self.environment, capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)

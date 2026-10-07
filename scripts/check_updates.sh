@@ -91,6 +91,13 @@ latest_tag_for_branch() {
   return 1
 }
 
+# Archive installations use published release metadata; no Git checkout is needed.
+if [[ -f "${INSTALLED_APP_DIR}/CONTROLLER_PACKAGE.json" ]] || [[ ! -d "${SOURCE_DIR}/.git" ]]; then
+  archive_args=(check --branch "${BRANCH:-$DEFAULT_BRANCH}" --installed "$INSTALLED_APP_DIR")
+  if [[ "$LIST_MODE" == 1 ]]; then archive_args+=(--list); fi
+  exec python3 "${SCRIPT_DIR}/controller_release.py" "${archive_args[@]}"
+fi
+
 if [[ ! -d "$SOURCE_DIR" ]]; then
   emit_error "source checkout not found"
 fi
