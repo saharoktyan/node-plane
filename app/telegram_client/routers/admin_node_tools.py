@@ -32,6 +32,8 @@ async def show_install(chat_id, user_id, message_id, node_key, bot, backend, sta
     locale = normalize_locale((await state.get_data()).get('locale'))
     node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=user_id)
     await remember_node(state, node)
+    back = (f'node_manage:{node_key}' if node.get('applied_revision') else
+            AdminNodeCallback(node_key=node_key).pack())
     overview = await backend.node_overview(user_id, node_key)
     rows = []
     lines = []
@@ -48,7 +50,7 @@ async def show_install(chat_id, user_id, message_id, node_key, bot, backend, sta
             if not overview['settings_complete']:
                 lines.append(tr(locale, 'node_tools.incomplete'))
                 rows.append([button(locale, 'nodes.card.settings', NodeSettingsCallback(node_key=node_key).pack())])
-                rows.append([button(locale, 'back', AdminNodeCallback(node_key=node_key).pack())])
+                rows.append([button(locale, 'back', back)])
                 await render(bot, chat_id, Screen(tr(locale, 'node_tools.install'),
                     (server_label(node),), sections=(Section(tr(locale, 'nodes.rich.next_step'),
                         lines=tuple(lines), rows=(tuple(rows[0]),)),),
@@ -71,7 +73,7 @@ async def show_install(chat_id, user_id, message_id, node_key, bot, backend, sta
             rows.append([button(locale, 'node_tools.setup_agent', target, style='primary')])
         else:
             rows.append([button(locale, 'node_tools.refresh', f'bootstrap_menu:{node_key}')])
-    rows.append([button(locale, 'back', AdminNodeCallback(node_key=node_key).pack())])
+    rows.append([button(locale, 'back', back)])
     actions = tuple(tuple(row) for row in rows[:-1])
     await render(bot, chat_id, Screen(tr(locale, 'node_tools.install'),
         (server_label(node),), sections=(Section(tr(locale, 'nodes.rich.next_step'),

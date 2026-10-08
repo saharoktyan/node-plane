@@ -23,7 +23,7 @@ from ..screens import Screen, Section, Table, server_label
 from ..i18n import normalize_locale, tr
 from .callbacks import HomeCallback
 from .common import render
-from ..navigation import remember_node
+from ..navigation import remember_node, remember_label, parent_path
 
 router = Router()
 
@@ -561,7 +561,7 @@ async def _render_issuance(chat_id: int, user_id: int, message_id: int,
     locale = normalize_locale((await state.get_data()).get('locale'))
     device_back = result['protocol'] == 'awg' and result.get('device_id')
     rows = [[button(user_id, tr(locale, 'back'),
-                    'device_picker' if device_back else ('profile' if result['protocol'] == 'awg' else 'protocol'),
+                    'device_picker_back' if device_back else ('profile' if result['protocol'] == 'awg' else 'protocol'),
                     profile_id, *((node_key,) if device_back else (() if result['protocol'] == 'awg' else (node_key, 'xray'))) )]]
     if result['status'] == 'succeeded':
         artifact = await backend.artifact(user_id, issuance_id)
@@ -577,14 +577,27 @@ async def _render_issuance(chat_id: int, user_id: int, message_id: int,
             return
         import_hint = tr(locale, 'config.import_xray' if result['protocol'] == 'xray'
                          else 'config.import_awg_vpn' if uri else 'config.import_awg_conf')
-        screen = Screen(artifact.get('display_name') or tr(locale, 'config.ready'),
+        title = artifact.get('display_name') or tr(locale, 'config.ready')
+        breadcrumbs = ()
+        if device_back:
+            data = await state.get_data()
+            title = data.get('_navigation_devices', {}).get(result['device_id'])
+            if not title:
+                from .user_devices import get_device
+                item = await get_device(backend, user_id, profile_id, result['device_id'])
+                title = item['display_name']
+                await remember_label(state, 'devices', result['device_id'], title)
+            picker = button(user_id, tr(locale, 'devices.title'), 'device_picker', profile_id, node_key)
+            breadcrumbs = parent_path(picker.callback_data, locale, await state.get_data())
+        screen = Screen(title,
             (tr(locale, 'ui.config_intro'),),
             uri=uri, uri_collapsed=True, uri_title=tr(locale, 'ui.config_link'), qr=image, qr_title=tr(locale, 'ui.config_qr'),
             sections=(), details_title=tr(locale, 'ui.config_help'), details_lines=(import_hint,),
             files=tuple((item['filename'], item['content'].encode()) for item in files),
             files_title=tr(locale, 'ui.config_files'),
             uri_rows=((button(user_id, tr(locale, 'config.link.send'), 'issuance_plain', issuance_id),),) if uri else (),
-            embedded_buttons=True, navigation=True)
+            embedded_buttons=True, navigation=True, breadcrumbs=breadcrumbs,
+            navigation_return=button(user_id, tr(locale, 'config.ready'), 'issuance', issuance_id).callback_data)
         rich = await render(bot, chat_id, screen, rows, state, message_id)
         # Older Telegram deployments may reject rich media. Preserve downloads
         # there, while supported deployments keep everything in the control message.
@@ -634,7 +647,7 @@ async def issue(chat_id: int, user_id: int, message_id: int, profile_id: str,
         await render(bot, chat_id, Screen(tr(locale, 'config.preparing_title'),
             (tr(locale, 'config.preparing'),), embedded_buttons=True, navigation=True),
             [[button(user_id, tr(locale, 'back'),
-                     'device_picker' if device_id else ('profile' if protocol == 'awg' else 'protocol'), profile_id,
+                     'device_picker_back' if device_id else ('profile' if protocol == 'awg' else 'protocol'), profile_id,
                      *((node_key,) if device_id else (() if protocol == 'awg' else (node_key, protocol))))]], state, message_id)
         queued = await backend.issue(user_id, profile_id, node_key, protocol, transport,
             **({'device_id': device_id} if device_id else {}))

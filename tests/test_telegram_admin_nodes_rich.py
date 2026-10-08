@@ -9,6 +9,16 @@ from telegram_client.i18n import tr
 
 
 class AdminNodeRichTests(IsolatedAsyncioTestCase):
+    async def test_reinstall_back_returns_to_management_and_initial_bootstrap_to_card(self):
+        self.backend.node_services.return_value = {'docker': True, 'awg_config_valid': True, 'xray_config_valid': True}
+        for applied_revision, target in [(2, 'node_manage:msk1'), (0, 'admin_node:msk1')]:
+            self.node['applied_revision'] = applied_revision
+            for complete in [True, False]:
+                self.overview['settings_complete'] = complete
+                with patch.object(tools, 'render', new_callable=AsyncMock) as draw:
+                    await tools.show_install(123, 123, 77, 'msk1', self.bot, self.backend, self.state)
+                self.assertEqual(draw.call_args.args[3][-1][0].callback_data, target)
+
     async def test_deleting_card_exposes_progress_instead_of_mutation_controls(self):
         for locale in ('ru', 'en'):
             self.data['locale'] = locale

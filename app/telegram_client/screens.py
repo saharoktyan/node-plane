@@ -6,10 +6,10 @@ from dataclasses import dataclass
 from aiogram.types import (InputRichBlockDetails, InputRichBlockParagraph,
     InputRichBlockSectionHeading, InputRichMessage, InputRichBlockPhoto,
     InputRichBlockDocument, InputMediaPhoto, InputMediaDocument, BufferedInputFile,
-    InputRichBlockPreformatted, MessageEntity)
+    MessageEntity)
 from aiogram.types import (InputRichBlockButtons, RichMessageButton, InlineKeyboardButton,
     InputRichBlockDivider, InputRichBlockTable, RichBlockTableCell)
-from aiogram.types import RichTextButton, RichTextBold
+from aiogram.types import RichTextButton, RichTextBold, RichTextCode
 import unicodedata
 
 
@@ -117,13 +117,19 @@ class Section:
     heading_rows: tuple[tuple[InlineKeyboardButton, ...], ...] = ()
 
     def rich(self, depth=2):
+        # iOS cannot activate controls inside Details, even in nested sections.
+        # Expand the whole interactive branch so every control stays accessible.
+        def interactive(section):
+            return bool(section.rows or section.heading_rows or
+                        any(interactive(child) for child in section.sections))
+        collapsed = self.collapsed and not interactive(self)
         size = self.heading_size or min(depth, 6)
         blocks = [InputRichBlockParagraph(text=line) for line in self.lines if line]
         blocks.extend(table.rich() for table in self.tables)
         for section in self.sections:
-            blocks.extend(section.rich(depth=size if self.collapsed or not self.title else size + 1))
+            blocks.extend(section.rich(depth=size if collapsed or not self.title else size + 1))
         blocks.extend(rich_buttons(self.rows))
-        if self.collapsed:
+        if collapsed:
             content = [*rich_buttons(self.heading_rows), *blocks]
             if not content:
                 return []
@@ -153,6 +159,7 @@ class Screen:
     navigation: bool = False
     breadcrumbs: tuple[Breadcrumb, ...] = ()
     breadcrumb_more: str | None = None
+    navigation_return: str | None = None
 
     def rich(self, rows=()) -> InputRichMessage:
         blocks = ([InputRichBlockParagraph(text=breadcrumb_text(self.breadcrumbs,
@@ -173,11 +180,19 @@ class Screen:
                     media=BufferedInputFile(self.qr, 'config.png')))]))
         if self.uri and self.uri_collapsed:
             blocks.append(InputRichBlockDetails(summary=self.uri_title or '', is_open=False,
-                blocks=[InputRichBlockPreformatted(text=self.uri), *rich_buttons(self.uri_rows)]))
-        else:
-            blocks.extend(rich_buttons(self.uri_rows))
+                blocks=[InputRichBlockParagraph(text=RichTextCode(text=self.uri))]))
+        for row in self.uri_rows:
+            # Native inline text links are visible outside the collapsible URI.
+            links = []
+            for button in row:
+                if links:
+                    links.append(' · ')
+                links.append(RichTextButton(button=RichMessageButton(text=button.text,
+                    callback_data=button.callback_data, url=button.url, style='link')))
+            if links:
+                blocks.append(InputRichBlockParagraph(text=links))
         if self.uri and not self.uri_collapsed:
-            uri = InputRichBlockPreformatted(text=self.uri)
+            uri = InputRichBlockParagraph(text=RichTextCode(text=self.uri))
             if self.uri_title and not self.uri_rows:
                 blocks.append(InputRichBlockSectionHeading(text=self.uri_title, size=2))
             blocks.append(uri)

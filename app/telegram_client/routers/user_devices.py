@@ -8,6 +8,7 @@ from aiogram.fsm.state import State, StatesGroup
 from ..backend import BackendError
 from ..i18n import normalize_locale, tr
 from ..screens import Screen, Section
+from ..navigation import remember_label, parent_path
 from . import user
 from .common import render
 
@@ -83,10 +84,15 @@ async def show_card(chat_id, user_id, message_id, profile_id, device_id, bot, ba
         embedded_buttons=True, navigation=True), rows, state, message_id)
 
 
-async def show_picker(chat_id, user_id, message_id, profile_id, node_key, bot, backend, state, *, force=False, page=0):
+async def show_picker(chat_id, user_id, message_id, profile_id, node_key, bot, backend, state, *, force=False, page=0, returning=False):
     locale = await locale_for(state)
     items = [d for d in await devices(backend, user_id, profile_id) if d['status'] == 'active']
     items.sort(key=lambda d: (d['display_name'].casefold(), d['id']))
+    for item in items:
+        await remember_label(state, 'devices', item['id'], item['display_name'])
+    if len(items) == 1 and returning:
+        await user.show_profile(chat_id, user_id, message_id, profile_id, bot, backend, state)
+        return
     if len(items) == 1 and not force:
         await select_device(chat_id, user_id, message_id, profile_id, node_key,
             items[0]['id'], bot, backend, state)
@@ -99,8 +105,10 @@ async def show_picker(chat_id, user_id, message_id, profile_id, node_key, bot, b
     rows.append([user.button(user_id, tr(locale, 'devices.add'), 'device_create', profile_id, node_key)
         .model_copy(update={'style': 'primary'})])
     rows.append([user.button(user_id, tr(locale, 'back'), 'profile', profile_id)])
-    await render(bot, chat_id, Screen(tr(locale, 'devices.choose'),
-        (tr(locale, 'devices.empty'),) if not items else (), embedded_buttons=True,
+    picker = user.button(user_id, tr(locale, 'devices.title'), 'device_picker', profile_id, node_key)
+    path = parent_path(picker.callback_data, locale, await state.get_data())
+    await render(bot, chat_id, Screen(tr(locale, 'devices.title'), breadcrumbs=path[:-1],
+        lines=(tr(locale, 'devices.empty'),) if not items else (), embedded_buttons=True,
         navigation=True), rows, state, message_id)
 
 
@@ -115,7 +123,7 @@ async def select_device(chat_id, user_id, message_id, profile_id, node_key, devi
         await render(bot, chat_id, Screen(tr(locale, 'devices.preparing'),
             (tr(locale, 'devices.preparing_text'),), embedded_buttons=True, navigation=True),
             [[user.button(user_id, tr(locale, 'devices.refresh'), 'device_pick', profile_id, node_key, device_id)],
-             [user.button(user_id, tr(locale, 'back'), 'device_picker', profile_id, node_key)]], state, message_id)
+             [user.button(user_id, tr(locale, 'back'), 'device_picker_back', profile_id, node_key)]], state, message_id)
 
 
 async def prompt_name(chat_id, user_id, message_id, profile_id, device_id, bot, backend, state, *, node_key=None):
@@ -192,9 +200,10 @@ async def handle_action(action, query, bot, backend, state):
         await prompt_name(chat_id, owner, message_id, args[0],
             args[1] if action.name == 'device_rename' else None, bot, backend, state,
             node_key=args[1] if action.name == 'device_create' and len(args) > 1 else None)
-    elif action.name in {'device_picker', 'device_picker_page'}:
+    elif action.name in {'device_picker', 'device_picker_page', 'device_picker_back'}:
         await show_picker(chat_id, owner, message_id, args[0], args[1], bot, backend, state,
-            force=True, page=int(args[2]) if action.name == 'device_picker_page' else 0)
+            force=True, page=int(args[2]) if action.name == 'device_picker_page' else 0,
+            returning=action.name == 'device_picker_back')
     elif action.name == 'device_pick':
         await select_device(chat_id, owner, message_id, *args, bot, backend, state)
     elif action.name == 'device_delete':

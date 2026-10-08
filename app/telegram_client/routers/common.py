@@ -97,7 +97,7 @@ async def render(bot: Bot, chat_id: int, screen: Screen, rows: list[list[InlineK
     parents = screen_parents(screen, rows, normalize_locale(data.get('locale')), data)
     navigation_nonce = uuid4().hex[:12]
     screen = replace(screen, breadcrumbs=parents, breadcrumb_more=
-        'nav_more:' + navigation_nonce if parents and not (screen.files or screen.qr) else None)
+        'nav_more:' + navigation_nonce if parents and (screen.navigation_return or not (screen.files or screen.qr)) else None)
     fallback_rows = screen.fallback_rows(rows)
     fallback_markup = InlineKeyboardMarkup(inline_keyboard=fallback_rows) if fallback_rows else None
     # Keep only this panel's navigation snapshot; notification FSMs are isolated.
@@ -114,7 +114,16 @@ async def render(bot: Bot, chat_id: int, screen: Screen, rows: list[list[InlineK
     rich_content, uploads = reuse_media(rich_content, cache)
 
     async def remember_navigation(control_id, rich):
-        if not parents or screen.files or screen.qr:
+        if not parents:
+            return
+        if screen.files or screen.qr:
+            if screen.navigation_return:
+                # Store only navigation and a read-only issuance lookup. Never
+                # persist uploaded files, QR data or configuration URI contents.
+                await state.update_data(navigation_screen={
+                    'nonce': navigation_nonce, 'message_id': control_id,
+                    'parents': [{'label': p.label, 'callback': p.callback} for p in parents],
+                    'title': screen.title, 'return_callback': screen.navigation_return})
             return
         await state.update_data(navigation_screen={
             'nonce': navigation_nonce, 'message_id': control_id,
