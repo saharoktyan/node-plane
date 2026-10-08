@@ -23,7 +23,7 @@ impl Action {
         match self {
             Self::Install => "Install Node Plane",
             Self::Diagnose => "Check installation",
-            Self::Update => "Update the whole stack",
+            Self::Update => "Update Node Plane",
             Self::PrepareNode => "Prepare a VPN node",
         }
     }
