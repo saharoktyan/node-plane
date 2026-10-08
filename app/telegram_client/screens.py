@@ -9,6 +9,56 @@ from aiogram.types import (InputRichBlockDetails, InputRichBlockParagraph,
     InputRichBlockPreformatted, MessageEntity)
 from aiogram.types import (InputRichBlockButtons, RichMessageButton, InlineKeyboardButton,
     InputRichBlockDivider, InputRichBlockTable, RichBlockTableCell)
+from aiogram.types import RichTextButton, RichTextBold
+import unicodedata
+
+
+@dataclass(frozen=True)
+class Breadcrumb:
+    label: str
+    callback: str
+
+
+def text_width(text):
+    return sum(0 if unicodedata.combining(c) else
+               2 if unicodedata.east_asian_width(c) in {'W', 'F'} else 1 for c in text)
+
+
+def shorten_label(text, limit):
+    if text_width(text) <= limit:
+        return text
+    result = ''
+    for char in text:
+        if text_width(result + char) > limit - 1:
+            break
+        result += char
+    return result.rstrip() + '…'
+
+
+def breadcrumb_text(parents, title, more_callback=None, limit=48):
+    """Keep the immediate parent and current screen legible on mobile clients."""
+    visible = list(parents)
+    if not more_callback:
+        limit = 100000
+    hidden = False
+    while len(visible) > 1 and text_width(' › '.join(
+            [p.label for p in visible] + [title])) + (4 if hidden else 0) > limit:
+        visible.pop(0)
+        hidden = True
+    labels = [p.label for p in visible]
+    if text_width(' › '.join(labels + [title])) + (4 if hidden else 0) > limit:
+        labels = [shorten_label(label, 16) for label in labels]
+        title = shorten_label(title, 24)
+        hidden = True
+    parts = []
+    if hidden and more_callback:
+        parts.extend([RichTextButton(button=RichMessageButton(text='…',
+            callback_data=more_callback, style='link')), ' › '])
+    for parent, label in zip(visible, labels):
+        parts.extend([RichTextButton(button=RichMessageButton(text=label,
+            callback_data=parent.callback, style='link')), ' › '])
+    parts.append(RichTextBold(text=title))
+    return parts
 
 
 def server_label(node: dict) -> str:
@@ -101,9 +151,16 @@ class Screen:
     sections: tuple[Section, ...] = ()
     embedded_buttons: bool = False
     navigation: bool = False
+    breadcrumbs: tuple[Breadcrumb, ...] = ()
+    breadcrumb_more: str | None = None
 
     def rich(self, rows=()) -> InputRichMessage:
-        blocks = [InputRichBlockSectionHeading(text=self.title, size=1)]
+        blocks = ([InputRichBlockParagraph(text=breadcrumb_text(self.breadcrumbs,
+            self.title, self.breadcrumb_more))] if self.breadcrumbs else
+            [InputRichBlockSectionHeading(text=self.title, size=1)])
+        if self.breadcrumbs and self.breadcrumb_more and text_width(self.title) > 24 and text_width(
+                ' › '.join([p.label for p in self.breadcrumbs] + [self.title])) > 48:
+            blocks.append(InputRichBlockSectionHeading(text=self.title, size=1))
         blocks.extend(InputRichBlockParagraph(text=line) for line in self.lines if line)
         for section in self.sections:
             blocks.extend(section.rich())
@@ -143,7 +200,7 @@ class Screen:
         return InputRichMessage(blocks=blocks, skip_entity_detection=True)
 
     def plain(self) -> str:
-        lines = [self.title, *self.lines]
+        lines = [' › '.join([p.label for p in self.breadcrumbs] + [self.title]), *self.lines]
         def append_sections(sections):
             for section in sections:
                 lines.extend((section.title, *section.lines))
@@ -163,7 +220,9 @@ class Screen:
                 yield from (list(row) for row in section.heading_rows)
                 yield from section_rows(section.sections)
                 yield from (list(row) for row in section.rows)
-        return [*section_rows(self.sections), *(list(row) for row in self.uri_rows), *rows]
+        parents = [[InlineKeyboardButton(text=p.label, callback_data=p.callback)
+                    for p in self.breadcrumbs]] if self.breadcrumbs else []
+        return [*parents, *section_rows(self.sections), *(list(row) for row in self.uri_rows), *rows]
 
     def plain_entities(self) -> list[MessageEntity] | None:
         if not self.uri:

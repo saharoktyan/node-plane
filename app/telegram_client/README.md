@@ -110,8 +110,17 @@ Language and announcement sound settings use a pair of buttons in one row;
 only the selected value has the primary color, without a separate value label.
 The final server in the Profile accordion has no trailing divider; one divider
 outside the accordion separates Back from the rest of the screen.
-Navigation sits at
-the bottom as link-style buttons, separated from content by a divider. When Rich Message delivery is rejected by
+Member and admin screens have a compact structural breadcrumb paragraph above
+their content. Parent names are native link-style callback buttons; the current
+screen is bold text. Long paths hide leftmost levels behind an ellipsis and keep
+the nearest parent visible. The ellipsis opens all parents in the same message;
+Back restores the panel without rerunning its handler. Existing list search and
+pagination remain intact. Server settings drafts survive ancestor navigation;
+leaving an altered access draft or unfinished server creation requires explicit
+discard confirmation. Notification panels have their own navigation state.
+Cards with uploaded media keep full wrapping paths and do not snapshot uploads.
+Back remains at the bottom as a link-style button, separated from content by a
+divider. When Rich Message delivery is rejected by
 Telegram, the screen falls back to plain text with equivalent inline navigation;
 files and QR are then sent separately. All member text is localized in RU/EN.
 A real Telegram client acceptance pass on Android, iOS, and Desktop is still

@@ -23,6 +23,7 @@ from ..screens import Screen, Section, Table, server_label
 from ..i18n import normalize_locale, tr
 from .callbacks import HomeCallback
 from .common import render
+from ..navigation import remember_node
 
 router = Router()
 
@@ -470,6 +471,8 @@ async def show_profile(chat_id: int, user_id: int, message_id: int,
                        state: FSMContext, *, page_index: int | None = None) -> None:
     locale = normalize_locale((await state.get_data()).get('locale'))
     page = await backend.profile_nodes(user_id, profile_id)
+    for node in page['items']:
+        await remember_node(state, node)
     data = await state.get_data()
     saved = data.get('member_nodes_page', {})
     if page_index is None:
@@ -497,6 +500,7 @@ async def show_node(chat_id: int, user_id: int, message_id: int,
     if node is None:
         await show_profile(chat_id, user_id, message_id, profile_id, bot, backend, state)
         return
+    await remember_node(state, node)
     locale = normalize_locale((await state.get_data()).get('locale'))
     rows = [[button(user_id, tr(locale, f"protocol.{protocol['kind']}"),
                     'protocol', profile_id, node_key, protocol['kind'])]
@@ -517,6 +521,7 @@ async def show_protocol(chat_id: int, user_id: int, message_id: int, profile_id:
     if selected is None:
         await show_node(chat_id, user_id, message_id, profile_id, node_key, bot, backend, state)
         return
+    await remember_node(state, node)
     if protocol == 'awg':
         from .user_devices import show_picker
         await show_picker(chat_id, user_id, message_id, profile_id, node_key,

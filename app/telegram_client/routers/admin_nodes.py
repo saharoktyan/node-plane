@@ -13,6 +13,7 @@ from ..screens import Screen, Section, Table, server_label
 from ..i18n import normalize_locale, tr
 from ..node_templates import NODE_TEMPLATES
 from .common import render
+from ..navigation import remember_node, parent_path
 from .states import NodeDraftState, NodeEditState, MaintenanceState, AgentDraftState
 from .callbacks import (
     AdminNodesCallback, NewNodeCallback, AdminNodeCallback,
@@ -37,7 +38,7 @@ async def _clear_node_flow(state: FSMContext) -> None:
     data = await state.get_data()
     await state.clear()
     await state.update_data(**{key: value for key, value in data.items()
-        if key in {'locale', 'admin_node_search', 'admin_node_cursors', 'admin_node_page', 'node_settings_draft', 'node_settings_view'}})
+        if key in {'locale', 'admin_node_search', 'admin_node_cursors', 'admin_node_page', 'node_settings_draft', 'node_settings_view', '_navigation_nodes', '_navigation_node_jobs'}})
 
 
 _DRAFT_FIELDS = ('title', 'region', 'flag', 'notes', 'transport', 'ssh_target',
@@ -46,6 +47,7 @@ _DRAFT_FIELDS = ('title', 'region', 'flag', 'notes', 'transport', 'ssh_target',
 
 async def editable_node(user_id, node_key, backend, state):
     node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=user_id)
+    await remember_node(state, node)
     draft = (await state.get_data()).get('node_settings_draft')
     if draft and draft['node_key'] == node_key:
         node = {**node, **deepcopy(draft['values'])}
@@ -192,6 +194,7 @@ async def show_admin_nodes(chat_id, user_id, message_id, bot, backend, state, pa
     await state.update_data(admin_node_cursors=cursors, admin_node_page=page_index)
     groups = {}
     for node in page['items']:
+        await remember_node(state, node)
         groups.setdefault(node.get('region') or tr(locale, 'nodes.region_unknown'), []).append(node)
     sections = []
     controls = [InlineKeyboardButton(text=tr(locale, 'nodes.admin.add'), callback_data=NewNodeCallback().pack(), style='primary'),
@@ -783,6 +786,7 @@ async def wizard_setup_agent_cb(query: CallbackQuery, bot: Bot,
     if not data.get('wizard_saved') or not w.get('key'):
         return
     node = await backend.request('GET', f"/api/v1/nodes/{w['key']}", telegram_user_id=query.from_user.id)
+    await remember_node(state, node)
     if node.get('transport') not in {'local', 'ssh'}:
         return
     await state.update_data(rollout_node_key=w['key'], rollout_ssh_target=node.get('ssh_target'))
@@ -794,6 +798,7 @@ async def show_admin_node(chat_id, user_id, message_id, node_key, bot, backend, 
     locale = normalize_locale((await state.get_data()).get('locale'))
     try:
         node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=user_id)
+        await remember_node(state, node)
     except BackendError:
         await render(bot, chat_id, Screen(tr(locale, 'nodes.card.unavailable'),
             (tr(locale, 'nodes.card.retry'),), embedded_buttons=True, navigation=True),
@@ -857,6 +862,7 @@ async def node_manage_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
     node_key = query.data.split(':', 1)[1]
     locale = normalize_locale((await state.get_data()).get('locale'))
     node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=query.from_user.id)
+    await remember_node(state, node)
     await render(bot, query.message.chat.id, Screen(tr(locale, 'nodes.rich.manage'), embedded_buttons=True, navigation=True),
         [[InlineKeyboardButton(text=tr(locale, 'nodes.draft.reinstall' if node['applied_revision'] else 'nodes.card.bootstrap'), callback_data=f'bootstrap_menu:{node_key}', style='primary')],
          [InlineKeyboardButton(text=tr(locale, 'nodes.maintenance.title'), callback_data=NodeMaintenanceCallback(node_key=node_key).pack())],
@@ -869,6 +875,7 @@ async def node_technical_cb(query: CallbackQuery, bot: Bot, backend: BackendClie
     await query.answer()
     node_key = query.data.split(':', 1)[1]
     node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=query.from_user.id)
+    await remember_node(state, node)
     overview = await backend.node_overview(query.from_user.id, node_key)
     locale = normalize_locale((await state.get_data()).get('locale'))
     lines = (tr(locale, 'nodes.card.agent_transport', value=node.get('transport') or '—'),
@@ -1297,6 +1304,7 @@ async def apply_node_cb(query: CallbackQuery, callback_data: ApplyNodeCallback, 
 async def apply_node(chat_id, user_id, message_id, node_key, bot, backend, state, revision=None):
     locale = normalize_locale((await state.get_data()).get('locale'))
     node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=user_id)
+    await remember_node(state, node)
     if not node['applied_revision']:
         from .admin_node_tools import show_install
         await show_install(chat_id, user_id, message_id, node_key, bot, backend, state)
@@ -1525,6 +1533,7 @@ async def show_registry_confirmation(chat_id, user_id, message_id, node_key, bot
     locale = normalize_locale((await state.get_data()).get('locale'))
     try:
         node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=user_id)
+        await remember_node(state, node)
     except BackendError as exc:
         await state.update_data(registry_removal_confirmation=None)
         if exc.status == 404:
@@ -1683,7 +1692,9 @@ async def show_rollout_status(chat_id, user_id, message_id, task_id, bot, backen
     await render(bot, chat_id, Screen(tr(locale, 'nodes.rollout.title'),
         tuple(lines), sections=(Section(tr(locale, 'nodes.rich.technical'), collapsed=True,
             lines=(tr(locale, 'nodes.rich.operation_id', value=task_id),)),),
-        embedded_buttons=True, navigation=True), rows, state, message_id)
+        embedded_buttons=True, navigation=True,
+        breadcrumbs=parent_path('admin_node:' + task['node_key'], locale,
+                                await state.get_data())), rows, state, message_id)
 
 
 @router.callback_query(F.data.startswith('rust_offer:'))
@@ -1711,6 +1722,7 @@ async def rust_confirm_cb(query: CallbackQuery, bot: Bot, backend: BackendClient
         return
     task = await backend.agent_rollout(query.from_user.id, task_id)
     node = await backend.request('GET', f"/api/v1/nodes/{task['node_key']}", telegram_user_id=query.from_user.id)
+    await remember_node(state, node)
     queued = await backend.rollout_agent(query.from_user.id, task['node_key'], node['transport'],
         ssh_target=node.get('ssh_target'), command_key=data['rust_rollout_key'], install_rust=True)
     await show_rollout_status(query.message.chat.id, query.from_user.id,
@@ -1733,6 +1745,7 @@ async def rollout_saved_cb(query: CallbackQuery, bot: Bot, backend: BackendClien
     await query.answer()
     node_key = query.data.split(':', 1)[1]
     node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=query.from_user.id)
+    await remember_node(state, node)
     if node.get('transport') != 'ssh' or not node.get('ssh_target'):
         await show_admin_node(query.message.chat.id, query.from_user.id,
                               query.message.message_id, node_key, bot, backend, state)

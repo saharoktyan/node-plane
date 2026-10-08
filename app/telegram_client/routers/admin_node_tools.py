@@ -8,6 +8,7 @@ from ..backend import BackendClient, BackendError
 from ..i18n import normalize_locale, tr
 from ..screens import Screen, Section, Table, server_label
 from .common import render
+from ..navigation import remember_node, remember_label
 from .callbacks import AdminNodeCallback, NodeSettingsCallback, EditNodeFieldCallback
 
 router = Router()
@@ -30,6 +31,7 @@ async def show_install(chat_id, user_id, message_id, node_key, bot, backend, sta
     from .admin_nodes import RolloutLocalCallback, RolloutSshCallback
     locale = normalize_locale((await state.get_data()).get('locale'))
     node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=user_id)
+    await remember_node(state, node)
     overview = await backend.node_overview(user_id, node_key)
     rows = []
     lines = []
@@ -160,6 +162,7 @@ async def view_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state:
     rows, lines, sections = [], [], []
     try:
         node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=query.from_user.id)
+        await remember_node(state, node)
         if view in {'runtime', 'diagnostics', 'entropy'}:
             facts = await backend.node_services(query.from_user.id, node_key)
             if view == 'entropy':
@@ -211,6 +214,7 @@ async def action_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, stat
         return
     try:
         node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=query.from_user.id)
+        await remember_node(state, node)
         await state.update_data(node_job_draft={'node_key': node_key, 'action': action,
             'revision': node['desired_revision'], 'command_key': str(uuid4())})
         rows = [[button(locale, 'back', f'bootstrap_menu:{node_key}' if action in {'bootstrap', 'reinstall_clean', 'reinstall_keep', 'install_docker'} else f'node_tools:{node_key}'),
@@ -241,6 +245,7 @@ async def submit_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, stat
 
 
 async def show_job(chat_id, user_id, message_id, job, bot, state):
+    await remember_label(state, 'node_jobs', job['id'], job['node_key'])
     locale = normalize_locale((await state.get_data()).get('locale'))
     lines = [tr(locale, 'operation.' + job['status'])]
     result = job.get('result') or {}

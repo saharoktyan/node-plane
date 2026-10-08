@@ -24,6 +24,7 @@ from .callbacks import (AccountsCallback, AccountCallback, NewProfileCallback,
     GrantProtocolsCallback, AddGrantCallback, RemoveGrantCallback,
     ToggleFreezeCallback)
 from .common import render
+from ..navigation import remember_label
 from .states import ProfileDraftState
 
 router = Router()
@@ -48,6 +49,8 @@ async def _ensure_grant_draft(backend, user_id, profile_id, state):
         return data
     policy, profile = await asyncio.gather(backend.profile_access_policy(user_id, profile_id),
         backend.request('GET', f'/api/v1/profiles/{profile_id}', telegram_user_id=user_id))
+    if profile.get('display_name'):
+        await remember_label(state, 'profiles', profile_id, profile['display_name'])
     if policy['revision'] != profile['desired_revision']:
         raise BackendError('revision_conflict', 412)
     regions = await _all_policy_regions(backend, user_id) if any(r['scope'] == 'region' for r in policy['rules']) else []
@@ -637,6 +640,8 @@ async def show_admin_profiles(chat_id: int, user_id: int, message_id: int,
         cursors = cursors[:page_index + 1]
     await state.update_data(admin_profile_cursors=cursors,
                             admin_profile_page=page_index)
+    for profile in page['items']:
+        await remember_label(state, 'profiles', profile['id'], profile['display_name'])
     controls = [InlineKeyboardButton(text=tr(locale, 'profiles.admin.new'),
                 callback_data='profile_add_user', style='primary'),
                 InlineKeyboardButton(text=tr(locale, 'profiles.admin.search'),
@@ -759,6 +764,7 @@ async def show_admin_profile(chat_id: int, user_id: int, message_id: int,
     await state.update_data(edit_profile_id=None, draft_grants=None,
         original_grants=None, edit_profile_revision=None, grant_nodes_page=0,
         admin_promotion=None, profile_expiry=None, delete_profile_id=None, profile_setup=None)
+    await remember_label(state, 'profiles', profile_id, profile['display_name'])
     lines = [tr(locale, 'profile.admin.status', status=_status(profile, locale))]
     lines.append(tr(locale, 'profile.rich.expires', value=_expiry_label(profile['expires_at']) if profile.get('expires_at') else tr(locale, 'profile.layout.unlimited')))
     lines.append(tr(locale, 'profile.rich.access_count',
