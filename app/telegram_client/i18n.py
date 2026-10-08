@@ -3,6 +3,12 @@ from __future__ import annotations
 
 CATALOG = {
     'ru': {
+        'navigation.admin': 'Админ', 'navigation.menu': 'Меню',
+        'navigation.title': 'Навигация', 'navigation.profile': 'Профиль',
+        'navigation.account': 'Аккаунт', 'navigation.device': 'Устройство',
+        'navigation.unsaved': 'Несохранённые изменения',
+        'navigation.discard_note': 'Выйти и отменить несохранённые изменения?',
+        'navigation.leave': 'Выйти',
         'policy.title': 'Текущие и будущие серверы',
         'policy.configure': 'Настроить правила',
         'policy.all': 'Все серверы установки',
@@ -648,6 +654,12 @@ CATALOG = {
         'role.member': 'пользователь', 'role.admin': 'администратор',
     },
     'en': {
+        'navigation.admin': 'Admin', 'navigation.menu': 'Menu',
+        'navigation.title': 'Navigation', 'navigation.profile': 'Profile',
+        'navigation.account': 'Account', 'navigation.device': 'Device',
+        'navigation.unsaved': 'Unsaved changes',
+        'navigation.discard_note': 'Leave and discard your unsaved changes?',
+        'navigation.leave': 'Leave',
         'policy.title': 'Current and future servers',
         'policy.configure': 'Configure rules',
         'policy.all': 'All installation servers',

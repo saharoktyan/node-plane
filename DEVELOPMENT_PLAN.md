@@ -443,12 +443,23 @@ the key after controller verification. Conflicting selectors, revoked keys and
 deleted/disabled/demoted administrators fail closed. Privileged SSH revocation
 and restoration are audited; restoration does not revive old bearer tokens. The
 binding reuses backend account UUIDs and leaves future non-SSH user interfaces
-free to use their own authentication methods. Nodes navigation is the next UI task.
+free to use their own authentication methods. The workstation Nodes browser is
+implemented; its live VPS acceptance remains a separate check.
 Telegram audit is now a compact event list with native expandable timestamp/actor
 rows, short action/outcome summaries, and full identifiers inside the details.
-After workstation Nodes, consider clickable Telegram navigation breadcrumbs
-(Admin > Servers > server), with clear interactive styling; do not apply that
-navigation redesign as part of the audit or Nodes work.
+Telegram structural navigation (2026-10-08): member and admin panels now render
+owner-bound link-style buttons inside a compact breadcrumb paragraph. The current
+screen is bold plain text. Long paths drop the leftmost ancestors and shorten
+long labels, with an ellipsis opening the full parent list in the same message.
+Returning restores the panel snapshot without replaying any backend operation.
+Server/profile labels reuse already loaded records; breadcrumbs add no backend
+reads. Existing list cursors/search and server drafts are retained. Leaving a
+changed access editor or unfinished node wizard through an ancestor requires
+discard confirmation. Notifications keep their own FSM and navigation snapshot.
+Cards containing configuration files/photos keep a full wrapping path, avoiding
+upload snapshots and preserving their media. Plain fallback exposes the same
+parent destinations as inline buttons. Telegram client visual acceptance remains
+to be checked on Android, iOS and Desktop.
 
 Workstation attribution (2026-10-07): credentials bind the selected admin name,
 SSH username and workstation key fingerprint. Secret-free API admission/HTTP

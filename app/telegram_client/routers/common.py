@@ -11,6 +11,8 @@ from typing import Callable, Dict, Any, Awaitable
 from ..screens import Screen
 from ..backend import BackendClient, BackendError
 from ..i18n import normalize_locale
+from ..navigation import screen_parents
+from uuid import uuid4
 
 
 def log_rich_failure(stage, exc):
@@ -87,13 +89,19 @@ async def remember_media(state, result, uploads, cache):
 
 async def render(bot: Bot, chat_id: int, screen: Screen, rows: list[list[InlineKeyboardButton]], state: FSMContext, message_id: int | None = None) -> bool:
     markup = InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
-    fallback_rows = screen.fallback_rows(rows)
-    fallback_markup = InlineKeyboardMarkup(inline_keyboard=fallback_rows) if fallback_rows else None
     # Explicitly clear an old inline keyboard when switching from an admin
     # screen or a plain-text fallback to embedded member actions.
     rich_markup = InlineKeyboardMarkup(inline_keyboard=[]) if screen.embedded_buttons else markup
     
     data = await state.get_data()
+    parents = screen_parents(screen, rows, normalize_locale(data.get('locale')), data)
+    navigation_nonce = uuid4().hex[:12]
+    screen = replace(screen, breadcrumbs=parents, breadcrumb_more=
+        'nav_more:' + navigation_nonce if parents and not (screen.files or screen.qr) else None)
+    fallback_rows = screen.fallback_rows(rows)
+    fallback_markup = InlineKeyboardMarkup(inline_keyboard=fallback_rows) if fallback_rows else None
+    # Keep only this panel's navigation snapshot; notification FSMs are isolated.
+    await state.update_data(navigation_screen=None, navigation_discard=None)
     # A delayed destructive callback from the previous screen must require a
     # new confirmation, even when navigation edits the same control message.
     if data.get('registry_removal_confirmation') is not None:
@@ -104,6 +112,18 @@ async def render(bot: Bot, chat_id: int, screen: Screen, rows: list[list[InlineK
     rich_content = screen.rich(rows)
     cache = dict(data.get('rich_media_cache', {}))
     rich_content, uploads = reuse_media(rich_content, cache)
+
+    async def remember_navigation(control_id, rich):
+        if not parents or screen.files or screen.qr:
+            return
+        await state.update_data(navigation_screen={
+            'nonce': navigation_nonce, 'message_id': control_id,
+            'parents': [{'label': p.label, 'callback': p.callback} for p in parents],
+            'title': screen.title, 'rich': rich_content.model_dump(mode='json') if rich else None,
+            'plain': screen.plain(), 'entities': [e.model_dump(mode='json') for e in screen.plain_entities() or []],
+            'markup': (rich_markup if rich else fallback_markup).model_dump(mode='json')
+                if (rich_markup if rich else fallback_markup) else None,
+            'fallback_markup': fallback_markup.model_dump(mode='json') if fallback_markup else None})
     
     if existing:
         try:
@@ -111,15 +131,18 @@ async def render(bot: Bot, chat_id: int, screen: Screen, rows: list[list[InlineK
                 rich_message=rich_content, reply_markup=rich_markup, request_timeout=10)
             await remember_media(state, edited, uploads, cache)
             await state.update_data(control_message_id=existing)
+            await remember_navigation(existing, True)
             return True
         except (TelegramBadRequest, TelegramNotFound, TelegramNetworkError) as exc:
             if 'message is not modified' in str(exc).lower():
+                await remember_navigation(existing, True)
                 return True
             log_rich_failure('edit', exc)
             try:
                 await bot.edit_message_text(chat_id=chat_id,
                     message_id=existing, text=screen.plain(), entities=screen.plain_entities(), reply_markup=fallback_markup, request_timeout=15)
                 await state.update_data(control_message_id=existing)
+                await remember_navigation(existing, False)
                 return False
             except (TelegramBadRequest, TelegramNotFound):
                 pass
@@ -136,6 +159,7 @@ async def render(bot: Bot, chat_id: int, screen: Screen, rows: list[list[InlineK
             text=screen.plain(), entities=screen.plain_entities(), reply_markup=fallback_markup, request_timeout=15)
             
     await state.update_data(control_message_id=sent.message_id)
+    await remember_navigation(sent.message_id, rich)
     if data.get('notification_session') and existing != sent.message_id:
         # A missing notice may be recreated by the delivery fallback. Its new
         # callbacks must still use an isolated FSM, never the main panel.
