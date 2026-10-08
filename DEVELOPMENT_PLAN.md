@@ -587,6 +587,13 @@ Subsequent business actions use backend authorization and operation contracts.
 
 Current implementation and remaining acceptance:
 
+- [x] Add workstation Nodes: region folding, local name/region/code search,
+  responsive pagination, compact persisted-state cards and explicit service
+  inspection. Retain SSH preparation; expose confirmed agent/Docker/bootstrap
+  jobs with private progress records, administrator-scoped lost-dispatch lookup
+  and no uncertain replay. Server creation/editing and custom SSH-port agent
+  setup remain in Telegram. Region navigation and keyboard/mouse rendering are
+  tested in simulated terminals; real VPS acceptance remains manual.
 - [x] Implement embedded SSH with explicit host trust and a workstation-owned
   Ed25519 key. First-password login appends its public key without replacing
   existing keys, then verifies an independent key login. Subsequent connections

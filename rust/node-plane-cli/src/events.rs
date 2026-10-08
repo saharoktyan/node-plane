@@ -17,6 +17,7 @@ pub enum Event {
     Stage(String),
     Progress(Progress),
     Update(crate::workstation::UpdateSnapshot),
+    Nodes(crate::nodes::Update),
     Prompt(Prompt, mpsc::Sender<Answer>),
     Finished(Result<String, String>),
 }
