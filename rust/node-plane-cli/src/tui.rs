@@ -140,6 +140,7 @@ enum Control {
     Continue,
     Confirm(bool),
     Prompt(bool),
+    Administrator(usize),
     Close,
     Page(bool),
     ScrollResult(bool),
@@ -182,9 +183,9 @@ impl Form {
     fn visible(&self) -> Vec<usize> {
         let all: &[usize] = match self.action {
             Action::Install => &[0, 1, 2, 3, 4, 5, 6],
-            Action::Diagnose => &[0, 1, 2, 7, 11],
-            Action::Update => &[0, 1, 2, 3, 4, 7],
-            Action::PrepareNode => &[0, 1, 2, 7, 8, 9, 10],
+            Action::Diagnose => &[0, 1, 2, 11],
+            Action::Update => &[0, 1, 2, 3, 4],
+            Action::PrepareNode => &[0, 1, 2, 8, 9, 10],
         };
         all.iter()
             .copied()
@@ -321,6 +322,7 @@ struct App {
     nodes: crate::nodes::Browser,
     nodes_requested: Option<crate::nodes::Command>,
     nodes_busy: bool,
+    ssh_state: crate::nodes::ConnectionState,
     nodes_selected: usize,
     nodes_sidebar: bool,
     nodes_capacity: std::cell::Cell<usize>,
@@ -334,6 +336,7 @@ struct App {
     stage: String,
     tracker: Tracker,
     prompt: Option<(Prompt, mpsc::Sender<Answer>)>,
+    administrator_selected: usize,
     password: Zeroizing<String>,
     trust: bool,
     outcome: Option<Result<String, String>>,
@@ -362,6 +365,7 @@ impl App {
             nodes: crate::nodes::Browser::default(),
             nodes_requested: None,
             nodes_busy: false,
+            ssh_state: crate::nodes::ConnectionState::Closed,
             nodes_selected: 0,
             nodes_sidebar: false,
             nodes_capacity: std::cell::Cell::new(10),
@@ -375,6 +379,7 @@ impl App {
             stage: String::new(),
             tracker: Tracker::default(),
             prompt: None,
+            administrator_selected: 0,
             password: Zeroizing::new(String::new()),
             trust: false,
             outcome: None,
@@ -897,6 +902,15 @@ impl App {
                         && item.key == key
                     {
                         item.services = Some(facts);
+                        item.agent = crate::nodes::AgentState::Ready;
+                    }
+                }
+                crate::nodes::Update::Agent(key, agent) => {
+                    if let Some(item) = &mut self.nodes.card
+                        && item.key == key
+                    {
+                        item.agent = agent;
+                        item.services = None;
                     }
                 }
                 crate::nodes::Update::List(items) => {
@@ -925,6 +939,7 @@ impl App {
                 }
             }
             Event::Prompt(prompt, reply) => {
+                self.administrator_selected = 0;
                 self.prompt = Some((prompt, reply));
                 self.password.zeroize();
                 self.trust = false;
@@ -948,6 +963,22 @@ impl App {
             return;
         };
         let answer = match prompt {
+            Prompt::SelectAdministrator { choices } => match key.code {
+                KeyCode::Up => {
+                    self.administrator_selected = self.administrator_selected.saturating_sub(1);
+                    None
+                }
+                KeyCode::Down | KeyCode::Tab => {
+                    self.administrator_selected =
+                        (self.administrator_selected + 1).min(choices.len().saturating_sub(1));
+                    None
+                }
+                KeyCode::Enter if !choices.is_empty() => {
+                    Some(Answer::Selection(self.administrator_selected))
+                }
+                KeyCode::Esc => Some(Answer::Cancel),
+                _ => None,
+            },
             Prompt::HostKey { .. } | Prompt::ConfirmAction { .. } => match key.code {
                 KeyCode::Char('y' | 'Y') => Some(Answer::Confirm(true)),
                 KeyCode::Char('n' | 'N') | KeyCode::Esc => Some(Answer::Confirm(false)),
@@ -1196,6 +1227,7 @@ impl App {
             Control::NodesInspect => {
                 if let Some(node) = &mut self.nodes.card {
                     node.services = None;
+                    node.agent = crate::nodes::AgentState::Unknown;
                     self.nodes_requested = Some(crate::nodes::Command::Inspect(node.key.clone()));
                 }
                 return None;
@@ -1394,11 +1426,22 @@ impl App {
             }
             Control::Prompt(value) => {
                 self.trust = value;
-                if matches!(&self.prompt, Some((Prompt::Password { .. }, _))) && !value {
+                if matches!(
+                    &self.prompt,
+                    Some((
+                        Prompt::Password { .. } | Prompt::SelectAdministrator { .. },
+                        _
+                    ))
+                ) && !value
+                {
                     KeyCode::Esc
                 } else {
                     KeyCode::Enter
                 }
+            }
+            Control::Administrator(index) => {
+                self.administrator_selected = index;
+                KeyCode::Enter
             }
             Control::ScrollResult(backwards) => {
                 self.scroll_result(backwards, self.result_page_size.get());
@@ -1469,6 +1512,8 @@ pub fn run(mut request: Request) -> Result<()> {
     app.load_connections(&request)?;
     let mut receiver: Option<mpsc::Receiver<Event>> = None;
     let mut worker = None;
+    let mut nodes_worker = crate::nodes::Worker::new()?;
+    let mut nodes_profile = None;
     let (check_tx, check_rx) = mpsc::channel();
     let startup_tx = check_tx.clone();
     std::thread::spawn(move || {
@@ -1479,6 +1524,20 @@ pub fn run(mut request: Request) -> Result<()> {
     let mut self_confirmation: Option<mpsc::Receiver<Answer>> = None;
     let mut self_updating = false;
     loop {
+        let selected = app.form.saved.as_ref().map(|p| {
+            (
+                p.id,
+                p.host.clone(),
+                p.port,
+                p.user.clone(),
+                p.account.clone(),
+            )
+        });
+        if selected != nodes_profile {
+            nodes_worker.reset();
+            nodes_profile = selected;
+        }
+        app.ssh_state = nodes_worker.state();
         if let Some(command) = app.nodes_requested.take() {
             let mut next = app.next_request();
             next.action = Action::Diagnose;
@@ -1491,7 +1550,7 @@ pub fn run(mut request: Request) -> Result<()> {
                     // Browsing has no target-node fields and never runs the old preparation workflow.
                     next.action = Action::Diagnose;
                     let (tx, rx) = mpsc::channel();
-                    worker = Some(crate::nodes::spawn(next, command, tx));
+                    nodes_worker.submit(next, command, tx)?;
                     receiver = Some(rx);
                     app.nodes_busy = true;
                     app.screen = Screen::Running;
@@ -1612,6 +1671,7 @@ pub fn run(mut request: Request) -> Result<()> {
         if !event::poll(Duration::from_millis(100))? {
             continue;
         }
+        nodes_worker.touch();
         let input = match event::read()? {
             TermEvent::Mouse(mouse) => match app.mouse(mouse) {
                 Some(key) => TermEvent::Key(key),
@@ -2064,6 +2124,23 @@ pub fn run(mut request: Request) -> Result<()> {
     }
     drop(terminal);
     drop(guard);
+    if app.nodes_busy
+        && let Some(rx) = receiver.take()
+    {
+        while let Ok(value) = rx.recv() {
+            match value {
+                Event::Prompt(_, reply) => {
+                    let _ = reply.send(Answer::Cancel);
+                }
+                Event::Finished(result) => {
+                    app.event(Event::Finished(result));
+                    break;
+                }
+                value => app.event(value),
+            }
+        }
+    }
+    nodes_worker.shutdown()?;
     if let Some(worker) = worker {
         if app.exit && app.exit_confirm {
             println!(
@@ -2104,15 +2181,21 @@ fn draw(frame: &mut Frame, app: &App) -> Vec<Hit> {
         Constraint::Length(3),
     ])
     .split(area);
+    let header = Layout::horizontal([Constraint::Min(0), Constraint::Length(17)]).split(rows[0]);
+    frame.render_widget(Block::default().borders(Borders::BOTTOM), rows[0]);
     frame.render_widget(
-        Paragraph::new("Node Plane | Workstation assistant")
-            .style(
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            )
-            .block(Block::default().borders(Borders::BOTTOM)),
-        rows[0],
+        Paragraph::new("Node Plane | Workstation assistant").style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
+        header[0],
+    );
+    frame.render_widget(
+        Paragraph::new(app.ssh_state.label())
+            .alignment(ratatui::layout::Alignment::Right)
+            .style(Style::default().fg(Color::Gray)),
+        header[1],
     );
     match app.screen {
         Screen::Form => draw_form(frame, app, rows[1], &mut hits),
@@ -2360,8 +2443,17 @@ fn draw(frame: &mut Frame, app: &App) -> Vec<Hit> {
         // Modal hit targets replace background controls, including outside clicks.
         hits.clear();
         let popup = centered(area, 84, 20);
-        let sections = dialog(frame, popup, " Connection confirmation ");
+        let sections = dialog(
+            frame,
+            popup,
+            if matches!(prompt, Prompt::SelectAdministrator { .. }) {
+                " Choose administrator "
+            } else {
+                " Connection confirmation "
+            },
+        );
         let text = match prompt {
+            Prompt::SelectAdministrator { .. } => "Select the account to bind to this workstation key.\n↑ / ↓ · Enter to select · Esc to cancel".into(),
             Prompt::ConfirmAction { title, description } => format!("{title}\n\n{description}"),
             Prompt::HostKey { host, fingerprint } => format!(
                 "First connection to {host}\n\nSSH fingerprint:\n{fingerprint}\n\nCompare it with a trusted provider/source before accepting."
@@ -2370,7 +2462,44 @@ fn draw(frame: &mut Frame, app: &App) -> Vec<Hit> {
                 "SSH login: {user}@{host}\nThe workstation key is not authorized yet. Enter the server password below; only the public key will be enrolled after login."
             ),
         };
-        if matches!(prompt, Prompt::Password { .. }) {
+        if let Prompt::SelectAdministrator { choices } = prompt {
+            let body =
+                Layout::vertical([Constraint::Length(3), Constraint::Min(0)]).split(sections[0]);
+            frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: false }), body[0]);
+            let capacity = usize::from(body[1].height).max(1);
+            let start = app.administrator_selected.saturating_sub(capacity - 1);
+            for (row, (index, (_, label))) in choices
+                .iter()
+                .enumerate()
+                .skip(start)
+                .take(capacity)
+                .enumerate()
+            {
+                let area = Rect::new(body[1].x, body[1].y + row as u16, body[1].width, 1);
+                frame.render_widget(
+                    Paragraph::new(format!(
+                        "{} {label}",
+                        if index == app.administrator_selected {
+                            "→"
+                        } else {
+                            " "
+                        }
+                    ))
+                    .style(Style::default().fg(
+                        if index == app.administrator_selected {
+                            Color::Cyan
+                        } else {
+                            Color::Gray
+                        },
+                    )),
+                    area,
+                );
+                hits.push(Hit {
+                    area,
+                    control: Control::Administrator(index),
+                });
+            }
+        } else if matches!(prompt, Prompt::Password { .. }) {
             let body =
                 Layout::vertical([Constraint::Min(0), Constraint::Length(3)]).split(sections[0]);
             frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: false }), body[0]);
@@ -2416,7 +2545,11 @@ fn draw(frame: &mut Frame, app: &App) -> Vec<Hit> {
             frame,
             sections[1],
             (label, "Cancel"),
-            app.trust || matches!(prompt, Prompt::Password { .. }),
+            app.trust
+                || matches!(
+                    prompt,
+                    Prompt::Password { .. } | Prompt::SelectAdministrator { .. }
+                ),
             (Control::Prompt(true), Control::Prompt(false)),
             &mut hits,
         );
@@ -2606,6 +2739,7 @@ fn draw_nodes(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
                     .add_modifier(Modifier::BOLD),
             ),
             Line::from(format!("Code: {} · {}", node.key, node.state_label())),
+            Line::from(format!("Agent: {}", node.agent.label())),
             Line::from(format!(
                 "Connection: {}{}",
                 node.transport.as_deref().unwrap_or("Not configured"),
@@ -2637,7 +2771,8 @@ fn draw_nodes(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
         {
             lines.push(Line::from(""));
             lines.push(Line::from(format!(
-                "Operation: {}{}",
+                "{}: {}{}",
+                operation.label(),
                 operation.status,
                 if operation.error.is_empty() {
                     String::new()
@@ -2647,7 +2782,7 @@ fn draw_nodes(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
             )));
             lines.push(Line::from(operation.id.to_string()));
             if operation.status != "rejected" {
-                actions.push(("Progress", Control::NodesObserve));
+                actions.push(("Operation status", Control::NodesObserve));
             }
         }
         if let Some(facts) = &node.services {
@@ -2683,7 +2818,7 @@ fn draw_nodes(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
         });
         actions.push(("Check status", Control::NodesInspect));
         if !busy {
-            if node.transport.is_some() && node.services.is_none() {
+            if node.transport.is_some() && node.agent == crate::nodes::AgentState::Missing {
                 actions.push(("Agent setup", Control::NodesSetup));
             }
             if let Some(facts) = &node.services {
@@ -3686,6 +3821,53 @@ fn draw_editor(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn administrator_picker_selects_exact_account_and_cancels_without_answer() {
+        let mut app = test_profile_app();
+        let choices: Vec<_> = (0..40)
+            .map(|i| (format!("account-{i}"), format!("{} · @admin{i}", 100 + i)))
+            .collect();
+        let (tx, rx) = mpsc::channel();
+        app.event(Event::Prompt(
+            Prompt::SelectAdministrator {
+                choices: choices.clone(),
+            },
+            tx,
+        ));
+        for _ in 0..30 {
+            app.prompt_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        }
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(80, 24)).unwrap();
+        terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+        assert!(
+            app.hits
+                .iter()
+                .any(|hit| matches!(hit.control, Control::Administrator(30)))
+        );
+        app.prompt_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(matches!(rx.recv().unwrap(), Answer::Selection(30)));
+        let (tx, rx) = mpsc::channel();
+        app.event(Event::Prompt(Prompt::SelectAdministrator { choices }, tx));
+        assert_eq!(app.administrator_selected, 0);
+        let key = app.activate(Control::Administrator(2)).unwrap();
+        app.prompt_key(key);
+        assert!(matches!(rx.recv().unwrap(), Answer::Selection(2)));
+        let (tx, rx) = mpsc::channel();
+        app.event(Event::Prompt(
+            Prompt::SelectAdministrator { choices: vec![] },
+            tx,
+        ));
+        app.prompt_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(matches!(rx.recv().unwrap(), Answer::Cancel));
+    }
+    #[test]
+    fn action_forms_do_not_offer_administrator_selector() {
+        let mut form = Form::new(&test_request());
+        for action in Action::ALL {
+            form.select_action(action);
+            assert!(!form.visible().contains(&7));
+        }
+    }
     use super::*;
     #[test]
     fn progress_label_uses_terminal_background_on_filled_accent() {
@@ -4150,10 +4332,10 @@ mod tests {
             saved: None,
         };
         form.append("admin-account");
-        assert_eq!(form.fields[7], "admin-account");
+        assert!(form.fields[7].is_empty());
         assert!(form.fields[5].is_empty());
         form.action = Action::PrepareNode;
-        form.selected = 5;
+        form.selected = 4;
         form.append("target.example");
         assert_eq!(form.fields[8], "target.example");
         assert!(form.fields[6].is_empty());
@@ -4823,6 +5005,7 @@ mod tests {
         app.nodes.operation = Some(crate::nodes::Operation {
             id: uuid::Uuid::new_v4(),
             kind: "node-jobs".into(),
+            action: "bootstrap".into(),
             node_key: node.key,
             status: "awaiting_executor".into(),
             error: String::new(),
@@ -4842,6 +5025,47 @@ mod tests {
         app.nodes_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
         assert!(app.nodes.card.is_none());
         assert!(app.nodes_requested.is_none());
+    }
+    #[test]
+    fn agent_setup_requires_confirmed_absence_and_ssh_status_keeps_layout_fixed() {
+        let mut app = test_profile_app();
+        app.activate(Control::Action(Action::PrepareNode));
+        app.nodes_requested = None;
+        let mut node = browser_node("lv1", "Europe");
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
+        for state in [
+            crate::nodes::AgentState::Unknown,
+            crate::nodes::AgentState::Ready,
+            crate::nodes::AgentState::Unavailable,
+            crate::nodes::AgentState::Missing,
+        ] {
+            node.agent = state;
+            app.nodes.card = Some(node.clone());
+            terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+            assert_eq!(
+                app.nodes_controls()
+                    .iter()
+                    .any(|c| matches!(c, Control::NodesSetup)),
+                state == crate::nodes::AgentState::Missing
+            );
+        }
+        let mut areas = None;
+        for state in [
+            crate::nodes::ConnectionState::Closed,
+            crate::nodes::ConnectionState::Connecting,
+            crate::nodes::ConnectionState::Connected,
+        ] {
+            app.ssh_state = state;
+            terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+            let current: Vec<_> = app.hits.iter().map(|hit| hit.area).collect();
+            if let Some(previous) = &areas {
+                assert_eq!(previous, &current);
+            }
+            areas = Some(current);
+            let buffer = terminal.backend().buffer();
+            let text: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+            assert!(text.contains(state.label()));
+        }
     }
     #[test]
     fn nodes_worker_returns_to_browser_and_profile_switch_drops_cached_nodes() {

@@ -157,21 +157,31 @@ pub async fn authenticate(
             let Some(selection) = error.downcast_ref::<AdminSelection>() else {
                 return Err(error);
             };
-            let mut selected = None;
-            for (account_id, label) in &selection.0 {
-                if crate::events::confirm(
+            ensure!(
+                !selection.0.is_empty(),
+                "No approved administrators available"
+            );
+            let index = if selection.0.len() == 1 {
+                0
+            } else {
+                crate::events::select_administrator(tx, selection.0.clone())?
+            };
+            let (account_id, label) = selection
+                .0
+                .get(index)
+                .context("Invalid administrator selection")?;
+            ensure!(
+                crate::events::confirm(
                     tx,
                     "Register workstation access",
                     format!(
-                        "Bind this workstation key to {label}?\nAccount: {account_id}\nKey: {}\n\nThis is privileged SSH registration, not Telegram identity verification. Future sessions use this account. Cancel skips this administrator.",
+                        "Bind this workstation key to {label}?\nAccount: {account_id}\nKey: {}\n\nThis is privileged SSH registration, not Telegram identity verification. Future sessions use this account. Cancel leaves this key unregistered.",
                         session.workstation_fingerprint
                     ),
-                )? {
-                    selected = Some(account_id.clone());
-                    break;
-                }
-            }
-            input["account_id"] = json!(selected.context("Workstation registration cancelled")?);
+                )?,
+                "Workstation registration cancelled"
+            );
+            input["account_id"] = json!(account_id);
             helper(session, input).await?
         }
     };

@@ -7,11 +7,13 @@ pub enum Prompt {
     HostKey { host: String, fingerprint: String },
     Password { user: String, host: String },
     ConfirmAction { title: String, description: String },
+    SelectAdministrator { choices: Vec<(String, String)> },
 }
 pub enum Answer {
     Confirm(bool),
     Password(Zeroizing<String>),
     Cancel,
+    Selection(usize),
 }
 pub enum Event {
     Stage(String),
@@ -40,6 +42,15 @@ pub fn confirm(tx: &mpsc::Sender<Event>, title: &str, description: String) -> Re
     })? {
         Answer::Confirm(value) => Ok(value),
         _ => Ok(false),
+    }
+}
+pub fn select_administrator(
+    tx: &mpsc::Sender<Event>,
+    choices: Vec<(String, String)>,
+) -> Result<usize> {
+    match UiInteraction(tx.clone()).ask(Prompt::SelectAdministrator { choices })? {
+        Answer::Selection(index) => Ok(index),
+        _ => bail!("Workstation registration cancelled"),
     }
 }
 impl Interaction for UiInteraction {

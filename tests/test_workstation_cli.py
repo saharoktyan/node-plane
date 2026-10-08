@@ -174,7 +174,7 @@ class WorkstationCredentialTests(unittest.TestCase):
             self.service.handle({'version': 1, 'action': 'authenticate',
                 'session_id': self.session_id, 'attribution': self.attribution})
         self.assertEqual(caught.exception.code, 'admin_selection_required')
-        self.assertEqual({choice['label'] for choice in caught.exception.choices}, {'@operator', 'Another Admin'})
+        self.assertEqual({choice['label'] for choice in caught.exception.choices}, {'101 · @operator', '102'})
         self.assertEqual(self.db.connection.execute('SELECT COUNT(*) FROM backend_credentials').fetchone()[0], 0)
         self.assertEqual(self.authenticate(account_id=second.id)['account_id'], second.id)
 
@@ -201,7 +201,7 @@ class WorkstationCredentialTests(unittest.TestCase):
         self.identities.resolve_telegram(103)
         self.authenticate()
         result = self.service.handle({'version': 1, 'action': 'list'})
-        self.assertEqual(result['accounts'], [{'account_id': self.admin.id, 'label': '@operator'}])
+        self.assertEqual(result['accounts'], [{'account_id': self.admin.id, 'label': '101 · @operator'}])
         self.assertNotIn('token', result)
         self.assertNotIn('np_', json.dumps(result))
 

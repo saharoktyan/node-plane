@@ -380,6 +380,10 @@ impl SshSession {
         i32::try_from(status).context("SSH server returned an invalid exit status")
     }
 
+    pub fn is_closed(&self) -> bool {
+        self.session.is_closed()
+    }
+
     pub async fn close(self) -> Result<()> {
         timeout(
             AUTH_TIMEOUT,
@@ -1040,6 +1044,7 @@ mod tests {
                     return Ok(()); // Dropping the reply explicitly rejects an unexpected target.
                 }
                 reply.accept().await;
+                let fixture_home = self.home.clone();
                 tokio::spawn(async move {
                     let mut stream = channel.into_stream();
                     let mut request = Vec::new();
@@ -1053,6 +1058,62 @@ mod tests {
                             break;
                         }
                         assert!(request.len() < 4096);
+                    }
+                    if fixture_home.join("nodes-fixture").exists() {
+                        use std::io::Write;
+                        let request_line = String::from_utf8_lossy(&request)
+                            .lines()
+                            .next()
+                            .unwrap()
+                            .to_owned();
+                        writeln!(
+                            OpenOptions::new()
+                                .create(true)
+                                .append(true)
+                                .open(fixture_home.join("api-requests"))
+                                .unwrap(),
+                            "{request_line}"
+                        )
+                        .unwrap();
+                        if request_line.starts_with("POST ") {
+                            // An accepted mutation with a lost HTTP response is
+                            // deliberately uncertain and must never be replayed.
+                            stream.shutdown().await.unwrap();
+                            return;
+                        }
+                        let path = request_line.split_whitespace().nth(1).unwrap();
+                        let node = serde_json::json!({"key":"lv1","title":"Latvia","region":"Europe","flag":"", "enabled":true,"protocols":["awg"],"xray_transports":[],"desired_revision":1,"applied_revision":1,"transport":"ssh","ssh_target":"root@node.example"});
+                        let (status, body) = if path.ends_with("/services") {
+                            if let Ok(code) = fs::read_to_string(fixture_home.join("service-error"))
+                            {
+                                (
+                                    if code == "node_agent_unconfigured" {
+                                        409
+                                    } else {
+                                        503
+                                    },
+                                    serde_json::json!({"error":{"code":code}}),
+                                )
+                            } else {
+                                (
+                                    200,
+                                    serde_json::json!({"docker":true,"awg_running":true,"xray_running":false}),
+                                )
+                            }
+                        } else if path.ends_with("/overview") {
+                            (
+                                200,
+                                serde_json::json!({"state":"applied_unverified","settings_complete":true,"last_job":null}),
+                            )
+                        } else if path.starts_with("/api/v1/nodes?") {
+                            (200, serde_json::json!({"items":[node],"next_cursor":null}))
+                        } else {
+                            (200, node)
+                        };
+                        let body = serde_json::to_string(&body).unwrap();
+                        stream.write_all(format!("HTTP/1.1 {status} Fixture\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+                        stream.shutdown().await.unwrap();
+                        return;
                     }
                     assert_eq!(
                         request,
@@ -1103,6 +1164,45 @@ mod tests {
                 }
                 let home = self.home.clone();
                 let input = self.inputs.remove(&channel).unwrap_or_default();
+                if home.join("nodes-fixture").exists()
+                    && command.contains("NODE_PLANE_APP_DIR=/opt/node-plane/current")
+                {
+                    use std::io::Write;
+                    let input: serde_json::Value = serde_json::from_slice(&input)?;
+                    writeln!(
+                        OpenOptions::new()
+                            .create(true)
+                            .append(true)
+                            .open(home.join("backend-actions"))?,
+                        "{input}"
+                    )?;
+                    let response = if input["action"] == "authenticate" {
+                        if home.join("select-admin").exists()
+                            && input["account_id"].is_null()
+                            && !home.join("bound-admin").exists()
+                        {
+                            serde_json::json!({"ok":false,"error":{"code":"admin_selection_required","choices":[
+                                {"account_id":"00000000-0000-4000-8000-000000000001","label":"101 · @first"},
+                                {"account_id":"00000000-0000-4000-8000-000000000002","label":"102"}]}})
+                        } else {
+                            let account = input["account_id"]
+                                .as_str()
+                                .map(str::to_owned)
+                                .or_else(|| fs::read_to_string(home.join("bound-admin")).ok())
+                                .unwrap_or_else(|| "00000000-0000-4000-8000-000000000001".into());
+                            if home.join("select-admin").exists() {
+                                fs::write(home.join("bound-admin"), &account)?;
+                            }
+                            serde_json::json!({"ok":true,"token":format!("np_{}", "a".repeat(76)),"account_id":account})
+                        }
+                    } else {
+                        serde_json::json!({"ok":true})
+                    };
+                    session.data(channel, serde_json::to_vec(&response)?)?;
+                    session.exit_status_request(channel, 0)?;
+                    session.close(channel)?;
+                    return Ok(());
+                }
                 let output =
                     tokio::task::spawn_blocking(move || -> Result<std::process::Output> {
                         let mut child = std::process::Command::new("/bin/bash")
@@ -1207,6 +1307,231 @@ mod tests {
                     task.abort();
                 }
             }
+        }
+
+        fn nodes_request(server: &MockServer, state: &Path) -> crate::config::Request {
+            crate::config::Request {
+                action: crate::config::Action::Diagnose,
+                host: "127.0.0.1".into(),
+                port: server.port,
+                user: "test".into(),
+                state_dir: state.into(),
+                tag: String::new(),
+                branch: "dev".into(),
+                admin_ids: String::new(),
+                bot_token: Zeroizing::new(String::new()),
+                workflow: crate::config::WorkflowOptions::default(),
+            }
+        }
+        fn prepare_nodes_fixture(server: &MockServer, state: &Path) {
+            secure_state_directory(state).unwrap();
+            let key = load_or_create_key(state).unwrap();
+            fs::create_dir(server.home.join(".ssh")).unwrap();
+            fs::write(
+                server.home.join(".ssh/authorized_keys"),
+                key.public_key().to_openssh().unwrap(),
+            )
+            .unwrap();
+            fs::write(server.home.join("nodes-fixture"), "enabled").unwrap();
+        }
+        async fn nodes_command(
+            worker: &crate::nodes::Worker,
+            request: crate::config::Request,
+            command: crate::nodes::Command,
+        ) -> (
+            std::result::Result<String, String>,
+            Vec<crate::nodes::Update>,
+        ) {
+            use crate::events::{Answer, Event, Prompt};
+            let (tx, rx) = std::sync::mpsc::channel();
+            worker.submit(request, command, tx).unwrap();
+            tokio::task::spawn_blocking(move || {
+                let mut updates = Vec::new();
+                loop {
+                    match rx.recv_timeout(Duration::from_secs(10)).unwrap() {
+                        Event::Prompt(prompt, reply) => {
+                            reply
+                                .send(match prompt {
+                                    Prompt::Password { .. } => {
+                                        Answer::Password(Zeroizing::new("test-password".into()))
+                                    }
+                                    Prompt::SelectAdministrator { .. } => Answer::Selection(1),
+                                    _ => Answer::Confirm(true),
+                                })
+                                .unwrap();
+                        }
+                        Event::Nodes(update) => updates.push(update),
+                        Event::Finished(result) => return (result, updates),
+                        _ => {}
+                    }
+                }
+            })
+            .await
+            .unwrap()
+        }
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn first_nodes_connection_binds_selected_admin_and_reuses_binding() {
+            let server = MockServer::start().await;
+            let state = tempfile::tempdir().unwrap();
+            prepare_nodes_fixture(&server, state.path());
+            fs::write(server.home.join("select-admin"), "enabled").unwrap();
+            let mut worker = crate::nodes::Worker::new().unwrap();
+            for _ in 0..2 {
+                let (result, _) = nodes_command(
+                    &worker,
+                    nodes_request(&server, state.path()),
+                    crate::nodes::Command::List,
+                )
+                .await;
+                assert!(result.is_ok(), "{result:?}");
+            }
+            assert_eq!(
+                fs::read_to_string(server.home.join("bound-admin")).unwrap(),
+                "00000000-0000-4000-8000-000000000002"
+            );
+            let actions: Vec<serde_json::Value> =
+                fs::read_to_string(server.home.join("backend-actions"))
+                    .unwrap()
+                    .lines()
+                    .map(|line| serde_json::from_str(line).unwrap())
+                    .filter(|value: &serde_json::Value| value["action"] == "authenticate")
+                    .collect();
+            assert_eq!(actions.len(), 3);
+            assert!(actions[0]["account_id"].is_null());
+            assert_eq!(
+                actions[1]["account_id"],
+                "00000000-0000-4000-8000-000000000002"
+            );
+            assert!(actions[2]["account_id"].is_null());
+            worker.shutdown().unwrap();
+        }
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn nodes_reuse_ssh_with_fresh_authorization_and_close_on_idle_reset_and_exit() {
+            use crate::nodes::{Command, ConnectionState, Worker};
+            let server = MockServer::start().await;
+            let state = tempfile::tempdir().unwrap();
+            prepare_nodes_fixture(&server, state.path());
+            let mut worker = Worker::with_idle_timeout(Duration::from_millis(500)).unwrap();
+            for command in [Command::List, Command::Card("lv1".into())] {
+                let (result, _) =
+                    nodes_command(&worker, nodes_request(&server, state.path()), command).await;
+                assert!(result.is_ok(), "{result:?}");
+            }
+            assert_eq!(server.connections.lock().unwrap().len(), 1);
+            assert_eq!(worker.state(), ConnectionState::Connected);
+            let log: Vec<serde_json::Value> =
+                fs::read_to_string(server.home.join("backend-actions"))
+                    .unwrap()
+                    .lines()
+                    .map(|s| serde_json::from_str(s).unwrap())
+                    .collect();
+            let auth: Vec<_> = log
+                .iter()
+                .filter(|v| v["action"] == "authenticate")
+                .collect();
+            assert_eq!(auth.len(), 2);
+            assert_ne!(auth[0]["session_id"], auth[1]["session_id"]);
+            for session in auth {
+                assert!(
+                    log.iter().any(
+                        |v| v["action"] == "revoke" && v["session_id"] == session["session_id"]
+                    )
+                );
+            }
+            for _ in 0..3 {
+                tokio::time::sleep(Duration::from_millis(250)).await;
+                worker.touch();
+            }
+            assert_eq!(worker.state(), ConnectionState::Connected);
+            tokio::time::sleep(Duration::from_millis(1100)).await;
+            assert_eq!(worker.state(), ConnectionState::Closed);
+            let (result, _) =
+                nodes_command(&worker, nodes_request(&server, state.path()), Command::List).await;
+            assert!(result.is_ok(), "{result:?}");
+            assert_eq!(server.connections.lock().unwrap().len(), 2);
+            worker.reset();
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            assert_eq!(worker.state(), ConnectionState::Closed);
+            let (result, _) =
+                nodes_command(&worker, nodes_request(&server, state.path()), Command::List).await;
+            assert!(result.is_ok(), "{result:?}");
+            assert_eq!(server.connections.lock().unwrap().len(), 3);
+            worker.shutdown().unwrap();
+            assert_eq!(worker.state(), ConnectionState::Closed);
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn nodes_probe_distinguishes_missing_from_unavailable_and_never_replays_uncertain_setup()
+         {
+            use crate::nodes::{AgentState, Command, Update, Worker};
+            let server = MockServer::start().await;
+            let state = tempfile::tempdir().unwrap();
+            prepare_nodes_fixture(&server, state.path());
+            let mut worker = Worker::new().unwrap();
+            let mut card = None;
+            for (code, expected) in [
+                (None, AgentState::Ready),
+                (Some("node_agent_unconfigured"), AgentState::Missing),
+                (Some("node_agent_unavailable"), AgentState::Unavailable),
+            ] {
+                let path = server.home.join("service-error");
+                if let Some(code) = code {
+                    fs::write(path, code).unwrap();
+                } else if path.exists() {
+                    fs::remove_file(path).unwrap();
+                }
+                let (result, updates) = nodes_command(
+                    &worker,
+                    nodes_request(&server, state.path()),
+                    Command::Card("lv1".into()),
+                )
+                .await;
+                assert!(result.is_ok(), "{result:?}");
+                let node = updates
+                    .into_iter()
+                    .find_map(|u| {
+                        if let Update::Card(n) = u {
+                            Some(n)
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap();
+                assert_eq!(node.agent, expected);
+                card = Some(node);
+            }
+            let (result, updates) = nodes_command(
+                &worker,
+                nodes_request(&server, state.path()),
+                Command::Setup(card.unwrap()),
+            )
+            .await;
+            assert!(result.is_err());
+            let operation = updates
+                .into_iter()
+                .find_map(|u| {
+                    if let Update::Operation(o) = u {
+                        Some(o)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap();
+            assert_eq!(operation.status, "unconfirmed");
+            assert!(operation.command_id.is_some());
+            let (result, _) = nodes_command(
+                &worker,
+                nodes_request(&server, state.path()),
+                Command::Observe(operation),
+            )
+            .await;
+            assert!(result.is_ok(), "{result:?}");
+            let requests = fs::read_to_string(server.home.join("api-requests")).unwrap();
+            assert_eq!(
+                requests.lines().filter(|s| s.starts_with("POST ")).count(),
+                1
+            );
+            worker.shutdown().unwrap();
         }
 
         #[tokio::test]

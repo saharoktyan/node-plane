@@ -13,7 +13,7 @@ mod ssh;
 mod tui;
 mod workstation;
 
-use anyhow::{Result, ensure};
+use anyhow::{Context, Result, ensure};
 use clap::{Args, Parser, Subcommand};
 use config::{Action, Request, WorkflowOptions};
 use events::{Answer, Event, Prompt, UiInteraction};
@@ -319,6 +319,22 @@ fn read_line(prompt: &str) -> Result<String> {
 }
 fn console_prompt(prompt: Prompt) -> Result<Answer> {
     match prompt {
+        Prompt::SelectAdministrator { choices } => {
+            println!("Choose administrator");
+            for (index, (_, label)) in choices.iter().enumerate() {
+                println!("{}: {label}", index + 1);
+            }
+            let value = read_line("Account number (blank cancels): ")?;
+            if value.is_empty() {
+                return Ok(Answer::Cancel);
+            }
+            let index: usize = value.parse().context("Invalid account number")?;
+            ensure!(
+                index > 0 && index <= choices.len(),
+                "Invalid account number"
+            );
+            Ok(Answer::Selection(index - 1))
+        }
         Prompt::HostKey { host, fingerprint } => {
             ensure!(
                 io::stdin().is_terminal(),

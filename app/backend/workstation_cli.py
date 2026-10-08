@@ -233,10 +233,11 @@ class WorkstationService:
                 WHERE a.role = 'admin' AND a.status = 'approved' ORDER BY a.id, i.subject""").fetchall()
         choices = {}
         for row in rows:
-            label = ('@' + row['username']) if row['username'] else ' '.join(
-                part for part in (row['first_name'], row['last_name']) if part)
+            label = str(row['subject'] or row['id'])
+            if row['username']:
+                label += ' · @' + row['username']
             choices.setdefault(row['id'], {'account_id': row['id'],
-                'label': (label or ('admin ' + row['subject'] if row['subject'] else row['id']))[:200]})
+                'label': label[:200]})
         return list(choices.values())
 
     def _account(self, request: dict, previous: dict | None):
