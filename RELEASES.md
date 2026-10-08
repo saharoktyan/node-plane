@@ -12,12 +12,38 @@ virtual environments, local configuration and caches. `CONTROLLER_PACKAGE.json`
 records the release tag, version, full commit and SHA-256 of every included file.
 `BUILD_COMMIT` is packaged with the same full commit.
 
+The controller must also carry `runtime_assets/`: the driver reads this bundle
+when deploying local or SSH node protocols. Packaging and extraction validate
+every dependency named by its deployment manifest, including shell scripts,
+Python helpers, the AWG Dockerfile and container entrypoint. Through alpha.53,
+these assets were accidentally omitted. Existing archive readers from those
+releases also reject this newly included directory, so upgrading them requires
+running the corrected archive reader/update script from a separately staged
+release; using their installed reader alone cannot complete the upgrade.
+
 The controller archive is included in `SHA256SUMS.txt`; publishing verifies its
 manifest and its identity against the release tag. Installation and update reject
 missing/corrupt archives and never fall back to full-source downloads. Ordinary
 archive installations need no checkout; release discovery fetches public release
 metadata and remote tag refs only. Unpublished dev HEAD remains a development
 checkout workflow using `--from-source`.
+
+## v0.4.3-alpha.54
+
+- Include the complete runtime_assets deployment bundle in the controller archive.
+  This fixes protocol bootstrap on archive installations, where the driver could
+  not find the runtime manifest or scripts after successful agent installation.
+- Check every deployment manifest dependency during packaging and extraction,
+  including AWG container build files. Reject incomplete bundles even when their
+  outer package checksums are consistent.
+- Explicit node-operation resolution restores runtime helpers before reading or
+  retiring an old command. It never replays bootstrap; passive recovery remains
+  read-only.
+- Validation: 43 archive, recovery guard, journal archival, agent setup and node
+  operation tests passed. Live local/SSH protocol bootstrap remains a manual check.
+- Clean installations can use this release directly. Existing archive readers
+  through alpha.53 cannot read the new runtime directory; upgrading those installs
+  needs a separately staged corrected updater or a clean reinstall.
 
 ## v0.4.3-alpha.53
 
