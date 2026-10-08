@@ -125,7 +125,8 @@ async def audit_page(query: CallbackQuery, callback_data: AuditPage, bot: Bot,
     except BackendError:
         await show(query, bot, backend, state, note=tr(locale, 'settings.error_unavailable'))
         return
-    sections = [Section(tr(locale, 'audit.attribution'), (tr(locale, 'audit.attribution_text'),))]
+    sections = [Section(tr(locale, 'audit.attribution'),
+                        (tr(locale, 'audit.attribution_text'),), collapsed=True)]
     for item in page['items']:
         result = tr(locale, 'audit.phase.' + item['phase'])
         if item['http_status'] is not None:
@@ -136,14 +137,25 @@ async def audit_page(query: CallbackQuery, callback_data: AuditPage, bot: Bot,
         if item.get('target'):
             enrollment = (tr(locale, 'audit.target', target=item['target']),
                           tr(locale, 'audit.key', fingerprint=item['key_fingerprint']))
-        sections.append(Section(item['occurred_at'][:19].replace('T', ' ') + ' · ' + item['account_label'],
-            lines=(item['action'], result),
-            sections=(Section(tr(locale, 'audit.details'),
-                lines=(tr(locale, 'audit.ssh_user', user=item['ssh_user']), item['device_fingerprint'],
+        action = {
+            'credential': 'credential',
+            'privileged SSH workstation registration': 'registration',
+            'privileged SSH workstation revoke-access': 'revoke',
+            'privileged SSH workstation restore-access': 'restore',
+            'SSH controller key enrollment': 'enrollment',
+        }.get(item['action'])
+        action = tr(locale, 'audit.action.' + action) if action else item['action'].replace('/api/v1/system/', '')
+        sections.append(Section('', sections=(
+            Section(item['occurred_at'][:16].replace('T', ' ') + ' · ' + item['account_label'],
+                lines=(item['occurred_at'], item['action'],
+                       tr(locale, 'audit.ssh_user', user=item['ssh_user']), item['device_fingerprint'],
                        tr(locale, 'audit.account', id=item['account_id']),
                        tr(locale, 'audit.session', id=item['session_id']),
                        tr(locale, 'audit.request', id=item['request_id'] or '—'),
-                       tr(locale, 'audit.command', id=item['command_id'] or '—')) + enrollment, collapsed=True),), divider_after=True))
+                       tr(locale, 'audit.command', id=item['command_id'] or '—')) + enrollment,
+                collapsed=True),
+            Section('', lines=(f'{action} · {result}',)),
+        )))
     if not page['items']:
         sections.append(Section(tr(locale, 'audit.events'), (tr(locale, 'audit.empty'),)))
     rows = []

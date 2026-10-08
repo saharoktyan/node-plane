@@ -26,9 +26,14 @@ class RecoveryScreenTests(IsolatedAsyncioTestCase):
                 await recovery.audit_page(self.query, recovery.AuditPage(), self.bot, backend, self.state)
             screen, rows = render.call_args.args[2:4]
             self.assertTrue(screen.rich(rows).blocks)
-            self.assertIn('@operator', screen.sections[1].title)
+            self.assertTrue(screen.sections[0].collapsed)
+            self.assertEqual(screen.sections[1].title, '')
+            self.assertIn('@operator', screen.sections[1].sections[0].title)
             self.assertTrue(screen.sections[1].sections[0].collapsed)
             self.assertIn('vps.example', '\n'.join(screen.sections[1].sections[0].lines))
+            self.assertIn(event['action'], screen.sections[1].sections[0].lines)
+            self.assertTrue(screen.sections[1].sections[1].lines[0].startswith('POST updates/run · '))
+            self.assertFalse(screen.sections[1].divider_after)
             self.assertEqual(rows[-1][0].callback_data, recovery.RecoveryPage().pack())
 
     async def test_confirmation_precedes_cancel_and_uses_existing_contract(self):
