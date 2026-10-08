@@ -97,6 +97,63 @@ class ControllerReleaseTests(unittest.TestCase):
                        stop=lambda: self.fail('A clean host needs no service stop'))
         self.assertEqual((host / 'state/controller-installation-id').read_text().strip(), controller)
 
+    def test_reader_accepts_checksummed_future_libraries_but_builder_stays_explicit(self):
+        extra = 'scripts/lib/future_runtime.py'
+        self.assertFalse(release.allowed(extra))
+        self.assertTrue(release.allowed(extra, forward_compatible=True))
+        for name in ('scripts/lib/../secret.py', '/scripts/lib/helper.py',
+                     'scripts/lib/keys.pem', 'docs/example.py', 'rust/main.rs'):
+            self.assertFalse(release.allowed(name, forward_compatible=True))
+        manifest, contents = release.verify(self.archive)
+        contents[extra] = b'# new operational dependency\n'
+        manifest['files'][extra] = hashlib.sha256(contents[extra]).hexdigest()
+        contents[release.MANIFEST] = json.dumps(manifest).encode()
+        future = self.root / 'future.tar.gz'
+        with tarfile.open(future, 'w:gz') as output:
+            for name, value in contents.items():
+                info = tarfile.TarInfo(name)
+                info.size = len(value)
+                output.addfile(info, io.BytesIO(value))
+        destination = self.root / 'future'
+        release.extract(future, destination, self.tag, self.commit)
+        release.copy_package(destination, self.root / 'future-copy')
+        self.assertEqual((self.root / 'future-copy' / extra).read_bytes(), contents[extra])
+
+    def test_download_failure_in_nested_shell_function_writes_terminal_receipt(self):
+        source = (ROOT / 'scripts/update.sh').read_text()
+        begin = source.index('fetch_code() {')
+        function = source[begin:source.index('\n}\n', begin) + 3]
+        receipt = self.root / 'failure-receipt'
+        script = source.splitlines()[1] + '''
+FROM_SOURCE=0
+TARGET_BRANCH=dev
+TARGET_REF=v0.4.3-alpha.52
+set_step() { :; }
+prepare_controller_archive() { return 1; }
+on_error() { printf failed > "$RECEIPT"; }
+trap 'on_error $?' ERR
+''' + function + '\nmain() { fetch_code; }\nmain\n'
+        result = subprocess.run(['bash', '-c', script], env={**os.environ, 'RECEIPT': str(receipt)},
+                                capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(receipt.read_text(), 'failed')
+
+    def test_reader_still_verifies_actual_previous_archive_layout(self):
+        manifest, contents = release.verify(self.archive)
+        contents.pop('scripts/lib/archive_agent_journals.py')
+        manifest['files'].pop('scripts/lib/archive_agent_journals.py')
+        manifest.update(ref='v0.4.3-alpha.51', version='0.4.3-alpha.51')
+        contents['VERSION'] = b'0.4.3-alpha.51\n'
+        manifest['files']['VERSION'] = hashlib.sha256(contents['VERSION']).hexdigest()
+        contents[release.MANIFEST] = json.dumps(manifest).encode()
+        old = self.root / 'old.tar.gz'
+        with tarfile.open(old, 'w:gz') as output:
+            for name, value in contents.items():
+                info = tarfile.TarInfo(name)
+                info.size = len(value)
+                output.addfile(info, io.BytesIO(value))
+        release.extract(old, self.root / 'previous', 'v0.4.3-alpha.51', self.commit)
+
     def test_wrong_identity_and_existing_destination_do_not_replace_files(self):
         target = self.root / 'target'
         for ref, commit in [('v9.9.9', self.commit), (self.tag, 'b' * 40)]:

@@ -272,6 +272,38 @@ for offline deployments and tests.
 - make sure the SSH key in `SSH_KEY` is readable by the process that runs the bot
 - if first bootstrap fails, rerun `Probe` and fix the reported host issues before retrying `Bootstrap`
 
+## One-time recovery: alpha.51 rejects the alpha.52 archive
+
+The alpha.51 verifier rejects the newly packaged agent journal helper before
+applying the update. Its shell error trap can leave the presentation receipt
+at `running`. Do not edit database gates or mark the operation successful.
+
+`scripts/recover_archive_update.py` is a narrow bridge for this exact failure.
+It requires the blocked stack job, its pinned commit, no dispatched agent
+updates, an inactive original unit, the original alpha.51 installation and
+journal evidence of one archive rejection before any installation step.
+It extends the old verifier in memory for this one known library only and
+retains checksum/path/commit validation. The installed package is not modified.
+With `--apply`, it stages the verified alpha.52 package and explicitly launches
+its updater under the original unit/job identity. Staging is retained; a second
+launch is refused if staging already exists, preserving uncertain outcomes.
+
+On the controller as root, download the helper, then validate first:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/saharoktyan/node-plane/dev/scripts/recover_archive_update.py -o /tmp/node-plane-recover-archive.py
+NODE_PLANE_APP_DIR=/opt/node-plane/current \
+NODE_PLANE_SHARED_DIR=/opt/node-plane/shared \
+PYTHONPATH=/opt/node-plane/current/app \
+/opt/node-plane/current/.venv/bin/python /tmp/node-plane-recover-archive.py JOB_UUID
+```
+
+Replace `JOB_UUID` with the backend update ID, not the local workstation
+operation ID. After validation, repeat the last command with `--apply`, observe
+the printed update unit journal and resume the original workstation operation
+after the update service finishes. The backend rechecks durable completion;
+this helper does not clear its gate or change the job record.
+
 ## Development
 
 ```bash
