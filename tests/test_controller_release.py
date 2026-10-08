@@ -77,6 +77,26 @@ class ControllerReleaseTests(unittest.TestCase):
             release.copy_package(installed, self.root / 'invalid')
         self.assertFalse((self.root / 'invalid').exists())
 
+    def test_packaged_agent_setup_contains_and_runs_its_journal_helper(self):
+        installed = self.root / 'installed'
+        release.extract(self.archive, installed)
+        library = ROOT / 'scripts/lib'
+        for dependency in library.iterdir():
+            if dependency.is_file() and dependency.suffix in {'.sh', '.py'}:
+                self.assertTrue((installed / 'scripts/lib' / dependency.name).is_file(),
+                                f'Missing operational library: {dependency.name}')
+        helper = installed / 'scripts/lib/archive_agent_journals.py'
+        spec = importlib.util.spec_from_file_location('packaged_journal_helper', helper)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        host = self.root / 'disposable-host'
+        host.mkdir()
+        controller = '4cfbcbc4-52ec-40e8-874d-a9ee692f1123'
+        module.archive(controller, 'a' * 64, 'spb1', config=host / 'agent.toml',
+                       journal=host / 'profile-intents.sqlite3', state=host / 'state',
+                       stop=lambda: self.fail('A clean host needs no service stop'))
+        self.assertEqual((host / 'state/controller-installation-id').read_text().strip(), controller)
+
     def test_wrong_identity_and_existing_destination_do_not_replace_files(self):
         target = self.root / 'target'
         for ref, commit in [('v9.9.9', self.commit), (self.tag, 'b' * 40)]:
