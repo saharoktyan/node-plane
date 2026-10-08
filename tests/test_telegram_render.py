@@ -27,7 +27,17 @@ class RenderRecoveryTests(IsolatedAsyncioTestCase):
         action = InlineKeyboardButton(text='Edit', callback_data='edit')
         populated = Screen('Profile', sections=(Section('Access', collapsed=True,
             heading_rows=((action,),)),))
-        self.assertEqual(populated.rich().blocks[1].blocks[0].type, 'buttons')
+        self.assertEqual([block.type for block in populated.rich().blocks], ['heading', 'heading', 'buttons'])
+
+    async def test_nested_interactive_sections_are_expanded_and_read_only_details_remain(self):
+        action = InlineKeyboardButton(text='Open', callback_data='open')
+        screen = Screen('Screen', sections=(Section('Servers', collapsed=True, sections=(
+            Section('Region', collapsed=True, sections=(Section('Server', rows=((action,),)),)),
+            Section('Help', lines=('Read only',), collapsed=True),)),))
+        blocks = screen.rich().blocks
+        self.assertEqual([block.type for block in blocks], ['heading', 'heading', 'heading', 'heading', 'buttons', 'details'])
+        self.assertEqual(blocks[-2].buttons[0].callback_data, 'open')
+        self.assertEqual(blocks[-1].summary, 'Help')
 
     async def test_single_destructive_action_remains_red_in_navigation_screen(self):
         cleanup = InlineKeyboardButton(text='Cleanup', callback_data='cleanup', style='danger')
@@ -132,8 +142,8 @@ class RenderRecoveryTests(IsolatedAsyncioTestCase):
             self.assertEqual(len(files), 3)
             self.assertFalse(payload['blocks'][1]['is_open'])
             self.assertTrue(payload['blocks'][1]['blocks'][0]['photo']['media'].startswith('attach://'))
-            self.assertEqual(payload['blocks'][2]['type'], 'pre')
-            self.assertEqual(payload['blocks'][2]['text'], 'vpn://fresh')
+            self.assertEqual(payload['blocks'][2]['type'], 'paragraph')
+            self.assertEqual(payload['blocks'][2]['text'], {'type': 'code', 'text': 'vpn://fresh'})
             self.assertEqual(payload['blocks'][3]['type'], 'heading')
             self.assertEqual([block['type'] for block in payload['blocks'][4:]],
                              ['document', 'document'])

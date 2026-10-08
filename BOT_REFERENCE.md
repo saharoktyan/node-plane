@@ -230,6 +230,22 @@ The `Details` screen is mainly useful when you need to:
 - understand where it should be installed
 - avoid opening a shell just to inspect the key
 
+## Rich UI Navigation and Configuration
+
+Rich UI keeps interactive sections open: buttons and callback text links must
+never be placed inside collapsible Details blocks, including nested branches,
+because those controls are inaccessible in the iOS client. Read-only information,
+QR images and URI text may remain collapsible. Configuration URIs use inline
+monospace text, with a visible callback text link below the block to send the URI
+as a separate ordinary message for iOS.
+
+AWG configuration paths are `Menu -> Get config -> Server -> AmneziaWG -> Devices
+-> Device name`. A sole device is selected automatically, and Back skips the
+picker in that case. The Devices breadcrumb still offers explicit device selection.
+Long configuration paths support the same ellipsis navigation as other screens;
+returning rereads the existing issuance and rechecks access, without storing
+configuration contents in the navigation snapshot or creating another issuance.
+
 ## Supported Slash Commands
 
 - `/start`: open or refresh the current control message.

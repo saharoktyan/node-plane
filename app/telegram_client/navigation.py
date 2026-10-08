@@ -28,14 +28,15 @@ def parent_path(callback, locale, data):
             return (*menu, Breadcrumb(tr(locale, 'home.account'), callback))
         if name == 'member_settings':
             return (*menu, Breadcrumb(tr(locale, 'home.settings'), callback))
-        if name in {'node', 'protocol', 'device_picker'} and len(args) >= 2:
+        if name in {'node', 'protocol', 'device_picker', 'device_picker_back'} and len(args) >= 2:
             profile, key = args[:2]
             path = (*menu, member(tr(locale, 'home.get_config'), 'profile', profile),
                     member(data.get('_navigation_nodes', {}).get(key, key), 'node', profile, key))
             if name == 'node':
                 return (*path[:-1], Breadcrumb(path[-1].label, callback))
-            if name == 'device_picker':
-                return (*path, Breadcrumb(tr(locale, 'protocol.awg'), callback))
+            if name in {'device_picker', 'device_picker_back'}:
+                return (*path, member(tr(locale, 'protocol.awg'), 'protocol', profile, key, 'awg'),
+                        member(tr(locale, 'devices.title'), 'device_picker', profile, key))
             if len(args) == 3 and args[2] in {'awg', 'xray'}:
                 return (*path, Breadcrumb(tr(locale, 'protocol.' + args[2]), callback))
             return ()

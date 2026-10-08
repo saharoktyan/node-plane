@@ -15,6 +15,37 @@ class TelegramDeviceTests(IsolatedAsyncioTestCase):
     def backend(self, items):
         return SimpleNamespace(request=AsyncMock(return_value={'items': items}))
 
+    async def test_single_device_skips_picker_forward_and_backward_without_reissuing(self):
+        backend = self.backend([{'id': 'phone', 'display_name': 'My phone', 'status': 'active'}])
+        with patch.object(user, 'issue', new_callable=AsyncMock) as issue, \
+             patch.object(user, 'show_profile', new_callable=AsyncMock) as profile, \
+             patch.object(user_devices, 'render', new_callable=AsyncMock) as draw:
+            await user_devices.show_picker(123, 123, 77, 'profile', 'node', self.bot, backend, self.state)
+            issue.assert_awaited_once()
+            self.assertEqual(self.state_data['_navigation_devices']['phone'], 'My phone')
+            issue.reset_mock()
+            await user_devices.handle_action(user.Action(123, 'device_picker_back', ('profile', 'node')),
+                self.query, self.bot, backend, self.state)
+            profile.assert_awaited_once()
+            issue.assert_not_awaited()
+            draw.assert_not_awaited()
+
+    async def test_awg_config_title_and_path_use_device_name_and_back_checks_picker(self):
+        self.state_data.update(_navigation_nodes={'node': 'Petersburg #1'}, _navigation_devices={'phone': 'My phone'})
+        backend = SimpleNamespace(issuance=AsyncMock(return_value={'status': 'succeeded',
+            'profile_id': 'profile', 'node_key': 'node', 'protocol': 'awg', 'transport': 'vpn', 'device_id': 'phone'}),
+            artifact=AsyncMock(return_value={'filename': 'config.vpn', 'content': 'vpn://config',
+                'display_name': 'Petersburg #1 AmneziaWG · username · My phone'}))
+        with patch.object(user, 'render', new_callable=AsyncMock, return_value=True) as draw:
+            await user.show_issuance(123, 123, 77, 'issuance', self.bot, backend, self.state)
+        screen, rows = draw.call_args.args[2:4]
+        self.assertEqual(screen.title, 'My phone')
+        actions = [user.actions[p.callback[2:]].name for p in screen.breadcrumbs]
+        self.assertEqual(actions, ['home', 'profile', 'node', 'protocol', 'device_picker'])
+        self.assertEqual(screen.breadcrumbs[2].label, 'Petersburg #1')
+        self.assertEqual(user.actions[rows[-1][0].callback_data[2:]].name, 'device_picker_back')
+        self.assertEqual(user.actions[screen.navigation_return[2:]].name, 'issuance')
+
     async def test_multi_device_picker_never_issues_without_selection(self):
         backend = self.backend([{'id': 'b', 'display_name': 'Laptop', 'status': 'active'},
             {'id': 'a', 'display_name': 'Phone', 'status': 'active'},

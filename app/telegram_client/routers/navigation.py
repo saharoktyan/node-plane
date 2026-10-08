@@ -67,6 +67,16 @@ async def navigation_cb(query, bot, state, dispatcher=None, **handler_data):
     if not saved or nonce != saved['nonce'] or query.message.message_id != saved['message_id']:
         await query.answer()
         return
+    if action == 'nav_return' and saved.get('return_callback'):
+        if dispatcher is None:
+            await query.answer()
+            return
+        handler_data.update(bot=bot, state=state, dispatcher=dispatcher,
+                            raw_state=await state.get_state())
+        # Re-read the existing issuance and recheck access; never create/replay it.
+        await dispatcher.propagate_event(update_type='callback_query',
+            event=query.model_copy(update={'data': saved['return_callback']}), **handler_data)
+        return
     if action == 'nav_discard':
         discard = data.get('navigation_discard')
         if not discard or discard['nonce'] != nonce or dispatcher is None or discard['callback'] not in {

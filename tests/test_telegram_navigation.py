@@ -21,7 +21,7 @@ class NavigationPathTests(TestCase):
         callback = user.button(owner, 'Back', 'device_picker', 'p1', 'lv1').callback_data
         path = parent_path(callback, 'en', {'_navigation_nodes': {'lv1': 'Latvia #1'}})
         actions = [user.actions[p.callback[2:]] for p in path]
-        self.assertEqual([a.name for a in actions], ['home', 'profile', 'node', 'device_picker'])
+        self.assertEqual([a.name for a in actions], ['home', 'profile', 'node', 'protocol', 'device_picker'])
         self.assertTrue(all(a.owner_id == owner for a in actions))
         self.assertEqual(path[2].label, 'Latvia #1')
         for name, args in (('issue', ('p1','lv1','awg','')),
@@ -100,6 +100,36 @@ class NavigationPathTests(TestCase):
 
 
 class NavigationRenderTests(IsolatedAsyncioTestCase):
+    async def test_config_media_path_shortens_without_storing_secrets_and_returns_by_lookup(self):
+        from telegram_client.routers import user
+        parents = tuple(Breadcrumb(label, user.button(123, label, name, *args).callback_data)
+            for label, name, args in [('Menu', 'home', ()), ('Get config', 'profile', ('p1',)),
+                ('Petersburg #1', 'node', ('p1', 'lv1')), ('AmneziaWG', 'protocol', ('p1','lv1','awg')),
+                ('Devices', 'device_picker', ('p1','lv1'))])
+        lookup = user.button(123, 'Config', 'issuance', 'existing').callback_data
+        screen = Screen('My phone', uri='vpn://secret', uri_collapsed=True,
+            qr=b'private-qr', qr_title='QR', files=(('secret.conf', b'private-config'),),
+            breadcrumbs=parents, navigation_return=lookup, embedded_buttons=True, navigation=True)
+        await render(self.bot, 123, screen, [[InlineKeyboardButton(text='Back', callback_data=parents[-1].callback)]], self.state)
+        rich = self.bot.edit_message_text.call_args.kwargs['rich_message']
+        first = next(p for p in rich.blocks[0].text if isinstance(p, RichTextButton))
+        self.assertEqual(first.button.text, '…')
+        snapshot = self.data['navigation_screen']
+        self.assertNotIn('rich', snapshot)
+        self.assertNotIn('secret', json.dumps(snapshot))
+        self.query.data = 'nav_more:' + snapshot['nonce']
+        await navigation_cb(self.query, self.bot, self.state)
+        dispatcher = SimpleNamespace(propagate_event=AsyncMock())
+        query = CallbackQuery(id='return', from_user=User(id=123, is_bot=False, first_name='User'),
+            chat_instance='test', data='nav_return:' + snapshot['nonce'],
+            message=Message(message_id=77, date=0, chat=Chat(id=123, type='private')))
+        backend = object()
+        await navigation_cb(query, self.bot, self.state, dispatcher, backend=backend)
+        forwarded = dispatcher.propagate_event.call_args.kwargs
+        self.assertEqual(forwarded['event'].data, lookup)
+        self.assertIs(forwarded['backend'], backend)
+        self.assertEqual(user.actions[lookup[2:]].name, 'issuance')
+
     async def test_discard_reaches_real_router_with_same_backend_and_fsm(self):
         from aiogram import Dispatcher, Router, F
         await self.draw()

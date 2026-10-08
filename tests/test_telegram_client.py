@@ -713,9 +713,12 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
                 blocks = screen.rich(rows).blocks
                 link = next(block for block in blocks if block.type == 'details' and block.summary == screen.uri_title)
                 self.assertFalse(link.is_open)
-                self.assertEqual([block.type for block in link.blocks], ['pre', 'buttons'])
-                self.assertEqual(link.blocks[0].text, uri)
-                self.assertIn('(iOS)', link.blocks[1].buttons[0].text)
+                self.assertEqual([block.type for block in link.blocks], ['paragraph'])
+                self.assertEqual(link.blocks[0].text.type, 'code')
+                self.assertEqual(link.blocks[0].text.text, uri)
+                send_link = blocks[blocks.index(link) + 1].text[0].button
+                self.assertIn('(iOS)', send_link.text)
+                self.assertEqual(send_link.style, 'link')
                 self.assertEqual(screen.plain_entities()[0].type, 'code')
                 documents = [block for block in blocks if block.type == 'document']
                 self.assertEqual([block.document.media.filename for block in documents],
@@ -827,7 +830,8 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             self.assertEqual(first.sections[:3], second.sections[:3])
             self.assertEqual(second.sections[-1].sections[0].sections[0].title, 'Server 10')
             self.assertEqual(len(second.sections[-1].sections[0].sections), 1)
-            self.assertTrue(second.sections[-1].rich()[0].is_open)
+            self.assertEqual(second.sections[-1].rich()[0].type, 'heading')
+            self.assertFalse(any(block.type == 'details' for block in second.sections[-1].rich()))
             self.assertEqual(draw.call_args.args[-1], 77)
             backend.member_profile_summary.assert_awaited_with(123, 'p1')
 

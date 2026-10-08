@@ -2881,6 +2881,20 @@ fn draw_running(frame: &mut Frame, app: &App, area: Rect) {
                 .label(app.tracker.detail.as_str()),
             sections[2],
         );
+        // Reverse accent/default-background colors on the filled label. ANSI
+        // reverse video uses the terminal's actual background rather than a
+        // guessed RGB value or its default foreground (often white).
+        for x in sections[2].left()..sections[2].right() {
+            let cell = &mut frame.buffer_mut()[(x, sections[2].top())];
+            if cell.bg == Color::Cyan {
+                cell.set_style(
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .bg(Color::Reset)
+                        .add_modifier(Modifier::REVERSED),
+                );
+            }
+        }
     }
 }
 fn draw_update(
@@ -3673,6 +3687,52 @@ fn draw_editor(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn progress_label_uses_terminal_background_on_filled_accent() {
+        let mut app = App::new(&test_request());
+        app.form.action = Action::Install;
+        app.screen = Screen::Running;
+        app.tracker.current = "Prepare PostgreSQL and backend schema".into();
+        app.tracker.detail = "auto-provision local postgresql runtime".into();
+        app.tracker.completed = 3;
+        for accent in ["terminal", "#ffbb74"] {
+            app.connections.accent = accent.into();
+            for (width, height) in [(100, 24), (60, 16)] {
+                let mut terminal =
+                    Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
+                terminal
+                    .draw(|frame| {
+                        draw(frame, &app);
+                    })
+                    .unwrap();
+                let buffer = terminal.backend().buffer();
+                let filled: Vec<_> = buffer
+                    .content
+                    .iter()
+                    .filter(|cell| cell.modifier.contains(Modifier::REVERSED))
+                    .collect();
+                assert!(!filled.is_empty(), "{accent} at {width}x{height}");
+                assert!(
+                    filled
+                        .iter()
+                        .all(|cell| cell.fg == accent_color(accent) && cell.bg == Color::Reset)
+                );
+                assert!(
+                    filled
+                        .iter()
+                        .any(|cell| cell.symbol().chars().any(char::is_alphabetic))
+                );
+                assert!(
+                    buffer
+                        .content
+                        .iter()
+                        .any(|cell| cell.fg == accent_color(accent)
+                            && !cell.modifier.contains(Modifier::REVERSED)
+                            && cell.symbol() == "e")
+                );
+            }
+        }
+    }
     #[test]
     fn appearance_mouse_keyboard_and_custom_color_persist_across_restart() {
         let dir = tempfile::tempdir().unwrap();
