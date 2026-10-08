@@ -2,6 +2,8 @@ name: Workstation assistant
 
 on:
   push:
+    branches: [dev, main]
+    tags: ['v*']
     paths:
       - 'rust/node-plane-cli/**'
       - 'scripts/install.sh'
@@ -30,8 +32,14 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: workstation-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
 jobs:
   native:
+    # Alpha tags duplicate the checked dev commit; stable tags get release builds.
+    if: github.ref_type != 'tag' || !contains(github.ref_name, '-')
     strategy:
       fail-fast: false
       matrix:
@@ -54,16 +62,16 @@ jobs:
       - name: Tests
         run: cargo +1.89.0 test --locked
       - name: Linux binary
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && (github.event_name == 'workflow_dispatch' || github.ref_type == 'tag')
         run: cargo +1.89.0 build --locked --release
       - name: Windows binary with static CRT
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && (github.event_name == 'workflow_dispatch' || github.ref_type == 'tag')
         env:
           RUSTFLAGS: '-C target-feature=+crt-static'
         run: cargo +1.89.0 build --locked --release
       - name: Linux command smoke test
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && (github.event_name == 'workflow_dispatch' || github.ref_type == 'tag')
         run: ./target/release/node-plane --help
       - name: Windows command smoke test
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && (github.event_name == 'workflow_dispatch' || github.ref_type == 'tag')
         run: .\target\release\node-plane.exe --help
