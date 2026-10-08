@@ -444,6 +444,11 @@ deleted/disabled/demoted administrators fail closed. Privileged SSH revocation
 and restoration are audited; restoration does not revive old bearer tokens. The
 binding reuses backend account UUIDs and leaves future non-SSH user interfaces
 free to use their own authentication methods. Nodes navigation is the next UI task.
+Telegram audit is now a compact event list with native expandable timestamp/actor
+rows, short action/outcome summaries, and full identifiers inside the details.
+After workstation Nodes, consider clickable Telegram navigation breadcrumbs
+(Admin > Servers > server), with clear interactive styling; do not apply that
+navigation redesign as part of the audit or Nodes work.
 
 Workstation attribution (2026-10-07): credentials bind the selected admin name,
 SSH username and workstation key fingerprint. Secret-free API admission/HTTP
