@@ -88,9 +88,38 @@ pub async fn execute(
     tx: mpsc::Sender<Event>,
 ) -> Result<String> {
     request.validate()?;
+    let _ = tx.send(Event::Stage(
+        "Connecting to SSH and verifying the workstation key".into(),
+    ));
+    let mut session = ssh::connect(
+        &SshOptions {
+            host: request.host.clone(),
+            port: request.port,
+            user: request.user.clone(),
+            state_dir: request.state_dir.clone(),
+        },
+        interaction,
+    )
+    .await?;
+    let result = execute_connected(request, &mut session, tx).await;
+    let _ = session.close().await;
+    result
+}
+
+pub async fn execute_connected(
+    request: Request,
+    session: &mut SshSession,
+    tx: mpsc::Sender<Event>,
+) -> Result<String> {
+    request.validate()?;
+    // Installation can replace the controller's identity store. Reuse SSH, but
+    // register against the resulting installation instead of an older token.
+    if request.action == Action::Install {
+        let _ = crate::backend::end_authorization(session).await;
+    }
     let mut journal = Journal::open(&request)?;
     let log_path = journal.path.clone();
-    let result = run(&request, interaction, &tx, &mut journal).await;
+    let result = run(&request, session, &tx, &mut journal).await;
     match result {
         Ok(message) => Ok(format!("{message}\nLog: {}", log_path.display())),
         Err(error) => {
@@ -106,29 +135,18 @@ pub async fn execute(
 
 async fn run(
     request: &Request,
-    interaction: Arc<dyn Interaction>,
+    session: &mut SshSession,
     tx: &mpsc::Sender<Event>,
     journal: &mut Journal,
 ) -> Result<String> {
     let stage = |label: &str| {
         let _ = tx.send(Event::Stage(label.into()));
     };
-    stage("Connecting to SSH and verifying the workstation key");
-    let mut session = ssh::connect(
-        &SshOptions {
-            host: request.host.clone(),
-            port: request.port,
-            user: request.user.clone(),
-            state_dir: request.state_dir.clone(),
-        },
-        interaction,
-    )
-    .await?;
     stage("Checking the server and administrator permissions");
-    checked(&mut session, PREFLIGHT, None, journal, false, tx).await?;
+    checked(session, PREFLIGHT, None, journal, false, tx).await?;
     if request.action == Action::Diagnose {
         stage("Checking controller services, database, release and maintenance state");
-        let mut report = diagnosis(&mut session, journal, tx).await?;
+        let mut report = diagnosis(session, journal, tx).await?;
         let before = report.render();
         if request.workflow.repair {
             for check in &report.checks {
@@ -148,7 +166,7 @@ async fn run(
                     stage(&format!("Recovering {unit}"));
                     journal.line(&format!("Confirmed service recovery: {unit}"))?;
                     let script = diagnostics_script(Some(unit));
-                    let output = checked(&mut session, &script, None, journal, false, tx).await?;
+                    let output = checked(session, &script, None, journal, false, tx).await?;
                     let result: serde_json::Value = serde_json::from_str(&output.join("\n"))?;
                     ensure!(
                         result["status"] == "dispatched",
@@ -159,7 +177,7 @@ async fn run(
                 }
             }
             stage("Verifying the installation after recovery");
-            report = diagnosis(&mut session, journal, tx).await?;
+            report = diagnosis(session, journal, tx).await?;
         }
         if report
             .checks
@@ -167,7 +185,7 @@ async fn run(
             .any(|check| check.id == "api" && check.status == "ok")
         {
             stage("Inspecting queued and blocked backend operations");
-            match crate::workstation::recover_operations(request, &mut session, tx).await {
+            match crate::workstation::recover_operations(request, session, tx).await {
                 Ok(detail) => report.checks.push(DiagnosticCheck {
                     id: "operations".into(),
                     status: "ok".into(),
@@ -181,13 +199,12 @@ async fn run(
                 }
             }
         }
-        let _ = session.close().await;
         let text = report.render();
         ensure!(report.errors == 0, "{text}");
         return Ok(text);
     }
     stage("Checking installation paths and preparing prerequisites");
-    checked(&mut session, PREPARE_HOST, None, journal, false, tx).await?;
+    checked(session, PREPARE_HOST, None, journal, false, tx).await?;
     stage("Preparing a private controller archive installation");
     let prepare = format!(
         "{}\nbranch={}\ntag={}\n{}",
@@ -196,7 +213,7 @@ async fn run(
         shell_quote(&request.tag),
         PREPARE_SOURCE_SUFFIX
     );
-    let output = checked(&mut session, &prepare, None, journal, false, tx).await?;
+    let output = checked(session, &prepare, None, journal, false, tx).await?;
     let work = output
         .iter()
         .find_map(|l| l.strip_prefix("NODE_PLANE_WORK_DIR "))
@@ -215,7 +232,7 @@ async fn run(
         CHECK_WORK_OWNER
     );
     checked(
-        &mut session,
+        session,
         &upload,
         Some(&bundle(request)?),
         journal,
@@ -237,14 +254,13 @@ async fn run(
         }
     );
     stage("Starting the seven installation steps");
-    checked(&mut session, &command, None, journal, true, tx).await?;
+    checked(session, &command, None, journal, true, tx).await?;
     stage("Verifying services, Telegram startup and backend readiness");
-    checked(&mut session, VERIFY, None, journal, false, tx).await?;
+    checked(session, VERIFY, None, journal, false, tx).await?;
     stage("Registering this workstation key with the controller administrator");
     let session_id = uuid::Uuid::new_v4();
-    crate::backend::authenticate(&mut session, session_id, &request.workflow.account, tx).await?;
-    crate::backend::revoke(&mut session, session_id).await?;
-    let _ = session.close().await;
+    crate::backend::authenticate(session, session_id, &request.workflow.account, tx).await?;
+    crate::backend::revoke(session, session_id).await?;
     Ok("Node Plane is installed. Open your Telegram bot and send /start.\nThe workstation public key is saved on the server; future connections do not need a password.".into())
 }
 

@@ -357,7 +357,7 @@ impl SessionKey {
     }
 }
 enum WorkerMessage {
-    Run(Box<Request>, Box<Command>, mpsc::Sender<Event>),
+    Run(Box<Request>, Option<Box<Command>>, mpsc::Sender<Event>),
     Touch,
     Reset,
     Shutdown,
@@ -397,7 +397,7 @@ impl Worker {
                                 status.store(1, Ordering::Release);
                                 let _ = events
                                     .send(Event::Stage("Connecting to the controller".into()));
-                                let ssh = ssh::connect(
+                                let mut ssh = ssh::connect(
                                     &SshOptions {
                                         host: request.host.clone(),
                                         port: request.port,
@@ -407,22 +407,42 @@ impl Worker {
                                     UiInteraction::shared(events.clone()),
                                 )
                                 .await?;
+                                ssh.persistent = true;
                                 session = Some((key, ssh));
                                 status.store(2, Ordering::Release);
                             }
                             // A fresh, audited backend credential belongs to each
                             // command, even while the verified SSH transport is reused.
-                            execute(
-                                *request,
-                                *command,
-                                &events,
-                                &mut session.as_mut().expect("connected").1,
-                            )
-                            .await
+                            let ssh = &mut session.as_mut().expect("connected").1;
+                            if let Some(command) = command {
+                                execute(*request, *command, &events, ssh).await
+                            } else {
+                                match request.action {
+                                    crate::config::Action::Install
+                                    | crate::config::Action::Diagnose => {
+                                        crate::installer::execute_connected(
+                                            *request,
+                                            ssh,
+                                            events.clone(),
+                                        )
+                                        .await
+                                    }
+                                    crate::config::Action::Update
+                                    | crate::config::Action::PrepareNode => {
+                                        crate::workstation::execute_connected(
+                                            *request,
+                                            ssh,
+                                            UiInteraction::shared(events.clone()),
+                                            events.clone(),
+                                        )
+                                        .await
+                                    }
+                                }
+                            }
                         });
-                        if result.is_err()
-                            || session.as_ref().is_some_and(|(_, ssh)| ssh.is_closed())
-                        {
+                        if session.as_ref().is_some_and(|(_, ssh)| {
+                            ssh.is_closed() || backend::rejected_authorization(ssh)
+                        }) {
                             close_session(&runtime, &mut session, &status);
                         }
                         last_activity = Instant::now();
@@ -459,10 +479,15 @@ impl Worker {
         self.tx
             .send(WorkerMessage::Run(
                 Box::new(request),
-                Box::new(command),
+                Some(Box::new(command)),
                 events,
             ))
             .context("Node connection worker is unavailable")
+    }
+    pub fn workflow(&self, request: Request, events: mpsc::Sender<Event>) -> Result<()> {
+        self.tx
+            .send(WorkerMessage::Run(Box::new(request), None, events))
+            .context("Connection worker is unavailable")
     }
     pub fn touch(&self) {
         let _ = self.tx.send(WorkerMessage::Touch);
@@ -512,7 +537,9 @@ async fn execute(
     let _lock = crate::operation_store::OperationLock::acquire(&request.state_dir)?;
     let id = Uuid::new_v4();
     async {
-        let _ = tx.send(Event::Stage("Authorizing the controller administrator".into()));
+        if !backend::authorized(session, &request.workflow.account) {
+            let _ = tx.send(Event::Stage("Authorizing the controller administrator".into()));
+        }
         let credential = backend::authenticate(session, id, &request.workflow.account, tx).await?;
         let result = async {
             let setup = matches!(&command, Command::Setup(_));

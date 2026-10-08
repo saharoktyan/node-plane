@@ -23,10 +23,51 @@ impl fmt::Display for AdminSelection {
 }
 impl std::error::Error for AdminSelection {}
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct Credential {
     pub token: Zeroizing<String>,
     pub account_id: String,
+}
+pub struct Authorization {
+    credential: Credential,
+    session_id: Uuid,
+    selector: String,
+    issued: std::time::Instant,
+    valid: bool,
+}
+impl Authorization {
+    fn usable(&self, account: &str) -> bool {
+        self.valid
+            && self.issued.elapsed() < Duration::from_secs(25 * 60)
+            && (account.is_empty()
+                || account == self.selector
+                || account == self.credential.account_id)
+    }
+}
+pub fn authorized(session: &SshSession, account: &str) -> bool {
+    session.persistent
+        && !session.is_closed()
+        && session
+            .authorization
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_some_and(|auth| auth.usable(account))
+}
+pub fn rejected_authorization(session: &SshSession) -> bool {
+    session
+        .authorization
+        .lock()
+        .unwrap()
+        .as_ref()
+        .is_some_and(|auth| !auth.valid)
+}
+pub async fn end_authorization(session: &mut SshSession) -> Result<()> {
+    let authorization = session.authorization.lock().unwrap().take();
+    if let Some(auth) = authorization {
+        revoke(session, auth.session_id).await?;
+    }
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -56,7 +97,16 @@ impl ApiError {
     }
 }
 
-pub async fn helper(session: &mut SshSession, input: Value) -> Result<Value> {
+pub async fn helper(session: &mut SshSession, mut input: Value) -> Result<Value> {
+    // Lookup and enrollment audit use the live credential's session, while their
+    // command IDs continue to identify each separate operation.
+    if matches!(
+        input["action"].as_str(),
+        Some("lookup-update" | "lookup-node" | "audit-enrollment")
+    ) && let Some(auth) = session.authorization.lock().unwrap().as_ref()
+    {
+        input["session_id"] = json!(auth.session_id);
+    }
     let source = include_str!("../../../app/backend/workstation_cli.py");
     let script = format!(
         "export NODE_PLANE_APP_DIR=/opt/node-plane/current NODE_PLANE_SHARED_DIR=/opt/node-plane/shared PYTHONPATH=/opt/node-plane/current/app\nexec /opt/node-plane/current/.venv/bin/python -c {}",
@@ -95,6 +145,11 @@ pub async fn helper(session: &mut SshSession, input: Value) -> Result<Value> {
             .pointer("/error/code")
             .and_then(Value::as_str)
             .unwrap_or("workstation_authentication_failed");
+        if code == "session_reauthentication_required"
+            && let Some(auth) = session.authorization.lock().unwrap().as_mut()
+        {
+            auth.valid = false;
+        }
         let choices = value
             .pointer("/error/choices")
             .or_else(|| value.get("choices"));
@@ -142,6 +197,22 @@ pub async fn authenticate(
     account: &str,
     tx: &std::sync::mpsc::Sender<crate::events::Event>,
 ) -> Result<Credential> {
+    if authorized(session, account) {
+        return Ok(session
+            .authorization
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .credential
+            .clone());
+    }
+    end_authorization(session).await?;
+    let id = if session.persistent {
+        Uuid::new_v4()
+    } else {
+        id
+    };
     let mut input = json!({"version":1,"action":"authenticate","session_id":id,
         "attribution":{"ssh_user":session.ssh_user,"device_fingerprint":session.workstation_fingerprint}});
     if !account.is_empty() {
@@ -210,10 +281,23 @@ pub async fn authenticate(
         use zeroize::Zeroize;
         secret.zeroize();
     }
-    Ok(Credential { token, account_id })
+    let credential = Credential { token, account_id };
+    if session.persistent {
+        *session.authorization.lock().unwrap() = Some(Authorization {
+            credential: credential.clone(),
+            session_id: id,
+            selector: account.into(),
+            issued: std::time::Instant::now(),
+            valid: true,
+        });
+    }
+    Ok(credential)
 }
 
 pub async fn revoke(session: &mut SshSession, id: Uuid) -> Result<()> {
+    if session.persistent && session.authorization.lock().unwrap().is_some() {
+        return Ok(());
+    }
     helper(
         session,
         json!({"version":1,"action":"revoke","session_id":id}),
@@ -261,9 +345,17 @@ pub async fn request(
             .map_err(|_| transport_error())?;
         exchange(stream, credential, method, path, body, command).await
     };
-    tokio::time::timeout(timeout, operation)
+    let result = tokio::time::timeout(timeout, operation)
         .await
-        .map_err(|_| transport_error())?
+        .map_err(|_| transport_error())?;
+    if result
+        .as_ref()
+        .is_err_and(|error| matches!(error.status, Some(401 | 403)))
+        && let Some(auth) = session.authorization.lock().unwrap().as_mut()
+    {
+        auth.valid = false;
+    }
+    result
 }
 async fn exchange<S>(
     stream: S,
@@ -385,6 +477,28 @@ fn ensure_api_path(path: &str) -> std::result::Result<(), ApiError> {
 mod tests {
     use super::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    #[test]
+    fn cached_authorization_is_bounded_and_cannot_select_another_account() {
+        let mut auth = Authorization {
+            credential: Credential {
+                token: Zeroizing::new("fixture".into()),
+                account_id: Uuid::new_v4().to_string(),
+            },
+            session_id: Uuid::new_v4(),
+            selector: "101".into(),
+            issued: std::time::Instant::now(),
+            valid: true,
+        };
+        assert!(auth.usable(""));
+        assert!(auth.usable("101"));
+        assert!(auth.usable(&auth.credential.account_id));
+        assert!(!auth.usable("102"));
+        auth.valid = false;
+        assert!(!auth.usable("101"));
+        auth.valid = true;
+        auth.issued -= Duration::from_secs(26 * 60);
+        assert!(!auth.usable("101"));
+    }
 
     async fn http_fixture(
         status: u16,

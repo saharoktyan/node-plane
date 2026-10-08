@@ -84,6 +84,9 @@ pub struct SshSession {
     pub ssh_user: String,
     pub workstation_fingerprint: String,
     pub endpoint: String,
+    pub peers: BTreeMap<String, SshSession>,
+    pub persistent: bool,
+    pub authorization: std::sync::Mutex<Option<crate::backend::Authorization>>,
 }
 
 /// Connect with our local key first. A password is requested only after verified
@@ -109,6 +112,9 @@ pub async fn connect(
             ssh_user: options.user.clone(),
             workstation_fingerprint,
             endpoint: endpoint(options),
+            peers: BTreeMap::new(),
+            persistent: false,
+            authorization: std::sync::Mutex::new(None),
         });
     }
 
@@ -142,6 +148,9 @@ pub async fn connect(
         ssh_user: options.user.clone(),
         workstation_fingerprint: workstation_fingerprint.clone(),
         endpoint: self::endpoint(options),
+        peers: BTreeMap::new(),
+        persistent: false,
+        authorization: std::sync::Mutex::new(None),
     };
     let command = initial.audited_enrollment_command(
         &public_key,
@@ -171,6 +180,9 @@ pub async fn connect(
         ssh_user: options.user.clone(),
         workstation_fingerprint,
         endpoint: self::endpoint(options),
+        peers: BTreeMap::new(),
+        persistent: false,
+        authorization: std::sync::Mutex::new(None),
     })
 }
 
@@ -384,7 +396,18 @@ impl SshSession {
         self.session.is_closed()
     }
 
-    pub async fn close(self) -> Result<()> {
+    pub async fn close(mut self) -> Result<()> {
+        let mut peers: Vec<_> = std::mem::take(&mut self.peers).into_values().collect();
+        while let Some(mut peer) = peers.pop() {
+            peers.extend(std::mem::take(&mut peer.peers).into_values());
+            let _ = crate::backend::end_authorization(&mut peer).await;
+            let _ = timeout(
+                AUTH_TIMEOUT,
+                peer.session.disconnect(Disconnect::ByApplication, "", "en"),
+            )
+            .await;
+        }
+        let _ = crate::backend::end_authorization(&mut self).await;
         timeout(
             AUTH_TIMEOUT,
             self.session.disconnect(Disconnect::ByApplication, "", "en"),
@@ -1075,7 +1098,9 @@ mod tests {
                             "{request_line}"
                         )
                         .unwrap();
-                        if request_line.starts_with("POST ") {
+                        if request_line.starts_with("POST ")
+                            && !request_line.contains("/system/updates/check ")
+                        {
                             // An accepted mutation with a lost HTTP response is
                             // deliberately uncertain and must never be replayed.
                             stream.shutdown().await.unwrap();
@@ -1083,7 +1108,34 @@ mod tests {
                         }
                         let path = request_line.split_whitespace().nth(1).unwrap();
                         let node = serde_json::json!({"key":"lv1","title":"Latvia","region":"Europe","flag":"", "enabled":true,"protocols":["awg"],"xray_transports":[],"desired_revision":1,"applied_revision":1,"transport":"ssh","ssh_target":"root@node.example"});
-                        let (status, body) = if path.ends_with("/services") {
+                        let (status, body) = if fixture_home.join("deny-api").exists() {
+                            (
+                                401,
+                                serde_json::json!({"error":{"code":"credential_revoked"}}),
+                            )
+                        } else if path == "/api/v1/system/ssh-key" {
+                            (
+                                200,
+                                serde_json::json!({"public_key":fs::read_to_string(fixture_home.join(".ssh/authorized_keys")).unwrap()}),
+                            )
+                        } else if path == "/api/v1/system/updates/check" {
+                            (200, serde_json::json!({"status":"success"}))
+                        } else if path == "/api/v1/system/updates" {
+                            (
+                                200,
+                                serde_json::json!({"branch":"dev","update_available":false,"update_supported":true}),
+                            )
+                        } else if path == "/api/v1/system/updates/rollout" {
+                            (
+                                200,
+                                serde_json::json!({"agents_required":false,"runtimes_required":false,"driver_status":"current","nodes":[]}),
+                            )
+                        } else if path.starts_with("/api/v1/system/recovery?") {
+                            (
+                                200,
+                                serde_json::json!({"items":[],"offset":0,"total":0,"page_size":20}),
+                            )
+                        } else if path.ends_with("/services") {
                             if let Ok(code) = fs::read_to_string(fixture_home.join("service-error"))
                             {
                                 (
@@ -1164,6 +1216,23 @@ mod tests {
                 }
                 let home = self.home.clone();
                 let input = self.inputs.remove(&channel).unwrap_or_default();
+                if home.join("nodes-fixture").exists()
+                    && (command.contains("NODE_PLANE_DIAGNOSTICS_SOURCE")
+                        || command.contains("A running systemd host is required"))
+                {
+                    if command.contains("NODE_PLANE_DIAGNOSTICS_SOURCE") {
+                        session.data(
+                            channel,
+                            serde_json::to_vec(
+                                &serde_json::json!({"version":1,"errors":0,"warnings":0,
+                            "checks":[{"id":"api","status":"ok","detail":"Ready","repair":null}]}),
+                            )?,
+                        )?;
+                    }
+                    session.exit_status_request(channel, 0)?;
+                    session.close(channel)?;
+                    return Ok(());
+                }
                 if home.join("nodes-fixture").exists()
                     && command.contains("NODE_PLANE_APP_DIR=/opt/node-plane/current")
                 {
@@ -1370,6 +1439,178 @@ mod tests {
             .unwrap()
         }
         #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn cancelled_target_preparation_keeps_both_connections_for_next_action() {
+            use crate::events::{Answer, Event, Prompt};
+            let server = MockServer::start().await;
+            let state = tempfile::tempdir().unwrap();
+            prepare_nodes_fixture(&server, state.path());
+            let mut worker = crate::nodes::Worker::new().unwrap();
+            for _ in 0..2 {
+                let mut request = nodes_request(&server, state.path());
+                request.action = crate::config::Action::PrepareNode;
+                request.workflow.target_host = request.host.clone();
+                request.workflow.target_port = request.port;
+                request.workflow.target_user = request.user.clone();
+                let (tx, rx) = std::sync::mpsc::channel();
+                worker.workflow(request, tx).unwrap();
+                let result = tokio::task::spawn_blocking(move || {
+                    loop {
+                        match rx.recv_timeout(Duration::from_secs(10)).unwrap() {
+                            Event::Finished(result) => break result,
+                            Event::Prompt(prompt, reply) => {
+                                reply
+                                    .send(match prompt {
+                                        Prompt::HostKey { .. } => Answer::Confirm(true),
+                                        Prompt::ConfirmAction { .. } => Answer::Confirm(false),
+                                        _ => Answer::Cancel,
+                                    })
+                                    .unwrap();
+                            }
+                            _ => {}
+                        }
+                    }
+                })
+                .await
+                .unwrap();
+                assert!(result.is_err());
+                assert_eq!(worker.state(), crate::nodes::ConnectionState::Connected);
+            }
+            assert_eq!(server.connections.lock().unwrap().len(), 2);
+            let actions: Vec<serde_json::Value> =
+                fs::read_to_string(server.home.join("backend-actions"))
+                    .unwrap()
+                    .lines()
+                    .map(|line| serde_json::from_str(line).unwrap())
+                    .collect();
+            assert_eq!(
+                actions
+                    .iter()
+                    .filter(|value| value["action"] == "authenticate")
+                    .count(),
+                1
+            );
+            assert!(
+                !actions
+                    .iter()
+                    .any(|value| value["action"] == "audit-enrollment")
+            );
+            worker.shutdown().unwrap();
+            assert_eq!(worker.state(), crate::nodes::ConnectionState::Closed);
+        }
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn diagnostics_updates_and_nodes_share_connection_and_credential() {
+            use crate::events::{Answer, Event};
+            let server = MockServer::start().await;
+            let state = tempfile::tempdir().unwrap();
+            prepare_nodes_fixture(&server, state.path());
+            let mut worker = crate::nodes::Worker::new().unwrap();
+            let (result, _) = nodes_command(
+                &worker,
+                nodes_request(&server, state.path()),
+                crate::nodes::Command::List,
+            )
+            .await;
+            assert!(result.is_ok(), "{result:?}");
+            for action in [
+                crate::config::Action::Diagnose,
+                crate::config::Action::Update,
+            ] {
+                let mut request = nodes_request(&server, state.path());
+                request.action = action;
+                let (tx, rx) = std::sync::mpsc::channel();
+                worker.workflow(request, tx).unwrap();
+                let result = tokio::task::spawn_blocking(move || {
+                    loop {
+                        match rx.recv_timeout(Duration::from_secs(10)).unwrap() {
+                            Event::Finished(result) => break result,
+                            Event::Prompt(_, reply) => {
+                                reply.send(Answer::Confirm(true)).unwrap();
+                            }
+                            Event::Stage(stage) => assert!(!stage.starts_with("Authorizing")),
+                            _ => {}
+                        }
+                    }
+                })
+                .await
+                .unwrap();
+                assert!(result.is_ok(), "{result:?}");
+            }
+            let (result, _) = nodes_command(
+                &worker,
+                nodes_request(&server, state.path()),
+                crate::nodes::Command::Card("lv1".into()),
+            )
+            .await;
+            assert!(result.is_ok(), "{result:?}");
+            assert_eq!(server.connections.lock().unwrap().len(), 1);
+            let actions: Vec<serde_json::Value> =
+                fs::read_to_string(server.home.join("backend-actions"))
+                    .unwrap()
+                    .lines()
+                    .map(|line| serde_json::from_str(line).unwrap())
+                    .collect();
+            assert_eq!(
+                actions
+                    .iter()
+                    .filter(|value| value["action"] == "authenticate")
+                    .count(),
+                1
+            );
+            assert!(!actions.iter().any(|value| value["action"] == "revoke"));
+            worker.shutdown().unwrap();
+        }
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn rejected_cached_credential_is_discarded_without_replaying_request() {
+            let server = MockServer::start().await;
+            let state = tempfile::tempdir().unwrap();
+            prepare_nodes_fixture(&server, state.path());
+            let mut worker = crate::nodes::Worker::new().unwrap();
+            let (result, _) = nodes_command(
+                &worker,
+                nodes_request(&server, state.path()),
+                crate::nodes::Command::List,
+            )
+            .await;
+            assert!(result.is_ok());
+            fs::write(server.home.join("deny-api"), "enabled").unwrap();
+            let (result, _) = nodes_command(
+                &worker,
+                nodes_request(&server, state.path()),
+                crate::nodes::Command::List,
+            )
+            .await;
+            assert!(result.is_err());
+            assert_eq!(worker.state(), crate::nodes::ConnectionState::Closed);
+            fs::remove_file(server.home.join("deny-api")).unwrap();
+            let (result, _) = nodes_command(
+                &worker,
+                nodes_request(&server, state.path()),
+                crate::nodes::Command::List,
+            )
+            .await;
+            assert!(result.is_ok());
+            let log: Vec<serde_json::Value> =
+                fs::read_to_string(server.home.join("backend-actions"))
+                    .unwrap()
+                    .lines()
+                    .map(|line| serde_json::from_str(line).unwrap())
+                    .collect();
+            assert_eq!(
+                log.iter()
+                    .filter(|value| value["action"] == "authenticate")
+                    .count(),
+                2
+            );
+            assert_eq!(
+                fs::read_to_string(server.home.join("api-requests"))
+                    .unwrap()
+                    .lines()
+                    .count(),
+                3
+            );
+            worker.shutdown().unwrap();
+        }
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
         async fn first_nodes_connection_binds_selected_admin_and_reuses_binding() {
             let server = MockServer::start().await;
             let state = tempfile::tempdir().unwrap();
@@ -1396,17 +1637,16 @@ mod tests {
                     .map(|line| serde_json::from_str(line).unwrap())
                     .filter(|value: &serde_json::Value| value["action"] == "authenticate")
                     .collect();
-            assert_eq!(actions.len(), 3);
+            assert_eq!(actions.len(), 2);
             assert!(actions[0]["account_id"].is_null());
             assert_eq!(
                 actions[1]["account_id"],
                 "00000000-0000-4000-8000-000000000002"
             );
-            assert!(actions[2]["account_id"].is_null());
             worker.shutdown().unwrap();
         }
         #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-        async fn nodes_reuse_ssh_with_fresh_authorization_and_close_on_idle_reset_and_exit() {
+        async fn nodes_reuse_ssh_and_authorization_and_revoke_on_idle_reset_and_exit() {
             use crate::nodes::{Command, ConnectionState, Worker};
             let server = MockServer::start().await;
             let state = tempfile::tempdir().unwrap();
@@ -1429,15 +1669,9 @@ mod tests {
                 .iter()
                 .filter(|v| v["action"] == "authenticate")
                 .collect();
-            assert_eq!(auth.len(), 2);
-            assert_ne!(auth[0]["session_id"], auth[1]["session_id"]);
-            for session in auth {
-                assert!(
-                    log.iter().any(
-                        |v| v["action"] == "revoke" && v["session_id"] == session["session_id"]
-                    )
-                );
-            }
+            assert_eq!(auth.len(), 1);
+            assert!(!log.iter().any(|v| v["action"] == "revoke"));
+            let first_auth_id = auth[0]["session_id"].clone();
             for _ in 0..3 {
                 tokio::time::sleep(Duration::from_millis(250)).await;
                 worker.touch();
@@ -1445,6 +1679,14 @@ mod tests {
             assert_eq!(worker.state(), ConnectionState::Connected);
             tokio::time::sleep(Duration::from_millis(1100)).await;
             assert_eq!(worker.state(), ConnectionState::Closed);
+            let log = fs::read_to_string(server.home.join("backend-actions")).unwrap();
+            assert!(
+                log.lines()
+                    .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+                    .any(
+                        |value| value["action"] == "revoke" && value["session_id"] == first_auth_id
+                    )
+            );
             let (result, _) =
                 nodes_command(&worker, nodes_request(&server, state.path()), Command::List).await;
             assert!(result.is_ok(), "{result:?}");
@@ -1458,6 +1700,24 @@ mod tests {
             assert_eq!(server.connections.lock().unwrap().len(), 3);
             worker.shutdown().unwrap();
             assert_eq!(worker.state(), ConnectionState::Closed);
+            let log: Vec<serde_json::Value> =
+                fs::read_to_string(server.home.join("backend-actions"))
+                    .unwrap()
+                    .lines()
+                    .map(|line| serde_json::from_str(line).unwrap())
+                    .collect();
+            assert_eq!(
+                log.iter()
+                    .filter(|value| value["action"] == "authenticate")
+                    .count(),
+                3
+            );
+            assert_eq!(
+                log.iter()
+                    .filter(|value| value["action"] == "revoke")
+                    .count(),
+                3
+            );
         }
 
         #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

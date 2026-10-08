@@ -6,7 +6,7 @@ The controller permanently binds each workstation key fingerprint to one backend
 account, independently of local installation profiles and temporary sessions.
 On the first connection, choose an approved administrator explicitly (or supply
 `--account` with their UUID or Telegram ID). The TUI asks for confirmation; Cancel
-skips the displayed administrator. Installation registers the key after verifying
+leaves the workstation key unregistered. Installation registers the key after verifying
 the installed controller. Later sessions resolve the same account from the key,
 even when more administrators exist. A conflicting account selector is rejected.
 
@@ -80,7 +80,7 @@ New profiles default to the `dev` channel rather than inheriting
 the previous connection. Session opens read-only information about the current
 TUI launch UUID, local installation UUID, administrator selector, SSH endpoint,
 workstation public-key fingerprint and state directory. The launch UUID is local
-to the interface; backend audit sessions are created per operation. Viewing this
+to the interface; backend audit identifies each request and command within the authorized session. Viewing this
 screen does not create keys or expose passwords or tokens. A quick profile switcher directly above Settings supports clickable
 arrows and Left/Right when focused. It cycles through saved installations and
 New profile. Clicking the selected New profile again, or pressing Enter, opens
@@ -220,16 +220,29 @@ Search matches server name, region and code locally, without reconnecting. Page
 size follows the available terminal height, includes region headings, and repeats
 the heading when a region spans pages. Page arrows and the page counter appear
 only when needed. Tab/up/down select controls, Enter activates them, Ctrl+F
-selects search, left/right change pages, and Escape returns to the list/sidebar.
+selects search, left/right change list pages, and Escape returns to the list/sidebar.
+On a node card all four arrows follow the visible button positions; Tab and
+Shift+Tab retain sequential selection. Right from the action sidebar enters the
+selected section's content (the profile selector retains its switching arrows).
+Escape from any Settings subpage returns to the Settings overview.
 Mouse clicks and the wheel also work. Switching installation profiles clears the
 browser cache; Refresh explicitly loads updated registry state.
 
-Nodes reuses one SSH connection across reads and actions. It closes after five
-minutes without interaction, on installation profile changes, and on exit. The
-next request reconnects when necessary. A fixed indicator in the top-right corner
-shows SSH connected, connecting or closed without moving the interface. Each
-action still receives fresh backend authorization and its own audit session;
-uncertain mutations are never replayed when reconnecting.
+All TUI actions share the selected installation's verified SSH connection:
+installation, updates, diagnostics, recovery and Nodes. Target connections opened
+by Prepare SSH are retained with that controller session too. Connections close
+after five minutes without interaction, on installation profile changes, and on
+exit. The next action reconnects when necessary. A fixed indicator in the
+top-right corner shows SSH connected, connecting or closed without moving panels.
+
+The backend bearer credential stays only in memory while the SSH session is open.
+Actions reuse it instead of launching the privileged Python helper each time.
+It is renewed after at most 25 minutes, before the backend's one-hour expiry.
+An authentication/permission rejection invalidates the cache; closing the session
+revokes its credential when the controller is reachable. Backend permissions and
+audit still apply to each HTTP request, with separate command IDs for mutations.
+Uncertain mutations are never replayed when reconnecting. Command mode closes
+its connection and authorization when its single action finishes.
 
 Cards show persisted status, selected protocols and connection type, and inspect
 agent/Docker/protocol services when opened. Check status refreshes that inspection.
