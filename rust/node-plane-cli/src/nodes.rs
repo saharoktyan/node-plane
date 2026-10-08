@@ -3,7 +3,7 @@ use crate::{
     backend,
     config::Request,
     events::{self, Event, UiInteraction},
-    ssh::{self, SshOptions},
+    ssh::{self, SshOptions, SshSession},
 };
 use anyhow::{Context, Result, ensure};
 use hyper::Method;
@@ -11,7 +11,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet},
-    sync::mpsc,
+    sync::{
+        Arc,
+        atomic::{AtomicU8, Ordering},
+        mpsc,
+    },
+    time::{Duration, Instant},
 };
 use uuid::Uuid;
 
@@ -31,6 +36,26 @@ pub struct Node {
     pub overview: Option<Value>,
     #[serde(default)]
     pub services: Option<Value>,
+    #[serde(skip)]
+    pub agent: AgentState,
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AgentState {
+    #[default]
+    Unknown,
+    Ready,
+    Missing,
+    Unavailable,
+}
+impl AgentState {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Unknown => "Not checked",
+            Self::Ready => "Ready",
+            Self::Missing => "Not installed",
+            Self::Unavailable => "Unreachable",
+        }
+    }
 }
 impl Node {
     pub fn state(&self) -> &str {
@@ -78,6 +103,22 @@ pub struct Operation {
     pub error: String,
     #[serde(default)]
     pub command_id: Option<Uuid>,
+    #[serde(default)]
+    pub action: String,
+}
+impl Operation {
+    pub fn label(&self) -> &str {
+        if self.kind == "agent-rollouts" {
+            return "Agent setup";
+        }
+        match self.action.as_str() {
+            "bootstrap" => "Bootstrap protocols",
+            "install_docker" => "Install Docker",
+            "reinstall_clean" | "reinstall_keep" => "Reinstall protocols",
+            "apply_settings" => "Apply settings",
+            _ => "Node operation",
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -167,6 +208,7 @@ pub enum Update {
     Card(Node),
     Operation(Operation),
     Services(String, Value),
+    Agent(String, AgentState),
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Row {
@@ -275,40 +317,203 @@ fn operation(value: &Value, kind: &str, key: &str) -> Result<Operation> {
                 .unwrap_or(&Value::Null),
         ),
         command_id: None,
+        action: clean(&value["action"]),
     })
 }
 
-pub fn spawn(
-    request: Request,
-    command: Command,
-    tx: mpsc::Sender<Event>,
-) -> std::thread::JoinHandle<()> {
-    std::thread::spawn(move || {
-        let result = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(anyhow::Error::from)
-            .and_then(|runtime| runtime.block_on(execute(request, command, &tx)));
-        let _ = tx.send(Event::Finished(result.map_err(|e| format!("{e:#}"))));
-    })
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ConnectionState {
+    #[default]
+    Closed,
+    Connecting,
+    Connected,
 }
-async fn execute(request: Request, command: Command, tx: &mpsc::Sender<Event>) -> Result<String> {
-    let _lock = crate::operation_store::OperationLock::acquire(&request.state_dir)?;
-    let _ = tx.send(Event::Stage("Connecting to the controller".into()));
-    let mut session = ssh::connect(
-        &SshOptions {
-            host: request.host.clone(),
+impl ConnectionState {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Closed => "SSH: closed",
+            Self::Connecting => "SSH: connecting",
+            Self::Connected => "SSH: connected",
+        }
+    }
+}
+#[derive(PartialEq, Eq)]
+struct SessionKey {
+    host: String,
+    port: u16,
+    user: String,
+    account: String,
+    state: std::path::PathBuf,
+}
+impl SessionKey {
+    fn from_request(request: &Request) -> Self {
+        Self {
+            host: request.host.to_ascii_lowercase(),
             port: request.port,
             user: request.user.clone(),
-            state_dir: request.state_dir.clone(),
-        },
-        UiInteraction::shared(tx.clone()),
-    )
-    .await?;
+            account: request.workflow.account.clone(),
+            state: request.state_dir.clone(),
+        }
+    }
+}
+enum WorkerMessage {
+    Run(Box<Request>, Box<Command>, mpsc::Sender<Event>),
+    Touch,
+    Reset,
+    Shutdown,
+}
+pub struct Worker {
+    tx: mpsc::Sender<WorkerMessage>,
+    state: Arc<AtomicU8>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+impl Worker {
+    pub fn new() -> Result<Self> {
+        Self::with_idle_timeout(Duration::from_secs(300))
+    }
+    pub(crate) fn with_idle_timeout(idle_timeout: Duration) -> Result<Self> {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()?;
+        let (tx, rx) = mpsc::channel();
+        let state = Arc::new(AtomicU8::new(0));
+        let status = state.clone();
+        let thread = std::thread::spawn(move || {
+            let mut session: Option<(SessionKey, SshSession)> = None;
+            let mut last_activity = Instant::now();
+            loop {
+                match rx.recv_timeout(idle_timeout.min(Duration::from_secs(1))) {
+                    Ok(WorkerMessage::Run(request, command, events)) => {
+                        let key = SessionKey::from_request(&request);
+                        if session
+                            .as_ref()
+                            .is_some_and(|(saved, ssh)| saved != &key || ssh.is_closed())
+                        {
+                            close_session(&runtime, &mut session, &status);
+                        }
+                        let result = runtime.block_on(async {
+                            if session.is_none() {
+                                status.store(1, Ordering::Release);
+                                let _ = events
+                                    .send(Event::Stage("Connecting to the controller".into()));
+                                let ssh = ssh::connect(
+                                    &SshOptions {
+                                        host: request.host.clone(),
+                                        port: request.port,
+                                        user: request.user.clone(),
+                                        state_dir: request.state_dir.clone(),
+                                    },
+                                    UiInteraction::shared(events.clone()),
+                                )
+                                .await?;
+                                session = Some((key, ssh));
+                                status.store(2, Ordering::Release);
+                            }
+                            // A fresh, audited backend credential belongs to each
+                            // command, even while the verified SSH transport is reused.
+                            execute(
+                                *request,
+                                *command,
+                                &events,
+                                &mut session.as_mut().expect("connected").1,
+                            )
+                            .await
+                        });
+                        if result.is_err()
+                            || session.as_ref().is_some_and(|(_, ssh)| ssh.is_closed())
+                        {
+                            close_session(&runtime, &mut session, &status);
+                        }
+                        last_activity = Instant::now();
+                        let _ = events.send(Event::Finished(result.map_err(|e| format!("{e:#}"))));
+                    }
+                    Ok(WorkerMessage::Touch) => last_activity = Instant::now(),
+                    Ok(WorkerMessage::Reset) => close_session(&runtime, &mut session, &status),
+                    Ok(WorkerMessage::Shutdown) | Err(mpsc::RecvTimeoutError::Disconnected) => {
+                        break;
+                    }
+                    Err(mpsc::RecvTimeoutError::Timeout) => {
+                        if last_activity.elapsed() >= idle_timeout
+                            || session.as_ref().is_some_and(|(_, ssh)| ssh.is_closed())
+                        {
+                            close_session(&runtime, &mut session, &status);
+                        }
+                    }
+                }
+            }
+            close_session(&runtime, &mut session, &status);
+        });
+        Ok(Self {
+            tx,
+            state,
+            thread: Some(thread),
+        })
+    }
+    pub fn submit(
+        &self,
+        request: Request,
+        command: Command,
+        events: mpsc::Sender<Event>,
+    ) -> Result<()> {
+        self.tx
+            .send(WorkerMessage::Run(
+                Box::new(request),
+                Box::new(command),
+                events,
+            ))
+            .context("Node connection worker is unavailable")
+    }
+    pub fn touch(&self) {
+        let _ = self.tx.send(WorkerMessage::Touch);
+    }
+    pub fn reset(&self) {
+        let _ = self.tx.send(WorkerMessage::Reset);
+    }
+    pub fn state(&self) -> ConnectionState {
+        match self.state.load(Ordering::Acquire) {
+            1 => ConnectionState::Connecting,
+            2 => ConnectionState::Connected,
+            _ => ConnectionState::Closed,
+        }
+    }
+    pub fn shutdown(&mut self) -> Result<()> {
+        let _ = self.tx.send(WorkerMessage::Shutdown);
+        if let Some(thread) = self.thread.take() {
+            thread
+                .join()
+                .map_err(|_| anyhow::anyhow!("Node connection worker failed"))?;
+        }
+        Ok(())
+    }
+}
+impl Drop for Worker {
+    fn drop(&mut self) {
+        let _ = self.tx.send(WorkerMessage::Shutdown);
+    }
+}
+fn close_session(
+    runtime: &tokio::runtime::Runtime,
+    session: &mut Option<(SessionKey, SshSession)>,
+    state: &AtomicU8,
+) {
+    if let Some((_, ssh)) = session.take() {
+        let _ = runtime.block_on(ssh.close());
+    }
+    state.store(0, Ordering::Release);
+}
+
+async fn execute(
+    request: Request,
+    command: Command,
+    tx: &mpsc::Sender<Event>,
+    session: &mut SshSession,
+) -> Result<String> {
+    let _lock = crate::operation_store::OperationLock::acquire(&request.state_dir)?;
     let id = Uuid::new_v4();
-    let result = async {
+    async {
         let _ = tx.send(Event::Stage("Authorizing the controller administrator".into()));
-        let credential = backend::authenticate(&mut session, id, &request.workflow.account, tx).await?;
+        let credential = backend::authenticate(session, id, &request.workflow.account, tx).await?;
         let result = async {
             let setup = matches!(&command, Command::Setup(_));
             let docker = matches!(&command, Command::Docker(_));
@@ -321,7 +526,7 @@ async fn execute(request: Request, command: Command, tx: &mpsc::Sender<Event>) -
                     loop {
                         let mut path = "/api/v1/nodes?limit=100&order=region&include_summary=true".to_string();
                         if let Some(cursor) = &cursor { path.push_str(&format!("&cursor={}", encode(cursor))); }
-                        let value = backend::request(&session, &credential, Method::GET, &path, None, None).await?;
+                        let value = backend::request(session, &credential, Method::GET, &path, None, None).await?;
                         for item in value["items"].as_array().context("Missing node list")? {
                             ensure!(items.len() < 20_000, "Node registry is too large");
                             items.push(node(item.clone())?);
@@ -336,9 +541,19 @@ async fn execute(request: Request, command: Command, tx: &mpsc::Sender<Event>) -
                 }
                 Command::Card(key) => {
                     let path = format!("/api/v1/nodes/{key}");
-                    let mut item = node(backend::request(&session, &credential, Method::GET, &path, None, None).await?)?;
-                    item.overview = Some(backend::request(&session, &credential, Method::GET,
-                        &format!("{path}/overview"), None, None).await?);
+                    let mut item = node(backend::request(session, &credential, Method::GET, &path, None, None).await?)?;
+                    let overview_path = format!("{path}/overview");
+                    let services_path = format!("{path}/services");
+                    let (overview, services) = tokio::join!(
+                        backend::request(session, &credential, Method::GET, &overview_path, None, None),
+                        backend::request(session, &credential, Method::GET, &services_path, None, None));
+                    item.overview = Some(overview?);
+                    match services {
+                        Ok(facts) => { item.services = Some(facts); item.agent = AgentState::Ready; }
+                        Err(error) if error.code == "node_agent_unconfigured" => item.agent = AgentState::Missing,
+                        Err(error) if error.code == "node_agent_unavailable" => item.agent = AgentState::Unavailable,
+                        Err(error) => return Err(error.into()),
+                    }
                     let mut saved = SavedOperation::latest(&request, &credential.account_id, &key)?;
                     if saved.is_none() && let Some(job) = item.overview.as_ref().and_then(|v| v.get("last_job")).filter(|v| v.is_object()) {
                         let mut job = job.clone();
@@ -351,9 +566,15 @@ async fn execute(request: Request, command: Command, tx: &mpsc::Sender<Event>) -
                     let _ = tx.send(Event::Nodes(Update::Card(item)));
                 }
                 Command::Inspect(key) => {
-                    let facts = backend::request(&session, &credential, Method::GET,
-                        &format!("/api/v1/nodes/{key}/services"), None, None).await?;
-                    let _ = tx.send(Event::Nodes(Update::Services(key, facts)));
+                    match backend::request(session, &credential, Method::GET,
+                        &format!("/api/v1/nodes/{key}/services"), None, None).await {
+                        Ok(facts) => { let _ = tx.send(Event::Nodes(Update::Services(key, facts))); }
+                        Err(error) => {
+                            let agent = if error.code == "node_agent_unconfigured" { AgentState::Missing } else { AgentState::Unavailable };
+                            let _ = tx.send(Event::Nodes(Update::Agent(key, agent)));
+                            return Err(error.into());
+                        }
+                    }
                 }
                 Command::Setup(item) | Command::Bootstrap(item) | Command::Docker(item) => {
                     let title = if setup { "Install node agent?" } else if docker { "Install Docker?" } else { "Bootstrap VPN protocols?" };
@@ -367,11 +588,11 @@ async fn execute(request: Request, command: Command, tx: &mpsc::Sender<Event>) -
                         ensure!(docker || item.can_bootstrap(), "Refresh the node card before bootstrap");
                         (format!("/api/v1/nodes/{}/actions", item.key), json!({"action":if docker { "install_docker" } else { "bootstrap" }, "revision":item.desired_revision}), "node-jobs")
                     };
-                    let pending = Operation { kind: kind.into(), id: command_id, node_key: item.key.clone(),
+                    let pending = Operation { kind: kind.into(), id: command_id, node_key: item.key.clone(), action: clean(&body["action"]),
                         status: "unconfirmed".into(), error: String::new(), command_id: Some(command_id) };
                     SavedOperation::save(&request, &credential.account_id, &pending)?;
                     let _ = tx.send(Event::Nodes(Update::Operation(pending.clone())));
-                    let value = match backend::request(&session, &credential, Method::POST, &path, Some(body), Some(command_id)).await {
+                    let value = match backend::request(session, &credential, Method::POST, &path, Some(body), Some(command_id)).await {
                         Ok(value) => value,
                         Err(error) if error.status.is_some_and(|status| (400..500).contains(&status) && status != 408) => {
                             let rejected = Operation { status:"rejected".into(), error:error.code.clone(), ..pending };
@@ -380,9 +601,10 @@ async fn execute(request: Request, command: Command, tx: &mpsc::Sender<Event>) -
                             return Err(error.into());
                         }
                         Err(error) => return Err(anyhow::Error::new(error).context(format!(
-                            "Node action was not confirmed. Use Progress to check its original command; do not resubmit. Command: {command_id}"))),
+                            "Node action was not confirmed. Use Operation status to check its original command; do not resubmit. Command: {command_id}"))),
                     };
                     let mut operation = operation(&value, kind, &item.key)?;
+                    if operation.action.is_empty() { operation.action = pending.action; }
                     operation.command_id = Some(command_id);
                     let _ = tx.send(Event::Nodes(Update::Operation(operation.clone())));
                     SavedOperation::save(&request, &credential.account_id, &operation)
@@ -392,7 +614,7 @@ async fn execute(request: Request, command: Command, tx: &mpsc::Sender<Event>) -
                     let mut previous = previous;
                     if previous.status == "unconfirmed" {
                         let command_id = previous.command_id.context("Missing saved command identity")?;
-                        let result = backend::helper(&mut session, json!({"version":1,"action":"lookup-node",
+                        let result = backend::helper(session, json!({"version":1,"action":"lookup-node",
                             "session_id":id,"command_id":command_id})).await?;
                         if result["job"].is_null() {
                             previous.error = "No confirmed backend operation; inspect recovery before retrying".into();
@@ -401,12 +623,14 @@ async fn execute(request: Request, command: Command, tx: &mpsc::Sender<Event>) -
                         }
                         ensure!(result["job"]["kind"] == previous.kind, "Node command kind changed");
                         let mut found = operation(&result["job"], &previous.kind, &previous.node_key)?;
+                        if found.action.is_empty() { found.action = previous.action; }
                         found.command_id = previous.command_id;
                         previous = found;
                     }
-                    let value = backend::request(&session, &credential, Method::GET,
+                    let value = backend::request(session, &credential, Method::GET,
                         &format!("/api/v1/{}/{}", previous.kind, previous.id), None, None).await?;
                     let mut observed = operation(&value, &previous.kind, &previous.node_key)?;
+                    if observed.action.is_empty() { observed.action = previous.action.clone(); }
                     observed.command_id = previous.command_id;
                     ensure!(observed.id == previous.id, "Backend returned another operation");
                     SavedOperation::save(&request, &credential.account_id, &observed)?;
@@ -415,11 +639,9 @@ async fn execute(request: Request, command: Command, tx: &mpsc::Sender<Event>) -
             }
             Ok("Node registry ready".into())
         }.await;
-        let _ = backend::revoke(&mut session, id).await;
+        let _ = backend::revoke(session, id).await;
         result
-    }.await;
-    let _ = session.close().await;
-    result
+    }.await
 }
 fn encode(text: &str) -> String {
     text.bytes()
@@ -512,6 +734,7 @@ mod tests {
         let account = Uuid::new_v4().to_string();
         let operation = Operation {
             kind: "agent-rollouts".into(),
+            action: String::new(),
             id: Uuid::new_v4(),
             node_key: "lv1".into(),
             status: "queued".into(),

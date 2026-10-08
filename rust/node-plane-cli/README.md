@@ -203,10 +203,18 @@ prompts rather than accepting hosts or guessing credentials.
 
 ## Nodes
 
-The sidebar order is Install Node Plane, Update Node Plane, Nodes, and Check
-installation. Nodes reads the selected controller's server registry through its
+The sidebar order is Install Node Plane, Update Node Plane, Nodes, and
+Diagnostic. Nodes reads the selected controller's server registry through its
 bound administrator account. Regions start expanded; click their triangle or
 select the region and press Enter to fold them. Server rows open a card.
+
+Action forms do not ask for an administrator account. An existing workstation key
+binding selects the account automatically; the installation profile can retain an
+explicit selector in Settings. For an unbound key with several administrators, a
+separate dialog lists `Telegram ID · @username` (ID alone without a username).
+Use up/down and Enter or click an account; Escape cancels registration. One
+administrator skips the list. Key registration still requires confirmation, and
+subsequent actions use the permanent backend binding.
 
 Search matches server name, region and code locally, without reconnecting. Page
 size follows the available terminal height, includes region headings, and repeats
@@ -216,8 +224,17 @@ selects search, left/right change pages, and Escape returns to the list/sidebar.
 Mouse clicks and the wheel also work. Switching installation profiles clears the
 browser cache; Refresh explicitly loads updated registry state.
 
-Cards show persisted status, selected protocols and connection type. Check status
-explicitly inspects the agent/Docker/protocol services. Agent setup and bootstrap
+Nodes reuses one SSH connection across reads and actions. It closes after five
+minutes without interaction, on installation profile changes, and on exit. The
+next request reconnects when necessary. A fixed indicator in the top-right corner
+shows SSH connected, connecting or closed without moving the interface. Each
+action still receives fresh backend authorization and its own audit session;
+uncertain mutations are never replayed when reconnecting.
+
+Cards show persisted status, selected protocols and connection type, and inspect
+agent/Docker/protocol services when opened. Check status refreshes that inspection.
+Agent setup appears only when the backend confirms the agent is not installed;
+unchecked or unreachable agents do not offer setup. Agent setup and bootstrap
 use existing backend jobs and require confirmation; Docker installation is offered
 when the inspection reports it missing. Agent setup uses the stored SSH target
 and port 22; custom-port agent setup remains available in Telegram. Prepare SSH
@@ -225,10 +242,10 @@ retains the existing editable target/user/port workflow. Server creation and
 configuration editing remain in Telegram for this increment.
 
 Each mutation records its command identity before dispatch. An uncertain result
-blocks another mutation in the card; Progress resolves the original command
+blocks another mutation in the card; Operation status resolves the original command
 through the administrator-scoped journal, then reads the exact backend job.
 It never repeats the POST. Accepted and uncertain operations are saved privately
-as `node-operation-UUID.json` without bearer tokens or passwords, so Progress
+as `node-operation-UUID.json` without bearer tokens or passwords, so Operation status
 can be reopened after a workstation restart. A confirmed terminal result may
 still require refreshing the card or checking its current host status.
 
