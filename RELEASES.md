@@ -19,6 +19,17 @@ archive installations need no checkout; release discovery fetches public release
 metadata and remote tag refs only. Unpublished dev HEAD remains a development
 checkout workflow using `--from-source`.
 
+## v0.4.3-alpha.52
+
+- Include `scripts/lib/archive_agent_journals.py` in the controller runtime
+  archive. Its omission prevented local and SSH agent setup before systemd unit
+  creation on archive-based installations.
+- Add a packaged-runtime regression test that checks operational library
+  completeness and runs journal preparation against a disposable clean host.
+- Validation: 23 archive, journal archival and agent setup tests passed. This
+  verifies packaging and fixtures; live VPS installation remains a manual check.
+- Update the controller, then retry agent setup; a full VPS reinstall is unnecessary.
+
 ## v0.4.3-alpha.51
 
 - Fix the SSH password dialog: a clearly labeled masked input remains visible
