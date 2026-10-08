@@ -4,7 +4,7 @@ use anyhow::{Context, Result, ensure};
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use std::{
-    fs::{self, File, OpenOptions},
+    fs::{self, OpenOptions},
     io::Write,
     path::Path,
 };
@@ -172,7 +172,7 @@ impl Connections {
         file.persist(state.join("installations.json"))
             .map_err(|e| e.error)?;
         #[cfg(unix)]
-        File::open(state)?.sync_all()?;
+        fs::File::open(state)?.sync_all()?;
         self.revision = next_revision;
         Ok(())
     }
