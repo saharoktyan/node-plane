@@ -640,6 +640,23 @@ fn load_or_create_key(state_dir: &Path) -> Result<PrivateKey> {
     Ok(key)
 }
 
+pub fn forget_host(state_dir: &Path, host: &str, port: u16) -> Result<()> {
+    let _lock = state_lock(state_dir)?;
+    let path = state_dir.join("known_hosts.json");
+    if !check_regular(&path)? {
+        return Ok(());
+    }
+    let mut hosts: BTreeMap<String, String> = serde_json::from_slice(&fs::read(&path)?)
+        .context("Saved profile removed, but the invalid known-host file was left unchanged")?;
+    if hosts
+        .remove(&format!("[{}]:{port}", host.to_ascii_lowercase()))
+        .is_some()
+    {
+        atomic_write(&path, &serde_json::to_vec_pretty(&hosts)?, true)?;
+    }
+    Ok(())
+}
+
 fn verify_fingerprint(
     state_dir: &Path,
     host: &str,
