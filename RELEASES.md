@@ -19,6 +19,19 @@ archive installations need no checkout; release discovery fetches public release
 metadata and remote tag refs only. Unpublished dev HEAD remains a development
 checkout workflow using `--from-source`.
 
+## v0.4.3-alpha.53
+
+- Accept checksummed operational scripts added by later controller releases while
+  retaining the explicit build allowlist and archive path, manifest and hash checks.
+  Continue verifying the older alpha.51 controller archive layout.
+- Inherit the update error trap inside shell functions so failed downloads record
+  a terminal result instead of leaving component progress running indefinitely.
+- Provide a guarded, explicit recovery helper for the blocked alpha.51 to alpha.52
+  archive update. Existing alpha.51 installations need this bridge before a normal
+  update; publishing this release does not repair their installed verifier.
+- Validation: 29 archive, recovery guard, journal archival and agent setup tests
+  passed. Live recovery and VPS acceptance remain manual checks.
+
 ## v0.4.3-alpha.52
 
 - Include `scripts/lib/archive_agent_journals.py` in the controller runtime
