@@ -80,6 +80,12 @@ class CredentialService:
         timestamp = now or datetime.now(timezone.utc)
         if row['revoked_at'] is not None:
             raise AccessDenied('invalid_credentials', 401)
+        with self.db.connect() as conn:
+            binding = conn.execute('''SELECT k.account_id,k.revoked_at
+                FROM backend_workstation_context c JOIN backend_workstation_keys k
+                ON k.fingerprint=c.device_fingerprint WHERE c.credential_id=?''', (row['id'],)).fetchone()
+        if binding is not None and (binding['revoked_at'] is not None or binding['account_id'] != row['account_id']):
+            raise AccessDenied('invalid_credentials', 401)
         try:
             expires_at = datetime.fromisoformat(row['expires_at'])
             kind = PrincipalKind(row['kind'])

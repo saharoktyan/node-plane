@@ -214,7 +214,7 @@ async fn prepare_node(
     let session_id = Uuid::new_v4();
     stage(tx, "Authorizing the controller administrator");
     let credential =
-        backend::authenticate(controller, session_id, &request.workflow.account).await?;
+        backend::authenticate(controller, session_id, &request.workflow.account, tx).await?;
     let result=async {
         let response=backend::request(controller,&credential,Method::GET,"/api/v1/system/ssh-key",None,None).await?;
         let public=response["public_key"].as_str().context("Controller did not return its SSH public key")?;
@@ -416,7 +416,8 @@ pub async fn recover_operations(
     tx: &mpsc::Sender<Event>,
 ) -> Result<String> {
     let session_id = Uuid::new_v4();
-    let credential = backend::authenticate(session, session_id, &request.workflow.account).await?;
+    let credential =
+        backend::authenticate(session, session_id, &request.workflow.account, tx).await?;
     let result = async {
         let mut lines = vec!["Operation recovery".to_string()];
         let mut offset = 0;
@@ -535,7 +536,7 @@ async fn update(
         tx,
         "Authorizing the administrator for backend-owned updates",
     );
-    let mut credential = backend::authenticate(session, auth_id, account).await?;
+    let mut credential = backend::authenticate(session, auth_id, account, tx).await?;
     let mut record = if let Some(record) = previous {
         ensure!(
             credential.account_id == record.account_id,
@@ -647,7 +648,7 @@ async fn update(
             );
         }
         if authorized.elapsed() > Duration::from_secs(1800) {
-            credential = backend::authenticate(session, auth_id, &record.account_id).await?;
+            credential = backend::authenticate(session, auth_id, &record.account_id, tx).await?;
             authorized = Instant::now();
         }
         if record.job_id.is_none() {
@@ -682,7 +683,7 @@ async fn update(
                     }
                     reconnect(session, request, interaction.clone()).await?;
                     credential =
-                        backend::authenticate(session, auth_id, &record.account_id).await?;
+                        backend::authenticate(session, auth_id, &record.account_id, tx).await?;
                 }
             }
         } else if let Some(id) = record.job_id {
@@ -751,7 +752,7 @@ async fn update(
                 }
                 Err(error) if error.status == Some(401) => {
                     credential =
-                        backend::authenticate(session, auth_id, &record.account_id).await?;
+                        backend::authenticate(session, auth_id, &record.account_id, tx).await?;
                     authorized = Instant::now();
                 }
                 Err(error) if error.transient() => {

@@ -37,12 +37,16 @@ class WorkstationCredentialTests(unittest.TestCase):
         self.service = WorkstationService(self.db, self.path)
         self.session_id = str(uuid4())
         self.now = datetime.now(timezone.utc)
+        self.attribution = {'ssh_user': 'root', 'device_fingerprint': 'SHA256:' + 'a' * 43}
         self.db.connection.execute('''CREATE TABLE backend_update_jobs (
             id TEXT PRIMARY KEY, actor_id TEXT, command_key TEXT, kind TEXT, intent_json TEXT)''')
 
     def authenticate(self, **selectors):
-        return self.service.handle({'version': 1, 'action': 'authenticate',
-            'session_id': self.session_id, **selectors}, now=self.now)
+        request = {'version': 1, 'action': 'authenticate', 'session_id': self.session_id,
+            'attribution': self.attribution, 'account_id': self.admin.id, **selectors}
+        if 'telegram_id' in selectors:
+            request.pop('account_id')
+        return self.service.handle(request, now=self.now)
 
     def assert_denied(self, code, call):
         with self.assertRaises(WorkstationError) as caught:
@@ -66,18 +70,75 @@ class WorkstationCredentialTests(unittest.TestCase):
         row = self.db.connection.execute('SELECT * FROM backend_credentials').fetchone()
         self.assertNotIn(result['token'], str(dict(row)))
 
+    def test_first_key_requires_selection_even_with_one_admin(self):
+        self.assert_denied('admin_selection_required', lambda: self.service.handle({
+            'version': 1, 'action': 'authenticate', 'session_id': self.session_id,
+            'attribution': self.attribution}))
+
+    def test_new_session_resolves_permanent_binding_without_selector(self):
+        self.authenticate()
+        bootstrap_admin(self.identities, 102)
+        result = WorkstationService(self.db, self.path).handle({'version': 1,
+            'action': 'authenticate', 'session_id': str(uuid4()), 'attribution': self.attribution})
+        self.assertEqual(result['account_id'], self.admin.id)
+        other = self.identities.find_telegram_account(102)
+        self.assert_denied('workstation_account_conflict', lambda: self.service.handle({
+            'version': 1, 'action': 'authenticate', 'session_id': str(uuid4()),
+            'attribution': self.attribution, 'account_id': other.id}))
+
+    def test_key_revocation_denies_live_token_and_new_session_until_explicit_restore(self):
+        first = self.authenticate()
+        request = {'version': 1, 'action': 'revoke-access', 'session_id': str(uuid4()),
+            'attribution': self.attribution}
+        self.service.handle(request)
+        with self.assertRaises(AccessDenied):
+            self.credentials.authenticate('Bearer ' + first['token'])
+        self.assert_denied('workstation_access_revoked', lambda: self.service.handle({
+            **request, 'action': 'authenticate', 'session_id': str(uuid4()), 'account_id': self.admin.id}))
+        self.service.handle({**request, 'action': 'restore-access', 'account_id': self.admin.id})
+        with self.assertRaises(AccessDenied):
+            self.credentials.authenticate('Bearer ' + first['token'])
+        self.assertEqual(self.authenticate()['account_id'], self.admin.id)
+
+    def test_deleted_account_tombstone_prevents_rebinding_to_remaining_admin(self):
+        self.authenticate()
+        self.db.connection.execute('DELETE FROM backend_credentials')
+        self.db.connection.execute('DELETE FROM backend_external_identities')
+        self.db.connection.execute('DELETE FROM backend_accounts')
+        other = bootstrap_admin(self.identities, 102)
+        self.assert_denied('approved_admin_required', lambda: self.service.handle({
+            'version': 1, 'action': 'authenticate', 'session_id': str(uuid4()),
+            'attribution': self.attribution}))
+        self.assert_denied('workstation_account_conflict', lambda: self.service.handle({
+            'version': 1, 'action': 'authenticate', 'session_id': str(uuid4()),
+            'attribution': self.attribution, 'account_id': other.id}))
+
+    def test_each_key_has_its_own_binding_and_restore_cannot_change_owner(self):
+        self.authenticate()
+        other = bootstrap_admin(self.identities, 102)
+        other_context = {**self.attribution, 'device_fingerprint': 'SHA256:' + 'b' * 43}
+        other_request = {'version': 1, 'action': 'authenticate', 'session_id': str(uuid4()),
+            'attribution': other_context, 'account_id': other.id}
+        other_token = self.service.handle(other_request)['token']
+        self.service.handle({'version': 1, 'action': 'revoke-access', 'session_id': str(uuid4()),
+            'attribution': self.attribution})
+        self.assertEqual(self.credentials.authenticate('Bearer ' + other_token).account_id, other.id)
+        self.assert_denied('workstation_account_conflict', lambda: self.service.handle({
+            'version': 1, 'action': 'restore-access', 'session_id': str(uuid4()),
+            'attribution': self.attribution, 'account_id': other.id}))
+
     def test_retry_returns_same_secret_and_credential(self):
         first = self.authenticate()
         second_service = WorkstationService(self.db, self.path)
         second = second_service.handle({'version': 1, 'action': 'authenticate',
-            'session_id': self.session_id}, now=self.now + timedelta(minutes=5))
+            'session_id': self.session_id, 'attribution': self.attribution}, now=self.now + timedelta(minutes=5))
         self.assertEqual(first, second)
         self.assertEqual(self.db.connection.execute('SELECT COUNT(*) FROM backend_credentials').fetchone()[0], 1)
 
     def test_expired_session_renews_same_actor_and_revokes_old_credential(self):
         first = self.authenticate()
         second = self.service.handle({'version': 1, 'action': 'authenticate',
-            'session_id': self.session_id}, now=self.now + LIFETIME)
+            'session_id': self.session_id, 'attribution': self.attribution}, now=self.now + LIFETIME)
         self.assertEqual(second['account_id'], first['account_id'])
         self.assertNotEqual(second['credential_id'], first['credential_id'])
         with self.assertRaises(AccessDenied):
@@ -87,7 +148,8 @@ class WorkstationCredentialTests(unittest.TestCase):
         second = bootstrap_admin(self.identities, 102)
         self.identities.update_telegram_details(102, first_name='Another', last_name='Admin')
         with self.assertRaises(WorkstationError) as caught:
-            self.authenticate()
+            self.service.handle({'version': 1, 'action': 'authenticate',
+                'session_id': self.session_id, 'attribution': self.attribution})
         self.assertEqual(caught.exception.code, 'admin_selection_required')
         self.assertEqual({choice['label'] for choice in caught.exception.choices}, {'@operator', 'Another Admin'})
         self.assertEqual(self.db.connection.execute('SELECT COUNT(*) FROM backend_credentials').fetchone()[0], 0)

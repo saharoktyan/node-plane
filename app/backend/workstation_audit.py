@@ -10,6 +10,10 @@ class WorkstationAudit:
 
     def initialize_schema(self):
         with self.db.transaction() as conn:
+            # Tombstones survive account deletion and database restoration.
+            conn.execute('''CREATE TABLE IF NOT EXISTS backend_workstation_keys (
+                fingerprint TEXT PRIMARY KEY, account_id TEXT NOT NULL,
+                registered_at TEXT NOT NULL, revoked_at TEXT)''')
             # No FK to accounts/credentials: deletion or restoration must not erase history.
             conn.execute('''CREATE TABLE IF NOT EXISTS backend_workstation_context (
                 credential_id TEXT PRIMARY KEY, session_id TEXT NOT NULL,

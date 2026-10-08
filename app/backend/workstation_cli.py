@@ -57,7 +57,7 @@ def validate_request(request) -> dict:
         raise WorkstationError('invalid_request')
     action = request.get('action')
     allowed = {'version', 'action'}
-    if action in {'authenticate', 'revoke', 'lookup-update', 'audit-enrollment'}:
+    if action in {'authenticate', 'revoke', 'lookup-update', 'audit-enrollment', 'revoke-access', 'restore-access'}:
         _uuid(request.get('session_id'))
         allowed.add('session_id')
     elif action != 'list':
@@ -76,7 +76,7 @@ def validate_request(request) -> dict:
     elif action == 'lookup-update':
         _uuid(request.get('command_id'))
         allowed.add('command_id')
-    elif action == 'authenticate':
+    elif action in {'authenticate', 'revoke-access', 'restore-access'}:
         allowed |= {'account_id', 'telegram_id', 'attribution'}
         if 'attribution' in request:
             from backend.workstation_audit import WorkstationAudit
@@ -233,23 +233,45 @@ class WorkstationService:
         return list(choices.values())
 
     def _account(self, request: dict, previous: dict | None):
+        context = request.get('attribution')
+        if context is None:
+            raise WorkstationError('workstation_attribution_required')
+        fingerprint = context['device_fingerprint']
+        with self.db.connect() as conn:
+            binding = conn.execute('SELECT * FROM backend_workstation_keys WHERE fingerprint=?', (fingerprint,)).fetchone()
+        if binding is not None and binding['revoked_at'] is not None:
+            raise WorkstationError('workstation_access_revoked')
         if 'account_id' in request:
             account = self.identities.get_account(request['account_id'])
         elif 'telegram_id' in request:
             account = self.identities.find_telegram_account(request['telegram_id'])
+        elif binding is not None:
+            account = self.identities.get_account(binding['account_id'])
         elif previous is not None:
             account = self.identities.get_account(previous['account_id'])
         else:
             choices = self.choices()
             if not choices:
                 raise WorkstationError('approved_admin_required')
-            if len(choices) != 1:
-                raise WorkstationError('admin_selection_required', choices=choices)
-            account = self.identities.get_account(choices[0]['account_id'])
+            raise WorkstationError('admin_selection_required', choices=choices)
         if account is None or account.role != 'admin' or account.status != 'approved':
             raise WorkstationError('approved_admin_required')
         if previous is not None and account.id != previous['account_id']:
             raise WorkstationError('session_account_conflict')
+        if binding is not None and account.id != binding['account_id']:
+            raise WorkstationError('workstation_account_conflict')
+        if previous is not None:
+            old_context = self.audit.context(previous['credential_id'])
+            if old_context is not None and old_context['device_fingerprint'] != fingerprint:
+                raise WorkstationError('workstation_attribution_conflict')
+        if binding is None:
+            with self.db.transaction() as conn:
+                conn.execute('INSERT INTO backend_workstation_keys VALUES (?,?,?,NULL)',
+                    (fingerprint, account.id, datetime.now(timezone.utc).isoformat()))
+            label = next(choice['label'] for choice in self.choices() if choice['account_id'] == account.id)
+            self.audit.record({'credential_id': None, 'session_id': request['session_id'],
+                'account_id': account.id, 'account_label': label, **context},
+                'privileged SSH workstation registration', 'issued')
         return account
 
     def _owns_credential(self, previous: dict) -> bool:
@@ -268,6 +290,32 @@ class WorkstationService:
         session_id = request['session_id']
         with self.store.locked() as directory_fd:
             previous = self.store.read(directory_fd, session_id)
+            if request['action'] in {'revoke-access', 'restore-access'}:
+                context = request.get('attribution')
+                if context is None:
+                    raise WorkstationError('workstation_attribution_required')
+                with self.db.transaction() as conn:
+                    binding = conn.execute('SELECT * FROM backend_workstation_keys WHERE fingerprint=?',
+                        (context['device_fingerprint'],)).fetchone()
+                    if binding is None:
+                        raise WorkstationError('workstation_key_not_registered')
+                    if request['action'] == 'restore-access':
+                        if request.get('account_id') != binding['account_id']:
+                            raise WorkstationError('workstation_account_conflict')
+                        account = self.identities.get_account(binding['account_id'])
+                        if account is None or account.role != 'admin' or account.status != 'approved':
+                            raise WorkstationError('approved_admin_required')
+                    conn.execute('UPDATE backend_workstation_keys SET revoked_at=? WHERE fingerprint=?',
+                        (None if request['action'] == 'restore-access' else datetime.now(timezone.utc).isoformat(),
+                         context['device_fingerprint']))
+                    # Restoring a key never revives old bearer tokens.
+                    conn.execute('''UPDATE backend_credentials SET revoked_at=? WHERE id IN
+                        (SELECT credential_id FROM backend_workstation_context WHERE device_fingerprint=?)''',
+                        (datetime.now(timezone.utc).isoformat(), context['device_fingerprint']))
+                self.audit.record({'credential_id': None, 'session_id': session_id,
+                    'account_id': binding['account_id'], 'account_label': binding['account_id'], **context},
+                    'privileged SSH workstation ' + request['action'], 'completed')
+                return {'version': VERSION, 'ok': True}
             if request['action'] == 'revoke':
                 revoked = False
                 if previous is not None:
