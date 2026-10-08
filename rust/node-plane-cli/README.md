@@ -2,6 +2,28 @@
 
 ## Action attribution
 
+The controller permanently binds each workstation key fingerprint to one backend
+account, independently of local installation profiles and temporary sessions.
+On the first connection, choose an approved administrator explicitly (or supply
+`--account` with their UUID or Telegram ID). The TUI asks for confirmation; Cancel
+skips the displayed administrator. Installation registers the key after verifying
+the installed controller. Later sessions resolve the same account from the key,
+even when more administrators exist. A conflicting account selector is rejected.
+
+Deleting, disabling or demoting the account cannot silently rebind its key to
+another administrator. Key records and audit history remain on the controller
+across account deletion and backup restoration; session bearer tokens remain
+short-lived. No Telegram ownership proof or additional password is implied by
+this binding: registration uses the existing privileged SSH trust boundary.
+
+The root-only `backend.workstation_cli` JSON helper also accepts `revoke-access`
+and `restore-access`. Both require `version: 1`, a fresh UUID `session_id`, and
+`attribution` containing `ssh_user` and `device_fingerprint`. Restore additionally
+requires the original `account_id` of a currently approved administrator. These
+are explicit privileged recovery actions, recorded in the audit. Revocation
+blocks current tokens and future sessions; restoration never revives old tokens.
+Ordinary `revoke` ends one operation's session and leaves its key binding intact.
+
 The assistant sends the SSH username and the SHA256 fingerprint of its actual
 workstation public key when obtaining a short-lived backend credential. Backend
 mutations are attributed to the selected approved admin account, including a

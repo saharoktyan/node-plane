@@ -436,6 +436,15 @@ Follow-up: the read-only `/api/v1/system/recovery` inventory now paginates
   controller launch/rollback emergencies and Telegram host diagnostics remain
 unfinished. The original full recovery-menu checkbox therefore stays open.
 
+Workstation account binding (2026-10-08): a permanent controller-side key fingerprint
+binding identifies the same backend administrator across sessions. Initial
+registration requires an explicit administrator selection; installation registers
+the key after controller verification. Conflicting selectors, revoked keys and
+deleted/disabled/demoted administrators fail closed. Privileged SSH revocation
+and restoration are audited; restoration does not revive old bearer tokens. The
+binding reuses backend account UUIDs and leaves future non-SSH user interfaces
+free to use their own authentication methods. Nodes navigation is the next UI task.
+
 Workstation attribution (2026-10-07): credentials bind the selected admin name,
 SSH username and workstation key fingerprint. Secret-free API admission/HTTP
 completion events are available in a paginated Rich audit viewer. Installer and

@@ -18,7 +18,7 @@ class CredentialAttributionTests(TestCase):
 
     def issue(self):
         return self.service.handle({'version': 1, 'action': 'authenticate',
-            'session_id': self.session_id, 'attribution': ATTRIBUTION}, now=self.now)
+            'session_id': self.session_id, 'attribution': ATTRIBUTION, 'account_id': self.admin.id}, now=self.now)
 
     def test_device_admin_and_ssh_user_are_bound_and_retry_does_not_duplicate_event(self):
         first = self.issue()
@@ -28,7 +28,7 @@ class CredentialAttributionTests(TestCase):
         self.assertEqual(context['ssh_user'], 'deploy')
         self.assertEqual(context['device_fingerprint'], ATTRIBUTION['device_fingerprint'])
         rows = self.db.connection.execute('SELECT * FROM backend_workstation_audit').fetchall()
-        self.assertEqual(len(rows), 1)
+        self.assertEqual(len(rows), 2)
         self.assertNotIn(first['token'], str([dict(row) for row in rows]))
         with self.assertRaises(WorkstationError):
             self.service.handle({'version': 1, 'action': 'authenticate', 'session_id': self.session_id,
@@ -40,7 +40,7 @@ class CredentialAttributionTests(TestCase):
         self.service.handle(request)
         self.service.handle(request)
         rows = self.db.connection.execute('SELECT * FROM backend_workstation_audit').fetchall()
-        self.assertEqual([row['phase'] for row in rows], ['issued', 'revoked'])
+        self.assertEqual([row['phase'] for row in rows], ['issued', 'issued', 'revoked'])
         self.assertTrue(all(row['account_id'] == self.admin.id for row in rows))
         self.assertNotIn(first['token'], str([dict(row) for row in rows]))
 
@@ -49,7 +49,7 @@ class CredentialAttributionTests(TestCase):
         self.db.connection.execute('DELETE FROM backend_credentials WHERE account_id=?', (self.admin.id,))
         self.db.connection.execute('DELETE FROM backend_external_identities WHERE account_id=?', (self.admin.id,))
         self.db.connection.execute('DELETE FROM backend_accounts WHERE id=?', (self.admin.id,))
-        row = self.db.connection.execute('SELECT account_id, account_label FROM backend_workstation_audit').fetchone()
+        row = self.db.connection.execute('SELECT account_id, account_label FROM backend_workstation_audit WHERE credential_id IS NOT NULL').fetchone()
         self.assertEqual(dict(row), {'account_id': self.admin.id, 'account_label': '@operator'})
 
     def test_enrollment_records_target_key_and_actor_without_key_material(self):
@@ -81,7 +81,8 @@ class CredentialAttributionTests(TestCase):
                       {'key_fingerprint': 'ssh-ed25519 actual-key'}, {'private_key': 'secret'}):
             with self.assertRaises(WorkstationError):
                 validate_request({**request, **extra})
-        self.service.handle({'version': 1, 'action': 'authenticate', 'session_id': self.session_id})
+        with self.assertRaises(WorkstationError):
+            self.service.handle({'version': 1, 'action': 'authenticate', 'session_id': self.session_id})
         with self.assertRaises(WorkstationError):
             self.service.handle(request)
 
@@ -95,7 +96,7 @@ class APIAuditTests(TestCase):
         with tempfile.TemporaryDirectory() as directory:
             service = WorkstationService(self.db, __import__('pathlib').Path(directory) / 'sessions')
             credential = service.handle({'version': 1, 'action': 'authenticate',
-                'session_id': str(uuid4()), 'attribution': ATTRIBUTION})
+                'session_id': str(uuid4()), 'attribution': ATTRIBUTION, 'account_id': self.admin.id})
             original = WorkstationAudit.record
             def record(audit, context, action, phase, **kwargs):
                 if phase == 'completed':
@@ -116,7 +117,7 @@ class APIAuditTests(TestCase):
         with tempfile.TemporaryDirectory() as directory:
             service = WorkstationService(self.db, __import__('pathlib').Path(directory) / 'sessions')
             credential = service.handle({'version': 1, 'action': 'authenticate',
-                'session_id': str(uuid4()), 'attribution': ATTRIBUTION})
+                'session_id': str(uuid4()), 'attribution': ATTRIBUTION, 'account_id': self.admin.id})
             headers = {'Authorization': 'Bearer ' + credential['token'], 'Idempotency-Key': str(uuid4()),
                        'X-Workstation-User': 'forged-person'}
             import app.services

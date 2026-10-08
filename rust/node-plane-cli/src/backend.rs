@@ -11,6 +11,18 @@ use std::{fmt, time::Duration};
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
+#[derive(Debug)]
+struct AdminSelection(Vec<(String, String)>);
+impl fmt::Display for AdminSelection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Choose an administrator for this workstation key using --account."
+        )
+    }
+}
+impl std::error::Error for AdminSelection {}
+
 #[derive(Deserialize)]
 pub struct Credential {
     pub token: Zeroizing<String>,
@@ -86,6 +98,26 @@ pub async fn helper(session: &mut SshSession, input: Value) -> Result<Value> {
         let choices = value
             .pointer("/error/choices")
             .or_else(|| value.get("choices"));
+        if code == "admin_selection_required" {
+            let choices = choices
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|choice| {
+                    let id = choice["account_id"].as_str()?;
+                    Uuid::parse_str(id).ok()?;
+                    let label: String = choice["label"]
+                        .as_str()
+                        .unwrap_or(id)
+                        .chars()
+                        .filter(|c| !c.is_control())
+                        .take(200)
+                        .collect();
+                    Some((id.to_owned(), label))
+                })
+                .collect();
+            return Err(AdminSelection(choices).into());
+        }
         let mut message = format!("Controller authorization: {code}.");
         if let Some(choices) = choices.and_then(Value::as_array) {
             for account in choices.iter().take(20) {
@@ -104,7 +136,12 @@ pub async fn helper(session: &mut SshSession, input: Value) -> Result<Value> {
     Ok(value)
 }
 
-pub async fn authenticate(session: &mut SshSession, id: Uuid, account: &str) -> Result<Credential> {
+pub async fn authenticate(
+    session: &mut SshSession,
+    id: Uuid,
+    account: &str,
+    tx: &std::sync::mpsc::Sender<crate::events::Event>,
+) -> Result<Credential> {
     let mut input = json!({"version":1,"action":"authenticate","session_id":id,
         "attribution":{"ssh_user":session.ssh_user,"device_fingerprint":session.workstation_fingerprint}});
     if !account.is_empty() {
@@ -114,7 +151,30 @@ pub async fn authenticate(session: &mut SshSession, id: Uuid, account: &str) -> 
             input["account_id"] = json!(Uuid::parse_str(account)?);
         }
     }
-    let mut result = helper(session, input).await?;
+    let mut result = match helper(session, input.clone()).await {
+        Ok(result) => result,
+        Err(error) => {
+            let Some(selection) = error.downcast_ref::<AdminSelection>() else {
+                return Err(error);
+            };
+            let mut selected = None;
+            for (account_id, label) in &selection.0 {
+                if crate::events::confirm(
+                    tx,
+                    "Register workstation access",
+                    format!(
+                        "Bind this workstation key to {label}?\nAccount: {account_id}\nKey: {}\n\nThis is privileged SSH registration, not Telegram identity verification. Future sessions use this account. Cancel skips this administrator.",
+                        session.workstation_fingerprint
+                    ),
+                )? {
+                    selected = Some(account_id.clone());
+                    break;
+                }
+            }
+            input["account_id"] = json!(selected.context("Workstation registration cancelled")?);
+            helper(session, input).await?
+        }
+    };
     let token = Zeroizing::new(
         result
             .get("token")
