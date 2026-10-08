@@ -133,7 +133,7 @@ class ControllerReleaseTests(unittest.TestCase):
         self.assertFalse(release.allowed(extra))
         self.assertTrue(release.allowed(extra, forward_compatible=True))
         for name in ('scripts/lib/../secret.py', '/scripts/lib/helper.py',
-                     'scripts/lib/keys.pem', 'docs/example.py', 'rust/main.rs'):
+                     'scripts//helper.py', 'C:/absolute.py', 'scripts\\helper.py', '.'):
             self.assertFalse(release.allowed(name, forward_compatible=True))
         manifest, contents = release.verify(self.archive)
         contents[extra] = b'# new operational dependency\n'
@@ -149,6 +149,34 @@ class ControllerReleaseTests(unittest.TestCase):
         release.extract(future, destination, self.tag, self.commit)
         release.copy_package(destination, self.root / 'future-copy')
         self.assertEqual((self.root / 'future-copy' / extra).read_bytes(), contents[extra])
+
+    def test_reader_accepts_unknown_directories_and_file_types_with_manifest_hashes(self):
+        manifest, contents = release.verify(self.archive)
+        extra = 'future_runtime/nested/resources/payload.dat'
+        self.assertFalse(release.allowed(extra))
+        contents[extra] = b'\x00\x01future runtime asset'
+        manifest['files'][extra] = hashlib.sha256(contents[extra]).hexdigest()
+        contents[release.MANIFEST] = json.dumps(manifest).encode()
+        future = self.root / 'future-runtime.tar.gz'
+        def archive():
+            with tarfile.open(future, 'w:gz') as output:
+                for name, value in contents.items():
+                    info = tarfile.TarInfo(name)
+                    info.size = len(value)
+                    output.addfile(info, io.BytesIO(value))
+        archive()
+        release.extract(future, self.root / 'future-runtime')
+        release.copy_package(self.root / 'future-runtime', self.root / 'future-runtime-copy')
+        self.assertEqual((self.root / 'future-runtime-copy' / extra).read_bytes(), contents[extra])
+        contents[extra] = b'tampered'
+        archive()
+        with self.assertRaisesRegex(ValueError, 'checksum mismatch'):
+            release.extract(future, self.root / 'tampered')
+        manifest['files'].pop(extra)
+        contents[release.MANIFEST] = json.dumps(manifest).encode()
+        archive()
+        with self.assertRaisesRegex(ValueError, 'manifest is incomplete'):
+            release.extract(future, self.root / 'unlisted')
 
     def test_download_failure_in_nested_shell_function_writes_terminal_receipt(self):
         source = (ROOT / 'scripts/update.sh').read_text()

@@ -33,13 +33,16 @@ checkout workflow using `--from-source`.
 - Include the complete runtime_assets deployment bundle in the controller archive.
   This fixes protocol bootstrap on archive installations, where the driver could
   not find the runtime manifest or scripts after successful agent installation.
+- Accept future manifest-listed directories and file types without an installed
+  filename allowlist. Continue rejecting unsafe paths, links, unlisted files and
+  checksum mismatches; the build allowlist remains separate.
 - Check every deployment manifest dependency during packaging and extraction,
   including AWG container build files. Reject incomplete bundles even when their
   outer package checksums are consistent.
 - Explicit node-operation resolution restores runtime helpers before reading or
   retiring an old command. It never replays bootstrap; passive recovery remains
   read-only.
-- Validation: 43 archive, recovery guard, journal archival, agent setup and node
+- Validation: 44 archive, recovery guard, journal archival, agent setup and node
   operation tests passed. Live local/SSH protocol bootstrap remains a manual check.
 - Clean installations can use this release directly. Existing archive readers
   through alpha.53 cannot read the new runtime directory; upgrading those installs
