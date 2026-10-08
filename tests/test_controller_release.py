@@ -33,6 +33,7 @@ class ControllerReleaseTests(unittest.TestCase):
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / name, target)
         shutil.copytree(ROOT / 'app', self.source / 'app', dirs_exist_ok=True)
+        shutil.copytree(ROOT / 'runtime_assets', self.source / 'runtime_assets', dirs_exist_ok=True)
         for name in ('rust/node-agent/main.rs', 'docs/plan.md', 'tests/example.py',
                      'scripts/tag_release.sh', '.env', 'app/__pycache__/cached.pyc',
                      'app/backend/README.md'):
@@ -76,6 +77,36 @@ class ControllerReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'checksum mismatch'):
             release.copy_package(installed, self.root / 'invalid')
         self.assertFalse((self.root / 'invalid').exists())
+
+    def test_packaged_driver_can_read_every_deployment_asset(self):
+        installed = self.root / 'installed'
+        release.extract(self.archive, installed)
+        release.copy_package(installed, self.root / 'runtime-copy')
+        entries = json.loads((installed / 'runtime_assets/manifest.json').read_text())
+        for entry in entries:
+            name = 'runtime_assets/' + entry['asset_path']
+            self.assertEqual((self.root / 'runtime-copy' / name).read_bytes(),
+                             (ROOT / name).read_bytes())
+        (self.source / 'runtime_assets/awg_ports.py').unlink()
+        subprocess.run(['git', '-C', str(self.source), 'add', '-u'], check=True)
+        with self.assertRaisesRegex(ValueError, 'Missing runtime asset: awg_ports.py'):
+            release.build(self.source, self.root / 'incomplete.tar.gz', self.tag, self.commit)
+
+    def test_manifest_checksums_do_not_hide_missing_runtime_dependency(self):
+        manifest, contents = release.verify(self.archive)
+        name = 'runtime_assets/awg_ports.py'
+        contents.pop(name)
+        manifest['files'].pop(name)
+        contents[release.MANIFEST] = json.dumps(manifest).encode()
+        incomplete = self.root / 'incomplete.tar.gz'
+        with tarfile.open(incomplete, 'w:gz') as output:
+            for name, value in contents.items():
+                info = tarfile.TarInfo(name)
+                info.size = len(value)
+                output.addfile(info, io.BytesIO(value))
+        with self.assertRaisesRegex(ValueError, 'Missing runtime asset: awg_ports.py'):
+            release.extract(incomplete, self.root / 'incomplete')
+        self.assertFalse((self.root / 'incomplete').exists())
 
     def test_packaged_agent_setup_contains_and_runs_its_journal_helper(self):
         installed = self.root / 'installed'
@@ -140,6 +171,10 @@ trap 'on_error $?' ERR
 
     def test_reader_still_verifies_actual_previous_archive_layout(self):
         manifest, contents = release.verify(self.archive)
+        for name in list(contents):
+            if name.startswith('runtime_assets/'):
+                contents.pop(name)
+                manifest['files'].pop(name)
         contents.pop('scripts/lib/archive_agent_journals.py')
         manifest['files'].pop('scripts/lib/archive_agent_journals.py')
         manifest.update(ref='v0.4.3-alpha.51', version='0.4.3-alpha.51')

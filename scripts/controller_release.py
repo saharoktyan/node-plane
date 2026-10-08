@@ -28,7 +28,7 @@ SCRIPTS = {
 ROOT_FILES = {'VERSION', 'LICENSE', '.env.example', 'requirements.txt',
               'requirements-backend.txt', 'requirements-telegram.txt'}
 REQUIRED = ROOT_FILES | {'app/backend/http_api.py', 'app/backend/executor.py',
-                        'app/telegram_client/main.py'} | {'scripts/' + s for s in SCRIPTS}
+                        'app/telegram_client/main.py', 'runtime_assets/manifest.json'} | {'scripts/' + s for s in SCRIPTS}
 TAG = re.compile(r'^v?(\d+)\.(\d+)\.(\d+)(?:-alpha\.(\d+))?$')
 COMMIT = re.compile(r'^[0-9a-f]{40}$')
 LIMIT = 64 * 1024 * 1024
@@ -42,7 +42,26 @@ def allowed(name, *, forward_compatible=False):
                       (path.parent == PurePosixPath('scripts') or
                        path.parent == PurePosixPath('scripts/lib')))
     return runtime_script or name in ROOT_FILES or name in {'scripts/' + s for s in SCRIPTS} or (
-        name.startswith('app/') and path.suffix == '.py' and '__pycache__' not in path.parts)
+        name.startswith('app/') and path.suffix == '.py' and '__pycache__' not in path.parts) or (
+        name.startswith('runtime_assets/') and '__pycache__' not in path.parts
+        and (path.suffix in {'.py', '.sh', '.json'} or path.name in {'Dockerfile', 'node.env.example'})
+        and not any(part.startswith('.') for part in path.parts))
+
+
+def verify_runtime_assets(contents):
+    """Require the entire driver deployment bundle, including non-Python assets."""
+    name = 'runtime_assets/manifest.json'
+    if name not in contents:
+        return
+    entries = json.loads(contents[name])
+    if not isinstance(entries, list) or not entries:
+        raise ValueError('Invalid runtime asset manifest')
+    for entry in entries:
+        asset = entry.get('asset_path') if isinstance(entry, dict) else None
+        if not isinstance(asset, str) or not allowed('runtime_assets/' + asset):
+            raise ValueError('Unsafe runtime asset path')
+        if 'runtime_assets/' + asset not in contents:
+            raise ValueError('Missing runtime asset: ' + asset)
 
 
 def build(root, output, ref, commit):
@@ -63,6 +82,7 @@ def build(root, output, ref, commit):
             raise ValueError('Controller package files must be regular files')
         payload[name] = path.read_bytes()
     payload['BUILD_COMMIT'] = (commit + '\n').encode()
+    verify_runtime_assets(payload)
     manifest = {'format': 1, 'ref': ref, 'version': version, 'commit': commit,
                 'files': {name: hashlib.sha256(value).hexdigest() for name, value in payload.items()}}
     payload[MANIFEST] = (json.dumps(manifest, sort_keys=True) + '\n').encode()
@@ -102,15 +122,20 @@ def verify(archive_path, ref=None, commit=None):
     files = manifest.get('files', {})
     # Readers must accept previously published runtime layouts too. The helper
     # became mandatory in alpha.52; its absence in older packages is intentional.
-    required = REQUIRED
+    required = set(REQUIRED)
     version = tuple(int(value or 0) for value in TAG.fullmatch(manifest['ref']).groups())
     if version < (0, 4, 3, 0) or (version[:3] == (0, 4, 3) and version[3] in range(1, 52)):
-        required = REQUIRED - {'scripts/lib/archive_agent_journals.py'}
+        required.discard('scripts/lib/archive_agent_journals.py')
+    # Runtime assets were accidentally omitted through alpha.53. Old archives
+    # remain readable; new builds always require a complete deployment bundle.
+    if version < (0, 4, 3, 0) or (version[:3] == (0, 4, 3) and version[3] in range(1, 54)):
+        required.discard('runtime_assets/manifest.json')
     if not isinstance(files, dict) or set(files) != set(contents) - {MANIFEST} or not required.issubset(files):
         raise ValueError('Controller package manifest is incomplete')
     for name, digest in files.items():
         if hashlib.sha256(contents[name]).hexdigest() != digest:
             raise ValueError('Controller package file checksum mismatch: ' + name)
+    verify_runtime_assets(contents)
     if (contents['VERSION'].decode().strip() != manifest['version'] or
         contents['BUILD_COMMIT'].decode().strip() != manifest['commit']):
         raise ValueError('Controller package build identity is inconsistent')

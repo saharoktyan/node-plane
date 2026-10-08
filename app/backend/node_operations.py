@@ -99,7 +99,10 @@ class NodeOperations:
             raise AccessDenied('resource_not_found', 404)
         if row['status'] != 'blocked':
             raise AccessDenied('task_not_blocked', 409)
-        result = self.driver.node_action(job_id, 'resolve_' + row['action'], json.loads(row['intent_json']), recover=True)
+        # Explicit resolution may restore missing runtime helpers before reading
+        # or retiring the command. The resolve_* helper never runs its mutation.
+        # Passive journal polling below must remain recover-only.
+        result = self.driver.node_action(job_id, 'resolve_' + row['action'], json.loads(row['intent_json']))
         if result.get('retired') is not True:
             self._finish(row, result)
         else:

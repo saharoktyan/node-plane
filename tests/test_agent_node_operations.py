@@ -5,7 +5,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 SPEC = importlib.util.spec_from_file_location('node_operations', Path(__file__).resolve().parents[1] / 'runtime_assets/backend-node-operation.py')
 MODULE = importlib.util.module_from_spec(SPEC)
@@ -61,6 +61,26 @@ class AgentNodeOperationTests(unittest.TestCase):
         with patch.object(MODULE, 'run') as run:
             with self.assertRaises(ValueError):
                 self.execute()
+            run.assert_not_called()
+
+    def test_explicit_backend_resolution_restores_helpers_without_replaying_bootstrap(self):
+        from backend.node_operations import NodeOperations
+        row = {'id': 'job1', 'node_key': 'n1', 'action': 'bootstrap', 'revision': 2,
+               'status': 'blocked', 'intent_json': json.dumps(self.intent), 'result_json': None}
+        db = MagicMock()
+        conn = db.connect.return_value.__enter__.return_value
+        conn.execute.return_value.fetchone.side_effect = [row, dict(row, status='superseded')]
+        calls = []
+        class Driver:
+            def node_action(inner, job_id, action, intent, recover=False):
+                calls.append((action, recover))
+                return MODULE.execute(action, job_id, intent, recover, self.path)
+        with patch('backend.node_operations.require_permission'), patch.object(MODULE, 'run') as run:
+            result = NodeOperations(db, Driver()).resolve(object(), 'job1')
+            self.assertEqual(result['status'], 'superseded')
+            self.assertEqual(calls, [('resolve_bootstrap', False)])
+            with self.assertRaises(ValueError):
+                self.execute('bootstrap')
             run.assert_not_called()
 
     def test_cleanup_removes_client_cache_but_preserves_agent_journal_and_scripts(self):
