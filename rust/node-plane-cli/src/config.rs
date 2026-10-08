@@ -22,7 +22,7 @@ impl Action {
     pub fn label(self) -> &'static str {
         match self {
             Self::Install => "Install Node Plane",
-            Self::Diagnose => "Check installation",
+            Self::Diagnose => "Diagnostic",
             Self::Update => "Update Node Plane",
             Self::PrepareNode => "Nodes",
         }

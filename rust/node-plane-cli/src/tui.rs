@@ -33,6 +33,22 @@ use std::{
 };
 use zeroize::{Zeroize, Zeroizing};
 
+const ACCENTS: [(&str, &str); 5] = [
+    ("Terminal theme", "terminal"),
+    ("Peach", "#ffbb74"),
+    ("Blue", "#74b9ff"),
+    ("Purple", "#c792ea"),
+    ("Green", "#98c379"),
+];
+fn accent_color(value: &str) -> Color {
+    if value == "terminal" {
+        Color::Cyan
+    } else {
+        let rgb = u32::from_str_radix(&value[1..], 16).expect("validated accent");
+        Color::Rgb((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8)
+    }
+}
+
 enum Screen {
     Form,
     Nodes,
@@ -47,14 +63,16 @@ enum Screen {
 #[derive(Clone, Copy, PartialEq)]
 enum SettingsPage {
     Profiles,
+    Appearance,
     Updates,
     Security,
     Session,
     About,
 }
 impl SettingsPage {
-    const ALL: [Self; 5] = [
+    const ALL: [Self; 6] = [
         Self::Profiles,
+        Self::Appearance,
         Self::Updates,
         Self::Security,
         Self::Session,
@@ -63,6 +81,7 @@ impl SettingsPage {
     fn label(self) -> &'static str {
         match self {
             Self::Profiles => "Installation profiles",
+            Self::Appearance => "Appearance",
             Self::Updates => "Workstation updates",
             Self::Security => "Connection & security",
             Self::Session => "Diagnostics & session",
@@ -100,6 +119,9 @@ enum Control {
     CycleProfile(bool),
     Settings,
     SettingsPage(SettingsPage),
+    Accent(usize),
+    AccentInput,
+    SaveAccent,
     DeleteInstallation,
     ConfirmDelete(bool),
     CheckWorkstationUpdates,
@@ -325,6 +347,7 @@ struct App {
     session_id: uuid::Uuid,
     settings_selected: usize,
     settings_profile: usize,
+    accent_input: String,
     editor: Option<(Option<uuid::Uuid>, Vec<String>, usize)>,
     exit: bool,
     exit_confirm: bool,
@@ -365,6 +388,7 @@ impl App {
             session_id: uuid::Uuid::new_v4(),
             settings_selected: 0,
             settings_profile: 0,
+            accent_input: String::new(),
             editor: None,
             exit: false,
             exit_confirm: false,
@@ -415,6 +439,37 @@ impl App {
         self.settings_selected = 0;
         self.error.clear();
     }
+    fn appearance_key(&mut self, key: KeyCode) {
+        let count = ACCENTS.len() + 3;
+        match key {
+            KeyCode::Esc => self.open_settings(),
+            KeyCode::Down | KeyCode::Tab => {
+                self.settings_selected = self.settings_selected % count + 1
+            }
+            KeyCode::Up | KeyCode::BackTab => {
+                self.settings_selected = (self.settings_selected + count - 2) % count + 1
+            }
+            KeyCode::Char(c)
+                if self.settings_selected == ACCENTS.len() + 1
+                    && self.accent_input.len() < 7
+                    && (c == '#' || c.is_ascii_hexdigit()) =>
+            {
+                self.accent_input.push(c)
+            }
+            KeyCode::Backspace if self.settings_selected == ACCENTS.len() + 1 => {
+                self.accent_input.pop();
+            }
+            KeyCode::Enter => {
+                let control = match self.settings_selected {
+                    i if i > 0 && i <= ACCENTS.len() => Control::Accent(i - 1),
+                    i if i == ACCENTS.len() + 1 || i == ACCENTS.len() + 2 => Control::SaveAccent,
+                    _ => Control::Settings,
+                };
+                self.activate(control);
+            }
+            _ => {}
+        }
+    }
     fn profile_controls(&self) -> Vec<Control> {
         let mut controls: Vec<_> = (0..self.connections.installations.len())
             .map(Control::Installation)
@@ -434,6 +489,11 @@ impl App {
     }
     fn delete_profile(&mut self, id: uuid::Uuid) -> Result<()> {
         let mut next = self.connections.clone();
+        let removed = next
+            .installations
+            .iter()
+            .find(|profile| profile.id == id)
+            .cloned();
         ensure!(
             next.installations.iter().any(|profile| profile.id == id),
             "Saved profile no longer exists."
@@ -468,6 +528,15 @@ impl App {
         self.settings_selected = 1;
         self.screen = Screen::SettingsPage(SettingsPage::Profiles);
         self.error.clear();
+        if let Some(removed) = removed
+            && !self
+                .connections
+                .installations
+                .iter()
+                .any(|p| p.host.eq_ignore_ascii_case(&removed.host) && p.port == removed.port)
+        {
+            crate::ssh::forget_host(&self.state_dir, &removed.host, removed.port)?;
+        }
         Ok(())
     }
     fn navigate(&mut self, backwards: bool) {
@@ -1175,9 +1244,46 @@ impl App {
                 return None;
             }
             Control::SettingsPage(page) => {
+                if page == SettingsPage::Appearance {
+                    self.accent_input = if self.connections.accent == "terminal" {
+                        String::new()
+                    } else {
+                        self.connections.accent.clone()
+                    };
+                }
                 self.screen = Screen::SettingsPage(page);
                 self.settings_selected = 1;
                 self.error.clear();
+                return None;
+            }
+            Control::Accent(index) => {
+                self.settings_selected = index + 1;
+                let mut next = self.connections.clone();
+                next.accent = ACCENTS[index].1.into();
+                match next.save(&self.state_dir) {
+                    Ok(()) => {
+                        self.connections = next;
+                        self.error.clear();
+                    }
+                    Err(error) => self.error = error.to_string(),
+                }
+                return None;
+            }
+            Control::AccentInput => {
+                self.settings_selected = ACCENTS.len() + 1;
+                return None;
+            }
+            Control::SaveAccent => {
+                self.settings_selected = ACCENTS.len() + 2;
+                let mut next = self.connections.clone();
+                next.accent = self.accent_input.trim().to_ascii_lowercase();
+                match next.save(&self.state_dir) {
+                    Ok(()) => {
+                        self.connections = next;
+                        self.error.clear();
+                    }
+                    Err(error) => self.error = error.to_string(),
+                }
                 return None;
             }
             Control::DeleteInstallation => {
@@ -1520,6 +1626,15 @@ pub fn run(mut request: Request) -> Result<()> {
                         app.password
                             .extend(text.chars().filter(|c| !c.is_control()));
                     }
+                } else if matches!(app.screen, Screen::SettingsPage(SettingsPage::Appearance))
+                    && !app.exit
+                    && app.settings_selected == ACCENTS.len() + 1
+                {
+                    app.accent_input.extend(
+                        text.chars()
+                            .filter(|c| *c == '#' || c.is_ascii_hexdigit())
+                            .take(7usize.saturating_sub(app.accent_input.len())),
+                    );
                 } else if matches!(app.screen, Screen::EditInstallation) && !app.exit {
                     if let Some((_, fields, selected)) = &mut app.editor
                         && *selected < fields.len()
@@ -1698,6 +1813,14 @@ pub fn run(mut request: Request) -> Result<()> {
                                 }
                             }
                             _ => {}
+                        }
+                    }
+                    Screen::SettingsPage(SettingsPage::Appearance) => {
+                        if quit {
+                            app.exit = true;
+                            app.exit_confirm = false;
+                        } else if !key.modifiers.contains(KeyModifiers::CONTROL) {
+                            app.appearance_key(key.code);
                         }
                     }
                     Screen::SettingsPage(SettingsPage::Session) => match key.code {
@@ -1995,6 +2118,9 @@ fn draw(frame: &mut Frame, app: &App) -> Vec<Hit> {
         Screen::Form => draw_form(frame, app, rows[1], &mut hits),
         Screen::Nodes => draw_nodes(frame, app, rows[1], &mut hits),
         Screen::Settings => draw_settings(frame, app, rows[1], &mut hits),
+        Screen::SettingsPage(SettingsPage::Appearance) => {
+            draw_appearance(frame, app, rows[1], &mut hits)
+        }
         Screen::SettingsPage(SettingsPage::Profiles) => {
             draw_profiles(frame, app, rows[1], &mut hits)
         }
@@ -2011,7 +2137,7 @@ fn draw(frame: &mut Frame, app: &App) -> Vec<Hit> {
                 .find(|p| p.id == id)
                 .map(|p| p.name.as_str())
                 .unwrap_or("Profile");
-            frame.render_widget(Paragraph::new(format!("Remove {name} from this workstation?\n\nOnly the saved connection profile is removed. The VPS, Node Plane installation, SSH keys, trusted hosts and audit history remain unchanged.")).wrap(Wrap { trim: false }), sections[0]);
+            frame.render_widget(Paragraph::new(format!("Remove {name} from this workstation?\n\nThe saved profile and its host trust entry are removed. Host trust is kept if another saved profile uses the same address and port. The VPS, installation, SSH keys and operation history remain unchanged.")).wrap(Wrap { trim: false }), sections[0]);
             button_pair(
                 frame,
                 sections[1],
@@ -2190,6 +2316,9 @@ fn draw(frame: &mut Frame, app: &App) -> Vec<Hit> {
                 "Click: select   Tab: move   Arrows: actions / fields   Enter: next / continue   Esc: sidebar / exit"
             }
             Screen::SettingsPage(SettingsPage::Session) => "Enter / Esc: back   Ctrl+C: exit",
+            Screen::SettingsPage(SettingsPage::Appearance) => {
+                "Tab / arrows: select   Enter / click: apply   Custom color: #RRGGBB   Esc: settings"
+            }
             Screen::SettingsPage(SettingsPage::Updates) => {
                 "Tab / arrows: select   Enter / click: activate   C: check   U: update   Esc: settings"
             }
@@ -2316,6 +2445,17 @@ fn draw(frame: &mut Frame, app: &App) -> Vec<Hit> {
             (Control::Exit(true), Control::Exit(false)),
             &mut hits,
         );
+    }
+    let accent = accent_color(&app.connections.accent);
+    if accent != Color::Cyan {
+        for cell in &mut frame.buffer_mut().content {
+            if cell.fg == Color::Cyan {
+                cell.fg = accent;
+            }
+            if cell.bg == Color::Cyan {
+                cell.bg = accent;
+            }
+        }
     }
     hits
 }
@@ -3218,6 +3358,7 @@ fn draw_settings(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) 
         .take(capacity)
     {
         let value = match page {
+            SettingsPage::Appearance => format!("Accent: {}", app.connections.accent),
             SettingsPage::Profiles => format!(
                 "{} saved installations · select, edit or remove",
                 app.connections.installations.len()
@@ -3243,6 +3384,70 @@ fn draw_settings(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) 
         hits.push(Hit {
             area: rect,
             control: Control::SettingsPage(page),
+        });
+    }
+}
+fn draw_appearance(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
+    let right = draw_navigation(frame, app, area, hits);
+    frame.render_widget(Block::bordered().title(" Appearance · Accent "), right);
+    let content = Block::bordered().inner(right);
+    let capacity = usize::from(content.height / 3).max(1);
+    let offset = app.settings_selected.saturating_sub(capacity);
+    let mut entries: Vec<(String, String, Control)> = ACCENTS
+        .iter()
+        .enumerate()
+        .map(|(i, (name, value))| {
+            (
+                format!(
+                    "{}{}",
+                    name,
+                    if app.connections.accent == *value {
+                        " · Selected"
+                    } else {
+                        ""
+                    }
+                ),
+                if *value == "terminal" {
+                    "Use the terminal's Cyan palette color".into()
+                } else {
+                    value.to_string()
+                },
+                Control::Accent(i),
+            )
+        })
+        .collect();
+    entries.extend([
+        (
+            "Custom color · #RRGGBB".into(),
+            app.accent_input.clone(),
+            Control::AccentInput,
+        ),
+        (
+            "Apply custom color".into(),
+            "Saved for all installation profiles".into(),
+            Control::SaveAccent,
+        ),
+        ("Back".into(), String::new(), Control::Settings),
+    ]);
+    for (index, (label, value, control)) in
+        entries.into_iter().enumerate().skip(offset).take(capacity)
+    {
+        let rect = Rect::new(
+            content.x,
+            content.y + (index - offset) as u16 * 3,
+            content.width,
+            3,
+        );
+        draw_field(
+            frame,
+            rect,
+            &label,
+            &value,
+            app.settings_selected == index + 1,
+        );
+        hits.push(Hit {
+            area: rect,
+            control,
         });
     }
 }
@@ -3469,6 +3674,63 @@ fn draw_editor(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
 mod tests {
     use super::*;
     #[test]
+    fn appearance_mouse_keyboard_and_custom_color_persist_across_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = App::new(&test_request());
+        app.state_dir = dir.path().into();
+        app.activate(Control::SettingsPage(SettingsPage::Appearance));
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 40)).unwrap();
+        terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+        let peach = app
+            .hits
+            .iter()
+            .find(|h| matches!(h.control, Control::Accent(1)))
+            .unwrap()
+            .area;
+        click(&mut app, (peach.x + 1, peach.y + 1));
+        terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+        assert!(
+            terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .any(|c| c.fg == Color::Rgb(255, 187, 116))
+        );
+        assert_eq!(Connections::load(dir.path()).unwrap().accent, "#ffbb74");
+        app.activate(Control::AccentInput);
+        app.accent_input.clear();
+        for c in "#123abc".chars() {
+            app.appearance_key(KeyCode::Char(c));
+        }
+        app.appearance_key(KeyCode::Enter);
+        assert_eq!(Connections::load(dir.path()).unwrap().accent, "#123abc");
+        app.activate(Control::Accent(0));
+        assert_eq!(Connections::load(dir.path()).unwrap().accent, "terminal");
+        assert_eq!(Action::Diagnose.label(), "Diagnostic");
+    }
+    #[test]
+    fn deleting_one_of_two_profiles_on_same_endpoint_preserves_trust() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = test_profile_app();
+        app.state_dir = dir.path().into();
+        let profile = app.connections.active().unwrap().clone();
+        let mut other = profile.clone();
+        other.id = uuid::Uuid::new_v4();
+        other.user = "admin".into();
+        app.connections.installations.push(other);
+        app.connections.save(dir.path()).unwrap();
+        let path = dir.path().join("known_hosts.json");
+        let trust = serde_json::to_vec(&std::collections::BTreeMap::from([(
+            format!("[{}]:{}", profile.host.to_ascii_lowercase(), profile.port),
+            "fingerprint",
+        )]))
+        .unwrap();
+        std::fs::write(&path, &trust).unwrap();
+        app.delete_profile(profile.id).unwrap();
+        assert_eq!(std::fs::read(path).unwrap(), trust);
+    }
+    #[test]
     fn ssh_password_field_is_visible_masked_and_empty_submit_is_rejected() {
         let mut app = App::new(&test_request());
         let (tx, rx) = mpsc::channel();
@@ -3565,8 +3827,9 @@ mod tests {
     fn settings_directory_opens_sections_without_profile_actions_on_home() {
         let mut app = test_profile_app();
         let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(80, 24)).unwrap();
-        for page in SettingsPage::ALL {
+        for (index, page) in SettingsPage::ALL.into_iter().enumerate() {
             app.open_settings();
+            app.settings_selected = index + 1;
             terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
             assert!(!app.hits.iter().any(|h| matches!(
                 h.control,
@@ -3580,6 +3843,9 @@ mod tests {
                 .area;
             click(&mut app, (target.x + 1, target.y + 1));
             assert!(matches!(app.screen, Screen::SettingsPage(p) if p == page));
+            if page == SettingsPage::Appearance {
+                app.settings_selected = ACCENTS.len() + 3;
+            }
             terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
             assert!(
                 app.hits
@@ -3601,9 +3867,20 @@ mod tests {
             let other = saved_installation("other.example");
             app.connections.installations.push(other.clone());
             app.connections.save(&app.state_dir).unwrap();
-            for name in ["id_ed25519", "known_hosts.json", "update-operation.json"] {
+            for name in ["id_ed25519", "update-operation.json"] {
                 std::fs::write(dir.path().join(name), "keep").unwrap();
             }
+            let host = app.connections.active().unwrap().host.clone();
+            std::fs::write(
+                dir.path().join("known_hosts.json"),
+                serde_json::to_vec(&std::collections::BTreeMap::from([
+                    (format!("[{host}]:2222"), "active"),
+                    ("[other.example]:22".into(), "other"),
+                    ("[other.example]:2222".into(), "other-port"),
+                ]))
+                .unwrap(),
+            )
+            .unwrap();
             app.delete_profile(if delete_active { active } else { other.id })
                 .unwrap();
             let restored = Connections::load(dir.path()).unwrap();
@@ -3613,7 +3890,17 @@ mod tests {
                 if delete_active { None } else { Some(active) }
             );
             assert_eq!(app.actions_enabled(), !delete_active);
-            for name in ["id_ed25519", "known_hosts.json", "update-operation.json"] {
+            let hosts: std::collections::BTreeMap<String, String> = serde_json::from_slice(
+                &std::fs::read(dir.path().join("known_hosts.json")).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(
+                hosts.contains_key(&format!("[{host}]:2222")),
+                !delete_active
+            );
+            assert_eq!(hosts.contains_key("[other.example]:2222"), delete_active);
+            assert!(hosts.contains_key("[other.example]:22"));
+            for name in ["id_ed25519", "update-operation.json"] {
                 assert_eq!(
                     std::fs::read_to_string(dir.path().join(name)).unwrap(),
                     "keep"

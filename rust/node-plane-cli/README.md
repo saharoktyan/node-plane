@@ -67,8 +67,16 @@ Mouse support requires a terminal that forwards mouse events; keyboard navigatio
 remains available. Manual Windows mouse acceptance is still pending.
 
 Settings is anchored at the bottom of the sidebar; clicking it or selecting it
-with the keyboard opens the saved installation list. Hovering does not open it. Use selects a connection, Edit updates it, and New
-creates one. New profiles default to the `dev` channel rather than inheriting
+with the keyboard opens the settings directory. Hovering does not open it.
+Installation profiles contains the saved connection list. Use selects a connection, Edit updates it, and New
+creates one. Deleting a profile also removes its address/port from
+the workstation's `known_hosts.json`, unless another saved profile uses that
+endpoint. SSH keys, server state and operation history remain unchanged. An empty
+saved list is authoritative and is not reimported from operation history.
+Appearance offers the terminal's Cyan palette color (default), Peach `#ffbb74`,
+Blue, Purple, Green, or a custom `#RRGGBB` accent. The choice is saved globally,
+applies immediately, and preserves warning colors and disabled controls.
+New profiles default to the `dev` channel rather than inheriting
 the previous connection. Session opens read-only information about the current
 TUI launch UUID, local installation UUID, administrator selector, SSH endpoint,
 workstation public-key fingerprint and state directory. The launch UUID is local
@@ -226,7 +234,7 @@ still require refreshing the card or checking its current host status.
 
 ## Detailed diagnostics and initial recovery
 
-Check installation now runs an embedded, versioned observer rather than dumping
+Diagnostic now runs an embedded, versioned observer rather than dumping
 `healthcheck.sh`. It checks managed installation files, required configuration
 key presence (never their values), release metadata, disk space, PostgreSQL and
 maintenance schema, controller services, worker timer/last result, API readiness

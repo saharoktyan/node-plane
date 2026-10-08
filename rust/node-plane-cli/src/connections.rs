@@ -83,6 +83,21 @@ pub struct Connections {
     pub revision: u64,
     pub selected: Option<Uuid>,
     pub installations: Vec<Installation>,
+    #[serde(default = "default_accent")]
+    pub accent: String,
+}
+fn default_accent() -> String {
+    "terminal".into()
+}
+pub fn validate_accent(value: &str) -> Result<()> {
+    ensure!(
+        value == "terminal"
+            || (value.len() == 7
+                && value.starts_with('#')
+                && value[1..].bytes().all(|b| b.is_ascii_hexdigit())),
+        "Use a color in #RRGGBB format."
+    );
+    Ok(())
 }
 impl Default for Connections {
     fn default() -> Self {
@@ -91,6 +106,7 @@ impl Default for Connections {
             revision: 0,
             selected: None,
             installations: Vec::new(),
+            accent: default_accent(),
         }
     }
 }
@@ -112,6 +128,7 @@ impl Connections {
             "Saved installation preferences are unsupported."
         );
         let mut ids = std::collections::HashSet::new();
+        validate_accent(&value.accent)?;
         for profile in &value.installations {
             profile.validate()?;
             ensure!(
@@ -131,6 +148,7 @@ impl Connections {
             .find(|p| Some(p.id) == self.selected)
     }
     pub fn save(&mut self, state: &Path) -> Result<()> {
+        validate_accent(&self.accent)?;
         ssh::secure_state_directory(state)?;
         let lock_path = state.join("installations.lock");
         if lock_path.exists() {
@@ -177,7 +195,12 @@ impl Connections {
         Ok(())
     }
     pub fn import_update_history(&mut self, state: &Path) -> Result<bool> {
-        if !self.installations.is_empty() || !state.try_exists()? {
+        // An existing preferences file, including an intentionally empty list,
+        // is authoritative. History migration must never resurrect deleted profiles.
+        if !self.installations.is_empty()
+            || !state.try_exists()?
+            || state.join("installations.json").try_exists()?
+        {
             return Ok(false);
         }
         let mut records = Vec::new();
@@ -229,6 +252,31 @@ impl Connections {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn accent_defaults_for_old_saves_and_invalid_colors_do_not_replace_preferences() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Connections::default();
+        store.save(dir.path()).unwrap();
+        let mut legacy = serde_json::to_value(&store).unwrap();
+        legacy.as_object_mut().unwrap().remove("accent");
+        fs::write(
+            dir.path().join("installations.json"),
+            serde_json::to_vec(&legacy).unwrap(),
+        )
+        .unwrap();
+        let mut loaded = Connections::load(dir.path()).unwrap();
+        assert_eq!(loaded.accent, "terminal");
+        loaded.accent = "#ffbb74".into();
+        loaded.save(dir.path()).unwrap();
+        let before = fs::read(dir.path().join("installations.json")).unwrap();
+        loaded.accent = "#invalid".into();
+        assert!(loaded.save(dir.path()).is_err());
+        assert_eq!(
+            fs::read(dir.path().join("installations.json")).unwrap(),
+            before
+        );
+        assert_eq!(Connections::load(dir.path()).unwrap().accent, "#ffbb74");
+    }
     fn installation(host: &str) -> Installation {
         Installation {
             id: Uuid::new_v4(),
@@ -310,6 +358,17 @@ mod tests {
         assert_eq!(store.active().unwrap().port, 2222);
         assert_eq!(store.active().unwrap().account, record.account_id);
         assert!(!store.import_update_history(dir.path()).unwrap());
+        store.installations.clear();
+        store.selected = None;
+        store.save(dir.path()).unwrap();
+        let mut reloaded = Connections::load(dir.path()).unwrap();
+        assert!(!reloaded.import_update_history(dir.path()).unwrap());
+        assert!(
+            Connections::load(dir.path())
+                .unwrap()
+                .installations
+                .is_empty()
+        );
         assert_eq!(fs::read(record.path(dir.path())).unwrap(), before);
     }
 }
