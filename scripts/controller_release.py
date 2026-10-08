@@ -36,12 +36,14 @@ LIMIT = 64 * 1024 * 1024
 
 def allowed(name, *, forward_compatible=False):
     path = PurePosixPath(name)
-    if path.is_absolute() or '..' in path.parts or str(path) != name:
+    if (not path.parts or path.is_absolute() or '..' in path.parts or str(path) != name
+            or '\\' in name or '\x00' in name or re.match(r'^[A-Za-z]:', name)):
         return False
-    runtime_script = (forward_compatible and path.suffix in {'.py', '.sh'} and
-                      (path.parent == PurePosixPath('scripts') or
-                       path.parent == PurePosixPath('scripts/lib')))
-    return runtime_script or name in ROOT_FILES or name in {'scripts/' + s for s in SCRIPTS} or (
+    # The producer chooses the runtime bundle. Readers validate paths, manifest
+    # membership and hashes, without knowing future file names or directories.
+    if forward_compatible:
+        return True
+    return name in ROOT_FILES or name in {'scripts/' + s for s in SCRIPTS} or (
         name.startswith('app/') and path.suffix == '.py' and '__pycache__' not in path.parts) or (
         name.startswith('runtime_assets/') and '__pycache__' not in path.parts
         and (path.suffix in {'.py', '.sh', '.json'} or path.name in {'Dockerfile', 'node.env.example'})
@@ -58,7 +60,7 @@ def verify_runtime_assets(contents):
         raise ValueError('Invalid runtime asset manifest')
     for entry in entries:
         asset = entry.get('asset_path') if isinstance(entry, dict) else None
-        if not isinstance(asset, str) or not allowed('runtime_assets/' + asset):
+        if not isinstance(asset, str) or not allowed(asset, forward_compatible=True):
             raise ValueError('Unsafe runtime asset path')
         if 'runtime_assets/' + asset not in contents:
             raise ValueError('Missing runtime asset: ' + asset)
