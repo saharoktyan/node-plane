@@ -351,7 +351,17 @@ fn transport_error() -> ApiError {
     }
 }
 fn ensure_api_path(path: &str) -> std::result::Result<(), ApiError> {
-    if path.starts_with("/api/v1/system/") && !path.contains(['\r', '\n', '#']) {
+    let resource = path.split('?').next().unwrap_or_default();
+    if (path.starts_with("/api/v1/system/")
+        || resource == "/api/v1/nodes"
+        || resource.starts_with("/api/v1/nodes/")
+        || resource.starts_with("/api/v1/node-jobs/")
+        || resource.starts_with("/api/v1/agent-rollouts/"))
+        && !path.contains(['\r', '\n', '#'])
+        && !resource.contains("..")
+        && !resource.contains('%')
+        && !resource.contains('\\')
+    {
         Ok(())
     } else {
         Err(ApiError {
@@ -478,6 +488,10 @@ mod tests {
     #[test]
     fn api_never_targets_external_urls_or_delegates_telegram() {
         assert!(ensure_api_path("/api/v1/system/updates").is_ok());
+        assert!(ensure_api_path("/api/v1/nodes?order=region&cursor=a%2Fb").is_ok());
+        assert!(ensure_api_path("/api/v1/nodes/lv1/overview").is_ok());
+        assert!(ensure_api_path("/api/v1/nodes/../profiles").is_err());
+        assert!(ensure_api_path("/api/v1/nodes/%2e%2e/profiles").is_err());
         for value in [
             "http://other.example/api/v1/system/updates",
             "/api/v1/integrations/telegram",

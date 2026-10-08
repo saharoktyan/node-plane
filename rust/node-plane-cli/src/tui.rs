@@ -35,6 +35,7 @@ use zeroize::{Zeroize, Zeroizing};
 
 enum Screen {
     Form,
+    Nodes,
     Settings,
     SettingsPage(SettingsPage),
     DeleteInstallation(uuid::Uuid),
@@ -83,6 +84,18 @@ impl Screen {
 #[derive(Clone, Copy)]
 enum Control {
     Action(Action),
+    NodesSearch,
+    NodesRegion(usize),
+    NodesCard(usize),
+    NodesRefresh,
+    NodesBack,
+    NodesPrepare,
+    NodesSetup,
+    NodesBootstrap,
+    NodesInspect,
+    NodesDocker,
+    NodesObserve,
+    NodesPage(bool),
     QuickProfile,
     CycleProfile(bool),
     Settings,
@@ -283,6 +296,12 @@ impl Drop for Form {
 }
 
 struct App {
+    nodes: crate::nodes::Browser,
+    nodes_requested: Option<crate::nodes::Command>,
+    nodes_busy: bool,
+    nodes_selected: usize,
+    nodes_sidebar: bool,
+    nodes_capacity: std::cell::Cell<usize>,
     self_release: Option<crate::self_manage::Release>,
     self_status: String,
     self_requested: bool,
@@ -317,6 +336,12 @@ struct App {
 impl App {
     fn new(r: &Request) -> Self {
         Self {
+            nodes: crate::nodes::Browser::default(),
+            nodes_requested: None,
+            nodes_busy: false,
+            nodes_selected: 0,
+            nodes_sidebar: false,
+            nodes_capacity: std::cell::Cell::new(10),
             self_release: None,
             self_status: "Checking for workstation updates…".into(),
             self_requested: false,
@@ -470,9 +495,128 @@ impl App {
             self.editor = None;
         } else {
             self.form.select_action(Action::ALL[next]);
-            self.screen = Screen::Form;
+            self.screen = if self.form.action == Action::PrepareNode {
+                Screen::Nodes
+            } else {
+                Screen::Form
+            };
+            self.nodes_sidebar = true;
+            if self.form.action == Action::PrepareNode
+                && self.nodes.profile_id != self.form.saved.as_ref().map(|p| p.id)
+            {
+                self.nodes = crate::nodes::Browser::default();
+            }
             self.editor = None;
             self.error.clear();
+        }
+    }
+    fn open_nodes(&mut self) {
+        if !self.actions_enabled() {
+            return;
+        }
+        let profile_id = self.form.saved.as_ref().map(|p| p.id);
+        if self.nodes.profile_id != profile_id {
+            self.nodes = crate::nodes::Browser {
+                profile_id,
+                ..crate::nodes::Browser::default()
+            };
+        }
+        self.screen = Screen::Nodes;
+        self.nodes.card = None;
+        self.nodes_sidebar = false;
+        self.nodes_selected = 0;
+        if !self.nodes.loaded {
+            self.nodes_requested = Some(crate::nodes::Command::List);
+        }
+    }
+    fn nodes_controls(&self) -> Vec<Control> {
+        self.hits
+            .iter()
+            .filter(|hit| {
+                matches!(
+                    hit.control,
+                    Control::NodesSearch
+                        | Control::NodesRegion(_)
+                        | Control::NodesCard(_)
+                        | Control::NodesRefresh
+                        | Control::NodesBack
+                        | Control::NodesPrepare
+                        | Control::NodesSetup
+                        | Control::NodesBootstrap
+                        | Control::NodesInspect
+                        | Control::NodesDocker
+                        | Control::NodesObserve
+                        | Control::NodesPage(_)
+                )
+            })
+            .map(|hit| hit.control)
+            .collect()
+    }
+    fn nodes_key(&mut self, key: KeyEvent) {
+        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            self.exit = true;
+            self.exit_confirm = false;
+            return;
+        }
+        if self.nodes_sidebar {
+            match key.code {
+                KeyCode::Enter | KeyCode::Tab => self.open_nodes(),
+                KeyCode::Up | KeyCode::Down => self.navigate(key.code == KeyCode::Up),
+                KeyCode::Esc => {
+                    self.exit = true;
+                    self.exit_confirm = false;
+                }
+                _ => {}
+            }
+            return;
+        }
+        let controls = self.nodes_controls();
+        let selected = self.nodes_selected.min(controls.len().saturating_sub(1));
+        let search = matches!(controls.get(selected), Some(Control::NodesSearch));
+        match key.code {
+            KeyCode::Esc if self.nodes.card.is_some() => {
+                self.nodes.card = None;
+                self.nodes_selected = 0;
+            }
+            KeyCode::Esc => self.nodes_sidebar = true,
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.exit = true;
+                self.exit_confirm = false;
+            }
+            KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.nodes_selected = 0
+            }
+            KeyCode::Tab | KeyCode::Down => {
+                self.nodes_selected = (selected + 1) % controls.len().max(1)
+            }
+            KeyCode::BackTab | KeyCode::Up => {
+                self.nodes_selected = (selected + controls.len().max(1) - 1) % controls.len().max(1)
+            }
+            KeyCode::Enter if !self.nodes.loaded && self.nodes.card.is_none() => self.open_nodes(),
+            KeyCode::Enter if search => {
+                self.nodes_selected = 1.min(controls.len().saturating_sub(1))
+            }
+            KeyCode::Enter => {
+                if let Some(control) = controls.get(selected) {
+                    self.activate(*control);
+                }
+            }
+            KeyCode::Left | KeyCode::Right if self.nodes.card.is_none() => {
+                self.activate(Control::NodesPage(key.code == KeyCode::Left));
+            }
+            KeyCode::Char(c)
+                if search && !key.modifiers.contains(KeyModifiers::CONTROL) && !c.is_control() =>
+            {
+                if self.nodes.search.chars().count() < 128 {
+                    self.nodes.search.push(c);
+                    self.nodes.page = 0;
+                }
+            }
+            KeyCode::Backspace if search => {
+                self.nodes.search.pop();
+                self.nodes.page = 0;
+            }
+            _ => {}
         }
     }
     fn actions_enabled(&self) -> bool {
@@ -678,6 +822,30 @@ impl App {
     }
     fn event(&mut self, event: Event) {
         match event {
+            Event::Nodes(update) => match update {
+                crate::nodes::Update::Services(key, facts) => {
+                    if let Some(item) = &mut self.nodes.card
+                        && item.key == key
+                    {
+                        item.services = Some(facts);
+                    }
+                }
+                crate::nodes::Update::List(items) => {
+                    self.nodes.items = items;
+                    self.nodes.loaded = true;
+                    self.nodes.card = None;
+                }
+                crate::nodes::Update::Card(item) => {
+                    if let Some(existing) = self.nodes.items.iter_mut().find(|n| n.key == item.key)
+                    {
+                        *existing = item.clone();
+                    }
+                    self.nodes.card = Some(item);
+                }
+                crate::nodes::Update::Operation(operation) => {
+                    self.nodes.operation = Some(operation)
+                }
+            },
             Event::Stage(label) => self.stage = label,
             Event::Update(snapshot) => {
                 self.update = Some(snapshot);
@@ -693,6 +861,13 @@ impl App {
                 self.trust = false;
             }
             Event::Finished(result) => {
+                if self.nodes_busy {
+                    self.nodes_busy = false;
+                    self.screen = Screen::Nodes;
+                    self.error = result.err().unwrap_or_default();
+                    self.nodes_selected = 0;
+                    return;
+                }
                 self.result_scroll = 0;
                 self.outcome = Some(result);
                 self.screen = Screen::Finished;
@@ -802,6 +977,22 @@ impl App {
         }
     }
     fn mouse(&mut self, event: MouseEvent) -> Option<KeyEvent> {
+        if matches!(self.screen, Screen::Nodes)
+            && self.prompt.is_none()
+            && !self.exit
+            && matches!(
+                event.kind,
+                MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+            )
+        {
+            self.nodes_sidebar = false;
+            self.nodes_selected = if event.kind == MouseEventKind::ScrollUp {
+                self.nodes_selected.saturating_sub(1)
+            } else {
+                (self.nodes_selected + 1).min(self.nodes_controls().len().saturating_sub(1))
+            };
+            return None;
+        }
         if self.prompt.is_none()
             && !self.exit
             && matches!(
@@ -853,6 +1044,17 @@ impl App {
         self.activate(control)
     }
     fn activate(&mut self, control: Control) -> Option<KeyEvent> {
+        if matches!(self.screen, Screen::Nodes)
+            && !matches!(
+                control,
+                Control::Action(_)
+                    | Control::QuickProfile
+                    | Control::CycleProfile(_)
+                    | Control::Settings
+            )
+        {
+            self.nodes_sidebar = false;
+        }
         let key = match control {
             Control::Action(action) => {
                 if !self.actions_enabled() {
@@ -863,6 +1065,98 @@ impl App {
                 self.screen = Screen::Form;
                 self.editor = None;
                 self.error.clear();
+                if action == Action::PrepareNode {
+                    self.open_nodes();
+                }
+                return None;
+            }
+            Control::NodesSearch => {
+                self.nodes_selected = 0;
+                self.nodes_sidebar = false;
+                return None;
+            }
+            Control::NodesRegion(index) => {
+                if let Some(node) = self.nodes.items.get(index) {
+                    if !self.nodes.collapsed.remove(&node.region) {
+                        self.nodes.collapsed.insert(node.region.clone());
+                    }
+                    self.nodes.page = 0;
+                    self.nodes_selected = 0;
+                }
+                return None;
+            }
+            Control::NodesCard(index) => {
+                if let Some(node) = self.nodes.items.get(index) {
+                    self.nodes_requested = Some(crate::nodes::Command::Card(node.key.clone()));
+                }
+                return None;
+            }
+            Control::NodesRefresh => {
+                self.nodes_requested = Some(
+                    self.nodes
+                        .card
+                        .as_ref()
+                        .map_or(crate::nodes::Command::List, |node| {
+                            crate::nodes::Command::Card(node.key.clone())
+                        }),
+                );
+                return None;
+            }
+            Control::NodesBack => {
+                self.nodes.card = None;
+                self.nodes_selected = 0;
+                return None;
+            }
+            Control::NodesPrepare => {
+                self.screen = Screen::Form;
+                self.form.select_action(Action::PrepareNode);
+                self.form.selected = 1;
+                self.quick_focus = false;
+                if let Some(node) = &self.nodes.card
+                    && let Some(target) = &node.ssh_target
+                {
+                    if let Some((user, host)) = target.split_once('@') {
+                        self.form.fields[8] = host.into();
+                        self.form.fields[10] = user.into();
+                    } else {
+                        self.form.fields[8] = target.clone();
+                    }
+                }
+                return None;
+            }
+            Control::NodesInspect => {
+                if let Some(node) = &self.nodes.card {
+                    self.nodes_requested = Some(crate::nodes::Command::Inspect(node.key.clone()));
+                }
+                return None;
+            }
+            Control::NodesSetup | Control::NodesBootstrap | Control::NodesDocker => {
+                if let Some(node) = &self.nodes.card {
+                    self.nodes_requested = Some(if matches!(control, Control::NodesSetup) {
+                        crate::nodes::Command::Setup(node.clone())
+                    } else if matches!(control, Control::NodesDocker) {
+                        crate::nodes::Command::Docker(node.clone())
+                    } else {
+                        crate::nodes::Command::Bootstrap(node.clone())
+                    });
+                }
+                return None;
+            }
+            Control::NodesObserve => {
+                if let Some(operation) = &self.nodes.operation {
+                    self.nodes_requested = Some(crate::nodes::Command::Observe(operation.clone()));
+                }
+                return None;
+            }
+            Control::NodesPage(backwards) => {
+                let pages = self.nodes.pages(self.nodes_capacity.get()).len();
+                let page = self.nodes.page.min(pages - 1);
+                self.nodes.page = if backwards {
+                    page.saturating_sub(1)
+                } else {
+                    (page + 1).min(pages - 1)
+                };
+                self.nodes_selected = 0;
                 return None;
             }
             Control::QuickProfile => {
@@ -1078,6 +1372,29 @@ pub fn run(mut request: Request) -> Result<()> {
     let mut self_confirmation: Option<mpsc::Receiver<Answer>> = None;
     let mut self_updating = false;
     loop {
+        if let Some(command) = app.nodes_requested.take() {
+            let mut next = app.next_request();
+            next.action = Action::Diagnose;
+            next.host = app.form.fields[0].clone();
+            next.port = app.form.fields[1].parse().unwrap_or(0);
+            next.user = app.form.fields[2].clone();
+            next.workflow.account = app.form.fields[7].clone();
+            match next.validate() {
+                Ok(()) => {
+                    // Browsing has no target-node fields and never runs the old preparation workflow.
+                    next.action = Action::Diagnose;
+                    let (tx, rx) = mpsc::channel();
+                    worker = Some(crate::nodes::spawn(next, command, tx));
+                    receiver = Some(rx);
+                    app.nodes_busy = true;
+                    app.screen = Screen::Running;
+                    app.error.clear();
+                    app.update = None;
+                    app.tracker = Tracker::default();
+                }
+                Err(error) => app.error = error.to_string(),
+            }
+        }
         if app.self_check_requested {
             app.self_check_requested = false;
             if !checking {
@@ -1151,6 +1468,7 @@ pub fn run(mut request: Request) -> Result<()> {
                 app.self_status = "Updating workstation…".into();
             }
         }
+        let mut finished = false;
         if let Some(rx) = &receiver {
             loop {
                 match rx.try_recv() {
@@ -1166,17 +1484,22 @@ pub fn run(mut request: Request) -> Result<()> {
                                     "Workstation update failed; retry from Settings.".into();
                             }
                         }
+                        finished |= matches!(&value, Event::Finished(_));
                         app.event(value);
                     }
                     Err(mpsc::TryRecvError::Empty) => break,
                     Err(mpsc::TryRecvError::Disconnected) => {
-                        if !matches!(app.screen, Screen::Finished) {
+                        if !finished && !matches!(app.screen, Screen::Finished) {
                             app.event(Event::Finished(Err("Operation worker disconnected. Diagnose the server before retrying.".into())));
                         }
+                        finished = true;
                         break;
                     }
                 }
             }
+        }
+        if finished {
+            receiver = None;
         }
         terminal.draw(|frame| app.hits = draw(frame, &app))?;
         if !event::poll(Duration::from_millis(100))? {
@@ -1204,6 +1527,16 @@ pub fn run(mut request: Request) -> Result<()> {
                     {
                         fields[*selected].extend(text.chars().filter(|c| !c.is_control()));
                     }
+                } else if matches!(app.screen, Screen::Nodes)
+                    && !app.exit
+                    && app.nodes_selected == 0
+                    && app.nodes.card.is_none()
+                {
+                    let remaining = 128usize.saturating_sub(app.nodes.search.chars().count());
+                    app.nodes
+                        .search
+                        .extend(text.chars().filter(|c| !c.is_control()).take(remaining));
+                    app.nodes.page = 0;
                 } else if matches!(app.screen, Screen::Form) && !app.exit {
                     app.form.append(&text);
                 }
@@ -1258,6 +1591,7 @@ pub fn run(mut request: Request) -> Result<()> {
                     continue;
                 }
                 match app.screen {
+                    Screen::Nodes => app.nodes_key(key),
                     Screen::SettingsPage(SettingsPage::Updates) => {
                         let controls = if app.self_release.is_some() {
                             vec![
@@ -1658,6 +1992,7 @@ fn draw(frame: &mut Frame, app: &App) -> Vec<Hit> {
     );
     match app.screen {
         Screen::Form => draw_form(frame, app, rows[1], &mut hits),
+        Screen::Nodes => draw_nodes(frame, app, rows[1], &mut hits),
         Screen::Settings => draw_settings(frame, app, rows[1], &mut hits),
         Screen::SettingsPage(SettingsPage::Profiles) => {
             draw_profiles(frame, app, rows[1], &mut hits)
@@ -1847,6 +2182,9 @@ fn draw(frame: &mut Frame, app: &App) -> Vec<Hit> {
         app.error.as_str()
     } else {
         match app.screen {
+            Screen::Nodes => {
+                "Tab / ↑ / ↓: select   Enter / click: open   Ctrl+F: search   ← / →: pages   Esc: list / sidebar"
+            }
             Screen::Form => {
                 "Click: select   Tab: move   Arrows: actions / fields   Enter: next / continue   Esc: sidebar / exit"
             }
@@ -2075,6 +2413,261 @@ fn centered(area: Rect, width: u16, height: u16) -> Rect {
         height,
     )
 }
+fn draw_nodes(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
+    let right = draw_navigation(frame, app, area, hits);
+    let card = app.nodes.card.as_ref();
+    let title = app.form.saved.as_ref().map_or("Nodes", |p| p.name.as_str());
+    let block = Block::bordered().title(format!(" {title} · Nodes "));
+    let inner = block.inner(right);
+    frame.render_widget(block, right);
+    if inner.height < 8 || inner.width < 20 {
+        frame.render_widget(
+            Paragraph::new("Enlarge the terminal to browse nodes."),
+            inner,
+        );
+        return;
+    }
+    let rows = Layout::vertical([
+        Constraint::Length(if card.is_some() { 0 } else { 3 }),
+        Constraint::Min(2),
+        Constraint::Length(if card.is_some() { 6 } else { 3 }),
+    ])
+    .split(inner);
+    let mut index = 0usize;
+    let selected = |index| !app.nodes_sidebar && app.nodes_selected == index;
+    if card.is_none() {
+        draw_field(
+            frame,
+            rows[0],
+            "Search · name / region / code",
+            &app.nodes.search,
+            selected(index),
+        );
+        hits.push(Hit {
+            area: rows[0],
+            control: Control::NodesSearch,
+        });
+        index += 1;
+    }
+    let mut actions = Vec::new();
+    if let Some(node) = card {
+        let protocols = node
+            .protocols
+            .iter()
+            .map(|p| if p == "awg" { "AmneziaWG" } else { "VLESS" })
+            .collect::<Vec<_>>()
+            .join(" · ");
+        let mut lines = vec![
+            Line::styled(
+                format!("{} {} · {}", node.flag, node.region, node.title),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Line::from(format!("Code: {} · {}", node.key, node.state_label())),
+            Line::from(format!(
+                "Connection: {}{}",
+                node.transport.as_deref().unwrap_or("Not configured"),
+                node.ssh_target
+                    .as_ref()
+                    .map(|s| format!(" · {s}"))
+                    .unwrap_or_default()
+            )),
+            Line::from(format!(
+                "Protocols: {}",
+                if protocols.is_empty() {
+                    "Not selected"
+                } else {
+                    &protocols
+                }
+            )),
+        ];
+        if !node.xray_transports.is_empty() {
+            lines.push(Line::from(format!(
+                "VLESS: {}",
+                node.xray_transports.join(" · ")
+            )));
+        }
+        if let Some(operation) = app
+            .nodes
+            .operation
+            .as_ref()
+            .filter(|o| o.node_key == node.key)
+        {
+            lines.push(Line::from(""));
+            lines.push(Line::from(format!(
+                "Operation: {}{}",
+                operation.status,
+                if operation.error.is_empty() {
+                    String::new()
+                } else {
+                    format!(" · {}", operation.error)
+                }
+            )));
+            lines.push(Line::from(operation.id.to_string()));
+            actions.push(("Progress", Control::NodesObserve));
+        }
+        if let Some(facts) = &node.services {
+            lines.push(Line::from(format!(
+                "Docker: {} · AWG: {} · VLESS: {}",
+                if facts["docker"] == true {
+                    "ready"
+                } else {
+                    "missing"
+                },
+                if facts["awg_running"] == true {
+                    "running"
+                } else {
+                    "stopped"
+                },
+                if facts["xray_running"] == true {
+                    "running"
+                } else {
+                    "stopped"
+                }
+            )));
+        }
+        frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), rows[1]);
+        let busy = matches!(
+            node.state(),
+            "deleting" | "deletion_blocked" | "applying" | "needs_attention"
+        ) || app.nodes.operation.as_ref().is_some_and(|o| {
+            o.node_key == node.key
+                && !matches!(o.status.as_str(), "succeeded" | "failed" | "cancelled")
+        });
+        actions.push(("Check status", Control::NodesInspect));
+        if !busy {
+            if node.transport.is_some() && node.services.is_none() {
+                actions.push(("Agent setup", Control::NodesSetup));
+            }
+            if let Some(facts) = &node.services {
+                if facts["docker"] == false {
+                    actions.push(("Install Docker", Control::NodesDocker));
+                } else if facts["docker"] == true && node.can_bootstrap() {
+                    actions.push(("Bootstrap", Control::NodesBootstrap));
+                }
+            }
+        }
+        if node.transport.as_deref() == Some("ssh") {
+            actions.push(("Prepare SSH", Control::NodesPrepare));
+        }
+        actions.extend([
+            ("Refresh", Control::NodesRefresh),
+            ("Back", Control::NodesBack),
+        ]);
+    } else {
+        let capacity = usize::from(rows[1].height).max(2);
+        app.nodes_capacity.set(capacity);
+        let pages = app.nodes.pages(capacity);
+        let page = app.nodes.page.min(pages.len() - 1);
+        if !app.nodes.loaded {
+            frame.render_widget(Paragraph::new("Open Nodes to load the registry.\nRefresh connects to the selected installation."), rows[1]);
+        } else if pages[page].is_empty() {
+            frame.render_widget(Paragraph::new(if app.nodes.items.is_empty() {
+                "No registered servers. Create a server in the Telegram bot.\nPrepare SSH adds the controller key to a VPS."
+            } else { "No servers match this search." }).wrap(Wrap { trim: false }), rows[1]);
+        } else {
+            for (offset, row) in pages[page].iter().enumerate() {
+                let rect = Rect::new(rows[1].x, rows[1].y + offset as u16, rows[1].width, 1);
+                let (text, control, color) = match row {
+                    crate::nodes::Row::Region(region, count) => {
+                        let node_index = app
+                            .nodes
+                            .items
+                            .iter()
+                            .position(|n| &n.region == region)
+                            .unwrap();
+                        (
+                            format!(
+                                "{} {region} · {count}",
+                                if app.nodes.collapsed.contains(region) {
+                                    "▸"
+                                } else {
+                                    "▾"
+                                }
+                            ),
+                            Control::NodesRegion(node_index),
+                            Color::Cyan,
+                        )
+                    }
+                    crate::nodes::Row::Node(node_index) => {
+                        let node = &app.nodes.items[*node_index];
+                        (
+                            format!(
+                                "  › {} {} · {} · {}",
+                                node.flag,
+                                node.title,
+                                node.key,
+                                node.state_label()
+                            ),
+                            Control::NodesCard(*node_index),
+                            Color::White,
+                        )
+                    }
+                };
+                frame.render_widget(
+                    Paragraph::new(text).style(Style::default().fg(color).add_modifier(
+                        if selected(index) {
+                            Modifier::REVERSED
+                        } else {
+                            Modifier::empty()
+                        },
+                    )),
+                    rect,
+                );
+                hits.push(Hit {
+                    area: rect,
+                    control,
+                });
+                index += 1;
+            }
+        }
+        if pages.len() > 1 {
+            if page > 0 {
+                actions.push(("←", Control::NodesPage(true)));
+            }
+            if page + 1 < pages.len() {
+                actions.push(("→", Control::NodesPage(false)));
+            }
+            frame.render_widget(
+                Paragraph::new(format!(" {}/{} ", page + 1, pages.len()))
+                    .alignment(ratatui::layout::Alignment::Right)
+                    .style(Style::default().fg(Color::Gray)),
+                Rect::new(
+                    rows[0].right().saturating_sub(10),
+                    rows[0].y,
+                    9.min(rows[0].width),
+                    1,
+                ),
+            );
+        }
+        actions.extend([
+            ("Refresh", Control::NodesRefresh),
+            ("Prepare SSH", Control::NodesPrepare),
+        ]);
+    }
+    let count = actions.len();
+    let per_row = if card.is_some() {
+        count.div_ceil(2).max(1)
+    } else {
+        count.max(1)
+    };
+    for (position, (label, control)) in actions.into_iter().enumerate() {
+        let row = position / per_row;
+        let column = position % per_row;
+        let columns =
+            Layout::horizontal(vec![Constraint::Ratio(1, per_row as u32); per_row]).split(
+                Rect::new(rows[2].x, rows[2].y + row as u16 * 3, rows[2].width, 3),
+            );
+        draw_button(frame, columns[column], label, selected(index));
+        hits.push(Hit {
+            area: columns[column],
+            control,
+        });
+        index += 1;
+    }
+}
+
 fn draw_running(frame: &mut Frame, app: &App, area: Rect) {
     let popup = centered(area, 84, 9);
     let installing = app.form.action == Action::Install
@@ -2099,6 +2692,7 @@ fn draw_running(frame: &mut Frame, app: &App, area: Rect) {
             Action::Install if app.tracker.completed == 7 => " Verifying installation ",
             Action::Install => " Installation preparation ",
         };
+        let title = if app.nodes_busy { " Nodes " } else { title };
         (
             title.into(),
             if app.tracker.completed == 7 && app.form.action == Action::Install {
@@ -2388,7 +2982,17 @@ fn draw_form(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
     }
     let title = app.form.saved.as_ref().map_or_else(
         || " Connection settings ".to_string(),
-        |profile| format!(" {} · {} ", profile.name, app.form.action.label()),
+        |profile| {
+            format!(
+                " {} · {} ",
+                profile.name,
+                if app.form.action == Action::PrepareNode {
+                    "Prepare SSH access"
+                } else {
+                    app.form.action.label()
+                }
+            )
+        },
     );
     let sections = dialog(frame, right, &title);
     let visible = app.form.visible();
@@ -2495,7 +3099,9 @@ fn draw_navigation(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>
                 frame,
                 rect,
                 action.label(),
-                !app.quick_focus && matches!(app.screen, Screen::Form) && app.form.action == action,
+                !app.quick_focus
+                    && matches!(app.screen, Screen::Form | Screen::Nodes)
+                    && app.form.action == action,
             );
             hits.push(Hit {
                 area: rect,
@@ -3199,6 +3805,8 @@ mod tests {
         assert_eq!(form.fields[8], "target.example");
         assert!(form.fields[6].is_empty());
         form.cycle(false);
+        assert!(form.action == Action::Diagnose);
+        form.cycle(false);
         assert!(form.action == Action::Install);
         assert_eq!(form.fields[3], "dev");
         form.cycle(false);
@@ -3416,6 +4024,12 @@ mod tests {
             .area;
         assert!(click(&mut app, (action.x + 1, action.y + 1)).is_none());
         assert!(app.form.action == Action::PrepareNode);
+        assert!(matches!(app.screen, Screen::Nodes));
+        assert!(matches!(
+            app.nodes_requested.take(),
+            Some(crate::nodes::Command::List)
+        ));
+        app.activate(Control::NodesPrepare);
         terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
         let target_position = app
             .form
@@ -3786,5 +4400,109 @@ mod tests {
             .area;
         click(&mut app, (label.x + 1, label.y + 1));
         assert!(matches!(app.screen, Screen::EditInstallation));
+    }
+    fn browser_node(key: &str, region: &str) -> crate::nodes::Node {
+        serde_json::from_value(serde_json::json!({"key":key, "title":key, "region":region,
+            "flag":"", "enabled":true, "protocols":["awg"], "xray_transports":[],
+            "desired_revision":1, "applied_revision":0, "transport":"local",
+            "overview":{"state":"not_installed", "settings_complete":true}}))
+        .unwrap()
+    }
+    #[test]
+    fn nodes_resize_search_and_fold_remain_local_without_new_requests() {
+        let mut app = test_profile_app();
+        app.activate(Control::Action(Action::PrepareNode));
+        assert!(matches!(
+            app.nodes_requested.take(),
+            Some(crate::nodes::Command::List)
+        ));
+        app.event(Event::Nodes(crate::nodes::Update::List(
+            (0..40)
+                .map(|i| browser_node(&format!("n{i:02}"), if i < 20 { "Europe" } else { "Asia" }))
+                .collect(),
+        )));
+        let mut capacities = Vec::new();
+        for (width, height) in [(80, 24), (120, 40), (50, 16)] {
+            let mut terminal =
+                Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
+            terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+            capacities.push(app.nodes_capacity.get());
+        }
+        assert!(capacities[1] > capacities[0]);
+        app.nodes_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE));
+        app.nodes_key(KeyEvent::new(KeyCode::Char('3'), KeyModifiers::NONE));
+        assert_eq!(app.nodes.search, "n3");
+        assert!(app.nodes_requested.is_none());
+        app.activate(Control::NodesRegion(25));
+        assert!(app.nodes.collapsed.contains("Asia"));
+        assert!(app.nodes_requested.is_none());
+    }
+    #[test]
+    fn node_card_requires_live_prerequisites_and_hides_mutations_while_busy() {
+        let mut app = test_profile_app();
+        app.activate(Control::Action(Action::PrepareNode));
+        app.nodes_requested = None;
+        let mut node = browser_node("lv1", "Europe");
+        app.nodes.card = Some(node.clone());
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
+        terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+        assert!(
+            !app.nodes_controls()
+                .iter()
+                .any(|c| matches!(c, Control::NodesBootstrap))
+        );
+        node.services =
+            Some(serde_json::json!({"docker":true,"awg_running":false,"xray_running":false}));
+        app.nodes.card = Some(node.clone());
+        terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+        assert!(
+            app.nodes_controls()
+                .iter()
+                .any(|c| matches!(c, Control::NodesBootstrap))
+        );
+        app.nodes.operation = Some(crate::nodes::Operation {
+            id: uuid::Uuid::new_v4(),
+            kind: "node-jobs".into(),
+            node_key: node.key,
+            status: "awaiting_executor".into(),
+            error: String::new(),
+            command_id: None,
+        });
+        terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+        assert!(
+            app.nodes_controls()
+                .iter()
+                .any(|c| matches!(c, Control::NodesObserve))
+        );
+        assert!(
+            !app.nodes_controls()
+                .iter()
+                .any(|c| matches!(c, Control::NodesBootstrap | Control::NodesSetup))
+        );
+        app.nodes_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(app.nodes.card.is_none());
+        assert!(app.nodes_requested.is_none());
+    }
+    #[test]
+    fn nodes_worker_returns_to_browser_and_profile_switch_drops_cached_nodes() {
+        let mut app = test_profile_app();
+        app.activate(Control::Action(Action::PrepareNode));
+        app.nodes_requested = None;
+        app.nodes_busy = true;
+        app.screen = Screen::Running;
+        app.event(Event::Nodes(crate::nodes::Update::List(vec![
+            browser_node("lv1", "Europe"),
+        ])));
+        app.event(Event::Finished(Ok("Ready".into())));
+        assert!(matches!(app.screen, Screen::Nodes));
+        assert!(!app.nodes_busy);
+        assert!(app.outcome.is_none());
+        app.form.saved.as_mut().unwrap().id = uuid::Uuid::new_v4();
+        app.open_nodes();
+        assert!(app.nodes.items.is_empty());
+        assert!(matches!(
+            app.nodes_requested,
+            Some(crate::nodes::Command::List)
+        ));
     }
 }

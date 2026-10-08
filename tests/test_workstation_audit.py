@@ -90,6 +90,17 @@ class CredentialAttributionTests(TestCase):
 class APIAuditTests(TestCase):
     setUp = http_fixture.BackendHTTPTests.setUp
 
+    def test_workstation_reads_node_registry_without_telegram_delegation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            service = WorkstationService(self.db, __import__('pathlib').Path(directory) / 'sessions')
+            credential = service.handle({'version': 1, 'action': 'authenticate',
+                'session_id': str(uuid4()), 'attribution': ATTRIBUTION, 'account_id': self.admin.id})
+            headers = {'Authorization': 'Bearer ' + credential['token']}
+            response = self.client.get('/api/v1/nodes?order=region&include_summary=true', headers=headers)
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()['items'], [])
+            self.assertEqual(self.client.get('/api/v1/profiles', headers=headers).status_code, 403)
+
     def test_outcome_logging_failure_does_not_invite_replay_of_committed_action(self):
         import app.services
         from backend.workstation_audit import WorkstationAudit

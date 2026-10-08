@@ -27,7 +27,8 @@ from backend.identity_repository import SQLIdentityRepository
 
 
 VERSION = 1
-SCOPES = frozenset({'maintenance.manage', 'settings.manage'})
+LEGACY_SCOPES = frozenset({'maintenance.manage', 'settings.manage'})
+SCOPES = LEGACY_SCOPES | {'nodes.manage'}
 LIFETIME = timedelta(hours=1)
 MAX_REQUEST_BYTES = 16_384
 MAX_SESSION_BYTES = 16_384
@@ -57,7 +58,7 @@ def validate_request(request) -> dict:
         raise WorkstationError('invalid_request')
     action = request.get('action')
     allowed = {'version', 'action'}
-    if action in {'authenticate', 'revoke', 'lookup-update', 'audit-enrollment', 'revoke-access', 'restore-access'}:
+    if action in {'authenticate', 'revoke', 'lookup-update', 'lookup-node', 'audit-enrollment', 'revoke-access', 'restore-access'}:
         _uuid(request.get('session_id'))
         allowed.add('session_id')
     elif action != 'list':
@@ -73,7 +74,7 @@ def validate_request(request) -> dict:
                 or not isinstance(request.get('outcome'), str)
                 or request['outcome'] not in {'admitted', 'succeeded', 'unconfirmed'}):
             raise WorkstationError('invalid_request')
-    elif action == 'lookup-update':
+    elif action in {'lookup-update', 'lookup-node'}:
         _uuid(request.get('command_id'))
         allowed.add('command_id')
     elif action in {'authenticate', 'revoke-access', 'restore-access'}:
@@ -162,7 +163,7 @@ class SessionStore:
             _uuid(value.get('account_id'))
             token = value.get('token')
             match = TOKEN_PATTERN.fullmatch(token) if isinstance(token, str) else None
-            if match is None or value.get('credential_id') != match[1] or value.get('scopes') != sorted(SCOPES):
+            if match is None or value.get('credential_id') != match[1] or value.get('scopes') not in (sorted(SCOPES), sorted(LEGACY_SCOPES)):
                 raise WorkstationError('session_state_invalid')
             expires_at = datetime.fromisoformat(value['expires_at'])
             if expires_at.tzinfo is None or type(value.get('revoked', False)) is not bool:
@@ -202,6 +203,12 @@ class WorkstationService:
         from backend.workstation_audit import WorkstationAudit
         self.audit = WorkstationAudit(db)
         self.audit.initialize_schema()
+        # This helper is embedded in the workstation. Older installed audit
+        # modules must still permit the workstation to upgrade the controller.
+        with db.transaction() as conn:
+            conn.execute('''CREATE TABLE IF NOT EXISTS backend_workstation_keys (
+                fingerprint TEXT PRIMARY KEY, account_id TEXT NOT NULL,
+                registered_at TEXT NOT NULL, revoked_at TEXT)''')
 
     def _audit_credential(self, result, request):
         if 'attribution' not in request:
@@ -280,7 +287,7 @@ class WorkstationService:
                                (previous['credential_id'],)).fetchone()
         return bool(row is not None and row['account_id'] == previous['account_id']
                     and row['kind'] == PrincipalKind.ACCOUNT.value
-                    and frozenset(json.loads(row['scopes_json'])) == SCOPES
+                    and frozenset(json.loads(row['scopes_json'])) == frozenset(previous['scopes'])
                     and hmac.compare_digest(row['secret_hash'], hashlib.sha256(previous['token'].encode()).hexdigest()))
 
     def handle(self, request: dict, *, now: datetime | None = None) -> dict:
@@ -329,7 +336,7 @@ class WorkstationService:
                 return {'version': VERSION, 'ok': True, 'session_id': session_id, 'revoked': revoked}
             if previous is not None and previous.get('revoked'):
                 raise WorkstationError('session_revoked')
-            if request['action'] in {'lookup-update', 'audit-enrollment'}:
+            if request['action'] in {'lookup-update', 'lookup-node', 'audit-enrollment'}:
                 if previous is None:
                     raise WorkstationError('session_not_found')
                 try:
@@ -340,6 +347,17 @@ class WorkstationService:
                 if (principal.kind != PrincipalKind.ACCOUNT or principal.account_id != previous['account_id']
                         or principal.scopes != SCOPES):
                     raise WorkstationError('session_state_invalid')
+                if request['action'] == 'lookup-node':
+                    with self.db.connect() as conn:
+                        matches = []
+                        for table, kind in (('backend_node_jobs', 'node-jobs'), ('backend_agent_rollouts', 'agent-rollouts')):
+                            row = conn.execute(f'SELECT id,node_key,status FROM {table} WHERE actor_id=? AND command_key=?',
+                                (principal.account_id, request['command_id'])).fetchone()
+                            if row:
+                                matches.append({**dict(row), 'kind': kind})
+                    if len(matches) > 1:
+                        raise WorkstationError('node_command_conflict')
+                    return {'version': VERSION, 'ok': True, 'job': matches[0] if matches else None}
                 if request['action'] == 'audit-enrollment':
                     context = self.audit.context(principal.id)
                     if context is None:

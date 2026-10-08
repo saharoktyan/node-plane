@@ -16,15 +16,15 @@ impl Action {
     pub const ALL: [Self; 4] = [
         Self::Install,
         Self::Update,
-        Self::Diagnose,
         Self::PrepareNode,
+        Self::Diagnose,
     ];
     pub fn label(self) -> &'static str {
         match self {
             Self::Install => "Install Node Plane",
             Self::Diagnose => "Check installation",
             Self::Update => "Update Node Plane",
-            Self::PrepareNode => "Prepare a VPN node",
+            Self::PrepareNode => "Nodes",
         }
     }
 }

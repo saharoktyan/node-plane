@@ -5,6 +5,7 @@ mod connections;
 mod enrollment;
 mod events;
 mod installer;
+mod nodes;
 mod operation_store;
 mod progress;
 mod self_manage;
@@ -272,6 +273,7 @@ fn entry() -> Result<()> {
                     );
                 }
             }
+            Event::Nodes(_) => {}
             Event::Progress(p) => {
                 if p.event == "step" {
                     println!(

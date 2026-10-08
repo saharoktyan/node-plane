@@ -17,7 +17,7 @@ from backend.authorization import AccessDenied, PrincipalKind, require_permissio
 from backend.credentials import CredentialService
 from backend.identity_repository import SQLIdentityRepository
 from backend.workstation_cli import (
-    LIFETIME, SCOPES, WorkstationError, WorkstationService, main, validate_request,
+    LIFETIME, SCOPES, LEGACY_SCOPES, WorkstationError, WorkstationService, main, validate_request,
 )
 
 
@@ -40,6 +40,9 @@ class WorkstationCredentialTests(unittest.TestCase):
         self.attribution = {'ssh_user': 'root', 'device_fingerprint': 'SHA256:' + 'a' * 43}
         self.db.connection.execute('''CREATE TABLE backend_update_jobs (
             id TEXT PRIMARY KEY, actor_id TEXT, command_key TEXT, kind TEXT, intent_json TEXT)''')
+        for table in ('backend_node_jobs', 'backend_agent_rollouts'):
+            self.db.connection.execute(f'''CREATE TABLE {table} (
+                id TEXT PRIMARY KEY, actor_id TEXT, command_key TEXT, node_key TEXT, status TEXT)''')
 
     def authenticate(self, **selectors):
         request = {'version': 1, 'action': 'authenticate', 'session_id': self.session_id,
@@ -134,6 +137,26 @@ class WorkstationCredentialTests(unittest.TestCase):
             'session_id': self.session_id, 'attribution': self.attribution}, now=self.now + timedelta(minutes=5))
         self.assertEqual(first, second)
         self.assertEqual(self.db.connection.execute('SELECT COUNT(*) FROM backend_credentials').fetchone()[0], 1)
+
+    def test_old_session_scopes_upgrade_without_changing_account(self):
+        first = self.authenticate()
+        old_id, old_token = self.credentials.issue(PrincipalKind.ACCOUNT, LEGACY_SCOPES,
+            account_id=self.admin.id, now=self.now)
+        old = {**first, 'credential_id': old_id, 'token': old_token, 'scopes': sorted(LEGACY_SCOPES)}
+        old.pop('ok')
+        with self.service.store.locked() as directory:
+            self.service.store.write(directory, self.session_id, old)
+        result = self.authenticate()
+        self.assertEqual(result['account_id'], self.admin.id)
+        self.assertEqual(result['scopes'], sorted(SCOPES))
+        with self.assertRaises(AccessDenied):
+            self.credentials.authenticate('Bearer ' + old_token, now=self.now)
+
+    def test_embedded_helper_initializes_binding_schema_on_older_controller(self):
+        self.db.connection.execute('DROP TABLE backend_workstation_keys')
+        with patch('backend.workstation_audit.WorkstationAudit.initialize_schema'):
+            self.service = WorkstationService(self.db, self.path)
+        self.assertEqual(self.authenticate()['account_id'], self.admin.id)
 
     def test_expired_session_renews_same_actor_and_revokes_old_credential(self):
         first = self.authenticate()
@@ -247,6 +270,20 @@ class WorkstationCredentialTests(unittest.TestCase):
         result = self.service.handle({'version': 1, 'action': 'lookup-update',
             'session_id': self.session_id, 'command_id': command_id}, now=self.now)
         self.assertIsNone(result['job'])
+
+    def test_node_lookup_recovers_only_own_dispatch_without_replaying(self):
+        self.authenticate()
+        command_id, job_id = str(uuid4()), str(uuid4())
+        self.db.connection.execute('INSERT INTO backend_agent_rollouts VALUES (?,?,?,?,?)',
+            (job_id, self.admin.id, command_id, 'lv1', 'running'))
+        request = {'version': 1, 'action': 'lookup-node', 'session_id': self.session_id,
+            'command_id': command_id}
+        self.assertEqual(self.service.handle(request)['job'], {
+            'id': job_id, 'node_key': 'lv1', 'status': 'running', 'kind': 'agent-rollouts'})
+        other = bootstrap_admin(self.identities, 102)
+        self.db.connection.execute('UPDATE backend_agent_rollouts SET actor_id=?', (other.id,))
+        self.assertIsNone(self.service.handle(request)['job'])
+        self.assertEqual(self.db.connection.execute('SELECT COUNT(*) FROM backend_agent_rollouts').fetchone()[0], 1)
 
     def test_lookup_requires_unexpired_session_and_current_approved_admin(self):
         self.authenticate()
