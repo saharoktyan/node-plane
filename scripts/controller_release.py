@@ -34,11 +34,14 @@ COMMIT = re.compile(r'^[0-9a-f]{40}$')
 LIMIT = 64 * 1024 * 1024
 
 
-def allowed(name):
+def allowed(name, *, forward_compatible=False):
     path = PurePosixPath(name)
     if path.is_absolute() or '..' in path.parts or str(path) != name:
         return False
-    return name in ROOT_FILES or name in {'scripts/' + s for s in SCRIPTS} or (
+    runtime_script = (forward_compatible and path.suffix in {'.py', '.sh'} and
+                      (path.parent == PurePosixPath('scripts') or
+                       path.parent == PurePosixPath('scripts/lib')))
+    return runtime_script or name in ROOT_FILES or name in {'scripts/' + s for s in SCRIPTS} or (
         name.startswith('app/') and path.suffix == '.py' and '__pycache__' not in path.parts)
 
 
@@ -79,7 +82,7 @@ def verify(archive_path, ref=None, commit=None):
     with tarfile.open(archive_path, 'r:gz') as archive:
         for member in archive:
             if (not member.isfile() or member.size < 0 or member.name in contents or
-                not (allowed(member.name) or member.name in {MANIFEST, 'BUILD_COMMIT'})):
+                not (allowed(member.name, forward_compatible=True) or member.name in {MANIFEST, 'BUILD_COMMIT'})):
                 raise ValueError('Unexpected or unsafe controller archive member: ' + member.name)
             total += member.size
             if total > LIMIT or len(contents) >= 4096:
@@ -97,7 +100,13 @@ def verify(archive_path, ref=None, commit=None):
     if commit and manifest['commit'] != commit:
         raise ValueError('Controller archive commit does not match requested release')
     files = manifest.get('files', {})
-    if not isinstance(files, dict) or set(files) != set(contents) - {MANIFEST} or not REQUIRED.issubset(files):
+    # Readers must accept previously published runtime layouts too. The helper
+    # became mandatory in alpha.52; its absence in older packages is intentional.
+    required = REQUIRED
+    version = tuple(int(value or 0) for value in TAG.fullmatch(manifest['ref']).groups())
+    if version < (0, 4, 3, 0) or (version[:3] == (0, 4, 3) and version[3] in range(1, 52)):
+        required = REQUIRED - {'scripts/lib/archive_agent_journals.py'}
+    if not isinstance(files, dict) or set(files) != set(contents) - {MANIFEST} or not required.issubset(files):
         raise ValueError('Controller package manifest is incomplete')
     for name, digest in files.items():
         if hashlib.sha256(contents[name]).hexdigest() != digest:
@@ -137,7 +146,7 @@ def copy_package(root, destination):
         total = 0
         with tarfile.open(archive_path, 'w:gz') as archive:
             for name in names:
-                if not (allowed(name) or name in {MANIFEST, 'BUILD_COMMIT'}):
+                if not (allowed(name, forward_compatible=True) or name in {MANIFEST, 'BUILD_COMMIT'}):
                     raise ValueError('Unsafe controller package path')
                 path = root / name
                 if path.is_symlink() or not path.resolve().is_relative_to(root.resolve()):
