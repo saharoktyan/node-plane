@@ -1,7 +1,7 @@
 use crate::{
     config::{Action, Request, WorkflowOptions},
     connections::{Connections, Installation},
-    events::{Answer, Event, Prompt, UiInteraction},
+    events::{Answer, Event, Prompt},
     progress::Tracker,
 };
 use anyhow::{Result, ensure};
@@ -604,6 +604,9 @@ impl App {
         }
     }
     fn nodes_controls(&self) -> Vec<Control> {
+        self.nodes_hits().iter().map(|hit| hit.control).collect()
+    }
+    fn nodes_hits(&self) -> Vec<&Hit> {
         self.hits
             .iter()
             .filter(|hit| {
@@ -623,7 +626,6 @@ impl App {
                         | Control::NodesPage(_)
                 )
             })
-            .map(|hit| hit.control)
             .collect()
     }
     fn nodes_key(&mut self, key: KeyEvent) {
@@ -634,7 +636,7 @@ impl App {
         }
         if self.nodes_sidebar {
             match key.code {
-                KeyCode::Enter | KeyCode::Tab => self.open_nodes(),
+                KeyCode::Enter | KeyCode::Tab | KeyCode::Right => self.open_nodes(),
                 KeyCode::Up | KeyCode::Down => self.navigate(key.code == KeyCode::Up),
                 KeyCode::Esc => {
                     self.exit = true;
@@ -648,6 +650,11 @@ impl App {
         let selected = self.nodes_selected.min(controls.len().saturating_sub(1));
         let search = matches!(controls.get(selected), Some(Control::NodesSearch));
         match key.code {
+            KeyCode::Up | KeyCode::Down | KeyCode::Left | KeyCode::Right
+                if self.nodes.card.is_some() =>
+            {
+                self.nodes_move_direction(key.code);
+            }
             KeyCode::Esc if self.nodes.card.is_some() => {
                 self.nodes.card = None;
                 self.nodes_selected = 0;
@@ -692,6 +699,60 @@ impl App {
             }
             _ => {}
         }
+    }
+    fn nodes_move_direction(&mut self, direction: KeyCode) {
+        let areas: Vec<_> = self.nodes_hits().iter().map(|hit| hit.area).collect();
+        let selected = self.nodes_selected.min(areas.len().saturating_sub(1));
+        let Some(current) = areas.get(selected) else {
+            return;
+        };
+        let center = |area: &Rect| {
+            (
+                i32::from(area.x) * 2 + i32::from(area.width),
+                i32::from(area.y) * 2 + i32::from(area.height),
+            )
+        };
+        let (x, y) = center(current);
+        if let Some((index, _)) = areas
+            .iter()
+            .enumerate()
+            .filter_map(|(index, area)| {
+                let (nx, ny) = center(area);
+                let (forward, sideways) = match direction {
+                    KeyCode::Up => (y - ny, nx - x),
+                    KeyCode::Down => (ny - y, nx - x),
+                    KeyCode::Left => (x - nx, ny - y),
+                    KeyCode::Right => (nx - x, ny - y),
+                    _ => return None,
+                };
+                (forward > 0).then_some((index, (sideways != 0, forward, sideways.abs())))
+            })
+            .min_by_key(|(_, score)| *score)
+        {
+            self.nodes_selected = index;
+        }
+    }
+    fn section_navigation(&mut self, key: KeyCode) -> bool {
+        if key == KeyCode::Esc && matches!(self.screen, Screen::SettingsPage(_)) {
+            self.open_settings();
+            return true;
+        }
+        if key == KeyCode::Right {
+            match self.screen {
+                Screen::Form
+                    if !self.quick_focus && self.form.selected == 0 && self.actions_enabled() =>
+                {
+                    self.form.next();
+                    return true;
+                }
+                Screen::Settings if self.settings_selected == 0 => {
+                    self.settings_selected = 1;
+                    return true;
+                }
+                _ => {}
+            }
+        }
+        false
     }
     fn actions_enabled(&self) -> bool {
         self.form.saved.is_some()
@@ -1737,6 +1798,9 @@ pub fn run(mut request: Request) -> Result<()> {
                     }
                     continue;
                 }
+                if app.section_navigation(key.code) {
+                    continue;
+                }
                 let quit = key.code == KeyCode::Esc
                     || (key.code == KeyCode::Char('c')
                         && key.modifiers.contains(KeyModifiers::CONTROL));
@@ -2070,8 +2134,7 @@ pub fn run(mut request: Request) -> Result<()> {
                                 continue;
                             }
                             let (tx, rx) = mpsc::channel();
-                            let interaction = UiInteraction::shared(tx.clone());
-                            worker = Some(crate::spawn(request, interaction, tx));
+                            nodes_worker.workflow(request, tx)?;
                             receiver = Some(rx);
                             app.screen = Screen::Running;
                             // The request has moved into the worker and is never logged/debugged.
@@ -2124,7 +2187,7 @@ pub fn run(mut request: Request) -> Result<()> {
     }
     drop(terminal);
     drop(guard);
-    if app.nodes_busy
+    if matches!(app.screen, Screen::Running)
         && let Some(rx) = receiver.take()
     {
         while let Ok(value) = rx.recv() {
@@ -5025,6 +5088,65 @@ mod tests {
         app.nodes_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
         assert!(app.nodes.card.is_none());
         assert!(app.nodes_requested.is_none());
+    }
+    #[test]
+    fn sidebar_right_enters_content_and_settings_escape_returns_to_settings() {
+        let mut app = test_profile_app();
+        app.screen = Screen::Form;
+        app.quick_focus = false;
+        app.form.selected = 0;
+        assert!(app.section_navigation(KeyCode::Right));
+        assert_eq!(app.form.selected, 1);
+        assert!(!app.section_navigation(KeyCode::Right));
+        app.open_settings();
+        assert!(app.section_navigation(KeyCode::Right));
+        assert_eq!(app.settings_selected, 1);
+        for page in SettingsPage::ALL {
+            app.activate(Control::SettingsPage(page));
+            assert!(app.section_navigation(KeyCode::Esc));
+            assert!(matches!(app.screen, Screen::Settings));
+            assert!(!app.exit);
+        }
+        assert!(!app.section_navigation(KeyCode::Esc));
+        app.activate(Control::Action(Action::PrepareNode));
+        app.nodes_requested = None;
+        app.nodes_sidebar = true;
+        app.nodes_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+        assert!(!app.nodes_sidebar);
+        assert!(matches!(app.screen, Screen::Nodes));
+    }
+    #[test]
+    fn node_card_arrows_follow_button_geometry_after_resize() {
+        let mut app = test_profile_app();
+        app.activate(Control::Action(Action::PrepareNode));
+        app.nodes_requested = None;
+        let mut node = browser_node("lv1", "Europe");
+        node.transport = Some("ssh".into());
+        node.agent = crate::nodes::AgentState::Missing;
+        node.services =
+            Some(serde_json::json!({"docker":true,"awg_running":false,"xray_running":false}));
+        app.nodes.card = Some(node);
+        for (width, height) in [(100, 30), (80, 24)] {
+            let mut terminal =
+                Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
+            terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+            let count = app.nodes_controls().len();
+            let per_row = count.div_ceil(2);
+            app.nodes_selected = per_row;
+            app.nodes_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+            assert_eq!(app.nodes_selected, 0);
+            app.nodes_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+            assert_eq!(app.nodes_selected, 1);
+            app.nodes_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+            assert_eq!(app.nodes_selected, per_row + 1);
+            app.nodes_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
+            assert_eq!(app.nodes_selected, per_row);
+            app.nodes_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+            assert_eq!(app.nodes_selected, per_row);
+            app.nodes_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+            assert_eq!(app.nodes_selected, per_row + 1);
+            assert!(app.nodes_requested.is_none());
+        }
     }
     #[test]
     fn agent_setup_requires_confirmed_absence_and_ssh_status_keeps_layout_fixed() {

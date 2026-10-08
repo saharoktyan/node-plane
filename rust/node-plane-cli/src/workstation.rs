@@ -177,12 +177,24 @@ pub async fn execute(
     tx: mpsc::Sender<Event>,
 ) -> Result<String> {
     request.validate()?;
-    let _lock = OperationLock::acquire(&request.state_dir)?;
     stage(&tx, "Connecting to the controller and checking host trust");
     let mut session = ssh::connect(&controller_options(&request), interaction.clone()).await?;
+    let result = execute_connected(request, &mut session, interaction, tx).await;
+    let _ = session.close().await;
+    result
+}
+
+pub async fn execute_connected(
+    request: Request,
+    session: &mut SshSession,
+    interaction: Arc<dyn Interaction>,
+    tx: mpsc::Sender<Event>,
+) -> Result<String> {
+    request.validate()?;
+    let _lock = OperationLock::acquire(&request.state_dir)?;
     let mut result = match request.action {
-        Action::Update => update(&request, &mut session, interaction, &tx).await,
-        Action::PrepareNode => prepare_node(&request, &mut session, interaction, &tx).await,
+        Action::Update => update(&request, session, interaction, &tx).await,
+        Action::PrepareNode => prepare_node(&request, session, interaction, &tx).await,
         _ => bail!("Unsupported workstation operation"),
     };
     if result
@@ -201,7 +213,6 @@ pub async fn execute(
             )
         ));
     }
-    let _ = session.close().await;
     result
 }
 
@@ -212,7 +223,9 @@ async fn prepare_node(
     tx: &mpsc::Sender<Event>,
 ) -> Result<String> {
     let session_id = Uuid::new_v4();
-    stage(tx, "Authorizing the controller administrator");
+    if !backend::authorized(controller, &request.workflow.account) {
+        stage(tx, "Authorizing the controller administrator");
+    }
     let credential =
         backend::authenticate(controller, session_id, &request.workflow.account, tx).await?;
     let result=async {
@@ -221,7 +234,13 @@ async fn prepare_node(
         let key=russh::keys::PublicKey::from_openssh(public).context("Controller returned an invalid SSH public key")?;
         let options=SshOptions{host:request.workflow.target_host.clone(),port:request.workflow.target_port,user:request.workflow.target_user.clone(),state_dir:request.state_dir.clone()};
         stage(tx,"Connecting to the target node; enrolling the workstation key if needed");
-        let mut target=ssh::connect(&options,interaction).await?;
+        let target_key = format!("{}@{}:{}", options.user, options.host.to_ascii_lowercase(), options.port);
+        let cached = controller.peers.remove(&target_key);
+        let mut target = match cached {
+            Some(target) if !target.is_closed() => target,
+            Some(target) => { let _ = target.close().await; ssh::connect(&options, interaction).await? },
+            None => ssh::connect(&options, interaction).await?,
+        };
         let result=async {
             let description=format!("Allow this controller to connect to {}@{}:{}?\n\nController public key: {}\nThe existing authorized keys remain. No VPN protocols or agent are installed by this step.",options.user,options.host,options.port,key.fingerprint(russh::keys::ssh_key::HashAlg::Sha256));
             ensure!(request.workflow.yes || events::confirm(tx,"Prepare SSH access",description)?,"Node preparation cancelled.");
@@ -243,7 +262,8 @@ async fn prepare_node(
             }
             Ok(format!("Controller SSH access to {} is verified. Add the SSH node in the bot to install its agent and protocols.",options.host))
         }.await;
-        let _=target.close().await;
+        if controller.persistent { controller.peers.insert(target_key, target); }
+        else { let _=target.close().await; }
         result
     }.await;
     let _ = backend::revoke(controller, session_id).await;
@@ -532,10 +552,12 @@ async fn update(
     } else {
         request.workflow.account.as_str()
     };
-    stage(
-        tx,
-        "Authorizing the administrator for backend-owned updates",
-    );
+    if !backend::authorized(session, account) {
+        stage(
+            tx,
+            "Authorizing the administrator for backend-owned updates",
+        );
+    }
     let mut credential = backend::authenticate(session, auth_id, account, tx).await?;
     let mut record = if let Some(record) = previous {
         ensure!(
@@ -785,7 +807,8 @@ async fn reconnect(
     request: &Request,
     interaction: Arc<dyn Interaction>,
 ) -> Result<()> {
-    let fresh=ssh::connect(&controller_options(request),interaction).await.context("Controller SSH is unavailable. Reopen update with its saved --operation identity after the host returns")?;
+    let mut fresh=ssh::connect(&controller_options(request),interaction).await.context("Controller SSH is unavailable. Reopen update with its saved --operation identity after the host returns")?;
+    fresh.persistent = session.persistent;
     let previous = std::mem::replace(session, fresh);
     let _ = previous.close().await;
     Ok(())
