@@ -632,6 +632,10 @@ impl App {
                     self.password.pop();
                     None
                 }
+                KeyCode::Enter if self.password.is_empty() => {
+                    self.error = "Enter the SSH password before connecting.".into();
+                    None
+                }
                 KeyCode::Enter => Some(Answer::Password(std::mem::replace(
                     &mut self.password,
                     Zeroizing::new(String::new()),
@@ -641,6 +645,7 @@ impl App {
             },
         };
         if let Some(answer) = answer {
+            self.error.clear();
             let (_, reply) = self.prompt.take().unwrap();
             let _ = reply.send(answer);
         }
@@ -1620,11 +1625,46 @@ fn draw(frame: &mut Frame, app: &App) -> Vec<Hit> {
                 "First connection to {host}\n\nSSH fingerprint:\n{fingerprint}\n\nCompare it with a trusted provider/source before accepting."
             ),
             Prompt::Password { user, host } => format!(
-                "SSH password for {user}@{host}\n\nThe workstation key is not authorized yet. After login, only its\npublic key will be added and a fresh key login will be checked.\n\n{}\n\nEnter: connect   Esc: cancel",
-                "*".repeat(app.password.chars().count().min(64))
+                "SSH login: {user}@{host}\nThe workstation key is not authorized yet. Enter the server password below; only the public key will be enrolled after login."
             ),
         };
-        frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: false }), sections[0]);
+        if matches!(prompt, Prompt::Password { .. }) {
+            let body =
+                Layout::vertical([Constraint::Min(0), Constraint::Length(3)]).split(sections[0]);
+            frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: false }), body[0]);
+            let value = if app.password.is_empty() {
+                "Type or paste the SSH password".into()
+            } else {
+                "*".repeat(
+                    app.password
+                        .chars()
+                        .count()
+                        .min(body[1].width.saturating_sub(3) as usize),
+                )
+            };
+            frame.render_widget(
+                Paragraph::new(value)
+                    .style(Style::default().fg(if app.password.is_empty() {
+                        Color::Gray
+                    } else {
+                        Color::White
+                    }))
+                    .block(
+                        Block::bordered()
+                            .title(" SSH password (hidden) ")
+                            .border_style(Style::default().fg(Color::Cyan)),
+                    ),
+                body[1],
+            );
+            if body[1].height >= 3 && body[1].width >= 3 {
+                let x = body[1].x
+                    + 1
+                    + (app.password.chars().count() as u16).min(body[1].width.saturating_sub(3));
+                frame.set_cursor_position((x, body[1].y + 1));
+            }
+        } else {
+            frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: false }), sections[0]);
+        }
         let label = match prompt {
             Prompt::HostKey { .. } => "Trust host",
             Prompt::Password { .. } => "Connect",
@@ -2464,6 +2504,60 @@ fn draw_editor(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn ssh_password_field_is_visible_masked_and_empty_submit_is_rejected() {
+        let mut app = App::new(&test_request());
+        let (tx, rx) = mpsc::channel();
+        app.event(Event::Prompt(
+            Prompt::Password {
+                user: "root".into(),
+                host: "vps.example".into(),
+            },
+            tx,
+        ));
+        for (width, height) in [(120, 40), (80, 24), (40, 16)] {
+            let mut terminal =
+                Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
+            terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+            let content = format!("{:?}", terminal.backend().buffer());
+            assert!(
+                content.contains("SSH password (hidden)"),
+                "{width}x{height}: {content}"
+            );
+        }
+        let connect = app
+            .hits
+            .iter()
+            .find(|h| matches!(h.control, Control::Prompt(true)))
+            .unwrap()
+            .area;
+        let enter = click(&mut app, (connect.x + 1, connect.y + 1)).unwrap();
+        app.prompt_key(enter);
+        assert!(app.prompt.is_some());
+        assert!(rx.try_recv().is_err());
+        for c in "secret".chars() {
+            app.prompt_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+        }
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(80, 24)).unwrap();
+        terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+        let content = format!("{:?}", terminal.backend().buffer());
+        assert!(content.contains("******"));
+        assert!(!content.contains("secret"));
+        let connect = app
+            .hits
+            .iter()
+            .find(|h| matches!(h.control, Control::Prompt(true)))
+            .unwrap()
+            .area;
+        let enter = click(&mut app, (connect.x + 1, connect.y + 1)).unwrap();
+        app.prompt_key(enter);
+        let Answer::Password(password) = rx.recv().unwrap() else {
+            panic!("Password answer expected")
+        };
+        assert_eq!(password.as_str(), "secret");
+        assert!(app.password.is_empty());
+        assert!(app.error.is_empty());
+    }
     #[test]
     fn workstation_settings_offer_update_without_starting_server_work() {
         let mut app = App::new(&test_request());

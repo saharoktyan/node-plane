@@ -19,6 +19,20 @@ archive installations need no checkout; release discovery fetches public release
 metadata and remote tag refs only. Unpublished dev HEAD remains a development
 checkout workflow using `--from-source`.
 
+## v0.4.3-alpha.51
+
+- Fix the SSH password dialog: a clearly labeled masked input remains visible
+  above the confirmation buttons in smaller terminals. Empty submissions keep
+  the dialog open instead of failing authentication; mouse confirmation preserves
+  the typed password.
+- Include the verified one-command Linux workstation installer added after
+  alpha.50. It discovers published releases, verifies archive checksum and
+  executable version, and delegates local PATH installation to `self install`.
+- Validation: 70 workstation Rust tests and Clippy passed; six shell installer
+  tests cover release selection, corrupt archives, version mismatch and cleanup.
+- Linux x86_64 workstation self-update from alpha.50 is available through Settings
+  or `node-plane self update`. Restart TUI after updating the local binary.
+
 ## v0.4.3-alpha.50
 
 - Named device management with independent AWG peers, device-aware revocations
