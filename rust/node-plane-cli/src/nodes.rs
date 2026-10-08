@@ -370,9 +370,18 @@ async fn execute(request: Request, command: Command, tx: &mpsc::Sender<Event>) -
                     let pending = Operation { kind: kind.into(), id: command_id, node_key: item.key.clone(),
                         status: "unconfirmed".into(), error: String::new(), command_id: Some(command_id) };
                     SavedOperation::save(&request, &credential.account_id, &pending)?;
-                    let _ = tx.send(Event::Nodes(Update::Operation(pending)));
-                    let value = backend::request(&session, &credential, Method::POST, &path, Some(body), Some(command_id)).await
-                        .with_context(|| format!("Node action was not confirmed. Do not resubmit until backend diagnostics confirms its outcome. Command: {command_id}"))?;
+                    let _ = tx.send(Event::Nodes(Update::Operation(pending.clone())));
+                    let value = match backend::request(&session, &credential, Method::POST, &path, Some(body), Some(command_id)).await {
+                        Ok(value) => value,
+                        Err(error) if error.status.is_some_and(|status| (400..500).contains(&status) && status != 408) => {
+                            let rejected = Operation { status:"rejected".into(), error:error.code.clone(), ..pending };
+                            SavedOperation::save(&request, &credential.account_id, &rejected)?;
+                            let _ = tx.send(Event::Nodes(Update::Operation(rejected)));
+                            return Err(error.into());
+                        }
+                        Err(error) => return Err(anyhow::Error::new(error).context(format!(
+                            "Node action was not confirmed. Use Progress to check its original command; do not resubmit. Command: {command_id}"))),
+                    };
                     let mut operation = operation(&value, kind, &item.key)?;
                     operation.command_id = Some(command_id);
                     let _ = tx.send(Event::Nodes(Update::Operation(operation.clone())));

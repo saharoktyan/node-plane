@@ -1125,7 +1125,8 @@ impl App {
                 return None;
             }
             Control::NodesInspect => {
-                if let Some(node) = &self.nodes.card {
+                if let Some(node) = &mut self.nodes.card {
+                    node.services = None;
                     self.nodes_requested = Some(crate::nodes::Command::Inspect(node.key.clone()));
                 }
                 return None;
@@ -2505,7 +2506,9 @@ fn draw_nodes(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
                 }
             )));
             lines.push(Line::from(operation.id.to_string()));
-            actions.push(("Progress", Control::NodesObserve));
+            if operation.status != "rejected" {
+                actions.push(("Progress", Control::NodesObserve));
+            }
         }
         if let Some(facts) = &node.services {
             lines.push(Line::from(format!(
@@ -2533,7 +2536,10 @@ fn draw_nodes(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
             "deleting" | "deletion_blocked" | "applying" | "needs_attention"
         ) || app.nodes.operation.as_ref().is_some_and(|o| {
             o.node_key == node.key
-                && !matches!(o.status.as_str(), "succeeded" | "failed" | "cancelled")
+                && !matches!(
+                    o.status.as_str(),
+                    "succeeded" | "failed" | "cancelled" | "rejected"
+                )
         });
         actions.push(("Check status", Control::NodesInspect));
         if !busy {
@@ -4460,6 +4466,13 @@ mod tests {
                 .iter()
                 .any(|c| matches!(c, Control::NodesBootstrap))
         );
+        app.activate(Control::NodesInspect);
+        assert!(app.nodes.card.as_ref().unwrap().services.is_none());
+        assert!(matches!(
+            app.nodes_requested.take(),
+            Some(crate::nodes::Command::Inspect(_))
+        ));
+        app.nodes.card = Some(node.clone());
         app.nodes.operation = Some(crate::nodes::Operation {
             id: uuid::Uuid::new_v4(),
             kind: "node-jobs".into(),
