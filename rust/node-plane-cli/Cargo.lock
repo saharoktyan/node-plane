@@ -1615,7 +1615,7 @@ dependencies = [
 
 [[package]]
 name = "node-plane-cli"
-version = "0.4.3-alpha.54"
+version = "0.4.3-alpha.55"
 dependencies = [
  "anyhow",
  "bytes",
