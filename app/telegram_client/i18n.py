@@ -166,6 +166,7 @@ CATALOG = {
         'ui.traffic': 'Статистика трафика',
 
         'home.title': 'Node Plane', 'home.choose': 'Выберите действие.',
+        'home.admin_quick_start': 'Добро пожаловать в Node Plane!\n\nБыстрый старт:\n1. Нажмите «Админ-панель» -> «Серверы» и добавьте свой первый узел.\n2. Установите агент на сервер через терминал или дайте боту доступ по SSH.\n3. Создайте профиль доступа и выдайте его пользователям.\n\nБольше информации доступно в документации.',
         'home.waiting': 'Заявка ожидает решения администратора.',
         'home.request_prompt': 'Запросите доступ, чтобы получать VPN-конфиги.',
         'home.service_unavailable': 'Сервис временно недоступен. Повторите /start позже.',
@@ -848,6 +849,7 @@ CATALOG = {
         'ui.traffic': 'Traffic statistics',
 
         'home.title': 'Node Plane', 'home.choose': 'Choose an action.',
+        'home.admin_quick_start': 'Welcome to Node Plane!\n\nQuick start guide:\n1. Open "Admin panel" -> "Servers" and add your first node.\n2. Install the agent via terminal or provide SSH access to the bot.\n3. Create an access profile and grant it to users.\n\nSee project documentation for more details.',
         'home.waiting': 'Your request is waiting for an administrator.',
         'home.request_prompt': 'Request access to receive VPN configurations.',
         'home.service_unavailable': 'Service is temporarily unavailable. Try /start later.',
