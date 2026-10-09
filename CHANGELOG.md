@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.3-alpha.63 - 2026-10-09
+
+- Fix Workstation builds with Rust 1.90 and make expiry and SSH test fixtures reliable across operating systems.
+
+
 ## 0.4.3-alpha.62 - 2026-10-09
 
 - Fix Workstation release builds on all platforms by using Rust 1.90, required by the QR image dependency.
