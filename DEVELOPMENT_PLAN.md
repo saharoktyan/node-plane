@@ -73,6 +73,18 @@ Older evidence below records the state at each increment, not new prerequisites.
 
 ### Temporary VPN configurations: 24 hours
 
+- [x] Add the node-local lease journal and expiry engine: persist the deadline
+  before provisioning, retain it across retries, isolate identities, retry only
+  revocations, and respect the node cleanup fence. Unit coverage includes an
+  interrupted ensure, concurrent expiry, failed revoke and permanent-peer isolation.
+  This is an internal foundation; RPC, scheduling and user issuance remain pending.
+- [ ] Install independent node-local expiry scheduling and carry the lease receipt
+  through driver/agent RPC. Verify support before issuance; never silently send a
+  lease to an older agent that would provision permanent access.
+- [ ] Implement verified termination of established VLESS tunnels without restarting
+  shared Xray or disrupting other profiles. Xray 26.3.27 `RemoveUser` removes a
+  validator entry, but does not close ordinary existing connections. See
+  [runtime enforcement notes](runtime_assets/TEMPORARY_ACCESS.md).
 - [ ] Define a shared backend command for a temporary configuration on a selected
   server/protocol, with its own credentials and a persisted UTC expiry 24 hours
   after successful activation. Show the exact expiry in both interfaces.
