@@ -205,7 +205,49 @@ def run(action, intent, lock_fd):
     return json.loads(result['payload_json'])
 
 
+def temporary_profile(action, command_id, intent, recover, path):
+    """Explicit leased-peer commands over the existing authenticated node RPC.
+
+    Unknown actions on old runtime bundles fail instead of losing a TTL field.
+    """
+    intents.validate(intent)
+    if intent['command_id'] != command_id or intent['protocol'] != 'awg':
+        raise ValueError('temporary operation is not supported')
+    if action == 'temporary_ensure':
+        if intent.get('lease_seconds') != 86400 or intent['action'] != 'ensure':
+            raise ValueError('temporary lease is required')
+    elif action == 'temporary_revoke':
+        if intent['action'] != 'delete' or 'lease_seconds' in intent:
+            raise ValueError('invalid temporary revocation')
+        # This endpoint must never delete a permanent peer.
+        with closing(sqlite3.connect(Path(path).resolve().as_uri() + '?mode=ro', uri=True)) as conn:
+            if not conn.execute('SELECT 1 FROM temporary_leases WHERE protocol=? AND profile=?',
+                                (intent['protocol'], intent['runtime_name'])).fetchone():
+                raise ValueError('temporary identity not found')
+    else:
+        raise ValueError('invalid temporary action')
+    if Path(str(path) + '.disabled').exists():
+        raise ValueError('agent removal is in progress')
+    if recover:
+        response = intents.lookup(intent, path)
+    else:
+        if action == 'temporary_ensure':
+            intents.ensure_lease_scheduler()
+        response = intents.apply(intent, path, intents.run)
+    result = json.loads(response['payload_json']) if response['payload_json'] else {}
+    if action == 'temporary_ensure':
+        summary = response['summary']
+        config = summary[summary.index('[Interface]'):].split('\n===========', 1)[0].strip()
+        uri = next(line.strip() for line in summary.splitlines() if line.strip().startswith('vpn://'))
+        if not result.get('expires_at'):
+            raise ValueError('temporary expiry receipt missing')
+        result.update(wg_conf=config, vpn_key=uri)
+    return result
+
+
 def execute(action, command_id, intent, recover=False, path='/etc/node-plane/profile-intents.sqlite3'):
+    if action in {'temporary_ensure', 'temporary_revoke'}:
+        return temporary_profile(action, command_id, intent, recover, path)
     resolving = action.startswith('resolve_')
     if resolving:
         action = action[len('resolve_'):]

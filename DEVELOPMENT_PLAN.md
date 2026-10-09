@@ -78,9 +78,15 @@ Older evidence below records the state at each increment, not new prerequisites.
   revocations, and respect the node cleanup fence. Unit coverage includes an
   interrupted ensure, concurrent expiry, failed revoke and permanent-peer isolation.
   This is an internal foundation; RPC, scheduling and user issuance remain pending.
-- [ ] Install independent node-local expiry scheduling and carry the lease receipt
-  through driver/agent RPC. Verify support before issuance; never silently send a
-  lease to an older agent that would provision permanent access.
+- [x] Connect AWG lease commands to authenticated driver/agent node RPC. Install
+  an independent persistent systemd timer before provisioning; return the exact
+  expiry/config receipt and recover by reading the same command. Temporary
+  revocation cannot target permanent peers; cleanup removes/verifies timer units.
+  VLESS lease commands remain explicitly unsupported.
+- [ ] Verify remote support and enforcement health in backend issuance, reconcile
+  expired temporary peers before runtime restart, and define failure/clock/lock
+  scheduling behavior before claiming strict cutoff. Never silently provision a
+  permanent peer when local expiry support is missing.
 - [ ] Implement verified termination of established VLESS tunnels without restarting
   shared Xray or disrupting other profiles. Xray 26.3.27 `RemoveUser` removes a
   validator entry, but does not close ordinary existing connections. See
@@ -97,6 +103,11 @@ Older evidence below records the state at each increment, not new prerequisites.
   bridge supports administrators; ordinary-user Workstation access needs a
   separate backend credential/enrollment flow bound to the same account identity.
   Root SSH access must not become a requirement for ordinary VPN users.
+  Workstation: a dedicated sidebar tab selects server, then protocol only when
+  several are available, then Xray transport only when several are available.
+  The selected node card in Nodes offers the same flow without server selection.
+  Telegram: expose the flow only in a dedicated Settings submenu, never on a
+  server card. Preserve Back destinations for automatically skipped steps.
 - [ ] Require authorized issuance to an eligible, ready node; retain command
   identity across retries. Deliver URI/file with expiry and a copyable format,
   preserving the existing iOS separate-message action in Telegram. Do not log

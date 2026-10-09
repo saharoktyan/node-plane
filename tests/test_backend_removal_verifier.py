@@ -30,6 +30,8 @@ class RemovalVerifierTests(unittest.TestCase):
         self.assertIn('node-plane-agent.service', kwargs['input'])
         self.assertIn('node_key = "node"', kwargs['input'])
         self.assertIn('bot_ssh_key_present', calls[1][1]['input'])
+        self.assertIn('node-plane-lease-expiry.timer', calls[1][1]['input'])
+        self.assertIn('node-plane-lease-expiry.service', calls[1][1]['input'])
         self.assertEqual(evidence['target'], 'root@node.example')
 
     def test_only_local_verification_can_omit_ssh_key(self):

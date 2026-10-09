@@ -4,11 +4,14 @@ from pathlib import Path
 import sqlite3
 import tempfile
 import unittest
+import subprocess
+from unittest.mock import patch
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 from concurrent.futures import ThreadPoolExecutor
 
 from tests.test_agent_profile_intents import MODULE
+from tests.test_agent_node_operations import MODULE as OPERATIONS
 
 
 class TemporaryLeaseTests(unittest.TestCase):
@@ -168,3 +171,68 @@ class TemporaryLeaseTests(unittest.TestCase):
         MODULE.expire_leases(self.path, self.mutate)
         with sqlite3.connect(self.path) as conn:
             self.assertEqual(conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall(), [('old_fixture',)])
+
+    def test_scheduler_is_persistent_and_independent_of_agent_service(self):
+        calls = []
+        directory = Path(self.tmp.name) / 'units'
+        directory.mkdir()
+        def execute(args, **kwargs):
+            calls.append(args)
+            return subprocess.CompletedProcess(args, 0)
+        MODULE.ensure_lease_scheduler(directory, execute)
+        first = (directory / 'node-plane-lease-expiry.service').stat().st_mtime_ns
+        MODULE.ensure_lease_scheduler(directory, execute)
+        self.assertEqual((directory / 'node-plane-lease-expiry.service').stat().st_mtime_ns, first)
+        self.assertEqual(calls.count(['systemctl', 'daemon-reload']), 1)
+        unit = (directory / 'node-plane-lease-expiry.service').read_text()
+        self.assertNotIn('node-plane-agent.service', unit)
+        self.assertIn('expire-leases', unit)
+        self.assertIn('KillMode=control-group', unit)
+        self.assertIn('WantedBy=timers.target', (directory / 'node-plane-lease-expiry.timer').read_text())
+
+    def test_scheduler_failure_never_provisions_a_peer(self):
+        intent = self.intent()
+        with patch.object(OPERATIONS.intents, 'ensure_lease_scheduler', side_effect=RuntimeError('systemd unavailable')), \
+             patch.object(OPERATIONS.intents, 'run') as mutate:
+            with self.assertRaises(RuntimeError):
+                OPERATIONS.execute('temporary_ensure', intent['command_id'], intent, path=self.path)
+            mutate.assert_not_called()
+        self.assertFalse(self.path.exists())
+
+    def test_authenticated_node_action_returns_exact_receipt_and_recovers_without_mutation(self):
+        intent = self.intent()
+        def mutate(i, fd):
+            self.calls.append(i)
+            return {'summary': '[Interface]\nPrivateKey = secret\n\n=========== key\nvpn://encoded\n====', 'payload_json': ''}
+        with patch.object(OPERATIONS.intents, 'ensure_lease_scheduler'), \
+             patch.object(OPERATIONS.intents, 'run', side_effect=mutate):
+            first = OPERATIONS.execute('temporary_ensure', intent['command_id'], intent, path=self.path)
+            recovered = OPERATIONS.execute('temporary_ensure', intent['command_id'], intent, recover=True, path=self.path)
+            self.assertEqual(first, recovered)
+            self.assertEqual(first['vpn_key'], 'vpn://encoded')
+            self.assertNotIn('===========', first['wg_conf'])
+            self.assertEqual(len(self.calls), 1)
+            revoke = dict(intent, command_id=str(uuid4()), action='delete', revision=2)
+            revoke.pop('lease_seconds')
+            OPERATIONS.execute('temporary_revoke', revoke['command_id'], revoke, path=self.path)
+            with self.assertRaises(ValueError):
+                OPERATIONS.execute('temporary_ensure', intent['command_id'], intent, recover=True, path=self.path)
+
+    def test_rpc_rejects_unsupported_vless_and_conflicting_identity_before_scheduler(self):
+        for intent in (self.intent('xray'), self.intent(command_id='conflicting')):
+            with patch.object(OPERATIONS.intents, 'ensure_lease_scheduler') as scheduler:
+                with self.assertRaises(ValueError):
+                    command_id = intent['command_id'] if intent['protocol'] == 'xray' else 'request-id'
+                    OPERATIONS.execute('temporary_ensure', command_id, intent, path=self.path)
+                scheduler.assert_not_called()
+        self.assertFalse(self.path.exists())
+
+    def test_rpc_temporary_revoke_cannot_delete_permanent_peer(self):
+        intent = self.intent()
+        intent.pop('lease_seconds')
+        MODULE.apply(intent, self.path, self.mutate)
+        revoke = dict(intent, action='delete', revision=2, command_id=str(uuid4()))
+        with patch.object(OPERATIONS.intents, 'run') as mutate:
+            with self.assertRaises(ValueError):
+                OPERATIONS.execute('temporary_revoke', revoke['command_id'], revoke, path=self.path)
+            mutate.assert_not_called()
