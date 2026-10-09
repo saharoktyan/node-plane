@@ -50,6 +50,7 @@ fn accent_color(value: &str) -> Color {
 }
 
 enum Screen {
+    QuickStart,
     Form,
     Nodes,
     Temporary,
@@ -104,6 +105,9 @@ impl Screen {
 }
 #[derive(Clone, Copy)]
 enum Control {
+    QuickStartToggle,
+    QuickStartClose,
+    QuickStartAction,
     Action(Action),
     NodesSearch,
     NodesRegion(usize),
@@ -1560,6 +1564,20 @@ impl App {
             self.nodes_sidebar = false;
         }
         let key = match control {
+            Control::QuickStartToggle => {
+                self.connections.hide_quick_start = !self.connections.hide_quick_start;
+                let _ = self.connections.save(&self.state_dir);
+                return None;
+            }
+            Control::QuickStartClose => {
+                self.screen = Screen::Form;
+                return None;
+            }
+            Control::QuickStartAction => {
+                self.screen = Screen::Form;
+                self.begin_edit(true);
+                return None;
+            }
             Control::Temporary => {
                 self.open_temporary(None);
                 return None;
@@ -2119,6 +2137,9 @@ pub fn run(mut request: Request) -> Result<()> {
             )
         });
     app.load_connections(&request)?;
+    if !app.connections.hide_quick_start {
+        app.screen = Screen::QuickStart;
+    }
     let mut receiver: Option<mpsc::Receiver<Event>> = None;
     let mut worker = None;
     let mut nodes_worker = crate::nodes::Worker::new()?;
@@ -2395,6 +2416,7 @@ pub fn run(mut request: Request) -> Result<()> {
                     continue;
                 }
                 match app.screen {
+                    Screen::QuickStart => {}
                     Screen::Temporary => app.temporary_key(key),
                     Screen::Nodes => app.nodes_key(key),
                     Screen::NodeWizard => app.wizard_key(key),
@@ -2834,6 +2856,7 @@ fn draw(frame: &mut Frame, app: &App) -> Vec<Hit> {
         rows[0],
     );
     match app.screen {
+        Screen::QuickStart => draw_quick_start(frame, app, rows[1], &mut hits),
         Screen::Form => draw_form(frame, app, rows[1], &mut hits),
         Screen::Temporary => draw_temporary(frame, app, rows[1], &mut hits),
         Screen::Nodes => draw_nodes(frame, app, rows[1], &mut hits),
@@ -3030,6 +3053,9 @@ fn draw(frame: &mut Frame, app: &App) -> Vec<Hit> {
         app.error.as_str()
     } else {
         match app.screen {
+            Screen::QuickStart => {
+                "Tab / arrows: select   Enter / click: action   Esc: close"
+            }
             Screen::NodeWizard => {
                 "Tab / arrows: select   Enter / click: continue   Esc: previous step   Ctrl+C: exit"
             }
@@ -4300,6 +4326,35 @@ fn draw_channel(
         control: Control::Channel(editor, false),
     });
 }
+fn draw_quick_start(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
+    let right = draw_navigation(frame, app, area, hits);
+    let sections = dialog(frame, right, " Welcome to Node Plane Workstation! ");
+    let text = "Quick start guide:\n1. Select \"New\" to add a connection profile.\n2. Choose \"Local\" or \"SSH\" to connect to your target server.\n3. Enter the required details and press Enter to save.\n4. Select your new profile and use \"Install Node Plane\" to set up the controller.\n\nPasswords and bot tokens are not saved on disk.";
+    let layout = Layout::vertical([
+        Constraint::Min(8),
+        Constraint::Length(1),
+    ]).split(sections[0]);
+    frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: false }), layout[0]);
+    let checkbox_label = if app.connections.hide_quick_start {
+        "[X] Don't show this again"
+    } else {
+        "[ ] Don't show this again"
+    };
+    frame.render_widget(Paragraph::new(checkbox_label).style(Style::default().fg(Color::Cyan)), layout[1]);
+    hits.push(Hit {
+        area: layout[1],
+        control: Control::QuickStartToggle,
+    });
+    button_pair(
+        frame,
+        sections[1],
+        ("Close", "Quick start"),
+        app.confirm,
+        (Control::QuickStartClose, Control::QuickStartAction),
+        hits,
+    );
+}
+
 fn draw_form(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
     let labels = [
         "Controller hostname / IP",
@@ -4679,7 +4734,7 @@ fn draw_profiles(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) 
     }
     let count = app.connections.installations.len();
     if count == 0 {
-        frame.render_widget(Paragraph::new("Welcome to Node Plane Workstation!\n\nQuick start guide:\n1. Select \"New\" below to add a connection profile.\n2. Choose \"Local\" or \"SSH\" to connect to your target server.\n3. Enter the required details and press Enter to save.\n4. Select your new profile and use \"Install Node Plane\" to set up the controller.\n\nPasswords and bot tokens are not saved on disk.").wrap(Wrap { trim: false }), sections[0]);
+        frame.render_widget(Paragraph::new("No saved installations yet.\nCreate one here, or fill an action form; its connection will be remembered when you continue.\n\nPasswords and bot tokens are not saved.").wrap(Wrap { trim: false }), sections[0]);
     }
     let capacity = usize::from(sections[0].height / 3).max(1);
     let offset = app
