@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.3-alpha.64 - 2026-10-09
+
+- Run Workstation tests serially on Linux, macOS and Windows to avoid concurrent temporary-state locks.
+
+
 ## 0.4.3-alpha.63 - 2026-10-09
 
 - Fix Workstation builds with Rust 1.90 and make expiry and SSH test fixtures reliable across operating systems.
