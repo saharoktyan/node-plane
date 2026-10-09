@@ -2984,6 +2984,13 @@ fn draw_nodes(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
                 node.xray_transports.join(" · ")
             )));
         }
+        if let Some(overview) = &node.overview {
+            lines.extend(
+                crate::nodes::traffic_lines(overview)
+                    .into_iter()
+                    .map(Line::from),
+            );
+        }
         if let Some(operation) = app
             .nodes
             .operation

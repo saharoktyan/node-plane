@@ -9,6 +9,24 @@ from telegram_client.i18n import tr
 
 
 class AdminNodeRichTests(IsolatedAsyncioTestCase):
+    async def test_monthly_traffic_is_compact_and_disabled_or_unknown_is_not_zero(self):
+        for locale in ('ru', 'en'):
+            self.data['locale'] = locale
+            self.overview['traffic'] = {'month':'2026-10','status':'current','total_bytes':3072,
+                'items':[{'protocol':'xray','status':'current','uplink_bytes':1024,'downlink_bytes':0},
+                    {'protocol':'awg','status':'current','uplink_bytes':1024,'downlink_bytes':1024}]}
+            with patch.object(nodes, 'render', new_callable=AsyncMock) as draw:
+                await nodes.show_admin_node(123, 123, 77, 'msk1', self.bot, self.backend, self.state)
+            screen = draw.call_args.args[2]
+            self.assertIn('3.0 KiB · VLESS: 1.0 KiB · AWG: 2.0 KiB', screen.plain())
+            screen.rich(draw.call_args.args[3])
+            self.overview['traffic']['status'] = 'unknown'
+            self.assertIn('≈ 3.0 KiB', nodes.node_traffic_section(self.overview['traffic'], locale).lines[0])
+            self.overview['traffic']['total_bytes'] = None
+            self.overview['traffic']['items'][1]['uplink_bytes'] = None
+            self.assertIn('AWG: —', nodes.node_traffic_section(self.overview['traffic'], locale).lines[0])
+            self.assertIsNone(nodes.node_traffic_section(None, locale))
+
     async def test_full_cleanup_confirmation_lists_affected_profiles_and_resources(self):
         backend = SimpleNamespace(node_maintenance=AsyncMock(return_value={'affected_profiles': 3}))
         for locale in ('ru', 'en'):

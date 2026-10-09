@@ -70,7 +70,8 @@ class AlertService:
             )
             if not policy["enabled"]:
                 conn.execute(
-                    "UPDATE backend_alert_deliveries SET status='skipped' WHERE status='queued'"
+                    """UPDATE backend_alert_deliveries SET status='skipped' WHERE status='queued'
+                    AND event_id IN (SELECT id FROM backend_alert_events WHERE kind!='update_available')"""
                 )
         return policy
 
@@ -95,7 +96,8 @@ class AlertService:
                 )
             }
             for entry in conn.execute(
-                "SELECT status,COUNT(*) AS count FROM backend_alert_deliveries GROUP BY status"
+                """SELECT d.status,COUNT(*) AS count FROM backend_alert_deliveries d
+                JOIN backend_alert_events e ON e.id=d.event_id WHERE e.kind!='update_available' GROUP BY d.status"""
             ).fetchall():
                 counts[entry["status"]] = entry["count"]
             return {
@@ -345,21 +347,25 @@ class AlertService:
             key = str(UUID(key))
         except (ValueError, TypeError, AttributeError):
             raise AccessDenied("invalid_idempotency_key", 422) from None
+        selection = None
+        with self.db.connect() as conn:
+            pending_update = conn.execute("""SELECT 1 FROM backend_alert_deliveries d
+                JOIN backend_alert_events e ON e.id=d.event_id
+                WHERE d.status='queued' AND e.kind='update_available' LIMIT 1""").fetchone()
+        if pending_update:
+            from app.services import app_settings
+            selection = (app_settings.is_updates_auto_check_enabled(),
+                app_settings.get_updates_branch(), app_settings.get_updates_dev_track())
         timestamp = datetime.now(timezone.utc)
         with self.db.transaction() as conn:
             conn.execute('UPDATE backend_account_guard SET revision=revision+1 WHERE id=1')
             from .maintenance_gate import active
             if active(conn):
                 return None
-            from .maintenance_gate import active
-            if active(conn):
-                return False
             conn.execute(
                 "UPDATE backend_alert_deliveries SET status='unknown' WHERE status='claimed' AND claimed_until<=?",
                 (timestamp.isoformat(),),
             )
-            if not self._policy(conn)["enabled"]:
-                return None
             prior = conn.execute(
                 "SELECT * FROM backend_alert_deliveries WHERE claim_id=? AND adapter_id=?",
                 (key, principal.id),
@@ -373,6 +379,16 @@ class AlertService:
             for row in conn.execute(
                 "SELECT d.* FROM backend_alert_deliveries d JOIN backend_alert_events e ON e.id=d.event_id WHERE d.status='queued' ORDER BY e.created_at,e.id,d.id LIMIT 100"
             ).fetchall():
+                event = conn.execute('SELECT kind,payload_json FROM backend_alert_events WHERE id=?', (row['event_id'],)).fetchone()
+                update_notice = event['kind'] == 'update_available'
+                if update_notice:
+                    payload = json.loads(event['payload_json'])
+                    eligible = selection == (True, payload['branch'], payload['dev_track'])
+                else:
+                    eligible = self._policy(conn)['enabled']
+                if not eligible:
+                    conn.execute("UPDATE backend_alert_deliveries SET status='skipped' WHERE id=?", (row['id'],))
+                    continue
                 admin = conn.execute(
                     """SELECT 1 FROM backend_accounts a JOIN backend_external_identities i ON i.account_id=a.id AND i.provider='telegram'
                     WHERE a.id=? AND a.role='admin' AND a.status='approved' AND i.subject=?""",
@@ -385,7 +401,7 @@ class AlertService:
                     AND NOT EXISTS (SELECT 1 FROM backend_node_cleanup c WHERE c.node_key=n.key)""",
                     (row["event_id"],),
                 ).fetchone()
-                if not admin or not node:
+                if not admin or not (update_notice or node):
                     conn.execute(
                         "UPDATE backend_alert_deliveries SET status='skipped' WHERE id=?",
                         (row["id"],),

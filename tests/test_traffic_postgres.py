@@ -7,6 +7,7 @@ import os
 import unittest
 from datetime import datetime, timezone
 from uuid import uuid4
+from unittest.mock import patch
 
 from backend.traffic import TrafficService
 from backend.devices import DeviceRepository
@@ -67,3 +68,25 @@ class TrafficPostgresTests(unittest.TestCase):
             self.assertEqual(self.service.summary(owner, profile)['items'][0]['uplink_bytes'], 100)
         for owner, profile in [(None, 'owned'), ('admin', 'ownerless'), ('different', 'owned')]:
             self.assertEqual(self.service.summary(owner, profile)['items'], [])
+
+    def test_node_protocol_totals_use_postgres_upsert_and_idempotent_seed(self):
+        now = datetime.now(timezone.utc)
+        with self.db.transaction() as conn:
+            conn.execute("ALTER TABLE backend_nodes ADD COLUMN protocols_json TEXT DEFAULT '[\"xray\",\"awg\"]'")
+            conn.execute("INSERT INTO backend_devices(id,profile_id,display_name,runtime_name,status,created_at) VALUES ('device','owned','Phone','phone','active',?)", (now.isoformat(),))
+            for protocol in ('xray','awg'):
+                target = {'key':('owned','node',protocol,'device'), 'account_id':'admin'}
+                observation = {'identity':protocol, 'epoch':'a'*64, 'uplink_bytes':1000, 'downlink_bytes':2000}
+                self.service._record(conn,target,observation,now.isoformat())
+                observation.update(uplink_bytes=1100,downlink_bytes=2200)
+                from datetime import timedelta
+                self.service._record(conn,target,observation,(now+timedelta(seconds=1)).isoformat())
+        with patch.object(self.service, '_targets', return_value=[]):
+            summary = self.service.node_summary('node')
+            self.assertEqual(summary['total_bytes'],600)
+            self.assertEqual(summary['status'],'current')
+            with self.db.transaction() as conn:
+                conn.execute('DELETE FROM backend_node_traffic')
+            self.service.initialize_schema()
+            self.service.initialize_schema()
+            self.assertEqual(self.service.node_summary('node')['total_bytes'],600)

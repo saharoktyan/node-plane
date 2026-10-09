@@ -163,6 +163,25 @@ transfer historical usage to another account. Native counter reads do not reset
 counters or collect browsing history. Accounting is approximate, not a completed
 quota/billing enforcement contract.
 
+The administrator node overview (`GET /api/v1/nodes/{key}/overview`,
+`nodes.manage`) includes `traffic` for the current UTC month. It is null when
+accounting is disabled; otherwise it contains `month`, `status`, nullable
+`total_bytes` and per-protocol nullable upload/download totals. Missing samples
+are not zeroes. Anonymous node totals survive profile/device retirement and are
+reset with traffic baselines during backup restore. Node removal clears them.
+
+## Update auto-check
+
+Update preferences accept `auto_check_enabled` and
+`auto_check_interval_minutes` (15, 60, 360 or 1440; default 60), alongside branch
+and development-track selection. The overview returns the saved interval.
+Automatic checks enqueue one `update_available` notification per version and
+channel for approved Telegram administrators. The existing alert claim/ack
+transport delivers these independently of the server-monitoring switch, and
+rechecks recipient authorization and the selected update channel. Payloads
+contain `version`, `branch`, `dev_track` and optional bounded `changelog`.
+Closing the separate notification leaves the active control panel untouched.
+
 ## Controller cleanup (2026-10-01)
 
 `maintenance.manage` controls `/api/v1/system/cleanup`. GET reports supported

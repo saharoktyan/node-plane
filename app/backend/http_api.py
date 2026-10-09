@@ -39,6 +39,7 @@ from .node_lifecycle import NodeLifecycle
 from .admin_overview import AdminOverviewService
 from .node_overview import NodeOverviewService
 from .system_settings import SystemSettingsService
+from .traffic import TrafficService
 from .updates import UpdateService
 from .backups import BackupService
 from config import APP_VERSION, SSH_KEY
@@ -239,6 +240,7 @@ class AdminOverviewOutput(BaseModel):
 class UpdatePreferencesInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
     auto_check_enabled: bool | None = Field(default=None, strict=True)
+    auto_check_interval_minutes: Literal[15, 60, 360, 1440] | None = None
     branch: Literal['main', 'dev'] | None = None
     dev_track: Literal['tag', 'head'] | None = None
 
@@ -417,6 +419,20 @@ class AdminNodePage(BaseModel):
     next_cursor: str | None
 
 
+class NodeTrafficItem(BaseModel):
+    protocol: Literal['awg', 'xray']
+    status: Literal['current', 'waiting', 'unknown']
+    uplink_bytes: int | None
+    downlink_bytes: int | None
+
+
+class NodeTrafficSummary(BaseModel):
+    month: str
+    status: Literal['current', 'waiting', 'unknown']
+    total_bytes: int | None
+    items: list[NodeTrafficItem]
+
+
 class AdminNodeOverviewOutput(BaseModel):
     node_key: str
     enabled: bool
@@ -432,6 +448,7 @@ class AdminNodeOverviewOutput(BaseModel):
     attention: int
     last_job: dict | None = None
     removal_status: str | None = None
+    traffic: NodeTrafficSummary | None = None
 
 
 class NodeRuntimeObservation(BaseModel):
@@ -892,6 +909,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
                 conn.execute('SELECT key FROM backend_system_settings LIMIT 1').fetchone()
                 conn.execute('SELECT profile_id FROM backend_traffic_usage LIMIT 1').fetchone()
                 conn.execute('SELECT device_id FROM backend_traffic_peers LIMIT 1').fetchone()
+                conn.execute('SELECT node_key FROM backend_node_traffic LIMIT 1').fetchone()
                 conn.execute('SELECT id FROM backend_system_cleanup_jobs LIMIT 1').fetchone()
                 conn.execute('SELECT actor_account_id FROM backend_account_commands LIMIT 1').fetchone()
                 conn.execute('SELECT id FROM backend_account_guard LIMIT 1').fetchone()
@@ -1211,7 +1229,9 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
 
     @app.get('/api/v1/nodes/{node_key}/overview', response_model=AdminNodeOverviewOutput)
     def get_node_overview(node_key: str, current=Depends(actor)):
-        return node_overview.get(current, node_key)
+        result = node_overview.get(current, node_key)
+        result['traffic'] = TrafficService(db).node_summary(node_key)
+        return result
 
     @app.get('/api/v1/nodes/{node_key}/services')
     def get_node_services(node_key: str, current=Depends(actor)):
@@ -1615,6 +1635,8 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
             app_settings.set_updates_dev_track(values['dev_track'])
         if 'auto_check_enabled' in values:
             app_settings.set_updates_auto_check_enabled(values['auto_check_enabled'])
+        if 'auto_check_interval_minutes' in values:
+            app_settings.set_updates_check_interval_minutes(values['auto_check_interval_minutes'])
         return updates.get_updates_overview()
 
     @app.post('/api/v1/system/updates/check')

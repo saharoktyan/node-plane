@@ -19,7 +19,7 @@ Older evidence below records the state at each increment, not new prerequisites.
 1. Include the completed current UI fixes in the next release: restore the
    AWG preset port hint, use one Refresh action for live node/operation status,
    stretch incomplete button rows, preserve the header accent and Settings focus.
-2. Add monthly node traffic summaries to both server cards.
+2. Include completed monthly traffic and Auto-check changes in the next release.
 3. Add independent 24-hour VLESS/AWG configurations through Telegram and Workstation.
 4. Complete the Telegram Diagnostics & Recovery menu using existing backend
    recovery contracts; extend per-node workstation diagnostics as needed.
@@ -29,19 +29,31 @@ Older evidence below records the state at each increment, not new prerequisites.
 
 ### Monthly traffic on server cards
 
-- [ ] Add an administrator-authorized backend node summary for the current UTC
+- [x] Add an administrator-authorized backend node summary for the current UTC
   calendar month, shared by Telegram and Workstation. Aggregate accounted upload
   and download across profiles/devices and VLESS transports without double counting.
-- [ ] Show one compact line on each server card:
+- [x] Show one compact line on each server card:
   `All: … · VLESS: … · AWG: …`. All is the sum of VPN protocol traffic, not total
   host/interface traffic. Use the existing readable byte units and identify the
   month in the surrounding label.
-- [ ] Honor the installation-wide accounting switch. Do not display disabled,
+- [x] Honor the installation-wide accounting switch. Do not display disabled,
   missing, stale or incomplete statistics as measured zero or a complete total.
   Include already collected traffic for subsequently revoked profiles/devices.
-- [ ] Verify month rollover, both protocols, multiple AWG devices, empty/missing
+- [x] Verify month rollover, both protocols, multiple AWG devices, empty/missing
   samples, counter resets and collection being disabled; ensure node-card Refresh
   retrieves current totals.
+
+### Update auto-check and notifications
+
+- [x] Open a dedicated settings screen from Auto-check, with an explicit on/off
+  selection and intervals of 15 minutes, 1 hour, 6 hours and 1 day. Highlight the
+  Updates button while enabled.
+- [x] Notify approved administrators once per available version/channel, with the
+  current branch, optional collapsed release notes and a single Close button.
+  Keep the existing control panel and server monitoring policy independent.
+- [x] Review server alert detection, transition deduplication, recovery, unknown
+  measurements and recipient authorization through automated regression tests.
+  Live agent/container outages and Telegram delivery remain host acceptance checks.
 
 ### Temporary VPN configurations: 24 hours
 

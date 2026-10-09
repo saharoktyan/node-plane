@@ -182,7 +182,8 @@ async def show_overview(query, bot, backend, state, page=0, opened=False):
             title_key='updates.rich.outdated_servers'))
     sections.append(Section(tr(lang, 'updates.rich.checks'), rows=((
         button(tr(lang, 'updates.auto_on' if overview.get('auto_check_enabled') else 'updates.auto_off'),
-            UpdateActionCallback(action='auto_check').pack()),),)))
+            UpdateActionCallback(action='auto_check').pack()).model_copy(update={
+                'style': 'primary' if overview.get('auto_check_enabled') else None}),),)))
     sections.append(Section(tr(lang, 'updates.rich.selection'), rows=((
         button(tr(lang, 'updates.choose_branch'), UpdateActionCallback(action='branch_menu').pack()),
         button(tr(lang, 'update_tools.versions'), 'uv_page:0')),)))

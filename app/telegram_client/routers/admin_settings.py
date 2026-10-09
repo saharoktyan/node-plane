@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import hashlib
 from aiogram import Bot, F, Router
+from aiogram.exceptions import TelegramAPIError
 from aiogram.filters.callback_data import CallbackData
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -17,6 +18,15 @@ from .common import render
 from .admin_recovery import RecoveryPage
 
 router = Router()
+
+
+@router.callback_query(F.data == 'update_notice_close')
+async def update_notice_close(query: CallbackQuery) -> None:
+    await query.answer()
+    try:
+        await query.message.delete()
+    except TelegramAPIError:
+        pass
 
 
 class RequestPolicyState(StatesGroup):
@@ -63,8 +73,7 @@ async def admin_settings_cb(query: CallbackQuery, bot: Bot,
          InlineKeyboardButton(text=tr(locale, 'backups.title'), callback_data='backups')],
         [InlineKeyboardButton(text=tr(locale, 'alerts.title'), callback_data='alerts'),
          InlineKeyboardButton(text=tr(locale, 'traffic.title'), callback_data='traffic')],
-        [InlineKeyboardButton(text=tr(locale, 'settings.admin.ssh_key'), callback_data=SshKeyCallback().pack()),
-         InlineKeyboardButton(text=tr(locale, 'recovery.title'), callback_data=RecoveryPage().pack())],
+        [InlineKeyboardButton(text=tr(locale, 'settings.admin.ssh_key'), callback_data=SshKeyCallback().pack())],
         [InlineKeyboardButton(text=tr(locale, 'system_cleanup.title'), callback_data='system_cleanup', style='danger')],
         [InlineKeyboardButton(text=tr(locale, 'back'), callback_data='admin_menu')],
     ]
@@ -72,6 +81,7 @@ async def admin_settings_cb(query: CallbackQuery, bot: Bot,
         Section(tr(locale, 'settings.rich.access'), rows=(tuple(rows[0]),)),
         Section(tr(locale, 'settings.rich.monitoring'), rows=(tuple(rows[2]),)),
         Section(tr(locale, 'settings.rich.maintenance'), rows=(tuple(rows[1]), tuple(rows[3]),
+            (InlineKeyboardButton(text=tr(locale, 'recovery.title'), callback_data=RecoveryPage().pack()),),
             (InlineKeyboardButton(text=tr(locale, 'defaults.title'), callback_data='idefault:open'),))),
         Section(tr(locale, 'settings.rich.danger'), collapsed=True, rows=(tuple(rows[4]),)))
     await render(bot, query.message.chat.id, Screen(tr(locale, 'settings.admin.title'),
@@ -329,6 +339,30 @@ async def show_updates(query: CallbackQuery, bot: Bot, backend: BackendClient,
     await show_overview(query, bot, backend, state)
 
 
+async def show_auto_check(query, bot, backend, state):
+    locale = await _locale(state)
+    overview = await backend.updates_overview(query.from_user.id)
+    enabled = overview.get('auto_check_enabled', False)
+    interval = overview.get('auto_check_interval_minutes', 60)
+    def choice(label, action, selected):
+        return InlineKeyboardButton(text=tr(locale, label),
+            callback_data=UpdateActionCallback(action=action).pack(),
+            style='primary' if selected else None)
+    sections = (
+        Section('', rows=((choice('updates.auto_enable', 'auto_enable', enabled),
+            choice('updates.auto_disable', 'auto_disable', not enabled)),)),
+        Section(tr(locale, 'updates.auto_frequency'), rows=(
+            tuple(choice('updates.auto_interval.' + str(minutes), 'auto_interval_' + str(minutes), interval == minutes)
+                for minutes in (15, 60)),
+            tuple(choice('updates.auto_interval.' + str(minutes), 'auto_interval_' + str(minutes), interval == minutes)
+                for minutes in (360, 1440)))),
+    )
+    await render(bot, query.message.chat.id, Screen(tr(locale, 'updates.auto_title'),
+        sections=sections, embedded_buttons=True, navigation=True),
+        [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data=UpdatesCallback().pack())]],
+        state, query.message.message_id)
+
+
 async def show_update_branches(query: CallbackQuery, bot: Bot,
                                backend: BackendClient, state: FSMContext) -> None:
     locale = await _locale(state)
@@ -380,10 +414,14 @@ async def update_action_cb(query: CallbackQuery, callback_data: UpdateActionCall
             await backend.check_updates(query.from_user.id)
             await show_updates(query, bot, backend, state)
         elif action == 'auto_check':
-            overview = await backend.updates_overview(query.from_user.id)
+            await show_auto_check(query, bot, backend, state)
+        elif action in {'auto_enable', 'auto_disable'}:
+            await backend.update_preferences(query.from_user.id, {'auto_check_enabled': action == 'auto_enable'})
+            await show_auto_check(query, bot, backend, state)
+        elif action.startswith('auto_interval_') and action.removeprefix('auto_interval_') in {'15', '60', '360', '1440'}:
             await backend.update_preferences(query.from_user.id,
-                {'auto_check_enabled': not overview.get('auto_check_enabled', False)})
-            await show_updates(query, bot, backend, state)
+                {'auto_check_interval_minutes': int(action.removeprefix('auto_interval_'))})
+            await show_auto_check(query, bot, backend, state)
         elif action == 'branch_menu':
             await show_update_branches(query, bot, backend, state)
         elif action in {'branch_main', 'branch_dev'}:

@@ -49,6 +49,31 @@ class UpdatesTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.tmpdir.cleanup()
 
+    def test_auto_check_frequency_is_persisted_and_validated(self):
+        self.assertEqual(self.app_settings.get_updates_check_interval_minutes(), 60)
+        for minutes in (15, 60, 360, 1440):
+            self.app_settings.set_updates_check_interval_minutes(minutes)
+            self.assertEqual(self.app_settings.get_updates_check_interval_minutes(), minutes)
+            self.assertEqual(self.updates.get_updates_overview()['auto_check_interval_minutes'], minutes)
+        for invalid in (True, 10, 60.0, '60'):
+            with self.assertRaises(ValueError):
+                self.app_settings.set_updates_check_interval_minutes(invalid)
+
+    def test_changelog_is_optional_bounded_and_uses_only_release_tags(self):
+        import json
+        from unittest.mock import MagicMock
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = json.dumps({
+            'tag_name':'v9.0.0', 'body':'notes' * 1000, 'draft':False}).encode()
+        with patch('services.updates.urllib.request.urlopen', return_value=response) as request:
+            self.assertEqual(len(self.updates.get_release_changelog('v9.0.0')), 1800)
+            self.assertEqual(self.updates.get_release_changelog('origin/dev'), '')
+            self.assertEqual(request.call_count, 1)
+            response.__enter__.return_value.read.return_value = b'[]'
+            self.assertEqual(self.updates.get_release_changelog('v9.0.0'), '')
+        with patch('services.updates.urllib.request.urlopen', side_effect=OSError):
+            self.assertEqual(self.updates.get_release_changelog('v9.0.0'), '')
+
     def test_check_for_updates_records_available_state(self) -> None:
         proc = SimpleNamespace(
             returncode=0,

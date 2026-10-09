@@ -51,6 +51,24 @@ class TrafficService:
                 epoch TEXT, identity TEXT, last_uplink BIGINT, last_downlink BIGINT,
                 last_sample_at TEXT,status TEXT NOT NULL,
                 PRIMARY KEY(profile_id,node_key,device_id))''')
+            # Node totals outlive profile ownership changes and peer retirement.
+            # They contain no user identity and are not configuration backups.
+            conn.execute('''CREATE TABLE IF NOT EXISTS backend_node_traffic (
+                node_key TEXT NOT NULL REFERENCES backend_nodes(key) ON DELETE CASCADE,
+                protocol TEXT NOT NULL CHECK(protocol IN ('awg','xray')),
+                period_month TEXT NOT NULL,
+                uplink_bytes BIGINT NOT NULL, downlink_bytes BIGINT NOT NULL,
+                tracked_since TEXT NOT NULL, last_sample_at TEXT NOT NULL,
+                PRIMARY KEY(node_key,protocol))''')
+            conn.execute('''INSERT INTO backend_node_traffic
+                (node_key,protocol,period_month,uplink_bytes,downlink_bytes,tracked_since,last_sample_at)
+                SELECT node_key,protocol,period_month,SUM(uplink_bytes),SUM(downlink_bytes),
+                    MIN(tracked_since),MAX(last_sample_at)
+                FROM backend_traffic_usage WHERE tracked_since IS NOT NULL
+                    AND last_sample_at IS NOT NULL AND period_month=?
+                GROUP BY node_key,protocol,period_month
+                ON CONFLICT(node_key,protocol) DO NOTHING''',
+                (datetime.now(timezone.utc).strftime('%Y-%m'),))
 
     @staticmethod
     def _enabled(conn):
@@ -73,7 +91,7 @@ class TrafficService:
             ON CONFLICT(profile_id,node_key,device_id) DO NOTHING''')
 
     @staticmethod
-    def _targets(conn):
+    def _targets(conn, node_key=None):
         rows = conn.execute("""SELECT p.id,p.owner_account_id,g.node_key,g.protocol,d.id AS device_id
             FROM backend_profiles p JOIN backend_grants g ON g.profile_id=p.id
             LEFT JOIN backend_accounts a ON a.id=p.owner_account_id
@@ -81,7 +99,8 @@ class TrafficService:
             WHERE (p.owner_account_id IS NULL OR a.status='approved')
             AND NOT EXISTS (SELECT 1 FROM backend_profile_deletions d WHERE d.profile_id=p.id)
             AND (g.protocol!='awg' OR d.id IS NOT NULL)
-            ORDER BY p.id,g.node_key,g.protocol,d.id""").fetchall()
+            AND (? = '' OR g.node_key = ?)
+            ORDER BY p.id,g.node_key,g.protocol,d.id""", (node_key or '', node_key or '')).fetchall()
         targets = []
         for row in rows:
             try:
@@ -271,6 +290,17 @@ class TrafficService:
                 key,
             )
             return
+        conn.execute('''INSERT INTO backend_node_traffic
+            (node_key,protocol,period_month,uplink_bytes,downlink_bytes,tracked_since,last_sample_at)
+            VALUES (?,?,?,?,?,?,?) ON CONFLICT(node_key,protocol) DO UPDATE SET
+                uplink_bytes=CASE WHEN backend_node_traffic.period_month=excluded.period_month
+                    THEN backend_node_traffic.uplink_bytes+excluded.uplink_bytes ELSE excluded.uplink_bytes END,
+                downlink_bytes=CASE WHEN backend_node_traffic.period_month=excluded.period_month
+                    THEN backend_node_traffic.downlink_bytes+excluded.downlink_bytes ELSE excluded.downlink_bytes END,
+                tracked_since=CASE WHEN backend_node_traffic.period_month=excluded.period_month
+                    THEN backend_node_traffic.tracked_since ELSE excluded.tracked_since END,
+                period_month=excluded.period_month,last_sample_at=excluded.last_sample_at''',
+            (key[1],key[2],month,*increments,timestamp,timestamp))
         peer_status = 'current'
         if peer_key:
             conn.execute('''UPDATE backend_traffic_peers SET epoch=?,identity=?,last_uplink=?,last_downlink=?,
@@ -389,6 +419,45 @@ class TrafficService:
                     (key, json.dumps(value)),
                 )
         return True
+
+    def node_summary(self, node_key):
+        # Caller authorizes administrator access via NodeOverviewService first.
+        now = datetime.now(timezone.utc)
+        month = now.strftime('%Y-%m')
+        stale = (now - timedelta(minutes=15)).isoformat()
+        with self.db.connect() as conn:
+            if not self._enabled(conn):
+                return None
+            rows = {r['protocol']: dict(r) for r in conn.execute(
+                'SELECT * FROM backend_node_traffic WHERE node_key=? AND period_month=?',
+                (node_key,month)).fetchall()}
+            protocols = json.loads(conn.execute(
+                'SELECT protocols_json FROM backend_nodes WHERE key=?', (node_key,)).fetchone()['protocols_json'])
+            targets = self._targets(conn, node_key)
+            items = []
+            for protocol in ('xray', 'awg'):
+                row = rows.get(protocol)
+                active = [t for t in targets if t['key'][2] == protocol]
+                unknown = False
+                for target in active:
+                    if protocol == 'awg':
+                        sample = conn.execute('''SELECT status,last_sample_at FROM backend_traffic_peers
+                            WHERE profile_id=? AND node_key=? AND device_id=?''',
+                            (target['key'][0],node_key,target['key'][3])).fetchone()
+                    else:
+                        sample = conn.execute('''SELECT status,last_sample_at FROM backend_traffic_usage
+                            WHERE profile_id=? AND node_key=? AND protocol='xray' ''',
+                            (target['key'][0],node_key)).fetchone()
+                    unknown |= not sample or sample['status'] != 'current' or not sample['last_sample_at'] or sample['last_sample_at'] < stale
+                unused = protocol not in protocols and not row and not active
+                status = 'unknown' if unknown else 'current' if row or unused else 'waiting'
+                items.append({'protocol': protocol, 'status': status,
+                    'uplink_bytes': row['uplink_bytes'] if row else 0 if unused else None,
+                    'downlink_bytes': row['downlink_bytes'] if row else 0 if unused else None})
+            known = all(item['uplink_bytes'] is not None for item in items)
+            status = 'unknown' if any(i['status'] == 'unknown' for i in items) else 'current' if known else 'waiting'
+            return {'month':month, 'status':status, 'items':items,
+                'total_bytes':sum(i['uplink_bytes'] + i['downlink_bytes'] for i in items) if known else None}
 
     def summary(self, account_id, profile_id):
         # Caller must first authorize ownership through ProfileService.

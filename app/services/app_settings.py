@@ -8,6 +8,7 @@ from db import ensure_schema, get_db
 _db = get_db()
 
 _UPDATES_AUTO_CHECK_KEY = "updates_auto_check_enabled"
+_UPDATES_CHECK_INTERVAL_KEY = "updates_check_interval_minutes"
 
 _UPDATES_LAST_CHECKED_AT_KEY = "updates_last_checked_at"
 
@@ -74,6 +75,16 @@ def is_updates_auto_check_enabled() -> bool:
 def set_updates_auto_check_enabled(enabled: bool) -> bool:
     _meta_set(_UPDATES_AUTO_CHECK_KEY, "1" if enabled else "0")
     return enabled
+
+def get_updates_check_interval_minutes() -> int:
+    value = _meta_get(_UPDATES_CHECK_INTERVAL_KEY, "60")
+    return int(value) if value in {"15", "60", "360", "1440"} else 60
+
+def set_updates_check_interval_minutes(minutes: int) -> int:
+    if type(minutes) is not int or minutes not in {15, 60, 360, 1440}:
+        raise ValueError("Unsupported update check interval")
+    _meta_set(_UPDATES_CHECK_INTERVAL_KEY, str(minutes))
+    return minutes
 
 def get_updates_branch() -> str:
     value = _meta_get(_UPDATES_BRANCH_KEY, UPDATE_BRANCH or "main").strip().lower()

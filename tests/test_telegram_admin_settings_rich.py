@@ -19,6 +19,9 @@ class AdminSettingsRichTests(IsolatedAsyncioTestCase):
             screen, rows = draw.call_args.args[2:4]
             self.assertEqual(len(screen.sections), 4)
             self.assertTrue(screen.sections[-1].collapsed)
+            recovery_rows = [row for section in screen.sections for row in section.rows
+                if any(b.callback_data == settings.RecoveryPage().pack() for b in row)]
+            self.assertEqual([len(row) for row in recovery_rows], [1])
             callbacks = [b.callback_data for row in screen.fallback_rows(rows) for b in row]
             for value in ('bot_title_settings', 'backups', 'alerts', 'traffic', 'system_cleanup', 'admin_menu'):
                 self.assertIn(value, callbacks)
@@ -71,3 +74,32 @@ class AdminSettingsRichTests(IsolatedAsyncioTestCase):
         self.assertEqual(screen.sections, ())
         self.assertTrue(screen.embedded_buttons)
         self.assertEqual(len(rows), 1)
+
+    async def test_auto_check_opens_settings_without_toggling_and_highlights_values(self):
+        backend = SimpleNamespace(updates_overview=AsyncMock(return_value={
+            'auto_check_enabled':True, 'auto_check_interval_minutes':360}),
+            update_preferences=AsyncMock())
+        for locale in ('en', 'ru'):
+            self.state_data['locale'] = locale
+            self.query.data = 'upd_act:auto_check'
+            with patch.object(settings, 'render', new_callable=AsyncMock) as draw:
+                await settings.update_action_cb(self.query, settings.UpdateActionCallback.unpack(self.query.data), self.bot, backend, self.state)
+            backend.update_preferences.assert_not_called()
+            screen, rows = draw.call_args.args[2:4]
+            self.assertEqual(screen.sections[0].rows[0][0].style, 'primary')
+            choices = [b for row in screen.sections[1].rows for b in row]
+            self.assertEqual([b.callback_data for b in choices if b.style == 'primary'], ['upd_act:auto_interval_360'])
+            self.assertEqual(rows[-1][0].callback_data, 'updates')
+            screen.rich(rows)
+        self.query.data = 'upd_act:auto_interval_15'
+        with patch.object(settings, 'show_auto_check', new_callable=AsyncMock):
+            await settings.update_action_cb(self.query, settings.UpdateActionCallback.unpack(self.query.data), self.bot, backend, self.state)
+        backend.update_preferences.assert_awaited_once_with(123, {'auto_check_interval_minutes':15})
+
+    async def test_update_notification_close_preserves_control_panel(self):
+        self.state_data['control_message_id'] = 999
+        before = dict(self.state_data)
+        self.query.message.delete = AsyncMock()
+        await settings.update_notice_close(self.query)
+        self.query.message.delete.assert_awaited_once()
+        self.assertEqual(self.state_data, before)

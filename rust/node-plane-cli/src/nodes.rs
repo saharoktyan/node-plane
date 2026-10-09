@@ -403,6 +403,66 @@ fn operation(value: &Value, kind: &str, key: &str) -> Result<Operation> {
     })
 }
 
+pub fn traffic_lines(overview: &Value) -> Vec<String> {
+    let Some(traffic) = overview.get("traffic").filter(|value| value.is_object()) else {
+        return Vec::new();
+    };
+    let amount = |bytes: Option<u64>, status: &str| {
+        let Some(bytes) = bytes else {
+            return "—".to_string();
+        };
+        let mut value = bytes as f64;
+        let mut unit = "B";
+        for next in ["KiB", "MiB", "GiB", "TiB", "PiB", "EiB"] {
+            if value < 1024.0 {
+                break;
+            }
+            value /= 1024.0;
+            unit = next;
+        }
+        let number = if unit == "B" {
+            bytes.to_string()
+        } else {
+            format!("{value:.1}")
+        };
+        format!(
+            "{}{number} {unit}",
+            if status == "unknown" { "≈ " } else { "" }
+        )
+    };
+    let status = traffic["status"].as_str().unwrap_or("unknown");
+    let mut parts = vec![format!(
+        "All: {}",
+        amount(traffic["total_bytes"].as_u64(), status)
+    )];
+    for (protocol, label) in [("xray", "VLESS"), ("awg", "AWG")] {
+        let item = traffic["items"]
+            .as_array()
+            .and_then(|items| items.iter().find(|item| item["protocol"] == protocol));
+        let bytes = item.and_then(|item| {
+            item["uplink_bytes"]
+                .as_u64()?
+                .checked_add(item["downlink_bytes"].as_u64()?)
+        });
+        parts.push(format!(
+            "{label}: {}",
+            amount(
+                bytes,
+                item.and_then(|item| item["status"].as_str())
+                    .unwrap_or("waiting")
+            )
+        ));
+    }
+    let mut lines = vec![
+        format!("Traffic · {} (UTC)", clean(&traffic["month"])),
+        parts.join(" · "),
+    ];
+    if status == "unknown" {
+        lines.push("Some traffic totals may be incomplete.".into());
+    }
+    lines
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ConnectionState {
     #[default]
@@ -801,6 +861,28 @@ mod tests {
         )
         .unwrap()
     }
+    #[test]
+    fn monthly_traffic_formats_missing_and_partial_measurements() {
+        assert!(traffic_lines(&json!({})).is_empty());
+        let lines = traffic_lines(&json!({"traffic":{"month":"2026-10","status":"current",
+            "total_bytes":2048,"items":[{"protocol":"xray","status":"current",
+            "uplink_bytes":1024,"downlink_bytes":0},{"protocol":"awg","status":"current",
+            "uplink_bytes":512,"downlink_bytes":512}]}}));
+        assert!(
+            lines
+                .join("\n")
+                .contains("All: 2.0 KiB · VLESS: 1.0 KiB · AWG: 1.0 KiB")
+        );
+        let lines = traffic_lines(&json!({"traffic":{"month":"2026-10","status":"unknown",
+            "total_bytes":null,"items":[{"protocol":"xray","status":"unknown",
+            "uplink_bytes":1024,"downlink_bytes":0}]}}));
+        assert!(
+            lines
+                .join("\n")
+                .contains("All: — · VLESS: ≈ 1.0 KiB · AWG: —")
+        );
+    }
+
     #[test]
     fn protocol_status_distinguishes_missing_stopped_and_running_with_legacy_fallback() {
         let mut node = fixture("lv1", "Europe");

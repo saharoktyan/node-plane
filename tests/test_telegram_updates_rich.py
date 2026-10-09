@@ -70,6 +70,10 @@ class UpdatesRichTests(IsolatedAsyncioTestCase):
             with patch.object(updates, 'render', new_callable=AsyncMock) as draw:
                 await updates.show_overview(self.query, self.bot, backend, self.state)
             screen, rows = draw.call_args.args[2:4]
+            auto_buttons = [b for row in screen.fallback_rows(rows) for b in row
+                if b.callback_data == 'upd_act:auto_check']
+            self.assertEqual(len(auto_buttons),1)
+            self.assertEqual(auto_buttons[0].style,'primary')
             self.assertEqual(len(screen.sections[0].tables[0].rows), 4)
             self.assertTrue(screen.sections[2].collapsed)
             self.assertEqual(len(screen.sections[2].sections[0].sections), 10)

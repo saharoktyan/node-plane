@@ -1700,6 +1700,8 @@ CATALOG["ru"].update({
 })
 
 CATALOG['en'].update({
+    'nodes.traffic.month': 'Traffic · {month} (UTC)',
+    'nodes.traffic.all': 'All',
     'traffic.title': 'Traffic statistics',
     'pagination.previous': '←',
     'pagination.next': '→',
@@ -1723,6 +1725,8 @@ CATALOG['en'].update({
     'traffic.sample': 'Tracked since {since} UTC · Last sample {at} UTC',
 })
 CATALOG['ru'].update({
+    'nodes.traffic.month': 'Трафик · {month} (UTC)',
+    'nodes.traffic.all': 'Всего',
     'traffic.title': 'Статистика трафика',
     'pagination.previous': '←',
     'pagination.next': '→',
@@ -2447,4 +2451,29 @@ CATALOG['ru'].update({
     'node_tools.effect.sync_xray': 'Восстановить установку VLESS.',
     'node_tools.effect.regenerate_entropy': 'Сгенерировать новые параметры AmneziaWG. Пользователям понадобятся новые конфиги.',
     'node_tools.effect.reconcile_access': 'Применить права доступа профилей на сервере.',
+})
+
+
+CATALOG['en'].update({
+    'updates.auto_title': 'Auto-check',
+    'updates.auto_enable': 'On', 'updates.auto_disable': 'Off',
+    'updates.auto_frequency': 'Check every',
+    'updates.auto_interval.15': '15 minutes', 'updates.auto_interval.60': '1 hour',
+    'updates.auto_interval.360': '6 hours', 'updates.auto_interval.1440': '1 day',
+    'updates.notice.title': 'New version available',
+    'updates.notice.version': 'Version: {value}',
+    'updates.notice.branch': 'Branch: {value}',
+    'updates.notice.changelog': 'Changelog',
+})
+CATALOG['ru'].update({
+    'updates.auto_title': 'Автопроверка',
+    'updates.auto_enable': 'Включить', 'updates.auto_disable': 'Выключить',
+    'updates.auto_frequency': 'Проверять каждые',
+    'updates.auto_interval.15': '15 минут', 'updates.auto_interval.60': '1 час',
+    'updates.auto_interval.360': '6 часов', 'updates.auto_interval.1440': '1 день',
+    'updates.notice.title': 'Доступна новая версия',
+    'updates.notice.version': 'Версия: {value}',
+    'updates.notice.branch': 'Ветка: {value}',
+    'updates.notice.changelog': 'Изменения',
+    'updates.auto_on': 'Автопроверка', 'updates.auto_off': 'Автопроверка',
 })
