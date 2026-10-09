@@ -41,6 +41,7 @@ async def show(query, bot, state, *, error=None):
         sections.append(Section(tr(locale, 'defaults.transports'), rows=transport_rows))
     if not advanced and 'awg' in draft['protocols']:
         sections.append(Section(tr(locale, 'defaults.awg'),
+            lines=(tr(locale, 'defaults.port_policy'),),
             rows=(tuple(button(preset.upper(), 'preset:' + preset,
                 selected=settings.get('awg_i1_preset', 'quic') == preset)
                 for preset in ('quic', 'dns', 'chaos')),

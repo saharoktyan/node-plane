@@ -118,9 +118,7 @@ enum Control {
     WizardOpen,
     NodesSetup,
     NodesBootstrap,
-    NodesInspect,
     NodesDocker,
-    NodesObserve,
     NodesPage(bool),
     QuickProfile,
     CycleProfile(bool),
@@ -451,8 +449,14 @@ impl App {
     }
     fn open_settings(&mut self) {
         self.quick_focus = false;
+        self.settings_selected = match self.screen {
+            Screen::SettingsPage(page) => SettingsPage::ALL
+                .iter()
+                .position(|entry| *entry == page)
+                .map_or(1, |index| index + 1),
+            _ => 0,
+        };
         self.screen = Screen::Settings;
-        self.settings_selected = 0;
         self.error.clear();
     }
     fn appearance_key(&mut self, key: KeyCode) {
@@ -632,9 +636,7 @@ impl App {
                         | Control::NodesNew
                         | Control::NodesSetup
                         | Control::NodesBootstrap
-                        | Control::NodesInspect
                         | Control::NodesDocker
-                        | Control::NodesObserve
                         | Control::NodesPage(_)
                 )
             })
@@ -1054,22 +1056,6 @@ impl App {
                     }
                     self.nodes.card = Some(item);
                 }
-                crate::nodes::Update::Services(key, facts) => {
-                    if let Some(item) = &mut self.nodes.card
-                        && item.key == key
-                    {
-                        item.services = Some(facts);
-                        item.agent = crate::nodes::AgentState::Ready;
-                    }
-                }
-                crate::nodes::Update::Agent(key, agent) => {
-                    if let Some(item) = &mut self.nodes.card
-                        && item.key == key
-                    {
-                        item.agent = agent;
-                        item.services = None;
-                    }
-                }
                 crate::nodes::Update::List(items) => {
                     self.nodes.items = items;
                     self.nodes.loaded = true;
@@ -1457,14 +1443,6 @@ impl App {
                 }
                 return None;
             }
-            Control::NodesInspect => {
-                if let Some(node) = &mut self.nodes.card {
-                    node.services = None;
-                    node.agent = crate::nodes::AgentState::Unknown;
-                    self.nodes_requested = Some(crate::nodes::Command::Inspect(node.key.clone()));
-                }
-                return None;
-            }
             Control::NodesSetup | Control::NodesBootstrap | Control::NodesDocker => {
                 if let Some(node) = &self.nodes.card {
                     self.nodes_requested = Some(if matches!(control, Control::NodesSetup) {
@@ -1474,12 +1452,6 @@ impl App {
                     } else {
                         crate::nodes::Command::Bootstrap(node.clone())
                     });
-                }
-                return None;
-            }
-            Control::NodesObserve => {
-                if let Some(operation) = &self.nodes.operation {
-                    self.nodes_requested = Some(crate::nodes::Command::Observe(operation.clone()));
                 }
                 return None;
             }
@@ -2422,7 +2394,6 @@ fn draw(frame: &mut Frame, app: &App) -> Vec<Hit> {
     ])
     .split(area);
     let header = Layout::horizontal([Constraint::Min(0), Constraint::Length(17)]).split(rows[0]);
-    frame.render_widget(Block::default().borders(Borders::BOTTOM), rows[0]);
     frame.render_widget(
         Paragraph::new("Node Plane | Workstation assistant").style(
             Style::default()
@@ -2436,6 +2407,12 @@ fn draw(frame: &mut Frame, app: &App) -> Vec<Hit> {
             .alignment(ratatui::layout::Alignment::Right)
             .style(Style::default().fg(Color::Gray)),
         header[1],
+    );
+    frame.render_widget(
+        Block::default()
+            .borders(Borders::BOTTOM)
+            .border_style(Style::default().fg(Color::Cyan)),
+        rows[0],
     );
     match app.screen {
         Screen::Form => draw_form(frame, app, rows[1], &mut hits),
@@ -3025,9 +3002,6 @@ fn draw_nodes(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
                 }
             )));
             lines.push(Line::from(operation.id.to_string()));
-            if operation.status != "rejected" {
-                actions.push(("Operation status", Control::NodesObserve));
-            }
         }
         if let Some(facts) = &node.services {
             lines.push(Line::from(format!(
@@ -3052,7 +3026,6 @@ fn draw_nodes(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
                     "succeeded" | "failed" | "cancelled" | "rejected"
                 )
         });
-        actions.push(("Check status", Control::NodesInspect));
         if !busy {
             if node.transport.is_some() && node.agent == crate::nodes::AgentState::Missing {
                 actions.push(("Agent setup", Control::NodesSetup));
@@ -3180,8 +3153,9 @@ fn draw_nodes(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
     for (position, (label, control)) in actions.into_iter().enumerate() {
         let row = position / per_row;
         let column = position % per_row;
+        let row_count = (count - row * per_row).min(per_row);
         let columns =
-            Layout::horizontal(vec![Constraint::Ratio(1, per_row as u32); per_row]).split(
+            Layout::horizontal(vec![Constraint::Ratio(1, row_count as u32); row_count]).split(
                 Rect::new(rows[2].x, rows[2].y + row as u16 * 3, rows[2].width, 3),
             );
         draw_button(frame, columns[column], label, selected(index));
@@ -5437,11 +5411,11 @@ mod tests {
                 .iter()
                 .any(|c| matches!(c, Control::NodesBootstrap))
         );
-        app.activate(Control::NodesInspect);
-        assert!(app.nodes.card.as_ref().unwrap().services.is_none());
+        app.activate(Control::NodesRefresh);
+        assert!(app.nodes.card.as_ref().unwrap().services.is_some());
         assert!(matches!(
             app.nodes_requested.take(),
-            Some(crate::nodes::Command::Inspect(_))
+            Some(crate::nodes::Command::Card(_))
         ));
         app.nodes.card = Some(node.clone());
         app.nodes.operation = Some(crate::nodes::Operation {
@@ -5457,7 +5431,7 @@ mod tests {
         assert!(
             app.nodes_controls()
                 .iter()
-                .any(|c| matches!(c, Control::NodesObserve))
+                .any(|c| matches!(c, Control::NodesRefresh))
         );
         assert!(
             !app.nodes_controls()
@@ -5480,10 +5454,11 @@ mod tests {
         app.open_settings();
         assert!(app.section_navigation(KeyCode::Right));
         assert_eq!(app.settings_selected, 1);
-        for page in SettingsPage::ALL {
+        for (index, page) in SettingsPage::ALL.into_iter().enumerate() {
             app.activate(Control::SettingsPage(page));
             assert!(app.section_navigation(KeyCode::Esc));
             assert!(matches!(app.screen, Screen::Settings));
+            assert_eq!(app.settings_selected, index + 1);
             assert!(!app.exit);
         }
         assert!(!app.section_navigation(KeyCode::Esc));
@@ -5511,11 +5486,21 @@ mod tests {
             terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
             let count = app.nodes_controls().len();
             let per_row = count.div_ceil(2);
+            let areas: Vec<_> = app.nodes_hits().iter().map(|hit| hit.area).collect();
+            assert_eq!(count, 5);
+            let first = &areas[..per_row];
+            let last = &areas[per_row..];
+            assert_eq!(first[0].x, last[0].x);
+            assert_eq!(first.last().unwrap().right(), last.last().unwrap().right());
+            assert!(last[0].width > first[0].width);
+            assert!(last[0].width.abs_diff(last[1].width) <= 1);
             app.nodes_selected = per_row;
             app.nodes_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
             assert_eq!(app.nodes_selected, 0);
             app.nodes_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
             assert_eq!(app.nodes_selected, 1);
+            app.nodes_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+            assert_eq!(app.nodes_selected, 2);
             app.nodes_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
             assert_eq!(app.nodes_selected, per_row + 1);
             app.nodes_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
@@ -5558,6 +5543,7 @@ mod tests {
             );
         }
         let mut areas = None;
+        app.connections.accent = "#ffbb74".into();
         for state in [
             crate::nodes::ConnectionState::Closed,
             crate::nodes::ConnectionState::Connecting,
@@ -5573,6 +5559,10 @@ mod tests {
             let buffer = terminal.backend().buffer();
             let text: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
             assert!(text.contains(state.label()));
+            for x in 0..buffer.area.width {
+                assert_eq!(buffer[(x, 2)].symbol(), "─");
+                assert_eq!(buffer[(x, 2)].fg, Color::Rgb(255, 187, 116));
+            }
         }
     }
     #[test]
