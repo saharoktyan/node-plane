@@ -41,9 +41,9 @@ jobs:
         with:
           persist-credentials: false
       - name: Rust toolchain
-        run: rustup toolchain install 1.89.0 --profile minimal --component rustfmt --component clippy
+        run: rustup toolchain install 1.90.0 --profile minimal --component rustfmt --component clippy
       - name: Format
-        run: cargo +1.89.0 fmt --check
+        run: cargo +1.90.0 fmt --check
       - name: Unix installer syntax
         if: runner.os != 'Windows'
         run: bash -n ../../scripts/install_workstation.sh
@@ -58,7 +58,7 @@ jobs:
             [ref]$tokens, [ref]$errors) | Out-Null
           if ($errors.Count) { throw ($errors | Out-String) }
       - name: Lint
-        run: cargo +1.89.0 clippy --locked --all-targets -- -D warnings
+        run: cargo +1.90.0 clippy --locked --all-targets -- -D warnings
       - name: Linux server tools for SSH fixtures
         if: runner.os == 'macOS'
         run: |
@@ -67,11 +67,11 @@ jobs:
           echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
       - name: Tests
         if: runner.os != 'macOS'
-        run: cargo +1.89.0 test --locked
+        run: cargo +1.90.0 test --locked
       - name: macOS tests
         if: runner.os == 'macOS'
         # SSH fixtures fork shell processes; run serially to prevent a fixture
         # child from retaining another test's advisory installation lock.
-        run: cargo +1.89.0 test --locked -- --test-threads=1
+        run: cargo +1.90.0 test --locked -- --test-threads=1
       - name: Command smoke test
-        run: cargo +1.89.0 run --locked -- --help
+        run: cargo +1.90.0 run --locked -- --help

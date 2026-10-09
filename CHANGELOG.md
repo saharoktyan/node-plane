@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.3-alpha.62 - 2026-10-09
+
+- Fix Workstation release builds on all platforms by using Rust 1.90, required by the QR image dependency.
+- Align the declared minimum Rust version, release workflow and native Workstation checks.
+
+
 ## 0.4.3-alpha.61 - 2026-10-09
 
 - Add temporary AWG/VLESS configurations with 12h, 1d and 3d durations, early revocation and management in Telegram and Workstation.

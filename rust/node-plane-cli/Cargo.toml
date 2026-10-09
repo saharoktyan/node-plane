@@ -1,8 +1,8 @@
 [package]
 name = "node-plane-cli"
-version = "0.4.3-alpha.61"
+version = "0.4.3-alpha.62"
 edition = "2024"
-rust-version = "1.89"
+rust-version = "1.90"
 description = "Node Plane workstation installation assistant"
 license = "Apache-2.0"
 repository = "https://github.com/saharoktyan/node-plane"

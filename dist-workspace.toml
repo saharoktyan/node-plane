@@ -21,7 +21,7 @@ install-path = "~/.local/bin"
 install-updater = true
 install-success-msg = "Open a new terminal and run: node-plane"
 msvc-crt-static = true
-rust-toolchain-version = "1.89.0"
+rust-toolchain-version = "1.90.0"
 pr-run-mode = "plan"
 
 [[dist.extra-artifacts]]
