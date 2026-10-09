@@ -663,6 +663,25 @@ is deferred: the same config works on Android and Linux NekoBox.
 Fourth automatic block, 2026-10-06 (unreleased): process faults, removal and
 actual protocol runtimes are now covered by three additional modules:
 
+Additional isolated host checks, 2026-10-09:
+
+- `tests/test_agent_container_faults.py`: four opt-in checks run the current Rust
+  agent in disposable Docker containers with certificate-verified mutual TLS and
+  the production profile journal. Killing just the agent leaves an orphaned helper
+  able to finish; recovery confirms its result without another mutation. Killing
+  the whole container during mutation leaves uncertainty fenced after restart.
+  Killing it after journal commit recovers success and rejects changed command
+  identity. A client without its certificate cannot mutate anything.
+  The mutation script is an explicit pause/counter fixture, not a live VPN.
+  The pinned Python gRPC TLS client failed handshaking with this debug server;
+  a loopback OpenSSL TLS bridge preserves gRPC framing and mandatory client/server
+  verification for these tests. This does not validate the normal Rust driver TLS path.
+- Re-ran all five PostgreSQL process-fault cases successfully, plus real AWG
+  temporary expiry and guarded Xray restart checks. No host systemd units were
+  installed. Containers, temporary PostgreSQL data, networks, certificate files
+  and test directories were removed; cleanup inventory was empty afterwards.
+  Full systemd boot scheduling and Internet REALITY tunnel acceptance remain open.
+
 - `tests/test_process_faults_postgres.py`: five checks use real SIGKILL before
   dispatch, inside an agent-helper mutation, after the durable helper journal
   commit and inside a PostgreSQL result transaction. They verify flock release,
