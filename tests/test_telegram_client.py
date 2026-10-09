@@ -27,6 +27,21 @@ class RouterStartupTests(TestCase):
 
 
 class TelegramFlowTests(IsolatedAsyncioTestCase):
+    async def test_admin_quick_start_only_reads_nodes_when_requested(self):
+        backend = SimpleNamespace(
+            me=AsyncMock(return_value={'role': 'admin', 'status': 'approved'}),
+            bot_title=AsyncMock(return_value={'title': 'Node Plane'}),
+            admin_nodes=AsyncMock(return_value={'items': []}))
+        with patch.object(user, 'render', new_callable=AsyncMock) as draw:
+            await user.show_home(123, 123, self.bot, backend, self.state, 77)
+            backend.admin_nodes.assert_not_awaited()
+            await user.show_home(123, 123, self.bot, backend, self.state, 77,
+                                 quick_start=True)
+            backend.admin_nodes.assert_awaited_once_with(123, limit=1)
+            self.assertIn(user.tr('en', 'home.admin_quick_start'),
+                          draw.call_args.args[2].lines)
+            self.assertIn('Bootstrap', user.tr('en', 'home.admin_quick_start'))
+
     async def test_get_config_back_uses_home_presentation_without_backend_reads(self):
         backend = SimpleNamespace(
             me=AsyncMock(return_value={'role': 'member', 'status': 'approved'}),

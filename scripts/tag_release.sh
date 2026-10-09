@@ -211,22 +211,17 @@ build_release_artifacts() {
 
   local driver_name="node-plane-driver-linux-amd64"
   local agent_name="node-plane-agent-linux-amd64"
-  local workstation_name="node-plane-cli-linux-amd64"
   local checksums_file="SHA256SUMS.txt"
   local controller_name="node-plane-controller.tar.gz"
 
   cp "$driver_bin" "${tmp_dir}/${driver_name}"
   cp "$agent_bin" "${tmp_dir}/${agent_name}"
-  cp "$workstation_bin" "${tmp_dir}/${workstation_name}"
   chmod +x "${tmp_dir}/${driver_name}" "${tmp_dir}/${agent_name}"
-  chmod +x "${tmp_dir}/${workstation_name}"
 
   set_step "package driver artifact"
   tar -C "$tmp_dir" -czf "${release_dir}/${driver_name}.tar.gz" "$driver_name"
   set_step "package agent artifact"
   tar -C "$tmp_dir" -czf "${release_dir}/${agent_name}.tar.gz" "$agent_name"
-  set_step "package workstation artifact"
-  tar -C "$tmp_dir" -czf "${release_dir}/${workstation_name}.tar.gz" "$workstation_name"
 
   set_step "package controller runtime"
   python3 scripts/controller_release.py build --root "$ROOT_DIR" \
@@ -234,7 +229,7 @@ build_release_artifacts() {
 
   (
     cd "$release_dir"
-    sha256sum "${driver_name}.tar.gz" "${agent_name}.tar.gz" "${workstation_name}.tar.gz" "$controller_name" > "$checksums_file"
+    sha256sum "${driver_name}.tar.gz" "${agent_name}.tar.gz" "$controller_name" > "$checksums_file"
   )
 
   cat > "${release_dir}/RELEASE_METADATA.txt" <<EOF
@@ -280,7 +275,7 @@ publish_github_release() {
   need_cmd tar
   local verify_dir
   verify_dir="$(mktemp -d)"
-  for name in node-plane-driver-linux-amd64 node-plane-agent-linux-amd64 node-plane-cli-linux-amd64; do
+  for name in node-plane-driver-linux-amd64 node-plane-agent-linux-amd64; do
     if ! tar -xOzf "${release_dir}/${name}.tar.gz" "$name" > "${verify_dir}/${name}"; then
       rm -rf "$verify_dir"
       echo "Invalid release archive: ${name}.tar.gz" >&2

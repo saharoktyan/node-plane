@@ -1,18 +1,14 @@
-import hashlib
-import io
 import json
 import os
 from pathlib import Path
 import subprocess
 import sys
-import tarfile
 import tempfile
 import unittest
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / 'scripts/install_workstation.sh'
 ASSET = 'node-plane-cli-linux-amd64.tar.gz'
-MEMBER = 'node-plane-cli-linux-amd64'
 
 
 class WorkstationBootstrapTests(unittest.TestCase):
@@ -39,21 +35,8 @@ shutil.copyfile(root / name, destination)
         curl.chmod(0o755)
         (self.root / 'releases.json').write_text(json.dumps([
             {'tag_name': 'v0.4.3-alpha.50'}, {'tag_name': 'v0.4.3-alpha.49'}]))
-        self.make_archive()
-
-    def make_archive(self, member=MEMBER, version='0.4.3-alpha.50'):
-        binary = f'''#!/usr/bin/env bash
-set -e
-if [[ "$1" == --version ]]; then echo "node-plane {version}"; exit 0; fi
-[[ "$1 $2" == 'self install' ]]
-printf installed > "$TEST_INSTALL_MARKER"
-'''.encode()
-        with tarfile.open(self.root / ASSET, 'w:gz') as archive:
-            info = tarfile.TarInfo(member)
-            info.mode, info.size = 0o755, len(binary)
-            archive.addfile(info, io.BytesIO(binary))
-        digest = hashlib.sha256((self.root / ASSET).read_bytes()).hexdigest()
-        (self.root / 'SHA256SUMS.txt').write_text(f'{digest}  {ASSET}\n')
+        (self.root / 'node-plane-cli-installer.sh').write_text(
+            '#!/bin/sh\nprintf installed > "$TEST_INSTALL_MARKER"\n')
 
     def run_installer(self, *args):
         return subprocess.run(['bash', str(SCRIPT), *args], env=self.env,
@@ -73,24 +56,17 @@ printf installed > "$TEST_INSTALL_MARKER"
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn('api.github.com', self.requests.read_text())
 
-    def test_bad_checksum_never_executes_installer(self):
-        (self.root / 'SHA256SUMS.txt').write_text(f'{"0" * 64}  {ASSET}\n')
+    def test_missing_generated_installer_never_falls_back_to_legacy(self):
+        (self.root / 'node-plane-cli-installer.sh').unlink()
+        (self.root / ASSET).write_bytes(b'legacy archive')
         result = self.run_installer('--tag', 'v0.4.3-alpha.50')
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn('checksum mismatch', result.stderr)
+        self.assertIn('no cargo-dist', result.stderr)
         self.assertFalse(self.marker.exists())
-
-    def test_wrong_archive_or_version_never_installs(self):
-        for options in ({'member': 'unexpected'}, {'version': '0.4.3-alpha.49'}):
-            with self.subTest(options=options):
-                self.make_archive(**options)
-                result = self.run_installer('--tag', 'v0.4.3-alpha.50')
-                self.assertNotEqual(result.returncode, 0)
-                self.assertFalse(self.marker.exists())
+        self.assertNotIn(ASSET, self.requests.read_text())
 
     def test_stable_selection_and_invalid_arguments(self):
         (self.root / 'releases.json').write_text(json.dumps({'tag_name': 'v0.4.3'}))
-        self.make_archive(version='0.4.3')
         result = self.run_installer('--channel', 'stable')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('/releases/latest', self.requests.read_text())
