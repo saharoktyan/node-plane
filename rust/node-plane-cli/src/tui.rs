@@ -3053,9 +3053,7 @@ fn draw(frame: &mut Frame, app: &App) -> Vec<Hit> {
         app.error.as_str()
     } else {
         match app.screen {
-            Screen::QuickStart => {
-                "Tab / arrows: select   Enter / click: action   Esc: close"
-            }
+            Screen::QuickStart => "Tab / arrows: select   Enter / click: action   Esc: close",
             Screen::NodeWizard => {
                 "Tab / arrows: select   Enter / click: continue   Esc: previous step   Ctrl+C: exit"
             }
@@ -3569,14 +3567,14 @@ fn draw_temporary(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>)
         }
     } else {
         if app.qr_visible && browser.view == View::Artifact {
-            let layout = Layout::vertical([Constraint::Length(lines.len() as u16), Constraint::Min(0)]).split(rows[1]);
-            frame.render_widget(
-                Paragraph::new(lines).wrap(Wrap { trim: false }),
-                layout[0],
-            );
+            let layout =
+                Layout::vertical([Constraint::Length(lines.len() as u16), Constraint::Min(0)])
+                    .split(rows[1]);
+            frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), layout[0]);
             if let Some(qr) = app.qr.borrow_mut().as_mut() {
                 frame.render_stateful_widget(
-                    ratatui_image::StatefulImage::default().resize(ratatui_image::Resize::Scale(None)),
+                    ratatui_image::StatefulImage::default()
+                        .resize(ratatui_image::Resize::Scale(None)),
                     layout[1],
                     qr,
                 );
@@ -4330,17 +4328,17 @@ fn draw_quick_start(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit
     let right = draw_navigation(frame, app, area, hits);
     let sections = dialog(frame, right, " Welcome to Node Plane Workstation! ");
     let text = "Quick start guide:\n1. Select \"New\" to add a connection profile.\n2. Choose \"Local\" or \"SSH\" to connect to your target server.\n3. Enter the required details and press Enter to save.\n4. Select your new profile and use \"Install Node Plane\" to set up the controller.\n\nPasswords and bot tokens are not saved on disk.";
-    let layout = Layout::vertical([
-        Constraint::Min(8),
-        Constraint::Length(1),
-    ]).split(sections[0]);
+    let layout = Layout::vertical([Constraint::Min(8), Constraint::Length(1)]).split(sections[0]);
     frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: false }), layout[0]);
     let checkbox_label = if app.connections.hide_quick_start {
         "[X] Don't show this again"
     } else {
         "[ ] Don't show this again"
     };
-    frame.render_widget(Paragraph::new(checkbox_label).style(Style::default().fg(Color::Cyan)), layout[1]);
+    frame.render_widget(
+        Paragraph::new(checkbox_label).style(Style::default().fg(Color::Cyan)),
+        layout[1],
+    );
     hits.push(Hit {
         area: layout[1],
         control: Control::QuickStartToggle,
