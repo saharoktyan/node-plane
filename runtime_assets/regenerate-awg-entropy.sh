@@ -10,8 +10,14 @@ PROFILE_TOOL="${AWG_PROFILE_TOOL:-/opt/node-plane-runtime/awg_profile.py}"
 [[ -f "$CFG" ]] || { echo "AWG config not found: $CFG" >&2; exit 1; }
 BACKUP="$(mktemp "$(dirname "$CFG")/.awg-regenerate-backup-XXXXXX")"
 cp -p "$CFG" "$BACKUP"
+prepare_leased() {
+  if [[ -f /etc/systemd/system/node-plane-leased-awg.service ]]; then
+    python3 /opt/node-plane-runtime/apply-profile-intent.py prepare-leased-runtime awg >/dev/null
+  fi
+}
 restore_config() {
   cp -p "$BACKUP" "$CFG"
+  prepare_leased || return 1
   if docker info >/dev/null 2>&1; then
     docker restart "$CONTAINER" >/dev/null 2>&1 || true
   else
@@ -22,6 +28,7 @@ restore_config() {
 }
 trap restore_config EXIT
 python3 "$PROFILE_TOOL" regenerate "$CFG" "$PRESET"
+prepare_leased
 
 if docker info >/dev/null 2>&1; then
   docker restart "$CONTAINER" >/dev/null

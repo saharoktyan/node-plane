@@ -102,6 +102,36 @@ class DockerRuntimeTests(unittest.TestCase):
     def started(self, container):
         return docker('inspect', '-f', '{{.State.StartedAt}}', container).stdout
 
+    def test_expired_temporary_vless_is_pruned_before_real_container_restart(self):
+        path, container = self.xray()
+        self.sync(path,container,'add',str(uuid4()))
+        engine = OPERATIONS.intents
+        journal = self.root/'lease-journal.sqlite3'
+        intent = {'command_id':str(uuid4()),'protocol':'xray','runtime_name':'tmp_'+uuid4().hex,
+            'revision':1,'action':'ensure','uuid':str(uuid4()),'short_id':'0123456789abcdef','lease_seconds':43200}
+        def mutate(value,fd):
+            XRAY.run('add' if value['action']=='ensure' else 'delete',path,container,
+                     'reality-tcp','reality-xhttp',value['runtime_name'],value['uuid'] or None)
+            return {'summary':'OK','payload_json':''}
+        engine.apply(intent,journal,mutate)
+        import sqlite3
+        from datetime import datetime,timedelta,timezone
+        with sqlite3.connect(journal) as conn:
+            conn.execute('UPDATE temporary_leases SET expires_at=?',((datetime.now(timezone.utc)-timedelta(seconds=1)).isoformat(),))
+        docker('stop',container)
+        def execute(args,**kwargs):
+            if args[:2]==['docker','wait']:
+                return subprocess.CompletedProcess(args,0,stdout='0\n')
+            return subprocess.run(args,**kwargs)
+        with patch.object(engine,'leased_runtime_settings',return_value=(path,container,'')):
+            engine.start_leased_runtime('xray',journal,execute)
+        self.wait_users(container)
+        for tag in ('reality-tcp','reality-xhttp'):
+            users = XRAY.users(container,tag)
+            self.assertIn('alice',users)
+            self.assertNotIn(intent['runtime_name'],users)
+        self.assertEqual(engine.expire_leases(journal,mutate),{'expired':1,'pending':0})
+
     def test_xray_api_add_and_revoke_persist_across_real_restart(self):
         path, container = self.xray()
         identity, started = str(uuid4()), self.started(container)
@@ -249,6 +279,43 @@ class DockerRuntimeTests(unittest.TestCase):
         docker('exec', server, 'awg', 'setconf', 'awg0', '/config/peer.conf')
         docker('exec', client, 'awg', 'setconf', 'awg0', '/config/peer.conf')
         docker('exec', client, 'ping', '-c', '3', '-W', '2', '10.88.0.1')
+
+    def test_temporary_awg_expiry_disconnects_peer_and_preserves_other_peer(self):
+        server,client = self.awg_pair('quic')
+        engine = OPERATIONS.intents
+        journal = self.root/'lease-journal.sqlite3'
+        name = 'tmp_'+uuid4().hex
+        path = self.root/'server-quic'/'peer.conf'
+        text = path.read_text().replace('[Peer]','# '+name+'\n[Peer]',1)
+        permanent_key = base64.b64encode(os.urandom(32)).decode()
+        text += '\n# permanent\n[Peer]\nPublicKey = '+permanent_key+'\nAllowedIPs = 10.88.0.3/32\n'
+        path.write_text(text)
+        docker('exec',server,'awg','setconf','awg0','/config/peer.conf')
+        docker('exec',client,'awg','setconf','awg0','/config/peer.conf')
+        probe = docker('exec',client,'ping','-c','5','-W','2','10.88.0.1',check=False)
+        self.assertEqual(probe.returncode,0,probe.stdout+probe.stderr+docker('logs',client).stderr)
+        peers = load('expiry_test_awg_peers','awg-peer-state.py')
+        intent = {'command_id':str(uuid4()),'protocol':'awg','runtime_name':name,'revision':1,
+                  'action':'ensure','uuid':'','short_id':'','lease_seconds':43200}
+        def wg_docker(*args,**kwargs):
+            # The production wrapper aliases wg to awg; this fixture uses the
+            # unmodified upstream image, so select its original executable.
+            return subprocess.run(['docker',*('awg' if a=='wg' else a for a in args)],check=True,**kwargs)
+        def mutate(value,fd):
+            if value['action']=='delete':
+                with patch.object(peers,'docker',side_effect=wg_docker):
+                    peers.mutate('revoke',path,self.root/'clients',name,server,'awg0')
+            return {'summary':'OK','payload_json':''}
+        engine.apply(intent,journal,mutate)
+        import sqlite3
+        from datetime import datetime,timedelta,timezone
+        with sqlite3.connect(journal) as conn:
+            conn.execute('UPDATE temporary_leases SET expires_at=?',((datetime.now(timezone.utc)-timedelta(seconds=1)).isoformat(),))
+        self.assertEqual(engine.expire_leases(journal,mutate),{'expired':1,'pending':0})
+        self.assertNotEqual(docker('exec',client,'ping','-c','2','-W','1','10.88.0.1',check=False).returncode,0)
+        self.assertEqual(docker('exec',server,'awg','show','awg0','peers').stdout.strip(),permanent_key)
+        self.assertNotIn('# '+name,path.read_text())
+        self.assertIn('# permanent',path.read_text())
 
     def uninstall_fixture(self):
         container = self.container('uninstall', 'node-plane-release-builder:bookworm',

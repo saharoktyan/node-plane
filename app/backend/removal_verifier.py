@@ -80,6 +80,8 @@ check_absent() {{
 check_absent /etc/systemd/system/node-plane-agent.service agent_unit
 check_absent /etc/systemd/system/node-plane-lease-expiry.timer lease_expiry_timer
 check_absent /etc/systemd/system/node-plane-lease-expiry.service lease_expiry_service
+check_absent /etc/systemd/system/node-plane-leased-awg.service leased_awg_unit
+check_absent /etc/systemd/system/node-plane-leased-xray.service leased_xray_unit
 check_absent /usr/local/bin/node-plane-agent agent_binary
 check_absent /etc/node-plane agent_config
 check_absent /opt/node-plane-runtime runtime

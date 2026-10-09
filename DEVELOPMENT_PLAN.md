@@ -10,6 +10,11 @@ The implemented AWG/device and provisioning work package is recorded in
 Its remaining real-client acceptance checks are recorded separately from new
 feature work.
 
+User acceptance on 2026-10-09 confirmed simultaneous AWG connections with
+different registered-device configurations. Local/SSH node installation through
+Telegram is already accepted; the outstanding full wizard acceptance below
+refers to the newer Workstation creation -> agent -> Docker/protocol flow.
+
 ## Current remaining work and delivery order
 
 The core migration, workstation assistant, device management, AWG port presets,
@@ -84,9 +89,12 @@ Older evidence below records the state at each increment, not new prerequisites.
 - [x] Accept only 12h, 1d and 3d lifetimes, with three days as the maximum. Include
   the chosen lifetime in immutable command identity; retries cannot extend it.
   Receipts distinguish AWG peer removal from VLESS new-connection revocation.
-- [ ] Verify remote support and enforcement health in backend issuance, reconcile
+- [x] Verify remote support and enforcement health in backend issuance, reconcile
   expired temporary identities before runtime restart, and report failed/pending
   revocations. Never silently provision permanent access when lease support is absent.
+  Issuance/download require fresh timer/supervisor/container health and a matching
+  lease receipt. Guarded protocol starts prune expired/uncertain credentials before
+  loading configs; the expiry CLI dispatch is covered by an actual subprocess test.
 - [x] Define a shared backend command for a temporary configuration on a selected
   server/protocol, with independent credentials and a persisted UTC expiry after
   successful activation. Show the exact expiry in both interfaces.
@@ -123,10 +131,12 @@ Older evidence below records the state at each increment, not new prerequisites.
   connections may continue until they disconnect." Never claim that an expired
   UUID proves all existing tunnels have stopped. AWG uses actual peer removal.
   The limitation also applies to existing profiles with an expiry such as 30 days.
-- [ ] Persist scheduling/revocation across controller/agent restarts, prevent new
+- [x] Persist scheduling/revocation across controller/agent restarts, prevent new
   retrieval after expiry, and integrate early revocation, node removal, restore
   and audit. Distinguish expired download access, pending remote revocation and
   confirmed credential removal. Report runtime unavailability without claiming cutoff.
+  Node-local timer and protocol supervisors are independent of backend/agent
+  processes. Real host reboot and downtime acceptance remain in the checklist below.
 - [x] Backend download expiry, node retirement and secret-free lifecycle audit.
   Restore excludes temporary credentials and refuses to start until outstanding
   temporary access is settled; retained lifecycle events survive restore.
@@ -139,6 +149,15 @@ Older evidence below records the state at each increment, not new prerequisites.
   expiry, early revoke, offline failures, restart and restore without resurrecting
   expired credentials. Live VLESS tests must verify new connections fail and
   document behavior of an already established tunnel; AWG tests must verify both stop.
+  Automated verification (2026-10-09): registry/journal/guard tests pass, including
+  disposable PostgreSQL migrations and registry operations (10 tests). Real Docker
+  checks confirm AWG expiry stops traffic and retains another peer; guarded Xray
+  restart removes expired authorization while preserving permanent access.
+  Host systemd reboot/downtime and established VLESS tunnel checks are still manual.
+  Full Python discovery: 1147 tests, 113 opt-in/environment skips, no failures;
+  separately, all 11 Docker runtime tests and 10 PostgreSQL migration tests pass.
+  Agent unit tests: 12 pass. Strict agent Clippy remains blocked by pre-existing
+  warnings, including generated tonic code; no lint suppressions were added.
 - Future consideration, deferred: modify Xray to close active sessions by user,
   including ordinary profile expiry and manual revocation. Do not introduce
   per-user ports/processes, restart shared Xray, or gate the current temporary

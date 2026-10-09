@@ -31,6 +31,12 @@ IMAGE="${XRAY_DOCKER_IMAGE:-ghcr.io/xtls/xray-core:26.3.27}"
 CONTAINER="${XRAY_CONTAINER_NAME:-xray}"
 CONFIG="${XRAY_CONFIG:-/opt/node-plane-runtime/xray/config.json}"
 
+prepare_leased() {
+  if [[ -f /etc/systemd/system/node-plane-leased-xray.service ]]; then
+    python3 /opt/node-plane-runtime/apply-profile-intent.py prepare-leased-runtime xray >/dev/null
+  fi
+}
+
 mkdir -p "$DOCKER_DIR"
 chmod 0755 /opt >/dev/null 2>&1 || true
 chmod 0755 /opt/node-plane-runtime >/dev/null 2>&1 || true
@@ -46,6 +52,7 @@ if [[ ! -f "$CONFIG" ]]; then
 fi
 
 chmod 0600 "$CONFIG" >/dev/null 2>&1 || true
+prepare_leased
 
 docker_cmd pull "$IMAGE" >/dev/null
 docker_cmd run --rm \
@@ -67,7 +74,7 @@ fi
 start_container() {
   docker_cmd run -d \
     --name "$CONTAINER" \
-    --restart unless-stopped \
+    --restart no \
     --user 0:0 \
     --network host \
     -v "$(dirname "$CONFIG"):/etc/xray:ro" \
@@ -78,6 +85,7 @@ restore_previous() {
   docker_cmd rm -f "$CONTAINER" >/dev/null 2>&1 || true
   if [[ -n "$PREVIOUS_CONTAINER" ]]; then
     docker_cmd rename "$PREVIOUS_CONTAINER" "$CONTAINER" >/dev/null
+    prepare_leased || return 1
     if ! docker_cmd start "$CONTAINER" >/dev/null; then
       echo "Previous Xray container could not be restarted" >&2
       return 1
@@ -97,6 +105,16 @@ if [[ "$(docker_cmd inspect -f '{{.State.Status}}' "$CONTAINER" 2>/dev/null || e
   restore_previous || true
   echo "Xray container did not start with the current config" >&2
   exit 1
+fi
+
+if [[ -f /etc/systemd/system/node-plane-leased-xray.service ]]; then
+  if ! python3 /opt/node-plane-runtime/apply-profile-intent.py leased-deploy xray >/dev/null; then
+    restore_previous || true
+    echo "Xray lease supervisor could not be started" >&2
+    exit 1
+  fi
+else
+  docker_cmd update --restart unless-stopped "$CONTAINER" >/dev/null
 fi
 
 if [[ -n "$PREVIOUS_CONTAINER" ]]; then
