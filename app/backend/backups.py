@@ -39,6 +39,7 @@ TABLES = (
     "backend_access_requests",
 )
 CLEAR = (
+    "backend_temporary_configs",
     "backend_system_cleanup_items",
     "backend_system_cleanup_jobs",
     "backend_system_cleanup_plans",
@@ -96,6 +97,8 @@ class BackupService:
         )
 
     def initialize_schema(self):
+        from .temporary_configs import TemporaryConfigService
+        TemporaryConfigService(self.db).initialize_schema()
         with self.db.transaction() as conn:
             conn.execute("""CREATE TABLE IF NOT EXISTS backend_backup_jobs (
                 id TEXT PRIMARY KEY, actor_id TEXT NOT NULL, command_key TEXT NOT NULL,
@@ -293,6 +296,8 @@ class BackupService:
 
     @staticmethod
     def busy(conn):
+        if conn.execute("SELECT 1 FROM backend_temporary_configs WHERE status NOT IN ('expired','revoked','cancelled') LIMIT 1").fetchone():
+            return True
         if conn.execute("SELECT 1 FROM backend_alert_deliveries WHERE status='claimed' LIMIT 1").fetchone():
             return True
         if conn.execute("SELECT 1 FROM backend_announcement_deliveries WHERE status IN ('queued','claimed') LIMIT 1").fetchone():

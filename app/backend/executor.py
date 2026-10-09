@@ -248,6 +248,8 @@ def main():
             from .node_removal import NodeRemovalService
             removals = NodeRemovalService(executor.db, executor.driver)
             config_executor = ConfigIssuanceService(executor.db, executor.driver)
+            from .temporary_configs import TemporaryConfigService
+            temporary_executor = TemporaryConfigService(executor.db, executor.driver)
             rollout_executor = AgentRolloutService(executor.db)
             from .updates import UpdateService
             update_executor = UpdateService(executor.db, executor.driver)
@@ -277,6 +279,9 @@ def main():
             node_jobs.recover()
             node_jobs.reconcile_completed()
             config_executor.recover()
+            temporary_executor.recover()
+            temporary_executor.scheduled()
+            temporary_executor.reconcile()
             rollout_executor.recover()
             executor.reconcile_completed()
             executor.queue_expired_profiles()
@@ -285,7 +290,7 @@ def main():
                 DeviceRepository.settle_deletions(conn)
             node_executor.reconcile_completed()
             executor.inspect_blocked()
-            while system_cleanup.run_one() or backup_executor.run_one() or update_executor.run_one() or rollout_executor.run_one() or removals.run_one() or node_jobs.run_one() or node_executor.run_one() or executor.run_one() or config_executor.run_one():
+            while system_cleanup.run_one() or backup_executor.run_one() or update_executor.run_one() or rollout_executor.run_one() or removals.run_one() or node_jobs.run_one() or node_executor.run_one() or executor.run_one() or temporary_executor.run_one() or config_executor.run_one():
                 pass
             from .alerts import AlertService
             try:

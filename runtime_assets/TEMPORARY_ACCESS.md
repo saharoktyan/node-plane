@@ -3,9 +3,10 @@
 The command journal supports an internal `lease_seconds` option (43200 / 86400 / 259200) on
 `ensure` for a new `tmp_<32 lowercase hex digits>` identity. AWG and VLESS commands are
 available over the existing authenticated `BackendNodeAction` RPC as
-`temporary_ensure` and `temporary_revoke`. Neither user interface nor public
-backend issuance is connected yet. Do not treat this foundation as a released
-temporary configuration management feature.
+`temporary_ensure`, `temporary_revoke` and read-only `temporary_status`.
+The backend registry/API and worker are connected; user interfaces remain
+planned. Live tunnel/reboot validation is still required before presenting this
+as a finished temporary configuration management feature.
 
 The local journal stores a conservative expiry **before** the external ensure.
 A successful result records expiry the selected 12 hours, 1 day or 3 days after completion in the journal and
@@ -57,8 +58,7 @@ Before exposing issuance:
    disconnect." Do not label credential removal as confirmed session termination.
    Keep shared ports and process. A possible Xray session-closing modification
    is deferred; do not restart shared Xray or create per-user ports/processes.
-4. Add backend authorization, idempotent issuance, retrieval/early revocation,
-   restore/removal/audit integration and both interfaces. Ordinary Workstation
+4. Connect both interfaces to the backend registry described below. Ordinary Workstation
    users need enrollment separate from privileged SSH administration.
 5. Verify with real tunnels, including controller/agent downtime and node reboot.
    For VLESS, test denial of new connections and document continued established
@@ -83,3 +83,35 @@ opens this section filtered to that server and skips server selection on Create.
 Telegram exposes it only in administrator Settings, with the same conditional
 steps and the existing separate-message URI action for iOS. There is no Telegram
 server-card entry. VLESS issuance includes the notice above in both interfaces.
+
+## Backend registry
+
+Migration revision 3 adds independent temporary configurations and lifecycle
+events. It does not alter permanent grants or devices. Only approved
+administrators with `settings.manage` can access these endpoints:
+
+- `POST /api/v1/system/temporary-configs`, with `Idempotency-Key` and
+  `node_key`, `protocol`, `transport`, `duration_seconds` (43200 / 86400 / 259200).
+  Returns a queued operation; remote mutations belong to the worker.
+- `GET /api/v1/system/temporary-configs`, with optional `node_key`, `page` and
+  `page_size`. Pending and failed work remains visible; completed entries leave
+  the list. `GET /{id}` retains their final status.
+- `GET /api/v1/system/temporary-configs/{id}/artifact` returns URI/config files,
+  exact expiry and `revocation_mode`. It reads the original node receipt and
+  checks the live independent identity and current node revision before returning
+  anything. Expiry immediately denies retrieval even before worker reconciliation.
+- `POST /api/v1/system/temporary-configs/{id}/revoke` cancels an unstarted request
+  or queues deletion. It can retry a failed deletion without renewing the lease.
+
+Unknown issuance becomes `blocked` and is reconciled only through read-only
+lookup. Failed revocation remains `revoke_blocked`; it is never reported as
+confirmed removal. The node timer also settles failed manual deletions and
+supersedes only their corresponding interrupted journal entries after successful
+removal. Unrelated unfinished operations remain fenced.
+
+Verified node retirement settles temporary access as revoked. Registry-only
+retirement records cancellation without claiming host cleanup. Backups exclude
+temporary credentials; restoration refuses outstanding temporary access rather
+than losing its revocation tracking. Restore clears the terminal registry while
+preserving secret-free lifecycle events (administrator account and principal,
+node, protocol, action, status and time).

@@ -104,6 +104,8 @@ class BackendHTTPTests(unittest.TestCase):
         NodeSettingsService(self.db).initialize_schema()
         ConfigIssuanceService(self.db).initialize_schema()
         AgentRolloutService(self.db).initialize_schema()
+        from backend.temporary_configs import TemporaryConfigService
+        TemporaryConfigService(self.db).initialize_schema()
         # Readiness fixtures have the deployed revision journal. Real migration
         # application/rollback is covered separately against PostgreSQL.
         from db.migrations import LEDGER_DDL, REVISIONS

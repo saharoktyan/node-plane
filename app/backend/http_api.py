@@ -737,6 +737,8 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     node_settings = NodeSettingsService(db)
     node_jobs = NodeOperations(db)
     config_issuances = ConfigIssuanceService(db, node_driver)
+    from .temporary_configs import TemporaryConfigService
+    temporary_configs = TemporaryConfigService(db, node_driver)
     agent_rollouts = AgentRolloutService(db)
     lifecycle = NodeLifecycle(db)
     update_service = UpdateService(db, node_driver)
@@ -1584,6 +1586,35 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     def get_config_artifact(issuance_id: UUID, current=Depends(actor)):
         return config_issuances.artifact(current, str(issuance_id))
 
+
+    class TemporaryConfigInput(BaseModel):
+        node_key: str
+        protocol: str
+        transport: str
+        duration_seconds: int
+
+    @app.get('/api/v1/system/temporary-configs')
+    def list_temporary_configs(page: int = 0, page_size: int = 20,
+                               node_key: str | None = None, current=Depends(actor)):
+        return temporary_configs.list(current,node_key=node_key,page=page,page_size=page_size)
+
+    @app.post('/api/v1/system/temporary-configs', status_code=202)
+    def create_temporary_config(body: TemporaryConfigInput,
+        command_key: Annotated[str, Header(alias='Idempotency-Key')], current=Depends(actor)):
+        return temporary_configs.create(current,body.node_key,body.protocol,body.transport,
+                                        body.duration_seconds,command_key)
+
+    @app.get('/api/v1/system/temporary-configs/{config_id}')
+    def get_temporary_config(config_id: UUID, current=Depends(actor)):
+        return temporary_configs.get(current,str(config_id))
+
+    @app.get('/api/v1/system/temporary-configs/{config_id}/artifact')
+    def get_temporary_artifact(config_id: UUID, current=Depends(actor)):
+        return temporary_configs.artifact(current,str(config_id))
+
+    @app.post('/api/v1/system/temporary-configs/{config_id}/revoke', status_code=202)
+    def revoke_temporary_config(config_id: UUID, current=Depends(actor)):
+        return temporary_configs.revoke(current,str(config_id))
 
     class SshKeyOutput(BaseModel):
         public_key: str

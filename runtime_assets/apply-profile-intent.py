@@ -152,6 +152,9 @@ def apply(intent, path, runner):
             if 'action' not in {row[1] for row in connection.execute('PRAGMA table_info(fences)')}:
                 connection.execute('ALTER TABLE fences ADD COLUMN action TEXT')
             lease_schema(connection)
+            target = (intent['protocol'], intent['runtime_name'])
+            lease = lease_current(connection, intent) if intent['action'] == 'delete' else None
+            retry_delete = False
             prior = connection.execute('SELECT fingerprint, status, response FROM commands WHERE id = ?', (intent['command_id'],)).fetchone()
             if prior:
                 if prior[0] != fingerprint:
@@ -159,23 +162,28 @@ def apply(intent, path, runner):
                 if prior[1] == 'succeeded':
                     lease_current(connection, intent)
                     return json.loads(prior[2])
-                raise ValueError('previous command did not complete successfully')
+                retry_delete = prior[1] == 'running' and intent['action'] == 'delete' and lease is not None
+                if not retry_delete:
+                    raise ValueError('previous command did not complete successfully')
             # The node-wide lock serializes mutations. A crashed predecessor may
             # have orphaned an external operation: do not advance any fence.
-            if connection.execute("SELECT 1 FROM commands WHERE status = 'running' LIMIT 1").fetchone():
+            allowed = {intent['command_id']} if retry_delete else set()
+            if lease and intent['action'] == 'delete':
+                allowed.update(r[0] for r in connection.execute('SELECT command_id FROM temporary_leases WHERE protocol=? AND profile=?', target))
+            if any(r[0] not in allowed for r in connection.execute("SELECT id FROM commands WHERE status = 'running'")):
                 raise ValueError('unfinished execution requires operator reconciliation')
-            target = (intent['protocol'], intent['runtime_name'])
             lease = lease_current(connection, intent)
             if lease and intent['action'] == 'ensure':
                 raise ValueError('temporary lease cannot be renewed')
-            fence = connection.execute('SELECT revision FROM fences WHERE protocol = ? AND profile = ?', target).fetchone()
+            fence = connection.execute('SELECT revision,command_id FROM fences WHERE protocol = ? AND profile = ?', target).fetchone()
             if 'lease_seconds' in intent and fence:
                 raise ValueError('temporary lease requires an unused identity')
-            if fence and intent['revision'] <= fence[0]:
+            if fence and intent['revision'] <= fence[0] and not (retry_delete and fence == (intent['revision'],intent['command_id'])):
                 raise ValueError('stale or conflicting revision')
             instance_id = os.environ.get('NODE_PLANE_AGENT_INSTANCE_ID', 'standalone')
             with connection:
-                connection.execute("INSERT INTO commands(id, fingerprint, status, instance_id) VALUES (?, ?, 'running', ?)", (intent['command_id'], fingerprint, instance_id))
+                if not retry_delete:
+                    connection.execute("INSERT INTO commands(id, fingerprint, status, instance_id) VALUES (?, ?, 'running', ?)", (intent['command_id'], fingerprint, instance_id))
                 connection.execute('INSERT INTO fences(protocol, profile, revision, command_id, action) VALUES (?, ?, ?, ?, ?) ON CONFLICT(protocol, profile) DO UPDATE SET revision = excluded.revision, command_id = excluded.command_id, action = excluded.action', (*target, intent['revision'], intent['command_id'], intent['action']))
                 if 'lease_seconds' in intent:
                     # Persist a conservative deadline before any external change.
@@ -183,6 +191,8 @@ def apply(intent, path, runner):
                     expires = datetime.now(timezone.utc) + timedelta(seconds=intent['lease_seconds'])
                     connection.execute('''INSERT INTO temporary_leases VALUES (?,?,?,?,'provisioning')''',
                                        (*target, intent['command_id'], expires.isoformat()))
+                elif intent['action'] == 'delete' and lease:
+                    connection.execute("UPDATE temporary_leases SET status='revoking' WHERE protocol=? AND profile=?",target)
             try:
                 response = runner(intent, lock.fileno())
                 if not isinstance(response, dict) or set(response) != {'summary', 'payload_json'} or any(not isinstance(v, str) for v in response.values()):
@@ -204,6 +214,7 @@ def apply(intent, path, runner):
                                        (expires.isoformat(), *target))
                 elif intent['action'] == 'delete' and lease:
                     connection.execute("UPDATE temporary_leases SET status='revoked' WHERE protocol=? AND profile=?", target)
+                    connection.execute("UPDATE commands SET status='superseded' WHERE status='running' AND id=(SELECT command_id FROM temporary_leases WHERE protocol=? AND profile=?)", target)
                 connection.execute("UPDATE commands SET status = 'succeeded', response = ? WHERE id = ?", (json.dumps(response), intent['command_id']))
             return response
         finally:
@@ -274,7 +285,7 @@ def expire_leases(path, runner, now=None):
                 # Reserve the identity permanently, including after a failed delete.
                 with connection:
                     connection.execute("UPDATE temporary_leases SET status='revoking' WHERE protocol=? AND profile=?", (protocol, profile))
-                fence = connection.execute('SELECT revision FROM fences WHERE protocol=? AND profile=?', (protocol, profile)).fetchone()
+                fence = connection.execute('SELECT revision,command_id,action FROM fences WHERE protocol=? AND profile=?', (protocol, profile)).fetchone()
                 intent = {'command_id': 'expiry:' + hashlib.sha256(command_id.encode()).hexdigest(),
                           'protocol': protocol, 'runtime_name': profile, 'revision': fence[0] + 1,
                           'action': 'delete', 'uuid': '', 'short_id': ''}
@@ -295,6 +306,8 @@ def expire_leases(path, runner, now=None):
                     connection.execute("UPDATE fences SET revision=?,command_id=?,action='delete' WHERE protocol=? AND profile=?",
                                        (intent['revision'], intent['command_id'], protocol, profile))
                     connection.execute("UPDATE commands SET status='superseded' WHERE id=? AND status='running'", (command_id,))
+                    if fence[2] == 'delete':
+                        connection.execute("UPDATE commands SET status='superseded' WHERE id=? AND status='running'",(fence[1],))
                     connection.execute("UPDATE temporary_leases SET status='expired' WHERE protocol=? AND profile=?", (protocol, profile))
                 expired += 1
             return {'expired': expired, 'pending': pending}

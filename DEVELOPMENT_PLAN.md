@@ -90,6 +90,11 @@ Older evidence below records the state at each increment, not new prerequisites.
 - [ ] Define a shared backend command for a temporary configuration on a selected
   server/protocol, with independent credentials and a persisted UTC expiry after
   successful activation. Show the exact expiry in both interfaces.
+- [x] Backend registry and API: queue independent identities with 12h / 1d / 3d
+  lifetimes, retain idempotency keys and exact UTC receipts, list pending/active
+  access, download after live identity checks, and revoke early. Worker recovery
+  reads the original issuance; it never repeats an unknown ensure. Interface
+  integration and the issuance notices remain below.
 - [ ] Keep temporary access separate from permanent profile grants, AWG device
   credentials and profile expiry. Revocation must not disrupt normal connections
   or other temporary configurations. Keep shared Xray ports and the shared process.
@@ -119,6 +124,14 @@ Older evidence below records the state at each increment, not new prerequisites.
   retrieval after expiry, and integrate early revocation, node removal, restore
   and audit. Distinguish expired download access, pending remote revocation and
   confirmed credential removal. Report runtime unavailability without claiming cutoff.
+- [x] Backend download expiry, node retirement and secret-free lifecycle audit.
+  Restore excludes temporary credentials and refuses to start until outstanding
+  temporary access is settled; retained lifecycle events survive restore.
+  A failed manual delete is retried by the node timer and can also be retried by
+  the administrator. An unrelated interrupted command keeps its fence closed.
+- [x] Automated registry tests cover both protocols, idempotency, stale/demoted
+  administrators, changed nodes, expiry, unknown issuance, early revoke/retry,
+  HTTP authorization and concurrent requests on disposable PostgreSQL.
 - [ ] Verify permanent/temporary isolation, concurrent issuance, immutable duration,
   expiry, early revoke, offline failures, restart and restore without resurrecting
   expired credentials. Live VLESS tests must verify new connections fail and

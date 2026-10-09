@@ -32,11 +32,11 @@ class MigrationsPostgresTests(unittest.TestCase):
 
     def test_clean_database_and_repeat_are_noops(self):
         self.assertFalse(schema_status(self.db)['ready'])
-        self.assertEqual(migrate(self.db)['applied'], [1,2])
+        self.assertEqual(migrate(self.db)['applied'], [r.number for r in REVISIONS])
         self.assertEqual(migrate(self.db)['applied'], [])
         self.assertTrue(check_schema(self.db)['ready'])
         with self.db.connect() as conn:
-            self.assertEqual(conn.execute('SELECT COUNT(*) AS n FROM backend_schema_revisions').fetchone()['n'],2)
+            self.assertEqual(conn.execute('SELECT COUNT(*) AS n FROM backend_schema_revisions').fetchone()['n'],len(REVISIONS))
             self.assertEqual(conn.execute('SELECT revision FROM backend_account_guard WHERE id=1').fetchone()['revision'],1)
             conn.execute('SELECT device_id FROM backend_operation_tasks LIMIT 1')
             conn.execute('SELECT node_key FROM backend_node_traffic LIMIT 1')
@@ -66,7 +66,7 @@ class MigrationsPostgresTests(unittest.TestCase):
             conn.execute("INSERT INTO schema_meta VALUES ('updates_auto_check_enabled','1')")
             before = [dict(r) for r in conn.execute('SELECT * FROM backend_operation_tasks ORDER BY id').fetchall()]
             devices = [dict(r) for r in conn.execute('SELECT * FROM backend_devices ORDER BY id').fetchall()]
-        self.assertEqual(migrate(self.db)['applied'],[2])
+        self.assertEqual(migrate(self.db)['applied'],[r.number for r in REVISIONS[1:]])
         self.assertEqual(migrate(self.db)['applied'],[])
         with self.db.connect() as conn:
             self.assertEqual([dict(r) for r in conn.execute('SELECT * FROM backend_operation_tasks ORDER BY id').fetchall()],before)
@@ -97,7 +97,7 @@ class MigrationsPostgresTests(unittest.TestCase):
         with self.db.transaction() as conn:
             conn.execute("INSERT INTO backend_nodes(key,title,region,protocols_json) VALUES ('node','Node','Europe','[]')")
             conn.execute("INSERT INTO backend_node_traffic VALUES ('node','xray',?,123,456,?,?)", ('2026-10','2026-10-09','2026-10-09'))
-        self.assertEqual(migrate(self.db)['applied'],[1,2])
+        self.assertEqual(migrate(self.db)['applied'],[r.number for r in REVISIONS])
         self.assertEqual(ProfileRepository(self.db).get(profile)['runtime_name'],'existing')
         with self.db.connect() as conn:
             row = conn.execute('SELECT * FROM backend_node_traffic').fetchone()
@@ -149,15 +149,15 @@ class MigrationsPostgresTests(unittest.TestCase):
         def fail(conn):
             conn.execute('CREATE TABLE migration_failed_marker(id INTEGER PRIMARY KEY)')
             raise RuntimeError('private diagnostic must not appear in error')
-        revisions = (*REVISIONS,self.revision(3,'first',first),self.revision(4,'failed',fail))
-        with self.assertRaisesRegex(MigrationError,'revision=4; transaction rolled back') as error:
+        revisions = (*REVISIONS,self.revision(len(REVISIONS)+1,'first',first),self.revision(len(REVISIONS)+2,'failed',fail))
+        with self.assertRaisesRegex(MigrationError,f'revision={len(REVISIONS)+2}; transaction rolled back') as error:
             migrate(self.db,revisions=revisions)
         self.assertNotIn('private',str(error.exception))
         with self.db.connect() as conn:
             self.assertIsNone(conn.execute("SELECT to_regclass('migration_marker') AS name").fetchone()['name'])
             self.assertIsNone(conn.execute("SELECT to_regclass('migration_failed_marker') AS name").fetchone()['name'])
             self.assertIsNone(conn.execute("SELECT value FROM schema_meta WHERE key='migration_marker'").fetchone())
-        self.assertEqual(check_schema(self.db)['current_revision'],2)
+        self.assertEqual(check_schema(self.db)['current_revision'],len(REVISIONS))
 
     def test_concurrent_migrators_apply_each_revision_once(self):
         start = threading.Barrier(2)
@@ -166,8 +166,8 @@ class MigrationsPostgresTests(unittest.TestCase):
             return migrate(self.db)['applied']
         with ThreadPoolExecutor(max_workers=2) as pool:
             results = list(pool.map(lambda _:run(),range(2)))
-        self.assertEqual(sorted(results),[[],[1,2]])
-        self.assertEqual(check_schema(self.db)['current_revision'],2)
+        self.assertEqual(sorted(results),[[],[r.number for r in REVISIONS]])
+        self.assertEqual(check_schema(self.db)['current_revision'],len(REVISIONS))
 
     def test_immutable_history_rejects_changed_checksum_or_missing_revision(self):
         migrate(self.db)
@@ -184,13 +184,13 @@ class MigrationsPostgresTests(unittest.TestCase):
 
     def test_compatible_readers_can_rollback_application_but_cannot_migrate_backwards(self):
         migrate(self.db)
-        future = self.revision(3,'additive',lambda conn:conn.execute('CREATE TABLE future_field(id INTEGER)'),1)
+        future = self.revision(len(REVISIONS)+1,'additive',lambda conn:conn.execute('CREATE TABLE future_field(id INTEGER)'),1)
         migrate(self.db,revisions=(*REVISIONS,future))
         self.assertTrue(check_schema(self.db)['ready'])
         with self.assertRaisesRegex(MigrationError,'database_newer_than_migrator'):
             migrate(self.db)
         with self.db.transaction() as conn:
-            conn.execute('UPDATE backend_schema_revisions SET minimum_reader=3 WHERE revision=3')
+            conn.execute('UPDATE backend_schema_revisions SET minimum_reader=? WHERE revision=?',(len(REVISIONS)+1,len(REVISIONS)+1))
         with self.assertRaisesRegex(MigrationError,'database_reader_incompatible'):
             check_schema(self.db)
 
@@ -199,3 +199,54 @@ class MigrationsPostgresTests(unittest.TestCase):
             check_schema(self.db)
         with self.db.connect() as conn:
             self.assertIsNone(conn.execute("SELECT to_regclass('backend_schema_revisions') AS name").fetchone()['name'])
+
+    def test_temporary_registry_lifecycle_and_restore_guard_on_postgres(self):
+        migrate(self.db)
+        from backend.admin_cli import bootstrap_admin
+        from backend.identity_repository import SQLIdentityRepository
+        from backend.authorization import Actor,Principal,PrincipalKind,ADMIN_PERMISSIONS
+        from backend.temporary_configs import TemporaryConfigService
+        from backend.backups import BackupService,TABLES,CLEAR
+        from datetime import timedelta
+        import json
+        admin = bootstrap_admin(SQLIdentityRepository(self.db),101,self.db)
+        actor = Actor(Principal('workstation-test',PrincipalKind.ACCOUNT,ADMIN_PERMISSIONS,admin.id),admin)
+        with self.db.transaction() as conn:
+            conn.execute('''INSERT INTO backend_nodes(key,title,region,enabled,protocols_json,
+                xray_transports_json,desired_revision,applied_revision)
+                VALUES ('lv1','Latvia #1','Europe',1,'["xray"]','["tcp"]',1,1)''')
+        class Driver:
+            calls = 0
+            def node_action(self, identity, action, intent, recover=False):
+                self.calls += 1
+                if action=='temporary_revoke':
+                    return {'revocation_mode':'new_connections_only'}
+                return {'expires_at':(datetime.now(timezone.utc)+timedelta(seconds=intent['lease_seconds'])).isoformat(),
+                        'revocation_mode':'new_connections_only','xray_uuid':intent['uuid']}
+        driver = Driver()
+        service = TemporaryConfigService(self.db,driver)
+        key = str(uuid4())
+        start = threading.Barrier(2)
+        def create():
+            start.wait(timeout=5)
+            return service.create(actor,'lv1','xray','tcp',86400,key)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(lambda _:create(),range(2)))
+        self.assertEqual(results[0],results[1])
+        config = results[0]
+        service.run_one()
+        self.assertEqual(service.get(actor,config['id'])['status'],'active')
+        with self.db.connect() as conn:
+            self.assertTrue(BackupService.busy(conn))
+        service.revoke(actor,config['id'])
+        service.run_one()
+        self.assertEqual(service.list(actor)['total'],0)
+        self.assertEqual(driver.calls,2)
+        with self.db.connect() as conn:
+            self.assertFalse(BackupService.busy(conn))
+            history = [dict(r) for r in conn.execute('SELECT * FROM backend_temporary_config_events').fetchall()]
+        self.assertTrue(history)
+        self.assertNotIn('xray_uuid',json.dumps(history))
+        self.assertNotIn('backend_temporary_configs',TABLES)
+        self.assertIn('backend_temporary_configs',CLEAR)
+        self.assertNotIn('backend_temporary_config_events',CLEAR)
