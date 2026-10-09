@@ -237,8 +237,11 @@ def main():
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         from db import get_db
         from .driver_transport import GrpcIntentDriver, local_channel
+        db = get_db()
+        from db.migrations import check_schema
+        check_schema(db)
         with local_channel(args.driver) as channel:
-            executor = IntentExecutor(get_db(), GrpcIntentDriver(channel))
+            executor = IntentExecutor(db, GrpcIntentDriver(channel))
             node_executor = NodeSettingsExecutor(executor.db, executor.driver)
             from .node_operations import NodeOperations
             node_jobs = NodeOperations(executor.db, executor.driver)

@@ -38,12 +38,8 @@ class BackupsPostgresTests(unittest.TestCase):
         # first statement in its transaction, exactly as in production.
         self.db = PostgresDB(make_conninfo(self.base.dsn, options=f'-c search_path={self.schema}'))
         identities = SQLIdentityRepository(self.db)
-        for service in (identities, CredentialService(self.db), ProfileRepository(self.db),
-                        ProfileCommands(self.db), AccessRequestService(self.db),
-                        SystemSettingsService(self.db), AccountService(self.db),
-                        NodeService(self.db), NodeSettingsService(self.db),
-                        ConfigIssuanceService(self.db), AgentRolloutService(self.db)):
-            service.initialize_schema()
+        from db.migrations import migrate
+        migrate(self.db)
         self.admin = bootstrap_admin(identities, 101, self.db)
         self.actor = Actor(Principal('test', PrincipalKind.SERVICE, ADMIN_PERMISSIONS), self.admin)
         directory = tempfile.TemporaryDirectory()
@@ -73,4 +69,6 @@ class BackupsPostgresTests(unittest.TestCase):
         self.assertTrue(self.service.run_one())
         self.assertEqual(self.service.get(self.actor, job['id'])['status'], 'succeeded')
         self.assertEqual(ProfileRepository(self.db).get(profile)['display_name'], 'Alice')
+        from db.migrations import check_schema
+        self.assertEqual(check_schema(self.db)['current_revision'],2)
         self.assertEqual(SQLIdentityRepository(self.db).find_telegram_account(101).id, self.admin.id)

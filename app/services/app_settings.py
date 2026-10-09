@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from config import UPDATE_BRANCH
 
-from db import ensure_schema, get_db
+from db import get_db
 
 _db = get_db()
 
@@ -50,20 +50,21 @@ VALUES (?, ?)
 ON CONFLICT(key) DO UPDATE SET value = excluded.value
 """
 
-def _ensure_runtime_schema() -> None:
+def _check_runtime_schema() -> None:
     global _schema_ready
-    with _db.transaction() as conn:
-        ensure_schema(conn)
-    _schema_ready = True
+    if not _schema_ready:
+        with _db.connect() as conn:
+            conn.execute("SELECT key FROM schema_meta LIMIT 1").fetchone()
+        _schema_ready = True
 
 def _meta_get(key: str, default: str = "") -> str:
-    _ensure_runtime_schema()
+    _check_runtime_schema()
     with _db.connect() as conn:
         row = conn.execute("SELECT value FROM schema_meta WHERE key = ?", (key,)).fetchone()
     return str(row["value"]).strip() if row and row["value"] is not None else default
 
 def _meta_set(key: str, value: str) -> str:
-    _ensure_runtime_schema()
+    _check_runtime_schema()
     normalized = str(value or "")
     with _db.transaction() as conn:
         conn.execute(_META_UPSERT_SQL, (key, normalized))

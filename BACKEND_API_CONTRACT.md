@@ -277,3 +277,13 @@ Verified runtime results include `awg_port` and a digest of the effective
 settings. The controller validates the candidate policy and digest before
 persisting the actual port, keeping the original durable command unchanged.
 An uncertain deployment or a late bind failure remains blocked for recovery.
+
+## Database deployment revisions
+
+The HTTP factory performs no migrations. `/health/ready` checks the immutable
+`backend_schema_revisions` journal, reader compatibility and required tables;
+missing, changed or incompatible revisions return 503. Deployment uses
+`backend.admin_cli init-schema` before activating the new release. Worker startup
+also checks schema compatibility. Migration history survives configuration backup
+restore/reset, and rolling back application binaries never downgrades the schema.
+See [migration instructions](app/db/MIGRATIONS.md) for revision and rollback rules.

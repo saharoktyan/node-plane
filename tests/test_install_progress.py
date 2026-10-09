@@ -65,6 +65,9 @@ if [[ "$1" == -m && "$2" == venv ]]; then
   mkdir -p "$3/bin"
   cp "$0" "$3/bin/python"
 fi
+if [[ "$*" == *backend.admin_cli* && "$*" == *init-schema* && "${SCHEMA_FAILURE:-0}" != 0 ]]; then
+  exit 19
+fi
 if [[ "$*" == *backend.admin_cli* && "${IDENTITY_FAILURE:-0}" != 0 && "$*" != *init-schema* ]]; then
   exit 17
 fi
@@ -172,6 +175,16 @@ esac
         self.assertIn('backend-services', actions)
         self.assertIn('telegram-service', actions)
         self.assertIn('driver', actions)
+
+    def test_failed_migration_does_not_activate_release_or_start_services(self):
+        result = self.run_install(environment={'SCHEMA_FAILURE':'1'})
+        self.assertNotEqual(result.returncode,0)
+        self.assertFalse((self.base/'current').exists())
+        actions = self.log.read_text()
+        self.assertNotIn('backend-services',actions)
+        self.assertNotIn('telegram-service',actions)
+        self.assertNotIn('driver\n',actions)
+        self.assertFalse(any(event.get('id') == 'identity' for event in self.events(result)))
 
     def test_events_disabled_do_not_change_normal_output(self):
         result = self.run_install(progress=False)

@@ -20,12 +20,28 @@ Older evidence below records the state at each increment, not new prerequisites.
    AWG preset port hint, use one Refresh action for live node/operation status,
    stretch incomplete button rows, preserve the header accent and Settings focus.
 2. Include completed monthly traffic and Auto-check changes in the next release.
-3. Add independent 24-hour VLESS/AWG configurations through Telegram and Workstation.
-4. Complete the Telegram Diagnostics & Recovery menu using existing backend
+3. Include completed versioned database migrations in the next release.
+4. Add independent 24-hour VLESS/AWG configurations through Telegram and Workstation.
+5. Complete the Telegram Diagnostics & Recovery menu using existing backend
    recovery contracts; extend per-node workstation diagnostics as needed.
-5. Run the deferred real-client/host acceptance checks and the planned installation
+6. Run the deferred real-client/host acceptance checks and the planned installation
    usability sessions with new users. These checks do not require rebuilding
    automated failure fixtures or repeatedly reinstalling the user's controller.
+
+### Versioned database migrations
+
+- [x] Replace deployment schema initialization with immutable, ordered revisions
+  and a PostgreSQL advisory lock. Commit pending DDL/backfills/history atomically.
+- [x] Adopt current unversioned installations without replacing accounts,
+  credentials, profiles, grants, peer identities or operation payloads.
+- [x] Apply migrations from the new release before activation. Check revision
+  integrity and reader compatibility in backend readiness and workers. Settings
+  reads must not mutate schema.
+- [x] Keep application rollback separate from database downgrade. Permit older
+  compatible readers; reject unsupported readers and older migration writers.
+- [x] Verify clean and populated upgrades, no-op repeats, concurrent runners,
+  failure rollback, checksum mismatch and backup restore on disposable PostgreSQL.
+  See [database migration instructions](app/db/MIGRATIONS.md).
 
 ### Monthly traffic on server cards
 

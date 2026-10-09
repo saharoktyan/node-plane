@@ -13,6 +13,7 @@ from uuid import uuid4
 
 from backend.announcements import AnnouncementService
 from backend.authorization import AccessDenied, Principal, PrincipalKind
+from backend.devices import DeviceRepository
 from backend.identity_repository import SQLIdentityRepository
 from backend.node_lifecycle import NodeLifecycle
 from backend.operations import OperationRepository
@@ -191,8 +192,10 @@ class TrafficPolicyPostgresTests(unittest.TestCase):
         with self.db.transaction() as conn:
             conn.execute("UPDATE backend_nodes SET protocols_json='[\"awg\"]'")
             conn.execute("UPDATE backend_grants SET protocol='awg'")
-            conn.execute("UPDATE backend_operation_tasks SET protocol='awg',result_json=?", (
-                json.dumps({'wg_conf': f'[Interface]\nPublicKey = {key}\n[Peer]\nPublicKey = other'}),))
+            profile = conn.execute('SELECT * FROM backend_profiles WHERE id=?', (self.profile,)).fetchone()
+            device_id = DeviceRepository.ensure_default(conn, profile)
+            conn.execute("UPDATE backend_operation_tasks SET protocol='awg',device_id=?,result_json=?", (
+                device_id, json.dumps({'wg_conf': f'[Interface]\nPublicKey = {key}\n[Peer]\nPublicKey = other'})))
         self.collect()
         self.assertEqual(self.driver.calls[0]['identity'], key)
         self.assertEqual(self.row()['protocol'], 'awg')

@@ -13,15 +13,7 @@ from .authorization import AccessDenied, Actor, Principal, PrincipalKind, valida
 from .credentials import ADAPTER_SCOPES, PERMISSIONS, CredentialService
 from .identity_repository import SQLIdentityRepository
 from .profiles import ProfileRepository
-from .profile_commands import ProfileCommands
 from .node_lifecycle import NodeLifecycle
-from .access_requests import AccessRequestService
-from .accounts import AccountService
-from .nodes import NodeService
-from .node_settings import NodeSettingsService
-from .config_issuance import ConfigIssuanceService
-from .agent_rollout import AgentRolloutService
-from .system_settings import SystemSettingsService
 
 
 def bootstrap_admin(repository: SQLIdentityRepository, telegram_user_id: int, db=None):
@@ -53,7 +45,8 @@ def write_secret(path: Path, secret: str):
 def main():
     parser = argparse.ArgumentParser(description='Local backend identity/credential administration')
     commands = parser.add_subparsers(dest='command', required=True)
-    commands.add_parser('init-schema')
+    commands.add_parser('init-schema', help='Apply pending versioned database migrations')
+    commands.add_parser('schema-status', help='Read database migration history and compatibility')
     bootstrap = commands.add_parser('bootstrap-admin')
     bootstrap.add_argument('--telegram-id', type=int, required=True)
     create_account = commands.add_parser('create-account',
@@ -124,23 +117,22 @@ def main():
     bind.add_argument('--ssh-port', type=int, default=22)
     args = parser.parse_args()
     from db import get_db
+    from db.migrations import MigrationError
     db = get_db()
     identities = SQLIdentityRepository(db)
     credentials = CredentialService(db)
     try:
+        if args.command not in {'init-schema', 'schema-status'}:
+            from db.migrations import check_schema
+            check_schema(db)
         if args.command == 'init-schema':
-            identities.initialize_schema()
-            credentials.initialize_schema()
-            ProfileRepository(db).initialize_schema()
-            ProfileCommands(db).initialize_schema()
-            AccessRequestService(db).initialize_schema()
-            SystemSettingsService(db).initialize_schema()
-            AccountService(db).initialize_schema()
-            NodeService(db).initialize_schema()
-            NodeSettingsService(db).initialize_schema()
-            ConfigIssuanceService(db).initialize_schema()
-            AgentRolloutService(db).initialize_schema()
-            print('Backend identity schema initialized.')
+            from db.migrations import migrate
+            result = migrate(db)
+            print(f"Database revision: {result['current_revision']}; applied: {result['applied']}")
+        elif args.command == 'schema-status':
+            from db.migrations import schema_status
+            import json
+            print(json.dumps(schema_status(db)))
         elif args.command == 'bootstrap-admin':
             account = bootstrap_admin(identities, args.telegram_id, db)
             print(f'Administrator account: {account.id}')
@@ -279,7 +271,7 @@ def main():
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 outcome = NodeLifecycle(db).bind_verification_target(actor, args.node_key, verifier)
             print(f"Node {outcome['node_key']} verification target bound: {outcome['target']} (active agent identity checked).")
-    except (OSError, ValueError, AccessDenied) as error:
+    except (OSError, ValueError, AccessDenied, MigrationError) as error:
         parser.error(str(error))
 
 

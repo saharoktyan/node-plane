@@ -885,6 +885,8 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     @app.get('/health/ready')
     def ready(request: Request):
         try:
+            from db.migrations import check_schema
+            check_schema(db)
             with db.connect() as conn:
                 # Only readiness for this implemented slice, not node connectivity.
                 conn.execute('SELECT id FROM backend_accounts LIMIT 1').fetchone()

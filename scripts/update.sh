@@ -543,7 +543,7 @@ update_simple() {
   set_step "install python dependencies with uv"
   install_release_dependencies "$new_release_dir" "$shared_dir"
 
-  echo "Applying database/schema init..."
+  echo "Applying database migrations..."
   set_step "load database runtime configuration"
   db_backend="$(read_env_value DB_BACKEND "$runtime_env_file")"
   postgres_dsn="$(read_env_value POSTGRES_DSN "$runtime_env_file")"
@@ -565,7 +565,7 @@ update_simple() {
   fi
 
   if [[ -f "${new_release_dir}/app/backend/admin_cli.py" ]]; then
-    set_step "initialize backend schema"
+    set_step "apply database migrations"
     NODE_PLANE_BASE_DIR="${base_dir}" \
     NODE_PLANE_APP_DIR="${new_release_dir}" \
     NODE_PLANE_SHARED_DIR="${shared_dir}" \
