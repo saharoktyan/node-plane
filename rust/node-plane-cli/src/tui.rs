@@ -3565,28 +3565,24 @@ fn draw_temporary(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>)
             });
             index += 1;
         }
-    } else {
-        if app.qr_visible && browser.view == View::Artifact {
-            let layout =
-                Layout::vertical([Constraint::Length(lines.len() as u16), Constraint::Min(0)])
-                    .split(rows[1]);
-            frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), layout[0]);
-            if let Some(qr) = app.qr.borrow_mut().as_mut() {
-                frame.render_stateful_widget(
-                    ratatui_image::StatefulImage::default()
-                        .resize(ratatui_image::Resize::Scale(None)),
-                    layout[1],
-                    qr,
-                );
-            }
-        } else {
-            frame.render_widget(
-                Paragraph::new(lines)
-                    .wrap(Wrap { trim: false })
-                    .scroll((browser.scroll, 0)),
-                rows[1],
+    } else if app.qr_visible && browser.view == View::Artifact {
+        let layout = Layout::vertical([Constraint::Length(lines.len() as u16), Constraint::Min(0)])
+            .split(rows[1]);
+        frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), layout[0]);
+        if let Some(qr) = app.qr.borrow_mut().as_mut() {
+            frame.render_stateful_widget(
+                ratatui_image::StatefulImage::default().resize(ratatui_image::Resize::Scale(None)),
+                layout[1],
+                qr,
             );
         }
+    } else {
+        frame.render_widget(
+            Paragraph::new(lines)
+                .wrap(Wrap { trim: false })
+                .scroll((browser.scroll, 0)),
+            rows[1],
+        );
     }
     let count = actions.len();
     let per_row = count.div_ceil(2).max(1);
