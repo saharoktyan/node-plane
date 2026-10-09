@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.3-alpha.61 - 2026-10-09
+
+- Add temporary AWG/VLESS configurations with 12h, 1d and 3d durations, early revocation and management in Telegram and Workstation.
+- Enforce temporary access independently of the controller and agent, with persistent expiry scheduling and guarded protocol startup.
+- Verify agent failure recovery and two real Debian 12 systemd boots without resurrecting expired credentials.
+- Fix AWG image builds on Debian 12 Docker 20.10.
+- Preserve permanent and other active temporary configurations during expiry and restart.
+
+
 ## 0.4.3-alpha.60 - 2026-10-09
 
 - Build Workstation releases with cargo-dist for Linux, Windows and macOS, including shell and PowerShell installers.
