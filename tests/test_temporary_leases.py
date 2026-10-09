@@ -66,6 +66,61 @@ class TemporaryLeaseTests(unittest.TestCase):
             MODULE.apply(dict(intent, lease_seconds=259200), self.path, self.mutate)
         self.assertEqual(len(self.calls), 1)
 
+    def test_early_delete_recovers_failed_ensure_and_retries_failed_delete(self):
+        intent = self.intent('xray')
+        def fail(i, fd):
+            raise TimeoutError('lost result')
+        with self.assertRaises(TimeoutError):
+            MODULE.apply(intent,self.path,fail)
+        deletion = dict(intent,command_id=str(uuid4()),revision=2,action='delete',uuid='',short_id='')
+        deletion.pop('lease_seconds')
+        with self.assertRaises(TimeoutError):
+            MODULE.apply(deletion,self.path,fail)
+        MODULE.apply(deletion,self.path,self.mutate)
+        self.assertEqual(self.status(intent),'revoked')
+        with sqlite3.connect(self.path) as conn:
+            self.assertEqual(conn.execute('SELECT status FROM commands WHERE id=?',(intent['command_id'],)).fetchone()[0],'superseded')
+        MODULE.apply(deletion,self.path,self.mutate)
+        self.assertEqual(len(self.calls),1)
+
+    def test_status_accepts_transport_node_key_and_never_mutates(self):
+        intent = self.intent('xray')
+        MODULE.apply(intent,self.path,self.mutate)
+        with patch.object(OPERATIONS.intents,'apply',side_effect=AssertionError('mutation')):
+            state = OPERATIONS.execute('temporary_status',intent['command_id'],dict(intent,node_key='n1'),True,self.path)
+            self.assertEqual(state['status'],'active')
+            with self.assertRaises(ValueError):
+                OPERATIONS.execute('temporary_status',intent['command_id'],dict(intent,node_key='n1'),False,self.path)
+        self.overdue(intent)
+        MODULE.expire_leases(self.path,self.mutate)
+        self.assertEqual(OPERATIONS.execute('temporary_status',intent['command_id'],intent,True,self.path)['status'],'expired')
+
+    def test_early_delete_does_not_ignore_unrelated_interrupted_command(self):
+        intent = self.intent()
+        MODULE.apply(intent,self.path,self.mutate)
+        with sqlite3.connect(self.path) as conn:
+            conn.execute("INSERT INTO commands VALUES ('unrelated','fingerprint','running',NULL,'standalone')")
+        deletion = dict(intent,command_id=str(uuid4()),revision=2,action='delete')
+        deletion.pop('lease_seconds')
+        with self.assertRaisesRegex(ValueError,'unfinished'):
+            MODULE.apply(deletion,self.path,self.mutate)
+
+    def test_timer_settles_failed_manual_delete_without_leaving_a_running_fence(self):
+        intent = self.intent()
+        MODULE.apply(intent,self.path,self.mutate)
+        deletion = dict(intent,command_id=str(uuid4()),revision=2,action='delete')
+        deletion.pop('lease_seconds')
+        def fail(i, fd):
+            raise TimeoutError('lost deletion')
+        with self.assertRaises(TimeoutError):
+            MODULE.apply(deletion,self.path,fail)
+        self.assertEqual(MODULE.expire_leases(self.path,self.mutate),{'expired':1,'pending':0})
+        with sqlite3.connect(self.path) as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM commands WHERE status='running'").fetchone()[0],0)
+        permanent = dict(self.intent(),runtime_name='permanent')
+        permanent.pop('lease_seconds')
+        MODULE.apply(permanent,self.path,self.mutate)
+
     def test_expiry_isolated_from_permanent_and_other_temporary_credentials(self):
         first, second = self.intent(), self.intent()
         permanent = {**self.intent(), 'runtime_name': 'permanent'}

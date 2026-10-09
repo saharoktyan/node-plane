@@ -29,7 +29,8 @@ class GrpcIntentDriver:
         intent = {key: value for key, value in intent.items() if key != 'requested_revision'}
         response = self.runtime.BackendNodeAction(runtime_service_pb2.BackendNodeActionRequest(
             node_key=intent['node_key'], command_id=task_id, action=action,
-            intent_json=json.dumps(intent), recover=recover), timeout=max(self.timeout, 1200))
+            intent_json=json.dumps(intent), recover=recover),
+            timeout=self.timeout if action == 'temporary_status' else max(self.timeout, 1200))
         return json.loads(response.result_json)
 
     def inspect_node_services(self, node_key):

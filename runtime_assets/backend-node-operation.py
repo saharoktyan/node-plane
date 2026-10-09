@@ -210,9 +210,24 @@ def temporary_profile(action, command_id, intent, recover, path):
 
     Unknown actions on old runtime bundles fail instead of losing a TTL field.
     """
+    # node_key selects the authenticated agent in the driver; the agent also
+    # checks its own node identity before executing this helper.
+    intent = dict(intent)
+    intent.pop('node_key', None)
     intents.validate(intent)
     if intent['command_id'] != command_id:
         raise ValueError('temporary operation is not supported')
+    if action == 'temporary_status':
+        if not recover:
+            raise ValueError('temporary status is read-only')
+        with open(str(path) + '.lock', 'a') as lock:
+            fcntl.flock(lock, fcntl.LOCK_SH)
+            with closing(sqlite3.connect(Path(path).resolve().as_uri() + '?mode=ro', uri=True)) as conn:
+                row = conn.execute('SELECT command_id,expires_at,status FROM temporary_leases WHERE protocol=? AND profile=?',
+                                   (intent['protocol'],intent['runtime_name'])).fetchone()
+                if row is None or row[0] != command_id:
+                    raise ValueError('temporary identity not found')
+                return {'expires_at':row[1],'status':row[2]}
     if action == 'temporary_ensure':
         if intent.get('lease_seconds') not in intents.LEASE_DURATIONS or intent['action'] != 'ensure':
             raise ValueError('temporary lease is required')
@@ -221,9 +236,12 @@ def temporary_profile(action, command_id, intent, recover, path):
             raise ValueError('invalid temporary revocation')
         # This endpoint must never delete a permanent peer.
         with closing(sqlite3.connect(Path(path).resolve().as_uri() + '?mode=ro', uri=True)) as conn:
-            if not conn.execute('SELECT 1 FROM temporary_leases WHERE protocol=? AND profile=?',
-                                (intent['protocol'], intent['runtime_name'])).fetchone():
+            lease = conn.execute('SELECT status FROM temporary_leases WHERE protocol=? AND profile=?',
+                                (intent['protocol'], intent['runtime_name'])).fetchone()
+            if not lease:
                 raise ValueError('temporary identity not found')
+            if lease[0] in {'expired','revoked'}:
+                return {'revocation_mode': 'new_connections_only' if intent['protocol']=='xray' else 'peer_removed'}
     else:
         raise ValueError('invalid temporary action')
     if Path(str(path) + '.disabled').exists():
@@ -253,7 +271,7 @@ def temporary_profile(action, command_id, intent, recover, path):
 
 
 def execute(action, command_id, intent, recover=False, path='/etc/node-plane/profile-intents.sqlite3'):
-    if action in {'temporary_ensure', 'temporary_revoke'}:
+    if action in {'temporary_ensure', 'temporary_revoke', 'temporary_status'}:
         return temporary_profile(action, command_id, intent, recover, path)
     resolving = action.startswith('resolve_')
     if resolving:
