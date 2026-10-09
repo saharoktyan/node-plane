@@ -52,6 +52,7 @@ fn accent_color(value: &str) -> Color {
 enum Screen {
     Form,
     Nodes,
+    Temporary,
     NodeWizard,
     Settings,
     SettingsPage(SettingsPage),
@@ -119,6 +120,19 @@ enum Control {
     NodesSetup,
     NodesBootstrap,
     NodesDocker,
+    Temporary,
+    NodeTemporary,
+    TemporaryChoice(usize),
+    TemporaryBack,
+    TemporaryNew,
+    TemporaryRefresh,
+    TemporaryPage(bool),
+    TemporaryShow,
+    TemporaryCopy,
+    TemporaryQr,
+    TemporarySave,
+    TemporaryRevoke,
+    TemporaryConfirm,
     NodesPage(bool),
     QuickProfile,
     CycleProfile(bool),
@@ -324,6 +338,13 @@ impl Drop for Form {
 }
 
 struct App {
+    image_picker: Option<ratatui_image::picker::Picker>,
+    qr: std::cell::RefCell<Option<ratatui_image::protocol::StatefulProtocol>>,
+    clipboard: Option<arboard::Clipboard>,
+    qr_visible: bool,
+    temporary: crate::temporary::Browser,
+    temporary_sidebar: bool,
+    temporary_busy: bool,
     nodes: crate::nodes::Browser,
     nodes_requested: Option<crate::nodes::Command>,
     nodes_busy: bool,
@@ -369,6 +390,13 @@ struct App {
 impl App {
     fn new(r: &Request) -> Self {
         Self {
+            image_picker: None,
+            qr: std::cell::RefCell::new(None),
+            clipboard: None,
+            qr_visible: false,
+            temporary: crate::temporary::Browser::default(),
+            temporary_sidebar: false,
+            temporary_busy: false,
             nodes: crate::nodes::Browser::default(),
             nodes_requested: None,
             nodes_busy: false,
@@ -561,27 +589,32 @@ impl App {
     }
     fn navigate(&mut self, backwards: bool) {
         let current = if self.quick_focus {
-            4
-        } else if self.screen.is_settings() {
             5
+        } else if self.screen.is_settings() {
+            6
+        } else if matches!(self.screen, Screen::Temporary) {
+            4
         } else {
             Action::ALL
                 .iter()
                 .position(|a| *a == self.form.action)
                 .unwrap()
         };
-        let mut next = (current + if backwards { 5 } else { 1 }) % 6;
-        while next < 4 && !self.actions_enabled() {
-            next = (next + if backwards { 5 } else { 1 }) % 6;
+        let mut next = (current + if backwards { 6 } else { 1 }) % 7;
+        while next < 5 && !self.actions_enabled() {
+            next = (next + if backwards { 6 } else { 1 }) % 7;
         }
         self.quick_focus = false;
-        if next == 5 {
+        if next == 6 {
             self.open_settings();
-        } else if next == 4 {
+        } else if next == 5 {
             self.quick_focus = true;
             self.form.selected = 0;
             self.screen = Screen::Form;
             self.editor = None;
+        } else if next == 4 {
+            self.screen = Screen::Temporary;
+            self.temporary_sidebar = true;
         } else {
             self.form.select_action(Action::ALL[next]);
             self.screen = if self.form.action == Action::PrepareNode {
@@ -598,6 +631,152 @@ impl App {
             self.editor = None;
             self.error.clear();
         }
+    }
+    fn temporary_command(&mut self, command: crate::temporary::Command) {
+        self.nodes_requested = Some(crate::nodes::Command::Temporary(command));
+        self.error.clear();
+    }
+    fn open_temporary(&mut self, filter: Option<crate::nodes::Node>) {
+        if !self.actions_enabled() {
+            return;
+        }
+        let profile = self.form.saved.as_ref().map(|p| p.id);
+        if self.temporary.profile != profile {
+            self.temporary = crate::temporary::Browser {
+                profile,
+                ..Default::default()
+            };
+        }
+        self.temporary.filter = filter;
+        self.temporary.view = crate::temporary::View::List;
+        self.temporary
+            .capacity
+            .set(self.nodes_capacity.get().max(1));
+        self.temporary.page = 0;
+        self.temporary.selected = 0;
+        self.temporary.artifact = None;
+        self.temporary.notice.clear();
+        self.qr_visible = false;
+        *self.qr.borrow_mut() = None;
+        self.screen = Screen::Temporary;
+        self.temporary_sidebar = false;
+        self.quick_focus = false;
+        self.temporary_command(self.temporary.list());
+    }
+    fn temporary_controls(&self) -> Vec<Control> {
+        self.hits
+            .iter()
+            .filter_map(|h| match h.control {
+                Control::TemporaryChoice(_)
+                | Control::TemporaryBack
+                | Control::TemporaryNew
+                | Control::TemporaryRefresh
+                | Control::TemporaryPage(_)
+                | Control::TemporaryCopy
+                | Control::TemporaryQr
+                | Control::TemporaryShow
+                | Control::TemporarySave
+                | Control::TemporaryRevoke
+                | Control::TemporaryConfirm => Some(h.control),
+                _ => None,
+            })
+            .collect()
+    }
+    fn temporary_key(&mut self, key: KeyEvent) {
+        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            self.exit = true;
+            self.exit_confirm = false;
+            return;
+        }
+        if self.temporary_sidebar {
+            match key.code {
+                KeyCode::Enter | KeyCode::Tab | KeyCode::Right => self.open_temporary(None),
+                KeyCode::Up | KeyCode::Down => self.navigate(key.code == KeyCode::Up),
+                KeyCode::Esc => {
+                    self.exit = true;
+                    self.exit_confirm = false;
+                }
+                _ => {}
+            }
+            return;
+        }
+        let count = self.temporary_controls().len().max(1);
+        match key.code {
+            KeyCode::Esc if self.temporary.view == crate::temporary::View::List => {
+                self.temporary_sidebar = true
+            }
+            KeyCode::Esc if self.qr_visible => self.qr_visible = false,
+            KeyCode::Esc => {
+                self.activate(Control::TemporaryBack);
+            }
+            KeyCode::Tab | KeyCode::Down | KeyCode::Right => {
+                self.temporary.selected = (self.temporary.selected + 1) % count
+            }
+            KeyCode::BackTab | KeyCode::Up | KeyCode::Left => {
+                self.temporary.selected = (self.temporary.selected + count - 1) % count
+            }
+            KeyCode::PageDown => self.temporary.scroll = self.temporary.scroll.saturating_add(8),
+            KeyCode::PageUp => self.temporary.scroll = self.temporary.scroll.saturating_sub(8),
+            KeyCode::Enter => {
+                if let Some(control) = self.temporary_controls().get(self.temporary.selected) {
+                    self.activate(*control);
+                }
+            }
+            _ => {}
+        }
+    }
+    fn temporary_choice(&mut self, index: usize) {
+        use crate::temporary::View;
+        match self.temporary.view {
+            View::List => {
+                if let Some(id) = self
+                    .temporary
+                    .items
+                    .get(index)
+                    .and_then(|v| v["id"].as_str())
+                    .map(str::to_owned)
+                {
+                    self.temporary_command(crate::temporary::Command::Card(id));
+                }
+            }
+            View::Server => {
+                if let Some(node) = self.temporary.nodes.get(index).cloned() {
+                    self.temporary.choose_node(node);
+                }
+            }
+            View::Protocol => {
+                if let Some(protocol) = self
+                    .temporary
+                    .node
+                    .as_ref()
+                    .and_then(|n| n.protocols.get(index))
+                    .cloned()
+                {
+                    self.temporary.protocol = protocol;
+                    self.temporary.choose_protocol();
+                }
+            }
+            View::Transport => {
+                if let Some(transport) = self
+                    .temporary
+                    .node
+                    .as_ref()
+                    .and_then(|n| n.xray_transports.get(index))
+                    .cloned()
+                {
+                    self.temporary.transport = transport;
+                    self.temporary.view = View::Duration;
+                }
+            }
+            View::Duration => {
+                if let Some(seconds) = [43200, 86400, 259200].get(index) {
+                    self.temporary.seconds = *seconds;
+                    self.temporary.view = View::Confirm;
+                }
+            }
+            _ => {}
+        }
+        self.temporary.selected = 0;
     }
     fn open_nodes(&mut self) {
         if !self.actions_enabled() {
@@ -637,6 +816,7 @@ impl App {
                         | Control::NodesSetup
                         | Control::NodesBootstrap
                         | Control::NodesDocker
+                        | Control::NodeTemporary
                         | Control::NodesPage(_)
                 )
             })
@@ -1034,6 +1214,48 @@ impl App {
     fn event(&mut self, event: Event) {
         match event {
             Event::Nodes(update) => match update {
+                crate::nodes::Update::Temporary(command, value) => {
+                    use crate::temporary::{Command, View};
+                    self.temporary.selected = 0;
+                    match command {
+                        Command::List { .. } => {
+                            self.temporary.items =
+                                value["items"].as_array().cloned().unwrap_or_default();
+                            self.temporary.total = value["total"].as_u64().unwrap_or(0) as usize;
+                            self.temporary.loaded_size =
+                                value["page_size"].as_u64().unwrap_or(20) as usize;
+                        }
+                        Command::Servers => {
+                            self.temporary.nodes = value["items"]
+                                .as_array()
+                                .into_iter()
+                                .flatten()
+                                .filter_map(|v| {
+                                    serde_json::from_value::<crate::nodes::Node>(v.clone()).ok()
+                                })
+                                .filter(|n| {
+                                    n.enabled
+                                        && n.applied_revision > 0
+                                        && n.applied_revision == n.desired_revision
+                                        && !n.protocols.is_empty()
+                                })
+                                .collect();
+                        }
+                        Command::Card(_) | Command::Revoke(_) | Command::Create { .. } => {
+                            self.temporary.card = Some(value);
+                            self.temporary.artifact = None;
+                            self.temporary.view = View::Card;
+                            self.temporary.id = None;
+                        }
+                        Command::Artifact(_) => {
+                            self.qr_visible = false;
+                            *self.qr.borrow_mut() = None;
+                            self.temporary.artifact = Some(value);
+                            self.temporary.scroll = 0;
+                            self.temporary.view = View::Artifact;
+                        }
+                    }
+                }
                 crate::nodes::Update::CreationOptions(options) => {
                     match crate::node_wizard::Wizard::new(options) {
                         Ok(wizard) => self.node_wizard = Some(wizard),
@@ -1091,7 +1313,10 @@ impl App {
                 if self.nodes_busy {
                     self.nodes_busy = false;
                     let failed = result.is_err();
-                    self.screen = if self.wizard_loading && self.node_wizard.is_some() {
+                    self.screen = if self.temporary_busy {
+                        self.temporary_busy = false;
+                        Screen::Temporary
+                    } else if self.wizard_loading && self.node_wizard.is_some() {
                         Screen::NodeWizard
                     } else {
                         Screen::Nodes
@@ -1239,6 +1464,23 @@ impl App {
         }
     }
     fn mouse(&mut self, event: MouseEvent) -> Option<KeyEvent> {
+        if matches!(self.screen, Screen::Temporary)
+            && self.temporary.view == crate::temporary::View::Artifact
+            && self.prompt.is_none()
+            && !self.exit
+        {
+            match event.kind {
+                MouseEventKind::ScrollUp => {
+                    self.temporary.scroll = self.temporary.scroll.saturating_sub(3);
+                    return None;
+                }
+                MouseEventKind::ScrollDown => {
+                    self.temporary.scroll = self.temporary.scroll.saturating_add(3);
+                    return None;
+                }
+                _ => {}
+            }
+        }
         if matches!(self.screen, Screen::Nodes)
             && self.prompt.is_none()
             && !self.exit
@@ -1318,11 +1560,164 @@ impl App {
             self.nodes_sidebar = false;
         }
         let key = match control {
+            Control::Temporary => {
+                self.open_temporary(None);
+                return None;
+            }
+            Control::NodeTemporary => {
+                self.open_temporary(self.nodes.card.clone());
+                return None;
+            }
+            Control::TemporaryChoice(index) => {
+                self.temporary_choice(index);
+                return None;
+            }
+            Control::TemporaryBack => {
+                if self.qr_visible {
+                    self.qr_visible = false;
+                    return None;
+                }
+                self.temporary.back();
+                if self.temporary.view == crate::temporary::View::List {
+                    self.temporary_command(self.temporary.list());
+                }
+                return None;
+            }
+            Control::TemporaryNew => {
+                let command = self.temporary.new_config();
+                self.temporary_command(command);
+                return None;
+            }
+            Control::TemporaryRefresh => {
+                let command = if self.temporary.view == crate::temporary::View::Card {
+                    self.temporary
+                        .card
+                        .as_ref()
+                        .and_then(|v| v["id"].as_str())
+                        .map(|id| crate::temporary::Command::Card(id.into()))
+                } else {
+                    Some(self.temporary.list())
+                };
+                if let Some(command) = command {
+                    self.temporary_command(command);
+                }
+                return None;
+            }
+            Control::TemporaryPage(backwards) => {
+                self.temporary.page = if backwards {
+                    self.temporary.page.saturating_sub(1)
+                } else {
+                    self.temporary.page + 1
+                };
+                if self.temporary.view != crate::temporary::View::Server {
+                    self.temporary_command(self.temporary.list());
+                }
+                self.temporary.selected = 0;
+                return None;
+            }
+            Control::TemporaryShow => {
+                if let Some(id) = self
+                    .temporary
+                    .card
+                    .as_ref()
+                    .and_then(|v| v["id"].as_str())
+                    .map(str::to_owned)
+                {
+                    self.temporary_command(crate::temporary::Command::Artifact(id));
+                }
+                return None;
+            }
+            Control::TemporaryCopy => {
+                if let Some(uri) = self
+                    .temporary
+                    .artifact
+                    .as_ref()
+                    .and_then(|v| v["content"].as_str())
+                {
+                    let result = (|| -> Result<()> {
+                        if self.clipboard.is_none() {
+                            self.clipboard = Some(arboard::Clipboard::new()?);
+                        }
+                        self.clipboard.as_mut().unwrap().set_text(uri.to_owned())?;
+                        Ok(())
+                    })();
+                    if result.is_ok() {
+                        self.error.clear();
+                        self.temporary.notice = "Configuration link copied.".into();
+                    } else {
+                        self.error =
+                            "Clipboard unavailable. Save the configuration to a file.".into();
+                    }
+                }
+                return None;
+            }
+            Control::TemporaryQr => {
+                if let (Some(picker), Some(uri)) = (
+                    &self.image_picker,
+                    self.temporary
+                        .artifact
+                        .as_ref()
+                        .and_then(|v| v["content"].as_str()),
+                ) {
+                    match crate::temporary::qr_image(uri) {
+                        Ok(image) => {
+                            *self.qr.borrow_mut() = Some(picker.new_resize_protocol(image));
+                            self.qr_visible = true;
+                            self.error.clear();
+                        }
+                        Err(_) => {
+                            self.error =
+                                "The link is too large for a QR code. Copy it or save the files."
+                                    .into()
+                        }
+                    }
+                }
+                return None;
+            }
+            Control::TemporarySave => {
+                if let (Some(card), Some(artifact)) =
+                    (&self.temporary.card, &self.temporary.artifact)
+                {
+                    let result = crate::temporary::save_artifact(
+                        &self.state_dir,
+                        card["id"].as_str().unwrap_or(""),
+                        artifact,
+                    );
+                    match result {
+                        Ok(path) => {
+                            self.error.clear();
+                            self.temporary.notice = format!("Saved: {}", path.display());
+                        }
+                        Err(error) => self.error = error.to_string(),
+                    }
+                }
+                return None;
+            }
+            Control::TemporaryRevoke => {
+                self.temporary.view = crate::temporary::View::Revoke;
+                self.temporary.selected = 0;
+                return None;
+            }
+            Control::TemporaryConfirm => {
+                let command = if self.temporary.view == crate::temporary::View::Revoke {
+                    crate::temporary::Command::Revoke(
+                        self.temporary.card.as_ref().unwrap()["id"]
+                            .as_str()
+                            .unwrap()
+                            .into(),
+                    )
+                } else {
+                    self.temporary.create()
+                };
+                self.temporary_command(command);
+                return None;
+            }
             Control::Action(action) => {
                 if !self.actions_enabled() {
                     return None;
                 }
                 self.quick_focus = false;
+                self.temporary.artifact = None;
                 self.form.select_action(action);
                 self.screen = Screen::Form;
                 self.editor = None;
@@ -1714,6 +2109,15 @@ pub fn run(mut request: Request) -> Result<()> {
     let guard = TerminalGuard::enter()?;
     let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
     let mut app = App::new(&request);
+    app.image_picker = ratatui_image::picker::Picker::from_query_stdio()
+        .ok()
+        .filter(|p| {
+            crate::temporary::supports_images(
+                p.protocol_type(),
+                p.capabilities(),
+                std::env::var_os("WT_SESSION").is_some(),
+            )
+        });
     app.load_connections(&request)?;
     let mut receiver: Option<mpsc::Receiver<Event>> = None;
     let mut worker = None;
@@ -1743,6 +2147,16 @@ pub fn run(mut request: Request) -> Result<()> {
             nodes_profile = selected;
         }
         app.ssh_state = nodes_worker.state();
+        if matches!(app.screen, Screen::Temporary)
+            && app.temporary.view == crate::temporary::View::List
+            && app.temporary.loaded_size > 0
+            && app.temporary.loaded_size != app.temporary.capacity.get().clamp(1, 100)
+            && !app.nodes_busy
+            && app.nodes_requested.is_none()
+        {
+            app.temporary.page = 0;
+            app.temporary_command(app.temporary.list());
+        }
         if let Some(command) = app.nodes_requested.take() {
             let mut next = app.next_request();
             next.action = Action::Diagnose;
@@ -1755,9 +2169,11 @@ pub fn run(mut request: Request) -> Result<()> {
                     // Browsing has no target-node fields and never runs the old preparation workflow.
                     next.action = Action::Diagnose;
                     let (tx, rx) = mpsc::channel();
+                    let temporary_command = matches!(command, crate::nodes::Command::Temporary(_));
                     nodes_worker.submit(next, command, tx)?;
                     receiver = Some(rx);
                     app.nodes_busy = true;
+                    app.temporary_busy = temporary_command;
                     app.screen = Screen::Running;
                     app.error.clear();
                     app.update = None;
@@ -1979,6 +2395,7 @@ pub fn run(mut request: Request) -> Result<()> {
                     continue;
                 }
                 match app.screen {
+                    Screen::Temporary => app.temporary_key(key),
                     Screen::Nodes => app.nodes_key(key),
                     Screen::NodeWizard => app.wizard_key(key),
                     Screen::SettingsPage(SettingsPage::Updates) => {
@@ -2393,6 +2810,8 @@ fn draw(frame: &mut Frame, app: &App) -> Vec<Hit> {
         Constraint::Length(3),
     ])
     .split(area);
+    app.nodes_capacity
+        .set(usize::from(rows[1].height.saturating_sub(10)).max(1));
     let header = Layout::horizontal([Constraint::Min(0), Constraint::Length(17)]).split(rows[0]);
     frame.render_widget(
         Paragraph::new("Node Plane | Workstation assistant").style(
@@ -2416,6 +2835,7 @@ fn draw(frame: &mut Frame, app: &App) -> Vec<Hit> {
     );
     match app.screen {
         Screen::Form => draw_form(frame, app, rows[1], &mut hits),
+        Screen::Temporary => draw_temporary(frame, app, rows[1], &mut hits),
         Screen::Nodes => draw_nodes(frame, app, rows[1], &mut hits),
         Screen::NodeWizard => draw_node_wizard(frame, app, rows[1], &mut hits),
         Screen::Settings => draw_settings(frame, app, rows[1], &mut hits),
@@ -2612,6 +3032,9 @@ fn draw(frame: &mut Frame, app: &App) -> Vec<Hit> {
         match app.screen {
             Screen::NodeWizard => {
                 "Tab / arrows: select   Enter / click: continue   Esc: previous step   Ctrl+C: exit"
+            }
+            Screen::Temporary => {
+                "Tab / arrows: select   Enter / click: open   PgUp / PgDn: scroll   Esc: back / sidebar"
             }
             Screen::Nodes => {
                 "Tab / ↑ / ↓: select   Enter / click: open   Ctrl+F: search   ← / →: pages   Esc: list / sidebar"
@@ -2908,6 +3331,276 @@ fn centered(area: Rect, width: u16, height: u16) -> Rect {
         height,
     )
 }
+fn draw_temporary(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
+    use crate::temporary::View;
+    let right = draw_navigation(frame, app, area, hits);
+    let block = Block::bordered().title(" Temporary configurations ");
+    let inner = block.inner(right);
+    frame.render_widget(block, right);
+    let rows = Layout::vertical([
+        Constraint::Length(2),
+        Constraint::Min(1),
+        Constraint::Length(6),
+    ])
+    .split(inner);
+    let capacity = usize::from(rows[1].height).max(1);
+    app.temporary.capacity.set(capacity);
+    let browser = &app.temporary;
+    let selected = |i| !app.temporary_sidebar && browser.selected == i;
+    let mut choices: Vec<(String, Control)> = Vec::new();
+    let mut actions: Vec<(&str, Control)> = Vec::new();
+    let mut lines: Vec<Line> = Vec::new();
+    frame.render_widget(
+        Paragraph::new(
+            browser
+                .filter
+                .as_ref()
+                .map(|n| n.title.as_str())
+                .unwrap_or("All servers")
+                .to_owned()
+                + "\n"
+                + &browser.notice,
+        ),
+        rows[0],
+    );
+    match browser.view {
+        View::List => {
+            for (i, item) in browser.items.iter().enumerate() {
+                choices.push((
+                    format!(
+                        "{} · {} {} · {} · {}",
+                        item["node_title"]
+                            .as_str()
+                            .or_else(|| item["node_key"].as_str())
+                            .unwrap_or(""),
+                        if item["protocol"] == "xray" {
+                            "VLESS"
+                        } else {
+                            "AWG"
+                        },
+                        item["transport"].as_str().unwrap_or(""),
+                        item["status"].as_str().unwrap_or("unknown"),
+                        item["expires_at"].as_str().unwrap_or("Pending expiry")
+                    ),
+                    Control::TemporaryChoice(i),
+                ));
+            }
+            if choices.is_empty() {
+                lines.push(Line::from("No active configurations."));
+            }
+            actions.extend([
+                ("Create", Control::TemporaryNew),
+                ("Refresh", Control::TemporaryRefresh),
+            ]);
+            if browser.page > 0 {
+                actions.push(("←", Control::TemporaryPage(true)));
+            }
+            if (browser.page + 1) * capacity < browser.total {
+                actions.push(("→", Control::TemporaryPage(false)));
+            }
+        }
+        View::Server => {
+            for (i, node) in browser
+                .nodes
+                .iter()
+                .enumerate()
+                .skip(browser.page * capacity)
+                .take(capacity)
+            {
+                choices.push((
+                    format!("{} {} · {}", node.flag, node.title, node.region),
+                    Control::TemporaryChoice(i),
+                ));
+            }
+            if choices.is_empty() {
+                lines.push(Line::from("No ready servers."));
+            }
+            if browser.page > 0 {
+                actions.push(("←", Control::TemporaryPage(true)));
+            }
+            if (browser.page + 1) * capacity < browser.nodes.len() {
+                actions.push(("→", Control::TemporaryPage(false)));
+            }
+        }
+        View::Protocol => {
+            if let Some(node) = &browser.node {
+                for (i, p) in node.protocols.iter().enumerate() {
+                    choices.push((
+                        if p == "xray" {
+                            "VLESS".into()
+                        } else {
+                            "AmneziaWG".into()
+                        },
+                        Control::TemporaryChoice(i),
+                    ));
+                }
+            }
+        }
+        View::Transport => {
+            if let Some(node) = &browser.node {
+                for (i, p) in node.xray_transports.iter().enumerate() {
+                    choices.push((p.to_uppercase(), Control::TemporaryChoice(i)));
+                }
+            }
+        }
+        View::Duration => {
+            for (i, label) in ["12 hours", "1 day", "3 days"].iter().enumerate() {
+                choices.push(((*label).into(), Control::TemporaryChoice(i)));
+            }
+        }
+        View::Confirm => {
+            lines.push(Line::from(format!(
+                "{} · {} {} · {}h",
+                browser
+                    .node
+                    .as_ref()
+                    .map(|n| n.title.as_str())
+                    .unwrap_or(""),
+                browser.protocol,
+                browser.transport,
+                browser.seconds / 3600
+            )));
+            lines.push(Line::from(""));
+            if browser.protocol == "xray" {
+                lines.push(Line::from(crate::temporary::NOTICE));
+            }
+            actions.push(("Create", Control::TemporaryConfirm));
+        }
+        View::Card | View::Revoke | View::Artifact => {
+            if let Some(card) = &browser.card {
+                lines.push(Line::from(format!(
+                    "{} · {} {}",
+                    card["node_title"]
+                        .as_str()
+                        .or_else(|| card["node_key"].as_str())
+                        .unwrap_or(""),
+                    if card["protocol"] == "xray" {
+                        "VLESS"
+                    } else {
+                        "AWG"
+                    },
+                    card["transport"].as_str().unwrap_or("")
+                )));
+                lines.push(Line::from(format!(
+                    "Status: {}",
+                    card["status"].as_str().unwrap_or("unknown")
+                )));
+                if let Some(expiry) = card["expires_at"].as_str() {
+                    lines.push(Line::from(format!("Expires: {expiry}")));
+                }
+                if card["protocol"] == "xray" {
+                    lines.push(Line::from(crate::temporary::NOTICE));
+                }
+                match browser.view {
+                    View::Revoke => {
+                        lines.push(Line::from("Revoke access to this configuration?"));
+                        actions.push(("Revoke", Control::TemporaryConfirm));
+                    }
+                    View::Artifact => {
+                        if let Some(artifact) = &browser.artifact {
+                            lines.push(Line::from(""));
+                            lines.extend(
+                                artifact["content"]
+                                    .as_str()
+                                    .unwrap_or("")
+                                    .lines()
+                                    .map(Line::from),
+                            );
+                            actions.push(("Copy URI", Control::TemporaryCopy));
+                            if app.image_picker.is_some() {
+                                actions.push(("QR code", Control::TemporaryQr));
+                            }
+                            actions.push(("Save files", Control::TemporarySave));
+                        }
+                    }
+                    _ => {
+                        if card["status"] == "active" {
+                            actions.push(("Show configuration", Control::TemporaryShow));
+                        }
+                        if !["expired", "revoked", "cancelled", "revoking"]
+                            .contains(&card["status"].as_str().unwrap_or(""))
+                        {
+                            actions.push(("Revoke early", Control::TemporaryRevoke));
+                        }
+                        actions.push(("Refresh", Control::TemporaryRefresh));
+                    }
+                }
+            }
+        }
+    }
+    if browser.view != View::List {
+        actions.push(("Back", Control::TemporaryBack));
+    }
+    let mut index = 0;
+    if !choices.is_empty() {
+        for (i, (label, control)) in choices.iter().take(capacity).enumerate() {
+            let rect = Rect::new(rows[1].x, rows[1].y + i as u16, rows[1].width, 1);
+            frame.render_widget(
+                Paragraph::new(label.as_str()).style(Style::default().fg(if selected(index) {
+                    Color::Cyan
+                } else {
+                    Color::White
+                })),
+                rect,
+            );
+            hits.push(Hit {
+                area: rect,
+                control: *control,
+            });
+            index += 1;
+        }
+    } else {
+        frame.render_widget(
+            Paragraph::new(lines)
+                .wrap(Wrap { trim: false })
+                .scroll((browser.scroll, 0)),
+            rows[1],
+        );
+    }
+    if app.qr_visible && browser.view == View::Artifact {
+        frame.render_widget(Clear, rows[1]);
+        if let Some(qr) = app.qr.borrow_mut().as_mut() {
+            frame.render_stateful_widget(
+                ratatui_image::StatefulImage::default().resize(ratatui_image::Resize::Scale(None)),
+                rows[1],
+                qr,
+            );
+        }
+    }
+    let count = actions.len();
+    let per_row = count.div_ceil(2).max(1);
+    // Focus indexes use only visible controls, matching mouse hit targets.
+    index = hits
+        .iter()
+        .filter(|h| matches!(h.control, Control::TemporaryChoice(_)))
+        .count();
+    for (i, (label, control)) in actions.into_iter().enumerate() {
+        let row = i / per_row;
+        let column = i % per_row;
+        let row_count = (count - row * per_row).min(per_row);
+        let columns =
+            Layout::horizontal(vec![Constraint::Ratio(1, row_count as u32); row_count]).split(
+                Rect::new(rows[2].x, rows[2].y + row as u16 * 3, rows[2].width, 3),
+            );
+        draw_button_color(
+            frame,
+            columns[column],
+            label,
+            selected(index),
+            if label.starts_with("Revoke") {
+                Color::Red
+            } else {
+                Color::Cyan
+            },
+        );
+        hits.push(Hit {
+            area: columns[column],
+            control,
+        });
+        index += 1;
+    }
+}
+
 fn draw_nodes(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
     let right = draw_navigation(frame, app, area, hits);
     let card = app.nodes.card.as_ref();
@@ -3050,6 +3743,7 @@ fn draw_nodes(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
         {
             actions.push(("Prepare SSH", Control::NodesPrepare));
         }
+        actions.push(("Temporary configs", Control::NodeTemporary));
         actions.extend([
             ("Refresh", Control::NodesRefresh),
             ("Back", Control::NodesBack),
@@ -3733,11 +4427,34 @@ fn draw_navigation(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>
         navigation.width,
         profile_height,
     );
-    let action_height = if profile.y.saturating_sub(navigation.y) >= 12 {
+    let action_height = if profile.y.saturating_sub(navigation.y) >= 15 {
         3
     } else {
         2
     };
+    let y = navigation.y.saturating_add(4 * action_height);
+    if y.saturating_add(action_height) <= profile.y {
+        let rect = Rect::new(navigation.x, y, navigation.width, action_height);
+        if app.actions_enabled() {
+            draw_navigation_button(
+                frame,
+                rect,
+                "Temporary configs",
+                matches!(app.screen, Screen::Temporary),
+            );
+            hits.push(Hit {
+                area: rect,
+                control: Control::Temporary,
+            });
+        } else {
+            frame.render_widget(
+                Paragraph::new("Temporary configurations")
+                    .style(Style::default().fg(Color::DarkGray))
+                    .block(Block::bordered()),
+                rect,
+            );
+        }
+    }
     for (index, action) in Action::ALL.into_iter().enumerate() {
         let y = navigation.y.saturating_add(index as u16 * action_height);
         if y.saturating_add(action_height) > profile.y {
@@ -4176,6 +4893,76 @@ fn draw_editor(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn temporary_artifact_offers_copy_and_hides_qr_without_graphics() {
+        let mut app = test_profile_app();
+        app.screen = Screen::Temporary;
+        app.temporary.view = crate::temporary::View::Artifact;
+        app.temporary.card = Some(
+            serde_json::json!({"id":uuid::Uuid::new_v4(), "node_key":"lv1", "protocol":"awg", "transport":"vpn", "status":"active"}),
+        );
+        app.temporary.artifact = Some(serde_json::json!({"content":"vpn://SECRET"}));
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
+        terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+        assert!(
+            app.temporary_controls()
+                .iter()
+                .any(|c| matches!(c, Control::TemporaryCopy))
+        );
+        assert!(
+            app.temporary_controls()
+                .iter()
+                .any(|c| matches!(c, Control::TemporarySave))
+        );
+        assert!(
+            !app.temporary_controls()
+                .iter()
+                .any(|c| matches!(c, Control::TemporaryQr))
+        );
+        app.qr_visible = true;
+        app.temporary_key(KeyCode::Esc.into());
+        assert!(!app.qr_visible);
+        assert!(app.temporary.view == crate::temporary::View::Artifact);
+        app.temporary_key(KeyCode::Esc.into());
+        assert!(app.temporary.view == crate::temporary::View::Card);
+        app.temporary_key(KeyCode::Esc.into());
+        assert!(matches!(
+            app.nodes_requested.take(),
+            Some(crate::nodes::Command::Temporary(
+                crate::temporary::Command::List { .. }
+            ))
+        ));
+    }
+
+    #[test]
+    fn temporary_creation_skips_only_single_choices_and_keeps_identity() {
+        let mut app = test_profile_app();
+        let mut node = browser_node("lv1", "Europe");
+        node.applied_revision = 1;
+        app.open_temporary(Some(node.clone()));
+        app.nodes_requested = None;
+        app.activate(Control::TemporaryNew);
+        assert!(app.temporary.view == crate::temporary::View::Duration);
+        app.temporary.seconds = 43200;
+        let identity = app.temporary.id;
+        let first = app.temporary.create();
+        let second = app.temporary.create();
+        assert!(
+            matches!((first,second), (crate::temporary::Command::Create{id:a,body:x}, crate::temporary::Command::Create{id:b,body:y}) if a==b && x==y)
+        );
+        assert_eq!(app.temporary.id, identity);
+        app.temporary.back();
+        assert!(app.temporary.view == crate::temporary::View::List);
+        node.protocols = vec!["xray".into()];
+        node.xray_transports = vec!["tcp".into(), "xhttp".into()];
+        app.temporary.choose_node(node);
+        assert!(app.temporary.view == crate::temporary::View::Transport);
+        app.temporary.transport = "xhttp".into();
+        app.temporary.view = crate::temporary::View::Duration;
+        app.temporary.back();
+        assert!(app.temporary.view == crate::temporary::View::Transport);
+    }
+
     #[test]
     fn administrator_picker_selects_exact_account_and_cancels_without_answer() {
         let mut app = test_profile_app();
@@ -5482,7 +6269,7 @@ mod tests {
         app.activate(Control::Action(Action::PrepareNode));
         app.nodes_requested = None;
         let mut node = browser_node("lv1", "Europe");
-        node.transport = Some("ssh".into());
+        node.transport = Some("local".into());
         node.agent = crate::nodes::AgentState::Missing;
         node.services =
             Some(serde_json::json!({"docker":true,"awg_running":false,"xray_running":false}));

@@ -215,8 +215,8 @@ prompts rather than accepting hosts or guessing credentials.
 
 ## Nodes
 
-The sidebar order is Install Node Plane, Update Node Plane, Nodes, and
-Diagnostic. Nodes reads the selected controller's server registry through its
+The sidebar order is Install Node Plane, Update Node Plane, Nodes,
+Diagnostic, and Temporary configs. Nodes reads the selected controller's server registry through its
 bound administrator account. Regions start expanded; click their triangle or
 select the region and press Enter to fold them. Server rows open a card.
 
@@ -239,6 +239,27 @@ selected section's content (the profile selector retains its switching arrows).
 Escape from any Settings subpage returns to the Settings overview.
 Mouse clicks and the wheel also work. Switching installation profiles clears the
 browser cache; Refresh explicitly loads updated registry state.
+
+## Temporary configurations
+
+Temporary configs lists pending and active configurations, their server,
+protocol/transport, status and UTC expiry. Create selects a ready server, skips
+single protocol/transport choices, and offers 12h, 1d or 3d. A node card opens
+the same section for that server. Revoke requires confirmation; Refresh reads
+the latest operation status.
+
+Show configuration offers Copy URI and Save files. QR code appears only when
+graphics support is detected: Kitty, Sixel or iTerm2. Windows Terminal requires
+a positive Sixel capability response; its name or WT_SESSION does not enable
+the button. Older Windows Terminal and other unsupported terminals still offer
+the URI and files. Clipboard errors leave file saving available. Escape closes
+the QR view; Page Up/Down and the mouse wheel scroll long links.
+
+VLESS expiry/revocation blocks new connections; existing connections may continue
+until disconnect. The creation confirmation and card show this limitation.
+Real tunnel, reboot and cross-platform terminal validation remain pending.
+
+## Shared SSH connections
 
 All TUI actions share the selected installation's verified SSH connection:
 installation, updates, diagnostics, recovery and Nodes. Target connections opened

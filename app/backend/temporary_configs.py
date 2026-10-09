@@ -39,12 +39,15 @@ class TemporaryConfigService:
              action, status, now().isoformat()))
 
     @staticmethod
-    def public(row):
+    def public(row, conn=None):
         result = {k: row[k] for k in ('id','node_key','protocol','transport','duration_seconds',
                                       'status','created_at','expires_at','error_code')}
         if row['status'] == 'active' and datetime.fromisoformat(row['expires_at']) <= now():
             result['status'] = 'expiry_pending'
         result['revocation_mode'] = 'new_connections_only' if row['protocol'] == 'xray' else 'peer_removed'
+        if conn is not None:
+            node = conn.execute('SELECT title FROM backend_nodes WHERE key=?', (row['node_key'],)).fetchone()
+            result['node_title'] = node['title'] if node else row['node_key']
         return result
 
     @staticmethod
@@ -84,7 +87,7 @@ class TemporaryConfigService:
                 if (previous['node_key'],previous['protocol'],previous['transport'],previous['duration_seconds']) != (
                         node_key,protocol,transport,duration_seconds):
                     raise AccessDenied('idempotency_conflict',409)
-                return self.public(previous)
+                return self.public(previous, conn)
             conn.execute('UPDATE backend_nodes SET enabled=enabled WHERE key=?',(node_key,))
             node = self.ready_node(conn,node_key,protocol,transport)
             identity = str(uuid4())
@@ -100,7 +103,7 @@ class TemporaryConfigService:
                  transport,duration_seconds,intent['runtime_name'],json.dumps(intent,sort_keys=True),now().isoformat()))
             row = conn.execute('SELECT * FROM backend_temporary_configs WHERE id=?',(identity,)).fetchone()
             self.event(conn,row,'create','queued',actor)
-            return self.public(row)
+            return self.public(row, conn)
 
     def list(self, actor, *, node_key=None, page=0, page_size=20):
         if type(page) is not int or page < 0 or type(page_size) is not int or not 1 <= page_size <= 100:
@@ -112,7 +115,7 @@ class TemporaryConfigService:
             count = conn.execute(f'SELECT COUNT(*) AS n FROM backend_temporary_configs WHERE {condition}',args).fetchone()['n']
             rows = conn.execute(f'''SELECT * FROM backend_temporary_configs WHERE {condition}
                 ORDER BY COALESCE(expires_at,created_at),id LIMIT ? OFFSET ?''',(*args,page_size,page*page_size)).fetchall()
-            return {'items':[self.public(r) for r in rows],'total':count,'page':page,'page_size':page_size}
+            return {'items':[self.public(r,conn) for r in rows],'total':count,'page':page,'page_size':page_size}
 
     def get(self, actor, config_id):
         with self.db.connect() as conn:
@@ -120,7 +123,7 @@ class TemporaryConfigService:
             row = conn.execute('SELECT * FROM backend_temporary_configs WHERE id=?',(config_id,)).fetchone()
             if row is None:
                 raise AccessDenied('resource_not_found',404)
-            return self.public(row)
+            return self.public(row, conn)
 
     def revoke(self, actor, config_id):
         with self.db.transaction() as conn:
@@ -131,12 +134,12 @@ class TemporaryConfigService:
             if row is None:
                 raise AccessDenied('resource_not_found',404)
             if row['status'] in TERMINAL | {'revoking'}:
-                return self.public(row)
+                return self.public(row, conn)
             status = 'cancelled' if row['status']=='queued' else 'revoking'
             conn.execute('''UPDATE backend_temporary_configs SET status=?,revoke_reason='manual',error_code=NULL WHERE id=?''',
                          (status,config_id))
             self.event(conn,row,'revoke',status,actor)
-            return self.public(conn.execute('SELECT * FROM backend_temporary_configs WHERE id=?',(config_id,)).fetchone())
+            return self.public(conn.execute('SELECT * FROM backend_temporary_configs WHERE id=?',(config_id,)).fetchone(), conn)
 
     def recover(self):
         with self.db.transaction() as conn:

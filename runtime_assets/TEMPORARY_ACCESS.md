@@ -4,8 +4,8 @@ The command journal supports an internal `lease_seconds` option (43200 / 86400 /
 `ensure` for a new `tmp_<32 lowercase hex digits>` identity. AWG and VLESS commands are
 available over the existing authenticated `BackendNodeAction` RPC as
 `temporary_ensure`, `temporary_revoke` and read-only `temporary_status`.
-The backend registry/API and worker are connected; user interfaces remain
-planned. Live tunnel/reboot validation is still required before presenting this
+The backend registry/API, worker and management interfaces are connected.
+Live tunnel/reboot validation is still required before presenting this
 as a finished temporary configuration management feature.
 
 The local journal stores a conservative expiry **before** the external ensure.
@@ -69,7 +69,7 @@ Source for the Xray limitation:
 <https://github.com/XTLS/Xray-core/blob/v26.3.27/proxy/vless/inbound/inbound.go#L232-L236>
 
 
-## Management interfaces (planned)
+## Management interfaces
 
 Both interfaces open an active temporary-config list with server, protocol /
 transport, expiry and actual operation status. Each entry supports viewing /
@@ -83,6 +83,15 @@ opens this section filtered to that server and skips server selection on Create.
 Telegram exposes it only in administrator Settings, with the same conditional
 steps and the existing separate-message URI action for iOS. There is no Telegram
 server-card entry. VLESS issuance includes the notice above in both interfaces.
+
+Workstation also offers Copy URI through the native clipboard and Save files.
+Saved files live under the workstation state directory in `temporary-configs/<id>`;
+on Unix their directory and file permissions are 0700 and 0600. Saving is atomic
+and can be repeated for the same configuration. QR is offered only when graphics
+support is detected. Windows Terminal must actually answer the Sixel capability
+query; WT_SESSION alone never enables it. Unsupported or unresponsive terminals
+retain URI and file actions. Real terminal/clipboard and live-node validation
+remain separate from automated UI tests.
 
 ## Backend registry
 

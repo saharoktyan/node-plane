@@ -56,6 +56,7 @@ def parent_path(callback, locale, data):
         return roots[callback]
     settings_pages = {
         'updates': 'updates.title', 'backups': 'backups.title',
+        'temporary:list:0': 'temporary.title',
         'alerts': 'alerts.title', 'traffic': 'traffic.title',
         'bot_title_settings': 'bot_title.title', 'request_policy': 'request_policy.title',
         'idefault:open': 'defaults.title', 'idefault:main': 'defaults.title',
@@ -64,6 +65,17 @@ def parent_path(callback, locale, data):
     }
     if callback in settings_pages:
         return (*settings, Breadcrumb(tr(locale, settings_pages[callback]), callback))
+    if callback.startswith('temporary:'):
+        root = (*settings, Breadcrumb(tr(locale, 'temporary.title'), 'temporary:list:0'))
+        action = callback.split(':',1)[1]
+        if action.startswith('list:'):
+            return (*settings, Breadcrumb(tr(locale, 'temporary.title'), callback))
+        if action.startswith(('card:', 'show:')):
+            identity = action.split(':')[1]
+            return (*root, Breadcrumb(tr(locale, 'temporary.show'), 'temporary:card:'+identity))
+        if action.startswith('confirm_revoke:'):
+            return (*root, Breadcrumb(tr(locale, 'temporary.revoke'), callback))
+        return root
     if callback == 'idefault:advanced':
         return (*parent_path('idefault:main', locale, data),
                 Breadcrumb(tr(locale, 'defaults.edit_advanced'), callback))
