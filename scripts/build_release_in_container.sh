@@ -35,7 +35,7 @@ fi
   --env GIT_CONFIG_COUNT=1 \
   --env GIT_CONFIG_KEY_0=safe.directory \
   --env GIT_CONFIG_VALUE_0=/work \
-  "$IMAGE_NAME" \
+  --network host "$IMAGE_NAME" \
   bash scripts/tag_release.sh "$TAG" --skip-tests --no-tag
 
 echo "Portable artifacts are ready in dist/releases/${TAG}."
