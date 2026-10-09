@@ -19,13 +19,13 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 
 def validate(intent):
     expected = {'command_id', 'protocol', 'runtime_name', 'revision', 'action', 'uuid', 'short_id'}
-    if set(intent) != expected or not re.fullmatch(r'[A-Za-z0-9_.:-]{1,128}', intent['command_id']):
+    if set(intent) not in (expected, expected | {'lease_seconds'}) or not re.fullmatch(r'[A-Za-z0-9_.:-]{1,128}', intent['command_id']):
         raise ValueError('invalid command identity')
     if not re.fullmatch(r'[A-Za-z0-9_-]{1,64}', intent['runtime_name']):
         raise ValueError('invalid runtime name')
@@ -40,6 +40,29 @@ def validate(intent):
             raise ValueError('invalid xray identity')
     elif intent['uuid'] or intent['short_id']:
         raise ValueError('unexpected identity')
+    if 'lease_seconds' in intent and (type(intent['lease_seconds']) is not int
+            or intent['lease_seconds'] != 86400 or intent['action'] != 'ensure'
+            or not re.fullmatch(r'tmp_[0-9a-f]{32}', intent['runtime_name'])):
+        raise ValueError('invalid temporary lease')
+
+
+def lease_schema(connection):
+    connection.execute('''CREATE TABLE IF NOT EXISTS temporary_leases (
+        protocol TEXT NOT NULL, profile TEXT NOT NULL, command_id TEXT NOT NULL,
+        expires_at TEXT NOT NULL, status TEXT NOT NULL
+            CHECK(status IN ('provisioning','active','revoking','revoked','expired')),
+        PRIMARY KEY(protocol, profile))''')
+
+
+def lease_current(connection, intent, now=None):
+    lease = connection.execute('SELECT expires_at,status FROM temporary_leases WHERE protocol=? AND profile=?',
+                               (intent['protocol'], intent['runtime_name'])).fetchone()
+    if intent['action'] == 'ensure' and lease:
+        if (lease[1] != 'active' or datetime.fromisoformat(lease[0]) <= (now or datetime.now(timezone.utc))):
+            raise ValueError('temporary lease is unavailable')
+        if 'lease_seconds' not in intent:
+            raise ValueError('temporary identity cannot become permanent')
+    return lease
 
 
 def apply(intent, path, runner):
@@ -61,11 +84,13 @@ def apply(intent, path, runner):
             connection.execute('CREATE TABLE IF NOT EXISTS fences (protocol TEXT, profile TEXT, revision INTEGER NOT NULL, command_id TEXT NOT NULL, action TEXT, PRIMARY KEY(protocol, profile))')
             if 'action' not in {row[1] for row in connection.execute('PRAGMA table_info(fences)')}:
                 connection.execute('ALTER TABLE fences ADD COLUMN action TEXT')
+            lease_schema(connection)
             prior = connection.execute('SELECT fingerprint, status, response FROM commands WHERE id = ?', (intent['command_id'],)).fetchone()
             if prior:
                 if prior[0] != fingerprint:
                     raise ValueError('command identity conflict')
                 if prior[1] == 'succeeded':
+                    lease_current(connection, intent)
                     return json.loads(prior[2])
                 raise ValueError('previous command did not complete successfully')
             # The node-wide lock serializes mutations. A crashed predecessor may
@@ -73,13 +98,24 @@ def apply(intent, path, runner):
             if connection.execute("SELECT 1 FROM commands WHERE status = 'running' LIMIT 1").fetchone():
                 raise ValueError('unfinished execution requires operator reconciliation')
             target = (intent['protocol'], intent['runtime_name'])
+            lease = lease_current(connection, intent)
+            if lease and intent['action'] == 'ensure':
+                raise ValueError('temporary lease cannot be renewed')
             fence = connection.execute('SELECT revision FROM fences WHERE protocol = ? AND profile = ?', target).fetchone()
+            if 'lease_seconds' in intent and fence:
+                raise ValueError('temporary lease requires an unused identity')
             if fence and intent['revision'] <= fence[0]:
                 raise ValueError('stale or conflicting revision')
             instance_id = os.environ.get('NODE_PLANE_AGENT_INSTANCE_ID', 'standalone')
             with connection:
                 connection.execute("INSERT INTO commands(id, fingerprint, status, instance_id) VALUES (?, ?, 'running', ?)", (intent['command_id'], fingerprint, instance_id))
                 connection.execute('INSERT INTO fences(protocol, profile, revision, command_id, action) VALUES (?, ?, ?, ?, ?) ON CONFLICT(protocol, profile) DO UPDATE SET revision = excluded.revision, command_id = excluded.command_id, action = excluded.action', (*target, intent['revision'], intent['command_id'], intent['action']))
+                if 'lease_seconds' in intent:
+                    # Persist a conservative deadline before any external change.
+                    # A crash after creating the peer still leaves revocation work.
+                    expires = datetime.now(timezone.utc) + timedelta(seconds=intent['lease_seconds'])
+                    connection.execute('''INSERT INTO temporary_leases VALUES (?,?,?,?,'provisioning')''',
+                                       (*target, intent['command_id'], expires.isoformat()))
             try:
                 response = runner(intent, lock.fileno())
                 if not isinstance(response, dict) or set(response) != {'summary', 'payload_json'} or any(not isinstance(v, str) for v in response.values()):
@@ -89,6 +125,16 @@ def apply(intent, path, runner):
                 # an external Docker/API operation stopped. Fence remains closed.
                 raise
             with connection:
+                if 'lease_seconds' in intent:
+                    expires = datetime.now(timezone.utc) + timedelta(seconds=intent['lease_seconds'])
+                    payload = json.loads(response['payload_json']) if response['payload_json'] else {}
+                    if not isinstance(payload, dict):
+                        raise ValueError('invalid lease result')
+                    response = dict(response, payload_json=json.dumps(dict(payload, expires_at=expires.isoformat()), sort_keys=True))
+                    connection.execute("UPDATE temporary_leases SET status='active',expires_at=? WHERE protocol=? AND profile=?",
+                                       (expires.isoformat(), *target))
+                elif intent['action'] == 'delete' and lease:
+                    connection.execute("UPDATE temporary_leases SET status='revoked' WHERE protocol=? AND profile=?", target)
                 connection.execute("UPDATE commands SET status = 'succeeded', response = ? WHERE id = ?", (json.dumps(response), intent['command_id']))
             return response
         finally:
@@ -116,9 +162,70 @@ def lookup(intent, path):
         row = connection.execute('SELECT fingerprint, status, response FROM commands WHERE id = ?', (intent['command_id'],)).fetchone()
         if not row or row[0] != fingerprint or row[1] != 'succeeded':
             raise ValueError('command success is not confirmed')
+        if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='temporary_leases'").fetchone():
+            lease_current(connection, intent)
         return json.loads(row[2])
     finally:
         connection.close()
+
+
+def expire_leases(path, runner, now=None):
+    """Local revocation independent of the controller and agent RPC service.
+
+    Only idempotent deletes are retried. Never replay an interrupted ensure.
+    The shared lock also waits for orphaned mutation subprocesses to stop.
+    """
+    path = Path(path)
+    if not path.exists():
+        return {'expired': 0, 'pending': 0}
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        raise ValueError('expiry requires an aware UTC clock')
+    with open(str(path) + '.lock', 'a') as lock:
+        os.chmod(lock.name, 0o600)
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        # Decommission writes this fence only after all known peers are removed.
+        # Cleanup may already have deleted the protocol scripts and containers.
+        if Path(str(path) + '.disabled').exists():
+            return {'expired': 0, 'pending': 0}
+        with closing(sqlite3.connect(path)) as connection:
+            connection.execute('PRAGMA synchronous=FULL')
+            if not connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='temporary_leases'").fetchone():
+                return {'expired': 0, 'pending': 0}
+            expired = pending = 0
+            rows = connection.execute('''SELECT protocol,profile,command_id,expires_at,status
+                FROM temporary_leases WHERE status IN ('provisioning','active','revoking')
+                ORDER BY expires_at,protocol,profile''').fetchall()
+            for protocol, profile, command_id, deadline, status in rows:
+                if status != 'revoking' and datetime.fromisoformat(deadline) > now:
+                    continue
+                # Reserve the identity permanently, including after a failed delete.
+                with connection:
+                    connection.execute("UPDATE temporary_leases SET status='revoking' WHERE protocol=? AND profile=?", (protocol, profile))
+                fence = connection.execute('SELECT revision FROM fences WHERE protocol=? AND profile=?', (protocol, profile)).fetchone()
+                intent = {'command_id': 'expiry:' + hashlib.sha256(command_id.encode()).hexdigest(),
+                          'protocol': protocol, 'runtime_name': profile, 'revision': fence[0] + 1,
+                          'action': 'delete', 'uuid': '', 'short_id': ''}
+                validate(intent)
+                try:
+                    response = runner(intent, lock.fileno())
+                    if (not isinstance(response, dict) or set(response) != {'summary', 'payload_json'}
+                            or any(not isinstance(value, str) for value in response.values())):
+                        raise ValueError('invalid expiry result')
+                except Exception:
+                    pending += 1
+                    continue
+                fingerprint = hashlib.sha256(json.dumps(intent, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+                with connection:
+                    connection.execute('''INSERT INTO commands VALUES (?,?,'succeeded',?,?)
+                        ON CONFLICT(id) DO NOTHING''', (intent['command_id'], fingerprint, json.dumps(response),
+                            os.environ.get('NODE_PLANE_AGENT_INSTANCE_ID', 'standalone')))
+                    connection.execute("UPDATE fences SET revision=?,command_id=?,action='delete' WHERE protocol=? AND profile=?",
+                                       (intent['revision'], intent['command_id'], protocol, profile))
+                    connection.execute("UPDATE commands SET status='superseded' WHERE id=? AND status='running'", (command_id,))
+                    connection.execute("UPDATE temporary_leases SET status='expired' WHERE protocol=? AND profile=?", (protocol, profile))
+                expired += 1
+            return {'expired': expired, 'pending': pending}
 
 
 def validate_node_settings(intent):
@@ -250,6 +357,10 @@ def lookup_node_settings(intent, path):
     fingerprint = hashlib.sha256(json.dumps(intent, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
     connection = sqlite3.connect(Path(path).resolve().as_uri() + '?mode=ro', uri=True, timeout=2)
     try:
+        if len(sys.argv) == 2 and sys.argv[1] == 'expire-leases':
+            result = expire_leases('/etc/node-plane/profile-intents.sqlite3', run)
+            print(json.dumps(result))
+            sys.exit(1 if result['pending'] else 0)
         row = connection.execute('SELECT fingerprint, status, response FROM commands WHERE id = ?', (intent['command_id'],)).fetchone()
         if not row or row[0] != fingerprint or row[1] != 'succeeded':
             raise ValueError('node settings success is not confirmed')
