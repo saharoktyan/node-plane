@@ -22,6 +22,8 @@ import tempfile
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
+LEASE_DURATIONS = frozenset({43200, 86400, 259200})  # 12h / 1d / 3d
+
 
 def validate(intent):
     expected = {'command_id', 'protocol', 'runtime_name', 'revision', 'action', 'uuid', 'short_id'}
@@ -41,7 +43,7 @@ def validate(intent):
     elif intent['uuid'] or intent['short_id']:
         raise ValueError('unexpected identity')
     if 'lease_seconds' in intent and (type(intent['lease_seconds']) is not int
-            or intent['lease_seconds'] != 86400 or intent['action'] != 'ensure'
+            or intent['lease_seconds'] not in LEASE_DURATIONS or intent['action'] != 'ensure'
             or not re.fullmatch(r'tmp_[0-9a-f]{32}', intent['runtime_name'])):
         raise ValueError('invalid temporary lease')
 
@@ -195,7 +197,9 @@ def apply(intent, path, runner):
                     payload = json.loads(response['payload_json']) if response['payload_json'] else {}
                     if not isinstance(payload, dict):
                         raise ValueError('invalid lease result')
-                    response = dict(response, payload_json=json.dumps(dict(payload, expires_at=expires.isoformat()), sort_keys=True))
+                    response = dict(response, payload_json=json.dumps(dict(payload,
+                        expires_at=expires.isoformat(), revocation_mode=(
+                            'new_connections_only' if intent['protocol'] == 'xray' else 'peer_removed')), sort_keys=True))
                     connection.execute("UPDATE temporary_leases SET status='active',expires_at=? WHERE protocol=? AND profile=?",
                                        (expires.isoformat(), *target))
                 elif intent['action'] == 'delete' and lease:
@@ -210,8 +214,6 @@ def run(intent, lock_fd):
     root = Path(__file__).parent
     protocol, action = intent['protocol'], intent['action']
     if 'lease_seconds' in intent:
-        if protocol != 'awg':
-            raise ValueError('temporary VLESS tunnel termination is not supported yet')
         subprocess.run(['systemctl', 'is-active', '--quiet', 'node-plane-lease-expiry.timer'],
                        check=True, capture_output=True, timeout=15)
     script = 'xray-add-user-existing.sh' if protocol == 'xray' and action == 'ensure' else f'{protocol}-{"add" if action == "ensure" else "del"}-user.sh'

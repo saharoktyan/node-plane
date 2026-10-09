@@ -211,10 +211,10 @@ def temporary_profile(action, command_id, intent, recover, path):
     Unknown actions on old runtime bundles fail instead of losing a TTL field.
     """
     intents.validate(intent)
-    if intent['command_id'] != command_id or intent['protocol'] != 'awg':
+    if intent['command_id'] != command_id:
         raise ValueError('temporary operation is not supported')
     if action == 'temporary_ensure':
-        if intent.get('lease_seconds') != 86400 or intent['action'] != 'ensure':
+        if intent.get('lease_seconds') not in intents.LEASE_DURATIONS or intent['action'] != 'ensure':
             raise ValueError('temporary lease is required')
     elif action == 'temporary_revoke':
         if intent['action'] != 'delete' or 'lease_seconds' in intent:
@@ -236,12 +236,19 @@ def temporary_profile(action, command_id, intent, recover, path):
         response = intents.apply(intent, path, intents.run)
     result = json.loads(response['payload_json']) if response['payload_json'] else {}
     if action == 'temporary_ensure':
-        summary = response['summary']
-        config = summary[summary.index('[Interface]'):].split('\n===========', 1)[0].strip()
-        uri = next(line.strip() for line in summary.splitlines() if line.strip().startswith('vpn://'))
         if not result.get('expires_at'):
             raise ValueError('temporary expiry receipt missing')
-        result.update(wg_conf=config, vpn_key=uri)
+        if intent['protocol'] == 'awg':
+            summary = response['summary']
+            config = summary[summary.index('[Interface]'):].split('\n===========', 1)[0].strip()
+            uri = next(line.strip() for line in summary.splitlines() if line.strip().startswith('vpn://'))
+            result.update(wg_conf=config, vpn_key=uri)
+        else:
+            # REALITY uses the existing inbound's shortId/public metadata. Only
+            # the independent VLESS client UUID is new; ports remain unchanged.
+            result['xray_uuid'] = intent['uuid']
+    else:
+        result['revocation_mode'] = 'new_connections_only' if intent['protocol'] == 'xray' else 'peer_removed'
     return result
 
 
