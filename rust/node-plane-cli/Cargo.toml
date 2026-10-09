@@ -1,6 +1,6 @@
 [package]
 name = "node-plane-cli"
-version = "0.4.3-alpha.60"
+version = "0.4.3-alpha.61"
 edition = "2024"
 rust-version = "1.89"
 description = "Node Plane workstation installation assistant"
