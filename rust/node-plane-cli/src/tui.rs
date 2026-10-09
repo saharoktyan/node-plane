@@ -688,16 +688,14 @@ impl App {
                     }
                 } else if selected < choices {
                     Control::WizardChoice(selected)
+                } else if selection {
+                    [Control::WizardBack, Control::WizardCancel][selected - choices]
                 } else {
-                    if selection {
-                        [Control::WizardBack, Control::WizardCancel][selected - choices]
-                    } else {
-                        [
-                            Control::WizardNext,
-                            Control::WizardBack,
-                            Control::WizardCancel,
-                        ][selected - choices]
-                    }
+                    [
+                        Control::WizardNext,
+                        Control::WizardBack,
+                        Control::WizardCancel,
+                    ][selected - choices]
                 };
                 self.activate(control);
             }
