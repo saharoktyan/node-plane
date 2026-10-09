@@ -264,6 +264,14 @@ async def show_home(chat_id: int, user_id: int, bot: Bot, backend: BackendClient
         rows.append([button(user_id, tr(locale, 'home.get_config'), 'profiles').model_copy(update={'style': 'primary'})])
         rows.append([button(user_id, tr(locale, 'home.account'), 'account_info')])
         lines = (tr(locale, 'home.choose'),)
+        if account['role'] == 'admin':
+            try:
+                async with asyncio.timeout(3.0):
+                    nodes_page = await backend.admin_nodes(user_id, limit=1)
+                    if not nodes_page['items']:
+                        lines = (tr(locale, 'home.admin_quick_start'),)
+            except Exception:
+                pass
     if account['status'] == 'approved':
         rows[-1].append(button(user_id, tr(locale, 'home.settings'), 'member_settings'))
     else:

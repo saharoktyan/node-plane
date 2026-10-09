@@ -3497,15 +3497,7 @@ fn draw_temporary(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>)
                         actions.push(("Revoke", Control::TemporaryConfirm));
                     }
                     View::Artifact => {
-                        if let Some(artifact) = &browser.artifact {
-                            lines.push(Line::from(""));
-                            lines.extend(
-                                artifact["content"]
-                                    .as_str()
-                                    .unwrap_or("")
-                                    .lines()
-                                    .map(Line::from),
-                            );
+                        if browser.artifact.is_some() {
                             actions.push(("Copy URI", Control::TemporaryCopy));
                             if app.image_picker.is_some() {
                                 actions.push(("QR code", Control::TemporaryQr));
@@ -3550,20 +3542,25 @@ fn draw_temporary(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>)
             index += 1;
         }
     } else {
-        frame.render_widget(
-            Paragraph::new(lines)
-                .wrap(Wrap { trim: false })
-                .scroll((browser.scroll, 0)),
-            rows[1],
-        );
-    }
-    if app.qr_visible && browser.view == View::Artifact {
-        frame.render_widget(Clear, rows[1]);
-        if let Some(qr) = app.qr.borrow_mut().as_mut() {
-            frame.render_stateful_widget(
-                ratatui_image::StatefulImage::default().resize(ratatui_image::Resize::Scale(None)),
+        if app.qr_visible && browser.view == View::Artifact {
+            let layout = Layout::vertical([Constraint::Length(lines.len() as u16), Constraint::Min(0)]).split(rows[1]);
+            frame.render_widget(
+                Paragraph::new(lines).wrap(Wrap { trim: false }),
+                layout[0],
+            );
+            if let Some(qr) = app.qr.borrow_mut().as_mut() {
+                frame.render_stateful_widget(
+                    ratatui_image::StatefulImage::default().resize(ratatui_image::Resize::Scale(None)),
+                    layout[1],
+                    qr,
+                );
+            }
+        } else {
+            frame.render_widget(
+                Paragraph::new(lines)
+                    .wrap(Wrap { trim: false })
+                    .scroll((browser.scroll, 0)),
                 rows[1],
-                qr,
             );
         }
     }
@@ -4682,7 +4679,7 @@ fn draw_profiles(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) 
     }
     let count = app.connections.installations.len();
     if count == 0 {
-        frame.render_widget(Paragraph::new("No saved installations yet.\nCreate one here, or fill an action form; its connection will be remembered when you continue.\n\nPasswords and bot tokens are not saved.").wrap(Wrap { trim: false }), sections[0]);
+        frame.render_widget(Paragraph::new("Welcome to Node Plane Workstation!\n\nQuick start guide:\n1. Select \"New\" below to add a connection profile.\n2. Choose \"Local\" or \"SSH\" to connect to your target server.\n3. Enter the required details and press Enter to save.\n4. Select your new profile and use \"Install Node Plane\" to set up the controller.\n\nPasswords and bot tokens are not saved on disk.").wrap(Wrap { trim: false }), sections[0]);
     }
     let capacity = usize::from(sections[0].height / 3).max(1);
     let offset = app

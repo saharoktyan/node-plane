@@ -18,7 +18,7 @@ if (-not $Tag) {
     $releases = @(Invoke-RestMethod -Uri "$repo/releases?per_page=100" -Headers $headers)
     $release = $releases | Where-Object {
         -not $_.draft -and ($Channel -eq 'dev' -or -not $_.prerelease) -and
-        ($_.assets.name -contains 'node-plane-cli-installer.ps1')
+        ($_.assets | Where-Object { $_.name -eq 'node-plane-cli-installer.ps1' })
     } | Select-Object -First 1
     if (-not $release) { throw 'No Windows Workstation release found for this channel.' }
     $Tag = $release.tag_name

@@ -1,0 +1,365 @@
+EEEEEEEE..EEEEEEEEEEEEEEEE
+======================================================================
+ERROR: test_telegram_admin_nodes_rich (unittest.loader._FailedTest.test_telegram_admin_nodes_rich)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_telegram_admin_nodes_rich
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/unittest/loader.py", line 433, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/usr/lib/python3.14/unittest/loader.py", line 374, in _get_module_from_name
+    __import__(name)
+    ~~~~~~~~~~^^^^^^
+  File "/home/saharoktyan/projects/node-plane/tests/test_telegram_admin_nodes_rich.py", line 6, in <module>
+    from telegram_client.routers import admin_nodes as nodes, admin_node_tools as tools
+ModuleNotFoundError: No module named 'telegram_client'
+
+
+======================================================================
+ERROR: test_telegram_admin_profiles_rich (unittest.loader._FailedTest.test_telegram_admin_profiles_rich)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_telegram_admin_profiles_rich
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/unittest/loader.py", line 433, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/usr/lib/python3.14/unittest/loader.py", line 374, in _get_module_from_name
+    __import__(name)
+    ~~~~~~~~~~^^^^^^
+  File "/home/saharoktyan/projects/node-plane/tests/test_telegram_admin_profiles_rich.py", line 6, in <module>
+    from telegram_client.backend import BackendError
+ModuleNotFoundError: No module named 'telegram_client'
+
+
+======================================================================
+ERROR: test_telegram_admin_settings_rich (unittest.loader._FailedTest.test_telegram_admin_settings_rich)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_telegram_admin_settings_rich
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/unittest/loader.py", line 433, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/usr/lib/python3.14/unittest/loader.py", line 374, in _get_module_from_name
+    __import__(name)
+    ~~~~~~~~~~^^^^^^
+  File "/home/saharoktyan/projects/node-plane/tests/test_telegram_admin_settings_rich.py", line 6, in <module>
+    from telegram_client.routers import admin_settings as settings
+ModuleNotFoundError: No module named 'telegram_client'
+
+
+======================================================================
+ERROR: test_telegram_alerts_rich (unittest.loader._FailedTest.test_telegram_alerts_rich)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_telegram_alerts_rich
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/unittest/loader.py", line 433, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/usr/lib/python3.14/unittest/loader.py", line 374, in _get_module_from_name
+    __import__(name)
+    ~~~~~~~~~~^^^^^^
+  File "/home/saharoktyan/projects/node-plane/tests/test_telegram_alerts_rich.py", line 6, in <module>
+    from telegram_client.routers import admin_alerts as alerts
+ModuleNotFoundError: No module named 'telegram_client'
+
+
+======================================================================
+ERROR: test_telegram_client (unittest.loader._FailedTest.test_telegram_client)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_telegram_client
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/unittest/loader.py", line 433, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/usr/lib/python3.14/unittest/loader.py", line 374, in _get_module_from_name
+    __import__(name)
+    ~~~~~~~~~~^^^^^^
+  File "/home/saharoktyan/projects/node-plane/tests/test_telegram_client.py", line 7, in <module>
+    from aiogram import Dispatcher
+ModuleNotFoundError: No module named 'aiogram'
+
+
+======================================================================
+ERROR: test_telegram_commands (unittest.loader._FailedTest.test_telegram_commands)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_telegram_commands
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/unittest/loader.py", line 433, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/usr/lib/python3.14/unittest/loader.py", line 374, in _get_module_from_name
+    __import__(name)
+    ~~~~~~~~~~^^^^^^
+  File "/home/saharoktyan/projects/node-plane/tests/test_telegram_commands.py", line 5, in <module>
+    from telegram_client.commands import COMMANDS, register_commands
+ModuleNotFoundError: No module named 'telegram_client'
+
+
+======================================================================
+ERROR: test_telegram_devices (unittest.loader._FailedTest.test_telegram_devices)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_telegram_devices
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/unittest/loader.py", line 433, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/usr/lib/python3.14/unittest/loader.py", line 374, in _get_module_from_name
+    __import__(name)
+    ~~~~~~~~~~^^^^^^
+  File "/home/saharoktyan/projects/node-plane/tests/test_telegram_devices.py", line 6, in <module>
+    from telegram_client.backend import BackendClient, BackendError
+ModuleNotFoundError: No module named 'telegram_client'
+
+
+======================================================================
+ERROR: test_telegram_grant_policies (unittest.loader._FailedTest.test_telegram_grant_policies)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_telegram_grant_policies
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/unittest/loader.py", line 433, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/usr/lib/python3.14/unittest/loader.py", line 374, in _get_module_from_name
+    __import__(name)
+    ~~~~~~~~~~^^^^^^
+  File "/home/saharoktyan/projects/node-plane/tests/test_telegram_grant_policies.py", line 6, in <module>
+    from telegram_client import access_policy as policy_ui
+ModuleNotFoundError: No module named 'telegram_client'
+
+
+======================================================================
+ERROR: test_telegram_installation_defaults (unittest.loader._FailedTest.test_telegram_installation_defaults)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_telegram_installation_defaults
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/unittest/loader.py", line 433, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/usr/lib/python3.14/unittest/loader.py", line 374, in _get_module_from_name
+    __import__(name)
+    ~~~~~~~~~~^^^^^^
+  File "/home/saharoktyan/projects/node-plane/tests/test_telegram_installation_defaults.py", line 6, in <module>
+    from telegram_client.routers import admin_installation_defaults as defaults
+ModuleNotFoundError: No module named 'telegram_client'
+
+
+======================================================================
+ERROR: test_telegram_locale_restore (unittest.loader._FailedTest.test_telegram_locale_restore)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_telegram_locale_restore
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/unittest/loader.py", line 433, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/usr/lib/python3.14/unittest/loader.py", line 374, in _get_module_from_name
+    __import__(name)
+    ~~~~~~~~~~^^^^^^
+  File "/home/saharoktyan/projects/node-plane/tests/test_telegram_locale_restore.py", line 6, in <module>
+    from aiogram.fsm.context import FSMContext
+ModuleNotFoundError: No module named 'aiogram'
+
+
+======================================================================
+ERROR: test_telegram_maintenance_rich (unittest.loader._FailedTest.test_telegram_maintenance_rich)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_telegram_maintenance_rich
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/unittest/loader.py", line 433, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/usr/lib/python3.14/unittest/loader.py", line 374, in _get_module_from_name
+    __import__(name)
+    ~~~~~~~~~~^^^^^^
+  File "/home/saharoktyan/projects/node-plane/tests/test_telegram_maintenance_rich.py", line 8, in <module>
+    from telegram_client.routers import admin_backups as backups, admin_system_cleanup as cleanup
+ModuleNotFoundError: No module named 'telegram_client'
+
+
+======================================================================
+ERROR: test_telegram_media_retention (unittest.loader._FailedTest.test_telegram_media_retention)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_telegram_media_retention
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/unittest/loader.py", line 433, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/usr/lib/python3.14/unittest/loader.py", line 374, in _get_module_from_name
+    __import__(name)
+    ~~~~~~~~~~^^^^^^
+  File "/home/saharoktyan/projects/node-plane/tests/test_telegram_media_retention.py", line 5, in <module>
+    from telegram_client.i18n import tr
+ModuleNotFoundError: No module named 'telegram_client'
+
+
+======================================================================
+ERROR: test_telegram_navigation (unittest.loader._FailedTest.test_telegram_navigation)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_telegram_navigation
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/unittest/loader.py", line 433, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/usr/lib/python3.14/unittest/loader.py", line 374, in _get_module_from_name
+    __import__(name)
+    ~~~~~~~~~~^^^^^^
+  File "/home/saharoktyan/projects/node-plane/tests/test_telegram_navigation.py", line 6, in <module>
+    from aiogram import Bot
+ModuleNotFoundError: No module named 'aiogram'
+
+
+======================================================================
+ERROR: test_telegram_node_templates (unittest.loader._FailedTest.test_telegram_node_templates)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_telegram_node_templates
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/unittest/loader.py", line 433, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/usr/lib/python3.14/unittest/loader.py", line 374, in _get_module_from_name
+    __import__(name)
+    ~~~~~~~~~~^^^^^^
+  File "/home/saharoktyan/projects/node-plane/tests/test_telegram_node_templates.py", line 7, in <module>
+    from aiogram.fsm.context import FSMContext
+ModuleNotFoundError: No module named 'aiogram'
+
+
+======================================================================
+ERROR: test_telegram_plain_uri (unittest.loader._FailedTest.test_telegram_plain_uri)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_telegram_plain_uri
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/unittest/loader.py", line 433, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/usr/lib/python3.14/unittest/loader.py", line 374, in _get_module_from_name
+    __import__(name)
+    ~~~~~~~~~~^^^^^^
+  File "/home/saharoktyan/projects/node-plane/tests/test_telegram_plain_uri.py", line 6, in <module>
+    from aiogram.fsm.context import FSMContext
+ModuleNotFoundError: No module named 'aiogram'
+
+
+======================================================================
+ERROR: test_telegram_profile_errors (unittest.loader._FailedTest.test_telegram_profile_errors)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_telegram_profile_errors
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/unittest/loader.py", line 433, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/usr/lib/python3.14/unittest/loader.py", line 374, in _get_module_from_name
+    __import__(name)
+    ~~~~~~~~~~^^^^^^
+  File "/home/saharoktyan/projects/node-plane/tests/test_telegram_profile_errors.py", line 6, in <module>
+    from telegram_client.backend import BackendError
+ModuleNotFoundError: No module named 'telegram_client'
+
+
+======================================================================
+ERROR: test_telegram_profile_roles (unittest.loader._FailedTest.test_telegram_profile_roles)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_telegram_profile_roles
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/unittest/loader.py", line 433, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/usr/lib/python3.14/unittest/loader.py", line 374, in _get_module_from_name
+    __import__(name)
+    ~~~~~~~~~~^^^^^^
+  File "/home/saharoktyan/projects/node-plane/tests/test_telegram_profile_roles.py", line 6, in <module>
+    from telegram_client.backend import BackendError
+ModuleNotFoundError: No module named 'telegram_client'
+
+
+======================================================================
+ERROR: test_telegram_recovery (unittest.loader._FailedTest.test_telegram_recovery)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_telegram_recovery
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/unittest/loader.py", line 433, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/usr/lib/python3.14/unittest/loader.py", line 374, in _get_module_from_name
+    __import__(name)
+    ~~~~~~~~~~^^^^^^
+  File "/home/saharoktyan/projects/node-plane/tests/test_telegram_recovery.py", line 6, in <module>
+    from telegram_client.routers import admin_recovery as recovery
+ModuleNotFoundError: No module named 'telegram_client'
+
+
+======================================================================
+ERROR: test_telegram_render (unittest.loader._FailedTest.test_telegram_render)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_telegram_render
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/unittest/loader.py", line 433, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/usr/lib/python3.14/unittest/loader.py", line 374, in _get_module_from_name
+    __import__(name)
+    ~~~~~~~~~~^^^^^^
+  File "/home/saharoktyan/projects/node-plane/tests/test_telegram_render.py", line 6, in <module>
+    from aiogram.exceptions import TelegramBadRequest, TelegramNotFound, TelegramNetworkError
+ModuleNotFoundError: No module named 'aiogram'
+
+
+======================================================================
+ERROR: test_telegram_request_setup (unittest.loader._FailedTest.test_telegram_request_setup)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_telegram_request_setup
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/unittest/loader.py", line 433, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/usr/lib/python3.14/unittest/loader.py", line 374, in _get_module_from_name
+    __import__(name)
+    ~~~~~~~~~~^^^^^^
+  File "/home/saharoktyan/projects/node-plane/tests/test_telegram_request_setup.py", line 7, in <module>
+    from aiogram.fsm.context import FSMContext
+ModuleNotFoundError: No module named 'aiogram'
+
+
+======================================================================
+ERROR: test_telegram_system_cleanup (unittest.loader._FailedTest.test_telegram_system_cleanup)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_telegram_system_cleanup
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/unittest/loader.py", line 433, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/usr/lib/python3.14/unittest/loader.py", line 374, in _get_module_from_name
+    __import__(name)
+    ~~~~~~~~~~^^^^^^
+  File "/home/saharoktyan/projects/node-plane/tests/test_telegram_system_cleanup.py", line 6, in <module>
+    from telegram_client.i18n import CATALOG
+ModuleNotFoundError: No module named 'telegram_client'
+
+
+======================================================================
+ERROR: test_telegram_temporary_configs (unittest.loader._FailedTest.test_telegram_temporary_configs)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_telegram_temporary_configs
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/unittest/loader.py", line 433, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/usr/lib/python3.14/unittest/loader.py", line 374, in _get_module_from_name
+    __import__(name)
+    ~~~~~~~~~~^^^^^^
+  File "/home/saharoktyan/projects/node-plane/tests/test_telegram_temporary_configs.py", line 6, in <module>
+    from telegram_client.routers import admin_temporary_configs as screens
+ModuleNotFoundError: No module named 'telegram_client'
+
+
+======================================================================
+ERROR: test_telegram_traffic (unittest.loader._FailedTest.test_telegram_traffic)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_telegram_traffic
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/unittest/loader.py", line 433, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/usr/lib/python3.14/unittest/loader.py", line 374, in _get_module_from_name
+    __import__(name)
+    ~~~~~~~~~~^^^^^^
+  File "/home/saharoktyan/projects/node-plane/tests/test_telegram_traffic.py", line 7, in <module>
+    from telegram_client.i18n import tr
+ModuleNotFoundError: No module named 'telegram_client'
+
+
+======================================================================
+ERROR: test_telegram_updates_rich (unittest.loader._FailedTest.test_telegram_updates_rich)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_telegram_updates_rich
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/unittest/loader.py", line 433, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/usr/lib/python3.14/unittest/loader.py", line 374, in _get_module_from_name
+    __import__(name)
+    ~~~~~~~~~~^^^^^^
+  File "/home/saharoktyan/projects/node-plane/tests/test_telegram_updates_rich.py", line 6, in <module>
+    from telegram_client.routers import admin_updates as updates
+ModuleNotFoundError: No module named 'telegram_client'
+
+
+----------------------------------------------------------------------
+Ran 26 tests in 0.039s
+
+FAILED (errors=24)
