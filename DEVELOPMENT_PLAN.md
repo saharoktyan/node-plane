@@ -1,14 +1,75 @@
 # Development plan
 
-Updated: 2026-10-08. This is the main active development backlog. It replaces
+Updated: 2026-10-09. This is the main active development backlog. It replaces
 the historical roadmap, migration/parity maps, Rich UI plans, protocol upgrade
 plans and the implementation audit. Architecture and operator references are
 separate documents, not competing task lists.
 
-The next AWG/device and provisioning work package is specified in
-[DEVICES_AND_PROVISIONING_PLAN.md](DEVICES_AND_PROVISIONING_PLAN.md). Follow its
-delivery order: preserve existing peer identities before enabling additional
-devices, then address port policies, defaults and access to future servers.
+The implemented AWG/device and provisioning work package is recorded in
+[DEVICES_AND_PROVISIONING_PLAN.md](DEVICES_AND_PROVISIONING_PLAN.md).
+Its remaining real-client acceptance checks are recorded separately from new
+feature work.
+
+## Current remaining work and delivery order
+
+The core migration, workstation assistant, device management, AWG port presets,
+installation defaults and persistent future-server access policies are implemented.
+Older evidence below records the state at each increment, not new prerequisites.
+
+1. Include the completed current UI fixes in the next release: restore the
+   AWG preset port hint, use one Refresh action for live node/operation status,
+   stretch incomplete button rows, preserve the header accent and Settings focus.
+2. Add monthly node traffic summaries to both server cards.
+3. Add independent 24-hour VLESS/AWG configurations through Telegram and Workstation.
+4. Complete the Telegram Diagnostics & Recovery menu using existing backend
+   recovery contracts; extend per-node workstation diagnostics as needed.
+5. Run the deferred real-client/host acceptance checks and the planned installation
+   usability sessions with new users. These checks do not require rebuilding
+   automated failure fixtures or repeatedly reinstalling the user's controller.
+
+### Monthly traffic on server cards
+
+- [ ] Add an administrator-authorized backend node summary for the current UTC
+  calendar month, shared by Telegram and Workstation. Aggregate accounted upload
+  and download across profiles/devices and VLESS transports without double counting.
+- [ ] Show one compact line on each server card:
+  `All: … · VLESS: … · AWG: …`. All is the sum of VPN protocol traffic, not total
+  host/interface traffic. Use the existing readable byte units and identify the
+  month in the surrounding label.
+- [ ] Honor the installation-wide accounting switch. Do not display disabled,
+  missing, stale or incomplete statistics as measured zero or a complete total.
+  Include already collected traffic for subsequently revoked profiles/devices.
+- [ ] Verify month rollover, both protocols, multiple AWG devices, empty/missing
+  samples, counter resets and collection being disabled; ensure node-card Refresh
+  retrieves current totals.
+
+### Temporary VPN configurations: 24 hours
+
+- [ ] Define a shared backend command for a temporary configuration on a selected
+  server/protocol, with its own credentials and a persisted UTC expiry 24 hours
+  after successful activation. Show the exact expiry in both interfaces.
+- [ ] Keep temporary access separate from the existing profile's permanent grants,
+  AWG device credentials and profile expiry. Expiring a temporary config must not
+  interrupt normal connections or other temporary configs. VLESS needs an
+  independent client identity; AWG needs an independent peer/key/address.
+- [ ] Offer issuance and delivery through both Telegram and Workstation. Do not
+  require Telegram interaction for the Workstation path. The current SSH/admin
+  bridge supports administrators; ordinary-user Workstation access needs a
+  separate backend credential/enrollment flow bound to the same account identity.
+  Root SSH access must not become a requirement for ordinary VPN users.
+- [ ] Require authorized issuance to an eligible, ready node; retain command
+  identity across retries. Deliver URI/file with expiry and a copyable format,
+  preserving the existing iOS separate-message action in Telegram. Do not log
+  configuration secrets or make anonymous issuance implicit.
+- [ ] Expiry must disable the actual tunnel, not only its download link. Persist
+  scheduling/revocation across worker/controller restarts, prevent new retrieval
+  after expiry, and support early revocation, node removal, restore and audit.
+  Specify enforcement during controller/agent unavailability before claiming a
+  strict 24-hour lifetime; a queued remote revoke alone cannot guarantee it.
+- [ ] Verify isolation from permanent access, concurrent issuance, idempotent
+  retries, expiry, early revocation, failed/offline revocation, restart and restore
+  without resurrecting expired credentials. Live tests must confirm both existing
+  tunnels and new connections stop at expiry.
 
 ## Baseline and completed work
 
@@ -96,13 +157,15 @@ fix is implemented and tested and included in the `0.4.3-alpha.39` release.
   Telegram tests passed, including template creation/back navigation and the
   regular-message URI action. The tests verify fresh artifact authorization,
   stale-delivery suppression and preservation of the main panel on Close.
-- [ ] Device identities: issue independent VPN credentials per registered
-  device, with optional platform metadata and individual revocation. Telegram's
+- [x] Device identities: issue independent AWG credentials per registered
+  device, with individual revocation. Telegram's
   normal Bot API does not expose the user's OS; Mini Apps expose platform only
   after opening a web app. A requested device's OS also need not match the
   Telegram client used to obtain its config. Keep the regular-message URI action
-  available even when platform-specific defaults are introduced. This is a
-  future feature, not a prerequisite for the clipboard compatibility action.
+  available even when platform-specific defaults are introduced. Independent
+  AWG devices and individual revocation are implemented without collecting OS
+  metadata; optional platform-specific defaults remain deferred. See the device
+  work package for implementation and real-client acceptance evidence.
 
 ### Execution and ownership cleanup
 
@@ -750,8 +813,11 @@ configure PATH; Workstation updates use cargo-dist receipts on each platform.
 The same release contains the controller/driver/agent artifacts and an old-format
 Linux Workstation archive for existing alpha updaters. Local release helpers
 upload only to a CI-created release. Native checks remain a separate workflow,
-and PR release planning does not build the complete release matrix. Real Windows
-and macOS release builds/installations remain to be verified on the first release.
+and PR release planning does not build the complete release matrix. All four
+native release builds succeeded for v0.4.3-alpha.60, and the published server
+archive manifest and checksums were verified. Native Linux and Windows checks
+passed. Interactive Windows/macOS installation, terminal behavior and self-update
+under a normal local user still require real-machine acceptance.
 Validation: 105 Rust tests and 10 installer/release Python tests pass; CLI Clippy
 passes with warnings denied. cargo-dist planning and generated-workflow checks
 confirm all four targets and the combined Workstation/server artifact set.
@@ -760,7 +826,7 @@ confirm all four targets and the combined Workstation/server artifact set.
 
 | Idea | Preconditions and scope |
 | --- | --- |
-| Device identities and independent revocation | Separate credentials/peers per device; define identity and UX before quotas. |
+| Optional device platform defaults | Independent AWG identities/revocation are implemented; OS metadata remains optional and deferred. |
 | Authenticated VLESS subscriptions | Current access/config generation, credential expiry and revocation; no stale cached subscriptions. |
 | Traffic/device limits | Explicit enforcement and reliable accounting; sampled statistics are not a billing guarantee. |
 | Richer observations, fleet diagnostics and bulk maintenance | Extend the existing backend; preserve per-node outcomes and authorization. |

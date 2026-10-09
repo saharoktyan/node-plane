@@ -1189,9 +1189,24 @@ mod tests {
                                 )
                             }
                         } else if path.ends_with("/overview") {
+                            let last_job = fs::read_to_string(fixture_home.join("node-job.json"))
+                                .ok()
+                                .map(|text| {
+                                    serde_json::from_str::<serde_json::Value>(&text).unwrap()
+                                })
+                                .unwrap_or(serde_json::Value::Null);
                             (
                                 200,
-                                serde_json::json!({"state":"applied_unverified","settings_complete":true,"last_job":null}),
+                                serde_json::json!({"state":"applied_unverified","settings_complete":true,"last_job":last_job}),
+                            )
+                        } else if path.starts_with("/api/v1/node-jobs/") {
+                            (
+                                200,
+                                serde_json::from_str::<serde_json::Value>(
+                                    &fs::read_to_string(fixture_home.join("node-job.json"))
+                                        .unwrap(),
+                                )
+                                .unwrap(),
                             )
                         } else if path.starts_with("/api/v1/nodes?") {
                             (200, serde_json::json!({"items":[node],"next_cursor":null}))
@@ -1842,6 +1857,62 @@ mod tests {
         }
 
         #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn refreshing_node_card_updates_saved_operation_without_replaying_installation() {
+            use crate::nodes::{Command, Update, Worker};
+            let server = MockServer::start().await;
+            let state = tempfile::tempdir().unwrap();
+            prepare_nodes_fixture(&server, state.path());
+            let mut worker = Worker::new().unwrap();
+            let id = uuid::Uuid::new_v4();
+            for status in ["awaiting_executor", "running", "succeeded"] {
+                fs::write(
+                    server.home.join("node-job.json"),
+                    serde_json::json!({
+                        "id":id, "node_key":"lv1", "action":"bootstrap", "status":status
+                    })
+                    .to_string(),
+                )
+                .unwrap();
+                let (result, updates) = nodes_command(
+                    &worker,
+                    nodes_request(&server, state.path()),
+                    Command::Card("lv1".into()),
+                )
+                .await;
+                assert!(result.is_ok(), "{result:?}");
+                assert!(
+                    updates
+                        .iter()
+                        .any(|update| matches!(update, Update::Card(node)
+                    if node.services.is_some() && node.agent == crate::nodes::AgentState::Ready))
+                );
+                assert!(
+                    updates
+                        .iter()
+                        .any(|update| matches!(update, Update::Operation(operation)
+                    if operation.id == id && operation.status == status))
+                );
+            }
+            let requests = fs::read_to_string(server.home.join("api-requests")).unwrap();
+            assert_eq!(
+                requests
+                    .lines()
+                    .filter(|line| line.starts_with("GET /api/v1/node-jobs/"))
+                    .count(),
+                3
+            );
+            assert_eq!(
+                requests
+                    .lines()
+                    .filter(|line| line.starts_with("GET /api/v1/nodes/lv1/services "))
+                    .count(),
+                3
+            );
+            assert!(!requests.lines().any(|line| line.starts_with("POST ")));
+            worker.shutdown().unwrap();
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
         async fn nodes_probe_distinguishes_missing_from_unavailable_and_never_replays_uncertain_setup()
          {
             use crate::nodes::{AgentState, Command, Update, Worker};
@@ -1903,7 +1974,7 @@ mod tests {
             let (result, _) = nodes_command(
                 &worker,
                 nodes_request(&server, state.path()),
-                Command::Observe(operation),
+                Command::Card(operation.node_key),
             )
             .await;
             assert!(result.is_ok(), "{result:?}");

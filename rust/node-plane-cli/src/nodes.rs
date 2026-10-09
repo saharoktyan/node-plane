@@ -283,9 +283,7 @@ pub enum Command {
     Card(String),
     Setup(Node),
     Bootstrap(Node),
-    Inspect(String),
     Docker(Node),
-    Observe(Operation),
 }
 pub enum Update {
     CreationOptions(crate::node_wizard::Options),
@@ -293,8 +291,6 @@ pub enum Update {
     List(Vec<Node>),
     Card(Node),
     Operation(Operation),
-    Services(String, Value),
-    Agent(String, AgentState),
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Row {
@@ -711,20 +707,35 @@ async fn execute(
                         job["node_key"] = json!(key);
                         saved = Some(operation(&job, "node-jobs", &key)?);
                     }
-                    if let Some(operation) = saved {
-                        let _ = tx.send(Event::Nodes(Update::Operation(operation)));
-                    }
                     let _ = tx.send(Event::Nodes(Update::Card(item)));
-                }
-                Command::Inspect(key) => {
-                    match backend::request(session, &credential, Method::GET,
-                        &format!("/api/v1/nodes/{key}/services"), None, None).await {
-                        Ok(facts) => { let _ = tx.send(Event::Nodes(Update::Services(key, facts))); }
-                        Err(error) => {
-                            let agent = if error.code == "node_agent_unconfigured" { AgentState::Missing } else { AgentState::Unavailable };
-                            let _ = tx.send(Event::Nodes(Update::Agent(key, agent)));
-                            return Err(error.into());
+                    if let Some(mut previous) = saved {
+                        if previous.status == "rejected" {
+                            let _ = tx.send(Event::Nodes(Update::Operation(previous)));
+                            return Ok("Node registry ready".into());
                         }
+                        if previous.status == "unconfirmed" {
+                            let command_id = previous.command_id.context("Missing saved command identity")?;
+                            let result = backend::helper(session, json!({"version":1,"action":"lookup-node",
+                                "session_id":id,"command_id":command_id})).await?;
+                            if result["job"].is_null() {
+                                previous.error = "No confirmed backend operation; inspect recovery before retrying".into();
+                                let _ = tx.send(Event::Nodes(Update::Operation(previous)));
+                                return Ok("The command was not replayed".into());
+                            }
+                            ensure!(result["job"]["kind"] == previous.kind, "Node command kind changed");
+                            let mut found = operation(&result["job"], &previous.kind, &previous.node_key)?;
+                            if found.action.is_empty() { found.action = previous.action; }
+                            found.command_id = previous.command_id;
+                            previous = found;
+                        }
+                        let value = backend::request(session, &credential, Method::GET,
+                            &format!("/api/v1/{}/{}", previous.kind, previous.id), None, None).await?;
+                        let mut observed = operation(&value, &previous.kind, &previous.node_key)?;
+                        if observed.action.is_empty() { observed.action = previous.action.clone(); }
+                        observed.command_id = previous.command_id;
+                        ensure!(observed.id == previous.id, "Backend returned another operation");
+                        SavedOperation::save(&request, &credential.account_id, &observed)?;
+                        let _ = tx.send(Event::Nodes(Update::Operation(observed)));
                     }
                 }
                 Command::Setup(item) | Command::Bootstrap(item) | Command::Docker(item) => {
@@ -752,7 +763,7 @@ async fn execute(
                             return Err(error.into());
                         }
                         Err(error) => return Err(anyhow::Error::new(error).context(format!(
-                            "Node action was not confirmed. Use Operation status to check its original command; do not resubmit. Command: {command_id}"))),
+                            "Node action was not confirmed. Use Refresh to check its original command; do not resubmit. Command: {command_id}"))),
                     };
                     let mut operation = operation(&value, kind, &item.key)?;
                     if operation.action.is_empty() { operation.action = pending.action; }
@@ -760,32 +771,6 @@ async fn execute(
                     let _ = tx.send(Event::Nodes(Update::Operation(operation.clone())));
                     SavedOperation::save(&request, &credential.account_id, &operation)
                         .context("The operation was accepted, but its local record could not be saved. Do not resubmit")?;
-                }
-                Command::Observe(previous) => {
-                    let mut previous = previous;
-                    if previous.status == "unconfirmed" {
-                        let command_id = previous.command_id.context("Missing saved command identity")?;
-                        let result = backend::helper(session, json!({"version":1,"action":"lookup-node",
-                            "session_id":id,"command_id":command_id})).await?;
-                        if result["job"].is_null() {
-                            previous.error = "No confirmed backend operation; inspect recovery before retrying".into();
-                            let _ = tx.send(Event::Nodes(Update::Operation(previous)));
-                            return Ok("The command was not replayed".into());
-                        }
-                        ensure!(result["job"]["kind"] == previous.kind, "Node command kind changed");
-                        let mut found = operation(&result["job"], &previous.kind, &previous.node_key)?;
-                        if found.action.is_empty() { found.action = previous.action; }
-                        found.command_id = previous.command_id;
-                        previous = found;
-                    }
-                    let value = backend::request(session, &credential, Method::GET,
-                        &format!("/api/v1/{}/{}", previous.kind, previous.id), None, None).await?;
-                    let mut observed = operation(&value, &previous.kind, &previous.node_key)?;
-                    if observed.action.is_empty() { observed.action = previous.action.clone(); }
-                    observed.command_id = previous.command_id;
-                    ensure!(observed.id == previous.id, "Backend returned another operation");
-                    SavedOperation::save(&request, &credential.account_id, &observed)?;
-                    let _ = tx.send(Event::Nodes(Update::Operation(observed)));
                 }
             }
             Ok("Node registry ready".into())
