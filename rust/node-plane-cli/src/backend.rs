@@ -37,8 +37,11 @@ pub struct Authorization {
 }
 impl Authorization {
     fn usable(&self, account: &str) -> bool {
+        self.usable_at(account, std::time::Instant::now())
+    }
+    fn usable_at(&self, account: &str, now: std::time::Instant) -> bool {
         self.valid
-            && self.issued.elapsed() < Duration::from_secs(25 * 60)
+            && now.saturating_duration_since(self.issued) < Duration::from_secs(25 * 60)
             && (account.is_empty()
                 || account == self.selector
                 || account == self.credential.account_id)
@@ -496,8 +499,7 @@ mod tests {
         auth.valid = false;
         assert!(!auth.usable("101"));
         auth.valid = true;
-        auth.issued -= Duration::from_secs(26 * 60);
-        assert!(!auth.usable("101"));
+        assert!(!auth.usable_at("101", auth.issued + Duration::from_secs(26 * 60)));
     }
 
     async fn http_fixture(
