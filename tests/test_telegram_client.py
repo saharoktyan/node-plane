@@ -1,7 +1,7 @@
 """Exercise the Telegram paths that connect a person, node, and config."""
 from types import SimpleNamespace
 from unittest import IsolatedAsyncioTestCase, TestCase
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 from uuid import UUID
 
 from aiogram import Dispatcher
@@ -580,6 +580,29 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             'at':'2026-09-30T10:00:00+00:00','payload':{'node_title':'Moscow'}}})
         self.assertIn('устранена',screen.title)
         self.assertIn('Moscow',screen.plain())
+
+    async def test_update_notification_has_only_close_and_optional_changelog(self):
+        from telegram_client.alert_delivery import deliver_one, alert_screen
+        from aiogram.exceptions import TelegramBadRequest
+        delivery = {'id':'d', 'locale':'en', 'telegram_user_id':101,
+            'event':{'kind':'update_available', 'payload':{'branch':'dev',
+                'version':'9.0.0', 'changelog':'Release notes'}}}
+        screen = alert_screen(delivery)
+        self.assertIn('Branch: dev', screen.plain())
+        self.assertEqual([b.type for b in screen.rich().blocks][-1], 'details')
+        bot = SimpleNamespace(send_rich_message=AsyncMock(), send_message=AsyncMock())
+        backend = SimpleNamespace(alert_claim=AsyncMock(return_value={'delivery':delivery}), alert_ack=AsyncMock())
+        await deliver_one(bot, backend)
+        content = bot.send_rich_message.call_args.kwargs['rich_message']
+        buttons = [button for block in content.blocks if block.type == 'buttons' for button in block.buttons]
+        self.assertEqual(len(buttons), 1)
+        self.assertEqual(buttons[0].callback_data, 'update_notice_close')
+        bot.send_rich_message.side_effect = TelegramBadRequest(method=Mock(), message='unsupported')
+        await deliver_one(bot, backend)
+        rows = bot.send_message.call_args.kwargs['reply_markup'].inline_keyboard
+        self.assertEqual(rows[0][0].callback_data, 'update_notice_close')
+        delivery['event']['payload']['changelog'] = ''
+        self.assertFalse(any(b.type == 'details' for b in alert_screen(delivery).rich().blocks))
 
     async def test_update_confirmation_uses_same_key_on_double_tap(self):
         from telegram_client.routers import admin_updates

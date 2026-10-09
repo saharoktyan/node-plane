@@ -231,6 +231,9 @@ class BackendDevicePeerTests(unittest.TestCase):
         row = self.collect(service)
         self.assertEqual((row['uplink_bytes'],row['downlink_bytes']),(600,800))
         self.assertEqual(row['status'],'current')
+        node_total = service.node_summary('n1')
+        self.assertEqual(node_total['total_bytes'],1400)
+        self.assertEqual(node_total['status'],'current')
         self.assertEqual(self.collect(service)['uplink_bytes'],600)
         self.driver.counters['alice'][:2] = [1125,2235]
         self.driver.counters['phone_peer'] = [10,20,'b'*64]
@@ -240,6 +243,8 @@ class BackendDevicePeerTests(unittest.TestCase):
         self.driver.counters['phone_peer'][0] += 40
         row = self.collect(service)
         self.assertEqual((row['uplink_bytes'],row['status']),(675,'unknown'))
+        self.assertEqual(service.node_summary('n1')['status'],'unknown')
+        self.assertEqual(service.node_summary('n1')['total_bytes'],1530)
         self.driver.failures.clear()
         self.driver.counters['alice'][0] += 15
         self.assertEqual(self.collect(service)['uplink_bytes'],690)

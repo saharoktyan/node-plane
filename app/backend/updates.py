@@ -3,6 +3,7 @@ import json
 import os
 import subprocess
 import time
+import hashlib
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from uuid import UUID, uuid4, uuid5
@@ -457,8 +458,42 @@ class UpdateService:
             return
         last = app_settings.get_update_state().get('last_checked_at')
         try:
-            due = not last or datetime.fromisoformat(last.replace('Z', '+00:00')) < datetime.now(timezone.utc) - timedelta(hours=1)
-        except ValueError:
+            due = not last or datetime.fromisoformat(last.replace('Z', '+00:00')) < datetime.now(timezone.utc) - timedelta(minutes=app_settings.get_updates_check_interval_minutes())
+        except (ValueError, TypeError):
             due = True
         if due:
-            self.updater.check_for_updates()
+            branch, track = app_settings.get_updates_branch(), app_settings.get_updates_dev_track()
+            result = self.updater.check_for_updates()
+            if (result.get('status') == 'available' and app_settings.is_updates_auto_check_enabled()
+                and branch == app_settings.get_updates_branch() and track == app_settings.get_updates_dev_track()):
+                self._notify_update(result, branch, track)
+
+    def _notify_update(self, result, branch, track):
+        from .alerts import AlertService
+        version = str(result.get('remote_label') or result.get('remote_version') or '')[:200]
+        ref = str(result.get('upstream_ref') or '')[:200]
+        if not version:
+            return
+        identity = json.dumps([branch,track,ref,version])
+        key = 'update_notification:' + hashlib.sha256(identity.encode()).hexdigest()
+        with self.db.connect() as conn:
+            if conn.execute('SELECT 1 FROM backend_system_settings WHERE key=?', (key,)).fetchone():
+                return
+        changelog = result.get('changelog')
+        if not isinstance(changelog, str):
+            from app.services.updates import get_release_changelog
+            tag = ref if ref.startswith('v') else 'v' + str(result.get('remote_version') or '')
+            changelog = get_release_changelog(tag) if track == 'tag' or branch == 'main' else ''
+        payload = {'branch':branch, 'dev_track':track, 'version':version,
+            'changelog':changelog.strip()[:1800]}
+        timestamp = datetime.now(timezone.utc).isoformat()
+        with self.db.transaction() as conn:
+            conn.execute('UPDATE backend_account_guard SET revision=revision+1 WHERE id=1')
+            from .maintenance_gate import active
+            if active(conn):
+                return
+            inserted = conn.execute('''INSERT INTO backend_system_settings(key,value) VALUES (?,?)
+                ON CONFLICT(key) DO NOTHING RETURNING key''', (key,json.dumps(payload))).fetchone()
+            if inserted:
+                AlertService._event(conn, {'key':'@controller','title':'Node Plane'},
+                    'update_available', payload, False, timestamp)

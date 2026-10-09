@@ -72,6 +72,86 @@ class TrafficTests(unittest.TestCase):
             "SELECT * FROM backend_traffic_usage"
         ).fetchone()
 
+    def test_node_summary_is_authorized_and_has_monthly_protocol_totals(self):
+        endpoint = '/api/v1/nodes/n1/overview'
+        headers = {**self.headers, 'X-Node-Plane-Telegram-User-ID': '101'}
+        self.assertEqual(self.client.get(endpoint, headers=headers).json()['traffic']['total_bytes'], None)
+        self.collect()
+        self.driver.up, self.driver.down = 1100, 2250
+        self.collect()
+        self.collect()
+        response = self.client.get(endpoint, headers=headers)
+        self.assertEqual(response.status_code, 200, response.text)
+        traffic = response.json()['traffic']
+        self.assertEqual(traffic['total_bytes'], 350)
+        self.assertEqual(traffic['status'], 'current')
+        self.assertEqual(traffic['items'][0]['uplink_bytes'], 100)
+        self.assertEqual(traffic['items'][1]['uplink_bytes'], 0)
+        member = fixture.BackendHTTPTests.register(self, 102).json()
+        self.db.connection.execute("UPDATE backend_accounts SET status='approved' WHERE id=?", (member['id'],))
+        self.db.connection.commit()
+        self.assertEqual(self.client.get(endpoint, headers={**self.headers,
+            'X-Node-Plane-Telegram-User-ID':'102'}).status_code, 403)
+        self.settings.update_traffic_policy(self.actor, False)
+        self.assertIsNone(self.client.get(endpoint, headers=headers).json()['traffic'])
+
+    def test_node_totals_survive_profile_deletion_without_profile_identity(self):
+        self.collect()
+        self.driver.up = 1300
+        self.collect()
+        with self.db.transaction() as conn:
+            conn.execute('INSERT INTO backend_profile_deletions(profile_id,requested_at) VALUES (?,?)',
+                (self.profile_id,datetime.now(timezone.utc).isoformat()))
+            conn.execute('DELETE FROM backend_grants WHERE profile_id=?', (self.profile_id,))
+        self.collect()
+        summary = self.service.node_summary('n1')
+        self.assertEqual(summary['total_bytes'], 300)
+        self.assertEqual(summary['status'], 'current')
+        self.assertEqual(self.db.connection.execute('SELECT COUNT(*) FROM backend_traffic_usage').fetchone()[0], 0)
+
+    def test_node_outage_is_partial_and_missing_samples_are_not_zero(self):
+        self.driver.error = True
+        self.collect()
+        summary = self.service.node_summary('n1')
+        self.assertIsNone(summary['total_bytes'])
+        self.assertEqual(summary['status'], 'unknown')
+        self.driver.error = False
+        self.collect()
+        self.driver.up = 1400
+        self.collect()
+        self.driver.error = True
+        self.collect()
+        summary = self.service.node_summary('n1')
+        self.assertEqual(summary['total_bytes'], 400)
+        self.assertEqual(summary['status'], 'unknown')
+
+    def test_node_month_rollover_preserves_counter_baseline(self):
+        self.collect()
+        self.driver.up = 1100
+        self.collect()
+        with patch('backend.traffic.datetime', wraps=datetime) as clock:
+            clock.now.return_value = datetime(2099, 2, 1, tzinfo=timezone.utc)
+            self.assertIsNone(self.service.node_summary('n1')['total_bytes'])
+            self.driver.up = 1120
+            self.collect()
+            summary = self.service.node_summary('n1')
+            self.assertEqual(summary['month'], '2099-02')
+            self.assertEqual(summary['total_bytes'], 20)
+
+    def test_node_seed_is_idempotent_and_counter_resets_do_not_double_count(self):
+        self.collect()
+        self.driver.up, self.driver.down = 1100, 2250
+        self.collect()
+        with self.db.transaction() as conn:
+            conn.execute('DELETE FROM backend_node_traffic')
+        self.service.initialize_schema()
+        self.service.initialize_schema()
+        self.assertEqual(self.service.node_summary('n1')['total_bytes'], 350)
+        self.driver.epoch = 'b' * 64
+        self.driver.up, self.driver.down = 50, 30
+        self.collect()
+        self.assertEqual(self.service.node_summary('n1')['total_bytes'], 430)
+
     def test_admin_summary_authorizes_management_but_member_cannot_read_admin_route(self):
         self.collect()
         self.driver.up = 1100

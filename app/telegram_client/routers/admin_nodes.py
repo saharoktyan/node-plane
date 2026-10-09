@@ -9,7 +9,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
 from ..backend import BackendClient, BackendError
-from ..screens import Screen, Section, Table, server_label
+from ..screens import Screen, Section, Table, server_label, format_size
 from ..i18n import normalize_locale, tr
 from ..node_templates import NODE_TEMPLATES
 from .common import render
@@ -804,6 +804,22 @@ async def wizard_setup_agent_cb(query: CallbackQuery, bot: Bot,
         query.message.message_id, w['key'], node['transport'], bot, backend,
         state, node.get('ssh_target'))
 
+def node_traffic_section(traffic, locale):
+    if not traffic:
+        return None
+    def amount(value, status):
+        if value is None:
+            return '—'
+        return ('≈ ' if status == 'unknown' else '') + format_size(value)
+    parts = [tr(locale, 'nodes.traffic.all') + ': ' + amount(traffic.get('total_bytes'), traffic['status'])]
+    for protocol, label in (('xray', 'VLESS'), ('awg', 'AWG')):
+        item = next((item for item in traffic['items'] if item['protocol'] == protocol), None)
+        value = item['uplink_bytes'] + item['downlink_bytes'] if item and item['uplink_bytes'] is not None and item['downlink_bytes'] is not None else None
+        parts.append(label + ': ' + amount(value, item['status'] if item else 'waiting'))
+    return Section(tr(locale, 'nodes.traffic.month', month=traffic['month']),
+        (' · '.join(parts), *((tr(locale, 'traffic.status.unknown'),) if traffic['status'] == 'unknown' else ())))
+
+
 async def show_admin_node(chat_id, user_id, message_id, node_key, bot, backend, state):
     locale = normalize_locale((await state.get_data()).get('locale'))
     try:
@@ -824,6 +840,7 @@ async def show_admin_node(chat_id, user_id, message_id, node_key, bot, backend, 
         title = f"{node.get('region') or tr(locale, 'nodes.region_unknown')} · {server_label(node)}"
         await render(bot, chat_id, Screen(title,
             (tr(locale, 'nodes.card.state', value=tr(locale, 'nodes.card.state.' + overview['state'])),),
+            sections=tuple(filter(None, (node_traffic_section(overview.get('traffic'), locale),))),
             embedded_buttons=True, navigation=True),
             [[InlineKeyboardButton(text=tr(locale, 'nodes.card.deletion_status'),
                 callback_data=f'remove_progress:{node_key}', style='primary')],
@@ -860,6 +877,9 @@ async def show_admin_node(chat_id, user_id, message_id, node_key, bot, backend, 
         rows=((InlineKeyboardButton(text=tr(locale, 'nodes.card.settings'), callback_data=NodeSettingsCallback(node_key=node_key).pack(), style='primary' if pending else None),),)))
     if node.get('notes'):
         sections.append(Section(tr(locale, 'nodes.settings.field.notes'), (node['notes'],), collapsed=True))
+    traffic = node_traffic_section(overview.get('traffic') if overview else None, locale)
+    if traffic:
+        sections.append(traffic)
     title = f"{node.get('region') or tr(locale, 'nodes.region_unknown')} · {server_label(node)}"
     await render(bot, chat_id, Screen(title, tuple(lines), sections=tuple(sections), embedded_buttons=True, navigation=True),
         [[InlineKeyboardButton(text=tr(locale, 'nodes.rich.manage'), callback_data=f'node_manage:{node_key}', style='link')],

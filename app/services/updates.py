@@ -5,6 +5,8 @@ import subprocess
 import logging
 import re
 import threading
+import json
+import urllib.request
 from datetime import datetime, timezone
 from typing import Dict, List
 
@@ -243,6 +245,28 @@ def check_for_updates(timeout: int = 60, branch: str | None = None) -> Dict[str,
     return result
 
 
+def get_release_changelog(ref: str) -> str:
+    """Optional public release notes; an unavailable note never blocks checking."""
+    repo = os.environ.get('NODE_PLANE_GITHUB_REPO', 'saharoktyan/node-plane')
+    if not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', repo) or not re.fullmatch(
+        r'v\d+\.\d+\.\d+(?:-alpha\.\d+)?', ref):
+        return ''
+    request = urllib.request.Request(f'https://api.github.com/repos/{repo}/releases/tags/{ref}',
+        headers={'User-Agent':'node-plane-controller', 'Accept':'application/vnd.github+json'})
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            raw = response.read(1024 * 1024 + 1)
+        if len(raw) > 1024 * 1024:
+            return ''
+        release = json.loads(raw)
+        if not isinstance(release, dict) or release.get('tag_name') != ref or release.get('draft'):
+            return ''
+        body = release.get('body')
+        return body.strip()[:1800] if isinstance(body, str) else ''
+    except (OSError, ValueError):
+        return ''
+
+
 def list_available_versions(branch: str | None = None, timeout: int = 60) -> Dict[str, object]:
     selected_branch = str(branch or app_settings.get_updates_branch()).strip().lower() or "main"
     try:
@@ -457,6 +481,7 @@ def get_updates_overview() -> Dict[str, str | bool]:
         "source_dir": _effective_source_root(),
         "update_supported": is_manual_update_supported(),
         "auto_check_enabled": app_settings.is_updates_auto_check_enabled(),
+        "auto_check_interval_minutes": app_settings.get_updates_check_interval_minutes(),
         "last_checked_at": state.get("last_checked_at", "") if checked_for_selection else "",
         "last_status": last_status,
         "update_available": update_available,

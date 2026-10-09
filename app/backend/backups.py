@@ -44,6 +44,7 @@ CLEAR = (
     "backend_system_cleanup_plans",
     "backend_traffic_peers",
     "backend_traffic_usage",
+    "backend_node_traffic",
     "backend_alert_deliveries",
     "backend_alert_events",
     "backend_alert_state",

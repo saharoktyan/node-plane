@@ -77,6 +77,8 @@ def parent_path(callback, locale, data):
             'backups.details' if callback.startswith('backup_detail:') else 'backups.restore'), callback))
     if callback.startswith('backup_job:'):
         return (*parent_path('backups', locale, data), Breadcrumb(tr(locale, 'backups.result'), callback))
+    if callback == 'upd_act:auto_check':
+        return (*parent_path('updates', locale, data), Breadcrumb(tr(locale, 'updates.auto_title'), callback))
     if callback.startswith('update_job:'):
         return (*parent_path('updates', locale, data), Breadcrumb(tr(locale, 'update_tools.result'), callback))
     if callback == 'ufleet':

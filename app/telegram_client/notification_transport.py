@@ -5,18 +5,19 @@ from aiogram.exceptions import (
     TelegramForbiddenError,
     TelegramRetryAfter,
 )
+from aiogram.types import InlineKeyboardMarkup
 
 
-async def send_notification(bot, chat_id, screen, silent=False):
+async def send_notification(bot, chat_id, screen, silent=False, *, rows=None):
     try:
         try:
             await bot.send_rich_message(
-                chat_id=chat_id, rich_message=screen.rich(), disable_notification=silent
+                chat_id=chat_id, rich_message=screen.rich(rows), disable_notification=silent
             )
         except TelegramBadRequest:
-            await bot.send_message(
-                chat_id=chat_id, text=screen.plain(), disable_notification=silent
-            )
+            options = {'reply_markup': InlineKeyboardMarkup(inline_keyboard=rows)} if rows else {}
+            await bot.send_message(chat_id=chat_id, text=screen.plain(),
+                disable_notification=silent, **options)
         return "sent"
     except (TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter):
         return "failed"

@@ -3,7 +3,7 @@
 import json
 import unittest
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 from uuid import uuid4
 
 import grpc
@@ -39,6 +39,10 @@ class RpcFailure(grpc.RpcError):
 class AlertTests(unittest.TestCase):
     def setUp(self):
         fixture.BackendHTTPTests.setUp(self)
+        # Persistent settings modules initialize their database at import time.
+        with patch('db.get_db', return_value=self.db):
+            import app.services.app_settings
+
         self.actor = Actor(
             Principal("monitor-test", PrincipalKind.SERVICE, ADMIN_PERMISSIONS),
             self.admin,
@@ -276,6 +280,75 @@ class AlertTests(unittest.TestCase):
             ).fetchone()[0],
             0,
         )
+
+    def test_events_target_every_approved_admin_and_skip_other_accounts(self):
+        second = fixture.BackendHTTPTests.register(self, 102).json()
+        third = fixture.BackendHTTPTests.register(self, 103).json()
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_accounts SET role='admin',status='approved' WHERE id=?", (second['id'],))
+            conn.execute("UPDATE backend_accounts SET role='admin',status='disabled' WHERE id=?", (third['id'],))
+        self.driver.inspect_node_services.return_value = {**HEALTHY, 'awg_running':False}
+        self.scan()
+        recipients = set()
+        while delivery := self.service.claim(self.transport, str(uuid4())):
+            recipients.add(delivery['telegram_user_id'])
+        self.assertEqual(recipients, {101,102})
+
+    def test_update_notice_is_deduplicated_and_independent_of_monitoring(self):
+        from backend.updates import UpdateService
+        self.service.preferences(self.actor, {"enabled": False})
+        updater = UpdateService(self.db)
+        result = dict(remote_version='9.0.0', remote_label='9.0.0',
+                      upstream_ref='v9.0.0', changelog='New features')
+        updater._notify_update(result, 'dev', 'tag')
+        updater._notify_update(result, 'dev', 'tag')
+        self.assertEqual(len(self.events()), 1)
+        self.service.preferences(self.actor, {"enabled": False})
+        self.assertEqual(self.service.overview(self.actor)['delivery_counts']['queued'], 0)
+        with patch('app.services.app_settings.is_updates_auto_check_enabled', return_value=True), \
+             patch('app.services.app_settings.get_updates_branch', return_value='dev'), \
+             patch('app.services.app_settings.get_updates_dev_track', return_value='tag'):
+            delivery = self.service.claim(self.transport, str(uuid4()))
+        self.assertEqual(delivery['telegram_user_id'], 101)
+        self.assertEqual(delivery['event']['kind'], 'update_available')
+        self.assertEqual(delivery['event']['payload']['changelog'], 'New features')
+
+    def test_queued_update_notice_rechecks_channel_policy_and_admin(self):
+        from backend.updates import UpdateService
+        for change in ('off', 'branch', 'role'):
+            with self.subTest(change=change):
+                UpdateService(self.db)._notify_update(dict(remote_label=change,
+                    upstream_ref=change, changelog=''), 'dev', 'tag')
+                if change == 'role':
+                    self.db.connection.execute("UPDATE backend_accounts SET role='member' WHERE id=?", (self.admin.id,))
+                    self.db.connection.commit()
+                with patch('app.services.app_settings.is_updates_auto_check_enabled', return_value=change != 'off'), \
+                     patch('app.services.app_settings.get_updates_branch', return_value='main' if change == 'branch' else 'dev'), \
+                     patch('app.services.app_settings.get_updates_dev_track', return_value='tag'):
+                    self.assertIsNone(self.service.claim(self.transport, str(uuid4())))
+
+    def test_auto_check_respects_frequency_and_notifies_only_available_releases(self):
+        from backend.updates import UpdateService
+        from datetime import datetime, timezone
+        updater = Mock()
+        updater.check_for_updates.return_value = dict(status='available', remote_label='9.0.0',
+            upstream_ref='v9.0.0', changelog='')
+        service = UpdateService(self.db, updater=updater)
+        with patch('app.services.app_settings.is_updates_auto_check_enabled', return_value=True), \
+             patch('app.services.app_settings.get_updates_branch', return_value='dev'), \
+             patch('app.services.app_settings.get_updates_dev_track', return_value='tag'), \
+             patch('app.services.app_settings.get_updates_check_interval_minutes', return_value=15), \
+             patch('app.services.app_settings.get_update_state') as state:
+            state.return_value = {'last_checked_at': datetime.now(timezone.utc).isoformat()}
+            service.auto_check()
+            updater.check_for_updates.assert_not_called()
+            state.return_value = {'last_checked_at': '2000-01-01T00:00:00Z'}
+            service.auto_check()
+            service.auto_check()
+            self.assertEqual(len(self.events()), 1)
+            updater.check_for_updates.return_value = {'status':'up_to_date'}
+            service.auto_check()
+            self.assertEqual(len(self.events()), 1)
 
     def test_member_http_access_denied(self):
         fixture.BackendHTTPTests.register(self, 102)
