@@ -136,7 +136,8 @@ Older evidence below records the state at each increment, not new prerequisites.
   and audit. Distinguish expired download access, pending remote revocation and
   confirmed credential removal. Report runtime unavailability without claiming cutoff.
   Node-local timer and protocol supervisors are independent of backend/agent
-  processes. Real host reboot and downtime acceptance remain in the checklist below.
+  processes. Two real Debian 12 guest kernel reboots, agent downtime and Docker
+  restart passed; see [systemd boot checks](tests/SYSTEMD_BOOT_CHECK.md).
 - [x] Backend download expiry, node retirement and secret-free lifecycle audit.
   Restore excludes temporary credentials and refuses to start until outstanding
   temporary access is settled; retained lifecycle events survive restore.
@@ -153,7 +154,8 @@ Older evidence below records the state at each increment, not new prerequisites.
   disposable PostgreSQL migrations and registry operations (10 tests). Real Docker
   checks confirm AWG expiry stops traffic and retains another peer; guarded Xray
   restart removes expired authorization while preserving permanent access.
-  Host systemd reboot/downtime and established VLESS tunnel checks are still manual.
+  Real Debian 12 QEMU boot, agent downtime and Docker restart checks pass.
+  Established Internet VLESS tunnel acceptance remains manual.
   Full Python discovery: 1147 tests, 113 opt-in/environment skips, no failures;
   separately, all 11 Docker runtime tests and 10 PostgreSQL migration tests pass.
   Agent unit tests: 12 pass. Strict agent Clippy remains blocked by pre-existing
@@ -680,7 +682,10 @@ Additional isolated host checks, 2026-10-09:
   temporary expiry and guarded Xray restart checks. No host systemd units were
   installed. Containers, temporary PostgreSQL data, networks, certificate files
   and test directories were removed; cleanup inventory was empty afterwards.
-  Full systemd boot scheduling and Internet REALITY tunnel acceptance remain open.
+  Subsequent [Debian 12 QEMU checks](tests/SYSTEMD_BOOT_CHECK.md) passed two
+  real kernel reboots, expiry with the agent stopped, Docker restart and startup
+  pruning with the timer disabled. Internet REALITY tunnel acceptance remains open.
+  The guest also exposed and verified a fix for AWG image builds on Docker 20.10.
 
 - `tests/test_process_faults_postgres.py`: five checks use real SIGKILL before
   dispatch, inside an agent-helper mutation, after the durable helper journal
