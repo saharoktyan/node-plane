@@ -21,7 +21,7 @@ Older evidence below records the state at each increment, not new prerequisites.
    stretch incomplete button rows, preserve the header accent and Settings focus.
 2. Include completed monthly traffic and Auto-check changes in the next release.
 3. Include completed versioned database migrations in the next release.
-4. Add independent 24-hour VLESS/AWG configurations through Telegram and Workstation.
+4. Add managed temporary VLESS/AWG configurations (12h / 1d / 3d) through Telegram and Workstation.
 5. Complete the Telegram Diagnostics & Recovery menu using existing backend
    recovery contracts; extend per-node workstation diagnostics as needed.
 6. Run the deferred real-client/host acceptance checks and the planned installation
@@ -71,56 +71,63 @@ Older evidence below records the state at each increment, not new prerequisites.
   measurements and recipient authorization through automated regression tests.
   Live agent/container outages and Telegram delivery remain host acceptance checks.
 
-### Temporary VPN configurations: 24 hours
+### Temporary VPN configurations: 12 hours / 1 day / 3 days
 
 - [x] Add the node-local lease journal and expiry engine: persist the deadline
   before provisioning, retain it across retries, isolate identities, retry only
   revocations, and respect the node cleanup fence. Unit coverage includes an
   interrupted ensure, concurrent expiry, failed revoke and permanent-peer isolation.
-  This is an internal foundation; RPC, scheduling and user issuance remain pending.
-- [x] Connect AWG lease commands to authenticated driver/agent node RPC. Install
-  an independent persistent systemd timer before provisioning; return the exact
-  expiry/config receipt and recover by reading the same command. Temporary
-  revocation cannot target permanent peers; cleanup removes/verifies timer units.
-  VLESS lease commands remain explicitly unsupported.
+- [x] Connect AWG and VLESS lease commands to authenticated driver/agent node RPC.
+  Install an independent persistent systemd timer before provisioning; return the
+  exact expiry receipt and recover by reading the same command. Temporary
+  revocation cannot target permanent identities; cleanup removes/verifies timer units.
+- [x] Accept only 12h, 1d and 3d lifetimes, with three days as the maximum. Include
+  the chosen lifetime in immutable command identity; retries cannot extend it.
+  Receipts distinguish AWG peer removal from VLESS new-connection revocation.
 - [ ] Verify remote support and enforcement health in backend issuance, reconcile
-  expired temporary peers before runtime restart, and define failure/clock/lock
-  scheduling behavior before claiming strict cutoff. Never silently provision a
-  permanent peer when local expiry support is missing.
-- [ ] Implement verified termination of established VLESS tunnels without restarting
-  shared Xray or disrupting other profiles. Xray 26.3.27 `RemoveUser` removes a
-  validator entry, but does not close ordinary existing connections. See
-  [runtime enforcement notes](runtime_assets/TEMPORARY_ACCESS.md).
+  expired temporary identities before runtime restart, and report failed/pending
+  revocations. Never silently provision permanent access when lease support is absent.
 - [ ] Define a shared backend command for a temporary configuration on a selected
-  server/protocol, with its own credentials and a persisted UTC expiry 24 hours
-  after successful activation. Show the exact expiry in both interfaces.
-- [ ] Keep temporary access separate from the existing profile's permanent grants,
-  AWG device credentials and profile expiry. Expiring a temporary config must not
-  interrupt normal connections or other temporary configs. VLESS needs an
-  independent client identity; AWG needs an independent peer/key/address.
-- [ ] Offer issuance and delivery through both Telegram and Workstation. Do not
-  require Telegram interaction for the Workstation path. The current SSH/admin
-  bridge supports administrators; ordinary-user Workstation access needs a
-  separate backend credential/enrollment flow bound to the same account identity.
-  Root SSH access must not become a requirement for ordinary VPN users.
-  Workstation: a dedicated sidebar tab selects server, then protocol only when
-  several are available, then Xray transport only when several are available.
-  The selected node card in Nodes offers the same flow without server selection.
-  Telegram: expose the flow only in a dedicated Settings submenu, never on a
-  server card. Preserve Back destinations for automatically skipped steps.
+  server/protocol, with independent credentials and a persisted UTC expiry after
+  successful activation. Show the exact expiry in both interfaces.
+- [ ] Keep temporary access separate from permanent profile grants, AWG device
+  credentials and profile expiry. Revocation must not disrupt normal connections
+  or other temporary configurations. Keep shared Xray ports and the shared process.
+- [ ] Add a managed Temporary configurations section listing all active configs,
+  showing server, protocol/transport and exact expiry. Provide Create, Show/download
+  configuration and Revoke early. Keep pending/failed issuance and revocation
+  visible with their actual status; do not hide a failed revoke as completed.
+  Remove completed expired/revoked entries from the active list, retaining audit.
+- [ ] Workstation: add a dedicated sidebar tab opening the list. Create selects
+  server, protocol only when more than one is available, Xray transport only when
+  more than one is available, then 12h / 1d / 3d and confirmation.
+  A Temporary configurations action on the selected Nodes card opens the same
+  section filtered to that server; creation skips server selection.
+- [ ] Telegram: expose the section only in administrator Settings, never on a
+  server card. Use the same conditional selections and durations; preserve Back
+  destinations for skipped steps and the iOS separate-message action for URI.
 - [ ] Require authorized issuance to an eligible, ready node; retain command
-  identity across retries. Deliver URI/file with expiry and a copyable format,
-  preserving the existing iOS separate-message action in Telegram. Do not log
-  configuration secrets or make anonymous issuance implicit.
-- [ ] Expiry must disable the actual tunnel, not only its download link. Persist
-  scheduling/revocation across worker/controller restarts, prevent new retrieval
-  after expiry, and support early revocation, node removal, restore and audit.
-  Specify enforcement during controller/agent unavailability before claiming a
-  strict 24-hour lifetime; a queued remote revoke alone cannot guarantee it.
-- [ ] Verify isolation from permanent access, concurrent issuance, idempotent
-  retries, expiry, early revocation, failed/offline revocation, restart and restore
-  without resurrecting expired credentials. Live tests must confirm both existing
-  tunnels and new connections stop at expiry.
+  identity across retries. Do not log secrets or allow anonymous issuance.
+  Current Workstation SSH administration is sufficient for this admin feature;
+  future ordinary-user access needs independent account-bound enrollment, not root SSH.
+- [ ] Display a clear VLESS notice before issuance and in its configuration/status
+  card: "After expiry or revocation, new connections are blocked. Existing
+  connections may continue until they disconnect." Never claim that an expired
+  UUID proves all existing tunnels have stopped. AWG uses actual peer removal.
+  The limitation also applies to existing profiles with an expiry such as 30 days.
+- [ ] Persist scheduling/revocation across controller/agent restarts, prevent new
+  retrieval after expiry, and integrate early revocation, node removal, restore
+  and audit. Distinguish expired download access, pending remote revocation and
+  confirmed credential removal. Report runtime unavailability without claiming cutoff.
+- [ ] Verify permanent/temporary isolation, concurrent issuance, immutable duration,
+  expiry, early revoke, offline failures, restart and restore without resurrecting
+  expired credentials. Live VLESS tests must verify new connections fail and
+  document behavior of an already established tunnel; AWG tests must verify both stop.
+- Future consideration, deferred: modify Xray to close active sessions by user,
+  including ordinary profile expiry and manual revocation. Do not introduce
+  per-user ports/processes, restart shared Xray, or gate the current temporary
+  configuration feature on such a modification. See
+  [runtime enforcement notes](runtime_assets/TEMPORARY_ACCESS.md).
 
 ## Baseline and completed work
 

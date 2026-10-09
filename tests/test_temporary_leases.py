@@ -43,18 +43,28 @@ class TemporaryLeaseTests(unittest.TestCase):
             return conn.execute('SELECT status FROM temporary_leases WHERE protocol=? AND profile=?',
                                 (intent['protocol'], intent['runtime_name'])).fetchone()[0]
 
-    def test_both_protocols_get_one_persisted_day_and_duplicate_does_not_extend_it(self):
+    def test_both_protocols_get_selected_lifetime_and_duplicate_does_not_extend_it(self):
         for protocol in ('awg', 'xray'):
-            intent = self.intent(protocol)
-            before = datetime.now(timezone.utc)
-            receipt = MODULE.apply(intent, self.path, self.mutate)
-            deadline = datetime.fromisoformat(json.loads(receipt['payload_json'])['expires_at'])
-            self.assertGreaterEqual(deadline, before + timedelta(days=1))
-            self.assertLessEqual(deadline, datetime.now(timezone.utc) + timedelta(days=1))
-            self.assertEqual(MODULE.apply(intent, self.path, self.mutate), receipt)
-            self.assertEqual(MODULE.lookup(intent, self.path), receipt)
-        self.assertEqual(len(self.calls), 2)
+            for seconds in (43200, 86400, 259200):
+                intent = self.intent(protocol, lease_seconds=seconds)
+                before = datetime.now(timezone.utc)
+                receipt = MODULE.apply(intent, self.path, self.mutate)
+                payload = json.loads(receipt['payload_json'])
+                deadline = datetime.fromisoformat(payload['expires_at'])
+                self.assertGreaterEqual(deadline, before + timedelta(seconds=seconds))
+                self.assertLessEqual(deadline, datetime.now(timezone.utc) + timedelta(seconds=seconds))
+                self.assertEqual(payload['revocation_mode'], 'new_connections_only' if protocol == 'xray' else 'peer_removed')
+                self.assertEqual(MODULE.apply(intent, self.path, self.mutate), receipt)
+                self.assertEqual(MODULE.lookup(intent, self.path), receipt)
+        self.assertEqual(len(self.calls), 6)
         self.assertEqual(MODULE.expire_leases(self.path, self.mutate), {'expired': 0, 'pending': 0})
+
+    def test_retry_cannot_change_selected_lifetime(self):
+        intent = self.intent(lease_seconds=43200)
+        MODULE.apply(intent, self.path, self.mutate)
+        with self.assertRaisesRegex(ValueError, 'identity conflict'):
+            MODULE.apply(dict(intent, lease_seconds=259200), self.path, self.mutate)
+        self.assertEqual(len(self.calls), 1)
 
     def test_expiry_isolated_from_permanent_and_other_temporary_credentials(self):
         first, second = self.intent(), self.intent()
@@ -131,6 +141,7 @@ class TemporaryLeaseTests(unittest.TestCase):
 
     def test_invalid_duration_or_nonisolated_identity_never_runs(self):
         for fields in ({'lease_seconds': True}, {'lease_seconds': 1}, {'lease_seconds': 172800},
+                       {'lease_seconds': 259201}, {'lease_seconds': 345600},
                        {'runtime_name': 'permanent'}, {'action': 'delete'}):
             with self.assertRaises(ValueError):
                 MODULE.apply(self.intent(**fields), self.path, self.mutate)
@@ -218,14 +229,33 @@ class TemporaryLeaseTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 OPERATIONS.execute('temporary_ensure', intent['command_id'], intent, recover=True, path=self.path)
 
-    def test_rpc_rejects_unsupported_vless_and_conflicting_identity_before_scheduler(self):
-        for intent in (self.intent('xray'), self.intent(command_id='conflicting')):
+    def test_rpc_rejects_invalid_duration_and_conflicting_identity_before_scheduler(self):
+        for intent in (self.intent(lease_seconds=345600), self.intent(command_id='conflicting')):
             with patch.object(OPERATIONS.intents, 'ensure_lease_scheduler') as scheduler:
                 with self.assertRaises(ValueError):
-                    command_id = intent['command_id'] if intent['protocol'] == 'xray' else 'request-id'
+                    command_id = intent['command_id'] if intent['lease_seconds'] == 345600 else 'request-id'
                     OPERATIONS.execute('temporary_ensure', command_id, intent, path=self.path)
                 scheduler.assert_not_called()
         self.assertFalse(self.path.exists())
+
+    def test_vless_receipt_and_early_revocation_report_existing_connection_limit(self):
+        intent = self.intent('xray', lease_seconds=259200)
+        with patch.object(OPERATIONS.intents, 'ensure_lease_scheduler'), \
+             patch.object(OPERATIONS.intents, 'run', return_value={'summary': 'OK', 'payload_json': ''}) as mutate:
+            receipt = OPERATIONS.execute('temporary_ensure', intent['command_id'], intent, path=self.path)
+            self.assertEqual(receipt['xray_uuid'], intent['uuid'])
+            self.assertEqual(receipt['revocation_mode'], 'new_connections_only')
+            self.assertNotIn('wg_conf', receipt)
+            self.assertEqual(OPERATIONS.execute('temporary_ensure', intent['command_id'], intent,
+                                               recover=True, path=self.path), receipt)
+            self.assertEqual(mutate.call_count, 1)
+            revoke = dict(intent, action='delete', revision=2, command_id=str(uuid4()), uuid='', short_id='')
+            revoke.pop('lease_seconds')
+            result = OPERATIONS.execute('temporary_revoke', revoke['command_id'], revoke, path=self.path)
+            self.assertEqual(result['revocation_mode'], 'new_connections_only')
+            self.assertEqual(self.status(intent), 'revoked')
+            with self.assertRaises(ValueError):
+                OPERATIONS.execute('temporary_ensure', intent['command_id'], intent, recover=True, path=self.path)
 
     def test_rpc_temporary_revoke_cannot_delete_permanent_peer(self):
         intent = self.intent()
