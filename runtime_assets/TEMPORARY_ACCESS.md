@@ -1,12 +1,12 @@
-# Temporary access: node-local foundation
+# Temporary access
 
 The command journal supports an internal `lease_seconds` option (43200 / 86400 / 259200) on
 `ensure` for a new `tmp_<32 lowercase hex digits>` identity. AWG and VLESS commands are
 available over the existing authenticated `BackendNodeAction` RPC as
 `temporary_ensure`, `temporary_revoke` and read-only `temporary_status`.
 The backend registry/API, worker and management interfaces are connected.
-Live tunnel/reboot validation is still required before presenting this
-as a finished temporary configuration management feature.
+Isolated live AWG expiry and Xray authorization/restart checks pass. Real host
+reboot, controller/agent downtime and established VLESS tunnel acceptance remain.
 
 The local journal stores a conservative expiry **before** the external ensure.
 A successful result records expiry the selected 12 hours, 1 day or 3 days after completion in the journal and
@@ -26,7 +26,23 @@ units before journaling/provisioning a peer. The timer is independent of the
 agent and controller, runs after boot and schedules the next scan one second
 after the previous scan finishes, with one-second systemd accuracy. Scheduler
 installation/activation failure prevents provisioning. Uninstallation stops and
-removes both units; independent host verification checks they are gone.
+removes the scheduler and protocol supervisor units; independent host verification
+checks they are gone.
+
+For each protocol that issues temporary access, a `node-plane-leased-{protocol}.service`
+owns container restart instead of Docker's automatic restart policy. It validates
+the configured container and bind mount, takes the journal mutation lock, removes
+expired or uncertain temporary identities from disk, then starts the stopped
+container. A running container is monitored without restarting it. The lock is
+released before waiting for container exit. Protocol deployment and rollback also
+prune before starting; cleanup disables the supervisors before removing containers.
+Permanent peers and other containers keep their existing behavior.
+
+`temporary_status` includes fresh `enforcement_ready` health: the timer and protocol
+supervisor must be enabled/active, the expiry service must not be failed, and the
+owned protocol container must be running with Docker restart disabled. Backend
+activation and downloads require this health, an active lease and the matching
+expiry receipt. Older runtimes without this field cannot issue usable credentials.
 
 Recovery uses the same command and intent through `recover=true`; it never
 provisions a missing command or installs scheduling. The receipt includes
@@ -39,16 +55,17 @@ Its `revocation_mode` is `new_connections_only`; AWG uses `peer_removed`. These
 values describe the protocol operation, not a promise that an offline runtime
 has already processed a revoke. Backend/UI status must keep failures visible.
 
-Before exposing issuance:
+Enforcement boundaries and remaining acceptance:
 
-1. Reconcile deadlines before restarting temporary runtimes. Scans need a working
+1. Scans and guarded starts need a working
    local systemd, correct UTC clock and running protocol administration interface.
    A busy shared mutation lock, a stopped Docker daemon or failed deletion delays
    confirmation; the engine retains work and denies retrieval but does not prove
-   exact tunnel cutoff during those conditions. Boot-time Docker autostart may
-   currently precede the first scan. Do not claim a strict deadline yet.
-2. Connect the persisted receipt to backend authorization, retrieval and monitoring.
-   Verify actual remote support and enforcement health before enabling issuance.
+   exact tunnel cutoff during those conditions. Managed container starts prune
+   overdue identities before loading configuration. Direct root actions such as
+   manually starting a container bypass this supervisor. Do not claim a strict deadline.
+2. Backend authorization, retrieval and monitoring use the persisted receipt and
+   current remote enforcement health. Failed/unknown outcomes remain visible.
 3. Honor the accepted VLESS limitation: the shared Xray API adapter removes the
    UUID from live authorization and persisted config, but an established ordinary
    connection may continue until disconnect. This also applies to ordinary
@@ -58,12 +75,14 @@ Before exposing issuance:
    disconnect." Do not label credential removal as confirmed session termination.
    Keep shared ports and process. A possible Xray session-closing modification
    is deferred; do not restart shared Xray or create per-user ports/processes.
-4. Connect both interfaces to the backend registry described below. Ordinary Workstation
+4. Both interfaces use the backend registry described below. Ordinary Workstation
    users need enrollment separate from privileged SSH administration.
 5. Verify with real tunnels, including controller/agent downtime and node reboot.
    For VLESS, test denial of new connections and document continued established
-   traffic; for AWG, confirm existing and new traffic stop. Unit tests use mutation
-   doubles and do not prove live tunnel behavior.
+   traffic; for AWG, confirm existing and new traffic stop. Disposable Docker tests
+   already verify live AWG traffic stops while another peer is retained, and real
+   Xray API authorization excludes expired identities after guarded container restart.
+   These tests do not cover systemd boot or an established REALITY tunnel.
 
 Source for the Xray limitation:
 <https://github.com/XTLS/Xray-core/blob/v26.3.27/proxy/vless/inbound/inbound.go#L232-L236>

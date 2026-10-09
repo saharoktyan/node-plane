@@ -84,7 +84,12 @@ restore_previous() {
   fi
   restored=0
   if [[ "$OLD_CONTAINER_RENAMED" == 1 ]]; then
-    docker_cmd rename "$OLD_CONTAINER" "$CONTAINER" >/dev/null 2>&1 && docker_cmd start "$CONTAINER" >/dev/null 2>&1 && restored=1
+    if docker_cmd rename "$OLD_CONTAINER" "$CONTAINER" >/dev/null 2>&1; then
+      if [[ -f /etc/systemd/system/node-plane-leased-awg.service ]]; then
+        python3 /opt/node-plane-runtime/apply-profile-intent.py prepare-leased-runtime awg >/dev/null || return 1
+      fi
+      docker_cmd start "$CONTAINER" >/dev/null 2>&1 && restored=1
+    fi
   fi
   rm -f "$CFG_BACKUP"
   if [[ "$restored" == 1 ]]; then
@@ -106,6 +111,9 @@ if docker_cmd ps -a --format '{{.Names}}' | grep -q "^${CONTAINER}$"; then
 fi
 
 NEW_CONTAINER_ATTEMPTED=1
+if [[ -f /etc/systemd/system/node-plane-leased-awg.service ]]; then
+  python3 /opt/node-plane-runtime/apply-profile-intent.py prepare-leased-runtime awg >/dev/null
+fi
 docker_cmd run -d \
   --name "$CONTAINER" \
   --restart no \
@@ -152,7 +160,11 @@ if [[ "$STATE" != "running" ]]; then
   exit 1
 fi
 
-docker_cmd update --restart unless-stopped "$CONTAINER" >/dev/null 2>&1 || true
+if [[ -f /etc/systemd/system/node-plane-leased-awg.service ]]; then
+  python3 /opt/node-plane-runtime/apply-profile-intent.py leased-deploy awg >/dev/null
+else
+  docker_cmd update --restart unless-stopped "$CONTAINER" >/dev/null
+fi
 ROLLBACK_NEEDED=0
 trap - EXIT
 rm -f "$CFG_BACKUP"

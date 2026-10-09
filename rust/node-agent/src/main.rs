@@ -1421,6 +1421,7 @@ impl AgentState {
                         || name.starts_with(".awg-regenerate-backup-")
                         || name.starts_with(".xray-config-")
                         || name.starts_with(".xray-user-")
+                        || name.starts_with(".lease-config-")
                     {
                         fs::remove_file(entry.path()).map_err(|err| {
                             Status::internal(format!("failed to remove config artifact: {err}"))
@@ -1621,6 +1622,8 @@ impl NodeAgentApi {
         let script = r#"set -eu
 systemctl disable --now node-plane-lease-expiry.timer 2>/dev/null || true
 systemctl stop node-plane-lease-expiry.service 2>/dev/null || true
+systemctl disable --now node-plane-leased-awg.service node-plane-leased-xray.service 2>/dev/null || true
+rm -f /etc/systemd/system/node-plane-leased-awg.service /etc/systemd/system/node-plane-leased-xray.service
 rm -f /etc/systemd/system/node-plane-lease-expiry.timer /etc/systemd/system/node-plane-lease-expiry.service /etc/systemd/system/.node-plane-lease-expiry.lock
 systemctl disable node-plane-agent.service
 systemctl stop node-plane-agent.service

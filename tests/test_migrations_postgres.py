@@ -217,11 +217,16 @@ class MigrationsPostgresTests(unittest.TestCase):
                 VALUES ('lv1','Latvia #1','Europe',1,'["xray"]','["tcp"]',1,1)''')
         class Driver:
             calls = 0
+            expiry = None
             def node_action(self, identity, action, intent, recover=False):
                 self.calls += 1
                 if action=='temporary_revoke':
                     return {'revocation_mode':'new_connections_only'}
-                return {'expires_at':(datetime.now(timezone.utc)+timedelta(seconds=intent['lease_seconds'])).isoformat(),
+                if action=='temporary_status':
+                    return {'status':'active','enforcement_ready':True,'expires_at':self.expiry}
+                if self.expiry is None:
+                    self.expiry = (datetime.now(timezone.utc)+timedelta(seconds=intent['lease_seconds'])).isoformat()
+                return {'expires_at':self.expiry,
                         'revocation_mode':'new_connections_only','xray_uuid':intent['uuid']}
         driver = Driver()
         service = TemporaryConfigService(self.db,driver)
@@ -241,7 +246,7 @@ class MigrationsPostgresTests(unittest.TestCase):
         service.revoke(actor,config['id'])
         service.run_one()
         self.assertEqual(service.list(actor)['total'],0)
-        self.assertEqual(driver.calls,2)
+        self.assertEqual(driver.calls,3)
         with self.db.connect() as conn:
             self.assertFalse(BackupService.busy(conn))
             history = [dict(r) for r in conn.execute('SELECT * FROM backend_temporary_config_events').fetchall()]

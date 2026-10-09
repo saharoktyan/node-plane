@@ -176,6 +176,10 @@ class TemporaryConfigService:
         if row['protocol']=='awg' and (not receipt.get('wg_conf','').startswith('[Interface]')
                 or not receipt.get('vpn_key','').startswith('vpn://')):
             raise ValueError('invalid temporary artifact')
+        state = self.driver.node_action(row['id'],'temporary_status',intent,recover=True)
+        if (state.get('status') != 'active' or state.get('enforcement_ready') is not True
+                or datetime.fromisoformat(state['expires_at']) != expiry):
+            raise ValueError('temporary expiry enforcement is unavailable')
         with self.db.transaction() as conn:
             conn.execute('UPDATE backend_account_guard SET revision=revision+1 WHERE id=1')
             current = conn.execute('SELECT * FROM backend_temporary_configs WHERE id=?',(row['id'],)).fetchone()
@@ -289,6 +293,10 @@ class TemporaryConfigService:
         with self.db.connect() as conn:
             row,node = self._readable(conn,actor,config_id)
         intent = json.loads(row['intent_json'])
+        state = driver.node_action(row['id'],'temporary_status',intent,recover=True)
+        if (state.get('status') != 'active' or state.get('enforcement_ready') is not True
+                or datetime.fromisoformat(state['expires_at']) != datetime.fromisoformat(row['expires_at'])):
+            raise AccessDenied('config_unavailable',503)
         receipt = driver.node_action(row['id'],'temporary_ensure',intent,recover=True)
         if receipt.get('revocation_mode') != self.public(row)['revocation_mode']:
             raise AccessDenied('config_stale',409)

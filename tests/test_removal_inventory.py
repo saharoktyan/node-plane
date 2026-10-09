@@ -23,7 +23,8 @@ class RemovalInventoryTests(unittest.TestCase):
             backup = root / 'custom/config.json.bak.123'
             backup.write_text('private')
             temporary = [root / 'custom' / name for name in
-                         ('.xray-config-interrupted.json', '.xray-user-interrupted.json')]
+                         ('.xray-config-interrupted.json', '.xray-user-interrupted.json',
+                          '.lease-config-interrupted')]
             for path in temporary:
                 path.write_text('private')
             legacy_directory = root / 'custom/config.json.dirbak.20261006'

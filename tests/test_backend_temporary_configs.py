@@ -32,7 +32,7 @@ class TemporaryConfigTests(unittest.TestCase):
                 base.receipts[identity] = {'expires_at':expiry,
                     'revocation_mode':'new_connections_only' if intent['protocol']=='xray' else 'peer_removed',
                     'xray_uuid':intent['uuid'],'wg_conf':'[Interface]\nPrivateKey = secret\n','vpn_key':'vpn://secret'}
-                base.states[identity] = {'status':'active','expires_at':expiry}
+                base.states[identity] = {'status':'active','expires_at':expiry,'enforcement_ready':True}
             return base.receipts[identity]
         base.node_action = action
         base.refresh_awg_config = lambda *args: {'wg_conf':'[Interface]\nPrivateKey = secret\n','vpn_key':'vpn://secret'}
@@ -58,6 +58,27 @@ class TemporaryConfigTests(unittest.TestCase):
         self.assertEqual(len({i['runtime_name'] for i in intents}),2)
         self.assertNotEqual(first['id'],second['id'])
         self.assertNotIn('runtime_name',first)
+
+    def test_stopped_or_unsupported_enforcement_blocks_issuance_and_recovers_read_only(self):
+        self.prepare()
+        original = self.driver.node_action
+        def unhealthy(identity, action, intent, recover=False):
+            result = original(identity,action,intent,recover)
+            if action=='temporary_status':
+                return {k:v for k,v in result.items() if k!='enforcement_ready'}
+            return result
+        self.driver.node_action = unhealthy
+        config = self.create()
+        self.service.run_one()
+        self.assertEqual(self.service.get(self.actor,config['id'])['status'],'blocked')
+        self.driver.node_action = original
+        self.service.reconcile()
+        self.assertEqual(self.service.get(self.actor,config['id'])['status'],'active')
+        self.assertEqual(len([c for c in self.driver.calls if c[1]=='temporary_ensure' and not c[2]]),1)
+        self.driver.states[config['id']]['enforcement_ready'] = False
+        with self.assertRaises(AccessDenied) as failure:
+            self.service.artifact(self.actor,config['id'])
+        self.assertEqual(failure.exception.code,'config_unavailable')
 
     def test_issue_download_revoke_for_both_protocols_and_backup_guard(self):
         for protocol in ('xray','awg'):

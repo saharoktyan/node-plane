@@ -9,7 +9,8 @@ not reopen the completed PTB migration or workstation implementation.
 
 ## 1. Device identities and AWG peers
 
-Status: in progress; start with the backend identity model and compatibility.
+Status: implemented. On 2026-10-09 the user confirmed simultaneous AWG
+connections using configurations for different registered devices.
 
 A profile owns named devices, such as Phone, Laptop and Router. A device stores
 an opaque UUID, a display name and lifecycle state. Do not request or infer an
@@ -79,8 +80,8 @@ revocation while multiple devices share its credentials.
 - Crash/restart/recovery preserves exact command identities and does not
   replay uncertain actions.
 - PostgreSQL migration, backup restore and per-device traffic aggregation
-  receive automated coverage. Concurrent connections from two real AWG
-  clients remain a separate live acceptance check.
+  receive automated coverage. Concurrent connections from real AWG clients
+  using different device configurations passed user acceptance on 2026-10-09.
 
 ## 2. iOS-compatible configuration delivery
 
@@ -344,4 +345,5 @@ Next: manual acceptance checks for future-server rules and device connections.
 Late Docker bind race retry remains deferred pending verified rollback support.
 Legacy compatibility is optional during alpha development, so further work must
 not be delayed by old configuration migration requirements. Independent AWG
-connections from real devices and the iOS copy fallback remain manual checks.
+connections from real devices passed user acceptance on 2026-10-09; the iOS
+copy fallback remains a manual check.

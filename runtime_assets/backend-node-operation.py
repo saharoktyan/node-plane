@@ -29,7 +29,8 @@ ACTIONS = {'bootstrap', 'reinstall_keep', 'reinstall_clean', 'cleanup_runtime',
 
 def command(args, lock_fd=None):
     return subprocess.run(args, check=True, capture_output=True, text=True,
-                          timeout=1200, pass_fds=() if lock_fd is None else (lock_fd,)).stdout.strip()
+                          timeout=1200, pass_fds=() if lock_fd is None else (lock_fd,),
+                          env=None if lock_fd is None else dict(os.environ,NODE_PLANE_PROFILE_LOCK_FD=str(lock_fd))).stdout.strip()
 
 
 def environment():
@@ -151,6 +152,7 @@ def remove_protocol_runtime(lock_fd):
         if directory.is_symlink() or directory.resolve() != owned:
             raise ValueError('runtime cleanup path is outside managed directories')
     containers = owned_protocol_containers(xray, awg, xc, ac)
+    intents.stop_leased_runtime_units()
     for identity in containers:
         command(['docker', 'rm', '-f', identity], lock_fd)
     # Only protocol-owned directories; never agent identity, journal or scripts.
@@ -227,7 +229,8 @@ def temporary_profile(action, command_id, intent, recover, path):
                                    (intent['protocol'],intent['runtime_name'])).fetchone()
                 if row is None or row[0] != command_id:
                     raise ValueError('temporary identity not found')
-                return {'expires_at':row[1],'status':row[2]}
+                return {'expires_at':row[1],'status':row[2],
+                        'enforcement_ready':intents.lease_enforcement_ready(intent['protocol'])}
     if action == 'temporary_ensure':
         if intent.get('lease_seconds') not in intents.LEASE_DURATIONS or intent['action'] != 'ensure':
             raise ValueError('temporary lease is required')
@@ -250,7 +253,7 @@ def temporary_profile(action, command_id, intent, recover, path):
         response = intents.lookup(intent, path)
     else:
         if action == 'temporary_ensure':
-            intents.ensure_lease_scheduler()
+            intents.ensure_lease_scheduler(protocol=intent['protocol'])
         response = intents.apply(intent, path, intents.run)
     result = json.loads(response['payload_json']) if response['payload_json'] else {}
     if action == 'temporary_ensure':

@@ -6,7 +6,7 @@ have an unknown outcome. Higher revisions require a completed predecessor.
 No mutation is launched for duplicate, stale or conflicting commands.
 """
 import fcntl
-from contextlib import closing
+from contextlib import closing, contextmanager
 import hashlib
 import importlib.util
 import json
@@ -82,9 +82,30 @@ Unit=node-plane-lease-expiry.service
 WantedBy=timers.target
 ''',
 }
+for _protocol in ('awg', 'xray'):
+    LEASE_UNITS['node-plane-leased-' + _protocol + '.service'] = f'''[Unit]
+Description=Node Plane leased {_protocol} runtime
+Requires=docker.service
+After=docker.service
+PartOf=docker.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=root
+UMask=0077
+ExecStart=/usr/bin/python3 /opt/node-plane-runtime/apply-profile-intent.py start-leased-runtime {_protocol}
+Restart=always
+RestartSec=5s
+TimeoutStopSec=45s
+KillMode=control-group
+
+[Install]
+WantedBy=docker.service
+'''
 
 
-def ensure_lease_scheduler(directory='/etc/systemd/system', execute=subprocess.run):
+def ensure_lease_scheduler(directory='/etc/systemd/system', execute=subprocess.run, protocol=None):
     """Install persistent scheduling before provisioning the first leased peer."""
     directory = Path(directory)
     # Serialize concurrent first issuances; unit writes never expose partial files.
@@ -93,6 +114,8 @@ def ensure_lease_scheduler(directory='/etc/systemd/system', execute=subprocess.r
         fcntl.flock(lock, fcntl.LOCK_EX)
         changed = False
         for name, contents in LEASE_UNITS.items():
+            if name.startswith('node-plane-leased-') and name != 'node-plane-leased-' + str(protocol) + '.service':
+                continue
             destination = directory / name
             if destination.is_file() and destination.read_text() == contents:
                 continue
@@ -119,6 +142,214 @@ def ensure_lease_scheduler(directory='/etc/systemd/system', execute=subprocess.r
                 check=True, capture_output=True, timeout=30)
         execute(['systemctl', 'is-active', '--quiet', 'node-plane-lease-expiry.timer'],
                 check=True, capture_output=True, timeout=15)
+        if protocol is not None:
+            config, container, server_key = leased_runtime_settings(protocol, execute)
+            record = leased_container(protocol, config, container, execute)
+            # Only this verified container changes its restart owner. No shared
+            # Docker daemon hooks, other containers or permanent identities change.
+            execute(['docker', 'update', '--restart', 'no', record['Id']],
+                    check=True, capture_output=True, timeout=30)
+            execute(['systemctl', 'enable', '--now', 'node-plane-leased-' + protocol + '.service'],
+                    check=True, capture_output=True, timeout=30)
+            if not lease_enforcement_ready(protocol, execute):
+                raise ValueError('temporary expiry enforcement is unavailable')
+
+
+def leased_runtime_settings(protocol, execute=subprocess.run):
+    if protocol not in {'awg', 'xray'}:
+        raise ValueError('invalid leased protocol')
+    command = ('source "$1"; printf "%s\\n%s\\n%s\\n" '
+               '"${AWG_CONFIG:-/opt/node-plane-runtime/amnezia-awg/data/wg0.conf}" '
+               '"${AWG_CONTAINER_NAME:-amnezia-awg}" "${SERVER_KEY:-}"' if protocol == 'awg' else
+               'source "$1"; printf "%s\\n%s\\n%s\\n" '
+               '"${XRAY_CONFIG:-/opt/node-plane-runtime/xray/config.json}" '
+               '"${XRAY_CONTAINER_NAME:-xray}" "${SERVER_KEY:-}"')
+    lines = execute(['bash', '-e', '-c', command, 'leased-runtime', '/etc/node-plane/node.env'],
+                    check=True, capture_output=True, text=True, timeout=15).stdout.splitlines()
+    if (len(lines) != 3 or not Path(lines[0]).is_absolute()
+            or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}', lines[1])
+            or (lines[2] and not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,63}', lines[2]))):
+        raise ValueError('invalid leased runtime environment')
+    return Path(lines[0]), lines[1], lines[2]
+
+
+def leased_container(protocol, config, container, execute=subprocess.run):
+    records = json.loads(execute(['docker', 'container', 'inspect', container],
+                        check=True, capture_output=True, text=True, timeout=15).stdout)
+    if not isinstance(records, list) or len(records) != 1:
+        raise ValueError('leased runtime is unavailable')
+    record = records[0]
+    destination = '/etc/xray' if protocol == 'xray' else '/opt/amnezia/awg'
+    if (record.get('Name') != '/' + container or not re.fullmatch(r'[a-f0-9]{64}', record.get('Id', ''))
+            or not any(m.get('Type') == 'bind' and m.get('Source') == str(config.parent)
+                       and m.get('Destination') == destination for m in record.get('Mounts', []))
+            or type(record.get('State', {}).get('Running')) is not bool):
+        raise ValueError('leased container ownership is unconfirmed')
+    return record
+
+
+def lease_enforcement_ready(protocol, execute=subprocess.run):
+    """Read-only, current health; stale environment/version hints are insufficient."""
+    try:
+        for action, unit in (('is-enabled', 'node-plane-lease-expiry.timer'),
+                             ('is-active', 'node-plane-lease-expiry.timer'),
+                             ('is-enabled', 'node-plane-leased-' + protocol + '.service'),
+                             ('is-active', 'node-plane-leased-' + protocol + '.service')):
+            execute(['systemctl', action, '--quiet', unit], check=True, capture_output=True, timeout=15)
+        failed = execute(['systemctl', 'is-failed', '--quiet', 'node-plane-lease-expiry.service'],
+                         capture_output=True, timeout=15)
+        if failed.returncode != 1:
+            return False
+        config, container, _ = leased_runtime_settings(protocol, execute)
+        record = leased_container(protocol, config, container, execute)
+        return (record['State']['Running'] and
+                record.get('HostConfig', {}).get('RestartPolicy', {}).get('Name') == 'no')
+    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
+        return False
+
+
+def stop_leased_runtime_units(protocols=('awg', 'xray'), execute=subprocess.run, directory='/etc/systemd/system'):
+    for protocol in protocols:
+        name = 'node-plane-leased-' + protocol + '.service'
+        path = Path(directory) / name
+        if not path.exists():
+            continue
+        if path.is_symlink() or path.read_text() != LEASE_UNITS[name]:
+            raise ValueError('leased runtime unit ownership is unconfirmed')
+        execute(['systemctl', 'disable', '--now', name], check=True, capture_output=True, timeout=45)
+
+
+def refresh_leased_runtime(protocol, execute=subprocess.run, directory='/etc/systemd/system'):
+    """Retain startup protection when a managed protocol container is replaced."""
+    name = 'node-plane-leased-' + protocol + '.service'
+    path = Path(directory) / name
+    if not path.exists():
+        return False
+    if path.is_symlink() or path.read_text() != LEASE_UNITS[name]:
+        raise ValueError('leased runtime unit ownership is unconfirmed')
+    config, container, _ = leased_runtime_settings(protocol, execute)
+    record = leased_container(protocol, config, container, execute)
+    execute(['docker', 'update', '--restart', 'no', record['Id']], check=True, capture_output=True, timeout=30)
+    execute(['systemctl', 'enable', '--now', name], check=True, capture_output=True, timeout=30)
+    return True
+
+
+def prune_leased_config(protocol, config, names, server_key=''):
+    """Remove only journaled temporary identities while the container is stopped."""
+    names = set(names)
+    if not names or any(not re.fullmatch(r'tmp_[0-9a-f]{32}', name) for name in names):
+        if names:
+            raise ValueError('invalid temporary identity')
+        return
+    config = Path(config)
+    if config.is_symlink() or any(p.is_symlink() for p in config.parents):
+        raise ValueError('unsafe leased configuration path')
+    with open(str(config) + '.lock', 'a') as lock:
+        os.chmod(lock.name, 0o600)
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        original = config.read_text()
+        if protocol == 'xray':
+            value = json.loads(original)
+            for inbound in value['inbounds']:
+                if inbound.get('protocol') == 'vless':
+                    clients = inbound['settings']['clients']
+                    inbound['settings']['clients'] = [c for c in clients
+                        if c.get('email') not in names and c.get('name') not in names]
+            updated = json.dumps(value, ensure_ascii=False, indent=2)
+        elif protocol == 'awg':
+            peer_spec = importlib.util.spec_from_file_location('lease_awg_peers', Path(__file__).parent / 'awg-peer-state.py')
+            peers = importlib.util.module_from_spec(peer_spec)
+            peer_spec.loader.exec_module(peers)
+            updated = original
+            for name in names:
+                updated, _ = peers.split_peer(updated, server_key + '-' + name if server_key else name)
+        else:
+            raise ValueError('invalid leased protocol')
+        if updated == original:
+            return
+        fd, candidate = tempfile.mkstemp(dir=config.parent, prefix='.lease-config-')
+        try:
+            os.fchmod(fd, 0o600)
+            with os.fdopen(fd, 'w') as stream:
+                stream.write(updated)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(candidate, config)
+            directory = os.open(config.parent, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+        finally:
+            if os.path.exists(candidate):
+                os.unlink(candidate)
+
+
+def prepare_leased_config_locked(protocol, path, config, server_key):
+    path = Path(path)
+    if Path(str(path) + '.disabled').exists():
+        raise ValueError('node removal is in progress')
+    if not path.exists():
+        return
+    with closing(sqlite3.connect(path)) as conn:
+        if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='temporary_leases'").fetchone():
+            return
+        rows = conn.execute('SELECT profile,expires_at,status FROM temporary_leases WHERE protocol=?', (protocol,)).fetchall()
+        names = [name for name, deadline, status in rows if
+            status != 'active' or datetime.fromisoformat(deadline) <= datetime.now(timezone.utc)]
+        # Retain pending revocations if pruning/start fails. Never report a
+        # completed removal before confirming the runtime outcome.
+        with conn:
+            conn.executemany("UPDATE temporary_leases SET status='revoking' WHERE protocol=? AND profile=? AND status IN ('active','provisioning')",
+                             ((protocol, name) for name in names))
+        prune_leased_config(protocol, config, names, server_key)
+
+
+@contextmanager
+def lease_restart_lock(path):
+    lock_path = str(path) + '.lock'
+    inherited = os.environ.get('NODE_PLANE_PROFILE_LOCK_FD')
+    if inherited is not None:
+        fd = int(inherited)
+        actual, expected = os.fstat(fd), os.stat(lock_path)
+        if (actual.st_dev, actual.st_ino) != (expected.st_dev, expected.st_ino):
+            raise ValueError('invalid inherited runtime lock')
+        # An inherited open description shares its parent's flock. Never
+        # release that lock here; another process's lock fails without waiting.
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        yield
+    else:
+        with open(lock_path, 'a') as lock:
+            os.chmod(lock.name, 0o600)
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            yield
+
+
+def prepare_leased_runtime(protocol, path='/etc/node-plane/profile-intents.sqlite3', execute=subprocess.run):
+    with lease_restart_lock(path):
+        config, _, server_key = leased_runtime_settings(protocol, execute)
+        prepare_leased_config_locked(protocol, path, config, server_key)
+
+
+def start_leased_runtime(protocol, path='/etc/node-plane/profile-intents.sqlite3', execute=subprocess.run):
+    """Supervise one owned container; never load overdue identities on restart."""
+    path = Path(path)
+    with open(str(path) + '.lock', 'a') as lock:
+        os.chmod(lock.name, 0o600)
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if Path(str(path) + '.disabled').exists():
+            raise ValueError('node removal is in progress')
+        config, container, server_key = leased_runtime_settings(protocol, execute)
+        record = leased_container(protocol, config, container, execute)
+        execute(['docker', 'update', '--restart', 'no', record['Id']], check=True, capture_output=True, timeout=30)
+        if not record['State']['Running']:
+            prepare_leased_config_locked(protocol, path, config, server_key)
+            execute(['docker', 'start', record['Id']], check=True, capture_output=True, timeout=30)
+            if not leased_container(protocol, config, container, execute)['State']['Running']:
+                raise ValueError('leased runtime did not start')
+    # The lock must not be held while supervising: regular grants, revocation
+    # and the expiry timer share it. Restart after a crash runs the guard again.
+    execute(['docker', 'wait', record['Id']], check=True, capture_output=True)
 
 
 def lease_current(connection, intent, now=None):
@@ -225,13 +456,20 @@ def run(intent, lock_fd):
     root = Path(__file__).parent
     protocol, action = intent['protocol'], intent['action']
     if 'lease_seconds' in intent:
-        subprocess.run(['systemctl', 'is-active', '--quiet', 'node-plane-lease-expiry.timer'],
-                       check=True, capture_output=True, timeout=15)
+        if not lease_enforcement_ready(protocol):
+            raise ValueError('temporary expiry enforcement is unavailable')
+    if action == 'delete' and re.fullmatch(r'tmp_[0-9a-f]{32}', intent['runtime_name']):
+        config, container, server_key = leased_runtime_settings(protocol)
+        record = leased_container(protocol, config, container)
+        if not record['State']['Running']:
+            prune_leased_config(protocol, config, [intent['runtime_name']], server_key)
+            return {'summary': 'OK', 'payload_json': ''}
     script = 'xray-add-user-existing.sh' if protocol == 'xray' and action == 'ensure' else f'{protocol}-{"add" if action == "ensure" else "del"}-user.sh'
     args = [intent['runtime_name']]
     if protocol == 'xray' and action == 'ensure':
         args += [intent['uuid'], intent['short_id']]
-    output = subprocess.run([str(root / script), *args], check=True, capture_output=True, text=True, pass_fds=(lock_fd,))
+    output = subprocess.run([str(root / script), *args], check=True, capture_output=True, text=True, pass_fds=(lock_fd,),
+                            env=dict(os.environ, NODE_PLANE_PROFILE_LOCK_FD=str(lock_fd)))
     # Keep the existing AWG output format for extraction by the agent.
     return {'summary': output.stdout.strip(), 'payload_json': ''}
 
@@ -442,10 +680,6 @@ def lookup_node_settings(intent, path):
     fingerprint = hashlib.sha256(json.dumps(intent, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
     connection = sqlite3.connect(Path(path).resolve().as_uri() + '?mode=ro', uri=True, timeout=2)
     try:
-        if len(sys.argv) == 2 and sys.argv[1] == 'expire-leases':
-            result = expire_leases('/etc/node-plane/profile-intents.sqlite3', run)
-            print(json.dumps(result))
-            sys.exit(1 if result['pending'] else 0)
         row = connection.execute('SELECT fingerprint, status, response FROM commands WHERE id = ?', (intent['command_id'],)).fetchone()
         if not row or row[0] != fingerprint or row[1] != 'succeeded':
             raise ValueError('node settings success is not confirmed')
@@ -620,7 +854,8 @@ def run_node_settings(intent, lock_fd, *, env_path=Path('/etc/node-plane/node.en
             str(settings.get('xray_tcp_port', 443)), str(settings.get('xray_xhttp_port', 8443)),
             settings.get('xray_xhttp_path', '/assets'),
             str('xray' in intent['protocols']).lower(), str('awg' in intent['protocols']).lower()]
-    subprocess.run(args, check=True, capture_output=True, text=True, pass_fds=(lock_fd,))
+    subprocess.run(args, check=True, capture_output=True, text=True, pass_fds=(lock_fd,),
+                   env=dict(os.environ, NODE_PLANE_PROFILE_LOCK_FD=str(lock_fd)))
     # The apply script only reports success after protocol config edits and
     # deployment. Read the resulting files independently before acknowledgment.
     verify_node_settings_config(intent, xray_path, awg_path)
@@ -869,13 +1104,27 @@ def run_legacy(path, scope, profile, script, args):
                      None if scope == 'all' else profile)
         result = subprocess.run([str(Path(__file__).parent / script), *args],
                                 check=True, capture_output=True, text=True,
-                                pass_fds=(lock.fileno(),))
+                                pass_fds=(lock.fileno(),), env=dict(os.environ, NODE_PLANE_PROFILE_LOCK_FD=str(lock.fileno())))
         return result.stdout.strip()
 
 
 if __name__ == '__main__':
     os.umask(0o077)
     try:
+        if len(sys.argv) == 3 and sys.argv[1] == 'prepare-leased-runtime':
+            prepare_leased_runtime(sys.argv[2])
+            print(json.dumps({'prepared': True}))
+            sys.exit(0)
+        if len(sys.argv) == 3 and sys.argv[1] == 'leased-deploy':
+            print(json.dumps({'protected': refresh_leased_runtime(sys.argv[2])}))
+            sys.exit(0)
+        if len(sys.argv) == 3 and sys.argv[1] == 'start-leased-runtime':
+            start_leased_runtime(sys.argv[2])
+            sys.exit(0)
+        if len(sys.argv) == 2 and sys.argv[1] == 'expire-leases':
+            result = expire_leases('/etc/node-plane/profile-intents.sqlite3', run)
+            print(json.dumps(result))
+            sys.exit(1 if result['pending'] else 0)
         if len(sys.argv) == 3 and sys.argv[1] == 'apply-node-settings':
             result = apply_node_settings(json.loads(sys.argv[2]), '/etc/node-plane/profile-intents.sqlite3', run_node_settings)
             print(json.dumps(result))

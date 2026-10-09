@@ -42,6 +42,9 @@ os.replace(staged, path)
 PY
   if ! /opt/node-plane-runtime/deploy-xray.sh; then
     cp -p "$XRAY_BACKUP" "$XRAY_CONFIG_PATH"
+    if [[ -f /etc/systemd/system/node-plane-leased-xray.service ]]; then
+      python3 /opt/node-plane-runtime/apply-profile-intent.py prepare-leased-runtime xray >/dev/null
+    fi
     docker restart "${XRAY_CONTAINER_NAME:-xray}" >/dev/null 2>&1 || true
     echo "Xray deployment failed; previous config restored" >&2
     exit 1
