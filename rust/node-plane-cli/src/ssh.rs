@@ -1089,15 +1089,15 @@ mod tests {
                             .next()
                             .unwrap()
                             .to_owned();
-                        writeln!(
-                            OpenOptions::new()
-                                .create(true)
-                                .append(true)
-                                .open(fixture_home.join("api-requests"))
-                                .unwrap(),
-                            "{request_line}"
-                        )
-                        .unwrap();
+                        // Format before writing: concurrent overview/services requests
+                        // must not interleave the request line and its newline.
+                        OpenOptions::new()
+                            .create(true)
+                            .append(true)
+                            .open(fixture_home.join("api-requests"))
+                            .unwrap()
+                            .write_all(format!("{request_line}\n").as_bytes())
+                            .unwrap();
                         if request_line == "POST /api/v1/nodes HTTP/1.1" {
                             let headers = String::from_utf8_lossy(&request);
                             let length: usize = headers
