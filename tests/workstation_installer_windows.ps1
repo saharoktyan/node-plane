@@ -1,10 +1,10 @@
 # Run with Windows PowerShell 5.1 as well as PowerShell 7. No network or install.
 $ErrorActionPreference = 'Stop'
-$script:download = ''
+$downloads = New-Object 'System.Collections.Generic.List[string]'
 function Invoke-WebRequest {
     param($Uri, $Headers, $OutFile, [switch]$UseBasicParsing)
     if ($OutFile) {
-        $script:download = $Uri
+        $downloads.Add($Uri)
         Set-Content -LiteralPath $OutFile -Value '# mock installer'
         return
     }
@@ -13,10 +13,10 @@ function Invoke-WebRequest {
 function powershell.exe { $global:LASTEXITCODE = 0 }
 $installer = Join-Path $PSScriptRoot '../scripts/install_workstation.ps1'
 & $installer -Channel dev
-if ($script:download -notlike '*/v0.4.3-alpha.66/node-plane-cli-installer.ps1') {
-    throw "Wrong development release: $script:download"
+if ($downloads[$downloads.Count - 1] -notlike '*/v0.4.3-alpha.66/node-plane-cli-installer.ps1') {
+    throw "Wrong development release: $($downloads[$downloads.Count - 1])"
 }
 & $installer -Channel stable
-if ($script:download -notlike '*/v0.4.3/node-plane-cli-installer.ps1') {
-    throw "Wrong stable release: $script:download"
+if ($downloads[$downloads.Count - 1] -notlike '*/v0.4.3/node-plane-cli-installer.ps1') {
+    throw "Wrong stable release: $($downloads[$downloads.Count - 1])"
 }
