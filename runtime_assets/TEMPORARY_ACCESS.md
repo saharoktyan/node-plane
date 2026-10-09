@@ -5,8 +5,10 @@ The command journal supports an internal `lease_seconds` option (43200 / 86400 /
 available over the existing authenticated `BackendNodeAction` RPC as
 `temporary_ensure`, `temporary_revoke` and read-only `temporary_status`.
 The backend registry/API, worker and management interfaces are connected.
-Isolated live AWG expiry and Xray authorization/restart checks pass. Real host
-reboot, controller/agent downtime and established VLESS tunnel acceptance remain.
+Isolated live AWG expiry and Xray authorization/restart checks pass. Two real
+Debian 12 QEMU kernel reboots, agent downtime and Docker restart also pass; see
+[systemd boot checks](../tests/SYSTEMD_BOOT_CHECK.md). Established Internet VLESS
+tunnel acceptance remains.
 
 The local journal stores a conservative expiry **before** the external ensure.
 A successful result records expiry the selected 12 hours, 1 day or 3 days after completion in the journal and
@@ -82,7 +84,9 @@ Enforcement boundaries and remaining acceptance:
    traffic; for AWG, confirm existing and new traffic stop. Disposable Docker tests
    already verify live AWG traffic stops while another peer is retained, and real
    Xray API authorization excludes expired identities after guarded container restart.
-   These tests do not cover systemd boot or an established REALITY tunnel.
+   Separate QEMU checks cover real systemd boot and expiry with the agent stopped,
+   including startup guards with the expiry timer disabled. They do not cover
+   an established REALITY tunnel or every supported host OS.
 
 Source for the Xray limitation:
 <https://github.com/XTLS/Xray-core/blob/v26.3.27/proxy/vless/inbound/inbound.go#L232-L236>
