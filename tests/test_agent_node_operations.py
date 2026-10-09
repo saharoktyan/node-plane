@@ -13,6 +13,20 @@ SPEC.loader.exec_module(MODULE)
 
 
 class AgentNodeOperationTests(unittest.TestCase):
+    def test_inspection_distinguishes_absent_stopped_and_running_containers(self):
+        for code, output, installed, running in [(1, '', False, False), (0, 'false', True, False), (0, 'true', True, True)]:
+            with self.subTest(installed=installed, running=running), \
+                 patch.object(MODULE, 'environment', return_value=('missing-xray', 'missing-awg', 'xray', 'amnezia-awg')), \
+                 patch.object(MODULE.shutil, 'which', return_value='/usr/bin/docker'), \
+                 patch.object(MODULE.Path, 'read_text', side_effect=OSError), \
+                 patch.object(MODULE, 'host_metrics', return_value={}), \
+                 patch.object(MODULE.subprocess, 'run', side_effect=[SimpleNamespace(returncode=0),
+                     SimpleNamespace(returncode=code, stdout=output), SimpleNamespace(returncode=code, stdout=output)]):
+                facts = MODULE.inspect()
+                for protocol in ('awg', 'xray'):
+                    self.assertEqual(facts[protocol + '_installed'], installed)
+                    self.assertEqual(facts[protocol + '_running'], running)
+
     def test_host_metrics_use_available_memory_and_runtime_filesystem(self):
         with patch.object(MODULE.Path,'read_text',return_value='MemTotal: 1000 kB\nMemAvailable: 200 kB\n'), \
              patch.object(MODULE.os,'statvfs',return_value=SimpleNamespace(f_blocks=100,f_bavail=7)), \

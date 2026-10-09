@@ -214,7 +214,9 @@ Driver/agent rollout (the only driver mode is gRPC):
   machine with Docker or Podman, prepare portable artifacts with
   `./scripts/build_release_in_container.sh <tag>` (use `sudo` if Docker requires
   it; build outputs remain owned by the checkout owner), then create/push the tag and
-  publish those artifacts with `./scripts/tag_release.sh <tag> --no-tag --no-build --publish --no-draft`.
+  push the version tag to build and publish all platforms through cargo-dist in
+  GitHub Actions. To refresh local artifacts on an already published release, use
+  `./scripts/tag_release.sh <tag> --no-tag --no-build --publish`.
   The release script rejects binaries that require a newer glibc. Agent rollout
   also checks the staged binary on each node before replacing the installed one.
 - The rollout generates a private driver-agent CA and mutual TLS identities in

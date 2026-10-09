@@ -1,10 +1,11 @@
 [package]
 name = "node-plane-cli"
-version = "0.4.3-alpha.59"
+version = "0.4.3-alpha.60"
 edition = "2024"
 rust-version = "1.89"
 description = "Node Plane workstation installation assistant"
 license = "Apache-2.0"
+repository = "https://github.com/saharoktyan/node-plane"
 
 [[bin]]
 name = "node-plane"
@@ -35,10 +36,15 @@ tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time", "io-util", "sync", "process"] }
 zeroize = { version = "1", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
+axoupdater = { version = "0.10.2", features = ["blocking"] }
 
 [target.'cfg(windows)'.dependencies]
+self-replace = "1.5"
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Threading"] }
 
 [profile.release]
 lto = "thin"
 strip = true
+
+[profile.dist]
+inherits = "release"

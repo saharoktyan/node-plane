@@ -1,31 +1,20 @@
-name: Workstation assistant
+name: Workstation checks
 
 on:
   push:
     branches: [dev, main]
-    tags: ['v*']
     paths:
       - 'rust/node-plane-cli/**'
-      - 'scripts/install.sh'
-      - 'scripts/postgres_runtime.sh'
-      - 'scripts/python_runtime.sh'
-      - 'scripts/lib/install_progress.sh'
-      - 'app/backend/workstation_cli.py'
-      - 'app/config.py'
-      - 'scripts/setup_driver_agents.sh'
-      - '.gitattributes'
+      - 'dist-workspace.toml'
+      - 'scripts/install_workstation.sh'
+      - 'scripts/install_workstation.ps1'
       - '.github/workflows/workstation.yml'
   pull_request:
     paths:
       - 'rust/node-plane-cli/**'
-      - 'scripts/install.sh'
-      - 'scripts/postgres_runtime.sh'
-      - 'scripts/python_runtime.sh'
-      - 'scripts/lib/install_progress.sh'
-      - 'app/backend/workstation_cli.py'
-      - 'app/config.py'
-      - 'scripts/setup_driver_agents.sh'
-      - '.gitattributes'
+      - 'dist-workspace.toml'
+      - 'scripts/install_workstation.sh'
+      - 'scripts/install_workstation.ps1'
       - '.github/workflows/workstation.yml'
   workflow_dispatch:
 
@@ -33,17 +22,15 @@ permissions:
   contents: read
 
 concurrency:
-  group: workstation-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+  group: workstation-checks-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   native:
-    # Alpha tags duplicate the checked dev commit; stable tags get release builds.
-    if: github.ref_type != 'tag' || !contains(github.ref_name, '-')
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, windows-2022]
+        os: [ubuntu-22.04, macos-14, windows-2022]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     defaults:
@@ -57,21 +44,22 @@ jobs:
         run: rustup toolchain install 1.89.0 --profile minimal --component rustfmt --component clippy
       - name: Format
         run: cargo +1.89.0 fmt --check
+      - name: Unix installer syntax
+        if: runner.os != 'Windows'
+        run: bash -n ../../scripts/install_workstation.sh
+      - name: Windows installer syntax
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path ../../scripts/install_workstation.ps1),
+            [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count) { throw ($errors | Out-String) }
       - name: Lint
         run: cargo +1.89.0 clippy --locked --all-targets -- -D warnings
       - name: Tests
         run: cargo +1.89.0 test --locked
-      - name: Linux binary
-        if: runner.os == 'Linux' && (github.event_name == 'workflow_dispatch' || github.ref_type == 'tag')
-        run: cargo +1.89.0 build --locked --release
-      - name: Windows binary with static CRT
-        if: runner.os == 'Windows' && (github.event_name == 'workflow_dispatch' || github.ref_type == 'tag')
-        env:
-          RUSTFLAGS: '-C target-feature=+crt-static'
-        run: cargo +1.89.0 build --locked --release
-      - name: Linux command smoke test
-        if: runner.os == 'Linux' && (github.event_name == 'workflow_dispatch' || github.ref_type == 'tag')
-        run: ./target/release/node-plane --help
-      - name: Windows command smoke test
-        if: runner.os == 'Windows' && (github.event_name == 'workflow_dispatch' || github.ref_type == 'tag')
-        run: .\target\release\node-plane.exe --help
+      - name: Command smoke test
+        run: cargo +1.89.0 run --locked -- --help

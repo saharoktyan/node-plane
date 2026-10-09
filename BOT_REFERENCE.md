@@ -2,6 +2,13 @@
 
 This document summarizes the bot screens, the main admin sections, and the small set of slash commands that are useful in regular operations.
 
+## Screen text
+
+Use short, direct descriptions of the current state or action. Keep implementation
+details and migration history out of routine screens. Destructive confirmations
+list the affected profiles and resources, plus any irreversible consequences.
+Error messages name the problem and the next useful step.
+
 Some buttons appear only in specific cases:
 - `Admin` is shown only to admins
 - `Request Access` is shown only to users without access
@@ -16,7 +23,7 @@ Some buttons appear only in specific cases:
 - `Profile`
   View the profile card and access summary.
 - `Settings`
-  Change language, announcement sound behavior, and telemetry preferences.
+  Change language and announcement sound.
 
 ### User Without Access
 - `Request Access`
@@ -45,7 +52,6 @@ Some buttons appear only in specific cases:
 ### Settings
 - `Language`
 - announcement sound toggle
-- telemetry toggle, when telemetry is available for the profile
 
 ## Admin Menu
 

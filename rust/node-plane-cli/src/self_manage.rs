@@ -10,8 +10,9 @@ use std::{
 };
 
 const REPO: &str = "https://api.github.com/repos/saharoktyan/node-plane";
-const ASSET: &str = "node-plane-cli-linux-amd64.tar.gz";
-const MEMBER: &str = "node-plane-cli-linux-amd64";
+const LEGACY_ASSET: &str = "node-plane-cli-linux-amd64.tar.gz";
+const LEGACY_MEMBER: &str = "node-plane-cli-linux-amd64";
+const DIST_APP: &str = "node-plane-cli";
 const MARKER: &str = "# Node Plane workstation PATH";
 const PATH_BLOCK: &str = "# Node Plane workstation PATH\nexport PATH=\"$HOME/.local/bin:$PATH\"\n# End Node Plane workstation PATH\n";
 
@@ -35,6 +36,12 @@ pub struct Release {
     draft: bool,
     prerelease: bool,
     assets: Vec<Asset>,
+    #[serde(skip)]
+    pub dist_managed: bool,
+    #[serde(skip)]
+    asset_name: String,
+    #[serde(skip)]
+    checksum_name: String,
 }
 #[derive(Clone, Deserialize)]
 struct Asset {
@@ -59,12 +66,10 @@ fn newer(tag: &str, current: &str) -> bool {
     }
 }
 pub fn discover() -> Result<Option<Release>> {
-    ensure!(
-        cfg!(all(target_os = "linux", target_arch = "x86_64")),
-        "Self-update currently supports Linux x86_64 only."
-    );
     let current = env!("CARGO_PKG_VERSION");
     let alpha = current.contains("-alpha.");
+    let dist_managed = dist_updater().is_some();
+    let platform_asset = platform_archive();
     let releases: Vec<Release> = client()?
         .get(format!("{REPO}/releases?per_page=100"))
         .send()?
@@ -72,14 +77,129 @@ pub fn discover() -> Result<Option<Release>> {
         .json()?;
     Ok(releases
         .into_iter()
-        .filter(|r| {
-            !r.draft
-                && (alpha || !r.prerelease)
-                && newer(&r.tag_name, current)
-                && r.assets.iter().any(|a| a.name == ASSET)
-                && r.assets.iter().any(|a| a.name == "SHA256SUMS.txt")
+        .filter_map(|mut release| {
+            if release.draft || (!alpha && release.prerelease) || !newer(&release.tag_name, current)
+            {
+                return None;
+            }
+            let target_asset = platform_asset
+                .as_ref()
+                .filter(|asset| release.assets.iter().any(|a| &a.name == *asset));
+            if dist_managed {
+                let name = target_asset?;
+                let checksum = format!("{name}.sha256");
+                release.assets.iter().any(|a| a.name == checksum).then(|| {
+                    release.dist_managed = true;
+                    release.asset_name = name.clone();
+                    release.checksum_name = checksum;
+                    release
+                })
+            } else if let Some(name) = target_asset {
+                let checksum = format!("{name}.sha256");
+                if release.assets.iter().any(|a| a.name == checksum) {
+                    release.asset_name = name.clone();
+                    release.checksum_name = checksum;
+                    return Some(release);
+                }
+                legacy_release(&mut release)
+            } else {
+                legacy_release(&mut release)
+            }
         })
         .max_by_key(|r| semver::Version::parse(r.tag_name.trim_start_matches('v')).ok()))
+}
+
+fn legacy_release(release: &mut Release) -> Option<Release> {
+    if !cfg!(all(target_os = "linux", target_arch = "x86_64"))
+        || !release.assets.iter().any(|a| a.name == LEGACY_ASSET)
+        || !release.assets.iter().any(|a| a.name == "SHA256SUMS.txt")
+    {
+        return None;
+    }
+    release.asset_name = LEGACY_ASSET.into();
+    release.checksum_name = "SHA256SUMS.txt".into();
+    Some(release.clone())
+}
+
+fn platform_archive() -> Option<String> {
+    let target = if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+        "x86_64-unknown-linux-gnu"
+    } else if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
+        "x86_64-apple-darwin"
+    } else if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+        "aarch64-apple-darwin"
+    } else if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
+        "x86_64-pc-windows-msvc"
+    } else {
+        return None;
+    };
+    let extension = if cfg!(windows) { "zip" } else { "tar.gz" };
+    Some(format!("{DIST_APP}-{target}.{extension}"))
+}
+
+fn dist_updater() -> Option<axoupdater::AxoUpdater> {
+    let mut updater = axoupdater::AxoUpdater::new_for(DIST_APP);
+    updater.load_receipt().ok()?;
+    let source = updater.source.as_ref()?;
+    if source.owner != "saharoktyan" || source.name != "node-plane" || source.app_name != DIST_APP {
+        return None;
+    }
+    if !updater.check_receipt_is_for_this_executable().ok()? {
+        return None;
+    }
+    updater.disable_installer_output();
+    Some(updater)
+}
+
+fn uninstall_dist() -> Result<()> {
+    let _lock = installation_lock(&home()?)?;
+    let _updater =
+        dist_updater().context("This executable is not a cargo-dist managed installation")?;
+    let executable = std::env::current_exe()?.canonicalize()?;
+    let parent = executable
+        .parent()
+        .context("Missing installation directory")?;
+    let updater_name = if cfg!(windows) {
+        "node-plane-cli-update.exe"
+    } else {
+        "node-plane-cli-update"
+    };
+    let updater_path = parent.join(updater_name);
+    if updater_path.is_file() {
+        fs::remove_file(updater_path)?;
+    }
+    #[cfg(windows)]
+    self_replace::self_delete()?;
+    #[cfg(not(windows))]
+    fs::remove_file(executable)?;
+
+    // Retain cargo-dist's env scripts: shell startup files source these and
+    // ~/.local/bin can contain other applications. Retain user data as before.
+    let mut config_paths = Vec::new();
+    if std::env::var_os("AXOUPDATER_CONFIG_WORKING_DIR").is_some() {
+        config_paths.push(std::env::current_dir()?);
+    } else if let Some(path) = std::env::var_os("AXOUPDATER_CONFIG_PATH") {
+        config_paths.push(PathBuf::from(path));
+    } else {
+        if let Some(path) = std::env::var_os("XDG_CONFIG_HOME") {
+            config_paths.push(PathBuf::from(path).join(DIST_APP));
+        }
+        if cfg!(windows) {
+            if let Some(path) = std::env::var_os("LOCALAPPDATA") {
+                config_paths.push(PathBuf::from(path).join(DIST_APP));
+            }
+        } else {
+            config_paths.push(home()?.join(".config").join(DIST_APP));
+        }
+    }
+    for config in config_paths {
+        let receipt = config.join(format!("{DIST_APP}-receipt.json"));
+        if receipt.is_file() {
+            fs::remove_file(receipt)?;
+            break;
+        }
+    }
+    Ok(())
 }
 fn home() -> Result<PathBuf> {
     dirs::home_dir().context("Cannot locate your home directory.")
@@ -185,6 +305,25 @@ fn installation_lock(home: &Path) -> Result<fs::File> {
     Ok(file)
 }
 pub fn update(release: &Release) -> Result<String> {
+    if release.dist_managed {
+        let _lock = installation_lock(&home()?)?;
+        let mut updater = dist_updater().context(
+            "The cargo-dist install receipt is missing; reinstall Workstation with its release installer.",
+        )?;
+        updater.configure_version_specifier(axoupdater::UpdateRequest::SpecificTag(
+            release.tag_name.clone(),
+        ));
+        let result = updater
+            .run_sync()
+            .context("cargo-dist could not update Workstation")?;
+        let Some(result) = result else {
+            return Ok("Workstation is already up to date.".into());
+        };
+        return Ok(format!(
+            "Workstation updated to {}. Restart TUI to use the new version.",
+            result.new_version_tag
+        ));
+    }
     let home = home()?;
     managed(&home)?;
     let client = client()?;
@@ -212,9 +351,14 @@ pub fn update(release: &Release) -> Result<String> {
         );
         Ok(bytes)
     };
-    let sums = String::from_utf8(download("SHA256SUMS.txt", 1024 * 1024)?)?;
-    let archive = download(ASSET, 100 * 1024 * 1024)?;
-    install_at(&home, &verified_binary(&archive, &sums)?)?;
+    let checksum = String::from_utf8(download(&release.checksum_name, 1024 * 1024)?)?;
+    let archive = download(&release.asset_name, 100 * 1024 * 1024)?;
+    let binary = if release.asset_name == LEGACY_ASSET {
+        verified_binary(&archive, &checksum)?
+    } else {
+        verified_dist_linux_binary(&archive, &checksum, &release.asset_name)?
+    };
+    install_at(&home, &binary)?;
     Ok(format!(
         "Workstation updated to {}. Restart TUI to use the new version.",
         release.tag_name
@@ -226,7 +370,7 @@ fn verified_binary(archive: &[u8], sums: &str) -> Result<Vec<u8>> {
         .find_map(|line| {
             let mut fields = line.split_whitespace();
             let checksum = fields.next()?;
-            (fields.next()?.trim_start_matches('*') == ASSET).then_some(checksum)
+            (fields.next()?.trim_start_matches('*') == LEGACY_ASSET).then_some(checksum)
         })
         .context("Workstation checksum missing")?;
     ensure!(
@@ -238,7 +382,7 @@ fn verified_binary(archive: &[u8], sums: &str) -> Result<Vec<u8>> {
     for entry in tar.entries()? {
         let entry = entry?;
         ensure!(
-            entry.path()?.as_ref() == Path::new(MEMBER)
+            entry.path()?.as_ref() == Path::new(LEGACY_MEMBER)
                 && entry.header().entry_type().is_file()
                 && binary.is_none(),
             "Unexpected workstation archive member"
@@ -253,14 +397,67 @@ fn verified_binary(archive: &[u8], sums: &str) -> Result<Vec<u8>> {
     }
     binary.context("Empty workstation archive")
 }
-pub fn execute(command: &Command) -> Result<()> {
+
+fn verified_dist_linux_binary(
+    archive: &[u8],
+    checksum: &str,
+    archive_name: &str,
+) -> Result<Vec<u8>> {
     ensure!(
-        cfg!(target_os = "linux"),
-        "Local installation currently supports Linux only."
+        cfg!(all(target_os = "linux", target_arch = "x86_64")),
+        "Only cargo-dist managed installs can update Workstation on this platform."
     );
+    let expected = checksum
+        .split_whitespace()
+        .next()
+        .context("Workstation archive checksum is empty")?;
+    ensure!(
+        expected.len() == 64 && expected.bytes().all(|c| c.is_ascii_hexdigit()),
+        "Invalid Workstation archive checksum"
+    );
+    ensure!(
+        hash(archive) == expected,
+        "Workstation archive checksum mismatch"
+    );
+    let root = archive_name.trim_end_matches(".tar.gz");
+    let member = format!("{root}/node-plane");
+    let mut tar = tar::Archive::new(flate2::read::GzDecoder::new(archive));
+    let mut binary = None;
+    for entry in tar.entries()? {
+        let entry = entry?;
+        if entry.header().entry_type().is_dir() && entry.path()?.as_ref() == Path::new(root) {
+            continue;
+        }
+        ensure!(
+            entry.path()?.as_ref() == Path::new(&member)
+                && entry.header().entry_type().is_file()
+                && binary.is_none(),
+            "Unexpected Workstation archive member"
+        );
+        let mut bytes = Vec::new();
+        entry.take(100 * 1024 * 1024 + 1).read_to_end(&mut bytes)?;
+        ensure!(
+            bytes.len() <= 100 * 1024 * 1024 && bytes.starts_with(b"\x7fELF"),
+            "Invalid Workstation binary"
+        );
+        binary = Some(bytes);
+    }
+    binary.context("Workstation archive did not contain the expected executable")
+}
+pub fn execute(command: &Command) -> Result<()> {
     let home = home()?;
     match command {
         Command::Install => {
+            if dist_updater().is_some() {
+                println!(
+                    "Workstation is already installed. Run `node-plane self update` to update it."
+                );
+                return Ok(());
+            }
+            ensure!(
+                cfg!(target_os = "linux"),
+                "Use the generated release installer to install Workstation on this platform."
+            );
             install_at(&home, &fs::read(std::env::current_exe()?)?)?;
             println!(
                 "Installed {}. Open a new terminal to refresh PATH. Profiles and SSH keys are retained.",
@@ -268,6 +465,17 @@ pub fn execute(command: &Command) -> Result<()> {
             );
         }
         Command::Uninstall => {
+            if dist_updater().is_some() {
+                uninstall_dist()?;
+                println!(
+                    "Workstation uninstalled. Profiles, SSH keys and shared shell PATH entries are retained."
+                );
+                return Ok(());
+            }
+            ensure!(
+                cfg!(target_os = "linux"),
+                "Remove Workstation using the uninstall instructions for the generated release installer."
+            );
             let _lock = installation_lock(&home)?;
             managed(&home)?;
             configure_path(&home, false)?;
@@ -278,7 +486,9 @@ pub fn execute(command: &Command) -> Result<()> {
             );
         }
         Command::Update { yes } => {
-            managed(&home)?;
+            if dist_updater().is_none() {
+                managed(&home)?;
+            }
             if let Some(release) = discover()? {
                 if !yes {
                     ensure!(
@@ -314,17 +524,20 @@ mod tests {
     }
     #[test]
     fn release_verification_rejects_tampering_and_unexpected_members() {
-        let valid = archive(MEMBER, b"\x7fELFtest");
-        let sums = format!("{}  {}\n", hash(&valid), ASSET);
+        let valid = archive(LEGACY_MEMBER, b"\x7fELFtest");
+        let sums = format!("{}  {}\n", hash(&valid), LEGACY_ASSET);
         assert_eq!(verified_binary(&valid, &sums).unwrap(), b"\x7fELFtest");
-        assert!(verified_binary(&valid, &format!("{}  {}\n", "0".repeat(64), ASSET)).is_err());
+        assert!(
+            verified_binary(&valid, &format!("{}  {}\n", "0".repeat(64), LEGACY_ASSET)).is_err()
+        );
         assert!(verified_binary(&valid, "").is_err());
         for invalid in [
             archive("wrong-binary", b"\x7fELFtest"),
-            archive(MEMBER, b"not executable"),
+            archive(LEGACY_MEMBER, b"not executable"),
         ] {
             assert!(
-                verified_binary(&invalid, &format!("{}  {}\n", hash(&invalid), ASSET)).is_err()
+                verified_binary(&invalid, &format!("{}  {}\n", hash(&invalid), LEGACY_ASSET))
+                    .is_err()
             );
         }
     }
@@ -334,6 +547,26 @@ mod tests {
         assert!(!newer("v0.4.3-alpha.9", "0.4.3-alpha.49"));
         assert!(newer("v0.4.3", "0.4.3-alpha.49"));
         assert!(!newer("garbage", "0.4.3"));
+    }
+    #[test]
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    fn cargo_dist_archive_checks_its_root_checksum_and_executable() {
+        let name = "node-plane-cli-x86_64-unknown-linux-gnu.tar.gz";
+        let member = "node-plane-cli-x86_64-unknown-linux-gnu/node-plane";
+        let valid = archive(member, b"\x7fELFtest");
+        let checksum = format!("{}  {name}\n", hash(&valid));
+        assert_eq!(
+            verified_dist_linux_binary(&valid, &checksum, name).unwrap(),
+            b"\x7fELFtest"
+        );
+        assert!(verified_dist_linux_binary(&valid, &"0".repeat(64), name).is_err());
+        for (path, bytes) in [
+            ("unexpected/node-plane", b"\x7fELFtest".as_slice()),
+            (member, b"not executable".as_slice()),
+        ] {
+            let invalid = archive(path, bytes);
+            assert!(verified_dist_linux_binary(&invalid, &hash(&invalid), name).is_err());
+        }
     }
     #[test]
     fn install_is_repeatable_and_preserves_shell_content_and_user_data() {

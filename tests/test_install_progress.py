@@ -129,6 +129,11 @@ esac
             if not path.exists():
                 path.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(ROOT / name, path)
+        for entry in json.loads((ROOT / 'runtime_assets/manifest.json').read_text()):
+            name = 'runtime_assets/' + entry['asset_path']
+            path = self.source / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(ROOT / name, path)
         shutil.copytree(self.release, self.source, dirs_exist_ok=True)
         subprocess.run(['git', 'init', '-q', str(self.source)], check=True)
         subprocess.run(['git', '-C', str(self.source), 'add', '-f', '.'], check=True)

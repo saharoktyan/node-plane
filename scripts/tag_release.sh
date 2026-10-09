@@ -8,7 +8,6 @@ RUN_TESTS="${RUN_TESTS:-1}"
 CREATE_TAG=1
 BUILD_ARTIFACTS=1
 PUBLISH_RELEASE=0
-DRAFT_RELEASE=1
 ARTIFACTS_DIR="${ARTIFACTS_DIR:-$ROOT_DIR/dist/releases}"
 CURRENT_STEP="startup"
 
@@ -21,8 +20,8 @@ Options:
   --skip-tests         Do not run preflight checks (python tests + cargo check)
   --no-build           Do not build/package release artifacts
   --no-tag             Do not create a git tag (prep-only mode)
-  --publish            Publish GitHub release with artifacts via gh CLI
-  --no-draft           When used with --publish, create non-draft release
+  --publish            Upload local artifacts to an existing CI-created GitHub release
+  --no-draft           Compatibility option; release visibility is managed by CI
   --artifacts-dir DIR  Release artifacts output directory
   -h, --help           Show this help
 
@@ -87,7 +86,6 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --no-draft)
-      DRAFT_RELEASE=0
       shift
       ;;
     --artifacts-dir)
@@ -298,22 +296,16 @@ publish_github_release() {
     --ref "$tag" --commit "$(git rev-parse "${tag}^{commit}")"
   (cd "$release_dir" && sha256sum -c SHA256SUMS.txt)
 
-  local -a flags
-  if [[ $DRAFT_RELEASE -eq 1 ]]; then
-    flags+=(--draft)
+  if ! gh release view "$tag" >/dev/null 2>&1; then
+    echo "Push $tag and wait for the cargo-dist Release workflow before uploading local artifacts." >&2
+    return 1
   fi
-  if [[ "$tag" == *"-alpha."* ]]; then
-    flags+=(--prerelease)
-  fi
-
-  set_step "publish github release"
-  gh release create "$tag" \
+  set_step "upload local release artifacts"
+  gh release upload "$tag" \
     "${release_dir}"/*.tar.gz \
     "${release_dir}/SHA256SUMS.txt" \
     "${release_dir}/RELEASE_METADATA.txt" \
-    "${flags[@]}" \
-    --title "$tag" \
-    --notes "Automated release artifacts for ${tag}"
+    --clobber
 }
 
 if [[ "$RUN_TESTS" == "1" ]]; then
@@ -338,9 +330,9 @@ fi
 
 if [[ $PUBLISH_RELEASE -eq 1 ]]; then
   publish_github_release "$ARTIFACTS_DIR" "$TAG"
-  echo "Published GitHub release for ${TAG}."
+  echo "Uploaded local artifacts to the existing GitHub release for ${TAG}."
 else
-  echo "GitHub publish skipped. Use --publish when ready."
+  echo "GitHub Actions will build and publish the release when the tag is pushed."
 fi
 
 echo

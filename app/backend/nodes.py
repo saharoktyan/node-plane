@@ -54,12 +54,16 @@ def _command_key(value):
 
 def _validate(values, *, create):
     allowed = {'key', 'title', 'region', 'flag', 'protocols', 'xray_transports', 'settings',
-               'transport', 'ssh_target', 'notes'} if create else {
+               'transport', 'ssh_target', 'notes', 'template'} if create else {
         'title', 'region', 'flag', 'protocols', 'xray_transports', 'settings', 'transport', 'ssh_target', 'notes', 'confirm_access_change'}
     if not values or set(values) - allowed:
         raise AccessDenied('invalid_input', 422)
     if create and (set(values) < {'key', 'title', 'region', 'protocols'}):
         raise AccessDenied('invalid_input', 422)
+    if 'template' in values:
+        from .node_templates import NODE_TEMPLATES
+        if values['template'] not in {t.code for t in NODE_TEMPLATES}:
+            raise AccessDenied('invalid_input', 422)
     if 'key' in values and (not isinstance(values['key'], str) or not _KEY.fullmatch(values['key'])):
         raise AccessDenied('invalid_input', 422)
     for field in ('title', 'region'):
@@ -258,6 +262,16 @@ class NodeService:
             # Keep a previously retired key fenced forever. Reusing it could
             # deliver an old queued command to an unrelated machine.
             if action == 'create':
+                # A single row lock serializes all creators, across administrator
+                # accounts, including the local-slot guard and template numbering.
+                conn.execute("INSERT INTO backend_system_settings(key,value) VALUES ('node_creation_lock','1') ON CONFLICT(key) DO NOTHING")
+                conn.execute("UPDATE backend_system_settings SET value=value WHERE key='node_creation_lock'")
+                if values.get('template'):
+                    from .node_templates import NODE_TEMPLATES
+                    template = next(t for t in NODE_TEMPLATES if t.code == values['template'])
+                    keys = [r['key'] for r in conn.execute('SELECT key FROM backend_nodes').fetchall()]
+                    keys += [r['node_key'] for r in conn.execute('SELECT node_key FROM backend_node_retirements').fetchall()]
+                    values.update(template.draft(keys))
                 node_key = values['key']
                 if conn.execute('SELECT 1 FROM backend_node_retirements WHERE node_key = ?', (node_key,)).fetchone():
                     raise AccessDenied('node_key_retired', 409)

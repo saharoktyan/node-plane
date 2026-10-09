@@ -67,6 +67,10 @@ open closure tasks, not implied by the API version number.
 
 ## Node creation and installation defaults
 
+`GET /api/v1/nodes/{node_key}/maintenance` includes `affected_profiles`, the
+number of distinct profiles currently granted access to the server. Full cleanup
+uses this count in its confirmation, counting each profile once across protocols.
+
 `GET /api/v1/nodes/creation-options` requires `nodes.manage` and returns
 `local_available` and the portable installation defaults. Creating a node or
 changing its connection to local enforces the single-local-node rule inside

@@ -92,6 +92,28 @@ impl Node {
                 .as_ref()
                 .is_some_and(|v| v["settings_complete"] == true)
     }
+    pub fn protocol_status(&self, protocol: &str) -> &'static str {
+        let Some(facts) = &self.services else {
+            return "not checked";
+        };
+        if facts[format!("{protocol}_running")] == true {
+            return "running";
+        }
+        if facts["docker"] == false {
+            return "unavailable";
+        }
+        match facts[format!("{protocol}_installed")].as_bool() {
+            Some(true) => "stopped",
+            Some(false) => "missing",
+            None if facts[format!("{protocol}_config_valid")] == true => "stopped",
+            None if self.applied_revision == 0
+                || !self.protocols.iter().any(|item| item == protocol) =>
+            {
+                "missing"
+            }
+            None => "not checked",
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -193,8 +215,70 @@ impl SavedOperation {
         Ok(latest.map(|(_, operation)| operation))
     }
 }
+#[derive(Serialize, Deserialize)]
+struct SavedCreation {
+    host: String,
+    port: u16,
+    user: String,
+    account_id: String,
+    draft: crate::node_wizard::Draft,
+    status: String,
+}
+impl SavedCreation {
+    fn path(&self, request: &Request) -> std::path::PathBuf {
+        request
+            .state_dir
+            .join(format!("node-creation-{}.json", self.draft.command_id))
+    }
+    fn save(&self, request: &Request) -> Result<()> {
+        use std::io::Write;
+        let path = self.path(request);
+        if path.exists() {
+            ssh::secure_file(&path)?;
+        }
+        let mut temporary = tempfile::NamedTempFile::new_in(&request.state_dir)?;
+        ssh::secure_file(temporary.path())?;
+        temporary.write_all(&serde_json::to_vec(self)?)?;
+        temporary.as_file().sync_all()?;
+        temporary.persist(path).map_err(|e| e.error)?;
+        Ok(())
+    }
+    fn pending(request: &Request, account_id: &str) -> Result<Option<Self>> {
+        for entry in std::fs::read_dir(&request.state_dir)? {
+            let path = entry?.path();
+            let name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or_default();
+            if !name.starts_with("node-creation-") || !name.ends_with(".json") {
+                continue;
+            }
+            ssh::secure_file(&path)?;
+            ensure!(
+                path.metadata()?.len() < 32768,
+                "Saved creation is oversized"
+            );
+            let record: Self = serde_json::from_slice(&std::fs::read(&path)?)?;
+            ensure!(
+                record.path(request) == path,
+                "Invalid saved creation identity"
+            );
+            if record.host.eq_ignore_ascii_case(&request.host)
+                && record.port == request.port
+                && record.user == request.user
+                && record.account_id == account_id
+                && record.status == "unconfirmed"
+            {
+                return Ok(Some(record));
+            }
+        }
+        Ok(None)
+    }
+}
 #[derive(Clone)]
 pub enum Command {
+    CreationOptions,
+    Create(crate::node_wizard::Draft),
     List,
     Card(String),
     Setup(Node),
@@ -204,6 +288,8 @@ pub enum Command {
     Observe(Operation),
 }
 pub enum Update {
+    CreationOptions(crate::node_wizard::Options),
+    Created(Node),
     List(Vec<Node>),
     Card(Node),
     Operation(Operation),
@@ -545,6 +631,44 @@ async fn execute(
             let setup = matches!(&command, Command::Setup(_));
             let docker = matches!(&command, Command::Docker(_));
             match command {
+                Command::CreationOptions => {
+                    let _ = tx.send(Event::Stage("Loading node templates and installation defaults".into()));
+                    let value = backend::request(session, &credential, Method::GET, "/api/v1/nodes/creation-options", None, None).await?;
+                    let options = serde_json::from_value(value).context("Update the controller to use the shared node creation wizard")?;
+                    let _ = tx.send(Event::Nodes(Update::CreationOptions(options)));
+                    if let Some(mut saved) = SavedCreation::pending(&request, &credential.account_id)? {
+                        let found = backend::helper(session, json!({"version":1,"action":"lookup-node-create",
+                            "session_id":id,"command_id":saved.draft.command_id})).await?;
+                        if !found["node"].is_null() {
+                            let created = node(found["node"].clone())?;
+                            saved.status = "succeeded".into(); saved.save(&request)?;
+                            let _ = tx.send(Event::Nodes(Update::Created(created)));
+                            return Ok("Original node creation confirmed; no command was replayed".into());
+                        }
+                        anyhow::bail!("Node creation remains unconfirmed. Command: {}. No request was replayed; check controller diagnostics before creating another node", saved.draft.command_id);
+                    }
+
+                }
+                Command::Create(draft) => {
+                    ensure!(SavedCreation::pending(&request, &credential.account_id)?.is_none(), "Resolve the previous node creation before submitting another");
+                    let mut saved = SavedCreation { host:request.host.clone(), port:request.port, user:request.user.clone(),
+                        account_id:credential.account_id.clone(), draft, status:"unconfirmed".into() };
+                    saved.save(&request)?;
+                    let _ = tx.send(Event::Stage("Creating the server registry entry".into()));
+                    let value = match backend::request(session, &credential, Method::POST, "/api/v1/nodes", Some(saved.draft.body.clone()), Some(saved.draft.command_id)).await {
+                        Ok(value) => value,
+                        Err(error) if error.status.is_some_and(|status| (400..500).contains(&status) && status != 408) => {
+                            saved.status = "rejected".into(); saved.save(&request)?;
+                            return Err(error.into());
+                        }
+                        Err(error) => return Err(anyhow::Error::new(error).context(format!("Creation was not confirmed. Reopen New node to check the original command without replaying it. Command: {}", saved.draft.command_id))),
+                    };
+                    let created = node(value)?;
+                    // Publish success before saving; a local write failure must not
+                    // invite another create POST. Recovery uses the original command.
+                    let _ = tx.send(Event::Nodes(Update::Created(created)));
+                    saved.status = "succeeded".into(); saved.save(&request)?;
+                }
                 Command::List => {
                     let _ = tx.send(Event::Stage("Loading the server registry".into()));
                     let mut items = Vec::new();
@@ -691,6 +815,29 @@ mod tests {
             "protocols":["awg"],"xray_transports":[],"desired_revision":1,"applied_revision":0}),
         )
         .unwrap()
+    }
+    #[test]
+    fn protocol_status_distinguishes_missing_stopped_and_running_with_legacy_fallback() {
+        let mut node = fixture("lv1", "Europe");
+        for protocol in ["awg", "xray"] {
+            for (installed, running, expected) in [
+                (false, false, "missing"),
+                (true, false, "stopped"),
+                (true, true, "running"),
+            ] {
+                node.services = Some(
+                    json!({"docker":true, format!("{protocol}_installed"):installed, format!("{protocol}_running"):running}),
+                );
+                assert_eq!(node.protocol_status(protocol), expected);
+            }
+            node.services = Some(json!({"docker":true, format!("{protocol}_running"):false}));
+            assert_eq!(node.protocol_status(protocol), "missing");
+        }
+        node.applied_revision = 1;
+        node.services = Some(json!({"docker":true,"awg_running":false,"awg_config_valid":true}));
+        assert_eq!(node.protocol_status("awg"), "stopped");
+        node.services = Some(json!({"docker":false}));
+        assert_eq!(node.protocol_status("awg"), "unavailable");
     }
     #[test]
     fn pagination_repeats_region_headers_and_never_orphans_them() {

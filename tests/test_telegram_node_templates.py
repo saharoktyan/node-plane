@@ -62,8 +62,24 @@ class NodeTemplateTests(IsolatedAsyncioTestCase):
         self.assertEqual(body['ssh_target'], 'root@node.example.test')
         self.assertEqual(body['settings'], {'public_host': 'vpn.example.test', 'awg_i1_preset': 'quic', 'awg_port_mode': 'auto'})
         self.assertEqual(body['protocols'], ['awg'])
-        self.assertRegex(body['key'], r'^lv1-[a-f0-9]{8}$')
+        self.assertEqual(body['key'], 'lv1')
+        self.assertEqual(body['template'], 'lv')
         self.assertTrue((await self.state.get_data())['wizard_saved'])
+
+    async def test_shared_preview_and_allocated_result_keep_actual_node_card_identity(self):
+        self.backend.node_creation_options.return_value['templates'] = [{
+            'code': 'lv', 'draft': {'key': 'lv4', 'title': 'Latvia #4', 'region': 'Europe', 'flag': '🇱🇻', 'template': 'lv'}}]
+        await self.choose('local')
+        self.backend.request.assert_not_awaited()
+        self.assertEqual((await self.state.get_data())['wizard_data']['key'], 'lv4')
+        await nodes.process_wizard_host(self.message('vpn.example'), self.bot, self.backend, self.state)
+        self.query.data = 'wizard_proto:done'
+        await nodes.wizard_proto_cb(self.query, self.bot, self.backend, self.state)
+        self.backend.create_node.return_value = {'key': 'lv5', 'title': 'Latvia #5', 'region': 'Europe', 'flag': '🇱🇻'}
+        await nodes.wizard_save_cb(self.query, self.bot, self.backend, self.state)
+        self.assertEqual((await self.state.get_data())['wizard_data']['key'], 'lv5')
+        rows = self.draw.call_args.args[3]
+        self.assertIn('lv5', rows[1][0].callback_data)
 
     async def test_local_only_needs_public_address_and_back_keeps_template(self):
         await self.choose('local', 'de')
@@ -101,18 +117,18 @@ class NodeTemplateTests(IsolatedAsyncioTestCase):
         self.assertEqual(self.draw.call_args.args[3][0][0].callback_data, 'wizard_back:flag')
         self.assertEqual((await self.state.get_data())['wizard_data']['region'], 'Asia')
 
-    async def test_existing_numbers_include_later_pages_and_each_draft_has_fresh_identity(self):
+    async def test_existing_numbers_include_later_pages_and_drafts_preview_same_next_number(self):
         self.backend.request.side_effect = [
             {'items': [{'key': 'lv2'}, {'key': 'irrelevant'}], 'next_cursor': 'next-page'},
             {'items': [{'key': 'lv11-12345678'}], 'next_cursor': None}]
         await self.choose('local')
         w = (await self.state.get_data())['wizard_data']
         self.assertEqual(w['title'], 'Latvia #12')
-        self.assertRegex(w['key'], r'^lv12-[a-f0-9]{8}$')
+        self.assertEqual(w['key'], 'lv12')
         params = parse_qs(urlsplit(self.backend.request.call_args.args[1]).query)
         self.assertEqual(params['cursor'], ['next-page'])
         other = NODE_TEMPLATES[0].draft(['lv2', 'lv11-12345678'])
-        self.assertNotEqual(other['key'], w['key'])
+        self.assertEqual(other['key'], w['key'])
 
     async def test_template_lookup_failure_does_not_advance_or_overwrite_draft(self):
         self.backend.request.side_effect = BackendError('backend_unavailable', 503)

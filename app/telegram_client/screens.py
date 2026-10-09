@@ -92,11 +92,15 @@ def rich_buttons(rows, *, navigation=False):
 class Table:
     headers: tuple[str, ...]
     rows: tuple[tuple[str, ...], ...]
+    row_callbacks: tuple[str, ...] = ()
 
     def rich(self):
         return InputRichBlockTable(is_compact=True, is_striped=True, cells=[
-            [RichBlockTableCell(text=value, align='left', valign='top', is_header=index == 0)
-             for value in row] for index, row in enumerate((self.headers, *self.rows))])
+            [RichBlockTableCell(text=RichTextButton(button=RichMessageButton(text=value,
+                callback_data=self.row_callbacks[index - 1], style='link'))
+                if index and column == 0 and index <= len(self.row_callbacks) else value,
+                align='left', valign='top', is_header=index == 0)
+             for column, value in enumerate(row)] for index, row in enumerate((self.headers, *self.rows))])
 
     def plain(self):
         return tuple(' · '.join(f'{label}: {value}' for label, value in zip(self.headers, row))
@@ -120,7 +124,7 @@ class Section:
         # iOS cannot activate controls inside Details, even in nested sections.
         # Expand the whole interactive branch so every control stays accessible.
         def interactive(section):
-            return bool(section.rows or section.heading_rows or
+            return bool(section.rows or section.heading_rows or any(t.row_callbacks for t in section.tables) or
                         any(interactive(child) for child in section.sections))
         collapsed = self.collapsed and not interactive(self)
         size = self.heading_size or min(depth, 6)
@@ -233,6 +237,9 @@ class Screen:
         def section_rows(sections):
             for section in sections:
                 yield from (list(row) for row in section.heading_rows)
+                for table in section.tables:
+                    for row, callback in zip(table.rows, table.row_callbacks):
+                        yield [InlineKeyboardButton(text=row[0], callback_data=callback)]
                 yield from section_rows(section.sections)
                 yield from (list(row) for row in section.rows)
         parents = [[InlineKeyboardButton(text=p.label, callback_data=p.callback)

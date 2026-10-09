@@ -58,7 +58,7 @@ def validate_request(request) -> dict:
         raise WorkstationError('invalid_request')
     action = request.get('action')
     allowed = {'version', 'action'}
-    if action in {'authenticate', 'revoke', 'lookup-update', 'lookup-node', 'audit-enrollment', 'revoke-access', 'restore-access'}:
+    if action in {'authenticate', 'revoke', 'lookup-update', 'lookup-node', 'lookup-node-create', 'audit-enrollment', 'revoke-access', 'restore-access'}:
         _uuid(request.get('session_id'))
         allowed.add('session_id')
     elif action != 'list':
@@ -74,7 +74,7 @@ def validate_request(request) -> dict:
                 or not isinstance(request.get('outcome'), str)
                 or request['outcome'] not in {'admitted', 'succeeded', 'unconfirmed'}):
             raise WorkstationError('invalid_request')
-    elif action in {'lookup-update', 'lookup-node'}:
+    elif action in {'lookup-update', 'lookup-node', 'lookup-node-create'}:
         _uuid(request.get('command_id'))
         allowed.add('command_id')
     elif action in {'authenticate', 'revoke-access', 'restore-access'}:
@@ -337,7 +337,7 @@ class WorkstationService:
                 return {'version': VERSION, 'ok': True, 'session_id': session_id, 'revoked': revoked}
             if previous is not None and previous.get('revoked'):
                 raise WorkstationError('session_revoked')
-            if request['action'] in {'lookup-update', 'lookup-node', 'audit-enrollment'}:
+            if request['action'] in {'lookup-update', 'lookup-node', 'lookup-node-create', 'audit-enrollment'}:
                 if previous is None:
                     raise WorkstationError('session_not_found')
                 try:
@@ -348,6 +348,11 @@ class WorkstationService:
                 if (principal.kind != PrincipalKind.ACCOUNT or principal.account_id != previous['account_id']
                         or principal.scopes != SCOPES):
                     raise WorkstationError('session_state_invalid')
+                if request['action'] == 'lookup-node-create':
+                    with self.db.connect() as conn:
+                        row = conn.execute('SELECT result_json FROM backend_node_commands WHERE actor_account_id=? AND command_key=?',
+                            (principal.account_id, request['command_id'])).fetchone()
+                    return {'version': VERSION, 'ok': True, 'node': json.loads(row['result_json']) if row and row['result_json'] else None}
                 if request['action'] == 'lookup-node':
                     with self.db.connect() as conn:
                         matches = []

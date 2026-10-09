@@ -400,7 +400,6 @@ async def show_create_nodes(chat_id: int, user_id: int, message_id: int,
     for node in visible:
         groups.setdefault(node.get('region') or '', []).append(node)
     sections = [Section(tr(locale, 'profile.rich.bulk'),
-        (tr(locale, 'profile.rich.bulk_note'),),
         heading_rows=(_bulk_buttons(nonce, 'all', locale, prefix='draft_bulk'),)),
         Section(tr(locale, 'policy.title'), rows=((InlineKeyboardButton(
             text=tr(locale, 'policy.configure'), callback_data='future_open:create'),),))]
@@ -667,8 +666,7 @@ async def show_admin_profiles(chat_id: int, user_id: int, message_id: int,
     if arrows:
         rows.append(arrows)
     rows.append([InlineKeyboardButton(text=tr(locale, 'back'), callback_data='admin_menu')])
-    lines = [tr(locale, 'profiles.admin.description') if page['items'] else
-             tr(locale, 'profiles.search.empty' if search else 'profiles.admin.empty')]
+    lines = [] if page['items'] else [tr(locale, 'profiles.search.empty' if search else 'profiles.admin.empty')]
     if page_index or page.get('next_cursor'):
         lines.append(tr(locale, 'profiles.admin.page', page=page_index + 1))
     await render(bot, chat_id, Screen(tr(locale, 'profiles.admin.title'), tuple(lines),
@@ -1034,8 +1032,7 @@ async def profile_operation_cb(query: CallbackQuery, bot: Bot, backend: BackendC
                 _task_status(task['status'], locale))
                 for task in operation['tasks'])),)))
     await render(bot, query.message.chat.id, Screen(tr(locale, 'profile.rich.synchronization'),
-        (tr(locale, 'profile.rich.operation_state', value=tr(locale, 'operation.' + status)),
-         tr(locale, 'profile.rich.sync_note')), sections=tuple(sections), embedded_buttons=True, navigation=True),
+        (tr(locale, 'profile.rich.operation_state', value=tr(locale, 'operation.' + status)),), sections=tuple(sections), embedded_buttons=True, navigation=True),
         [[InlineKeyboardButton(text=tr(locale, 'profile.admin.refresh'), callback_data=f'prof_op:{profile_id}')],
          [InlineKeyboardButton(text=tr(locale, 'back'), callback_data=f'prof_tech:{profile_id}')]],
         state, query.message.message_id)
@@ -1074,7 +1071,7 @@ async def show_profile_edit_menu(chat_id: int, user_id: int, message_id: int,
             () if owner_admin else ((InlineKeyboardButton(text=tr(locale, 'profile.layout.change_expiry'),
                 callback_data=f'prof_expiry:{profile_id}'),),)),
         Section(tr(locale, 'profile.admin.status_title'),
-            (tr(locale, 'profile.rich.sync_note'),), (_status_buttons(profile, locale),)))
+            rows=(_status_buttons(profile, locale),)))
     await render(bot, chat_id, Screen(tr(locale, 'profile.layout.edit'), sections=sections,
         embedded_buttons=True, navigation=True),
         [[InlineKeyboardButton(text=tr(locale, 'back'),
@@ -1345,8 +1342,7 @@ async def show_profile_status(chat_id: int, user_id: int, message_id: int,
         [InlineKeyboardButton(text=tr(locale, 'back'),
         callback_data=f'admin_profile_edit:{profile_id}')]]
     await render(bot, chat_id, Screen(tr(locale, 'profile.admin.status_title'),
-        (tr(locale, 'profile.admin.status', status=_status(profile, locale)),
-         tr(locale, 'profile.rich.sync_note')), embedded_buttons=True, navigation=True),
+        (tr(locale, 'profile.admin.status', status=_status(profile, locale)),), embedded_buttons=True, navigation=True),
         rows, state, message_id)
 
 
@@ -1402,15 +1398,13 @@ async def show_grant_nodes(chat_id: int, user_id: int, message_id: int,
             heading_rows=(_bulk_buttons(profile_id, token, locale, region=True),)))
     await state.update_data(grant_bulk_regions=scopes)
     sections = (Section(tr(locale, 'profile.rich.bulk'),
-        (tr(locale, 'profile.rich.bulk_note'),),
         heading_rows=(_bulk_buttons(profile_id, 'all', locale),)),
         Section(tr(locale, 'policy.title'),
             (tr(locale, 'policy.count', count=len(data.get('draft_rules') or [])),),
             rows=((InlineKeyboardButton(text=tr(locale, 'policy.configure'),
                 callback_data=f'future_open:edit:{profile_id}'),),)), *with_controls)
     changed = policy_ui.changed(data)
-    lines = [tr(locale, 'profile.rich.draft_note'),
-             tr(locale, 'profile.rich.unsaved' if changed else 'profile.rich.no_changes')]
+    lines = [tr(locale, 'profile.rich.unsaved')] if changed else []
     if pages > 1:
         lines.append(tr(locale, 'pagination.page', page=page + 1, pages=pages))
     if not nodes:

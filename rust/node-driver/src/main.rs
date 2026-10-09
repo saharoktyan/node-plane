@@ -677,6 +677,7 @@ impl RuntimeService for RuntimeApi {
                 .any(|item| item.kind == "docker" && item.status == "ok");
             return Ok(Response::new(BackendNodeSettingsResult { result_json: serde_json::json!({
                 "docker": docker, "xray_config_valid": false, "awg_config_valid": false,
+                "xray_installed": false, "awg_installed": false,
                 "xray_running": false, "awg_running": false, "entropy": [],
                 "runtime_version": facts.version, "runtime_commit": facts.commit,
                 "desired_runtime_version": self.ctx.app_semver, "desired_runtime_commit": self.ctx.app_commit,

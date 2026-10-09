@@ -389,7 +389,7 @@ def profile_traffic_section(summary, locale):
 def profile_server_section(summary, node, locale, *, divider_after=False):
     traffic = summary.get('traffic')
     if not traffic:
-        return Section(server_label(node), tuple(tr(locale, 'protocol.' + protocol) for protocol in node['protocols']),
+        return Section(server_label(node), (' · '.join(tr(locale, 'protocol.' + protocol) for protocol in node['protocols']),),
             divider_after=divider_after, heading_size=3)
     rows, stale = [], False
     for protocol in node['protocols']:
@@ -997,8 +997,7 @@ async def show_admin_status(chat_id: int, user_id: int, message_id: int,
                 total=overview['profiles_total']),
              tr(locale, 'admin.status.frozen', count=overview['profiles_frozen']),
              tr(locale, 'admin.status.pending', count=overview['pending_requests']),
-             tr(locale, 'admin.status.problems', count=len(overview['problem_nodes'])),
-             tr(locale, 'admin.status.runtime_note')]
+             tr(locale, 'admin.status.problems', count=len(overview['problem_nodes']))]
     rows = []
     if overview['pending_requests']:
         rows.append([InlineKeyboardButton(text=tr(locale, 'admin.requests'),
@@ -1019,7 +1018,7 @@ async def show_admin_status(chat_id: int, user_id: int, message_id: int,
          (tr(locale, 'admin.status.open_problems'), str(len(overview['problem_nodes']))))),))]
     if attention:
         sections.append(Section(tr(locale, 'admin.rich.attention'), rows=attention))
-    sections.append(Section(tr(locale, 'nodes.rich.technical'), collapsed=True, lines=(lines[0], lines[-1])))
+    sections.append(Section(tr(locale, 'nodes.rich.technical'), collapsed=True, lines=(lines[0],)))
     await render(bot, chat_id, Screen(tr(locale, 'admin.status.title'),
         sections=tuple(sections), embedded_buttons=True, navigation=True), rows[-2:], state, message_id)
 

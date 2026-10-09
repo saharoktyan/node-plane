@@ -1098,6 +1098,35 @@ mod tests {
                             "{request_line}"
                         )
                         .unwrap();
+                        if request_line == "POST /api/v1/nodes HTTP/1.1" {
+                            let headers = String::from_utf8_lossy(&request);
+                            let length: usize = headers
+                                .lines()
+                                .find_map(|line| {
+                                    let (name, value) = line.split_once(':')?;
+                                    name.eq_ignore_ascii_case("content-length")
+                                        .then(|| value.trim().parse().unwrap())
+                                })
+                                .unwrap();
+                            let mut body = vec![0; length];
+                            stream.read_exact(&mut body).await.unwrap();
+                            let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+                            let result = serde_json::json!({"key":body["key"],"title":body["title"],"region":body["region"],"flag":body["flag"],
+                                "enabled":false,"protocols":body["protocols"],"xray_transports":body["xray_transports"],
+                                "desired_revision":1,"applied_revision":0,"transport":body["transport"],"ssh_target":body["ssh_target"]});
+                            fs::write(
+                                fixture_home.join("created-node"),
+                                serde_json::to_vec(&result).unwrap(),
+                            )
+                            .unwrap();
+                            fs::write(fixture_home.join("creation-request"), &request).unwrap();
+                            if fixture_home.join("creation-response").exists() {
+                                let body = result.to_string();
+                                stream.write_all(format!("HTTP/1.1 201 Created\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).as_bytes()).await.unwrap();
+                            }
+                            stream.shutdown().await.unwrap();
+                            return;
+                        }
                         if request_line.starts_with("POST ")
                             && !request_line.contains("/system/updates/check ")
                         {
@@ -1112,6 +1141,13 @@ mod tests {
                             (
                                 401,
                                 serde_json::json!({"error":{"code":"credential_revoked"}}),
+                            )
+                        } else if path == "/api/v1/nodes/creation-options" {
+                            (
+                                200,
+                                serde_json::json!({"local_available":true,
+                                "defaults":{"protocols":["awg"],"xray_transports":[],"settings":{"awg_i1_preset":"quic","awg_port_mode":"auto"}},
+                                "templates":[{"code":"lv","title":"Latvia","region":"Europe","flag":"🇱🇻","draft":{"key":"lv1","title":"Latvia #1"}}]}),
                             )
                         } else if path == "/api/v1/system/ssh-key" {
                             (
@@ -1264,6 +1300,11 @@ mod tests {
                             }
                             serde_json::json!({"ok":true,"token":format!("np_{}", "a".repeat(76)),"account_id":account})
                         }
+                    } else if input["action"] == "lookup-node-create" {
+                        let node = fs::read(home.join("created-node")).ok().map(|bytes| {
+                            serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()
+                        });
+                        serde_json::json!({"ok":true,"node":node})
                     } else {
                         serde_json::json!({"ok":true})
                     };
@@ -1644,6 +1685,86 @@ mod tests {
                 "00000000-0000-4000-8000-000000000002"
             );
             worker.shutdown().unwrap();
+        }
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn node_creation_retains_identity_and_recovers_lost_response_without_post_replay() {
+            use crate::nodes::{Command, Update, Worker};
+            let server = MockServer::start().await;
+            let state = tempfile::tempdir().unwrap();
+            prepare_nodes_fixture(&server, state.path());
+            let mut worker = Worker::new().unwrap();
+            let (result, updates) = nodes_command(
+                &worker,
+                nodes_request(&server, state.path()),
+                Command::CreationOptions,
+            )
+            .await;
+            assert!(result.is_ok(), "{result:?}");
+            let options = updates
+                .into_iter()
+                .find_map(|u| {
+                    if let Update::CreationOptions(o) = u {
+                        Some(o)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap();
+            let mut wizard = crate::node_wizard::Wizard::new(options).unwrap();
+            wizard.choose(0).unwrap();
+            wizard.choose(0).unwrap();
+            wizard.append("vpn.example");
+            wizard.next().unwrap();
+            wizard.next().unwrap();
+            let draft = wizard.next().unwrap().unwrap();
+            let command_id = draft.command_id;
+            let (result, _) = nodes_command(
+                &worker,
+                nodes_request(&server, state.path()),
+                Command::Create(draft.clone()),
+            )
+            .await;
+            assert!(result.is_err());
+            let headers = fs::read_to_string(server.home.join("creation-request")).unwrap();
+            assert!(headers.to_lowercase().contains(&command_id.to_string()));
+            let (again, _) = nodes_command(
+                &worker,
+                nodes_request(&server, state.path()),
+                Command::Create(draft),
+            )
+            .await;
+            assert!(again.is_err());
+            worker.shutdown().unwrap();
+            let mut restarted = Worker::new().unwrap();
+            let (result, updates) = nodes_command(
+                &restarted,
+                nodes_request(&server, state.path()),
+                Command::CreationOptions,
+            )
+            .await;
+            assert!(result.is_ok(), "{result:?}");
+            assert!(
+                updates
+                    .iter()
+                    .any(|u| matches!(u,Update::Created(n) if n.key == "lv1"))
+            );
+            let requests = fs::read_to_string(server.home.join("api-requests")).unwrap();
+            assert_eq!(
+                requests
+                    .lines()
+                    .filter(|s| s.starts_with("POST /api/v1/nodes "))
+                    .count(),
+                1
+            );
+            let actions = fs::read_to_string(server.home.join("backend-actions")).unwrap();
+            assert!(
+                actions
+                    .lines()
+                    .map(|s| serde_json::from_str::<serde_json::Value>(s).unwrap())
+                    .any(|v| v["action"] == "lookup-node-create"
+                        && v["command_id"] == command_id.to_string())
+            );
+            restarted.shutdown().unwrap();
         }
         #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
         async fn nodes_reuse_ssh_and_authorization_and_revoke_on_idle_reset_and_exit() {

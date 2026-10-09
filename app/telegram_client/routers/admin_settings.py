@@ -419,16 +419,15 @@ async def traffic_settings_cb(query: CallbackQuery, bot: Bot,
             policy = await backend.traffic_policy(query.from_user.id)
         enabled = policy['enabled']
         choices = policy_choices(locale, 'traffic', enabled)
-        lines = (tr(locale, 'traffic.description'), tr(locale, 'traffic.collection_note'),
-                 tr(locale, 'traffic.interval', minutes=policy['interval_minutes']))
+        lines = (tr(locale, 'traffic.interval', minutes=policy['interval_minutes']),)
         scan = policy.get('last_scan')
         if scan:
             lines += (tr(locale, 'traffic.scan', at=scan['at'][:16].replace('T', ' '),
                          checked=scan['profiles_checked'], unknown=scan['unknown']),)
         else:
             lines += (tr(locale, 'traffic.not_checked'),)
-        sections = (Section(tr(locale, 'settings.rich.collection'), (lines[0], lines[1]), rows=(choices,)),
-            Section(tr(locale, 'settings.rich.scan'), lines[2:]))
+        sections = (Section(tr(locale, 'settings.rich.collection'), rows=(choices,)),
+            Section(tr(locale, 'settings.rich.scan'), lines))
     except BackendError as exc:
         lines = (_friendly_error(locale, exc),)
     await render(bot, query.message.chat.id, Screen(tr(locale, 'traffic.title'),

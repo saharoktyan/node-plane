@@ -285,6 +285,20 @@ class WorkstationCredentialTests(unittest.TestCase):
         self.assertIsNone(self.service.handle(request)['job'])
         self.assertEqual(self.db.connection.execute('SELECT COUNT(*) FROM backend_agent_rollouts').fetchone()[0], 1)
 
+    def test_creation_lookup_returns_only_original_admin_result(self):
+        self.authenticate()
+        self.db.connection.execute('CREATE TABLE backend_node_commands (actor_account_id TEXT, command_key TEXT, result_json TEXT)')
+        command = str(uuid4())
+        self.db.connection.execute('INSERT INTO backend_node_commands VALUES (?,?,?)',
+            (self.admin.id, command, json.dumps({'key': 'lv1'})))
+        request = {'version': 1, 'action': 'lookup-node-create', 'session_id': self.session_id, 'command_id': command}
+        self.assertEqual(self.service.handle(request)['node'], {'key': 'lv1'})
+        other = bootstrap_admin(self.identities, 102)
+        self.db.connection.execute('UPDATE backend_node_commands SET actor_account_id=?', (other.id,))
+        self.assertIsNone(self.service.handle(request)['node'])
+        self.assert_denied('session_reauthentication_required',
+            lambda: self.service.handle(request, now=self.now + LIFETIME))
+
     def test_lookup_requires_unexpired_session_and_current_approved_admin(self):
         self.authenticate()
         request = {'version': 1, 'action': 'lookup-update', 'session_id': self.session_id, 'command_id': str(uuid4())}

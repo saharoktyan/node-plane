@@ -305,6 +305,7 @@ async def new_node_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, st
     defaults = options['defaults']
     await state.update_data(wizard_data={'protocols': list(defaults['protocols']),
         'xray_transports': list(defaults['xray_transports']), 'settings': dict(defaults['settings'])},
+        wizard_templates=options.get('templates', []),
         wizard_local_available=options['local_available'], create_node_command_key=str(uuid4()),
                             rollout_command_key=str(uuid4()), wizard_saved=False)
     await render_wizard_transport(query.message.chat.id, bot, state,
@@ -556,6 +557,12 @@ async def wizard_template_cb(query: CallbackQuery, bot: Bot, backend: BackendCli
     if template is None:
         return
     if w.get('template') != token:
+        preview = next((t['draft'] for t in data.get('wizard_templates', []) if t['code'] == token), None)
+        if preview:
+            w.update(preview)
+            await state.update_data(wizard_data=w)
+            await render_wizard_address(query.message.chat.id, bot, state, query.message.message_id)
+            return
         keys = []
         cursor = None
         try:
@@ -682,7 +689,7 @@ async def render_wizard_summary(chat_id: int, bot: Bot, state: FSMContext,
             ('awg_i1_preset', settings.get('awg_i1_preset', 'quic')),
             ('awg_port', settings.get('awg_port') or tr(locale, 'nodes.awg.port_automatic')))),)), sections[-1])
     await render(bot, chat_id, Screen(tr(locale, 'node.wizard.summary.title'),
-                 (tr(locale, 'node.wizard.summary.note'),), sections=sections, embedded_buttons=True, navigation=True),
+                 sections=sections, embedded_buttons=True, navigation=True),
                  rows, state, message_id)
 
 @router.callback_query(F.data.startswith("wizard_proto:"))
@@ -741,7 +748,8 @@ async def wizard_save_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
             state, query.message.message_id)
         return
     try:
-        await backend.create_node(query.from_user.id, {
+        created = await backend.create_node(query.from_user.id, {
+            **({'template': w['template']} if w.get('template') not in {None, 'custom'} else {}),
             'key': w['key'], 'title': w['title'], 'region': w['region'],
             'flag': w['flag'], 'protocols': w['protocols'],
             'xray_transports': (w.get('xray_transports') or ['tcp', 'xhttp']) if 'xray' in w['protocols'] else [],
@@ -762,8 +770,10 @@ async def wizard_save_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
             [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data='wizard_proto:back')]],
             state, query.message.message_id)
         return
+    if isinstance(created, dict) and isinstance(created.get('key'), str):
+        w.update({field: created[field] for field in ('key', 'title', 'region', 'flag')})
     await state.set_state(None)
-    await state.update_data(wizard_saved=True)
+    await state.update_data(wizard_saved=True, wizard_data=w)
     rows = [[InlineKeyboardButton(text=tr(locale, 'node.wizard.setup_agent'),
         callback_data='wizard_setup_agent', style='primary')],
         [InlineKeyboardButton(text=tr(locale, 'node.wizard.open_card'),
@@ -1036,16 +1046,14 @@ async def edit_node_field_cb(query: CallbackQuery, callback_data: EditNodeFieldC
             callback_data=f'node_section:awg:{node_key}')])
         await render(bot, query.message.chat.id,
             Screen(tr(locale, 'nodes.settings.field.awg_i1_preset'),
-                (tr(locale, 'nodes.settings.current_value', value=current or 'quic'),
-                 tr(locale, 'nodes.settings.apply_note')), embedded_buttons=True, navigation=True), rows, state, query.message.message_id)
+                embedded_buttons=True, navigation=True), rows, state, query.message.message_id)
         return
     await render(bot, query.message.chat.id,
         Screen(tr(locale, 'nodes.settings.edit_title',
                 field=tr(locale, 'nodes.settings.field.' + field)),
             (tr(locale, 'nodes.settings.send_value'),), sections=(
-                Section(tr(locale, 'nodes.rich.current_value'), lines=(str(current or '—'),)),
-                Section(tr(locale, 'nodes.rich.about_setting'), collapsed=True,
-                    lines=(tr(locale, 'nodes.settings.apply_note'),))), embedded_buttons=True, navigation=True),
+                Section(tr(locale, 'nodes.rich.current_value'), lines=(str(current or '—'),)),),
+            embedded_buttons=True, navigation=True),
         [[InlineKeyboardButton(text=tr(locale, 'back'),
             callback_data=f'node_section:{(await state.get_data()).get("edit_section", "general")}:{node_key}')]],
         state, query.message.message_id)
@@ -1241,12 +1249,11 @@ async def probe_node_cb(query: CallbackQuery, callback_data: ProbeNodeCallback, 
                 'nodes.probe.present' if observation['xray_config_present'] else 'nodes.probe.missing')),
             tr(locale, 'nodes.probe.awg', value=tr(locale,
                 'nodes.probe.present' if observation['awg_config_present'] else 'nodes.probe.missing')),
-            tr(locale, 'nodes.probe.note'))
+        )
         await render(bot, query.message.chat.id,
             Screen(tr(locale, 'nodes.probe.title'), (lines[0],), sections=(
                 Section(tr(locale, 'nodes.rich.services'), lines=lines[3:5]),
                 Section(tr(locale, 'nodes.rich.technical'), collapsed=True, lines=lines[1:3]),
-                Section(tr(locale, 'nodes.rich.about_check'), collapsed=True, lines=(lines[5],)),
             ), embedded_buttons=True, navigation=True),
             [[InlineKeyboardButton(text=tr(locale, 'nodes.diagnostics.open'),
                 callback_data=f'node_diagnostics:{node_key}')], *back], state,
@@ -1286,7 +1293,6 @@ async def node_diagnostics_cb(query: CallbackQuery, bot: Bot,
         for field in ('docker', 'runtime_root', 'xray_config', 'awg_config')]
     lines.append(tr(locale, 'nodes.diagnostics.version',
         value=result.get('runtime_version') or '—'))
-    lines.append(tr(locale, 'nodes.diagnostics.note'))
     await render(bot, query.message.chat.id,
         Screen(tr(locale, 'nodes.diagnostics.title'), sections=(
             Section(tr(locale, 'nodes.rich.services'), lines=tuple(lines[:4])),
@@ -1390,9 +1396,6 @@ async def show_node_maintenance(chat_id, user_id, message_id, node_key, bot, bac
     st = await backend.node_maintenance(user_id, node_key)
     lines = [tr(locale, 'nodes.maintenance.state',
         value=tr(locale, 'nodes.maintenance.status.' + st['status']))]
-    target = st.get('verification_target')
-    target_line = tr(locale, 'nodes.maintenance.target',
-        value=target or tr(locale, 'nodes.maintenance.not_bound'))
     if st['status'] == 'draining':
         lines.extend((tr(locale, 'nodes.maintenance.pending', count=st['pending_tasks']),
             tr(locale, 'nodes.maintenance.blocked', count=st['blocked_tasks']),
@@ -1407,9 +1410,6 @@ async def show_node_maintenance(chat_id, user_id, message_id, node_key, bot, bac
         callback_data=ConfirmRegistryRemovalCallback(node_key=node_key).pack(), style='danger')])
     rows.append([InlineKeyboardButton(text=tr(locale, 'back'), callback_data=f'node_manage:{node_key}')])
     await render(bot, chat_id, Screen(tr(locale, 'nodes.maintenance.title'), tuple(lines),
-        sections=(Section(tr(locale, 'nodes.maintenance.details_title'), collapsed=True,
-            lines=(target_line, tr(locale, 'nodes.maintenance.binding_note'),
-                tr(locale, 'nodes.maintenance.verification_note'), tr(locale, 'nodes.maintenance.registry_note'))),),
         embedded_buttons=True, navigation=True), rows, state, message_id)
 
 @router.callback_query(BindLocalCallback.filter())
@@ -1475,12 +1475,19 @@ async def confirm_node_drain_cb(query: CallbackQuery, callback_data: ConfirmNode
     await query.answer()
     node_key = callback_data.node_key
     locale = normalize_locale((await state.get_data()).get('locale'))
+    try:
+        maintenance = await backend.node_maintenance(query.from_user.id, node_key)
+    except BackendError:
+        await show_node_maintenance_error(query.message.chat.id, query.message.message_id,
+            node_key, bot, state)
+        return
     await render(bot, query.message.chat.id,
         Screen(tr(locale, 'nodes.maintenance.start'),
             (tr(locale, 'nodes.maintenance.node', key=node_key),
-             tr(locale, 'nodes.maintenance.drain_grants'),
-             tr(locale, 'nodes.maintenance.drain_runtime'),
-             tr(locale, 'nodes.maintenance.drain_verify')), embedded_buttons=True, navigation=True),
+             '• ' + tr(locale, 'nodes.maintenance.drain_grants', count=maintenance['affected_profiles']),
+             '• ' + tr(locale, 'nodes.maintenance.drain_runtime'),
+             '• ' + tr(locale, 'nodes.maintenance.drain_agent'),
+             '• ' + tr(locale, 'nodes.maintenance.drain_registry')), embedded_buttons=True, navigation=True),
         [[InlineKeyboardButton(text=tr(locale, 'nodes.maintenance.drain_confirm'),
             callback_data=DrainNodeCallback(node_key=node_key).pack(), style='danger')],
          [InlineKeyboardButton(text=tr(locale, 'back'),

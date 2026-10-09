@@ -179,13 +179,17 @@ class NodeLifecycle:
                                  (node_key,)).fetchone()
             bound = conn.execute('''SELECT target FROM backend_node_verification_targets
                 WHERE node_key = ?''', (node_key,)).fetchone()
+            affected_profiles = conn.execute('''SELECT COUNT(DISTINCT profile_id) AS count
+                FROM backend_grants WHERE node_key = ?''', (node_key,)).fetchone()['count']
         if drain is not None:
             return {**self.drain_status(actor, node_key),
-                    'verification_target': bound['target'] if bound else None}
+                    'verification_target': bound['target'] if bound else None,
+                    'affected_profiles': affected_profiles}
         return {'node_key': node_key, 'status': 'active', 'operation_ids': [],
                 'pending_tasks': 0, 'blocked_tasks': 0,
                 'revocations_complete': False, 'cleanup_phase': None,
-                'verification_target': bound['target'] if bound else None}
+                'verification_target': bound['target'] if bound else None,
+                'affected_profiles': affected_profiles}
 
     @staticmethod
     def _revocation_state(conn, node_key):

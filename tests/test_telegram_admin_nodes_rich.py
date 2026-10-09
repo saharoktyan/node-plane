@@ -9,6 +9,20 @@ from telegram_client.i18n import tr
 
 
 class AdminNodeRichTests(IsolatedAsyncioTestCase):
+    async def test_full_cleanup_confirmation_lists_affected_profiles_and_resources(self):
+        backend = SimpleNamespace(node_maintenance=AsyncMock(return_value={'affected_profiles': 3}))
+        for locale in ('ru', 'en'):
+            self.data['locale'] = locale
+            with patch.object(nodes, 'render', new_callable=AsyncMock) as draw:
+                await nodes.confirm_node_drain_cb(self.query,
+                    nodes.ConfirmNodeDrainCallback(node_key='msk1'), self.bot, backend, self.state)
+            screen, rows = draw.call_args.args[2:4]
+            self.assertIn(tr(locale, 'nodes.maintenance.drain_grants', count=3), screen.plain())
+            self.assertEqual(sum(line.startswith('• ') for line in screen.lines), 4)
+            self.assertNotIn(tr(locale, 'nodes.maintenance.drain_verify'), screen.plain())
+            self.assertEqual(rows[0][0].style, 'danger')
+            screen.rich(rows)
+
     async def test_reinstall_back_returns_to_management_and_initial_bootstrap_to_card(self):
         self.backend.node_services.return_value = {'docker': True, 'awg_config_valid': True, 'xray_config_valid': True}
         for applied_revision, target in [(2, 'node_manage:msk1'), (0, 'admin_node:msk1')]:
