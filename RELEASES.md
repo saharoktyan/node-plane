@@ -2,6 +2,26 @@
 
 This document defines the release and versioning policy for Node Plane.
 
+## GitHub Actions and cargo-dist
+
+Pushing a version tag runs the generated cargo-dist release workflow. It builds
+Workstation for Linux x86_64, Windows x64 and macOS Intel/Apple Silicon, produces
+shell and PowerShell installers and SHA-256 checksums, and publishes all artifacts
+in one GitHub Release. Prerelease tags remain GitHub prereleases. Pull requests
+run release planning only; native Workstation checks run separately.
+
+`dist-workspace.toml` pins cargo-dist and defines the release platforms. Regenerate
+`.github/workflows/release.yml` with `dist generate` after changing the configuration;
+do not edit the generated workflow by hand. `scripts/build_release_stack.sh` builds
+the controller, driver and agent as extra artifacts during the global build.
+It also repackages the built Linux Workstation in the old Linux archive format so
+existing alpha installations can discover and install the release.
+
+`scripts/tag_release.sh` remains available for local packaging/tag preparation.
+GitHub Actions owns release creation. Its `--publish` option can refresh locally
+built artifacts on an existing CI-created release; it never creates a competing
+release. Wait for the Release workflow before using that option.
+
 ## Controller runtime artifact
 
 Each release now includes `node-plane-controller.tar.gz` alongside the driver,

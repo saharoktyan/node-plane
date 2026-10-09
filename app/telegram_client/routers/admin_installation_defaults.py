@@ -13,7 +13,7 @@ from .common import render
 
 router = Router()
 PATH = '/api/v1/system/installation-defaults'
-EDITABLE = ('awg_port', 'awg_interface', 'xray_sni', 'xray_fingerprint',
+EDITABLE = ('awg_port', 'xray_sni', 'xray_fingerprint',
     'xray_tcp_port', 'xray_xhttp_port', 'xray_xhttp_path')
 
 
@@ -31,31 +31,45 @@ async def show(query, bot, state, *, error=None):
     draft = data['installation_defaults_draft']
     locale = normalize_locale(data.get('locale'))
     settings = draft['settings']
+    advanced = data.get('installation_defaults_view') == 'advanced'
     protocol_rows = (tuple(button(tr(locale, 'protocol.' + kind), 'protocol:' + kind,
         selected=kind in draft['protocols']) for kind in ('xray', 'awg')),)
     transport_rows = (tuple(button(tr(locale, 'transport.' + kind), 'transport:' + kind,
         selected=kind in draft['xray_transports']) for kind in ('tcp', 'xhttp')),)
-    sections = [Section(tr(locale, 'defaults.protocols'), rows=protocol_rows)]
-    if 'xray' in draft['protocols']:
+    sections = [] if advanced else [Section(tr(locale, 'defaults.protocols'), rows=protocol_rows)]
+    if not advanced and 'xray' in draft['protocols']:
         sections.append(Section(tr(locale, 'defaults.transports'), rows=transport_rows))
-    if 'awg' in draft['protocols']:
+    if not advanced and 'awg' in draft['protocols']:
         sections.append(Section(tr(locale, 'defaults.awg'),
-            (tr(locale, 'defaults.port_mode.' + settings.get('awg_port_mode', 'auto')),
-             tr(locale, 'defaults.port_policy')),
             rows=(tuple(button(preset.upper(), 'preset:' + preset,
                 selected=settings.get('awg_i1_preset', 'quic') == preset)
                 for preset in ('quic', 'dns', 'chaos')),
                 (button(tr(locale, 'defaults.auto'), 'auto', selected=settings.get('awg_port_mode', 'auto') == 'auto'),
-                 button(tr(locale, 'defaults.manual'), 'field:awg_port', selected=settings.get('awg_port_mode') == 'manual')))))
+                 button(tr(locale, 'defaults.manual_value', port=settings['awg_port']) if settings.get('awg_port_mode') == 'manual' and settings.get('awg_port') else tr(locale, 'defaults.manual'),
+                    'field:awg_port', selected=settings.get('awg_port_mode') == 'manual')))))
     fields = [f for f in EDITABLE if ('awg' if f.startswith('awg') else 'xray') in draft['protocols']]
-    sections.append(Section(tr(locale, 'nodes.rich.advanced'), collapsed=True,
-        tables=(Table((tr(locale, 'account.rich.field'), tr(locale, 'account.rich.value')),
-            tuple((tr(locale, 'nodes.settings.field.' + f), str(settings.get(f, '—'))) for f in fields)),),
-        rows=tuple(tuple(button(tr(locale, 'nodes.settings.field.' + f), 'field:' + f)
-            for f in fields[index:index + 2]) for index in range(0, len(fields), 2))))
+    def field_value(field):
+        if field == 'awg_port' and settings.get('awg_port_mode', 'auto') == 'auto':
+            return tr(locale, 'defaults.auto_value')
+        return str(settings.get(field, '—'))
+    if advanced:
+        for protocol, title in [('awg', 'defaults.awg'), ('xray', 'protocol.xray')]:
+            options = [field for field in fields if field.startswith(protocol)]
+            if options:
+                sections.append(Section(tr(locale, title), tables=(Table(
+                    (tr(locale, 'account.rich.field'), tr(locale, 'account.rich.value')),
+                    tuple((tr(locale, 'nodes.settings.field.' + f), field_value(f)) for f in options),
+                    row_callbacks=tuple('idefault:field:' + f for f in options)),)))
+        sections.append(Section('', lines=(tr(locale, 'defaults.edit_hint'),)))
+    else:
+        sections.append(Section(tr(locale, 'nodes.rich.advanced'), collapsed=True,
+            tables=(Table((tr(locale, 'account.rich.field'), tr(locale, 'account.rich.value')),
+                tuple((tr(locale, 'nodes.settings.field.' + f), field_value(f)) for f in fields)),)))
+        sections.append(Section('', rows=((button(tr(locale, 'defaults.edit_advanced'), 'advanced'),),)))
     rows = [[button(tr(locale, 'defaults.save'), 'save', selected=True), button(tr(locale, 'defaults.reset'), 'reset')],
-        [InlineKeyboardButton(text=tr(locale, 'back'), callback_data=AdminSettingsCallback().pack())]]
-    await render(bot, query.message.chat.id, Screen(tr(locale, 'defaults.title'),
+        [button(tr(locale, 'back'), 'main') if advanced else
+         InlineKeyboardButton(text=tr(locale, 'back'), callback_data=AdminSettingsCallback().pack())]]
+    await render(bot, query.message.chat.id, Screen(tr(locale, 'defaults.edit_advanced' if advanced else 'defaults.title'),
         ((error,) if error else ()) + (tr(locale, 'defaults.future_only'),),
         sections=tuple(sections), embedded_buttons=True, navigation=True), rows, state, query.message.message_id)
 
@@ -70,12 +84,15 @@ async def defaults_cb(query, bot, backend, state):
         data = await state.get_data()
         if action == 'open' or not data.get('installation_defaults_draft'):
             current = await backend.request('GET', PATH, telegram_user_id=query.from_user.id)
-            await state.update_data(installation_defaults_draft=current)
+            await state.update_data(installation_defaults_draft=current,
+                installation_defaults_original=current, installation_defaults_view='main')
             await show(query, bot, state)
             return
         draft = dict(data['installation_defaults_draft'])
         draft['settings'] = dict(draft['settings'])
-        if action.startswith('protocol:'):
+        if action in {'advanced', 'main'}:
+            await state.update_data(installation_defaults_view=action)
+        elif action.startswith('protocol:'):
             kind = action.split(':')[1]
             if kind not in {'awg', 'xray'}:
                 return
@@ -97,8 +114,8 @@ async def defaults_cb(query, bot, backend, state):
             draft['settings']['awg_port_mode'] = 'auto'
             draft['settings'].pop('awg_port', None)
         elif action == 'reset':
-            draft.update(protocols=['awg', 'xray'], xray_transports=['tcp', 'xhttp'],
-                settings={'awg_i1_preset': 'quic', 'awg_port_mode': 'auto'})
+            draft = data.get('installation_defaults_original') or await backend.request(
+                'GET', PATH, telegram_user_id=query.from_user.id)
         elif action.startswith('field:'):
             field = action.split(':')[1]
             if field not in EDITABLE:
@@ -113,6 +130,7 @@ async def defaults_cb(query, bot, backend, state):
             current = await backend.request('PUT', PATH, telegram_user_id=query.from_user.id,
                 revision=draft['revision'], body={k: draft[k] for k in ('protocols', 'xray_transports', 'settings')})
             draft = current
+            await state.update_data(installation_defaults_original=current)
         await state.update_data(installation_defaults_draft=draft)
         await show(query, bot, state)
     except BackendError as error:

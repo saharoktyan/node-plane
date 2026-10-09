@@ -58,11 +58,18 @@ def parent_path(callback, locale, data):
         'updates': 'updates.title', 'backups': 'backups.title',
         'alerts': 'alerts.title', 'traffic': 'traffic.title',
         'bot_title_settings': 'bot_title.title', 'request_policy': 'request_policy.title',
-        'idefault:open': 'defaults.title', 'recpage:0': 'recovery.title',
+        'idefault:open': 'defaults.title', 'idefault:main': 'defaults.title',
+        'recpage:0': 'recovery.title',
         'system_cleanup': 'system_cleanup.title', 'ssh_key': 'settings.admin.ssh_key',
     }
     if callback in settings_pages:
         return (*settings, Breadcrumb(tr(locale, settings_pages[callback]), callback))
+    if callback == 'idefault:advanced':
+        return (*parent_path('idefault:main', locale, data),
+                Breadcrumb(tr(locale, 'defaults.edit_advanced'), callback))
+    if callback == 'idefault:back':
+        return parent_path('idefault:advanced' if data.get('installation_defaults_view') == 'advanced'
+                           else 'idefault:main', locale, data)
     if callback == 'backup_settings':
         return (*parent_path('backups', locale, data), Breadcrumb(tr(locale, 'backups.settings'), callback))
     if callback.startswith(('backup_list:', 'backup_detail:')):

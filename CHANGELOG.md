@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.3-alpha.60 - 2026-10-09
+
+- Build Workstation releases with cargo-dist for Linux, Windows and macOS, including shell and PowerShell installers.
+- Add the shared node creation wizard to Workstation, with clean template codes and the single-local-node limit.
+- Simplify RU/EN bot text and show concrete cleanup consequences with affected profile counts.
+- Keep profile protocols on one compact line with or without traffic statistics.
+- Reorganize Installation defaults with a collapsed summary, editable parameter links and complete Xray defaults.
+
+
 ## 0.4.3-alpha.39 - 2026-10-05
 
 - Remove the retired PTB monolith, dependency and obsolete controller Docker entrypoint.

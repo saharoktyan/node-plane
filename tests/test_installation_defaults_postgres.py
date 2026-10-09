@@ -17,12 +17,16 @@ class InstallationDefaultsPostgresTests(unittest.TestCase):
     drop_schema = fixture.BackupsPostgresTests.drop_schema
 
     def test_concurrent_local_creation_only_claims_one_slot(self):
+        from backend.admin_cli import bootstrap_admin
+        from backend.authorization import Actor
+        from backend.identity_repository import SQLIdentityRepository
+        other_actor = Actor(self.actor.principal, bootstrap_admin(SQLIdentityRepository(self.db), 102, self.db))
         start = threading.Barrier(2)
 
         def create(key):
             start.wait(timeout=5)
             try:
-                return NodeService(self.db).command(self.actor, action='create', command_key=str(uuid4()),
+                return NodeService(self.db).command(self.actor if key == 'local1' else other_actor, action='create', command_key=str(uuid4()),
                     values={'key': key, 'title': key, 'region': 'Europe', 'transport': 'local',
                         'protocols': ['awg'], 'settings': {'public_host': key + '.example'}})
             except AccessDenied as error:
@@ -36,6 +40,27 @@ class InstallationDefaultsPostgresTests(unittest.TestCase):
         with self.db.connect() as conn:
             self.assertEqual(conn.execute('SELECT COUNT(*) AS count FROM backend_nodes').fetchone()['count'], 1)
         self.assertFalse(InstallationDefaults(self.db).creation_options(self.actor)['local_available'])
+
+    def test_template_allocation_serializes_different_admins_and_retired_codes(self):
+        from backend.admin_cli import bootstrap_admin
+        from backend.authorization import Actor
+        from backend.identity_repository import SQLIdentityRepository
+        other = bootstrap_admin(SQLIdentityRepository(self.db), 102, self.db)
+        other_actor = Actor(self.actor.principal, other)
+        with self.db.transaction() as conn:
+            conn.execute("INSERT INTO backend_node_retirements VALUES ('lv1',?,'verified','test',NULL,0,'{}','2026-10-08')", (self.admin.id,))
+        barrier = threading.Barrier(2)
+        def create(actor):
+            barrier.wait(timeout=5)
+            return NodeService(self.db).command(actor, action='create', command_key=str(uuid4()),
+                values={'template': 'lv', 'key': 'lv1', 'title': 'Latvia #1', 'region': 'Europe',
+                    'transport': 'ssh', 'ssh_target': 'root@vpn.example', 'protocols': ['awg'],
+                    'settings': {'public_host': 'vpn.example'}})
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first, second = pool.submit(create, self.actor), pool.submit(create, other_actor)
+            results = [first.result(timeout=15), second.result(timeout=15)]
+        self.assertEqual({r['key'] for r in results}, {'lv2', 'lv3'})
+        self.assertEqual({r['title'] for r in results}, {'Latvia #2', 'Latvia #3'})
 
     def test_concurrent_default_edits_do_not_overwrite_each_other(self):
         start = threading.Barrier(2)

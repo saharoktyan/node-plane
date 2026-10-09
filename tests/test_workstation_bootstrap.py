@@ -100,8 +100,27 @@ printf installed > "$TEST_INSTALL_MARKER"
 
     def test_unsupported_platform_downloads_nothing(self):
         uname = self.bin / 'uname'
-        uname.write_text('#!/bin/sh\necho Darwin\n')
+        uname.write_text('#!/bin/sh\necho Windows_NT\n')
         uname.chmod(0o755)
         result = self.run_installer()
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse(self.requests.exists())
+
+    def test_macos_uses_generated_installer_without_legacy_archive(self):
+        uname = self.bin / 'uname'
+        uname.write_text('#!/bin/sh\necho Darwin\n')
+        uname.chmod(0o755)
+        (self.root / 'node-plane-cli-installer.sh').write_text(
+            '#!/bin/sh\nprintf installed > "$TEST_INSTALL_MARKER"\n')
+        result = self.run_installer()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(self.marker.exists())
+        self.assertIn('node-plane-cli-installer.sh', self.requests.read_text())
+        self.assertNotIn(ASSET, self.requests.read_text())
+
+    def test_generated_installer_failure_is_not_replayed_as_legacy_install(self):
+        (self.root / 'node-plane-cli-installer.sh').write_text('#!/bin/sh\nexit 7\n')
+        result = self.run_installer()
+        self.assertEqual(result.returncode, 7)
+        self.assertFalse(self.marker.exists())
+        self.assertNotIn(ASSET, self.requests.read_text())

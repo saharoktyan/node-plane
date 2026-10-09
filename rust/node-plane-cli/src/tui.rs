@@ -52,6 +52,7 @@ fn accent_color(value: &str) -> Color {
 enum Screen {
     Form,
     Nodes,
+    NodeWizard,
     Settings,
     SettingsPage(SettingsPage),
     DeleteInstallation(uuid::Uuid),
@@ -109,6 +110,12 @@ enum Control {
     NodesRefresh,
     NodesBack,
     NodesPrepare,
+    NodesNew,
+    WizardChoice(usize),
+    WizardNext,
+    WizardBack,
+    WizardCancel,
+    WizardOpen,
     NodesSetup,
     NodesBootstrap,
     NodesInspect,
@@ -322,6 +329,8 @@ struct App {
     nodes: crate::nodes::Browser,
     nodes_requested: Option<crate::nodes::Command>,
     nodes_busy: bool,
+    node_wizard: Option<crate::node_wizard::Wizard>,
+    wizard_loading: bool,
     ssh_state: crate::nodes::ConnectionState,
     nodes_selected: usize,
     nodes_sidebar: bool,
@@ -365,6 +374,8 @@ impl App {
             nodes: crate::nodes::Browser::default(),
             nodes_requested: None,
             nodes_busy: false,
+            node_wizard: None,
+            wizard_loading: false,
             ssh_state: crate::nodes::ConnectionState::Closed,
             nodes_selected: 0,
             nodes_sidebar: false,
@@ -618,6 +629,7 @@ impl App {
                         | Control::NodesRefresh
                         | Control::NodesBack
                         | Control::NodesPrepare
+                        | Control::NodesNew
                         | Control::NodesSetup
                         | Control::NodesBootstrap
                         | Control::NodesInspect
@@ -627,6 +639,70 @@ impl App {
                 )
             })
             .collect()
+    }
+    fn wizard_key(&mut self, key: KeyEvent) {
+        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            self.exit = true;
+            self.exit_confirm = false;
+            return;
+        }
+        let Some(wizard) = &mut self.node_wizard else {
+            self.screen = Screen::Nodes;
+            return;
+        };
+        let choices = wizard.choices().len();
+        let created = wizard.step == crate::node_wizard::Step::Created;
+        let selection = wizard.selection_step();
+        let count = if created {
+            2
+        } else {
+            choices + if selection { 2 } else { 3 }
+        };
+        match key.code {
+            KeyCode::Esc => {
+                self.activate(Control::WizardBack);
+            }
+            KeyCode::Tab | KeyCode::Down | KeyCode::Right => {
+                wizard.selected = (wizard.selected + 1) % count;
+            }
+            KeyCode::BackTab | KeyCode::Up | KeyCode::Left => {
+                wizard.selected = (wizard.selected + count - 1) % count;
+            }
+            KeyCode::Backspace => {
+                if let Some(field) = wizard.field_mut() {
+                    field.pop();
+                }
+            }
+            KeyCode::Char(c)
+                if !key.modifiers.contains(KeyModifiers::CONTROL) && wizard.field().is_some() =>
+            {
+                wizard.append(&c.to_string());
+            }
+            KeyCode::Enter | KeyCode::Char(' ') => {
+                let selected = wizard.selected;
+                let control = if created {
+                    if selected == 0 {
+                        Control::WizardOpen
+                    } else {
+                        Control::WizardCancel
+                    }
+                } else if selected < choices {
+                    Control::WizardChoice(selected)
+                } else {
+                    if selection {
+                        [Control::WizardBack, Control::WizardCancel][selected - choices]
+                    } else {
+                        [
+                            Control::WizardNext,
+                            Control::WizardBack,
+                            Control::WizardCancel,
+                        ][selected - choices]
+                    }
+                };
+                self.activate(control);
+            }
+            _ => {}
+        }
     }
     fn nodes_key(&mut self, key: KeyEvent) {
         if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
@@ -958,6 +1034,28 @@ impl App {
     fn event(&mut self, event: Event) {
         match event {
             Event::Nodes(update) => match update {
+                crate::nodes::Update::CreationOptions(options) => {
+                    match crate::node_wizard::Wizard::new(options) {
+                        Ok(wizard) => self.node_wizard = Some(wizard),
+                        Err(error) => self.error = error.to_string(),
+                    }
+                }
+                crate::nodes::Update::Created(item) => {
+                    if let Some(existing) = self.nodes.items.iter_mut().find(|n| n.key == item.key)
+                    {
+                        *existing = item.clone();
+                    } else {
+                        self.nodes.items.push(item.clone());
+                    }
+                    if let Some(wizard) = &mut self.node_wizard {
+                        wizard.created_key = Some(item.key.clone());
+                        wizard.title = item.title.clone();
+                        wizard.key = item.key.clone();
+                        wizard.step = crate::node_wizard::Step::Created;
+                        wizard.selected = 0;
+                    }
+                    self.nodes.card = Some(item);
+                }
                 crate::nodes::Update::Services(key, facts) => {
                     if let Some(item) = &mut self.nodes.card
                         && item.key == key
@@ -1008,8 +1106,27 @@ impl App {
             Event::Finished(result) => {
                 if self.nodes_busy {
                     self.nodes_busy = false;
-                    self.screen = Screen::Nodes;
-                    self.error = result.err().unwrap_or_default();
+                    let failed = result.is_err();
+                    self.screen = if self.wizard_loading && self.node_wizard.is_some() {
+                        Screen::NodeWizard
+                    } else {
+                        Screen::Nodes
+                    };
+                    self.wizard_loading = false;
+                    let error = result.err().unwrap_or_default();
+                    if !error.is_empty() {
+                        self.error = error;
+                    }
+                    if failed && let Some(wizard) = &mut self.node_wizard {
+                        if self.error.contains("local_node_exists") {
+                            wizard.options.local_available = false;
+                            wizard.step = crate::node_wizard::Step::Transport;
+                            wizard.selected = 0;
+                        }
+                        // A definitive rejection is safe to edit, while uncertain
+                        // submissions remain fenced by the durable creation record.
+                        wizard.command_id = uuid::Uuid::new_v4();
+                    }
                     self.nodes_selected = 0;
                     return;
                 }
@@ -1266,6 +1383,63 @@ impl App {
             Control::NodesBack => {
                 self.nodes.card = None;
                 self.nodes_selected = 0;
+                return None;
+            }
+            Control::NodesNew => {
+                self.node_wizard = None;
+                self.wizard_loading = true;
+                self.nodes_requested = Some(crate::nodes::Command::CreationOptions);
+                return None;
+            }
+            Control::WizardChoice(index) => {
+                if let Some(wizard) = &mut self.node_wizard {
+                    self.error = wizard
+                        .choose(index)
+                        .err()
+                        .map(|e| e.to_string())
+                        .unwrap_or_default();
+                }
+                return None;
+            }
+            Control::WizardNext => {
+                if let Some(wizard) = &mut self.node_wizard {
+                    match wizard.next() {
+                        Ok(Some(draft)) => {
+                            self.wizard_loading = true;
+                            self.nodes_requested = Some(crate::nodes::Command::Create(draft));
+                        }
+                        Ok(None) => self.error.clear(),
+                        Err(error) => self.error = error.to_string(),
+                    }
+                }
+                return None;
+            }
+            Control::WizardBack => {
+                self.error.clear();
+                if self.node_wizard.as_mut().is_none_or(|w| !w.back()) {
+                    self.node_wizard = None;
+                    self.screen = Screen::Nodes;
+                }
+                return None;
+            }
+            Control::WizardCancel => {
+                self.node_wizard = None;
+                self.screen = Screen::Nodes;
+                self.error.clear();
+                return None;
+            }
+            Control::WizardOpen => {
+                let key = self
+                    .node_wizard
+                    .as_ref()
+                    .and_then(|w| w.created_key.clone())
+                    .or_else(|| self.nodes.card.as_ref().map(|n| n.key.clone()));
+                self.node_wizard = None;
+                self.screen = Screen::Nodes;
+                self.nodes.operation = None;
+                if let Some(key) = key {
+                    self.nodes_requested = Some(crate::nodes::Command::Card(key));
+                }
                 return None;
             }
             Control::NodesPrepare => {
@@ -1663,7 +1837,7 @@ pub fn run(mut request: Request) -> Result<()> {
                     Prompt::ConfirmAction {
                         title: "Update workstation?".into(),
                         description: format!(
-                            "{} → {}\nOnly the local managed binary is replaced. Restart TUI afterwards. Server installations and saved profiles are retained.\nIf not installed yet, run `node-plane self install` first.",
+                            "{} → {}\nWorkstation is updated on this computer. Restart TUI afterwards. Server installations and saved profiles are retained.",
                             env!("CARGO_PKG_VERSION"),
                             release.tag_name
                         ),
@@ -1774,6 +1948,10 @@ pub fn run(mut request: Request) -> Result<()> {
                         .search
                         .extend(text.chars().filter(|c| !c.is_control()).take(remaining));
                     app.nodes.page = 0;
+                } else if matches!(app.screen, Screen::NodeWizard) && !app.exit {
+                    if let Some(wizard) = &mut app.node_wizard {
+                        wizard.append(&text);
+                    }
                 } else if matches!(app.screen, Screen::Form) && !app.exit {
                     app.form.append(&text);
                 }
@@ -1832,6 +2010,7 @@ pub fn run(mut request: Request) -> Result<()> {
                 }
                 match app.screen {
                     Screen::Nodes => app.nodes_key(key),
+                    Screen::NodeWizard => app.wizard_key(key),
                     Screen::SettingsPage(SettingsPage::Updates) => {
                         let controls = if app.self_release.is_some() {
                             vec![
@@ -2263,6 +2442,7 @@ fn draw(frame: &mut Frame, app: &App) -> Vec<Hit> {
     match app.screen {
         Screen::Form => draw_form(frame, app, rows[1], &mut hits),
         Screen::Nodes => draw_nodes(frame, app, rows[1], &mut hits),
+        Screen::NodeWizard => draw_node_wizard(frame, app, rows[1], &mut hits),
         Screen::Settings => draw_settings(frame, app, rows[1], &mut hits),
         Screen::SettingsPage(SettingsPage::Appearance) => {
             draw_appearance(frame, app, rows[1], &mut hits)
@@ -2455,6 +2635,9 @@ fn draw(frame: &mut Frame, app: &App) -> Vec<Hit> {
         app.error.as_str()
     } else {
         match app.screen {
+            Screen::NodeWizard => {
+                "Tab / arrows: select   Enter / click: continue   Esc: previous step   Ctrl+C: exit"
+            }
             Screen::Nodes => {
                 "Tab / ↑ / ↓: select   Enter / click: open   Ctrl+F: search   ← / →: pages   Esc: list / sidebar"
             }
@@ -2856,16 +3039,8 @@ fn draw_nodes(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
                 } else {
                     "missing"
                 },
-                if facts["awg_running"] == true {
-                    "running"
-                } else {
-                    "stopped"
-                },
-                if facts["xray_running"] == true {
-                    "running"
-                } else {
-                    "stopped"
-                }
+                node.protocol_status("awg"),
+                node.protocol_status("xray")
             )));
         }
         frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), rows[1]);
@@ -2892,7 +3067,9 @@ fn draw_nodes(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
                 }
             }
         }
-        if node.transport.as_deref() == Some("ssh") {
+        if node.transport.as_deref() == Some("ssh")
+            && node.agent == crate::nodes::AgentState::Missing
+        {
             actions.push(("Prepare SSH", Control::NodesPrepare));
         }
         actions.extend([
@@ -2907,9 +3084,15 @@ fn draw_nodes(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
         if !app.nodes.loaded {
             frame.render_widget(Paragraph::new("Open Nodes to load the registry.\nRefresh connects to the selected installation."), rows[1]);
         } else if pages[page].is_empty() {
-            frame.render_widget(Paragraph::new(if app.nodes.items.is_empty() {
-                "No registered servers. Create a server in the Telegram bot.\nPrepare SSH adds the controller key to a VPS."
-            } else { "No servers match this search." }).wrap(Wrap { trim: false }), rows[1]);
+            frame.render_widget(
+                Paragraph::new(if app.nodes.items.is_empty() {
+                    "No registered servers. Choose New node to create one."
+                } else {
+                    "No servers match this search."
+                })
+                .wrap(Wrap { trim: false }),
+                rows[1],
+            );
         } else {
             for (offset, row) in pages[page].iter().enumerate() {
                 let rect = Rect::new(rows[1].x, rows[1].y + offset as u16, rows[1].width, 1);
@@ -2987,7 +3170,7 @@ fn draw_nodes(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
         }
         actions.extend([
             ("Refresh", Control::NodesRefresh),
-            ("Prepare SSH", Control::NodesPrepare),
+            ("New node", Control::NodesNew),
         ]);
     }
     let count = actions.len();
@@ -3009,6 +3192,136 @@ fn draw_nodes(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
             control,
         });
         index += 1;
+    }
+}
+
+fn draw_node_wizard(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
+    use crate::node_wizard::Step;
+    let Some(wizard) = &app.node_wizard else {
+        return;
+    };
+    let right = draw_navigation(frame, app, area, hits);
+    let outer = Block::bordered().title(format!(" New node · {} ", wizard.title()));
+    let inner = outer.inner(right);
+    frame.render_widget(outer, right);
+    let rows = Layout::vertical([
+        Constraint::Length(2),
+        Constraint::Min(1),
+        Constraint::Length(3),
+    ])
+    .split(inner);
+    let note = match wizard.step {
+        Step::Transport if !wizard.options.local_available => {
+            "A local node already exists. Add another host using SSH."
+        }
+        Step::Transport => "Local runs beside the controller. SSH uses a separate VPS.",
+        Step::Template => "Presets fill the name, region, flag and next available server code.",
+        Step::Target => {
+            "Root access or passwordless sudo is required. Example: root@node.example.com"
+        }
+        Step::Host => "Address VPN clients connect to. Example: vpn.example.com",
+        Step::Protocols => "Choose at least one protocol. Installation defaults are inherited.",
+        Step::Created => "The node is saved. Open its card to install the agent and VPN protocols.",
+        _ => "Back keeps your inputs. Creation does not install anything on the host.",
+    };
+    frame.render_widget(
+        Paragraph::new(note)
+            .wrap(Wrap { trim: true })
+            .style(Style::default().fg(Color::Gray)),
+        rows[0],
+    );
+    let choices = wizard.choices();
+    if matches!(wizard.step, Step::Review) {
+        frame.render_widget(
+            Paragraph::new(wizard.summary()).wrap(Wrap { trim: false }),
+            rows[1],
+        );
+    } else if wizard.step == Step::Created {
+        frame.render_widget(
+            Paragraph::new(format!(
+                "{}
+Code: {}",
+                wizard.title, wizard.key
+            ))
+            .style(Style::default().fg(Color::Cyan)),
+            rows[1],
+        );
+    } else {
+        let capacity = (rows[1].height / 3).max(1) as usize;
+        let first = wizard
+            .selected
+            .min(choices.len().saturating_sub(1))
+            .saturating_sub(capacity - 1);
+        for (index, label) in choices.iter().enumerate().skip(first).take(capacity) {
+            let area = Rect::new(
+                rows[1].x,
+                rows[1].y + ((index - first) * 3) as u16,
+                rows[1].width,
+                3.min(rows[1].height),
+            );
+            draw_button(frame, area, label, wizard.selected == index);
+            hits.push(Hit {
+                area,
+                control: Control::WizardChoice(index),
+            });
+        }
+        if let Some(text) = wizard.field() {
+            let area = if choices.is_empty() {
+                rows[1]
+            } else {
+                Rect::new(
+                    rows[1].x,
+                    rows[1].bottom().saturating_sub(3),
+                    rows[1].width,
+                    3.min(rows[1].height),
+                )
+            };
+            frame.render_widget(
+                Paragraph::new(format!("{}▏", text))
+                    .block(Block::bordered().title(" Input "))
+                    .wrap(Wrap { trim: false }),
+                area,
+            );
+        }
+    }
+    let buttons = if wizard.step == Step::Created {
+        vec![
+            ("Open node card", Control::WizardOpen),
+            ("Nodes", Control::WizardCancel),
+        ]
+    } else if wizard.selection_step() {
+        vec![
+            ("← Back", Control::WizardBack),
+            ("Cancel", Control::WizardCancel),
+        ]
+    } else {
+        vec![
+            (
+                if wizard.step == Step::Review {
+                    "Create node"
+                } else if wizard.step == Step::Flag {
+                    "Next / Skip"
+                } else {
+                    "Continue"
+                },
+                Control::WizardNext,
+            ),
+            ("← Back", Control::WizardBack),
+            ("Cancel", Control::WizardCancel),
+        ]
+    };
+    let columns = Layout::horizontal(vec![
+        Constraint::Ratio(1, buttons.len() as u32);
+        buttons.len()
+    ])
+    .split(rows[2]);
+    for (index, (label, control)) in buttons.into_iter().enumerate() {
+        let selected = wizard.selected == choices.len() + index;
+        draw_button(frame, columns[index], label, selected);
+        hits.push(Hit {
+            area: columns[index],
+            control,
+        });
     }
 }
 
@@ -4999,6 +5312,74 @@ mod tests {
         click(&mut app, (label.x + 1, label.y + 1));
         assert!(matches!(app.screen, Screen::EditInstallation));
     }
+    #[test]
+    fn new_node_wizard_keyboard_and_mouse_offer_card_without_installing() {
+        let mut app = test_profile_app();
+        app.open_nodes();
+        app.nodes_requested = None;
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
+        terminal.draw(|f| app.hits = draw(f, &app)).unwrap();
+        assert!(
+            app.hits
+                .iter()
+                .any(|h| matches!(h.control, Control::NodesNew))
+        );
+        assert!(
+            !app.hits
+                .iter()
+                .any(|h| matches!(h.control, Control::NodesPrepare))
+        );
+        app.activate(Control::NodesNew);
+        assert!(matches!(
+            app.nodes_requested.take(),
+            Some(crate::nodes::Command::CreationOptions)
+        ));
+        app.nodes_busy = true;
+        app.event(Event::Nodes(crate::nodes::Update::CreationOptions(serde_json::from_value(serde_json::json!({
+            "local_available":false,"defaults":{"protocols":["awg"],"xray_transports":[],"settings":{"awg_i1_preset":"quic","awg_port_mode":"auto"}},
+            "templates":[{"code":"lv","title":"Latvia","region":"Europe","flag":"🇱🇻","draft":{"key":"lv1","title":"Latvia #1"}}]})).unwrap())));
+        app.event(Event::Finished(Ok("Options ready".into())));
+        assert!(matches!(app.screen, Screen::NodeWizard));
+        app.wizard_key(KeyCode::Enter.into());
+        app.wizard_key(KeyCode::Enter.into());
+        app.node_wizard
+            .as_mut()
+            .unwrap()
+            .append("root@node.example");
+        app.wizard_key(KeyCode::Enter.into());
+        app.node_wizard.as_mut().unwrap().append("vpn.example");
+        app.wizard_key(KeyCode::Enter.into());
+        app.wizard_key(KeyCode::Esc.into());
+        assert_eq!(app.node_wizard.as_ref().unwrap().host, "vpn.example");
+        app.wizard_key(KeyCode::Enter.into());
+        app.activate(Control::WizardNext);
+        app.activate(Control::WizardNext);
+        assert!(matches!(
+            app.nodes_requested.take(),
+            Some(crate::nodes::Command::Create(_))
+        ));
+        app.nodes_busy = true;
+        let mut item = browser_node("lv1", "Europe");
+        item.title = "Latvia #1".into();
+        app.event(Event::Nodes(crate::nodes::Update::Created(item)));
+        app.event(Event::Finished(Ok("Created".into())));
+        terminal.draw(|f| app.hits = draw(f, &app)).unwrap();
+        assert!(
+            app.hits
+                .iter()
+                .any(|h| matches!(h.control, Control::WizardOpen))
+        );
+        assert!(
+            !app.hits
+                .iter()
+                .any(|h| matches!(h.control, Control::NodesSetup))
+        );
+        app.wizard_key(KeyCode::Enter.into());
+        assert!(
+            matches!(app.nodes_requested.take(),Some(crate::nodes::Command::Card(key)) if key == "lv1")
+        );
+        assert!(matches!(app.screen, Screen::Nodes));
+    }
     fn browser_node(key: &str, region: &str) -> crate::nodes::Node {
         serde_json::from_value(serde_json::json!({"key":key, "title":key, "region":region,
             "flag":"", "enabled":true, "protocols":["awg"], "xray_transports":[],
@@ -5154,6 +5535,7 @@ mod tests {
         app.activate(Control::Action(Action::PrepareNode));
         app.nodes_requested = None;
         let mut node = browser_node("lv1", "Europe");
+        node.transport = Some("ssh".into());
         let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
         for state in [
             crate::nodes::AgentState::Unknown,
@@ -5168,6 +5550,12 @@ mod tests {
                 app.nodes_controls()
                     .iter()
                     .any(|c| matches!(c, Control::NodesSetup)),
+                state == crate::nodes::AgentState::Missing
+            );
+            assert_eq!(
+                app.nodes_controls()
+                    .iter()
+                    .any(|control| matches!(control, Control::NodesPrepare)),
                 state == crate::nodes::AgentState::Missing
             );
         }

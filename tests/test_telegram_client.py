@@ -662,7 +662,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             self.assertTrue(servers.collapsed)
             self.assertEqual(servers.sections[0].title, 'Europe')
             self.assertEqual(servers.sections[0].sections[0].title, '🇱🇻 Latvia')
-            self.assertEqual(servers.sections[0].sections[0].lines, ('AmneziaWG', 'VLESS'))
+            self.assertEqual(servers.sections[0].sections[0].lines, ('AmneziaWG · VLESS',))
             self.assertNotEqual(servers.rich()[0].blocks[-1].type, 'divider')
             blocks = profile_screen.rich(render.call_args.args[3]).blocks
             self.assertEqual([block.type for block in blocks][-2:], ['divider', 'buttons'])
@@ -1053,7 +1053,8 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
                             'flag': '🇱🇻', 'public_host': 'lv1.example.com',
                             'protocols': ['awg', 'xray'], 'transport': 'ssh',
                             'ssh_target': 'root@lv1.example.com'}})
-        backend = SimpleNamespace(create_node=AsyncMock(return_value={'key': 'lv1'}),
+        backend = SimpleNamespace(create_node=AsyncMock(return_value={
+            'key': 'lv1', 'title': 'Latvia', 'region': 'EU', 'flag': '🇱🇻'}),
             rollout_agent=AsyncMock(return_value={'id': 'rollout-id'}),
             request=AsyncMock(return_value={'transport': 'ssh',
                 'ssh_target': 'root@lv1.example.com'}))
@@ -1530,6 +1531,9 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             self.assertEqual(server.lines[0], 'AmneziaWG: 3.0 KiB · VLESS: ' + user.tr(locale, 'account.rich.waiting'))
         summary['traffic'] = None
         self.assertIsNone(user.profile_traffic_section(summary, 'en'))
+        for locale in ('ru', 'en'):
+            server = user.profile_server_section(summary, node, locale)
+            self.assertEqual(server.lines, ('AmneziaWG · VLESS',))
 
 
     async def test_profile_has_no_member_consent_prompt(self):

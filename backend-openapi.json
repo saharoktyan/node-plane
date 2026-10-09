@@ -9002,6 +9002,11 @@
               }
             ],
             "title": "Verification Target"
+          },
+          "affected_profiles": {
+            "type": "integer",
+            "title": "Affected Profiles",
+            "default": 0
           }
         },
         "type": "object",

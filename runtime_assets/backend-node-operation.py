@@ -64,11 +64,17 @@ def inspect():
         entropy = [line for line in text.splitlines() if re.match(r'^(S[1-4]|H[1-4]|I[1-5]|RandomTrailers|DisableCookies)\s*=', line)]
     except OSError:
         pass
-    def running(name):
-        return docker and subprocess.run(['docker', 'inspect', '-f', '{{.State.Running}}', name],
-            capture_output=True, text=True, timeout=30).stdout.strip() == 'true'
+    def container(name):
+        if not docker:
+            return False, False
+        result = subprocess.run(['docker', 'inspect', '-f', '{{.State.Running}}', name],
+            capture_output=True, text=True, timeout=30)
+        return result.returncode == 0, result.returncode == 0 and result.stdout.strip() == 'true'
+    xinstalled, xrunning = container(xc)
+    ainstalled, arunning = container(ac)
     return {'docker': docker, 'xray_config_valid': bool(xvalid), 'awg_config_valid': avalid,
-            'xray_running': running(xc), 'awg_running': running(ac), 'entropy': entropy,
+            'xray_installed': xinstalled, 'awg_installed': ainstalled,
+            'xray_running': xrunning, 'awg_running': arunning, 'entropy': entropy,
             'host_metrics': host_metrics(), 'inspection_available': True}
 
 

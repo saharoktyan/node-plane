@@ -34,20 +34,28 @@ Protocol configuration: [PROTOCOL_REFERENCE.md](PROTOCOL_REFERENCE.md).
 
 ## Deployment Modes
 
-### Workstation quick start (Linux x86_64)
+### Workstation quick start (Linux, macOS and Windows)
 
 Run this on your own computer to install the workstation TUI, then use it to
 install/manage a VPS over SSH:
+
+**Linux / macOS**
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/saharoktyan/node-plane/dev/scripts/install_workstation.sh | bash
 ```
 
-The installer downloads the latest published alpha/stable workstation, verifies
-SHA256 and its version, and runs `self install` without sudo. Open a new terminal
+**Windows 10 / 11 (x64)** — run this in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/saharoktyan/node-plane/dev/scripts/install_workstation.ps1 | iex
+```
+
+The installer selects a published alpha/stable release and runs its cargo-dist
+installer to verify the platform archive and configure PATH. Open a new terminal
 after installation and run `node-plane`. No Python or external SSH client is
-needed on the workstation; the download script requires Bash, curl, tar and
-sha256sum. For a pinned release, add `bash -s -- --tag v0.4.3-alpha.50` after the
+needed on the workstation. Linux/macOS use Bash and curl; Windows uses PowerShell.
+For a pinned Unix release, add `bash -s -- --tag v0.4.3-alpha.50` after the
 pipe. The script installs the local assistant; it does not install a controller
 on your computer. Details: [workstation guide](rust/node-plane-cli/README.md).
 

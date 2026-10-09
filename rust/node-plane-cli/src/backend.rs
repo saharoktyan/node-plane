@@ -102,7 +102,7 @@ pub async fn helper(session: &mut SshSession, mut input: Value) -> Result<Value>
     // command IDs continue to identify each separate operation.
     if matches!(
         input["action"].as_str(),
-        Some("lookup-update" | "lookup-node" | "audit-enrollment")
+        Some("lookup-update" | "lookup-node" | "lookup-node-create" | "audit-enrollment")
     ) && let Some(auth) = session.authorization.lock().unwrap().as_ref()
     {
         input["session_id"] = json!(auth.session_id);

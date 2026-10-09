@@ -1,0 +1,39 @@
+# Workstation releases; server artifacts join the same cargo-dist announcement.
+[workspace]
+members = ["cargo:rust/node-plane-cli"]
+
+[dist]
+cargo-dist-version = "0.33.0"
+ci = ["github"]
+installers = ["shell", "powershell"]
+targets = [
+  "x86_64-unknown-linux-gnu",
+  "x86_64-apple-darwin",
+  "aarch64-apple-darwin",
+  "x86_64-pc-windows-msvc",
+]
+unix-archive = ".tar.gz"
+windows-archive = ".zip"
+checksum = "sha256"
+source-tarball = false
+auto-includes = false
+install-path = "~/.local/bin"
+install-updater = true
+install-success-msg = "Open a new terminal and run: node-plane"
+msvc-crt-static = true
+rust-toolchain-version = "1.89.0"
+pr-run-mode = "plan"
+
+[[dist.extra-artifacts]]
+build = ["bash", "scripts/build_release_stack.sh"]
+artifacts = [
+  "dist/release-stack/node-plane-controller.tar.gz",
+  "dist/release-stack/node-plane-driver-linux-amd64.tar.gz",
+  "dist/release-stack/node-plane-agent-linux-amd64.tar.gz",
+  "dist/release-stack/node-plane-cli-linux-amd64.tar.gz",
+  "dist/release-stack/SHA256SUMS.txt",
+  "dist/release-stack/RELEASE_METADATA.txt",
+]
+
+[dist.github-custom-runners]
+x86_64-unknown-linux-gnu = "ubuntu-22.04"

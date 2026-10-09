@@ -6,7 +6,7 @@ usage() {
   cat <<'EOF'
 Usage: bash install_workstation.sh [--channel dev|stable] [--tag vX.Y.Z[-alpha.N]]
 
-Installs the Linux x86_64 workstation in ~/.local/bin and configures shell PATH.
+Installs Workstation on Linux x86_64 or macOS (Intel/Apple Silicon) and configures PATH.
 The default dev channel includes alpha releases. An exact tag overrides discovery.
 Saved installation profiles and SSH keys are retained.
 EOF
@@ -27,11 +27,11 @@ if [[ -n "$tag" && ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-alpha\.[0-9]+)?$ ]]; th
   echo 'Invalid release tag.' >&2
   exit 1
 fi
-[[ "$(uname -s)" == Linux && "$(uname -m)" == x86_64 ]] || {
-  echo 'The workstation installer currently supports Linux x86_64 only.' >&2
+[[ ( "$(uname -s)" == Linux && "$(uname -m)" == x86_64 ) || "$(uname -s)" == Darwin ]] || {
+  echo 'Supported systems: Linux x86_64 and macOS Intel/Apple Silicon.' >&2
   exit 1
 }
-for command in curl tar sha256sum mktemp grep sed uname; do
+for command in curl mktemp grep sed uname; do
   command -v "$command" >/dev/null || { echo "Required command missing: $command" >&2; exit 1; }
 done
 
@@ -61,9 +61,25 @@ else
   echo "[1/4] Using release $tag"
 fi
 
+base="https://github.com/saharoktyan/node-plane/releases/download/$tag"
+echo "[2/4] Downloading the release installer for $tag…"
+if download "$base/node-plane-cli-installer.sh" "$tmp_dir/installer.sh"; then
+  echo '[3/4] Starting the cargo-dist installer…'
+  sh "$tmp_dir/installer.sh"
+  echo '[4/4] Workstation installed. Open a new terminal, then run: node-plane'
+  exit 0
+fi
+
+# Older alpha releases used the original Linux-only archive and install receipt.
+[[ "$(uname -s)" == Linux && "$(uname -m)" == x86_64 ]] || {
+  echo 'This release has no macOS installer. Choose a newer release.' >&2
+  exit 1
+}
+for command in tar sha256sum; do
+  command -v "$command" >/dev/null || { echo "Required command missing: $command" >&2; exit 1; }
+done
 asset='node-plane-cli-linux-amd64.tar.gz'
 member='node-plane-cli-linux-amd64'
-base="https://github.com/saharoktyan/node-plane/releases/download/$tag"
 echo "[2/4] Downloading workstation $tag…"
 download "$base/$asset" "$tmp_dir/$asset"
 download "$base/SHA256SUMS.txt" "$tmp_dir/SHA256SUMS.txt"

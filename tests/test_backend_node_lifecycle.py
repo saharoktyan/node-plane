@@ -55,6 +55,18 @@ class BackendNodeLifecycleTests(unittest.TestCase):
         self.assertEqual(lifecycle.start_drain(self.actor(), 'node')['operation_ids'], [])
         self.assertTrue(lifecycle.drain_status(self.actor(), 'node')['revocations_complete'])
 
+    def test_maintenance_counts_profiles_once_across_protocols(self):
+        profile = self.prepare()
+        lifecycle = NodeLifecycle(self.db)
+        self.assertEqual(lifecycle.overview(self.actor(), 'node')['affected_profiles'], 0)
+        self.grants(profile, 1, [{'node_key': 'node', 'protocol': 'awg'},
+                                 {'node_key': 'node', 'protocol': 'xray'}])
+        self.assertEqual(lifecycle.overview(self.actor(), 'node')['affected_profiles'], 1)
+        response = self.client.get('/api/v1/nodes/node/maintenance',
+                                   headers=self.headers_for())
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['affected_profiles'], 1)
+
     def test_cleanup_retry_cannot_advance_past_observed_phase(self):
         self.prepare()
         lifecycle = NodeLifecycle(self.db)

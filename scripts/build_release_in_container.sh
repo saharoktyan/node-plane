@@ -40,4 +40,4 @@ fi
 
 echo "Portable artifacts are ready in dist/releases/${TAG}."
 echo "Create the tag with: scripts/tag_release.sh ${TAG} --no-build"
-echo "Push the tag, then publish with: scripts/tag_release.sh ${TAG} --no-tag --no-build --publish --no-draft"
+echo "Push the tag; GitHub Actions builds all platforms and publishes the release via cargo-dist."

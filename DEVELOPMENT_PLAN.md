@@ -1,6 +1,6 @@
 # Development plan
 
-Updated: 2026-10-07. This is the main active development backlog. It replaces
+Updated: 2026-10-08. This is the main active development backlog. It replaces
 the historical roadmap, migration/parity maps, Rich UI plans, protocol upgrade
 plans and the implementation audit. Architecture and operator references are
 separate documents, not competing task lists.
@@ -596,6 +596,52 @@ enrollment. Bootstrap must work before a backend API exists; use the supported
 installer and release tooling rather than duplicating orchestration policy.
 Subsequent business actions use backend authorization and operation contracts.
 
+### Node creation parity between Telegram and Workstation
+
+Implemented on 2026-10-08. Both interfaces share the backend template catalog,
+installation defaults and transactionally allocated clean codes (`lv1`, `lv2`, …).
+The general Nodes action is now New node. Creation offers Open node card, where
+agent setup, Docker installation and protocol bootstrap remain explicit actions.
+Prepare SSH is hidden when the agent is installed/unreachable; service observation
+separates absent containers (`missing`) from existing stopped containers.
+
+- [x] Move the country template catalog and collision-safe generated node
+  names/codes to a shared backend contract, available from creation options.
+  Consume it in both interfaces; do not duplicate the catalog in Rust. Keep
+  Latvia, Germany, Netherlands, Finland, Singapore and United States plus Custom.
+  Preserve creation retries and retired-key protection.
+- [x] Add New node to Workstation Nodes with this sequence: Local/SSH → template
+  or Custom → addresses → protocols → review → Create. SSH templates require
+  SSH target and public client address; local templates require only the public
+  client address. Custom also asks for code, name, region and optional flag.
+  Region choices, protocol defaults, VLESS transports and AWG preset/automatic
+  port policy must match Telegram and honor installation defaults. No OS field.
+- [x] Enforce one local node using both `local_available` in the UI and the
+  existing backend creation check. Serialize creation in the backend and handle a
+  concurrent local-node creation without leaving a phantom server.
+- [x] After creation offer the same explicit stages as the bot: verify/prepare
+  controller SSH access when needed → install agent → install Docker only if
+  absent → bootstrap selected protocols. The saved registry entry alone does not
+  mean installation has succeeded. An installed agent skips SSH preparation;
+  an unavailable agent leads to status/diagnostics rather than blind reinstall.
+- [x] Use current authenticated backend endpoints and command identities for
+  creation, rollout and bootstrap. Preserve drafts on validation errors and Back.
+  Cancellation before creation leaves no registry entry. Reconcile a lost response through the original command ID;
+  never create another server or repeat installation to resolve uncertainty.
+  Keep operation status accessible after leaving the wizard or restarting TUI.
+- [ ] Verify both interfaces against shared template/default fixtures; local and
+  SSH paths; Custom; duplicate/retired keys; local-node races; failed SSH access;
+  cancellation; lost responses; agent-only nodes; missing/stopped/running
+  protocols; and reopening each confirmed or unconfirmed stage. Reserve real VPS
+  acceptance for one local and one SSH end-to-end run rather than repeated
+  reinstalls for cases already covered by automated fixtures.
+
+Automated coverage: reversible local/SSH/Custom wizard, shared/default fixtures,
+creation success/card offer, clean numbering with retired/legacy codes,
+PostgreSQL races across different admins for template numbering and the local
+slot, and lost HTTP response followed by restart/recovery without a repeated POST.
+Live VPS acceptance of the full wizard → agent → Docker/protocols remains pending.
+
 Current implementation and remaining acceptance:
 
 - [x] Add workstation Nodes: region folding, local name/region/code search,
@@ -696,6 +742,19 @@ profile selection survives restart, and switching clears connection-specific
 secrets and target fields. Compact sidebars retain all four actions. Regression
 checks cover disabled hit targets, wrapping/persistence, creation, compact layout
 and focus transfer from the switcher to action controls.
+
+Workstation distribution follow-up (2026-10-09): cargo-dist now owns tag-triggered
+GitHub release builds for Linux x86_64, Windows x64 and macOS Intel/Apple Silicon.
+Shell and PowerShell one-command installers select the matching platform and
+configure PATH; Workstation updates use cargo-dist receipts on each platform.
+The same release contains the controller/driver/agent artifacts and an old-format
+Linux Workstation archive for existing alpha updaters. Local release helpers
+upload only to a CI-created release. Native checks remain a separate workflow,
+and PR release planning does not build the complete release matrix. Real Windows
+and macOS release builds/installations remain to be verified on the first release.
+Validation: 105 Rust tests and 10 installer/release Python tests pass; CLI Clippy
+passes with warnings denied. cargo-dist planning and generated-workflow checks
+confirm all four targets and the combined Workstation/server artifact set.
 
 ## 3. Preserved ideas, outside the current delivery gate
 

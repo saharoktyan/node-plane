@@ -139,7 +139,7 @@ async def show_section(chat_id, user_id, message_id, section, node_key, bot, bac
         sections = (Section(tr(locale, 'nodes.draft.protocol_settings'),
             heading_size=2, sections=sections),)
     await render(bot, chat_id, Screen(tr(locale, 'nodes.rich.connection' if section == 'connection' else 'node_tools.' + section),
-        (tr(locale, 'nodes.rich.settings_note'),), sections=sections, embedded_buttons=True, navigation=True),
+        sections=sections, embedded_buttons=True, navigation=True),
         await draft_controls(node, state, locale) +
         [[button(locale, 'nodes.card.back_to_settings', NodeSettingsCallback(node_key=node_key).pack())]], state, message_id)
 
@@ -223,8 +223,7 @@ async def action_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, stat
                  button(locale, 'node_tools.confirm', 'node_job_submit',
                     style='danger' if action in {'reinstall_clean', 'cleanup_runtime'} else 'primary')]]
         await render(bot, query.message.chat.id, Screen(tr(locale, 'node_tools.' + action), embedded_buttons=True, navigation=True, lines=
-            (tr(locale, 'node_tools.confirm_note'),) + ((tr(locale, 'node_tools.clean_warning'),)
-                if action in {'reinstall_clean', 'cleanup_runtime'} else ())), rows, state, query.message.message_id)
+            (tr(locale, 'node_tools.effect.' + action),)), rows, state, query.message.message_id)
     except BackendError as exc:
         await render(bot, query.message.chat.id, Screen(tr(locale, 'node_tools.error_title'), (error(locale, exc),), embedded_buttons=True, navigation=True),
             [[button(locale, 'back', AdminNodeCallback(node_key=node_key).pack())]], state, query.message.message_id)

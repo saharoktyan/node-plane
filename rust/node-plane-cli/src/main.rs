@@ -5,6 +5,7 @@ mod connections;
 mod enrollment;
 mod events;
 mod installer;
+mod node_wizard;
 mod nodes;
 mod operation_store;
 mod progress;

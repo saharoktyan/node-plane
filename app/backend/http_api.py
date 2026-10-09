@@ -345,6 +345,7 @@ class NodeSettingsInput(BaseModel):
 
 class NodeCreateInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
+    template: StrictStr | None = None
     key: StrictStr
     title: StrictStr
     region: StrictStr
@@ -502,6 +503,7 @@ class NodeMaintenanceOutput(BaseModel):
     revocations_complete: bool
     cleanup_phase: str | None
     verification_target: str | None
+    affected_profiles: int = 0
 
 
 class VerificationTargetInput(BaseModel):
