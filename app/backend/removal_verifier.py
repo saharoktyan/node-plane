@@ -78,6 +78,8 @@ check_absent() {{
     fi
 }}
 check_absent /etc/systemd/system/node-plane-agent.service agent_unit
+check_absent /etc/systemd/system/node-plane-lease-expiry.timer lease_expiry_timer
+check_absent /etc/systemd/system/node-plane-lease-expiry.service lease_expiry_service
 check_absent /usr/local/bin/node-plane-agent agent_binary
 check_absent /etc/node-plane agent_config
 check_absent /opt/node-plane-runtime runtime

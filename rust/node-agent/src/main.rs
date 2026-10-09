@@ -1619,6 +1619,9 @@ impl NodeAgentApi {
         // The transient unit survives termination of this service. Do not
         // remove the durable fence until the agent has actually stopped.
         let script = r#"set -eu
+systemctl disable --now node-plane-lease-expiry.timer 2>/dev/null || true
+systemctl stop node-plane-lease-expiry.service 2>/dev/null || true
+rm -f /etc/systemd/system/node-plane-lease-expiry.timer /etc/systemd/system/node-plane-lease-expiry.service /etc/systemd/system/.node-plane-lease-expiry.lock
 systemctl disable node-plane-agent.service
 systemctl stop node-plane-agent.service
 rm -f /etc/node-plane/profile-intents.sqlite3 /etc/node-plane/profile-intents.sqlite3.lock /etc/node-plane/profile-intents.sqlite3.disabled /etc/node-plane/profile-intents.sqlite3-journal /etc/node-plane/profile-intents.sqlite3-wal /etc/node-plane/profile-intents.sqlite3-shm

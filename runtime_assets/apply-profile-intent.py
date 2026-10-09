@@ -54,6 +54,71 @@ def lease_schema(connection):
         PRIMARY KEY(protocol, profile))''')
 
 
+LEASE_UNITS = {
+    'node-plane-lease-expiry.service': '''[Unit]
+Description=Node Plane temporary access expiry
+After=docker.service
+
+[Service]
+Type=oneshot
+User=root
+UMask=0077
+ExecStart=/usr/bin/python3 /opt/node-plane-runtime/apply-profile-intent.py expire-leases
+TimeoutStartSec=60
+KillMode=control-group
+''',
+    'node-plane-lease-expiry.timer': '''[Unit]
+Description=Node Plane temporary access expiry timer
+
+[Timer]
+OnBootSec=1s
+OnUnitInactiveSec=1s
+AccuracySec=1s
+Unit=node-plane-lease-expiry.service
+
+[Install]
+WantedBy=timers.target
+''',
+}
+
+
+def ensure_lease_scheduler(directory='/etc/systemd/system', execute=subprocess.run):
+    """Install persistent scheduling before provisioning the first leased peer."""
+    directory = Path(directory)
+    # Serialize concurrent first issuances; unit writes never expose partial files.
+    with open(directory / '.node-plane-lease-expiry.lock', 'a') as lock:
+        os.chmod(lock.name, 0o600)
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        changed = False
+        for name, contents in LEASE_UNITS.items():
+            destination = directory / name
+            if destination.is_file() and destination.read_text() == contents:
+                continue
+            fd, temporary = tempfile.mkstemp(dir=directory, prefix='.node-plane-lease-')
+            try:
+                os.fchmod(fd, 0o644)
+                with os.fdopen(fd, 'w') as stream:
+                    stream.write(contents)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.replace(temporary, destination)
+                changed = True
+            finally:
+                if os.path.exists(temporary):
+                    os.unlink(temporary)
+        if changed:
+            fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+            execute(['systemctl', 'daemon-reload'], check=True, capture_output=True, timeout=30)
+        execute(['systemctl', 'enable', '--now', 'node-plane-lease-expiry.timer'],
+                check=True, capture_output=True, timeout=30)
+        execute(['systemctl', 'is-active', '--quiet', 'node-plane-lease-expiry.timer'],
+                check=True, capture_output=True, timeout=15)
+
+
 def lease_current(connection, intent, now=None):
     lease = connection.execute('SELECT expires_at,status FROM temporary_leases WHERE protocol=? AND profile=?',
                                (intent['protocol'], intent['runtime_name'])).fetchone()
@@ -144,6 +209,11 @@ def apply(intent, path, runner):
 def run(intent, lock_fd):
     root = Path(__file__).parent
     protocol, action = intent['protocol'], intent['action']
+    if 'lease_seconds' in intent:
+        if protocol != 'awg':
+            raise ValueError('temporary VLESS tunnel termination is not supported yet')
+        subprocess.run(['systemctl', 'is-active', '--quiet', 'node-plane-lease-expiry.timer'],
+                       check=True, capture_output=True, timeout=15)
     script = 'xray-add-user-existing.sh' if protocol == 'xray' and action == 'ensure' else f'{protocol}-{"add" if action == "ensure" else "del"}-user.sh'
     args = [intent['runtime_name']]
     if protocol == 'xray' and action == 'ensure':
