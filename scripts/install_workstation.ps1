@@ -16,10 +16,24 @@ if ($Tag -and $Tag -notmatch '^v\d+\.\d+\.\d+(-alpha\.\d+)?$') {
 if (-not $Tag) {
     Write-Host '[1/3] Finding the latest Workstation release...'
     $releases = @(Invoke-RestMethod -Uri "$repo/releases?per_page=100" -Headers $headers)
-    $release = $releases | Where-Object {
-        -not $_.draft -and ($Channel -eq 'dev' -or -not $_.prerelease) -and
-        ($_.assets | Where-Object { $_.name -eq 'node-plane-cli-installer.ps1' })
-    } | Select-Object -First 1
+    $release = $null
+    foreach ($r in $releases) {
+        if ($r.draft) { continue }
+        if ($Channel -ne 'dev' -and $r.prerelease) { continue }
+        $hasInstaller = $false
+        if ($null -ne $r.assets) {
+            foreach ($a in $r.assets) {
+                if ($a.name -eq 'node-plane-cli-installer.ps1') {
+                    $hasInstaller = $true
+                    break
+                }
+            }
+        }
+        if ($hasInstaller) {
+            $release = $r
+            break
+        }
+    }
     if (-not $release) { throw 'No Windows Workstation release found for this channel.' }
     $Tag = $release.tag_name
 }
