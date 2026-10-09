@@ -899,7 +899,7 @@ run_simple_install() {
     exit 1
   fi
   if [[ -f "${new_release_dir}/app/backend/admin_cli.py" ]]; then
-    set_step "initialize backend schema"
+    set_step "apply database migrations"
     NODE_PLANE_BASE_DIR="${base_dir}" \
     NODE_PLANE_APP_DIR="${new_release_dir}" \
     NODE_PLANE_SHARED_DIR="${shared_dir}" \

@@ -202,13 +202,25 @@ class WorkstationService:
         self.store = SessionStore(state_directory)
         from backend.workstation_audit import WorkstationAudit
         self.audit = WorkstationAudit(db)
-        self.audit.initialize_schema()
-        # This helper is embedded in the workstation. Older installed audit
-        # modules must still permit the workstation to upgrade the controller.
-        with db.transaction() as conn:
-            conn.execute('''CREATE TABLE IF NOT EXISTS backend_workstation_keys (
-                fingerprint TEXT PRIMARY KEY, account_id TEXT NOT NULL,
-                registered_at TEXT NOT NULL, revoked_at TEXT)''')
+        try:
+            from db.migrations import check_schema, history_exists
+        except ModuleNotFoundError as error:
+            if error.name != 'db.migrations':
+                raise
+            versioned = False  # Remote bridge can still upgrade pre-migration releases.
+        else:
+            with db.connect() as conn:
+                versioned = history_exists(conn)
+            if versioned:
+                check_schema(db)
+        if not versioned:
+            # Legacy audit bootstrap only; versioned deployments never mutate
+            # schema while authorizing a workstation session.
+            self.audit.initialize_schema()
+            with db.transaction() as conn:
+                conn.execute("""CREATE TABLE IF NOT EXISTS backend_workstation_keys (
+                    fingerprint TEXT PRIMARY KEY, account_id TEXT NOT NULL,
+                    registered_at TEXT NOT NULL, revoked_at TEXT)""")
 
     def _audit_credential(self, result, request):
         if 'attribution' not in request:

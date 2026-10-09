@@ -331,7 +331,7 @@ check_simple_mode() {
     add_remediation "Set POSTGRES_DSN in ${shared_dir}/.env and rerun installation/update"
   else
     warn "No PostgreSQL configuration was detected"
-    add_remediation "Set POSTGRES_DSN in ${shared_dir}/.env and initialize the database: PYTHONPATH=app .venv/bin/python -m backend.admin_cli init-schema"
+    add_remediation "Set POSTGRES_DSN in ${shared_dir}/.env and apply database migrations: PYTHONPATH=app .venv/bin/python -m backend.admin_cli init-schema"
   fi
 
   if has_cmd systemctl; then
@@ -367,7 +367,7 @@ check_simple_mode() {
         ok "backend API is ready on loopback"
       else
         warn "backend API readiness check failed"
-        add_remediation "Inspect sudo journalctl -u node-plane-backend and verify backend schema initialization"
+        add_remediation "Inspect sudo journalctl -u node-plane-backend and verify backend database migrations"
       fi
     fi
   else

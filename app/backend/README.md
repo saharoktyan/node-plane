@@ -67,9 +67,11 @@ scope is not an admin role. Administrative config access must be explicit.
 Service actors are intentionally rejected by human resolve_actor; their distinct
 background-workflow authorization remains to be implemented.
 
-No old-data migration is performed. bootstrap-admin deliberately approves and
+Versioned deployment migrations are described in [database migrations](../db/MIGRATIONS.md).
+Current unversioned backend installations are adopted without replacing their data.
+bootstrap-admin deliberately approves and
 promotes exactly the specified Telegram identity. New registration remains a
-pending member. New tables are created only by init-schema, not during imports.
+pending member. Pending revisions are applied only by init-schema, not during imports.
 
 Tests use SQLite for isolated SQL/policy checks. PostgreSQL integration, including
 concurrent identity resolution, is still required before production cutover.
@@ -82,7 +84,7 @@ initializes the backend schema in the shared PostgreSQL database and installs
 binds to `127.0.0.1:8080`; the timer runs the finite worker every five seconds
 after its previous invocation finishes. Both use the active release symlink
 and the same shared environment file as the legacy bot. `scripts/update.sh`
-reinitializes the schema and restarts the API when switching releases.
+applies pending migrations before switching releases and restarts the API.
 `scripts/healthcheck.sh --mode simple` checks both units and API readiness.
 Portable Docker installation is temporarily unsupported during this migration.
 The installed legacy Telegram bot still uses its old business stack; installing
@@ -97,7 +99,8 @@ PYTHONPATH=app .venv/bin/python -m uvicorn backend.http_api:application --factor
 ```
 
 This factory does not create or migrate tables on startup. /health/live reports
-process liveness; /health/ready checks the identity slice's required tables.
+process liveness; /health/ready checks migration integrity, reader compatibility
+and required tables.
 Readiness does not yet imply driver/agent reachability or full application readiness.
 
 Implemented routes:

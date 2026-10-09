@@ -45,6 +45,10 @@ class UpdatesTests(unittest.TestCase):
         self.config = importlib.reload(config)
         self.app_settings = importlib.reload(app_settings)
         self.updates = importlib.reload(updates)
+        from db import ensure_schema
+        with self.app_settings._db.transaction() as conn:
+            ensure_schema(conn)
+
 
     def tearDown(self) -> None:
         self.tmpdir.cleanup()

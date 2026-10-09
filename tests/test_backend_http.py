@@ -104,6 +104,14 @@ class BackendHTTPTests(unittest.TestCase):
         NodeSettingsService(self.db).initialize_schema()
         ConfigIssuanceService(self.db).initialize_schema()
         AgentRolloutService(self.db).initialize_schema()
+        # Readiness fixtures have the deployed revision journal. Real migration
+        # application/rollback is covered separately against PostgreSQL.
+        from db.migrations import LEDGER_DDL, REVISIONS
+        with self.db.transaction() as conn:
+            conn.execute(LEDGER_DDL)
+            for revision in REVISIONS:
+                conn.execute('INSERT INTO backend_schema_revisions VALUES (?,?,?,?,?)',
+                    (revision.number,revision.name,revision.checksum,revision.minimum_reader,'2026-10-09'))
         self.admin = bootstrap_admin(self.identities, 101)
         self.token_id, self.token = self.credentials.issue(PrincipalKind.ADAPTER, ADAPTER_SCOPES)
         self.headers = {'Authorization': 'Bearer ' + self.token}
@@ -175,6 +183,16 @@ class BackendHTTPTests(unittest.TestCase):
         response = self.client.get('/api/v1/me', headers=[('Authorization', 'Bearer ' + self.token),
             ('Authorization', 'Bearer invalid'), ('X-Node-Plane-Telegram-User-ID', '101')])
         self.assertEqual(response.status_code, 422)
+
+    def test_readiness_rejects_missing_or_modified_revision_journal(self):
+        self.assertEqual(self.client.get('/health/ready').status_code,200)
+        self.db.connection.execute("UPDATE backend_schema_revisions SET checksum='modified' WHERE revision=1")
+        response = self.client.get('/health/ready')
+        self.assertEqual(response.status_code,503)
+        self.assertNotIn('modified',response.text)
+        self.db.connection.execute('DROP TABLE backend_schema_revisions')
+        self.assertEqual(self.client.get('/health/ready').status_code,503)
+        self.assertIsNone(self.db.connection.execute("SELECT name FROM sqlite_master WHERE name='backend_schema_revisions'").fetchone())
 
     def test_readiness_requires_schema_and_openapi_exists(self):
         self.assertEqual(self.client.get('/health/ready').status_code, 200)
