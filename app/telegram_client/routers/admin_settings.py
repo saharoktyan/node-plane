@@ -78,7 +78,8 @@ async def admin_settings_cb(query: CallbackQuery, bot: Bot,
         [InlineKeyboardButton(text=tr(locale, 'back'), callback_data='admin_menu')],
     ]
     sections = (
-        Section(tr(locale, 'settings.rich.access'), rows=(tuple(rows[0]),)),
+        Section(tr(locale, 'settings.rich.access'), rows=(tuple(rows[0]),
+            (InlineKeyboardButton(text=tr(locale, 'temporary.title'),callback_data='temporary:list:0'),))),
         Section(tr(locale, 'settings.rich.monitoring'), rows=(tuple(rows[2]),)),
         Section(tr(locale, 'settings.rich.maintenance'), rows=(tuple(rows[1]), tuple(rows[3]),
             (InlineKeyboardButton(text=tr(locale, 'recovery.title'), callback_data=RecoveryPage().pack()),),

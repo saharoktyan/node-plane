@@ -49,6 +49,8 @@ async def main() -> None:
             dispatcher.include_router(admin_recovery.router)
             dispatcher.include_router(admin_updates.router)
             dispatcher.include_router(admin_backups.router)
+            from .routers import admin_temporary_configs
+            dispatcher.include_router(admin_temporary_configs.router)
             dispatcher.include_router(admin_announcements.router)
             dispatcher.include_router(admin_alerts.router)
             dispatcher.include_router(admin_system_cleanup.router)

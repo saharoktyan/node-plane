@@ -11,6 +11,7 @@ mod operation_store;
 mod progress;
 mod self_manage;
 mod ssh;
+mod temporary;
 mod tui;
 mod workstation;
 

@@ -277,6 +277,7 @@ impl SavedCreation {
 }
 #[derive(Clone)]
 pub enum Command {
+    Temporary(crate::temporary::Command),
     CreationOptions,
     Create(crate::node_wizard::Draft),
     List,
@@ -286,6 +287,7 @@ pub enum Command {
     Docker(Node),
 }
 pub enum Update {
+    Temporary(crate::temporary::Command, Value),
     CreationOptions(crate::node_wizard::Options),
     Created(Node),
     List(Vec<Node>),
@@ -687,6 +689,34 @@ async fn execute(
             let setup = matches!(&command, Command::Setup(_));
             let docker = matches!(&command, Command::Docker(_));
             match command {
+                Command::Temporary(command) => {
+                    use crate::temporary::Command as Temporary;
+                    let root = "/api/v1/system/temporary-configs";
+                    let (method,path,body,key) = match &command {
+                        Temporary::List { node,page,page_size } => (Method::GET,
+                            format!("{root}?page={page}&page_size={page_size}{}",node.as_ref().map(|n|format!("&node_key={}",encode(n))).unwrap_or_default()),None,None),
+                        Temporary::Servers => (Method::GET,"/api/v1/nodes?limit=100&order=region&include_summary=true".into(),None,None),
+                        Temporary::Card(id) => (Method::GET,format!("{root}/{id}"),None,None),
+                        Temporary::Artifact(id) => (Method::GET,format!("{root}/{id}/artifact"),None,None),
+                        Temporary::Create { id,body } => (Method::POST,root.into(),Some(body.clone()),Some(*id)),
+                        Temporary::Revoke(id) => (Method::POST,format!("{root}/{id}/revoke"),None,None),
+                    };
+                    let mut value = backend::request(session,&credential,method,&path,body,key).await?;
+                    if matches!(command,Temporary::Servers) {
+                        let mut cursors = BTreeSet::new();
+                        while let Some(cursor) = value["next_cursor"].as_str().map(str::to_owned) {
+                            ensure!(cursors.insert(cursor.clone()),"Node pagination did not advance");
+                            let next = backend::request(session,&credential,Method::GET,
+                                &format!("/api/v1/nodes?limit=100&order=region&include_summary=true&cursor={}",encode(&cursor)),None,None).await?;
+                            let extra = next["items"].as_array().context("Missing nodes")?;
+                            let items = value["items"].as_array_mut().context("Missing nodes")?;
+                            ensure!(items.len()+extra.len()<20_000,"Too many nodes");
+                            items.extend(extra.iter().cloned());
+                            value["next_cursor"] = next["next_cursor"].clone();
+                        }
+                    }
+                    let _ = tx.send(Event::Nodes(Update::Temporary(command,value)));
+                }
                 Command::CreationOptions => {
                     let _ = tx.send(Event::Stage("Loading node templates and installation defaults".into()));
                     let value = backend::request(session, &credential, Method::GET, "/api/v1/nodes/creation-options", None, None).await?;

@@ -87,35 +87,38 @@ Older evidence below records the state at each increment, not new prerequisites.
 - [ ] Verify remote support and enforcement health in backend issuance, reconcile
   expired temporary identities before runtime restart, and report failed/pending
   revocations. Never silently provision permanent access when lease support is absent.
-- [ ] Define a shared backend command for a temporary configuration on a selected
+- [x] Define a shared backend command for a temporary configuration on a selected
   server/protocol, with independent credentials and a persisted UTC expiry after
   successful activation. Show the exact expiry in both interfaces.
 - [x] Backend registry and API: queue independent identities with 12h / 1d / 3d
   lifetimes, retain idempotency keys and exact UTC receipts, list pending/active
   access, download after live identity checks, and revoke early. Worker recovery
   reads the original issuance; it never repeats an unknown ensure. Interface
-  integration and the issuance notices remain below.
+  integration and the issuance notices are connected in both interfaces.
 - [ ] Keep temporary access separate from permanent profile grants, AWG device
   credentials and profile expiry. Revocation must not disrupt normal connections
   or other temporary configurations. Keep shared Xray ports and the shared process.
-- [ ] Add a managed Temporary configurations section listing all active configs,
+- [x] Add a managed Temporary configurations section listing all active configs,
   showing server, protocol/transport and exact expiry. Provide Create, Show/download
   configuration and Revoke early. Keep pending/failed issuance and revocation
   visible with their actual status; do not hide a failed revoke as completed.
   Remove completed expired/revoked entries from the active list, retaining audit.
-- [ ] Workstation: add a dedicated sidebar tab opening the list. Create selects
+- [x] Workstation: add a dedicated sidebar tab opening the list. Create selects
   server, protocol only when more than one is available, Xray transport only when
   more than one is available, then 12h / 1d / 3d and confirmation.
   A Temporary configurations action on the selected Nodes card opens the same
   section filtered to that server; creation skips server selection.
-- [ ] Telegram: expose the section only in administrator Settings, never on a
+  Add Copy URI and private file saving. Offer QR only with detected graphics;
+  Windows Terminal requires an actual Sixel capability response (1.22+), not
+  just WT_SESSION. Real clipboard/QR validation on Windows/macOS remains pending.
+- [x] Telegram: expose the section only in administrator Settings, never on a
   server card. Use the same conditional selections and durations; preserve Back
   destinations for skipped steps and the iOS separate-message action for URI.
-- [ ] Require authorized issuance to an eligible, ready node; retain command
+- [x] Require authorized issuance to an eligible, ready node; retain command
   identity across retries. Do not log secrets or allow anonymous issuance.
   Current Workstation SSH administration is sufficient for this admin feature;
   future ordinary-user access needs independent account-bound enrollment, not root SSH.
-- [ ] Display a clear VLESS notice before issuance and in its configuration/status
+- [x] Display a clear VLESS notice before issuance and in its configuration/status
   card: "After expiry or revocation, new connections are blocked. Existing
   connections may continue until they disconnect." Never claim that an expired
   UUID proves all existing tunnels have stopped. AWG uses actual peer removal.
