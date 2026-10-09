@@ -8,6 +8,7 @@ on:
       - 'dist-workspace.toml'
       - 'scripts/install_workstation.sh'
       - 'scripts/install_workstation.ps1'
+      - 'tests/workstation_installer_windows.ps1'
       - '.github/workflows/workstation.yml'
   pull_request:
     paths:
@@ -15,6 +16,7 @@ on:
       - 'dist-workspace.toml'
       - 'scripts/install_workstation.sh'
       - 'scripts/install_workstation.ps1'
+      - 'tests/workstation_installer_windows.ps1'
       - '.github/workflows/workstation.yml'
   workflow_dispatch:
 
@@ -57,6 +59,10 @@ jobs:
             (Resolve-Path ../../scripts/install_workstation.ps1),
             [ref]$tokens, [ref]$errors) | Out-Null
           if ($errors.Count) { throw ($errors | Out-String) }
+      - name: Windows installer release discovery (PowerShell 5.1)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: '& ../../tests/workstation_installer_windows.ps1'
       - name: Lint
         run: cargo +1.90.0 clippy --locked --all-targets -- -D warnings
       - name: Linux server tools for SSH fixtures

@@ -1551,6 +1551,37 @@ impl App {
             .control;
         self.activate(control)
     }
+    fn quick_start_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc => {
+                self.screen = Screen::Form;
+            }
+            KeyCode::Tab
+            | KeyCode::BackTab
+            | KeyCode::Left
+            | KeyCode::Right
+            | KeyCode::Up
+            | KeyCode::Down => {
+                self.confirm = !self.confirm;
+            }
+            KeyCode::Char(' ') => {
+                self.activate(Control::QuickStartToggle);
+            }
+            KeyCode::Enter => {
+                self.activate(if self.confirm {
+                    Control::QuickStartClose
+                } else {
+                    Control::QuickStartAction
+                });
+            }
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.exit = true;
+                self.exit_confirm = false;
+            }
+            _ => {}
+        }
+    }
+
     fn activate(&mut self, control: Control) -> Option<KeyEvent> {
         if matches!(self.screen, Screen::Nodes)
             && !matches!(
@@ -1566,7 +1597,9 @@ impl App {
         let key = match control {
             Control::QuickStartToggle => {
                 self.connections.hide_quick_start = !self.connections.hide_quick_start;
-                let _ = self.connections.save(&self.state_dir);
+                if let Err(error) = self.connections.save(&self.state_dir) {
+                    self.error = error.to_string();
+                }
                 return None;
             }
             Control::QuickStartClose => {
@@ -2153,6 +2186,7 @@ pub fn run(mut request: Request) -> Result<()> {
     let mut offer = false;
     let mut self_confirmation: Option<mpsc::Receiver<Answer>> = None;
     let mut self_updating = false;
+    let mut qr_was_visible = false;
     loop {
         let selected = app.form.saved.as_ref().map(|p| {
             (
@@ -2309,6 +2343,10 @@ pub fn run(mut request: Request) -> Result<()> {
         if finished {
             receiver = None;
         }
+        if qr_was_visible != app.qr_visible {
+            terminal.clear()?;
+            qr_was_visible = app.qr_visible;
+        }
         terminal.draw(|frame| app.hits = draw(frame, &app))?;
         if !event::poll(Duration::from_millis(100))? {
             continue;
@@ -2322,6 +2360,11 @@ pub fn run(mut request: Request) -> Result<()> {
             input => input,
         };
         match input {
+            TermEvent::Resize(_, _) => {
+                // Image protocols draw outside ratatui's cell diff. Invalidate
+                // both buffers so resizing repaints every cell around the QR.
+                terminal.clear()?;
+            }
             TermEvent::Paste(text) => {
                 if matches!(&app.prompt, Some((Prompt::Password { .. }, _))) {
                     if app.password.len() + text.len() <= 4096 {
@@ -2416,7 +2459,7 @@ pub fn run(mut request: Request) -> Result<()> {
                     continue;
                 }
                 match app.screen {
-                    Screen::QuickStart => {}
+                    Screen::QuickStart => app.quick_start_key(key),
                     Screen::Temporary => app.temporary_key(key),
                     Screen::Nodes => app.nodes_key(key),
                     Screen::NodeWizard => app.wizard_key(key),
@@ -3053,7 +3096,9 @@ fn draw(frame: &mut Frame, app: &App) -> Vec<Hit> {
         app.error.as_str()
     } else {
         match app.screen {
-            Screen::QuickStart => "Tab / arrows: select   Enter / click: action   Esc: close",
+            Screen::QuickStart => {
+                "Tab / arrows: select   Enter: action   Space: don't show again   Esc: close"
+            }
             Screen::NodeWizard => {
                 "Tab / arrows: select   Enter / click: continue   Esc: previous step   Ctrl+C: exit"
             }
@@ -4322,8 +4367,9 @@ fn draw_channel(
 }
 fn draw_quick_start(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
     let right = draw_navigation(frame, app, area, hits);
+    hits.clear();
     let sections = dialog(frame, right, " Welcome to Node Plane Workstation! ");
-    let text = "Quick start guide:\n1. Select \"New\" to add a connection profile.\n2. Choose \"Local\" or \"SSH\" to connect to your target server.\n3. Enter the required details and press Enter to save.\n4. Select your new profile and use \"Install Node Plane\" to set up the controller.\n\nPasswords and bot tokens are not saved on disk.";
+    let text = "Quick start guide:\n1. Create a connection profile with your VPS address, SSH port and user.\n2. Select \"Install Node Plane\" and enter your Telegram ID and BotFather token.\n3. Confirm the server fingerprint and enter the SSH password when requested.\n4. Open \"Nodes\" to add a VPN node, install its agent and protocols.\n\nPasswords and bot tokens are not saved on disk.";
     let layout = Layout::vertical([Constraint::Min(8), Constraint::Length(1)]).split(sections[0]);
     frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: false }), layout[0]);
     let checkbox_label = if app.connections.hide_quick_start {
@@ -4940,6 +4986,53 @@ fn draw_editor(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn quick_start_keyboard_opens_profile_and_escape_closes_guide() {
+        let mut app = test_profile_app();
+        let directory = tempfile::tempdir().unwrap();
+        app.state_dir = directory.path().into();
+        app.connections.save(&app.state_dir).unwrap();
+        app.screen = Screen::QuickStart;
+        app.confirm = true;
+        app.quick_start_key(KeyCode::Right.into());
+        assert!(!app.confirm);
+        app.quick_start_key(KeyCode::Enter.into());
+        assert!(app.editor.is_some());
+        app.screen = Screen::QuickStart;
+        app.quick_start_key(KeyCode::Esc.into());
+        assert!(matches!(app.screen, Screen::Form));
+        assert!(!app.exit);
+    }
+
+    #[test]
+    fn temporary_qr_survives_small_and_large_layouts_without_showing_uri() {
+        let mut app = test_profile_app();
+        app.screen = Screen::Temporary;
+        app.temporary.view = crate::temporary::View::Artifact;
+        app.temporary.card = Some(serde_json::json!({
+            "node_key":"lv1", "protocol":"awg", "status":"active"
+        }));
+        app.temporary.artifact = Some(serde_json::json!({"content":"vpn://SECRET"}));
+        let mut picker = ratatui_image::picker::Picker::halfblocks();
+        picker.set_protocol_type(ratatui_image::picker::ProtocolType::Sixel);
+        *app.qr.borrow_mut() =
+            Some(picker.new_resize_protocol(crate::temporary::qr_image("vpn://SECRET").unwrap()));
+        app.image_picker = Some(picker);
+        app.qr_visible = true;
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
+        for (width, height) in [(100, 30), (60, 18), (140, 45), (36, 12)] {
+            terminal.backend_mut().resize(width, height);
+            terminal.clear().unwrap();
+            terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+            assert!(!format!("{:?}", terminal.backend().buffer()).contains("vpn://SECRET"));
+            assert!(
+                app.hits
+                    .iter()
+                    .any(|hit| matches!(hit.control, Control::TemporaryCopy))
+            );
+        }
+    }
+
+    #[test]
     fn temporary_artifact_offers_copy_and_hides_qr_without_graphics() {
         let mut app = test_profile_app();
         app.screen = Screen::Temporary;
@@ -4950,6 +5043,7 @@ mod tests {
         app.temporary.artifact = Some(serde_json::json!({"content":"vpn://SECRET"}));
         let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
         terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+        assert!(!format!("{:?}", terminal.backend().buffer()).contains("SECRET"));
         assert!(
             app.temporary_controls()
                 .iter()

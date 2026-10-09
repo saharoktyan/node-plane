@@ -1,6 +1,5 @@
 import hashlib
 import importlib.util
-import io
 import json
 import os
 from pathlib import Path
@@ -19,7 +18,7 @@ spec.loader.exec_module(controller)
 
 
 class CargoDistReleaseTests(unittest.TestCase):
-    def test_global_build_packages_downloaded_linux_binary_and_complete_stack(self):
+    def test_global_build_packages_server_stack_without_legacy_workstation(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             for name in controller.REQUIRED:
@@ -40,13 +39,6 @@ class CargoDistReleaseTests(unittest.TestCase):
                 path = root / f'rust/{crate}/target/release/node-plane-{name}'
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(binary)
-            archive_path = root / 'target/distrib/node-plane-cli-x86_64-unknown-linux-gnu.tar.gz'
-            archive_path.parent.mkdir(parents=True)
-            with tarfile.open(archive_path, 'w:gz') as archive:
-                member = tarfile.TarInfo('node-plane-cli-x86_64-unknown-linux-gnu/node-plane')
-                member.size = len(binary)
-                archive.addfile(member, io.BytesIO(binary))
-
             commands = root / 'commands'
             commands.mkdir()
             for name, content in {
@@ -70,9 +62,7 @@ class CargoDistReleaseTests(unittest.TestCase):
             for line in (out / 'SHA256SUMS.txt').read_text().splitlines():
                 digest, name = line.split()
                 self.assertEqual(hashlib.sha256((out / name).read_bytes()).hexdigest(), digest)
-            with tarfile.open(out / 'node-plane-cli-linux-amd64.tar.gz') as archive:
-                self.assertEqual(archive.getnames(), ['node-plane-cli-linux-amd64'])
-                self.assertEqual(archive.extractfile('node-plane-cli-linux-amd64').read(), binary)
+            self.assertFalse((out / 'node-plane-cli-linux-amd64.tar.gz').exists())
             _, payload = controller.verify(out / 'node-plane-controller.tar.gz', 'v0.4.3-alpha.59', 'a' * 40)
             self.assertNotIn('.env', payload)
             self.assertNotIn('scripts/build_release_stack.sh', payload)

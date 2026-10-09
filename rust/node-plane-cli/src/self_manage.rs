@@ -28,8 +28,39 @@ pub struct Release {
     pub tag_name: String,
     draft: bool,
     prerelease: bool,
+    #[serde(default)]
+    assets: Vec<Asset>,
     #[serde(skip)]
     pub dist_managed: bool,
+}
+
+#[derive(Clone, Deserialize)]
+struct Asset {
+    name: String,
+}
+
+fn platform_archive() -> String {
+    let target = if cfg!(windows) {
+        "x86_64-pc-windows-msvc.zip"
+    } else if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
+        "aarch64-apple-darwin.tar.gz"
+    } else if cfg!(target_os = "macos") {
+        "x86_64-apple-darwin.tar.gz"
+    } else {
+        "x86_64-unknown-linux-gnu.tar.gz"
+    };
+    format!("node-plane-cli-{target}")
+}
+
+fn has_platform_artifacts(release: &Release) -> bool {
+    let archive = platform_archive();
+    [
+        archive.clone(),
+        format!("{archive}.sha256"),
+        "dist-manifest.json".into(),
+    ]
+    .iter()
+    .all(|name| release.assets.iter().any(|asset| &asset.name == name))
 }
 
 fn client() -> Result<Client> {
@@ -61,7 +92,10 @@ pub fn discover() -> Result<Option<Release>> {
     Ok(releases
         .into_iter()
         .filter_map(|mut release| {
-            if release.draft || (!alpha && release.prerelease) || !newer(&release.tag_name, current)
+            if release.draft
+                || (!alpha && release.prerelease)
+                || !newer(&release.tag_name, current)
+                || !has_platform_artifacts(&release)
             {
                 return None;
             }
@@ -213,5 +247,29 @@ mod tests {
         assert!(!newer("v0.4.3-alpha.9", "0.4.3-alpha.49"));
         assert!(newer("v0.4.3", "0.4.3-alpha.49"));
         assert!(!newer("garbage", "0.4.3"));
+    }
+
+    #[test]
+    fn discovery_requires_complete_modern_artifacts_for_this_platform() {
+        let mut release: Release = serde_json::from_value(serde_json::json!({
+            "tag_name": "v0.4.3-alpha.99", "draft": false, "prerelease": true,
+            "assets": [{"name": "node-plane-cli-linux-amd64.tar.gz"}]
+        }))
+        .unwrap();
+        assert!(!has_platform_artifacts(&release));
+        let archive = platform_archive();
+        release.assets = vec![
+            Asset {
+                name: archive.clone(),
+            },
+            Asset {
+                name: format!("{archive}.sha256"),
+            },
+        ];
+        assert!(!has_platform_artifacts(&release));
+        release.assets.push(Asset {
+            name: "dist-manifest.json".into(),
+        });
+        assert!(has_platform_artifacts(&release));
     }
 }

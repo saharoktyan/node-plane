@@ -70,42 +70,5 @@ if download "$base/node-plane-cli-installer.sh" "$tmp_dir/installer.sh"; then
   exit 0
 fi
 
-# Older alpha releases used the original Linux-only archive and install receipt.
-[[ "$(uname -s)" == Linux && "$(uname -m)" == x86_64 ]] || {
-  echo 'This release has no macOS installer. Choose a newer release.' >&2
-  exit 1
-}
-for command in tar sha256sum; do
-  command -v "$command" >/dev/null || { echo "Required command missing: $command" >&2; exit 1; }
-done
-asset='node-plane-cli-linux-amd64.tar.gz'
-member='node-plane-cli-linux-amd64'
-echo "[2/4] Downloading workstation $tag…"
-download "$base/$asset" "$tmp_dir/$asset"
-download "$base/SHA256SUMS.txt" "$tmp_dir/SHA256SUMS.txt"
-echo '[3/4] Verifying the download…'
-expected=
-while read -r checksum filename extra; do
-  if [[ "${filename#\*}" == "$asset" ]]; then
-    [[ -z "$expected" && "$checksum" =~ ^[[:xdigit:]]{64}$ && -z "${extra:-}" ]] || {
-      echo 'Invalid or duplicate workstation checksum.' >&2; exit 1;
-    }
-    expected="$checksum"
-  fi
-done < "$tmp_dir/SHA256SUMS.txt"
-[[ -n "$expected" ]] || { echo 'Workstation checksum missing.' >&2; exit 1; }
-printf '%s  %s\n' "$expected" "$tmp_dir/$asset" | sha256sum --check --status || {
-  echo 'Workstation checksum mismatch; nothing was installed.' >&2; exit 1;
-}
-[[ "$(tar -tzf "$tmp_dir/$asset")" == "$member" ]] || {
-  echo 'Unexpected workstation archive contents.' >&2; exit 1;
-}
-# Stream the only expected member; never extract archive paths onto the filesystem.
-tar -xOzf "$tmp_dir/$asset" "$member" > "$tmp_dir/$member"
-chmod 700 "$tmp_dir/$member"
-[[ "$("$tmp_dir/$member" --version)" == "node-plane ${tag#v}" ]] || {
-  echo 'Workstation binary version does not match the release.' >&2; exit 1;
-}
-echo '[4/4] Installing the workstation…'
-"$tmp_dir/$member" self install
-echo 'Open a new terminal, then run: node-plane'
+echo 'This release has no cargo-dist Workstation installer. Choose a newer release.' >&2
+exit 1

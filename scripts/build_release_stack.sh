@@ -41,24 +41,11 @@ cargo build --release --manifest-path rust/node-agent/Cargo.toml
 DRIVER_NAME="node-plane-driver-linux-amd64"
 AGENT_NAME="node-plane-agent-linux-amd64"
 CONTROLLER_NAME="node-plane-controller.tar.gz"
-WORKSTATION_NAME="node-plane-cli-linux-amd64"
-WORKSTATION_ARCHIVE="$ROOT_DIR/target/distrib/node-plane-cli-x86_64-unknown-linux-gnu.tar.gz"
-[[ -f "$WORKSTATION_ARCHIVE" ]] || {
-  echo "Build/download cargo-dist local artifacts before packaging the stack." >&2
-  exit 1
-}
-
 cp rust/node-driver/target/release/node-plane-driver "$TMP_DIR/$DRIVER_NAME"
 cp rust/node-agent/target/release/node-plane-agent "$TMP_DIR/$AGENT_NAME"
 chmod 0755 "$TMP_DIR/$DRIVER_NAME" "$TMP_DIR/$AGENT_NAME"
 
-# Keep the old Linux asset through the transition so installed alpha copies
-# can discover this release using their existing updater.
-tar -xOzf "$WORKSTATION_ARCHIVE" node-plane-cli-x86_64-unknown-linux-gnu/node-plane \
-  > "$TMP_DIR/$WORKSTATION_NAME"
-chmod 0755 "$TMP_DIR/$WORKSTATION_NAME"
-
-for binary in "$TMP_DIR/$DRIVER_NAME" "$TMP_DIR/$AGENT_NAME" "$TMP_DIR/$WORKSTATION_NAME"; do
+for binary in "$TMP_DIR/$DRIVER_NAME" "$TMP_DIR/$AGENT_NAME"; do
   readelf -h "$binary" >/dev/null
   required="$(readelf --version-info "$binary" | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sed 's/^GLIBC_//' | sort -Vu | tail -n 1 || true)"
   if [[ -n "$required" && "$(printf '%s\n%s\n' 2.36 "$required" | sort -V | tail -n 1)" != 2.36 ]]; then
@@ -69,13 +56,12 @@ done
 
 tar -C "$TMP_DIR" -czf "$OUT_DIR/$DRIVER_NAME.tar.gz" "$DRIVER_NAME"
 tar -C "$TMP_DIR" -czf "$OUT_DIR/$AGENT_NAME.tar.gz" "$AGENT_NAME"
-tar -C "$TMP_DIR" -czf "$OUT_DIR/$WORKSTATION_NAME.tar.gz" "$WORKSTATION_NAME"
 python3 scripts/controller_release.py build --root "$ROOT_DIR" \
   --archive "$OUT_DIR/$CONTROLLER_NAME" --ref "$TAG" --commit "$COMMIT"
 
 (
   cd "$OUT_DIR"
-  sha256sum "$CONTROLLER_NAME" "$DRIVER_NAME.tar.gz" "$AGENT_NAME.tar.gz" "$WORKSTATION_NAME.tar.gz" > SHA256SUMS.txt
+  sha256sum "$CONTROLLER_NAME" "$DRIVER_NAME.tar.gz" "$AGENT_NAME.tar.gz" > SHA256SUMS.txt
 )
 
 cat > "$OUT_DIR/RELEASE_METADATA.txt" <<EOF

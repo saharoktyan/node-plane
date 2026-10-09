@@ -118,7 +118,8 @@ async def start_cmd(message: Message, bot: Bot, backend: BackendClient,
         if not account.get('locale_selected'):
             await show_language_picker(message.chat.id, message.from_user.id, bot, backend, state)
         else:
-            await show_home(message.chat.id, message.from_user.id, bot, backend, state)
+            await show_home(message.chat.id, message.from_user.id, bot, backend, state,
+                            quick_start=True)
     except BackendError:
         await render(bot, message.chat.id,
             Screen(tr(message.from_user.language_code, 'home.title'),
@@ -222,7 +223,8 @@ async def home_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
 
 async def show_home(chat_id: int, user_id: int, bot: Bot, backend: BackendClient,
                     state: FSMContext, message_id: int | None = None, *,
-                    account: dict | None = None, cached_navigation: bool = False) -> None:
+                    account: dict | None = None, cached_navigation: bool = False,
+                    quick_start: bool = False) -> None:
     data = await state.get_data()
     locale = normalize_locale(data.get('locale'))
     presentation = data.get('home_presentation')
@@ -264,7 +266,7 @@ async def show_home(chat_id: int, user_id: int, bot: Bot, backend: BackendClient
         rows.append([button(user_id, tr(locale, 'home.get_config'), 'profiles').model_copy(update={'style': 'primary'})])
         rows.append([button(user_id, tr(locale, 'home.account'), 'account_info')])
         lines = (tr(locale, 'home.choose'),)
-        if account['role'] == 'admin':
+        if quick_start and account['role'] == 'admin':
             try:
                 async with asyncio.timeout(3.0):
                     nodes_page = await backend.admin_nodes(user_id, limit=1)
@@ -843,7 +845,8 @@ async def user_action_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
                 async with asyncio.timeout(ONBOARDING_TIMEOUT):
                     account = await backend.set_locale(user_id, action.args[0])
                     await state.update_data(locale=action.args[0])
-                    await show_home(chat_id, user_id, bot, backend, state, message_id, account=account)
+                    await show_home(chat_id, user_id, bot, backend, state, message_id,
+                                    account=account, quick_start=True)
             except TimeoutError:
                 raise BackendError('backend_unavailable', 503) from None
             finally:

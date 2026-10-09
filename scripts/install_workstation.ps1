@@ -15,7 +15,10 @@ if ($Tag -and $Tag -notmatch '^v\d+\.\d+\.\d+(-alpha\.\d+)?$') {
 }
 if (-not $Tag) {
     Write-Host '[1/3] Finding the latest Workstation release...'
-    $releases = @(Invoke-RestMethod -Uri "$repo/releases?per_page=100" -Headers $headers)
+    # Windows PowerShell 5.1 can emit the entire REST array as one pipeline
+    # object. Parse the response explicitly before iterating releases.
+    $response = Invoke-WebRequest -UseBasicParsing -Uri "$repo/releases?per_page=100" -Headers $headers
+    $releases = ConvertFrom-Json -InputObject $response.Content
     $release = $null
     foreach ($r in $releases) {
         if ($r.draft) { continue }
