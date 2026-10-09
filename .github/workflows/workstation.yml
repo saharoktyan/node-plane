@@ -66,6 +66,12 @@ jobs:
           echo "$(brew --prefix coreutils)/libexec/gnubin" >> "$GITHUB_PATH"
           echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
       - name: Tests
+        if: runner.os != 'macOS'
         run: cargo +1.89.0 test --locked
+      - name: macOS tests
+        if: runner.os == 'macOS'
+        # SSH fixtures fork shell processes; run serially to prevent a fixture
+        # child from retaining another test's advisory installation lock.
+        run: cargo +1.89.0 test --locked -- --test-threads=1
       - name: Command smoke test
         run: cargo +1.89.0 run --locked -- --help
