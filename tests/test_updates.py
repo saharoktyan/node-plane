@@ -63,6 +63,15 @@ class UpdatesTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 self.app_settings.set_updates_check_interval_minutes(invalid)
 
+    def test_display_reads_settings_in_one_connection_without_host_commands(self):
+        self.app_settings.get_update_state()  # Warm the schema check.
+        with patch.object(self.app_settings._db, 'connect', wraps=self.app_settings._db.connect) as connect:
+            with patch.object(self.updates, 'refresh_update_run_state') as refresh:
+                overview = self.updates.get_updates_overview(refresh_run=False)
+        self.assertEqual(connect.call_count, 1)
+        refresh.assert_not_called()
+        self.assertEqual(overview['auto_check_interval_minutes'], 60)
+
     def test_changelog_is_optional_bounded_and_uses_only_release_tags(self):
         import json
         from unittest.mock import MagicMock

@@ -20,10 +20,11 @@ def same_commit(actual, desired):
 
 
 class UpdateService:
-    def __init__(self, db, driver=None, updater=None, runner=None):
+    def __init__(self, db, driver=None, updater=None, runner=None, observation_cache=None):
         self.db, self.driver = db, driver
         self._updater = updater
         self.runner = runner
+        self.observation_cache = observation_cache if observation_cache is not None else {}
 
     def _verify_commit(self, read, field, expected):
         """Allow restarted services to become reachable; never replay installation."""
@@ -98,7 +99,7 @@ class UpdateService:
                 (key, json.dumps(dismissed)))
         return {'dismissed_job_id': identity}
 
-    def rollout_overview(self, actor):
+    def rollout_overview(self, actor, *, use_cache=False):
         require_permission(actor, 'settings.manage')
         from config import APP_COMMIT, APP_SEMVER
         with self.db.connect() as conn:
@@ -107,26 +108,41 @@ class UpdateService:
                 WHERE NOT EXISTS (SELECT 1 FROM backend_node_drains d WHERE d.node_key=n.key)
                 ORDER BY n.region,n.title,n.key''').fetchall()
             latest = conn.execute("SELECT id FROM backend_update_jobs WHERE kind IN ('agents', 'runtimes') ORDER BY created_at DESC LIMIT 1").fetchone()
-        try:
-            binary = self.driver.binary_info()
-            driver_status = 'current' if same_commit(binary.get('commit'), APP_COMMIT) else 'required'
-        except Exception as exc:
-            import grpc
-            reachable_old = isinstance(exc, grpc.RpcError) and exc.code() in {
-                grpc.StatusCode.UNIMPLEMENTED, grpc.StatusCode.FAILED_PRECONDITION}
-            binary, driver_status = {}, 'required' if reachable_old else 'unknown'
-        items = []
-        for node in nodes:
-            item = dict(node)
+        signature = (APP_COMMIT, tuple(tuple(dict(n).items()) for n in nodes))
+        cached = self.observation_cache.get('rollout') if use_cache else None
+        cache_valid = cached and cached['signature'] == signature and time.monotonic() - cached['time'] < 3
+        if cache_valid:
+            # Permissions, topology, and job state are always read afresh.
+            with self.db.connect() as conn:
+                pending = any(conn.execute(f"SELECT 1 FROM {table} WHERE status IN ('awaiting_executor','running') LIMIT 1").fetchone()
+                    for table in ('backend_update_jobs', 'backend_agent_rollouts', 'backend_node_jobs', 'backend_node_bootstraps'))
+            cache_valid = not pending
+        if cache_valid:
+            binary, driver_status, items = cached['binary'], cached['driver_status'], cached['items']
+        else:
             try:
-                facts = self.driver.inspect_node_services(node['key'])
-                item.update(agent_status='current' if same_commit(facts.get('agent_commit'), APP_COMMIT) else 'required',
-                    agent_commit=facts.get('agent_commit'), agent_version=facts.get('agent_version'),
-                    runtime_status='current' if same_commit(facts.get('runtime_commit'), APP_COMMIT) else 'required',
-                    runtime_commit=facts.get('runtime_commit'), runtime_version=facts.get('runtime_version'))
-            except Exception:
-                item.update(agent_status='unknown', runtime_status='unknown')
-            items.append(item)
+                binary = self.driver.binary_info()
+                driver_status = 'current' if same_commit(binary.get('commit'), APP_COMMIT) else 'required'
+            except Exception as exc:
+                import grpc
+                reachable_old = isinstance(exc, grpc.RpcError) and exc.code() in {
+                    grpc.StatusCode.UNIMPLEMENTED, grpc.StatusCode.FAILED_PRECONDITION}
+                binary, driver_status = {}, 'required' if reachable_old else 'unknown'
+            items = []
+            for node in nodes:
+                item = dict(node)
+                try:
+                    facts = self.driver.inspect_node_services(node['key'])
+                    item.update(agent_status='current' if same_commit(facts.get('agent_commit'), APP_COMMIT) else 'required',
+                        agent_commit=facts.get('agent_commit'), agent_version=facts.get('agent_version'),
+                        runtime_status='current' if same_commit(facts.get('runtime_commit'), APP_COMMIT) else 'required',
+                        runtime_commit=facts.get('runtime_commit'), runtime_version=facts.get('runtime_version'))
+                except Exception:
+                    item.update(agent_status='unknown', runtime_status='unknown')
+                items.append(item)
+            if use_cache:
+                self.observation_cache['rollout'] = {'signature': signature, 'time': time.monotonic(),
+                    'binary': binary, 'driver_status': driver_status, 'items': items}
         active = self.get(actor, latest['id']) if latest else None
         return {'desired_version': APP_SEMVER, 'desired_commit': APP_COMMIT,
                 'driver_status': driver_status, 'driver': binary, 'nodes': items,

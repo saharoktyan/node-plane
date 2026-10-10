@@ -47,7 +47,8 @@ async def overview(query, bot, backend, state):
             button(tr(lang, "backups.create"), "backup_create", style='primary'),
             button(tr(lang, "backups.restore"), "backup_list:0"),
         ],
-        [button(tr(lang, "backups.settings"), "backup_settings")],
+        [button(tr(lang, "backups.settings"), "backup_settings",
+            style='primary' if value["enabled"] else None)],
     ]
     if value.get("last_job"):
         lines.append(

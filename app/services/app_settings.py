@@ -137,24 +137,37 @@ def record_update_check(result: dict[str, str]) -> None:
     _meta_set(_UPDATES_LAST_ERROR_KEY, result.get("message", ""))
 
 def get_update_state() -> dict[str, str]:
-    return {
-        "branch": get_updates_branch(),
-        "dev_track": get_updates_dev_track(),
-        "last_checked_at": _meta_get(_UPDATES_LAST_CHECKED_AT_KEY, ""),
-        "last_status": _meta_get(_UPDATES_LAST_STATUS_KEY, "never"),
-        "update_available": _meta_get(_UPDATES_UPDATE_AVAILABLE_KEY, "0"),
-        "local_version": _meta_get(_UPDATES_LOCAL_VERSION_KEY, ""),
-        "remote_version": _meta_get(_UPDATES_REMOTE_VERSION_KEY, ""),
-        "local_label": _meta_get(_UPDATES_LOCAL_LABEL_KEY, ""),
-        "remote_label": _meta_get(_UPDATES_REMOTE_LABEL_KEY, ""),
-        "upstream_ref": _meta_get(_UPDATES_UPSTREAM_REF_KEY, ""),
-        "last_error": _meta_get(_UPDATES_LAST_ERROR_KEY, ""),
-        "last_run_started_at": _meta_get(_UPDATES_LAST_RUN_STARTED_AT_KEY, ""),
-        "last_run_finished_at": _meta_get(_UPDATES_LAST_RUN_FINISHED_AT_KEY, ""),
-        "last_run_status": _meta_get(_UPDATES_LAST_RUN_STATUS_KEY, "never"),
-        "last_run_log_tail": _meta_get(_UPDATES_LAST_RUN_LOG_TAIL_KEY, ""),
-        "last_run_unit": _meta_get(_UPDATES_LAST_RUN_UNIT_KEY, ""),
+    # One snapshot instead of a separate connection for every metadata field.
+    fields = {
+        'branch': (_UPDATES_BRANCH_KEY, UPDATE_BRANCH or 'main'),
+        'dev_track': (_UPDATES_DEV_TRACK_KEY, 'tag'),
+        'last_checked_at': (_UPDATES_LAST_CHECKED_AT_KEY, ''),
+        'last_status': (_UPDATES_LAST_STATUS_KEY, 'never'),
+        'update_available': (_UPDATES_UPDATE_AVAILABLE_KEY, '0'),
+        'local_version': (_UPDATES_LOCAL_VERSION_KEY, ''),
+        'remote_version': (_UPDATES_REMOTE_VERSION_KEY, ''),
+        'local_label': (_UPDATES_LOCAL_LABEL_KEY, ''),
+        'remote_label': (_UPDATES_REMOTE_LABEL_KEY, ''),
+        'upstream_ref': (_UPDATES_UPSTREAM_REF_KEY, ''),
+        'last_error': (_UPDATES_LAST_ERROR_KEY, ''),
+        'last_run_started_at': (_UPDATES_LAST_RUN_STARTED_AT_KEY, ''),
+        'last_run_finished_at': (_UPDATES_LAST_RUN_FINISHED_AT_KEY, ''),
+        'last_run_status': (_UPDATES_LAST_RUN_STATUS_KEY, 'never'),
+        'last_run_log_tail': (_UPDATES_LAST_RUN_LOG_TAIL_KEY, ''),
+        'last_run_unit': (_UPDATES_LAST_RUN_UNIT_KEY, ''),
+        'auto_check_enabled': (_UPDATES_AUTO_CHECK_KEY, '0'),
+        'auto_check_interval_minutes': (_UPDATES_CHECK_INTERVAL_KEY, '60'),
     }
+    _check_runtime_schema()
+    with _db.connect() as conn:
+        keys = [key for key, _ in fields.values()]
+        rows = conn.execute('SELECT key,value FROM schema_meta WHERE key IN (' +
+            ','.join('?' for _ in keys) + ')', tuple(keys)).fetchall()
+    values = {row['key']: str(row['value']).strip() for row in rows if row['value'] is not None}
+    state = {field: values.get(key, default) for field, (key, default) in fields.items()}
+    state['branch'] = state['branch'].lower() if state['branch'].lower() in {'main', 'dev'} else 'main'
+    state['dev_track'] = state['dev_track'].lower() if state['dev_track'].lower() in {'tag', 'head'} else 'tag'
+    return state
 
 def record_update_run_started(started_at: str, unit_name: str) -> None:
     _meta_set(_UPDATES_LAST_RUN_STARTED_AT_KEY, started_at)

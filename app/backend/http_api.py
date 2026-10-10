@@ -751,7 +751,8 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     from .node_bootstrap import NodeBootstrapService
     node_bootstraps = NodeBootstrapService(db)
     lifecycle = NodeLifecycle(db)
-    update_service = UpdateService(db, node_driver)
+    update_observations = {}
+    update_service = UpdateService(db, node_driver, observation_cache=update_observations)
     backup_service = BackupService(db)
     announcements = AnnouncementService(db)
     alerts = AlertService(db)
@@ -765,7 +766,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
         else:
             from .driver_transport import GrpcIntentDriver, local_channel
             with local_channel('127.0.0.1:50051') as channel:
-                yield UpdateService(db, GrpcIntentDriver(channel, timeout=5))
+                yield UpdateService(db, GrpcIntentDriver(channel, timeout=5), observation_cache=update_observations)
 
     @contextmanager
     def maintenance_lock(current):
@@ -1674,7 +1675,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     def get_updates(current=Depends(actor)):
         require_permission(current, 'settings.manage')
         import app.services.updates as updater
-        return {**updater.get_updates_overview(), 'latest_job': update_service.latest(current),
+        return {**updater.get_updates_overview(refresh_run=False), 'latest_job': update_service.latest(current),
                 'dismissed_job_ids': update_service.dismissed_results(current)}
 
     @app.patch('/api/v1/system/updates/preferences')
@@ -1692,7 +1693,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
             app_settings.set_updates_auto_check_enabled(values['auto_check_enabled'])
         if 'auto_check_interval_minutes' in values:
             app_settings.set_updates_check_interval_minutes(values['auto_check_interval_minutes'])
-        return updates.get_updates_overview()
+        return updates.get_updates_overview(refresh_run=False)
 
     @app.post('/api/v1/system/updates/check')
     def check_updates(current=Depends(actor)):
@@ -1713,7 +1714,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     @app.get('/api/v1/system/updates/rollout')
     def update_rollout(current=Depends(actor)):
         with live_updates() as service:
-            return service.rollout_overview(current)
+            return service.rollout_overview(current, use_cache=True)
 
     @app.get('/api/v1/system/recovery/history')
     def recovery_history(offset: int = Query(default=0, ge=0, le=1000000), current=Depends(actor)):

@@ -367,9 +367,10 @@ async def show_updates(query: CallbackQuery, bot: Bot, backend: BackendClient,
     await show_overview(query, bot, backend, state)
 
 
-async def show_auto_check(query, bot, backend, state):
+async def show_auto_check(query, bot, backend, state, *, overview=None):
     locale = await _locale(state)
-    overview = await backend.updates_overview(query.from_user.id)
+    if overview is None:
+        overview = await backend.updates_overview(query.from_user.id)
     enabled = overview.get('auto_check_enabled', False)
     interval = overview.get('auto_check_interval_minutes', 60)
     def choice(label, action, selected):
@@ -444,12 +445,12 @@ async def update_action_cb(query: CallbackQuery, callback_data: UpdateActionCall
         elif action == 'auto_check':
             await show_auto_check(query, bot, backend, state)
         elif action in {'auto_enable', 'auto_disable'}:
-            await backend.update_preferences(query.from_user.id, {'auto_check_enabled': action == 'auto_enable'})
-            await show_auto_check(query, bot, backend, state)
+            overview = await backend.update_preferences(query.from_user.id, {'auto_check_enabled': action == 'auto_enable'})
+            await show_auto_check(query, bot, backend, state, overview=overview)
         elif action.startswith('auto_interval_') and action.removeprefix('auto_interval_') in {'15', '60', '360', '1440'}:
-            await backend.update_preferences(query.from_user.id,
+            overview = await backend.update_preferences(query.from_user.id,
                 {'auto_check_interval_minutes': int(action.removeprefix('auto_interval_'))})
-            await show_auto_check(query, bot, backend, state)
+            await show_auto_check(query, bot, backend, state, overview=overview)
         elif action == 'branch_menu':
             await show_update_branches(query, bot, backend, state)
         elif action in {'branch_main', 'branch_dev'}:
