@@ -1,6 +1,8 @@
 import subprocess
 import unittest
 import hashlib
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from backend.removal_verifier import RemovalVerifier, RemovalVerificationError
 
@@ -14,7 +16,7 @@ class RemovalVerifierTests(unittest.TestCase):
         calls = []
         def runner(command, **kwargs):
             calls.append((command, kwargs))
-            marker = ('NODE_PLANE_HOST_ID:' if 'agent.toml' in kwargs['input']
+            marker = ('NODE_PLANE_HOST_ID:' if 'NODE_PLANE_HOST_ID:' in kwargs['input']
                       else 'NODE_PLANE_REMOVED_OK:')
             return subprocess.CompletedProcess(command, 0, marker + self.MACHINE_ID + '\n', '')
         verifier = RemovalVerifier(ssh_target='root@node.example', ssh_port=2222,
@@ -41,6 +43,33 @@ class RemovalVerifierTests(unittest.TestCase):
         self.assertEqual(verifier.verify('node', self.FINGERPRINT)['target'], 'local')
         with self.assertRaisesRegex(ValueError, 'public key is required'):
             RemovalVerifier(ssh_target='root@node.example').script()
+
+    def test_remaining_progress_does_not_hide_real_agent_artifacts(self):
+        script = RemovalVerifier(local=True).script()
+        # Execute the real artifact checks against an isolated host directory.
+        checks = script[script.index('check_absent()'):script.index('check_absent /opt/node-plane-runtime')]
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = root / 'etc/node-plane'
+            (config / 'operation-progress').mkdir(parents=True)
+            (config / 'operation-progress/task.json').write_text('{}')
+            checks = checks.replace('/etc/', str(root / 'etc') + '/').replace('/usr/', str(root / 'usr') + '/')
+            def run():
+                return subprocess.run(['/bin/sh', '-c', checks], capture_output=True, text=True)
+            self.assertEqual(run().returncode, 0)
+            for name, label in (('agent.toml', 'agent_config'), ('node.env', 'agent_environment'),
+                                ('tls/server.key', 'agent_private_key'),
+                                ('profile-intents.sqlite3-wal', 'agent_journal')):
+                path = config / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text('remaining')
+                result = run()
+                self.assertEqual(result.returncode, 22)
+                self.assertIn('artifact_present:' + label, result.stderr)
+                path.unlink()
+            link = config / 'agent.toml'
+            link.symlink_to(root / 'missing')
+            self.assertEqual(run().returncode, 22)
 
     def test_unavailable_or_failed_host_check_never_succeeds(self):
         def failed(command, **kwargs):

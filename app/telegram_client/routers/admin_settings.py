@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+from uuid import uuid4
 from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramAPIError
 from aiogram.filters.callback_data import CallbackData
@@ -426,8 +427,24 @@ async def update_action_cb(query: CallbackQuery, callback_data: UpdateActionCall
         elif action == 'branch_menu':
             await show_update_branches(query, bot, backend, state)
         elif action in {'branch_main', 'branch_dev'}:
-            await backend.update_preferences(query.from_user.id,
-                {'branch': action.removeprefix('branch_')})
+            branch = action.removeprefix('branch_')
+            overview = await backend.updates_overview(query.from_user.id)
+            if overview.get('branch') == branch:
+                return await show_update_branches(query, bot, backend, state)
+            nonce = uuid4().hex[:8]
+            await state.update_data(update_branch_draft={'branch': branch, 'nonce': nonce})
+            await render(bot, query.message.chat.id, Screen(tr(locale, 'updates.branch_title'),
+                (('stable' if branch == 'main' else branch), tr(locale, 'updates.rich.branch_warning')),
+                embedded_buttons=True, navigation=True), [[
+                    InlineKeyboardButton(text=tr(locale, 'back'), callback_data='upd_act:branch_menu'),
+                    InlineKeyboardButton(text=tr(locale, 'node_tools.confirm'),
+                        callback_data=UpdateActionCallback(action='branch_do_' + nonce).pack(), style='danger')]],
+                state, query.message.message_id)
+        elif action.startswith('branch_do_'):
+            draft = (await state.get_data()).get('update_branch_draft')
+            if draft and draft['nonce'] == action.removeprefix('branch_do_'):
+                await backend.update_preferences(query.from_user.id, {'branch': draft['branch']})
+                await state.update_data(update_branch_draft=None)
             await show_update_branches(query, bot, backend, state)
         elif action in {'track_tag', 'track_head'}:
             await backend.update_preferences(query.from_user.id, {'dev_track': action.removeprefix('track_')})

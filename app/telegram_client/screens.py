@@ -119,17 +119,22 @@ class Section:
     is_open: bool = False
     tables: tuple[Table, ...] = ()
     heading_rows: tuple[tuple[InlineKeyboardButton, ...], ...] = ()
+    inline_rows: tuple[tuple[str | InlineKeyboardButton, ...], ...] = ()
 
     def rich(self, depth=2):
         # iOS cannot activate controls inside Details, even in nested sections.
         # Expand the whole interactive branch so every control stays accessible.
         def interactive(section):
-            return bool(section.rows or section.heading_rows or any(t.row_callbacks for t in section.tables) or
+            return bool(section.rows or section.heading_rows or section.inline_rows or any(t.row_callbacks for t in section.tables) or
                         any(interactive(child) for child in section.sections))
         collapsed = self.collapsed and not interactive(self)
         size = self.heading_size or min(depth, 6)
         blocks = [InputRichBlockParagraph(text=line) for line in self.lines if line]
         blocks.extend(table.rich() for table in self.tables)
+        blocks.extend(InputRichBlockParagraph(text=[
+            RichTextButton(button=RichMessageButton(text=item.text, callback_data=item.callback_data,
+                url=item.url, style='link')) if isinstance(item, InlineKeyboardButton) else item
+            for item in row]) for row in self.inline_rows)
         for section in self.sections:
             blocks.extend(section.rich(depth=size if collapsed or not self.title else size + 1))
         blocks.extend(rich_buttons(self.rows))
@@ -223,6 +228,8 @@ class Screen:
         def append_sections(sections):
             for section in sections:
                 lines.extend((section.title, *section.lines))
+                lines.extend(''.join(item.text if isinstance(item, InlineKeyboardButton) else item
+                    for item in row) for row in section.inline_rows)
                 for table in section.tables:
                     lines.extend(table.plain())
                 append_sections(section.sections)
@@ -237,6 +244,10 @@ class Screen:
         def section_rows(sections):
             for section in sections:
                 yield from (list(row) for row in section.heading_rows)
+                for row in section.inline_rows:
+                    buttons = [item for item in row if isinstance(item, InlineKeyboardButton)]
+                    if buttons:
+                        yield buttons
                 for table in section.tables:
                     for row, callback in zip(table.rows, table.row_callbacks):
                         yield [InlineKeyboardButton(text=row[0], callback_data=callback)]

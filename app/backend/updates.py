@@ -48,6 +48,7 @@ class UpdateService:
 
     def initialize_schema(self):
         with self.db.transaction() as conn:
+            conn.execute('CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
             conn.execute('''CREATE TABLE IF NOT EXISTS backend_controller_update_gate (
                 id INTEGER PRIMARY KEY, job_id TEXT NOT NULL)''')
             conn.execute('''CREATE TABLE IF NOT EXISTS backend_update_jobs (
@@ -73,6 +74,29 @@ class UpdateService:
         with self.db.connect() as conn:
             row = conn.execute('SELECT id FROM backend_update_jobs ORDER BY created_at DESC LIMIT 1').fetchone()
         return self.get(actor, row['id']) if row else None
+
+    def dismissed_results(self, actor):
+        require_permission(actor, 'settings.manage')
+        with self.db.connect() as conn:
+            row = conn.execute('SELECT value FROM schema_meta WHERE key=?',
+                ('updates.dismissed.' + actor.account.id,)).fetchone()
+        return json.loads(row['value']) if row else []
+
+    def dismiss_result(self, actor, identity):
+        require_permission(actor, 'settings.manage')
+        job = self.get(actor, identity)
+        if job['status'] in {'awaiting_executor', 'running'}:
+            raise AccessDenied('update_result_active', 409)
+        key = 'updates.dismissed.' + actor.account.id
+        with self.db.transaction() as conn:
+            row = conn.execute('SELECT value FROM schema_meta WHERE key=?', (key,)).fetchone()
+            dismissed = json.loads(row['value']) if row else []
+            if identity not in dismissed:
+                dismissed.append(identity)
+            conn.execute('INSERT INTO schema_meta(key,value) VALUES (?,?) '
+                'ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+                (key, json.dumps(dismissed)))
+        return {'dismissed_job_id': identity}
 
     def rollout_overview(self, actor):
         require_permission(actor, 'settings.manage')
@@ -108,7 +132,7 @@ class UpdateService:
                 'driver_status': driver_status, 'driver': binary, 'nodes': items,
                 'agents_required': driver_status == 'required' or any(i['agent_status'] == 'required' for i in items),
                 'runtimes_required': any(i['runtime_status'] == 'required' for i in items),
-                'latest_job': active}
+                'latest_job': active, 'dismissed_job_ids': self.dismissed_results(actor)}
 
     def _previous(self, actor, key, kind, encoded):
         require_permission(actor, 'settings.manage')

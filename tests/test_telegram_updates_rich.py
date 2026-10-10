@@ -100,13 +100,12 @@ class UpdatesRichTests(IsolatedAsyncioTestCase):
             self.assertTrue(screen.sections[2].collapsed)
             self.assertEqual(len(screen.sections[2].sections[0].sections), 10)
             self.assertTrue(all(not section.collapsed for section in screen.sections[3:]))
-            self.assertIn(updates.tr(lang, 'updates.current', value='old'), screen.lines)
-            self.assertIn(updates.tr(lang, 'updates.available', value='new'), screen.lines)
+            self.assertIn('stable · old', screen.lines)
             callbacks = [b.callback_data for row in screen.fallback_rows(rows) for b in row]
             for action in ('ufleet', 'uv_page:0', 'upd_act:branch_menu', 'upd_act:run', 'upd_act:check'):
                 self.assertIn(action, callbacks)
             self.assertNotIn('upd_act:cleanup_menu', callbacks)
-            self.assertIn('upd_act:check', [b.callback_data for b in screen.sections[1].rows[0]])
+            self.assertEqual(screen.sections[0].inline_rows[0][-1].callback_data, 'upd_act:check')
             self.assertEqual([b.size for b in screen.rich(rows).blocks if b.type == 'heading'][0], 1)
             with patch.object(updates, 'render', new_callable=AsyncMock) as draw:
                 await updates.show_overview(self.query, self.bot, backend, self.state, 1, opened=True)
@@ -114,7 +113,8 @@ class UpdatesRichTests(IsolatedAsyncioTestCase):
             self.assertTrue(servers.is_open)
             self.assertEqual(len(servers.sections[0].sections), 1)
             self.assertEqual(servers.rows[0][0].text, '←')
-            self.assertEqual(servers.sections[0].sections[0].heading_size, 3)
+            self.assertEqual(servers.sections[0].title, '')
+            self.assertEqual(servers.sections[0].sections[0].title, '')
 
     async def test_outdated_list_excludes_current_and_unknown_agents_and_old_job_nodes(self):
         fleet = {'nodes': [dict(key=key, title=key, agent_status=status) for key, status in
@@ -129,11 +129,117 @@ class UpdatesRichTests(IsolatedAsyncioTestCase):
         servers = screen.sections[2]
         self.assertEqual(servers.title, updates.tr('en', 'updates.rich.outdated_servers'))
         self.assertEqual(len(servers.sections[0].sections), 1)
-        token = servers.sections[0].sections[0].rows[0][0].callback_data.split(':')[1]
+        token = servers.sections[0].sections[0].inline_rows[0][0].callback_data.split(':')[1]
         self.assertEqual(self.state_data['update_node_links'][token],
                          {'node_key': 'old', 'callback': 'updates_nodes:0'})
         self.assertEqual(len(screen.lines), 1)
         self.assertEqual(updates.state_label('en', 'current'), 'Up to date')
+
+    async def test_compact_fleet_combines_runtime_and_preserves_inline_node_navigation(self):
+        fleet = dict(desired_version='v', desired_commit='hash', driver_status='current',
+            driver={}, agents_required=False, runtimes_required=True, latest_job=None,
+            nodes=[dict(key='n1', title='Latvia', region='Europe', agent_status='current', runtime_status='required')])
+        backend = SimpleNamespace(update_rollout=AsyncMock(return_value=fleet))
+        with patch.object(updates, 'render', new_callable=AsyncMock) as draw:
+            await updates.show_fleet(self.query, self.bot, backend, self.state)
+        screen, rows = draw.call_args.args[2:4]
+        self.assertNotIn('ufleet', [b.callback_data for row in rows for b in row])
+        entry = screen.sections[0].sections[0].sections[0]
+        self.assertEqual(entry.inline_rows[0][2], updates.state_label('en', 'required'))
+        self.assertEqual(entry.title, '')
+        token = entry.inline_rows[0][0].callback_data.split(':')[1]
+        self.assertEqual(self.state_data['update_node_links'][token]['callback'], 'fleet_nodes:0')
+        self.assertNotIn('Runtime:', screen.plain())
+        screen.rich(rows)
+
+    async def test_dismiss_hides_only_that_result_and_new_job_remains_visible(self):
+        latest = dict(id='j1', status='succeeded', kind='stack', items=[], result={})
+        overview = {'latest_job': latest, 'dismissed_job_ids': []}
+        async def dismiss(*args, **kwargs):
+            overview['dismissed_job_ids'].append('j1')
+        backend = SimpleNamespace(update_job=AsyncMock(return_value=latest), request=AsyncMock(side_effect=dismiss),
+            updates_overview=AsyncMock(return_value=overview),
+            update_rollout=AsyncMock(return_value={'nodes': [], 'driver_status': 'current'}))
+        self.query.data = 'update_dismiss:j1'
+        with patch.object(updates, 'render', new_callable=AsyncMock) as draw:
+            await updates.update_tools_cb(self.query, self.bot, backend, self.state)
+        backend.request.assert_awaited_once_with('POST', '/api/v1/system/updates/jobs/j1/dismiss',
+            telegram_user_id=self.query.from_user.id)
+        screen, rows = draw.call_args.args[2:4]
+        self.assertNotIn('update_job:j1', [b.callback_data for row in screen.fallback_rows(rows) for b in row])
+        latest['id'] = 'j2'
+        with patch.object(updates, 'render', new_callable=AsyncMock) as draw:
+            await updates.show_overview(self.query, self.bot, backend, self.state)
+        screen, rows = draw.call_args.args[2:4]
+        self.assertIn('update_job:j2', [b.callback_data for row in screen.fallback_rows(rows) for b in row])
+
+    async def test_check_row_reports_latest_version_and_completed_check_without_hash(self):
+        overview = dict(branch='dev', current_version='1.0', current_label='1.0 · deadbeef',
+            remote_version='1.0', last_checked_at='2026-10-10T08:00:00Z', update_available=False)
+        backend = SimpleNamespace(updates_overview=AsyncMock(return_value=overview),
+            update_rollout=AsyncMock(return_value={'nodes': [], 'driver_status': 'current'}))
+        with patch.object(updates, 'render', new_callable=AsyncMock) as draw:
+            await updates.show_overview(self.query, self.bot, backend, self.state)
+        screen, rows = draw.call_args.args[2:4]
+        self.assertEqual(screen.lines, ('dev · 1.0',))
+        self.assertIn('1.0 · Last check: 2026-10-10 08:00 UTC', screen.plain())
+        callbacks = [b.callback_data for row in screen.fallback_rows(rows) for b in row]
+        self.assertEqual(callbacks.count('upd_act:check'), 1)
+        self.assertNotIn('updates', callbacks)
+        blocks = screen.rich(rows).blocks
+        self.assertTrue(any(b.type == 'paragraph' and any(getattr(t, 'type', None) == 'button'
+            for t in b.text) for b in blocks))
+
+    async def test_branch_change_requires_explicit_confirmation(self):
+        from telegram_client.routers import admin_settings
+        backend = SimpleNamespace(updates_overview=AsyncMock(return_value={'branch': 'main'}),
+            update_preferences=AsyncMock())
+        self.query.data = 'upd_act:branch_dev'
+        with patch.object(admin_settings, 'render', new_callable=AsyncMock) as draw:
+            await admin_settings.update_action_cb(self.query,
+                admin_settings.UpdateActionCallback(action='branch_dev'), self.bot, backend, self.state)
+        backend.update_preferences.assert_not_awaited()
+        self.assertEqual(draw.call_args.args[3][0][1].style, 'danger')
+        action = draw.call_args.args[3][0][1].callback_data.split(':', 1)[1]
+        with patch.object(admin_settings, 'show_update_branches', new_callable=AsyncMock):
+            await admin_settings.update_action_cb(self.query,
+                admin_settings.UpdateActionCallback(action=action), self.bot, backend, self.state)
+        backend.update_preferences.assert_awaited_once_with(self.query.from_user.id, {'branch': 'dev'})
+
+    async def test_downgrade_confirmation_warns_and_does_not_leak_ui_flags_to_api(self):
+        page = {'branch': 'dev', 'offset': 0, 'items': [dict(allowed=True, action='downgrade',
+            ref='v0.1', version='0.1', reason='downgrade')]}
+        self.state_data.update(update_catalog=page, update_catalog_nonce='nonce')
+        self.query.data = 'uv_select:nonce:0'
+        with patch.object(updates, 'render', new_callable=AsyncMock) as draw:
+            await updates.update_tools_cb(self.query, self.bot, object(), self.state)
+        self.assertEqual(draw.call_args.args[3][0][1].style, 'danger')
+        self.assertIn(updates.tr('en', 'updates.rich.downgrade_warning'), draw.call_args.args[2].lines)
+        self.assertNotIn('_dangerous', self.state_data['update_draft']['body'])
+
+    async def test_completed_update_does_not_override_current_version_state(self):
+        overview = {'update_available': False, 'latest_job': {'id': 'old', 'status': 'succeeded',
+            'result': {'components': dict.fromkeys(('backend', 'worker', 'driver', 'telegram'), 'succeeded')}}}
+        fleet = {'nodes': [], 'driver_status': 'required'}
+        backend = SimpleNamespace(updates_overview=AsyncMock(return_value=overview),
+            update_rollout=AsyncMock(return_value=fleet))
+        for lang in ('en', 'ru'):
+            self.state_data['locale'] = lang
+            for available in (False, True):
+                overview['update_available'] = available
+                with patch.object(updates, 'render', new_callable=AsyncMock) as draw:
+                    await updates.show_overview(self.query, self.bot, backend, self.state)
+                table = draw.call_args.args[2].sections[0].tables[0]
+                expected = updates.state_label(lang, 'required' if available else 'current')
+                self.assertEqual([row[1] for row in table.rows],
+                    [expected, expected, updates.state_label(lang, 'required'), expected])
+                self.assertEqual(table.headers[1], updates.tr(lang, 'updates.rich.version_state'))
+        overview['latest_job']['status'] = 'running'
+        overview['latest_job']['result']['components']['backend'] = 'running'
+        with patch.object(updates, 'render', new_callable=AsyncMock) as draw:
+            await updates.show_overview(self.query, self.bot, backend, self.state)
+        self.assertEqual(draw.call_args.args[2].sections[0].tables[0].rows[0][1],
+            updates.state_label('ru', 'running'))
 
     async def test_latest_action_queues_whole_stack(self):
         backend = SimpleNamespace(updates_overview=AsyncMock(return_value={'update_available': True, 'remote_version': '0.4.3-alpha.36'}),
@@ -181,7 +287,7 @@ class UpdatesRichTests(IsolatedAsyncioTestCase):
             await updates.show_job(self.query, self.bot, backend, self.state, 'j1')
         screen, rows = draw.call_args.args[2:4]
         self.assertEqual(len(screen.sections[0].tables[0].rows), 4)
-        token = screen.sections[1].rows[0][0].callback_data.split(':')[1]
+        token = screen.sections[1].sections[0].sections[0].inline_rows[0][0].callback_data.split(':')[1]
         self.assertEqual(self.state_data['update_node_links'][token],
                          {'node_key': 'lv1', 'callback': 'update_nodes:j1:0'})
         self.assertIn(updates.tr('en', 'updates.rich.partial_note'), screen.lines)

@@ -1462,7 +1462,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
 
     async def test_install_menu_checks_docker_and_reusable_configs(self):
         from telegram_client.routers import admin_node_tools
-        node = {'key': 'lv1', 'title': 'Latvia', 'transport': 'local', 'ssh_target': None, 'protocols': ['awg', 'xray']}
+        node = {'key': 'lv1', 'title': 'Latvia', 'transport': 'local', 'ssh_target': None, 'protocols': ['awg', 'xray'], 'desired_revision': 1}
         facts = {'docker': False, 'awg_config_valid': False, 'xray_config_valid': False}
         backend = SimpleNamespace(request=AsyncMock(return_value=node),
             node_overview=AsyncMock(return_value={'settings_complete': True}),
@@ -1472,10 +1472,10 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
                 await admin_node_tools.show_install(123, 123, 77, 'lv1', self.bot, backend, self.state)
                 screen, rows = render.call_args.args[2:4]
                 return [b.callback_data for row in screen.fallback_rows(rows) for b in row]
-            self.assertIn('node_action:bootstrap:lv1', await buttons())
+            self.assertIn('node_job_submit', await buttons())
             self.assertNotIn('node_action:install_docker:lv1', await buttons())
             facts['docker'] = True
-            self.assertIn('node_action:bootstrap:lv1', await buttons())
+            self.assertIn('node_job_submit', await buttons())
             self.assertNotIn('node_action:reinstall_keep:lv1', await buttons())
             node['applied_revision'] = 1
             facts['awg_config_valid'] = True
