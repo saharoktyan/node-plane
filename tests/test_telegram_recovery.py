@@ -31,7 +31,7 @@ class RecoveryScreenTests(IsolatedAsyncioTestCase):
             self.assertTrue(entry.bold_first_line)
             self.assertIn('@operator', entry.lines[0])
             self.assertNotIn(event['account_id'], screen.plain())
-            callback = entry.inline_rows[0][0].callback_data
+            callback = entry.inline_rows[0][2].callback_data
             self.assertLessEqual(len(callback.encode()), 64)
             self.query.data = callback
             with patch.object(recovery, 'render', new_callable=AsyncMock) as detail:
@@ -51,9 +51,9 @@ class RecoveryScreenTests(IsolatedAsyncioTestCase):
         blocks = screen.rich(rows).blocks
         self.assertEqual(sum(b.type in {'heading', 'section_heading'} for b in blocks), 1)
         self.assertTrue(all(s.title == '' and s.bold_first_line for s in screen.sections))
-        self.assertIn('Worker', screen.sections[0].inline_rows[0][0].text)
+        self.assertIn('Worker', screen.sections[0].inline_rows[0][2].text)
         self.assertNotIn('Connection verified', screen.plain())
-        self.query.data = screen.sections[0].inline_rows[0][0].callback_data
+        self.query.data = screen.sections[0].inline_rows[0][2].callback_data
         with patch.object(recovery, 'render', new_callable=AsyncMock) as detail:
             await recovery.recovery_detail(self.query, self.bot, self.state)
         self.assertIn('Long failure explanation ' * 12, detail.call_args.args[2].lines)

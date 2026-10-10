@@ -1,0 +1,46 @@
+name: Release Rust dependency cache
+description: Carry compiled dependencies across successful release tags
+inputs:
+  key:
+    required: true
+    description: Target and build profile identity
+  mode:
+    required: true
+    description: restore or save
+runs:
+  using: composite
+  steps:
+    - id: previous
+      if: inputs.mode == 'restore'
+      uses: actions/github-script@v8
+      env:
+        CACHE_NAME: rust-deps-v1-${{ runner.os }}-${{ runner.arch }}-1.90.0-${{ inputs.key }}
+      with:
+        script: |
+          const {owner, repo} = context.repo;
+          const artifacts = await github.rest.actions.listArtifactsForRepo({owner, repo, name: process.env.CACHE_NAME, per_page: 20});
+          for (const artifact of artifacts.data.artifacts) {
+            if (artifact.expired || artifact.workflow_run.id === context.runId) continue;
+            const {data: run} = await github.rest.actions.getWorkflowRun({owner, repo, run_id: artifact.workflow_run.id});
+            if (run.conclusion !== 'success' || run.event !== 'push' || run.name !== 'Release') continue;
+            core.setOutput('run-id', String(run.id));
+            break;
+          }
+    - if: inputs.mode == 'restore' && steps.previous.outputs.run-id != ''
+      uses: actions/download-artifact@v8
+      with:
+        name: rust-deps-v1-${{ runner.os }}-${{ runner.arch }}-1.90.0-${{ inputs.key }}
+        path: .release-rust-cache
+        run-id: ${{ steps.previous.outputs.run-id }}
+        github-token: ${{ github.token }}
+    - if: inputs.mode == 'save' || steps.previous.outputs.run-id != ''
+      shell: bash
+      run: python scripts/release_rust_cache.py '${{ inputs.mode }}'
+    - if: inputs.mode == 'save'
+      uses: actions/upload-artifact@v7
+      with:
+        name: rust-deps-v1-${{ runner.os }}-${{ runner.arch }}-1.90.0-${{ inputs.key }}
+        path: .release-rust-cache/dependencies.tar.gz
+        compression-level: 0
+        retention-days: 7
+        if-no-files-found: error

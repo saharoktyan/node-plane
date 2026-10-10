@@ -92,6 +92,38 @@ class AlertTests(unittest.TestCase):
         )
         self.assertEqual(self.service.overview(self.actor)["active_count"], 0)
 
+    def test_dismiss_is_per_admin_preserves_fault_and_new_occurrence_needs_attention(self):
+        self.driver.inspect_node_services.return_value = {**HEALTHY, 'xray_running':False}
+        self.scan()
+        event = self.service.overview(self.actor)['active'][0]['event_id']
+        headers = {**self.headers, 'X-Node-Plane-Telegram-User-ID':'101'}
+        response = self.client.post('/api/v1/system/alerts/' + event + '/dismiss', headers=headers)
+        self.assertEqual(response.status_code, 200, response.text)
+        value = self.service.overview(self.actor)
+        self.assertEqual(value['active_count'], 1)
+        self.assertEqual(value['unacknowledged_count'], 0)
+        self.assertTrue(value['active'][0]['dismissed'])
+        from backend.admin_overview import AdminOverviewService
+        self.assertEqual(AdminOverviewService(self.db).get(self.actor)['unacknowledged_alerts'], 0)
+        other = Actor(self.actor.principal, SimpleNamespace(id='another-admin', role='admin', status='approved'))
+        self.assertEqual(self.service.overview(other)['unacknowledged_count'], 1)
+        self.driver.inspect_node_services.return_value = dict(HEALTHY)
+        self.scan()
+        self.driver.inspect_node_services.return_value = {**HEALTHY, 'xray_running':False}
+        self.scan()
+        self.assertEqual(self.service.overview(self.actor)['unacknowledged_count'], 1)
+        with self.assertRaises(AccessDenied):
+            self.service.dismiss(self.actor, event)
+
+    def test_attention_reads_known_update_status_without_probing_host(self):
+        headers = {**self.headers, 'X-Node-Plane-Telegram-User-ID':'101'}
+        with patch('db.get_db', return_value=self.db), \
+             patch('app.services.updates.get_updates_overview', return_value={'update_available':True}) as read:
+            response = self.client.get('/api/v1/system/attention', headers=headers)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.json()['update_available'])
+        read.assert_called_once_with(refresh_run=False)
+
     def test_unknown_resources_do_not_resolve_old_condition(self):
         self.driver.inspect_node_services.return_value = {
             **HEALTHY,
@@ -353,6 +385,8 @@ class AlertTests(unittest.TestCase):
     def test_member_http_access_denied(self):
         fixture.BackendHTTPTests.register(self, 102)
         headers = {**self.headers, "X-Node-Plane-Telegram-User-ID": "102"}
+        self.assertEqual(self.client.post('/api/v1/system/alerts/' + str(uuid4()) + '/dismiss',
+            headers=headers).status_code, 403)
         self.assertEqual(
             self.client.get("/api/v1/system/alerts", headers=headers).status_code, 403
         )

@@ -13,6 +13,8 @@ class AdminOverviewService:
     def get(self, actor):
         require_permission(actor, 'profiles.manage')
         with self.db.connect() as conn:
+            from .alerts import AlertService
+            alert_count = sum(not r['dismissed'] for r in AlertService.active(conn, actor.account.id))
             nodes = conn.execute('SELECT key, title, region, flag, enabled FROM backend_nodes ORDER BY region, title, key').fetchall()
             profiles = conn.execute('''SELECT p.frozen, p.expires_at, d.profile_id AS deleting
                 FROM backend_profiles p LEFT JOIN backend_profile_deletions d ON d.profile_id = p.id''').fetchall()
@@ -31,6 +33,7 @@ class AdminOverviewService:
             (p['expires_at'] is None or datetime.fromisoformat(p['expires_at']) > now)
             for p in profiles)
         return {
+            'unacknowledged_alerts': alert_count,
             'nodes_total': len(nodes),
             'nodes_enabled': sum(bool(node['enabled']) for node in nodes),
             'profiles_total': sum(not p['deleting'] for p in profiles),

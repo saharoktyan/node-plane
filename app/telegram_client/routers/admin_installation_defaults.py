@@ -67,7 +67,9 @@ async def show(query, bot, state, *, error=None):
             tables=(Table((tr(locale, 'account.rich.field'), tr(locale, 'account.rich.value')),
                 tuple((tr(locale, 'nodes.settings.field.' + f), field_value(f)) for f in fields)),)))
         sections.append(Section('', rows=((button(tr(locale, 'defaults.edit_advanced'), 'advanced'),),)))
-    rows = [[button(tr(locale, 'defaults.save'), 'save', selected=True), button(tr(locale, 'defaults.reset'), 'reset')],
+    changed = any(draft.get(key) != data.get('installation_defaults_original', {}).get(key)
+        for key in ('protocols', 'xray_transports', 'settings'))
+    rows = ([[button(tr(locale, 'defaults.save'), 'save', selected=True), button(tr(locale, 'defaults.reset'), 'reset')]] if changed else []) + [
         [button(tr(locale, 'back'), 'main') if advanced else
          InlineKeyboardButton(text=tr(locale, 'back'), callback_data=AdminSettingsCallback().pack())]]
     await render(bot, query.message.chat.id, Screen(tr(locale, 'defaults.edit_advanced' if advanced else 'defaults.title'),

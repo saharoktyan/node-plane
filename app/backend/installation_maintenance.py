@@ -209,7 +209,13 @@ class InstallationMaintenance:
         directory.mkdir(mode=0o700, exist_ok=True)
         directory.chmod(0o700)
         script = directory / "remove.sh"
-        lines = ["#!/usr/bin/env bash", "set -euo pipefail", "sleep 5"]
+        lines = ["#!/usr/bin/env bash", "set -euo pipefail", "finish() {",
+            'result=$?; trap - EXIT',
+            "if [ -f " + shlex.quote(str(directory / 'notification.json')) + " ]; then",
+            "/usr/bin/python3 " + shlex.quote(str(directory / 'notify.py')) + " "
+                + shlex.quote(str(directory / 'notification.json')) + ' "$result" || true',
+            'fi', "rm -rf -- " + shlex.quote(str(directory)),
+            'exit "$result"', '}', "trap finish EXIT", "sleep 5"]
         for unit in UNITS:
             # Timer and worker must be stopped before the API/driver.
             lines.append(
@@ -234,11 +240,37 @@ class InstallationMaintenance:
             lines.append("rm -rf -- " + shlex.quote(str(path)))
         lines += [
             'echo "Node Plane installation removed"',
-            "rm -rf -- " + shlex.quote(str(directory)),
         ]
         script.write_text("\n".join(lines) + "\n")
         script.chmod(0o700)
         return {"script": str(script), "unit": "node-plane-uninstall-" + job_id}
+
+    def prepare_notification(self, plan, chat_id, message_id, locale):
+        # Same ownership validation as abort; secrets stay in a root-only file
+        # outside the installation that will be deleted.
+        directory = self.staging_root / plan['unit']
+        suffix = plan['unit'].removeprefix('node-plane-uninstall-')
+        if (plan['unit'] != 'node-plane-uninstall-' + str(UUID(suffix))
+                or directory.is_symlink() or Path(plan['script']) != directory / 'remove.sh'):
+            raise AccessDenied('unsafe_installation_path', 409)
+        token = os.environ.get('BOT_TOKEN')
+        if not token:
+            raise AccessDenied('cleanup_notification_unavailable', 409)
+        deployment = self.deployment()
+        payload = {'token': token, 'chat_id': chat_id, 'message_id': message_id,
+            'locale': locale, 'paths': [deployment['base_dir'], deployment['shared_dir'],
+                '/usr/local/bin/node-plane-driver'],
+            'units': list(UNITS), 'units_root': str(self.units_root),
+            'postgres_container': deployment['postgres_container']}
+        for name, content in (
+                ('notification.json', json.dumps(payload)),
+                ('notify.py', Path(__file__).with_name('uninstall_notification.py').read_text())):
+            target = directory / name
+            if target.is_symlink():
+                raise AccessDenied('unsafe_installation_path', 409)
+            with target.open('w') as stream:
+                target.chmod(0o600)
+                stream.write(content)
 
     def launch_uninstall(self, plan):
         subprocess.run(

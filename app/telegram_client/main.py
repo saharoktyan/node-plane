@@ -17,6 +17,7 @@ from .routers import user, admin_requests, admin_profiles, admin_nodes, admin_se
 from .routers import user_devices
 from .routers import admin_installation_defaults
 from .routers import navigation
+from . import update_panels
 
 async def main() -> None:
     logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(levelname)s | %(name)s | %(message)s')
@@ -57,6 +58,9 @@ async def main() -> None:
             
             delivery_task = asyncio.create_task(delivery_loop(bot, backend))
             try:
+                update_panels.configure(Path(os.environ.get('NODE_PLANE_SHARED_DIR', '/opt/node-plane/shared'))
+                    / 'data' / 'telegram-update-panels.sqlite3')
+                await update_panels.resume(bot, dispatcher, backend)
                 await dispatcher.start_polling(bot)
             finally:
                 await shutdown_refreshes()

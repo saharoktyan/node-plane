@@ -9,6 +9,7 @@ from ..backend import BackendClient, BackendError
 from ..i18n import tr, normalize_locale
 from ..screens import Screen, Section, Table, server_label
 from .common import schedule_refresh, render
+from .. import update_panels
 from .callbacks import UpdatesCallback, AdminNodeCallback, AdminSettingsCallback
 
 router = Router()
@@ -291,8 +292,13 @@ async def show_job(query, bot, backend, state, job_id, page=0, opened=False):
     await render(bot, query.message.chat.id, Screen(tr(lang, 'update_tools.result'), tuple(lines),
         sections=tuple(sections), embedded_buttons=True, navigation=True), rows, state, query.message.message_id)
     if job['status'] in {'awaiting_executor', 'running'}:
+        await update_panels.remember(state, job_id,
+            (await state.get_data()).get('control_message_id') or query.message.message_id,
+            page=page, opened=opened)
         schedule_refresh(state, lambda: show_job(query, bot, backend, state, job_id,
             page=page, opened=opened))
+    else:
+        update_panels.forget(state)
 
 
 @router.callback_query(F.data.startswith('uv_page:'))

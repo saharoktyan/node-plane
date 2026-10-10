@@ -103,7 +103,9 @@ async def card(query, bot, backend, state, identity, show=False):
         lines.append(tr(locale,'temporary.expires',value=item['expires_at'][:19].replace('T',' ')+' UTC'))
     if item['protocol']=='xray':
         lines.append(tr(locale,'temporary.vless_notice'))
-    if item['status']=='active' and not show:
+    if item.get('unavailable_reason') == 'node_changed':
+        lines.append(tr(locale, 'temporary.node_changed_notice'))
+    if item['status']=='active' and item.get('artifact_available', True) and not show:
         rows.append([button(locale,'temporary.show','show:'+identity)])
     if item['status'] not in {'expired','revoked','cancelled','revoking'}:
         rows.append([button(locale,'temporary.revoke','confirm_revoke:'+identity,'danger')])

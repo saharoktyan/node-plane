@@ -94,8 +94,17 @@ class SystemCleanupTests(unittest.TestCase):
         ProfileRepository(self.db).create_profile(
             runtime_name="alice", display_name="Alice"
         )
+        operator_profile = ProfileRepository(self.db).create_profile(
+            runtime_name="operator", display_name="Operator", owner_account_id=self.admin.id)
+        from backend.devices import DeviceRepository
+        with self.db.transaction() as conn:
+            profile = conn.execute('SELECT * FROM backend_profiles WHERE id=?', (operator_profile,)).fetchone()
+            device_id = DeviceRepository.ensure_default(conn, profile)
         job = self.queue()
         self.advance(job, "succeeded")
+        self.assertIsNotNone(ProfileRepository(self.db).get(operator_profile))
+        with self.db.connect() as conn:
+            self.assertIsNotNone(conn.execute('SELECT id FROM backend_devices WHERE id=?', (device_id,)).fetchone())
         self.assertEqual(self.identities.find_telegram_account(101).id, self.admin.id)
         self.assertEqual(
             self.credentials.authenticate(self.headers["Authorization"]).id,
@@ -103,7 +112,7 @@ class SystemCleanupTests(unittest.TestCase):
         )
         with self.db.connect() as conn:
             self.assertEqual(
-                conn.execute("SELECT COUNT(*) FROM backend_profiles").fetchone()[0], 0
+                conn.execute("SELECT COUNT(*) FROM backend_profiles").fetchone()[0], 1
             )
             admit(conn)
         self.host.clear_local.assert_called_once()
@@ -136,6 +145,23 @@ class SystemCleanupTests(unittest.TestCase):
         self.host.launch_uninstall.assert_called_once()
         self.assertFalse(self.service.run_one())
         self.assertIsNone(self.identities.find_telegram_account(101))
+
+    def test_full_removal_skips_backup_even_when_backup_storage_fails(self):
+        self.service.backups = Mock()
+        self.service.backups.create_snapshot.side_effect = RuntimeError("unavailable")
+        job = self.queue("remove")
+        self.assertEqual(job["phase"], "nodes")
+        self.advance(job, "awaiting_shutdown")
+        self.service.backups.create_snapshot.assert_not_called()
+        self.assertIsNone(self.service.get(self.actor, job["id"])["backup_id"])
+
+    def test_previously_queued_remove_also_skips_backup(self):
+        self.service.backups = Mock()
+        job = self.queue("remove")
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_system_cleanup_jobs SET phase='backup' WHERE id=?", (job["id"],))
+        self.advance(job, "awaiting_shutdown")
+        self.service.backups.create_snapshot.assert_not_called()
 
     def test_uncertain_shutdown_never_replays(self):
         job = self.queue("remove")

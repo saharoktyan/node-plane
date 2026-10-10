@@ -239,7 +239,7 @@ class SystemCleanupService:
             conn.execute(
                 """INSERT INTO backend_system_cleanup_jobs
                 (id,actor_id,principal_id,command_key,plan_id,intent_json,status,phase,created_at)
-                VALUES (?,?,?,?,?,?,'queued','backup',?)""",
+                VALUES (?,?,?,?,?,?,'queued',?,?)""",
                 (
                     job_id,
                     actor.account.id,
@@ -247,6 +247,7 @@ class SystemCleanupService:
                     key,
                     plan_id,
                     plan["intent_json"],
+                    "backup" if intent["action"] == "reset" else "nodes",
                     now(),
                 ),
             )
@@ -299,7 +300,7 @@ class SystemCleanupService:
                 raise AccessDenied("resource_not_found", 404)
             return self._public(conn, row)
 
-    def acknowledge_shutdown(self, actor, job_id):
+    def acknowledge_shutdown(self, actor, job_id, notification=None):
         require_permission(actor, "maintenance.manage")
         with self.db.transaction() as conn:
             conn.execute(
@@ -317,6 +318,13 @@ class SystemCleanupService:
                 raise AccessDenied("resource_not_found", 404)
             if row["status"] != "awaiting_shutdown":
                 raise AccessDenied("cleanup_not_ready", 409)
+            if notification:
+                identity = conn.execute("SELECT subject FROM backend_external_identities "
+                    "WHERE account_id=? AND provider='telegram'", (actor.account.id,)).fetchone()
+                if not identity:
+                    raise AccessDenied("permission_denied")
+                self.host.prepare_notification(json.loads(row['local_plan_json']),
+                    int(identity['subject']), notification['message_id'], notification['locale'])
             conn.execute(
                 "UPDATE backend_system_cleanup_jobs SET shutdown_ack=1 WHERE id=?",
                 (job_id,),
@@ -446,6 +454,12 @@ class SystemCleanupService:
                     ).fetchall()
                     if r["subject"] in subjects
                 ]
+                kept["backend_profiles"] = [dict(r) for r in conn.execute(
+                    "SELECT * FROM backend_profiles WHERE owner_account_id=?", (actor_id,)).fetchall()]
+                profile_ids = {r['id'] for r in kept['backend_profiles']}
+                for table in ('backend_devices', 'backend_profile_identities'):
+                    kept[table] = [dict(r) for r in conn.execute(f"SELECT * FROM {table}").fetchall()
+                        if r['profile_id'] in profile_ids]
                 kept["backend_credentials"] = [
                     dict(r)
                     for r in conn.execute(
@@ -483,6 +497,9 @@ class SystemCleanupService:
                 "backend_external_identities",
                 "backend_telegram_identity_details",
                 "backend_credentials",
+                "backend_profiles",
+                "backend_devices",
+                "backend_profile_identities",
             ):
                 for row in kept.get(table, []):
                     columns = list(row)
@@ -533,13 +550,15 @@ class SystemCleanupService:
                 if self.host.deployment() != intent["deployment"]:
                     raise AccessDenied("installation_manifest_mismatch", 409)
                 if job["phase"] == "backup":
-                    backup = self.backups.create_snapshot(
-                        "pre_" + intent["action"], prune=False
-                    )
+                    backup_id = None
+                    if intent["action"] == "reset":
+                        backup_id = self.backups.create_snapshot(
+                            "pre_reset", prune=False
+                        )["backup_id"]
                     with self.db.transaction() as conn:
                         conn.execute(
                             "UPDATE backend_system_cleanup_jobs SET status='running',phase='nodes',backup_id=? WHERE id=?",
-                            (backup["backup_id"], job["id"]),
+                            (backup_id, job["id"]),
                         )
                     return True
                 if job["phase"] == "nodes":

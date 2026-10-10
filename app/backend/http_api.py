@@ -102,6 +102,12 @@ class TrafficPolicyInput(BaseModel):
     enabled: StrictBool
 
 
+class CleanupNotificationInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    message_id: StrictInt = Field(gt=0)
+    locale: Literal['en', 'ru'] = 'en'
+
+
 class SystemCleanupPlanInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
     action: Literal['reset', 'remove']
@@ -1031,8 +1037,9 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
         return system_cleanup.abort(current,str(job_id))
 
     @app.post('/api/v1/system/cleanup/jobs/{job_id}/shutdown-ack')
-    def cleanup_shutdown_ack(job_id:UUID,current=Depends(actor)):
-        return system_cleanup.acknowledge_shutdown(current,str(job_id))
+    def cleanup_shutdown_ack(job_id:UUID,body:CleanupNotificationInput | None=None,current=Depends(actor)):
+        return system_cleanup.acknowledge_shutdown(current,str(job_id),
+            body.model_dump() if body else None)
 
     @app.patch('/api/v1/system/traffic/preferences')
     def traffic_preferences(body: TrafficPolicyInput, current=Depends(actor)):
@@ -1041,6 +1048,19 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     @app.get('/api/v1/system/alerts')
     def alert_overview(current=Depends(actor)):
         return alerts.overview(current)
+
+    @app.post('/api/v1/system/alerts/{event_id}/dismiss')
+    def alert_dismiss(event_id: UUID, current=Depends(actor)):
+        return alerts.dismiss(current, str(event_id))
+
+    @app.get('/api/v1/system/attention')
+    def system_attention(current=Depends(actor)):
+        require_permission(current, 'settings.manage')
+        from app.services import updates as updater
+        with db.connect() as conn:
+            count = sum(not r['dismissed'] for r in AlertService.active(conn, current.account.id))
+        return {'unacknowledged_alerts': count,
+            'update_available': updater.get_updates_overview(refresh_run=False)['update_available']}
 
     @app.patch('/api/v1/system/alerts/preferences')
     def alert_preferences(body:AlertPreferencesInput,current=Depends(actor)):

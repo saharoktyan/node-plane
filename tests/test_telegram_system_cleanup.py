@@ -38,7 +38,8 @@ class CleanupScreensTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(cleanup, "render", AsyncMock()):
             await cleanup.cleanup_action(self.query, self.bot, self.backend, self.state)
         self.backend.system_cleanup_action.assert_awaited_once_with(
-            123, self.job_id, "shutdown-ack"
+            123, self.job_id, "shutdown-ack",
+            notification={"message_id": self.query.message.message_id, "locale": "en"}
         )
 
     async def test_shutdown_buttons_and_all_screens_are_localized(self):
@@ -57,6 +58,18 @@ class CleanupScreensTests(unittest.IsolatedAsyncioTestCase):
         en = {key for key in CATALOG["en"] if key.startswith("system_cleanup.")}
         ru = {key for key in CATALOG["ru"] if key.startswith("system_cleanup.")}
         self.assertEqual(en, ru)
+
+    async def test_running_cleanup_refreshes_but_terminal_status_stops(self):
+        self.job.update(status='running', phase='nodes')
+        with patch.object(cleanup, 'render', AsyncMock()), \
+                patch.object(cleanup, 'schedule_refresh') as refresh:
+            await cleanup.show_job(123, 123, 77, self.job_id, self.bot, self.backend, self.state)
+            refresh.assert_called_once()
+        self.job.update(status='succeeded', phase='complete')
+        with patch.object(cleanup, 'render', AsyncMock()), \
+                patch.object(cleanup, 'schedule_refresh') as refresh:
+            await cleanup.show_job(123, 123, 77, self.job_id, self.bot, self.backend, self.state)
+            refresh.assert_not_called()
 
     async def test_phrase_mismatch_does_not_submit_operation(self):
         self.state_data.update(

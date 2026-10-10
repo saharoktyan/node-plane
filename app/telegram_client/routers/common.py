@@ -10,6 +10,8 @@ from typing import Callable, Dict, Any, Awaitable
 
 from ..screens import Screen
 from ..backend import BackendClient, BackendError
+from .. import update_panels
+from aiohttp import ClientError
 from ..i18n import normalize_locale
 from ..navigation import screen_parents
 from uuid import uuid4
@@ -25,30 +27,42 @@ def _refresh_key(state):
     return id(state)
 
 
-def cancel_refresh(state):
+def cancel_refresh(state, *, forget_panel=True):
     key = _refresh_key(state)
     task = _REFRESH_TASKS.get(key)
     # Keep the current observer registered throughout its render so a user
     # navigation can still cancel an in-flight Telegram edit.
     if task is asyncio.current_task():
         return
+    if forget_panel:
+        update_panels.forget(state)
     if task is not None:
         _REFRESH_TASKS.pop(key, None)
         task.cancel()
 
 
 def schedule_refresh(state, refresh, *, interval=3):
-    cancel_refresh(state)
+    cancel_refresh(state, forget_panel=False)
     key = _refresh_key(state)
     async def observe():
-        await asyncio.sleep(interval)
-        try:
-            await refresh()
-        except BackendError:
-            logging.getLogger(__name__).warning('Panel refresh unavailable; manual refresh remains available')
-        except Exception as exc:
-            # Never include request objects or exception messages with secrets.
-            logging.getLogger(__name__).warning('Panel refresh failed: type=%s', type(exc).__name__)
+        delay = interval
+        while True:
+            await asyncio.sleep(delay)
+            delay = interval or 3
+            try:
+                await refresh()
+                return
+            except BackendError as exc:
+                if exc.status < 500 and exc.status != 429:
+                    update_panels.forget(state)
+                    return
+                logging.getLogger(__name__).warning('Panel refresh temporarily unavailable; retrying')
+            except (ClientError, asyncio.TimeoutError, TelegramNetworkError):
+                logging.getLogger(__name__).warning('Panel refresh connection unavailable; retrying')
+            except Exception as exc:
+                # Never include request objects or exception messages with secrets.
+                logging.getLogger(__name__).warning('Panel refresh failed: type=%s', type(exc).__name__)
+                return
     task = asyncio.create_task(observe())
     _REFRESH_TASKS[key] = task
     def finished(completed):

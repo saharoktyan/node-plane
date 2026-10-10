@@ -67,12 +67,21 @@ async def admin_settings_cb(query: CallbackQuery, bot: Bot,
     await query.answer()
     await state.set_state(None)
     locale = await _locale(state)
+    attention = {}
+    if hasattr(backend, 'system_attention'):
+        try:
+            attention = await backend.system_attention(query.from_user.id)
+        except BackendError as exc:
+            if exc.status in {401, 403}:
+                raise
     rows = [
         [InlineKeyboardButton(text=tr(locale, 'settings.admin.bot_title'), callback_data='bot_title_settings'),
          InlineKeyboardButton(text=tr(locale, 'settings.admin.request_policy'), callback_data=RequestPolicyCallback().pack())],
-        [InlineKeyboardButton(text=tr(locale, 'settings.admin.updates'), callback_data=UpdatesCallback().pack()),
+        [InlineKeyboardButton(text=tr(locale, 'settings.admin.updates'), callback_data=UpdatesCallback().pack(),
+            style='primary' if attention.get('update_available') else None),
          InlineKeyboardButton(text=tr(locale, 'backups.title'), callback_data='backups')],
-        [InlineKeyboardButton(text=tr(locale, 'alerts.title'), callback_data='alerts'),
+        [InlineKeyboardButton(text=tr(locale, 'alerts.title'), callback_data='alerts',
+            style='danger' if attention.get('unacknowledged_alerts') else None),
          InlineKeyboardButton(text=tr(locale, 'traffic.title'), callback_data='traffic')],
         [InlineKeyboardButton(text=tr(locale, 'settings.admin.ssh_key'), callback_data=SshKeyCallback().pack())],
         [InlineKeyboardButton(text=tr(locale, 'system_cleanup.title'), callback_data='system_cleanup', style='danger')],
@@ -312,7 +321,7 @@ async def ssh_key_cb(query: CallbackQuery, bot: Bot,
              tr(locale, 'settings.ssh.summary')),
             sections=(Section(tr(locale, 'settings.rich.fingerprint'), (fingerprint,)),),
             uri=response['public_key'], uri_title=tr(locale, 'settings.ssh.public_key'),
-            uri_rows=((InlineKeyboardButton(text=tr(locale, 'config.link.send'), callback_data='ssh_key_plain'),),),
+            uri_rows=((InlineKeyboardButton(text=tr(locale, 'ssh_key.send'), callback_data='ssh_key_plain'),),),
             files=(('node-plane.pub', (response['public_key'] + '\n').encode()),),
             files_title=tr(locale, 'settings.rich.download'), embedded_buttons=True, navigation=True)
     except BackendError as exc:

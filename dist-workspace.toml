@@ -23,9 +23,13 @@ install-success-msg = "Open a new terminal and run: node-plane"
 msvc-crt-static = true
 rust-toolchain-version = "1.90.0"
 pr-run-mode = "plan"
+# Release jobs carry dependency caches across tag refs and build server artifacts
+# concurrently. Keep the custom workflow under version control.
+allow-dirty = ["ci"]
+local-artifacts-jobs = ["./release-server"]
 
 [[dist.extra-artifacts]]
-build = ["bash", "scripts/build_release_stack.sh"]
+build = ["bash", "scripts/build_release_stack.sh", "--from-ci"]
 artifacts = [
   "dist/release-stack/node-plane-controller.tar.gz",
   "dist/release-stack/node-plane-driver-linux-amd64.tar.gz",

@@ -253,12 +253,13 @@ async fn run(
             format!("--ref {}", shell_quote(&request.tag))
         }
     );
-    stage("Starting the seven installation steps");
+    stage("Starting installation");
     checked(session, &command, None, journal, true, tx).await?;
     stage("Verifying services, Telegram startup and backend readiness");
     checked(session, VERIFY, None, journal, false, tx).await?;
     stage("Registering this workstation key with the controller administrator");
     let session_id = uuid::Uuid::new_v4();
+    *session.authorization.lock().unwrap() = None;
     crate::backend::authenticate(session, session_id, &request.workflow.account, tx).await?;
     crate::backend::revoke(session, session_id).await?;
     Ok("Node Plane is installed. Open your Telegram bot and send /start.\nThe workstation public key is saved on the server; future connections do not need a password.".into())

@@ -200,7 +200,10 @@ async def audit_page(query: CallbackQuery, callback_data: AuditPage, bot: Bot,
     for index, item in enumerate(page['items']):
         action = audit_action(locale, item['action'])
         result = audit_result(locale, item)
-        details = (item['occurred_at'], item['account_label'], item['action'], result,
+        account_label = item['account_label']
+        if account_label.isdecimal():
+            account_label = tr(locale, 'audit.telegram_id', id=account_label)
+        details = (item['occurred_at'], account_label, item['action'], result,
             tr(locale, 'audit.ssh_user', user=item['ssh_user']), item['device_fingerprint'],
             tr(locale, 'audit.account', id=item['account_id']), tr(locale, 'audit.session', id=item['session_id']),
             tr(locale, 'audit.request', id=item['request_id'] or '—'),
@@ -211,8 +214,8 @@ async def audit_page(query: CallbackQuery, callback_data: AuditPage, bot: Bot,
             details += (tr(locale, 'audit.target', target=item['target']),
                         tr(locale, 'audit.key', fingerprint=item['key_fingerprint']))
         link = await detail_link(state, action, details, back)
-        sections.append(Section('', lines=(item['occurred_at'][:16].replace('T', ' ') + ' · ' + item['account_label'],),
-            bold_first_line=True, inline_rows=((InlineKeyboardButton(text=action + ' ↗', callback_data=link), ' · ', result),),
+        sections.append(Section('', lines=(item['occurred_at'][:16].replace('T', ' ') + ' · ' + account_label,),
+            bold_first_line=True, inline_rows=((result, ' · ', InlineKeyboardButton(text=action + ' →', callback_data=link)),),
             divider_after=index < len(page['items']) - 1))
     filters = [InlineKeyboardButton(text=tr(locale, 'audit.filter.all'), callback_data=AuditPage().pack(),
                                    style='primary' if not callback_data.errors else None),
@@ -268,8 +271,8 @@ async def controller_diagnostics(query: CallbackQuery, bot: Bot, backend: Backen
         name = diagnostic_name(locale, check['id'])
         link = await detail_link(state, name, (tr(locale, 'recovery.check.' + check['status']),
             check['detail']), RecoveryDiagnostics().pack())
-        sections.append(Section('', inline_rows=((InlineKeyboardButton(text=name + ' ↗', callback_data=link), ' · ',
-                tr(locale, 'recovery.check.' + check['status'])),), bold_first_line=True,
+        sections.append(Section('', inline_rows=((tr(locale, 'recovery.check.' + check['status']), ' · ',
+                InlineKeyboardButton(text=name + ' →', callback_data=link)),), bold_first_line=True,
             sections=(Section('', lines=(shorten_label(check['detail'], 120),)),) if check['status'] != 'ok' else ()))
     rows = [[InlineKeyboardButton(text=tr(locale, 'recovery.refresh'), callback_data=RecoveryDiagnostics().pack())],
             [InlineKeyboardButton(text=tr(locale, 'back'), callback_data=RecoveryPage().pack())]]
@@ -293,11 +296,11 @@ async def recovery_history(query: CallbackQuery, callback_data: RecoveryHistory,
         label = tr(locale, 'recovery.kind.' + item['kind'])
         if item.get('node_title') or item.get('node_key'):
             label += ' · ' + (item.get('node_title') or item['node_key'])
-        result = tr(locale, 'recovery.action.' + item['action']) + ' · ' + tr(locale, 'recovery.outcome.' + item['outcome'])
+        result = tr(locale, 'recovery.outcome.' + item['outcome']) + ' · ' + tr(locale, 'recovery.action.' + item['action'])
         link = await detail_link(state, label, (item['created_at'], result, item['operation_id'],
             tr(locale, 'audit.account', id=item['actor_id'])), back)
         sections.append(Section('', lines=(item['created_at'][:16].replace('T', ' ') + ' · ' + label,),
-            inline_rows=((InlineKeyboardButton(text=result + ' ↗', callback_data=link),),), bold_first_line=True,
+            inline_rows=((InlineKeyboardButton(text=result + ' →', callback_data=link),),), bold_first_line=True,
             divider_after=index < len(page['items']) - 1))
     arrows = []
     if page['offset']:

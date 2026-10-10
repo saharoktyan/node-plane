@@ -144,6 +144,13 @@ class BackendClient:
     async def alerts_overview(self,user_id):
         return await self.request('GET','/api/v1/system/alerts',telegram_user_id=user_id)
 
+    async def system_attention(self, user_id):
+        return await self.request('GET', '/api/v1/system/attention', telegram_user_id=user_id)
+
+    async def dismiss_alert(self, user_id, event_id):
+        return await self.request('POST', '/api/v1/system/alerts/' + quote(event_id, safe='') + '/dismiss',
+            telegram_user_id=user_id)
+
     async def alert_preferences(self,user_id,changes):
         return await self.request('PATCH','/api/v1/system/alerts/preferences',telegram_user_id=user_id,body=changes)
 
@@ -431,10 +438,10 @@ class BackendClient:
     async def system_cleanup_job(self, telegram_user_id, job_id):
         return await self.request('GET', f'/api/v1/system/cleanup/jobs/{job_id}', telegram_user_id=telegram_user_id)
 
-    async def system_cleanup_action(self, telegram_user_id, job_id, action):
+    async def system_cleanup_action(self, telegram_user_id, job_id, action, *, notification=None):
         if action not in {'retry','abort','shutdown-ack'}:
             raise ValueError('unsupported cleanup action')
-        return await self.request('POST', f'/api/v1/system/cleanup/jobs/{job_id}/{action}', telegram_user_id=telegram_user_id)
+        return await self.request('POST', f'/api/v1/system/cleanup/jobs/{job_id}/{action}', telegram_user_id=telegram_user_id, body=notification)
 
     async def update_traffic_policy(self, telegram_user_id, enabled):
         return await self.request('PATCH', '/api/v1/system/traffic/preferences',

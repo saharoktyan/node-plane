@@ -87,11 +87,35 @@ fn accent_color(value: &str) -> Color {
     }
 }
 
+// Resolved after drawing, alongside the selected accent palette.
+const SECTION_BORDER: Color = Color::Indexed(253);
+
+fn section_border_color(accent: Color) -> Color {
+    match accent {
+        Color::Rgb(r, g, b) => Color::Rgb(
+            (u16::from(r) * 3 / 4) as u8,
+            (u16::from(g) * 3 / 4) as u8,
+            (u16::from(b) * 3 / 4) as u8,
+        ),
+        _ => Color::DarkGray,
+    }
+}
+
+fn section_block<'a>(title: impl Into<Line<'a>>) -> Block<'a> {
+    Block::bordered()
+        .title(title)
+        .title_style(Style::default().fg(Color::Cyan))
+        .border_style(Style::default().fg(SECTION_BORDER))
+}
+
 enum Screen {
+    Controller,
+    NewInstallation,
     QuickStart,
     Form,
     Nodes,
     Temporary,
+    Access,
     NodeWizard,
     Settings,
     SettingsPage(SettingsPage),
@@ -143,6 +167,18 @@ impl Screen {
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Control {
+    Controller,
+    ControllerScope,
+    ControllerPlan(bool),
+    ControllerPhrase,
+    ControllerConfirm,
+    ControllerRefresh,
+    ControllerRetry,
+    ControllerShutdown,
+    ControllerBack,
+    ControllerNew,
+    ControllerCheck,
+    NewInstallationConfirm(bool),
     QuickStartToggle,
     QuickStartClose,
     QuickStartAction,
@@ -161,6 +197,44 @@ enum Control {
     NodesSetup,
     NodesBootstrap,
     Temporary,
+    Access,
+    AccessTab(crate::access::Tab),
+    AccessItem(usize),
+    AccessSearch,
+    AccessRefresh,
+    AccessBack,
+    AccessPage(bool),
+    AccessDecision(bool),
+    AccessConfirm,
+    AccessEdit,
+    AccessNew,
+    AccessAccountProfiles,
+    AccessField(usize),
+    AccessSave,
+    AccessProfileAction(bool),
+    AccessProfileConfirm,
+    AccessAccountAction(bool),
+    AccessAccountConfirm,
+    AccessDevices,
+    AccessDeviceItem(usize),
+    AccessDeviceNew,
+    AccessDeviceEdit,
+    AccessDeviceName,
+    AccessDeviceSave,
+    AccessDeviceDelete,
+    AccessDeviceConfirm,
+    AccessDevicePage(bool),
+    AccessExpiryMenu,
+    AccessExpiry(Option<u32>),
+    AccessExpiryBack,
+    AccessExpiryPage(bool),
+    AccessGrants,
+    AccessGrant(usize, bool),
+    AccessRule(Option<usize>, bool),
+    AccessGrantMode(bool),
+    AccessGrantPage(bool),
+    AccessGrantBack,
+    AccessGrantAll(bool),
     NodeTemporary,
     TemporaryChoice(usize),
     TemporaryBack,
@@ -317,6 +391,7 @@ impl Form {
     }
     fn installation(&self) -> Installation {
         Installation {
+            installed: self.saved.as_ref().is_some_and(|p| p.installed),
             id: self
                 .saved
                 .as_ref()
@@ -413,7 +488,18 @@ struct App {
     update: Option<crate::workstation::UpdateSnapshot>,
     node_page: usize,
     stop: Arc<AtomicBool>,
+    controller: crate::controller::Browser,
+    installed_profile: Option<uuid::Uuid>,
+    fresh_installation: bool,
+    controller_sidebar: bool,
+    confirmed_installation: Option<uuid::Uuid>,
+    probe_requested: bool,
+    ignore_nodes_updates: bool,
+    access: crate::access::Browser,
+    access_busy: bool,
+    access_capacity: std::cell::Cell<usize>,
     hits: Vec<Hit>,
+    hovered: Option<Control>,
     confirm: bool,
     connections: Connections,
     state_dir: std::path::PathBuf,
@@ -467,7 +553,18 @@ impl App {
             update: None,
             node_page: 0,
             stop: r.workflow.stop.clone(),
+            controller: crate::controller::Browser::default(),
+            installed_profile: None,
+            fresh_installation: false,
+            controller_sidebar: false,
+            confirmed_installation: None,
+            probe_requested: false,
+            ignore_nodes_updates: false,
+            access: crate::access::Browser::default(),
+            access_busy: false,
+            access_capacity: std::cell::Cell::new(10),
             hits: Vec::new(),
+            hovered: None,
             confirm: true,
             connections: Connections::default(),
             state_dir: r.state_dir.clone(),
@@ -635,6 +732,7 @@ impl App {
         Ok(())
     }
     fn navigate(&mut self, backwards: bool) {
+        self.fresh_installation = false;
         let current = if self.quick_focus {
             5
         } else if self.screen.is_settings() {
@@ -648,7 +746,7 @@ impl App {
                 .unwrap()
         };
         let mut next = (current + if backwards { 6 } else { 1 }) % 7;
-        while next < 5 && !self.actions_enabled() {
+        while next < 5 && (!self.actions_enabled() || next > 0 && !self.controller_ready()) {
             next = (next + if backwards { 6 } else { 1 }) % 7;
         }
         self.quick_focus = false;
@@ -664,6 +762,10 @@ impl App {
             self.temporary_sidebar = true;
         } else {
             self.form.select_action(Action::ALL[next]);
+            if self.form.action == Action::Install && self.has_installation() {
+                self.open_controller();
+                return;
+            }
             self.screen = if self.form.action == Action::PrepareNode {
                 Screen::Nodes
             } else {
@@ -684,7 +786,7 @@ impl App {
         self.error.clear();
     }
     fn open_temporary(&mut self, filter: Option<crate::nodes::Node>) {
-        if !self.actions_enabled() {
+        if !self.controller_ready() {
             return;
         }
         let profile = self.form.saved.as_ref().map(|p| p.id);
@@ -709,6 +811,386 @@ impl App {
         self.temporary_sidebar = false;
         self.quick_focus = false;
         self.temporary_command(self.temporary.list());
+    }
+    fn controller_command(&mut self, command: crate::controller::Command) {
+        if self.nodes_busy {
+            return;
+        }
+        self.nodes_requested = Some(crate::nodes::Command::Controller(
+            self.form.saved.as_ref().map(|p| p.id),
+            command,
+        ));
+        self.error.clear();
+    }
+    fn controller_ready(&self) -> bool {
+        self.form
+            .saved
+            .as_ref()
+            .is_some_and(|p| self.confirmed_installation == Some(p.id))
+    }
+    fn has_installation(&self) -> bool {
+        self.form
+            .saved
+            .as_ref()
+            .is_some_and(|p| p.installed || self.installed_profile == Some(p.id))
+    }
+    fn remember_installed(&mut self) {
+        let Some(saved) = &self.form.saved else {
+            return;
+        };
+        self.installed_profile = Some(saved.id);
+        self.confirmed_installation = Some(saved.id);
+        if saved.installed {
+            return;
+        }
+        let mut next = self.connections.clone();
+        if let Some(profile) = next.installations.iter_mut().find(|p| p.id == saved.id) {
+            profile.installed = true;
+            match next.save(&self.state_dir) {
+                Ok(()) => {
+                    self.connections = next;
+                    if let Some(saved) = &mut self.form.saved {
+                        saved.installed = true;
+                    }
+                }
+                Err(error) => self.error = format!("Could not save installation state: {error}"),
+            }
+        }
+    }
+    fn open_controller(&mut self) {
+        if !self.actions_enabled() {
+            return;
+        }
+        let profile = self.form.saved.as_ref().map(|p| p.id);
+        if self.controller.profile != profile {
+            self.controller = crate::controller::Browser {
+                profile,
+                ..Default::default()
+            };
+        }
+        self.controller.plan = None;
+        self.controller.phrase.clear();
+        self.controller.selected = 0;
+        self.screen = Screen::Controller;
+        self.quick_focus = false;
+        self.controller_sidebar = false;
+        if let Some(saved) = &self.form.saved
+            && let Err(error) = self.controller.restore_verification(&self.state_dir, saved)
+        {
+            self.error = format!("Could not resume removal verification: {error}");
+        }
+        if let Some(command) = self.controller.poll() {
+            self.controller_command(command);
+        } else {
+            self.controller_command(if self.controller_ready() {
+                crate::controller::Command::Overview
+            } else {
+                crate::controller::Command::Probe
+            });
+        }
+    }
+    fn controller_controls(&self) -> Vec<Control> {
+        let state = &self.controller;
+        let mut controls = Vec::new();
+        if state.removed || !self.controller_ready() && !state.verifying {
+            return vec![
+                Control::ControllerNew,
+                Control::ControllerCheck,
+                Control::ControllerBack,
+            ];
+        }
+        if state.plan.is_some() {
+            return vec![
+                Control::ControllerPhrase,
+                Control::ControllerConfirm,
+                Control::ControllerBack,
+            ];
+        }
+        if let Some(job) = &state.job {
+            if job["status"] == "blocked" {
+                controls.push(Control::ControllerRetry);
+            }
+            if job["status"] == "awaiting_shutdown" && !state.verifying {
+                controls.push(Control::ControllerShutdown);
+            }
+        }
+        let active = state.verifying
+            || state.job.as_ref().is_some_and(|j| {
+                matches!(
+                    j["status"].as_str(),
+                    Some("queued" | "running" | "blocked" | "awaiting_shutdown")
+                )
+            });
+        if !active
+            && state
+                .overview
+                .as_ref()
+                .is_some_and(|v| v["supported"] == true)
+        {
+            controls.extend([
+                Control::ControllerScope,
+                Control::ControllerPlan(false),
+                Control::ControllerPlan(true),
+            ]);
+        }
+        if !active {
+            controls.push(Control::ControllerNew);
+        }
+        controls.extend([Control::ControllerRefresh, Control::ControllerBack]);
+        controls
+    }
+    fn controller_key(&mut self, key: crossterm::event::KeyEvent) {
+        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            self.exit = true;
+            self.exit_confirm = false;
+            return;
+        }
+        if self.controller_sidebar {
+            match key.code {
+                KeyCode::Down | KeyCode::Up => self.navigate(key.code == KeyCode::Up),
+                KeyCode::Enter | KeyCode::Right | KeyCode::Tab => {
+                    self.controller_sidebar = false;
+                    self.quick_focus = false;
+                }
+                KeyCode::Esc => {
+                    self.exit = true;
+                    self.exit_confirm = false;
+                }
+                _ => {}
+            }
+            return;
+        }
+        if key.code == KeyCode::Esc {
+            self.activate(Control::ControllerBack);
+            return;
+        }
+        let controls = self.controller_controls();
+        if controls.is_empty() {
+            return;
+        }
+        let current = self.controller.selected.min(controls.len() - 1);
+        match key.code {
+            KeyCode::Enter => {
+                self.activate(controls[current]);
+            }
+            KeyCode::Down => self.controller.selected = (current + 1).min(controls.len() - 1),
+            KeyCode::Up => self.controller.selected = current.saturating_sub(1),
+            KeyCode::Tab => self.controller.selected = (current + 1) % controls.len(),
+            KeyCode::BackTab => {
+                self.controller.selected = (current + controls.len() - 1) % controls.len()
+            }
+            KeyCode::Left | KeyCode::Right => {
+                let rects: Vec<_> = controls
+                    .iter()
+                    .filter_map(|c| self.hits.iter().find(|h| h.control == *c).map(|h| h.area))
+                    .collect();
+                self.controller.selected =
+                    directional_index(&rects, current, key.code).unwrap_or(current);
+            }
+            KeyCode::Char(c)
+                if controls[current] == Control::ControllerPhrase && !c.is_control() =>
+            {
+                if self.controller.phrase.len() < 64 {
+                    self.controller.phrase.push(c);
+                }
+            }
+            KeyCode::Backspace if controls[current] == Control::ControllerPhrase => {
+                self.controller.phrase.pop();
+            }
+            _ => {}
+        }
+    }
+    fn access_command(&mut self, command: crate::access::Command) {
+        self.nodes_requested = Some(crate::nodes::Command::Access(command));
+    }
+    fn open_access(&mut self) {
+        if !self.controller_ready() {
+            return;
+        }
+        let profile = self.form.saved.as_ref().map(|p| p.id);
+        if self.access.profile != profile {
+            self.access = crate::access::Browser {
+                profile,
+                ..Default::default()
+            };
+        }
+        self.access.card = None;
+        self.access.devices = None;
+        self.access.decision = None;
+        self.access.editor = None;
+        self.access.profile_action = None;
+        self.access.account_action = None;
+        self.access.owner_filter = None;
+        self.screen = Screen::Access;
+        self.quick_focus = false;
+        self.access_command(crate::access::Command::List(self.access.tab));
+    }
+    fn access_controls(&self) -> Vec<Control> {
+        self.hits
+            .iter()
+            .filter_map(|hit| {
+                matches!(
+                    hit.control,
+                    Control::AccessTab(_)
+                        | Control::AccessItem(_)
+                        | Control::AccessSearch
+                        | Control::AccessRefresh
+                        | Control::AccessBack
+                        | Control::AccessPage(_)
+                        | Control::AccessDecision(_)
+                        | Control::AccessConfirm
+                        | Control::AccessEdit
+                        | Control::AccessNew
+                        | Control::AccessAccountProfiles
+                        | Control::AccessField(_)
+                        | Control::AccessSave
+                        | Control::AccessProfileAction(_)
+                        | Control::AccessAccountAction(_)
+                        | Control::AccessDevices
+                        | Control::AccessDeviceItem(_)
+                        | Control::AccessDeviceNew
+                        | Control::AccessDeviceEdit
+                        | Control::AccessDeviceName
+                        | Control::AccessDeviceSave
+                        | Control::AccessDeviceDelete
+                        | Control::AccessDeviceConfirm
+                        | Control::AccessDevicePage(_)
+                        | Control::AccessExpiryMenu
+                        | Control::AccessExpiry(_)
+                        | Control::AccessExpiryPage(_)
+                        | Control::AccessExpiryBack
+                        | Control::AccessAccountConfirm
+                        | Control::AccessProfileConfirm
+                        | Control::AccessGrants
+                        | Control::AccessGrant(_, _)
+                        | Control::AccessRule(_, _)
+                        | Control::AccessGrantMode(_)
+                        | Control::AccessGrantPage(_)
+                        | Control::AccessGrantBack
+                        | Control::AccessGrantAll(_)
+                )
+                .then_some(hit.control)
+            })
+            .collect()
+    }
+    fn access_key(&mut self, key: KeyEvent) {
+        let controls = self.access_controls();
+        if controls.get(self.access.selected) == Some(&Control::AccessDeviceName)
+            && let Some(editor) = self.access.devices.as_mut().and_then(|d| d.editor.as_mut())
+        {
+            match key.code {
+                KeyCode::Char(c)
+                    if !key.modifiers.contains(KeyModifiers::CONTROL) && !c.is_control() =>
+                {
+                    if editor.name.chars().count() < 64 {
+                        editor.name.push(c);
+                        editor.key = uuid::Uuid::new_v4();
+                    }
+                    return;
+                }
+                KeyCode::Backspace => {
+                    editor.name.pop();
+                    editor.key = uuid::Uuid::new_v4();
+                    return;
+                }
+                _ => {}
+            }
+        }
+        if let Some(Control::AccessField(index)) = controls.get(self.access.selected).copied()
+            && let Some(editor) = &mut self.access.editor
+        {
+            match key.code {
+                KeyCode::Char(c)
+                    if !key.modifiers.contains(KeyModifiers::CONTROL) && !c.is_control() =>
+                {
+                    if editor.fields[index].chars().count() < 128 {
+                        editor.fields[index].push(c);
+                        editor.key = uuid::Uuid::new_v4();
+                    }
+                    return;
+                }
+                KeyCode::Backspace => {
+                    editor.fields[index].pop();
+                    editor.key = uuid::Uuid::new_v4();
+                    return;
+                }
+                _ => {}
+            }
+        }
+        match key.code {
+            KeyCode::Esc => {
+                if self.access.devices.is_some() {
+                    self.activate(Control::AccessBack);
+                    return;
+                }
+                if let Some(editor) = &mut self.access.editor
+                    && editor.expiry_view
+                {
+                    editor.expiry_view = false;
+                    self.access.selected = 0;
+                    return;
+                }
+                if let Some(editor) = &mut self.access.editor
+                    && editor.grants_view
+                {
+                    editor.grants_view = false;
+                    self.access.selected = 0;
+                    return;
+                }
+                if self.access.editor.take().is_some()
+                    || self.access.profile_action.take().is_some()
+                    || self.access.account_action.take().is_some()
+                {
+                    return;
+                }
+                if self.access.decision.take().is_some() {
+                    return;
+                }
+                if self.access.card.take().is_some() {
+                    self.access_command(crate::access::Command::List(self.access.tab));
+                } else {
+                    self.screen = Screen::Form;
+                }
+            }
+            KeyCode::Tab => {
+                self.access.selected =
+                    (self.access.selected + 1).min(controls.len().saturating_sub(1))
+            }
+            KeyCode::BackTab => self.access.selected = self.access.selected.saturating_sub(1),
+            KeyCode::Enter => {
+                if let Some(control) = controls.get(self.access.selected) {
+                    self.activate(*control);
+                }
+            }
+            KeyCode::Char(c) if key.modifiers.contains(KeyModifiers::CONTROL) && c == 'c' => {
+                self.exit = true;
+                self.exit_confirm = false;
+            }
+            KeyCode::Char(c)
+                if controls.get(self.access.selected) == Some(&Control::AccessSearch) =>
+            {
+                if !c.is_control() && self.access.search.len() < 128 {
+                    self.access.search.push(c);
+                    self.access.page = 0;
+                }
+            }
+            KeyCode::Backspace
+                if controls.get(self.access.selected) == Some(&Control::AccessSearch) =>
+            {
+                self.access.search.pop();
+                self.access.page = 0;
+            }
+            KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down => {
+                let areas: Vec<_> = controls
+                    .iter()
+                    .filter_map(|c| self.hits.iter().find(|h| h.control == *c).map(|h| h.area))
+                    .collect();
+                if let Some(next) = directional_index(&areas, self.access.selected, key.code) {
+                    self.access.selected = next;
+                }
+            }
+            _ => {}
+        }
     }
     fn temporary_controls(&self) -> Vec<Control> {
         self.hits
@@ -835,15 +1317,15 @@ impl App {
         self.temporary.selected = 0;
     }
     fn open_nodes(&mut self) {
-        if !self.actions_enabled() {
-            return;
-        }
         let profile_id = self.form.saved.as_ref().map(|p| p.id);
         if self.nodes.profile_id != profile_id {
             self.nodes = crate::nodes::Browser {
                 profile_id,
                 ..crate::nodes::Browser::default()
             };
+        }
+        if !self.controller_ready() {
+            return;
         }
         self.screen = Screen::Nodes;
         self.nodes.card = None;
@@ -1281,6 +1763,16 @@ impl App {
     fn save_edit(&mut self) -> Result<()> {
         let (id, fields, _) = self.editor.as_ref().unwrap();
         let profile = Installation {
+            installed: id
+                .and_then(|id| self.connections.installations.iter().find(|p| p.id == id))
+                .is_some_and(|p| {
+                    p.installed
+                        && p.matches(
+                            fields[1].trim(),
+                            fields[2].parse().unwrap_or(0),
+                            fields[3].trim(),
+                        )
+                }),
             id: id.unwrap_or_else(uuid::Uuid::new_v4),
             name: fields[0].trim().into(),
             host: fields[1].trim().into(),
@@ -1316,6 +1808,7 @@ impl App {
         Ok(())
     }
     fn use_selected(&mut self) -> Result<()> {
+        self.fresh_installation = false;
         let Some(profile) = self
             .connections
             .installations
@@ -1361,131 +1854,199 @@ impl App {
     }
     fn event(&mut self, event: Event) {
         match event {
-            Event::Nodes(update) => match update {
-                crate::nodes::Update::Temporary(command, value) => {
-                    use crate::temporary::{Command, View};
-                    self.temporary.selected = 0;
-                    match command {
-                        Command::List { .. } => {
-                            self.temporary.items =
-                                value["items"].as_array().cloned().unwrap_or_default();
-                            self.temporary.total = value["total"].as_u64().unwrap_or(0) as usize;
-                            self.temporary.loaded_size =
-                                value["page_size"].as_u64().unwrap_or(20) as usize;
+            Event::Nodes(update) => {
+                if self.ignore_nodes_updates {
+                    return;
+                }
+                if !matches!(&update, crate::nodes::Update::Controller(..)) {
+                    self.remember_installed();
+                }
+                match update {
+                    crate::nodes::Update::Controller(profile, command, value) => {
+                        if matches!(command, crate::controller::Command::Probe) {
+                            if profile == self.form.saved.as_ref().map(|p| p.id) {
+                                if value["installed"] == true {
+                                    self.remember_installed();
+                                    if matches!(self.screen, Screen::Controller)
+                                        && !self.controller.verifying
+                                    {
+                                        self.nodes_requested =
+                                            Some(crate::nodes::Command::Controller(
+                                                profile,
+                                                crate::controller::Command::Overview,
+                                            ));
+                                    }
+                                    if self.controller.removed {
+                                        self.controller = crate::controller::Browser {
+                                            profile,
+                                            ..Default::default()
+                                        };
+                                    }
+                                } else {
+                                    self.confirmed_installation = None;
+                                }
+                            }
+                            return;
                         }
-                        Command::Servers => {
-                            self.temporary.nodes = value["items"]
-                                .as_array()
-                                .into_iter()
-                                .flatten()
-                                .filter_map(|v| {
-                                    serde_json::from_value::<crate::nodes::Node>(v.clone()).ok()
-                                })
-                                .filter(|n| {
-                                    n.enabled
-                                        && n.applied_revision > 0
-                                        && n.applied_revision == n.desired_revision
-                                        && !n.protocols.is_empty()
-                                })
-                                .collect();
+                        if profile != self.form.saved.as_ref().map(|p| p.id)
+                            || profile != self.controller.profile
+                        {
+                            return;
                         }
-                        Command::Card(_) | Command::Revoke(_) | Command::Create { .. } => {
-                            self.temporary.card = Some(value);
-                            self.temporary.artifact = None;
-                            self.temporary.view = View::Card;
-                            self.temporary.id = None;
+                        self.remember_installed();
+                        let shutdown = matches!(&command, crate::controller::Command::Shutdown(..));
+                        self.controller.apply(command, value);
+                        if shutdown
+                            && let Some(saved) = &self.form.saved
+                            && let Err(error) =
+                                self.controller.save_verification(&self.state_dir, saved)
+                        {
+                            self.error = format!("Could not save removal verification: {error}");
                         }
-                        Command::Artifact(_) => {
-                            self.qr_visible = false;
-                            *self.qr.borrow_mut() = None;
-                            self.temporary.artifact = Some(value);
-                            self.temporary.scroll = 0;
-                            self.temporary.view = View::Artifact;
+                        if self.controller.removed {
+                            self.installed_profile = None;
+                            self.confirmed_installation = None;
+                            if let Some(id) = profile
+                                && let Err(error) = crate::controller::Browser::forget_verification(
+                                    &self.state_dir,
+                                    id,
+                                )
+                            {
+                                self.error = error.to_string();
+                            }
                         }
                     }
-                }
-                crate::nodes::Update::CreationOptions(options) => {
-                    match crate::node_wizard::Wizard::new(options) {
-                        Ok(wizard) => self.node_wizard = Some(wizard),
-                        Err(error) => self.error = error.to_string(),
+                    crate::nodes::Update::Access(command, value) => {
+                        self.access.apply(command, value)
                     }
-                }
-                crate::nodes::Update::Created(item) => {
-                    if let Some(existing) = self.nodes.items.iter_mut().find(|n| n.key == item.key)
-                    {
-                        *existing = item.clone();
-                    } else {
-                        self.nodes.items.push(item.clone());
+                    crate::nodes::Update::Temporary(command, value) => {
+                        use crate::temporary::{Command, View};
+                        self.temporary.selected = 0;
+                        match command {
+                            Command::List { .. } => {
+                                self.temporary.items =
+                                    value["items"].as_array().cloned().unwrap_or_default();
+                                self.temporary.total =
+                                    value["total"].as_u64().unwrap_or(0) as usize;
+                                self.temporary.loaded_size =
+                                    value["page_size"].as_u64().unwrap_or(20) as usize;
+                            }
+                            Command::Servers => {
+                                self.temporary.nodes = value["items"]
+                                    .as_array()
+                                    .into_iter()
+                                    .flatten()
+                                    .filter_map(|v| {
+                                        serde_json::from_value::<crate::nodes::Node>(v.clone()).ok()
+                                    })
+                                    .filter(|n| {
+                                        n.enabled
+                                            && n.applied_revision > 0
+                                            && n.applied_revision == n.desired_revision
+                                            && !n.protocols.is_empty()
+                                    })
+                                    .collect();
+                            }
+                            Command::Card(_) | Command::Revoke(_) | Command::Create { .. } => {
+                                self.temporary.card = Some(value);
+                                self.temporary.artifact = None;
+                                self.temporary.view = View::Card;
+                                self.temporary.id = None;
+                            }
+                            Command::Artifact(_) => {
+                                self.qr_visible = false;
+                                *self.qr.borrow_mut() = None;
+                                self.temporary.artifact = Some(value);
+                                self.temporary.scroll = 0;
+                                self.temporary.view = View::Artifact;
+                            }
+                        }
                     }
-                    if let Some(wizard) = &mut self.node_wizard {
-                        wizard.created_key = Some(item.key.clone());
-                        wizard.title = item.title.clone();
-                        wizard.key = item.key.clone();
-                        wizard.step = crate::node_wizard::Step::Created;
-                        wizard.selected = 0;
+                    crate::nodes::Update::CreationOptions(options) => {
+                        match crate::node_wizard::Wizard::new(options) {
+                            Ok(wizard) => self.node_wizard = Some(wizard),
+                            Err(error) => self.error = error.to_string(),
+                        }
                     }
-                    self.nodes.card = Some(item);
-                }
-                crate::nodes::Update::List(items) => {
-                    self.nodes.items = items;
-                    self.nodes.loaded = true;
-                    self.nodes.card = None;
-                }
-                crate::nodes::Update::Observation(item) => {
-                    if self
-                        .nodes
-                        .card
-                        .as_ref()
-                        .is_some_and(|current| current.key == item.key)
-                    {
-                        if let Some(existing) = self
+                    crate::nodes::Update::Created(item) => {
+                        if let Some(existing) =
+                            self.nodes.items.iter_mut().find(|n| n.key == item.key)
+                        {
+                            *existing = item.clone();
+                        } else {
+                            self.nodes.items.push(item.clone());
+                        }
+                        if let Some(wizard) = &mut self.node_wizard {
+                            wizard.created_key = Some(item.key.clone());
+                            wizard.title = item.title.clone();
+                            wizard.key = item.key.clone();
+                            wizard.step = crate::node_wizard::Step::Created;
+                            wizard.selected = 0;
+                        }
+                        self.nodes.card = Some(item);
+                    }
+                    crate::nodes::Update::List(items) => {
+                        self.nodes.items = items;
+                        self.nodes.loaded = true;
+                        self.nodes.card = None;
+                    }
+                    crate::nodes::Update::Observation(item) => {
+                        if self
                             .nodes
-                            .items
-                            .iter_mut()
-                            .find(|node| node.key == item.key)
+                            .card
+                            .as_ref()
+                            .is_some_and(|current| current.key == item.key)
+                        {
+                            if let Some(existing) = self
+                                .nodes
+                                .items
+                                .iter_mut()
+                                .find(|node| node.key == item.key)
+                            {
+                                *existing = item.clone();
+                            }
+                            self.nodes.card = Some(item);
+                        }
+                    }
+                    crate::nodes::Update::Card(item) => {
+                        if let Some(existing) =
+                            self.nodes.items.iter_mut().find(|n| n.key == item.key)
                         {
                             *existing = item.clone();
                         }
                         self.nodes.card = Some(item);
                     }
-                }
-                crate::nodes::Update::Card(item) => {
-                    if let Some(existing) = self.nodes.items.iter_mut().find(|n| n.key == item.key)
-                    {
-                        *existing = item.clone();
-                    }
-                    self.nodes.card = Some(item);
-                }
-                crate::nodes::Update::Operation(operation) => {
-                    if operation.kind == "agent-rollouts" && operation.status == "succeeded" {
-                        if let Some(node) = self
-                            .nodes
-                            .card
-                            .as_mut()
-                            .filter(|node| node.key == operation.node_key)
-                        {
-                            node.agent = crate::nodes::AgentState::Ready;
+                    crate::nodes::Update::Operation(operation) => {
+                        if operation.kind == "agent-rollouts" && operation.status == "succeeded" {
+                            if let Some(node) = self
+                                .nodes
+                                .card
+                                .as_mut()
+                                .filter(|node| node.key == operation.node_key)
+                            {
+                                node.agent = crate::nodes::AgentState::Ready;
+                            }
+                            if let Some(node) = self
+                                .nodes
+                                .items
+                                .iter_mut()
+                                .find(|node| node.key == operation.node_key)
+                            {
+                                node.agent = crate::nodes::AgentState::Ready;
+                            }
                         }
-                        if let Some(node) = self
-                            .nodes
-                            .items
-                            .iter_mut()
-                            .find(|node| node.key == operation.node_key)
+                        if !self.nodes_background
+                            || self
+                                .nodes
+                                .card
+                                .as_ref()
+                                .is_some_and(|node| node.key == operation.node_key)
                         {
-                            node.agent = crate::nodes::AgentState::Ready;
+                            self.nodes.operation = Some(operation)
                         }
                     }
-                    if !self.nodes_background
-                        || self
-                            .nodes
-                            .card
-                            .as_ref()
-                            .is_some_and(|node| node.key == operation.node_key)
-                    {
-                        self.nodes.operation = Some(operation)
-                    }
                 }
-            },
+            }
             Event::Stage(label) => self.stage = label,
             Event::Update(snapshot) => {
                 self.update = Some(snapshot);
@@ -1502,17 +2063,25 @@ impl App {
                 self.trust = false;
             }
             Event::Finished(result) => {
+                self.ignore_nodes_updates = false;
+                if !self.nodes_busy && self.form.action == Action::Install && result.is_ok() {
+                    self.remember_installed();
+                }
                 if self.nodes_busy {
                     self.nodes_busy = false;
                     if self.nodes_background {
                         self.nodes_background = false;
+                        self.access_busy = false;
                         if let Err(error) = result {
                             self.error = error;
                         }
                         return;
                     }
                     let failed = result.is_err();
-                    self.screen = if self.temporary_busy {
+                    self.screen = if self.access_busy {
+                        self.access_busy = false;
+                        Screen::Access
+                    } else if self.temporary_busy {
                         self.temporary_busy = false;
                         Screen::Temporary
                     } else if self.wizard_loading && self.node_wizard.is_some() {
@@ -1622,7 +2191,12 @@ impl App {
         if !matches!(key.code, KeyCode::Enter | KeyCode::Esc) {
             return false;
         }
-        self.screen = Screen::Form;
+        self.fresh_installation = false;
+        self.screen = if self.form.action == Action::Install && self.has_installation() {
+            Screen::Controller
+        } else {
+            Screen::Form
+        };
         self.form.selected = 0;
         self.quick_focus = !self.actions_enabled();
         self.outcome = None;
@@ -1775,6 +2349,47 @@ impl App {
                 _ => {}
             }
         }
+        if matches!(self.screen, Screen::Access)
+            && matches!(
+                event.kind,
+                MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+            )
+        {
+            self.access.selected = if event.kind == MouseEventKind::ScrollUp {
+                self.access.selected.saturating_sub(1)
+            } else {
+                (self.access.selected + 1).min(self.access_controls().len().saturating_sub(1))
+            };
+            return None;
+        }
+        if matches!(self.screen, Screen::Controller)
+            && matches!(
+                event.kind,
+                MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+            )
+        {
+            self.controller.selected = if event.kind == MouseEventKind::ScrollUp {
+                self.controller.selected.saturating_sub(1)
+            } else {
+                (self.controller.selected + 1)
+                    .min(self.controller_controls().len().saturating_sub(1))
+            };
+            return None;
+        }
+        if event.kind == MouseEventKind::Moved {
+            let control = self
+                .hits
+                .iter()
+                .rev()
+                .find(|hit| hit.area.contains((event.column, event.row).into()))
+                .map(|hit| hit.control);
+            if let Some(control) = control {
+                self.focus(control);
+            }
+            self.hovered = control;
+            return None;
+        }
+        self.hovered = None;
         if event.kind != MouseEventKind::Down(MouseButton::Left) {
             return None;
         }
@@ -1786,6 +2401,106 @@ impl App {
             .control;
         self.activate(control)
     }
+    fn focus(&mut self, control: Control) {
+        if matches!(self.screen, Screen::Controller)
+            && let Some(index) = self
+                .controller_controls()
+                .iter()
+                .position(|c| *c == control)
+        {
+            self.controller.selected = index;
+            return;
+        }
+        // Focus is deliberately separate from activation: no network requests,
+        // toggles, page changes or writes happen when the pointer moves.
+        match control {
+            Control::AccessSearch | Control::AccessField(_) => {
+                if let Some(index) = self.access_controls().iter().position(|c| *c == control) {
+                    self.access.selected = index;
+                }
+            }
+            Control::Field(index) => {
+                self.quick_focus = false;
+                self.form.selected = index;
+            }
+            Control::EditField(index) => {
+                if let Some(editor) = &mut self.editor {
+                    editor.2 = index;
+                }
+            }
+            Control::Channel(editor, _) => {
+                if editor {
+                    if let Some(editor) = &mut self.editor {
+                        editor.2 = 4;
+                    }
+                } else if let Some(index) = self.form.visible().iter().position(|&i| i == 3) {
+                    self.quick_focus = false;
+                    self.form.selected = index + 1;
+                }
+            }
+            Control::RepairMode => {
+                if let Some(index) = self.form.visible().iter().position(|&i| i == 11) {
+                    self.quick_focus = false;
+                    self.form.selected = index + 1;
+                }
+            }
+            Control::Continue => {
+                self.quick_focus = false;
+                self.form.selected = self.form.count() - 1;
+            }
+            Control::Accent(index) => self.settings_selected = index + 1,
+            Control::AccentInput => self.settings_selected = ACCENTS.len() + 1,
+            Control::SaveAccent => self.settings_selected = ACCENTS.len() + 2,
+            Control::Installation(index) => self.settings_selected = index + 1,
+            Control::SettingsPage(page) => {
+                if matches!(self.screen, Screen::Settings) {
+                    self.settings_selected =
+                        SettingsPage::ALL.iter().position(|p| *p == page).unwrap() + 1;
+                }
+            }
+            Control::Confirm(value) | Control::ConfirmDelete(value) => self.confirm = value,
+            Control::Prompt(value) => self.trust = value,
+            Control::Administrator(index) => self.administrator_selected = index,
+            Control::Exit(value) => self.exit_confirm = value,
+            _ => {
+                if matches!(self.screen, Screen::Access) {
+                    if let Some(index) = self.access_controls().iter().position(|c| *c == control) {
+                        self.access.selected = index;
+                    }
+                } else if matches!(self.screen, Screen::Nodes) {
+                    if let Some(index) = self.nodes_controls().iter().position(|c| *c == control) {
+                        self.nodes_selected = index;
+                        self.nodes_sidebar = false;
+                    }
+                } else if matches!(self.screen, Screen::Temporary) {
+                    if let Some(index) =
+                        self.temporary_controls().iter().position(|c| *c == control)
+                    {
+                        self.temporary.selected = index;
+                        self.temporary_sidebar = false;
+                    }
+                } else if matches!(self.screen, Screen::NodeWizard)
+                    && let Some(wizard) = &mut self.node_wizard
+                {
+                    let mut controls: Vec<_> = (0..wizard.choices().len())
+                        .map(Control::WizardChoice)
+                        .collect();
+                    if wizard.step == crate::node_wizard::Step::Created {
+                        controls = vec![Control::WizardOpen, Control::WizardCancel];
+                    } else {
+                        if !wizard.selection_step() {
+                            controls.push(Control::WizardNext);
+                        }
+                        controls.extend([Control::WizardBack, Control::WizardCancel]);
+                    }
+                    if let Some(index) = controls.iter().position(|c| *c == control) {
+                        wizard.selected = index;
+                    }
+                }
+            }
+        }
+    }
+
     fn quick_start_key(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Esc => {
@@ -1844,6 +2559,416 @@ impl App {
             Control::QuickStartAction => {
                 self.screen = Screen::Form;
                 self.begin_edit(true);
+                return None;
+            }
+            Control::AccessGrants => {
+                if let Some(editor) = &mut self.access.editor {
+                    editor.grants_view = true;
+                    editor.grants_page = 0;
+                }
+                self.access.selected = 0;
+                return None;
+            }
+            Control::AccessGrantBack => {
+                if let Some(editor) = &mut self.access.editor {
+                    editor.grants_view = false;
+                }
+                self.access.selected = 0;
+                return None;
+            }
+            Control::AccessGrantMode(future) => {
+                if let Some(editor) = &mut self.access.editor {
+                    editor.future_view = future;
+                    editor.grants_page = 0;
+                }
+                self.access.selected = 0;
+                return None;
+            }
+            Control::AccessGrantPage(next) => {
+                if let Some(editor) = &mut self.access.editor {
+                    let count = if editor.future_view {
+                        editor.regions.len() + 1
+                    } else {
+                        editor.nodes.len()
+                    };
+                    let pages = count.div_ceil(self.access_capacity.get().max(1)).max(1);
+                    editor.grants_page = if next {
+                        (editor.grants_page + 1).min(pages - 1)
+                    } else {
+                        editor.grants_page.saturating_sub(1)
+                    };
+                }
+                return None;
+            }
+            Control::AccessGrant(index, awg) => {
+                if let Some(editor) = &mut self.access.editor
+                    && let Some(node) = editor
+                        .nodes
+                        .get(index)
+                        .and_then(|n| n["key"].as_str())
+                        .map(str::to_owned)
+                {
+                    editor.toggle_grant(&node, if awg { "awg" } else { "xray" });
+                }
+                return None;
+            }
+            Control::AccessRule(region, awg) => {
+                if let Some(editor) = &mut self.access.editor {
+                    let id = region
+                        .and_then(|index| editor.regions.get(index))
+                        .and_then(|r| r["id"].as_str())
+                        .map(str::to_owned);
+                    editor.toggle_rule(id.as_deref(), if awg { "awg" } else { "xray" });
+                }
+                return None;
+            }
+            Control::AccessGrantAll(grant) => {
+                if let Some(editor) = &mut self.access.editor {
+                    let targets: Vec<_> = editor
+                        .nodes
+                        .iter()
+                        .flat_map(|n| {
+                            n["protocols"]
+                                .as_array()
+                                .into_iter()
+                                .flatten()
+                                .filter_map(|p| {
+                                    Some((n["key"].as_str()?.to_owned(), p.as_str()?.to_owned()))
+                                })
+                        })
+                        .collect();
+                    for (node, protocol) in targets {
+                        if editor.granted(&node, &protocol) != grant {
+                            editor.toggle_grant(&node, &protocol);
+                        }
+                    }
+                }
+                return None;
+            }
+            Control::AccessEdit => {
+                if let Some(id) = self
+                    .access
+                    .card
+                    .as_ref()
+                    .and_then(|v| v["id"].as_str())
+                    .map(str::to_owned)
+                {
+                    self.access_command(crate::access::Command::EditContext {
+                        id: Some(id),
+                        owner: None,
+                    });
+                }
+                return None;
+            }
+            Control::AccessAccountProfiles => {
+                self.access.owner_filter = self
+                    .access
+                    .card
+                    .as_ref()
+                    .and_then(|v| v["id"].as_str())
+                    .map(str::to_owned);
+                self.access.tab = crate::access::Tab::Profiles;
+                self.access.search.clear();
+                self.access.page = 0;
+                self.access_command(crate::access::Command::List(self.access.tab));
+                return None;
+            }
+            Control::AccessNew => {
+                if self.access.tab == crate::access::Tab::Accounts
+                    || self.access.owner_filter.is_some()
+                {
+                    let owner = self.access.owner_filter.clone().or_else(|| {
+                        self.access
+                            .card
+                            .as_ref()
+                            .and_then(|v| v["id"].as_str())
+                            .map(str::to_owned)
+                    });
+                    self.access_command(crate::access::Command::EditContext { id: None, owner });
+                } else {
+                    self.access.notice = "Select an account, then choose New profile.".into();
+                    self.access.tab = crate::access::Tab::Accounts;
+                    self.access_command(crate::access::Command::List(self.access.tab));
+                }
+                return None;
+            }
+            Control::AccessField(_) => {
+                self.focus(control);
+                return None;
+            }
+            Control::AccessSave => {
+                if let Some(editor) = &self.access.editor {
+                    match editor.save() {
+                        Ok(command) => self.access_command(command),
+                        Err(error) => self.error = error.to_string(),
+                    }
+                }
+                return None;
+            }
+            Control::AccessDevices => {
+                if let Some(id) = self.access.card.as_ref().and_then(|v| v["id"].as_str()) {
+                    self.access.notice.clear();
+                    self.access_command(crate::access::Command::Devices(id.into()));
+                }
+                return None;
+            }
+            Control::AccessDeviceItem(index) => {
+                if let Some(devices) = &mut self.access.devices {
+                    devices.card = devices.items.get(index).cloned();
+                }
+                self.access.selected = 0;
+                return None;
+            }
+            Control::AccessDeviceNew | Control::AccessDeviceEdit => {
+                if let Some(devices) = &mut self.access.devices {
+                    devices.edit(control == Control::AccessDeviceNew);
+                }
+                self.error.clear();
+                self.access.selected = 0;
+                return None;
+            }
+            Control::AccessDeviceName => {
+                self.focus(control);
+                return None;
+            }
+            Control::AccessDeviceSave => {
+                if let Some(devices) = &self.access.devices {
+                    match devices.save() {
+                        Ok(command) => self.access_command(command),
+                        Err(error) => self.error = error.to_string(),
+                    }
+                }
+                return None;
+            }
+            Control::AccessDeviceDelete => {
+                if let Some(devices) = &mut self.access.devices {
+                    devices.delete_key = Some(uuid::Uuid::new_v4());
+                }
+                self.access.selected = 0;
+                return None;
+            }
+            Control::AccessDeviceConfirm => {
+                if let Some(devices) = &self.access.devices
+                    && let (Some(card), Some(key)) = (&devices.card, devices.delete_key)
+                    && let Some(revision) = card["revision"].as_u64()
+                {
+                    self.access_command(crate::access::Command::DeviceMutate {
+                        profile: crate::access::text(&devices.profile["id"]),
+                        device: card["id"].as_str().map(str::to_owned),
+                        revision,
+                        name: String::new(),
+                        delete: true,
+                        key,
+                    });
+                }
+                return None;
+            }
+            Control::AccessDevicePage(next) => {
+                if let Some(devices) = &mut self.access.devices {
+                    let last = devices
+                        .items
+                        .len()
+                        .div_ceil(self.access_capacity.get().max(1))
+                        .saturating_sub(1);
+                    devices.page = if next {
+                        (devices.page + 1).min(last)
+                    } else {
+                        devices.page.saturating_sub(1)
+                    };
+                }
+                self.access.selected = 0;
+                return None;
+            }
+            Control::AccessExpiryMenu => {
+                if let Some(editor) = &mut self.access.editor {
+                    editor.expiry_view = true;
+                    editor.expiry_page = 0;
+                }
+                self.access.selected = 0;
+                return None;
+            }
+            Control::AccessExpiry(days) => {
+                if let Some(editor) = &mut self.access.editor {
+                    match days
+                        .map(|d| crate::access::expiry_after(d, std::time::SystemTime::now()))
+                        .transpose()
+                    {
+                        Ok(date) => {
+                            editor.fields[1] = date.unwrap_or_default();
+                            editor.key = uuid::Uuid::new_v4();
+                            editor.expiry_view = false;
+                            self.access.selected = 0;
+                        }
+                        Err(error) => self.error = error.to_string(),
+                    }
+                }
+                return None;
+            }
+            Control::AccessExpiryPage(next) => {
+                if let Some(editor) = &mut self.access.editor {
+                    let last = 6usize
+                        .div_ceil(self.access_capacity.get().max(1))
+                        .saturating_sub(1);
+                    editor.expiry_page = if next {
+                        (editor.expiry_page + 1).min(last)
+                    } else {
+                        editor.expiry_page.saturating_sub(1)
+                    };
+                }
+                self.access.selected = 0;
+                return None;
+            }
+            Control::AccessExpiryBack => {
+                if let Some(editor) = &mut self.access.editor {
+                    editor.expiry_view = false;
+                }
+                self.access.selected = 0;
+                return None;
+            }
+            Control::AccessAccountAction(role) => {
+                if let Some(card) = &self.access.card {
+                    let body = if role {
+                        serde_json::json!({"role": if card["role"] == "admin" { "member" } else { "admin" }})
+                    } else {
+                        serde_json::json!({"status": if card["status"] == "approved" { "disabled" } else { "approved" }})
+                    };
+                    self.access.account_action = Some((body, uuid::Uuid::new_v4()));
+                    self.access.selected = 0;
+                }
+                return None;
+            }
+            Control::AccessAccountConfirm => {
+                if let (Some(card), Some((body, key))) =
+                    (&self.access.card, &self.access.account_action)
+                    && let (Some(id), Some(revision)) =
+                        (card["id"].as_str(), card["revision"].as_u64())
+                {
+                    self.access_command(crate::access::Command::AccountMutate {
+                        id: id.into(),
+                        revision,
+                        body: body.clone(),
+                        key: *key,
+                    });
+                }
+                return None;
+            }
+            Control::AccessProfileAction(delete) => {
+                self.access.profile_action = Some(delete);
+                self.access.selected = 0;
+                return None;
+            }
+            Control::AccessProfileConfirm => {
+                if let (Some(card), Some(delete)) = (&self.access.card, self.access.profile_action)
+                {
+                    self.access_command(crate::access::Command::Mutate {
+                        id: card["id"].as_str().map(str::to_owned),
+                        revision: card["desired_revision"].as_u64(),
+                        body: serde_json::json!({"frozen": card["frozen"] != true}),
+                        delete,
+                        key: uuid::Uuid::new_v4(),
+                    });
+                }
+                return None;
+            }
+            Control::Access => {
+                self.open_access();
+                return None;
+            }
+            Control::AccessTab(tab) => {
+                self.access.tab = tab;
+                self.access.owner_filter = None;
+                self.access.items.clear();
+                self.access.page = 0;
+                self.access.search.clear();
+                self.access.notice.clear();
+                self.access_command(crate::access::Command::List(tab));
+                return None;
+            }
+            Control::AccessItem(index) => {
+                if let Some(id) = self.access.items.get(index).and_then(|v| v["id"].as_str()) {
+                    self.access.notice.clear();
+                    self.access_command(crate::access::Command::Card(self.access.tab, id.into()));
+                }
+                return None;
+            }
+            Control::AccessSearch => {
+                self.focus(control);
+                return None;
+            }
+            Control::AccessRefresh => {
+                if let Some(devices) = &self.access.devices {
+                    self.access_command(crate::access::Command::Devices(crate::access::text(
+                        &devices.profile["id"],
+                    )));
+                    return None;
+                }
+                let command = self
+                    .access
+                    .card
+                    .as_ref()
+                    .and_then(|v| v["id"].as_str())
+                    .map(|id| crate::access::Command::Card(self.access.tab, id.into()))
+                    .unwrap_or(crate::access::Command::List(self.access.tab));
+                self.access_command(command);
+                return None;
+            }
+            Control::AccessBack => {
+                self.error.clear();
+                self.access.selected = 0;
+                if let Some(devices) = &mut self.access.devices {
+                    if devices.editor.take().is_some() || devices.delete_key.take().is_some() {
+                        return None;
+                    }
+                    if devices.card.take().is_some() {
+                        return None;
+                    }
+                    let profile = devices.profile.clone();
+                    self.access.card = Some(profile);
+                    self.access.devices = None;
+                    self.access.notice.clear();
+                    return None;
+                }
+                if self.access.editor.take().is_some()
+                    || self.access.profile_action.take().is_some()
+                    || self.access.account_action.take().is_some()
+                {
+                    return None;
+                }
+                if self.access.decision.take().is_none() {
+                    self.access.card = None;
+                    self.access_command(crate::access::Command::List(self.access.tab));
+                }
+                return None;
+            }
+            Control::AccessPage(next) => {
+                let total = self
+                    .access
+                    .filtered()
+                    .len()
+                    .div_ceil(self.access_capacity.get().max(1))
+                    .max(1);
+                self.access.page = if next {
+                    (self.access.page + 1).min(total - 1)
+                } else {
+                    self.access.page.saturating_sub(1)
+                };
+                return None;
+            }
+            Control::AccessDecision(approve) => {
+                self.access.decision = Some(approve);
+                self.access.selected = 0;
+                return None;
+            }
+            Control::AccessConfirm => {
+                if let (Some(card), Some(approve)) = (&self.access.card, self.access.decision)
+                    && let Some(id) = card["id"].as_str()
+                {
+                    self.access_command(crate::access::Command::Decision {
+                        id: id.into(),
+                        approve,
+                        key: uuid::Uuid::new_v4(),
+                    });
+                }
                 return None;
             }
             Control::Temporary => {
@@ -2000,17 +3125,147 @@ impl App {
                 self.temporary_command(command);
                 return None;
             }
+            Control::ControllerCheck => {
+                self.controller_command(crate::controller::Command::Probe);
+                return None;
+            }
+            Control::ControllerNew => {
+                if !self.nodes_busy {
+                    self.screen = Screen::NewInstallation;
+                    self.confirm = false;
+                }
+                return None;
+            }
+            Control::NewInstallationConfirm(yes) => {
+                if yes {
+                    if let Some(saved) = &self.form.saved
+                        && let Err(error) = crate::controller::Browser::forget_verification(
+                            &self.state_dir,
+                            saved.id,
+                        )
+                    {
+                        self.error = error.to_string();
+                        return None;
+                    }
+                    self.controller = crate::controller::Browser::default();
+                    self.fresh_installation = true;
+                    self.form.select_action(Action::Install);
+                    self.form.fields[7].clear();
+                    self.form.fields[6].zeroize();
+                    self.form.selected = 1;
+                    self.screen = Screen::Form;
+                    self.error.clear();
+                } else {
+                    self.screen = Screen::Controller;
+                }
+                return None;
+            }
+            Control::Controller => {
+                self.open_controller();
+                return None;
+            }
+            Control::ControllerScope => {
+                self.controller.cleanup_nodes = !self.controller.cleanup_nodes;
+                return None;
+            }
+            Control::ControllerPlan(remove) => {
+                self.controller_command(crate::controller::Command::Plan {
+                    action: if remove { "remove" } else { "reset" }.into(),
+                    cleanup_nodes: self.controller.cleanup_nodes,
+                });
+                return None;
+            }
+            Control::ControllerPhrase => {
+                return None;
+            }
+            Control::ControllerConfirm => {
+                if let Some(plan) = &self.controller.plan {
+                    if self.controller.phrase != plan["confirmation_phrase"].as_str().unwrap_or("")
+                    {
+                        self.error = "Enter the confirmation phrase exactly.".into();
+                    } else if let Ok(id) = uuid::Uuid::parse_str(plan["id"].as_str().unwrap_or(""))
+                    {
+                        self.controller_command(crate::controller::Command::Queue {
+                            plan: id,
+                            phrase: self.controller.phrase.clone(),
+                            key: self.controller.key.unwrap_or_default(),
+                        });
+                    }
+                }
+                return None;
+            }
+            Control::ControllerRefresh => {
+                if self.controller.verifying
+                    && let Some(deployment) = self
+                        .controller
+                        .overview
+                        .as_ref()
+                        .and_then(|v| v.get("deployment"))
+                        .cloned()
+                {
+                    self.controller.verification_started = Some(std::time::Instant::now());
+                    self.controller_command(crate::controller::Command::Verify(deployment));
+                    return None;
+                }
+                if let Some(command) = self.controller.poll() {
+                    self.controller_command(command);
+                } else if let Some(id) = self
+                    .controller
+                    .job
+                    .as_ref()
+                    .and_then(|j| j["id"].as_str())
+                    .and_then(|s| uuid::Uuid::parse_str(s).ok())
+                {
+                    self.controller_command(crate::controller::Command::Job(id));
+                } else {
+                    self.controller_command(crate::controller::Command::Overview);
+                }
+                return None;
+            }
+            Control::ControllerRetry | Control::ControllerShutdown => {
+                if let Some(id) = self
+                    .controller
+                    .job
+                    .as_ref()
+                    .and_then(|j| j["id"].as_str())
+                    .and_then(|s| uuid::Uuid::parse_str(s).ok())
+                {
+                    let key = uuid::Uuid::new_v4();
+                    self.controller_command(if control == Control::ControllerShutdown {
+                        crate::controller::Command::Shutdown(id, key)
+                    } else {
+                        crate::controller::Command::Retry(id, key)
+                    });
+                }
+                return None;
+            }
+            Control::ControllerBack => {
+                if self.controller.plan.take().is_some() {
+                    self.controller.phrase.clear();
+                    self.controller.selected = 0;
+                } else {
+                    self.screen = Screen::Controller;
+                    self.controller.selected = 0;
+                    self.form.selected = 0;
+                    self.controller_sidebar = true;
+                }
+                return None;
+            }
             Control::Action(action) => {
-                if !self.actions_enabled() {
+                if !self.actions_enabled() || action != Action::Install && !self.controller_ready()
+                {
                     return None;
                 }
                 self.quick_focus = false;
                 self.temporary.artifact = None;
+                self.fresh_installation = false;
                 self.form.select_action(action);
                 self.screen = Screen::Form;
                 self.editor = None;
                 self.error.clear();
-                if action == Action::PrepareNode {
+                if action == Action::Install && self.has_installation() {
+                    self.open_controller();
+                } else if action == Action::PrepareNode {
                     self.open_nodes();
                 }
                 return None;
@@ -2282,7 +3537,9 @@ impl App {
                 return None;
             }
             Control::Continue => {
-                if !self.actions_enabled() {
+                if !self.actions_enabled()
+                    || self.form.action != Action::Install && !self.controller_ready()
+                {
                     return None;
                 }
                 self.quick_focus = false;
@@ -2398,6 +3655,8 @@ pub fn run(mut request: Request) -> Result<()> {
     let mut offer = false;
     let mut self_confirmation: Option<mpsc::Receiver<Answer>> = None;
     let mut self_updating = false;
+    let mut last_controller_poll = std::time::Instant::now();
+    let mut last_access_poll = std::time::Instant::now();
     let mut last_node_observation = std::time::Instant::now();
     let mut qr_was_visible = false;
     let mut qr_needs_redraw = false;
@@ -2415,6 +3674,21 @@ pub fn run(mut request: Request) -> Result<()> {
         if selected != nodes_profile {
             nodes_worker.reset();
             nodes_profile = selected;
+            app.confirmed_installation = None;
+            app.ignore_nodes_updates = app.nodes_busy;
+            app.nodes_requested = None;
+            app.probe_requested = app.form.saved.is_some();
+            app.controller = crate::controller::Browser {
+                profile: app.form.saved.as_ref().map(|p| p.id),
+                ..Default::default()
+            };
+            app.nodes = crate::nodes::Browser::default();
+            app.access = crate::access::Browser::default();
+            app.temporary = crate::temporary::Browser::default();
+        }
+        if app.probe_requested && !app.nodes_busy && app.nodes_requested.is_none() {
+            app.probe_requested = false;
+            app.controller_command(crate::controller::Command::Probe);
         }
         app.ssh_state = nodes_worker.state();
         if matches!(app.screen, Screen::Temporary)
@@ -2448,6 +3722,26 @@ pub fn run(mut request: Request) -> Result<()> {
             last_node_observation = std::time::Instant::now();
         }
         if !app.nodes_busy
+            && app.nodes_requested.is_none()
+            && matches!(app.screen, Screen::Controller)
+            && last_controller_poll.elapsed() >= std::time::Duration::from_secs(3)
+        {
+            last_controller_poll = std::time::Instant::now();
+            if let Some(command) = app.controller.poll() {
+                app.controller_command(command);
+            }
+        }
+        if !app.nodes_busy
+            && app.nodes_requested.is_none()
+            && matches!(app.screen, Screen::Access)
+            && last_access_poll.elapsed() >= std::time::Duration::from_secs(3)
+        {
+            last_access_poll = std::time::Instant::now();
+            if let Some(command) = app.access.poll() {
+                app.access_command(command);
+            }
+        }
+        if !app.nodes_busy
             && let Some(command) = app.nodes_requested.take()
         {
             let mut next = app.next_request();
@@ -2461,13 +3755,22 @@ pub fn run(mut request: Request) -> Result<()> {
                     // Browsing has no target-node fields and never runs the old preparation workflow.
                     next.action = Action::Diagnose;
                     let (tx, rx) = mpsc::channel();
+                    let access_command = matches!(command, crate::nodes::Command::Access(_));
                     let temporary_command = matches!(command, crate::nodes::Command::Temporary(_));
-                    let observing = matches!(command, crate::nodes::Command::Observe(..));
+                    let observing = matches!(
+                        command,
+                        crate::nodes::Command::Observe(..)
+                            | crate::nodes::Command::Controller(..)
+                            | crate::nodes::Command::Access(
+                                crate::access::Command::ProfileProgress(_)
+                            )
+                    );
                     nodes_worker.submit(next, command, tx)?;
                     receiver = Some(rx);
                     app.nodes_busy = true;
                     app.nodes_background = observing;
                     app.temporary_busy = temporary_command;
+                    app.access_busy = access_command;
                     if !app.nodes_background {
                         app.screen = Screen::Running;
                     }
@@ -2605,6 +3908,19 @@ pub fn run(mut request: Request) -> Result<()> {
                 Some(key) => TermEvent::Key(key),
                 None => continue,
             },
+            TermEvent::Key(key) if key.kind == KeyEventKind::Press => {
+                let hovered = app.hovered.take();
+                if key.code == KeyCode::Enter
+                    && let Some(control) = hovered
+                {
+                    match app.activate(control) {
+                        Some(key) => TermEvent::Key(key),
+                        None => continue,
+                    }
+                } else {
+                    TermEvent::Key(key)
+                }
+            }
             input => input,
         };
         match input {
@@ -2651,6 +3967,48 @@ pub fn run(mut request: Request) -> Result<()> {
                     if let Some(wizard) = &mut app.node_wizard {
                         wizard.append(&text);
                     }
+                } else if matches!(app.screen, Screen::Controller) && !app.exit {
+                    if app.controller_controls().get(app.controller.selected)
+                        == Some(&Control::ControllerPhrase)
+                    {
+                        let remaining =
+                            64usize.saturating_sub(app.controller.phrase.chars().count());
+                        app.controller
+                            .phrase
+                            .extend(text.chars().filter(|c| !c.is_control()).take(remaining));
+                    }
+                } else if matches!(app.screen, Screen::Access) && !app.exit {
+                    if let Some(Control::AccessField(index)) =
+                        app.access_controls().get(app.access.selected).copied()
+                    {
+                        if let Some(editor) = &mut app.access.editor {
+                            let remaining =
+                                128usize.saturating_sub(editor.fields[index].chars().count());
+                            editor.fields[index]
+                                .extend(text.chars().filter(|c| !c.is_control()).take(remaining));
+                            editor.key = uuid::Uuid::new_v4();
+                        }
+                    } else if app.access_controls().get(app.access.selected)
+                        == Some(&Control::AccessDeviceName)
+                    {
+                        if let Some(editor) =
+                            app.access.devices.as_mut().and_then(|d| d.editor.as_mut())
+                        {
+                            let remaining = 64usize.saturating_sub(editor.name.chars().count());
+                            editor
+                                .name
+                                .extend(text.chars().filter(|c| !c.is_control()).take(remaining));
+                            editor.key = uuid::Uuid::new_v4();
+                        }
+                    } else if app.access_controls().get(app.access.selected)
+                        == Some(&Control::AccessSearch)
+                    {
+                        let remaining = 128usize.saturating_sub(app.access.search.chars().count());
+                        app.access
+                            .search
+                            .extend(text.chars().filter(|c| !c.is_control()).take(remaining));
+                        app.access.page = 0;
+                    }
                 } else if matches!(app.screen, Screen::Form) && !app.exit {
                     app.form.append(&text);
                 }
@@ -2677,6 +4035,10 @@ pub fn run(mut request: Request) -> Result<()> {
                 }
                 if app.qr_visible {
                     app.temporary_key(key);
+                    continue;
+                }
+                if matches!(app.screen, Screen::Access) {
+                    app.access_key(key);
                     continue;
                 }
                 if app.section_navigation(key.code) {
@@ -2715,6 +4077,24 @@ pub fn run(mut request: Request) -> Result<()> {
                     continue;
                 }
                 match app.screen {
+                    Screen::NewInstallation => match key.code {
+                        KeyCode::Left | KeyCode::Right | KeyCode::Tab | KeyCode::BackTab => {
+                            app.confirm = !app.confirm
+                        }
+                        KeyCode::Enter => {
+                            app.activate(Control::NewInstallationConfirm(app.confirm));
+                        }
+                        KeyCode::Esc => {
+                            app.activate(Control::NewInstallationConfirm(false));
+                        }
+                        _ if quit => {
+                            app.exit = true;
+                            app.exit_confirm = false;
+                        }
+                        _ => {}
+                    },
+                    Screen::Controller => app.controller_key(key),
+                    Screen::Access => app.access_key(key),
                     Screen::QuickStart => app.quick_start_key(key),
                     Screen::Temporary => app.temporary_key(key),
                     Screen::Nodes => app.nodes_key(key),
@@ -2759,7 +4139,16 @@ pub fn run(mut request: Request) -> Result<()> {
                         }
                     }
                     Screen::Form => {
-                        if !app.actions_enabled() {
+                        if app.form.action == Action::Install
+                            && app.has_installation()
+                            && !app.fresh_installation
+                        {
+                            app.open_controller();
+                            continue;
+                        }
+                        if !app.actions_enabled()
+                            || app.form.action != Action::Install && !app.controller_ready()
+                        {
                             app.quick_focus = true;
                             continue;
                         }
@@ -2775,6 +4164,11 @@ pub fn run(mut request: Request) -> Result<()> {
                         match key.code {
                             KeyCode::Down | KeyCode::Up if app.form.selected == 0 => {
                                 app.navigate(key.code == KeyCode::Up)
+                            }
+                            KeyCode::Char('m')
+                                if app.form.action == Action::Install && app.form.selected == 0 =>
+                            {
+                                app.open_controller()
                             }
                             KeyCode::Tab | KeyCode::Down => app.form.next(),
                             KeyCode::BackTab | KeyCode::Up => app.form.previous(),
@@ -3016,6 +4410,13 @@ pub fn run(mut request: Request) -> Result<()> {
                             continue;
                         }
                         if key.code == KeyCode::Enter || key.code == KeyCode::Char('y') {
+                            if app.form.action == Action::Install
+                                && app.has_installation()
+                                && !app.fresh_installation
+                            {
+                                app.open_controller();
+                                continue;
+                            }
                             if let Err(error) = app.remember_form() {
                                 app.error = error.to_string();
                                 continue;
@@ -3139,7 +4540,8 @@ fn draw(frame: &mut Frame, app: &App) -> Vec<Hit> {
             Block::default()
                 .borders(Borders::ALL)
                 .title("QR code")
-                .border_style(Style::default().fg(accent_color(&app.connections.accent))),
+                .title_style(Style::default().fg(Color::Cyan))
+                .border_style(Style::default().fg(SECTION_BORDER)),
             modal,
         );
         let close = Rect::new(
@@ -3204,6 +4606,24 @@ fn draw(frame: &mut Frame, app: &App) -> Vec<Hit> {
     match app.screen {
         Screen::QuickStart => draw_quick_start(frame, app, rows[1], &mut hits),
         Screen::Form => draw_form(frame, app, rows[1], &mut hits),
+        Screen::NewInstallation => {
+            let popup = centered(rows[1], 80, 14);
+            let sections = dialog(frame, popup, " New installation ");
+            frame.render_widget(Paragraph::new(format!("Create a new Node Plane installation on {} using this saved profile.\n\nUse this after the previous installation was removed. A new administrator binding will be created. Existing installations are not overwritten.",app.form.fields[0])).wrap(Wrap{trim:false}),sections[0]);
+            button_pair(
+                frame,
+                sections[1],
+                ("Continue", "Cancel"),
+                app.confirm,
+                (
+                    Control::NewInstallationConfirm(true),
+                    Control::NewInstallationConfirm(false),
+                ),
+                &mut hits,
+            );
+        }
+        Screen::Controller => draw_controller(frame, app, rows[1], &mut hits),
+        Screen::Access => draw_access(frame, app, rows[1], &mut hits),
         Screen::Temporary => draw_temporary(frame, app, rows[1], &mut hits),
         Screen::Nodes => draw_nodes(frame, app, rows[1], &mut hits),
         Screen::NodeWizard => draw_node_wizard(frame, app, rows[1], &mut hits),
@@ -3336,7 +4756,8 @@ fn draw(frame: &mut Frame, app: &App) -> Vec<Hit> {
             let (summary, details) = result_sections(text, app.form.action == Action::Diagnose);
             let block = Block::bordered()
                 .title(title)
-                .border_style(Style::default().fg(color));
+                .title_style(Style::default().fg(color))
+                .border_style(Style::default().fg(SECTION_BORDER));
             let inner = block.inner(rows[1]);
             frame.render_widget(block, rows[1]);
             let sections = Layout::vertical([
@@ -3405,6 +4826,11 @@ fn draw(frame: &mut Frame, app: &App) -> Vec<Hit> {
             Screen::NodeWizard => {
                 "Tab / arrows: select   Enter / click: continue   Esc: previous step   Ctrl+C: exit"
             }
+            Screen::NewInstallation => "← / → / Tab: select   Enter: confirm   Esc: cancel",
+            Screen::Controller => "Tab / arrows: select   Enter / click: action   Esc: back",
+            Screen::Access => {
+                "Tab / arrows: select   Enter / click: open   Search: type   Esc: back"
+            }
             Screen::Temporary => {
                 "Tab / arrows: select   Enter / click: open   PgUp / PgDn: scroll   Esc: back / sidebar"
             }
@@ -3412,7 +4838,7 @@ fn draw(frame: &mut Frame, app: &App) -> Vec<Hit> {
                 "Tab / ↑ / ↓: select   Enter / click: open   Ctrl+F: search   ← / →: pages   Esc: list / sidebar"
             }
             Screen::Form => {
-                "Click: select   Tab: move   Arrows: actions / fields   Enter: next / continue   Esc: sidebar / exit"
+                "Click: select   Tab: move   Arrows: actions / fields   Enter: continue   M: manage installation   Esc: sidebar / exit"
             }
             Screen::SettingsPage(SettingsPage::Session) => "Enter / Esc: back   Ctrl+C: exit",
             Screen::SettingsPage(SettingsPage::Appearance) => {
@@ -3574,7 +5000,15 @@ fn draw(frame: &mut Frame, app: &App) -> Vec<Hit> {
         hits.clear();
         let popup = centered(area, 78, 12);
         let sections = dialog(frame, popup, " Close Node Plane? ");
-        let text = if matches!(app.screen, Screen::Running) {
+        let text = if app.controller.verifying
+            || app
+                .controller
+                .job
+                .as_ref()
+                .is_some_and(|j| matches!(j["status"].as_str(), Some("queued" | "running")))
+        {
+            "The operation continues on the server after you close Workstation. Reopen this profile to check its result."
+        } else if matches!(app.screen, Screen::Running) {
             if app.update.is_some() {
                 "The backend update continues independently after you close this interface. Reopen this installation to check its progress."
             } else {
@@ -3595,9 +5029,31 @@ fn draw(frame: &mut Frame, app: &App) -> Vec<Hit> {
             &mut hits,
         );
     }
+    if let Some(control) = app.hovered
+        && let Some(hit) = hits.iter().rfind(|hit| hit.control == control)
+    {
+        let area = hit.area;
+        for y in area.top()..area.bottom() {
+            for x in area.left()..area.right() {
+                if y == area.top()
+                    || y + 1 == area.bottom()
+                    || x == area.left()
+                    || x + 1 == area.right()
+                {
+                    let cell = &mut frame.buffer_mut()[(x, y)];
+                    if cell.fg != Color::Red {
+                        cell.fg = Color::Cyan;
+                    }
+                }
+            }
+        }
+    }
     let accent = accent_color(&app.connections.accent);
-    if accent != Color::Cyan {
+    {
         for cell in &mut frame.buffer_mut().content {
+            if cell.fg == SECTION_BORDER {
+                cell.fg = section_border_color(accent);
+            }
             if cell.fg == Color::Cyan {
                 cell.fg = accent;
             }
@@ -3764,7 +5220,7 @@ fn button_areas(area: Rect, count: usize, max_rows: usize) -> Vec<Rect> {
 fn draw_temporary(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
     use crate::temporary::View;
     let right = draw_navigation(frame, app, area, hits);
-    let block = Block::bordered().title(" Temporary configurations ");
+    let block = section_block(" Temporary configurations ");
     let inner = block.inner(right);
     frame.render_widget(block, right);
     let rows = Layout::vertical([
@@ -3918,6 +5374,11 @@ fn draw_temporary(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>)
                 if let Some(expiry) = card["expires_at"].as_str() {
                     lines.push(Line::from(format!("Expires: {expiry}")));
                 }
+                if card["unavailable_reason"] == "node_changed" {
+                    lines.push(Line::from(
+                        "Server settings changed. Revoke this configuration and issue a new one.",
+                    ));
+                }
                 if card["protocol"] == "xray" {
                     lines.push(Line::from(crate::temporary::NOTICE));
                 }
@@ -3936,7 +5397,7 @@ fn draw_temporary(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>)
                         }
                     }
                     _ => {
-                        if card["status"] == "active" {
+                        if card["status"] == "active" && card["artifact_available"] != false {
                             actions.push(("Show configuration", Control::TemporaryShow));
                         }
                         if !["expired", "revoked", "cancelled", "revoking"]
@@ -4016,7 +5477,7 @@ fn draw_nodes(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
     let right = draw_navigation(frame, app, area, hits);
     let card = app.nodes.card.as_ref();
     let title = app.form.saved.as_ref().map_or("Nodes", |p| p.name.as_str());
-    let block = Block::bordered().title(format!(" {title} · Nodes "));
+    let block = section_block(format!(" {title} · Nodes "));
     let inner = block.inner(right);
     frame.render_widget(block, right);
     if inner.height < 8 || inner.width < 20 {
@@ -4274,7 +5735,7 @@ fn draw_node_wizard(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit
         return;
     };
     let right = draw_navigation(frame, app, area, hits);
-    let outer = Block::bordered().title(format!(" New node · {} ", wizard.title()));
+    let outer = section_block(format!(" New node · {} ", wizard.title()));
     let inner = outer.inner(right);
     frame.render_widget(outer, right);
     let rows = Layout::vertical([
@@ -4429,9 +5890,7 @@ fn draw_running(frame: &mut Frame, app: &App, area: Rect) {
             app.stage.as_str(),
         )
     };
-    let block = Block::bordered()
-        .title(title)
-        .border_style(Style::default().fg(Color::Cyan));
+    let block = section_block(title);
     let inner = block.inner(popup);
     frame.render_widget(Clear, popup);
     frame.render_widget(block, popup);
@@ -4530,7 +5989,7 @@ fn draw_update(
             [Constraint::Percentage(50), Constraint::Percentage(50)],
         )
         .header(Row::new(["Component", "Status"]).style(Style::default().fg(Color::Cyan)))
-        .block(Block::bordered().title(" Controller stack ")),
+        .block(section_block(" Controller stack ")),
         sections[1],
     );
     let pages = snapshot.nodes.len().div_ceil(10).max(1);
@@ -4573,7 +6032,7 @@ fn draw_update(
     frame.render_widget(
         Paragraph::new(lines)
             .wrap(Wrap { trim: false })
-            .block(Block::bordered().title(title)),
+            .block(section_block(title)),
         sections[2],
     );
 }
@@ -4581,24 +6040,32 @@ fn draw_button(frame: &mut Frame, area: Rect, label: &str, selected: bool) {
     draw_button_color(frame, area, label, selected, Color::Cyan);
 }
 fn draw_button_color(frame: &mut Frame, area: Rect, label: &str, selected: bool, accent: Color) {
+    let block =
+        Block::bordered().border_style(Style::default().fg(if selected || accent == Color::Red {
+            accent
+        } else {
+            Color::Gray
+        }));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
     frame.render_widget(
         Paragraph::new(label)
             .alignment(ratatui::layout::Alignment::Center)
             .style(
                 Style::default()
                     .fg(if selected {
-                        Color::Black
+                        accent
                     } else if accent == Color::Red {
                         Color::Red
                     } else {
                         Color::Gray
                     })
-                    .bg(if selected { accent } else { Color::Reset }),
-            )
-            .block(Block::bordered()),
-        area,
+                    .bg(Color::Reset),
+            ),
+        inner,
     );
 }
+
 fn button_pair(
     frame: &mut Frame,
     area: Rect,
@@ -4636,9 +6103,7 @@ fn button_pair(
     });
 }
 fn dialog(frame: &mut Frame, area: Rect, title: &str) -> [Rect; 2] {
-    let block = Block::bordered()
-        .title(title)
-        .border_style(Style::default().fg(Color::Cyan));
+    let block = section_block(title);
     let inner = block.inner(area);
     frame.render_widget(Clear, area);
     frame.render_widget(block, area);
@@ -4729,7 +6194,907 @@ fn draw_quick_start(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit
     );
 }
 
+fn draw_access_grants(frame: &mut Frame, app: &App, sections: [Rect; 3], hits: &mut Vec<Hit>) {
+    use crate::access::text;
+    let editor = app.access.editor.as_ref().unwrap();
+    let tabs = Layout::horizontal([Constraint::Fill(1); 2]).split(sections[0]);
+    for (index, (label, future)) in [("Servers", false), ("Current & future servers", true)]
+        .into_iter()
+        .enumerate()
+    {
+        draw_button(frame, tabs[index], label, editor.future_view == future);
+        hits.push(Hit {
+            area: tabs[index],
+            control: Control::AccessGrantMode(future),
+        });
+    }
+    let capacity = usize::from(sections[1].height / 3).max(1);
+    app.access_capacity.set(capacity);
+    let count = if editor.future_view {
+        editor.regions.len() + 1
+    } else {
+        editor.nodes.len()
+    };
+    let pages = count.div_ceil(capacity).max(1);
+    let page = editor.grants_page.min(pages - 1);
+    for index in (page * capacity..count).take(capacity) {
+        let rect = Rect::new(
+            sections[1].x,
+            sections[1].y + (index - page * capacity) as u16 * 3,
+            sections[1].width,
+            3,
+        );
+        if rect.bottom() > sections[1].bottom() {
+            break;
+        }
+        let parts = Layout::horizontal([
+            Constraint::Fill(2),
+            Constraint::Fill(1),
+            Constraint::Fill(1),
+        ])
+        .split(rect);
+        let label = if editor.future_view {
+            if index == 0 {
+                "All regions".into()
+            } else {
+                text(&editor.regions[index - 1]["title"])
+            }
+        } else {
+            format!(
+                "{} · {}",
+                text(&editor.nodes[index]["region"]),
+                text(&editor.nodes[index]["title"])
+            )
+        };
+        frame.render_widget(Paragraph::new(label).wrap(Wrap { trim: false }), parts[0]);
+        for (column, (protocol, name, awg)) in [("xray", "VLESS", false), ("awg", "AWG", true)]
+            .into_iter()
+            .enumerate()
+        {
+            if !editor.future_view
+                && !editor.nodes[index]["protocols"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|p| p == protocol)
+            {
+                continue;
+            }
+            let (granted, control) = if editor.future_view {
+                let region = index.checked_sub(1);
+                (
+                    editor.rule(
+                        region.and_then(|i| editor.regions[i]["id"].as_str()),
+                        protocol,
+                    ),
+                    Control::AccessRule(region, awg),
+                )
+            } else {
+                (
+                    editor.granted(editor.nodes[index]["key"].as_str().unwrap(), protocol),
+                    Control::AccessGrant(index, awg),
+                )
+            };
+            draw_button(
+                frame,
+                parts[column + 1],
+                &format!("[{}] {name}", if granted { "✓" } else { " " }),
+                app.access_controls().get(app.access.selected) == Some(&control),
+            );
+            hits.push(Hit {
+                area: parts[column + 1],
+                control,
+            });
+        }
+    }
+    let mut buttons = vec![
+        ("Grant all", Control::AccessGrantAll(true)),
+        ("Revoke all", Control::AccessGrantAll(false)),
+    ];
+    if editor.future_view {
+        buttons.clear();
+    }
+    if pages > 1 {
+        buttons.extend([
+            ("Previous", Control::AccessGrantPage(false)),
+            ("Next", Control::AccessGrantPage(true)),
+        ]);
+    }
+    buttons.push(("Back", Control::AccessGrantBack));
+    let columns = Layout::horizontal(vec![Constraint::Fill(1); buttons.len()]).split(sections[2]);
+    for (index, (label, control)) in buttons.into_iter().enumerate() {
+        draw_button(
+            frame,
+            columns[index],
+            label,
+            app.access_controls().get(app.access.selected) == Some(&control),
+        );
+        hits.push(Hit {
+            area: columns[index],
+            control,
+        });
+    }
+}
+
+fn draw_controller(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
+    let right = draw_navigation(frame, app, area, hits);
+    let parts = dialog(
+        frame,
+        right,
+        if app.controller_ready() {
+            " Node Plane Installed "
+        } else {
+            " Node Plane "
+        },
+    );
+    let state = &app.controller;
+    let mut text = String::new();
+    let mut controls: Vec<(String, Control)> = Vec::new();
+    if state.removed || !app.controller_ready() && !state.verifying {
+        text.push_str(if state.removed {
+            "Bye-bye! Node Plane has been removed."
+        } else if app.nodes_busy {
+            "Checking installation…"
+        } else {
+            "Node Plane installation is not confirmed."
+        });
+        controls.push(("New installation".into(), Control::ControllerNew));
+        controls.push(("Check installation".into(), Control::ControllerCheck));
+    } else if let Some(plan) = &state.plan {
+        let remove = plan["action"] == "remove";
+        text.push_str("Type this phrase to confirm:\n");
+        text.push_str(plan["confirmation_phrase"].as_str().unwrap_or(""));
+        text.push_str(if remove { "\n\nNode Plane and its database will be deleted." } else { "\n\nController settings and access grants will be reset. Your administrator account and profiles are kept. A backup is created first." });
+        if plan["cleanup_nodes"] == true {
+            text.push_str(&format!(
+                "\n{} nodes will be uninstalled.",
+                plan["nodes"].as_array().map_or(0, Vec::len)
+            ));
+        } else {
+            text.push_str("\nVPN services on nodes are kept.");
+        }
+        controls.push(("Confirmation phrase".into(), Control::ControllerPhrase));
+        controls.push(("Confirm".into(), Control::ControllerConfirm));
+    } else {
+        if let Some(overview) = &state.overview {
+            text.push_str(&format!(
+                "Accounts: {} · Profiles: {} · Nodes: {}",
+                overview["counts"]["accounts"],
+                overview["counts"]["profiles"],
+                overview["counts"]["nodes"]
+            ));
+            if overview["supported"] != true {
+                text.push_str("\nMaintenance is unavailable for this installation.");
+            }
+        } else {
+            text.push_str("Loading installation…");
+        }
+        if let Some(job) = &state.job {
+            text.push_str(&format!(
+                "\n\n{} · {}\nStep: {}",
+                job["action"].as_str().unwrap_or(""),
+                job["status"].as_str().unwrap_or(""),
+                job["phase"].as_str().unwrap_or("")
+            ));
+            if let Some(error) = job["error_code"].as_str() {
+                text.push_str(&format!("\n{error}"));
+            }
+            if state.verifying {
+                text.push_str(if state.verification_timed_out() {
+                    "\nRemoval is not yet confirmed. Refresh to check again."
+                } else {
+                    "\nChecking that Node Plane has been removed…"
+                });
+            }
+            if job["status"] == "blocked" {
+                controls.push(("Retry".into(), Control::ControllerRetry));
+            }
+            if job["status"] == "awaiting_shutdown" && !state.verifying {
+                text.push_str("\nFinish removal to stop and delete the controller.");
+                controls.push(("Finish removal".into(), Control::ControllerShutdown));
+            }
+        }
+        let active = state.verifying
+            || state.job.as_ref().is_some_and(|j| {
+                matches!(
+                    j["status"].as_str(),
+                    Some("queued" | "running" | "blocked" | "awaiting_shutdown")
+                )
+            });
+        if !active
+            && state
+                .overview
+                .as_ref()
+                .is_some_and(|v| v["supported"] == true)
+        {
+            controls.push((
+                format!(
+                    "[{}] Uninstall nodes too",
+                    if state.cleanup_nodes { "✓" } else { " " }
+                ),
+                Control::ControllerScope,
+            ));
+            controls.push(("Reset controller".into(), Control::ControllerPlan(false)));
+            controls.push(("Remove Node Plane".into(), Control::ControllerPlan(true)));
+        }
+        if !active {
+            controls.push(("New installation".into(), Control::ControllerNew));
+        }
+        controls.push(("Refresh".into(), Control::ControllerRefresh));
+    }
+    controls.push(("Back".into(), Control::ControllerBack));
+    let text_height = (text.lines().count() as u16 + 1).min(parts[0].height.saturating_sub(3));
+    let lines: Vec<Line> = text
+        .lines()
+        .enumerate()
+        .map(|(index, line)| {
+            if state.plan.is_some() && index == 1 {
+                Line::styled(
+                    line.to_owned(),
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                )
+            } else {
+                Line::from(line.to_owned())
+            }
+        })
+        .collect();
+    frame.render_widget(
+        Paragraph::new(lines).wrap(Wrap { trim: false }),
+        Rect::new(parts[0].x, parts[0].y, parts[0].width, text_height),
+    );
+    let capacity = usize::from(parts[0].height.saturating_sub(text_height) / 3).max(1);
+    let offset = state.selected.saturating_add(1).saturating_sub(capacity);
+    for (index, (label, control)) in controls.into_iter().enumerate().skip(offset).take(capacity) {
+        let rect = Rect::new(
+            parts[0].x,
+            parts[0].y + text_height + (index - offset) as u16 * 3,
+            parts[0].width,
+            3,
+        );
+        if rect.bottom() > parts[0].bottom() {
+            break;
+        }
+        if control == Control::ControllerPhrase {
+            draw_field(frame, rect, &label, &state.phrase, index == state.selected);
+        } else {
+            draw_button_color(
+                frame,
+                rect,
+                &label,
+                index == state.selected,
+                if matches!(
+                    control,
+                    Control::ControllerPlan(true)
+                        | Control::ControllerConfirm
+                        | Control::ControllerShutdown
+                ) {
+                    Color::Red
+                } else {
+                    Color::Cyan
+                },
+            );
+        }
+        hits.push(Hit {
+            area: rect,
+            control,
+        });
+    }
+}
+fn draw_access_buttons(
+    frame: &mut Frame,
+    app: &App,
+    area: Rect,
+    buttons: &[(&str, Control)],
+    hits: &mut Vec<Hit>,
+) {
+    let columns = if area.height >= 6 && buttons.len() > 3 {
+        buttons.len().div_ceil(2)
+    } else {
+        buttons.len()
+    }
+    .max(1);
+    let rows =
+        Layout::vertical(vec![Constraint::Length(3); buttons.len().div_ceil(columns)]).split(area);
+    for (index, (label, control)) in buttons.iter().enumerate() {
+        let row = index / columns;
+        let count = (buttons.len() - row * columns).min(columns);
+        let cells = Layout::horizontal(vec![Constraint::Fill(1); count]).split(rows[row]);
+        let rect = cells[index % columns];
+        if rect.height < 3 {
+            continue;
+        }
+        draw_button_color(
+            frame,
+            rect,
+            label,
+            app.access_controls().get(app.access.selected) == Some(control),
+            if matches!(
+                control,
+                Control::AccessDeviceDelete | Control::AccessDeviceConfirm
+            ) {
+                Color::Red
+            } else {
+                Color::Cyan
+            },
+        );
+        hits.push(Hit {
+            area: rect,
+            control: *control,
+        });
+    }
+}
+fn draw_access_expiry(frame: &mut Frame, app: &App, sections: [Rect; 3], hits: &mut Vec<Hit>) {
+    frame.render_widget(
+        Paragraph::new("Access duration · starts now").style(Style::default().fg(Color::Cyan)),
+        sections[0],
+    );
+    let choices = [
+        ("Unlimited", Control::AccessExpiry(None)),
+        ("1 day", Control::AccessExpiry(Some(1))),
+        ("7 days", Control::AccessExpiry(Some(7))),
+        ("30 days", Control::AccessExpiry(Some(30))),
+        ("90 days", Control::AccessExpiry(Some(90))),
+        ("Custom date", Control::AccessExpiryBack),
+    ];
+    let capacity = (usize::from(sections[1].height / 3).max(1) * 2).min(6);
+    app.access_capacity.set(capacity);
+    let pages = choices.len().div_ceil(capacity);
+    let page = app
+        .access
+        .editor
+        .as_ref()
+        .map_or(0, |e| e.expiry_page)
+        .min(pages - 1);
+    for (index, (label, control)) in choices
+        .iter()
+        .skip(page * capacity)
+        .take(capacity)
+        .enumerate()
+    {
+        let row = Rect::new(
+            sections[1].x,
+            sections[1].y + (index / 2) as u16 * 3,
+            sections[1].width,
+            3,
+        );
+        if row.bottom() > sections[1].bottom() {
+            break;
+        }
+        let cells = Layout::horizontal([Constraint::Fill(1); 2]).split(row);
+        let rect = cells[index % 2];
+        draw_button(
+            frame,
+            rect,
+            label,
+            app.access_controls().get(app.access.selected) == Some(control),
+        );
+        hits.push(Hit {
+            area: rect,
+            control: *control,
+        });
+    }
+    let mut buttons = vec![("Back", Control::AccessExpiryBack)];
+    if pages > 1 {
+        buttons.extend([
+            ("Previous", Control::AccessExpiryPage(false)),
+            ("Next", Control::AccessExpiryPage(true)),
+        ]);
+    }
+    draw_access_buttons(frame, app, sections[2], &buttons, hits);
+}
+fn draw_access_devices(frame: &mut Frame, app: &App, sections: [Rect; 3], hits: &mut Vec<Hit>) {
+    use crate::access::text;
+    let Some(devices) = &app.access.devices else {
+        return;
+    };
+    frame.render_widget(
+        Paragraph::new(format!(
+            "{} · Devices",
+            text(&devices.profile["display_name"])
+        ))
+        .style(Style::default().fg(Color::Cyan)),
+        sections[0],
+    );
+    let mut buttons = vec![("Refresh", Control::AccessRefresh)];
+    if let Some(editor) = &devices.editor {
+        let field = Rect::new(
+            sections[1].x,
+            sections[1].y,
+            sections[1].width,
+            sections[1].height.min(3),
+        );
+        draw_field(
+            frame,
+            field,
+            if editor.source.is_some() {
+                "Device name"
+            } else {
+                "New device name"
+            },
+            &editor.name,
+            app.access_controls().get(app.access.selected) == Some(&Control::AccessDeviceName),
+        );
+        hits.push(Hit {
+            area: field,
+            control: Control::AccessDeviceName,
+        });
+        if sections[1].height > 3 {
+            frame.render_widget(
+                Paragraph::new(app.error.as_str())
+                    .style(Style::default().fg(Color::Red))
+                    .wrap(Wrap { trim: false }),
+                Rect::new(
+                    sections[1].x,
+                    sections[1].y + 3,
+                    sections[1].width,
+                    sections[1].height - 3,
+                ),
+            );
+        }
+        buttons = vec![
+            ("Save", Control::AccessDeviceSave),
+            ("Cancel", Control::AccessBack),
+        ];
+    } else if let Some(card) = &devices.card {
+        let mut lines = vec![
+            Line::from(text(&card["display_name"])),
+            Line::from(format!("Status: {}", text(&card["status"]))),
+        ];
+        if devices.delete_key.is_some() {
+            lines.push(Line::from("Delete this device and revoke its access?"));
+            buttons = vec![
+                ("Delete", Control::AccessDeviceConfirm),
+                ("Cancel", Control::AccessBack),
+            ];
+        } else {
+            if card["status"] == "active" {
+                buttons.extend([
+                    ("Rename", Control::AccessDeviceEdit),
+                    ("Delete", Control::AccessDeviceDelete),
+                ]);
+            }
+            buttons.push(("Back", Control::AccessBack));
+        }
+        if !app.error.is_empty() {
+            lines.push(Line::styled(
+                app.error.as_str(),
+                Style::default().fg(Color::Red),
+            ));
+        }
+        frame.render_widget(
+            Paragraph::new(lines).wrap(Wrap { trim: false }),
+            sections[1],
+        );
+    } else {
+        let status = if !app.error.is_empty() {
+            app.error.clone()
+        } else if !devices.operation.is_null() {
+            format!("Access changes: {}", text(&devices.operation["status"]))
+        } else {
+            app.access.notice.clone()
+        };
+        let content = Layout::vertical([
+            Constraint::Length(if status.is_empty() { 0 } else { 2 }),
+            Constraint::Min(0),
+        ])
+        .split(sections[1]);
+        frame.render_widget(
+            Paragraph::new(status).wrap(Wrap { trim: false }),
+            content[0],
+        );
+        let capacity = usize::from(content[1].height / 3).max(1);
+        app.access_capacity.set(capacity);
+        let pages = devices.items.len().div_ceil(capacity).max(1);
+        let page = devices.page.min(pages - 1);
+        for (row, (index, item)) in devices
+            .items
+            .iter()
+            .enumerate()
+            .skip(page * capacity)
+            .take(capacity)
+            .enumerate()
+        {
+            let rect = Rect::new(
+                content[1].x,
+                content[1].y + row as u16 * 3,
+                content[1].width,
+                3,
+            );
+            if rect.bottom() > content[1].bottom() {
+                break;
+            }
+            let control = Control::AccessDeviceItem(index);
+            draw_navigation_button(
+                frame,
+                rect,
+                &format!(
+                    "{} · {}",
+                    text(&item["display_name"]),
+                    text(&item["status"])
+                ),
+                app.access_controls().get(app.access.selected) == Some(&control),
+            );
+            hits.push(Hit {
+                area: rect,
+                control,
+            });
+        }
+        if devices.items.is_empty() {
+            frame.render_widget(Paragraph::new("No devices."), content[1]);
+        }
+        if devices.profile["frozen"] != true && devices.profile["deleting"] != true {
+            buttons.push(("New device", Control::AccessDeviceNew));
+        }
+        if pages > 1 {
+            buttons.extend([
+                ("Previous", Control::AccessDevicePage(false)),
+                ("Next", Control::AccessDevicePage(true)),
+            ]);
+        }
+        buttons.push(("Back", Control::AccessBack));
+    }
+    draw_access_buttons(frame, app, sections[2], &buttons, hits);
+}
+
+fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
+    use crate::access::{Tab, label, text};
+    let right = draw_navigation(frame, app, area, hits);
+    let block = section_block(" Access ");
+    let inner = block.inner(right);
+    frame.render_widget(block, right);
+    let account_actions = matches!(app.access.tab, Tab::Accounts | Tab::Profiles)
+        && app.access.card.is_some()
+        && app.access.account_action.is_none()
+        && app.access.profile_action.is_none()
+        && app.access.editor.is_none()
+        && app.access.devices.is_none();
+    let sections = Layout::vertical([
+        Constraint::Length(3),
+        Constraint::Min(0),
+        Constraint::Length(if account_actions || app.access.devices.is_some() {
+            6
+        } else {
+            3
+        }),
+    ])
+    .split(inner);
+    if app.access.devices.is_some() {
+        draw_access_devices(frame, app, [sections[0], sections[1], sections[2]], hits);
+        return;
+    }
+    if let Some(editor) = &app.access.editor {
+        if editor.expiry_view {
+            draw_access_expiry(frame, app, [sections[0], sections[1], sections[2]], hits);
+            return;
+        }
+        if editor.grants_view {
+            draw_access_grants(frame, app, [sections[0], sections[1], sections[2]], hits);
+            return;
+        }
+        let labels = [
+            "Profile name",
+            "Expires at (UTC ISO 8601; blank = unlimited)",
+        ];
+        frame.render_widget(
+            Paragraph::new(if editor.source.is_some() {
+                "Edit profile"
+            } else {
+                "New profile"
+            })
+            .style(Style::default().fg(Color::Cyan)),
+            sections[0],
+        );
+        for (index, label) in labels.iter().enumerate() {
+            let rect = Rect::new(
+                sections[1].x,
+                sections[1].y + index as u16 * 3,
+                sections[1].width,
+                3,
+            );
+            if rect.bottom() <= sections[1].bottom() {
+                draw_field(
+                    frame,
+                    rect,
+                    label,
+                    &editor.fields[index],
+                    app.access_controls().get(app.access.selected)
+                        == Some(&Control::AccessField(index)),
+                );
+                hits.push(Hit {
+                    area: rect,
+                    control: Control::AccessField(index),
+                });
+            }
+        }
+        if !app.error.is_empty() && sections[1].height > 6 {
+            frame.render_widget(
+                Paragraph::new(app.error.as_str())
+                    .style(Style::default().fg(Color::Red))
+                    .wrap(Wrap { trim: false }),
+                Rect::new(
+                    sections[1].x,
+                    sections[1].y + 6,
+                    sections[1].width,
+                    sections[1].height - 6,
+                ),
+            );
+        }
+        let columns = Layout::horizontal([Constraint::Fill(1); 4]).split(sections[2]);
+        for (index, (label, control)) in [
+            ("Duration", Control::AccessExpiryMenu),
+            ("Access", Control::AccessGrants),
+            ("Save", Control::AccessSave),
+            ("Cancel", Control::AccessBack),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            draw_button(
+                frame,
+                columns[index],
+                label,
+                app.access_controls().get(app.access.selected) == Some(&control),
+            );
+            hits.push(Hit {
+                area: columns[index],
+                control,
+            });
+        }
+        return;
+    }
+    let tabs = Layout::horizontal([Constraint::Fill(1); 3]).split(sections[0]);
+    for (index, tab) in Tab::ALL.into_iter().enumerate() {
+        draw_button(frame, tabs[index], tab.label(), app.access.tab == tab);
+        hits.push(Hit {
+            area: tabs[index],
+            control: Control::AccessTab(tab),
+        });
+    }
+    let mut buttons = vec![("Refresh", Control::AccessRefresh)];
+    if let Some(card) = &app.access.card {
+        if app.access.tab == Tab::Requests && card["status"] != "pending" {
+            buttons.clear();
+        }
+        let mut lines = vec![Line::from(label(app.access.tab, card))];
+        for (key, title) in [
+            ("telegram_user_id", "Telegram ID"),
+            ("username", "Username"),
+            ("first_name", "First name"),
+            ("last_name", "Last name"),
+            ("role", "Role"),
+            ("status", "Status"),
+            ("owner_account_id", "Account"),
+            ("expires_at", "Expires"),
+        ] {
+            if !card[key].is_null() {
+                lines.push(Line::from(format!("{title}: {}", text(&card[key]))));
+            }
+        }
+        if app.access.tab == Tab::Profiles {
+            if card["deleting"] == true {
+                let status = card["operation"]["status"]
+                    .as_str()
+                    .unwrap_or("awaiting_executor");
+                lines.push(Line::from(
+                    if matches!(status, "succeeded" | "no_targets") {
+                        "Profile deleted.".into()
+                    } else {
+                        format!("Removal: {status}")
+                    },
+                ));
+                if let Some(tasks) = card["operation"]["tasks"].as_array() {
+                    for task in tasks {
+                        lines.push(Line::from(format!(
+                            "{} · {} · {}",
+                            text(&task["node_key"]),
+                            text(&task["protocol"]),
+                            text(&task["status"])
+                        )));
+                    }
+                }
+            }
+            lines.push(Line::from(format!("Frozen: {}", card["frozen"] == true)));
+        }
+        if let Some(approve) = app.access.decision {
+            lines.push(Line::from(if approve {
+                "Approve this request?"
+            } else {
+                "Reject this request?"
+            }));
+            buttons = vec![
+                ("Confirm", Control::AccessConfirm),
+                ("Cancel", Control::AccessBack),
+            ];
+        } else if let Some((body, _)) = &app.access.account_action {
+            lines.push(Line::from(
+                match (body["role"].as_str(), body["status"].as_str()) {
+                    (Some("admin"), _) => "Grant administrator access to this account?",
+                    (Some(_), _) => "Remove administrator access from this account?",
+                    (_, Some("disabled")) => "Block this account?",
+                    _ => "Approve this account?",
+                },
+            ));
+            buttons = vec![
+                ("Confirm", Control::AccessAccountConfirm),
+                ("Cancel", Control::AccessBack),
+            ];
+        } else if let Some(delete) = app.access.profile_action {
+            lines.push(Line::from(if delete {
+                "Delete this profile and revoke its access?"
+            } else if card["frozen"] == true {
+                "Unfreeze this profile?"
+            } else {
+                "Freeze this profile and suspend its access?"
+            }));
+            buttons = vec![
+                ("Confirm", Control::AccessProfileConfirm),
+                ("Cancel", Control::AccessBack),
+            ];
+        } else {
+            if app.access.tab == Tab::Accounts {
+                buttons.extend([
+                    ("Profiles", Control::AccessAccountProfiles),
+                    ("New profile", Control::AccessNew),
+                    (
+                        if card["role"] == "admin" {
+                            "Make member"
+                        } else {
+                            "Make admin"
+                        },
+                        Control::AccessAccountAction(true),
+                    ),
+                    (
+                        if card["status"] == "approved" {
+                            "Block"
+                        } else {
+                            "Approve"
+                        },
+                        Control::AccessAccountAction(false),
+                    ),
+                ]);
+            }
+            if app.access.tab == Tab::Profiles && card["deleting"] != true {
+                buttons.extend([
+                    ("Devices", Control::AccessDevices),
+                    ("Edit", Control::AccessEdit),
+                    (
+                        if card["frozen"] == true {
+                            "Unfreeze"
+                        } else {
+                            "Freeze"
+                        },
+                        Control::AccessProfileAction(false),
+                    ),
+                    ("Delete", Control::AccessProfileAction(true)),
+                ]);
+            }
+            if app.access.tab == Tab::Requests && card["status"] == "pending" {
+                buttons.extend([
+                    ("Approve", Control::AccessDecision(true)),
+                    ("Reject", Control::AccessDecision(false)),
+                ]);
+            }
+            buttons.push(("Back", Control::AccessBack));
+        }
+        if !app.access.notice.is_empty() {
+            lines.push(Line::from(app.access.notice.as_str()));
+        }
+        if !app.error.is_empty() {
+            lines.push(Line::styled(
+                app.error.as_str(),
+                Style::default().fg(Color::Red),
+            ));
+        }
+        frame.render_widget(
+            Paragraph::new(lines).wrap(Wrap { trim: false }),
+            sections[1],
+        );
+    } else {
+        let content =
+            Layout::vertical([Constraint::Length(3), Constraint::Min(0)]).split(sections[1]);
+        draw_field(
+            frame,
+            content[0],
+            if app.access.tab == Tab::Accounts && !app.access.notice.is_empty() {
+                "Select an account · Search"
+            } else {
+                "Search"
+            },
+            &app.access.search,
+            app.access_controls().get(app.access.selected) == Some(&Control::AccessSearch),
+        );
+        hits.push(Hit {
+            area: content[0],
+            control: Control::AccessSearch,
+        });
+        let capacity = usize::from(content[1].height / 3).max(1);
+        app.access_capacity.set(capacity);
+        let indices = app.access.filtered();
+        let pages = indices.len().div_ceil(capacity).max(1);
+        let page = app.access.page.min(pages - 1);
+        for (row, &index) in indices
+            .iter()
+            .skip(page * capacity)
+            .take(capacity)
+            .enumerate()
+        {
+            let rect = Rect::new(
+                content[1].x,
+                content[1].y + row as u16 * 3,
+                content[1].width,
+                3.min(content[1].height),
+            );
+            if rect.bottom() > content[1].bottom() {
+                break;
+            }
+            draw_navigation_button(
+                frame,
+                rect,
+                &label(app.access.tab, &app.access.items[index]),
+                app.access_controls().get(app.access.selected) == Some(&Control::AccessItem(index)),
+            );
+            hits.push(Hit {
+                area: rect,
+                control: Control::AccessItem(index),
+            });
+        }
+        if indices.is_empty() {
+            frame.render_widget(
+                Paragraph::new(if app.error.is_empty() {
+                    "No records."
+                } else {
+                    &app.error
+                }),
+                content[1],
+            );
+        }
+        if app.access.tab == Tab::Profiles {
+            buttons.push(("New profile", Control::AccessNew));
+        }
+        if pages > 1 {
+            buttons.extend([
+                ("Previous", Control::AccessPage(false)),
+                ("Next", Control::AccessPage(true)),
+            ]);
+        }
+    }
+    let per_row = if account_actions {
+        buttons.len().div_ceil(2)
+    } else {
+        buttons.len()
+    }
+    .max(1);
+    let rows = Layout::vertical(vec![Constraint::Length(3); buttons.len().div_ceil(per_row)])
+        .split(sections[2]);
+    for (index, (label, control)) in buttons.iter().enumerate() {
+        let row = index / per_row;
+        let row_count = (buttons.len() - row * per_row).min(per_row);
+        let columns = Layout::horizontal(vec![Constraint::Fill(1); row_count]).split(rows[row]);
+        let control = *control;
+        draw_button(
+            frame,
+            columns[index % per_row],
+            label,
+            app.access_controls().get(app.access.selected) == Some(&control),
+        );
+        hits.push(Hit {
+            area: columns[index % per_row],
+            control,
+        });
+    }
+}
+
 fn draw_form(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
+    if app.actions_enabled()
+        && !app.fresh_installation
+        && (app.form.action == Action::Install && app.has_installation()
+            || app.form.action != Action::Install && !app.controller_ready())
+    {
+        draw_controller(frame, app, area, hits);
+        return;
+    }
     let labels = [
         "Controller hostname / IP",
         "SSH port",
@@ -4765,6 +7130,21 @@ fn draw_form(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
         },
     );
     let sections = dialog(frame, right, &title);
+    if app.form.action == Action::Install
+        && sections[0].height >= (app.form.visible().len() as u16 + 1) * 3
+    {
+        let manage = Rect::new(
+            sections[0].x,
+            sections[0].bottom() - 3,
+            sections[0].width,
+            3,
+        );
+        draw_button(frame, manage, "Manage installed Node Plane", false);
+        hits.push(Hit {
+            area: manage,
+            control: Control::Controller,
+        });
+    }
     let visible = app.form.visible();
     if visible.is_empty() {
         frame.render_widget(Paragraph::new("This installation is ready. Continue to review the action.\nEdit its connection details in Settings.").wrap(Wrap { trim: false }), sections[0]);
@@ -4837,7 +7217,7 @@ fn draw_navigation(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>
         Constraint::Min(0),
     ])
     .split(area);
-    let sidebar = Block::bordered().title(" Actions ");
+    let sidebar = section_block(" Actions ");
     let navigation = sidebar.inner(columns[0]);
     frame.render_widget(sidebar, columns[0]);
     let settings = Rect::new(
@@ -4853,15 +7233,15 @@ fn draw_navigation(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>
         navigation.width,
         profile_height,
     );
-    let action_height = if profile.y.saturating_sub(navigation.y) >= 15 {
+    let action_height = if profile.y.saturating_sub(navigation.y) >= 18 {
         3
     } else {
         2
     };
-    let y = navigation.y.saturating_add(4 * action_height);
+    let y = navigation.y.saturating_add(5 * action_height);
     if y.saturating_add(action_height) <= profile.y {
         let rect = Rect::new(navigation.x, y, navigation.width, action_height);
-        if app.actions_enabled() {
+        if app.controller_ready() {
             draw_navigation_button(
                 frame,
                 rect,
@@ -4879,17 +7259,45 @@ fn draw_navigation(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>
                 Paragraph::new(if rect.height < 3 {
                     ""
                 } else {
-                    "Temporary configs"
+                    "× Temporary configs"
                 })
                 .alignment(ratatui::layout::Alignment::Center)
                 .style(disabled)
                 .block(if rect.height < 3 {
-                    block.title("Temporary configs").title_style(disabled)
+                    block.title("× Temporary configs").title_style(disabled)
                 } else {
                     block
                 }),
                 rect,
             );
+        }
+    }
+    let access_y = navigation.y.saturating_add(4 * action_height);
+    if access_y.saturating_add(action_height) <= profile.y {
+        let rect = Rect::new(navigation.x, access_y, navigation.width, action_height);
+        if app.controller_ready() {
+            draw_navigation_button(frame, rect, "Access", matches!(app.screen, Screen::Access));
+        } else {
+            frame.render_widget(
+                Paragraph::new("× Access")
+                    .alignment(ratatui::layout::Alignment::Center)
+                    .style(Style::default().fg(Color::DarkGray))
+                    .block(if rect.height < 3 {
+                        Block::bordered()
+                            .title("× Access")
+                            .title_style(Style::default().fg(Color::DarkGray))
+                            .border_style(Style::default().fg(Color::DarkGray))
+                    } else {
+                        Block::bordered().border_style(Style::default().fg(Color::DarkGray))
+                    }),
+                rect,
+            );
+        }
+        if app.controller_ready() {
+            hits.push(Hit {
+                area: rect,
+                control: Control::Access,
+            });
         }
     }
     for (index, action) in Action::ALL.into_iter().enumerate() {
@@ -4898,13 +7306,20 @@ fn draw_navigation(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>
             break;
         }
         let rect = Rect::new(navigation.x, y, navigation.width, action_height);
-        if app.actions_enabled() {
+        if app.actions_enabled() && (action == Action::Install || app.controller_ready()) {
             draw_navigation_button(
                 frame,
                 rect,
-                action.label(),
+                if action == Action::Install && app.controller_ready() {
+                    "Node Plane Installed"
+                } else {
+                    action.label()
+                },
                 !app.quick_focus
-                    && matches!(app.screen, Screen::Form | Screen::Nodes)
+                    && matches!(
+                        app.screen,
+                        Screen::Form | Screen::Nodes | Screen::Controller
+                    )
                     && app.form.action == action,
             );
             hits.push(Hit {
@@ -4914,16 +7329,13 @@ fn draw_navigation(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>
         } else {
             let disabled = Style::default().fg(Color::DarkGray);
             let block = Block::bordered().border_style(disabled);
-            let text = Paragraph::new(if action_height < 3 {
-                ""
-            } else {
-                action.label()
-            })
-            .alignment(ratatui::layout::Alignment::Center)
-            .style(disabled);
+            let label = format!("× {}", action.label());
+            let text = Paragraph::new(if action_height < 3 { "" } else { &label })
+                .alignment(ratatui::layout::Alignment::Center)
+                .style(disabled);
             frame.render_widget(
                 text.block(if action_height < 3 {
-                    block.title(action.label()).title_style(disabled)
+                    block.title(label.as_str()).title_style(disabled)
                 } else {
                     block
                 }),
@@ -4991,13 +7403,14 @@ fn draw_navigation_button(frame: &mut Frame, area: Rect, label: &str, selected: 
     );
 }
 fn draw_field(frame: &mut Frame, rect: Rect, label: &str, value: &str, selected: bool) {
-    let style = Style::default().fg(if selected {
-        Color::Cyan
-    } else {
-        Color::DarkGray
-    });
+    let style = Style::default().fg(if selected { Color::Cyan } else { Color::White });
     frame.render_widget(
-        Paragraph::new(value).block(Block::bordered().title(label).border_style(style)),
+        Paragraph::new(value).block(
+            Block::bordered()
+                .title(label)
+                .title_style(Style::default().fg(Color::Cyan))
+                .border_style(style),
+        ),
         rect,
     );
 }
@@ -5313,6 +7726,116 @@ fn draw_editor(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn device_delete_requires_confirmation_and_back_does_not_leave_profile() {
+        let mut app = test_profile_app();
+        app.screen = Screen::Access;
+        app.access.tab = crate::access::Tab::Profiles;
+        app.access.card = Some(serde_json::json!({"id":"profile", "desired_revision":8}));
+        app.access.apply(crate::access::Command::Devices("profile".into()), serde_json::json!({"profile":{"id":"profile", "desired_revision":8},"devices":{"items":[{"id":"device", "display_name":"Phone", "revision":3, "status":"active"}]}}));
+        app.nodes_requested = None;
+        app.activate(Control::AccessDeviceItem(0));
+        app.activate(Control::AccessDeviceDelete);
+        assert!(app.nodes_requested.is_none());
+        app.activate(Control::AccessBack);
+        assert!(app.access.devices.as_ref().unwrap().delete_key.is_none());
+        assert!(app.access.devices.as_ref().unwrap().card.is_some());
+        app.activate(Control::AccessDeviceDelete);
+        app.activate(Control::AccessDeviceConfirm);
+        let Some(crate::nodes::Command::Access(crate::access::Command::DeviceMutate {
+            profile,
+            device,
+            revision,
+            delete,
+            ..
+        })) = app.nodes_requested.take()
+        else {
+            panic!()
+        };
+        assert_eq!(profile, "profile");
+        assert_eq!(device.as_deref(), Some("device"));
+        assert_eq!(revision, 3);
+        assert!(delete);
+        app.activate(Control::AccessBack);
+        app.activate(Control::AccessBack);
+        app.activate(Control::AccessBack);
+        assert!(app.access.devices.is_none());
+        assert_eq!(app.access.card.as_ref().unwrap()["id"], "profile");
+    }
+    #[test]
+    fn duration_menu_keeps_draft_and_unlimited_does_not_submit_it() {
+        let mut app = test_profile_app();
+        app.screen = Screen::Access;
+        app.access.editor = Some(crate::access::Editor::new(
+            Some(serde_json::json!({"display_name":"Name", "expires_at":"2026-10-11T00:00:00Z"})),
+            None,
+        ));
+        app.nodes_requested = None;
+        app.activate(Control::AccessExpiryMenu);
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
+        terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+        assert!(
+            app.hits
+                .iter()
+                .any(|hit| hit.control == Control::AccessExpiry(Some(90)))
+        );
+        app.activate(Control::AccessExpiry(None));
+        assert!(app.access.editor.as_ref().unwrap().fields[1].is_empty());
+        assert!(app.nodes_requested.is_none());
+        app.activate(Control::AccessExpiryMenu);
+        app.access_key(KeyCode::Esc.into());
+        assert!(app.access.editor.is_some());
+        assert!(!app.access.editor.as_ref().unwrap().expiry_view);
+    }
+    #[test]
+    fn unavailable_sidebar_actions_have_a_cross_and_no_click_target() {
+        let mut app = test_profile_app();
+        app.confirmed_installation = None;
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+        terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+        let content = format!("{:?}", terminal.backend().buffer());
+        assert!(content.contains("× Access"));
+        assert!(content.contains("× Temporary configs"));
+        assert!(content.contains("× Diagnostic"));
+        assert!(!app.hits.iter().any(|hit| matches!(
+            hit.control,
+            Control::Access | Control::Temporary | Control::Action(Action::Diagnose)
+        )));
+    }
+
+    #[test]
+    fn account_changes_require_confirmation_and_cancel_keeps_card() {
+        let mut app = test_profile_app();
+        app.screen = Screen::Access;
+        app.access.tab = crate::access::Tab::Accounts;
+        app.access.card = Some(
+            serde_json::json!({"id":"account", "role":"member", "status":"approved", "revision":7}),
+        );
+        app.nodes_requested = None;
+        app.activate(Control::AccessAccountAction(true));
+        assert!(app.nodes_requested.is_none());
+        assert_eq!(
+            app.access.account_action.as_ref().unwrap().0["role"],
+            "admin"
+        );
+        app.activate(Control::AccessBack);
+        assert!(app.access.account_action.is_none());
+        assert!(app.access.card.is_some());
+        assert!(app.nodes_requested.is_none());
+        app.activate(Control::AccessAccountAction(false));
+        app.activate(Control::AccessAccountConfirm);
+        let Some(crate::nodes::Command::Access(crate::access::Command::AccountMutate {
+            revision,
+            body,
+            ..
+        })) = app.nodes_requested.take()
+        else {
+            panic!("missing confirmed account command")
+        };
+        assert_eq!(revision, 7);
+        assert_eq!(body["status"], "disabled");
+    }
+
     #[test]
     fn qr_preserves_black_and_white_modules_and_requires_enough_space() {
         let image = crate::temporary::qr_image("vpn://SECRET").unwrap();
@@ -6202,14 +8725,113 @@ mod tests {
         app.connections.installations.push(profile.clone());
         app.connections.selected = Some(profile.id);
         app.form.use_installation(&profile);
+        app.confirmed_installation = Some(profile.id);
         app.quick_focus = false;
         app
     }
+    #[test]
+    fn hovering_controls_focuses_without_opening_saving_or_submitting() {
+        let mut app = test_profile_app();
+        app.screen = Screen::SettingsPage(SettingsPage::Appearance);
+        let original = app.connections.accent.clone();
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+        terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+        let area = app
+            .hits
+            .iter()
+            .find(|hit| hit.control == Control::Accent(1))
+            .unwrap()
+            .area;
+        app.mouse(MouseEvent {
+            kind: MouseEventKind::Moved,
+            column: area.x + 1,
+            row: area.y + 1,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert_eq!(app.settings_selected, 2);
+        assert_eq!(app.connections.accent, original);
+        assert!(app.nodes_requested.is_none());
+        assert!(matches!(
+            app.screen,
+            Screen::SettingsPage(SettingsPage::Appearance)
+        ));
+        app.screen = Screen::Nodes;
+        terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+        let area = app
+            .hits
+            .iter()
+            .find(|hit| hit.control == Control::Settings)
+            .unwrap()
+            .area;
+        app.mouse(MouseEvent {
+            kind: MouseEventKind::Moved,
+            column: area.x + 1,
+            row: area.y + 1,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert!(matches!(app.screen, Screen::Nodes));
+    }
+
+    #[test]
+    fn selected_button_uses_accent_without_a_background() {
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(30, 10)).unwrap();
+        let area = Rect::new(3, 2, 20, 3);
+        terminal
+            .draw(|frame| draw_button_color(frame, area, "Save", true, Color::Rgb(255, 187, 116)))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        for y in area.top()..area.bottom() {
+            for x in area.left()..area.right() {
+                assert_eq!(buffer[(x, y)].bg, Color::Reset);
+                assert_eq!(buffer[(x, y)].fg, Color::Rgb(255, 187, 116));
+            }
+        }
+    }
+
+    #[test]
+    fn access_request_decision_requires_explicit_confirmation() {
+        let mut app = test_profile_app();
+        app.screen = Screen::Access;
+        app.access.tab = crate::access::Tab::Requests;
+        app.access.card = Some(
+            serde_json::json!({"id": "7aa330f4-264c-47fd-915f-1234a8c4a072",
+            "telegram_user_id": 123, "username": "alice", "status": "pending"}),
+        );
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 35)).unwrap();
+        terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+        let area = app
+            .hits
+            .iter()
+            .find(|hit| hit.control == Control::AccessDecision(true))
+            .unwrap()
+            .area;
+        app.mouse(MouseEvent {
+            kind: MouseEventKind::Moved,
+            column: area.x + 1,
+            row: area.y + 1,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert!(app.access.decision.is_none() && app.nodes_requested.is_none());
+        app.activate(Control::AccessDecision(true));
+        assert_eq!(app.access.decision, Some(true));
+        assert!(app.nodes_requested.is_none());
+        app.activate(Control::AccessConfirm);
+        assert!(matches!(
+            app.nodes_requested,
+            Some(crate::nodes::Command::Access(
+                crate::access::Command::Decision { approve: true, .. }
+            ))
+        ));
+    }
+
     #[test]
     fn result_close_returns_to_actions_for_success_and_failure_and_preserves_profile() {
         for action in Action::ALL {
             for outcome in [Ok("Done".into()), Err("Unconfirmed operation".into())] {
                 let mut app = test_profile_app();
+                let state = tempfile::tempdir().unwrap();
+                app.state_dir = state.path().into();
+                app.connections.save(&app.state_dir).unwrap();
                 app.form.select_action(action);
                 let profile_id = app.connections.selected;
                 let saved = app.form.saved.clone();
@@ -6218,6 +8840,7 @@ mod tests {
                 app.result_scroll = 12;
                 app.password.push_str("SECRET_PASSWORD");
                 app.form.fields[6] = "SECRET_TOKEN".into();
+                let installed = action == Action::Install && outcome.is_ok();
                 app.event(Event::Finished(outcome));
                 let mut terminal =
                     Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
@@ -6230,10 +8853,18 @@ mod tests {
                     .area;
                 let key = click(&mut app, (close.x + 1, close.y + 1)).unwrap();
                 assert!(app.close_result(key));
-                assert!(matches!(app.screen, Screen::Form));
+                assert!(if installed {
+                    matches!(app.screen, Screen::Controller)
+                } else {
+                    matches!(app.screen, Screen::Form)
+                });
                 assert!(!app.exit && !app.quick_focus);
                 assert_eq!(app.connections.selected, profile_id);
-                assert_eq!(app.form.saved, saved);
+                let mut expected = saved;
+                if installed && let Some(profile) = &mut expected {
+                    profile.installed = true;
+                }
+                assert_eq!(app.form.saved, expected);
                 assert_eq!(app.form.selected, 0);
                 assert!(app.outcome.is_none() && app.update.is_none());
                 assert!(app.stage.is_empty() && app.error.is_empty());
@@ -6388,6 +9019,7 @@ mod tests {
     }
     fn saved_installation(host: &str) -> Installation {
         Installation {
+            installed: false,
             id: uuid::Uuid::new_v4(),
             name: "Home installation".into(),
             host: host.into(),
@@ -7087,10 +9719,168 @@ mod tests {
         assert!(app.outcome.is_none());
         app.form.saved.as_mut().unwrap().id = uuid::Uuid::new_v4();
         app.open_nodes();
+        assert!(app.nodes_requested.is_none());
+        let profile = app.form.saved.as_ref().map(|p| p.id);
+        app.event(Event::Nodes(crate::nodes::Update::Controller(
+            profile,
+            crate::controller::Command::Probe,
+            serde_json::json!({"installed":true}),
+        )));
+        app.open_nodes();
         assert!(app.nodes.items.is_empty());
         assert!(matches!(
             app.nodes_requested,
             Some(crate::nodes::Command::List)
         ));
+    }
+    #[test]
+    fn controller_cleanup_requires_exact_phrase_and_queues_once() {
+        let mut app = App::new(&test_request());
+        let plan = uuid::Uuid::new_v4();
+        app.controller.plan =
+            Some(serde_json::json!({"id":plan,"confirmation_phrase":"RESET NODE PLANE"}));
+        app.controller.key = Some(uuid::Uuid::new_v4());
+        app.controller.phrase = "RESET".into();
+        app.activate(Control::ControllerConfirm);
+        assert!(app.nodes_requested.is_none());
+        app.controller.phrase = "RESET NODE PLANE".into();
+        app.activate(Control::ControllerConfirm);
+        assert!(matches!(
+            app.nodes_requested,
+            Some(crate::nodes::Command::Controller(
+                _,
+                crate::controller::Command::Queue { .. }
+            ))
+        ));
+        app.nodes_requested = None;
+        app.nodes_busy = true;
+        app.activate(Control::ControllerConfirm);
+        assert!(app.nodes_requested.is_none());
+    }
+    #[test]
+    fn controller_menu_scrolls_to_all_controls() {
+        let mut app = App::new(&test_request());
+        app.screen = Screen::Controller;
+        app.controller.overview = Some(
+            serde_json::json!({"supported":true,"counts":{"accounts":1,"profiles":2,"nodes":3}}),
+        );
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(80, 16)).unwrap();
+        for _ in 1..app.controller_controls().len() {
+            terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+            app.controller_key(KeyCode::Down.into());
+        }
+        terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+        assert!(app.controller_controls()[app.controller.selected] == Control::ControllerBack);
+        assert!(
+            app.hits
+                .iter()
+                .any(|h| h.control == Control::ControllerBack)
+        );
+    }
+    #[test]
+    fn new_installation_is_explicit_and_preserves_the_saved_profile_identity() {
+        let mut app = test_profile_app();
+        app.form.saved.as_mut().unwrap().installed = true;
+        let id = app.form.saved.as_ref().unwrap().id;
+        app.activate(Control::Action(Action::Install));
+        assert!(matches!(app.screen, Screen::Controller));
+        app.nodes_requested = None;
+        app.activate(Control::ControllerNew);
+        assert!(matches!(app.screen, Screen::NewInstallation));
+        assert!(!app.confirm && !app.fresh_installation);
+        app.activate(Control::NewInstallationConfirm(false));
+        assert!(matches!(app.screen, Screen::Controller));
+        app.activate(Control::ControllerNew);
+        app.activate(Control::NewInstallationConfirm(true));
+        assert!(app.fresh_installation && matches!(app.screen, Screen::Form));
+        assert_eq!(app.form.saved.as_ref().unwrap().id, id);
+        assert!(app.form.fields[7].is_empty());
+        app.activate(Control::Action(Action::Install));
+        assert!(!app.fresh_installation && matches!(app.screen, Screen::Controller));
+    }
+    #[test]
+    fn red_buttons_keep_red_frames_on_hover_and_confirmation_phrase_is_bold() {
+        let mut app = test_profile_app();
+        app.screen = Screen::Controller;
+        app.controller.plan = Some(
+            serde_json::json!({"action":"remove","confirmation_phrase":"REMOVE NODE PLANE","cleanup_nodes":false}),
+        );
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
+        terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+        let rect = app
+            .hits
+            .iter()
+            .find(|hit| hit.control == Control::ControllerConfirm)
+            .unwrap()
+            .area;
+        app.mouse(MouseEvent {
+            kind: MouseEventKind::Moved,
+            column: rect.x + 1,
+            row: rect.y + 1,
+            modifiers: KeyModifiers::NONE,
+        });
+        terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        assert_eq!(buffer[(rect.x, rect.y)].fg, Color::Red);
+        assert!(
+            buffer
+                .content
+                .iter()
+                .any(|c| c.symbol() == "R" && c.modifier.contains(Modifier::BOLD))
+        );
+        assert!(app.nodes_requested.is_none());
+    }
+    #[test]
+    fn removed_installation_disables_server_actions_and_can_be_checked_manually() {
+        let mut app = test_profile_app();
+        let profile = app.form.saved.as_ref().map(|p| p.id);
+        app.event(Event::Nodes(crate::nodes::Update::Controller(
+            profile,
+            crate::controller::Command::Probe,
+            serde_json::json!({"installed":false}),
+        )));
+        assert!(!app.controller_ready());
+        for action in [Action::Update, Action::Diagnose, Action::PrepareNode] {
+            app.activate(Control::Action(action));
+            assert!(app.nodes_requested.is_none());
+        }
+        app.open_access();
+        app.open_temporary(None);
+        assert!(app.nodes_requested.is_none());
+        app.screen = Screen::Controller;
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
+        terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+        assert!(
+            app.hits
+                .iter()
+                .any(|hit| hit.control == Control::ControllerCheck)
+        );
+        assert!(!app.hits.iter().any(|hit| matches!(
+            hit.control,
+            Control::Action(Action::Update | Action::Diagnose | Action::PrepareNode)
+                | Control::Access
+                | Control::Temporary
+        )));
+        app.activate(Control::ControllerCheck);
+        assert!(matches!(
+            app.nodes_requested,
+            Some(crate::nodes::Command::Controller(
+                _,
+                crate::controller::Command::Probe
+            ))
+        ));
+        app.nodes_requested = None;
+        app.event(Event::Nodes(crate::nodes::Update::Controller(
+            profile,
+            crate::controller::Command::Probe,
+            serde_json::json!({"installed":true}),
+        )));
+        assert!(app.controller_ready());
+        terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+        assert!(
+            !app.hits
+                .iter()
+                .any(|hit| hit.control == Control::ControllerCheck)
+        );
     }
 }

@@ -1,7 +1,9 @@
+mod access;
 mod audit;
 mod backend;
 mod config;
 mod connections;
+mod controller;
 mod enrollment;
 mod events;
 mod installer;

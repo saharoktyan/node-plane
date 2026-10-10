@@ -23,7 +23,7 @@ from .callbacks import (AccountsCallback, AccountCallback, NewProfileCallback,
     AdminProfilesCallback, AdminProfileCallback, GrantNodesCallback,
     GrantProtocolsCallback, AddGrantCallback, RemoveGrantCallback,
     ToggleFreezeCallback)
-from .common import render
+from .common import render, schedule_refresh
 from ..navigation import remember_label
 from .states import ProfileDraftState
 
@@ -743,6 +743,27 @@ async def admin_profile_cb(query: CallbackQuery, callback_data: AdminProfileCall
                              bot, backend, state)
 
 
+async def show_profile_deletion(chat_id, user_id, message_id, profile_id, bot, backend, state):
+    locale = await _locale(state)
+    profile, operation = await asyncio.gather(
+        backend.request('GET', f'/api/v1/profiles/{profile_id}', telegram_user_id=user_id),
+        backend.profile_operation(user_id, profile_id))
+    status = operation['status'] if operation else 'no_targets'
+    complete = status in {'succeeded', 'no_targets'}
+    lines = [profile['display_name'], tr(locale, 'profile.admin.delete_done') if complete else
+        tr(locale, 'profile.admin.delete_queued', status=tr(locale, 'operation.' + status))]
+    if operation and not complete:
+        lines.extend(f"{task['node_key']} · {tr(locale, 'protocol.' + task['protocol'])} · {_task_status(task['status'], locale)}"
+                     for task in operation.get('tasks', []))
+    await render(bot, chat_id, Screen(tr(locale, 'profile.admin.delete_title'), tuple(lines),
+        embedded_buttons=True, navigation=True),
+        [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data=AdminProfilesCallback().pack())]],
+        state, message_id)
+    if status not in {'succeeded', 'no_targets', 'superseded'}:
+        schedule_refresh(state, lambda: show_profile_deletion(chat_id, user_id, message_id,
+            profile_id, bot, backend, state))
+
+
 async def show_admin_profile(chat_id: int, user_id: int, message_id: int,
                              profile_id: str, bot: Bot, backend: BackendClient,
                              state: FSMContext) -> None:
@@ -757,6 +778,9 @@ async def show_admin_profile(chat_id: int, user_id: int, message_id: int,
             (tr(locale, 'profile.admin.error_loading'),), embedded_buttons=True, navigation=True),
             [[InlineKeyboardButton(text=tr(locale, 'back'),
                 callback_data=AdminProfilesCallback().pack())]], state, message_id)
+        return
+    if profile.get('deleting'):
+        await show_profile_deletion(chat_id, user_id, message_id, profile_id, bot, backend, state)
         return
     await state.set_state(None)
     await state.update_data(edit_profile_id=None, draft_grants=None,
@@ -1124,18 +1148,8 @@ async def delete_profile_cb(query: CallbackQuery, bot: Bot,
                             delete_profile_revision=None,
                             delete_profile_key=None)
     await refresh_deleted_owner(result, query.from_user.id, bot, backend, state)
-    locale = await _locale(state)
-    status = result['runtime_status']
-    lines = (tr(locale, 'profile.admin.delete_queued',
-                status=tr(locale, f'operation.{status}')),
-             tr(locale, 'profile.admin.delete_followup'))
-    rows = [[InlineKeyboardButton(text=tr(locale, 'profile.admin.open_status'),
-        callback_data=AdminProfileCallback(profile_id=profile_id).pack())],
-        [InlineKeyboardButton(text=tr(locale, 'back'),
-        callback_data=AdminProfilesCallback().pack())]]
-    await render(bot, query.message.chat.id,
-        Screen(tr(locale, 'profile.admin.delete_title'), lines, embedded_buttons=True, navigation=True),
-        rows, state, query.message.message_id)
+    await show_profile_deletion(query.message.chat.id, query.from_user.id,
+        query.message.message_id, profile_id, bot, backend, state)
 
 
 async def refresh_deleted_owner(result, admin_id, bot, backend, state):

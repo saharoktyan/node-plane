@@ -1,0 +1,37 @@
+name: Server release artifacts
+on:
+  workflow_call:
+    inputs:
+      plan:
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Rust toolchain
+        run: rustup toolchain install 1.90.0 --profile minimal && rustup default 1.90.0
+      - uses: ./.github/actions/release-rust-cache
+        continue-on-error: true
+        with:
+          key: server-linux-amd64
+          mode: restore
+      - name: Build server artifacts
+        run: bash scripts/build_release_stack.sh
+      - uses: actions/upload-artifact@v7
+        with:
+          name: artifacts-server
+          path: dist/release-stack/*
+          if-no-files-found: error
+      - uses: ./.github/actions/release-rust-cache
+        continue-on-error: true
+        with:
+          key: server-linux-amd64
+          mode: save
