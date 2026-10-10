@@ -22,6 +22,7 @@ UNITS = (
 JOB_TABLES = (
     'backend_agent_rollouts', 'backend_node_jobs', 'backend_operation_tasks',
     'backend_update_jobs', 'backend_node_removals', 'backend_backup_jobs',
+    'backend_node_settings_tasks', 'backend_node_bootstraps',
 )
 
 

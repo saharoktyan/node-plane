@@ -368,8 +368,10 @@ class WorkstationService:
                 if request['action'] == 'lookup-node':
                     with self.db.connect() as conn:
                         matches = []
-                        for table, kind in (('backend_node_jobs', 'node-jobs'), ('backend_agent_rollouts', 'agent-rollouts')):
-                            row = conn.execute(f'SELECT id,node_key,status FROM {table} WHERE actor_id=? AND command_key=?',
+                        for table, kind in (('backend_node_jobs', 'node-jobs'), ('backend_agent_rollouts', 'agent-rollouts'),
+                                            ('backend_node_bootstraps', 'node-bootstraps')):
+                            actor_column = 'actor_account_id' if kind == 'agent-rollouts' else 'actor_id'
+                            row = conn.execute(f'SELECT id,node_key,status FROM {table} WHERE {actor_column}=? AND command_key=?',
                                 (principal.account_id, request['command_id'])).fetchone()
                             if row:
                                 matches.append({**dict(row), 'kind': kind})

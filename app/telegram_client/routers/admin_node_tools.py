@@ -7,7 +7,7 @@ from aiogram.fsm.context import FSMContext
 from ..backend import BackendClient, BackendError
 from ..i18n import normalize_locale, tr
 from ..screens import Screen, Section, Table, server_label
-from .common import render
+from .common import render, schedule_refresh
 from ..navigation import remember_node, remember_label
 from .callbacks import AdminNodeCallback, NodeSettingsCallback, EditNodeFieldCallback
 
@@ -28,13 +28,54 @@ def error(locale, exc):
 
 
 async def show_install(chat_id, user_id, message_id, node_key, bot, backend, state):
-    from .admin_nodes import RolloutLocalCallback, RolloutSshCallback
     locale = normalize_locale((await state.get_data()).get('locale'))
     node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=user_id)
     await remember_node(state, node)
     back = (f'node_manage:{node_key}' if node.get('applied_revision') else
             AdminNodeCallback(node_key=node_key).pack())
     overview = await backend.node_overview(user_id, node_key)
+    if overview.get('bootstrap'):
+        await show_bootstrap(chat_id, user_id, message_id, overview['bootstrap'], bot, backend, state)
+        return
+    if not node['protocols']:
+        from .admin_nodes import RolloutLocalCallback, RolloutSshCallback, show_rollout_status
+        if overview.get('agent_rollout'):
+            await show_rollout_status(chat_id, user_id, message_id,
+                overview['agent_rollout']['id'], bot, backend, state)
+            return
+        rows = []
+        lines = [server_label(node)]
+        try:
+            await backend.node_services(user_id, node_key)
+            lines.append(tr(locale, 'nodes.rollout.agent_ready'))
+        except BackendError as exc:
+            if exc.code == 'node_agent_unconfigured':
+                target = (f'rollout_saved:{node_key}' if node.get('transport') == 'ssh' and node.get('ssh_target') else
+                          RolloutLocalCallback(node_key=node_key).pack() if node.get('transport') == 'local' else
+                          RolloutSshCallback(node_key=node_key).pack())
+                rows.append([button(locale, 'node_tools.setup_agent', target, style='primary')])
+            else:
+                lines.append(error(locale, exc))
+                rows.append([button(locale, 'node_tools.refresh', f'bootstrap_menu:{node_key}')])
+        rows.append([button(locale, 'back', back)])
+        await render(bot, chat_id, Screen(tr(locale, 'node_tools.setup_agent'), tuple(lines),
+            embedded_buttons=True, navigation=True), rows, state, message_id)
+        return
+    if not node.get('applied_revision'):
+        complete = overview['settings_complete']
+        label = 'node_tools.bootstrap'
+        if complete:
+            try:
+                await backend.node_services(user_id, node_key)
+                label = 'node_tools.protocols_stage_button'
+            except BackendError:
+                pass
+        await render(bot, chat_id, Screen(tr(locale, 'node_tools.install'), (server_label(node),),
+            embedded_buttons=True, navigation=True),
+            [[button(locale, label if complete else 'nodes.card.settings',
+                f'node_action:bootstrap:{node_key}' if complete else NodeSettingsCallback(node_key=node_key).pack(), style='primary')],
+             [button(locale, 'back', back)]], state, message_id)
+        return
     rows = []
     lines = []
     try:
@@ -45,7 +86,7 @@ async def show_install(chat_id, user_id, message_id, node_key, bot, backend, sta
             rows.append([button(locale, 'node_tools.refresh', 'node_job:' + job['id'])])
         elif not facts['docker']:
             lines.append(tr(locale, 'node_tools.docker_missing'))
-            rows.append([button(locale, 'node_tools.install_docker', f'node_action:install_docker:{node_key}', style='primary')])
+            rows.append([button(locale, 'node_tools.bootstrap', f'node_action:bootstrap:{node_key}', style='primary')])
         else:
             if not overview['settings_complete']:
                 lines.append(tr(locale, 'node_tools.incomplete'))
@@ -67,10 +108,7 @@ async def show_install(chat_id, user_id, message_id, node_key, bot, backend, sta
     except BackendError as exc:
         lines.append(error(locale, exc))
         if exc.code == 'node_agent_unconfigured':
-            target = (f'rollout_saved:{node_key}' if node.get('transport') == 'ssh' and node.get('ssh_target') else
-                      RolloutLocalCallback(node_key=node_key).pack() if node.get('transport') == 'local' else
-                      RolloutSshCallback(node_key=node_key).pack())
-            rows.append([button(locale, 'node_tools.setup_agent', target, style='primary')])
+            rows.append([button(locale, 'node_tools.bootstrap', f'node_action:bootstrap:{node_key}', style='primary')])
         else:
             rows.append([button(locale, 'node_tools.refresh', f'bootstrap_menu:{node_key}')])
     rows.append([button(locale, 'back', back)])
@@ -238,17 +276,56 @@ async def submit_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, stat
         return
     locale = normalize_locale(data.get('locale'))
     try:
-        job = await backend.node_action(query.from_user.id, **draft)
-        await show_job(query.message.chat.id, query.from_user.id, query.message.message_id, job, bot, state)
+        if draft['action'] == 'bootstrap':
+            job = await backend.bootstrap_node(query.from_user.id, **draft)
+            await show_bootstrap(query.message.chat.id, query.from_user.id, query.message.message_id, job, bot, backend, state)
+        else:
+            job = await backend.node_action(query.from_user.id, **draft)
+            await show_job(query.message.chat.id, query.from_user.id, query.message.message_id, job, bot, state, backend=backend)
     except BackendError as exc:
         await render(bot, query.message.chat.id, Screen(tr(locale, 'node_tools.error_title'), (error(locale, exc),), embedded_buttons=True, navigation=True),
             [[button(locale, 'back', AdminNodeCallback(node_key=draft['node_key']).pack())]], state, query.message.message_id)
 
 
-async def show_job(chat_id, user_id, message_id, job, bot, state):
+async def show_bootstrap(chat_id, user_id, message_id, job, bot, backend, state):
+    locale = normalize_locale((await state.get_data()).get('locale'))
+    phase = job['phase']
+    stages = ('agent', 'docker', 'protocols', 'done')
+    label = {'agent': 'node_tools.setup_agent', 'docker': 'node_tools.install_docker',
+             'protocols': 'node_tools.protocols_stage', 'done': 'node_tools.done.bootstrap'}[phase]
+    lines = (tr(locale, 'operation.' + job['status']),
+             f"{min(stages.index(phase) + 1, 3)}/3 · {tr(locale, label)}")
+    if job.get('progress'):
+        lines += (tr(locale, 'installation_progress.' + job['progress']['stage']),)
+    rows = [[button(locale, 'node_tools.refresh', 'bootstrap_status:' + job['id'])]]
+    if job['status'] == 'blocked' and job.get('child_id'):
+        from .callbacks import RolloutStatusCallback
+        callback = ('node_job:' + job['child_id'] if job['child_kind'] == 'node-jobs' else
+                    RolloutStatusCallback(task_id=job['child_id']).pack())
+        rows.append([button(locale, 'node_tools.resolve', callback)])
+    rows.append([button(locale, 'back', AdminNodeCallback(node_key=job['node_key']).pack())])
+    await render(bot, chat_id, Screen(tr(locale, 'node_tools.bootstrap'), lines,
+        embedded_buttons=True, navigation=True), rows, state, message_id)
+    if job['status'] in {'awaiting_executor', 'running'}:
+        async def refresh():
+            latest = await backend.node_bootstrap(user_id, job['id'])
+            await show_bootstrap(chat_id, user_id, message_id, latest, bot, backend, state)
+        schedule_refresh(state, refresh)
+
+
+@router.callback_query(F.data.startswith('bootstrap_status:'))
+async def bootstrap_status_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
+    await query.answer()
+    job = await backend.node_bootstrap(query.from_user.id, query.data.split(':', 1)[1])
+    await show_bootstrap(query.message.chat.id, query.from_user.id, query.message.message_id, job, bot, backend, state)
+
+
+async def show_job(chat_id, user_id, message_id, job, bot, state, backend=None):
     await remember_label(state, 'node_jobs', job['id'], job['node_key'])
     locale = normalize_locale((await state.get_data()).get('locale'))
     lines = [tr(locale, 'operation.' + job['status'])]
+    if job.get('progress'):
+        lines.append(tr(locale, 'installation_progress.' + job['progress']['stage']))
     result = job.get('result') or {}
     if job['status'] == 'succeeded':
         lines = [tr(locale, 'node_tools.done.' + job['action'])]
@@ -274,6 +351,11 @@ async def show_job(chat_id, user_id, message_id, job, bot, state):
         rows.append([button(locale, 'node_tools.resolve', 'node_resolve:' + job['id'])])
     rows.append([button(locale, 'back', AdminNodeCallback(node_key=job['node_key']).pack())])
     await render(bot, chat_id, Screen(tr(locale, 'node_tools.' + job['action']), tuple(lines), sections=tuple(sections), embedded_buttons=True, navigation=True), rows, state, message_id)
+    if backend is not None and job['status'] in {'awaiting_executor', 'running'}:
+        async def refresh():
+            latest = await backend.node_job(user_id, job['id'])
+            await show_job(chat_id, user_id, message_id, latest, bot, state, backend=backend)
+        schedule_refresh(state, refresh)
 
 
 @router.callback_query(F.data.startswith('node_job:'))
@@ -281,7 +363,7 @@ async def job_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: 
     await query.answer()
     try:
         job = await backend.node_job(query.from_user.id, query.data.split(':', 1)[1])
-        await show_job(query.message.chat.id, query.from_user.id, query.message.message_id, job, bot, state)
+        await show_job(query.message.chat.id, query.from_user.id, query.message.message_id, job, bot, state, backend=backend)
     except BackendError as exc:
         locale = normalize_locale((await state.get_data()).get('locale'))
         await render(bot, query.message.chat.id, Screen(tr(locale, 'node_tools.error_title'), (error(locale, exc),), embedded_buttons=True, navigation=True),
@@ -304,7 +386,7 @@ async def resolve_do_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, 
     job_id = query.data.split(':', 1)[1]
     try:
         job = await backend.resolve_node_job(query.from_user.id, job_id)
-        await show_job(query.message.chat.id, query.from_user.id, query.message.message_id, job, bot, state)
+        await show_job(query.message.chat.id, query.from_user.id, query.message.message_id, job, bot, state, backend=backend)
     except BackendError:
         locale = normalize_locale((await state.get_data()).get('locale'))
         await render(bot, query.message.chat.id, Screen(tr(locale, 'node_tools.error_title'),

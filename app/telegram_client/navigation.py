@@ -95,6 +95,12 @@ def parent_path(callback, locale, data):
         return (*parent_path('updates', locale, data), Breadcrumb(tr(locale, 'update_tools.result'), callback))
     if callback == 'ufleet':
         return (*parent_path('updates', locale, data), Breadcrumb(tr(locale, 'update_tools.fleet'), callback))
+    if callback.startswith('fleet_nodes:'):
+        return (*parent_path('updates', locale, data), Breadcrumb(tr(locale, 'update_tools.fleet'), callback))
+    if callback.startswith('updates_nodes:'):
+        return (*settings, Breadcrumb(tr(locale, 'updates.title'), callback))
+    if callback.startswith('update_nodes:') and len(callback.split(':')) == 3:
+        return (*parent_path('updates', locale, data), Breadcrumb(tr(locale, 'update_tools.result'), callback))
     if callback.startswith('request_page:'):
         return (*admin, Breadcrumb(tr(locale, 'requests.title'), callback))
     if callback.startswith('recpage:'):
@@ -129,7 +135,9 @@ def parent_path(callback, locale, data):
     if prefix in node_pages and len(pieces) == 2:
         key = pieces[1]
         label = data.get('_navigation_nodes', {}).get(key, key)
-        path = (*servers, Breadcrumb(label, 'admin_node:' + key))
+        origin = data.get('node_return') or {}
+        roots = parent_path(origin['callback'], locale, {}) if origin.get('node_key') == key else servers
+        path = (*(roots or servers), Breadcrumb(label, 'admin_node:' + key))
         if prefix == 'admin_node':
             return path
         if prefix in {'node_technical', 'node_maintenance', 'node_tools'}:

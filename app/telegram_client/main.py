@@ -12,7 +12,7 @@ from .announcement_delivery import delivery_loop
 from .routers import admin_announcements
 from .routers import admin_system_cleanup
 from .routers import admin_alerts, admin_recovery
-from .routers.common import BackendMiddleware, LocaleMiddleware, NotificationStateMiddleware
+from .routers.common import BackendMiddleware, LocaleMiddleware, NotificationStateMiddleware, shutdown_refreshes
 from .routers import user, admin_requests, admin_profiles, admin_nodes, admin_settings, admin_node_tools, admin_updates, admin_backups
 from .routers import user_devices
 from .routers import admin_installation_defaults
@@ -59,6 +59,7 @@ async def main() -> None:
             try:
                 await dispatcher.start_polling(bot)
             finally:
+                await shutdown_refreshes()
                 delivery_task.cancel()
                 with suppress(asyncio.CancelledError):
                     await delivery_task

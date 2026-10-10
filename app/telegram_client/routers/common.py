@@ -15,6 +15,56 @@ from ..navigation import screen_parents
 from uuid import uuid4
 
 
+# One observer per panel; navigation cancels it before the next handler reads data.
+_REFRESH_TASKS = {}
+
+
+def _refresh_key(state):
+    if hasattr(state, 'storage') and hasattr(state, 'key'):
+        return (id(state.storage), state.key)
+    return id(state)
+
+
+def cancel_refresh(state):
+    key = _refresh_key(state)
+    task = _REFRESH_TASKS.get(key)
+    # Keep the current observer registered throughout its render so a user
+    # navigation can still cancel an in-flight Telegram edit.
+    if task is asyncio.current_task():
+        return
+    if task is not None:
+        _REFRESH_TASKS.pop(key, None)
+        task.cancel()
+
+
+def schedule_refresh(state, refresh, *, interval=3):
+    cancel_refresh(state)
+    key = _refresh_key(state)
+    async def observe():
+        await asyncio.sleep(interval)
+        try:
+            await refresh()
+        except BackendError:
+            logging.getLogger(__name__).warning('Panel refresh unavailable; manual refresh remains available')
+        except Exception as exc:
+            # Never include request objects or exception messages with secrets.
+            logging.getLogger(__name__).warning('Panel refresh failed: type=%s', type(exc).__name__)
+    task = asyncio.create_task(observe())
+    _REFRESH_TASKS[key] = task
+    def finished(completed):
+        if _REFRESH_TASKS.get(key) is completed:
+            _REFRESH_TASKS.pop(key, None)
+    task.add_done_callback(finished)
+
+
+async def shutdown_refreshes():
+    tasks = list(_REFRESH_TASKS.values())
+    _REFRESH_TASKS.clear()
+    for task in tasks:
+        task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
+
+
 def log_rich_failure(stage, exc):
     # Do not log the exception/request object: it may contain config URIs,
     # file uploads or bot credentials. Emit only recognized error categories.
@@ -88,6 +138,7 @@ async def remember_media(state, result, uploads, cache):
     await state.update_data(rich_media_cache=dict(list(cache.items())[-30:]))
 
 async def render(bot: Bot, chat_id: int, screen: Screen, rows: list[list[InlineKeyboardButton]], state: FSMContext, message_id: int | None = None) -> bool:
+    cancel_refresh(state)
     markup = InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
     # Explicitly clear an old inline keyboard when switching from an admin
     # screen or a plain-text fallback to embedded member actions.
@@ -255,4 +306,6 @@ class NotificationStateMiddleware(BaseMiddleware):
                     await isolated.update_data(locale=locale)
                 data['state'] = isolated
                 data['raw_state'] = await isolated.get_state()
+        if data.get('state') is not None:
+            cancel_refresh(data['state'])
         return await handler(event, data)

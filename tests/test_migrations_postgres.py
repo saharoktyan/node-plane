@@ -30,6 +30,40 @@ class MigrationsPostgresTests(unittest.TestCase):
         with self.base.transaction() as conn:
             conn.execute(f'DROP SCHEMA {self.schema} CASCADE')
 
+    def test_recovery_audit_is_additive_and_preserves_existing_jobs(self):
+        migrate(self.db,revisions=REVISIONS[:4])
+        identity=str(uuid4())
+        with self.db.transaction() as conn:
+            conn.execute("INSERT INTO backend_node_jobs VALUES (?,'n1','actor','key','sync_runtime',1,'{}','blocked',NULL)",(identity,))
+        self.assertEqual(migrate(self.db)['applied'],[5])
+        with self.db.transaction() as conn:
+            self.assertEqual(conn.execute('SELECT status FROM backend_node_jobs WHERE id=?',(identity,)).fetchone()['status'],'blocked')
+            conn.execute('INSERT INTO backend_recovery_audit VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                (str(uuid4()),'actor','node',identity,'recheck','unconfirmed','blocked',datetime.now(timezone.utc).isoformat()))
+        self.assertEqual(migrate(self.db)['applied'],[])
+        with self.db.connect() as conn:
+            self.assertEqual(conn.execute('SELECT COUNT(*) AS n FROM backend_recovery_audit').fetchone()['n'],1)
+
+    def test_targeted_recovery_and_audit_use_real_postgres_rows(self):
+        migrate(self.db)
+        from backend.admin_cli import bootstrap_admin
+        from backend.identity_repository import SQLIdentityRepository
+        from backend.authorization import Actor, Principal, PrincipalKind, ADMIN_PERMISSIONS
+        from backend.recovery import overview, act, history
+        admin=bootstrap_admin(SQLIdentityRepository(self.db),101,self.db)
+        actor=Actor(Principal('repair',PrincipalKind.SERVICE,ADMIN_PERMISSIONS),admin)
+        identity=str(uuid4())
+        with self.db.transaction() as conn:
+            conn.execute("INSERT INTO backend_nodes(key,title,region,protocols_json) VALUES ('n1','Node','EU','[]')")
+            conn.execute("INSERT INTO backend_node_jobs VALUES (?,'n1',?,?,'sync_runtime',1,?,'blocked',NULL)",
+                (identity,admin.id,str(uuid4()),'{"node_key":"n1","revision":1}'))
+        self.assertEqual(overview(self.db,actor)['items'][0]['actions'],['recheck','resolve'])
+        driver=SimpleNamespace(node_action=lambda *args,**kwargs: {'node_key':'n1','action':'sync_runtime','revision':1,'result':{'synced':True}})
+        result=act(self.db,actor,driver,'node',identity,'recheck')
+        self.assertEqual(result['status'],'succeeded')
+        self.assertEqual(overview(self.db,actor)['items'],[])
+        self.assertEqual(history(self.db,actor)['items'][0]['actor_id'],admin.id)
+
     def test_clean_database_and_repeat_are_noops(self):
         self.assertFalse(schema_status(self.db)['ready'])
         self.assertEqual(migrate(self.db)['applied'], [r.number for r in REVISIONS])

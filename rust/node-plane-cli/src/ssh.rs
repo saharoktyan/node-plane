@@ -1955,7 +1955,13 @@ mod tests {
             let (result, updates) = nodes_command(
                 &worker,
                 nodes_request(&server, state.path()),
-                Command::Setup(card.unwrap()),
+                Command::Setup({
+                    let mut node = card.unwrap();
+                    node.transport = Some("local".into());
+                    node.ssh_target = None;
+                    node.protocols.clear();
+                    node
+                }),
             )
             .await;
             assert!(result.is_err());

@@ -339,8 +339,21 @@ def execute(action, command_id, intent, recover=False, path='/etc/node-plane/pro
             conn.execute("INSERT INTO commands VALUES (?, ?, 'running', NULL, ?)",
                 (command_id, fingerprint, os.environ.get('NODE_PLANE_AGENT_INSTANCE_ID', 'standalone')))
             conn.commit()
-            result = {'node_key': intent['node_key'], 'action': action,
-                      'revision': intent['revision'], 'result': run(action, intent, lock.fileno())}
+            progress_keys = ('NODE_PLANE_OPERATION_PROGRESS_FILE', 'NODE_PLANE_OPERATION_PROGRESS_ID')
+            previous = {key: os.environ.get(key) for key in progress_keys}
+            os.environ[progress_keys[0]] = str(path.parent / 'operation-progress' / (command_id + '.json'))
+            os.environ[progress_keys[1]] = command_id
+            try:
+                if action == 'install_docker':
+                    intents.installation_step('docker_verify')
+                result = {'node_key': intent['node_key'], 'action': action,
+                          'revision': intent['revision'], 'result': run(action, intent, lock.fileno())}
+            finally:
+                for key, value in previous.items():
+                    if value is None:
+                        os.environ.pop(key, None)
+                    else:
+                        os.environ[key] = value
             conn.execute("UPDATE commands SET status = 'succeeded', response = ? WHERE id = ?",
                          (json.dumps(result), command_id))
             conn.commit()

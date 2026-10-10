@@ -216,9 +216,10 @@ class IntentExecutor:
             else:
                 result = self.driver.execute(row['id'], intent)
             status = 'succeeded' if result['succeeded'] else 'blocked'
-        except Exception:
+        except Exception as error:
             # No raw exception/credential data enters operation responses.
-            result, status = {}, 'blocked'
+            from .recovery import failure_code
+            result, status = {'result_json': json.dumps({'error_code': failure_code(error)})}, 'blocked'
         with self.db.transaction() as conn:
             conn.execute("""UPDATE backend_operation_tasks SET status = ?, driver_operation_id = ?, result_json = ?
                 WHERE id = ? AND status = 'running'""", (status, result.get('driver_operation_id'), result.get('result_json'), row['id']))
@@ -251,6 +252,8 @@ def main():
             from .temporary_configs import TemporaryConfigService
             temporary_executor = TemporaryConfigService(executor.db, executor.driver)
             rollout_executor = AgentRolloutService(executor.db)
+            from .node_bootstrap import NodeBootstrapService
+            bootstrap_executor = NodeBootstrapService(executor.db, executor.driver)
             from .updates import UpdateService
             update_executor = UpdateService(executor.db, executor.driver)
             update_executor.recover()
@@ -290,7 +293,7 @@ def main():
                 DeviceRepository.settle_deletions(conn)
             node_executor.reconcile_completed()
             executor.inspect_blocked()
-            while system_cleanup.run_one() or backup_executor.run_one() or update_executor.run_one() or rollout_executor.run_one() or removals.run_one() or node_jobs.run_one() or node_executor.run_one() or executor.run_one() or temporary_executor.run_one() or config_executor.run_one():
+            while system_cleanup.run_one() or backup_executor.run_one() or update_executor.run_one() or bootstrap_executor.run_one() or rollout_executor.run_one() or removals.run_one() or node_jobs.run_one() or node_executor.run_one() or executor.run_one() or temporary_executor.run_one() or config_executor.run_one():
                 pass
             from .alerts import AlertService
             try:

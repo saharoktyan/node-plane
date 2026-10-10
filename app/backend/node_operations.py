@@ -6,6 +6,7 @@ from uuid import uuid4
 from .authorization import AccessDenied, require_permission
 from .node_settings import _key, _snapshot, persist_selected_port
 from .operations import OperationRepository
+from .installation_progress import read_progress
 
 ACTIONS = {'bootstrap', 'reinstall_keep', 'reinstall_clean', 'cleanup_runtime',
            'install_docker', 'check_ports', 'open_ports', 'sync_runtime',
@@ -30,7 +31,8 @@ class NodeOperations:
     @staticmethod
     def public(row):
         return {key: row[key] for key in ('id', 'node_key', 'action', 'revision', 'status')} | {
-            'result': json.loads(row['result_json']) if row['result_json'] else None}
+            'result': json.loads(row['result_json']) if row['result_json'] else None,
+            'progress': read_progress(row)}
 
     def get(self, actor, job_id):
         require_permission(actor, 'nodes.manage')
@@ -40,7 +42,7 @@ class NodeOperations:
             raise AccessDenied('resource_not_found', 404)
         return self.public(row)
 
-    def queue(self, actor, node_key, action, *, revision, command_key):
+    def queue(self, actor, node_key, action, *, revision, command_key, bootstrap_id=None):
         require_permission(actor, 'nodes.manage')
         key = _key(command_key)
         if action not in ACTIONS or type(revision) is not int or revision < 1:
@@ -61,6 +63,8 @@ class NodeOperations:
             node = conn.execute('UPDATE backend_nodes SET enabled = enabled WHERE key = ? RETURNING *', (node_key,)).fetchone()
             if node is None:
                 raise AccessDenied('resource_not_found', 404)
+            from .node_bootstrap import require_idle
+            require_idle(conn, node_key, bootstrap_id)
             if node['desired_revision'] != revision:
                 raise AccessDenied('revision_conflict', 412)
             if conn.execute('SELECT 1 FROM backend_node_drains WHERE node_key = ?', (node_key,)).fetchone():
@@ -167,9 +171,12 @@ class NodeOperations:
             if row['action'] == 'reconcile_access':
                 result = {'node_key': row['node_key'], 'action': row['action'], 'revision': row['revision'], 'result': {'reconciled': True}}
             else:
-                result = self.driver.node_action(row['id'], row['action'], intent)
+                from .installation_progress import observe_node_job
+                with observe_node_job(row, self.driver):
+                    result = self.driver.node_action(row['id'], row['action'], intent)
             self._finish(row, result)
-        except Exception:
+        except Exception as error:
+            from .recovery import failure_code
             with self.db.transaction() as conn:
-                conn.execute("UPDATE backend_node_jobs SET status = 'blocked' WHERE id = ? AND status = 'running'", (row['id'],))
+                conn.execute("UPDATE backend_node_jobs SET status = 'blocked',result_json=? WHERE id = ? AND status = 'running'", (json.dumps({'error_code': failure_code(error)}), row['id']))
         return True

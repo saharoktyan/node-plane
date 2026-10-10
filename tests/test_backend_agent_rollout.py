@@ -14,6 +14,41 @@ from tests.test_backend_http import BackendHTTPTests
 class BackendAgentRolloutTests(TestCase):
     setUp = BackendHTTPTests.setUp
 
+    def test_agent_only_node_can_be_created_and_later_receive_protocols(self):
+        headers = {**self.headers, 'X-Node-Plane-Telegram-User-ID': '101',
+                   'Idempotency-Key': str(uuid4())}
+        created = self.client.post('/api/v1/nodes', headers=headers, json={
+            'key': 'agent1', 'title': 'Agent server', 'region': 'Europe', 'transport': 'local',
+            'protocols': [], 'xray_transports': [], 'settings': {'public_host': 'agent.example'}})
+        self.assertEqual(created.status_code, 201, created.text)
+        self.assertEqual(created.json()['protocols'], [])
+        rollout = self.client.post('/api/v1/nodes/agent1/agent-rollouts',
+            headers={**headers, 'Idempotency-Key': str(uuid4())}, json={'transport': 'local'})
+        self.assertEqual(rollout.status_code, 202, rollout.text)
+        with patch.dict(os.environ, NODE_PLANE_APP_DIR='/opt/node-plane/current'):
+            self.assertTrue(AgentRolloutService(self.db, runner=lambda args: True).run_one())
+        with self.db.connect() as conn:
+            self.assertFalse(conn.execute('SELECT 1 FROM backend_node_jobs').fetchone())
+        updated = self.client.patch('/api/v1/nodes/agent1', headers={**headers,
+            'Idempotency-Key': str(uuid4()), 'If-Match': '"1"'}, json={'protocols': ['awg']})
+        self.assertEqual(updated.status_code, 200, updated.text)
+        summary = self.client.get('/api/v1/nodes/agent1/overview', headers=headers).json()
+        self.assertTrue(summary['settings_complete'])
+        self.assertEqual(summary['state'], 'not_installed')
+
+    def test_node_card_reports_agent_installation_until_it_finishes(self):
+        self.node()
+        headers={**self.headers,'X-Node-Plane-Telegram-User-ID':'101','Idempotency-Key':str(uuid4())}
+        queued=self.client.post('/api/v1/nodes/lv1/agent-rollouts',headers=headers,json={'transport':'local'}).json()
+        summary=self.client.get('/api/v1/nodes/lv1/overview',headers=headers).json()
+        self.assertEqual(summary['state'],'applying')
+        self.assertEqual(summary['agent_rollout']['id'],queued['id'])
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_agent_rollouts SET status='succeeded' WHERE id=?",(queued['id'],))
+        summary=self.client.get('/api/v1/nodes/lv1/overview',headers=headers).json()
+        self.assertEqual(summary['state'],'agent_only')
+        self.assertIsNone(summary['agent_rollout'])
+
     def test_archived_journal_notice_survives_rollout_and_reaches_api(self):
         self.node()
         headers = {**self.headers, 'X-Node-Plane-Telegram-User-ID': '101',
@@ -29,6 +64,26 @@ class BackendAgentRolloutTests(TestCase):
         result = self.client.get(f'/api/v1/agent-rollouts/{queued["id"]}', headers=headers).json()
         self.assertEqual(result['journal_archives'], [archive])
         self.assertEqual(result['status'], 'succeeded')
+
+    def test_rollout_exposes_live_stage_and_hides_it_after_completion(self):
+        from backend.installation_progress import progress_path, write_progress
+        self.node()
+        headers = {**self.headers, 'X-Node-Plane-Telegram-User-ID': '101',
+                   'Idempotency-Key': str(uuid4())}
+        queued = self.client.post('/api/v1/nodes/lv1/agent-rollouts', headers=headers,
+                                 json={'transport': 'local'}).json()
+        with TemporaryDirectory() as shared, patch.dict(os.environ, NODE_PLANE_SHARED_DIR=shared):
+            with self.db.transaction() as conn:
+                conn.execute("UPDATE backend_agent_rollouts SET status='running' WHERE id=?", (queued['id'],))
+            write_progress(progress_path(queued['id']), queued['id'], 'verify backend agent route for lv1')
+            result = self.client.get(f'/api/v1/agent-rollouts/{queued["id"]}', headers=headers).json()
+            self.assertEqual(result['progress']['stage'], 'verify_agent')
+            summary = self.client.get('/api/v1/nodes/lv1/overview', headers=headers).json()
+            self.assertEqual(summary['agent_rollout']['progress']['stage'], 'verify_agent')
+            with self.db.transaction() as conn:
+                conn.execute("UPDATE backend_agent_rollouts SET status='succeeded' WHERE id=?", (queued['id'],))
+            result = self.client.get(f'/api/v1/agent-rollouts/{queued["id"]}', headers=headers).json()
+            self.assertIsNone(result['progress'])
 
     def node(self):
         with self.db.transaction() as conn:

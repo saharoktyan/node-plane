@@ -14,6 +14,20 @@ from telegram_client.routers import user
 
 
 class RenderRecoveryTests(IsolatedAsyncioTestCase):
+    async def test_start_sends_new_panel_even_if_hidden_old_message_accepts_edits(self):
+        message = SimpleNamespace(chat=SimpleNamespace(id=1, type='private'), delete=AsyncMock(),
+            from_user=SimpleNamespace(id=101, username='admin', first_name='Admin',
+                last_name=None, language_code='en'))
+        backend = SimpleNamespace(resolve=AsyncMock(),
+            me=AsyncMock(return_value={'role': 'admin', 'status': 'approved',
+                'locale': 'en', 'locale_selected': True}),
+            bot_title=AsyncMock(return_value={'title': 'Node Plane'}),
+            admin_nodes=AsyncMock(return_value={'items': [{'key': 'lv1'}]}))
+        await user.start_cmd(message, self.bot, backend, self.state)
+        self.bot.edit_message_text.assert_not_awaited()
+        self.bot.send_rich_message.assert_awaited_once()
+        self.assertEqual(self.data['control_message_id'], 20)
+
     async def test_navigation_invalidates_registry_removal_confirmation_on_same_message(self):
         self.data['registry_removal_confirmation'] = {'node_key': 'node', 'message_id': 10}
         await render(self.bot, 1, Screen('Main menu'), [], self.state)

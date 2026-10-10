@@ -685,7 +685,14 @@ impl RuntimeService for RuntimeApi {
                 "runtime_drift": true,
             }).to_string() }));
         }
-        if !matches!(req.action.as_str(), "inspect" | "traffic") && !req.recover {
+        if req.action == "operation_progress" && !req.recover {
+            return Err(Status::invalid_argument("progress is read-only"));
+        }
+        if !matches!(
+            req.action.as_str(),
+            "inspect" | "traffic" | "operation_progress"
+        ) && !req.recover
+        {
             let mut files = self.ctx.runtime_file_bundle(&req.node_key)?;
             if transport.path_exists("/etc/node-plane/node.env").await? {
                 files.retain(|file| file.path != "/etc/node-plane/node.env");

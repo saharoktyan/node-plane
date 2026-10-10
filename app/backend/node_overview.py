@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import json
 
 from .authorization import AccessDenied, require_permission
 from .node_settings import _snapshot
@@ -33,6 +34,8 @@ class NodeOverviewService:
                 (node_key,)).fetchall()
             job = conn.execute('SELECT id, action, revision, status FROM backend_node_jobs WHERE node_key = ? ORDER BY revision DESC, id DESC LIMIT 1', (node_key,)).fetchone()
             removal = conn.execute('SELECT status FROM backend_node_removals WHERE node_key = ?', (node_key,)).fetchone()
+            rollout = conn.execute("SELECT id, status FROM backend_agent_rollouts WHERE node_key = ? AND status IN ('awaiting_executor', 'running') LIMIT 1", (node_key,)).fetchone()
+            bootstrap = conn.execute("SELECT id,node_key,phase,status,child_id,child_kind,error_code FROM backend_node_bootstraps WHERE node_key=? AND status IN ('awaiting_executor','running','blocked') LIMIT 1", (node_key,)).fetchone()
 
         current_settings = next((task['status'] for task in settings_tasks
             if task['revision'] == node['desired_revision']), None)
@@ -41,7 +44,9 @@ class NodeOverviewService:
             settings_complete = True
         except AccessDenied:
             settings_complete = False
-        if node['applied_revision'] == 0 and current_settings not in {'running', 'blocked'}:
+        if not json.loads(node['protocols_json']):
+            state = 'agent_only'
+        elif node['applied_revision'] == 0 and current_settings not in {'running', 'blocked'}:
             state = 'not_installed'
         elif current_settings in {'awaiting_executor', 'running'}:
             state = 'applying'
@@ -55,6 +60,10 @@ class NodeOverviewService:
             state = 'applied_unverified'
         if job and job['status'] in {'awaiting_executor', 'running', 'blocked'}:
             state = 'needs_attention' if job['status'] == 'blocked' else 'applying'
+        if rollout:
+            state = 'applying'
+        if bootstrap:
+            state = 'needs_attention' if bootstrap['status'] == 'blocked' else 'applying'
         removal_status = removal['status'] if removal else None
         if removal_status in {'queued', 'running', 'blocked'}:
             state = 'deletion_blocked' if removal_status == 'blocked' else 'deleting'
@@ -86,10 +95,18 @@ class NodeOverviewService:
             else:
                 counts['attention'] += 1
 
+        if bootstrap:
+            from .node_bootstrap import NodeBootstrapService
+            bootstrap = NodeBootstrapService(self.db).get(actor, bootstrap['id'])
+        if rollout:
+            from .agent_rollout import AgentRolloutService
+            rollout = dict(rollout, progress=AgentRolloutService.progress(rollout))
         return {'node_key': node['key'], 'enabled': bool(node['enabled']),
                 'state': state, 'desired_revision': node['desired_revision'],
                 'applied_revision': node['applied_revision'],
                 'settings_task_status': current_settings,
                 'removal_status': removal_status,
                 'settings_complete': settings_complete,
-                'access_total': len(grants), 'last_job': dict(job) if job else None, **counts}
+                'access_total': len(grants), 'last_job': dict(job) if job else None,
+                'agent_rollout': dict(rollout) if rollout else None,
+                'bootstrap': dict(bootstrap) if bootstrap else None, **counts}

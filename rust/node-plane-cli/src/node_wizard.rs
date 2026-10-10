@@ -139,7 +139,7 @@ impl Wizard {
                         if self.protocols.iter().any(|s| s == p) {
                             "✓"
                         } else {
-                            "+"
+                            "○"
                         },
                         if *p == "awg" { "AmneziaWG" } else { "VLESS" }
                     )
@@ -302,7 +302,6 @@ impl Wizard {
                 self.set_step(Step::Protocols);
             }
             Step::Protocols => {
-                ensure!(!self.protocols.is_empty(), "Select at least one protocol");
                 self.set_step(Step::Review);
             }
             Step::Review => return Ok(Some(self.draft())),
@@ -373,7 +372,11 @@ impl Wizard {
                 "—"
             },
             self.host,
-            self.protocols.join(" · "),
+            if self.protocols.is_empty() {
+                "None (agent only)".into()
+            } else {
+                self.protocols.join(" · ")
+            },
             self.settings["awg_i1_preset"].as_str().unwrap_or("quic"),
             self.settings["awg_port_mode"].as_str().unwrap_or("auto")
         )
@@ -480,7 +483,15 @@ mod tests {
         wizard.next().unwrap();
         wizard.choose(0).unwrap();
         wizard.choose(1).unwrap();
-        assert!(wizard.next().is_err());
+        wizard.next().unwrap();
+        assert_eq!(wizard.step, Step::Review);
+        assert!(
+            wizard.draft().body["protocols"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        assert!(wizard.back());
         wizard.choose(0).unwrap();
         wizard.next().unwrap();
         assert!(

@@ -6,10 +6,42 @@ from aiogram.fsm.context import FSMContext
 from ..backend import BackendClient, BackendError
 from ..i18n import tr, normalize_locale
 from ..screens import Screen, Section, Table, server_label
-from .common import render
+from .common import schedule_refresh, render
 from .callbacks import UpdatesCallback, AdminNodeCallback, AdminSettingsCallback
 
 router = Router()
+
+
+async def node_links(state, nodes, destination):
+    """Keep callbacks short and preserve the exact update page used to enter."""
+    links = dict(list((await state.get_data()).get('update_node_links', {}).items())[-100:])
+    ordered = sorted(nodes, key=lambda n: (n.get('region') or '', n.get('title') or n.get('node_key') or n.get('key') or ''))
+    page = min(max(0, int(destination.rsplit(':', 1)[1])), max(0, (len(ordered) - 1) // 10))
+    visible = ordered[page * 10:page * 10 + 10]
+    if destination.startswith('update_nodes:'):
+        visible += [node for node in nodes if node.get('status') in {'blocked', 'superseded'}]
+    callbacks = {}
+    for node in visible:
+        key = node.get('node_key') or node.get('key')
+        if not key or key == '@driver':
+            continue
+        token = uuid4().hex[:12]
+        links[token] = {'node_key': key, 'callback': destination}
+        callbacks[key] = 'update_node:' + token
+    await state.update_data(update_node_links=links, node_return=None)
+    return callbacks
+
+
+@router.callback_query(F.data.startswith('update_node:'))
+async def update_node_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
+    await query.answer()
+    entry = (await state.get_data()).get('update_node_links', {}).get(query.data.split(':', 1)[1])
+    if not entry:
+        return await failure(query, bot, state)
+    from .admin_nodes import show_admin_node
+    await state.update_data(node_return=entry)
+    await show_admin_node(query.message.chat.id, query.from_user.id, query.message.message_id,
+                          entry['node_key'], bot, backend, state)
 
 
 def button(text, data, *, style=None):
@@ -84,6 +116,7 @@ async def confirm_latest(query, bot, backend, state):
 async def show_fleet(query, bot, backend, state, page=0, opened=False):
     lang = await locale(state)
     value = await backend.update_rollout(query.from_user.id)
+    callbacks = await node_links(state, value['nodes'], f'fleet_nodes:{page}')
     lines = [tr(lang, 'update_tools.desired', version=value['desired_version'], commit=value['desired_commit'][:12]),
         tr(lang, 'update_tools.driver', status=tr(lang, 'update_tools.' + value['driver_status']),
            commit=str(value['driver'].get('commit') or '—')[:12])]
@@ -106,7 +139,7 @@ async def show_fleet(query, bot, backend, state, page=0, opened=False):
     rows += [[button(tr(lang, 'updates.refresh'), 'ufleet')],
              [button(tr(lang, 'back'), UpdatesCallback().pack())]]
     await render(bot, query.message.chat.id, Screen(tr(lang, 'update_tools.fleet'), tuple(lines),
-        sections=(server_sections(lang, value['nodes'], page, 'fleet_nodes', opened=opened),), embedded_buttons=True, navigation=True),
+        sections=(server_sections(lang, value['nodes'], page, 'fleet_nodes', opened=opened, callbacks=callbacks),), embedded_buttons=True, navigation=True),
                  rows, state, query.message.message_id)
 
 
@@ -116,7 +149,7 @@ def state_label(lang, status):
     return tr(lang, 'update_tools.status.' + status)
 
 
-def server_sections(lang, nodes, page, action, *, opened=False, title_key='updates.rich.servers'):
+def server_sections(lang, nodes, page, action, *, opened=False, title_key='updates.rich.servers', callbacks=None):
     from .user import region_sections, server_pagination
     ordered = sorted(nodes, key=lambda n: (n.get('region') or '', n.get('title') or n.get('node_key') or n.get('key') or ''))
     pages = max(1, (len(ordered) + 9) // 10)
@@ -131,7 +164,7 @@ def server_sections(lang, nodes, page, action, *, opened=False, title_key='updat
         if node.get('error_code'):
             lines.append(tr(lang, 'updates.rich.agent_failed'))
         return Section(title, tuple(lines), heading_size=3, divider_after=True,
-            rows=((button(tr(lang, 'alerts.rich.open'), AdminNodeCallback(node_key=key).pack()),),))
+            rows=((button(tr(lang, 'alerts.rich.open'), (callbacks or {}).get(key) or AdminNodeCallback(node_key=key).pack()),),))
     sections = region_sections(ordered[page * 10:page * 10 + 10], lang, entry)
     nav = []
     if pages > 1:
@@ -177,9 +210,10 @@ async def show_overview(query, bot, backend, state, page=0, opened=False):
         action_rows.append((check,))
     sections.append(Section('', rows=tuple(action_rows)))
     nodes = [n for n in fleet.get('nodes', []) if n.get('agent_status') == 'required']
+    callbacks = await node_links(state, nodes, f'updates_nodes:{page}')
     if nodes:
         sections.append(server_sections(lang, nodes, page, 'updates_nodes', opened=opened,
-            title_key='updates.rich.outdated_servers'))
+            title_key='updates.rich.outdated_servers', callbacks=callbacks))
     sections.append(Section(tr(lang, 'updates.rich.checks'), rows=((
         button(tr(lang, 'updates.auto_on' if overview.get('auto_check_enabled') else 'updates.auto_off'),
             UpdateActionCallback(action='auto_check').pack()).model_copy(update={
@@ -205,6 +239,7 @@ async def show_overview(query, bot, backend, state, page=0, opened=False):
 async def show_job(query, bot, backend, state, job_id, page=0, opened=False):
     lang = await locale(state)
     job = await backend.update_job(query.from_user.id, job_id)
+    callbacks = await node_links(state, job['items'], f'update_nodes:{job_id}:{page}')
     result = job.get('result') or {}
     sections = []
     driver_item = next((i for i in job['items'] if i['node_key'] == '@driver'), None)
@@ -222,11 +257,11 @@ async def show_job(query, bot, backend, state, job_id, page=0, opened=False):
         sections.append(Section(tr(lang, 'admin.rich.attention'),
             (tr(lang, 'updates.rich.failed_nodes', count=len(failed)),),
             rows=tuple((button(server_label({**i, 'title': i.get('title') or i['node_key']}),
-                AdminNodeCallback(node_key=i['node_key']).pack()),) for i in failed if i['node_key'] != '@driver')))
+                callbacks[i['node_key']]),) for i in failed if i['node_key'] != '@driver')))
     nodes = [i for i in job['items'] if i['node_key'] != '@driver']
     if nodes:
         sections.append(server_sections(lang, nodes, page,
-            'update_nodes:' + job_id, opened=opened))
+            'update_nodes:' + job_id, opened=opened, callbacks=callbacks))
     rows = []
     if job['status'] in {'awaiting_executor', 'running'}:
         rows.append([button(tr(lang, 'updates.refresh'), f'update_job:{job_id}')])
@@ -246,6 +281,9 @@ async def show_job(query, bot, backend, state, job_id, page=0, opened=False):
         lines.append(tr(lang, 'update_tools.blocked_note'))
     await render(bot, query.message.chat.id, Screen(tr(lang, 'update_tools.result'), tuple(lines),
         sections=tuple(sections), embedded_buttons=True, navigation=True), rows, state, query.message.message_id)
+    if job['status'] in {'awaiting_executor', 'running'}:
+        schedule_refresh(state, lambda: show_job(query, bot, backend, state, job_id,
+            page=page, opened=opened))
 
 
 @router.callback_query(F.data.startswith('uv_page:'))

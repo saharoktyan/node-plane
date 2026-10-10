@@ -53,6 +53,20 @@ class NavigationPathTests(TestCase):
             self.assertEqual(path[2].label, '🇱🇻 Latvia #1')
             self.assertFalse(any('.' in p.label for p in path))
 
+    def test_node_opened_from_updates_keeps_components_path_in_submenus(self):
+        for origin in ('fleet_nodes:2', 'updates_nodes:1', 'update_nodes:job-id:3'):
+            data = {'_navigation_nodes': {'lv1': 'Latvia #1'},
+                    'node_return': {'node_key': 'lv1', 'callback': origin}}
+            path = parent_path('node_manage:lv1', 'en', data)
+            callbacks = [p.callback for p in path]
+            self.assertEqual(callbacks[:2], ['admin_menu', 'admin_settings'])
+            self.assertEqual(callbacks[2], origin if origin == 'updates_nodes:1' else 'updates')
+            self.assertIn(origin, callbacks)
+            self.assertNotIn('admin_nodes', callbacks)
+            self.assertEqual(callbacks[-2:], ['admin_node:lv1', 'node_manage:lv1'])
+            other = parent_path('admin_node:another', 'en', data)
+            self.assertIn('admin_nodes', [p.callback for p in other])
+
     def test_only_navigation_callbacks_are_admitted(self):
         for callback in ('node_action:bootstrap:lv1', 'node_job_submit', 'remove_retry:lv1',
                          'retire_registry:lv1', 'upd_act:latest', 'traffic:on', 'idefault:save'):

@@ -39,6 +39,7 @@ TABLES = (
     "backend_access_requests",
 )
 CLEAR = (
+    "backend_node_bootstraps",
     "backend_temporary_configs",
     "backend_system_cleanup_items",
     "backend_system_cleanup_jobs",
@@ -313,6 +314,7 @@ class BackupService:
                     WHERE r.node_key=a.node_key AND r.mode IN ('verified','registry_only'))) LIMIT 1""").fetchone():
             return True
         for table in (
+            "backend_node_bootstraps",
             "backend_node_jobs",
             "backend_node_settings_tasks",
             "backend_operation_tasks",

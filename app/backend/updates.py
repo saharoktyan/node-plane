@@ -187,8 +187,10 @@ class UpdateService:
                 return self.get(actor, prior['id'])
             if conn.execute("SELECT 1 FROM backend_update_jobs WHERE status IN ('awaiting_executor','running')").fetchone():
                 raise AccessDenied('update_pending', 409)
+            if conn.execute("SELECT 1 FROM backend_node_bootstraps WHERE status IN ('awaiting_executor','running','blocked')").fetchone():
+                raise AccessDenied('maintenance_busy', 409)
             if kind in {'version', 'stack'}:
-                for table in ('backend_agent_rollouts', 'backend_node_jobs', 'backend_node_settings_tasks',
+                for table in ('backend_node_bootstraps', 'backend_agent_rollouts', 'backend_node_jobs', 'backend_node_settings_tasks',
                               'backend_operation_tasks', 'backend_config_issuances'):
                     if conn.execute(f"SELECT 1 FROM {table} WHERE status IN ('awaiting_executor','running')").fetchone():
                         raise AccessDenied('maintenance_busy', 409)

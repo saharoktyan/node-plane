@@ -240,8 +240,8 @@ class BackendNodeSettingsTests(unittest.TestCase):
             'settings': {'public_host': 'node.example', 'xray_sni': 'example.com";print(1)',
                          'xray_tcp_port': 443, 'xray_xhttp_port': 8443,
                          'xray_xhttp_path': '/assets'}})
-        self.assertEqual(response.status_code, 201)
-        self.assertEqual(self.queue().json()['error']['code'], 'invalid_input')
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()['error']['code'], 'invalid_input')
 
     def test_registry_only_retirement_can_abandon_uncertain_settings(self):
         self.assertEqual(self.create().status_code, 201)

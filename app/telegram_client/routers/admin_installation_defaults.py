@@ -166,6 +166,12 @@ async def field_text(message, bot, state):
             await state.set_state(None)
             return
         value = int(value)
+    if field == 'xray_sni':
+        from domain_names import valid_sni
+        if not valid_sni(value):
+            await show(query, bot, state, error=tr(locale, 'nodes.settings.sni_hint'))
+            await state.set_state(None)
+            return
     draft = dict(data['installation_defaults_draft'])
     draft['settings'] = dict(draft['settings'], **{field: value})
     if field == 'awg_port':

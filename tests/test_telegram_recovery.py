@@ -68,3 +68,32 @@ class RecoveryScreenTests(IsolatedAsyncioTestCase):
                 recovery.RecoveryAction(kind='profile', id=str(uuid4()), action='unlock', confirm=1),
                 self.bot, backend, self.state)
         backend.request.assert_not_called()
+
+    async def test_settings_and_profile_recovery_have_specific_confirmation_and_route(self):
+        identity = str(uuid4())
+        for kind in ('settings','profile','bootstrap'):
+            action = recovery.RecoveryAction(kind=kind,id=identity,action='resolve')
+            self.assertLessEqual(len(action.pack().encode()),64)
+            backend = SimpleNamespace(request=AsyncMock(return_value={'status':'superseded','replacement_id':str(uuid4())}))
+            with patch.object(recovery,'render',new_callable=AsyncMock) as render:
+                await recovery.recovery_action(self.query,action,self.bot,backend,self.state)
+            backend.request.assert_not_called()
+            self.assertNotIn('recovery.explain.',str(render.call_args.args[2]))
+            with patch.object(recovery,'show',new_callable=AsyncMock) as show:
+                await recovery.recovery_action(self.query,action.model_copy(update={'confirm':1}),self.bot,backend,self.state)
+            self.assertIn(backend.request.call_args.args[1], (f'/api/v1/system/recovery/{kind}/{identity}/resolve',))
+            self.assertIn(backend.request.return_value['replacement_id'],show.call_args.kwargs['note'])
+
+    async def test_inventory_shows_reason_hint_and_keeps_identifiers_in_details(self):
+        identity = str(uuid4())
+        backend = SimpleNamespace(request=AsyncMock(return_value={'items':[{'id':identity,'kind':'agent','node_key':'lv1','status':'blocked','actions':['recheck'],'error_code':'ssh_authentication','next_step':'agent'}], 'total':1,'offset':0,'page_size':10,'maintenance_active':False}))
+        for locale in ('ru','en'):
+            self.state_data['locale']=locale
+            with patch.object(recovery,'render',new_callable=AsyncMock) as render:
+                await recovery.show(self.query,self.bot,backend,self.state)
+            screen,rows=render.call_args.args[2:4]
+            self.assertNotIn(identity,screen.sections[0].lines)
+            self.assertEqual(screen.sections[0].sections[0].lines,(identity,))
+            self.assertTrue(screen.sections[0].sections[0].collapsed)
+            self.assertNotIn('recovery.',str(screen.sections[0].lines))
+            self.assertTrue(any(button.callback_data == recovery.RecoveryDiagnostics().pack() for row in rows for button in row))

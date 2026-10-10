@@ -110,6 +110,9 @@ async def start_cmd(message: Message, bot: Bot, backend: BackendClient,
         pass
     try:
         await clear_artifacts(bot, message.chat.id, state)
+        # Clear history may hide messages locally while Telegram still accepts
+        # edits to them. /start must send a visible, fresh control panel.
+        await state.update_data(control_message_id=None, navigation_screen=None)
         await backend.resolve(message.from_user.id, username=message.from_user.username,
             first_name=message.from_user.first_name, last_name=message.from_user.last_name,
             language_code=message.from_user.language_code)

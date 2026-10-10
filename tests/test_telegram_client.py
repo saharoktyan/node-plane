@@ -1250,10 +1250,13 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         backend = SimpleNamespace(
             me=AsyncMock(return_value={
                 'role': 'admin', 'status': 'approved', 'locale': 'en'}),
-            access_request_policy=AsyncMock(return_value={'notify_requests': True}))
+            access_request_policy=AsyncMock(return_value={'notify_requests': True}),
+            pending_access_request=AsyncMock(return_value={'id':'request-id','account_id':'account-id',
+                'first_name':'Alice','username':'alice','telegram_user_id':456}))
         with patch.dict('os.environ', {'ADMIN_IDS': '123'}), \
              patch.object(admin_requests, 'send_notice', new_callable=AsyncMock) as send_notice:
             await admin_requests.notify_admins(self.bot, backend, 'request-id')
+        self.assertIn('Alice · @alice', send_notice.call_args.args[2].plain())
         markup = send_notice.call_args.args[3]
         callbacks = [button.callback_data for row in markup.inline_keyboard
                      for button in row]
@@ -1262,6 +1265,14 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
                             for value in callbacks))
         self.assertTrue(any(value.startswith('notification_decide:') and 'reject' in value
                             for value in callbacks))
+
+    async def test_request_notification_without_username_shows_telegram_id(self):
+        backend = SimpleNamespace(me=AsyncMock(return_value={'role':'admin','status':'approved','locale':'en'}),
+            access_request_policy=AsyncMock(return_value={'notify_requests':True}),
+            pending_access_request=AsyncMock(return_value={'id':'r','account_id':'a','first_name':'Alice','telegram_user_id':456}))
+        with patch.dict('os.environ', {'ADMIN_IDS':'123'}), patch.object(admin_requests,'send_notice',new_callable=AsyncMock) as send:
+            await admin_requests.notify_admins(self.bot,backend,'r')
+        self.assertIn('Alice · 456',send.call_args.args[2].plain())
 
     async def test_request_notification_respects_admin_preference(self):
         backend = SimpleNamespace(
@@ -1461,10 +1472,12 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
                 await admin_node_tools.show_install(123, 123, 77, 'lv1', self.bot, backend, self.state)
                 screen, rows = render.call_args.args[2:4]
                 return [b.callback_data for row in screen.fallback_rows(rows) for b in row]
-            self.assertIn('node_action:install_docker:lv1', await buttons())
+            self.assertIn('node_action:bootstrap:lv1', await buttons())
+            self.assertNotIn('node_action:install_docker:lv1', await buttons())
             facts['docker'] = True
             self.assertIn('node_action:bootstrap:lv1', await buttons())
             self.assertNotIn('node_action:reinstall_keep:lv1', await buttons())
+            node['applied_revision'] = 1
             facts['awg_config_valid'] = True
             self.assertIn('node_action:reinstall_clean:lv1', await buttons())
             self.assertNotIn('node_action:reinstall_keep:lv1', await buttons())

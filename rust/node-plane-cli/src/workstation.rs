@@ -216,7 +216,7 @@ pub async fn execute_connected(
     result
 }
 
-async fn prepare_node(
+pub(crate) async fn prepare_node(
     request: &Request,
     controller: &mut SshSession,
     interaction: Arc<dyn Interaction>,
@@ -453,20 +453,35 @@ pub async fn recover_operations(
                 let status = text(&item["status"]);
                 let node = text(&item["node_key"]);
                 lines.push(format!("{kind} · {node} · {id}: {status}"));
+                lines.push(format!("  {}", recovery_reason(&text(&item["error_code"]))));
+                lines.push(format!("  {}", recovery_hint(&text(&item["next_step"]))));
+                if let Some(child) = item["related_id"].as_str().filter(|id| !id.is_empty()) {
+                    lines.push(format!("  Installation step: {child}"));
+                }
                 if !request.workflow.repair { continue; }
                 for action in item["actions"].as_array().into_iter().flatten() {
                     let action = action.as_str().context("Invalid recovery action")?;
                     let path = recovery_path(&kind, &id, action)?;
                     let explanation = match action {
                         "cancel" => "Cancel only an update that has not started; the backend rechecks the execution boundary.",
+                        "recheck" if kind == "agent" => "Verify the configured agent identity and current build. The installer will not run again.",
+                        "recheck" if kind == "bootstrap" => "Check the recorded installation step. A confirmed result lets setup continue.",
+                        "recheck" if kind != "update" => "Read the saved result of this exact command. Missing evidence keeps the block.",
                         "recheck" => "Inspect existing update/rollback evidence. No installation is repeated; missing evidence keeps the block.",
+                        "resolve" if kind == "bootstrap" => "Resume setup before dispatch, or adopt an already recorded child. No uncertain child is replayed.",
+                        "resolve" if kind == "profile" => "Inspect and retire the uncertain journal entry after agent restart, then queue the current profile access again.",
+                        "resolve" if kind == "settings" => "Inspect and retire the uncertain settings command after agent restart, then apply a new revision of current settings.",
                         "resolve" => "Resolve this exact node operation through the driver journal. Unconfirmed outcomes stay blocked.",
                         _ => bail!("Unsupported recovery action"),
                     };
                     if !events::confirm(tx, "Recover this operation?", format!("{kind}: {id}\nStatus: {status}\nNode: {node}\n\n{explanation}"))? { continue; }
                     stage(tx, "Checking the existing operation outcome");
                     match backend::request(session, &credential, Method::POST, &path, None, None).await {
-                        Ok(result) => lines.push(format!("  {action}: observed status {}", text(&result["status"]))),
+                        Ok(result) => {
+                            lines.push(format!("  {action}: {}", text(&result["status"])));
+                            if result["status"] == "blocked" { lines.push("  The outcome is still unconfirmed; the block remains.".into()); }
+                            if let Some(id) = result["replacement_id"].as_str() { lines.push(format!("  Recovery queued: {id}")); }
+                        },
                         Err(_) => lines.push(format!("  {action}: result unconfirmed. Check this exact operation again; no automatic retry.")),
                     }
                 }
@@ -490,8 +505,51 @@ fn recovery_path(kind: &str, id: &str, action: &str) -> Result<String> {
         ("update", "cancel" | "recheck") => {
             Ok(format!("/api/v1/system/updates/jobs/{id}/{action}"))
         }
-        ("node", "resolve") => Ok(format!("/api/v1/node-jobs/{id}/resolve")),
+        ("node" | "settings" | "profile" | "bootstrap", "resolve" | "recheck")
+        | ("agent", "recheck") => Ok(format!("/api/v1/system/recovery/{kind}/{id}/{action}")),
         _ => bail!("Unsupported recovery action"),
+    }
+}
+
+fn recovery_reason(code: &str) -> &str {
+    match code {
+        "waiting_worker" => "Waiting for the worker.",
+        "operation_running" => "The operation is in progress.",
+        "ssh_authentication" => "The controller cannot log in over SSH.",
+        "ssh_host_key" => "The SSH host key is missing or has changed.",
+        "ssh_prerequisites" => "SSH needs root or passwordless sudo, systemd and sha256sum.",
+        "rust_required" => "No suitable binary is available; Rust is needed to build it.",
+        "build_resources" => "Not enough resources to build the agent.",
+        "child_operation_blocked" => "An installation step is blocked.",
+        "child_operation_missing" => "The installation step record is missing.",
+        "revision_conflict" => "Server settings changed during installation.",
+        "permission_denied" => "The initiating administrator no longer has access.",
+        "node_agent_unavailable" => "The agent cannot be reached.",
+        "node_agent_unconfigured" => "No agent connection is configured.",
+        "operation_timeout" => "The operation timed out; its result is unconfirmed.",
+        "journal_unconfirmed" => "The agent journal has no confirmed result.",
+        "update_version_mismatch" => "The installed version differs from the requested version.",
+        "update_verification_unavailable" => "The controller update outcome could not be verified.",
+        _ => "The operation outcome is unconfirmed.",
+    }
+}
+
+fn recovery_hint(hint: &str) -> &str {
+    match hint {
+        "maintenance" => "Finish controller maintenance before recovering this operation.",
+        "child" => "Recover the installation step, then check the parent operation again.",
+        "agent" => {
+            "Check SSH access and the agent service; recheck verifies the bound agent and current build."
+        }
+        "journal" => "Check the recorded result first, then use journal recovery if necessary.",
+        "worker" => "Refresh to see the latest status.",
+        "backup" => {
+            "Check the restore phase in Backups; profiles stay frozen until revocations are confirmed."
+        }
+        "removal" => "Open the removal status; check host access and verification credentials.",
+        "update" => "Check controller services and the update journal in Diagnostics.",
+        "bootstrap" => "Check the server connection and settings before continuing setup.",
+        _ => "Open the operation to inspect its current state.",
     }
 }
 

@@ -438,6 +438,8 @@ CATALOG = {
         'nodes.settings.edit_title': 'Изменить: {field}',
         'nodes.settings.current_value': 'Сейчас: {value}',
         'nodes.settings.send_value': 'Отправьте новое значение сообщением.',
+        'nodes.settings.invalid_sni': 'Неверный SNI',
+        'nodes.settings.sni_hint': 'Введите доменное имя, например www.cloudflare.com, без https://, порта и пути.',
         'nodes.settings.invalid_port': 'Неверный порт',
         'nodes.settings.port_range': 'Введите число от 1 до 65535.',
         'nodes.settings.save_failed_title': 'Не удалось сохранить',
@@ -1121,6 +1123,8 @@ CATALOG = {
         'nodes.settings.edit_title': 'Edit: {field}',
         'nodes.settings.current_value': 'Current: {value}',
         'nodes.settings.send_value': 'Send the new value as a message.',
+        'nodes.settings.invalid_sni': 'Invalid SNI',
+        'nodes.settings.sni_hint': 'Enter a domain such as www.cloudflare.com, without https://, a port or a path.',
         'nodes.settings.invalid_port': 'Invalid port',
         'nodes.settings.port_range': 'Enter a number from 1 to 65535.',
         'nodes.settings.save_failed_title': 'Could not save',
@@ -2529,3 +2533,201 @@ CATALOG['ru'].update({
     'updates.notice.changelog': 'Изменения',
     'updates.auto_on': 'Автопроверка', 'updates.auto_off': 'Автопроверка',
 })
+
+# Installer observations contain fixed stage codes, never console output.
+CATALOG['en'].update({
+    'installation_progress.download_driver': 'Downloading driver',
+    'installation_progress.download_agent': 'Downloading agent',
+    'installation_progress.build_driver': 'Building driver',
+    'installation_progress.build_agent': 'Building agent',
+    'installation_progress.install_driver': 'Installing driver',
+    'installation_progress.check_ssh': 'Checking SSH access',
+    'installation_progress.archive_journals': 'Archiving previous installation journals',
+    'installation_progress.certificates': 'Preparing connection certificates',
+    'installation_progress.install_agent': 'Installing agent',
+    'installation_progress.configure': 'Saving connection settings',
+    'installation_progress.restart_driver': 'Restarting driver',
+    'installation_progress.verify_agent': 'Verifying agent connection',
+})
+CATALOG['ru'].update({
+    'installation_progress.download_driver': 'Скачивание драйвера',
+    'installation_progress.download_agent': 'Скачивание агента',
+    'installation_progress.build_driver': 'Сборка драйвера',
+    'installation_progress.build_agent': 'Сборка агента',
+    'installation_progress.install_driver': 'Установка драйвера',
+    'installation_progress.check_ssh': 'Проверка SSH-доступа',
+    'installation_progress.archive_journals': 'Архивирование журналов прошлой установки',
+    'installation_progress.certificates': 'Подготовка сертификатов подключения',
+    'installation_progress.install_agent': 'Установка агента',
+    'installation_progress.configure': 'Сохранение настроек подключения',
+    'installation_progress.restart_driver': 'Перезапуск драйвера',
+    'installation_progress.verify_agent': 'Проверка подключения агента',
+})
+
+CATALOG['en'].update({
+    'node_tools.bootstrap': 'Server setup',
+    'nodes.card.bootstrap': 'Server setup',
+    'node_tools.protocols_stage': 'Installing VPN protocols',
+})
+CATALOG['ru'].update({
+    'node_tools.bootstrap': 'Установка сервера',
+    'nodes.card.bootstrap': 'Установка сервера',
+    'node_tools.protocols_stage': 'Установка VPN-протоколов',
+})
+
+CATALOG['en'].update({
+    'installation_progress.runtime_sync': 'Preparing runtime files',
+    'installation_progress.docker_install': 'Installing Docker',
+    'installation_progress.docker_verify': 'Verifying Docker',
+    'installation_progress.protocol_settings': 'Preparing protocol settings',
+    'installation_progress.awg_port': 'Selecting AWG port',
+    'installation_progress.xray_init': 'Preparing Xray',
+    'installation_progress.awg_init': 'Preparing AmneziaWG',
+    'installation_progress.firewall': 'Opening protocol ports',
+    'installation_progress.protocol_deploy': 'Starting VPN protocols',
+    'installation_progress.protocol_verify': 'Verifying VPN protocols',
+})
+CATALOG['ru'].update({
+    'installation_progress.runtime_sync': 'Подготовка файлов сервера',
+    'installation_progress.docker_install': 'Установка Docker',
+    'installation_progress.docker_verify': 'Проверка Docker',
+    'installation_progress.protocol_settings': 'Подготовка настроек протоколов',
+    'installation_progress.awg_port': 'Выбор порта AWG',
+    'installation_progress.xray_init': 'Подготовка Xray',
+    'installation_progress.awg_init': 'Подготовка AmneziaWG',
+    'installation_progress.firewall': 'Открытие портов протоколов',
+    'installation_progress.protocol_deploy': 'Запуск VPN-протоколов',
+    'installation_progress.protocol_verify': 'Проверка VPN-протоколов',
+})
+
+CATALOG['en'].update({
+    'node_tools.setup_agent': 'Setup agent',
+    'nodes.rollout.agent_ready': 'Agent installed',
+    'nodes.card.state.agent_only': 'agent-only server',
+    'node_tools.protocols_stage_button': 'Install protocols',
+    'node.wizard.protocols.prompt': 'Select protocols, or continue with the agent only.',
+})
+CATALOG['ru'].update({
+    'node_tools.setup_agent': 'Установить агент',
+    'nodes.rollout.agent_ready': 'Агент установлен',
+    'nodes.card.state.agent_only': 'сервер без VPN-протоколов',
+    'node_tools.protocols_stage_button': 'Установить протоколы',
+    'node.wizard.protocols.prompt': 'Выберите протоколы или продолжите только с агентом.',
+})
+
+CATALOG['en']['nodes.rollout.succeeded'] = 'Agent installed.'
+CATALOG['ru']['nodes.rollout.succeeded'] = 'Агент установлен.'
+
+CATALOG['en']['node.wizard.protocols.none'] = 'None (agent only)'
+CATALOG['ru']['node.wizard.protocols.none'] = 'Без протоколов, только агент'
+
+CATALOG['en'].update({
+    'recovery.kind.settings': 'Server settings',
+    'recovery.kind.bootstrap': 'Server setup',
+    'recovery.controller': 'Controller diagnostics',
+    'recovery.history': 'Recovery history',
+    'recovery.profile_id': 'Profile: {id}',
+    'recovery.child_id': 'Installation step: {id}',
+    'recovery.still_blocked': 'The outcome is still unconfirmed. The operation remains blocked.',
+    'recovery.replacement': 'Recovery queued: {id}',
+    'recovery.diagnostic_summary': 'Errors: {errors} · Warnings: {warnings}',
+    'recovery.check.ok': 'OK',
+    'recovery.check.error': 'Error',
+    'recovery.check.warning': 'Needs attention',
+    'recovery.cause.outcome_unconfirmed': 'The operation outcome is unconfirmed.',
+    'recovery.cause.waiting_worker': 'Waiting for the worker.',
+    'recovery.cause.operation_running': 'The operation is in progress.',
+    'recovery.cause.ssh_authentication': 'The controller cannot log in over SSH.',
+    'recovery.cause.ssh_host_key': 'The SSH host key is missing or has changed.',
+    'recovery.cause.ssh_prerequisites': 'The SSH user needs root or passwordless sudo; systemd and sha256sum must be installed.',
+    'recovery.cause.rust_required': 'No suitable binary is available; Rust is needed to build it.',
+    'recovery.cause.build_resources': 'Not enough resources to build the agent.',
+    'recovery.cause.child_operation_blocked': 'An installation step is blocked.',
+    'recovery.cause.child_operation_missing': 'The installation step record is missing.',
+    'recovery.cause.revision_conflict': 'Server settings changed during installation.',
+    'recovery.cause.permission_denied': 'The initiating administrator no longer has access.',
+    'recovery.cause.node_agent_unavailable': 'The agent cannot be reached.',
+    'recovery.cause.node_agent_unconfigured': 'No agent connection is configured.',
+    'recovery.cause.update_verification_unavailable': 'The controller update outcome could not be verified.',
+    'recovery.cause.update_version_mismatch': 'The installed version differs from the requested version.',
+    'recovery.hint.maintenance': 'Finish controller maintenance before recovering this operation.',
+    'recovery.hint.child': 'Recover the installation step shown in Details, then check this operation again.',
+    'recovery.hint.agent': 'Check SSH access and the agent service. Recheck confirms the bound agent and current build.',
+    'recovery.hint.journal': 'Check the recorded result first. If it is missing, use journal recovery.',
+    'recovery.hint.worker': 'Refresh to see the latest status.',
+    'recovery.hint.backup': 'Open Backups to check the restore phase; keep profiles frozen until revocations are confirmed.',
+    'recovery.hint.removal': 'Open the server removal status and check host access and verification credentials.',
+    'recovery.hint.update': 'Use Workstation diagnostics to check the controller services and update journal.',
+    'recovery.hint.bootstrap': 'Check the server connection and settings before continuing setup.',
+    'recovery.explain.profile.resolve': 'Inspect and retire the uncertain journal entry after agent restart, then queue the current profile access again.',
+    'recovery.explain.settings.resolve': 'Inspect and retire the uncertain settings command after agent restart, then apply a new revision of the current settings.',
+    'recovery.explain.profile.recheck': 'Read the saved result of this profile command.',
+    'recovery.explain.settings.recheck': 'Read the saved result of this settings command.',
+    'recovery.explain.agent.recheck': 'Verify the configured agent identity and current build. The installer will not run again.',
+    'recovery.explain.bootstrap.recheck': 'Check the existing installation step and advance only after its result is confirmed.',
+    'recovery.outcome.admitted': 'Result pending',
+    'recovery.outcome.confirmed': 'Confirmed',
+    'recovery.outcome.still_blocked': 'Still blocked',
+    'recovery.outcome.unconfirmed': 'Unconfirmed',
+    'recovery.outcome.refused': 'Refused',
+})
+
+CATALOG['ru'].update({
+    'recovery.kind.settings': 'Настройки сервера',
+    'recovery.kind.bootstrap': 'Установка сервера',
+    'recovery.controller': 'Диагностика контроллера',
+    'recovery.history': 'История восстановления',
+    'recovery.profile_id': 'Профиль: {id}',
+    'recovery.child_id': 'Шаг установки: {id}',
+    'recovery.still_blocked': 'Результат пока не подтверждён. Операция остаётся заблокированной.',
+    'recovery.replacement': 'Восстановление поставлено в очередь: {id}',
+    'recovery.diagnostic_summary': 'Ошибок: {errors} · Предупреждений: {warnings}',
+    'recovery.check.ok': 'В порядке',
+    'recovery.check.error': 'Ошибка',
+    'recovery.check.warning': 'Требует внимания',
+    'recovery.cause.outcome_unconfirmed': 'Результат операции не подтверждён.',
+    'recovery.cause.waiting_worker': 'Ожидает выполнения рабочим процессом.',
+    'recovery.cause.operation_running': 'Операция выполняется.',
+    'recovery.cause.ssh_authentication': 'Контроллер не может войти по SSH.',
+    'recovery.cause.ssh_host_key': 'SSH-ключ хоста отсутствует или изменился.',
+    'recovery.cause.ssh_prerequisites': 'SSH-пользователю нужен root или sudo без пароля; на сервере нужны systemd и sha256sum.',
+    'recovery.cause.rust_required': 'Подходящий бинарник недоступен; для сборки нужен Rust.',
+    'recovery.cause.build_resources': 'Недостаточно ресурсов для сборки агента.',
+    'recovery.cause.child_operation_blocked': 'Один из шагов установки заблокирован.',
+    'recovery.cause.child_operation_missing': 'Запись шага установки отсутствует.',
+    'recovery.cause.revision_conflict': 'Настройки сервера изменились во время установки.',
+    'recovery.cause.permission_denied': 'У администратора, начавшего операцию, больше нет доступа.',
+    'recovery.cause.node_agent_unavailable': 'Агент недоступен.',
+    'recovery.cause.node_agent_unconfigured': 'Подключение к агенту не настроено.',
+    'recovery.cause.update_verification_unavailable': 'Не удалось проверить результат обновления контроллера.',
+    'recovery.cause.update_version_mismatch': 'Установленная версия отличается от запрошенной.',
+    'recovery.hint.maintenance': 'Сначала завершите обслуживание контроллера.',
+    'recovery.hint.child': 'Восстановите шаг установки из подробностей, затем проверьте эту операцию снова.',
+    'recovery.hint.agent': 'Проверьте SSH-доступ и службу агента. Повторная проверка подтвердит привязанный агент и текущую сборку.',
+    'recovery.hint.journal': 'Сначала проверьте сохранённый результат. Если его нет, используйте восстановление журнала.',
+    'recovery.hint.worker': 'Обновите экран для проверки статуса.',
+    'recovery.hint.backup': 'Проверьте этап восстановления в разделе бэкапов. До подтверждения отзыва доступа профили остаются замороженными.',
+    'recovery.hint.removal': 'Откройте статус удаления сервера и проверьте доступ к хосту и ключ проверки.',
+    'recovery.hint.update': 'Проверьте службы контроллера и журнал обновления через диагностику Workstation.',
+    'recovery.hint.bootstrap': 'Проверьте подключение и настройки сервера перед продолжением установки.',
+    'recovery.explain.profile.resolve': 'Проверить и завершить неопределённую запись журнала после перезапуска агента, затем заново применить актуальный доступ профиля.',
+    'recovery.explain.settings.resolve': 'Проверить и завершить неопределённую команду после перезапуска агента, затем применить новую ревизию актуальных настроек.',
+    'recovery.explain.profile.recheck': 'Прочитать сохранённый результат этой команды профиля.',
+    'recovery.explain.settings.recheck': 'Прочитать сохранённый результат этой команды настроек.',
+    'recovery.explain.agent.recheck': 'Проверить привязанный агент и текущую сборку. Установщик повторно не запускается.',
+    'recovery.explain.bootstrap.recheck': 'Проверить существующий шаг установки и продолжить только после подтверждения его результата.',
+    'recovery.outcome.admitted': 'Результат ожидается',
+    'recovery.outcome.confirmed': 'Подтверждено',
+    'recovery.outcome.still_blocked': 'Блокировка сохранена',
+    'recovery.outcome.unconfirmed': 'Не подтверждено',
+    'recovery.outcome.refused': 'Отказано',
+})
+
+CATALOG['en']['recovery.explain.bootstrap.resolve'] = 'Continue setup from the saved step. A previously started command keeps its identity and will not be repeated.'
+CATALOG['ru']['recovery.explain.bootstrap.resolve'] = 'Продолжить установку с сохранённого шага. Ранее начатая команда сохраняет свой идентификатор и повторно не запускается.'
+
+CATALOG['en'].update({'recovery.cause.operation_timeout': 'The operation timed out; its result is unconfirmed.', 'recovery.cause.journal_unconfirmed': 'The agent journal has no confirmed result.'})
+CATALOG['ru'].update({'recovery.cause.operation_timeout': 'Истекло время ожидания; результат операции не подтверждён.', 'recovery.cause.journal_unconfirmed': 'В журнале агента нет подтверждённого результата.'})
+
+CATALOG['en'].update({'recovery.action.recheck': 'Check result', 'recovery.action.resolve': 'Recover operation'})
+CATALOG['ru'].update({'recovery.action.recheck': 'Проверить результат', 'recovery.action.resolve': 'Восстановить операцию'})

@@ -71,6 +71,10 @@ JOURNAL_ARCHIVE_NOTICES=()
 
 set_step() {
   CURRENT_STEP="$1"
+  if [[ -n "${NODE_PLANE_AGENT_PROGRESS_FILE:-}" && -n "${NODE_PLANE_AGENT_PROGRESS_ID:-}" ]]; then
+    PYTHONPATH="${APP_ROOT}/app" "${PYTHON_BIN:-python3}" -m backend.installation_progress \
+      "$NODE_PLANE_AGENT_PROGRESS_FILE" "$NODE_PLANE_AGENT_PROGRESS_ID" "$CURRENT_STEP" 2>/dev/null || true
+  fi
 }
 
 show_agent_service_diagnostics() {

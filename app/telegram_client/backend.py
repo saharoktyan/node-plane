@@ -15,6 +15,14 @@ class BackendError(Exception):
 
 
 class BackendClient:
+    async def bootstrap_node(self, user_id, node_key, action, revision, command_key):
+        return await self.request('POST', f'/api/v1/nodes/{node_key}/bootstrap',
+            telegram_user_id=user_id, body={'action': action, 'revision': revision},
+            command=True, command_key=command_key)
+
+    async def node_bootstrap(self, user_id, identity):
+        return await self.request('GET', f'/api/v1/node-bootstraps/{identity}', telegram_user_id=user_id)
+
     async def node_services(self, user_id, node_key):
         return await self.request('GET', f'/api/v1/nodes/{node_key}/services', telegram_user_id=user_id)
 
