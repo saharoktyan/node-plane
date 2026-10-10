@@ -90,7 +90,7 @@ CATALOG = {
         'devices.delete_warning': 'Конфиги AmneziaWG этого устройства перестанут работать.',
         'devices.preparing': 'Подготовка устройства',
         'devices.preparing_text': 'Сервер ещё применяет изменения. Обновите экран через несколько секунд.',
-        'audit.title': 'Аудит рабочих устройств',
+        'audit.title': 'Аудит Workstation',
         'audit.attribution': 'Об аудите · время UTC',
         'audit.action.credential': 'Временный доступ',
         'audit.action.registration': 'Регистрация ключа workstation',

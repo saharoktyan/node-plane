@@ -70,6 +70,9 @@ async def show_install(chat_id, user_id, message_id, node_key, bot, backend, sta
                 label = 'node_tools.protocols_stage_button'
             except BackendError:
                 pass
+        if complete:
+            await show_action_confirmation(chat_id, message_id, node, 'bootstrap', bot, state, title_key=label)
+            return
         await render(bot, chat_id, Screen(tr(locale, 'node_tools.install'), (server_label(node),),
             embedded_buttons=True, navigation=True),
             [[button(locale, label if complete else 'nodes.card.settings',
@@ -85,8 +88,8 @@ async def show_install(chat_id, user_id, message_id, node_key, bot, backend, sta
             lines.append(tr(locale, 'node_tools.busy'))
             rows.append([button(locale, 'node_tools.refresh', 'node_job:' + job['id'])])
         elif not facts['docker']:
-            lines.append(tr(locale, 'node_tools.docker_missing'))
-            rows.append([button(locale, 'node_tools.bootstrap', f'node_action:bootstrap:{node_key}', style='primary')])
+            await show_action_confirmation(chat_id, message_id, node, 'bootstrap', bot, state)
+            return
         else:
             if not overview['settings_complete']:
                 lines.append(tr(locale, 'node_tools.incomplete'))
@@ -98,6 +101,9 @@ async def show_install(chat_id, user_id, message_id, node_key, bot, backend, sta
                     embedded_buttons=True, navigation=True), rows[-1:], state, message_id)
                 return
             present = any(facts[p + '_config_valid'] for p in node['protocols'])
+            if not present:
+                await show_action_confirmation(chat_id, message_id, node, 'bootstrap', bot, state)
+                return
             reusable = bool(node['protocols']) and all(facts[p + '_config_valid'] for p in node['protocols'])
             lines.append(tr(locale, 'node_tools.reinstall_note' if present else 'node_tools.bootstrap_note'))
             if reusable:
@@ -108,7 +114,8 @@ async def show_install(chat_id, user_id, message_id, node_key, bot, backend, sta
     except BackendError as exc:
         lines.append(error(locale, exc))
         if exc.code == 'node_agent_unconfigured':
-            rows.append([button(locale, 'node_tools.bootstrap', f'node_action:bootstrap:{node_key}', style='primary')])
+            await show_action_confirmation(chat_id, message_id, node, 'bootstrap', bot, state)
+            return
         else:
             rows.append([button(locale, 'node_tools.refresh', f'bootstrap_menu:{node_key}')])
     rows.append([button(locale, 'back', back)])
@@ -242,6 +249,23 @@ async def view_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state:
     await render(bot, query.message.chat.id, Screen(tr(locale, 'node_tools.' + view), tuple(lines), sections=tuple(sections), embedded_buttons=True, navigation=True), rows, state, query.message.message_id)
 
 
+async def show_action_confirmation(chat_id, message_id, node, action, bot, state, *, title_key=None):
+    locale = normalize_locale((await state.get_data()).get('locale'))
+    node_key = node['key']
+    await remember_node(state, node)
+    await state.update_data(node_job_draft={'node_key': node_key, 'action': action,
+        'revision': node['desired_revision'], 'command_key': str(uuid4())})
+    back = (AdminNodeCallback(node_key=node_key).pack() if action == 'bootstrap' else
+            f'bootstrap_menu:{node_key}' if action in {'reinstall_clean', 'reinstall_keep', 'install_docker'} else
+            f'node_tools:{node_key}')
+    rows = [[button(locale, 'back', back),
+             button(locale, 'node_tools.confirm', 'node_job_submit',
+                style='danger' if action in {'reinstall_clean', 'cleanup_runtime'} else 'primary')]]
+    await render(bot, chat_id, Screen(tr(locale, title_key or 'node_tools.' + action),
+        lines=(tr(locale, 'node_tools.effect.' + action),), embedded_buttons=True,
+        navigation=True), rows, state, message_id)
+
+
 @router.callback_query(F.data.startswith('node_action:'))
 async def action_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
     await query.answer()
@@ -254,14 +278,8 @@ async def action_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, stat
         return
     try:
         node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=query.from_user.id)
-        await remember_node(state, node)
-        await state.update_data(node_job_draft={'node_key': node_key, 'action': action,
-            'revision': node['desired_revision'], 'command_key': str(uuid4())})
-        rows = [[button(locale, 'back', f'bootstrap_menu:{node_key}' if action in {'bootstrap', 'reinstall_clean', 'reinstall_keep', 'install_docker'} else f'node_tools:{node_key}'),
-                 button(locale, 'node_tools.confirm', 'node_job_submit',
-                    style='danger' if action in {'reinstall_clean', 'cleanup_runtime'} else 'primary')]]
-        await render(bot, query.message.chat.id, Screen(tr(locale, 'node_tools.' + action), embedded_buttons=True, navigation=True, lines=
-            (tr(locale, 'node_tools.effect.' + action),)), rows, state, query.message.message_id)
+        await show_action_confirmation(query.message.chat.id, query.message.message_id,
+            node, action, bot, state)
     except BackendError as exc:
         await render(bot, query.message.chat.id, Screen(tr(locale, 'node_tools.error_title'), (error(locale, exc),), embedded_buttons=True, navigation=True),
             [[button(locale, 'back', AdminNodeCallback(node_key=node_key).pack())]], state, query.message.message_id)
@@ -295,6 +313,10 @@ async def show_bootstrap(chat_id, user_id, message_id, job, bot, backend, state)
              'protocols': 'node_tools.protocols_stage', 'done': 'node_tools.done.bootstrap'}[phase]
     lines = (tr(locale, 'operation.' + job['status']),
              f"{min(stages.index(phase) + 1, 3)}/3 · {tr(locale, label)}")
+    if job['status'] == 'blocked':
+        lines += (error(locale, BackendError(job.get('error_code') or 'bootstrap_unconfirmed', 409)),)
+        if job.get('error_code'):
+            lines += (job['error_code'],)
     if job.get('progress'):
         lines += (tr(locale, 'installation_progress.' + job['progress']['stage']),)
     rows = [[button(locale, 'node_tools.refresh', 'bootstrap_status:' + job['id'])]]

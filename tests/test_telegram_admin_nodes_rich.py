@@ -591,10 +591,12 @@ class AdminNodeRichTests(IsolatedAsyncioTestCase):
         self.backend.node_services.return_value = {'docker': False}
         with patch.object(tools, 'render', new_callable=AsyncMock) as draw:
             await tools.show_install(123, 123, 77, 'msk1', self.bot, self.backend, self.state)
-        self.assertIn('node_action:bootstrap:msk1', self.callbacks(draw))
-        self.assertEqual(draw.call_args.args[3][0][0].text, tr('en', 'node_tools.protocols_stage_button'))
+        self.assertIn('node_job_submit', self.callbacks(draw))
+        self.assertEqual(draw.call_args.args[2].title, tr('en', 'node_tools.protocols_stage_button'))
+        self.assertEqual(self.data['node_job_draft']['action'], 'bootstrap')
 
     async def test_initial_bootstrap_is_one_action_regardless_of_docker_state(self):
+        self.backend.bootstrap_node = AsyncMock()
         self.node['applied_revision'] = 0
         for docker in (False, True):
             self.backend.node_services.return_value = {'docker': docker,
@@ -602,7 +604,10 @@ class AdminNodeRichTests(IsolatedAsyncioTestCase):
             with patch.object(tools, 'render', new_callable=AsyncMock) as draw:
                 await tools.show_install(123, 123, 77, 'msk1', self.bot, self.backend, self.state)
             callbacks = self.callbacks(draw)
-            self.assertIn('node_action:bootstrap:msk1', callbacks)
+            self.assertIn('node_job_submit', callbacks)
+            self.assertNotIn('bootstrap_menu:msk1', callbacks)
+            self.assertIn(nodes.AdminNodeCallback(node_key='msk1').pack(), callbacks)
+            self.backend.bootstrap_node.assert_not_awaited()
             self.assertNotIn('node_action:install_docker:msk1', callbacks)
 
     async def test_node_return_from_updates_survives_submenu_state_reset(self):
@@ -631,9 +636,12 @@ class AdminNodeRichTests(IsolatedAsyncioTestCase):
 
     async def test_blocked_bootstrap_links_to_original_child_operation(self):
         parent = {'id': 'bootstrap-id', 'node_key': 'msk1', 'phase': 'protocols',
-                  'status': 'blocked', 'child_id': 'protocol-id', 'child_kind': 'node-jobs'}
+                  'status': 'blocked', 'error_code': 'node_agent_unavailable',
+                  'child_id': 'protocol-id', 'child_kind': 'node-jobs'}
         with patch.object(tools, 'render', new_callable=AsyncMock) as draw:
             await tools.show_bootstrap(123, 123, 77, parent, self.bot, self.backend, self.state)
+        self.assertIn('node_agent_unavailable', draw.call_args.args[2].lines)
+        self.assertIn(tr('en', 'node_tools.unreachable'), draw.call_args.args[2].lines)
         self.assertIn('node_job:protocol-id', self.callbacks(draw))
         self.assertIn('bootstrap_status:bootstrap-id', self.callbacks(draw))
 

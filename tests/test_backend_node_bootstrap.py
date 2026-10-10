@@ -85,6 +85,23 @@ class BootstrapTests(unittest.TestCase):
         with self.db.connect() as conn:
             self.assertEqual(conn.execute('SELECT COUNT(*) FROM backend_agent_rollouts').fetchone()[0], 0)
 
+    def test_docker_probe_recovers_when_agent_becomes_reachable_without_reinstall(self):
+        parent = self.queue()
+        self.service.run_one()
+        self.service.driver = SimpleNamespace(inspect_node_services=lambda key: (_ for _ in ()).throw(TimeoutError()))
+        self.assertTrue(self.service.run_one())
+        blocked = self.service.get(self.actor, parent['id'])
+        self.assertEqual((blocked['phase'], blocked['status'], blocked['child_id']), ('docker', 'blocked', None))
+        self.assertFalse(self.service.run_one())
+        self.service.driver = SimpleNamespace(inspect_node_services=lambda key: {'docker': True})
+        self.assertTrue(self.service.run_one())
+        self.assertEqual(self.service.get(self.actor, parent['id'])['status'], 'awaiting_executor')
+        self.assertTrue(self.service.run_one())
+        self.assertEqual(self.service.get(self.actor, parent['id'])['phase'], 'protocols')
+        with self.db.connect() as conn:
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM backend_agent_rollouts').fetchone()[0], 0)
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM backend_node_jobs').fetchone()[0], 0)
+
     def test_idempotency_retains_parent_and_confirmed_components_are_skipped(self):
         key = str(uuid4())
         first = self.service.queue(self.actor, 'n1', 1, key)

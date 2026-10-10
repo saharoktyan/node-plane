@@ -142,6 +142,15 @@ class NodeBootstrapService:
                 self._change(row, phase='docker' if row['phase'] == 'agent' else 'protocols')
             return True
         if row['status'] == 'blocked':
+            # A failed read-only probe has no command outcome to recover.
+            # Observe connectivity again before resuming the same coordinator.
+            if row['error_code'] == 'node_agent_unavailable' and row['phase'] in {'agent', 'docker'}:
+                try:
+                    self.driver.inspect_node_services(row['node_key'])
+                except Exception:
+                    return False
+                self._change(row, status='awaiting_executor')
+                return True
             return False
         if node['desired_revision'] != row['revision']:
             self._change(row, status='blocked', error='revision_conflict')
