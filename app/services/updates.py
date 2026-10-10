@@ -442,8 +442,8 @@ def is_driver_agents_setup_supported() -> bool:
     return detect_install_mode() == "simple" and os.path.isfile(_script_path("setup_driver_agents.sh"))
 
 
-def get_updates_overview() -> Dict[str, str | bool]:
-    state = refresh_update_run_state()
+def get_updates_overview(*, refresh_run: bool = True) -> Dict[str, str | bool]:
+    state = refresh_update_run_state() if refresh_run else app_settings.get_update_state()
     current_version = APP_SEMVER
     local_label = state.get("local_label", APP_VERSION)
     remote_label = state.get("remote_label", "")
@@ -451,8 +451,8 @@ def get_updates_overview() -> Dict[str, str | bool]:
     local_commit = _commit_from_label(str(local_label))
     remote_commit = _commit_from_label(str(remote_label))
     upstream_ref = str(state.get("upstream_ref", ""))
-    branch = app_settings.get_updates_branch()
-    dev_track = app_settings.get_updates_dev_track()
+    branch = state['branch']
+    dev_track = state['dev_track']
     checked_for_selection = (state.get("branch", branch) == branch and
                              state.get("dev_track", dev_track) == dev_track)
     if not checked_for_selection:
@@ -480,8 +480,9 @@ def get_updates_overview() -> Dict[str, str | bool]:
         "current_label": APP_VERSION,
         "source_dir": _effective_source_root(),
         "update_supported": is_manual_update_supported(),
-        "auto_check_enabled": app_settings.is_updates_auto_check_enabled(),
-        "auto_check_interval_minutes": app_settings.get_updates_check_interval_minutes(),
+        "auto_check_enabled": state.get("auto_check_enabled", "0") == "1",
+        "auto_check_interval_minutes": int(state["auto_check_interval_minutes"])
+            if state.get("auto_check_interval_minutes") in {"15", "60", "360", "1440"} else 60,
         "last_checked_at": state.get("last_checked_at", "") if checked_for_selection else "",
         "last_status": last_status,
         "update_available": update_available,

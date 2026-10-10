@@ -117,6 +117,33 @@ class BackendUpdateTests(TestCase):
         self.assertEqual(value['nodes'][0]['agent_status'], 'unknown')
         self.assertNotIn('secret', str(value))
 
+    def test_display_cache_expires_and_authoritative_reads_bypass_it(self):
+        service = self.service()
+        self.node()
+        with patch('backend.updates.time.monotonic', return_value=10):
+            service.rollout_overview(self.actor, use_cache=True)
+            service.rollout_overview(self.actor, use_cache=True)
+            self.driver.inspect_node_services.assert_called_once()
+            service.rollout_overview(self.actor)
+            self.assertEqual(self.driver.inspect_node_services.call_count, 2)
+        with patch('backend.updates.time.monotonic', return_value=14):
+            service.rollout_overview(self.actor, use_cache=True)
+        self.assertEqual(self.driver.inspect_node_services.call_count, 3)
+
+    def test_display_cache_invalidates_on_topology_change_and_active_update(self):
+        service = self.service()
+        self.node()
+        with patch('backend.updates.time.monotonic', return_value=10):
+            service.rollout_overview(self.actor, use_cache=True)
+            self.db.connection.execute("UPDATE backend_nodes SET title='New name' WHERE key='lv1'")
+            result = service.rollout_overview(self.actor, use_cache=True)
+            self.assertEqual(result['nodes'][0]['title'], 'New name')
+            self.assertEqual(self.driver.inspect_node_services.call_count, 2)
+            service.queue(self.actor, str(uuid4()), 'version',
+                target_ref='v0.4.3-alpha.19', branch='dev')
+            service.rollout_overview(self.actor, use_cache=True)
+            self.assertEqual(self.driver.inspect_node_services.call_count, 3)
+
     def test_batch_queues_only_outdated_agents_and_verifies_actual_result(self):
         service = self.service()
         self.node()

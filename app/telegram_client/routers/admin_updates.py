@@ -1,4 +1,5 @@
 """Version and fleet-update screens; all effects belong to the backend worker."""
+import asyncio
 from uuid import uuid4
 from datetime import datetime, timezone
 from aiogram import Router, F, Bot
@@ -179,15 +180,23 @@ def server_sections(lang, nodes, page, action, *, opened=False, title_key='updat
 async def show_overview(query, bot, backend, state, page=0, opened=False):
     from .admin_settings import UpdateActionCallback
     lang = await locale(state)
-    overview = await backend.updates_overview(query.from_user.id)
-    latest = overview.get('latest_job')
-    try:
-        fleet = (await state.get_data()).get('updates_fleet') if opened else None
-        if fleet is None:
-            fleet = await backend.update_rollout(query.from_user.id)
+    fleet = (await state.get_data()).get('updates_fleet') if opened else None
+    if fleet is None:
+        overview, fleet_result = await asyncio.gather(
+            backend.updates_overview(query.from_user.id), backend.update_rollout(query.from_user.id),
+            return_exceptions=True)
+        if isinstance(overview, BaseException):
+            raise overview
+        if isinstance(fleet_result, BackendError):
+            fleet = {'nodes': [], 'driver_status': 'unknown'}
+        elif isinstance(fleet_result, BaseException):
+            raise fleet_result
+        else:
+            fleet = fleet_result
             await state.update_data(updates_fleet=fleet)
-    except BackendError:
-        fleet = {'nodes': [], 'driver_status': 'unknown'}
+    else:
+        overview = await backend.updates_overview(query.from_user.id)
+    latest = overview.get('latest_job')
     active = latest and latest['status'] in {'awaiting_executor', 'running'}
     result = (latest or {}).get('result') or {}
     components = result.get('components') or {}
