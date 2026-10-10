@@ -139,6 +139,43 @@ class TemporaryConfigTests(unittest.TestCase):
         self.assertEqual(self.service.get(self.actor,second['id'])['status'],'cancelled')
         self.assertEqual(self.driver.calls,[])
 
+    def test_metadata_edits_preserve_active_lease_and_download(self):
+        from backend.nodes import NodeService
+        self.prepare()
+        config = self.create()
+        self.service.run_one()
+        before = self.service.get(self.actor, config['id'])
+        original = self.service.artifact(self.actor, config['id'])
+        nodes = NodeService(self.db)
+        current = nodes.get(self.actor, 'n1')
+        changed = nodes.command(self.actor, action='edit', node_key='n1',
+            revision=current['desired_revision'], command_key=str(uuid4()),
+            values={'title':'New server name', 'flag':'🇱🇻', 'notes':'Edited metadata'})
+        self.assertEqual(changed['desired_revision'], changed['applied_revision'])
+        after = self.service.get(self.actor, config['id'])
+        self.assertEqual(after['expires_at'], before['expires_at'])
+        self.assertEqual(after['status'], 'active')
+        refreshed = self.service.artifact(self.actor, config['id'])
+        self.assertEqual(refreshed['content'].split('#')[0], original['content'].split('#')[0])
+        self.assertEqual(sum(action == 'temporary_ensure' and not recover
+            for _, action, recover in self.driver.calls), 1)
+
+    def test_changed_connection_settings_are_explained_and_never_downloaded(self):
+        from backend.nodes import NodeService
+        self.prepare()
+        config = self.create()
+        self.service.run_one()
+        nodes = NodeService(self.db)
+        current = nodes.get(self.actor, 'n1')
+        settings = {**current['settings'], 'xray_sni':'example.org'}
+        nodes.command(self.actor, action='edit', node_key='n1', revision=current['desired_revision'],
+            command_key=str(uuid4()), values={'settings':settings})
+        item = self.service.get(self.actor, config['id'])
+        self.assertFalse(item['artifact_available'])
+        self.assertEqual(item['unavailable_reason'], 'node_changed')
+        with self.assertRaises(AccessDenied):
+            self.service.artifact(self.actor, config['id'])
+
     def test_expiry_denies_download_before_worker_and_queues_revocation(self):
         self.prepare()
         config = self.create()

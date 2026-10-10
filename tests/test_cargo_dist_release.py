@@ -66,3 +66,51 @@ class CargoDistReleaseTests(unittest.TestCase):
             _, payload = controller.verify(out / 'node-plane-controller.tar.gz', 'v0.4.3-alpha.59', 'a' * 40)
             self.assertNotIn('.env', payload)
             self.assertNotIn('scripts/build_release_stack.sh', payload)
+            # The global packaging job consumes the parallel job's artifacts,
+            # and must not fall back to compiling when an artifact is missing.
+            incoming = root / 'target/distrib'
+            shutil.copytree(out, incoming)
+            (commands / 'cargo').write_text('#!/bin/sh\nexit 99\n')
+            result = subprocess.run(['bash', str(root / 'scripts/build_release_stack.sh'), '--from-ci'],
+                env={**env, 'CI': 'true'}, capture_output=True, text=True, timeout=20)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            (incoming / 'node-plane-agent-linux-amd64.tar.gz').unlink()
+            result = subprocess.run(['bash', str(root / 'scripts/build_release_stack.sh'), '--from-ci'],
+                env={**env, 'CI': 'true'}, capture_output=True, text=True, timeout=20)
+            self.assertNotEqual(result.returncode, 0)
+
+    def test_dependency_cache_preserves_dependencies_but_excludes_project_outputs(self):
+        spec = importlib.util.spec_from_file_location('release_cache', ROOT / 'scripts/release_rust_cache.py')
+        cache = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cache)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            target = root / 'target'
+            files = ('release/deps/libserde-fixture.rlib', 'release/deps/node_plane-fixture',
+                'release/build/node-agent-fixture/output', 'release/node-plane.exe',
+                'distrib/archive.tar.gz', 'release/incremental/fixture')
+            for name in files:
+                path = target / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(name)
+            cache.LOCATIONS = {'rust/node-plane-cli/target': target}
+            cache.ARCHIVE = root / 'cache/dependencies.tar.gz'
+            cache.save()
+            shutil.rmtree(target)
+            cache.restore()
+            self.assertEqual([p.relative_to(target).as_posix() for p in target.rglob('*') if p.is_file()],
+                ['release/deps/libserde-fixture.rlib'])
+
+    def test_dependency_cache_rejects_path_traversal(self):
+        import io
+        spec = importlib.util.spec_from_file_location('release_cache', ROOT / 'scripts/release_rust_cache.py')
+        cache = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cache)
+        with tempfile.TemporaryDirectory() as temporary:
+            cache.ARCHIVE = Path(temporary) / 'bad.tar.gz'
+            with tarfile.open(cache.ARCHIVE, 'w:gz') as archive:
+                member = tarfile.TarInfo('target/../../outside')
+                member.size = 1
+                archive.addfile(member, io.BytesIO(b'x'))
+            with self.assertRaises(ValueError):
+                cache.restore()

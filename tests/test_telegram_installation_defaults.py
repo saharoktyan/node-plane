@@ -14,6 +14,20 @@ class TelegramInstallationDefaultsTests(IsolatedAsyncioTestCase):
     asyncTearDown = fixture.NodeTemplateTests.asyncTearDown
     message = fixture.NodeTemplateTests.message
 
+    async def test_save_and_reset_exist_only_for_changed_defaults(self):
+        current = {'revision':1, 'protocols':['awg'], 'xray_transports':[],
+            'settings':{'awg_i1_preset':'quic', 'awg_port_mode':'auto'}}
+        await self.state.update_data(installation_defaults_original=copy.deepcopy(current),
+            installation_defaults_draft=copy.deepcopy(current))
+        with patch.object(defaults, 'render', new_callable=AsyncMock) as draw:
+            await defaults.show(self.query, self.bot, self.state)
+            self.assertNotIn('idefault:save', [b.callback_data for row in draw.call_args.args[3] for b in row])
+            current['settings']['awg_i1_preset'] = 'dns'
+            await self.state.update_data(installation_defaults_draft=current)
+            await defaults.show(self.query, self.bot, self.state)
+            self.assertEqual([b.callback_data for b in draw.call_args.args[3][0]],
+                ['idefault:save','idefault:reset'])
+
     async def test_advanced_table_stays_collapsed_with_edit_controls_outside(self):
         from telegram_client.i18n import tr
         current = {'revision': 1, 'protocols': ['awg', 'xray'], 'xray_transports': ['tcp', 'xhttp'],

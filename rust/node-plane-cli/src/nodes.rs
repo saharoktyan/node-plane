@@ -303,6 +303,8 @@ impl SavedCreation {
 }
 #[derive(Clone)]
 pub enum Command {
+    Controller(Option<Uuid>, crate::controller::Command),
+    Access(crate::access::Command),
     Temporary(crate::temporary::Command),
     CreationOptions,
     Create(crate::node_wizard::Draft),
@@ -313,6 +315,8 @@ pub enum Command {
     Bootstrap(Node),
 }
 pub enum Update {
+    Controller(Option<Uuid>, crate::controller::Command, Value),
+    Access(crate::access::Command, Value),
     Temporary(crate::temporary::Command, Value),
     CreationOptions(crate::node_wizard::Options),
     Created(Node),
@@ -723,6 +727,29 @@ async fn execute(
     let _lock = crate::operation_store::OperationLock::acquire(&request.state_dir)?;
     let id = Uuid::new_v4();
     async {
+        if let Command::Controller(profile, crate::controller::Command::Probe) = &command {
+            let mut output = Vec::new();
+            let status = session.run("sudo -n python3 -",Some(crate::controller::PROBE_SCRIPT.as_bytes()),|stream,bytes| {
+                if matches!(stream,crate::ssh::OutputStream::Stdout) { output.extend_from_slice(bytes); }
+            }).await?;
+            ensure!(status==0,"Could not confirm the installation. Use Check installation to retry.");
+            let value: Value = serde_json::from_slice(&output)?;
+            if value["installed"] != true { *session.authorization.lock().unwrap()=None; }
+            let _ = tx.send(Event::Nodes(Update::Controller(*profile,crate::controller::Command::Probe,value)));
+            return Ok("Installation checked".into());
+        }
+        if let Command::Controller(profile, crate::controller::Command::Verify(deployment)) = &command {
+            let script = crate::controller::verification_script(deployment)?;
+            let mut output = Vec::new();
+            let status = session.run("sudo -n python3 -", Some(script.as_bytes()), |stream, bytes| {
+                if matches!(stream, crate::ssh::OutputStream::Stdout) { output.extend_from_slice(bytes); }
+            }).await?;
+            ensure!(status == 0, "Node Plane removal could not be verified. Check the systemd removal journal.");
+            let value: Value = serde_json::from_slice(&output)?;
+            if value["removed"] == true { *session.authorization.lock().unwrap() = None; }
+            let _ = tx.send(Event::Nodes(Update::Controller(*profile, crate::controller::Command::Verify(deployment.clone()), value)));
+            return Ok("Removal verification finished".into());
+        }
         if !backend::authorized(session, &request.workflow.account) {
             let _ = tx.send(Event::Stage("Authorizing the controller administrator".into()));
         }
@@ -730,6 +757,67 @@ async fn execute(
         let result = async {
             let setup = matches!(&command, Command::Setup(_));
             match command {
+                Command::Controller(profile, command) => {
+                    let (method, path, body, key) = command.request()?;
+                    let value = backend::request(session, &credential, method, &path, body, key).await?;
+                    let _ = tx.send(Event::Nodes(Update::Controller(profile, command, value)));
+                    return Ok("Controller state loaded".into());
+                }
+                Command::Access(command) => {
+                    if let crate::access::Command::EditContext { id, .. } = &command {
+                        let mut context = json!({});
+                        for (name, root) in [("nodes", "/api/v1/nodes"), ("regions", "/api/v1/regions")] {
+                            let mut items = Vec::new(); let mut cursor = None::<String>; let mut seen = BTreeSet::new();
+                            loop {
+                                let path = format!("{root}?limit=100{}", cursor.as_ref().map(|c| format!("&cursor={}", encode(c))).unwrap_or_default());
+                                let value = backend::request(session, &credential, Method::GET, &path, None, None).await?;
+                                items.extend(value["items"].as_array().context("Missing access options")?.iter().cloned());
+                                ensure!(items.len() <= 20_000, "Too many access options");
+                                cursor = value["next_cursor"].as_str().map(str::to_owned);
+                                let Some(next) = &cursor else { break; };
+                                ensure!(seen.insert(next.clone()), "Access pagination did not advance");
+                            }
+                            context[name] = json!(items);
+                        }
+                        if let Some(id) = id {
+                            context["profile"] = backend::request(session, &credential, Method::GET,
+                                &format!("/api/v1/profiles/{id}"), None, None).await?;
+                            context["policy"] = backend::request(session, &credential, Method::GET,
+                                &format!("/api/v1/profiles/{id}/access-policy"), None, None).await?;
+                            ensure!(context["profile"]["desired_revision"] == context["policy"]["revision"], "Profile changed; reopen the editor");
+                        }
+                        let _ = tx.send(Event::Nodes(Update::Access(command, context)));
+                        return Ok("Access options loaded".into());
+                    }
+                    let (method, path, body, key) = command.request();
+                    let revision = match &command { crate::access::Command::Mutate { revision, .. } => *revision, crate::access::Command::AccountMutate { revision, .. } | crate::access::Command::DeviceMutate { revision, .. } => Some(*revision), _ => None };
+                    let mut value = backend::request_revision(session, &credential, method, &path, body, key, revision).await?;
+                    if matches!(&command, crate::access::Command::ProfileProgress(_) | crate::access::Command::Card(crate::access::Tab::Profiles, _)) && value["deleting"] == true {
+                        let id = value["id"].as_str().context("Missing profile identity")?;
+                        let operation = backend::request(session, &credential, Method::GET, &format!("/api/v1/profiles/{id}/operation"), None, None).await?;
+                        value["operation"] = operation;
+                    }
+                    if let crate::access::Command::Devices(profile) | crate::access::Command::DeviceMutate { profile, .. } = &command {
+                        let result = if matches!(command, crate::access::Command::DeviceMutate { .. }) { value.clone() } else { Value::Null };
+                        let devices = if result.is_null() { value } else { backend::request(session, &credential, Method::GET, &format!("/api/v1/profiles/{profile}/devices"), None, None).await? };
+                        let profile_value = backend::request(session, &credential, Method::GET, &format!("/api/v1/profiles/{profile}"), None, None).await?;
+                        let operation = backend::request(session, &credential, Method::GET, &format!("/api/v1/profiles/{profile}/operation"), None, None).await?;
+                        value = json!({"profile": profile_value, "devices": devices, "operation": operation, "result":result});
+                    }
+                    if let crate::access::Command::List(tab) = &command {
+                        let mut cursors = BTreeSet::new();
+                        while let Some(cursor) = value["next_cursor"].as_str().map(str::to_owned) {
+                            ensure!(cursors.insert(cursor.clone()), "Access pagination did not advance");
+                            let next = backend::request(session, &credential, Method::GET,
+                                &format!("{}?limit=100&cursor={}", tab.root(), encode(&cursor)), None, None).await?;
+                            let extra = next["items"].as_array().context("Missing access records")?;
+                            let items = value["items"].as_array_mut().context("Missing access records")?;
+                            ensure!(items.len() + extra.len() <= 20_000, "Too many access records");
+                            items.extend(extra.iter().cloned()); value["next_cursor"] = next["next_cursor"].clone();
+                        }
+                    }
+                    let _ = tx.send(Event::Nodes(Update::Access(command, value)));
+                }
                 Command::Temporary(command) => {
                     use crate::temporary::Command as Temporary;
                     let root = "/api/v1/system/temporary-configs";

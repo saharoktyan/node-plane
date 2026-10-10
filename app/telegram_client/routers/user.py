@@ -983,7 +983,8 @@ async def show_admin_menu(chat_id: int, user_id: int, message_id: int,
           if isinstance(overview, dict) and overview['pending_requests'] else ()),
         Section(tr(locale, 'admin.rich.system'), rows=((
             InlineKeyboardButton(text=tr(locale, 'admin.status'), callback_data='admin_status'),
-            InlineKeyboardButton(text=tr(locale, 'admin.settings'), callback_data=AdminSettingsCallback().pack())),
+            InlineKeyboardButton(text=tr(locale, 'admin.settings'), callback_data=AdminSettingsCallback().pack(),
+                style='danger' if isinstance(overview, dict) and overview.get('unacknowledged_alerts') else None)),
             (InlineKeyboardButton(text=tr(locale, 'announce.title'), callback_data='announce_menu'),))),
     ))
     await render(bot, chat_id, Screen(f"{tr(locale, 'admin.menu')} · {bot_title}",

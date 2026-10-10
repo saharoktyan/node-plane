@@ -81,9 +81,7 @@ class AlertService:
             row = conn.execute(
                 "SELECT value FROM backend_system_settings WHERE key='alert_last_scan'"
             ).fetchone()
-            state = conn.execute("""SELECT s.node_key,s.kind,s.first_seen_at,s.last_seen_at,n.title,n.flag
-                FROM backend_alert_state s JOIN backend_nodes n ON n.key=s.node_key
-                WHERE n.enabled=1 ORDER BY s.node_key,s.kind""").fetchall()
+            state = self.active(conn, actor.account.id)
             counts = {
                 status: 0
                 for status in (
@@ -103,10 +101,37 @@ class AlertService:
             return {
                 **self._policy(conn),
                 "active_count": len(state),
+                "unacknowledged_count": sum(not r['dismissed'] for r in state),
                 "active": [dict(r) for r in state],
                 "last_scan": json.loads(row["value"]) if row else None,
                 "delivery_counts": counts,
             }
+
+    @staticmethod
+    def active(conn, account_id):
+        saved = conn.execute('SELECT value FROM backend_system_settings WHERE key=?',
+            ('alerts.dismissed.' + account_id,)).fetchone()
+        dismissed = set(json.loads(saved['value'])) if saved else set()
+        rows = conn.execute('''SELECT s.node_key,s.kind,s.first_seen_at,s.last_seen_at,n.title,n.flag,
+            (SELECT e.id FROM backend_alert_events e WHERE e.node_key=s.node_key
+             AND e.kind=s.kind AND e.resolved=0 AND e.created_at=s.first_seen_at LIMIT 1) AS event_id
+            FROM backend_alert_state s JOIN backend_nodes n ON n.key=s.node_key
+            WHERE n.enabled=1 ORDER BY s.node_key,s.kind''').fetchall()
+        return [{**dict(row), 'dismissed': row['event_id'] in dismissed} for row in rows]
+
+    def dismiss(self, actor, event_id):
+        require_permission(actor, 'settings.manage')
+        with self.db.transaction() as conn:
+            conn.execute('UPDATE backend_account_guard SET revision=revision WHERE id=1')
+            active = self.active(conn, actor.account.id)
+            if not any(r['event_id'] == event_id for r in active):
+                raise AccessDenied('alert_not_active', 409)
+            dismissed = {r['event_id'] for r in active if r['dismissed']}
+            dismissed.add(event_id)
+            conn.execute('INSERT INTO backend_system_settings(key,value) VALUES (?,?) '
+                'ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+                ('alerts.dismissed.' + actor.account.id, json.dumps(sorted(dismissed))))
+        return {'dismissed_event_id': event_id}
 
     @staticmethod
     def classify(observation, protocols):

@@ -44,6 +44,11 @@ jobs:
           persist-credentials: false
       - name: Rust toolchain
         run: rustup toolchain install 1.90.0 --profile minimal --component rustfmt --component clippy
+      - name: Rust dependency cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust/node-plane-cli
+          shared-key: workstation-checks
       - name: Format
         run: cargo +1.90.0 fmt --check
       - name: Unix installer syntax

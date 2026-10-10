@@ -46,8 +46,11 @@ class TemporaryConfigService:
             result['status'] = 'expiry_pending'
         result['revocation_mode'] = 'new_connections_only' if row['protocol'] == 'xray' else 'peer_removed'
         if conn is not None:
-            node = conn.execute('SELECT title FROM backend_nodes WHERE key=?', (row['node_key'],)).fetchone()
+            node = conn.execute('SELECT title,desired_revision FROM backend_nodes WHERE key=?', (row['node_key'],)).fetchone()
             result['node_title'] = node['title'] if node else row['node_key']
+            if row['status'] == 'active' and node and node['desired_revision'] != row['node_revision']:
+                result['artifact_available'] = False
+                result['unavailable_reason'] = 'node_changed'
         return result
 
     @staticmethod
@@ -186,7 +189,7 @@ class TemporaryConfigService:
             if current['status'] not in {'issuing','blocked'}:
                 return  # A concurrent revoke must never be overwritten by issuance.
             node = conn.execute('SELECT enabled,desired_revision,applied_revision FROM backend_nodes WHERE key=?',(row['node_key'],)).fetchone()
-            usable = node and node['enabled'] and node['desired_revision']==row['node_revision']==node['applied_revision']
+            usable = node and node['enabled'] and node['desired_revision']==current['node_revision']==node['applied_revision']
             status = 'active' if usable else 'revoking'
             conn.execute('UPDATE backend_temporary_configs SET status=?,expires_at=?,revoke_reason=?,error_code=NULL WHERE id=?',
                          (status,expiry.astimezone(timezone.utc).isoformat(),None if usable else 'node_changed',row['id']))

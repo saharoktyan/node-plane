@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.3-alpha.73 - 2026-10-10
+
+- Add Workstation Access: accounts, requests, profile settings, current/future access rules, devices and expiry presets.
+- Add controller reset/removal and live installation checks in Workstation, with independent removal verification and a final goodbye screen.
+- Refresh profile deletion progress automatically in Telegram and Workstation.
+- Improve Workstation focus, field labels and button styling; mark unavailable actions with a cross.
+- Preserve administrator profiles during controller reset and temporary configuration access after server metadata edits.
+- Highlight available updates and active alerts; allow dismissing alert attention.
+- Simplify controller diagnostics and cleanup screens, and restore update progress panels after bot restarts.
+- Build server artifacts alongside Workstation and reuse Rust dependencies across release tags.
+
 ## 0.4.3-alpha.68 - 2026-10-10
 
 - Add operation-specific diagnostics and recovery for profile access, server settings, agent installation and complete server setup, with administrator attribution and recovery history.

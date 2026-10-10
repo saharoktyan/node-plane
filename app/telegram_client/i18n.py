@@ -643,6 +643,7 @@ CATALOG = {
         'profile.admin.refresh': 'Обновить состояние',
         'profile.admin.delete': 'Удалить профиль',
         'profile.admin.delete_title': 'Удаление профиля',
+        'profile.admin.delete_done': 'Профиль удалён. Доступ отозван.',
         'profile.admin.delete_confirm': 'Удалить везде',
         'profile.admin.delete_warning': 'Профиль будет удалён, доступ к серверам отозван.',
         'profile.admin.delete_queued': 'Профиль закрыт. Очистка нод: {status}.',
@@ -736,7 +737,7 @@ CATALOG = {
         'defaults.title': 'Installation defaults',
         'defaults.auto_value': 'Auto',
         'defaults.manual_value': 'Port: {port}',
-        'defaults.edit_advanced': 'Edit advanced settings',
+        'defaults.edit_advanced': 'Edit advanced options',
         'defaults.edit_hint': 'Click a parameter name to change its value.',
         'defaults.future_only': 'Settings for new servers.',
         'defaults.protocols': 'Protocols',
@@ -1328,6 +1329,7 @@ CATALOG = {
         'profile.admin.refresh': 'Refresh status',
         'profile.admin.delete': 'Delete profile',
         'profile.admin.delete_title': 'Delete profile',
+        'profile.admin.delete_done': 'Profile deleted. Access revoked.',
         'profile.admin.delete_confirm': 'Delete everywhere',
         'profile.admin.delete_warning': 'The profile will be deleted and its server access revoked.',
         'profile.admin.delete_queued': 'Profile access is closed. Node cleanup: {status}.',
@@ -2774,4 +2776,48 @@ CATALOG['ru'].update({
     'recovery.diagnostic.api': 'Готовность backend', 'recovery.diagnostic.backend': 'Backend',
     'recovery.diagnostic.driver': 'Driver', 'recovery.diagnostic.telegram': 'Telegram-бот',
     'recovery.diagnostic.worker_timer': 'Таймер worker',
+})
+
+CATALOG['en'].update({
+    'alerts.dismiss': 'Dismiss', 'alerts.dismissed': 'Acknowledged',
+    'alerts.preview_notice': 'Preview notification', 'alerts.preview_list': 'Preview alert list',
+    'alerts.preview_note': 'Example alert. Server status is unchanged.',
+    'alerts.example_server': 'Example server',
+})
+CATALOG['ru'].update({
+    'alerts.dismiss': 'Прочитано', 'alerts.dismissed': 'Просмотрено',
+    'alerts.preview_notice': 'Пример уведомления', 'alerts.preview_list': 'Пример списка алертов',
+    'alerts.preview_note': 'Пример алерта. Состояние серверов не меняется.',
+    'alerts.example_server': 'Пример сервера',
+})
+
+CATALOG['en'].update({'ssh_key.send':'Send public key separately (iOS)',
+    'audit.telegram_id':'Telegram ID: {id}'})
+CATALOG['ru'].update({'ssh_key.send':'Отправить публичный ключ отдельно (iOS)',
+    'audit.telegram_id':'Telegram ID: {id}'})
+
+CATALOG['en'].update({'temporary.node_changed_notice':
+    'Server settings changed. Revoke this configuration and issue a new one.'})
+CATALOG['ru'].update({'temporary.node_changed_notice':
+    'Настройки сервера изменились. Отзовите этот конфиг и создайте новый.'})
+
+CATALOG['en'].update({
+    'system_cleanup.reset_local': 'Controller only',
+    'system_cleanup.reset_nodes': 'Controller and nodes',
+    'system_cleanup.remove_local': 'Controller only',
+    'system_cleanup.remove_nodes': 'Controller and nodes',
+    'system_cleanup.shutdown': 'Remove now',
+    'system_cleanup.reset_warning': 'Other profiles, node records, accounts and credentials will be deleted. Your administrator account and profiles, the bot/Workstation API credential and one recovery snapshot will be kept.',
+    'system_cleanup.keep_nodes_warning': 'VPN configs on nodes will remain. The controller will lose their records and can no longer manage them.',
+    'system_cleanup.shutdown_accepted': 'Removing Node Plane… This message will update after removal is verified.',
+})
+CATALOG['ru'].update({
+    'system_cleanup.reset_local': 'Только контроллер',
+    'system_cleanup.reset_nodes': 'Контроллер и ноды',
+    'system_cleanup.remove_local': 'Только контроллер',
+    'system_cleanup.remove_nodes': 'Контроллер и ноды',
+    'system_cleanup.shutdown': 'Удалить сейчас',
+    'system_cleanup.reset_warning': 'Будут удалены остальные профили, записи нод, аккаунты и ключи доступа. Сохранятся ваш аккаунт администратора и его профили, API-ключ бота/Workstation и один резервный снимок.',
+    'system_cleanup.keep_nodes_warning': 'VPN-конфиги на нодах останутся. Контроллер потеряет их записи и больше не сможет ими управлять.',
+    'system_cleanup.shutdown_accepted': 'Удаляем Node Plane… Сообщение обновится после проверки удаления.',
 })

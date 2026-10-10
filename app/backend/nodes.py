@@ -344,13 +344,21 @@ class NodeService:
                         WHERE node_key = ?''', (node_key,)).fetchall()
                     if any(grant['protocol'] not in next_values['protocols'] for grant in active_grants):
                         raise AccessDenied('node_protocol_in_use', 409)
+                previous_values = self.public(connection)
+                runtime_changed = any(next_values[field] != previous_values[field]
+                    for field in ('protocols', 'xray_transports', 'settings', 'transport', 'ssh_target'))
                 conn.execute('''UPDATE backend_nodes SET title = ?, region = ?, flag = ?,
                     protocols_json = ?, xray_transports_json = ?, settings_json = ?,
+                    applied_revision = CASE WHEN ? AND applied_revision=desired_revision
+                        THEN desired_revision+1 ELSE applied_revision END,
                     desired_revision = desired_revision + 1
                     WHERE key = ? AND desired_revision = ?''',
                     (next_values['title'], next_values['region'], next_values['flag'],
                      json.dumps(next_values['protocols']), json.dumps(next_values['xray_transports']),
-                     json.dumps(next_values['settings'], sort_keys=True), node_key, revision))
+                     json.dumps(next_values['settings'], sort_keys=True), int(not runtime_changed), node_key, revision))
+                if not runtime_changed:
+                    conn.execute('UPDATE backend_temporary_configs SET node_revision=? '
+                        'WHERE node_key=? AND node_revision=?', (revision + 1, node_key, revision))
                 conn.execute("UPDATE backend_node_settings_tasks SET status = 'superseded' WHERE node_key = ? AND status = 'awaiting_executor'", (node_key,))
                 if 'transport' in values or 'ssh_target' in values:
                     if next_values['transport'] is None:

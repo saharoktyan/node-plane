@@ -7,6 +7,16 @@ TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 cd "$ROOT_DIR"
+if [[ "${1:-}" == --from-ci && "${CI:-}" == true ]]; then
+  mkdir -p "$OUT_DIR"
+  for name in node-plane-controller.tar.gz node-plane-driver-linux-amd64.tar.gz node-plane-agent-linux-amd64.tar.gz SHA256SUMS.txt RELEASE_METADATA.txt; do
+    cp "$ROOT_DIR/target/distrib/$name" "$OUT_DIR/$name"
+  done
+  (cd "$OUT_DIR" && sha256sum --check SHA256SUMS.txt)
+  python3 scripts/controller_release.py verify --archive "$OUT_DIR/node-plane-controller.tar.gz" \
+    --ref "$GITHUB_REF_NAME" --commit "$GITHUB_SHA"
+  exit 0
+fi
 [[ "$(uname -s)" == Linux && "$(uname -m)" == x86_64 ]] || {
   echo "Server release artifacts require Linux x86_64." >&2
   exit 1

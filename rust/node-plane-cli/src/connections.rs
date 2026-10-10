@@ -22,6 +22,8 @@ pub struct Installation {
     pub branch: String,
     pub admin_ids: String,
     pub account: String,
+    #[serde(default)]
+    pub installed: bool,
 }
 impl Installation {
     pub fn validate(&self) -> Result<()> {
@@ -195,6 +197,9 @@ impl Connections {
         #[cfg(unix)]
         fs::File::open(state)?.sync_all()?;
         self.revision = next_revision;
+        // Explicitly release the lock even if a concurrently spawned child briefly
+        // inherited its file descriptor before exec closed it.
+        FileExt::unlock(&lock)?;
         Ok(())
     }
     pub fn import_update_history(&mut self, state: &Path) -> Result<bool> {
@@ -238,6 +243,7 @@ impl Connections {
                 branch: String::new(),
                 admin_ids: String::new(),
                 account: record.account_id,
+                installed: true,
             };
             if profile.validate().is_ok() {
                 self.installations.push(profile);
@@ -282,6 +288,7 @@ mod tests {
     }
     fn installation(host: &str) -> Installation {
         Installation {
+            installed: false,
             id: Uuid::new_v4(),
             name: host.into(),
             host: host.into(),

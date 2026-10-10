@@ -13,7 +13,7 @@ from ..backend import BackendClient, BackendError
 from ..i18n import normalize_locale, tr
 from ..screens import Screen, Section, Table
 from .callbacks import AdminSettingsCallback
-from .common import render
+from .common import render, schedule_refresh
 
 router = Router()
 
@@ -107,9 +107,9 @@ async def show_root(chat_id, user_id, message_id, bot, backend, state):
     if value['supported'] and not running:
         sections.extend((
             Section(tr(locale, 'system_cleanup.rich.reset'), (tr(locale, 'system_cleanup.reset_warning'),),
-                rows=(tuple(rows[0] + rows[1]),)),
+                rows=(tuple(rows[0]), tuple(rows[1]))),
             Section(tr(locale, 'system_cleanup.rich.remove'), (tr(locale, 'system_cleanup.remove_warning'),),
-                rows=(tuple(rows[2] + rows[3]),))))
+                rows=(tuple(rows[2]), tuple(rows[3])))))
     if latest:
         sections.append(Section(tr(locale, 'system_cleanup.result'), rows=(tuple(rows[-2]),)))
     await render(
@@ -149,8 +149,9 @@ async def show_plan(chat_id, user_id, message_id, bot, state, error=None):
     await render(
         bot,
         chat_id,
-        Screen(tr(locale, "system_cleanup.confirm"), tuple(lines[:2] + lines[3:]),
-            sections=(Section(tr(locale, 'nodes.rich.technical'), (lines[2],), collapsed=True),),
+        Screen(tr(locale, "system_cleanup.confirm"),
+            sections=(Section(lines[3], tuple(lines[:2] + lines[4:]), heading_size=6),
+                Section(tr(locale, 'nodes.rich.technical'), (lines[2],), collapsed=True)),
             embedded_buttons=True, navigation=True),
         [[back(locale)]],
         state,
@@ -246,6 +247,10 @@ async def show_job(
         message_id,
     )
 
+    if value["status"] in {"queued", "running"}:
+        schedule_refresh(state, lambda: show_job(chat_id, user_id, message_id,
+            job_id, bot, backend, state))
+
 
 @router.callback_query(F.data == "system_cleanup")
 async def cleanup_root(
@@ -332,7 +337,9 @@ async def cleanup_action(
                 state,
                 message_id,
             )
-            await backend.system_cleanup_action(user_id, args[0], "shutdown-ack")
+            await backend.system_cleanup_action(user_id, args[0], "shutdown-ack",
+                notification={"message_id": (await state.get_data()).get("control_message_id", message_id),
+                    "locale": locale})
     except BackendError as exc:
         await render(
             bot,

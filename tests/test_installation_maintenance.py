@@ -6,7 +6,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 from uuid import uuid4
 
 from backend.authorization import AccessDenied
@@ -99,6 +99,32 @@ class InstallationMaintenanceTests(unittest.TestCase):
         self.assertEqual(script.stat().st_mode & 0o777, 0o700)
         self.host.discard_uninstall(plan)
         self.assertFalse(script.exists())
+
+    def test_notification_is_staged_privately_and_verified_before_success(self):
+        from backend.uninstall_notification import verified, finish
+        plan = self.host.prepare_uninstall(self.host.deployment(), str(uuid4()))
+        with patch.dict(os.environ, {'BOT_TOKEN': 'test-secret'}):
+            self.host.prepare_notification(plan, 101, 77, 'ru')
+        staged = Path(plan['script']).parent
+        payload = json.loads((staged / 'notification.json').read_text())
+        self.assertEqual((staged / 'notification.json').stat().st_mode & 0o777, 0o600)
+        self.assertNotIn('test-secret', Path(plan['script']).read_text())
+        self.assertFalse(verified(payload, 0))  # Installation still exists.
+        payload['paths'] = [str(self.base / 'absent')]
+        with patch('backend.uninstall_notification.subprocess.run',
+                return_value=Mock(returncode=3, stdout='inactive')):
+            self.assertTrue(verified(payload, 0))
+            self.assertFalse(verified(payload, 1))
+        with patch('backend.uninstall_notification.subprocess.run',
+                return_value=Mock(returncode=0, stdout='active')):
+            self.assertFalse(verified(payload, 0))
+        with patch('backend.uninstall_notification.verified', return_value=False), \
+                patch('backend.uninstall_notification.urlopen') as send:
+            send.return_value.__enter__.return_value.read.return_value = b'{"ok": true}'
+            finish(payload, 0)
+            sent = json.loads(send.call_args.args[0].data)
+            self.assertIn('не подтверждено', sent['text'])
+            self.assertEqual(sent['message_id'], 77)
 
     def test_repurposed_unit_prevents_removal(self):
         (self.units / "node-plane-backend.service").write_text("ExecStart=/other/app")

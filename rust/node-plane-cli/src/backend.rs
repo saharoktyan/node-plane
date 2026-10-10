@@ -335,6 +335,18 @@ pub async fn request(
     body: Option<Value>,
     command: Option<Uuid>,
 ) -> std::result::Result<Value, ApiError> {
+    request_revision(session, credential, method, path, body, command, None).await
+}
+
+pub async fn request_revision(
+    session: &SshSession,
+    credential: &Credential,
+    method: Method,
+    path: &str,
+    body: Option<Value>,
+    command: Option<Uuid>,
+    revision: Option<u64>,
+) -> std::result::Result<Value, ApiError> {
     ensure_api_path(path)?;
     let timeout = if method == Method::GET {
         Duration::from_secs(15)
@@ -346,7 +358,7 @@ pub async fn request(
             .backend_stream()
             .await
             .map_err(|_| transport_error())?;
-        exchange(stream, credential, method, path, body, command).await
+        exchange_revision(stream, credential, method, path, body, command, revision).await
     };
     let result = tokio::time::timeout(timeout, operation)
         .await
@@ -360,6 +372,7 @@ pub async fn request(
     }
     result
 }
+#[cfg(test)]
 async fn exchange<S>(
     stream: S,
     credential: &Credential,
@@ -367,6 +380,21 @@ async fn exchange<S>(
     path: &str,
     body: Option<Value>,
     command: Option<Uuid>,
+) -> std::result::Result<Value, ApiError>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
+    exchange_revision(stream, credential, method, path, body, command, None).await
+}
+
+async fn exchange_revision<S>(
+    stream: S,
+    credential: &Credential,
+    method: Method,
+    path: &str,
+    body: Option<Value>,
+    command: Option<Uuid>,
+    revision: Option<u64>,
 ) -> std::result::Result<Value, ApiError>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
@@ -389,6 +417,9 @@ where
             );
         if let Some(key) = command {
             request = request.header("Idempotency-Key", key.to_string());
+        }
+        if let Some(revision) = revision {
+            request = request.header("If-Match", format!("\"{revision}\""));
         }
         let bytes = body
             .map(|value| serde_json::to_vec(&value).expect("JSON Value serializes"))
@@ -458,6 +489,13 @@ fn transport_error() -> ApiError {
 fn ensure_api_path(path: &str) -> std::result::Result<(), ApiError> {
     let resource = path.split('?').next().unwrap_or_default();
     if (path.starts_with("/api/v1/system/")
+        || resource == "/api/v1/regions"
+        || resource == "/api/v1/accounts"
+        || resource.starts_with("/api/v1/accounts/")
+        || resource == "/api/v1/profiles"
+        || resource.starts_with("/api/v1/profiles/")
+        || resource == "/api/v1/access-requests"
+        || resource.starts_with("/api/v1/access-requests/")
         || resource == "/api/v1/nodes"
         || resource.starts_with("/api/v1/nodes/")
         || resource.starts_with("/api/v1/node-jobs/")
@@ -509,6 +547,15 @@ mod tests {
         method: Method,
         command: Option<Uuid>,
     ) -> (std::result::Result<Value, ApiError>, String) {
+        http_fixture_revision(status, body, method, command, None).await
+    }
+    async fn http_fixture_revision(
+        status: u16,
+        body: &str,
+        method: Method,
+        command: Option<Uuid>,
+        revision: Option<u64>,
+    ) -> (std::result::Result<Value, ApiError>, String) {
         let (client, mut server) = tokio::io::duplex(65536);
         let reply = format!(
             "HTTP/1.1 {status} Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
@@ -544,16 +591,29 @@ mod tests {
             token: Zeroizing::new("private_fixture_bearer".into()),
             account_id: Uuid::new_v4().to_string(),
         };
-        let result = exchange(
+        let result = exchange_revision(
             client,
             &credential,
             method,
             "/api/v1/system/updates/run",
             Some(json!({"kind":"stack"})),
             command,
+            revision,
         )
         .await;
         (result, peer.await.unwrap())
+    }
+    #[tokio::test]
+    async fn profile_updates_send_optimistic_revision_and_command_identity() {
+        let id = Uuid::new_v4();
+        let (result, wire) =
+            http_fixture_revision(200, "{}", Method::PATCH, Some(id), Some(7)).await;
+        assert!(result.is_ok());
+        assert!(wire.to_lowercase().contains("if-match: \"7\""));
+        assert!(
+            wire.to_lowercase()
+                .contains(&format!("idempotency-key: {id}"))
+        );
     }
     #[tokio::test]
     async fn http_wire_uses_account_bearer_and_saved_command_without_delegation() {
