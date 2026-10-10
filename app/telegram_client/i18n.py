@@ -2746,3 +2746,32 @@ CATALOG['ru'].update({
     'updates.rich.branch_warning': 'Смена канала обновлений может сломать установку. Продолжить?',
     'updates.rich.downgrade_warning': 'Откат может сломать установку: старая версия может быть несовместима с базой данных. Продолжить?',
 })
+
+CATALOG['en'].update({
+    'audit.filter.all': 'All', 'audit.filter.errors': 'Errors',
+    'audit.action.update': 'Update Node Plane', 'audit.action.recovery': 'Recovery',
+    'audit.action.node': 'Server management', 'audit.action.profile': 'Profile management',
+    'recovery.diagnostic.healthy': 'Everything is working',
+    'recovery.diagnostic.installation': 'Installation', 'recovery.diagnostic.python': 'Python',
+    'recovery.diagnostic.environment': 'Configuration file', 'recovery.diagnostic.environment_keys': 'Configuration',
+    'recovery.diagnostic.version': 'Version', 'recovery.diagnostic.build': 'Build',
+    'recovery.diagnostic.disk': 'Disk', 'recovery.diagnostic.database': 'Database',
+    'recovery.diagnostic.maintenance': 'Maintenance', 'recovery.diagnostic.worker': 'Worker',
+    'recovery.diagnostic.api': 'Backend readiness', 'recovery.diagnostic.backend': 'Backend',
+    'recovery.diagnostic.driver': 'Driver', 'recovery.diagnostic.telegram': 'Telegram bot',
+    'recovery.diagnostic.worker_timer': 'Worker timer',
+})
+CATALOG['ru'].update({
+    'audit.filter.all': 'Все', 'audit.filter.errors': 'Ошибки',
+    'audit.action.update': 'Обновление Node Plane', 'audit.action.recovery': 'Восстановление',
+    'audit.action.node': 'Управление сервером', 'audit.action.profile': 'Управление профилем',
+    'recovery.diagnostic.healthy': 'Всё работает',
+    'recovery.diagnostic.installation': 'Установка', 'recovery.diagnostic.python': 'Python',
+    'recovery.diagnostic.environment': 'Файл настроек', 'recovery.diagnostic.environment_keys': 'Настройки',
+    'recovery.diagnostic.version': 'Версия', 'recovery.diagnostic.build': 'Сборка',
+    'recovery.diagnostic.disk': 'Диск', 'recovery.diagnostic.database': 'База данных',
+    'recovery.diagnostic.maintenance': 'Обслуживание', 'recovery.diagnostic.worker': 'Worker',
+    'recovery.diagnostic.api': 'Готовность backend', 'recovery.diagnostic.backend': 'Backend',
+    'recovery.diagnostic.driver': 'Driver', 'recovery.diagnostic.telegram': 'Telegram-бот',
+    'recovery.diagnostic.worker_timer': 'Таймер worker',
+})

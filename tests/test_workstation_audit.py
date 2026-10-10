@@ -34,6 +34,20 @@ class CredentialAttributionTests(TestCase):
             self.service.handle({'version': 1, 'action': 'authenticate', 'session_id': self.session_id,
                 'attribution': {**ATTRIBUTION, 'ssh_user': 'another'}}, now=self.now)
 
+    def test_error_filter_counts_and_pages_only_failed_or_unconfirmed_events(self):
+        from backend.authorization import Actor, Principal, PrincipalKind, ADMIN_PERMISSIONS
+        first = self.issue()
+        context = self.service.audit.context(first['credential_id'])
+        for status in (200, 202, 400, 503):
+            self.service.audit.record(context, 'POST /api/v1/system/updates/run', 'completed', http_status=status)
+        self.service.audit.record_enrollment(context, str(uuid4()), 'root@[vps.example]:22',
+            'SHA256:' + 'b' * 43, 'unconfirmed')
+        actor = Actor(Principal('test', PrincipalKind.SERVICE, ADMIN_PERMISSIONS), self.admin)
+        page = self.service.audit.page(actor, errors_only=True)
+        self.assertEqual(page['total'], 3)
+        self.assertTrue(all((i['http_status'] or 0) >= 400 or i['outcome'] == 'unconfirmed' for i in page['items']))
+        self.assertEqual(self.service.audit.page(actor, offset=1000, errors_only=True)['offset'], 0)
+
     def test_revocation_keeps_attributed_history_without_token(self):
         first = self.issue()
         request = {'version': 1, 'action': 'revoke', 'session_id': self.session_id}

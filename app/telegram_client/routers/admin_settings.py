@@ -9,7 +9,7 @@ from aiogram.exceptions import TelegramAPIError
 from aiogram.filters.callback_data import CallbackData
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import CallbackQuery, InlineKeyboardButton, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, MessageEntity, LinkPreviewOptions
 
 from ..backend import BackendClient, BackendError
 from ..screens import Screen, Section, Table, format_size
@@ -312,6 +312,7 @@ async def ssh_key_cb(query: CallbackQuery, bot: Bot,
              tr(locale, 'settings.ssh.summary')),
             sections=(Section(tr(locale, 'settings.rich.fingerprint'), (fingerprint,)),),
             uri=response['public_key'], uri_title=tr(locale, 'settings.ssh.public_key'),
+            uri_rows=((InlineKeyboardButton(text=tr(locale, 'config.link.send'), callback_data='ssh_key_plain'),),),
             files=(('node-plane.pub', (response['public_key'] + '\n').encode()),),
             files_title=tr(locale, 'settings.rich.download'), embedded_buttons=True, navigation=True)
     except BackendError as exc:
@@ -320,6 +321,31 @@ async def ssh_key_cb(query: CallbackQuery, bot: Bot,
             (_friendly_error(locale, exc),), embedded_buttons=True, navigation=True)
     await render(bot, query.message.chat.id, screen, rows, state,
                  query.message.message_id)
+
+
+@router.callback_query(F.data == 'ssh_key_plain')
+async def ssh_key_plain_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
+    await query.answer()
+    locale = await _locale(state)
+    try:
+        response = await backend.request('GET', '/api/v1/system/ssh-key', telegram_user_id=query.from_user.id)
+        key = response['public_key']
+        await bot.send_message(chat_id=query.message.chat.id, text=key, parse_mode=None,
+            entities=[MessageEntity(type='code', offset=0, length=len(key.encode('utf-16-le')) // 2)],
+            link_preview_options=LinkPreviewOptions(is_disabled=True),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text=tr(locale, 'setup.close'), callback_data='ssh_key_plain_close')]]))
+    except BackendError:
+        await query.message.answer(tr(locale, 'settings.ssh.unavailable'), parse_mode=None)
+
+
+@router.callback_query(F.data == 'ssh_key_plain_close')
+async def ssh_key_plain_close_cb(query: CallbackQuery, bot: Bot):
+    await query.answer()
+    try:
+        await bot.delete_message(query.message.chat.id, query.message.message_id)
+    except TelegramAPIError:
+        pass
 
 
 @router.callback_query(F.data == 'ssh_key_details')

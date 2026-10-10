@@ -83,14 +83,16 @@ class WorkstationAudit:
             'admitted' if outcome == 'admitted' else 'completed', command_id=command_id,
             enrollment=(target, fingerprint, outcome))
 
-    def page(self, actor, offset=0):
+    def page(self, actor, offset=0, errors_only=False):
         from .authorization import require_permission
         require_permission(actor, 'maintenance.manage')
+        joins = ' FROM backend_workstation_audit a LEFT JOIN backend_workstation_enrollment e ON e.event_id=a.id '
+        where = "WHERE a.http_status >= 400 OR e.outcome = 'unconfirmed'" if errors_only else ''
         with self.db.connect() as conn:
-            total = conn.execute('SELECT COUNT(*) AS count FROM backend_workstation_audit').fetchone()['count']
-            rows = conn.execute('''SELECT occurred_at,session_id,account_id,account_label,
-                ssh_user,device_fingerprint,action,phase,request_id,command_id,http_status
-                ,e.target,e.key_fingerprint,e.outcome
-                FROM backend_workstation_audit a LEFT JOIN backend_workstation_enrollment e ON e.event_id=a.id
-                ORDER BY occurred_at DESC,a.id DESC LIMIT 10 OFFSET ?''', (offset,)).fetchall()
+            total = conn.execute('SELECT COUNT(*) AS count' + joins + where).fetchone()['count']
+            offset = min(offset, max(0, (total - 1) // 10 * 10))
+            rows = conn.execute('SELECT occurred_at,session_id,account_id,account_label, '
+                'ssh_user,device_fingerprint,action,phase,request_id,command_id,http_status, '
+                'e.target,e.key_fingerprint,e.outcome' + joins + where +
+                ' ORDER BY occurred_at DESC,a.id DESC LIMIT 10 OFFSET ?', (offset,)).fetchall()
         return {'items': [dict(row) for row in rows], 'total': total, 'offset': offset, 'page_size': 10}

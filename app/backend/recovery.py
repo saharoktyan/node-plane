@@ -220,7 +220,18 @@ def history(db, actor, offset=0):
         total = conn.execute('SELECT COUNT(*) AS count FROM backend_recovery_audit').fetchone()['count']
         offset = min(offset, max(0, (total - 1) // 10 * 10))
         rows = conn.execute('SELECT * FROM backend_recovery_audit ORDER BY created_at DESC,id DESC LIMIT 10 OFFSET ?', (offset,)).fetchall()
-    return {'items': [dict(row) for row in rows], 'offset': offset, 'page_size': 10, 'total': total}
+        items = []
+        for row in rows:
+            item = dict(row)
+            table = TABLES.get(item['kind'])
+            if table and item['kind'] not in {'update', 'backup'}:
+                node = conn.execute(f'SELECT o.node_key,n.title FROM {table} o '
+                    'LEFT JOIN backend_nodes n ON n.key=o.node_key WHERE o.id=?',
+                    (item['operation_id'],)).fetchone()
+                if node:
+                    item.update(node_key=node['node_key'], node_title=node['title'])
+            items.append(item)
+    return {'items': items, 'offset': offset, 'page_size': 10, 'total': total}
 
 
 def failure_code(error):
