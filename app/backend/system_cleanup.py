@@ -60,6 +60,7 @@ class SystemCleanupService:
         for table in (
             "backend_operation_tasks",
             "backend_node_settings_tasks",
+            "backend_node_bootstraps",
             "backend_node_jobs",
             "backend_agent_rollouts",
             "backend_config_issuances",

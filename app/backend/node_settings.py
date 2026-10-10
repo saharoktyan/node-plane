@@ -138,6 +138,8 @@ class NodeSettingsService:
                 raise AccessDenied('resource_not_found', 404)
             if conn.execute('SELECT 1 FROM backend_node_drains WHERE node_key = ?', (node_key,)).fetchone():
                 raise AccessDenied('node_already_draining', 409)
+            from .node_bootstrap import require_idle
+            require_idle(conn, node_key)
             if node['desired_revision'] != revision:
                 raise AccessDenied('revision_conflict', 412)
             if conn.execute("SELECT 1 FROM backend_node_jobs WHERE node_key = ? AND status IN ('awaiting_executor', 'running', 'blocked')", (node_key,)).fetchone():
@@ -227,7 +229,7 @@ class NodeSettingsExecutor:
     def _finish(conn, row, result):
         intent = json.loads(row['intent_json'])
         if not _valid_result(intent, result):
-            conn.execute("UPDATE backend_node_settings_tasks SET status = 'blocked' WHERE id = ?", (row['id'],))
+            conn.execute("UPDATE backend_node_settings_tasks SET status = 'blocked',result_json=? WHERE id = ?", (result, row['id']))
             return False
         conn.execute("UPDATE backend_node_settings_tasks SET status = 'succeeded', result_json = ? WHERE id = ?",
                      (result, row['id']))
@@ -308,8 +310,9 @@ class NodeSettingsExecutor:
             return False
         try:
             result = self.driver.apply_node_settings(row['id'], json.loads(row['intent_json']))
-        except Exception:
-            result = None
+        except Exception as error:
+            from .recovery import failure_code
+            result = json.dumps({'error_code': failure_code(error)})
         with self.db.transaction() as conn:
             current = conn.execute("SELECT * FROM backend_node_settings_tasks WHERE id = ? AND status = 'running'", (row['id'],)).fetchone()
             if current is not None:

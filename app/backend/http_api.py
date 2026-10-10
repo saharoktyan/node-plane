@@ -247,11 +247,16 @@ class UpdatePreferencesInput(BaseModel):
 
 class RecoveryItemOutput(BaseModel):
     id: str
-    kind: Literal['update', 'node', 'agent', 'profile', 'removal', 'backup']
+    kind: Literal['update', 'node', 'settings', 'bootstrap', 'agent', 'profile', 'removal', 'backup']
     status: str
     node_key: str
     error_code: str
     actions: list[Literal['cancel', 'recheck', 'resolve']]
+    phase: str = ''
+    subject_id: str = ''
+    related_id: str = ''
+    related_kind: str = ''
+    next_step: str = ''
 
 
 class RecoveryOverviewOutput(BaseModel):
@@ -447,6 +452,8 @@ class AdminNodeOverviewOutput(BaseModel):
     failed: int
     attention: int
     last_job: dict | None = None
+    agent_rollout: dict | None = None
+    bootstrap: dict | None = None
     removal_status: str | None = None
     traffic: NodeTrafficSummary | None = None
 
@@ -509,6 +516,7 @@ class AgentRolloutOutput(BaseModel):
     status: str
     failure_code: str | None = None
     journal_archives: list[str] = Field(default_factory=list)
+    progress: dict[str, str] | None = None
 
 
 class NodeMaintenanceOutput(BaseModel):
@@ -740,6 +748,8 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     from .temporary_configs import TemporaryConfigService
     temporary_configs = TemporaryConfigService(db, node_driver)
     agent_rollouts = AgentRolloutService(db)
+    from .node_bootstrap import NodeBootstrapService
+    node_bootstraps = NodeBootstrapService(db)
     lifecycle = NodeLifecycle(db)
     update_service = UpdateService(db, node_driver)
     backup_service = BackupService(db)
@@ -1252,6 +1262,17 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
                 raise AccessDenied('node_agent_unconfigured', 409) from None
             raise AccessDenied('node_agent_unavailable', 503) from None
 
+    @app.post('/api/v1/nodes/{node_key}/bootstrap', status_code=202)
+    def bootstrap_node(node_key: str, body: NodeActionInput,
+                       idempotency_key: str | None = Header(default=None), current=Depends(actor)):
+        if body.action != 'bootstrap':
+            raise AccessDenied('invalid_input', 422)
+        return node_bootstraps.queue(current, node_key, body.revision, idempotency_key)
+
+    @app.get('/api/v1/node-bootstraps/{identity}')
+    def get_node_bootstrap(identity: UUID, current=Depends(actor)):
+        return node_bootstraps.get(current, str(identity))
+
     @app.post('/api/v1/nodes/{node_key}/actions', status_code=202)
     def queue_node_action(node_key: str, body: NodeActionInput,
                           idempotency_key: str | None = Header(default=None), current=Depends(actor)):
@@ -1693,6 +1714,34 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
         with live_updates() as service:
             return service.rollout_overview(current)
 
+    @app.get('/api/v1/system/recovery/history')
+    def recovery_history(offset: int = Query(default=0, ge=0, le=1000000), current=Depends(actor)):
+        from .recovery import history
+        return history(db, current, offset)
+
+    @app.get('/api/v1/system/recovery/controller')
+    def recovery_controller(current=Depends(actor)):
+        require_permission(current, 'maintenance.manage')
+        import importlib.util
+        source = Path(__file__).resolve().parents[2] / 'scripts' / 'installation_diagnostics.py'
+        try:
+            spec = importlib.util.spec_from_file_location('controller_diagnostics', source)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            return module.observe()
+        except Exception:
+            raise AccessDenied('diagnostics_unavailable', 503) from None
+
+    @app.post('/api/v1/system/recovery/{kind}/{identity}/{action}')
+    def recover_operation(kind: str, identity: UUID, action: str, current=Depends(actor)):
+        from .recovery import act
+        with maintenance_lock(current):
+            if node_driver is not None:
+                return act(db, current, node_driver, kind, str(identity), action)
+            from .driver_transport import GrpcIntentDriver, local_channel
+            with local_channel('127.0.0.1:50051') as channel:
+                return act(db, current, GrpcIntentDriver(channel, timeout=10), kind, str(identity), action)
+
     @app.get('/api/v1/system/recovery', response_model=RecoveryOverviewOutput)
     def recovery_overview(offset: int = Query(default=0, ge=0, le=1000000), current=Depends(actor)):
         from .recovery import overview
@@ -1709,12 +1758,14 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
 
     @app.post('/api/v1/system/updates/jobs/{job_id}/cancel')
     def cancel_update(job_id: UUID, current=Depends(actor)):
-        with maintenance_lock(current), live_updates() as service:
+        from .recovery import track
+        with maintenance_lock(current), track(db,current,'update',str(job_id),'cancel'), live_updates() as service:
             return service.cancel(current, str(job_id))
 
     @app.post('/api/v1/system/updates/jobs/{job_id}/recheck')
     def recheck_update(job_id: UUID, current=Depends(actor)):
-        with maintenance_lock(current), live_updates() as service:
+        from .recovery import track
+        with maintenance_lock(current), track(db,current,'update',str(job_id),'recheck'), live_updates() as service:
             return service.recheck(current, str(job_id))
 
     @app.get('/api/v1/system/backups')

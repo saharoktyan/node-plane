@@ -768,8 +768,33 @@ def inspect_node_settings_for_repair(intent):
     return {'config_matches': matches, 'containers_running': running}
 
 
+def installation_step(stage):
+    """Optional observation owned by a node command; never exposes config data."""
+    target = os.environ.get('NODE_PLANE_OPERATION_PROGRESS_FILE')
+    identity = os.environ.get('NODE_PLANE_OPERATION_PROGRESS_ID')
+    if not target or not identity:
+        return
+    temporary = None
+    try:
+        path = Path(target)
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        with tempfile.NamedTemporaryFile(mode='w', dir=path.parent, delete=False) as stream:
+            temporary = stream.name
+            json.dump({'operation_id': str(UUID(identity)), 'stage': stage}, stream)
+        os.replace(temporary, path)
+    except (OSError, ValueError):
+        pass
+    finally:
+        if temporary and os.path.exists(temporary):
+            try:
+                os.unlink(temporary)
+            except OSError:
+                pass
+
+
 def run_node_settings(intent, lock_fd, *, env_path=Path('/etc/node-plane/node.env'), root=Path(__file__).parent):
     """Apply to an already bootstrapped node; no implicit install or key reset."""
+    installation_step('protocol_settings')
     settings = intent['settings']
     env_path = Path(env_path)
     root = Path(root)
@@ -785,6 +810,7 @@ def run_node_settings(intent, lock_fd, *, env_path=Path('/etc/node-plane/node.en
         spec = importlib.util.spec_from_file_location('awg_ports', root / 'awg_ports.py')
         ports = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(ports)
+        installation_step('awg_port')
         selected_port = ports.select_port(settings.get('awg_i1_preset', 'quic'),
             settings['awg_port'], awg_path, paths[3])
         settings = dict(settings, awg_port=selected_port)
@@ -826,6 +852,7 @@ def run_node_settings(intent, lock_fd, *, env_path=Path('/etc/node-plane/node.en
     # protocol configs. Initialize only missing configs under this same durable
     # command identity; existing keys must never be regenerated on retry.
     if 'xray' in intent['protocols']:
+        installation_step('xray_init')
         if not xray_path.exists():
             subprocess.run([str(root / 'init-xray.sh'), str(xray_path), settings['public_host'],
                             settings['xray_sni'], str(settings['xray_tcp_port']),
@@ -834,6 +861,7 @@ def run_node_settings(intent, lock_fd, *, env_path=Path('/etc/node-plane/node.en
                            check=True, capture_output=True, text=True, pass_fds=(lock_fd,))
         json.loads(xray_path.read_text())
     if 'awg' in intent['protocols']:
+        installation_step('awg_init')
         if not awg_path.exists():
             subprocess.run([str(root / 'init-awg.sh')], check=True, capture_output=True,
                            text=True, pass_fds=(lock_fd,))
@@ -844,6 +872,7 @@ def run_node_settings(intent, lock_fd, *, env_path=Path('/etc/node-plane/node.en
     if 'awg' in intent['protocols']:
         rules.append(f"{settings['awg_port']}/udp")
     if shutil.which('ufw'):
+        installation_step('firewall')
         for rule in rules:
             subprocess.run(['ufw', 'allow', rule], check=True, capture_output=True, text=True,
                            pass_fds=(lock_fd,))
@@ -854,10 +883,12 @@ def run_node_settings(intent, lock_fd, *, env_path=Path('/etc/node-plane/node.en
             str(settings.get('xray_tcp_port', 443)), str(settings.get('xray_xhttp_port', 8443)),
             settings.get('xray_xhttp_path', '/assets'),
             str('xray' in intent['protocols']).lower(), str('awg' in intent['protocols']).lower()]
+    installation_step('protocol_deploy')
     subprocess.run(args, check=True, capture_output=True, text=True, pass_fds=(lock_fd,),
                    env=dict(os.environ, NODE_PLANE_PROFILE_LOCK_FD=str(lock_fd)))
     # The apply script only reports success after protocol config edits and
     # deployment. Read the resulting files independently before acknowledgment.
+    installation_step('protocol_verify')
     verify_node_settings_config(intent, xray_path, awg_path)
     for container in ([paths[2]] if 'xray' in intent['protocols'] else []) + ([paths[3]] if 'awg' in intent['protocols'] else []):
         state = subprocess.run(['docker', 'inspect', '-f', '{{.State.Running}}', container],

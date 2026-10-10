@@ -1591,6 +1591,39 @@ impl AgentState {
     }
 }
 
+fn read_operation_progress(directory: &Path, command_id: &str) -> Value {
+    use std::io::Read;
+    if command_id.len() != 36
+        || !command_id.bytes().enumerate().all(|(index, byte)| {
+            if matches!(index, 8 | 13 | 18 | 23) {
+                byte == b'-'
+            } else {
+                byte.is_ascii_hexdigit()
+            }
+        })
+    {
+        return Value::Null;
+    }
+    let path = directory.join(format!("{command_id}.json"));
+    let Ok(file) = fs::File::open(path) else {
+        return Value::Null;
+    };
+    let mut raw = String::new();
+    if file.take(2049).read_to_string(&mut raw).is_err() || raw.len() > 2048 {
+        return Value::Null;
+    }
+    let Ok(value) = serde_json::from_str::<Value>(&raw) else {
+        return Value::Null;
+    };
+    if value["operation_id"].as_str() != Some(command_id) {
+        return Value::Null;
+    }
+    let Some(stage) = value["stage"].as_str() else {
+        return Value::Null;
+    };
+    serde_json::json!({"operation_id": command_id, "stage": stage})
+}
+
 #[derive(Clone)]
 struct NodeAgentApi {
     state: AgentState,
@@ -1690,9 +1723,22 @@ impl NodeAgentService for NodeAgentApi {
         if req.node_key != self.state.config.node_key {
             return Err(Status::failed_precondition("agent node identity mismatch"));
         }
-        let output = self
-            .state
-            .run_runtime_command(
+        if req.action == "operation_progress" {
+            if !req.recover {
+                return Err(Status::invalid_argument("progress is read-only"));
+            }
+            let value = read_operation_progress(
+                Path::new("/etc/node-plane/operation-progress"),
+                &req.command_id,
+            );
+            return Ok(Response::new(RuntimeCommandResponse {
+                summary: "node operation observation".into(),
+                payload_json: value.to_string(),
+            }));
+        }
+        let state = self.state.clone();
+        let output = tokio::task::spawn_blocking(move || {
+            state.run_runtime_command(
                 "backend-node-operation.py",
                 &[
                     req.action,
@@ -1701,7 +1747,10 @@ impl NodeAgentService for NodeAgentApi {
                     req.recover.to_string(),
                 ],
             )
-            .map_err(|_| Status::failed_precondition("node operation needs attention"))?;
+        })
+        .await
+        .map_err(|_| Status::internal("node operation worker unavailable"))?
+        .map_err(|_| Status::failed_precondition("node operation needs attention"))?;
         let value: Value = serde_json::from_str(&output)
             .map_err(|_| Status::internal("invalid node operation response"))?;
         Ok(Response::new(RuntimeCommandResponse {
@@ -2138,7 +2187,11 @@ impl NodeAgentService for NodeAgentApi {
         &self,
         _request: Request<InstallDockerRequest>,
     ) -> Result<Response<InstallDockerResponse>, Status> {
-        Ok(Response::new(self.state.install_docker()?))
+        let state = self.state.clone();
+        let result = tokio::task::spawn_blocking(move || state.install_docker())
+            .await
+            .map_err(|_| Status::internal("Docker installation worker unavailable"))??;
+        Ok(Response::new(result))
     }
 
     async fn uninstall_agent(
@@ -2389,6 +2442,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::{AgentConfig, AgentState, awg_config_uses_port, xray_config_uses_port};
+
+    #[test]
+    fn progress_lookup_is_bounded_read_only_and_checks_command_identity() {
+        let directory = std::env::temp_dir().join(format!(
+            "node-progress-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        let identity = "a65d2b73-f47a-42af-90aa-b6d4dccbf904".to_string();
+        let path = directory.join(format!("{identity}.json"));
+        let raw = serde_json::json!({"operation_id": identity, "stage":"awg_init"}).to_string();
+        std::fs::write(&path, &raw).unwrap();
+        assert_eq!(
+            super::read_operation_progress(&directory, &identity)["stage"],
+            "awg_init"
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), raw);
+        assert!(super::read_operation_progress(&directory, "../escape").is_null());
+        std::fs::write(
+            &path,
+            serde_json::json!({"operation_id":"other", "stage":"awg_init"}).to_string(),
+        )
+        .unwrap();
+        assert!(super::read_operation_progress(&directory, &identity).is_null());
+        std::fs::write(&path, "x".repeat(4096)).unwrap();
+        assert!(super::read_operation_progress(&directory, &identity).is_null());
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 
     #[test]
     fn service_removal_does_not_require_a_login_home() {

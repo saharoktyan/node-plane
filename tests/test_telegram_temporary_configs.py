@@ -66,6 +66,45 @@ class TemporaryScreensTests(IsolatedAsyncioTestCase):
         self.assertIsNone(self.bot.send_message.call_args.kwargs['parse_mode'])
         self.assertEqual(self.bot.send_message.call_args.args[1],'vless://secret')
 
+    async def test_temporary_qr_matches_regular_payload_and_media_layout(self):
+        from telegram_client.routers.user import config_qr, qr_payload
+        for protocol, transport, uri in (('awg','vpn','vpn://secret'), ('xray','xhttp','vless://secret')):
+            identity=str(uuid4())
+            card=dict(id=identity,node_key='lv1',protocol=protocol,transport=transport,status='active')
+            artifact=dict(content=uri,files=[dict(filename='config.txt',content=uri)])
+            backend=SimpleNamespace(request=AsyncMock(side_effect=[card,artifact]))
+            draw=await self.click('show:'+identity,backend)
+            screen,rows=draw.call_args.args[2:4]
+            self.assertEqual(screen.qr,config_qr(qr_payload(protocol,transport,uri)))
+            self.assertTrue(screen.qr.startswith(b'\x89PNG'))
+            self.assertTrue(screen.details_lines)
+            self.assertTrue(screen.uri_collapsed)
+            self.assertFalse(any(b.callback_data=='temporary:show:'+identity for row in rows for b in row))
+            screen.rich(rows)
+
+    async def test_fallback_sends_qr_photo_and_files(self):
+        identity=str(uuid4())
+        item=dict(id=identity,node_key='lv1',protocol='awg',transport='vpn',status='active')
+        artifact=dict(content='vpn://secret',files=[dict(filename='config.txt',content='vpn://secret')])
+        backend=SimpleNamespace(request=AsyncMock(side_effect=[item,artifact]))
+        self.bot.send_photo=AsyncMock()
+        self.bot.send_document=AsyncMock()
+        with patch.object(screens,'render',new_callable=AsyncMock,return_value=False):
+            await screens.card(self.query,self.bot,backend,self.state,identity,show=True)
+        self.bot.send_photo.assert_awaited_once()
+        self.bot.send_document.assert_awaited_once()
+
+    async def test_oversized_uri_keeps_files_without_qr(self):
+        identity=str(uuid4())
+        item=dict(id=identity,node_key='lv1',protocol='xray',transport='tcp',status='active')
+        uri='vless://'+ 'a'*2600
+        backend=SimpleNamespace(request=AsyncMock(side_effect=[item,dict(content=uri,files=[dict(filename='config.txt',content=uri)])]))
+        draw=await self.click('show:'+identity,backend)
+        screen=draw.call_args.args[2]
+        self.assertIsNone(screen.qr)
+        self.assertTrue(screen.files)
+        self.assertEqual(screen.uri,uri)
+
     async def test_revocation_needs_confirmation_and_is_red(self):
         backend=SimpleNamespace(request=AsyncMock())
         identity=str(uuid4())

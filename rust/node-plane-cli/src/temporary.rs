@@ -218,6 +218,7 @@ pub fn save_artifact(
 }
 
 /// Windows Terminal must actually report Sixel; its presence alone proves nothing.
+#[cfg(test)]
 pub fn supports_images(
     protocol: ratatui_image::picker::ProtocolType,
     capabilities: &[ratatui_image::picker::Capability],

@@ -30,7 +30,15 @@ class GrpcIntentDriver:
         response = self.runtime.BackendNodeAction(runtime_service_pb2.BackendNodeActionRequest(
             node_key=intent['node_key'], command_id=task_id, action=action,
             intent_json=json.dumps(intent), recover=recover),
-            timeout=self.timeout if action == 'temporary_status' else max(self.timeout, 1200))
+            timeout=self.timeout if recover or action == 'temporary_status' else max(self.timeout, 1200))
+        return json.loads(response.result_json)
+
+    def node_action_progress(self, node_key, command_id):
+        from driver.v1 import runtime_service_pb2
+        import json
+        response = self.runtime.BackendNodeAction(runtime_service_pb2.BackendNodeActionRequest(
+            node_key=node_key, command_id=command_id, action='operation_progress',
+            intent_json='{}', recover=True), timeout=min(self.timeout, 2))
         return json.loads(response.result_json)
 
     def inspect_node_services(self, node_key):

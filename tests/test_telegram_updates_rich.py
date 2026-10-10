@@ -56,6 +56,28 @@ class UpdatesRichTests(IsolatedAsyncioTestCase):
             self.assertTrue(screen.embedded_buttons)
             self.assertEqual(rows[-1][0].callback_data, 'updates')
 
+    async def test_server_links_preserve_update_page_and_callbacks_fit_telegram_limit(self):
+        key = 'very-long-server-code-with-suffix'
+        origin = 'update_nodes:11111111-2222-4333-8444-555555555555:2'
+        callbacks = await updates.node_links(self.state, [{'node_key': key}], origin)
+        callback = callbacks[key]
+        self.assertLessEqual(len(callback.encode()), 64)
+        self.query.data = callback
+        from telegram_client.routers import admin_nodes
+        with patch.object(admin_nodes, 'show_admin_node', new_callable=AsyncMock) as show:
+            await updates.update_node_cb(self.query, self.bot, object(), self.state)
+        self.assertEqual(show.await_args.args[3], key)
+        self.assertEqual(self.state_data['node_return'], {'node_key': key, 'callback': origin})
+
+    async def test_large_fleet_keeps_every_visible_node_link_on_first_and_last_page(self):
+        nodes = [{'key': f'n{i:03}', 'title': f'Node {i:03}'} for i in range(150)]
+        for page, expected in ((0, 'n000'), (14, 'n140')):
+            callbacks = await updates.node_links(self.state, nodes, f'fleet_nodes:{page}')
+            self.assertEqual(len(callbacks), 10)
+            token = callbacks[expected].split(':')[1]
+            self.assertEqual(self.state_data['update_node_links'][token],
+                             {'node_key': expected, 'callback': f'fleet_nodes:{page}'})
+
 
     async def test_main_updates_groups_visible_actions_and_paginates_outdated_agents(self):
         fleet = {'nodes': [dict(key=f'n{i:02}', title=f'Node {i:02}', region='Europe', flag='🇱🇻',
@@ -107,7 +129,9 @@ class UpdatesRichTests(IsolatedAsyncioTestCase):
         servers = screen.sections[2]
         self.assertEqual(servers.title, updates.tr('en', 'updates.rich.outdated_servers'))
         self.assertEqual(len(servers.sections[0].sections), 1)
-        self.assertEqual(servers.sections[0].sections[0].rows[0][0].callback_data, 'admin_node:old')
+        token = servers.sections[0].sections[0].rows[0][0].callback_data.split(':')[1]
+        self.assertEqual(self.state_data['update_node_links'][token],
+                         {'node_key': 'old', 'callback': 'updates_nodes:0'})
         self.assertEqual(len(screen.lines), 1)
         self.assertEqual(updates.state_label('en', 'current'), 'Up to date')
 
@@ -157,7 +181,9 @@ class UpdatesRichTests(IsolatedAsyncioTestCase):
             await updates.show_job(self.query, self.bot, backend, self.state, 'j1')
         screen, rows = draw.call_args.args[2:4]
         self.assertEqual(len(screen.sections[0].tables[0].rows), 4)
-        self.assertEqual(screen.sections[1].rows[0][0].callback_data, 'admin_node:lv1')
+        token = screen.sections[1].rows[0][0].callback_data.split(':')[1]
+        self.assertEqual(self.state_data['update_node_links'][token],
+                         {'node_key': 'lv1', 'callback': 'update_nodes:j1:0'})
         self.assertIn(updates.tr('en', 'updates.rich.partial_note'), screen.lines)
         self.assertTrue(screen.sections[-1].collapsed)
         screen.rich(rows)

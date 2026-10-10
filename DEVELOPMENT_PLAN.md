@@ -976,3 +976,32 @@ DRIVER_ARCHITECTURE, NODE_AGENT_ARCHITECTURE, CODE_REVIEW and
 PLAN_IMPLEMENTATION_AUDIT documents. Protocol upgrade research is retained as
 configuration reference rather than an unfinished migration plan. Historical
 implementation details remain available in Git history.
+
+
+### Tester feedback and operation recovery — 2026-10-10
+
+Implemented in alpha.68: unified Server setup with durable agent/Docker/protocol
+children, agent-only creation, detailed installation observations, automatic card
+refresh, metadata draft fixes, SNI validation, request identification, Updates return
+navigation and Workstation layout/scroll/appearance fixes. Terminal image QR is
+withdrawn after failed real-terminal acceptance; Copy URI and Save files remain.
+
+Diagnostics & Recovery now includes blocked settings and setup coordinators,
+operation-specific reasons/guidance, targeted journal rechecks, existing profile
+and settings retirement contracts, authenticated current-agent confirmation, and
+setup continuation before dispatch. Controller observations are available in
+Telegram; Workstation retains offline service diagnostics and confirmed starts.
+Recovery attempts from either interface retain actor and operation identities in
+migration-5 audit storage. Unconfirmed agent/update/host outcomes retain their gates;
+this is not a blanket repair of every failure. Emergency controller launch/rollback
+repair without durable evidence and permanently unavailable hosts still require the
+existing explicit host/registry workflow. Live acceptance of the new flows and
+Telegram latency measurements remain next; no real tester VPS was modified here.
+
+Release validation: full Python discovery ran 1206 tests (119 environment-dependent
+skips), with 23 PostgreSQL migration/update/restore checks run separately in a
+removed disposable container. Workstation: 123 tests and strict Clippy passed;
+agent: 13 tests; driver: 34 tests. An API regression verifies administrator admission,
+worker-lock exclusion, exact command identity and recovery attribution. PostgreSQL
+checks cover additive audit migration, retained blocked jobs, targeted confirmation,
+and partial agent-update continuation.

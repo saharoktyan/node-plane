@@ -25,6 +25,8 @@ class RequestSearchState(StatesGroup):
 
 def _request_name(item, locale):
     name = ' '.join(filter(None, (item.get('first_name'), item.get('last_name'))))
+    if name and item.get('username'):
+        return name + ' · @' + item['username'].removeprefix('@')
     return name or (tr(locale, 'requests.username', username=item['username'])
         if item.get('username') else
         tr(locale, 'requests.account', id=item['account_id'][:8]))
@@ -382,8 +384,13 @@ async def notify_admins(bot: Bot, backend: BackendClient, request_id: str):
             if not policy.get('notify_requests', True):
                 continue
             locale = normalize_locale(admin.get('locale') or admin.get('language_code'))
+            item = await backend.pending_access_request(admin_id, request_id)
+            identity = ('@' + item['username'].removeprefix('@') if item.get('username')
+                        else str(item.get('telegram_user_id') or item['account_id'][:8]))
+            name = ' '.join(filter(None, (item.get('first_name'), item.get('last_name'))))
             notice = Screen(tr(locale, 'requests.title'),
-                (tr(locale, 'requests.notification'),), embedded_buttons=True)
+                (tr(locale, 'requests.notification'),
+                 ' · '.join(filter(None, (name, identity)))), embedded_buttons=True)
             markup = InlineKeyboardMarkup(inline_keyboard=[[
                 InlineKeyboardButton(text=tr(locale, 'requests.approve'),
                     callback_data=NotificationDecisionCallback(request_id=request_id,

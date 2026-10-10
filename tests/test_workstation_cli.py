@@ -40,9 +40,10 @@ class WorkstationCredentialTests(unittest.TestCase):
         self.attribution = {'ssh_user': 'root', 'device_fingerprint': 'SHA256:' + 'a' * 43}
         self.db.connection.execute('''CREATE TABLE backend_update_jobs (
             id TEXT PRIMARY KEY, actor_id TEXT, command_key TEXT, kind TEXT, intent_json TEXT)''')
-        for table in ('backend_node_jobs', 'backend_agent_rollouts'):
+        for table in ('backend_node_jobs', 'backend_agent_rollouts', 'backend_node_bootstraps'):
+            actor_column = 'actor_account_id' if table == 'backend_agent_rollouts' else 'actor_id'
             self.db.connection.execute(f'''CREATE TABLE {table} (
-                id TEXT PRIMARY KEY, actor_id TEXT, command_key TEXT, node_key TEXT, status TEXT)''')
+                id TEXT PRIMARY KEY, {actor_column} TEXT, command_key TEXT, node_key TEXT, status TEXT)''')
 
     def authenticate(self, **selectors):
         request = {'version': 1, 'action': 'authenticate', 'session_id': self.session_id,
@@ -281,7 +282,7 @@ class WorkstationCredentialTests(unittest.TestCase):
         self.assertEqual(self.service.handle(request)['job'], {
             'id': job_id, 'node_key': 'lv1', 'status': 'running', 'kind': 'agent-rollouts'})
         other = bootstrap_admin(self.identities, 102)
-        self.db.connection.execute('UPDATE backend_agent_rollouts SET actor_id=?', (other.id,))
+        self.db.connection.execute('UPDATE backend_agent_rollouts SET actor_account_id=?', (other.id,))
         self.assertIsNone(self.service.handle(request)['job'])
         self.assertEqual(self.db.connection.execute('SELECT COUNT(*) FROM backend_agent_rollouts').fetchone()[0], 1)
 

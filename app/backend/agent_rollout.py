@@ -36,7 +36,7 @@ class AgentRolloutService:
     def public(row):
         return {key: row[key] for key in ('id', 'node_key', 'status')}
 
-    def request(self, actor, node_key, command_key, *, transport, ssh_target=None, ssh_port=22, install_rust=False, skip_driver=False):
+    def request(self, actor, node_key, command_key, *, transport, ssh_target=None, ssh_port=22, install_rust=False, skip_driver=False, bootstrap_id=None):
         require_permission(actor, 'nodes.manage')
         if type(install_rust) is not bool or type(skip_driver) is not bool:
             raise AccessDenied('invalid_input', 422)
@@ -78,6 +78,8 @@ class AgentRolloutService:
             if connection is not None and (connection['transport'] != transport
                                            or connection['ssh_target'] != ssh_target):
                 raise AccessDenied('node_connection_mismatch', 409)
+            from .node_bootstrap import require_idle
+            require_idle(conn, node_key, bootstrap_id)
             if conn.execute('''SELECT 1 FROM backend_node_drains WHERE node_key = ?''',
                             (node_key,)).fetchone():
                 raise AccessDenied('node_already_draining', 409)
@@ -100,7 +102,13 @@ class AgentRolloutService:
         if row is None:
             raise AccessDenied('resource_not_found', 404)
         return {**self.public(row), 'failure_code': failure['code'] if failure else None,
-                'journal_archives': [item['path'] for item in archives]}
+                'journal_archives': [item['path'] for item in archives],
+                'progress': self.progress(row)}
+
+    @staticmethod
+    def progress(row):
+        from .installation_progress import read_progress
+        return read_progress(row)
 
     def recover(self):
         with self.db.transaction() as conn:
@@ -121,8 +129,16 @@ class AgentRolloutService:
                      '--backend-ssh-port', str(intent['ssh_port'])]
         if self.runner is not None:
             return self.runner(args)
+        from .installation_progress import progress_path
+        env = {**os.environ, 'NODE_PLANE_INSTALL_RUST': 'yes' if intent.get('install_rust') else 'no'}
+        # Override inherited observer targets; every job owns its own file.
+        env.pop('NODE_PLANE_AGENT_PROGRESS_FILE', None)
+        env.pop('NODE_PLANE_AGENT_PROGRESS_ID', None)
+        path = progress_path(row['id']) if 'id' in row.keys() else None
+        if path is not None:
+            env.update(NODE_PLANE_AGENT_PROGRESS_FILE=str(path), NODE_PLANE_AGENT_PROGRESS_ID=row['id'])
         result = subprocess.run(args, cwd=root, capture_output=True, text=True,
-            env={**os.environ, 'NODE_PLANE_INSTALL_RUST': 'yes' if intent.get('install_rust') else 'no'},
+            env=env,
             timeout=1200, check=False)
         output = result.stdout + result.stderr
         for line in output.splitlines():

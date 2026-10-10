@@ -461,6 +461,7 @@ fn ensure_api_path(path: &str) -> std::result::Result<(), ApiError> {
         || resource == "/api/v1/nodes"
         || resource.starts_with("/api/v1/nodes/")
         || resource.starts_with("/api/v1/node-jobs/")
+        || resource.starts_with("/api/v1/node-bootstraps/")
         || resource.starts_with("/api/v1/agent-rollouts/"))
         && !path.contains(['\r', '\n', '#'])
         && !resource.contains("..")

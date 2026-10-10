@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.3-alpha.68 - 2026-10-10
+
+- Add operation-specific diagnostics and recovery for profile access, server settings, agent installation and complete server setup, with administrator attribution and recovery history.
+- Add controller diagnostics to Telegram and explain blocked operation causes and applicable next steps in both interfaces.
+- Unify Server setup: prepare SSH in Workstation, install the agent, Docker and selected protocols; allow agent-only servers and install protocols later.
+- Publish detailed installation progress and refresh active server cards and operations automatically.
+- Fix Telegram panel recovery after Clear history, server metadata drafts, request notifications, SNI validation and navigation from Updates to server cards.
+- Unify Workstation button layouts, spatial navigation, scrolling and appearance; keep Temporary configs centered and disable unreliable terminal QR rendering.
+- Add QR delivery for temporary configurations in Telegram.
+- Fix nullable SQL parameter typing in the PostgreSQL setup guard.
+
 ## 0.4.3-alpha.64 - 2026-10-09
 
 - Run Workstation tests serially on Linux, macOS and Windows to avoid concurrent temporary-state locks.

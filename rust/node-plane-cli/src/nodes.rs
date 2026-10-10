@@ -75,6 +75,7 @@ impl Node {
     pub fn state_label(&self) -> &str {
         match self.state() {
             "not_installed" => "Not bootstrapped",
+            "agent_only" => "Agent-only server",
             "inactive" => "Disabled",
             "changes_pending" => "Pending changes",
             "applied_unverified" => "Configured",
@@ -85,12 +86,30 @@ impl Node {
             _ => "Unknown",
         }
     }
+    pub fn needs_observation(&self, operation: Option<&Operation>) -> bool {
+        self.state() == "applying"
+            || operation.is_some_and(|operation| {
+                operation.node_key == self.key
+                    && matches!(operation.status.as_str(), "awaiting_executor" | "running")
+            })
+    }
     pub fn can_bootstrap(&self) -> bool {
         self.state() == "not_installed"
             && self
                 .overview
                 .as_ref()
                 .is_some_and(|v| v["settings_complete"] == true)
+    }
+    pub fn needs_setup(&self) -> bool {
+        self.overview
+            .as_ref()
+            .is_some_and(|v| v["settings_complete"] == true)
+            && (self.can_bootstrap()
+                || self.agent == AgentState::Missing
+                || self
+                    .services
+                    .as_ref()
+                    .is_some_and(|facts| facts["docker"] == false))
     }
     pub fn protocol_status(&self, protocol: &str) -> &'static str {
         let Some(facts) = &self.services else {
@@ -130,8 +149,15 @@ pub struct Operation {
 }
 impl Operation {
     pub fn label(&self) -> &str {
+        if self.kind == "node-bootstraps" && !self.action.is_empty() {
+            return &self.action;
+        }
         if self.kind == "agent-rollouts" {
-            return "Agent setup";
+            return if self.action.is_empty() {
+                "Agent setup"
+            } else {
+                &self.action
+            };
         }
         match self.action.as_str() {
             "bootstrap" => "Bootstrap protocols",
@@ -196,7 +222,7 @@ impl SavedOperation {
                 record.path(&request.state_dir) == path
                     && matches!(
                         record.operation.kind.as_str(),
-                        "node-jobs" | "agent-rollouts"
+                        "node-jobs" | "agent-rollouts" | "node-bootstraps"
                     ),
                 "Invalid saved node operation"
             );
@@ -282,9 +308,9 @@ pub enum Command {
     Create(crate::node_wizard::Draft),
     List,
     Card(String),
+    Observe(Node, Option<Operation>),
     Setup(Node),
     Bootstrap(Node),
-    Docker(Node),
 }
 pub enum Update {
     Temporary(crate::temporary::Command, Value),
@@ -292,6 +318,7 @@ pub enum Update {
     Created(Node),
     List(Vec<Node>),
     Card(Node),
+    Observation(Node),
     Operation(Operation),
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -401,7 +428,22 @@ fn operation(value: &Value, kind: &str, key: &str) -> Result<Operation> {
                 .unwrap_or(&Value::Null),
         ),
         command_id: None,
-        action: clean(&value["action"]),
+        action: if kind == "node-bootstraps" {
+            let mut label = format!("Server setup · {}", clean(&value["phase"]));
+            if let Some(detail) = value.pointer("/progress/label").and_then(Value::as_str) {
+                label.push_str(" · ");
+                label.push_str(&clean(&Value::String(detail.into())));
+            }
+            label
+        } else if kind == "agent-rollouts" {
+            value
+                .pointer("/progress/label")
+                .filter(|value| value.is_string())
+                .map(clean)
+                .unwrap_or_else(|| "Agent setup".into())
+        } else {
+            clean(&value["action"])
+        },
     })
 }
 
@@ -673,7 +715,7 @@ fn close_session(
 }
 
 async fn execute(
-    request: Request,
+    mut request: Request,
     command: Command,
     tx: &mpsc::Sender<Event>,
     session: &mut SshSession,
@@ -687,7 +729,6 @@ async fn execute(
         let credential = backend::authenticate(session, id, &request.workflow.account, tx).await?;
         let result = async {
             let setup = matches!(&command, Command::Setup(_));
-            let docker = matches!(&command, Command::Docker(_));
             match command {
                 Command::Temporary(command) => {
                     use crate::temporary::Command as Temporary;
@@ -776,6 +817,24 @@ async fn execute(
                     }
                     let _ = tx.send(Event::Nodes(Update::List(items)));
                 }
+                Command::Observe(previous, current_operation) => {
+                    let path = format!("/api/v1/nodes/{}", previous.key);
+                    let mut item = node(backend::request(session, &credential, Method::GET, &path, None, None).await?)?;
+                    item.overview = Some(backend::request(session, &credential, Method::GET,
+                        &format!("{path}/overview"), None, None).await?);
+                    // Background observation reads registry state only; do not probe the host.
+                    item.services = previous.services;
+                    item.agent = previous.agent;
+                    let _ = tx.send(Event::Nodes(Update::Observation(item)));
+                    if let Some(previous) = current_operation {
+                        let value = backend::request(session, &credential, Method::GET,
+                            &format!("/api/v1/{}/{}", previous.kind, previous.id), None, None).await?;
+                        let mut observed = operation(&value, &previous.kind, &previous.node_key)?;
+                        if observed.action.is_empty() { observed.action = previous.action; }
+                        observed.command_id = previous.command_id;
+                        let _ = tx.send(Event::Nodes(Update::Operation(observed)));
+                    }
+                }
                 Command::Card(key) => {
                     let path = format!("/api/v1/nodes/{key}");
                     let mut item = node(backend::request(session, &credential, Method::GET, &path, None, None).await?)?;
@@ -792,6 +851,11 @@ async fn execute(
                         Err(error) => return Err(error.into()),
                     }
                     let mut saved = SavedOperation::latest(&request, &credential.account_id, &key)?;
+                    if let Some(parent) = item.overview.as_ref().and_then(|v| v.get("bootstrap")).filter(|v| v.is_object()) {
+                        let mut parent = parent.clone();
+                        parent["node_key"] = json!(key);
+                        saved = Some(operation(&parent, "node-bootstraps", &key)?);
+                    }
                     if saved.is_none() && let Some(job) = item.overview.as_ref().and_then(|v| v.get("last_job")).filter(|v| v.is_object()) {
                         let mut job = job.clone();
                         job["node_key"] = json!(key);
@@ -828,17 +892,29 @@ async fn execute(
                         let _ = tx.send(Event::Nodes(Update::Operation(observed)));
                     }
                 }
-                Command::Setup(item) | Command::Bootstrap(item) | Command::Docker(item) => {
-                    let title = if setup { "Install node agent?" } else if docker { "Install Docker?" } else { "Bootstrap VPN protocols?" };
+                Command::Setup(item) | Command::Bootstrap(item) => {
+                    let title = if setup { "Install node agent?" } else { "Set up server?" };
                     ensure!(events::confirm(tx, title, format!("{} · {}\n\nThis submits one backend operation. An uncertain response is never automatically replayed.", item.region, item.title))?, "Node action cancelled");
+                    if item.transport.as_deref() == Some("ssh")
+                        && item.agent != AgentState::Ready {
+                        let target = item.ssh_target.as_deref().context("Node SSH address is missing")?;
+                        let (user, host) = target.split_once('@').unwrap_or(("root", target));
+                        request.workflow.target_user = user.into();
+                        request.workflow.target_host = host.trim_matches(['[', ']']).into();
+                        request.workflow.target_port = 22;
+                        request.workflow.yes = true;
+                        crate::workstation::prepare_node(&request, session,
+                            UiInteraction::shared(tx.clone()), tx).await?;
+                    }
                     let command_id = Uuid::new_v4();
                     let (path, body, kind) = if setup {
                         let transport = item.transport.as_deref().context("Node transport is not configured")?;
                         (format!("/api/v1/nodes/{}/agent-rollouts", item.key), json!({"transport":transport,
                             "ssh_target":item.ssh_target,"ssh_port":22,"install_rust":false}), "agent-rollouts")
                     } else {
-                        ensure!(docker || item.can_bootstrap(), "Refresh the node card before bootstrap");
-                        (format!("/api/v1/nodes/{}/actions", item.key), json!({"action":if docker { "install_docker" } else { "bootstrap" }, "revision":item.desired_revision}), "node-jobs")
+                        ensure!(item.needs_setup(), "Refresh the node card before server setup");
+                        (format!("/api/v1/nodes/{}/bootstrap", item.key),
+                         json!({"action":"bootstrap", "revision":item.desired_revision}), "node-bootstraps")
                     };
                     let pending = Operation { kind: kind.into(), id: command_id, node_key: item.key.clone(), action: clean(&body["action"]),
                         status: "unconfirmed".into(), error: String::new(), command_id: Some(command_id) };
@@ -891,6 +967,65 @@ mod tests {
         )
         .unwrap()
     }
+    #[test]
+    fn bootstrap_observation_displays_installer_detail_without_changing_status() {
+        let value = json!({"id": Uuid::new_v4(), "node_key": "lv1", "phase": "agent",
+            "status": "running", "progress": {"stage": "check_ssh", "label": "Checking SSH access"}});
+        let observed = operation(&value, "node-bootstraps", "lv1").unwrap();
+        assert_eq!(
+            observed.action,
+            "Server setup · agent · Checking SSH access"
+        );
+        assert_eq!(observed.status, "running");
+        assert_eq!(
+            observed.label(),
+            "Server setup · agent · Checking SSH access"
+        );
+        let agent = operation(
+            &json!({"id": Uuid::new_v4(), "node_key": "lv1",
+            "status": "succeeded", "progress": null}),
+            "agent-rollouts",
+            "lv1",
+        )
+        .unwrap();
+        assert_eq!(agent.action, "Agent setup");
+        assert_eq!(agent.label(), "Agent setup");
+        let mut completed = value;
+        completed["status"] = json!("succeeded");
+        completed["phase"] = json!("done");
+        completed["progress"] = Value::Null;
+        assert_eq!(
+            operation(&completed, "node-bootstraps", "lv1")
+                .unwrap()
+                .action,
+            "Server setup · done"
+        );
+    }
+
+    #[test]
+    fn observations_stop_after_completion_and_ignore_other_nodes() {
+        let mut item = fixture("lv1", "Europe");
+        let mut operation = Operation {
+            kind: "node-jobs".into(),
+            id: Uuid::new_v4(),
+            node_key: "lv1".into(),
+            status: "running".into(),
+            error: String::new(),
+            command_id: None,
+            action: "bootstrap".into(),
+        };
+        assert!(item.needs_observation(Some(&operation)));
+        operation.status = "succeeded".into();
+        assert!(!item.needs_observation(Some(&operation)));
+        operation.status = "running".into();
+        operation.node_key = "lv2".into();
+        assert!(!item.needs_observation(Some(&operation)));
+        item.overview = Some(json!({"state":"applying"}));
+        assert!(item.needs_observation(None));
+        item.overview = Some(json!({"state":"needs_attention"}));
+        assert!(!item.needs_observation(None));
+    }
+
     #[test]
     fn monthly_traffic_formats_missing_and_partial_measurements() {
         assert!(traffic_lines(&json!({})).is_empty());

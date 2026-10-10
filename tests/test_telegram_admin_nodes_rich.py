@@ -9,6 +9,55 @@ from telegram_client.i18n import tr
 
 
 class AdminNodeRichTests(IsolatedAsyncioTestCase):
+    async def test_node_card_loads_node_and_overview_concurrently(self):
+        import asyncio
+        node_started, overview_started = asyncio.Event(), asyncio.Event()
+        async def read_node(*args, **kwargs):
+            node_started.set()
+            await overview_started.wait()
+            return self.node
+        async def read_overview(*args):
+            overview_started.set()
+            await node_started.wait()
+            return self.overview
+        self.backend.request.side_effect = read_node
+        self.backend.node_overview.side_effect = read_overview
+        with patch.object(nodes, 'render', new_callable=AsyncMock):
+            await asyncio.wait_for(nodes.show_admin_node(123, 123, 77, 'msk1',
+                self.bot, self.backend, self.state), 1)
+
+    async def test_save_continues_after_callback_acknowledgement_failure(self):
+        from aiogram.exceptions import TelegramNetworkError
+        from aiogram.methods import AnswerCallbackQuery
+        self.query.answer.side_effect = TelegramNetworkError(
+            method=AnswerCallbackQuery(callback_query_id='test'), message='network failure')
+        self.backend.edit_node = AsyncMock(return_value={**self.node, 'desired_revision': 4})
+        await nodes.change_node_draft(123, 'msk1', {'title': 'New name'}, self.backend, self.state)
+        self.query.data = 'node_draft_save:msk1'
+        with patch.object(nodes, 'apply_node', new_callable=AsyncMock):
+            await nodes.save_node_draft_cb(self.query, self.bot, self.backend, self.state)
+        self.backend.edit_node.assert_awaited_once()
+
+    async def test_apply_saves_pending_draft_and_reset_cannot_undo_saved_values(self):
+        self.backend.edit_node = AsyncMock(return_value={**self.node, 'title': 'New name', 'desired_revision': 4})
+        await nodes.change_node_draft(123, 'msk1', {'title': 'New name'}, self.backend, self.state)
+        with patch.object(nodes, 'apply_node', new_callable=AsyncMock) as apply:
+            await nodes.apply_node_cb(self.query, nodes.ApplyNodeCallback(node_key='msk1'),
+                self.bot, self.backend, self.state)
+        self.backend.edit_node.assert_awaited_once()
+        self.assertIsNone((await self.state.get_data()).get('node_settings_draft'))
+        self.assertEqual(apply.call_args.kwargs['revision'], 4)
+        self.query.data = 'node_draft_reset:msk1'
+        with patch.object(nodes, 'show_node_settings', new_callable=AsyncMock):
+            await nodes.reset_node_draft_cb(self.query, self.bot, self.backend, self.state)
+        self.backend.edit_node.assert_awaited_once()
+
+    async def test_save_without_draft_refreshes_settings_instead_of_silent_return(self):
+        self.query.data = 'node_draft_save:msk1'
+        with patch.object(nodes, 'show_node_settings', new_callable=AsyncMock) as show:
+            await nodes.save_node_draft_cb(self.query, self.bot, self.backend, self.state)
+        show.assert_awaited_once()
+
     async def test_monthly_traffic_is_compact_and_disabled_or_unknown_is_not_zero(self):
         for locale in ('ru', 'en'):
             self.data['locale'] = locale
@@ -421,6 +470,29 @@ class AdminNodeRichTests(IsolatedAsyncioTestCase):
         apply.assert_awaited_once()
         self.assertEqual(apply.await_args.kwargs['revision'], 4)
 
+    async def test_invalid_sni_keeps_edit_state_and_does_not_change_draft(self):
+        self.data.update(edit_node_key='msk1',edit_field='xray_sni',edit_revision=3,
+            edit_settings=self.node['settings'],edit_section='xray',control_message_id=77)
+        message=SimpleNamespace(delete=AsyncMock(),from_user=SimpleNamespace(id=123),
+            chat=SimpleNamespace(id=123,type='private'),text='https://example.com')
+        with patch.object(nodes,'render',new_callable=AsyncMock) as draw:
+            await nodes.process_node_edit(message,self.bot,self.backend,self.state)
+        self.assertNotIn('node_settings_draft',self.data)
+        self.assertIn(tr('en','nodes.settings.sni_hint'),draw.call_args.args[2].lines)
+
+    async def test_metadata_draft_survives_edit_flow_and_is_sent_to_backend(self):
+        self.backend.edit_node = AsyncMock(return_value={**self.node, 'desired_revision': 4})
+        changes = {'title': 'New name', 'flag': '🇱🇻', 'region': 'Europe'}
+        for field, value in changes.items():
+            await nodes.change_node_draft(123, 'msk1', {field: value}, self.backend, self.state)
+            await nodes._clear_node_flow(self.state)
+        self.backend.request.return_value = {'affected_profiles': 0, 'profiles': []}
+        self.query.data = 'node_draft_save:msk1'
+        with patch.object(nodes, 'apply_node', new_callable=AsyncMock):
+            await nodes.save_node_draft_cb(self.query, self.bot, self.backend, self.state)
+        self.assertEqual(self.backend.edit_node.await_args.args[3],
+                         {k: v for k, v in changes.items() if self.node.get(k) != v})
+
     async def test_protocol_in_use_keeps_draft_and_explains_save_failure(self):
         from telegram_client.backend import BackendError
         self.backend.edit_node = AsyncMock(side_effect=BackendError('node_protocol_in_use', 409))
@@ -488,7 +560,41 @@ class AdminNodeRichTests(IsolatedAsyncioTestCase):
         install.assert_awaited_once()
         self.backend.apply_node_settings.assert_not_awaited()
 
-    async def test_initial_bootstrap_only_offers_unfinished_installation_steps(self):
+    async def test_wizard_can_continue_without_protocols(self):
+        self.data['wizard_data'] = {'protocols': [], 'transport': 'local'}
+        self.query.data = 'wizard_proto:done'
+        with patch.object(nodes, 'render_wizard_summary', new_callable=AsyncMock) as summary:
+            await nodes.wizard_proto_cb(self.query, self.bot, self.backend, self.state)
+        summary.assert_awaited_once()
+
+    async def test_agent_only_setup_never_offers_docker_or_protocol_installation(self):
+        from telegram_client.backend import BackendError
+        self.node.update(protocols=[], xray_transports=[], applied_revision=0)
+        self.overview['settings_complete'] = False
+        self.backend.node_services.side_effect = BackendError('node_agent_unconfigured', 409)
+        with patch.object(tools, 'render', new_callable=AsyncMock) as draw:
+            await tools.show_install(123, 123, 77, 'msk1', self.bot, self.backend, self.state)
+        callbacks = self.callbacks(draw)
+        self.assertIn('rollout_saved:msk1', callbacks)
+        self.assertNotIn('node_action:bootstrap:msk1', callbacks)
+        self.assertNotIn('node_action:install_docker:msk1', callbacks)
+        self.assertEqual(draw.call_args.args[2].title, tr('en', 'node_tools.setup_agent'))
+        self.backend.node_services.side_effect = None
+        self.backend.node_services.return_value = {'docker': False}
+        with patch.object(tools, 'render', new_callable=AsyncMock) as draw:
+            await tools.show_install(123, 123, 77, 'msk1', self.bot, self.backend, self.state)
+        self.assertNotIn('rollout_saved:msk1', self.callbacks(draw))
+        self.assertIn(tr('en', 'nodes.rollout.agent_ready'), draw.call_args.args[2].lines)
+
+    async def test_adding_protocol_to_agent_only_node_offers_install_protocols(self):
+        self.node.update(protocols=['awg'], applied_revision=0)
+        self.backend.node_services.return_value = {'docker': False}
+        with patch.object(tools, 'render', new_callable=AsyncMock) as draw:
+            await tools.show_install(123, 123, 77, 'msk1', self.bot, self.backend, self.state)
+        self.assertIn('node_action:bootstrap:msk1', self.callbacks(draw))
+        self.assertEqual(draw.call_args.args[3][0][0].text, tr('en', 'node_tools.protocols_stage_button'))
+
+    async def test_initial_bootstrap_is_one_action_regardless_of_docker_state(self):
         self.node['applied_revision'] = 0
         for docker in (False, True):
             self.backend.node_services.return_value = {'docker': docker,
@@ -496,11 +602,40 @@ class AdminNodeRichTests(IsolatedAsyncioTestCase):
             with patch.object(tools, 'render', new_callable=AsyncMock) as draw:
                 await tools.show_install(123, 123, 77, 'msk1', self.bot, self.backend, self.state)
             callbacks = self.callbacks(draw)
-            if docker:
-                self.assertIn('node_action:bootstrap:msk1', callbacks)
-                self.assertNotIn('node_action:install_docker:msk1', callbacks)
-            else:
-                self.assertIn('node_action:install_docker:msk1', callbacks)
+            self.assertIn('node_action:bootstrap:msk1', callbacks)
+            self.assertNotIn('node_action:install_docker:msk1', callbacks)
+
+    async def test_node_return_from_updates_survives_submenu_state_reset(self):
+        self.data['node_return'] = {'node_key': 'msk1', 'callback': 'fleet_nodes:2'}
+        await nodes._clear_node_flow(self.state)
+        with patch.object(nodes, 'render', new_callable=AsyncMock) as draw:
+            await nodes.show_admin_node(123, 123, 77, 'msk1', self.bot, self.backend, self.state)
+        self.assertEqual(draw.call_args.args[3][-1][0].callback_data, 'fleet_nodes:2')
+
+    async def test_bootstrap_menu_opens_parent_progress_without_host_probe(self):
+        parent = {'id': 'bootstrap-id', 'node_key': 'msk1', 'phase': 'docker',
+                  'status': 'running', 'child_id': 'docker-id', 'child_kind': 'node-jobs'}
+        self.backend.node_overview.return_value['bootstrap'] = parent
+        with patch.object(tools, 'show_bootstrap', new_callable=AsyncMock) as progress:
+            await tools.show_install(123, 123, 77, 'msk1', self.bot, self.backend, self.state)
+        self.assertEqual(progress.await_args.args[3], parent)
+        self.backend.node_services.assert_not_awaited()
+
+    async def test_bootstrap_renders_live_agent_step(self):
+        parent = {'id': 'bootstrap-id', 'node_key': 'msk1', 'phase': 'agent',
+                  'status': 'running', 'child_id': 'agent-id', 'child_kind': 'agent-rollouts',
+                  'progress': {'stage': 'certificates', 'label': 'Preparing connection certificates'}}
+        with patch.object(tools, 'render', new_callable=AsyncMock) as draw:
+            await tools.show_bootstrap(123, 123, 77, parent, self.bot, self.backend, self.state)
+        self.assertIn(tr('en', 'installation_progress.certificates'), draw.call_args.args[2].lines)
+
+    async def test_blocked_bootstrap_links_to_original_child_operation(self):
+        parent = {'id': 'bootstrap-id', 'node_key': 'msk1', 'phase': 'protocols',
+                  'status': 'blocked', 'child_id': 'protocol-id', 'child_kind': 'node-jobs'}
+        with patch.object(tools, 'render', new_callable=AsyncMock) as draw:
+            await tools.show_bootstrap(123, 123, 77, parent, self.bot, self.backend, self.state)
+        self.assertIn('node_job:protocol-id', self.callbacks(draw))
+        self.assertIn('bootstrap_status:bootstrap-id', self.callbacks(draw))
 
     async def test_unstarted_initial_apply_result_offers_installation_instead_of_spinner(self):
         self.backend.node_settings_operation = AsyncMock(return_value={'status': 'superseded',

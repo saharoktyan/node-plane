@@ -69,6 +69,6 @@ class BackupsPostgresTests(unittest.TestCase):
         self.assertTrue(self.service.run_one())
         self.assertEqual(self.service.get(self.actor, job['id'])['status'], 'succeeded')
         self.assertEqual(ProfileRepository(self.db).get(profile)['display_name'], 'Alice')
-        from db.migrations import check_schema
-        self.assertEqual(check_schema(self.db)['current_revision'],3)
+        from db.migrations import check_schema, REVISIONS
+        self.assertEqual(check_schema(self.db)['current_revision'],len(REVISIONS))
         self.assertEqual(SQLIdentityRepository(self.db).find_telegram_account(101).id, self.admin.id)

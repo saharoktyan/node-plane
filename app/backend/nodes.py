@@ -9,6 +9,8 @@ import json
 import re
 from uuid import UUID
 
+from domain_names import valid_sni
+
 from .authorization import AccessDenied, require_permission
 from .profiles import _cursor, _page
 
@@ -96,6 +98,8 @@ def _validate(values, *, create):
                     raise AccessDenied('invalid_input', 422)
             elif not isinstance(value, str) or not value.strip() or len(value) > 255 or any(ord(c) < 32 for c in value):
                 raise AccessDenied('invalid_input', 422)
+            if field == 'xray_sni' and not valid_sni(value):
+                raise AccessDenied('invalid_input', 422)
             if field == 'awg_interface' and not re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]{0,14}', value):
                 raise AccessDenied('invalid_input', 422)
             if field == 'awg_i1_preset' and value not in {'quic', 'dns', 'chaos'}:
@@ -125,6 +129,8 @@ class NodeService:
         self.db = db
 
     def initialize_schema(self):
+        from .node_bootstrap import NodeBootstrapService
+        NodeBootstrapService(self.db).initialize_schema()
         from .backups import BackupService
         BackupService(self.db).initialize_schema()
         from .updates import UpdateService
@@ -308,6 +314,8 @@ class NodeService:
                     raise AccessDenied('resource_not_found', 404)
                 if conn.execute('SELECT 1 FROM backend_node_drains WHERE node_key = ?', (node_key,)).fetchone():
                     raise AccessDenied('node_already_draining', 409)
+                from .node_bootstrap import require_idle
+                require_idle(conn, node_key)
                 if row['desired_revision'] != revision:
                     raise AccessDenied('revision_conflict', 412)
                 if conn.execute("SELECT 1 FROM backend_node_jobs WHERE node_key = ? AND status IN ('awaiting_executor', 'running', 'blocked')", (node_key,)).fetchone():

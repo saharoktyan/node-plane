@@ -50,6 +50,24 @@ class AgentNodeOperationTests(unittest.TestCase):
     def execute(self, action='reinstall_clean', recover=False):
         return MODULE.execute(action, 'job1', self.intent, recover, self.path)
 
+    def test_protocol_progress_survives_failure_without_replaying_command(self):
+        from uuid import uuid4
+        identity = str(uuid4())
+        intent = dict(self.intent, command_id=identity)
+        def interrupted(*args):
+            MODULE.intents.installation_step('xray_init')
+            raise TimeoutError()
+        with patch.dict(os.environ, {'NODE_PLANE_OPERATION_PROGRESS_ID': 'inherited'}), \
+             patch.object(MODULE, 'run', side_effect=interrupted) as run:
+            with self.assertRaises(TimeoutError):
+                MODULE.execute('bootstrap', identity, intent, False, self.path)
+            observation = json.loads((self.path.parent / 'operation-progress' / (identity + '.json')).read_text())
+            self.assertEqual(observation, {'operation_id': identity, 'stage': 'xray_init'})
+            self.assertEqual(os.environ['NODE_PLANE_OPERATION_PROGRESS_ID'], 'inherited')
+            with self.assertRaises(ValueError):
+                MODULE.execute('bootstrap', identity, intent, True, self.path)
+            run.assert_called_once()
+
     def test_retries_and_recovery_do_not_repeat_clean_reinstall(self):
         with patch.object(MODULE, 'run', return_value={'verified': True}) as run:
             result = self.execute()

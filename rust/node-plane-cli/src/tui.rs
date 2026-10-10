@@ -19,7 +19,7 @@ use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
-    text::Line,
+    text::{Line, Span},
     widgets::{Block, Borders, Clear, Gauge, Paragraph, Wrap},
 };
 use std::{
@@ -33,13 +33,51 @@ use std::{
 };
 use zeroize::{Zeroize, Zeroizing};
 
-const ACCENTS: [(&str, &str); 5] = [
-    ("Terminal theme", "terminal"),
+const ACCENTS: [(&str, &str); 6] = [
+    ("Auto", "terminal"),
     ("Peach", "#ffbb74"),
-    ("Blue", "#74b9ff"),
-    ("Purple", "#c792ea"),
-    ("Green", "#98c379"),
+    ("Ocean", "#74b9ff"),
+    ("Lilac", "#c792ea"),
+    ("Olive", "#8a9a45"),
+    ("Glacer", "#55b1c2"),
 ];
+fn draw_qr(frame: &mut Frame, area: Rect, image: &image::DynamicImage) {
+    // qr_image uses six pixels per module, including its four-module quiet zone.
+    // Preserve every module; averaging or downsampling makes QR codes unreadable.
+    let pixels = image.to_luma8();
+    let side = (pixels.width() / 6) as u16;
+    let height = side.div_ceil(2);
+    if area.width < side || area.height < height {
+        frame.render_widget(Paragraph::new(format!(
+            "Enlarge the terminal to show the QR code ({side} columns × {height} rows required)."
+        )).wrap(Wrap { trim: false }), area);
+        return;
+    }
+    for row in 0..height {
+        let spans: Vec<Span> = (0..side)
+            .map(|column| {
+                let color = |module_row: u16| {
+                    if module_row < side
+                        && pixels.get_pixel(u32::from(column) * 6, u32::from(module_row) * 6)[0]
+                            == 0
+                    {
+                        Color::Black
+                    } else {
+                        Color::White
+                    }
+                };
+                Span::styled(
+                    "▀",
+                    Style::default().fg(color(row * 2)).bg(color(row * 2 + 1)),
+                )
+            })
+            .collect();
+        frame.render_widget(
+            Paragraph::new(Line::from(spans)),
+            Rect::new(area.x, area.y + row, side, 1),
+        );
+    }
+}
 fn accent_color(value: &str) -> Color {
     if value == "terminal" {
         Color::Cyan
@@ -63,7 +101,7 @@ enum Screen {
     Running,
     Finished,
 }
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum SettingsPage {
     Profiles,
     Appearance,
@@ -75,10 +113,10 @@ enum SettingsPage {
 impl SettingsPage {
     const ALL: [Self; 6] = [
         Self::Profiles,
-        Self::Appearance,
         Self::Updates,
         Self::Security,
         Self::Session,
+        Self::Appearance,
         Self::About,
     ];
     fn label(self) -> &'static str {
@@ -103,7 +141,7 @@ impl Screen {
         )
     }
 }
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum Control {
     QuickStartToggle,
     QuickStartClose,
@@ -114,7 +152,6 @@ enum Control {
     NodesCard(usize),
     NodesRefresh,
     NodesBack,
-    NodesPrepare,
     NodesNew,
     WizardChoice(usize),
     WizardNext,
@@ -123,7 +160,6 @@ enum Control {
     WizardOpen,
     NodesSetup,
     NodesBootstrap,
-    NodesDocker,
     Temporary,
     NodeTemporary,
     TemporaryChoice(usize),
@@ -205,7 +241,7 @@ impl Form {
     }
     fn visible(&self) -> Vec<usize> {
         let all: &[usize] = match self.action {
-            Action::Install => &[0, 1, 2, 3, 4, 5, 6],
+            Action::Install => &[0, 1, 2, 3, 6, 5, 4],
             Action::Diagnose => &[0, 1, 2, 11],
             Action::Update => &[0, 1, 2, 3, 4],
             Action::PrepareNode => &[0, 1, 2, 8, 9, 10],
@@ -343,7 +379,8 @@ impl Drop for Form {
 
 struct App {
     image_picker: Option<ratatui_image::picker::Picker>,
-    qr: std::cell::RefCell<Option<ratatui_image::protocol::StatefulProtocol>>,
+    qr: std::cell::RefCell<Option<image::DynamicImage>>,
+    qr_graphic: std::cell::RefCell<Option<ratatui_image::protocol::StatefulProtocol>>,
     clipboard: Option<arboard::Clipboard>,
     qr_visible: bool,
     temporary: crate::temporary::Browser,
@@ -352,6 +389,7 @@ struct App {
     nodes: crate::nodes::Browser,
     nodes_requested: Option<crate::nodes::Command>,
     nodes_busy: bool,
+    nodes_background: bool,
     node_wizard: Option<crate::node_wizard::Wizard>,
     wizard_loading: bool,
     ssh_state: crate::nodes::ConnectionState,
@@ -396,6 +434,7 @@ impl App {
         Self {
             image_picker: None,
             qr: std::cell::RefCell::new(None),
+            qr_graphic: std::cell::RefCell::new(None),
             clipboard: None,
             qr_visible: false,
             temporary: crate::temporary::Browser::default(),
@@ -404,6 +443,7 @@ impl App {
             nodes: crate::nodes::Browser::default(),
             nodes_requested: None,
             nodes_busy: false,
+            nodes_background: false,
             node_wizard: None,
             wizard_loading: false,
             ssh_state: crate::nodes::ConnectionState::Closed,
@@ -492,6 +532,9 @@ impl App {
         self.error.clear();
     }
     fn appearance_key(&mut self, key: KeyCode) {
+        if self.move_spatial(key) {
+            return;
+        }
         let count = ACCENTS.len() + 3;
         match key {
             KeyCode::Esc => self.open_settings(),
@@ -692,6 +735,12 @@ impl App {
             self.exit_confirm = false;
             return;
         }
+        if self.qr_visible {
+            if matches!(key.code, KeyCode::Esc | KeyCode::Enter) {
+                self.qr_visible = false;
+            }
+            return;
+        }
         if self.temporary_sidebar {
             match key.code {
                 KeyCode::Enter | KeyCode::Tab | KeyCode::Right => self.open_temporary(None),
@@ -702,6 +751,9 @@ impl App {
                 }
                 _ => {}
             }
+            return;
+        }
+        if self.move_spatial(key.code) {
             return;
         }
         let count = self.temporary_controls().len().max(1);
@@ -815,11 +867,9 @@ impl App {
                         | Control::NodesCard(_)
                         | Control::NodesRefresh
                         | Control::NodesBack
-                        | Control::NodesPrepare
                         | Control::NodesNew
                         | Control::NodesSetup
                         | Control::NodesBootstrap
-                        | Control::NodesDocker
                         | Control::NodeTemporary
                         | Control::NodesPage(_)
                 )
@@ -830,6 +880,9 @@ impl App {
         if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
             self.exit = true;
             self.exit_confirm = false;
+            return;
+        }
+        if self.move_spatial(key.code) {
             return;
         }
         let Some(wizard) = &mut self.node_wizard else {
@@ -910,9 +963,7 @@ impl App {
         let selected = self.nodes_selected.min(controls.len().saturating_sub(1));
         let search = matches!(controls.get(selected), Some(Control::NodesSearch));
         match key.code {
-            KeyCode::Up | KeyCode::Down | KeyCode::Left | KeyCode::Right
-                if self.nodes.card.is_some() =>
-            {
+            KeyCode::Up | KeyCode::Down | KeyCode::Left | KeyCode::Right => {
                 self.nodes_move_direction(key.code);
             }
             KeyCode::Esc if self.nodes.card.is_some() => {
@@ -927,10 +978,8 @@ impl App {
             KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.nodes_selected = 0
             }
-            KeyCode::Tab | KeyCode::Down => {
-                self.nodes_selected = (selected + 1) % controls.len().max(1)
-            }
-            KeyCode::BackTab | KeyCode::Up => {
+            KeyCode::Tab => self.nodes_selected = (selected + 1) % controls.len().max(1),
+            KeyCode::BackTab => {
                 self.nodes_selected = (selected + controls.len().max(1) - 1) % controls.len().max(1)
             }
             KeyCode::Enter if !self.nodes.loaded && self.nodes.card.is_none() => self.open_nodes(),
@@ -941,9 +990,6 @@ impl App {
                 if let Some(control) = controls.get(selected) {
                     self.activate(*control);
                 }
-            }
-            KeyCode::Left | KeyCode::Right if self.nodes.card.is_none() => {
-                self.activate(Control::NodesPage(key.code == KeyCode::Left));
             }
             KeyCode::Char(c)
                 if search && !key.modifiers.contains(KeyModifiers::CONTROL) && !c.is_control() =>
@@ -963,34 +1009,132 @@ impl App {
     fn nodes_move_direction(&mut self, direction: KeyCode) {
         let areas: Vec<_> = self.nodes_hits().iter().map(|hit| hit.area).collect();
         let selected = self.nodes_selected.min(areas.len().saturating_sub(1));
-        let Some(current) = areas.get(selected) else {
-            return;
-        };
-        let center = |area: &Rect| {
-            (
-                i32::from(area.x) * 2 + i32::from(area.width),
-                i32::from(area.y) * 2 + i32::from(area.height),
-            )
-        };
-        let (x, y) = center(current);
-        if let Some((index, _)) = areas
-            .iter()
-            .enumerate()
-            .filter_map(|(index, area)| {
-                let (nx, ny) = center(area);
-                let (forward, sideways) = match direction {
-                    KeyCode::Up => (y - ny, nx - x),
-                    KeyCode::Down => (ny - y, nx - x),
-                    KeyCode::Left => (x - nx, ny - y),
-                    KeyCode::Right => (nx - x, ny - y),
-                    _ => return None,
-                };
-                (forward > 0).then_some((index, (sideways != 0, forward, sideways.abs())))
-            })
-            .min_by_key(|(_, score)| *score)
-        {
+        if let Some(index) = directional_index(&areas, selected, direction) {
             self.nodes_selected = index;
         }
+    }
+    fn move_spatial(&mut self, direction: KeyCode) -> bool {
+        if !matches!(
+            direction,
+            KeyCode::Up | KeyCode::Down | KeyCode::Left | KeyCode::Right
+        ) {
+            return false;
+        }
+        let (controls, selected, offset) = match self.screen {
+            Screen::Temporary if !self.temporary_sidebar => {
+                (self.temporary_controls(), self.temporary.selected, 0)
+            }
+            Screen::NodeWizard => {
+                let Some(wizard) = &self.node_wizard else {
+                    return false;
+                };
+                let mut controls: Vec<_> = (0..wizard.choices().len())
+                    .map(Control::WizardChoice)
+                    .collect();
+                if wizard.step == crate::node_wizard::Step::Created {
+                    controls = vec![Control::WizardOpen, Control::WizardCancel];
+                } else if wizard.selection_step() {
+                    controls.extend([Control::WizardBack, Control::WizardCancel]);
+                } else {
+                    controls.extend([
+                        Control::WizardNext,
+                        Control::WizardBack,
+                        Control::WizardCancel,
+                    ]);
+                }
+                (controls, wizard.selected, 0)
+            }
+            Screen::Settings if self.settings_selected > 0 => (
+                SettingsPage::ALL
+                    .into_iter()
+                    .map(Control::SettingsPage)
+                    .collect(),
+                self.settings_selected - 1,
+                1,
+            ),
+            Screen::SettingsPage(SettingsPage::Profiles) if self.settings_selected > 0 => {
+                (self.profile_controls(), self.settings_selected - 1, 1)
+            }
+            Screen::SettingsPage(SettingsPage::Appearance) if self.settings_selected > 0 => {
+                let mut controls: Vec<_> = (0..ACCENTS.len()).map(Control::Accent).collect();
+                controls.extend([Control::AccentInput, Control::SaveAccent, Control::Settings]);
+                (controls, self.settings_selected - 1, 1)
+            }
+            Screen::SettingsPage(SettingsPage::Updates) if self.settings_selected > 0 => {
+                let mut controls = vec![Control::CheckWorkstationUpdates];
+                if self.self_release.is_some() {
+                    controls.push(Control::SelfUpdate);
+                }
+                controls.push(Control::Settings);
+                (controls, self.settings_selected - 1, 1)
+            }
+            _ => return false,
+        };
+        // Vertical lists must include entries outside the viewport. In particular,
+        // the sidebar Settings button is not the hidden content Back button.
+        if matches!(
+            self.screen,
+            Screen::Settings | Screen::SettingsPage(SettingsPage::Appearance)
+        ) && matches!(direction, KeyCode::Up | KeyCode::Down)
+        {
+            let next = if direction == KeyCode::Down {
+                (selected + 1).min(controls.len().saturating_sub(1))
+            } else {
+                selected.saturating_sub(1)
+            };
+            self.settings_selected = next + offset;
+            return true;
+        }
+        let visible: Vec<_> = controls
+            .iter()
+            .enumerate()
+            .filter_map(|(index, control)| {
+                if *control == Control::Settings
+                    && self
+                        .hits
+                        .iter()
+                        .filter(|hit| hit.control == *control)
+                        .count()
+                        < 2
+                {
+                    return None;
+                }
+                self.hits
+                    .iter()
+                    .rfind(|hit| hit.control == *control)
+                    .map(|hit| (index, hit.area))
+            })
+            .collect();
+        let Some(current) = visible.iter().position(|(index, _)| *index == selected) else {
+            return false;
+        };
+        let areas: Vec<_> = visible.iter().map(|(_, area)| *area).collect();
+        if let Some(next) = directional_index(&areas, current, direction) {
+            let next = visible[next].0;
+            match self.screen {
+                Screen::Temporary => self.temporary.selected = next,
+                Screen::NodeWizard => self.node_wizard.as_mut().unwrap().selected = next,
+                _ => {
+                    self.settings_selected = next + offset;
+                    if let Some(Control::Installation(index)) = controls.get(next) {
+                        self.settings_profile = *index;
+                    }
+                }
+            }
+        } else if matches!(direction, KeyCode::Up | KeyCode::Down) {
+            // Lists scroll by selecting the next off-screen entry.
+            let next = if direction == KeyCode::Down {
+                selected.checked_add(1)
+            } else {
+                selected.checked_sub(1)
+            };
+            if next.is_some_and(|next| {
+                next < controls.len() && !visible.iter().any(|(index, _)| *index == next)
+            }) {
+                return false;
+            }
+        }
+        true
     }
     fn section_navigation(&mut self, key: KeyCode) -> bool {
         if key == KeyCode::Esc && matches!(self.screen, Screen::SettingsPage(_)) {
@@ -1287,6 +1431,24 @@ impl App {
                     self.nodes.loaded = true;
                     self.nodes.card = None;
                 }
+                crate::nodes::Update::Observation(item) => {
+                    if self
+                        .nodes
+                        .card
+                        .as_ref()
+                        .is_some_and(|current| current.key == item.key)
+                    {
+                        if let Some(existing) = self
+                            .nodes
+                            .items
+                            .iter_mut()
+                            .find(|node| node.key == item.key)
+                        {
+                            *existing = item.clone();
+                        }
+                        self.nodes.card = Some(item);
+                    }
+                }
                 crate::nodes::Update::Card(item) => {
                     if let Some(existing) = self.nodes.items.iter_mut().find(|n| n.key == item.key)
                     {
@@ -1295,7 +1457,33 @@ impl App {
                     self.nodes.card = Some(item);
                 }
                 crate::nodes::Update::Operation(operation) => {
-                    self.nodes.operation = Some(operation)
+                    if operation.kind == "agent-rollouts" && operation.status == "succeeded" {
+                        if let Some(node) = self
+                            .nodes
+                            .card
+                            .as_mut()
+                            .filter(|node| node.key == operation.node_key)
+                        {
+                            node.agent = crate::nodes::AgentState::Ready;
+                        }
+                        if let Some(node) = self
+                            .nodes
+                            .items
+                            .iter_mut()
+                            .find(|node| node.key == operation.node_key)
+                        {
+                            node.agent = crate::nodes::AgentState::Ready;
+                        }
+                    }
+                    if !self.nodes_background
+                        || self
+                            .nodes
+                            .card
+                            .as_ref()
+                            .is_some_and(|node| node.key == operation.node_key)
+                    {
+                        self.nodes.operation = Some(operation)
+                    }
                 }
             },
             Event::Stage(label) => self.stage = label,
@@ -1316,6 +1504,13 @@ impl App {
             Event::Finished(result) => {
                 if self.nodes_busy {
                     self.nodes_busy = false;
+                    if self.nodes_background {
+                        self.nodes_background = false;
+                        if let Err(error) = result {
+                            self.error = error;
+                        }
+                        return;
+                    }
                     let failed = result.is_err();
                     self.screen = if self.temporary_busy {
                         self.temporary_busy = false;
@@ -1511,6 +1706,10 @@ impl App {
             let count = match self.screen {
                 Screen::Settings => SettingsPage::ALL.len(),
                 Screen::SettingsPage(SettingsPage::Profiles) => self.profile_controls().len(),
+                Screen::SettingsPage(SettingsPage::Appearance) => ACCENTS.len() + 3,
+                Screen::SettingsPage(SettingsPage::Updates) => {
+                    2 + usize::from(self.self_release.is_some())
+                }
                 _ => 0,
             };
             if count > 0 {
@@ -1525,6 +1724,42 @@ impl App {
                     self.settings_profile = self.settings_selected - 1;
                 }
                 return None;
+            }
+        }
+        if self.prompt.is_none()
+            && !self.exit
+            && matches!(
+                event.kind,
+                MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+            )
+        {
+            let backwards = event.kind == MouseEventKind::ScrollUp;
+            match self.screen {
+                Screen::NodeWizard => self.wizard_key(KeyEvent::new(
+                    if backwards {
+                        KeyCode::BackTab
+                    } else {
+                        KeyCode::Tab
+                    },
+                    KeyModifiers::NONE,
+                )),
+                Screen::Temporary => {
+                    self.temporary_sidebar = false;
+                    let count = self.temporary_controls().len().max(1);
+                    self.temporary.selected = if backwards {
+                        self.temporary.selected.saturating_sub(1)
+                    } else {
+                        (self.temporary.selected + 1).min(count - 1)
+                    };
+                }
+                Screen::Form => {
+                    if backwards {
+                        self.form.previous();
+                    } else {
+                        self.form.next();
+                    }
+                }
+                _ => {}
             }
         }
         if matches!(self.screen, Screen::Finished) && !self.exit && self.prompt.is_none() {
@@ -1712,7 +1947,9 @@ impl App {
                 ) {
                     match crate::temporary::qr_image(uri) {
                         Ok(image) => {
-                            *self.qr.borrow_mut() = Some(picker.new_resize_protocol(image));
+                            *self.qr_graphic.borrow_mut() =
+                                Some(picker.new_resize_protocol(image.clone()));
+                            *self.qr.borrow_mut() = Some(image);
                             self.qr_visible = true;
                             self.error.clear();
                         }
@@ -1872,29 +2109,10 @@ impl App {
                 }
                 return None;
             }
-            Control::NodesPrepare => {
-                self.screen = Screen::Form;
-                self.form.select_action(Action::PrepareNode);
-                self.form.selected = 1;
-                self.quick_focus = false;
-                if let Some(node) = &self.nodes.card
-                    && let Some(target) = &node.ssh_target
-                {
-                    if let Some((user, host)) = target.split_once('@') {
-                        self.form.fields[8] = host.into();
-                        self.form.fields[10] = user.into();
-                    } else {
-                        self.form.fields[8] = target.clone();
-                    }
-                }
-                return None;
-            }
-            Control::NodesSetup | Control::NodesBootstrap | Control::NodesDocker => {
+            Control::NodesSetup | Control::NodesBootstrap => {
                 if let Some(node) = &self.nodes.card {
                     self.nodes_requested = Some(if matches!(control, Control::NodesSetup) {
                         crate::nodes::Command::Setup(node.clone())
-                    } else if matches!(control, Control::NodesDocker) {
-                        crate::nodes::Command::Docker(node.clone())
                     } else {
                         crate::nodes::Command::Bootstrap(node.clone())
                     });
@@ -2160,15 +2378,9 @@ pub fn run(mut request: Request) -> Result<()> {
     let guard = TerminalGuard::enter()?;
     let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
     let mut app = App::new(&request);
-    app.image_picker = ratatui_image::picker::Picker::from_query_stdio()
-        .ok()
-        .filter(|p| {
-            crate::temporary::supports_images(
-                p.protocol_type(),
-                p.capabilities(),
-                std::env::var_os("WT_SESSION").is_some(),
-            )
-        });
+    // Terminal graphics can truncate the image or erase surrounding cells in
+    // Kitty and Windows Terminal. Keep QR disabled until rendering is reliable.
+    // Do not probe image capabilities: copy/save work in every terminal.
     app.load_connections(&request)?;
     if !app.connections.hide_quick_start {
         app.screen = Screen::QuickStart;
@@ -2186,7 +2398,10 @@ pub fn run(mut request: Request) -> Result<()> {
     let mut offer = false;
     let mut self_confirmation: Option<mpsc::Receiver<Answer>> = None;
     let mut self_updating = false;
+    let mut last_node_observation = std::time::Instant::now();
     let mut qr_was_visible = false;
+    let mut qr_needs_redraw = false;
+    let mut previous_accent = app.connections.accent.clone();
     loop {
         let selected = app.form.saved.as_ref().map(|p| {
             (
@@ -2212,7 +2427,29 @@ pub fn run(mut request: Request) -> Result<()> {
             app.temporary.page = 0;
             app.temporary_command(app.temporary.list());
         }
-        if let Some(command) = app.nodes_requested.take() {
+        if matches!(app.screen, Screen::Nodes)
+            && !app.nodes_busy
+            && app.nodes_requested.is_none()
+            && !app.nodes_sidebar
+            && app.prompt.is_none()
+            && !app.exit
+            && last_node_observation.elapsed() >= Duration::from_secs(3)
+            && app.ssh_state == crate::nodes::ConnectionState::Connected
+            && let Some(node) = &app.nodes.card
+            && node.needs_observation(app.nodes.operation.as_ref())
+        {
+            app.nodes_requested = Some(crate::nodes::Command::Observe(
+                node.clone(),
+                app.nodes
+                    .operation
+                    .clone()
+                    .filter(|operation| operation.node_key == node.key),
+            ));
+            last_node_observation = std::time::Instant::now();
+        }
+        if !app.nodes_busy
+            && let Some(command) = app.nodes_requested.take()
+        {
             let mut next = app.next_request();
             next.action = Action::Diagnose;
             next.host = app.form.fields[0].clone();
@@ -2225,11 +2462,15 @@ pub fn run(mut request: Request) -> Result<()> {
                     next.action = Action::Diagnose;
                     let (tx, rx) = mpsc::channel();
                     let temporary_command = matches!(command, crate::nodes::Command::Temporary(_));
+                    let observing = matches!(command, crate::nodes::Command::Observe(..));
                     nodes_worker.submit(next, command, tx)?;
                     receiver = Some(rx);
                     app.nodes_busy = true;
+                    app.nodes_background = observing;
                     app.temporary_busy = temporary_command;
-                    app.screen = Screen::Running;
+                    if !app.nodes_background {
+                        app.screen = Screen::Running;
+                    }
                     app.error.clear();
                     app.update = None;
                     app.tracker = Tracker::default();
@@ -2343,11 +2584,18 @@ pub fn run(mut request: Request) -> Result<()> {
         if finished {
             receiver = None;
         }
-        if qr_was_visible != app.qr_visible {
+        if qr_was_visible != app.qr_visible || previous_accent != app.connections.accent {
             terminal.clear()?;
+            qr_needs_redraw = true;
             qr_was_visible = app.qr_visible;
+            previous_accent = app.connections.accent.clone();
         }
-        terminal.draw(|frame| app.hits = draw(frame, &app))?;
+        // Graphics persist outside the cell buffer. Sending the same image on
+        // every idle tick clears and uploads it again, causing visible flicker.
+        if !app.qr_visible || qr_needs_redraw {
+            terminal.draw(|frame| app.hits = draw(frame, &app))?;
+            qr_needs_redraw = false;
+        }
         if !event::poll(Duration::from_millis(100))? {
             continue;
         }
@@ -2364,6 +2612,7 @@ pub fn run(mut request: Request) -> Result<()> {
                 // Image protocols draw outside ratatui's cell diff. Invalidate
                 // both buffers so resizing repaints every cell around the QR.
                 terminal.clear()?;
+                qr_needs_redraw = true;
             }
             TermEvent::Paste(text) => {
                 if matches!(&app.prompt, Some((Prompt::Password { .. }, _))) {
@@ -2426,7 +2675,14 @@ pub fn run(mut request: Request) -> Result<()> {
                     }
                     continue;
                 }
+                if app.qr_visible {
+                    app.temporary_key(key);
+                    continue;
+                }
                 if app.section_navigation(key.code) {
+                    continue;
+                }
+                if !key.modifiers.contains(KeyModifiers::CONTROL) && app.move_spatial(key.code) {
                     continue;
                 }
                 let quit = key.code == KeyCode::Esc
@@ -2869,6 +3125,53 @@ pub fn run(mut request: Request) -> Result<()> {
 fn draw(frame: &mut Frame, app: &App) -> Vec<Hit> {
     let mut hits = Vec::new();
     let area = frame.area();
+    if app.qr_visible {
+        frame.render_widget(ratatui::widgets::Clear, area);
+        // Keep all controls above the image: some graphics protocols erase cells
+        // below their output. Closing restores the entire underlying screen.
+        let modal = Rect::new(
+            area.x + 1,
+            area.y + 1,
+            area.width.saturating_sub(2),
+            area.height.saturating_sub(2),
+        );
+        frame.render_widget(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("QR code")
+                .border_style(Style::default().fg(accent_color(&app.connections.accent))),
+            modal,
+        );
+        let close = Rect::new(
+            modal.x + 2,
+            modal.y + 1,
+            modal.width.saturating_sub(4).min(22),
+            3,
+        );
+        draw_button(frame, close, "Close", true);
+        hits.push(Hit {
+            area: close,
+            control: Control::TemporaryBack,
+        });
+        let image_area = Rect::new(
+            modal.x + 2,
+            modal.y + 5,
+            modal.width.saturating_sub(4),
+            modal.height.saturating_sub(6),
+        );
+        if let Some(qr) = app.qr_graphic.borrow_mut().as_mut() {
+            frame.render_stateful_widget(
+                ratatui_image::StatefulImage::default().resize(ratatui_image::Resize::Scale(Some(
+                    image::imageops::FilterType::Nearest,
+                ))),
+                image_area,
+                qr,
+            );
+        } else if let Some(qr) = app.qr.borrow().as_ref() {
+            draw_qr(frame, image_area, qr);
+        }
+        return hits;
+    }
     let rows = Layout::vertical([
         Constraint::Length(3),
         Constraint::Min(4),
@@ -3400,6 +3703,64 @@ fn centered(area: Rect, width: u16, height: u16) -> Rect {
         height,
     )
 }
+fn directional_index(areas: &[Rect], selected: usize, direction: KeyCode) -> Option<usize> {
+    let center = |area: &Rect| {
+        (
+            i32::from(area.x) * 2 + i32::from(area.width),
+            i32::from(area.y) * 2 + i32::from(area.height),
+        )
+    };
+    let current = areas.get(selected)?;
+    let (x, y) = center(current);
+    areas
+        .iter()
+        .enumerate()
+        .filter_map(|(index, area)| {
+            if matches!(direction, KeyCode::Left | KeyCode::Right)
+                && (area.y >= current.bottom() || area.bottom() <= current.y)
+            {
+                return None;
+            }
+            let (nx, ny) = center(area);
+            let (forward, sideways) = match direction {
+                KeyCode::Up => (y - ny, nx - x),
+                KeyCode::Down => (ny - y, nx - x),
+                KeyCode::Left => (x - nx, ny - y),
+                KeyCode::Right => (nx - x, ny - y),
+                _ => return None,
+            };
+            (forward > 0).then_some((index, (sideways != 0, forward, sideways.abs())))
+        })
+        .min_by_key(|(_, score)| *score)
+        .map(|(index, _)| index)
+}
+
+fn button_areas(area: Rect, count: usize, max_rows: usize) -> Vec<Rect> {
+    if count == 0 {
+        return Vec::new();
+    }
+    let rows = if count > 3 {
+        max_rows.min(usize::from(area.height / 3)).max(1)
+    } else {
+        1
+    };
+    let columns = count.div_ceil(rows);
+    (0..count)
+        .map(|index| {
+            let row = index / columns;
+            let row_count = (count - row * columns).min(columns);
+            Layout::horizontal(vec![Constraint::Fill(1); row_count])
+                .spacing(1)
+                .split(Rect::new(
+                    area.x,
+                    area.y + row as u16 * 3,
+                    area.width,
+                    3.min(area.height),
+                ))[index % columns]
+        })
+        .collect()
+}
+
 fn draw_temporary(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
     use crate::temporary::View;
     let right = draw_navigation(frame, app, area, hits);
@@ -3615,11 +3976,7 @@ fn draw_temporary(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>)
             .split(rows[1]);
         frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), layout[0]);
         if let Some(qr) = app.qr.borrow_mut().as_mut() {
-            frame.render_stateful_widget(
-                ratatui_image::StatefulImage::default().resize(ratatui_image::Resize::Scale(None)),
-                layout[1],
-                qr,
-            );
+            draw_qr(frame, layout[1], qr);
         }
     } else {
         frame.render_widget(
@@ -3629,24 +3986,16 @@ fn draw_temporary(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>)
             rows[1],
         );
     }
-    let count = actions.len();
-    let per_row = count.div_ceil(2).max(1);
+    let areas = button_areas(rows[2], actions.len(), 2);
     // Focus indexes use only visible controls, matching mouse hit targets.
     index = hits
         .iter()
         .filter(|h| matches!(h.control, Control::TemporaryChoice(_)))
         .count();
     for (i, (label, control)) in actions.into_iter().enumerate() {
-        let row = i / per_row;
-        let column = i % per_row;
-        let row_count = (count - row * per_row).min(per_row);
-        let columns =
-            Layout::horizontal(vec![Constraint::Ratio(1, row_count as u32); row_count]).split(
-                Rect::new(rows[2].x, rows[2].y + row as u16 * 3, rows[2].width, 3),
-            );
         draw_button_color(
             frame,
-            columns[column],
+            areas[i],
             label,
             selected(index),
             if label.starts_with("Revoke") {
@@ -3656,7 +4005,7 @@ fn draw_temporary(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>)
             },
         );
         hits.push(Hit {
-            area: columns[column],
+            area: areas[i],
             control,
         });
         index += 1;
@@ -3789,21 +4138,22 @@ fn draw_nodes(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
                 )
         });
         if !busy {
-            if node.transport.is_some() && node.agent == crate::nodes::AgentState::Missing {
-                actions.push(("Agent setup", Control::NodesSetup));
-            }
-            if let Some(facts) = &node.services {
-                if facts["docker"] == false {
-                    actions.push(("Install Docker", Control::NodesDocker));
-                } else if facts["docker"] == true && node.can_bootstrap() {
-                    actions.push(("Bootstrap", Control::NodesBootstrap));
+            if node.protocols.is_empty() {
+                if matches!(
+                    node.agent,
+                    crate::nodes::AgentState::Missing | crate::nodes::AgentState::Unknown
+                ) {
+                    actions.push(("Setup agent", Control::NodesSetup));
                 }
+            } else if node.needs_setup() {
+                let label = if node.agent == crate::nodes::AgentState::Ready && node.can_bootstrap()
+                {
+                    "Install protocols"
+                } else {
+                    "Server setup"
+                };
+                actions.push((label, Control::NodesBootstrap));
             }
-        }
-        if node.transport.as_deref() == Some("ssh")
-            && node.agent == crate::nodes::AgentState::Missing
-        {
-            actions.push(("Prepare SSH", Control::NodesPrepare));
         }
         actions.push(("Temporary configs", Control::NodeTemporary));
         actions.extend([
@@ -3907,23 +4257,11 @@ fn draw_nodes(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
             ("New node", Control::NodesNew),
         ]);
     }
-    let count = actions.len();
-    let per_row = if card.is_some() {
-        count.div_ceil(2).max(1)
-    } else {
-        count.max(1)
-    };
+    let areas = button_areas(rows[2], actions.len(), if card.is_some() { 2 } else { 1 });
     for (position, (label, control)) in actions.into_iter().enumerate() {
-        let row = position / per_row;
-        let column = position % per_row;
-        let row_count = (count - row * per_row).min(per_row);
-        let columns =
-            Layout::horizontal(vec![Constraint::Ratio(1, row_count as u32); row_count]).split(
-                Rect::new(rows[2].x, rows[2].y + row as u16 * 3, rows[2].width, 3),
-            );
-        draw_button(frame, columns[column], label, selected(index));
+        draw_button(frame, areas[position], label, selected(index));
         hits.push(Hit {
-            area: columns[column],
+            area: areas[position],
             control,
         });
         index += 1;
@@ -4045,11 +4383,7 @@ Code: {}",
             ("Cancel", Control::WizardCancel),
         ]
     };
-    let columns = Layout::horizontal(vec![
-        Constraint::Ratio(1, buttons.len() as u32);
-        buttons.len()
-    ])
-    .split(rows[2]);
+    let columns = button_areas(rows[2], buttons.len(), 1);
     for (index, (label, control)) in buttons.into_iter().enumerate() {
         let selected = wizard.selected == choices.len() + index;
         draw_button(frame, columns[index], label, selected);
@@ -4539,10 +4873,21 @@ fn draw_navigation(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>
                 control: Control::Temporary,
             });
         } else {
+            let disabled = Style::default().fg(Color::DarkGray);
+            let block = Block::bordered().border_style(disabled);
             frame.render_widget(
-                Paragraph::new("Temporary configurations")
-                    .style(Style::default().fg(Color::DarkGray))
-                    .block(Block::bordered()),
+                Paragraph::new(if rect.height < 3 {
+                    ""
+                } else {
+                    "Temporary configs"
+                })
+                .alignment(ratatui::layout::Alignment::Center)
+                .style(disabled)
+                .block(if rect.height < 3 {
+                    block.title("Temporary configs").title_style(disabled)
+                } else {
+                    block
+                }),
                 rect,
             );
         }
@@ -4751,13 +5096,17 @@ fn draw_appearance(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>
             content.width,
             3,
         );
-        draw_field(
-            frame,
-            rect,
-            &label,
-            &value,
-            app.settings_selected == index + 1,
-        );
+        if matches!(control, Control::Settings | Control::SaveAccent) {
+            draw_button(frame, rect, &label, app.settings_selected == index + 1);
+        } else {
+            draw_field(
+                frame,
+                rect,
+                &label,
+                &value,
+                app.settings_selected == index + 1,
+            );
+        }
         hits.push(Hit {
             area: rect,
             control,
@@ -4767,7 +5116,7 @@ fn draw_appearance(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>
 fn draw_profiles(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
     let right = draw_navigation(frame, app, area, hits);
     let mut sections = dialog(frame, right, " Installation profiles ");
-    if right.width < 60 && !app.connections.installations.is_empty() {
+    if !app.connections.installations.is_empty() {
         let inner = Block::bordered().inner(right);
         let layout = Layout::vertical([Constraint::Min(1), Constraint::Length(6)]).split(inner);
         sections = [layout[0], layout[1]];
@@ -4831,28 +5180,7 @@ fn draw_profiles(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) 
             ("Back", Control::Settings),
         ]
     };
-    let mut buttons = Vec::new();
-    if sections[1].height >= 6 {
-        let rows =
-            Layout::vertical([Constraint::Length(3), Constraint::Length(3)]).split(sections[1]);
-        for (row, count) in [(rows[0], 3), (rows[1], 2)] {
-            buttons.extend(
-                Layout::horizontal(vec![Constraint::Fill(1); count])
-                    .spacing(1)
-                    .split(row)
-                    .iter()
-                    .copied(),
-            );
-        }
-    } else {
-        buttons.extend(
-            Layout::horizontal(vec![Constraint::Fill(1); actions.len()])
-                .spacing(1)
-                .split(sections[1])
-                .iter()
-                .copied(),
-        );
-    }
+    let buttons = button_areas(sections[1], actions.len(), 2);
     for (index, (label, control)) in actions.into_iter().enumerate() {
         draw_button_color(
             frame,
@@ -4986,6 +5314,54 @@ fn draw_editor(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn qr_preserves_black_and_white_modules_and_requires_enough_space() {
+        let image = crate::temporary::qr_image("vpn://SECRET").unwrap();
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(40, 20)).unwrap();
+        terminal
+            .draw(|frame| draw_qr(frame, frame.area(), &image))
+            .unwrap();
+        for cell in terminal.backend().buffer().content() {
+            if cell.symbol() == "▀" {
+                assert!(matches!(cell.fg, Color::Black | Color::White));
+                assert!(matches!(cell.bg, Color::Black | Color::White));
+            }
+        }
+        terminal.backend_mut().resize(20, 10);
+        terminal.clear().unwrap();
+        terminal
+            .draw(|frame| draw_qr(frame, frame.area(), &image))
+            .unwrap();
+        assert!(format!("{:?}", terminal.backend().buffer()).contains("Enlarge"));
+    }
+
+    #[test]
+    fn repeated_custom_accents_persist_and_render_each_selected_color() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::new(&test_request());
+        app.state_dir = directory.path().into();
+        app.activate(Control::SettingsPage(SettingsPage::Appearance));
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 40)).unwrap();
+        for color in [
+            "#123abc", "#ffbb74", "#55b1c2", "#123abc", "#000000", "#ffffff",
+        ] {
+            app.accent_input = color.into();
+            app.activate(Control::SaveAccent);
+            assert!(app.error.is_empty());
+            terminal.clear().unwrap();
+            terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+            assert_eq!(Connections::load(directory.path()).unwrap().accent, color);
+            assert!(
+                terminal
+                    .backend()
+                    .buffer()
+                    .content
+                    .iter()
+                    .any(|cell| cell.fg == accent_color(color))
+            );
+        }
+    }
+
+    #[test]
     fn quick_start_keyboard_opens_profile_and_escape_closes_guide() {
         let mut app = test_profile_app();
         let directory = tempfile::tempdir().unwrap();
@@ -5004,6 +5380,23 @@ mod tests {
     }
 
     #[test]
+    fn qr_modal_has_only_close_and_escape_or_enter_restores_artifact() {
+        for key in [KeyCode::Esc, KeyCode::Enter] {
+            let mut app = test_profile_app();
+            app.screen = Screen::Temporary;
+            app.temporary.view = crate::temporary::View::Artifact;
+            app.qr_visible = true;
+            let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 40)).unwrap();
+            terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+            assert_eq!(app.hits.len(), 1);
+            assert!(matches!(app.hits[0].control, Control::TemporaryBack));
+            app.temporary_key(KeyEvent::new(key, KeyModifiers::NONE));
+            assert!(!app.qr_visible);
+            assert!(app.temporary.view == crate::temporary::View::Artifact);
+        }
+    }
+
+    #[test]
     fn temporary_qr_survives_small_and_large_layouts_without_showing_uri() {
         let mut app = test_profile_app();
         app.screen = Screen::Temporary;
@@ -5014,8 +5407,7 @@ mod tests {
         app.temporary.artifact = Some(serde_json::json!({"content":"vpn://SECRET"}));
         let mut picker = ratatui_image::picker::Picker::halfblocks();
         picker.set_protocol_type(ratatui_image::picker::ProtocolType::Sixel);
-        *app.qr.borrow_mut() =
-            Some(picker.new_resize_protocol(crate::temporary::qr_image("vpn://SECRET").unwrap()));
+        *app.qr.borrow_mut() = Some(crate::temporary::qr_image("vpn://SECRET").unwrap());
         app.image_picker = Some(picker);
         app.qr_visible = true;
         let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
@@ -5027,7 +5419,7 @@ mod tests {
             assert!(
                 app.hits
                     .iter()
-                    .any(|hit| matches!(hit.control, Control::TemporaryCopy))
+                    .any(|hit| matches!(hit.control, Control::TemporaryBack))
             );
         }
     }
@@ -5142,6 +5534,31 @@ mod tests {
         app.prompt_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
         assert!(matches!(rx.recv().unwrap(), Answer::Cancel));
     }
+    #[test]
+    fn background_observation_preserves_screen_and_selection() {
+        let mut app = test_profile_app();
+        app.screen = Screen::Nodes;
+        app.nodes_busy = true;
+        app.nodes_background = true;
+        app.nodes_selected = 3;
+        app.event(Event::Finished(Ok("Registry observed".into())));
+        assert!(matches!(app.screen, Screen::Nodes));
+        assert_eq!(app.nodes_selected, 3);
+        assert!(!app.nodes_busy);
+        assert!(!app.nodes_background);
+    }
+
+    #[test]
+    fn install_token_precedes_release_without_changing_field_identity() {
+        let mut form = Form::new(&test_request());
+        form.action = Action::Install;
+        let fields = form.visible();
+        assert!(
+            fields.iter().position(|i| *i == 6).unwrap()
+                < fields.iter().position(|i| *i == 4).unwrap()
+        );
+    }
+
     #[test]
     fn action_forms_do_not_offer_administrator_selector() {
         let mut form = Form::new(&test_request());
@@ -5458,6 +5875,38 @@ mod tests {
         assert!(!app.actions_enabled());
         assert_eq!(app.profile_controls().len(), 2);
     }
+    #[test]
+    fn compact_appearance_keeps_apply_between_input_and_back() {
+        let mut app = test_profile_app();
+        app.screen = Screen::SettingsPage(SettingsPage::Appearance);
+        app.settings_selected = ACCENTS.len() + 1;
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(60, 13)).unwrap();
+        terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+        app.appearance_key(KeyCode::Down);
+        assert_eq!(app.settings_selected, ACCENTS.len() + 2);
+        terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+        assert!(
+            app.hits
+                .iter()
+                .any(|hit| hit.control == Control::SaveAccent)
+        );
+        app.mouse(MouseEvent {
+            kind: MouseEventKind::ScrollDown,
+            column: 50,
+            row: 5,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert_eq!(app.settings_selected, ACCENTS.len() + 3);
+        app.mouse(MouseEvent {
+            kind: MouseEventKind::ScrollUp,
+            column: 50,
+            row: 5,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert_eq!(app.settings_selected, ACCENTS.len() + 2);
+        assert!(app.nodes_requested.is_none());
+    }
+
     #[test]
     fn compact_settings_scroll_and_update_checks_keep_server_actions_idle() {
         let mut app = test_profile_app();
@@ -5846,7 +6295,8 @@ mod tests {
             app.nodes_requested.take(),
             Some(crate::nodes::Command::List)
         ));
-        app.activate(Control::NodesPrepare);
+        app.screen = Screen::Form;
+        app.form.selected = 1;
         terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
         let target_position = app
             .form
@@ -5976,7 +6426,7 @@ mod tests {
         restarted.form.select_action(Action::Diagnose);
         assert_eq!(restarted.form.visible(), vec![11]);
         restarted.form.select_action(Action::Install);
-        assert_eq!(restarted.form.visible(), vec![4, 6]);
+        assert_eq!(restarted.form.visible(), vec![6, 4]);
     }
     #[test]
     fn switching_installations_drops_target_and_secret_and_does_not_reuse_another_update() {
@@ -6231,9 +6681,14 @@ mod tests {
                 .any(|h| matches!(h.control, Control::NodesNew))
         );
         assert!(
-            !app.hits
+            !terminal
+                .backend()
+                .buffer()
+                .content
                 .iter()
-                .any(|h| matches!(h.control, Control::NodesPrepare))
+                .map(|c| c.symbol())
+                .collect::<String>()
+                .contains("Prepare SSH")
         );
         app.activate(Control::NodesNew);
         assert!(matches!(
@@ -6323,7 +6778,45 @@ mod tests {
         assert!(app.nodes_requested.is_none());
     }
     #[test]
-    fn node_card_requires_live_prerequisites_and_hides_mutations_while_busy() {
+    fn agent_only_card_switches_to_protocol_installation_after_protocol_is_added() {
+        let mut app = test_profile_app();
+        app.activate(Control::Action(Action::PrepareNode));
+        app.nodes_requested = None;
+        let mut node = browser_node("lv1", "Europe");
+        node.protocols.clear();
+        node.agent = crate::nodes::AgentState::Missing;
+        node.overview.as_mut().unwrap()["state"] = serde_json::json!("agent_only");
+        node.overview.as_mut().unwrap()["settings_complete"] = serde_json::json!(false);
+        app.nodes.card = Some(node.clone());
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
+        terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+        assert!(app.nodes_controls().contains(&Control::NodesSetup));
+        assert!(!app.nodes_controls().contains(&Control::NodesBootstrap));
+        node.agent = crate::nodes::AgentState::Ready;
+        app.nodes.card = Some(node.clone());
+        terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+        assert!(!app.nodes_controls().contains(&Control::NodesSetup));
+        node.protocols.push("awg".into());
+        node.overview.as_mut().unwrap()["state"] = serde_json::json!("not_installed");
+        node.overview.as_mut().unwrap()["settings_complete"] = serde_json::json!(true);
+        app.nodes.card = Some(node);
+        terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+        assert!(app.nodes_controls().contains(&Control::NodesBootstrap));
+        assert!(!app.nodes_controls().contains(&Control::NodesSetup));
+        assert!(
+            terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(|c| c.symbol())
+                .collect::<String>()
+                .contains("Install protocols")
+        );
+    }
+
+    #[test]
+    fn node_card_bootstrap_checks_prerequisites_in_worker_and_hides_mutations_while_busy() {
         let mut app = test_profile_app();
         app.activate(Control::Action(Action::PrepareNode));
         app.nodes_requested = None;
@@ -6332,7 +6825,7 @@ mod tests {
         let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
         terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
         assert!(
-            !app.nodes_controls()
+            app.nodes_controls()
                 .iter()
                 .any(|c| matches!(c, Control::NodesBootstrap))
         );
@@ -6409,7 +6902,8 @@ mod tests {
         app.activate(Control::Action(Action::PrepareNode));
         app.nodes_requested = None;
         let mut node = browser_node("lv1", "Europe");
-        node.transport = Some("local".into());
+        node.transport = Some("ssh".into());
+        node.overview.as_mut().unwrap()["state"] = serde_json::json!("installed");
         node.agent = crate::nodes::AgentState::Missing;
         node.services =
             Some(serde_json::json!({"docker":true,"awg_running":false,"xray_running":false}));
@@ -6421,12 +6915,12 @@ mod tests {
             let count = app.nodes_controls().len();
             let per_row = count.div_ceil(2);
             let areas: Vec<_> = app.nodes_hits().iter().map(|hit| hit.area).collect();
-            assert_eq!(count, 5);
+            assert_eq!(count, 4);
             let first = &areas[..per_row];
             let last = &areas[per_row..];
             assert_eq!(first[0].x, last[0].x);
             assert_eq!(first.last().unwrap().right(), last.last().unwrap().right());
-            assert!(last[0].width > first[0].width);
+            assert_eq!(last[0].width, first[0].width);
             assert!(last[0].width.abs_diff(last[1].width) <= 1);
             app.nodes_selected = per_row;
             app.nodes_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
@@ -6434,7 +6928,7 @@ mod tests {
             app.nodes_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
             assert_eq!(app.nodes_selected, 1);
             app.nodes_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
-            assert_eq!(app.nodes_selected, 2);
+            assert_eq!(app.nodes_selected, 1);
             app.nodes_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
             assert_eq!(app.nodes_selected, per_row + 1);
             app.nodes_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
@@ -6447,12 +6941,81 @@ mod tests {
         }
     }
     #[test]
+    fn profile_actions_use_spatial_navigation_without_wrapping_rows() {
+        let mut app = test_profile_app();
+        app.activate(Control::SettingsPage(SettingsPage::Profiles));
+        for (width, height) in [(80, 24), (120, 40)] {
+            let mut terminal =
+                Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
+            app.settings_selected = 2; // Use, after the one saved profile.
+            terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+            assert!(app.move_spatial(KeyCode::Right));
+            assert_eq!(app.settings_selected, 3); // Edit, on the same row.
+            app.settings_selected = 2;
+            assert!(app.move_spatial(KeyCode::Down));
+            assert_eq!(app.settings_selected, 5); // Delete, on the lower row.
+            assert!(app.move_spatial(KeyCode::Right));
+            assert_eq!(app.settings_selected, 6); // Back.
+            assert!(app.move_spatial(KeyCode::Right));
+            assert_eq!(app.settings_selected, 6); // No jump to another row.
+            assert!(app.move_spatial(KeyCode::Up));
+            assert_eq!(app.settings_selected, 4); // New, above Back.
+            assert!(matches!(
+                app.screen,
+                Screen::SettingsPage(SettingsPage::Profiles)
+            ));
+        }
+    }
+    #[test]
+    fn empty_profiles_actions_fill_the_row_and_small_grids_stay_in_bounds() {
+        for width in [30, 61, 100] {
+            for count in 1..=7 {
+                let area = Rect::new(3, 5, width, 6);
+                let buttons = button_areas(area, count, 2);
+                assert_eq!(buttons.len(), count);
+                for row in [5, 8] {
+                    let cells: Vec<_> = buttons.iter().filter(|cell| cell.y == row).collect();
+                    if !cells.is_empty() {
+                        assert_eq!(cells.first().unwrap().x, area.x);
+                        assert_eq!(cells.last().unwrap().right(), area.right());
+                        assert!(cells.iter().all(|cell| cell.bottom() <= area.bottom()));
+                    }
+                }
+            }
+        }
+        let mut app = test_profile_app();
+        app.connections.installations.clear();
+        app.activate(Control::SettingsPage(SettingsPage::Profiles));
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
+        terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+        let new = app
+            .hits
+            .iter()
+            .find(|hit| hit.control == Control::NewInstallation)
+            .unwrap()
+            .area;
+        let back = app
+            .hits
+            .iter()
+            .rfind(|hit| hit.control == Control::Settings)
+            .unwrap()
+            .area;
+        assert_eq!(new.y, back.y);
+        assert!(new.width.abs_diff(back.width) <= 1);
+        app.settings_selected = 1;
+        assert!(app.move_spatial(KeyCode::Right));
+        assert_eq!(app.settings_selected, 2);
+        assert!(app.move_spatial(KeyCode::Down));
+        assert_eq!(app.settings_selected, 2);
+    }
+    #[test]
     fn agent_setup_requires_confirmed_absence_and_ssh_status_keeps_layout_fixed() {
         let mut app = test_profile_app();
         app.activate(Control::Action(Action::PrepareNode));
         app.nodes_requested = None;
         let mut node = browser_node("lv1", "Europe");
         node.transport = Some("ssh".into());
+        node.overview.as_mut().unwrap()["state"] = serde_json::json!("installed");
         let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
         for state in [
             crate::nodes::AgentState::Unknown,
@@ -6466,14 +7029,23 @@ mod tests {
             assert_eq!(
                 app.nodes_controls()
                     .iter()
-                    .any(|c| matches!(c, Control::NodesSetup)),
+                    .any(|c| matches!(c, Control::NodesBootstrap)),
                 state == crate::nodes::AgentState::Missing
             );
-            assert_eq!(
-                app.nodes_controls()
+            assert!(
+                !terminal
+                    .backend()
+                    .buffer()
+                    .content
                     .iter()
-                    .any(|control| matches!(control, Control::NodesPrepare)),
-                state == crate::nodes::AgentState::Missing
+                    .map(|c| c.symbol())
+                    .collect::<String>()
+                    .contains("Prepare SSH")
+            );
+            assert!(
+                !app.nodes_controls()
+                    .iter()
+                    .any(|control| matches!(control, Control::NodesSetup))
             );
         }
         let mut areas = None;

@@ -1,4 +1,5 @@
 """Administrator-only temporary access; all mutations belong to the backend worker."""
+import asyncio
 from uuid import uuid4
 from urllib.parse import quote
 
@@ -102,7 +103,7 @@ async def card(query, bot, backend, state, identity, show=False):
         lines.append(tr(locale,'temporary.expires',value=item['expires_at'][:19].replace('T',' ')+' UTC'))
     if item['protocol']=='xray':
         lines.append(tr(locale,'temporary.vless_notice'))
-    if item['status']=='active':
+    if item['status']=='active' and not show:
         rows.append([button(locale,'temporary.show','show:'+identity)])
     if item['status'] not in {'expired','revoked','cancelled','revoking'}:
         rows.append([button(locale,'temporary.revoke','confirm_revoke:'+identity,'danger')])
@@ -110,13 +111,22 @@ async def card(query, bot, backend, state, identity, show=False):
     kwargs = {}
     if show:
         artifact = await request(backend,query.from_user.id,'GET','/'+identity+'/artifact')
-        kwargs = dict(uri=artifact['content'],uri_collapsed=True,uri_title=tr(locale,'ui.config_link'),
+        from .user import config_qr, qr_payload
+        uri = artifact['content']
+        image = await asyncio.to_thread(config_qr, qr_payload(item['protocol'],item['transport'],uri))
+        lines.append(tr(locale,'ui.config_intro'))
+        kwargs = dict(uri=uri,uri_collapsed=True,uri_title=tr(locale,'ui.config_link'),
+            qr=image,qr_title=tr(locale,'ui.config_qr'),
+            details_title=tr(locale,'ui.config_help'),
+            details_lines=(tr(locale,'config.import_xray' if item['protocol']=='xray' else 'config.import_awg_vpn'),),
             uri_rows=((button(locale,'config.link.send','plain:'+identity),),),
             files=tuple((f['filename'],f['content'].encode()) for f in artifact['files']),files_title=tr(locale,'ui.config_files'))
     rich = await draw(query,bot,state,'temporary.title',lines,rows,**kwargs)
     if show and rich is False:
         for name,content in kwargs['files']:
             await bot.send_document(query.message.chat.id,BufferedInputFile(content,name))
+        if kwargs.get('qr'):
+            await bot.send_photo(query.message.chat.id,BufferedInputFile(kwargs['qr'],'config.png'))
 
 
 @router.callback_query(F.data.startswith('temporary:'))

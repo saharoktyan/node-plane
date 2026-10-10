@@ -8,6 +8,16 @@ Remaining work is tracked only in [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md).
 
 ## Identity and authorization
 
+Initial node installation is coordinated by `POST /api/v1/nodes/{key}/bootstrap`
+with an idempotency key and `{ "action": "bootstrap", "revision": N }`.
+`GET /api/v1/node-bootstraps/{id}` returns the durable parent operation:
+agent, Docker, protocols, then done. Each stage refers to its existing child
+journal; uncertain children are observed or explicitly resolved, never replayed.
+Confirmed agent/Docker availability skips those installation steps. Active or
+blocked bootstrap prevents competing node changes and controller maintenance.
+Workstation prepares controller SSH access before submitting an SSH bootstrap.
+Telegram requires the controller to already have SSH access to the host.
+
 Accounts have immutable UUIDs and independent external identities. Telegram
 uses a numeric user ID for identity binding, never username or chat title.
 Accounts and VPN profiles are separate backend entities even though Telegram
@@ -287,3 +297,33 @@ missing, changed or incompatible revisions return 503. Deployment uses
 also checks schema compatibility. Migration history survives configuration backup
 restore/reset, and rolling back application binaries never downgrades the schema.
 See [migration instructions](app/db/MIGRATIONS.md) for revision and rollback rules.
+
+Installer progress: agent rollout and Bootstrap reads may include nullable `progress`
+with a fixed `stage` code and English `label`. This is a last observed installer step,
+not confirmation of success. Terminal success clears the observation; blocked jobs
+may retain the last observed step. Console output and SSH targets are never returned.
+
+Server setup is the durable node Bootstrap coordinator. It also accepts nodes with
+previously applied settings to restore missing prerequisites; confirmed configured
+and running protocols at the current revision are skipped. Agent-only nodes are
+created with `protocols: []` and use the agent rollout endpoint; no Docker/protocol
+job is queued for that action. Adding protocols later enables the normal coordinator.
+Node jobs expose the same optional last-observed `progress` as agent rollouts.
+
+
+Recovery now inventories node settings tasks and Server setup coordinators alongside
+updates, node jobs, agent rollouts, profile tasks, removals and backups. Items include
+sanitized cause codes, a next-step category and optional profile/child identities.
+`POST /api/v1/system/recovery/{kind}/{identity}/{action}` supports targeted journal
+recheck and existing retirement-based resolution for node/settings/profile commands,
+independent confirmation of a bound current agent, and coordinator continuation
+before dispatch or adoption of an already committed child. Every action requires
+an approved administrator, relevant scopes, no conflicting maintenance and the worker
+flock. Unknown outcomes remain blocked; no generic force-unlock is provided.
+Settings/profile retirement may queue a fresh revision and returns `replacement_id`.
+Agent confirmation requires exact node identity, connection binding and current
+controller build; connectivity alone is insufficient.
+`GET /api/v1/system/recovery/controller` returns the secret-free controller diagnostics.
+`GET /api/v1/system/recovery/history?offset=0` returns paginated recovery attempts,
+actor UUIDs, original operation identities and outcomes. Migration 5 adds the
+recovery audit table; interrupted actions remain admitted rather than recorded successful.

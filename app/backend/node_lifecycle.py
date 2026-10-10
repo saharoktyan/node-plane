@@ -118,6 +118,11 @@ class NodeLifecycle:
             if previous is not None:
                 return {'node_key': node_key, 'status': 'draining',
                         'operation_ids': json.loads(previous['operation_ids_json'])}
+            if abandon_uncertain_settings:
+                conn.execute("UPDATE backend_node_bootstraps SET status='superseded' WHERE node_key=? AND status IN ('awaiting_executor','running','blocked')", (node_key,))
+            else:
+                from .node_bootstrap import require_idle
+                require_idle(conn, node_key)
             if not abandon_uncertain_settings and conn.execute('''SELECT 1 FROM backend_agent_rollouts WHERE node_key = ?
                 AND status IN ('awaiting_executor', 'running')''',
                 (node_key,)).fetchone():
