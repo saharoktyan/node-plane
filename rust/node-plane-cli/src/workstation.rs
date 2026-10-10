@@ -663,6 +663,13 @@ async fn update(
             "Update the entire stack on {} to {} ({})?\n\nBackend, worker, driver and Telegram client are updated together, followed by node agents and runtimes. The backend manages rollback if a controller component fails.\n\nOperation: {}",
             request.host, record.intent.target_ref, record.intent.branch, record.id
         );
+        let description = if !request.tag.trim().is_empty() {
+            format!(
+                "{description}\n\nAn older or incompatible version can break this installation. Check the selected version before confirming."
+            )
+        } else {
+            description
+        };
         if !request.workflow.yes && !events::confirm(tx, "Update the whole stack", description)? {
             record.complete = true;
             if record.path(&request.state_dir).exists() {

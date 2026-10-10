@@ -231,19 +231,23 @@ async def show_home(chat_id: int, user_id: int, bot: Bot, backend: BackendClient
     data = await state.get_data()
     locale = normalize_locale(data.get('locale'))
     presentation = data.get('home_presentation')
+    notifications = {'total': 0}
     # Only reuse menu presentation for navigation, never as authorization.
     # Every destination/action still makes its own authenticated backend calls.
     if (cached_navigation and account is None and presentation and
             presentation.get('user_id') == user_id and
             presentation['account']['status'] == 'approved'):
         account, title = presentation['account'], presentation['title']
+        notifications = {'total': presentation.get('notifications_count', 0)}
     else:
         try:
             async with asyncio.timeout(ONBOARDING_TIMEOUT):
                 if account is None:
-                    account, title = await asyncio.gather(backend.me(user_id), backend.bot_title(user_id))
+                    account, title, notifications = await asyncio.gather(
+                        backend.me(user_id), backend.bot_title(user_id), backend.notifications(user_id, limit=1))
                 else:
-                    title = await backend.bot_title(user_id)
+                    title, notifications = await asyncio.gather(
+                        backend.bot_title(user_id), backend.notifications(user_id, limit=1))
                 if account['status'] != 'approved':
                     policy, requests = await asyncio.gather(backend.access_request_policy(user_id),
                         backend.request('GET', '/api/v1/me/access-requests?limit=25', telegram_user_id=user_id))
@@ -251,7 +255,7 @@ async def show_home(chat_id: int, user_id: int, bot: Bot, backend: BackendClient
             raise BackendError('backend_unavailable', 503) from None
         await state.update_data(home_presentation={'user_id': user_id,
             'account': {'status': account['status'], 'role': account['role']},
-            'title': title})
+            'title': title, 'notifications_count': notifications.get('total', 0)})
     bot_title = title['title']
     rows: list[list[InlineKeyboardButton]] = []
     if account['status'] != 'approved':
@@ -285,6 +289,8 @@ async def show_home(chat_id: int, user_id: int, bot: Bot, backend: BackendClient
         rows.append([button(user_id, tr(locale, 'home.admin'), 'admin_menu')])
     if account['status'] == 'approved':
         rows.insert(2, [button(user_id, tr(locale, 'devices.title'), 'device_profiles')])
+        if notifications.get('total', 0):
+            rows.insert(3, [button(user_id, tr(locale, 'announce.inbox'), 'notification_inbox')])
     if account['status'] != 'approved':
         request_rows = tuple(tuple(row) for row in rows[:-1])
         await render(bot, chat_id, Screen(bot_title,
@@ -304,6 +310,49 @@ async def show_language_picker(chat_id: int, user_id: int, bot: Bot,
     title = (await backend.bot_title(user_id))['title']
     await render(bot, chat_id, Screen(title,
         (tr(locale, 'language.prompt'),), embedded_buttons=True), rows, state, message_id)
+
+
+async def show_notification_inbox(chat_id: int, user_id: int, message_id: int,
+                                  bot: Bot, backend: BackendClient, state: FSMContext,
+                                  *, offset: int = 0) -> None:
+    locale = normalize_locale((await state.get_data()).get('locale'))
+    page = await backend.notifications(user_id, offset=offset, limit=10)
+    if not page['items']:
+        await show_home(chat_id, user_id, bot, backend, state, message_id,
+                        cached_navigation=False)
+        return
+    rows = [[button(user_id, f"{tr(locale, 'announce.read' if item.get('viewed_at') else 'announce.new')} · " +
+                    (item['text'].replace('\n', ' ').strip()[:35] or tr(locale, 'announce.notification')),
+                    'notification_detail', item['id'], str(page['offset']))]
+            for item in page['items']]
+    current = page['offset']
+    size = page['page_size']
+    pagination = []
+    if current:
+        pagination.append(button(user_id, tr(locale, 'pagination.previous'),
+                                 'notification_page', str(max(0, current - size))))
+    if current + size < page['total']:
+        pagination.append(button(user_id, tr(locale, 'pagination.next'),
+                                 'notification_page', str(current + size)))
+    if pagination:
+        rows.append(pagination)
+    rows.append([button(user_id, tr(locale, 'back'), 'home')])
+    await render(bot, chat_id, Screen(tr(locale, 'announce.inbox'),
+        (tr(locale, 'pagination.page', page=current // size + 1,
+            pages=max(1, (page['total'] + size - 1) // size)),),
+        embedded_buttons=True, navigation=True), rows, state, message_id)
+
+
+async def show_notification(chat_id: int, user_id: int, message_id: int,
+                            delivery_id: str, bot: Bot, backend: BackendClient,
+                            state: FSMContext, *, offset: int = 0) -> None:
+    locale = normalize_locale((await state.get_data()).get('locale'))
+    item = await backend.notification(user_id, delivery_id)
+    rows = [[button(user_id, tr(locale, 'announce.close'), 'notification_close', str(offset)),
+             button(user_id, tr(locale, 'announce.dismiss'), 'notification_dismiss',
+                    delivery_id, str(offset))]]
+    await render(bot, chat_id, Screen(tr(locale, 'announce.notification'),
+        (item['text'],), embedded_buttons=True, navigation=True), rows, state, message_id)
 
 
 async def show_profiles(chat_id: int, user_id: int, message_id: int, bot: Bot,
@@ -795,6 +844,17 @@ async def close_plain_uri_cb(query: CallbackQuery, bot: Bot, state: FSMContext):
         plain_uri_message_id=None if message_id == data.get('plain_uri_message_id') else data.get('plain_uri_message_id'))
 
 
+@router.callback_query(F.data.startswith('announce_close:'))
+async def close_announcement_message(query: CallbackQuery, bot: Bot) -> None:
+    if query.message is None or query.from_user is None or query.message.chat.type != 'private':
+        return
+    await query.answer()
+    try:
+        await bot.delete_message(query.message.chat.id, query.message.message_id)
+    except TelegramAPIError:
+        pass
+
+
 @router.callback_query(F.data.startswith('u:'))
 async def user_action_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
                          state: FSMContext) -> None:
@@ -896,6 +956,26 @@ async def user_action_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
         elif action.name == 'announcement_silent':
             await backend.set_announcement_silent(user_id, action.args[0] == 'true')
             await show_member_settings(chat_id, user_id, message_id, bot, backend, state)
+        elif action.name == 'notification_inbox':
+            await show_notification_inbox(chat_id, user_id, message_id, bot, backend, state)
+        elif action.name == 'notification_page':
+            await show_notification_inbox(chat_id, user_id, message_id, bot, backend, state,
+                                          offset=int(action.args[0]))
+        elif action.name == 'notification_detail':
+            await show_notification(chat_id, user_id, message_id, action.args[0], bot, backend,
+                                    state, offset=int(action.args[1]))
+        elif action.name == 'notification_close':
+            await show_notification_inbox(chat_id, user_id, message_id, bot, backend, state,
+                                          offset=int(action.args[0]))
+        elif action.name == 'notification_dismiss':
+            await backend.dismiss_notification(user_id, action.args[0])
+            page = await backend.notifications(user_id, offset=int(action.args[1]))
+            if not page['total']:
+                await show_home(chat_id, user_id, bot, backend, state, message_id,
+                                cached_navigation=False)
+            else:
+                await show_notification_inbox(chat_id, user_id, message_id, bot, backend,
+                                              state, offset=page['offset'])
         elif action.name == 'set_locale':
             await backend.set_locale(user_id, action.args[0])
             await state.update_data(locale=action.args[0])

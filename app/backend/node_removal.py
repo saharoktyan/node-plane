@@ -39,7 +39,13 @@ class NodeRemovalService:
         require_permission(actor, 'maintenance.manage')
         with self.db.connect() as conn:
             row = conn.execute('SELECT * FROM backend_node_removals WHERE node_key = ?', (node_key,)).fetchone()
+            retirement = (conn.execute('SELECT mode FROM backend_node_retirements WHERE node_key = ?', (node_key,)).fetchone()
+                          if row is None else None)
         if row is None:
+            # Registry-only retirement may have no worker job. Its tombstone
+            # still confirms the outcome after a lost HTTP response.
+            if retirement is not None and retirement['mode'] in {'verified', 'registry_only'}:
+                return {'node_key': node_key, 'status': 'removed' if retirement['mode'] == 'verified' else 'removed_registry_only'}
             raise AccessDenied('resource_not_found', 404)
         if row['status'] in {'succeeded', 'abandoned', 'unprovisioned'}:
             return {'node_key': node_key, 'status': {

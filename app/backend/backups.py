@@ -50,6 +50,7 @@ CLEAR = (
     "backend_alert_deliveries",
     "backend_alert_events",
     "backend_alert_state",
+    "backend_announcement_user_state",
     "backend_announcement_deliveries",
     "backend_announcements",
     "backend_repairs",
@@ -254,6 +255,20 @@ class BackupService:
             "profiles": len(value["tables"]["backend_profiles"]["rows"]),
             "nodes": len(value["tables"]["backend_nodes"]["rows"]),
         }
+
+    def delete(self, actor, backup_id, checksum):
+        require_permission(actor, "settings.manage")
+        path = self._path(backup_id)
+        with self.db.transaction() as conn:
+            from .maintenance_gate import admit
+            admit(conn)
+            if conn.execute("SELECT 1 FROM backend_backup_jobs WHERE backup_id=? AND status IN ('awaiting_executor','running','blocked') LIMIT 1", (str(UUID(backup_id)),)).fetchone():
+                raise AccessDenied("backup_in_use", 409)
+            value = self._load(backup_id)
+            if checksum != value["checksum"]:
+                raise AccessDenied("backup_changed", 409)
+            path.unlink()
+        return {"deleted_backup_id": str(UUID(backup_id))}
 
     def catalog(self, actor, offset=0, limit=8):
         require_permission(actor, "settings.manage")

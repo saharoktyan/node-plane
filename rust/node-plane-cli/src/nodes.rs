@@ -162,6 +162,9 @@ impl Operation {
                 &self.action
             };
         }
+        if self.action.starts_with("Check ports") {
+            return &self.action;
+        }
         match self.action.as_str() {
             "bootstrap" => "Bootstrap protocols",
             "install_docker" => "Install Docker",
@@ -316,6 +319,11 @@ pub enum Command {
     EditReview(crate::node_editor::Draft),
     EditSave(crate::node_editor::Draft),
     ApplySettings(Node, Uuid),
+    Diagnostics(String, usize),
+    Recover(String, Value, String),
+    Maintenance(String, Option<crate::node_maintenance::Mode>),
+    MaintenancePoll(String),
+    Remove(String, crate::node_maintenance::Mode, bool),
     CreationOptions,
     Create(crate::node_wizard::Draft),
     List,
@@ -323,6 +331,7 @@ pub enum Command {
     Observe(Node, Option<Operation>),
     Setup(Node),
     Bootstrap(Node),
+    ProtocolAction(Node, &'static str),
 }
 pub enum Update {
     Controller(Option<Uuid>, crate::controller::Command, Value),
@@ -331,6 +340,8 @@ pub enum Update {
     EditContext(Value, Value),
     EditReview(crate::node_editor::Draft, Value),
     Edited(Node),
+    Diagnostics(String, Value, Value),
+    Maintenance(crate::node_maintenance::Browser, bool),
     CreationOptions(crate::node_wizard::Options),
     Created(Node),
     List(Vec<Node>),
@@ -354,6 +365,12 @@ pub struct Browser {
     pub operation: Option<Operation>,
     pub profile_id: Option<Uuid>,
     pub editor: Option<crate::node_editor::Editor>,
+    pub diagnostics: Option<(Value, Value)>,
+    pub recovery_confirm: Option<(Value, String)>,
+    pub diagnostic_item: Option<Value>,
+    pub diagnostic_page: usize,
+    pub maintenance: Option<crate::node_maintenance::Browser>,
+    pub card_scroll: usize,
 }
 impl Browser {
     pub fn pages(&self, capacity: usize) -> Vec<Vec<Row>> {
@@ -427,6 +444,89 @@ fn node(value: Value) -> Result<Node> {
     }
     Ok(item)
 }
+async fn maintenance_snapshot(
+    session: &SshSession,
+    credential: &backend::Credential,
+    key: &str,
+) -> Result<Value> {
+    let path = format!("/api/v1/nodes/{key}");
+    match backend::request(
+        session,
+        credential,
+        Method::GET,
+        &format!("{path}/removal"),
+        None,
+        None,
+    )
+    .await
+    {
+        Ok(value) => Ok(value),
+        Err(error) if error.status == Some(404) => Ok(backend::request(
+            session,
+            credential,
+            Method::GET,
+            &format!("{path}/maintenance"),
+            None,
+            None,
+        )
+        .await?),
+        Err(error) => Err(error.into()),
+    }
+}
+
+async fn diagnostic_snapshot(
+    session: &SshSession,
+    credential: &backend::Credential,
+    key: &str,
+    offset: usize,
+) -> Result<(Value, Value)> {
+    let diagnostics_path = format!("/api/v1/nodes/{key}/diagnostics");
+    let recovery_path = format!(
+        "/api/v1/system/recovery?node_key={}&offset={offset}",
+        encode(key)
+    );
+    let (facts, inventory) = tokio::join!(
+        backend::request(
+            session,
+            credential,
+            Method::GET,
+            &diagnostics_path,
+            None,
+            None
+        ),
+        backend::request(session, credential, Method::GET, &recovery_path, None, None)
+    );
+    let facts = match facts {
+        Ok(value) => {
+            ensure!(
+                value["node_key"] == key,
+                "Diagnostics belong to another server"
+            );
+            value
+        }
+        // Recovery remains accessible when the agent is absent or unreachable.
+        Err(error)
+            if [
+                "node_agent_unconfigured",
+                "node_agent_unavailable",
+                "driver_unavailable",
+            ]
+            .contains(&error.code.as_str()) =>
+        {
+            json!({"error_code":error.code})
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let inventory = inventory?;
+    ensure!(
+        inventory["items"]
+            .as_array()
+            .is_some_and(|items| items.iter().all(|item| item["node_key"] == key)),
+        "Recovery belongs to another server"
+    );
+    Ok((facts, inventory))
+}
+
 async fn apply_settings(
     session: &SshSession,
     credential: &backend::Credential,
@@ -484,7 +584,33 @@ fn operation(value: &Value, kind: &str, key: &str) -> Result<Operation> {
                 .map(clean)
                 .unwrap_or_else(|| "Agent setup".into())
         } else {
-            clean(&value["action"])
+            if value["action"] == "check_ports" {
+                let mut label = "Check ports".to_string();
+                if value["status"] == "succeeded" {
+                    if let Some(ports) = value.pointer("/result/ports").and_then(Value::as_array) {
+                        for port in ports {
+                            label.push_str(&format!(
+                                "\n{} / {} · {}",
+                                port["port"]
+                                    .as_u64()
+                                    .map(|v| v.to_string())
+                                    .unwrap_or_else(|| clean(&port["port"])),
+                                clean(&port["protocol"]),
+                                clean(&port["status"])
+                            ));
+                        }
+                    }
+                    if value
+                        .pointer("/result/firewall")
+                        .is_some_and(|v| v == "unmanaged")
+                    {
+                        label.push_str("\nFirewall is not managed by Node Plane");
+                    }
+                }
+                label
+            } else {
+                clean(&value["action"])
+            }
         },
     })
 }
@@ -794,10 +920,46 @@ async fn execute(
         let credential = backend::authenticate(session, id, &request.workflow.account, tx).await?;
         let result = async {
             let setup = matches!(&command, Command::Setup(_));
+            let protocol_action = match &command { Command::ProtocolAction(_, action) => Some(*action), _ => None };
             match command {
                 Command::Controller(profile, command) => {
+                    if let crate::controller::Command::BackupDelete(_, _) = &command {
+                        ensure!(events::confirm(tx,"Delete backup?","This backup will be permanently deleted. Other backups and the running installation are kept.".into())?, "Backup deletion cancelled");
+                    }
+                    if let crate::controller::Command::BackupQueue(body, key) = &command {
+                        let restore = body["action"] == "restore";
+                        ensure!(events::confirm(tx, if restore { "Restore backup?" } else { "Create backup?" }, if restore { "Controller accounts, profiles, nodes and settings will be replaced with this backup. VPN access will be reconciled after restoration." } else { "Create a backup of controller data and settings." }.into())?, "Backup action cancelled");
+                        use std::io::Write;
+                        std::fs::create_dir_all(&request.state_dir)?;
+                        let mut file = tempfile::NamedTempFile::new_in(&request.state_dir)?;
+                        file.write_all(&serde_json::to_vec(&json!({"host":request.host,"port":request.port,"user":request.user,"account":credential.account_id,"command_id":key,"body":body}))?)?;
+                        file.as_file().sync_all()?;
+                        file.persist(request.state_dir.join(format!("backup-command-{key}.json")))?;
+                    }
+                    if let crate::controller::Command::UpdatePreferences(value) = &command
+                        && value.get("branch").is_some() {
+                        ensure!(events::confirm(tx, "Change update branch?", "Switching branches can install incompatible versions and break this installation. Continue?".into())?, "Branch change cancelled");
+                    }
+                    if let crate::controller::Command::AnnouncementCreate(_, _, recipients) = &command {
+                        ensure!(events::confirm(tx, "Send announcement?",
+                            format!("This will send the message to {recipients} eligible users."))?,
+                            "Announcement cancelled");
+                    }
                     let (method, path, body, key) = command.request()?;
-                    let value = backend::request(session, &credential, method, &path, body, key).await?;
+                    let revision = match &command { crate::controller::Command::DefaultsSave(_,revision) => Some(*revision), _ => None };
+                    let mut value = backend::request_revision(session, &credential, method, &path, body, key, revision).await.map_err(|error| anyhow::Error::new(error).context(if matches!(&command, crate::controller::Command::BackupQueue(_, _)) { "Backup submission failed or is unconfirmed. Refresh Backups before submitting another operation." } else { "Controller request failed" }))?;
+                    if matches!(&command, crate::controller::Command::UpdateCheck | crate::controller::Command::UpdatePreferences(_)) {
+                        value = backend::request(session, &credential, Method::GET, "/api/v1/system/updates", None, None).await?;
+                    }
+                    if matches!(&command, crate::controller::Command::BackupPreferences(_) | crate::controller::Command::BackupDelete(_, _)) {
+                        value = backend::request(session, &credential, Method::GET, "/api/v1/system/backups", None, None).await?;
+                    }
+                    if matches!(&command,crate::controller::Command::Policies | crate::controller::Command::PolicySave(_, _)) {
+                        let traffic = backend::request(session,&credential,Method::GET,"/api/v1/system/traffic",None,None).await?;
+                        let requests = backend::request(session,&credential,Method::GET,"/api/v1/system/access-requests",None,None).await?;
+                        value = json!({"traffic":traffic,"requests":requests});
+                    }
+                    if matches!(&command,crate::controller::Command::AlertPreferences(_) | crate::controller::Command::AlertDismiss(_)) { value = backend::request(session,&credential,Method::GET,"/api/v1/system/alerts",None,None).await?; }
                     let _ = tx.send(Event::Nodes(Update::Controller(profile, command, value)));
                     return Ok("Controller state loaded".into());
                 }
@@ -983,6 +1145,62 @@ async fn execute(
                     if apply { apply_settings(session, &credential, &request, &item, draft.apply_key, tx).await?; }
                 }
                 Command::ApplySettings(item, key) => { apply_settings(session, &credential, &request, &item, key, tx).await?; }
+                Command::Diagnostics(key, offset) => {
+                    let (facts, inventory) = diagnostic_snapshot(session, &credential, &key, offset).await?;
+                    let _ = tx.send(Event::Nodes(Update::Diagnostics(key, facts, inventory)));
+                }
+                Command::Maintenance(key, confirmation) => {
+                    let snapshot = maintenance_snapshot(session, &credential, &key).await?;
+                    let view = crate::node_maintenance::Browser::new(key, snapshot, confirmation)?;
+                    let _ = tx.send(Event::Nodes(Update::Maintenance(view, false)));
+                }
+                Command::MaintenancePoll(key) => {
+                    let snapshot = maintenance_snapshot(session, &credential, &key).await?;
+                    let view = crate::node_maintenance::Browser::new(key, snapshot, None)?;
+                    let _ = tx.send(Event::Nodes(Update::Maintenance(view, true)));
+                }
+                Command::Remove(key, mode, retry) => {
+                    use crate::node_maintenance::Mode;
+                    let (path, body) = match mode {
+                        Mode::Full => (format!("/api/v1/nodes/{key}/remove-step"), json!({"retry":retry})),
+                        Mode::RegistryOnly => (format!("/api/v1/nodes/{key}/retire-registry-only"), json!({
+                            "accept_unverified_runtime":true,
+                            "reason":"Administrator explicitly removed the server record through Workstation; remote runtime may remain."})),
+                    };
+                    let value = match backend::request(session, &credential, Method::POST, &path, Some(body), None).await {
+                        Ok(value) => value,
+                        Err(error) if error.status.is_none_or(|status| status == 408 || status >= 500) => {
+                            // Observe the original node-keyed removal; never replay the mutation
+                            // automatically after losing its response.
+                            if let Ok(snapshot) = maintenance_snapshot(session, &credential, &key).await {
+                                let view = crate::node_maintenance::Browser::new(key, snapshot, None)?;
+                                let _ = tx.send(Event::Nodes(Update::Maintenance(view, false)));
+                            }
+                            return Err(anyhow::Error::new(error).context("Removal response was unavailable. Use Refresh to check the result before retrying"));
+                        }
+                        Err(error) => return Err(error.into()),
+                    };
+                    ensure!(value["node_key"] == key, "Removal belongs to another server");
+                    let snapshot = if mode == Mode::RegistryOnly {
+                        ensure!(value["mode"] == "registry_only", "Unexpected retirement result");
+                        json!({"node_key":key,"status":"removed_registry_only"})
+                    } else { value };
+                    let view = crate::node_maintenance::Browser::new(key, snapshot, None)?;
+                    let _ = tx.send(Event::Nodes(Update::Maintenance(view, false)));
+                }
+                Command::Recover(key, item, action) => {
+                    ensure!(item["node_key"] == key, "Recovery belongs to another server");
+                    ensure!(["recheck", "resolve"].contains(&action.as_str()), "Unsupported recovery action");
+                    let kind = item["kind"].as_str().context("Missing recovery kind")?;
+                    ensure!(["node", "settings", "agent", "bootstrap", "profile"].contains(&kind), "Unsupported recovery kind");
+                    let identity = Uuid::parse_str(item["id"].as_str().context("Missing recovery identity")?)?;
+                    // The backend validates currently allowed actions under the worker lock.
+                    ensure!(item["actions"].as_array().is_some_and(|actions| actions.iter().any(|v| v == &action)), "Recovery action unavailable");
+                    backend::request(session, &credential, Method::POST,
+                        &format!("/api/v1/system/recovery/{kind}/{identity}/{action}"), None, None).await?;
+                    let (facts, inventory) = diagnostic_snapshot(session, &credential, &key, 0).await?;
+                    let _ = tx.send(Event::Nodes(Update::Diagnostics(key, facts, inventory)));
+                }
                 Command::Card(key) => {
                     let path = format!("/api/v1/nodes/{key}");
                     let mut item = node(backend::request(session, &credential, Method::GET, &path, None, None).await?)?;
@@ -999,7 +1217,7 @@ async fn execute(
                         Err(error) => return Err(error.into()),
                     }
                     let mut saved = SavedOperation::latest(&request, &credential.account_id, &key)?;
-                    if saved.as_ref().is_none_or(|v| v.kind != "node-settings-operations") && let Some(parent) = item.overview.as_ref().and_then(|v| v.get("bootstrap")).filter(|v| v.is_object()) {
+                    if saved.is_none() && let Some(parent) = item.overview.as_ref().and_then(|v| v.get("bootstrap")).filter(|v| v.is_object()) {
                         let mut parent = parent.clone();
                         parent["node_key"] = json!(key);
                         saved = Some(operation(&parent, "node-bootstraps", &key)?);
@@ -1040,9 +1258,9 @@ async fn execute(
                         let _ = tx.send(Event::Nodes(Update::Operation(observed)));
                     }
                 }
-                Command::Setup(item) | Command::Bootstrap(item) => {
-                    let title = if setup { "Install node agent?" } else { "Set up server?" };
-                    ensure!(events::confirm(tx, title, format!("{} · {}\n\nThis submits one backend operation. An uncertain response is never automatically replayed.", item.region, item.title))?, "Node action cancelled");
+                Command::Setup(item) | Command::Bootstrap(item) | Command::ProtocolAction(item, _) => {
+                    let title = match protocol_action { Some("reinstall_keep") => "Reinstall protocols and keep configurations?", Some("reinstall_clean") => "Reinstall protocols with new configurations?", Some("check_ports") => "Check protocol ports?", _ if setup => "Install node agent?", _ => "Set up server?" };
+                    ensure!(events::confirm(tx, title, format!("{} · {}\n\n{}", item.region, item.title, if protocol_action == Some("reinstall_clean") { "Existing configurations will be replaced. Users will need new configurations." } else { "The operation will run on this server." }))?, "Node action cancelled");
                     if item.transport.as_deref() == Some("ssh")
                         && item.agent != AgentState::Ready {
                         let target = item.ssh_target.as_deref().context("Node SSH address is missing")?;
@@ -1055,7 +1273,10 @@ async fn execute(
                             UiInteraction::shared(tx.clone()), tx).await?;
                     }
                     let command_id = Uuid::new_v4();
-                    let (path, body, kind) = if setup {
+                    let (path, body, kind) = if let Some(action) = protocol_action {
+                        ensure!(matches!(action, "reinstall_keep" | "reinstall_clean" | "check_ports"), "Unsupported protocol action");
+                        (format!("/api/v1/nodes/{}/actions", item.key), json!({"action":action,"revision":item.desired_revision}), "node-jobs")
+                    } else if setup {
                         let transport = item.transport.as_deref().context("Node transport is not configured")?;
                         (format!("/api/v1/nodes/{}/agent-rollouts", item.key), json!({"transport":transport,
                             "ssh_target":item.ssh_target,"ssh_port":22,"install_rust":false}), "agent-rollouts")
@@ -1115,6 +1336,15 @@ mod tests {
         )
         .unwrap()
     }
+    #[test]
+    fn port_check_result_is_visible_and_scoped_to_node() {
+        let value = json!({"id":Uuid::new_v4(),"node_key":"lv1","action":"check_ports","status":"succeeded","result":{"ports":[{"port":443,"protocol":"udp","status":"open"}],"firewall":"unmanaged"}});
+        let observed = operation(&value, "node-jobs", "lv1").unwrap();
+        assert!(observed.label().contains("443 / udp · open"));
+        assert!(observed.label().contains("Firewall is not managed"));
+        assert!(operation(&value, "node-jobs", "lv2").is_err());
+    }
+
     #[test]
     fn bootstrap_observation_displays_installer_detail_without_changing_status() {
         let value = json!({"id": Uuid::new_v4(), "node_key": "lv1", "phase": "agent",

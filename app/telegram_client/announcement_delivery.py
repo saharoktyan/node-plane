@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from uuid import uuid4
+from aiogram.types import InlineKeyboardButton
 
 from .i18n import tr
 from .notification_transport import send_notification
@@ -18,8 +19,10 @@ async def deliver_one(bot, backend):
     screen = Screen(
         tr(delivery.get("locale"), "announce.notification"), (delivery["text"],)
     )
+    rows = [[InlineKeyboardButton(text=tr(delivery.get("locale"), "announce.close"),
+        callback_data="announce_close:" + delivery["id"])]]
     status = await send_notification(
-        bot, delivery["telegram_user_id"], screen, delivery["silent"]
+        bot, delivery["telegram_user_id"], screen, delivery["silent"], rows=rows
     )
     await backend.announcement_ack(delivery["id"], key, status)
     return True

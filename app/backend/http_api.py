@@ -311,6 +311,11 @@ class BackupPreferencesInput(BaseModel):
     keep_count: Literal[5,10,20] | None = None
 
 
+class BackupDeleteInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    checksum: StrictStr = Field(pattern=r'^[0-9a-f]{64}$')
+
+
 class BackupCommandInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
     action: Literal['create','restore']
@@ -942,6 +947,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
                 conn.execute('SELECT job_id FROM backend_update_items LIMIT 1').fetchone()
                 conn.execute('SELECT id FROM backend_announcements LIMIT 1').fetchone()
                 conn.execute('SELECT id FROM backend_announcement_deliveries LIMIT 1').fetchone()
+                conn.execute('SELECT delivery_id FROM backend_announcement_user_state LIMIT 1').fetchone()
                 conn.execute('SELECT node_key FROM backend_alert_state LIMIT 1').fetchone()
         except Exception:
             return error(request, 'dependency_unavailable', 503)
@@ -1007,6 +1013,19 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     @app.get('/api/v1/announcements')
     def latest_announcement(current=Depends(actor)):
         return announcements.latest(current)
+
+    @app.get('/api/v1/me/notifications')
+    def my_notifications(offset: int = Query(default=0, ge=0, le=1000000),
+                         limit: int = Query(default=10, ge=1, le=50), current=Depends(actor)):
+        return announcements.inbox(current, offset=offset, limit=limit)
+
+    @app.get('/api/v1/me/notifications/{delivery_id}')
+    def my_notification(delivery_id: UUID, current=Depends(actor)):
+        return announcements.inbox_item(current, str(delivery_id))
+
+    @app.post('/api/v1/me/notifications/{delivery_id}/dismiss')
+    def dismiss_my_notification(delivery_id: UUID, current=Depends(actor)):
+        return announcements.dismiss_inbox_item(current, str(delivery_id))
 
     @app.get('/api/v1/system/traffic')
     def traffic_policy(current=Depends(actor)):
@@ -1765,9 +1784,10 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
                 return act(db, current, GrpcIntentDriver(channel, timeout=10), kind, str(identity), action)
 
     @app.get('/api/v1/system/recovery', response_model=RecoveryOverviewOutput)
-    def recovery_overview(offset: int = Query(default=0, ge=0, le=1000000), current=Depends(actor)):
+    def recovery_overview(offset: int = Query(default=0, ge=0, le=1000000),
+                          node_key: str | None = Query(default=None, min_length=1, max_length=100), current=Depends(actor)):
         from .recovery import overview
-        return overview(db, current, offset)
+        return overview(db, current, offset, node_key=node_key)
 
     @app.get('/api/v1/system/workstation-audit', response_model=WorkstationAuditPageOutput)
     def workstation_audit(offset: int = Query(default=0, ge=0, le=1000000),
@@ -1806,6 +1826,10 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     @app.get('/api/v1/system/backups/catalog/{backup_id}')
     def backup_detail(backup_id:UUID,current=Depends(actor)):
         return backup_service.detail(current,str(backup_id))
+
+    @app.post('/api/v1/system/backups/catalog/{backup_id}/delete')
+    def delete_backup(backup_id: UUID, body: BackupDeleteInput, current=Depends(actor)):
+        return backup_service.delete(current, str(backup_id), body.checksum)
 
     @app.patch('/api/v1/system/backups/preferences')
     def backup_preferences(body:BackupPreferencesInput,current=Depends(actor)):

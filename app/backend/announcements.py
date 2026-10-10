@@ -33,6 +33,8 @@ class AnnouncementService:
                 account_id TEXT NOT NULL, telegram_subject TEXT NOT NULL,
                 status TEXT NOT NULL, claim_id TEXT, adapter_id TEXT, claimed_until TEXT,
                 UNIQUE(announcement_id,telegram_subject))""")
+            from app.db.migration_revisions.r0006_announcement_inbox import upgrade
+            upgrade(conn)
 
     @staticmethod
     def validate_text(text):
@@ -161,6 +163,65 @@ class AnnouncementService:
                 "SELECT id FROM backend_announcements ORDER BY created_at DESC,id DESC LIMIT 1"
             ).fetchone()
         return {"last_job": self.get(actor, row["id"]) if row else None}
+
+    def inbox(self, actor, offset=0, limit=10):
+        require_permission(actor, "account.self.read")
+        limit = max(1, min(int(limit), 50))
+        with self.db.connect() as conn:
+            total = conn.execute("""SELECT COUNT(*) AS count
+                FROM backend_announcement_deliveries d
+                WHERE d.account_id=? AND d.status='sent'
+                AND NOT EXISTS (SELECT 1 FROM backend_announcement_user_state x
+                    WHERE x.delivery_id=d.id AND x.account_id=d.account_id AND x.dismissed_at IS NOT NULL)""",
+                (actor.account.id,)).fetchone()["count"]
+            offset = min(max(0, int(offset)), max(0, total - 1))
+            offset = offset // limit * limit
+            rows = conn.execute("""SELECT d.id,a.text,a.created_at,s.viewed_at
+                FROM backend_announcement_deliveries d
+                JOIN backend_announcements a ON a.id=d.announcement_id
+                LEFT JOIN backend_announcement_user_state s ON s.delivery_id=d.id AND s.account_id=d.account_id
+                WHERE d.account_id=? AND d.status='sent'
+                AND (s.dismissed_at IS NULL)
+                ORDER BY a.created_at DESC,a.id DESC LIMIT ? OFFSET ?""",
+                (actor.account.id, limit, offset)).fetchall()
+        return {"items": [dict(row) for row in rows], "total": total,
+            "offset": offset, "page_size": limit}
+
+    def inbox_item(self, actor, delivery_id):
+        require_permission(actor, "account.self.read")
+        viewed_at = datetime.now(timezone.utc).isoformat()
+        with self.db.transaction() as conn:
+            row = conn.execute("""SELECT d.id,a.text,a.created_at
+                FROM backend_announcement_deliveries d
+                JOIN backend_announcements a ON a.id=d.announcement_id
+                WHERE d.id=? AND d.account_id=? AND d.status='sent'
+                AND NOT EXISTS (SELECT 1 FROM backend_announcement_user_state x
+                    WHERE x.delivery_id=d.id AND x.account_id=d.account_id AND x.dismissed_at IS NOT NULL)""",
+                (delivery_id, actor.account.id)).fetchone()
+            if row is None:
+                raise AccessDenied("resource_not_found", 404)
+            conn.execute("""INSERT INTO backend_announcement_user_state
+                (delivery_id,account_id,viewed_at) VALUES (?,?,?)
+                ON CONFLICT(delivery_id) DO UPDATE SET viewed_at=excluded.viewed_at""",
+                (delivery_id, actor.account.id, viewed_at))
+            result = dict(row)
+            result["viewed_at"] = viewed_at
+        return result
+
+    def dismiss_inbox_item(self, actor, delivery_id):
+        require_permission(actor, "account.self.read")
+        timestamp = datetime.now(timezone.utc).isoformat()
+        with self.db.transaction() as conn:
+            row = conn.execute("""SELECT id FROM backend_announcement_deliveries
+                WHERE id=? AND account_id=? AND status='sent'""",
+                (delivery_id, actor.account.id)).fetchone()
+            if row is None:
+                raise AccessDenied("resource_not_found", 404)
+            conn.execute("""INSERT INTO backend_announcement_user_state
+                (delivery_id,account_id,dismissed_at) VALUES (?,?,?)
+                ON CONFLICT(delivery_id) DO UPDATE SET dismissed_at=excluded.dismissed_at""",
+                (delivery_id, actor.account.id, timestamp))
+        return {"dismissed": True}
 
     @staticmethod
     def _transport(principal):

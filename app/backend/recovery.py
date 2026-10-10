@@ -92,14 +92,19 @@ def _sql():
         for kind, table, node, result in SOURCES)
 
 
-def overview(db, actor, offset=0):
+def overview(db, actor, offset=0, node_key=None):
     require_permission(actor, 'maintenance.manage')
     page_size, sql = 10, _sql()
+    inventory = f'({sql}) inventory'
+    parameters = ()
+    if node_key is not None:
+        inventory += ' WHERE node_key=?'
+        parameters = (node_key,)
     with db.connect() as conn:
         gate, other = _maintenance(conn)
-        total = conn.execute(f'SELECT COUNT(*) AS count FROM ({sql}) inventory').fetchone()['count']
+        total = conn.execute(f'SELECT COUNT(*) AS count FROM {inventory}', parameters).fetchone()['count']
         offset = min(offset, max(0, (total - 1) // page_size * page_size))
-        rows = conn.execute(f'{sql} ORDER BY kind,id LIMIT ? OFFSET ?', (page_size, offset)).fetchall()
+        rows = conn.execute(f'SELECT * FROM {inventory} ORDER BY kind,id LIMIT ? OFFSET ?', (*parameters, page_size, offset)).fetchall()
         items = [_item(conn, row, actor, gate, other) for row in rows]
     return {'items': items, 'offset': offset, 'page_size': page_size, 'total': total,
             'maintenance_active': bool(gate) or other}

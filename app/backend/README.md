@@ -822,6 +822,10 @@ integration testing; isolated unit tests verify orchestration and policy only.
 `POST /api/v1/announcements` requires an administrator and Idempotency-Key; it
 snapshots approved Telegram accounts except the sender. GET on the collection
 returns the latest job, and GET on an ID returns durable delivery counts.
+Recipients can list, reopen, and dismiss their own delivered notices through
+`/api/v1/me/notifications`; viewed and dismissed state is stored per recipient.
+Closing a Telegram announcement removes only that chat message and keeps the
+notice in the recipient's list.
 
 A trusted Telegram adapter with `settings.manage` scope uses the integration
 claim/ack endpoints without a delegated user header. These endpoints deliver

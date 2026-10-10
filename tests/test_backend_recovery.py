@@ -34,6 +34,20 @@ class RecoveryTests(TestCase):
         page = overview(self.db, self.actor, 10)
         self.assertEqual((page['total'], page['offset'], page['items']), (0, 0, []))
 
+    def test_node_filter_is_applied_before_count_and_pagination(self):
+        self.service()
+        for index in range(12):
+            self.db.connection.execute("INSERT INTO backend_node_removals VALUES (?,?,'blocked','node_cleanup_unavailable')",
+                (f'node-{index}', self.admin.id))
+        page = overview(self.db, self.actor, 10, node_key='node-3')
+        self.assertEqual((page['total'], page['offset']), (1, 0))
+        self.assertEqual([item['node_key'] for item in page['items']], ['node-3'])
+        self.assertEqual(overview(self.db, self.actor, node_key="' OR 1=1 --")['total'], 0)
+        headers = {**self.headers, 'X-Node-Plane-Telegram-User-ID': '101'}
+        response = self.client.get('/api/v1/system/recovery?node_key=node-3', headers=headers)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()['total'], 1)
+
     def test_started_child_prevents_cancel_even_if_parent_still_queued(self):
         service = self.service()
         job = service.queue(self.actor, str(uuid4()), 'stack', target_ref='v0.4.3-alpha.19', branch='dev')

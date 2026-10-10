@@ -19,6 +19,16 @@ RESOURCES = {'paths': ['/opt/node-plane-runtime'], 'containers': ['xray', 'amnez
 class BackendNodeRemovalTests(unittest.TestCase):
     setUp = test_backend_node_jobs.BackendNodeJobTests.setUp
 
+    def test_registry_only_outcome_can_be_read_without_a_worker_job(self):
+        from backend.node_lifecycle import NodeLifecycle
+        NodeLifecycle(self.db).retire_registry_only(self.actor, 'n1',
+            'Administrator accepted that remote runtime may remain.')
+        self.assertIsNone(self.db.connection.execute("SELECT * FROM backend_node_removals WHERE node_key='n1'").fetchone())
+        self.assertEqual(NodeRemovalService(self.db).get(self.actor, 'n1'),
+                         {'node_key': 'n1', 'status': 'removed_registry_only'})
+        with self.assertRaises(AccessDenied):
+            NodeRemovalService(self.db).get(self.actor, 'unknown')
+
     def test_unprovisioned_card_removal_needs_no_host_connection_or_verifier(self):
         self.db.connection.execute("UPDATE backend_nodes SET applied_revision=0 WHERE key='n1'")
         self.db.connection.execute("DELETE FROM backend_node_connections WHERE node_key='n1'")

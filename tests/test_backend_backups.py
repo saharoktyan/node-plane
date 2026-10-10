@@ -74,6 +74,27 @@ class BackendBackupsTests(unittest.TestCase):
             self.actor, result["backup_id"]
         )["checksum"]
 
+    def test_delete_requires_original_checksum_and_rejects_traversal(self):
+        identity, checksum = self.snapshot()
+        with self.assertRaises(AccessDenied) as failure:
+            self.service.delete(self.actor, identity, "0" * 64)
+        self.assertEqual(failure.exception.code, "backup_changed")
+        self.assertTrue(self.service._path(identity).exists())
+        self.assertEqual(self.service.delete(self.actor, identity, checksum), {"deleted_backup_id":identity})
+        self.assertFalse(self.service._path(identity).exists())
+        with self.assertRaises(AccessDenied):
+            self.service.delete(self.actor, "../../outside", checksum)
+
+    def test_delete_rejects_backup_referenced_by_blocked_restore(self):
+        identity, checksum = self.snapshot()
+        job = self.service.queue(self.actor, str(uuid4()), "restore", identity, checksum)
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_backup_jobs SET status='blocked' WHERE id=?", (job["id"],))
+        with self.assertRaises(AccessDenied) as failure:
+            self.service.delete(self.actor, identity, checksum)
+        self.assertEqual(failure.exception.code,"backup_in_use")
+        self.assertTrue(self.service._path(identity).exists())
+
     def test_overview_reports_actual_nonzero_file_sizes_after_profile_changes(self):
         first_id, _ = self.snapshot()
         first_size = self.service._path(first_id).stat().st_size

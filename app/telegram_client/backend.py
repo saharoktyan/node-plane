@@ -141,6 +141,15 @@ class BackendClient:
     async def announcement_latest(self, user_id):
         return await self.request('GET','/api/v1/announcements',telegram_user_id=user_id)
 
+    async def notifications(self, user_id, offset=0, limit=10):
+        return await self.request('GET',f'/api/v1/me/notifications?offset={offset}&limit={limit}',telegram_user_id=user_id)
+
+    async def notification(self, user_id, delivery_id):
+        return await self.request('GET',f'/api/v1/me/notifications/{quote(delivery_id, safe="")}',telegram_user_id=user_id)
+
+    async def dismiss_notification(self, user_id, delivery_id):
+        return await self.request('POST',f'/api/v1/me/notifications/{quote(delivery_id, safe="")}/dismiss',telegram_user_id=user_id)
+
     async def alerts_overview(self,user_id):
         return await self.request('GET','/api/v1/system/alerts',telegram_user_id=user_id)
 
