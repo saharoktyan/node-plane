@@ -2281,6 +2281,7 @@ CATALOG['en'].update({
     'alerts.rich.recovery': 'Recovery notifications', 'alerts.rich.details': 'Policy and delivery details',
     'alerts.rich.open': 'Open server', 'alerts.rich.observations': 'Observations',
     'updates.rich.controller': 'Controller', 'updates.rich.component': 'Component',
+    'updates.rich.version_state': 'Version / updates',
     'updates.rich.component.backend': 'Backend', 'updates.rich.component.worker': 'Worker',
     'updates.rich.component.driver': 'Driver', 'updates.rich.component.telegram': 'Telegram bot',
     'updates.rich.servers': 'Servers', 'updates.rich.options': 'Update options',
@@ -2328,6 +2329,7 @@ CATALOG['ru'].update({
     'alerts.rich.recovery': 'Уведомления о восстановлении', 'alerts.rich.details': 'Правила и доставка',
     'alerts.rich.open': 'Открыть сервер', 'alerts.rich.observations': 'Наблюдения',
     'updates.rich.controller': 'Контроллер', 'updates.rich.component': 'Компонент',
+    'updates.rich.version_state': 'Версия / обновления',
     'updates.rich.component.backend': 'Бэкэнд', 'updates.rich.component.worker': 'Воркер',
     'updates.rich.component.driver': 'Драйвер', 'updates.rich.component.telegram': 'Telegram-бот',
     'updates.rich.servers': 'Серверы', 'updates.rich.options': 'Параметры обновления',
@@ -2731,3 +2733,16 @@ CATALOG['ru'].update({'recovery.cause.operation_timeout': 'Истекло вре
 
 CATALOG['en'].update({'recovery.action.recheck': 'Check result', 'recovery.action.resolve': 'Recover operation'})
 CATALOG['ru'].update({'recovery.action.recheck': 'Проверить результат', 'recovery.action.resolve': 'Восстановить операцию'})
+
+CATALOG['en'].update({
+    'updates.rich.last_check': 'Last check: {value}',
+    'updates.rich.dismiss': 'Dismiss',
+    'updates.rich.branch_warning': 'Changing the update channel is risky and may break the installation. Continue?',
+    'updates.rich.downgrade_warning': 'Rolling back is risky: older versions may be incompatible with the database and may break the installation. Continue?',
+})
+CATALOG['ru'].update({
+    'updates.rich.last_check': 'Последняя проверка: {value}',
+    'updates.rich.dismiss': 'Скрыть результат',
+    'updates.rich.branch_warning': 'Смена канала обновлений может сломать установку. Продолжить?',
+    'updates.rich.downgrade_warning': 'Откат может сломать установку: старая версия может быть несовместима с базой данных. Продолжить?',
+})

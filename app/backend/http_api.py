@@ -1674,7 +1674,8 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     def get_updates(current=Depends(actor)):
         require_permission(current, 'settings.manage')
         import app.services.updates as updater
-        return {**updater.get_updates_overview(), 'latest_job': update_service.latest(current)}
+        return {**updater.get_updates_overview(), 'latest_job': update_service.latest(current),
+                'dismissed_job_ids': update_service.dismissed_results(current)}
 
     @app.patch('/api/v1/system/updates/preferences')
     def edit_update_preferences(body: UpdatePreferencesInput, current=Depends(actor)):
@@ -1755,6 +1756,10 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     @app.get('/api/v1/system/updates/jobs/{job_id}')
     def update_job(job_id: UUID, current=Depends(actor)):
         return update_service.get(current, str(job_id))
+
+    @app.post('/api/v1/system/updates/jobs/{job_id}/dismiss')
+    def dismiss_update_result(job_id: UUID, current=Depends(actor)):
+        return update_service.dismiss_result(current, str(job_id))
 
     @app.post('/api/v1/system/updates/jobs/{job_id}/cancel')
     def cancel_update(job_id: UUID, current=Depends(actor)):

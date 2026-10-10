@@ -1662,7 +1662,7 @@ systemctl disable node-plane-agent.service
 systemctl stop node-plane-agent.service
 rm -f /etc/node-plane/profile-intents.sqlite3 /etc/node-plane/profile-intents.sqlite3.lock /etc/node-plane/profile-intents.sqlite3.disabled /etc/node-plane/profile-intents.sqlite3-journal /etc/node-plane/profile-intents.sqlite3-wal /etc/node-plane/profile-intents.sqlite3-shm
 rm -f /etc/systemd/system/node-plane-agent.service "$1" "$2" "$3" "$4" "$5"
-rm -rf "$6" "$7"
+rm -rf "$6" "$7" /etc/node-plane/operation-progress
 rmdir /etc/node-plane/tls /etc/node-plane 2>/dev/null || true
 systemctl daemon-reload
 if [ -n "$9" ]; then

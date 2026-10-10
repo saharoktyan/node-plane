@@ -83,7 +83,14 @@ check_absent /etc/systemd/system/node-plane-lease-expiry.service lease_expiry_se
 check_absent /etc/systemd/system/node-plane-leased-awg.service leased_awg_unit
 check_absent /etc/systemd/system/node-plane-leased-xray.service leased_xray_unit
 check_absent /usr/local/bin/node-plane-agent agent_binary
-check_absent /etc/node-plane agent_config
+check_absent /etc/node-plane/agent.toml agent_config
+check_absent /etc/node-plane/node.env agent_environment
+check_absent /etc/node-plane/tls/server.crt agent_certificate
+check_absent /etc/node-plane/tls/server.key agent_private_key
+check_absent /etc/node-plane/tls/ca.crt agent_ca
+for journal in /etc/node-plane/profile-intents.sqlite3*; do
+    check_absent "$journal" agent_journal
+done
 check_absent /opt/node-plane-runtime runtime
 check_absent /var/lib/node-plane-agent agent_state
 check_absent /var/log/node-plane-agent agent_logs

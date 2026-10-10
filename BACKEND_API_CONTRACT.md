@@ -327,3 +327,9 @@ controller build; connectivity alone is insufficient.
 `GET /api/v1/system/recovery/history?offset=0` returns paginated recovery attempts,
 actor UUIDs, original operation identities and outcomes. Migration 5 adds the
 recovery audit table; interrupted actions remain admitted rather than recorded successful.
+
+### Dismissing update results
+
+`POST /api/v1/system/updates/jobs/{job_id}/dismiss` requires `settings.manage` and a completed or blocked job. It stores the dismissal for the authenticated administrator without changing the job, its result, or recovery state. Active jobs return `409 update_result_active`. Repeating dismissal is harmless.
+
+`GET /api/v1/system/updates` and `GET /api/v1/system/updates/rollout` include `dismissed_job_ids` for that administrator. Other administrators and subsequent jobs are unaffected.

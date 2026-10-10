@@ -40,6 +40,40 @@ class BackendUpdateTests(TestCase):
             conn.execute("INSERT INTO backend_nodes(key,title,region,enabled,protocols_json,xray_transports_json) VALUES ('lv1','Latvia','EU',0,'[]','[]')")
             conn.execute("INSERT INTO backend_node_connections(node_key,transport,ssh_target) VALUES ('lv1','ssh','root@lv1.example')")
 
+    def test_dismiss_is_persistent_per_administrator_and_never_cancels_an_active_job(self):
+        service = self.service()
+        job = service.queue(self.actor, str(uuid4()), 'version',
+            target_ref='v0.4.3-alpha.19', branch='dev')
+        with self.assertRaises(AccessDenied) as rejected:
+            service.dismiss_result(self.actor, job['id'])
+        self.assertEqual(rejected.exception.code, 'update_result_active')
+        self.db.connection.execute("UPDATE backend_update_jobs SET status='succeeded' WHERE id=?", (job['id'],))
+        service.dismiss_result(self.actor, job['id'])
+        service.dismiss_result(self.actor, job['id'])
+        rebuilt = UpdateService(self.db, self.driver, self.updater)
+        self.assertEqual(rebuilt.dismissed_results(self.actor), [job['id']])
+        other = Actor(Principal('other', PrincipalKind.SERVICE, ADMIN_PERMISSIONS),
+                      SimpleNamespace(id='other-admin', role='admin', status='approved'))
+        self.assertEqual(rebuilt.dismissed_results(other), [])
+        self.assertEqual(rebuilt.get(self.actor, job['id'])['status'], 'succeeded')
+
+    def test_dismiss_http_endpoint_preserves_job_and_checks_admin_permission(self):
+        service = self.service()
+        job = service.queue(self.actor, str(uuid4()), 'version',
+            target_ref='v0.4.3-alpha.19', branch='dev')
+        path = '/api/v1/system/updates/jobs/' + job['id'] + '/dismiss'
+        admin_headers = {**self.headers, 'X-Node-Plane-Telegram-User-ID': '101'}
+        active = self.client.post(path, headers=admin_headers)
+        self.assertEqual(active.status_code, 409, active.text)
+        self.db.connection.execute("UPDATE backend_update_jobs SET status='succeeded' WHERE id=?", (job['id'],))
+        dismissed = self.client.post(path, headers=admin_headers)
+        self.assertEqual(dismissed.status_code, 200, dismissed.text)
+        self.assertEqual(dismissed.json(), {'dismissed_job_id': job['id']})
+        self.assertEqual(service.dismissed_results(self.actor), [job['id']])
+        BackendHTTPTests.register(self, 102)
+        denied = self.client.post(path, headers={**self.headers, 'X-Node-Plane-Telegram-User-ID': '102'})
+        self.assertEqual(denied.status_code, 403, denied.text)
+
     def test_version_target_validation_and_idempotent_worker_launch(self):
         service = self.service()
         for ref, branch in [('v0.3.0', 'dev'), ('arbitrary;command', 'dev'), ('v0.4.3-alpha.19', 'main')]:
