@@ -500,6 +500,7 @@ fn ensure_api_path(path: &str) -> std::result::Result<(), ApiError> {
         || resource.starts_with("/api/v1/nodes/")
         || resource.starts_with("/api/v1/node-jobs/")
         || resource.starts_with("/api/v1/node-bootstraps/")
+        || resource.starts_with("/api/v1/node-settings-operations/")
         || resource.starts_with("/api/v1/agent-rollouts/"))
         && !path.contains(['\r', '\n', '#'])
         && !resource.contains("..")
@@ -677,6 +678,8 @@ mod tests {
         assert!(ensure_api_path("/api/v1/system/updates").is_ok());
         assert!(ensure_api_path("/api/v1/nodes?order=region&cursor=a%2Fb").is_ok());
         assert!(ensure_api_path("/api/v1/nodes/lv1/overview").is_ok());
+        assert!(ensure_api_path("/api/v1/system/installation-defaults").is_ok());
+        assert!(ensure_api_path("/api/v1/node-settings-operations/fixture").is_ok());
         assert!(ensure_api_path("/api/v1/nodes/../profiles").is_err());
         assert!(ensure_api_path("/api/v1/nodes/%2e%2e/profiles").is_err());
         for value in [

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.3-alpha.74 - 2026-10-10
+
+- Preserve server artifact inputs while cargo-dist packages the release.
+- Add server settings editing in Workstation, including protocol options and region access confirmation.
+- Warn before discarding unsaved profile and server changes in Telegram and Workstation.
+
 ## 0.4.3-alpha.73 - 2026-10-10
 
 - Add Workstation Access: accounts, requests, profile settings, current/future access rules, devices and expiry presets.

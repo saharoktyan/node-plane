@@ -164,6 +164,7 @@ pub struct Editor {
     pub nodes: Vec<Value>,
     pub regions: Vec<Value>,
     pub policy: Value,
+    pub baseline_policy: Value,
     pub grants_view: bool,
     pub grants_page: usize,
     pub future_view: bool,
@@ -189,12 +190,26 @@ impl Editor {
             nodes: Vec::new(),
             regions: Vec::new(),
             policy: json!({"explicit_grants": [], "rules": [], "exclusions": []}),
+            baseline_policy: json!({"explicit_grants": [], "rules": [], "exclusions": []}),
             grants_view: false,
             grants_page: 0,
             future_view: false,
             expiry_view: false,
             expiry_page: 0,
         }
+    }
+    pub fn dirty(&self) -> bool {
+        let baseline = self
+            .source
+            .as_ref()
+            .map(|v| {
+                [
+                    v["display_name"].as_str().unwrap_or("").to_owned(),
+                    v["expires_at"].as_str().unwrap_or("").to_owned(),
+                ]
+            })
+            .unwrap_or_default();
+        self.fields != baseline || self.policy != self.baseline_policy
     }
     pub fn toggle_grant(&mut self, node: &str, protocol: &str) {
         let granted = self.granted(node, protocol);
@@ -481,6 +496,7 @@ impl Browser {
                         editor.policy[key] = value["policy"][key].clone();
                     }
                 }
+                editor.baseline_policy = editor.policy.clone();
                 self.editor = Some(editor);
             }
             Command::Mutate { delete, .. } => {
