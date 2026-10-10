@@ -199,14 +199,39 @@ class NavigationRenderTests(IsolatedAsyncioTestCase):
         self.assertIsNone(self.data['edit_profile_id'])
         self.assertIsNone(self.data['draft_grants'])
 
-    async def test_node_settings_draft_is_preserved_without_an_exit_prompt(self):
+    async def test_node_settings_draft_requires_confirmation_on_exit(self):
         await self.draw()
         self.query.data = 'admin_nodes'
         handler = AsyncMock()
         await NavigationGuardMiddleware()(handler, SimpleNamespace(callback_query=self.query),
                                            {'state': self.state, 'bot': self.bot})
-        handler.assert_awaited_once()
+        handler.assert_not_awaited()
+        self.assertEqual(self.data['navigation_discard']['kind'], 'node_settings')
         self.assertEqual(self.data['node_settings_draft']['values']['title'], 'New name')
+
+    async def test_unchanged_server_draft_and_return_to_same_server_do_not_warn(self):
+        await self.draw()
+        self.data['node_settings_draft']['baseline'] = {'title':'New name'}
+        self.query.data = 'admin_nodes'
+        handler = AsyncMock()
+        await NavigationGuardMiddleware()(handler, SimpleNamespace(callback_query=self.query), {'state':self.state,'bot':self.bot})
+        handler.assert_awaited_once()
+        self.data['node_settings_draft']['baseline'] = {'title':'Old name'}
+        self.query.data = 'admin_node:lv1'
+        handler.reset_mock()
+        await NavigationGuardMiddleware()(handler, SimpleNamespace(callback_query=self.query), {'state':self.state,'bot':self.bot})
+        handler.assert_awaited_once()
+
+    async def test_confirmed_exit_clears_server_draft_before_forwarding(self):
+        await self.draw()
+        nonce=self.data['navigation_screen']['nonce']
+        self.data['navigation_discard']={'nonce':nonce,'callback':'admin_nodes','kind':'node_settings'}
+        self.query=CallbackQuery(id='discard',from_user=User(id=123,is_bot=False,first_name='Admin'),chat_instance='test',data='nav_discard:'+nonce,message=Message(message_id=77,date=0,chat=Chat(id=123,type='private')))
+        dispatcher=SimpleNamespace(propagate_event=AsyncMock())
+        await navigation_cb(self.query,self.bot,self.state,dispatcher)
+        self.assertIsNone(self.data['node_settings_draft'])
+        self.assertIsNone(self.data['node_region_confirmation'])
+        self.assertEqual(dispatcher.propagate_event.call_args.kwargs['event'].data,'admin_nodes')
 
     async def test_abandoning_server_creation_requires_confirmation(self):
         await self.draw()

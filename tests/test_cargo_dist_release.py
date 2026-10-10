@@ -68,8 +68,13 @@ class CargoDistReleaseTests(unittest.TestCase):
             self.assertNotIn('scripts/build_release_stack.sh', payload)
             # The global packaging job consumes the parallel job's artifacts,
             # and must not fall back to compiling when an artifact is missing.
-            incoming = root / 'target/distrib'
+            incoming = root / 'dist/server-input'
             shutil.copytree(out, incoming)
+            # cargo-dist can clear its output directory before invoking the
+            # extra-artifact command; server inputs must survive that cleanup.
+            distrib = root / 'target/distrib'
+            shutil.copytree(out, distrib)
+            shutil.rmtree(distrib)
             (commands / 'cargo').write_text('#!/bin/sh\nexit 99\n')
             result = subprocess.run(['bash', str(root / 'scripts/build_release_stack.sh'), '--from-ci'],
                 env={**env, 'CI': 'true'}, capture_output=True, text=True, timeout=20)

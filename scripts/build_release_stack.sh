@@ -10,7 +10,7 @@ cd "$ROOT_DIR"
 if [[ "${1:-}" == --from-ci && "${CI:-}" == true ]]; then
   mkdir -p "$OUT_DIR"
   for name in node-plane-controller.tar.gz node-plane-driver-linux-amd64.tar.gz node-plane-agent-linux-amd64.tar.gz SHA256SUMS.txt RELEASE_METADATA.txt; do
-    cp "$ROOT_DIR/target/distrib/$name" "$OUT_DIR/$name"
+    cp "$ROOT_DIR/dist/server-input/$name" "$OUT_DIR/$name"
   done
   (cd "$OUT_DIR" && sha256sum --check SHA256SUMS.txt)
   python3 scripts/controller_release.py verify --archive "$OUT_DIR/node-plane-controller.tar.gz" \

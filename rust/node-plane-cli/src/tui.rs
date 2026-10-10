@@ -196,6 +196,17 @@ enum Control {
     WizardOpen,
     NodesSetup,
     NodesBootstrap,
+    NodesEdit,
+    NodesEditTab(crate::node_editor::Tab),
+    NodesEditField(usize),
+    NodesEditChoice(usize),
+    NodesEditToggle(bool, usize),
+    NodesEditPage(bool),
+    NodesEditSave,
+    NodesEditConfirm,
+    NodesEditReset,
+    NodesEditBack,
+    NodesApply,
     Temporary,
     Access,
     AccessTab(crate::access::Tab),
@@ -269,6 +280,7 @@ enum Control {
     SaveInstallation,
     CancelEdit,
     Exit(bool),
+    Discard(bool),
     Field(usize),
     Continue,
     Confirm(bool),
@@ -510,6 +522,9 @@ struct App {
     editor: Option<(Option<uuid::Uuid>, Vec<String>, usize)>,
     exit: bool,
     exit_confirm: bool,
+    discard: Option<Control>,
+    discard_confirm: bool,
+    discard_bypass: bool,
     quick_focus: bool,
     result_scroll: usize,
     result_max_scroll: std::cell::Cell<usize>,
@@ -575,6 +590,9 @@ impl App {
             editor: None,
             exit: false,
             exit_confirm: false,
+            discard: None,
+            discard_confirm: false,
+            discard_bypass: false,
             quick_focus: true,
             result_scroll: 0,
             result_max_scroll: std::cell::Cell::new(0),
@@ -748,6 +766,16 @@ impl App {
         let mut next = (current + if backwards { 6 } else { 1 }) % 7;
         while next < 5 && (!self.actions_enabled() || next > 0 && !self.controller_ready()) {
             next = (next + if backwards { 6 } else { 1 }) % 7;
+        }
+        if self.unsaved_changes() {
+            let control = match next {
+                6 => Control::Settings,
+                5 => Control::QuickProfile,
+                4 => Control::Temporary,
+                _ => Control::Action(Action::ALL[next]),
+            };
+            self.activate(control);
+            return;
         }
         self.quick_focus = false;
         if next == 6 {
@@ -1137,8 +1165,11 @@ impl App {
                     self.access.selected = 0;
                     return;
                 }
-                if self.access.editor.take().is_some()
-                    || self.access.profile_action.take().is_some()
+                if self.access.editor.is_some() {
+                    self.activate(Control::AccessBack);
+                    return;
+                }
+                if self.access.profile_action.take().is_some()
                     || self.access.account_action.take().is_some()
                 {
                     return;
@@ -1329,6 +1360,7 @@ impl App {
         }
         self.screen = Screen::Nodes;
         self.nodes.card = None;
+        self.nodes.editor = None;
         self.nodes_sidebar = false;
         self.nodes_selected = 0;
         if !self.nodes.loaded {
@@ -1351,6 +1383,17 @@ impl App {
                         | Control::NodesBack
                         | Control::NodesNew
                         | Control::NodesSetup
+                        | Control::NodesEdit
+                        | Control::NodesEditTab(_)
+                        | Control::NodesEditField(_)
+                        | Control::NodesEditChoice(_)
+                        | Control::NodesEditToggle(_, _)
+                        | Control::NodesEditPage(_)
+                        | Control::NodesEditSave
+                        | Control::NodesEditConfirm
+                        | Control::NodesEditReset
+                        | Control::NodesEditBack
+                        | Control::NodesApply
                         | Control::NodesBootstrap
                         | Control::NodeTemporary
                         | Control::NodesPage(_)
@@ -1444,6 +1487,31 @@ impl App {
         let controls = self.nodes_controls();
         let selected = self.nodes_selected.min(controls.len().saturating_sub(1));
         let search = matches!(controls.get(selected), Some(Control::NodesSearch));
+        if let Some(Control::NodesEditField(index)) = controls.get(selected)
+            && let Some(editor) = &mut self.nodes.editor
+        {
+            match key.code {
+                KeyCode::Char(c)
+                    if !key.modifiers.contains(KeyModifiers::CONTROL) && !c.is_control() =>
+                {
+                    if editor.fields[*index].value.chars().count() < 255 {
+                        editor.fields[*index].value.push(c);
+                        editor.changed();
+                    }
+                    return;
+                }
+                KeyCode::Backspace => {
+                    editor.fields[*index].value.pop();
+                    editor.changed();
+                    return;
+                }
+                _ => {}
+            }
+        }
+        if key.code == KeyCode::Esc && self.nodes.editor.is_some() {
+            self.activate(Control::NodesEditBack);
+            return;
+        }
         match key.code {
             KeyCode::Up | KeyCode::Down | KeyCode::Left | KeyCode::Right => {
                 self.nodes_move_direction(key.code);
@@ -1915,6 +1983,39 @@ impl App {
                                 self.error = error.to_string();
                             }
                         }
+                    }
+                    crate::nodes::Update::EditContext(source, defaults) => {
+                        match crate::node_editor::Editor::new(source, &defaults) {
+                            Ok(editor) => {
+                                self.nodes.editor = Some(editor);
+                                self.nodes_selected = 0;
+                            }
+                            Err(error) => self.error = error.to_string(),
+                        }
+                    }
+                    crate::nodes::Update::EditReview(draft, preview) => {
+                        if let Some(editor) = &mut self.nodes.editor
+                            && editor.key == draft.key
+                        {
+                            editor.review = Some((draft, preview));
+                            self.nodes_selected = 0;
+                        }
+                    }
+                    crate::nodes::Update::Edited(mut item) => {
+                        if let Some(old) =
+                            self.nodes.card.as_ref().filter(|old| old.key == item.key)
+                        {
+                            item.agent = old.agent;
+                            item.services = old.services.clone();
+                        }
+                        if let Some(existing) =
+                            self.nodes.items.iter_mut().find(|old| old.key == item.key)
+                        {
+                            *existing = item.clone();
+                        }
+                        self.nodes.card = Some(item);
+                        self.nodes.editor = None;
+                        self.nodes_selected = 0;
                     }
                     crate::nodes::Update::Access(command, value) => {
                         self.access.apply(command, value)
@@ -2462,6 +2563,7 @@ impl App {
             Control::Prompt(value) => self.trust = value,
             Control::Administrator(index) => self.administrator_selected = index,
             Control::Exit(value) => self.exit_confirm = value,
+            Control::Discard(value) => self.discard_confirm = value,
             _ => {
                 if matches!(self.screen, Screen::Access) {
                     if let Some(index) = self.access_controls().iter().position(|c| *c == control) {
@@ -2532,7 +2634,64 @@ impl App {
         }
     }
 
+    fn unsaved_changes(&self) -> bool {
+        (matches!(self.screen, Screen::Access)
+            && (self.access.editor.as_ref().is_some_and(|e| e.dirty())
+                || self
+                    .access
+                    .devices
+                    .as_ref()
+                    .and_then(|d| d.editor.as_ref())
+                    .is_some_and(|e| {
+                        e.name
+                            != e.source
+                                .as_ref()
+                                .and_then(|v| v["display_name"].as_str())
+                                .unwrap_or("")
+                    })))
+            || (matches!(self.screen, Screen::Nodes)
+                && self.nodes.editor.as_ref().is_some_and(|e| e.dirty()))
+    }
     fn activate(&mut self, control: Control) -> Option<KeyEvent> {
+        if self.discard.is_some() && !matches!(control, Control::Discard(_)) {
+            return None;
+        }
+        let global_leave = matches!(
+            control,
+            Control::Action(_)
+                | Control::Settings
+                | Control::QuickProfile
+                | Control::CycleProfile(_)
+                | Control::Temporary
+                | Control::Access
+                | Control::Controller
+        );
+        let leaving = global_leave
+            || matches!(control, Control::AccessTab(_) | Control::NodesBack)
+            || control == Control::AccessBack
+                && (self.access.editor.is_some()
+                    || self
+                        .access
+                        .devices
+                        .as_ref()
+                        .is_some_and(|d| d.editor.is_some()))
+            || control == Control::NodesEditBack
+                && self
+                    .nodes
+                    .editor
+                    .as_ref()
+                    .is_some_and(|e| e.review.is_none());
+        if leaving && self.unsaved_changes() && !self.discard_bypass {
+            self.discard = Some(control);
+            self.discard_confirm = false;
+            return None;
+        }
+        self.discard_bypass = false;
+        if global_leave {
+            self.access.editor = None;
+            self.nodes.editor = None;
+        }
+
         if matches!(self.screen, Screen::Nodes)
             && !matches!(
                 control,
@@ -2545,6 +2704,14 @@ impl App {
             self.nodes_sidebar = false;
         }
         let key = match control {
+            Control::Discard(leave) => {
+                let pending = self.discard.take();
+                if leave && let Some(pending) = pending {
+                    self.discard_bypass = true;
+                    return self.activate(pending);
+                }
+                return None;
+            }
             Control::QuickStartToggle => {
                 self.connections.hide_quick_start = !self.connections.hide_quick_start;
                 if let Err(error) = self.connections.save(&self.state_dir) {
@@ -2875,6 +3042,8 @@ impl App {
                 return None;
             }
             Control::AccessTab(tab) => {
+                self.access.editor = None;
+                self.access.devices = None;
                 self.access.tab = tab;
                 self.access.owner_filter = None;
                 self.access.items.clear();
@@ -3267,6 +3436,142 @@ impl App {
                     self.open_controller();
                 } else if action == Action::PrepareNode {
                     self.open_nodes();
+                }
+                return None;
+            }
+            Control::NodesEdit => {
+                if let Some(node) = &self.nodes.card {
+                    self.nodes_requested =
+                        Some(crate::nodes::Command::EditContext(node.key.clone()));
+                }
+                return None;
+            }
+            Control::NodesEditTab(tab) => {
+                if let Some(editor) = &mut self.nodes.editor {
+                    editor.tab = tab;
+                    editor.page = 0;
+                }
+                self.nodes_selected = 0;
+                return None;
+            }
+            Control::NodesEditField(_) => {
+                self.focus(control);
+                return None;
+            }
+            Control::NodesEditChoice(index) => {
+                if let Some(editor) = &mut self.nodes.editor
+                    && let Some(choices) =
+                        crate::node_editor::Editor::choices(editor.fields[index].key)
+                {
+                    let position = choices
+                        .iter()
+                        .position(|v| *v == editor.fields[index].value)
+                        .unwrap_or(0);
+                    editor.fields[index].value = choices[(position + 1) % choices.len()].into();
+                    if editor.fields[index].key == "awg_i1_preset"
+                        && editor
+                            .fields
+                            .iter()
+                            .any(|f| f.key == "awg_port_mode" && f.value == "auto")
+                    {
+                        let port = match editor.fields[index].value.as_str() {
+                            "quic" => 443,
+                            "dns" => 53,
+                            _ => rand::random_range(1024u16..=9999),
+                        };
+                        if let Some(field) = editor.fields.iter_mut().find(|f| f.key == "awg_port")
+                        {
+                            field.value = port.to_string();
+                        }
+                    }
+                    editor.changed();
+                }
+                return None;
+            }
+            Control::NodesEditToggle(transport, index) => {
+                if let Some(editor) = &mut self.nodes.editor {
+                    editor.toggle(
+                        if transport {
+                            ["tcp", "xhttp"][index]
+                        } else {
+                            ["awg", "xray"][index]
+                        },
+                        transport,
+                    );
+                }
+                return None;
+            }
+            Control::NodesEditPage(next) => {
+                if let Some(editor) = &mut self.nodes.editor {
+                    let count = if editor.tab == crate::node_editor::Tab::Protocols {
+                        if editor.protocols.iter().any(|p| p == "xray") {
+                            4
+                        } else {
+                            2
+                        }
+                    } else {
+                        editor.field_indices().len()
+                    };
+                    let last = count
+                        .div_ceil(self.nodes_capacity.get().max(1))
+                        .saturating_sub(1);
+                    editor.page = if next {
+                        (editor.page + 1).min(last)
+                    } else {
+                        editor.page.saturating_sub(1)
+                    };
+                }
+                self.nodes_selected = 0;
+                return None;
+            }
+            Control::NodesEditSave => {
+                if let Some(editor) = &self.nodes.editor {
+                    match editor.draft() {
+                        Ok(draft) => {
+                            self.nodes_requested = Some(crate::nodes::Command::EditReview(draft))
+                        }
+                        Err(error) => self.error = error.to_string(),
+                    }
+                }
+                return None;
+            }
+            Control::NodesEditConfirm => {
+                if let Some((draft, preview)) =
+                    self.nodes.editor.as_ref().and_then(|e| e.review.as_ref())
+                {
+                    let mut draft = draft.clone();
+                    if preview["affected_profiles"].as_u64().unwrap_or(0) > 0 {
+                        draft.body["confirm_access_change"] = serde_json::json!(true);
+                    }
+                    self.nodes_requested = Some(crate::nodes::Command::EditSave(draft));
+                }
+                return None;
+            }
+            Control::NodesEditReset => {
+                if let Some(editor) = &mut self.nodes.editor {
+                    editor.reset();
+                }
+                self.error.clear();
+                return None;
+            }
+            Control::NodesEditBack => {
+                if let Some(editor) = &mut self.nodes.editor
+                    && editor.review.take().is_some()
+                {
+                    self.nodes_selected = 0;
+                    return None;
+                }
+                self.nodes.editor = None;
+                self.nodes_selected = 0;
+                self.error.clear();
+                return None;
+            }
+            Control::NodesApply => {
+                if let Some(node) = &self.nodes.card {
+                    self.nodes_requested = Some(crate::nodes::Command::ApplySettings(
+                        node.clone(),
+                        uuid::Uuid::new_v4(),
+                    ));
                 }
                 return None;
             }
@@ -4009,11 +4314,38 @@ pub fn run(mut request: Request) -> Result<()> {
                             .extend(text.chars().filter(|c| !c.is_control()).take(remaining));
                         app.access.page = 0;
                     }
+                } else if matches!(app.screen, Screen::Nodes) && !app.exit {
+                    if let Some(Control::NodesEditField(index)) =
+                        app.nodes_controls().get(app.nodes_selected).copied()
+                        && let Some(editor) = &mut app.nodes.editor
+                    {
+                        let remaining =
+                            255usize.saturating_sub(editor.fields[index].value.chars().count());
+                        editor.fields[index]
+                            .value
+                            .extend(text.chars().filter(|c| !c.is_control()).take(remaining));
+                        editor.changed();
+                    }
                 } else if matches!(app.screen, Screen::Form) && !app.exit {
                     app.form.append(&text);
                 }
             }
             TermEvent::Key(key) if key.kind == KeyEventKind::Press => {
+                if app.discard.is_some() {
+                    match key.code {
+                        KeyCode::Left | KeyCode::Right | KeyCode::Tab | KeyCode::BackTab => {
+                            app.discard_confirm = !app.discard_confirm
+                        }
+                        KeyCode::Esc => {
+                            app.activate(Control::Discard(false));
+                        }
+                        KeyCode::Enter => {
+                            app.activate(Control::Discard(app.discard_confirm));
+                        }
+                        _ => {}
+                    }
+                    continue;
+                }
                 if app.prompt.is_some() {
                     app.prompt_key(key);
                     continue;
@@ -5014,6 +5346,8 @@ fn draw(frame: &mut Frame, app: &App) -> Vec<Hit> {
             } else {
                 "Server work is not cancelled. The interface will close, and this process will keep the SSH connection until it can detach safely or finish. Keep this terminal open until it returns."
             }
+        } else if app.unsaved_changes() {
+            "Close Workstation? Unsaved profile or server changes will be discarded."
         } else if matches!(app.screen, Screen::EditInstallation) {
             "Close the assistant? Unsaved installation changes will be discarded."
         } else {
@@ -5026,6 +5360,25 @@ fn draw(frame: &mut Frame, app: &App) -> Vec<Hit> {
             ("Close", "Cancel"),
             app.exit_confirm,
             (Control::Exit(true), Control::Exit(false)),
+            &mut hits,
+        );
+    }
+    if app.discard.is_some() {
+        hits.clear();
+        let popup = centered(area, 68, 10);
+        frame.render_widget(Clear, popup);
+        let sections = dialog(frame, popup, " Unsaved changes ");
+        frame.render_widget(
+            Paragraph::new("Leave without saving? Your changes will be discarded.")
+                .wrap(Wrap { trim: false }),
+            sections[0],
+        );
+        button_pair(
+            frame,
+            sections[1],
+            ("Discard", "Keep editing"),
+            app.discard_confirm,
+            (Control::Discard(true), Control::Discard(false)),
             &mut hits,
         );
     }
@@ -5473,7 +5826,228 @@ fn draw_temporary(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>)
     }
 }
 
+fn draw_node_editor(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
+    use crate::node_editor::{Editor, Tab};
+    let Some(editor) = &app.nodes.editor else {
+        return;
+    };
+    let right = draw_navigation(frame, app, area, hits);
+    let block = section_block(format!(
+        " {} · Settings ",
+        editor.source["title"].as_str().unwrap_or("Server")
+    ));
+    let inner = block.inner(right);
+    frame.render_widget(block, right);
+    let sections = Layout::vertical([
+        Constraint::Length(3),
+        Constraint::Min(0),
+        Constraint::Length(6),
+    ])
+    .split(inner);
+    let selected = |control| app.nodes_controls().get(app.nodes_selected) == Some(&control);
+    let mut buttons = Vec::new();
+    if let Some((draft, preview)) = &editor.review {
+        let mut lines = vec![Line::styled(
+            "Review changes",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )];
+        for (key, value) in draft.body.as_object().unwrap() {
+            if key == "settings" {
+                for (name, value) in value.as_object().unwrap() {
+                    if &editor.source["settings"][name] != value {
+                        lines.push(Line::from(format!(
+                            "{name}: {}",
+                            crate::access::text(value)
+                        )));
+                    }
+                }
+            } else {
+                lines.push(Line::from(format!("{key}: {}", crate::access::text(value))));
+            }
+        }
+        let affected = preview["affected_profiles"].as_u64().unwrap_or(0);
+        if affected > 0 {
+            lines.push(Line::styled(
+                format!("Region access changes: {affected} profiles"),
+                Style::default().fg(Color::Red),
+            ));
+        }
+        lines.push(Line::from(
+            if editor.source["applied_revision"].as_u64().unwrap_or(0) > 0 {
+                "Save and apply these changes?"
+            } else {
+                "Save these settings?"
+            },
+        ));
+        if !app.error.is_empty() {
+            lines.push(Line::styled(
+                app.error.as_str(),
+                Style::default().fg(Color::Red),
+            ));
+        }
+        let content = Rect::new(
+            sections[0].x,
+            sections[0].y,
+            sections[0].width,
+            sections[0].height + sections[1].height,
+        );
+        frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), content);
+        buttons.extend([
+            ("Confirm", Control::NodesEditConfirm),
+            ("Back", Control::NodesEditBack),
+        ]);
+    } else {
+        let tabs = Layout::horizontal([Constraint::Fill(1); 3]).split(sections[0]);
+        for (index, tab) in Tab::ALL.iter().enumerate() {
+            let control = Control::NodesEditTab(*tab);
+            draw_button(frame, tabs[index], tab.label(), selected(control));
+            hits.push(Hit {
+                area: tabs[index],
+                control,
+            });
+        }
+        let content = Layout::vertical([
+            Constraint::Min(0),
+            Constraint::Length(if app.error.is_empty() { 0 } else { 2 }),
+        ])
+        .split(sections[1]);
+        if !app.error.is_empty() {
+            frame.render_widget(
+                Paragraph::new(app.error.as_str())
+                    .style(Style::default().fg(Color::Red))
+                    .wrap(Wrap { trim: false }),
+                content[1],
+            );
+        }
+        let fields = editor.field_indices();
+        let capacity = usize::from(content[0].height / 3).max(1);
+        app.nodes_capacity.set(capacity);
+        let pages = if editor.tab == Tab::Protocols {
+            (if editor.protocols.iter().any(|p| p == "xray") {
+                4usize
+            } else {
+                2
+            })
+            .div_ceil(capacity)
+        } else {
+            fields.len().div_ceil(capacity)
+        }
+        .max(1);
+        let page = editor.page.min(pages - 1);
+        if editor.tab == Tab::Protocols {
+            for (row, index) in (0..if editor.protocols.iter().any(|p| p == "xray") {
+                4
+            } else {
+                2
+            })
+                .skip(page * capacity)
+                .take(capacity)
+                .enumerate()
+            {
+                let (value, name) = [
+                    ("awg", "AmneziaWG"),
+                    ("xray", "VLESS"),
+                    ("tcp", "TCP"),
+                    ("xhttp", "XHTTP"),
+                ][index];
+                let enabled = if index < 2 {
+                    &editor.protocols
+                } else {
+                    &editor.transports
+                }
+                .iter()
+                .any(|v| v == value);
+                let control = Control::NodesEditToggle(index >= 2, index % 2);
+                let rect = Rect::new(
+                    content[0].x,
+                    content[0].y + row as u16 * 3,
+                    content[0].width,
+                    3,
+                );
+                if rect.bottom() > content[0].bottom() {
+                    break;
+                }
+                draw_button(
+                    frame,
+                    rect,
+                    &format!("{} {name}", if enabled { "✓" } else { "○" }),
+                    selected(control),
+                );
+                hits.push(Hit {
+                    area: rect,
+                    control,
+                });
+            }
+        } else {
+            for (row, &index) in fields
+                .iter()
+                .skip(page * capacity)
+                .take(capacity)
+                .enumerate()
+            {
+                let field = &editor.fields[index];
+                let rect = Rect::new(
+                    content[0].x,
+                    content[0].y + row as u16 * 3,
+                    content[0].width,
+                    3,
+                );
+                if rect.bottom() > content[0].bottom() {
+                    break;
+                }
+                if let Some(_choices) = Editor::choices(field.key) {
+                    let control = Control::NodesEditChoice(index);
+                    draw_button(
+                        frame,
+                        rect,
+                        &format!("{}: {}", field.label, field.value),
+                        selected(control),
+                    );
+                    hits.push(Hit {
+                        area: rect,
+                        control,
+                    });
+                } else {
+                    let control = Control::NodesEditField(index);
+                    draw_field(frame, rect, field.label, &field.value, selected(control));
+                    hits.push(Hit {
+                        area: rect,
+                        control,
+                    });
+                }
+            }
+        }
+        if editor.dirty() {
+            buttons.extend([
+                ("Save", Control::NodesEditSave),
+                ("Reset draft", Control::NodesEditReset),
+            ]);
+        }
+        if pages > 1 {
+            buttons.extend([
+                ("Previous", Control::NodesEditPage(false)),
+                ("Next", Control::NodesEditPage(true)),
+            ]);
+        }
+        buttons.push(("Back", Control::NodesEditBack));
+    }
+    let cells = button_areas(sections[2], buttons.len(), 2);
+    for (index, (label, control)) in buttons.iter().enumerate() {
+        draw_button(frame, cells[index], label, selected(*control));
+        hits.push(Hit {
+            area: cells[index],
+            control: *control,
+        });
+    }
+}
+
 fn draw_nodes(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
+    if app.nodes.editor.is_some() {
+        draw_node_editor(frame, app, area, hits);
+        return;
+    }
     let right = draw_navigation(frame, app, area, hits);
     let card = app.nodes.card.as_ref();
     let title = app.form.saved.as_ref().map_or("Nodes", |p| p.name.as_str());
@@ -5614,6 +6188,15 @@ fn draw_nodes(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
                     "Server setup"
                 };
                 actions.push((label, Control::NodesBootstrap));
+            }
+        }
+        if !busy {
+            actions.push(("Settings", Control::NodesEdit));
+            if node.applied_revision > 0
+                && node.desired_revision > node.applied_revision
+                && !node.protocols.is_empty()
+            {
+                actions.push(("Apply changes", Control::NodesApply));
             }
         }
         actions.push(("Temporary configs", Control::NodeTemporary));
@@ -6086,7 +6669,10 @@ fn button_pair(
         buttons[0],
         labels.0,
         first,
-        if matches!(controls.0, Control::ConfirmDelete(true)) {
+        if matches!(
+            controls.0,
+            Control::ConfirmDelete(true) | Control::Discard(true)
+        ) {
             Color::Red
         } else {
             Color::Cyan
@@ -7726,6 +8312,97 @@ fn draw_editor(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
 
 #[cfg(test)]
 mod tests {
+    fn node_settings_editor() -> crate::node_editor::Editor {
+        crate::node_editor::Editor::new(serde_json::json!({"key":"lv1","title":"Server", "region":"Europe", "flag":"LV", "desired_revision":4,"applied_revision":4,"protocols":["awg"],"xray_transports":[],"settings":{"public_host":"vpn.test","awg_port":443,"awg_i1_preset":"quic","awg_port_mode":"auto"},"transport":"local"}), &serde_json::json!({"settings":{}})).unwrap()
+    }
+    #[test]
+    fn unsaved_server_changes_can_be_kept_or_discarded_without_mutation() {
+        let mut app = test_profile_app();
+        app.screen = Screen::Nodes;
+        app.nodes.card = Some(browser_node("lv1", "Europe"));
+        app.nodes.editor = Some(node_settings_editor());
+        app.nodes_requested = None;
+        app.nodes.editor.as_mut().unwrap().fields[0].value = "New name".into();
+        app.nodes_key(KeyCode::Esc.into());
+        assert!(app.discard == Some(Control::NodesEditBack));
+        assert!(app.nodes_requested.is_none());
+        app.activate(Control::Discard(false));
+        assert_eq!(
+            app.nodes.editor.as_ref().unwrap().fields[0].value,
+            "New name"
+        );
+        app.activate(Control::NodesEditBack);
+        app.activate(Control::Discard(true));
+        assert!(app.nodes.editor.is_none());
+        assert!(app.nodes.card.is_some());
+        assert!(app.nodes_requested.is_none());
+    }
+    #[test]
+    fn dirty_profile_exit_and_sidebar_navigation_require_confirmation() {
+        let mut app = test_profile_app();
+        app.screen = Screen::Access;
+        app.access.editor = Some(crate::access::Editor::new(
+            Some(serde_json::json!({"id":"p1","display_name":"Old"})),
+            None,
+        ));
+        app.access.editor.as_mut().unwrap().fields[0] = "New".into();
+        app.access_key(KeyCode::Esc.into());
+        assert!(app.discard == Some(Control::AccessBack));
+        app.activate(Control::Discard(false));
+        app.activate(Control::Settings);
+        assert!(app.discard == Some(Control::Settings));
+        assert!(matches!(app.screen, Screen::Access));
+        app.activate(Control::Discard(true));
+        assert!(app.access.editor.is_none());
+        assert!(matches!(app.screen, Screen::Settings));
+    }
+    #[test]
+    fn unmodified_editors_leave_without_warning_and_review_back_preserves_draft() {
+        let mut app = test_profile_app();
+        app.screen = Screen::Nodes;
+        app.nodes.editor = Some(node_settings_editor());
+        app.activate(Control::NodesEditBack);
+        assert!(app.discard.is_none());
+        assert!(app.nodes.editor.is_none());
+        let mut editor = node_settings_editor();
+        editor.fields[0].value = "New".into();
+        editor.changed();
+        let draft = editor.draft().unwrap();
+        editor.review = Some((draft, serde_json::json!({"affected_profiles":0})));
+        app.nodes.editor = Some(editor);
+        app.activate(Control::NodesEditBack);
+        assert!(app.discard.is_none());
+        assert!(app.nodes.editor.as_ref().unwrap().dirty());
+    }
+    #[test]
+    fn node_settings_paginate_small_terminals_and_save_requires_review() {
+        let mut app = test_profile_app();
+        app.screen = Screen::Nodes;
+        app.nodes.editor = Some(node_settings_editor());
+        app.nodes_requested = None;
+        app.nodes.editor.as_mut().unwrap().fields[1].value = "Asia".into();
+        app.nodes.editor.as_mut().unwrap().changed();
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 24)).unwrap();
+        terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+        assert!(app.hits.iter().any(|h| h.control == Control::NodesEditSave));
+        app.activate(Control::NodesEditSave);
+        assert!(matches!(
+            app.nodes_requested.take(),
+            Some(crate::nodes::Command::EditReview(_))
+        ));
+        let draft = app.nodes.editor.as_ref().unwrap().draft().unwrap();
+        app.event(Event::Nodes(crate::nodes::Update::EditReview(
+            draft,
+            serde_json::json!({"affected_profiles":3}),
+        )));
+        app.activate(Control::NodesEditConfirm);
+        let Some(crate::nodes::Command::EditSave(draft)) = app.nodes_requested.take() else {
+            panic!()
+        };
+        assert_eq!(draft.revision, 4);
+        assert_eq!(draft.body["confirm_access_change"], true);
+    }
+
     #[test]
     fn device_delete_requires_confirmation_and_back_does_not_leave_profile() {
         let mut app = test_profile_app();
@@ -9547,12 +10224,12 @@ mod tests {
             let count = app.nodes_controls().len();
             let per_row = count.div_ceil(2);
             let areas: Vec<_> = app.nodes_hits().iter().map(|hit| hit.area).collect();
-            assert_eq!(count, 4);
+            assert_eq!(count, 5);
             let first = &areas[..per_row];
             let last = &areas[per_row..];
             assert_eq!(first[0].x, last[0].x);
             assert_eq!(first.last().unwrap().right(), last.last().unwrap().right());
-            assert_eq!(last[0].width, first[0].width);
+            assert!(last[0].width >= first[0].width);
             assert!(last[0].width.abs_diff(last[1].width) <= 1);
             app.nodes_selected = per_row;
             app.nodes_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
@@ -9560,7 +10237,9 @@ mod tests {
             app.nodes_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
             assert_eq!(app.nodes_selected, 1);
             app.nodes_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
-            assert_eq!(app.nodes_selected, 1);
+            assert_eq!(app.nodes_selected, 2);
+            app.nodes_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+            assert_eq!(app.nodes_selected, 2);
             app.nodes_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
             assert_eq!(app.nodes_selected, per_row + 1);
             app.nodes_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));

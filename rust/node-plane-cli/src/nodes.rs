@@ -152,6 +152,9 @@ impl Operation {
         if self.kind == "node-bootstraps" && !self.action.is_empty() {
             return &self.action;
         }
+        if self.kind == "node-settings-operations" {
+            return "Apply settings";
+        }
         if self.kind == "agent-rollouts" {
             return if self.action.is_empty() {
                 "Agent setup"
@@ -222,7 +225,10 @@ impl SavedOperation {
                 record.path(&request.state_dir) == path
                     && matches!(
                         record.operation.kind.as_str(),
-                        "node-jobs" | "agent-rollouts" | "node-bootstraps"
+                        "node-jobs"
+                            | "agent-rollouts"
+                            | "node-bootstraps"
+                            | "node-settings-operations"
                     ),
                 "Invalid saved node operation"
             );
@@ -306,6 +312,10 @@ pub enum Command {
     Controller(Option<Uuid>, crate::controller::Command),
     Access(crate::access::Command),
     Temporary(crate::temporary::Command),
+    EditContext(String),
+    EditReview(crate::node_editor::Draft),
+    EditSave(crate::node_editor::Draft),
+    ApplySettings(Node, Uuid),
     CreationOptions,
     Create(crate::node_wizard::Draft),
     List,
@@ -318,6 +328,9 @@ pub enum Update {
     Controller(Option<Uuid>, crate::controller::Command, Value),
     Access(crate::access::Command, Value),
     Temporary(crate::temporary::Command, Value),
+    EditContext(Value, Value),
+    EditReview(crate::node_editor::Draft, Value),
+    Edited(Node),
     CreationOptions(crate::node_wizard::Options),
     Created(Node),
     List(Vec<Node>),
@@ -340,6 +353,7 @@ pub struct Browser {
     pub card: Option<Node>,
     pub operation: Option<Operation>,
     pub profile_id: Option<Uuid>,
+    pub editor: Option<crate::node_editor::Editor>,
 }
 impl Browser {
     pub fn pages(&self, capacity: usize) -> Vec<Vec<Row>> {
@@ -413,6 +427,30 @@ fn node(value: Value) -> Result<Node> {
     }
     Ok(item)
 }
+async fn apply_settings(
+    session: &SshSession,
+    credential: &backend::Credential,
+    request: &Request,
+    item: &Node,
+    key: Uuid,
+    tx: &mpsc::Sender<Event>,
+) -> Result<()> {
+    let value = backend::request_revision(
+        session,
+        credential,
+        Method::POST,
+        &format!("/api/v1/nodes/{}/apply-settings", item.key),
+        None,
+        Some(key),
+        Some(item.desired_revision),
+    )
+    .await?;
+    let operation = operation(&value, "node-settings-operations", &item.key)?;
+    SavedOperation::save(request, &credential.account_id, &operation)?;
+    let _ = tx.send(Event::Nodes(Update::Operation(operation)));
+    Ok(())
+}
+
 fn operation(value: &Value, kind: &str, key: &str) -> Result<Operation> {
     ensure!(
         value["node_key"] == key,
@@ -923,6 +961,28 @@ async fn execute(
                         let _ = tx.send(Event::Nodes(Update::Operation(observed)));
                     }
                 }
+                Command::EditContext(key) => {
+                    let source = backend::request(session, &credential, Method::GET, &format!("/api/v1/nodes/{key}"), None, None).await?;
+                    ensure!(source["key"] == key, "Backend returned another server");
+                    let defaults = backend::request(session, &credential, Method::GET, "/api/v1/system/installation-defaults", None, None).await?;
+                    let _ = tx.send(Event::Nodes(Update::EditContext(source, defaults)));
+                }
+                Command::EditReview(draft) => {
+                    let preview = if let Some(region) = draft.body["region"].as_str() {
+                        backend::request(session, &credential, Method::GET, &format!("/api/v1/nodes/{}/region-access-preview?region={}", draft.node, encode(region)), None, None).await?
+                    } else { json!({"affected_profiles":0}) };
+                    let _ = tx.send(Event::Nodes(Update::EditReview(draft, preview)));
+                }
+                Command::EditSave(draft) => {
+                    let saved = backend::request_revision(session, &credential, Method::PATCH, &format!("/api/v1/nodes/{}", draft.node), Some(draft.body), Some(draft.key), Some(draft.revision)).await?;
+                    let mut item = node(saved)?;
+                    ensure!(item.key == draft.node, "Backend returned another server");
+                    item.overview = backend::request(session, &credential, Method::GET, &format!("/api/v1/nodes/{}/overview", item.key), None, None).await.ok();
+                    let apply = item.applied_revision > 0 && item.applied_revision < item.desired_revision && !item.protocols.is_empty();
+                    let _ = tx.send(Event::Nodes(Update::Edited(item.clone())));
+                    if apply { apply_settings(session, &credential, &request, &item, draft.apply_key, tx).await?; }
+                }
+                Command::ApplySettings(item, key) => { apply_settings(session, &credential, &request, &item, key, tx).await?; }
                 Command::Card(key) => {
                     let path = format!("/api/v1/nodes/{key}");
                     let mut item = node(backend::request(session, &credential, Method::GET, &path, None, None).await?)?;
@@ -939,7 +999,7 @@ async fn execute(
                         Err(error) => return Err(error.into()),
                     }
                     let mut saved = SavedOperation::latest(&request, &credential.account_id, &key)?;
-                    if let Some(parent) = item.overview.as_ref().and_then(|v| v.get("bootstrap")).filter(|v| v.is_object()) {
+                    if saved.as_ref().is_none_or(|v| v.kind != "node-settings-operations") && let Some(parent) = item.overview.as_ref().and_then(|v| v.get("bootstrap")).filter(|v| v.is_object()) {
                         let mut parent = parent.clone();
                         parent["node_key"] = json!(key);
                         saved = Some(operation(&parent, "node-bootstraps", &key)?);

@@ -7,6 +7,7 @@ mod controller;
 mod enrollment;
 mod events;
 mod installer;
+mod node_editor;
 mod node_wizard;
 mod nodes;
 mod operation_store;

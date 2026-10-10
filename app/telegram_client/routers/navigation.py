@@ -17,6 +17,26 @@ def has_profile_changes(data):
         ('draft_exclusions', 'original_exclusions')))
 
 
+def has_node_changes(data):
+    draft = data.get('node_settings_draft')
+    return bool(draft and draft.get('values') != draft.get('baseline'))
+
+
+def leaving_node_settings(callback, data):
+    draft = data.get('node_settings_draft') or {}
+    return callback in {'admin_menu', 'admin_nodes'} or (
+        (callback or '').startswith(('admin_node:', 'node_settings:'))
+        and callback.split(':', 1)[1] != draft.get('node_key'))
+
+
+def safe_discard_destination(callback, kind, data):
+    if kind == 'node_settings':
+        return leaving_node_settings(callback, data)
+    if kind == 'access':
+        return callback in {'admin_menu', 'admin_profiles'} or (callback or '').startswith(('admin_profile:', 'admin_profile_edit:', 'prof_manage:'))
+    return callback in {'admin_menu', 'admin_nodes'}
+
+
 async def edit_navigation(query, bot, screen, rows):
     try:
         await bot.edit_message_text(chat_id=query.message.chat.id, message_id=query.message.message_id,
@@ -30,7 +50,7 @@ async def edit_navigation(query, bot, screen, rows):
 
 
 class NavigationGuardMiddleware(BaseMiddleware):
-    """A breadcrumb leaving an access editor must not silently discard its draft."""
+    """Warn before leaving changed access or server settings drafts."""
     async def __call__(self, handler, event, data):
         query = getattr(event, 'callback_query', None)
         state = data.get('state')
@@ -40,16 +60,16 @@ class NavigationGuardMiddleware(BaseMiddleware):
         saved = values.get('navigation_screen')
         if not saved or query.message is None or query.message.message_id != saved['message_id']:
             return await handler(event, data)
-        parent_callbacks = {p['callback'] for p in saved['parents']}
         leaving_access = has_profile_changes(values) and (
-            query.data in {'admin_menu', 'admin_profiles'} or (query.data or '').startswith('admin_profile:'))
+            safe_discard_destination(query.data, 'access', values))
         leaving_creation = bool(values.get('wizard_data') and not values.get('wizard_saved')) and (
             query.data in {'admin_menu', 'admin_nodes'})
-        if query.data not in parent_callbacks or not (leaving_access or leaving_creation):
+        leaving_settings = has_node_changes(values) and leaving_node_settings(query.data, values)
+        if not (leaving_access or leaving_creation or leaving_settings):
             return await handler(event, data)
         await query.answer()
         await state.update_data(navigation_discard={'nonce': saved['nonce'], 'callback': query.data,
-                                                   'kind': 'access' if leaving_access else 'node'})
+                                                   'kind': 'access' if leaving_access else 'node' if leaving_creation else 'node_settings'})
         locale = normalize_locale(values.get('locale'))
         title = tr(locale, 'navigation.unsaved')
         note = tr(locale, 'navigation.discard_note')
@@ -79,13 +99,17 @@ async def navigation_cb(query, bot, state, dispatcher=None, **handler_data):
         return
     if action == 'nav_discard':
         discard = data.get('navigation_discard')
-        if not discard or discard['nonce'] != nonce or dispatcher is None or discard['callback'] not in {
-                p['callback'] for p in saved['parents']}:
+        if (not discard or discard['nonce'] != nonce or dispatcher is None
+                or (discard['callback'] not in {p['callback'] for p in saved['parents']}
+                    and not safe_discard_destination(discard['callback'], discard['kind'], data))):
             await query.answer()
             return
         if discard['kind'] == 'access':
             await state.update_data(edit_profile_id=None, draft_grants=None, original_grants=None,
                 draft_rules=None, original_rules=None, draft_exclusions=None, original_exclusions=None)
+        elif discard['kind'] == 'node_settings':
+            await state.update_data(node_settings_draft=None, node_region_confirmation=None,
+                edit_node_key=None, edit_field=None)
         else:
             await state.update_data(wizard_data=None, wizard_saved=False)
         await state.update_data(navigation_discard=None)
