@@ -113,6 +113,10 @@ def parent_path(callback, locale, data):
     if callback.startswith('uv_page:'):
         return (*parent_path('updates', locale, data),
                 Breadcrumb(tr(locale, 'update_tools.versions'), callback))
+    if callback.startswith('recdiag:'):
+        return (*parent_path('recpage:0', locale, data), Breadcrumb(tr(locale, 'recovery.controller'), callback))
+    if callback.startswith('rechist:'):
+        return (*parent_path('recpage:0', locale, data), Breadcrumb(tr(locale, 'recovery.history'), callback))
     if callback.startswith('wsaudit:'):
         return (*parent_path('recpage:0', locale, data),
                 Breadcrumb(tr(locale, 'audit.title'), callback))

@@ -333,3 +333,5 @@ recovery audit table; interrupted actions remain admitted rather than recorded s
 `POST /api/v1/system/updates/jobs/{job_id}/dismiss` requires `settings.manage` and a completed or blocked job. It stores the dismissal for the authenticated administrator without changing the job, its result, or recovery state. Active jobs return `409 update_result_active`. Repeating dismissal is harmless.
 
 `GET /api/v1/system/updates` and `GET /api/v1/system/updates/rollout` include `dismissed_job_ids` for that administrator. Other administrators and subsequent jobs are unaffected.
+
+`GET /api/v1/system/workstation-audit?errors_only=true` filters failed HTTP requests (status >= 400) and unconfirmed SSH key enrollment outcomes before counting and pagination. `offset` is clamped to the last valid page.

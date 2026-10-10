@@ -1749,9 +1749,10 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
         return overview(db, current, offset)
 
     @app.get('/api/v1/system/workstation-audit', response_model=WorkstationAuditPageOutput)
-    def workstation_audit(offset: int = Query(default=0, ge=0, le=1000000), current=Depends(actor)):
+    def workstation_audit(offset: int = Query(default=0, ge=0, le=1000000),
+                          errors_only: bool = False, current=Depends(actor)):
         from .workstation_audit import WorkstationAudit
-        return WorkstationAudit(db).page(current, offset)
+        return WorkstationAudit(db).page(current, offset, errors_only)
 
     @app.get('/api/v1/system/updates/jobs/{job_id}')
     def update_job(job_id: UUID, current=Depends(actor)):

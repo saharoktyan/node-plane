@@ -120,6 +120,7 @@ class Section:
     tables: tuple[Table, ...] = ()
     heading_rows: tuple[tuple[InlineKeyboardButton, ...], ...] = ()
     inline_rows: tuple[tuple[str | InlineKeyboardButton, ...], ...] = ()
+    bold_first_line: bool = False
 
     def rich(self, depth=2):
         # iOS cannot activate controls inside Details, even in nested sections.
@@ -129,12 +130,15 @@ class Section:
                         any(interactive(child) for child in section.sections))
         collapsed = self.collapsed and not interactive(self)
         size = self.heading_size or min(depth, 6)
-        blocks = [InputRichBlockParagraph(text=line) for line in self.lines if line]
+        blocks = [InputRichBlockParagraph(text=RichTextBold(text=line)
+            if self.bold_first_line and index == 0 else line)
+            for index, line in enumerate(self.lines) if line]
         blocks.extend(table.rich() for table in self.tables)
-        blocks.extend(InputRichBlockParagraph(text=[
-            RichTextButton(button=RichMessageButton(text=item.text, callback_data=item.callback_data,
-                url=item.url, style='link')) if isinstance(item, InlineKeyboardButton) else item
-            for item in row]) for row in self.inline_rows)
+        for index, row in enumerate(self.inline_rows):
+            text = [RichTextButton(button=RichMessageButton(text=item.text, callback_data=item.callback_data,
+                url=item.url, style='link')) if isinstance(item, InlineKeyboardButton) else item for item in row]
+            blocks.append(InputRichBlockParagraph(text=RichTextBold(text=text)
+                if self.bold_first_line and not self.lines and index == 0 else text))
         for section in self.sections:
             blocks.extend(section.rich(depth=size if collapsed or not self.title else size + 1))
         blocks.extend(rich_buttons(self.rows))
@@ -190,6 +194,11 @@ class Screen:
         if self.uri and self.uri_collapsed:
             blocks.append(InputRichBlockDetails(summary=self.uri_title or '', is_open=False,
                 blocks=[InputRichBlockParagraph(text=RichTextCode(text=self.uri))]))
+        if self.uri and not self.uri_collapsed:
+            uri = InputRichBlockParagraph(text=RichTextCode(text=self.uri))
+            if self.uri_title and not self.uri_rows:
+                blocks.append(InputRichBlockSectionHeading(text=self.uri_title, size=2))
+            blocks.append(uri)
         for row in self.uri_rows:
             # Native inline text links are visible outside the collapsible URI.
             links = []
@@ -200,11 +209,6 @@ class Screen:
                     callback_data=button.callback_data, url=button.url, style='link')))
             if links:
                 blocks.append(InputRichBlockParagraph(text=links))
-        if self.uri and not self.uri_collapsed:
-            uri = InputRichBlockParagraph(text=RichTextCode(text=self.uri))
-            if self.uri_title and not self.uri_rows:
-                blocks.append(InputRichBlockSectionHeading(text=self.uri_title, size=2))
-            blocks.append(uri)
         documents = [InputRichBlockDocument(document=InputMediaDocument(
             media=BufferedInputFile(content, filename))) for filename, content in self.files]
         if documents:
