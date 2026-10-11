@@ -142,6 +142,7 @@ pub(super) enum Control {
     ControllerVersion(usize),
     ControllerVersionsPage(usize),
     ControllerUpdateCheck,
+    ControllerUpdateLatest,
     ControllerUpdateBranch,
     ControllerUpdateBranchConfirm(bool),
     ControllerUpdateAuto,

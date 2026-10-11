@@ -1,7 +1,7 @@
 """HTTP transport for identity services; constructing an app performs no DDL."""
 
 from uuid import UUID, uuid4
-from contextlib import contextmanager
+from contextlib import contextmanager, asynccontextmanager
 import fcntl
 import os
 from pathlib import Path
@@ -738,7 +738,28 @@ class OperationOutput(BaseModel):
 
 
 def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
-    app = FastAPI(title='Node Plane Backend', version='1.0.0', docs_url=None, redoc_url=None)
+    from db.postgres_db import PostgresDB
+    from .delivery_wakeup import DeliveryWakeup
+    postgres = isinstance(db, PostgresDB)
+    if postgres:
+        db.reuse_connections = True
+        db.max_idle = 8
+    wakeup = DeliveryWakeup(db.dsn) if postgres else None
+
+    @asynccontextmanager
+    async def lifespan(app):
+        if wakeup:
+            wakeup.start()
+        try:
+            yield
+        finally:
+            if wakeup:
+                wakeup.close()
+                db.close()
+
+    app = FastAPI(title='Node Plane Backend', version='1.0.0', docs_url=None,
+                  redoc_url=None, lifespan=lifespan)
+    app.state.delivery_wakeup = wakeup
     identities = SQLIdentityRepository(db)
     credentials = CredentialService(db)
     service = IdentityService(identities)
@@ -1084,6 +1105,31 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     @app.patch('/api/v1/system/alerts/preferences')
     def alert_preferences(body:AlertPreferencesInput,current=Depends(actor)):
         return alerts.preferences(current,body.model_dump(exclude_unset=True))
+
+    @app.get('/api/v1/integrations/telegram/deliveries/wait')
+    def wait_delivery(request: Request, timeout: int = Query(default=30, ge=1, le=30),
+                      principal=Depends(authenticate)):
+        if header(request, 'X-Node-Plane-Telegram-User-ID') is not None:
+            raise AccessDenied('invalid_input', 422)
+        AnnouncementService._transport(principal)
+        generation = wakeup.snapshot() if wakeup else 0
+        with db.connect() as conn:
+            from .maintenance_gate import active
+            restoring = conn.execute("SELECT 1 FROM backend_backup_jobs WHERE action='restore' "
+                "AND status IN ('awaiting_executor','running') LIMIT 1").fetchone()
+            ready = not active(conn) and (bool(conn.execute(
+                "SELECT 1 FROM backend_alert_deliveries WHERE status='queued' LIMIT 1").fetchone())
+                or not restoring and bool(conn.execute(
+                    "SELECT 1 FROM backend_announcement_deliveries WHERE status='queued' LIMIT 1").fetchone()))
+        if ready:
+            return {'ready': True}
+        if wakeup:
+            wakeup.wait(generation, timeout)
+        else:
+            import time
+            time.sleep(timeout)
+        # This is a hint only. Claim endpoints recheck eligibility and authorization.
+        return {'ready': False}
 
     @app.post('/api/v1/integrations/telegram/alerts/claim')
     def claim_alert(request:Request,principal=Depends(authenticate)):

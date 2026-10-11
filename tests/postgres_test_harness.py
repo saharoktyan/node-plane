@@ -29,8 +29,10 @@ def install_fake_psycopg() -> None:
         def __init__(self, dsn: str, autocommit: bool = False) -> None:
             path = _sqlite_path_from_dsn(dsn)
             os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-            self._conn = sqlite3.connect(path)
+            self._conn = sqlite3.connect(path, check_same_thread=False)
+            self.closed = False
             self._conn.row_factory = sqlite3.Row
+            self._conn.create_function('pg_notify', 2, lambda *_: None)
             self._conn.create_function("to_regclass", 1, lambda name: name if self._conn.execute("SELECT 1 FROM sqlite_master WHERE type=\"table\" AND name=?", (name,)).fetchone() else None)
             if autocommit:
                 self._conn.isolation_level = None
@@ -48,6 +50,7 @@ def install_fake_psycopg() -> None:
             self._conn.rollback()
 
         def close(self) -> None:
+            self.closed = True
             self._conn.close()
 
     def connect(dsn: str, row_factory=None, autocommit: bool = False):

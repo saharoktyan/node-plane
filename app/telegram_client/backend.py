@@ -166,6 +166,10 @@ class BackendClient:
     async def alert_claim(self,key):
         return await self.request('POST','/api/v1/integrations/telegram/alerts/claim',command=True,command_key=key)
 
+    async def wait_deliveries(self):
+        return await self.request('GET', '/api/v1/integrations/telegram/deliveries/wait',
+                                  timeout_seconds=35)
+
     async def alert_ack(self,delivery_id,key,status):
         return await self.request('POST',f'/api/v1/integrations/telegram/alerts/{delivery_id}/ack',body={'status':status},command=True,command_key=key)
 

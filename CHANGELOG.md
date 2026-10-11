@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.3-alpha.76 - 2026-10-11
+
+- Reuse PostgreSQL connections in the backend API.
+- Wake Telegram notification delivery after committed queue changes, with periodic fallback and automatic listener reconnection.
+- Preserve delivery authorization, claim/ack idempotency and interrupted-send handling.
+- Add a To latest action to Workstation when a controller update is available.
+- Fix the Workstation Clippy check for operation labels.
+
 ## 0.4.3-alpha.75 - 2026-10-11
 
 - Run the backend worker continuously, reuse PostgreSQL connections, and wake queued jobs after commit.

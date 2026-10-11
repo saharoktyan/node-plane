@@ -9,6 +9,8 @@ from config import POSTGRES_DSN
 
 _WORKER_CONNECTIONS = ContextVar('worker_connections', default=False)
 WORK_CHANNEL = 'node_plane_work'
+DELIVERY_CHANNEL = 'node_plane_delivery'
+_DELIVERY_TABLES = ('backend_alert_deliveries', 'backend_announcement_deliveries')
 _QUEUE_TABLES = ('backend_operation_tasks', 'backend_node_jobs', 'backend_node_settings_tasks',
     'backend_agent_rollouts', 'backend_node_bootstraps', 'backend_node_removals',
     'backend_config_issuances', 'backend_temporary_configs', 'backend_update_jobs',
@@ -62,25 +64,33 @@ class PostgresConnectionAdapter:
     def __init__(self, conn: Any) -> None:
         self._conn = conn
         self._wake = False
+        self._delivery_wake = False
 
     def execute(self, query: str, params: object | None = None) -> PostgresResult:
         cursor = self._conn.execute(_translate_query(query, params), params)
         sql = query.lstrip().lower()
-        if (not _WORKER_CONNECTIONS.get() and sql.startswith(('insert ', 'update ', 'delete '))
-            and any(table in sql for table in _QUEUE_TABLES)
-            and isinstance(cursor.rowcount, int) and cursor.rowcount > 0):
+        changed = (sql.startswith(('insert ', 'update ', 'delete '))
+            and isinstance(cursor.rowcount, int) and cursor.rowcount > 0)
+        if changed and any(table in sql for table in _DELIVERY_TABLES):
+            self._delivery_wake = True
+        if (changed and not _WORKER_CONNECTIONS.get()
+            and any(table in sql for table in _QUEUE_TABLES)):
             self._wake = True
         return PostgresResult(cursor)
 
     def commit(self) -> None:
+        if self._delivery_wake:
+            self._conn.execute("SELECT pg_notify('node_plane_delivery', '')")
         if self._wake:
             self._conn.execute("SELECT pg_notify('node_plane_work', '')")
         self._conn.commit()
         self._wake = False
+        self._delivery_wake = False
 
     def rollback(self) -> None:
         self._conn.rollback()
         self._wake = False
+        self._delivery_wake = False
 
     def close(self) -> None:
         self._conn.close()
@@ -92,6 +102,9 @@ class PostgresDB:
     def __init__(self, dsn: str | None = None) -> None:
         self._idle = []
         self._pool_lock = Lock()
+        self.reuse_connections = False
+        self.max_idle = 2
+        self._closed = False
         self.dsn = str(dsn or POSTGRES_DSN or "").strip()
         if not self.dsn:
             raise ValueError("POSTGRES_DSN is required when DB_BACKEND=postgres")
@@ -107,12 +120,15 @@ class PostgresDB:
 
     def close(self):
         with self._pool_lock:
+            self._closed = True
             idle, self._idle = self._idle, []
         for conn in idle:
             conn.close()
 
     def _acquire(self):
-        if _WORKER_CONNECTIONS.get():
+        if self._closed:
+            raise RuntimeError('Database connections are closed')
+        if self.reuse_connections or _WORKER_CONNECTIONS.get():
             with self._pool_lock:
                 while self._idle:
                     conn = self._idle.pop()
@@ -122,9 +138,9 @@ class PostgresDB:
         return self._open()
 
     def _release(self, conn):
-        if _WORKER_CONNECTIONS.get() and not conn._conn.closed:
+        if (self.reuse_connections or _WORKER_CONNECTIONS.get()) and not conn._conn.closed:
             with self._pool_lock:
-                if len(self._idle) < 2:
+                if not self._closed and len(self._idle) < self.max_idle:
                     self._idle.append(conn)
                     return
         conn.close()

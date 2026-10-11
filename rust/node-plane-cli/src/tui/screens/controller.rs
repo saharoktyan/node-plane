@@ -853,6 +853,9 @@ pub(in crate::tui) fn draw_controller(
             }
         }
         controls.push(("Check for updates".into(), Control::ControllerUpdateCheck));
+        if value["update_available"] == true {
+            controls.push(("To latest".into(), Control::ControllerUpdateLatest));
+        }
         controls.push((
             "Choose version / rollback".into(),
             Control::ControllerVersions,

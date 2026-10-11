@@ -40,4 +40,11 @@ async def delivery_loop(bot, backend):
                 logging.getLogger(__name__).warning(
                     "Notification delivery requires attention"
                 )
-        await asyncio.sleep(0.1 if worked else 5)
+        if worked:
+            await asyncio.sleep(0.1)
+        else:
+            try:
+                await backend.wait_deliveries()
+            except Exception:
+                # Includes older controllers and interrupted long polls.
+                await asyncio.sleep(5)

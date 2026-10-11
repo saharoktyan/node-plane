@@ -71,6 +71,7 @@ impl App {
                 | Control::ControllerUpdateAuto
                 | Control::ControllerUpdateInterval
                 | Control::ControllerUpdateCheck
+                | Control::ControllerUpdateLatest
                 | Control::ControllerBackupAuto
                 | Control::ControllerBackupInterval
                 | Control::ControllerBackupKeep
@@ -276,6 +277,7 @@ impl App {
             | Control::ControllerVersion(..)
             | Control::ControllerUpdates
             | Control::ControllerUpdateCheck
+            | Control::ControllerUpdateLatest
             | Control::ControllerUpdateAuto
             | Control::ControllerUpdateInterval
             | Control::ControllerSection(..)

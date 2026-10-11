@@ -545,6 +545,19 @@ impl App {
                 self.controller_command(crate::controller::Command::UpdateVersions(offset));
                 None
             }
+            Control::ControllerUpdateLatest => {
+                let updates = self.controller.updates.as_ref()?;
+                if updates["update_available"] != true {
+                    return None;
+                }
+                let target = updates["upstream_ref"].as_str().filter(|v| !v.is_empty())?;
+                let target = target.to_string();
+                self.form.select_action(Action::Update);
+                self.form.fields[4] = target;
+                self.form.selected = 1;
+                self.screen = Screen::Form;
+                None
+            }
             Control::ControllerVersion(index) => {
                 if let Some(item) = self
                     .controller
@@ -1082,6 +1095,9 @@ impl App {
             ];
             if update_result_available(updates) {
                 controls.insert(3, Control::ControllerUpdateResult);
+            }
+            if updates["update_available"] == true {
+                controls.insert(1, Control::ControllerUpdateLatest);
             }
             return controls;
         }

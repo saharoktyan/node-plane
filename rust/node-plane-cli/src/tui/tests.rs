@@ -1347,6 +1347,32 @@ fn controller_back_returns_from_nested_updates_then_closes_section() {
 }
 
 #[test]
+fn latest_update_uses_known_upstream_and_keeps_confirmation_flow() {
+    let mut app = test_profile_app();
+    app.form.action = Action::Update;
+    app.screen = Screen::Controller;
+    app.controller.updates = Some(serde_json::json!({
+        "update_available": false, "upstream_ref": "v0.4.3-alpha.75"
+    }));
+    assert!(
+        !app.controller_controls()
+            .contains(&Control::ControllerUpdateLatest)
+    );
+    app.activate(Control::ControllerUpdateLatest);
+    assert!(matches!(app.screen, Screen::Controller));
+    app.controller.updates.as_mut().unwrap()["update_available"] = true.into();
+    assert!(
+        app.controller_controls()
+            .contains(&Control::ControllerUpdateLatest)
+    );
+    app.activate(Control::ControllerUpdateLatest);
+    assert!(matches!(app.screen, Screen::Form));
+    assert!(app.form.action == Action::Update);
+    assert_eq!(app.form.fields[4], "v0.4.3-alpha.75");
+    assert!(!app.nodes_busy);
+}
+
+#[test]
 fn update_component_card_back_restores_components() {
     let mut app = test_profile_app();
     app.screen = Screen::Controller;

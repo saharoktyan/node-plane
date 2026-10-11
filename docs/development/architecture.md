@@ -16,6 +16,10 @@ Node Plane has two administrator interfaces, a shared backend and node-local exe
 
 The interfaces use the same backend policies. The driver does not need database credentials or reconstruct access policy. A local node follows the same agent path over loopback.
 
+The API retains up to eight idle PostgreSQL connections. Each transaction has an exclusive connection; commit and rollback finish before reuse. Authorization reads current credential and account state on each request.
+
+Telegram notification delivery drains durable claims, then waits up to 30 seconds through the backend. One dedicated PostgreSQL LISTEN connection per API process wakes waiting requests after delivery changes commit, including changes made by the worker. Generation tracking covers notifications arriving between the queue check and waiting. Reconnects trigger a recheck; timeout and transport failure provide periodic fallback. Wakeups carry no notification payload and never grant or replay a claim.
+
 ## Mutation lifecycle
 
 1. Authenticate and authorize the actor; validate input and expected revision.

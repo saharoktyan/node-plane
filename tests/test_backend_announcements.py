@@ -1,6 +1,7 @@
 """Announcement policy, durable delivery and HTTP authorization regression tests."""
 
 import unittest
+from unittest.mock import patch
 from uuid import uuid4
 
 from backend.announcements import AnnouncementService
@@ -212,3 +213,30 @@ class AnnouncementTests(unittest.TestCase):
             json={"status": "sent"},
         )
         self.assertEqual(response.status_code, 200, response.text)
+
+    def test_wait_requires_adapter_and_does_not_claim_pending_delivery(self):
+        endpoint = '/api/v1/integrations/telegram/deliveries/wait?timeout=1'
+        job = self.service.queue(self.actor, 'Hello', str(uuid4()))
+        result = self.client.get(endpoint, headers=self.headers)
+        self.assertEqual(result.status_code, 200, result.text)
+        self.assertTrue(result.json()['ready'])
+        self.assertEqual(self.service.get(self.actor, job['id'])['counts']['queued'], 1)
+        self.assertEqual(self.client.get(endpoint, headers=self.headers_for(101)).status_code, 422)
+        self.assertEqual(self.client.get(endpoint).status_code, 401)
+        _, account_token = self.credentials.issue(PrincipalKind.ACCOUNT, ADMIN_PERMISSIONS,
+                                                  account_id=self.admin.id)
+        self.assertEqual(self.client.get(endpoint, headers={
+            'Authorization': 'Bearer ' + account_token}).status_code, 403)
+        self.credentials.revoke(self.transport.id)
+        self.assertEqual(self.client.get(endpoint, headers=self.headers).status_code, 401)
+
+    def test_empty_wait_does_not_mutate_guard_or_claim_deliveries(self):
+        revision = self.db.connection.execute('SELECT revision FROM backend_account_guard WHERE id=1').fetchone()[0]
+        with patch('time.sleep') as sleep:
+            response = self.client.get('/api/v1/integrations/telegram/deliveries/wait',
+                                       headers=self.headers)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertFalse(response.json()['ready'])
+        sleep.assert_called_once_with(30)
+        self.assertEqual(self.db.connection.execute(
+            'SELECT revision FROM backend_account_guard WHERE id=1').fetchone()[0], revision)
