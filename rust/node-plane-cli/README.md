@@ -538,9 +538,16 @@ console behavior.
 
 ## TUI source layout
 
-`src/tui/mod.rs` coordinates the terminal, worker events and rendering.
-`app.rs` contains state transitions and actions; `widgets.rs` contains shared
-controls and layout helpers; `theme.rs` loads JSON palettes. Rendering is split
-by feature under `screens/`. Existing interface regression tests live in
-`tests.rs`, with theme-file tests beside the loader. Input handlers and state
-structures will be split further as the refactor continues.
+`src/tui/mod.rs` owns the terminal lifecycle and worker event loop.
+`state.rs` holds shared screen, form and focus state; `app.rs` constructs the
+application and loads saved connections. `events.rs` applies worker results.
+Input handling lives in `input/` (keyboard, mouse, navigation and scrolling),
+and feature actions live in `actions/` (controller, access, nodes, settings and
+temporary configurations). The shared action dispatcher keeps draft-discard
+checks and focus rules in one place before invoking feature handlers.
+
+`view.rs` composes screens, dialogs and focus decoration. Feature renderers live
+under `screens/`; `widgets.rs` supplies common controls and layouts. `theme.rs`
+loads JSON palettes. Existing interface regression tests live in `tests.rs`,
+with theme-file tests beside the loader. These modules remain private to the
+TUI; CLI and backend interfaces are unchanged.
