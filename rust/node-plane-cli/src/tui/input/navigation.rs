@@ -259,6 +259,13 @@ impl App {
         true
     }
     pub(in crate::tui) fn section_navigation(&mut self, key: KeyCode) -> bool {
+        self.remember_navigation_focus(None);
+        let result = self.section_navigation_inner(key);
+        self.restore_navigation_context();
+        result
+    }
+
+    fn section_navigation_inner(&mut self, key: KeyCode) -> bool {
         if key == KeyCode::Esc && self.section_root() {
             let control = match self.screen {
                 Screen::Settings => Control::Settings,
@@ -329,7 +336,6 @@ impl App {
                         | Control::Temporary
                         | Control::Settings
                         | Control::QuickProfile
-                        | Control::CycleProfile(_)
                 )
             })
             .collect();

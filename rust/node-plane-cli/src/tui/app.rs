@@ -4,6 +4,9 @@ use super::*;
 impl App {
     pub(super) fn new(r: &Request) -> Self {
         Self {
+            focus_history: std::collections::HashMap::new(),
+            navigation_context: None,
+            return_focus: None,
             image_picker: None,
             qr: std::cell::RefCell::new(None),
             qr_graphic: std::cell::RefCell::new(None),
@@ -83,6 +86,7 @@ impl App {
             discard_confirm: false,
             discard_bypass: false,
             quick_focus: true,
+            profile_flash: None,
             result_scroll: 0,
             result_max_scroll: std::cell::Cell::new(0),
             result_page_size: std::cell::Cell::new(1),

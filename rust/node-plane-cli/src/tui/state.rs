@@ -503,6 +503,9 @@ impl Drop for Form {
 }
 
 pub(super) struct App {
+    pub(super) focus_history: std::collections::HashMap<String, super::input::history::Bookmark>,
+    pub(super) navigation_context: Option<String>,
+    pub(super) return_focus: Option<Control>,
     pub(super) image_picker: Option<ratatui_image::picker::Picker>,
     pub(super) qr: std::cell::RefCell<Option<image::DynamicImage>>,
     pub(super) qr_graphic: std::cell::RefCell<Option<ratatui_image::protocol::StatefulProtocol>>,
@@ -582,6 +585,7 @@ pub(super) struct App {
     pub(super) discard_confirm: bool,
     pub(super) discard_bypass: bool,
     pub(super) quick_focus: bool,
+    pub(super) profile_flash: Option<(bool, std::time::Instant)>,
     pub(super) result_scroll: usize,
     pub(super) result_max_scroll: std::cell::Cell<usize>,
     pub(super) result_page_size: std::cell::Cell<usize>,

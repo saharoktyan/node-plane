@@ -268,6 +268,15 @@ impl App {
         self.connections = preferences;
         self.quick_focus = true;
         self.screen = Screen::Idle;
+        self.profile_flash = Some((backwards, std::time::Instant::now()));
+        // Enabled sidebar actions can change with the selected profile.
+        // Restore by control after drawing the new sidebar, not by its old index.
+        self.return_focus = Some(Control::QuickProfile);
+        self.idle_selection = self
+            .idle_controls()
+            .iter()
+            .position(|c| *c == Control::QuickProfile)
+            .unwrap_or(0);
         self.hovered = None;
         self.pointer_active = false;
         self.editor = None;

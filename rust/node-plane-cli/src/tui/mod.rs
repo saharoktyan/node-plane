@@ -394,8 +394,12 @@ pub fn run(mut request: Request) -> Result<()> {
         // Graphics persist outside the cell buffer. Sending the same image on
         // every idle tick clears and uploads it again, causing visible flicker.
         if !app.qr_visible || qr_needs_redraw {
+            app.restore_navigation_context();
             terminal.draw(|frame| app.hits = draw(frame, &app))?;
-            if app.refresh_scroll_hover() || app.restore_action_focus() {
+            if app.restore_return_focus()
+                || app.refresh_scroll_hover()
+                || app.restore_action_focus()
+            {
                 terminal.draw(|frame| app.hits = draw(frame, &app))?;
             }
             qr_needs_redraw = false;

@@ -2,6 +2,12 @@ use super::super::*;
 
 impl App {
     pub(in crate::tui) fn appearance_key(&mut self, key: KeyCode) {
+        self.remember_navigation_focus(None);
+        self.appearance_key_inner(key);
+        self.restore_navigation_context();
+    }
+
+    fn appearance_key_inner(&mut self, key: KeyCode) {
         if self.move_spatial(key) {
             return;
         }
@@ -38,6 +44,12 @@ impl App {
         }
     }
     pub(in crate::tui) fn controller_key(&mut self, key: crossterm::event::KeyEvent) {
+        self.remember_navigation_focus(None);
+        self.controller_key_inner(key);
+        self.restore_navigation_context();
+    }
+
+    fn controller_key_inner(&mut self, key: crossterm::event::KeyEvent) {
         if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
             self.exit = true;
             self.exit_confirm = false;
@@ -158,6 +170,12 @@ impl App {
         }
     }
     pub(in crate::tui) fn access_key(&mut self, key: KeyEvent) {
+        self.remember_navigation_focus(None);
+        self.access_key_inner(key);
+        self.restore_navigation_context();
+    }
+
+    fn access_key_inner(&mut self, key: KeyEvent) {
         let controls = self.access_controls();
         if controls.get(self.access.selected) == Some(&Control::AccessDeviceName)
             && let Some(editor) = self.access.devices.as_mut().and_then(|d| d.editor.as_mut())
@@ -280,6 +298,12 @@ impl App {
         }
     }
     pub(in crate::tui) fn temporary_key(&mut self, key: KeyEvent) {
+        self.remember_navigation_focus(None);
+        self.temporary_key_inner(key);
+        self.restore_navigation_context();
+    }
+
+    fn temporary_key_inner(&mut self, key: KeyEvent) {
         if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
             self.exit = true;
             self.exit_confirm = false;
@@ -336,6 +360,12 @@ impl App {
         }
     }
     pub(in crate::tui) fn wizard_key(&mut self, key: KeyEvent) {
+        self.remember_navigation_focus(None);
+        self.wizard_key_inner(key);
+        self.restore_navigation_context();
+    }
+
+    fn wizard_key_inner(&mut self, key: KeyEvent) {
         if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
             self.exit = true;
             self.exit_confirm = false;
@@ -401,6 +431,12 @@ impl App {
         }
     }
     pub(in crate::tui) fn nodes_key(&mut self, key: KeyEvent) {
+        self.remember_navigation_focus(None);
+        self.nodes_key_inner(key);
+        self.restore_navigation_context();
+    }
+
+    fn nodes_key_inner(&mut self, key: KeyEvent) {
         if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
             self.exit = true;
             self.exit_confirm = false;
@@ -545,6 +581,12 @@ impl App {
         }
     }
     pub(in crate::tui) fn idle_key(&mut self, key: KeyEvent) {
+        self.remember_navigation_focus(None);
+        self.idle_key_inner(key);
+        self.restore_navigation_context();
+    }
+
+    fn idle_key_inner(&mut self, key: KeyEvent) {
         let controls = self.idle_controls();
         if controls.is_empty() {
             return;
@@ -555,6 +597,12 @@ impl App {
             }
             KeyCode::Up | KeyCode::BackTab => {
                 self.idle_selection = (self.idle_selection + controls.len() - 1) % controls.len()
+            }
+            KeyCode::Left | KeyCode::Right
+                if controls[self.idle_selection.min(controls.len() - 1)]
+                    == Control::QuickProfile =>
+            {
+                self.activate(Control::CycleProfile(key.code == KeyCode::Left));
             }
             KeyCode::Enter | KeyCode::Right => {
                 self.activate(controls[self.idle_selection.min(controls.len() - 1)]);
@@ -571,6 +619,12 @@ impl App {
         }
     }
     pub(in crate::tui) fn installation_editor_key(&mut self, key: KeyEvent) {
+        self.remember_navigation_focus(None);
+        self.installation_editor_key_inner(key);
+        self.restore_navigation_context();
+    }
+
+    fn installation_editor_key_inner(&mut self, key: KeyEvent) {
         if key.code == KeyCode::Esc {
             self.activate(Control::CancelEdit);
             return;
@@ -616,6 +670,12 @@ impl App {
         }
     }
     pub(in crate::tui) fn prompt_key(&mut self, key: KeyEvent) {
+        self.remember_navigation_focus(None);
+        self.prompt_key_inner(key);
+        self.restore_navigation_context();
+    }
+
+    fn prompt_key_inner(&mut self, key: KeyEvent) {
         let Some((prompt, _)) = &self.prompt else {
             return;
         };
@@ -676,6 +736,12 @@ impl App {
         }
     }
     pub(in crate::tui) fn quick_start_key(&mut self, key: KeyEvent) {
+        self.remember_navigation_focus(None);
+        self.quick_start_key_inner(key);
+        self.restore_navigation_context();
+    }
+
+    fn quick_start_key_inner(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Esc => {
                 self.screen = Screen::Form;

@@ -4146,3 +4146,106 @@ fn custom_theme_selection_survives_restart_and_custom_color_clears_it() {
     assert!(restarted.connections.theme.is_none());
     assert!(Connections::load(state.path()).unwrap().theme.is_none());
 }
+
+#[test]
+fn returning_from_controller_section_restores_opener_and_scroll() {
+    let mut app = test_profile_app();
+    app.installed_profile = app.confirmed_installation;
+    app.activate(Control::Action(Action::Install));
+    let opener = Control::ControllerSection(ControllerSection::Monitoring);
+    let index = app
+        .controller_controls()
+        .iter()
+        .position(|c| *c == opener)
+        .unwrap();
+    app.controller.selected = index;
+    app.manual_viewport.set(Some(2));
+    app.activate(opener);
+    app.return_focus = None;
+    app.controller.selected = 2;
+    app.remember_navigation_focus(None);
+    app.controller.recovery_history = Some(serde_json::json!({"items": []}));
+    app.restore_navigation_context();
+    app.activate(Control::ControllerBack);
+    assert_eq!(app.controller.selected, 2);
+    app.return_focus = None;
+    app.activate(Control::ControllerBack);
+    assert_eq!(app.controller.selected, index);
+    assert_eq!(app.manual_viewport.get(), Some(2));
+}
+
+#[test]
+fn access_return_and_async_refresh_keep_selected_profile() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Access;
+    app.access.items = vec![
+        serde_json::json!({"id":"one"}),
+        serde_json::json!({"id":"two"}),
+    ];
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
+    terminal
+        .draw(|frame| app.hits = draw_content(frame, &app))
+        .unwrap();
+    let index = app
+        .access_controls()
+        .iter()
+        .position(|c| *c == Control::AccessItem(1))
+        .unwrap();
+    app.access.selected = index;
+    app.remember_navigation_focus(Some(Control::AccessItem(1)));
+    app.event(Event::Nodes(crate::nodes::Update::Access(
+        crate::access::Command::Card(crate::access::Tab::Profiles, "two".into()),
+        serde_json::json!({"id":"two"}),
+    )));
+    app.activate(Control::AccessBack);
+    assert_eq!(app.access.selected, index);
+    app.event(Event::Nodes(crate::nodes::Update::Access(
+        crate::access::Command::List(crate::access::Tab::Profiles),
+        serde_json::json!({"items":[{"id":"one"},{"id":"two"}]}),
+    )));
+    assert_eq!(app.access.selected, index);
+}
+
+#[test]
+fn settings_escape_restores_selected_submenu() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Settings;
+    let index = SettingsPage::ALL
+        .iter()
+        .position(|p| *p == SettingsPage::Appearance)
+        .unwrap()
+        + 1;
+    app.settings_selected = index;
+    app.activate(Control::SettingsPage(SettingsPage::Appearance));
+    app.appearance_key(KeyCode::Esc);
+    assert!(matches!(app.screen, Screen::Settings));
+    assert_eq!(app.settings_selected, index);
+}
+
+#[test]
+fn profile_switch_restores_selector_focus_after_sidebar_changes() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Idle;
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
+    terminal
+        .draw(|frame| app.hits = draw_content(frame, &app))
+        .unwrap();
+    let old_index = app
+        .idle_controls()
+        .iter()
+        .position(|c| *c == Control::QuickProfile)
+        .unwrap();
+    app.return_focus = Some(Control::QuickProfile);
+    app.form.saved = None;
+    app.idle_selection = old_index;
+    terminal
+        .draw(|frame| app.hits = draw_content(frame, &app))
+        .unwrap();
+    assert!(app.restore_return_focus());
+    assert!(app.idle_controls()[app.idle_selection] == Control::QuickProfile);
+    assert!(
+        !app.idle_controls()
+            .iter()
+            .any(|c| matches!(c, Control::CycleProfile(_)))
+    );
+}

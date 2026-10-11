@@ -799,14 +799,10 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
         && app.discard.is_none()
         && app.prompt.is_none()
     {
-        let mut navigation: Vec<_> = hits
-            .iter()
-            .filter(|hit| hit.control != Control::WindowClose)
-            .collect();
-        navigation.sort_by_key(|hit| (hit.area.y, hit.area.x));
+        let navigation = app.idle_controls();
         navigation
             .get(app.idle_selection.min(navigation.len().saturating_sub(1)))
-            .map(|hit| hit.control)
+            .copied()
     } else {
         None
     };
@@ -1190,7 +1186,12 @@ pub(super) fn draw_navigation(
         Constraint::Length(3),
     ])
     .split(profile);
-    draw_navigation_button(frame, parts[0], "←", app.quick_focus);
+    let profile_focused = matches!(app.screen, Screen::Form) && app.quick_focus;
+    let flash = app
+        .profile_flash
+        .filter(|(_, at)| at.elapsed() < Duration::from_millis(100))
+        .map(|(left, _)| left);
+    draw_navigation_button(frame, parts[0], "←", flash == Some(true));
     draw_navigation_button(
         frame,
         parts[1],
@@ -1198,9 +1199,9 @@ pub(super) fn draw_navigation(
             .saved
             .as_ref()
             .map_or("New profile", |p| p.name.as_str()),
-        app.quick_focus,
+        profile_focused,
     );
-    draw_navigation_button(frame, parts[2], "→", app.quick_focus);
+    draw_navigation_button(frame, parts[2], "→", flash == Some(false));
     hits.push(Hit {
         area: parts[0],
         control: Control::CycleProfile(true),

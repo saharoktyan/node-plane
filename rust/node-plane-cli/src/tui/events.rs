@@ -2,6 +2,15 @@ use super::*;
 
 impl App {
     pub(in crate::tui) fn event(&mut self, event: Event) {
+        let refresh = matches!(&event, Event::Nodes(_) | Event::Finished(_));
+        if refresh {
+            self.remember_navigation_focus(None);
+        }
+        self.event_inner(event);
+        self.restore_navigation_focus_after_event(refresh);
+    }
+
+    fn event_inner(&mut self, event: Event) {
         match event {
             Event::Nodes(update) => {
                 if self.ignore_nodes_updates {

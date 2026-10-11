@@ -29,6 +29,13 @@ impl App {
                 && self.nodes.editor.as_ref().is_some_and(|e| e.dirty()))
     }
     pub(in crate::tui) fn activate(&mut self, control: Control) -> Option<KeyEvent> {
+        self.remember_navigation_focus(Some(control));
+        let result = self.activate_inner(control);
+        self.restore_navigation_context();
+        result
+    }
+
+    fn activate_inner(&mut self, control: Control) -> Option<KeyEvent> {
         if control == Control::WindowClose {
             self.exit = true;
             self.exit_confirm = false;
