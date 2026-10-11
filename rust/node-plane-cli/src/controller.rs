@@ -255,6 +255,7 @@ impl Command {
 }
 #[derive(Default)]
 pub struct Browser {
+    pub plan_pending: bool,
     pub profile: Option<Uuid>,
     pub overview: Option<Value>,
     pub updates: Option<Value>,
@@ -298,6 +299,17 @@ pub struct Browser {
 }
 impl Browser {
     pub fn apply(&mut self, command: Command, value: Value) {
+        let selected = self.selected;
+        let keep_focus = matches!(
+            &command,
+            Command::AlertPreferences(_)
+                | Command::AlertDismiss(_)
+                | Command::PolicySave(_, _)
+                | Command::BackupPreferences(_)
+                | Command::UpdateCheck
+                | Command::UpdatePreferences(_)
+                | Command::AnnouncementStatus(_)
+        );
         match command {
             Command::BotTitle | Command::BotTitleSave(_) => {
                 self.bot_title = Some(value);
@@ -423,6 +435,7 @@ impl Browser {
                 self.overview = Some(value);
             }
             Command::Plan { .. } => {
+                self.plan_pending = false;
                 self.plan = Some(value);
                 self.phrase.clear();
                 self.key = Some(Uuid::new_v4());
@@ -442,6 +455,9 @@ impl Browser {
                 self.plan = None;
                 self.phrase.clear();
             }
+        }
+        if keep_focus {
+            self.selected = selected;
         }
     }
     pub fn verification_timed_out(&self) -> bool {

@@ -28,7 +28,10 @@ from backend.identity_repository import SQLIdentityRepository
 
 VERSION = 1
 LEGACY_SCOPES = frozenset({'maintenance.manage', 'settings.manage'})
-SCOPES = LEGACY_SCOPES | {'nodes.manage'}
+LEGACY_NODE_SCOPES = LEGACY_SCOPES | {'nodes.manage'}
+LEGACY_ACCESS_SCOPES = LEGACY_NODE_SCOPES | {'accounts.manage', 'profiles.manage', 'access_requests.manage', 'grants.manage'}
+LEGACY_PROFILE_SCOPES = LEGACY_ACCESS_SCOPES | {'profiles.self.read'}
+SCOPES = LEGACY_PROFILE_SCOPES | {'account.self.read', 'access_requests.self.read'}
 LIFETIME = timedelta(hours=1)
 MAX_REQUEST_BYTES = 16_384
 MAX_SESSION_BYTES = 16_384
@@ -163,7 +166,7 @@ class SessionStore:
             _uuid(value.get('account_id'))
             token = value.get('token')
             match = TOKEN_PATTERN.fullmatch(token) if isinstance(token, str) else None
-            if match is None or value.get('credential_id') != match[1] or value.get('scopes') not in (sorted(SCOPES), sorted(LEGACY_SCOPES)):
+            if match is None or value.get('credential_id') != match[1] or value.get('scopes') not in (sorted(SCOPES), sorted(LEGACY_PROFILE_SCOPES), sorted(LEGACY_ACCESS_SCOPES), sorted(LEGACY_NODE_SCOPES), sorted(LEGACY_SCOPES)):
                 raise WorkstationError('session_state_invalid')
             expires_at = datetime.fromisoformat(value['expires_at'])
             if expires_at.tzinfo is None or type(value.get('revoked', False)) is not bool:

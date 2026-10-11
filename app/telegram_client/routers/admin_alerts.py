@@ -122,8 +122,6 @@ async def alerts_cb(
                 tuple((tr(locale, 'announce.rich.' + kind), str(counts.get(kind, 0)))
                     for kind in ('queued', 'claimed', 'failed', 'unknown'))),)))
         rows = [[button(tr(locale, 'updates.refresh'), 'alerts')],
-                [button(tr(locale, 'alerts.preview_notice'), 'alerts_preview_notice'),
-                 button(tr(locale, 'alerts.preview_list'), 'alerts_preview_list')],
                 [button(tr(locale, 'back'), AdminSettingsCallback().pack())]]
         await render(bot, query.message.chat.id,
             Screen(tr(locale, 'alerts.title'), sections=tuple(sections), embedded_buttons=True, navigation=True),

@@ -17,7 +17,7 @@ from backend.authorization import AccessDenied, PrincipalKind, require_permissio
 from backend.credentials import CredentialService
 from backend.identity_repository import SQLIdentityRepository
 from backend.workstation_cli import (
-    LIFETIME, SCOPES, LEGACY_SCOPES, WorkstationError, WorkstationService, main, validate_request,
+    LIFETIME, SCOPES, LEGACY_SCOPES, LEGACY_NODE_SCOPES, LEGACY_ACCESS_SCOPES, LEGACY_PROFILE_SCOPES, WorkstationError, WorkstationService, main, validate_request,
 )
 
 
@@ -66,11 +66,12 @@ class WorkstationCredentialTests(unittest.TestCase):
         principal = self.credentials.authenticate('Bearer ' + result['token'], now=self.now)
         self.assertEqual(principal.kind, PrincipalKind.ACCOUNT)
         self.assertNotIn('delegate.telegram', principal.scopes)
+        self.assertTrue({'accounts.manage', 'profiles.manage', 'access_requests.manage', 'grants.manage'} <= principal.scopes)
         actor = resolve_actor(principal, self.identities)
         for permission in SCOPES:
             require_permission(actor, permission)
         with self.assertRaises(AccessDenied):
-            require_permission(actor, 'profiles.manage')
+            require_permission(actor, 'diagnostics.sensitive.read')
         row = self.db.connection.execute('SELECT * FROM backend_credentials').fetchone()
         self.assertNotIn(result['token'], str(dict(row)))
 
@@ -153,11 +154,62 @@ class WorkstationCredentialTests(unittest.TestCase):
         with self.assertRaises(AccessDenied):
             self.credentials.authenticate('Bearer ' + old_token, now=self.now)
 
+    def test_node_only_session_scopes_upgrade_for_access_management(self):
+        first = self.authenticate()
+        old_id, old_token = self.credentials.issue(PrincipalKind.ACCOUNT, LEGACY_NODE_SCOPES,
+            account_id=self.admin.id, now=self.now)
+        old = {**first, 'credential_id': old_id, 'token': old_token, 'scopes': sorted(LEGACY_NODE_SCOPES)}
+        old.pop('ok')
+        with self.service.store.locked() as directory:
+            self.service.store.write(directory, self.session_id, old)
+        result = self.authenticate()
+        self.assertEqual(result['account_id'], self.admin.id)
+        self.assertEqual(result['scopes'], sorted(SCOPES))
+        with self.assertRaises(AccessDenied):
+            self.credentials.authenticate('Bearer ' + old_token, now=self.now)
+
+    def test_access_session_upgrades_to_read_own_profile(self):
+        first = self.authenticate()
+        old_id, old_token = self.credentials.issue(PrincipalKind.ACCOUNT, LEGACY_ACCESS_SCOPES,
+            account_id=self.admin.id, now=self.now)
+        old = {**first, 'credential_id': old_id, 'token': old_token, 'scopes': sorted(LEGACY_ACCESS_SCOPES)}
+        old.pop('ok')
+        with self.service.store.locked() as directory:
+            self.service.store.write(directory, self.session_id, old)
+        result = self.authenticate()
+        self.assertEqual(result['account_id'], self.admin.id)
+        self.assertIn('profiles.self.read', result['scopes'])
+        with self.assertRaises(AccessDenied):
+            self.credentials.authenticate('Bearer ' + old_token, now=self.now)
+
     def test_embedded_helper_initializes_binding_schema_on_older_controller(self):
         self.db.connection.execute('DROP TABLE backend_workstation_keys')
         with patch('backend.workstation_audit.WorkstationAudit.initialize_schema'):
             self.service = WorkstationService(self.db, self.path)
         self.assertEqual(self.authenticate()['account_id'], self.admin.id)
+
+    def test_profile_session_upgrades_for_reading_system_settings(self):
+        first = self.authenticate()
+        old_id, old_token = self.credentials.issue(PrincipalKind.ACCOUNT, LEGACY_PROFILE_SCOPES,
+            account_id=self.admin.id, now=self.now)
+        old = {**first, 'credential_id': old_id, 'token': old_token, 'scopes': sorted(LEGACY_PROFILE_SCOPES)}
+        old.pop('ok')
+        with self.service.store.locked() as directory:
+            self.service.store.write(directory, self.session_id, old)
+        result = self.authenticate()
+        actor = resolve_actor(self.credentials.authenticate('Bearer ' + result['token'], now=self.now), self.identities)
+        for permission in ('account.self.read', 'access_requests.self.read', 'settings.manage', 'maintenance.manage'):
+            require_permission(actor, permission)
+        from backend.system_settings import SystemSettingsService
+        settings = SystemSettingsService(self.db)
+        settings.initialize_schema()
+        self.assertEqual(settings.bot_title(actor)['title'], 'Node Plane')
+        from backend.access_requests import AccessRequestService
+        requests = AccessRequestService(self.db)
+        requests.initialize_schema()
+        self.assertTrue(requests.policy(actor)['enabled'])
+        with self.assertRaises(AccessDenied):
+            self.credentials.authenticate('Bearer ' + old_token, now=self.now)
 
     def test_expired_session_renews_same_actor_and_revokes_old_credential(self):
         first = self.authenticate()

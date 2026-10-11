@@ -10,7 +10,7 @@ pub enum Tab {
     Requests,
 }
 impl Tab {
-    pub const ALL: [Self; 3] = [Self::Accounts, Self::Profiles, Self::Requests];
+    pub const ALL: [Self; 2] = [Self::Profiles, Self::Requests];
     pub fn label(self) -> &'static str {
         match self {
             Self::Accounts => "Accounts",
@@ -211,6 +211,71 @@ impl Editor {
             .unwrap_or_default();
         self.fields != baseline || self.policy != self.baseline_policy
     }
+    pub fn access_summary(&self) -> String {
+        let policy = &self.baseline_policy;
+        let mut rules = Vec::new();
+        for rule in policy["rules"].as_array().into_iter().flatten() {
+            let region = if rule["scope"] == "all" {
+                "All servers".to_owned()
+            } else {
+                self.regions
+                    .iter()
+                    .find(|region| region["id"] == rule["region_id"])
+                    .map(|region| {
+                        text(
+                            region
+                                .get("name")
+                                .or_else(|| region.get("title"))
+                                .unwrap_or(&region["id"]),
+                        )
+                    })
+                    .unwrap_or_else(|| text(&rule["region_id"]))
+            };
+            let protocols = rule["protocols"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|protocol| if protocol == "awg" { "AWG" } else { "VLESS" })
+                .collect::<Vec<_>>()
+                .join(" · ");
+            rules.push(format!("{region}: {protocols}"));
+        }
+        let nodes: Vec<_> = self
+            .nodes
+            .iter()
+            .filter(|node| {
+                node["protocols"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .any(|protocol| {
+                        self.granted_with(policy, node["key"].as_str().unwrap_or(""), protocol)
+                    })
+            })
+            .collect();
+        let regions: std::collections::BTreeSet<_> = nodes
+            .iter()
+            .filter_map(|node| node["region"].as_str())
+            .collect();
+        let region_names = regions.into_iter().collect::<Vec<_>>().join(" · ");
+        format!(
+            "Applied rules: {}\nExplicit grants: {} · Exclusions: {}\nAccess: {} servers\nRegions: {}",
+            if rules.is_empty() {
+                "None".into()
+            } else {
+                rules.join("; ")
+            },
+            policy["explicit_grants"].as_array().map_or(0, Vec::len),
+            policy["exclusions"].as_array().map_or(0, Vec::len),
+            nodes.len(),
+            if region_names.is_empty() {
+                "None"
+            } else {
+                &region_names
+            }
+        )
+    }
     pub fn toggle_grant(&mut self, node: &str, protocol: &str) {
         let granted = self.granted(node, protocol);
         for key in ["explicit_grants", "exclusions"] {
@@ -231,8 +296,11 @@ impl Editor {
         self.key = Uuid::new_v4();
     }
     pub fn granted(&self, node: &str, protocol: &str) -> bool {
+        self.granted_with(&self.policy, node, protocol)
+    }
+    fn granted_with(&self, policy: &Value, node: &str, protocol: &str) -> bool {
         let has = |key: &str| {
-            self.policy[key]
+            policy[key]
                 .as_array()
                 .unwrap()
                 .iter()
@@ -242,7 +310,7 @@ impl Editor {
             return false;
         }
         has("explicit_grants")
-            || self.policy["rules"].as_array().unwrap().iter().any(|r| {
+            || policy["rules"].as_array().unwrap().iter().any(|r| {
                 r["protocols"]
                     .as_array()
                     .unwrap()
@@ -483,6 +551,18 @@ impl Browser {
             }
             return;
         }
+        let selected = self.selected;
+        let keep_focus = match &command {
+            Command::List(tab) => *tab == self.tab && self.card.is_none() && self.editor.is_none(),
+            Command::Card(tab, id) => {
+                *tab == self.tab
+                    && self
+                        .card
+                        .as_ref()
+                        .is_some_and(|card| card["id"] == id.as_str())
+            }
+            _ => false,
+        };
         self.selected = 0;
         match command {
             Command::ProfileProgress(_) => unreachable!(),
@@ -501,7 +581,11 @@ impl Browser {
             }
             Command::Mutate { delete, .. } => {
                 self.tab = Tab::Profiles;
-                self.card = Some(value["profile"].clone());
+                let mut profile = value["profile"].clone();
+                if let Some(account) = self.card.as_ref().and_then(|card| card.get("_account")) {
+                    profile["_account"] = account.clone();
+                }
+                self.card = Some(profile);
                 self.editor = None;
                 self.profile_action = None;
                 self.notice = if delete {
@@ -536,8 +620,14 @@ impl Browser {
                 }
             }
             Command::AccountMutate { .. } => {
-                self.tab = Tab::Accounts;
-                self.card = Some(value);
+                if self.tab == Tab::Profiles
+                    && let Some(card) = &mut self.card
+                {
+                    card["_account"] = value;
+                } else {
+                    self.tab = Tab::Accounts;
+                    self.card = Some(value);
+                }
                 self.account_action = None;
                 self.notice = "Account saved.".into();
             }
@@ -561,6 +651,9 @@ impl Browser {
                 .into();
             }
         }
+        if keep_focus {
+            self.selected = selected;
+        }
     }
 }
 pub fn text(value: &Value) -> String {
@@ -573,6 +666,9 @@ pub fn text(value: &Value) -> String {
     })
 }
 pub fn label(tab: Tab, item: &Value) -> String {
+    if item["_account_only"] == true {
+        return format!("{} · No VPN access", text(&item["display_name"]));
+    }
     match tab {
         Tab::Profiles => format!(
             "{} · {}",
@@ -612,6 +708,19 @@ pub fn label(tab: Tab, item: &Value) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn applied_access_summary_counts_unique_servers_not_protocol_grants() {
+        let mut editor = Editor::new(None, None);
+        editor.nodes = vec![
+            json!({"key":"lv1","region":"Latvia","protocols":["awg","xray"]}),
+            json!({"key":"us1","region":"USA","protocols":["awg"]}),
+        ];
+        editor.baseline_policy = json!({"rules":[],"exclusions":[],"explicit_grants":[{"node_key":"lv1","protocol":"awg"},{"node_key":"lv1","protocol":"xray"}]});
+        let summary = editor.access_summary();
+        assert!(summary.contains("Access: 1 servers"));
+        assert!(summary.contains("Regions: Latvia"));
+        assert!(!summary.contains("USA"));
+    }
     use super::*;
     #[test]
     fn device_commands_use_profile_revision_for_creation_and_device_revision_for_edits() {

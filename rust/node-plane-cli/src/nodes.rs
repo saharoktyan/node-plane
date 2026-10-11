@@ -685,9 +685,9 @@ pub enum ConnectionState {
 impl ConnectionState {
     pub fn label(self) -> &'static str {
         match self {
-            Self::Closed => "SSH: closed",
-            Self::Connecting => "SSH: connecting",
-            Self::Connected => "SSH: connected",
+            Self::Closed => "SSH closed",
+            Self::Connecting => "SSH connecting",
+            Self::Connected => "SSH connected",
         }
     }
 }
@@ -992,6 +992,11 @@ async fn execute(
                     let (method, path, body, key) = command.request();
                     let revision = match &command { crate::access::Command::Mutate { revision, .. } => *revision, crate::access::Command::AccountMutate { revision, .. } | crate::access::Command::DeviceMutate { revision, .. } => Some(*revision), _ => None };
                     let mut value = backend::request_revision(session, &credential, method, &path, body, key, revision).await?;
+                    if matches!(&command, crate::access::Command::Card(crate::access::Tab::Profiles, _) | crate::access::Command::ProfileProgress(_))
+                        && let Some(owner) = value["owner_account_id"].as_str() {
+                        let account = backend::request(session, &credential, Method::GET, &format!("/api/v1/accounts/{owner}"), None, None).await?;
+                        value["_account"] = account;
+                    }
                     if matches!(&command, crate::access::Command::ProfileProgress(_) | crate::access::Command::Card(crate::access::Tab::Profiles, _)) && value["deleting"] == true {
                         let id = value["id"].as_str().context("Missing profile identity")?;
                         let operation = backend::request(session, &credential, Method::GET, &format!("/api/v1/profiles/{id}/operation"), None, None).await?;
@@ -1014,6 +1019,30 @@ async fn execute(
                             let items = value["items"].as_array_mut().context("Missing access records")?;
                             ensure!(items.len() + extra.len() <= 20_000, "Too many access records");
                             items.extend(extra.iter().cloned()); value["next_cursor"] = next["next_cursor"].clone();
+                        }
+                        if *tab == crate::access::Tab::Profiles {
+                            let mut accounts = backend::request(session, &credential, Method::GET, "/api/v1/accounts?limit=100", None, None).await?;
+                            let mut cursors = BTreeSet::new();
+                            while let Some(cursor) = accounts["next_cursor"].as_str().map(str::to_owned) {
+                                ensure!(cursors.insert(cursor.clone()), "Account pagination did not advance");
+                                let next = backend::request(session, &credential, Method::GET, &format!("/api/v1/accounts?limit=100&cursor={}", encode(&cursor)), None, None).await?;
+                                let extra = next["items"].as_array().context("Missing accounts")?;
+                                let items = accounts["items"].as_array_mut().context("Missing accounts")?;
+                                ensure!(items.len() + extra.len() <= 20_000, "Too many accounts");
+                                items.extend(extra.iter().cloned()); accounts["next_cursor"] = next["next_cursor"].clone();
+                            }
+                            let items = value["items"].as_array_mut().context("Missing profiles")?;
+                            for account in accounts["items"].as_array().into_iter().flatten() {
+                                let owned: Vec<_> = items.iter_mut().filter(|item| item["owner_account_id"] == account["id"]).collect();
+                                if owned.is_empty() {
+                                    let mut item = account.clone();
+                                    item["_account_only"] = json!(true);
+                                    item["display_name"] = json!(crate::access::label(crate::access::Tab::Accounts, account));
+                                    items.push(item);
+                                } else {
+                                    for item in owned { item["_account"] = account.clone(); }
+                                }
+                            }
                         }
                     }
                     let _ = tx.send(Event::Nodes(Update::Access(command, value)));

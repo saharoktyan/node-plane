@@ -88,6 +88,8 @@ pub struct Connections {
     #[serde(default = "default_accent")]
     pub accent: String,
     #[serde(default)]
+    pub theme: Option<String>,
+    #[serde(default)]
     pub hide_quick_start: bool,
 }
 fn default_accent() -> String {
@@ -111,6 +113,7 @@ impl Default for Connections {
             selected: None,
             installations: Vec::new(),
             accent: default_accent(),
+            theme: None,
             hide_quick_start: false,
         }
     }

@@ -103,6 +103,29 @@ Writes are private and atomic; conflicting windows cannot overwrite newer edits.
 On first use, valid existing update records seed the connection list without
 modifying those operation records or replaying their operations.
 
+### Workstation themes
+
+On startup, Workstation creates missing built-in theme files in
+`<state-dir>/themes/`, next to `installations.json`. Existing files are kept.
+Add a UTF-8 `.json` file there and restart Workstation to select it in
+**Settings → Appearance**. For example, `midnight.json`:
+
+```json
+{
+  "name": "Midnight",
+  "accent": "#55b1c2",
+  "section_border": "#3f7883"
+}
+```
+
+`accent` accepts `#RRGGBB` or `terminal` (the terminal's Cyan color).
+`section_border` is optional; by default section borders are darker than the
+accent. Buttons and fields keep the existing focus and warning colors.
+The selected theme is saved by filename. If its file is removed, Workstation
+uses the last saved accent. Invalid theme files are skipped with a warning;
+invalid built-in files use their packaged defaults without overwriting edits.
+Custom accent entry remains available and clears the selected file theme.
+
 Closing update observation leaves the backend worker running on the controller.
 Other active SSH workflows currently close the TUI but retain the workstation
 process and connection until completion; keep the terminal open as the exit
@@ -512,3 +535,12 @@ preserved authorized keys, command input/output and missing exit status. Windows
 runs portable state/key and rendering tests; the Unix mock-server tests are
 excluded. They do not prove a complete install on a live VPS or real Windows
 console behavior.
+
+## TUI source layout
+
+`src/tui/mod.rs` coordinates the terminal, worker events and rendering.
+`app.rs` contains state transitions and actions; `widgets.rs` contains shared
+controls and layout helpers; `theme.rs` loads JSON palettes. Rendering is split
+by feature under `screens/`. Existing interface regression tests live in
+`tests.rs`, with theme-file tests beside the loader. Input handlers and state
+structures will be split further as the refactor continues.

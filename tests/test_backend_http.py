@@ -21,6 +21,34 @@ from fastapi.testclient import TestClient
 
 
 class BackendHTTPTests(unittest.TestCase):
+    def test_workstation_can_read_policies_and_edit_bot_title(self):
+        from backend.workstation_cli import SCOPES
+        _, token = self.credentials.issue(PrincipalKind.ACCOUNT, SCOPES, account_id=self.admin.id)
+        headers = {'Authorization': 'Bearer ' + token}
+        for path in ('traffic', 'access-requests', 'bot-title', 'installation-defaults'):
+            response = self.client.get('/api/v1/system/' + path, headers=headers)
+            self.assertEqual(response.status_code, 200, response.text)
+        response = self.client.patch('/api/v1/system/bot-title', headers=headers, json={'title': 'My Node Plane'})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()['title'], 'My Node Plane')
+        response = self.client.patch('/api/v1/system/access-requests', headers=headers,
+                                     json={'notify_requests': False})
+        self.assertEqual(response.status_code, 200, response.text)
+        response = self.client.get('/api/v1/system/access-requests', headers=headers)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertFalse(response.json()['notify_requests'])
+
+    def test_workstation_can_read_own_and_other_profile_cards(self):
+        from backend.workstation_cli import SCOPES
+        self.register(101, username='administrator')
+        member = self.register(102, username='member').json()
+        _, token = self.credentials.issue(PrincipalKind.ACCOUNT, SCOPES, account_id=self.admin.id)
+        headers = {'Authorization': 'Bearer ' + token}
+        for account_id in (self.admin.id, member['id']):
+            profile = ProfileRepository(self.db).owned(account_id, after='', limit=10)[0]
+            response = self.client.get('/api/v1/profiles/' + profile['id'], headers=headers)
+            self.assertEqual(response.status_code, 200, response.text)
+
     def test_api_routes_are_unique_and_manual_release_cleanup_is_removed(self):
         pairs = [(method, route.path) for route in self.client.app.routes
                  for method in getattr(route, 'methods', ())]
