@@ -583,34 +583,32 @@ fn operation(value: &Value, kind: &str, key: &str) -> Result<Operation> {
                 .filter(|value| value.is_string())
                 .map(clean)
                 .unwrap_or_else(|| "Agent setup".into())
-        } else {
-            if value["action"] == "check_ports" {
-                let mut label = "Check ports".to_string();
-                if value["status"] == "succeeded" {
-                    if let Some(ports) = value.pointer("/result/ports").and_then(Value::as_array) {
-                        for port in ports {
-                            label.push_str(&format!(
-                                "\n{} / {} · {}",
-                                port["port"]
-                                    .as_u64()
-                                    .map(|v| v.to_string())
-                                    .unwrap_or_else(|| clean(&port["port"])),
-                                clean(&port["protocol"]),
-                                clean(&port["status"])
-                            ));
-                        }
-                    }
-                    if value
-                        .pointer("/result/firewall")
-                        .is_some_and(|v| v == "unmanaged")
-                    {
-                        label.push_str("\nFirewall is not managed by Node Plane");
+        } else if value["action"] == "check_ports" {
+            let mut label = "Check ports".to_string();
+            if value["status"] == "succeeded" {
+                if let Some(ports) = value.pointer("/result/ports").and_then(Value::as_array) {
+                    for port in ports {
+                        label.push_str(&format!(
+                            "\n{} / {} · {}",
+                            port["port"]
+                                .as_u64()
+                                .map(|v| v.to_string())
+                                .unwrap_or_else(|| clean(&port["port"])),
+                            clean(&port["protocol"]),
+                            clean(&port["status"])
+                        ));
                     }
                 }
-                label
-            } else {
-                clean(&value["action"])
+                if value
+                    .pointer("/result/firewall")
+                    .is_some_and(|v| v == "unmanaged")
+                {
+                    label.push_str("\nFirewall is not managed by Node Plane");
+                }
             }
+            label
+        } else {
+            clean(&value["action"])
         },
     })
 }
