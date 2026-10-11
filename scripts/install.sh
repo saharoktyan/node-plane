@@ -942,7 +942,7 @@ run_simple_install() {
   echo "Shared state:"
   echo "  ${shared_dir}"
   echo
-  echo "Systemd services: node-plane-backend, node-plane-backend-worker.timer, node-plane-telegram"
+  echo "Systemd services: node-plane-backend, node-plane-backend-worker, node-plane-telegram"
   echo
   if [[ $AUTO_INSTALL_SYSTEMD -eq 1 || $NON_INTERACTIVE -eq 1 ]]; then
     install_systemd_stack "$current_link" "$base_dir" "$shared_dir"

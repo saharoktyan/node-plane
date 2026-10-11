@@ -241,7 +241,7 @@ def diagnostic_name(locale, identity):
         'disk': 'disk', 'database': 'database', 'maintenance': 'maintenance',
         'worker': 'worker', 'api': 'api', 'unit:node-plane-backend.service': 'backend',
         'unit:node-plane-driver.service': 'driver', 'unit:node-plane-telegram.service': 'telegram',
-        'unit:node-plane-backend-worker.timer': 'worker_timer'}
+        'unit:node-plane-backend-worker.service': 'worker'}
     if identity in names:
         return tr(locale, 'recovery.diagnostic.' + names[identity])
     if identity.startswith('blocked:'):

@@ -1,5 +1,6 @@
 """Exercise snapshot restoration and rollback without touching host services."""
 import json
+import os
 from itertools import product
 from pathlib import Path
 import shlex
@@ -11,6 +12,36 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class StackUpdateScriptTests(TestCase):
+    def test_manual_rollback_installs_target_worker_units(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            scripts = root / 'scripts'
+            scripts.mkdir()
+            script = scripts / 'rollback.sh'
+            script.write_text((ROOT / 'scripts/rollback.sh').read_text())
+            release = root / 'releases' / 'old'
+            for name in ('app/backend/http_api.py', 'app/telegram_client/main.py'):
+                path = release / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.touch()
+            installer = release / 'scripts/install_backend_systemd.sh'
+            installer.parent.mkdir()
+            installer.write_text('printf "%s\\n" "$@" > "$1/restored-units"\n')
+            (root / '.env').write_text(f'NODE_PLANE_BASE_DIR={root}\n')
+            binaries = root / 'bin'
+            binaries.mkdir()
+            for name, body in (('sudo', 'exec "$@"'), ('systemctl', 'exit 0')):
+                path = binaries / name
+                path.write_text('#!/bin/sh\n' + body + '\n')
+                path.chmod(0o755)
+            result = subprocess.run(['bash', str(script), '--to', 'old'],
+                env={**os.environ, 'PATH': str(binaries) + ':' + os.environ['PATH']},
+                capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual((root / 'current').resolve(), release)
+            self.assertEqual((root / 'restored-units').read_text().splitlines(),
+                             [str(root), str(root / 'shared')])
+
     def test_update_preserves_runtime_credentials_and_uses_private_atomic_replacement(self):
         script=(ROOT / 'scripts/update.sh').read_text()
         setters=script[script.index('set_env_value_in_file() {'):script.index('detect_mode() {')]

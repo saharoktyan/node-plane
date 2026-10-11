@@ -1,190 +1,74 @@
+[Русская версия](README.ru.md)
+
 # Node Plane
 
-Node Plane is a Telegram-based control plane for self-hosted secure connectivity.
+Node Plane is an open-source control plane for self-hosted VPN infrastructure. Use Workstation on your computer or the Telegram bot to set up servers, manage access, deliver configurations and maintain your installation.
 
-It is built for operators who want one interface for node setup, runtime bootstrap, profile management, access delivery, and day-to-day operations across infrastructure they control themselves.
+A Linux controller stores accounts and settings in PostgreSQL and coordinates node agents. A VPN node can run on the controller or on a separate Linux server. Supported protocols are VLESS with Xray REALITY over TCP/XHTTP and AmneziaWG.
 
-Instead of juggling shell scripts, scattered configs, and ad-hoc server notes, you manage the full lifecycle from a Telegram admin flow: register a node, validate it with `Probe`, deploy runtime with `Bootstrap`, create profiles, and deliver connection configs to users.
+## Install Workstation
 
-The supported deployment is the bundled `install.sh` systemd workflow: a
-standalone backend, worker, aiogram Telegram client and Rust driver.
+Workstation is the administrator's terminal interface. Install it on your own computer, then run `node-plane`.
 
-Development priorities and remaining work: [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md).
-Architecture: [CORE_ARCHITECTURE.md](CORE_ARCHITECTURE.md).
-Protocol configuration: [PROTOCOL_REFERENCE.md](PROTOCOL_REFERENCE.md).
-
-## Why Node Plane
-
-- one control surface for server and user operations
-- built for self-hosted infrastructure, not a hosted service
-- supports both single-server and multi-node setups
-- combines provisioning, diagnostics, access delivery, and updates
-- keeps operator workflow inside Telegram instead of a pile of manual steps
-
-## What It Does
-
-- manages nodes from a Telegram admin interface
-- provisions targets over `local` host access or `ssh`
-- supports `Xray Reality (VLESS)` and `AmneziaWG`
-- creates and maintains user profiles with access control
-- delivers connection material to end users through the bot
-- stores control-plane state in PostgreSQL
-- includes diagnostics, telemetry, updates, rollback, and automatic release retention
-- supports Russian and English UI
-
-## Deployment Modes
-
-### Workstation quick start (Linux, macOS and Windows)
-
-Run this on your own computer to install the workstation TUI, then use it to
-install/manage a VPS over SSH:
-
-**Linux / macOS**
+**Linux (x64) and macOS (Intel or Apple Silicon)**
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/saharoktyan/node-plane/dev/scripts/install_workstation.sh | bash
 ```
 
-**Windows 10 / 11 (x64)** — run this in PowerShell:
+**Windows (x64), PowerShell**
 
 ```powershell
 irm https://raw.githubusercontent.com/saharoktyan/node-plane/dev/scripts/install_workstation.ps1 | iex
 ```
 
-The installer selects a published alpha/stable release and runs its cargo-dist
-installer to verify the platform archive and configure PATH. Open a new terminal
-after installation and run `node-plane`. No Python or external SSH client is
-needed on the workstation. Linux/macOS use Bash and curl; Windows uses PowerShell.
-For a pinned Unix release, add `bash -s -- --tag v0.4.3-alpha.50` after the
-pipe. The script installs the local assistant; it does not install a controller
-on your computer. Details: [workstation guide](rust/node-plane-cli/README.md).
+Workstation requires a supported OS, a terminal of at least 70 columns × 30 rows and SSH access to the controller. Open a new terminal if the command is not yet on PATH. Initial controller installation requires root access on the target server.
 
-### Simple Mode
+## Set up your installation
 
-Use this when you want the shortest path to a working deployment.
+Prepare a Linux server with systemd, root access, a Telegram bot token and your numeric Telegram ID. Debian/Ubuntu hosts support automatic Docker installation. The controller runs as systemd services and uses PostgreSQL. The standard installation runs PostgreSQL and the VPN protocols in Docker; an existing PostgreSQL server can also be used.
 
-- backend, worker and aiogram client run directly on the host
-- intended for `systemd` + Python venv setup
-- supports same-host runtime deployment
-- can also manage additional remote nodes over `ssh`
-- best fit for a single VPS
+1. Create an installation profile in Workstation and connect to the server.
+2. Install Node Plane with your bot token and administrator Telegram ID.
+3. Create a local or SSH node and run **Server setup**.
+4. Create or approve a user profile and grant access.
+5. Open the bot with `/start` to get a configuration.
 
-Controller Docker/Compose installation is unsupported. The retired PTB bot
-and its Docker entrypoint have been removed. Managed VPN protocols and the
-optional installer-managed PostgreSQL runtime still use Docker; the container
-used to build compatible release binaries is also retained.
+You can also [install the controller directly on the server](docs/install.md).
 
-## Supported Runtime
+## Server requirements
 
-- `VLESS` over `Xray Reality`
-  - transports: `tcp`, `xhttp`
-- `AmneziaWG`
+Use a Linux x64 server with systemd. Debian/Ubuntu support automatic Docker installation. Initial setup requires root or passwordless sudo access. VPN nodes need a public client address and reachable protocol ports.
 
-Current upstream images used by the project:
+Estimated minimum resources for a small installation using published binaries:
 
-- Xray: `ghcr.io/xtls/xray-core:26.3.27`
-- AWG: `amneziavpn/amneziawg-go:3.1.20260828`
+| Server role | CPU | RAM | Free disk space |
+| --- | --- | --- | --- |
+| Controller with local PostgreSQL | 1 vCPU | 1 GiB | 5 GiB |
+| Agent with VLESS and AmneziaWG | 1 vCPU | 1 GiB | 5 GiB |
+| Controller, local PostgreSQL, agent and both protocols | 1 vCPU | 1 GiB | 10 GiB |
 
-For AWG nodes, Node Plane builds and deploys its own wrapper image during bootstrap.
-AWG 3.1 requires a compatible client (AmneziaVPN 5.0.1.5 or newer, or a native
-AWG 3.1 client). After an existing node is migrated, users must import a newly
-issued `.conf` or `vpn://` key; previously downloaded configs can stop working.
+Disk figures are available space after installing the OS. Allow additional space for database growth, logs and backups. CPU and bandwidth needs grow with concurrent VPN traffic. The combined installation has been observed to run on a 1 GiB server, using about 350 MiB at idle. Plan additional RAM for active traffic; the other figures are sizing estimates. Local Rust compilation requires at least 2 GiB of available RAM.
 
-## Main Workflow
+## Guides
 
-1. Deploy the systemd stack in `Simple Mode`.
-2. Open the bot from the Telegram admin account.
-3. Send `/start` and create the first managed server.
-4. Install the local or SSH node agent, then use `Probe` to check readiness.
-5. Use `Bootstrap` to install Docker when needed and deploy protocols.
-6. Create one or more profiles.
-7. Let users request or receive connection configs through the bot.
-8. Use sync, diagnostics, telemetry, update, and rollback flows for ongoing operations.
+| Task | Guide |
+| --- | --- |
+| Install the controller manually | [Installation](docs/install.md) |
+| Use the terminal interface | [Workstation](docs/workstation.md) |
+| Use the bot | [Telegram](docs/telegram.md) |
+| Create and maintain VPN nodes | [Nodes](docs/nodes.md) |
+| Manage profiles, devices and requests | [Access](docs/access.md) |
+| Configure protocols | [Protocols](docs/protocols.md) |
+| Issue short-lived configurations | [Temporary configurations](docs/temporary-configs.md) |
+| Configure installation defaults and policies | [Settings](docs/settings.md) |
+| Update, back up and diagnose the installation | [Maintenance](docs/maintenance.md) |
+| Resolve a problem | [Troubleshooting](docs/troubleshooting.md) |
 
-## Quick Start
+## Development
 
-### Simple Mode
+Start with the [documentation index](docs/README.md), [architecture](docs/development/architecture.md) and [development/testing guide](docs/development/testing.md). Planned work is in the [roadmap](docs/roadmap.md); released changes are in [CHANGELOG.md](CHANGELOG.md).
 
-```bash
-git clone https://github.com/saharoktyan/node-plane.git node-plane-src
-cd node-plane-src
-./scripts/install.sh --mode simple
-```
+VPN configurations, database backups and SSH keys contain secrets. Store them privately. Expiry or revocation blocks new VLESS connections; an established connection may continue until it disconnects.
 
-Then follow the full guide in [INSTALL.md](INSTALL.md).
-
-Portable Mode is temporarily unsupported. The simple-mode installer starts the
-backend, worker timer, and aiogram Telegram client as systemd services.
-
-If you prefer SSH for cloning, configure a GitHub SSH key on the host first and then use:
-
-```bash
-git clone git@github.com:saharoktyan/node-plane.git node-plane-src
-```
-
-## Features
-
-### Node Operations
-
-- register nodes as `local` or `ssh`
-- enable protocols per node
-- validate node readiness with `Probe`
-- bootstrap and reinstall runtime
-- open ports, install Docker, and sync runtime settings from the bot
-
-### Profile And Access Management
-
-- create named profiles
-- assign one or more access methods to a profile
-- control access approval
-- keep user and profile state in PostgreSQL
-
-### User Delivery
-
-- issue connection material through Telegram
-- provide `Xray` links and QR output
-- provide `AWG` direct links, QR, `.vpn`, and `.conf` files
-
-### Operations And Maintenance
-
-- node health checks and diagnostics through the Rust driver
-- administrator-controlled monthly traffic usage reporting and configurable alerts
-- scripted updates with rollback support
-- automatic Docker and PostgreSQL runtime provisioning during install/update
-- automatic release retention
-
-## Operator Experience
-
-Node Plane is opinionated about the actual workflow operators go through:
-
-- first bring a node into a known-good state with `Probe`
-- then bootstrap runtime in a guided way
-- then attach profiles and access methods
-- then handle support and operations from the same bot
-
-That makes it useful not just as a deploy-once tool, but as an ongoing control plane for a small self-hosted network setup.
-
-## Project Layout
-
-```text
-app/backend/          Business API, authorization and durable worker scenarios
-app/telegram_client/  aiogram client, RU/EN catalog and Rich Message presentation
-app/db/               PostgreSQL adapter and schema helpers
-app/services/         Shared controller update and release-maintenance helpers
-rust/                 Central driver and node-local agent
-runtime_assets/       VPN configuration and runtime adapters
-scripts/   Install, healthcheck, update, rollback, and release helpers
-tests/     Backend, aiogram, installation and runtime tests
-```
-
-Installation, environment configuration, updates, and maintenance commands are documented in [INSTALL.md](INSTALL.md).
-
-## License
-
-Apache-2.0. See [LICENSE](LICENSE).
-
-## Safety
-
-This project changes real system state during admin operations. `Bootstrap`, `Install Docker`, `Sync`, `Reinstall`, and related actions may install packages, write runtime files, manage Docker, and restart services on the nodes you connect.
-
-Use it only on infrastructure you administer and review the deployment flow before running it in production.
+See [LICENSE](LICENSE) for the project license.

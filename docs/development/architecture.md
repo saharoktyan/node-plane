@@ -1,0 +1,52 @@
+# Architecture
+
+Node Plane has two administrator interfaces, a shared backend and node-local execution. The controller runs under systemd; managed protocols run in Docker. The worker is a persistent service, reuses PostgreSQL connections, wakes on committed queue changes and performs periodic reconciliation. Startup recovery runs once; ordinary wakeups do not mark in-flight work as interrupted.
+
+## Components
+
+| Component | Responsibility |
+| --- | --- |
+| Workstation | Local connection profiles, SSH sessions, TUI state and authenticated backend requests |
+| Telegram client | Telegram identity resolution, screen state, localization and delivery |
+| Backend | Accounts, authorization, profiles, grants, nodes, settings and durable business operations |
+| Worker | Execution/reconciliation of accepted jobs, scheduled maintenance and notifications |
+| Driver | Typed gRPC execution transport, observations and durable execution records |
+| Agent | Node-local runtime adapters, host actions, facts and command journals |
+| PostgreSQL | Controller business state, operation queues and schema history |
+
+The interfaces use the same backend policies. The driver does not need database credentials or reconstruct access policy. A local node follows the same agent path over loopback.
+
+## Mutation lifecycle
+
+1. Authenticate and authorize the actor; validate input and expected revision.
+2. Persist the desired state and stable command identity before dispatch.
+3. The worker sends a concrete intent through the driver to the agent.
+4. The agent journals the command and applies runtime changes under local locks.
+5. Reconcile observed results into backend read models.
+6. Interfaces read status and show the result.
+
+Duplicate identities with the same intent reuse recorded work. A changed payload under the same identity is rejected. Timeouts and interrupted execution can leave unknown outcomes. Recovery must inspect the original command before any replay decision. Navigating away does not cancel durable work.
+
+## Trust and transport
+
+Telegram uses a private adapter credential and resolves the Telegram principal through the backend. Workstation uses privileged SSH enrollment to bind its actual public-key fingerprint to an approved administrator; subsequent sessions use short-lived backend credentials. Local installation profiles are not backend accounts.
+
+Driver-agent connections require mutual TLS. Keep the CA private key and driver client key on the controller. Agents receive a server certificate/key and the public CA. Restrict remote agent reachability to the controller and verify the certificate's target address.
+
+Root access remains a privileged trust boundary. Audit attributes actions but cannot protect its records from a hostile server owner. Treat credentials, backup payloads and execution results as sensitive.
+
+## Resource ownership
+
+The controller installation manifest identifies owned directories, services and local database resources. Node removal captures configured runtime, agent, TLS and journal paths against a host identity. Full retirement requires independent verification of the captured resources.
+
+Delete managed containers by verified identity and mounts. Preserve shared host packages, Docker, unrelated containers/images, firewall rules and unrelated SSH keys. Registry-only retirement records unverified host state.
+
+## Persistence and compatibility
+
+Controller desired state, driver command fingerprints and agent journals are distinct durable stores. Preserve them through updates and interrupted work. No age-based command pruning is safe without a defined stale-request horizon.
+
+Configuration backups are snapshots of supported controller configuration; they do not replace host snapshots or remote journals. Application rollback requires compatible database revisions. See [Database](database.md), [Releases](releases.md) and [Temporary access implementation](temporary-access.md).
+
+The controller installation UUID binds agent journals to their owner. Onboarding under another installation archives the previous journals after stopping the agent. Archival does not remove protocol access; reconcile existing runtime before granting new access.
+
+Future service support is described in [Vaultwarden expansion](../design/service-expansion.md).

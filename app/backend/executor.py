@@ -227,86 +227,156 @@ class IntentExecutor:
         return True
 
 
+class Worker:
+    def __init__(self, db, channel):
+        from .driver_transport import GrpcIntentDriver
+        self.channel = channel
+        self.executor = IntentExecutor(db, GrpcIntentDriver(channel))
+        self.node_executor = NodeSettingsExecutor(self.executor.db, self.executor.driver)
+        from .node_operations import NodeOperations
+        self.node_jobs = NodeOperations(self.executor.db, self.executor.driver)
+        from .node_removal import NodeRemovalService
+        self.removals = NodeRemovalService(self.executor.db, self.executor.driver)
+        self.config_executor = ConfigIssuanceService(self.executor.db, self.executor.driver)
+        from .temporary_configs import TemporaryConfigService
+        self.temporary_executor = TemporaryConfigService(self.executor.db, self.executor.driver)
+        self.rollout_executor = AgentRolloutService(self.executor.db)
+        from .node_bootstrap import NodeBootstrapService
+        self.bootstrap_executor = NodeBootstrapService(self.executor.db, self.executor.driver)
+        from .updates import UpdateService
+        self.update_executor = UpdateService(self.executor.db, self.executor.driver)
+        from .backups import BackupService
+        self.backup_executor = BackupService(self.executor.db)
+        from .system_cleanup import SystemCleanupService
+        self.system_cleanup = SystemCleanupService(self.executor.db, self.executor.driver)
+
+    def recover(self):
+        for service in (self.update_executor, self.executor, self.node_executor,
+                        self.node_jobs, self.config_executor, self.temporary_executor,
+                        self.rollout_executor):
+            service.recover()
+
+    def drain(self, stop):
+        services = (self.system_cleanup, self.backup_executor, self.update_executor,
+                    self.bootstrap_executor, self.rollout_executor, self.removals,
+                    self.node_jobs, self.node_executor, self.executor,
+                    self.temporary_executor, self.config_executor)
+        while not stop.is_set():
+            if not any(service.run_one() for service in services):
+                break
+
+    def cycle(self, stop):
+        from .driver_transport import GrpcIntentDriver
+        from .maintenance_gate import active
+        with self.executor.db.connect() as conn:
+            cleaning = bool(active(conn))
+        try:
+            if not cleaning:
+                self.backup_executor.scheduled()
+        except Exception:
+            import logging
+            logging.getLogger(__name__).warning('Scheduled backup failed')
+        try:
+            if not cleaning:
+                self.update_executor.auto_check()
+        except Exception:
+            # An upstream check must not prevent provisioning or cleanup.
+            import logging
+            logging.getLogger(__name__).warning('Automatic update check failed')
+        self.node_jobs.reconcile_completed()
+        self.temporary_executor.scheduled()
+        self.temporary_executor.reconcile()
+        self.executor.reconcile_completed()
+        self.executor.queue_expired_profiles()
+        from .devices import DeviceRepository
+        with self.executor.db.transaction() as conn:
+            DeviceRepository.settle_deletions(conn)
+        self.node_executor.reconcile_completed()
+        self.executor.inspect_blocked()
+        self.drain(stop)
+        if stop.is_set():
+            return
+        from .alerts import AlertService
+        try:
+            AlertService(self.executor.db, GrpcIntentDriver(self.channel, timeout=5)).scheduled()
+        except Exception:
+            import logging
+            logging.getLogger(__name__).warning('Alert monitor requires attention')
+        from .traffic import TrafficService
+        try:
+            TrafficService(self.executor.db, GrpcIntentDriver(self.channel, timeout=10)).scheduled()
+        except Exception:
+            import logging
+            logging.getLogger(__name__).warning('Traffic collection requires attention')
+
+
+def run_daemon(worker, lock_fd, stop, wait, clock=None):
+    """Recover once, release the mutation lock while idle, and retain durable queues."""
+    import time
+    clock = clock or time.monotonic
+    started = False
+    next_scan = 0
+    while not stop.is_set():
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            stop.wait(0.2)
+            continue
+        try:
+            if not started:
+                worker.recover()
+                started = True
+            if clock() >= next_scan:
+                worker.cycle(stop)
+                next_scan = clock() + 5
+            else:
+                worker.drain(stop)
+        finally:
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        wait(max(0, next_scan - clock()))
+
+
 def main():
-    parser = argparse.ArgumentParser(description='Execute backend intents under a single-host exclusive lock')
-    parser.add_argument('--lock-file', required=True, help='Shared, stable lock path for every worker invocation')
+    import signal
+    import threading
+    from contextlib import ExitStack
+    parser = argparse.ArgumentParser(description='Execute durable backend jobs')
+    parser.add_argument('--lock-file', required=True)
     parser.add_argument('--driver', default='127.0.0.1:50051')
+    parser.add_argument('--daemon', action='store_true', help='Run continuously until stopped')
     args = parser.parse_args()
-    # Must be the same path on every invocation; distributed workers are not supported.
-    fd = os.open(args.lock_file, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
-    with os.fdopen(fd, 'a') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    stop = threading.Event()
+    if args.daemon:
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            signal.signal(sig, lambda *_: stop.set())
+    with ExitStack() as stack:
+        lock = stack.enter_context(os.fdopen(os.open(args.lock_file,
+            os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600), 'a'))
+        # A separate lifetime lock prevents two daemons; the mutation lock remains
+        # available to explicit HTTP recovery/cleanup while this process sleeps.
+        if args.daemon:
+            process_lock = stack.enter_context(os.fdopen(os.open(args.lock_file + '.daemon',
+                os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600), 'a'))
+            fcntl.flock(process_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        else:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         from db import get_db
-        from .driver_transport import GrpcIntentDriver, local_channel
-        db = get_db()
+        from db.postgres_db import worker_connections
         from db.migrations import check_schema
+        from .driver_transport import GrpcIntentDriver, local_channel
+        stack.enter_context(worker_connections())
+        db = get_db()
+        stack.callback(db.close)
         check_schema(db)
-        with local_channel(args.driver) as channel:
-            executor = IntentExecutor(db, GrpcIntentDriver(channel))
-            node_executor = NodeSettingsExecutor(executor.db, executor.driver)
-            from .node_operations import NodeOperations
-            node_jobs = NodeOperations(executor.db, executor.driver)
-            from .node_removal import NodeRemovalService
-            removals = NodeRemovalService(executor.db, executor.driver)
-            config_executor = ConfigIssuanceService(executor.db, executor.driver)
-            from .temporary_configs import TemporaryConfigService
-            temporary_executor = TemporaryConfigService(executor.db, executor.driver)
-            rollout_executor = AgentRolloutService(executor.db)
-            from .node_bootstrap import NodeBootstrapService
-            bootstrap_executor = NodeBootstrapService(executor.db, executor.driver)
-            from .updates import UpdateService
-            update_executor = UpdateService(executor.db, executor.driver)
-            update_executor.recover()
-            from .backups import BackupService
-            backup_executor = BackupService(executor.db)
-            from .system_cleanup import SystemCleanupService
-            system_cleanup = SystemCleanupService(executor.db, executor.driver)
-            from .maintenance_gate import active
-            with executor.db.connect() as conn:
-                cleaning = bool(active(conn))
-            try:
-                if not cleaning:
-                    backup_executor.scheduled()
-            except Exception:
-                import logging
-                logging.getLogger(__name__).warning('Scheduled backup failed')
-            try:
-                if not cleaning:
-                    update_executor.auto_check()
-            except Exception:
-                # An upstream check must not prevent provisioning or cleanup.
-                import logging
-                logging.getLogger(__name__).warning('Automatic update check failed')
-            executor.recover()
-            node_executor.recover()
-            node_jobs.recover()
-            node_jobs.reconcile_completed()
-            config_executor.recover()
-            temporary_executor.recover()
-            temporary_executor.scheduled()
-            temporary_executor.reconcile()
-            rollout_executor.recover()
-            executor.reconcile_completed()
-            executor.queue_expired_profiles()
-            from .devices import DeviceRepository
-            with executor.db.transaction() as conn:
-                DeviceRepository.settle_deletions(conn)
-            node_executor.reconcile_completed()
-            executor.inspect_blocked()
-            while system_cleanup.run_one() or backup_executor.run_one() or update_executor.run_one() or bootstrap_executor.run_one() or rollout_executor.run_one() or removals.run_one() or node_jobs.run_one() or node_executor.run_one() or executor.run_one() or temporary_executor.run_one() or config_executor.run_one():
-                pass
-            from .alerts import AlertService
-            try:
-                AlertService(executor.db, GrpcIntentDriver(channel, timeout=5)).scheduled()
-            except Exception:
-                import logging
-                logging.getLogger(__name__).warning('Alert monitor requires attention')
-            from .traffic import TrafficService
-            try:
-                TrafficService(executor.db, GrpcIntentDriver(channel, timeout=10)).scheduled()
-            except Exception:
-                import logging
-                logging.getLogger(__name__).warning('Traffic collection requires attention')
+        channel = stack.enter_context(local_channel(args.driver))
+        worker = Worker(db, channel)
+        if args.daemon:
+            from .worker_wakeup import Wakeup
+            wake = stack.enter_context(Wakeup(db.dsn))
+            run_daemon(worker, lock.fileno(), stop, lambda timeout: wake.wait(timeout, stop))
+        else:
+            worker.recover()
+            worker.cycle(stop)
 
 
 if __name__ == '__main__':

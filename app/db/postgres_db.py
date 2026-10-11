@@ -1,9 +1,28 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from contextvars import ContextVar
+from threading import Lock
 from typing import Any, Iterator
 
 from config import POSTGRES_DSN
+
+_WORKER_CONNECTIONS = ContextVar('worker_connections', default=False)
+WORK_CHANNEL = 'node_plane_work'
+_QUEUE_TABLES = ('backend_operation_tasks', 'backend_node_jobs', 'backend_node_settings_tasks',
+    'backend_agent_rollouts', 'backend_node_bootstraps', 'backend_node_removals',
+    'backend_config_issuances', 'backend_temporary_configs', 'backend_update_jobs',
+    'backend_backup_jobs', 'backend_system_cleanup_jobs')
+
+@contextmanager
+def worker_connections():
+    """Reuse idle connections and suppress self-generated wakeups in the worker."""
+    token = _WORKER_CONNECTIONS.set(True)
+    try:
+        yield
+    finally:
+        _WORKER_CONNECTIONS.reset(token)
+
 
 
 def _translate_query(query: str, params: object | None) -> str:
@@ -42,16 +61,26 @@ class PostgresConnectionAdapter:
 
     def __init__(self, conn: Any) -> None:
         self._conn = conn
+        self._wake = False
 
     def execute(self, query: str, params: object | None = None) -> PostgresResult:
         cursor = self._conn.execute(_translate_query(query, params), params)
+        sql = query.lstrip().lower()
+        if (not _WORKER_CONNECTIONS.get() and sql.startswith(('insert ', 'update ', 'delete '))
+            and any(table in sql for table in _QUEUE_TABLES)
+            and isinstance(cursor.rowcount, int) and cursor.rowcount > 0):
+            self._wake = True
         return PostgresResult(cursor)
 
     def commit(self) -> None:
+        if self._wake:
+            self._conn.execute("SELECT pg_notify('node_plane_work', '')")
         self._conn.commit()
+        self._wake = False
 
     def rollback(self) -> None:
         self._conn.rollback()
+        self._wake = False
 
     def close(self) -> None:
         self._conn.close()
@@ -61,6 +90,8 @@ class PostgresDB:
     backend_name = "postgres"
 
     def __init__(self, dsn: str | None = None) -> None:
+        self._idle = []
+        self._pool_lock = Lock()
         self.dsn = str(dsn or POSTGRES_DSN or "").strip()
         if not self.dsn:
             raise ValueError("POSTGRES_DSN is required when DB_BACKEND=postgres")
@@ -74,26 +105,47 @@ class PostgresDB:
         conn = connect(self.dsn, row_factory=dict_row)
         return PostgresConnectionAdapter(conn)
 
-    @contextmanager
-    def connect(self) -> Iterator[PostgresConnectionAdapter]:
-        conn = self._open()
-        try:
-            yield conn
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
+    def close(self):
+        with self._pool_lock:
+            idle, self._idle = self._idle, []
+        for conn in idle:
             conn.close()
 
+    def _acquire(self):
+        if _WORKER_CONNECTIONS.get():
+            with self._pool_lock:
+                while self._idle:
+                    conn = self._idle.pop()
+                    if not conn._conn.closed:
+                        return conn
+                    conn.close()
+        return self._open()
+
+    def _release(self, conn):
+        if _WORKER_CONNECTIONS.get() and not conn._conn.closed:
+            with self._pool_lock:
+                if len(self._idle) < 2:
+                    self._idle.append(conn)
+                    return
+        conn.close()
+
     @contextmanager
-    def transaction(self) -> Iterator[PostgresConnectionAdapter]:
-        conn = self._open()
+    def connect(self) -> Iterator[PostgresConnectionAdapter]:
+        conn = self._acquire()
+        reusable = True
         try:
             yield conn
             conn.commit()
-        except Exception:
-            conn.rollback()
+        except BaseException:
+            try:
+                conn.rollback()
+            except Exception:
+                reusable = False
             raise
         finally:
-            conn.close()
+            if reusable:
+                self._release(conn)
+            else:
+                conn.close()
+
+    transaction = connect

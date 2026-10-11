@@ -357,11 +357,11 @@ check_simple_mode() {
         warn "node-plane-backend.service is not active"
         add_remediation "Rerun ./scripts/install.sh --mode simple --install-systemd, then inspect sudo journalctl -u node-plane-backend"
       fi
-      if systemctl is-active --quiet node-plane-backend-worker.timer; then
-        ok "node-plane-backend-worker.timer is active"
+      if systemctl is-active --quiet node-plane-backend-worker.service; then
+        ok "node-plane-backend-worker.service is active"
       else
-        warn "node-plane-backend-worker.timer is not active"
-        add_remediation "Start the worker timer: sudo systemctl enable --now node-plane-backend-worker.timer"
+        warn "node-plane-backend-worker.service is not active"
+        add_remediation "Start the worker service: sudo systemctl enable --now node-plane-backend-worker.service"
       fi
       if [[ -x "${app_dir}/.venv/bin/python" ]] && "${app_dir}/.venv/bin/python" -c 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8080/health/ready", timeout=3).read()' >/dev/null 2>&1; then
         ok "backend API is ready on loopback"

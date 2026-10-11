@@ -1,4 +1,4 @@
-"""Manual checks inside the disposable QEMU guest described in SYSTEMD_BOOT_CHECK.md.
+"""Manual checks inside the disposable QEMU guest described in docs/development/testing.md.
 
 Never run against a production installation. This script changes lease deadlines
 in its disposable journal; product durations remain 12h / 1d / 3d.

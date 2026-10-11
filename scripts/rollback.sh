@@ -73,7 +73,7 @@ if [[ ! -d "$RELEASE_DIR" ]]; then
   echo "Release not found: ${RELEASE_DIR}" >&2
   exit 1
 fi
-if [[ ! -f "${RELEASE_DIR}/app/backend/http_api.py" || ! -f "${RELEASE_DIR}/app/telegram_client/main.py" ]]; then
+if [[ ! -f "${RELEASE_DIR}/app/backend/http_api.py" || ! -f "${RELEASE_DIR}/app/telegram_client/main.py" || ! -f "${RELEASE_DIR}/scripts/install_backend_systemd.sh" ]]; then
   echo "Rollback requires a standalone backend and aiogram release; PTB releases are unsupported." >&2
   exit 1
 fi
@@ -81,9 +81,12 @@ fi
 echo "Rolling back to release:"
 echo "  ${RELEASE_DIR}"
 
-sudo systemctl stop node-plane-backend-worker.timer node-plane-backend-worker.service
+sudo systemctl stop node-plane-backend-worker.timer 2>/dev/null || true
+sudo systemctl stop node-plane-backend-worker.service
 ln -sfn "$RELEASE_DIR" "$APP_DIR"
-sudo systemctl daemon-reload
-sudo systemctl restart node-plane-backend.service node-plane-telegram.service
-sudo systemctl start node-plane-backend-worker.timer
+# Restore the target release's worker contract, including timer-based releases.
+SHARED_DIR="$(read_env_value NODE_PLANE_SHARED_DIR)"
+SHARED_DIR="${SHARED_DIR:-${BASE_DIR}/shared}"
+sudo bash "${RELEASE_DIR}/scripts/install_backend_systemd.sh" "$BASE_DIR" "$SHARED_DIR"
+sudo systemctl restart node-plane-telegram.service
 sudo systemctl status node-plane-backend.service node-plane-telegram.service --no-pager || true

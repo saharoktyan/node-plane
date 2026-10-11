@@ -17,7 +17,7 @@ import urllib.request
 BASE = Path('/opt/node-plane')
 UNITS = (
     'node-plane-backend.service', 'node-plane-telegram.service',
-    'node-plane-driver.service', 'node-plane-backend-worker.timer',
+    'node-plane-driver.service', 'node-plane-backend-worker.service',
 )
 JOB_TABLES = (
     'backend_agent_rollouts', 'backend_node_jobs', 'backend_operation_tasks',
@@ -133,9 +133,8 @@ def observe():
         add('unit:' + unit, 'ok' if loaded and active == 'active' else 'error',
             f'{unit}: {active}/{state.get("SubState", "unknown")}; restarts={state.get("NRestarts", "unknown")}', repair)
     worker = unit_state('node-plane-backend-worker.service')
-    worker_ok = worker.get('LoadState') == 'loaded' and worker.get('Result') in ('success', '')
-    add('worker', 'ok' if worker_ok else 'warning',
-        f'Worker last result: {worker.get("Result", "unknown")}; an inactive successful oneshot is normal')
+    add('worker', 'ok' if worker.get('ActiveState') == 'active' else 'warning',
+        'Worker: ' + worker.get('ActiveState', 'unknown'))
     try:
         with urllib.request.urlopen('http://127.0.0.1:8080/health/ready', timeout=5) as response:
             ready = response.status == 200

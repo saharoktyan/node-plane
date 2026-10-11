@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.3-alpha.75 - 2026-10-11
+
+- Run the backend worker continuously, reuse PostgreSQL connections, and wake queued jobs after commit.
+- Preserve recovery locks and restore the appropriate worker service during updates and rollback.
+- Expand Workstation administration, notifications, server settings, and update management.
+- Improve Workstation navigation, scrolling, focus restoration, and file-based themes.
+- Rewrite installation and user documentation in English and Russian.
+
 ## 0.4.3-alpha.74 - 2026-10-10
 
 - Preserve server artifact inputs while cargo-dist packages the release.

@@ -326,7 +326,7 @@ sync_shared_env() {
   mkdir -p "$shared_dir"
   # Installed shared state is authoritative: the checkout's bootstrap .env can
   # predate generated PostgreSQL credentials, adapter identity and node targets.
-  # Build a private replacement and rename it so worker timer ticks cannot read
+  # Build a private replacement and rename it so the worker cannot read
   # a truncated environment during update preparation.
   local runtime_env="${shared_dir}/.env" temporary
   temporary="$(mktemp "${shared_dir}/.env-update.XXXXXX")"
@@ -409,7 +409,7 @@ wait_for_service() {
       if [[ -z "$STACK_JOB" ]]; then
         return 0
       fi
-      if sudo systemctl is-active --quiet node-plane-driver.service node-plane-backend.service node-plane-backend-worker.timer \
+      if sudo systemctl is-active --quiet node-plane-driver.service node-plane-backend.service node-plane-backend-worker.service \
           && "${STACK_CURRENT_LINK}/.venv/bin/python" -c 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8080/health/ready", timeout=2).read()' >/dev/null 2>&1; then
         stable=$((stable + 1))
         if [[ "$stable" -ge 3 ]]; then
@@ -458,13 +458,17 @@ rollback_simple() {
   sudo systemctl restart "$SIMPLE_BOT_SERVICE"
   if [[ -n "$STACK_JOB" ]]; then
     sudo systemctl restart node-plane-driver.service || restored=0
-    sudo systemctl start node-plane-backend-worker.timer || restored=0
+    if [[ -f /etc/systemd/system/node-plane-backend-worker.timer ]]; then
+      sudo systemctl start node-plane-backend-worker.timer || restored=0
+    else
+      sudo systemctl start node-plane-backend-worker.service || restored=0
+    fi
   fi
   if sudo systemctl list-unit-files node-plane-backend.service --no-legend 2>/dev/null | grep -q node-plane-backend.service; then
     if [[ -f "${previous_release}/app/backend/http_api.py" ]]; then
       sudo systemctl restart node-plane-backend.service || restored=0
     else
-      sudo systemctl stop node-plane-backend-worker.timer node-plane-backend.service || true
+      sudo systemctl stop node-plane-backend-worker.timer node-plane-backend-worker.service node-plane-backend.service || true
     fi
   fi
   if wait_for_service "$HEALTH_TIMEOUT" && [[ "$restored" == 1 ]]; then
@@ -588,7 +592,8 @@ update_simple() {
     NODE_PLANE_APP_DIR="$new_release_dir" NODE_PLANE_SHARED_DIR="$shared_dir" \
       PYTHONPATH="${new_release_dir}/app" "${new_release_dir}/.venv/bin/python" \
       -c 'import backend.executor; import telegram_client.main'
-    sudo systemctl stop node-plane-backend-worker.timer
+    sudo systemctl stop node-plane-backend-worker.timer 2>/dev/null || true
+    sudo systemctl stop node-plane-backend-worker.service
     CORE_ARMED=1
   fi
 

@@ -60,28 +60,20 @@ After=network-online.target postgresql.service node-plane-driver.service
 Wants=network-online.target
 
 [Service]
-Type=oneshot
+Type=simple
 WorkingDirectory=${current_dir}
 Environment=NODE_PLANE_BASE_DIR=${base_dir}
 Environment=NODE_PLANE_APP_DIR=${current_dir}
 Environment=NODE_PLANE_SHARED_DIR=${shared_dir}
 Environment=PYTHONPATH=${current_dir}/app
 EnvironmentFile=${shared_dir}/.env
-ExecStart=${current_dir}/.venv/bin/python -m backend.executor --lock-file ${shared_dir}/data/backend-worker.lock
-TimeoutStartSec=1h
-EOF
-
-cat > "${render_dir}/node-plane-backend-worker.timer" <<'EOF'
-[Unit]
-Description=Run Node Plane Backend Worker
-
-[Timer]
-OnBootSec=5s
-OnUnitInactiveSec=5s
-Unit=node-plane-backend-worker.service
+ExecStart=${current_dir}/.venv/bin/python -m backend.executor --lock-file ${shared_dir}/data/backend-worker.lock --daemon
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=1h
 
 [Install]
-WantedBy=timers.target
+WantedBy=multi-user.target
 EOF
 
 python3 - "$base_dir" "$shared_dir" "${render_dir}/.node-plane-installation.json" <<'PYMARKER'
@@ -108,11 +100,12 @@ fi
 install -m 0600 "${render_dir}/.node-plane-installation.json" "${base_dir}/.node-plane-installation.json"
 install -m 0644 "${render_dir}/node-plane-backend.service" /etc/systemd/system/
 install -m 0644 "${render_dir}/node-plane-backend-worker.service" /etc/systemd/system/
-install -m 0644 "${render_dir}/node-plane-backend-worker.timer" /etc/systemd/system/
+systemctl disable --now node-plane-backend-worker.timer 2>/dev/null || true
+rm -f /etc/systemd/system/node-plane-backend-worker.timer
 systemctl daemon-reload
-systemctl enable node-plane-backend.service node-plane-backend-worker.timer
+systemctl enable node-plane-backend.service node-plane-backend-worker.service
 systemctl restart node-plane-backend.service
-systemctl start node-plane-backend-worker.timer
+systemctl restart node-plane-backend-worker.service
 for attempt in 1 2 3 4 5 6 7 8 9 10; do
   if "${current_dir}/.venv/bin/python" -c 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8080/health/ready", timeout=2).read()' >/dev/null 2>&1; then
     exit 0

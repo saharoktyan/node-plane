@@ -47,15 +47,16 @@ class BackendSystemdInstallTests(unittest.TestCase):
             self.assertFalse((base / ".node-plane-installation.json").exists())
             api = (rendered / "node-plane-backend.service").read_text()
             worker = (rendered / "node-plane-backend-worker.service").read_text()
-            timer = (rendered / "node-plane-backend-worker.timer").read_text()
+            self.assertFalse((rendered / "node-plane-backend-worker.timer").exists())
             self.assertIn(f"EnvironmentFile={shared}/.env", api)
             self.assertIn(
                 "uvicorn backend.http_api:application --factory --host 127.0.0.1", api
             )
             self.assertIn("ExecStart=" + str(python) + " -m backend.executor", worker)
             self.assertIn(str(shared / "data" / "backend-worker.lock"), worker)
-            self.assertIn("Unit=node-plane-backend-worker.service", timer)
-            self.assertIn("OnUnitInactiveSec=5s", timer)
+            self.assertIn("Type=simple", worker)
+            self.assertIn("--daemon", worker)
+            self.assertIn("Restart=on-failure", worker)
 
 
 if __name__ == "__main__":
