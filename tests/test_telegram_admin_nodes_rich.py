@@ -212,6 +212,8 @@ class AdminNodeRichTests(IsolatedAsyncioTestCase):
                 screen, rows = draw.call_args.args[2:4]
                 self.assertTrue(screen.embedded_buttons)
                 callbacks = self.callbacks(draw)
+                self.assertFalse(any(c.startswith('node_connection:') or c.startswith('node_connection_set:')
+                                     for c in callbacks))
                 actual = {c.split(':')[-1] for c in callbacks if c.startswith('edit_node_field:')}
                 self.assertEqual(actual, fields)
                 self.assertTrue(any(c.startswith('apply_node:') for c in callbacks))
@@ -417,16 +419,22 @@ class AdminNodeRichTests(IsolatedAsyncioTestCase):
             await tools.advance_removal(123, 123, 77, 'msk1', self.bot, backend, self.state)
         self.assertIn(tr('en', 'node_tools.revocations_blocked'), draw.call_args.args[2].lines)
 
-    async def test_connection_choices_return_to_connection_section(self):
+    async def test_connection_channel_cannot_be_changed_from_settings(self):
         with patch.object(nodes, 'render', new_callable=AsyncMock) as draw:
             await nodes.show_node_connection(123, 123, 77, 'msk1', self.bot, self.backend, self.state)
         screen, rows = draw.call_args.args[2:4]
         choices = screen.sections[0].rows[0]
-        self.assertEqual(len(choices), 2)
-        self.assertEqual(choices[1].style, 'primary')
+        self.assertEqual(len(choices), 1)
+        self.assertEqual(choices[0].callback_data, 'edit_node_field:msk1:ssh_target')
         self.assertEqual(rows[-1][0].callback_data, 'node_section:connection:msk1')
         self.assertTrue(screen.sections[1].collapsed)
         screen.rich(rows)
+
+    async def test_old_connection_choice_callback_does_not_change_the_draft(self):
+        self.query.data = 'node_connection_set:msk1:local'
+        with patch.object(nodes, 'render', new_callable=AsyncMock):
+            await nodes.node_connection_set_cb(self.query, self.bot, self.backend, self.state)
+        self.assertNotIn('node_settings_draft', self.data)
 
     async def test_runtime_view_keeps_versions_visible_and_commits_collapsed(self):
         self.backend.node_services.return_value = {
@@ -469,6 +477,19 @@ class AdminNodeRichTests(IsolatedAsyncioTestCase):
         self.assertIsNone(self.data['node_settings_draft'])
         apply.assert_awaited_once()
         self.assertEqual(apply.await_args.kwargs['revision'], 4)
+
+    async def test_metadata_save_already_applied_does_not_queue_runtime_changes(self):
+        self.backend.edit_node = AsyncMock(return_value={**self.node,
+            'desired_revision': 4, 'applied_revision': 4})
+        await nodes.change_node_draft(123, 'msk1', {'title': 'Renamed'}, self.backend, self.state)
+        self.query.data = 'node_draft_save:msk1'
+        with patch.object(nodes, 'apply_node', new_callable=AsyncMock) as apply, \
+                patch.object(nodes, 'show_node_settings', new_callable=AsyncMock) as show:
+            await nodes.save_node_draft_cb(self.query, self.bot, self.backend, self.state)
+        self.backend.edit_node.assert_awaited_once()
+        apply.assert_not_awaited()
+        show.assert_awaited_once()
+        self.assertIsNone(self.data['node_settings_draft'])
 
     async def test_invalid_sni_keeps_edit_state_and_does_not_change_draft(self):
         self.data.update(edit_node_key='msk1',edit_field='xray_sni',edit_revision=3,

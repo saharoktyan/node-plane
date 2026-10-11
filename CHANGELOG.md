@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.3-alpha.78 - 2026-10-12
+
+- Verify the persistent worker service after installation and report Telegram polling conflicts explicitly.
+- Stop Telegram polling on token conflicts to prevent competing installations from alternating user state.
+- Validate Telegram credentials before installation and skip already installed host prerequisites.
+- Fix PostgreSQL server settings saves and avoid applying runtime settings for metadata-only changes.
+- Keep node connection transport fixed in Telegram settings.
+- Fix Rust dependency cache archives containing hardlinked Cargo outputs.
+
 ## 0.4.3-alpha.77 - 2026-10-11
 
 - Return to Node Plane Updates with refreshed status after closing a successful update result.

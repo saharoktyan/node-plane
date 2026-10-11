@@ -349,7 +349,7 @@ class NodeService:
                     for field in ('protocols', 'xray_transports', 'settings', 'transport', 'ssh_target'))
                 conn.execute('''UPDATE backend_nodes SET title = ?, region = ?, flag = ?,
                     protocols_json = ?, xray_transports_json = ?, settings_json = ?,
-                    applied_revision = CASE WHEN ? AND applied_revision=desired_revision
+                    applied_revision = CASE WHEN ? = 1 AND applied_revision=desired_revision
                         THEN desired_revision+1 ELSE applied_revision END,
                     desired_revision = desired_revision + 1
                     WHERE key = ? AND desired_revision = ?''',

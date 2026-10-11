@@ -18,6 +18,7 @@ from .routers import user_devices
 from .routers import admin_installation_defaults
 from .routers import navigation
 from . import update_panels
+from .polling import BotTokenConflict, CONFLICT_EXIT_CODE, guarded_polling
 
 async def main() -> None:
     logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(levelname)s | %(name)s | %(message)s')
@@ -61,7 +62,9 @@ async def main() -> None:
                 update_panels.configure(Path(os.environ.get('NODE_PLANE_SHARED_DIR', '/opt/node-plane/shared'))
                     / 'data' / 'telegram-update-panels.sqlite3')
                 await update_panels.resume(bot, dispatcher, backend)
-                await dispatcher.start_polling(bot)
+                await guarded_polling(dispatcher, bot,
+                    Path(os.environ.get('NODE_PLANE_SHARED_DIR', '/opt/node-plane/shared'))
+                    / 'data' / 'telegram-polling-conflict.json')
             finally:
                 await shutdown_refreshes()
                 delivery_task.cancel()
@@ -69,4 +72,7 @@ async def main() -> None:
                     await delivery_task
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except BotTokenConflict:
+        raise SystemExit(CONFLICT_EXIT_CODE) from None

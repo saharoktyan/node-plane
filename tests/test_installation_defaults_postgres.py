@@ -16,6 +16,28 @@ class InstallationDefaultsPostgresTests(unittest.TestCase):
     setUp = fixture.BackupsPostgresTests.setUp
     drop_schema = fixture.BackupsPostgresTests.drop_schema
 
+    def test_metadata_and_runtime_edits_persist_with_correct_applied_revision(self):
+        service = NodeService(self.db)
+        node = service.command(self.actor, action='create', command_key=str(uuid4()),
+            values={'key': 'local1', 'title': 'Original', 'region': 'Europe',
+                'transport': 'local', 'protocols': ['awg'],
+                'settings': {'public_host': 'vpn.example'}})
+        with self.db.transaction() as conn:
+            conn.execute('UPDATE backend_nodes SET applied_revision=desired_revision WHERE key=?', ('local1',))
+        metadata = {'title': 'Renamed', 'region': 'Asia', 'flag': 'JP', 'notes': 'Test notes'}
+        saved = service.command(self.actor, action='edit', node_key='local1',
+            revision=node['desired_revision'], command_key=str(uuid4()), values=metadata)
+        self.assertEqual(saved['applied_revision'], saved['desired_revision'])
+        stored = service.get(self.actor, 'local1')
+        for field, value in metadata.items():
+            self.assertEqual(stored[field], value)
+        changed = service.command(self.actor, action='edit', node_key='local1',
+            revision=saved['desired_revision'], command_key=str(uuid4()),
+            values={'settings': {**saved['settings'], 'awg_port': 51821, 'awg_port_mode': 'manual'}})
+        self.assertEqual(changed['applied_revision'], saved['applied_revision'])
+        self.assertEqual(changed['desired_revision'], saved['desired_revision'] + 1)
+        self.assertEqual(service.get(self.actor, 'local1')['settings']['awg_port'], 51821)
+
     def test_concurrent_local_creation_only_claims_one_slot(self):
         from backend.admin_cli import bootstrap_admin
         from backend.authorization import Actor

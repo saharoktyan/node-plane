@@ -1,6 +1,7 @@
 import importlib.util
 from pathlib import Path
 import sys
+import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import MagicMock, patch
@@ -63,6 +64,21 @@ class InstallationDiagnosticsTests(unittest.TestCase):
         self.assertGreater(report['errors'], 0)
         self.assertFalse(any('repair' in check for check in report['checks']))
         self.assertTrue(any(check['id'] == 'worker' for check in report['checks']))
+
+    def test_polling_conflict_is_an_error_even_with_active_services(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            marker = base / 'shared/data/telegram-polling-conflict.json'
+            marker.parent.mkdir(parents=True)
+            marker.write_text('{"code":"telegram_polling_conflict"}')
+            with patch.object(diagnostics, 'BASE', base), \
+                 patch.object(diagnostics, 'installed_database', return_value={'status': 'ok'}), \
+                 patch.object(diagnostics, 'unit_state', return_value={'LoadState': 'loaded', 'ActiveState': 'active'}), \
+                 patch.object(diagnostics.urllib.request, 'urlopen', side_effect=OSError):
+                report = diagnostics.observe()
+            check = next(c for c in report['checks'] if c['id'] == 'telegram_polling')
+            self.assertEqual(check['status'], 'error')
+            self.assertIn('other installation', check['detail'])
 
     def test_recovery_rechecks_after_diagnosis_and_rejects_unknown_units(self):
         conn, driver, state = self.database_case()

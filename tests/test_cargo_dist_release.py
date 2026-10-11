@@ -106,6 +106,26 @@ class CargoDistReleaseTests(unittest.TestCase):
             self.assertEqual([p.relative_to(target).as_posix() for p in target.rglob('*') if p.is_file()],
                 ['release/deps/libserde-fixture.rlib'])
 
+    def test_dependency_cache_round_trips_hardlinked_cargo_outputs(self):
+        spec = importlib.util.spec_from_file_location('release_cache', ROOT / 'scripts/release_rust_cache.py')
+        cache = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cache)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            target = root / 'target'
+            first = target / 'release/deps/libserde-fixture.rlib'
+            second = target / 'release/libserde.rlib'
+            first.parent.mkdir(parents=True)
+            first.write_bytes(b'compiled dependency')
+            os.link(first, second)
+            cache.LOCATIONS = {'target': target}
+            cache.ARCHIVE = root / 'cache/dependencies.tar.gz'
+            cache.save()
+            shutil.rmtree(target)
+            cache.restore()
+            self.assertEqual(first.read_bytes(), b'compiled dependency')
+            self.assertEqual(second.read_bytes(), first.read_bytes())
+
     def test_dependency_cache_rejects_path_traversal(self):
         import io
         spec = importlib.util.spec_from_file_location('release_cache', ROOT / 'scripts/release_rust_cache.py')

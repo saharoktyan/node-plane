@@ -203,7 +203,7 @@ async fn run(
         ensure!(report.errors == 0, "{text}");
         return Ok(text);
     }
-    stage("Checking installation paths and preparing prerequisites");
+    stage("Checking installation paths and installing missing prerequisites");
     checked(session, PREPARE_HOST, None, journal, false, tx).await?;
     stage("Preparing a private controller archive installation");
     let prepare = format!(
@@ -393,7 +393,7 @@ const PREPARE_HOST: &str = r#"
 set -eu
 umask 077
 . /etc/os-release
-case "$ID" in debian|ubuntu) ;; *) echo 'Automatic installation currently supports Debian/Ubuntu with Python 3.11 or 3.12.'; exit 12;; esac
+case "$ID" in debian|ubuntu) ;; *) echo 'Automatic installation currently supports Debian/Ubuntu.'; exit 12;; esac
 for dir in /opt /opt/node-plane /opt/node-plane/shared /opt/node-plane/shared/data /opt/node-plane/shared/ssh /opt/node-plane/releases /opt/node-plane-assistant; do
     [ ! -L "$dir" ] || { echo 'An installation directory is a symlink. Refusing to modify it.'; exit 13; }
     if [ -e "$dir" ]; then
@@ -434,19 +434,30 @@ else
     printf '%s\n' node-plane-workstation-v1 > /opt/node-plane-assistant/.owner
 fi
 export DEBIAN_FRONTEND=noninteractive
-timeout 600 apt-get update
-timeout 600 apt-get install -y git ca-certificates curl python3 openssl openssh-client sudo util-linux systemd tar gzip coreutils findutils
+set --
+for item in git:git curl:curl python3:python3 openssl:openssl ssh:openssh-client ssh-keygen:openssh-client sudo:sudo flock:util-linux systemctl:systemd tar:tar gzip:gzip sha256sum:coreutils timeout:coreutils find:findutils; do
+    tool=${item%%:*}
+    package=${item#*:}
+    if ! command -v "$tool" >/dev/null 2>&1; then
+        set -- "$@" "$package"
+    fi
+done
+if [ ! -s /etc/ssl/certs/ca-certificates.crt ] && [ ! -s /etc/pki/tls/certs/ca-bundle.crt ]; then
+    set -- "$@" ca-certificates
+fi
+if [ "$#" -gt 0 ]; then
+    printf 'Installing missing host prerequisites: %s\n' "$*"
+    timeout 600 apt-get update
+    timeout 600 apt-get install -y "$@"
+else
+    echo 'Host prerequisites are already installed; skipping APT'
+fi
 selected=''
 for candidate in python3.12 python3.11; do
     if command -v "$candidate" >/dev/null 2>&1; then selected="$candidate"; break; fi
 done
-if [ -z "$selected" ]; then
-    for candidate in python3.12 python3.11; do
-        if apt-cache show "$candidate" >/dev/null 2>&1; then selected="$candidate"; break; fi
-    done
-fi
 if [ -n "$selected" ]; then
-    timeout 600 apt-get install -y "$selected"
+    printf 'Using installed Python runtime: %s\n' "$selected"
 else
     echo 'uv will provision an isolated Python 3.12 runtime; system Python remains unchanged'
 fi
@@ -467,9 +478,16 @@ const CHECK_WORK_OWNER: &str = r#"
 
 const VERIFY: &str = r#"
 set -eu
+check_polling_conflict() {
+    if [ -f /opt/node-plane/shared/data/telegram-polling-conflict.json ]; then
+        echo 'Another installation is using this Telegram bot token. Stop its bot, then restart node-plane-telegram.service and run Check installation.'
+        exit 21
+    fi
+}
 for attempt in $(seq 1 20); do
     healthy=1
-    for unit in node-plane-backend.service node-plane-telegram.service node-plane-driver.service node-plane-backend-worker.timer; do
+    check_polling_conflict
+    for unit in node-plane-backend.service node-plane-telegram.service node-plane-driver.service node-plane-backend-worker.service; do
         systemctl is-active --quiet "$unit" || healthy=0
     done
     curl -fsS --max-time 3 http://127.0.0.1:8080/health/ready >/dev/null || healthy=0
@@ -480,6 +498,7 @@ done
 # A restart loop can briefly be active; require a stable Telegram process.
 pid=$(systemctl show -p MainPID --value node-plane-telegram.service)
 sleep 8
+check_polling_conflict
 test "$pid" != 0 && test "$(systemctl show -p MainPID --value node-plane-telegram.service)" = "$pid"
 systemctl is-active --quiet node-plane-telegram.service
 # Validate getMe through the installed runtime without putting the token in argv.
@@ -495,7 +514,7 @@ try:
 except Exception:
     raise SystemExit('Telegram token or network validation failed. Check the bot credentials and connectivity.')
 PY
-echo 'Backend, Telegram, driver and worker timer are ready'
+echo 'Backend, Telegram, driver and worker are ready'
 "#;
 const DIAGNOSE: &str = r#"
 set -eu
@@ -508,7 +527,7 @@ const RECOVERABLE_UNITS: &[&str] = &[
     "node-plane-backend.service",
     "node-plane-telegram.service",
     "node-plane-driver.service",
-    "node-plane-backend-worker.timer",
+    "node-plane-backend-worker.service",
 ];
 
 fn diagnostics_script(repair: Option<&str>) -> String {
@@ -651,6 +670,14 @@ mod tests {
         assert!(paths.contains(&"source/scripts/controller_release.py".to_owned()));
         assert!(paths.iter().all(|p| !p.contains("id_ed25519")));
     }
+    #[test]
+    fn verification_and_recovery_use_the_persistent_worker() {
+        assert!(VERIFY.contains("node-plane-backend-worker.service"));
+        assert!(!VERIFY.contains("node-plane-backend-worker.timer"));
+        assert!(RECOVERABLE_UNITS.contains(&"node-plane-backend-worker.service"));
+        assert!(!RECOVERABLE_UNITS.contains(&"node-plane-backend-worker.timer"));
+    }
+
     #[test]
     fn windows_sources_have_linux_line_endings() {
         assert_eq!(

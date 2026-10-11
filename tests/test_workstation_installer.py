@@ -146,6 +146,19 @@ fi
                 (base / 'current').mkdir()
                 (base / 'current/sentinel').write_text('keep')
             script = shell_constants()['PREPARE_HOST']
+            certificates = root / 'certificates.crt'
+            if variant != 'missing_ca':
+                certificates.write_text('test certificate bundle')
+            script = script.replace('/etc/ssl/certs/ca-certificates.crt', str(certificates))
+            script = script.replace('/etc/pki/tls/certs/ca-bundle.crt', str(root / 'absent-ca.crt'))
+            # Make dependency presence deterministic on the developer/CI host.
+            missing_tool = 'curl' if variant == 'missing' else ''
+            script = ('command() { if [[ "$1" == -v ]]; then '
+                      f'[[ "$2" != "{missing_tool}" ]]; '
+                      'else builtin command "$@"; fi; }\n') + script
+            if variant == 'isolated_python':
+                script = script.replace(f'[[ "$2" != "{missing_tool}" ]];',
+                    '[[ "$2" != python3.11 && "$2" != python3.12 ]];')
             script = script.replace('. /etc/os-release', f'. "{os_release}"')
             script = re.sub(r'/opt(?=/|[\s\";])', lambda _: str(opt), script)
             result = subprocess.run(['bash'], input=script, env=env,
@@ -156,6 +169,25 @@ fi
             if variant == 'active':
                 self.assertEqual((base / 'current/sentinel').read_text(), 'keep')
             return result, actions
+
+    def test_prepare_skips_package_manager_when_prerequisites_exist(self):
+        result, actions = self.run_prepare('ready')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(actions, '')
+        self.assertIn('skipping APT', result.stdout)
+
+    def test_prepare_installs_only_missing_tools_or_certificates(self):
+        for variant, package in (('missing', 'curl'), ('missing_ca', 'ca-certificates')):
+            with self.subTest(variant=variant):
+                result, actions = self.run_prepare(variant)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(actions.splitlines(), ['apt-get update', f'apt-get install -y {package}'])
+
+    def test_prepare_defers_isolated_python_to_the_release_installer(self):
+        result, actions = self.run_prepare('isolated_python')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(actions, '')
+        self.assertIn('uv will provision an isolated Python 3.12 runtime', result.stdout)
 
     def test_prepare_refuses_active_stack_before_package_mutations(self):
         result, actions = self.run_prepare('active')

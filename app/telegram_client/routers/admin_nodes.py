@@ -156,6 +156,10 @@ async def _save_node_draft(query, bot, backend, state, node_key, *, confirmed=Fa
         await show_admin_node(query.message.chat.id, query.from_user.id, query.message.message_id,
             node_key, bot, backend, state)
         return
+    if node['applied_revision'] >= node['desired_revision']:
+        await show_node_settings(query.message.chat.id, query.from_user.id,
+            query.message.message_id, node_key, bot, backend, state)
+        return
     await apply_node(query.message.chat.id, query.from_user.id, query.message.message_id, node_key, bot, backend, state, revision=node['desired_revision'])
 
 
@@ -973,10 +977,7 @@ async def show_node_connection(chat_id, user_id, message_id, node_key, bot, back
     node = await editable_node(user_id, node_key, backend, state)
     await state.update_data(node_settings_view='channel')
     transport = node.get('transport')
-    rows = [[InlineKeyboardButton(text=tr(locale, 'nodes.connection.local'),
-        callback_data=f'node_connection_set:{node_key}:local', style='primary' if transport == 'local' else None),
-        InlineKeyboardButton(text=tr(locale, 'nodes.connection.ssh'),
-        callback_data=f'node_connection_set:{node_key}:ssh', style='primary' if transport == 'ssh' else None)]]
+    rows = []
     if transport == 'ssh':
         rows.append([InlineKeyboardButton(text=tr(locale, 'nodes.connection.edit_target'),
             callback_data=EditNodeFieldCallback(node_key=node_key, field='ssh_target').pack())])
@@ -1006,24 +1007,8 @@ async def node_connection_cb(query: CallbackQuery, bot: Bot, backend: BackendCli
 async def node_connection_set_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
                                  state: FSMContext):
     await query.answer()
-    _, node_key, transport = query.data.split(':', 2)
-    if transport not in {'local', 'ssh'}:
-        return
-    node = await editable_node(query.from_user.id, node_key, backend, state)
-    if transport == 'ssh' and not node.get('ssh_target'):
-        await _prompt_node_ssh_target(query.message.chat.id, query.message.message_id,
-            node_key, node, bot, state, switch_transport=True)
-        return
-    body = {'transport': transport, 'ssh_target': node['ssh_target'] if transport == 'ssh' else None}
-    try:
-        await change_node_draft(query.from_user.id, node_key, body, backend, state)
-    except BackendError:
-        locale = normalize_locale((await state.get_data()).get('locale'))
-        await render(bot, query.message.chat.id, Screen(tr(locale, 'nodes.connection.title'),
-            (tr(locale, 'nodes.settings.save_failed'),), embedded_buttons=True, navigation=True),
-            [[InlineKeyboardButton(text=tr(locale, 'back'),
-                callback_data=f'node_connection:{node_key}')]], state, query.message.message_id)
-        return
+    # Old messages can retain this callback; never change the installation channel.
+    _, node_key, _ = query.data.split(':', 2)
     await show_node_connection(query.message.chat.id, query.from_user.id,
         query.message.message_id, node_key, bot, backend, state)
 

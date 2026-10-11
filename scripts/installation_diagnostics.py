@@ -133,6 +133,9 @@ def observe():
         add('unit:' + unit, 'ok' if loaded and active == 'active' else 'error',
             f'{unit}: {active}/{state.get("SubState", "unknown")}; restarts={state.get("NRestarts", "unknown")}', repair)
     worker = unit_state('node-plane-backend-worker.service')
+    if (BASE / 'shared/data/telegram-polling-conflict.json').exists():
+        add('telegram_polling', 'error',
+            'Another process is polling this bot token. Stop the bot on the other installation, then restart node-plane-telegram.service.')
     add('worker', 'ok' if worker.get('ActiveState') == 'active' else 'warning',
         'Worker: ' + worker.get('ActiveState', 'unknown'))
     try:

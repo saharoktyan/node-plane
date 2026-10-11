@@ -14,7 +14,7 @@ runs:
       if: inputs.mode == 'restore'
       uses: actions/github-script@v8
       env:
-        CACHE_NAME: rust-deps-v1-${{ runner.os }}-${{ runner.arch }}-1.90.0-${{ inputs.key }}
+        CACHE_NAME: rust-deps-v2-${{ runner.os }}-${{ runner.arch }}-1.90.0-${{ inputs.key }}
       with:
         script: |
           const {owner, repo} = context.repo;
@@ -29,7 +29,7 @@ runs:
     - if: inputs.mode == 'restore' && steps.previous.outputs.run-id != ''
       uses: actions/download-artifact@v8
       with:
-        name: rust-deps-v1-${{ runner.os }}-${{ runner.arch }}-1.90.0-${{ inputs.key }}
+        name: rust-deps-v2-${{ runner.os }}-${{ runner.arch }}-1.90.0-${{ inputs.key }}
         path: .release-rust-cache
         run-id: ${{ steps.previous.outputs.run-id }}
         github-token: ${{ github.token }}
@@ -39,7 +39,7 @@ runs:
     - if: inputs.mode == 'save'
       uses: actions/upload-artifact@v7
       with:
-        name: rust-deps-v1-${{ runner.os }}-${{ runner.arch }}-1.90.0-${{ inputs.key }}
+        name: rust-deps-v2-${{ runner.os }}-${{ runner.arch }}-1.90.0-${{ inputs.key }}
         path: .release-rust-cache/dependencies.tar.gz
         compression-level: 0
         retention-days: 7

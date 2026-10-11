@@ -163,9 +163,7 @@ async def show_section(chat_id, user_id, message_id, section, node_key, bot, bac
     if section == 'general':
         sections = (group('nodes.rich.name_region', ('title', 'region', 'flag')), group('nodes.settings.field.notes', ('notes',), collapsed=True))
     elif section == 'connection':
-        sections = (group('nodes.rich.connection', ('public_host',)),
-            Section(tr(locale, 'nodes.rich.advanced'), collapsed=True,
-                rows=((button(locale, 'nodes.settings.field.transport', f'node_connection:{node_key}'),),)))
+        sections = (group('nodes.rich.connection', ('public_host',)),)
     elif section == 'xray':
         sections = (group('nodes.rich.connection', ('xray_host', 'xray_sni')),
             group('node_tools.ports', ('xray_tcp_port', 'xray_xhttp_port')),

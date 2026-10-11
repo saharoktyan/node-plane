@@ -61,6 +61,7 @@ EnvironmentFile=${shared_dir}/.env
 ExecStart=${current_dir}/.venv/bin/python -m telegram_client.main
 Restart=always
 RestartSec=3
+RestartPreventExitStatus=78
 
 [Install]
 WantedBy=multi-user.target
@@ -89,6 +90,10 @@ if ! systemctl restart node-plane-telegram.service; then
   exit 1
 fi
 sleep 2
+if [[ -f "${shared_dir}/data/telegram-polling-conflict.json" ]]; then
+  echo "Another process is using this Telegram bot token. Stop the bot on the other installation, then restart node-plane-telegram.service." >&2
+  exit 1
+fi
 if ! systemctl is-active --quiet node-plane-telegram.service; then
   systemctl stop node-plane-telegram.service || true
   echo "New client stopped after startup; inspect journalctl -u node-plane-telegram" >&2

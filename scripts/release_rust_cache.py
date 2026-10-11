@@ -27,7 +27,9 @@ def dependency(name):
 
 def save():
     ARCHIVE.parent.mkdir(exist_ok=True)
-    with tarfile.open(ARCHIVE, 'w:gz', compresslevel=1) as archive:
+    # Cargo hardlinks some outputs. Store their bytes as regular files so the
+    # restore path can keep rejecting all archive links on every platform.
+    with tarfile.open(ARCHIVE, 'w:gz', compresslevel=1, dereference=True) as archive:
         for prefix, directory in LOCATIONS.items():
             if not directory.exists():
                 continue

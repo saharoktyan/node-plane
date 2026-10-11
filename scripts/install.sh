@@ -8,6 +8,7 @@ source "${SCRIPT_DIR}/python_runtime.sh"
 source "${SCRIPT_DIR}/uv_runtime.sh"
 source "${SCRIPT_DIR}/lib/install_progress.sh"
 source "${SCRIPT_DIR}/lib/controller_archive.sh"
+source "${SCRIPT_DIR}/lib/install_credentials.sh"
 FROM_SOURCE=0
 
 MODE="${MODE:-}"
@@ -580,6 +581,10 @@ configure_env() {
     echo "BOT_TOKEN is required." >&2
     exit 1
   fi
+  if ! valid_telegram_bot_token "$bot_token"; then
+    echo "BOT_TOKEN has an invalid format. Paste the token from BotFather: numeric bot ID, colon, then the secret." >&2
+    exit 1
+  fi
 
   if [[ -z "$admin_ids" || "$admin_ids" == "123456789" ]]; then
     admin_ids="$(prompt_value "Enter ADMIN_IDS (comma-separated Telegram numeric user ids)" "")"
@@ -591,8 +596,8 @@ configure_env() {
     echo "ADMIN_IDS is required." >&2
     exit 1
   fi
-  if [[ ! "$admin_ids" =~ ^[[:space:]]*[0-9]+[[:space:]]*(,[[:space:]]*[0-9]+[[:space:]]*)*$ ]]; then
-    echo "ADMIN_IDS must contain comma-separated numeric Telegram user IDs." >&2
+  if ! valid_telegram_admin_ids "$admin_ids"; then
+    echo "ADMIN_IDS must contain positive numeric Telegram user IDs, separated by commas; usernames and bot tokens are not IDs." >&2
     exit 1
   fi
 

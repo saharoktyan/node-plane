@@ -239,7 +239,7 @@ def diagnostic_name(locale, identity):
         'file:shared/.env': 'environment', 'environment': 'environment_keys',
         'release:current/VERSION': 'version', 'release:current/BUILD_COMMIT': 'build',
         'disk': 'disk', 'database': 'database', 'maintenance': 'maintenance',
-        'worker': 'worker', 'api': 'api', 'unit:node-plane-backend.service': 'backend',
+        'worker': 'worker', 'api': 'api', 'telegram_polling': 'telegram', 'unit:node-plane-backend.service': 'backend',
         'unit:node-plane-driver.service': 'driver', 'unit:node-plane-telegram.service': 'telegram',
         'unit:node-plane-backend-worker.service': 'worker'}
     if identity in names:

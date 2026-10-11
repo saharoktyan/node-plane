@@ -105,22 +105,20 @@ impl Request {
             );
             let (bot_id, secret) = self.bot_token.split_once(':').unwrap_or_default();
             ensure!(
-                !bot_id.is_empty()
-                    && bot_id.bytes().all(|b| b.is_ascii_digit())
+                valid_telegram_id(bot_id)
                     && secret.len() >= 20
                     && secret
                         .bytes()
                         .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-'),
-                "Enter the Telegram bot token from BotFather."
+                "Telegram bot token: paste the token from BotFather (numeric bot ID, colon, then the secret)."
             );
             ensure!(
                 !self.admin_ids.is_empty()
-                    && self.admin_ids.split(',').all(|id| id
-                        .trim()
-                        .bytes()
-                        .all(|b| b.is_ascii_digit())
-                        && id.trim().parse::<u64>().is_ok_and(|id| id > 0)),
-                "Administrator IDs must be positive Telegram numeric IDs, separated by commas."
+                    && self
+                        .admin_ids
+                        .split(',')
+                        .all(|id| valid_telegram_id(id.trim())),
+                "Administrator IDs: enter positive numeric Telegram user IDs, separated by commas; usernames and bot tokens are not IDs."
             );
         }
         if matches!(
@@ -176,6 +174,12 @@ impl Request {
             self.branch
         ))
     }
+}
+
+fn valid_telegram_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.bytes().all(|b| b.is_ascii_digit())
+        && value.parse::<i64>().is_ok_and(|id| id > 0)
 }
 
 fn valid_tag(tag: &str) -> bool {
@@ -236,6 +240,37 @@ mod tests {
             workflow: WorkflowOptions::default(),
         };
         assert!(r.validate().is_ok());
+        for token in [
+            "123456",
+            "0:abcdefghijklmnopqrstuvwx",
+            "-1:abcdefghijklmnopqrstuvwx",
+            "123:short",
+            "123:abcdefghijklmnop qrstuvwx",
+            "123:abcdefghijklmnopqrstuvwx:extra",
+            "9223372036854775808:abcdefghijklmnopqrstuvwx",
+        ] {
+            r.bot_token = Zeroizing::new(token.into());
+            assert!(r.validate().is_err(), "invalid token format accepted");
+        }
+        r.bot_token = Zeroizing::new("123:abcdefghijklmnopqrstuvwx".into());
+        for ids in [
+            "",
+            "0",
+            "-42",
+            "@admin",
+            "42,",
+            "42,,78",
+            "42:token",
+            "9223372036854775808",
+            "42\n78",
+        ] {
+            r.admin_ids = ids.into();
+            assert!(
+                r.validate().is_err(),
+                "invalid administrator ID format accepted"
+            );
+        }
+        r.admin_ids = "42, 78".into();
         r.bot_token.push('\n');
         assert!(r.validate().is_err());
         r.bot_token.pop();

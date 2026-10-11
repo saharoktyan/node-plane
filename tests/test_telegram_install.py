@@ -67,6 +67,7 @@ exit 0
             self.assertIn('ExecStart=' + str(base / 'current' / '.venv' / 'bin' / 'python')
                           + ' -m telegram_client.main', unit)
             self.assertIn('After=network-online.target node-plane-backend.service', unit)
+            self.assertIn('RestartPreventExitStatus=78', unit)
             self.assertNotIn('systemctl', unit)
 
 
