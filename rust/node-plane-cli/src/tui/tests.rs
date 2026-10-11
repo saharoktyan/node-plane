@@ -1347,6 +1347,36 @@ fn controller_back_returns_from_nested_updates_then_closes_section() {
 }
 
 #[test]
+fn updates_root_has_no_back_button_but_nested_screens_do() {
+    let mut app = test_profile_app();
+    app.form.action = Action::Update;
+    app.screen = Screen::Controller;
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+    for overview in [None, Some(serde_json::json!({"update_available": true}))] {
+        app.controller.updates = overview;
+        assert!(!app.controller_controls().contains(&Control::ControllerBack));
+        terminal
+            .draw(|frame| app.hits = draw_content(frame, &app))
+            .unwrap();
+        assert!(
+            !app.hits
+                .iter()
+                .any(|hit| hit.control == Control::ControllerBack)
+        );
+    }
+    app.controller.versions = Some(serde_json::json!({"items": []}));
+    assert!(app.controller_controls().contains(&Control::ControllerBack));
+    terminal
+        .draw(|frame| app.hits = draw_content(frame, &app))
+        .unwrap();
+    assert!(
+        app.hits
+            .iter()
+            .any(|hit| hit.control == Control::ControllerBack)
+    );
+}
+
+#[test]
 fn latest_update_uses_known_upstream_and_keeps_confirmation_flow() {
     let mut app = test_profile_app();
     app.form.action = Action::Update;
@@ -2988,6 +3018,7 @@ fn result_close_returns_to_actions_for_success_and_failure_and_preserves_profile
             app.password.push_str("SECRET_PASSWORD");
             app.form.fields[6] = "SECRET_TOKEN".into();
             let installed = action == Action::Install && outcome.is_ok();
+            let updated = action == Action::Update && outcome.is_ok();
             app.event(Event::Finished(outcome));
             let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
             terminal
@@ -3001,7 +3032,7 @@ fn result_close_returns_to_actions_for_success_and_failure_and_preserves_profile
                 .area;
             let key = click(&mut app, (close.x + 1, close.y + 1)).unwrap();
             assert!(app.close_result(key));
-            assert!(if installed {
+            assert!(if installed || updated {
                 matches!(app.screen, Screen::Controller)
             } else {
                 matches!(app.screen, Screen::Form)
@@ -3015,6 +3046,15 @@ fn result_close_returns_to_actions_for_success_and_failure_and_preserves_profile
             assert_eq!(app.form.saved, expected);
             assert_eq!(app.form.selected, 0);
             assert!(app.outcome.is_none() && app.update.is_none());
+            if updated {
+                assert!(matches!(
+                    app.nodes_requested,
+                    Some(crate::nodes::Command::Controller(
+                        _,
+                        crate::controller::Command::Updates
+                    ))
+                ));
+            }
             assert!(app.stage.is_empty() && app.error.is_empty());
             assert!(app.password.is_empty() && app.form.fields[6].is_empty());
             assert_eq!(app.result_scroll, 0);
@@ -3039,7 +3079,7 @@ fn result_escape_returns_home_and_ctrl_c_requires_exit_confirmation() {
     assert!(app.exit && !app.exit_confirm && matches!(app.screen, Screen::Finished));
     app.exit = false;
     assert!(app.close_result(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
-    assert!(matches!(app.screen, Screen::Form) && !app.exit);
+    assert!(matches!(app.screen, Screen::Controller) && !app.exit);
 }
 
 #[test]
@@ -3983,6 +4023,7 @@ fn controller_cleanup_requires_exact_phrase_and_queues_once() {
 #[test]
 fn controller_menu_scrolls_to_all_controls() {
     let mut app = App::new(&test_request());
+    app.form.action = Action::Install;
     app.screen = Screen::Controller;
     app.controller.overview =
         Some(serde_json::json!({"supported":true,"counts":{"accounts":1,"profiles":2,"nodes":3}}));

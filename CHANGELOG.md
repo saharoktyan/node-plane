@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.3-alpha.77 - 2026-10-11
+
+- Return to Node Plane Updates with refreshed status after closing a successful update result.
+- Remove the Back arrow from the Updates root while retaining navigation in nested screens.
+
 ## 0.4.3-alpha.76 - 2026-10-11
 
 - Reuse PostgreSQL connections in the backend API.

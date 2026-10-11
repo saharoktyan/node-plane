@@ -144,6 +144,8 @@ impl App {
         if !matches!(key.code, KeyCode::Enter | KeyCode::Esc) {
             return false;
         }
+        let updated =
+            self.form.action == Action::Update && self.outcome.as_ref().is_some_and(Result::is_ok);
         self.fresh_installation = false;
         self.screen = if self.form.action == Action::Install && self.has_installation() {
             Screen::Controller
@@ -169,6 +171,10 @@ impl App {
         self.exit = false;
         self.exit_confirm = false;
         self.stop.store(false, Ordering::Relaxed);
+        if updated {
+            self.open_controller();
+            self.controller_command(crate::controller::Command::Updates);
+        }
         true
     }
 

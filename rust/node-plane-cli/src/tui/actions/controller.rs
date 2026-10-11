@@ -1091,7 +1091,6 @@ impl App {
                 Control::ControllerUpdateBranch,
                 Control::ControllerUpdateAuto,
                 Control::ControllerUpdateInterval,
-                Control::ControllerBack,
             ];
             if update_result_available(updates) {
                 controls.insert(3, Control::ControllerUpdateResult);
@@ -1099,10 +1098,13 @@ impl App {
             if updates["update_available"] == true {
                 controls.insert(1, Control::ControllerUpdateLatest);
             }
+            if self.form.action != Action::Update {
+                controls.push(Control::ControllerBack);
+            }
             return controls;
         }
         if self.form.action == Action::Update {
-            return vec![Control::ControllerUpdates, Control::ControllerBack];
+            return vec![Control::ControllerUpdates];
         }
         if state.removed || !self.controller_ready() && !state.verifying {
             return vec![
