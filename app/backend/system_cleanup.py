@@ -288,6 +288,11 @@ class SystemCleanupService:
             "cleanup_nodes": intent["cleanup_nodes"],
             "items": items,
             "shutdown_ack": bool(row["shutdown_ack"]),
+            "cancel_requested": bool(intent.get("cancel_requested")),
+            "can_abort": not row["shutdown_ack"] and not intent.get("cancel_requested") and row["phase"] not in {
+                "local_state", "local_files", "uninstall_launch"
+            } and (row["status"] in {"blocked", "awaiting_shutdown"} or
+                   intent["action"] == "remove" and row["status"] in {"queued", "running"}),
         }
 
     def get(self, actor, job_id):
@@ -316,7 +321,7 @@ class SystemCleanupService:
                 or row["principal_id"] != actor.principal.id
             ):
                 raise AccessDenied("resource_not_found", 404)
-            if row["status"] != "awaiting_shutdown":
+            if row["status"] != "awaiting_shutdown" or json.loads(row["intent_json"]).get("cancel_requested"):
                 raise AccessDenied("cleanup_not_ready", 409)
             if notification:
                 identity = conn.execute("SELECT subject FROM backend_external_identities "
@@ -368,7 +373,7 @@ class SystemCleanupService:
             raise
         return self.get(actor, job_id)
 
-    def abort(self, actor, job_id):
+    def abort(self, actor, job_id, *, _finish=False):
         require_permission(actor, "maintenance.manage")
         with self.db.transaction() as conn:
             conn.execute(
@@ -384,10 +389,21 @@ class SystemCleanupService:
                 or row["principal_id"] != actor.principal.id
             ):
                 raise AccessDenied("resource_not_found", 404)
-            if row["status"] not in {"blocked", "awaiting_shutdown"} or row[
-                "phase"
-            ] in {"local_files", "uninstall_launch"}:
+            intent = json.loads(row["intent_json"])
+            if row["status"] == "aborted":
+                return self._public(conn, row)
+            preparing = intent["action"] == "remove" and row["status"] in {"queued", "running"}
+            if (row["shutdown_ack"] or row["phase"] in {"local_state", "local_files", "uninstall_launch"}
+                or row["status"] not in {"blocked", "awaiting_shutdown"} and not preparing):
                 raise AccessDenied("cleanup_abort_unsafe", 409)
+            # The worker may be preparing a node or uninstall script. Persist the
+            # request and let it finish its current step before stopping the job.
+            if preparing and not _finish:
+                intent["cancel_requested"] = True
+                conn.execute("UPDATE backend_system_cleanup_jobs SET intent_json=? WHERE id=?",
+                             (encoded(intent), job_id))
+                return self._public(conn, conn.execute(
+                    "SELECT * FROM backend_system_cleanup_jobs WHERE id=?", (job_id,)).fetchone())
             conn.execute(
                 """UPDATE backend_node_removals SET status='blocked',error_code='system_cleanup_aborted'
                 WHERE node_key IN (SELECT node_key FROM backend_system_cleanup_items WHERE job_id=?)
@@ -521,9 +537,12 @@ class SystemCleanupService:
     def run_one(self):
         with self.db.connect() as conn:
             jobs = conn.execute(
-                "SELECT * FROM backend_system_cleanup_jobs WHERE status IN ('queued','running','awaiting_shutdown') ORDER BY created_at"
+                "SELECT * FROM backend_system_cleanup_jobs WHERE status IN ('queued','running','awaiting_shutdown','blocked') ORDER BY created_at"
             ).fetchall()
         for job in jobs:
+            intent = json.loads(job["intent_json"])
+            if job["status"] == "blocked" and not intent.get("cancel_requested"):
+                continue
             try:
                 with self.db.connect() as conn:
                     account = conn.execute(
@@ -546,6 +565,9 @@ class SystemCleanupService:
                     Account(job["actor_id"], account["role"], account["status"]),
                 )
                 require_permission(actor, "maintenance.manage")
+                if intent.get("cancel_requested"):
+                    self.abort(actor, job["id"], _finish=True)
+                    return True
                 intent = json.loads(job["intent_json"])
                 if self.host.deployment() != intent["deployment"]:
                     raise AccessDenied("installation_manifest_mismatch", 409)
@@ -566,6 +588,11 @@ class SystemCleanupService:
                     for item in items:
                         if item["status"] == "succeeded":
                             continue
+                        with self.db.connect() as conn:
+                            current = conn.execute("SELECT intent_json FROM backend_system_cleanup_jobs WHERE id=?",
+                                                   (job["id"],)).fetchone()
+                        if json.loads(current["intent_json"]).get("cancel_requested"):
+                            return True
                         removal = self.removals.request(actor, item["node_key"])
                         status = removal.get("removal_status", removal["status"])
                         if status in {"blocked", "removed_registry_only"}:
@@ -629,6 +656,19 @@ class SystemCleanupService:
                     if isinstance(exc, AccessDenied)
                     else "system_cleanup_failed"
                 )
+                if intent.get("cancel_requested"):
+                    # A failed cancellation must not turn the drain loop into
+                    # an automatic retry of a host action. Once aborted, retain
+                    # that terminal state even if discarding the script failed.
+                    with self.db.transaction() as conn:
+                        current = conn.execute("SELECT * FROM backend_system_cleanup_jobs WHERE id=?",
+                                               (job["id"],)).fetchone()
+                        saved = json.loads(current["intent_json"])
+                        saved["cancel_requested"] = False
+                        conn.execute("UPDATE backend_system_cleanup_jobs SET intent_json=? WHERE id=?",
+                                     (encoded(saved), job["id"]))
+                    self._set(job["id"], status="aborted" if current["status"] == "aborted" else "blocked", error=code)
+                    return True
                 self._set(job["id"], status="blocked", error=code)
                 return True
         return False

@@ -49,6 +49,7 @@ pub enum Command {
     Job(Uuid),
     Retry(Uuid, Uuid),
     Shutdown(Uuid, Uuid),
+    Abort(Uuid),
     Verify(Value),
 }
 impl Command {
@@ -246,9 +247,10 @@ impl Command {
             Self::Shutdown(id, key) => (
                 Method::POST,
                 format!("{root}/jobs/{id}/shutdown-ack"),
-                Some(json!({})),
+                None,
                 Some(*key),
             ),
+            Self::Abort(id) => (Method::POST, format!("{root}/jobs/{id}/abort"), None, None),
             Self::Verify(_) => anyhow::bail!("Host verification does not use the backend"),
         })
     }
@@ -298,6 +300,26 @@ pub struct Browser {
     pub verification_started: Option<std::time::Instant>,
 }
 impl Browser {
+    pub fn removal_active(&self) -> bool {
+        self.verifying
+            || self.job.as_ref().is_some_and(|job| {
+                job["action"] == "remove"
+                    && matches!(
+                        job["status"].as_str(),
+                        Some("queued" | "running" | "blocked" | "awaiting_shutdown")
+                    )
+            })
+    }
+
+    pub fn removal_ready(&self) -> bool {
+        !self.verifying
+            && self.job.as_ref().is_some_and(|job| {
+                job["status"] == "awaiting_shutdown"
+                    && job["cancel_requested"] != true
+                    && job["shutdown_ack"] != true
+            })
+    }
+
     pub fn apply(&mut self, command: Command, value: Value) {
         let selected = self.selected;
         let keep_focus = matches!(
@@ -450,6 +472,16 @@ impl Browser {
                 self.verifying = true;
                 self.verification_started = Some(std::time::Instant::now());
             }
+            Command::Job(_) | Command::Abort(_) => {
+                if value["action"] == "remove" && value["shutdown_ack"] == true {
+                    self.verifying = true;
+                    self.verification_started
+                        .get_or_insert_with(std::time::Instant::now);
+                }
+                self.job = Some(value);
+                self.plan = None;
+                self.phrase.clear();
+            }
             _ => {
                 self.job = Some(value);
                 self.plan = None;
@@ -518,6 +550,24 @@ impl Browser {
         }
     }
     pub fn poll(&self) -> Option<Command> {
+        // Cleanup must keep progressing even if an older subsection is still loaded.
+        if self.verifying && !self.removed {
+            if self.verification_timed_out() {
+                return None;
+            }
+            return self
+                .overview
+                .as_ref()?
+                .get("deployment")
+                .cloned()
+                .map(Command::Verify);
+        }
+        if self.removal_active() {
+            return self.job.as_ref()?["id"]
+                .as_str()
+                .and_then(|id| Uuid::parse_str(id).ok())
+                .map(Command::Job);
+        }
         if let Some(job) = &self.backup_job
             && self.backups.is_some()
         {
@@ -545,17 +595,6 @@ impl Browser {
             } else {
                 None
             };
-        }
-        if self.verifying && !self.removed {
-            if self.verification_timed_out() {
-                return None;
-            }
-            return self
-                .overview
-                .as_ref()?
-                .get("deployment")
-                .cloned()
-                .map(Command::Verify);
         }
         let job = self.job.as_ref()?;
         if matches!(job["status"].as_str(), Some("queued" | "running")) {
@@ -612,6 +651,41 @@ print(json.dumps({'installed': manifest or ready, 'backend_ready':ready}))
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn cleanup_requests_and_polling_follow_the_removal_lifecycle() {
+        let id = Uuid::new_v4();
+        let (_, path, body, _) = Command::Shutdown(id, Uuid::new_v4()).request().unwrap();
+        assert!(path.ends_with("/shutdown-ack"));
+        assert!(
+            body.is_none(),
+            "Workstation does not supply a Telegram notification"
+        );
+        assert!(Command::Abort(id).request().unwrap().1.ends_with("/abort"));
+        let mut browser = Browser {
+            job: Some(json!({"id":id,"action":"remove","status":"running"})),
+            backups: Some(json!({})),
+            backup_job: Some(json!({"status":"succeeded"})),
+            ..Default::default()
+        };
+        assert!(matches!(browser.poll(), Some(Command::Job(value)) if value == id));
+        browser.apply(
+            Command::Job(id),
+            json!({"id":id,"action":"remove","status":"awaiting_shutdown"}),
+        );
+        assert!(browser.removal_ready());
+        browser.apply(
+            Command::Abort(id),
+            json!({"id":id,"action":"remove","status":"running","cancel_requested":true}),
+        );
+        assert!(!browser.removal_ready());
+        assert!(browser.poll().is_some());
+        browser.apply(
+            Command::Job(id),
+            json!({"id":id,"action":"remove","status":"aborted"}),
+        );
+        assert!(!browser.removal_active());
+        assert!(browser.poll().is_none());
+    }
     #[test]
     fn update_preferences_use_controller_api_and_preserve_cleanup_state() {
         let command = Command::UpdatePreferences(

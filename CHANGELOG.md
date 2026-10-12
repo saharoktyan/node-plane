@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.3-alpha.82 - 2026-10-12
+
+- Fix Workstation controller removal confirmation requests and keep removal progress updating across preparation and shutdown.
+- Show dedicated finish/cancel actions during controller removal and allow cancellation before final shutdown confirmation.
+- Fix the Workstation formatting check for expanded installation diagnostics.
+
 ## 0.4.3-alpha.81 - 2026-10-12
 
 - Extend installation diagnostics with bounded live server checks and explicit coverage in Telegram and Workstation.

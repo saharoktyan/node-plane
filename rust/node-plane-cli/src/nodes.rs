@@ -934,6 +934,9 @@ async fn execute_inner(
             let protocol_action = match &command { Command::ProtocolAction(_, action) => Some(*action), _ => None };
             match command {
                 Command::Controller(profile, command) => {
+                    if matches!(&command, crate::controller::Command::Abort(_)) {
+                        ensure!(events::confirm(tx, "Cancel removal?", "Keep the controller and stop further removal preparation. Nodes already removed cannot be restored by cancellation.".into())?, "Removal cancellation declined");
+                    }
                     if let crate::controller::Command::BackupDelete(_, _) = &command {
                         ensure!(events::confirm(tx,"Delete backup?","This backup will be permanently deleted. Other backups and the running installation are kept.".into())?, "Backup deletion cancelled");
                     }

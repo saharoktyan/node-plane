@@ -2685,6 +2685,48 @@ fn controller_settings_groups_keep_removal_last_and_updates_in_sidebar() {
 }
 
 #[test]
+fn controller_removal_replaces_settings_and_refreshes_to_finish_automatically() {
+    let mut app = test_profile_app();
+    app.open_controller();
+    app.nodes_requested = None;
+    let id = uuid::Uuid::new_v4();
+    app.controller.job = Some(
+        serde_json::json!({"id":id,"action":"remove","status":"running","phase":"nodes","items":[{"node_key":"local","status":"pending"}]}),
+    );
+    app.controller.backups = Some(serde_json::json!({}));
+    app.controller.backup_job = Some(serde_json::json!({"status":"succeeded"}));
+    assert!(
+        app.controller_controls() == vec![Control::ControllerShutdown, Control::ControllerAbort]
+    );
+    app.activate(Control::ControllerShutdown);
+    assert!(app.nodes_requested.is_none());
+    let command = app.controller.poll().unwrap();
+    app.event(Event::Nodes(crate::nodes::Update::Controller(app.controller.profile, command,
+        serde_json::json!({"id":id,"action":"remove","status":"awaiting_shutdown","phase":"shutdown"}))));
+    assert!(app.controller.removal_ready());
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 40)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    assert!(
+        app.hits
+            .iter()
+            .any(|hit| hit.control == Control::ControllerShutdown)
+    );
+    assert!(
+        app.hits
+            .iter()
+            .any(|hit| hit.control == Control::ControllerAbort)
+    );
+    assert!(!app.hits.iter().any(|hit| matches!(
+        hit.control,
+        Control::ControllerSection(_) | Control::ControllerBackups | Control::ControllerBack
+    )));
+    app.activate(Control::ControllerAbort);
+    assert!(
+        matches!(app.nodes_requested, Some(crate::nodes::Command::Controller(_, crate::controller::Command::Abort(value))) if value == id)
+    );
+}
+
+#[test]
 fn pinned_back_remains_visible_in_small_scrolled_settings() {
     let mut app = test_profile_app();
     app.screen = Screen::SettingsPage(SettingsPage::Appearance);

@@ -88,6 +88,7 @@ pub(super) enum Control {
     ControllerRefresh,
     ControllerRetry,
     ControllerShutdown,
+    ControllerAbort,
     ControllerBack,
     ControllerNew,
     ControllerCheck,

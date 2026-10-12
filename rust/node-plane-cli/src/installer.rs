@@ -216,8 +216,13 @@ async fn run(
             }
         } else {
             report.warnings += 1;
-            report.checks.push(DiagnosticCheck { id: "servers:coverage".into(), status: "warning".into(),
-                detail: "Backend API unavailable; only controller host checks were performed.".into(), repair: None });
+            report.checks.push(DiagnosticCheck {
+                id: "servers:coverage".into(),
+                status: "warning".into(),
+                detail: "Backend API unavailable; only controller host checks were performed."
+                    .into(),
+                repair: None,
+            });
         }
         let text = report.render();
         ensure!(report.errors == 0, "{text}");

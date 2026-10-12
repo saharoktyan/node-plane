@@ -230,6 +230,43 @@ pub(in crate::tui) fn draw_controller(
     let mut controls: Vec<(String, Control)> = Vec::new();
     if state.plan_pending {
         text = "Preparing confirmation…".into();
+    } else if state.removal_active() {
+        let empty = serde_json::json!({});
+        let job = state.job.as_ref().unwrap_or(&empty);
+        text = format!(
+            "Removal · {}\nStep: {}",
+            job["status"].as_str().unwrap_or("—"),
+            job["phase"].as_str().unwrap_or("—")
+        );
+        if let Some(items) = job["items"].as_array() {
+            for item in items {
+                text.push_str(&format!(
+                    "\n{} · {}",
+                    item["node_key"].as_str().unwrap_or("—"),
+                    item["status"].as_str().unwrap_or("—")
+                ));
+            }
+        }
+        if let Some(error) = job["error_code"].as_str() {
+            text.push_str(&format!("\n{error}"));
+        }
+        text.push_str(if state.verifying {
+            if state.verification_timed_out() {
+                "\nRemoval is not yet confirmed. Refresh to check again."
+            } else {
+                "\nChecking that Node Plane has been removed…"
+            }
+        } else if job["cancel_requested"] == true {
+            "\nCancelling after the current preparation step…"
+        } else if state.removal_ready() {
+            "\nNode cleanup is finished. Finish removal to delete the controller."
+        } else {
+            "\nPreparing removal. This screen updates automatically."
+        });
+        text.push_str(
+            "\nCancellation keeps the controller; nodes already removed are not restored.",
+        );
+        controls = app.controller_removal_controls();
     } else if state.branch_confirmation {
         let current = state
             .updates
@@ -932,6 +969,9 @@ pub(in crate::tui) fn draw_controller(
             if let Some(error) = job["error_code"].as_str() {
                 text.push_str(&format!("\n{error}"));
             }
+            if job["status"] == "aborted" {
+                text.push_str("\nRemoval cancelled. Nodes already removed are not restored.");
+            }
             if state.verifying {
                 text.push_str(if state.verification_timed_out() {
                     "\nRemoval is not yet confirmed. Refresh to check again."
@@ -1042,7 +1082,9 @@ pub(in crate::tui) fn draw_controller(
                     rect,
                     label,
                     index == state.selected && !app.controller_sidebar,
-                    if control == Control::ControllerAlerts && state.alerts_unread > 0
+                    if control == Control::ControllerShutdown && !state.removal_ready() {
+                        Color::DarkGray
+                    } else if control == Control::ControllerAlerts && state.alerts_unread > 0
                         || matches!(
                             control,
                             Control::ControllerPlan(_)

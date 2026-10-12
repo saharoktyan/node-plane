@@ -718,7 +718,12 @@ impl App {
                 }
                 None
             }
-            Control::ControllerRetry | Control::ControllerShutdown => {
+            Control::ControllerRetry | Control::ControllerShutdown | Control::ControllerAbort => {
+                if control == Control::ControllerShutdown && !self.controller.removal_ready() {
+                    self.error =
+                        "Wait for node cleanup to finish before removing the controller.".into();
+                    return None;
+                }
                 if let Some(id) = self
                     .controller
                     .job
@@ -729,6 +734,8 @@ impl App {
                     let key = uuid::Uuid::new_v4();
                     self.controller_command(if control == Control::ControllerShutdown {
                         crate::controller::Command::Shutdown(id, key)
+                    } else if control == Control::ControllerAbort {
+                        crate::controller::Command::Abort(id)
                     } else {
                         crate::controller::Command::Retry(id, key)
                     });
@@ -927,6 +934,13 @@ impl App {
         let state = &self.controller;
         if state.plan_pending {
             return Vec::new();
+        }
+        if state.removal_active() {
+            return self
+                .controller_removal_controls()
+                .into_iter()
+                .map(|(_, control)| control)
+                .collect();
         }
         let mut controls = Vec::new();
         if state.branch_confirmation {
@@ -1220,5 +1234,31 @@ impl App {
             controls.push(("Back".into(), Control::ControllerBack));
         }
         controls
+    }
+
+    pub(in crate::tui) fn controller_removal_controls(&self) -> Vec<(String, Control)> {
+        if self.controller.verifying {
+            return vec![("Refresh".into(), Control::ControllerRefresh)];
+        }
+        if self
+            .controller
+            .job
+            .as_ref()
+            .is_some_and(|job| job["cancel_requested"] == true)
+        {
+            return Vec::new();
+        }
+        vec![
+            (
+                if self.controller.removal_ready() {
+                    "Finish removal"
+                } else {
+                    "✕ Finish removal (preparing)"
+                }
+                .into(),
+                Control::ControllerShutdown,
+            ),
+            ("Cancel removal".into(), Control::ControllerAbort),
+        ]
     }
 }

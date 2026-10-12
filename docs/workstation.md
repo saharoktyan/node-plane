@@ -57,6 +57,10 @@ On startup the content area stays empty until you choose a section. If installat
 
 Choose **Install Node Plane**, fill the connection and installation fields, review the request and continue. Progress shows the current step and a log path. After completion, create a node in **Nodes** and run **Server setup**. Follow [Nodes](nodes.md) and [Access](access.md) for the remaining actions.
 
+## Remove a controller
+
+Open **Node Plane Settings → Reset & removal**, choose whether to uninstall nodes too, and confirm the removal phrase. Progress refreshes automatically. During preparation, Node Plane Settings shows **Finish removal** and **Cancel removal**; finishing becomes available once node cleanup is complete. Cancellation keeps the controller and stops further preparation after the current step. It cannot restore nodes already removed. After confirming **Finish removal**, Workstation verifies the uninstall and shows the goodbye screen; cancellation is no longer available.
+
 ## Appearance and local files
 
 Workstation stores its connection preferences, SSH material, logs and themes in the OS local data directory under `node-plane`, or the directory supplied by `--state-dir`. Keep this directory private.

@@ -292,6 +292,7 @@ impl App {
             | Control::ControllerRefresh
             | Control::ControllerRetry
             | Control::ControllerShutdown
+            | Control::ControllerAbort
             | Control::ControllerBack => return self.activate_controller(control),
             Control::Action(action) => {
                 if !self.actions_enabled() || action != Action::Install && !self.controller_ready()

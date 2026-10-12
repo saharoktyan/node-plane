@@ -436,7 +436,8 @@ pub async fn diagnose_servers(
     tx: &mpsc::Sender<Event>,
 ) -> Result<Vec<Value>> {
     let session_id = Uuid::new_v4();
-    let credential = backend::authenticate(session, session_id, &request.workflow.account, tx).await?;
+    let credential =
+        backend::authenticate(session, session_id, &request.workflow.account, tx).await?;
     let result = async {
         let mut checks = Vec::new();
         let mut offset = 0;

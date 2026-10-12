@@ -186,6 +186,100 @@ class SystemCleanupTests(unittest.TestCase):
         )
         self.host.launch_uninstall.assert_not_called()
 
+    def test_cancel_queued_removal_stops_before_host_preparation(self):
+        job = self.queue("remove")
+        pending = self.service.abort(self.actor, job["id"])
+        self.assertTrue(pending["cancel_requested"])
+        self.assertEqual(pending["status"], "queued")
+        self.service.run_one()
+        self.assertEqual(self.service.get(self.actor, job["id"])["status"], "aborted")
+        self.host.prepare_uninstall.assert_not_called()
+        self.host.launch_uninstall.assert_not_called()
+        with self.db.transaction() as conn:
+            admit(conn)
+
+    def test_cancel_between_nodes_does_not_start_the_next_node(self):
+        with self.db.transaction() as conn:
+            for key in ("one", "two"):
+                conn.execute("INSERT INTO backend_nodes(key,title,region,protocols_json) VALUES (?,?,'EU','[]')", (key, key))
+                conn.execute("INSERT INTO backend_node_connections(node_key,transport,ssh_target) VALUES (?,'ssh',?)", (key, f"root@{key}.example"))
+        self.service.removals = Mock()
+        job = self.queue("remove", nodes=True)
+        def request(*args):
+            self.service.abort(self.actor, job["id"])
+            return {"status": "running"}
+        self.service.removals.request.side_effect = request
+        self.service.run_one()
+        self.assertEqual(self.service.removals.request.call_count, 1)
+        self.service.run_one()
+        self.assertEqual(self.service.get(self.actor, job["id"])["status"], "aborted")
+        self.assertEqual(self.service.removals.request.call_count, 1)
+        self.host.prepare_uninstall.assert_not_called()
+
+    def test_cancel_during_preparation_blocks_shutdown_and_discards_script(self):
+        job = self.queue("remove")
+        self.service.run_one()  # nodes -> uninstall_prepare
+        def prepare(*args):
+            self.service.abort(self.actor, job["id"])
+            return {"unit": "fake-unit", "script": "/not-executed"}
+        self.host.prepare_uninstall.side_effect = prepare
+        self.service.run_one()
+        self.assertTrue(self.service.get(self.actor, job["id"])["cancel_requested"])
+        with self.assertRaises(AccessDenied):
+            self.service.acknowledge_shutdown(self.actor, job["id"])
+        self.service.run_one()
+        self.assertEqual(self.service.get(self.actor, job["id"])["status"], "aborted")
+        self.host.discard_uninstall.assert_called_once()
+        self.host.launch_uninstall.assert_not_called()
+
+    def test_cancel_is_rejected_after_shutdown_confirmation(self):
+        job = self.queue("remove")
+        self.advance(job, "awaiting_shutdown")
+        self.service.acknowledge_shutdown(self.actor, job["id"])
+        self.assertFalse(self.service.get(self.actor, job["id"])["can_abort"])
+        with self.assertRaises(AccessDenied) as error:
+            self.service.abort(self.actor, job["id"])
+        self.assertEqual(error.exception.code, "cleanup_abort_unsafe")
+
+    def test_cancel_script_discard_failure_does_not_replay_or_restart_removal(self):
+        job = self.queue("remove")
+        self.service.run_one()
+        self.host.prepare_uninstall.side_effect = lambda *args: (
+            self.service.abort(self.actor, job["id"]) and {"unit": "fake-unit", "script": "/not-executed"})
+        self.service.run_one()
+        self.host.discard_uninstall.side_effect = RuntimeError("discard failed")
+        self.service.run_one()
+        self.assertEqual(self.service.get(self.actor, job["id"])["status"], "aborted")
+        self.assertFalse(self.service.run_one())
+        self.host.launch_uninstall.assert_not_called()
+
+    def test_workstation_shutdown_ack_accepts_an_empty_http_body(self):
+        from backend.http_api import create_app
+        from fastapi.testclient import TestClient
+        job = self.queue("remove")
+        self.advance(job, "awaiting_shutdown")
+        with TestClient(create_app(self.db, cleanup_host=self.host)) as client:
+            headers = {**self.headers, "X-Node-Plane-Telegram-User-ID": "101"}
+            response = client.post(f"/api/v1/system/cleanup/jobs/{job['id']}/shutdown-ack", headers=headers)
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertTrue(response.json()["shutdown_ack"])
+
+    def test_http_starts_removal_with_a_local_node(self):
+        from backend.http_api import create_app
+        from fastapi.testclient import TestClient
+        with self.db.transaction() as conn:
+            conn.execute("INSERT INTO backend_nodes(key,title,region,protocols_json) VALUES ('local','Local','EU','[]')")
+            conn.execute("INSERT INTO backend_node_connections(node_key,transport) VALUES ('local','local')")
+        with TestClient(create_app(self.db, cleanup_host=self.host)) as client:
+            headers = {**self.headers, "X-Node-Plane-Telegram-User-ID": "101", "Idempotency-Key": str(uuid4())}
+            plan = client.post("/api/v1/system/cleanup/plans", headers=headers,
+                               json={"action": "remove", "cleanup_nodes": True})
+            self.assertEqual(plan.status_code, 200, plan.text)
+            queued = client.post("/api/v1/system/cleanup/jobs", headers=headers,
+                                 json={"plan_id": plan.json()["id"], "confirmation_phrase": "REMOVE NODE PLANE"})
+            self.assertEqual(queued.status_code, 202, queued.text)
+            self.assertEqual(queued.json()["items"][0]["node_key"], "local")
+
     def test_remote_failure_keeps_controller_state_and_retry_is_explicit(self):
         profile = ProfileRepository(self.db).create_profile(
             runtime_name="alice", display_name="Alice"
