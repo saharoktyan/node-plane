@@ -1618,6 +1618,16 @@ fn request_message_edit_does_not_modify_installation_defaults() {
     assert!(app.controller_controls()[0] == Control::ControllerDefaultsInput);
     app.controller.defaults_input.as_mut().unwrap().1 = "New text".into();
     app.activate(Control::ControllerDefaultsInputApply);
+    assert!(app.controller.text_confirmation);
+    assert!(app.nodes_requested.is_none());
+    app.activate(Control::ControllerBack);
+    assert!(!app.controller.text_confirmation);
+    assert_eq!(
+        app.controller.defaults_input.as_ref().unwrap().1,
+        "New text"
+    );
+    app.activate(Control::ControllerDefaultsInputApply);
+    app.activate(Control::ControllerTextConfirm);
     assert!(
         matches!(app.nodes_requested.take(),Some(crate::nodes::Command::Controller(_,crate::controller::Command::PolicySave("access-requests",body))) if body["gate_message"] == "New text")
     );
@@ -5254,4 +5264,79 @@ fn node_diagnostics_scrolls_all_checks_without_truncation() {
     assert!(app.nodes.diagnostic_scroll.get() > 0);
     app.nodes_key(KeyCode::Home.into());
     assert_eq!(app.nodes.diagnostic_scroll.get(), 0);
+}
+
+#[test]
+fn new_profile_selects_account_then_opens_editor_and_can_cancel() {
+    let mut app = test_profile_app();
+    app.open_access();
+    app.nodes_requested = None;
+    app.activate(Control::AccessNew);
+    assert!(app.access.creating_profile);
+    assert!(matches!(
+        app.nodes_requested.take(),
+        Some(crate::nodes::Command::Access(crate::access::Command::List(
+            crate::access::Tab::Accounts
+        )))
+    ));
+    app.access.items =
+        vec![serde_json::json!({"id":"owner", "role":"member", "status":"approved"})];
+    app.activate(Control::AccessItem(0));
+    assert!(!app.access.creating_profile);
+    assert!(
+        matches!(app.nodes_requested.take(), Some(crate::nodes::Command::Access(crate::access::Command::EditContext {id:None, owner:Some(owner)})) if owner == "owner")
+    );
+    app.activate(Control::AccessNew);
+    app.activate(Control::AccessBack);
+    assert!(!app.access.creating_profile);
+    assert_eq!(app.access.tab, crate::access::Tab::Profiles);
+}
+
+#[test]
+fn diagnostic_counts_color_only_positive_totals() {
+    let line = diagnostic_count_line("Errors: 2 · Warnings: 1");
+    assert_eq!(line.spans[1].style.fg, Some(Color::Red));
+    assert_eq!(line.spans[3].style.fg, Some(Color::Rgb(255, 165, 0)));
+    let line = diagnostic_count_line("Errors: 0 · Warnings: 0");
+    assert!(line.spans.iter().all(|span| span.style.fg.is_none()));
+}
+
+#[test]
+fn external_removal_clears_cached_installation_and_stops_polling() {
+    let mut app = test_profile_app();
+    let directory = tempfile::tempdir().unwrap();
+    app.state_dir = directory.path().into();
+    let profile = app.form.saved.clone().unwrap();
+    app.installed_profile = Some(profile.id);
+    app.event(Event::Nodes(crate::nodes::Update::Controller(None, crate::controller::Command::Probe,
+        serde_json::json!({"installed":false,"external_removal":true,"host":profile.host,"port":profile.port,"user":profile.user}))));
+    assert!(app.controller.removed);
+    assert!(app.confirmed_installation.is_none());
+    assert!(app.installed_profile.is_none());
+    assert!(!app.form.saved.as_ref().unwrap().installed);
+    assert!(app.controller.poll().is_none());
+    app.activate(Control::ControllerDefaults);
+    assert!(app.nodes_requested.is_none());
+}
+
+#[test]
+fn installation_defaults_count_fields_as_one_group() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Controller;
+    app.controller.defaults = Some(serde_json::json!({"settings":{}}));
+    let controls = [
+        Control::ControllerDefaultsField("xray_sni"),
+        Control::ControllerDefaultsPreset,
+        Control::ControllerDefaultsMode,
+        Control::ControllerDefaultsAdvanced,
+        Control::ControllerDefaultsSave,
+    ];
+    assert_eq!(
+        app.list_position(Control::ControllerDefaultsAdvanced, &controls),
+        Some((4, 4))
+    );
+    assert_eq!(
+        app.list_position(Control::ControllerDefaultsSave, &controls),
+        None
+    );
 }

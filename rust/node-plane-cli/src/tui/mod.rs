@@ -122,6 +122,7 @@ pub fn run(mut request: Request) -> Result<()> {
     let mut offer = false;
     let mut self_confirmation: Option<mpsc::Receiver<Answer>> = None;
     let mut self_updating = false;
+    let mut last_presence_check = std::time::Instant::now();
     let mut last_controller_poll = std::time::Instant::now();
     let mut last_temporary_poll = std::time::Instant::now();
     let mut last_access_poll = std::time::Instant::now();
@@ -184,6 +185,21 @@ pub fn run(mut request: Request) -> Result<()> {
             app.controller_command(crate::controller::Command::Probe);
         }
         app.ssh_state = nodes_worker.state();
+        if last_presence_check.elapsed() >= Duration::from_secs(30)
+            && app.ssh_state == crate::nodes::ConnectionState::Connected
+            && app.has_installation()
+            && !app.controller.removal_active()
+            && !app.nodes_busy
+            && app.nodes_requested.is_none()
+            && app.prompt.is_none()
+            && !app.exit
+        {
+            last_presence_check = std::time::Instant::now();
+            app.nodes_requested = Some(crate::nodes::Command::Controller(
+                app.form.saved.as_ref().map(|profile| profile.id),
+                crate::controller::Command::Presence,
+            ));
+        }
         if matches!(app.screen, Screen::Temporary)
             && app.temporary.view == crate::temporary::View::List
             && app.temporary.loaded_size > 0
@@ -300,6 +316,10 @@ pub fn run(mut request: Request) -> Result<()> {
                         _ => "Processing your request…",
                     }
                     .into();
+                    let presence_check = matches!(
+                        command,
+                        crate::nodes::Command::Controller(_, crate::controller::Command::Presence)
+                    );
                     nodes_worker.submit(next, command, tx)?;
                     receiver = Some(rx);
                     app.nodes_busy = true;
@@ -309,7 +329,9 @@ pub fn run(mut request: Request) -> Result<()> {
                     if !app.nodes_background {
                         app.screen = Screen::Running;
                     }
-                    app.error.clear();
+                    if !presence_check {
+                        app.error.clear();
+                    }
                     app.update = None;
                     app.tracker = Tracker::default();
                 }

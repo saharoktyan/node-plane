@@ -18,6 +18,23 @@ class BackendAccountTests(unittest.TestCase):
             headers={**self.headers_for(telegram_id), 'If-Match': f'"{revision}"',
                      'Idempotency-Key': key or str(uuid4())}, json=body)
 
+    def test_menu_refresh_ack_cannot_drop_a_newer_role_change(self):
+        member = self.register(102).json()
+        revision = self.client.get(f"/api/v1/accounts/{member['id']}", headers=self.headers_for(101)).json()['revision']
+        approved = self.patch_account(member['id'], revision, {'status': 'approved'}).json()
+        path = '/api/v1/integrations/telegram/menu-refresh'
+        first = self.client.post(path + '/claim', headers=self.headers).json()['delivery']
+        self.assertEqual(first['account']['telegram_user_id'], 102)
+        promoted = self.patch_account(member['id'], approved['revision'], {'role': 'admin'})
+        self.assertEqual(promoted.status_code, 200, promoted.text)
+        self.client.post(f"{path}/{member['id']}/ack?revision={first['revision']}", headers=self.headers)
+        current = self.client.post(path + '/claim', headers=self.headers).json()['delivery']
+        self.assertEqual(current['account']['role'], 'admin')
+        self.assertGreater(current['revision'], first['revision'])
+        self.client.post(f"{path}/{member['id']}/ack?revision={current['revision']}", headers=self.headers)
+        self.assertIsNone(self.client.post(path + '/claim', headers=self.headers).json()['delivery'])
+        self.assertEqual(self.client.post(path + '/claim', headers=self.headers_for(101)).status_code, 422)
+
     def test_admin_account_lifecycle_and_idempotency(self):
         member = self.register(102).json()
         self.assertEqual(self.client.get('/api/v1/accounts', headers=self.headers_for(102)).status_code, 403)

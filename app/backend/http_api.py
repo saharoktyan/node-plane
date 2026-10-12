@@ -1181,8 +1181,9 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
                 "AND status IN ('awaiting_executor','running') LIMIT 1").fetchone()
             ready = not active(conn) and (bool(conn.execute(
                 "SELECT 1 FROM backend_alert_deliveries WHERE status='queued' LIMIT 1").fetchone())
-                or not restoring and bool(conn.execute(
-                    "SELECT 1 FROM backend_announcement_deliveries WHERE status='queued' LIMIT 1").fetchone()))
+                or not restoring and (bool(conn.execute(
+                    "SELECT 1 FROM backend_announcement_deliveries WHERE status='queued' LIMIT 1").fetchone())
+                    or bool(conn.execute("SELECT 1 FROM backend_account_menu_refresh LIMIT 1").fetchone())))
         if ready:
             return {'ready': True}
         if wakeup:
@@ -1192,6 +1193,30 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
             time.sleep(timeout)
         # This is a hint only. Claim endpoints recheck eligibility and authorization.
         return {'ready': False}
+
+    @app.post('/api/v1/integrations/telegram/menu-refresh/claim')
+    def claim_menu_refresh(request: Request, principal=Depends(authenticate)):
+        if header(request, 'X-Node-Plane-Telegram-User-ID') is not None:
+            raise AccessDenied('invalid_input', 422)
+        AnnouncementService._transport(principal)
+        with db.connect() as conn:
+            from .maintenance_gate import active
+            if active(conn) or conn.execute("SELECT 1 FROM backend_backup_jobs WHERE action='restore' AND status IN ('awaiting_executor','running') LIMIT 1").fetchone():
+                return {'delivery': None}
+            row = conn.execute("SELECT account_id,revision FROM backend_account_menu_refresh ORDER BY account_id LIMIT 1").fetchone()
+            if not row:
+                return {'delivery': None}
+            account = AccountService.public(AccountService._read(conn, row['account_id']))
+        return {'delivery': {'account': account, 'revision': row['revision']}}
+
+    @app.post('/api/v1/integrations/telegram/menu-refresh/{account_id}/ack')
+    def ack_menu_refresh(account_id: UUID, request: Request, revision: int = Query(ge=1), principal=Depends(authenticate)):
+        if header(request, 'X-Node-Plane-Telegram-User-ID') is not None:
+            raise AccessDenied('invalid_input', 422)
+        AnnouncementService._transport(principal)
+        with db.transaction() as conn:
+            conn.execute("DELETE FROM backend_account_menu_refresh WHERE account_id=? AND revision=?", (str(account_id), revision))
+        return {'ok': True}
 
     @app.post('/api/v1/integrations/telegram/alerts/claim')
     def claim_alert(request:Request,principal=Depends(authenticate)):

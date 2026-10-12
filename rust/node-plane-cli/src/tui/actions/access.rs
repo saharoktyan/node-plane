@@ -115,7 +115,11 @@ impl App {
                     });
                     self.access_command(crate::access::Command::EditContext { id: None, owner });
                 } else {
-                    self.access.notice = "Select an account, then choose New profile.".into();
+                    self.access.creating_profile = true;
+                    self.access.card = None;
+                    self.access.editor = None;
+                    self.access.search.clear();
+                    self.access.notice = "Choose the account for the new profile.".into();
                     self.access.tab = crate::access::Tab::Accounts;
                     self.access_command(crate::access::Command::List(self.access.tab));
                 }
@@ -331,6 +335,7 @@ impl App {
                 None
             }
             Control::AccessTab(tab) => {
+                self.access.creating_profile = false;
                 self.access.editor = None;
                 self.access.devices = None;
                 self.access.tab = tab;
@@ -344,6 +349,18 @@ impl App {
             }
             Control::AccessItem(index) => {
                 if let Some(id) = self.access.items.get(index).and_then(|v| v["id"].as_str()) {
+                    if self.access.creating_profile {
+                        let owner = id.to_owned();
+                        self.access.creating_profile = false;
+                        self.access.tab = crate::access::Tab::Profiles;
+                        self.access.card = None;
+                        self.access.notice.clear();
+                        self.access_command(crate::access::Command::EditContext {
+                            id: None,
+                            owner: Some(owner),
+                        });
+                        return None;
+                    }
                     self.access.notice.clear();
                     let tab = if self.access.items[index]["_account_only"] == true {
                         crate::access::Tab::Accounts
@@ -376,6 +393,13 @@ impl App {
                 None
             }
             Control::AccessBack => {
+                if self.access.creating_profile {
+                    self.access.creating_profile = false;
+                    self.access.tab = crate::access::Tab::Profiles;
+                    self.access.notice.clear();
+                    self.access_command(crate::access::Command::List(self.access.tab));
+                    return None;
+                }
                 self.error.clear();
                 self.access.selected = 0;
                 if let Some(devices) = &mut self.access.devices {
@@ -454,6 +478,7 @@ impl App {
                 ..Default::default()
             };
         }
+        self.access.creating_profile = false;
         self.access.card = None;
         self.access.devices = None;
         self.access.decision = None;

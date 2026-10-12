@@ -23,9 +23,11 @@ cd /opt/node-plane/current
 
 ## Backups
 
-Open **Backups** to create a configuration backup, inspect the catalog or restore a selected backup. **Auto backups** controls scheduled backups, frequency and retention. Download sensitive backups to protected storage outside the controller.
+Telegram: administrator **Backups**. Open **Backups** to create a configuration backup, inspect the catalog or restore a selected backup. **Auto backups** controls scheduled backups, frequency and retention. Download sensitive backups to protected storage outside the controller.
 
 A configuration backup is not a complete host image. It does not preserve temporary credentials or replace your server/database disaster-recovery plan. Restoration can change accounts, profile grants and settings; review its plan and resolve outstanding work first.
+
+Restore reconnects the enabled nodes recorded in the backup, reuses reachable agents and installs missing or unreachable agents using the saved node connections. Each node has its own progress and result. A partial restore lists the nodes that still need attention; their recovery can be continued from their server cards.
 
 ## Alerts, diagnostics and audit
 

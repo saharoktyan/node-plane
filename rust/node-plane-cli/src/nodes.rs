@@ -899,6 +899,27 @@ async fn execute(
     .await
 }
 
+/// A cheap absence check: an unhealthy or partially updated installation is still present.
+async fn observe_controller_removal(
+    session: &mut SshSession,
+    request: &Request,
+    tx: &mpsc::Sender<Event>,
+) -> bool {
+    let command = "sudo -n /bin/sh -c 'if [ -e /opt/node-plane ] || [ -L /opt/node-plane ] || [ -e /etc/systemd/system/node-plane-backend.service ] || [ -L /etc/systemd/system/node-plane-backend.service ]; then exit 0; else exit 42; fi'";
+    if matches!(session.run(command, None, |_, _| {}).await, Ok(42)) {
+        *session.authorization.lock().unwrap() = None;
+        let value = json!({"installed":false,"external_removal":true,"host":request.host,"port":request.port,"user":request.user});
+        let _ = tx.send(Event::Nodes(Update::Controller(
+            None,
+            crate::controller::Command::Probe,
+            value,
+        )));
+        true
+    } else {
+        false
+    }
+}
+
 async fn execute_inner(
     mut request: Request,
     command: Command,
@@ -908,6 +929,10 @@ async fn execute_inner(
     let _lock = crate::operation_store::OperationLock::acquire(&request.state_dir)?;
     let id = Uuid::new_v4();
     async {
+        if matches!(command, Command::Controller(_, crate::controller::Command::Presence)) {
+            observe_controller_removal(session, &request, tx).await;
+            return Ok("Installation presence checked".into());
+        }
         if let Command::Controller(profile, crate::controller::Command::Probe) = &command {
             let mut output = Vec::new();
             let status = session.run("sudo -n python3 -",Some(crate::controller::PROBE_SCRIPT.as_bytes()),|stream,bytes| {
@@ -934,7 +959,15 @@ async fn execute_inner(
         if !backend::authorized(session, &request.workflow.account) {
             let _ = tx.send(Event::Stage("Authorizing the controller administrator".into()));
         }
-        let credential = backend::authenticate(session, id, &request.workflow.account, tx).await?;
+        let credential = match backend::authenticate(session, id, &request.workflow.account, tx).await {
+            Ok(credential) => credential,
+            Err(error) => {
+                if observe_controller_removal(session, &request, tx).await {
+                    anyhow::bail!("Node Plane is no longer installed on this host.");
+                }
+                return Err(error);
+            }
+        };
         let result = async {
             let setup = matches!(&command, Command::Setup(_));
             let protocol_action = match &command { Command::ProtocolAction(_, action) => Some(*action), _ => None };
@@ -1359,6 +1392,9 @@ async fn execute_inner(
             }
             Ok("Node registry ready".into())
         }.await;
+        if result.as_ref().err().is_some_and(|error| error.downcast_ref::<backend::ApiError>().is_some_and(backend::ApiError::transient)) {
+            observe_controller_removal(session, &request, tx).await;
+        }
         let _ = backend::revoke(session, id).await;
         result
     }.await

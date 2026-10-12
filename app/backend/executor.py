@@ -246,7 +246,7 @@ class Worker:
         from .updates import UpdateService
         self.update_executor = UpdateService(self.executor.db, self.executor.driver)
         from .backups import BackupService
-        self.backup_executor = BackupService(self.executor.db)
+        self.backup_executor = BackupService(self.executor.db, driver=self.executor.driver)
         from .system_cleanup import SystemCleanupService
         self.system_cleanup = SystemCleanupService(self.executor.db, self.executor.driver)
 

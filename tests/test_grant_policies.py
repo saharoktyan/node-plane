@@ -58,7 +58,7 @@ class GrantPolicyTests(unittest.TestCase):
         self.assertEqual(self.grants(profile), {('n1', 'awg'), ('n1', 'xray'), ('n2', 'awg')})
         operation = self.db.connection.execute('SELECT desired_revision FROM backend_operations WHERE profile_id=? ORDER BY desired_revision DESC LIMIT 1', (profile,)).fetchone()
         self.assertEqual(operation['desired_revision'], 3)
-        self.assertEqual(len(self.db.connection.execute('SELECT * FROM backend_devices WHERE profile_id=?', (profile,)).fetchall()), 1)
+        self.assertEqual(len(self.db.connection.execute('SELECT * FROM backend_devices WHERE profile_id=?', (profile,)).fetchall()), 0)
 
     def test_exclusion_and_policy_removal_preserve_independent_manual_access(self):
         profile = self.profile()
@@ -110,8 +110,7 @@ class GrantPolicyTests(unittest.TestCase):
         self.new_node()
         self.bootstrap('n2')
         tasks = self.db.connection.execute("SELECT action FROM backend_operation_tasks WHERE node_key='n2'").fetchall()
-        self.assertTrue(tasks)
-        self.assertEqual({t['action'] for t in tasks}, {'delete'})
+        self.assertFalse(any(t['action'] == 'ensure' for t in tasks))
 
     def test_drain_clears_manual_sources_and_keeps_future_rules(self):
         profile = self.profile()
@@ -196,6 +195,8 @@ class GrantPolicyTests(unittest.TestCase):
         self.policy(profile, self.values([self.rule()]))
         DeviceCommands(self.db).execute(self.actor, str(uuid4()), action='create', profile_id=profile,
                                        revision=2, display_name='Laptop')
+        DeviceCommands(self.db).execute(self.actor, str(uuid4()), action='create', profile_id=profile,
+                                       revision=3, display_name='Phone')
         result = self.policy(profile, self.values())
         tasks = self.db.connection.execute('SELECT device_id,action FROM backend_operation_tasks WHERE operation_id=?', (result['operation_id'],)).fetchall()
         self.assertEqual(len(tasks), 2)

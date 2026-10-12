@@ -77,9 +77,6 @@ async def admin_settings_cb(query: CallbackQuery, bot: Bot,
     rows = [
         [InlineKeyboardButton(text=tr(locale, 'settings.admin.bot_title'), callback_data='bot_title_settings'),
          InlineKeyboardButton(text=tr(locale, 'settings.admin.request_policy'), callback_data=RequestPolicyCallback().pack())],
-        [InlineKeyboardButton(text=tr(locale, 'settings.admin.updates'), callback_data=UpdatesCallback().pack(),
-            style='primary' if attention.get('update_available') else None),
-         InlineKeyboardButton(text=tr(locale, 'backups.title'), callback_data='backups')],
         [InlineKeyboardButton(text=tr(locale, 'alerts.title'), callback_data='alerts',
             style='danger' if attention.get('unacknowledged_alerts') else None),
          InlineKeyboardButton(text=tr(locale, 'traffic.title'), callback_data='traffic')],
@@ -90,11 +87,11 @@ async def admin_settings_cb(query: CallbackQuery, bot: Bot,
     sections = (
         Section(tr(locale, 'settings.rich.access'), rows=(tuple(rows[0]),
             (InlineKeyboardButton(text=tr(locale, 'temporary.title'),callback_data='temporary:list:0'),))),
-        Section(tr(locale, 'settings.rich.monitoring'), rows=(tuple(rows[2]),)),
-        Section(tr(locale, 'settings.rich.maintenance'), rows=(tuple(rows[1]), tuple(rows[3]),
+        Section(tr(locale, 'settings.rich.monitoring'), rows=(tuple(rows[1]),)),
+        Section(tr(locale, 'settings.rich.maintenance'), rows=(tuple(rows[2]),
             (InlineKeyboardButton(text=tr(locale, 'recovery.title'), callback_data=RecoveryPage().pack()),),
             (InlineKeyboardButton(text=tr(locale, 'defaults.title'), callback_data='idefault:open'),))),
-        Section(tr(locale, 'settings.rich.danger'), collapsed=True, rows=(tuple(rows[4]),)))
+        Section(tr(locale, 'settings.rich.danger'), collapsed=True, rows=(tuple(rows[3]),)))
     await render(bot, query.message.chat.id, Screen(tr(locale, 'settings.admin.title'),
         sections=sections, embedded_buttons=True, navigation=True), rows[-1:], state, query.message.message_id)
 
@@ -147,21 +144,20 @@ async def bot_title_text(message: Message, bot: Bot, backend: BackendClient,
             state, message_id)
         return
     await state.set_state(None)
-    try:
-        await backend.update_bot_title(message.from_user.id, value)
-        await bot_title_settings_view(message.chat.id, message.from_user.id, message_id,
-                                      bot, backend, state)
-    except BackendError as exc:
-        await render(bot, message.chat.id,
-            Screen(tr(locale, 'bot_title.title'), (_friendly_error(locale, exc),), embedded_buttons=True, navigation=True),
-            [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data='bot_title_settings')]],
-            state, message_id)
+    nonce = uuid4().hex[:12]
+    await state.update_data(settings_text_confirmation={'kind': 'title', 'value': value,
+        'nonce': nonce, 'message_id': message_id})
+    await render(bot, message.chat.id,
+        Screen(tr(locale, 'bot_title.title'), (tr(locale, 'settings.confirm_text'), value), embedded_buttons=True, navigation=True),
+        [[InlineKeyboardButton(text=tr(locale, 'policy.confirm'), callback_data='settings_text_confirm:' + nonce),
+          InlineKeyboardButton(text=tr(locale, 'cancel'), callback_data='bot_title_settings')]], state, message_id)
 
 
 async def bot_title_settings_view(chat_id: int, user_id: int, message_id: int,
                                  bot: Bot, backend: BackendClient,
                                  state: FSMContext) -> None:
     locale = await _locale(state)
+    await state.update_data(settings_text_confirmation=None)
     title = (await backend.bot_title(user_id))['title']
     rows = [[InlineKeyboardButton(text=tr(locale, 'bot_title.edit'), callback_data='bot_title_edit')],
             [InlineKeyboardButton(text=tr(locale, 'back'), callback_data=AdminSettingsCallback().pack())]]
@@ -172,6 +168,7 @@ async def bot_title_settings_view(chat_id: int, user_id: int, message_id: int,
 async def show_request_policy(chat_id: int, user_id: int, message_id: int,
                               bot: Bot, backend: BackendClient, state: FSMContext) -> None:
     locale = await _locale(state)
+    await state.update_data(settings_text_confirmation=None)
     policy = await backend.access_request_policy(user_id)
     sections = (
         Section(tr(locale, 'settings.rich.requests'), rows=(policy_choices(locale, 'request_policy_enabled', policy['enabled']),)),
@@ -290,15 +287,13 @@ async def request_policy_text(message: Message, bot: Bot, backend: BackendClient
             state, message_id)
         return
     await state.set_state(None)
-    try:
-        await backend.update_access_request_policy(message.from_user.id, {'gate_message': value})
-        await show_request_policy(message.chat.id, message.from_user.id, message_id,
-                                  bot, backend, state)
-    except BackendError as exc:
-        await render(bot, message.chat.id,
-            Screen(tr(locale, 'request_policy.title'), (_friendly_error(locale, exc),), embedded_buttons=True, navigation=True),
-            [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data=RequestPolicyCallback().pack())]],
-            state, message_id)
+    nonce = uuid4().hex[:12]
+    await state.update_data(settings_text_confirmation={'kind': 'request', 'value': value,
+        'nonce': nonce, 'message_id': message_id})
+    await render(bot, message.chat.id,
+        Screen(tr(locale, 'request_policy.title'), (tr(locale, 'settings.confirm_text'), value), embedded_buttons=True, navigation=True),
+        [[InlineKeyboardButton(text=tr(locale, 'policy.confirm'), callback_data='settings_text_confirm:' + nonce),
+          InlineKeyboardButton(text=tr(locale, 'cancel'), callback_data=RequestPolicyCallback().pack())]], state, message_id)
 
 
 @router.callback_query(SshKeyCallback.filter())
@@ -525,3 +520,24 @@ async def traffic_settings_cb(query: CallbackQuery, bot: Bot,
     await render(bot, query.message.chat.id, Screen(tr(locale, 'traffic.title'),
         () if sections else lines, sections=sections, embedded_buttons=True, navigation=True),
                  rows, state, query.message.message_id)
+
+
+@router.callback_query(F.data.startswith('settings_text_confirm:'))
+async def settings_text_confirm(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
+    locale = await _locale(state)
+    pending = (await state.get_data()).get('settings_text_confirmation')
+    if not pending or pending['nonce'] != query.data.split(':', 1)[1] or pending['message_id'] != query.message.message_id:
+        await query.answer(tr(locale, 'profile.role.stale'), show_alert=True)
+        return
+    try:
+        if pending['kind'] == 'title':
+            await backend.update_bot_title(query.from_user.id, pending['value'])
+        else:
+            await backend.update_access_request_policy(query.from_user.id, {'gate_message': pending['value']})
+    except BackendError as exc:
+        await query.answer(_friendly_error(locale, exc), show_alert=True)
+        return
+    await state.update_data(settings_text_confirmation=None)
+    await query.answer()
+    view = bot_title_settings_view if pending['kind'] == 'title' else show_request_policy
+    await view(query.message.chat.id, query.from_user.id, query.message.message_id, bot, backend, state)

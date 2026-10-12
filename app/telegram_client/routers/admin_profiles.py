@@ -999,12 +999,6 @@ async def profile_promote_confirm_cb(query: CallbackQuery, bot: Bot,
         [[InlineKeyboardButton(text=tr(locale, 'back'),
             callback_data=f"prof_role:{confirmation['profile_id']}")]],
         state, query.message.message_id)
-    recipient = result.get('telegram_user_id')
-    if recipient:
-        member_state = FSMContext(storage=state.storage,
-            key=replace(state.key, chat_id=recipient, user_id=recipient,
-                        thread_id=None, business_connection_id=None, destiny='default'))
-        await member_state.update_data(home_presentation=None)
 
 
 @router.callback_query(F.data.startswith('prof_access_page:'))

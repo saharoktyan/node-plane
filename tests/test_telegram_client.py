@@ -244,8 +244,8 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             callbacks = [b.callback_data for row in screen.fallback_rows(rows) for b in row]
             self.assertIn('admin_problem_nodes', callbacks)
             self.assertIn('admin_alerts', callbacks)
-            self.assertNotIn('backups', callbacks)
-            self.assertNotIn('updates', callbacks)
+            self.assertIn('backups', callbacks)
+            self.assertIn('updates', callbacks)
             self.assertNotIn('admin_status', callbacks)
             self.assertNotIn('0.4.4', screen.plain())
             self.assertFalse(any(s.title == user.tr(locale, 'admin.overview.tasks') for s in screen.sections))

@@ -29,6 +29,15 @@ class RenderRecoveryTests(IsolatedAsyncioTestCase):
         self.bot.send_rich_message.assert_awaited_once()
         self.assertEqual(self.data['control_message_id'], 20)
 
+    async def test_plain_noop_edit_never_creates_a_duplicate_panel(self):
+        method = EditMessageText(chat_id=1, message_id=10, text='test')
+        self.bot.edit_message_text.side_effect = [
+            TelegramBadRequest(method=method, message='Rich unsupported'),
+            TelegramBadRequest(method=method, message='Bad Request: message is not modified')]
+        await render(self.bot, 1, Screen('Main menu'), [], self.state, 10)
+        self.bot.send_rich_message.assert_not_awaited()
+        self.bot.send_message.assert_not_awaited()
+
     async def test_navigation_invalidates_registry_removal_confirmation_on_same_message(self):
         self.data['registry_removal_confirmation'] = {'node_key': 'node', 'message_id': 10}
         await render(self.bot, 1, Screen('Main menu'), [], self.state)

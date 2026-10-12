@@ -263,6 +263,7 @@ impl App {
             | Control::ControllerPolicies
             | Control::ControllerPolicyToggle(..)
             | Control::ControllerDefaultsInput
+            | Control::ControllerTextConfirm
             | Control::ControllerDefaultsInputApply
             | Control::ControllerDefaultsField(..)
             | Control::ControllerDefaultsAdvanced

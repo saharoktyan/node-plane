@@ -529,6 +529,8 @@ fn ensure_api_path(path: &str) -> std::result::Result<(), ApiError> {
         || resource == "/api/v1/regions"
         || resource == "/api/v1/accounts"
         || resource.starts_with("/api/v1/accounts/")
+        || resource == "/api/v1/announcements"
+        || resource.starts_with("/api/v1/announcements/")
         || resource == "/api/v1/profiles"
         || resource.starts_with("/api/v1/profiles/")
         || resource == "/api/v1/access-requests"
@@ -727,6 +729,10 @@ mod tests {
     }
     #[test]
     fn api_never_targets_external_urls_or_delegates_telegram() {
+        assert!(ensure_api_path("/api/v1/announcements").is_ok());
+        assert!(ensure_api_path("/api/v1/announcements/preview").is_ok());
+        assert!(ensure_api_path("/api/v1/announcements/job").is_ok());
+        assert!(ensure_api_path("/api/v1/announcements/../profiles").is_err());
         assert!(ensure_api_path("/api/v1/system/updates").is_ok());
         assert!(ensure_api_path("/api/v1/nodes?order=region&cursor=a%2Fb").is_ok());
         assert!(ensure_api_path("/api/v1/nodes/lv1/overview").is_ok());

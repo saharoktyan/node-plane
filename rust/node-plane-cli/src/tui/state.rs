@@ -127,6 +127,7 @@ pub(super) enum Control {
     ControllerDefaultsField(&'static str),
     ControllerDefaultsInput,
     ControllerDefaultsInputApply,
+    ControllerTextConfirm,
     ControllerBackups,
     ControllerBackupCreate,
     ControllerBackupAuto,

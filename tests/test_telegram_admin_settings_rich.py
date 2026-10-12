@@ -25,9 +25,35 @@ class AdminSettingsRichTests(IsolatedAsyncioTestCase):
             from telegram_client.routers.admin_recovery import RecoveryDiagnostics
             self.assertNotIn(RecoveryDiagnostics().pack(), [b.callback_data for row in screen.fallback_rows(rows) for b in row])
             callbacks = [b.callback_data for row in screen.fallback_rows(rows) for b in row]
-            for value in ('bot_title_settings', 'backups', 'alerts', 'traffic', 'system_cleanup', 'admin_menu'):
+            for value in ('bot_title_settings', 'alerts', 'traffic', 'system_cleanup', 'admin_menu'):
                 self.assertIn(value, callbacks)
+            self.assertNotIn('backups', callbacks)
+            self.assertNotIn('updates', callbacks)
             self.assertEqual([b.type for b in screen.rich(rows).blocks[-2:]], ['divider', 'buttons'])
+
+    async def test_text_edits_require_confirmation_and_cancel_invalidates_it(self):
+        message = SimpleNamespace(from_user=SimpleNamespace(id=123), chat=SimpleNamespace(id=123, type='private'),
+            text='New title', delete=AsyncMock())
+        self.state_data['control_message_id'] = 77
+        backend = SimpleNamespace(update_bot_title=AsyncMock(), bot_title=AsyncMock(return_value={'title': 'Old title'}))
+        with patch.object(settings, 'render', new_callable=AsyncMock):
+            await settings.bot_title_text(message, self.bot, backend, self.state)
+        backend.update_bot_title.assert_not_awaited()
+        pending = self.state_data['settings_text_confirmation']
+        self.query.data = 'settings_text_confirm:' + pending['nonce']
+        with patch.object(settings, 'render', new_callable=AsyncMock):
+            await settings.settings_text_confirm(self.query, self.bot, backend, self.state)
+        backend.update_bot_title.assert_awaited_once_with(123, 'New title')
+        backend.update_bot_title.reset_mock()
+        await settings.settings_text_confirm(self.query, self.bot, backend, self.state)
+        backend.update_bot_title.assert_not_awaited()
+        with patch.object(settings, 'render', new_callable=AsyncMock):
+            await settings.bot_title_text(message, self.bot, backend, self.state)
+            nonce = self.state_data['settings_text_confirmation']['nonce']
+            await settings.bot_title_settings_view(123, 123, 77, self.bot, backend, self.state)
+        self.query.data = 'settings_text_confirm:' + nonce
+        await settings.settings_text_confirm(self.query, self.bot, backend, self.state)
+        backend.update_bot_title.assert_not_awaited()
 
     async def test_request_choices_highlight_saved_values_and_set_explicit_values(self):
         for locale in ('en', 'ru'):

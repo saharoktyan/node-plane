@@ -74,6 +74,22 @@ class BootstrapTests(unittest.TestCase):
             NodeOperations(self.db).queue(self.actor, 'n1', 'install_docker', revision=1,
                                          command_key=str(uuid4()))
 
+    def test_restore_reconnect_installs_unreachable_agent_using_saved_connection(self):
+        from unittest.mock import patch
+        from backend.agent_rollout import AgentRolloutService
+        def unavailable(key):
+            raise TimeoutError()
+        self.service.driver = SimpleNamespace(inspect_node_services=unavailable)
+        with self.db.transaction() as conn:
+            conn.execute("INSERT INTO backend_node_connections(node_key,transport,ssh_target) VALUES ('n1','local',NULL) ON CONFLICT(node_key) DO NOTHING")
+        parent = self.service.queue(self.actor, 'n1', 1, str(uuid4()), recover_unreachable=True)
+        with patch.object(AgentRolloutService, 'request', return_value={'id': 'restore-agent'}) as deploy:
+            self.assertTrue(self.service.run_one())
+        deploy.assert_called_once()
+        self.assertEqual(deploy.call_args.kwargs['bootstrap_id'], parent['id'])
+        with self.db.connect() as conn:
+            self.assertEqual(conn.execute('SELECT child_id FROM backend_node_bootstraps WHERE id=?', (parent['id'],)).fetchone()['child_id'], 'restore-agent')
+
     def test_unavailable_agent_probe_does_not_queue_reinstall(self):
         def unavailable(key):
             raise TimeoutError()

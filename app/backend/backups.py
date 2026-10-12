@@ -6,7 +6,7 @@ import logging
 import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from uuid import UUID, uuid4
+from uuid import UUID, uuid4, uuid5
 
 from .authorization import (
     ADMIN_PERMISSIONS,
@@ -39,6 +39,7 @@ TABLES = (
     "backend_access_requests",
 )
 CLEAR = (
+    "backend_account_menu_refresh",
     "backend_node_bootstraps",
     "backend_temporary_configs",
     "backend_system_cleanup_items",
@@ -90,8 +91,9 @@ def encoded(value):
 
 
 class BackupService:
-    def __init__(self, db, root=None):
+    def __init__(self, db, root=None, driver=None):
         self.db = db
+        self.driver = driver
         self.root = Path(
             root
             or Path(os.environ.get("NODE_PLANE_SHARED_DIR", "/opt/node-plane/shared"))
@@ -522,6 +524,8 @@ class BackupService:
                 ).fetchall()
             }
             tables = payload["tables"]
+            recovery = [{"node_key": row["key"], "status": "pending"}
+                        for row in tables["backend_nodes"]["rows"] if row["enabled"]]
             # Preserve the restoring administrator and its Telegram mapping so
             # restore cannot lock out the current installation operator.
             tables["backend_accounts"]["rows"] = [
@@ -574,18 +578,60 @@ class BackupService:
                 "UPDATE backend_account_guard SET revision=revision+1 WHERE id=1"
             )
             conn.execute(
-                "UPDATE backend_backup_jobs SET status='succeeded',phase='restored',result_json=? WHERE id=?",
+                "UPDATE backend_backup_jobs SET status=?,phase=?,result_json=? WHERE id=?",
                 (
-                    json.dumps(
-                        {
-                            "status": "success",
-                            "backup_id": job["backup_id"],
-                            "nodes_need_apply": True,
-                        }
-                    ),
+                    "running" if recovery else "succeeded",
+                    "reconnecting" if recovery else "restored",
+                    json.dumps({"status": "recovering" if recovery else "success",
+                                "backup_id": job["backup_id"], "nodes": recovery}),
                     job["id"],
                 ),
             )
+
+    def _recover_nodes(self, job, actor):
+        """Persist one recovery transition at a time, adopting queued children after a crash."""
+        from .node_bootstrap import NodeBootstrapService
+        result = json.loads(job["result_json"])
+        changed = False
+        for item in result["nodes"]:
+            if item["status"] in {"succeeded", "failed"}:
+                continue
+            if not item.get("job_id"):
+                key = str(uuid5(UUID(job["id"]), item["node_key"]))
+                with self.db.connect() as conn:
+                    node = conn.execute("SELECT desired_revision FROM backend_nodes WHERE key=?", (item["node_key"],)).fetchone()
+                    recorded = conn.execute("SELECT id FROM backend_node_bootstraps WHERE actor_id=? AND command_key=?",
+                        (actor.account.id, key)).fetchone()
+                if recorded:
+                    item.update(status="running", job_id=recorded["id"])
+                elif not node:
+                    item.update(status="failed", error_code="resource_not_found")
+                else:
+                    try:
+                        child = NodeBootstrapService(self.db, self.driver).queue(actor,
+                            item["node_key"], node["desired_revision"], key, recover_unreachable=True)
+                        item.update(status="running", job_id=child["id"])
+                    except AccessDenied as error:
+                        item.update(status="failed", error_code=error.code)
+                changed = True
+                break
+            with self.db.connect() as conn:
+                child = conn.execute("SELECT status,error_code FROM backend_node_bootstraps WHERE id=?", (item["job_id"],)).fetchone()
+            if not child or child["status"] in {"blocked", "superseded"}:
+                item.update(status="failed", error_code=child["error_code"] if child else "child_operation_missing")
+                changed = True
+            elif child["status"] == "succeeded":
+                item["status"] = "succeeded"
+                changed = True
+        complete = all(item["status"] in {"succeeded", "failed"} for item in result["nodes"])
+        if complete:
+            result["status"] = "partial" if any(item["status"] == "failed" for item in result["nodes"]) else "success"
+        if changed or complete:
+            with self.db.transaction() as conn:
+                conn.execute("UPDATE backend_backup_jobs SET status=?,phase=?,result_json=? WHERE id=?",
+                    ("succeeded" if complete else "running", "restored" if complete else "reconnecting", json.dumps(result), job["id"]))
+            return True
+        return False
 
     def run_one(self):
         with self.db.connect() as conn:
@@ -621,6 +667,8 @@ class BackupService:
                         (json.dumps(result), job["id"]),
                     )
                 return True
+            if job["phase"] == "reconnecting":
+                return self._recover_nodes(job, actor)
             if not job["phase"]:
                 detail = self.detail(actor, job["backup_id"])
                 if not detail["compatible"] or detail["checksum"] != job["checksum"]:

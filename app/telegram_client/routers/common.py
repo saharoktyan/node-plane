@@ -151,7 +151,16 @@ async def remember_media(state, result, uploads, cache):
             cache[digest] = file_id
     await state.update_data(rich_media_cache=dict(list(cache.items())[-30:]))
 
+from weakref import WeakValueDictionary
+_RENDER_LOCKS = WeakValueDictionary()
+
 async def render(bot: Bot, chat_id: int, screen: Screen, rows: list[list[InlineKeyboardButton]], state: FSMContext, message_id: int | None = None) -> bool:
+    key = (id(bot), _refresh_key(state))
+    lock = _RENDER_LOCKS.setdefault(key, asyncio.Lock())
+    async with lock:
+        return await _render(bot, chat_id, screen, rows, state, message_id)
+
+async def _render(bot: Bot, chat_id: int, screen: Screen, rows: list[list[InlineKeyboardButton]], state: FSMContext, message_id: int | None = None) -> bool:
     from time import perf_counter
     from ..timings import record
     preparation_started = perf_counter()
@@ -176,13 +185,20 @@ async def render(bot: Bot, chat_id: int, screen: Screen, rows: list[list[InlineK
         await state.update_data(registry_removal_confirmation=None)
     if data.get('device_delete_confirmation') is not None:
         await state.update_data(device_delete_confirmation=None)
-    existing = message_id or data.get('control_message_id')
+    pending_text = data.get('settings_text_confirmation')
+    if pending_text and not any(button.callback_data == 'settings_text_confirm:' + pending_text['nonce']
+            for row in fallback_rows for button in row):
+        await state.update_data(settings_text_confirmation=None)
+    existing = data.get('control_message_id') or message_id
     rich_content = screen.rich(rows)
     cache = dict(data.get('rich_media_cache', {}))
     rich_content, uploads = reuse_media(rich_content, cache)
     record('render_prepare', preparation_started)
 
     async def remember_navigation(control_id, rich):
+        if pending_text and any(button.callback_data == 'settings_text_confirm:' + pending_text['nonce']
+                for row in fallback_rows for button in row):
+            await state.update_data(settings_text_confirmation={**pending_text, 'message_id': control_id})
         if not parents:
             return
         if screen.files or screen.qr:
@@ -222,8 +238,10 @@ async def render(bot: Bot, chat_id: int, screen: Screen, rows: list[list[InlineK
                 await state.update_data(control_message_id=existing)
                 await remember_navigation(existing, False)
                 return False
-            except (TelegramBadRequest, TelegramNotFound):
-                pass
+            except (TelegramBadRequest, TelegramNotFound) as fallback_error:
+                if 'message is not modified' in str(fallback_error).lower():
+                    await remember_navigation(existing, False)
+                    return False
                 
     rich = True
     try:

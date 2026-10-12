@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
 
-from .migration_revisions import r0001_baseline, r0002_node_traffic, r0003_temporary_configs, r0004_node_bootstrap, r0005_recovery_audit, r0006_announcement_inbox
+from .migration_revisions import r0001_baseline, r0002_node_traffic, r0003_temporary_configs, r0004_node_bootstrap, r0005_recovery_audit, r0006_announcement_inbox, r0007_account_menu_refresh
 
 LOCK_KEY = 0x4E504C414E454442  # NPLANEDB; shared by every controller/schema.
 LEDGER_DDL = '''CREATE TABLE IF NOT EXISTS backend_schema_revisions (
@@ -36,6 +36,7 @@ REVISIONS = (
     Revision(4, 'node_bootstrap', r0004_node_bootstrap, 1),
     Revision(5, 'recovery_audit', r0005_recovery_audit, 1),
     Revision(6, 'announcement_inbox', r0006_announcement_inbox, 1),
+    Revision(7, 'account_menu_refresh', r0007_account_menu_refresh, 1),
 )
 
 

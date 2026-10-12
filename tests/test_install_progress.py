@@ -26,11 +26,11 @@ class InstallProgressTests(unittest.TestCase):
         self.log = self.root / 'host-actions.log'
         (self.scripts / 'lib').mkdir(parents=True)
         self.binaries.mkdir()
-        for relative in ('install.sh', 'lib/install_progress.sh', 'lib/controller_archive.sh', 'controller_release.py', 'uv_runtime.sh', 'release_retention.py'):
+        for relative in ('install.sh', 'lib/install_progress.sh', 'lib/install_credentials.sh', 'lib/controller_archive.sh', 'controller_release.py', 'uv_runtime.sh', 'release_retention.py'):
             shutil.copyfile(ROOT / 'scripts' / relative, self.scripts / relative)
         (self.source / '.env.example').write_text('BOT_TOKEN=replace_me\nADMIN_IDS=123456789\n')
         self.config.write_text(
-            f'BOT_TOKEN=999:private-test-token\nADMIN_IDS=789\n'
+            f'BOT_TOKEN=999:private-test-token-xxxxxxxxxxxxxxxxxxxxxxxxx\nADMIN_IDS=789\n'
             f'NODE_PLANE_BASE_DIR={self.base}\n'
             'DB_BACKEND=postgres\nPOSTGRES_DSN=\n')
         (self.scripts / 'python_runtime.sh').write_text(
@@ -166,7 +166,7 @@ esac
         self.assertEqual([event['completed'] for event in major],
                          [count for index in range(7) for count in (index, index + 1)])
         self.assertTrue(all(event['total'] == 7 and event['version'] == 1 for event in events))
-        for secret in ('999:private-test-token', 'secret-test', 'BOT_TOKEN', 'POSTGRES_DSN'):
+        for secret in ('999:private-test-token-xxxxxxxxxxxxxxxxxxxxxxxxx', 'secret-test', 'BOT_TOKEN', 'POSTGRES_DSN'):
             self.assertNotIn(secret, json.dumps(events))
         self.assertFalse((self.source / '.env').exists())
         self.assertEqual(self.config.stat().st_mode & 0o777, 0o600)
@@ -194,7 +194,7 @@ esac
 
     def test_missing_credentials_fail_before_any_host_provisioning(self):
         for values, error in (('BOT_TOKEN=replace_me\n', 'BOT_TOKEN is required'),
-                              ('BOT_TOKEN=test\nADMIN_IDS=not-a-number\n', 'numeric Telegram')):
+                              ('BOT_TOKEN=999:valid-test-token-xxxxxxxxxxxxxxxxxxxx\nADMIN_IDS=not-a-number\n', 'numeric Telegram')):
             with self.subTest(values=values):
                 self.config.write_text(values)
                 result = self.run_install()
@@ -245,7 +245,7 @@ esac
         shared = self.base / 'shared'
         shared.mkdir(parents=True)
         (shared / '.env').write_text(
-            f'BOT_TOKEN=999:private-test-token\nADMIN_IDS=789\n'
+            f'BOT_TOKEN=999:private-test-token-xxxxxxxxxxxxxxxxxxxxxxxxx\nADMIN_IDS=789\n'
             'POSTGRES_DSN=postgresql://previous-secret@localhost/previous\n'
             'NODE_AGENT_TARGETS=keep=host:50061\n')
         result = self.run_install()

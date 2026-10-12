@@ -463,6 +463,26 @@ impl App {
                 }
             };
         }
+        if matches!(self.screen, Screen::Controller)
+            && self.controller.defaults.is_some()
+            && self.controller.defaults_input.is_none()
+        {
+            let fields: Vec<_> = controls
+                .iter()
+                .copied()
+                .filter(|c| {
+                    matches!(
+                        c,
+                        Control::ControllerDefaultsToggle(_)
+                            | Control::ControllerDefaultsPreset
+                            | Control::ControllerDefaultsMode
+                            | Control::ControllerDefaultsField(_)
+                            | Control::ControllerDefaultsAdvanced
+                    )
+                })
+                .collect();
+            return Some((fields.iter().position(|c| *c == control)? + 1, fields.len()));
+        }
         let indexed = matches!(
             control,
             Control::Accent(_)

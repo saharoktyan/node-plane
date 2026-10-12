@@ -833,6 +833,9 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
                 content[1],
             );
         }
+        if app.access.creating_profile {
+            buttons.push(("Cancel", Control::AccessBack));
+        }
         if app.access.tab == Tab::Profiles {
             buttons.push(("New profile", Control::AccessNew));
         }

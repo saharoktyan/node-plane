@@ -533,6 +533,7 @@ pub struct Browser {
     pub decision: Option<bool>,
     pub notice: String,
     pub owner_filter: Option<String>,
+    pub creating_profile: bool,
     pub editor: Option<Editor>,
     pub devices: Option<Devices>,
     pub account_action: Option<(Value, Uuid)>,

@@ -21,6 +21,8 @@ class AccountService:
 
     def initialize_schema(self):
         with self.db.transaction() as conn:
+            from db.migration_revisions.r0007_account_menu_refresh import upgrade
+            upgrade(conn)
             conn.execute('''CREATE TABLE IF NOT EXISTS backend_account_commands (
                 actor_account_id TEXT NOT NULL REFERENCES backend_accounts(id),
                 command_key TEXT NOT NULL,
@@ -123,6 +125,8 @@ class AccountService:
                     raise AccessDenied('request_pending', 409)
                 conn.execute('''UPDATE backend_accounts SET role = ?, status = ?, revision = revision + 1
                     WHERE id = ?''', (next_role, next_status, account_id))
+                conn.execute("""INSERT INTO backend_account_menu_refresh(account_id,revision) VALUES (?,?)
+                    ON CONFLICT(account_id) DO UPDATE SET revision=excluded.revision""", (account_id, revision + 1))
             if next_role == 'admin':
                 from .profile_commands import ProfileCommands
                 ProfileCommands.restore_admin_expiries(conn, actor, account_id)

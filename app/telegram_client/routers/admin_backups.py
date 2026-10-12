@@ -9,7 +9,6 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton
 from ..backend import BackendClient, BackendError
 from ..i18n import normalize_locale, tr
 from ..screens import Screen, Section, Table, format_size
-from .callbacks import AdminSettingsCallback
 from .common import render
 
 router = Router()
@@ -65,7 +64,7 @@ async def overview(query, bot, backend, state):
                 )
             ]
         )
-    rows.append([button(tr(lang, "back"), AdminSettingsCallback().pack())])
+    rows.append([button(tr(lang, "back"), 'admin_menu')])
     summary = Table((tr(lang, 'maintenance.rich.field'), tr(lang, 'maintenance.rich.value')), (
         (tr(lang, 'backups.rich.count'), str(value['count'])),
         (tr(lang, 'backups.rich.size'), format_size(value['size_bytes'])),
@@ -148,6 +147,12 @@ async def result(query, bot, backend, state, job_id):
     lang = normalize_locale((await state.get_data()).get("locale"))
     job = await backend.backup_job(query.from_user.id, job_id)
     lines = [tr(lang, "update_tools.status." + job["status"])]
+    if (job.get("result") or {}).get("status") == "partial":
+        lines[0] = tr(lang, "backups.partial")
+    if job.get("phase") == "reconnecting":
+        lines.append(tr(lang, "backups.reconnecting"))
+    for node in (job.get("result") or {}).get("nodes", []):
+        lines.append(f"{node['node_key']}: {node['status']}" + (f" · {node['error_code']}" if node.get('error_code') else ""))
     if job.get("phase") == "revoking":
         lines.append(tr(lang, "backups.revoking"))
     if job.get("result", {}):

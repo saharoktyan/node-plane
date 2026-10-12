@@ -319,7 +319,7 @@ pub(in crate::tui) fn draw_node_diagnostics(
                 Some("warning") => 1,
                 _ => 2,
             });
-            let mut lines = vec![Line::from(format!(
+            let totals = format!(
                 "Errors: {} · Warnings: {}",
                 checks
                     .iter()
@@ -329,7 +329,14 @@ pub(in crate::tui) fn draw_node_diagnostics(
                     .iter()
                     .filter(|check| check["status"] == "warning")
                     .count()
-            ))];
+            );
+            let mut lines = vec![Line::from(
+                diagnostic_count_line(&totals)
+                    .spans
+                    .into_iter()
+                    .map(|span| Span::styled(span.content.into_owned(), span.style))
+                    .collect::<Vec<_>>(),
+            )];
             lines.extend(checks.iter().map(|check| {
                 status_line(
                     check["status"].as_str().unwrap_or("unknown"),

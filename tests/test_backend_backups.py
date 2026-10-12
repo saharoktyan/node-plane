@@ -269,7 +269,10 @@ class BackendBackupsTests(unittest.TestCase):
         self.assertTrue(self.service.run_one())
         self.assertEqual(self.service.get(self.actor, job["id"])["phase"], "revoking")
         self.assertTrue(self.service.run_one())
-        self.assertEqual(self.service.get(self.actor, job["id"])["status"], "succeeded")
+        progress = self.service.get(self.actor, job["id"])
+        self.assertEqual(progress["status"], "running")
+        self.assertEqual(progress["phase"], "reconnecting")
+        self.assertEqual(progress["result"]["nodes"], [{"node_key": "test", "status": "pending"}])
         node = self.db.connection.execute("SELECT * FROM backend_nodes").fetchone()
         self.assertEqual(
             (node["enabled"], node["applied_revision"], node["desired_revision"]),
@@ -279,6 +282,46 @@ class BackendBackupsTests(unittest.TestCase):
         self.assertEqual(restored["display_name"], "Alice")
         self.assertGreater(restored["desired_revision"], 91)
         self.assertEqual(self.identities.find_telegram_account(101).id, self.admin.id)
+
+    def test_restored_nodes_reconnect_and_partial_result_survives_worker_restart(self):
+        from uuid import UUID, uuid5
+        from backend.node_bootstrap import NodeBootstrapService
+        from unittest.mock import patch
+        with self.db.transaction() as conn:
+            for key in ('first', 'second'):
+                conn.execute("INSERT INTO backend_nodes(key,title,region,protocols_json) VALUES (?,?, 'EU','[]')", (key, key))
+        backup_id, checksum = self.snapshot()
+        parent = self.service.queue(self.actor, str(uuid4()), 'restore', backup_id, checksum)
+        self.service.run_one()
+        self.service.run_one()
+        self.assertEqual(self.service.get(self.actor, parent['id'])['phase'], 'reconnecting')
+        # Simulate a committed child whose parent link was lost in a worker crash.
+        children = {}
+        with self.db.transaction() as conn:
+            for key in ('first', 'second'):
+                identity = str(uuid4())
+                children[key] = identity
+                conn.execute("""INSERT INTO backend_node_bootstraps
+                    (id,node_key,actor_id,command_key,revision,phase,status)
+                    VALUES (?,?,?,?,1,'protocols','running')""",
+                    (identity, key, self.actor.account.id, str(uuid5(UUID(parent['id']), key))))
+        with patch.object(NodeBootstrapService, 'queue') as queue:
+            self.assertTrue(self.service.run_one())
+            self.assertTrue(self.service.run_one())
+            queue.assert_not_called()
+        self.assertFalse(self.service.run_one())
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_node_bootstraps SET status='succeeded' WHERE id=?", (children['first'],))
+            conn.execute("UPDATE backend_node_bootstraps SET status='blocked',error_code='node_agent_unavailable' WHERE id=?", (children['second'],))
+        restarted = TestService(BackupDatabase(self.db), self.temp.name)
+        self.assertTrue(restarted.run_one())
+        final = restarted.get(self.actor, parent['id'])
+        self.assertEqual(final['status'], 'succeeded')
+        self.assertEqual(final['result']['status'], 'partial')
+        statuses = {item['node_key']: item for item in final['result']['nodes']}
+        self.assertEqual(statuses['first']['status'], 'succeeded')
+        self.assertEqual(statuses['second']['error_code'], 'node_agent_unavailable')
+        self.assertFalse(restarted.run_one())
 
     def test_restore_blocks_mutations_but_keeps_progress_readable(self):
         backup_id, checksum = self.snapshot()

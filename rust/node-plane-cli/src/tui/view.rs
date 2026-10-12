@@ -1273,8 +1273,43 @@ pub(super) fn diagnostic_lines(text: &str) -> Vec<Line<'_>> {
                     Span::raw(&line[end..]),
                 ])
             } else {
-                Line::from(line)
+                diagnostic_count_line(line)
             }
         })
         .collect()
+}
+
+/// Highlight only positive diagnostic totals; zero is a neutral result.
+pub(super) fn diagnostic_count_line(line: &str) -> Line<'_> {
+    let mut spans = Vec::new();
+    let mut rest = line;
+    while let Some((start, label, color)) = [
+        ("Errors:", Color::Red),
+        ("Failures:", Color::Red),
+        ("Warnings:", Color::Rgb(255, 165, 0)),
+    ]
+    .into_iter()
+    .filter_map(|(label, color)| rest.find(label).map(|start| (start, label, color)))
+    .min_by_key(|(start, _, _)| *start)
+    {
+        spans.push(Span::raw(&rest[..start]));
+        let value = rest[start + label.len()..].trim_start();
+        let positive = value
+            .chars()
+            .take_while(char::is_ascii_digit)
+            .collect::<String>()
+            .parse::<u64>()
+            .is_ok_and(|count| count > 0);
+        spans.push(if positive {
+            Span::styled(
+                &rest[start..start + label.len()],
+                Style::default().fg(color),
+            )
+        } else {
+            Span::raw(&rest[start..start + label.len()])
+        });
+        rest = &rest[start + label.len()..];
+    }
+    spans.push(Span::raw(rest));
+    Line::from(spans)
 }

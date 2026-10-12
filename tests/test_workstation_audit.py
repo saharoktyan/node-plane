@@ -24,7 +24,7 @@ class CredentialAttributionTests(TestCase):
         first = self.issue()
         self.assertEqual(self.issue()['credential_id'], first['credential_id'])
         context = self.service.audit.context(first['credential_id'])
-        self.assertEqual(context['account_label'], '101 · @operator')
+        self.assertEqual(context['account_label'], 'Telegram ID: 101 · @operator')
         self.assertEqual(context['ssh_user'], 'deploy')
         self.assertEqual(context['device_fingerprint'], ATTRIBUTION['device_fingerprint'])
         rows = self.db.connection.execute('SELECT * FROM backend_workstation_audit').fetchall()
@@ -64,7 +64,7 @@ class CredentialAttributionTests(TestCase):
         self.db.connection.execute('DELETE FROM backend_external_identities WHERE account_id=?', (self.admin.id,))
         self.db.connection.execute('DELETE FROM backend_accounts WHERE id=?', (self.admin.id,))
         row = self.db.connection.execute('SELECT account_id, account_label FROM backend_workstation_audit WHERE credential_id IS NOT NULL').fetchone()
-        self.assertEqual(dict(row), {'account_id': self.admin.id, 'account_label': '101 · @operator'})
+        self.assertEqual(dict(row), {'account_id': self.admin.id, 'account_label': 'Telegram ID: 101 · @operator'})
 
     def test_enrollment_records_target_key_and_actor_without_key_material(self):
         self.issue()
@@ -78,7 +78,7 @@ class CredentialAttributionTests(TestCase):
             FROM backend_workstation_audit a JOIN backend_workstation_enrollment e ON e.event_id=a.id
             ORDER BY a.occurred_at''').fetchall()
         self.assertEqual([row['outcome'] for row in rows], ['admitted', 'succeeded'])
-        self.assertTrue(all(row['account_label'] == '101 · @operator' and row['command_id'] == command_id for row in rows))
+        self.assertTrue(all(row['account_label'] == 'Telegram ID: 101 · @operator' and row['command_id'] == command_id for row in rows))
         self.assertEqual(rows[0]['target'], request['target'])
         self.assertEqual(rows[0]['key_fingerprint'], request['key_fingerprint'])
         self.service.handle({'version': 1, 'action': 'revoke', 'session_id': self.session_id})
@@ -113,7 +113,7 @@ class APIAuditTests(TestCase):
             response = self.client.get('/api/v1/nodes?order=region&include_summary=true', headers=headers)
             self.assertEqual(response.status_code, 200, response.text)
             self.assertEqual(response.json()['items'], [])
-            self.assertEqual(self.client.get('/api/v1/profiles', headers=headers).status_code, 403)
+            self.assertEqual(self.client.get('/api/v1/profiles', headers=headers).status_code, 200)
 
     def test_outcome_logging_failure_does_not_invite_replay_of_committed_action(self):
         import app.services

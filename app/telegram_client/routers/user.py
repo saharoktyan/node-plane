@@ -1150,6 +1150,9 @@ async def show_admin_menu(chat_id: int, user_id: int, message_id: int,
             InlineKeyboardButton(text=tr(locale, 'admin.requests'), callback_data=RequestsCallback().pack(), style='primary'),),)))
     sections.append(Section(tr(locale, 'admin.rich.system'), rows=((
         InlineKeyboardButton(text=tr(locale, 'admin.settings'), callback_data=AdminSettingsCallback().pack()),),
+        (InlineKeyboardButton(text=tr(locale, 'settings.admin.updates'), callback_data='updates',
+            style='primary' if isinstance(overview, dict) and (overview.get('updates') or {}).get('available') else None),
+         InlineKeyboardButton(text=tr(locale, 'backups.title'), callback_data='backups')),
         (InlineKeyboardButton(text=tr(locale, 'announce.title'), callback_data='announce_menu'),))))
     await render(bot, chat_id, Screen(f"{tr(locale, 'admin.menu')} · {bot_title}",
         sections=tuple(sections), embedded_buttons=True, navigation=True),

@@ -58,6 +58,8 @@ def parent_path(callback, locale, data):
              'admin_status': (*admin, Breadcrumb(tr(locale, 'admin.status.title'), 'admin_status'))}
     if callback in roots:
         return roots[callback]
+    if callback in {'updates', 'backups'}:
+        return (*admin, Breadcrumb(tr(locale, callback + '.title'), callback))
     settings_pages = {
         'updates': 'updates.title', 'backups': 'backups.title',
         'temporary:list:0': 'temporary.title',
@@ -102,7 +104,7 @@ def parent_path(callback, locale, data):
     if callback.startswith('fleet_nodes:'):
         return (*parent_path('updates', locale, data), Breadcrumb(tr(locale, 'update_tools.fleet'), callback))
     if callback.startswith('updates_nodes:'):
-        return (*settings, Breadcrumb(tr(locale, 'updates.title'), callback))
+        return (*admin, Breadcrumb(tr(locale, 'updates.title'), 'updates'), Breadcrumb(tr(locale, 'update_tools.fleet'), callback))
     if callback.startswith('update_nodes:') and len(callback.split(':')) == 3:
         return (*parent_path('updates', locale, data), Breadcrumb(tr(locale, 'update_tools.result'), callback))
     if callback.startswith('request_page:'):

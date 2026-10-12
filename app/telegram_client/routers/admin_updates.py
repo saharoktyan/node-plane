@@ -10,7 +10,7 @@ from ..i18n import tr, normalize_locale
 from ..screens import Screen, Section, Table, server_label
 from .common import schedule_refresh, render
 from .. import update_panels
-from .callbacks import UpdatesCallback, AdminNodeCallback, AdminSettingsCallback
+from .callbacks import UpdatesCallback, AdminNodeCallback
 
 router = Router()
 
@@ -238,7 +238,7 @@ async def show_overview(query, bot, backend, state, page=0, opened=False):
     await render(bot, query.message.chat.id, Screen(tr(lang, 'updates.title'), lines,
         sections=tuple(sections), embedded_buttons=True, navigation=True),
         ([[button(tr(lang, 'updates.refresh'), UpdatesCallback().pack())]] if active else []) +
-        [[button(tr(lang, 'back'), AdminSettingsCallback().pack())]], state, query.message.message_id)
+        [[button(tr(lang, 'back'), 'admin_menu')]], state, query.message.message_id)
 
 
 async def show_job(query, bot, backend, state, job_id, page=0, opened=False):

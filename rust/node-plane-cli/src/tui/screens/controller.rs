@@ -561,6 +561,17 @@ pub(in crate::tui) fn draw_controller(
             };
             controls.push((label, control));
         }
+    } else if state.text_confirmation {
+        text = format!(
+            "Save this text?\n\n{}",
+            state
+                .defaults_input
+                .as_ref()
+                .map(|(_, value)| value.as_str())
+                .unwrap_or("")
+        );
+        controls.push(("Confirm".into(), Control::ControllerTextConfirm));
+        controls.push(("Cancel".into(), Control::ControllerBack));
     } else if let Some((key, _)) = &state.defaults_input {
         text = match *key {
             "gate_message" => "Message for users requesting access".into(),
@@ -739,6 +750,32 @@ pub(in crate::tui) fn draw_controller(
                 job["action"].as_str().unwrap_or(""),
                 job["status"].as_str().unwrap_or("")
             ));
+            if job
+                .pointer("/result/status")
+                .and_then(serde_json::Value::as_str)
+                == Some("partial")
+            {
+                text.push_str("\nPartially restored: some nodes need attention.");
+            }
+            if job["phase"] == "reconnecting" {
+                text.push_str("\nReconnecting nodes and applying their settings…");
+            }
+            if let Some(nodes) = job
+                .pointer("/result/nodes")
+                .and_then(serde_json::Value::as_array)
+            {
+                for node in nodes {
+                    text.push_str(&format!(
+                        "\n{}: {}{}",
+                        node["node_key"].as_str().unwrap_or("—"),
+                        node["status"].as_str().unwrap_or("—"),
+                        node["error_code"]
+                            .as_str()
+                            .map(|error| format!(" · {error}"))
+                            .unwrap_or_default()
+                    ));
+                }
+            }
             if let Some(error) = job
                 .pointer("/result/error_code")
                 .and_then(serde_json::Value::as_str)
@@ -1004,7 +1041,11 @@ pub(in crate::tui) fn draw_controller(
         .lines()
         .enumerate()
         .map(|(index, line)| {
-            if state.history_detail.is_some() && index == 0 || state.plan.is_some() && index == 1 {
+            if state.removed && index == 0 {
+                Line::styled(line.to_owned(), Style::default().fg(Color::Red))
+            } else if state.history_detail.is_some() && index == 0
+                || state.plan.is_some() && index == 1
+            {
                 Line::styled(
                     line.to_owned(),
                     Style::default()
@@ -1033,7 +1074,10 @@ pub(in crate::tui) fn draw_controller(
             let mut row = vec![index];
             if choice_row_label(controls[index].1).is_some()
                 || state.defaults_input.is_some()
-                    && controls[index].1 == Control::ControllerDefaultsInputApply
+                    && matches!(
+                        controls[index].1,
+                        Control::ControllerDefaultsInputApply | Control::ControllerTextConfirm
+                    )
             {
                 while index + 1 < controls.len()
                     && (choice_row_label(controls[index].1).is_some()

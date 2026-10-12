@@ -43,7 +43,7 @@ class NodeBootstrapService:
             result['progress'] = NodeOperations(self.db).get(actor, row['child_id']).get('progress')
         return result
 
-    def queue(self, actor, node_key, revision, command_key):
+    def queue(self, actor, node_key, revision, command_key, *, recover_unreachable=False):
         require_permission(actor, 'nodes.manage')
         key = _key(command_key)
         if type(revision) is not int or revision < 1:
@@ -75,9 +75,9 @@ class NodeBootstrapService:
                     raise AccessDenied('node_operation_pending', 409)
             identity = str(uuid4())
             conn.execute('''INSERT INTO backend_node_bootstraps
-                (id,node_key,actor_id,command_key,revision,phase,status)
-                VALUES (?,?,?,?,?,'agent','awaiting_executor')''',
-                (identity, node_key, actor.account.id, key, revision))
+                (id,node_key,actor_id,command_key,revision,phase,status,child_kind)
+                VALUES (?,?,?,?,?,'agent','awaiting_executor',?)''',
+                (identity, node_key, actor.account.id, key, revision, 'restore' if recover_unreachable else None))
             return self.public(conn.execute('SELECT * FROM backend_node_bootstraps WHERE id=?', (identity,)).fetchone())
 
     def _change(self, row, *, phase=None, status='awaiting_executor', child=None, kind=None, error=None):
@@ -165,7 +165,7 @@ class NodeBootstrapService:
                 missing = (isinstance(error, grpc.RpcError)
                            and error.code() == grpc.StatusCode.FAILED_PRECONDITION
                            and error.details() in {'no node-agent target configured', 'agent not configured'})
-                if not missing or row['phase'] != 'agent':
+                if (not missing and row['child_kind'] != 'restore') or row['phase'] != 'agent':
                     raise AccessDenied('node_agent_unavailable', 503) from None
                 facts = None
             if row['phase'] == 'agent' and facts is not None:

@@ -279,16 +279,35 @@ impl App {
                 self.controller.selected = 0;
                 None
             }
+            Control::ControllerTextConfirm => {
+                if self.controller.text_confirmation {
+                    self.controller.text_confirmation = false;
+                    if let Some((key, input)) = self.controller.defaults_input.clone() {
+                        if key == "gate_message" {
+                            self.controller_command(crate::controller::Command::PolicySave(
+                                "access-requests",
+                                serde_json::json!({"gate_message":input}),
+                            ));
+                        } else if key == "bot_title" {
+                            self.controller_command(crate::controller::Command::BotTitleSave(
+                                input,
+                            ));
+                        }
+                    }
+                }
+                None
+            }
             Control::ControllerDefaultsInputApply => {
                 if !defaults_input_changed(&self.controller) {
                     return None;
                 }
                 if let Some((key, input)) = self.controller.defaults_input.clone() {
                     if key == "gate_message" {
-                        self.controller_command(crate::controller::Command::PolicySave(
-                            "access-requests",
-                            serde_json::json!({"gate_message":input}),
-                        ));
+                        if input.trim().is_empty() || input.chars().count() > 500 {
+                            self.error = "Enter a message from 1 to 500 characters".into();
+                            return None;
+                        }
+                        self.controller.text_confirmation = true;
                         return None;
                     }
                     if key == "bot_title" {
@@ -296,7 +315,7 @@ impl App {
                             self.error = "Enter a name from 1 to 64 characters".into();
                             return None;
                         }
-                        self.controller_command(crate::controller::Command::BotTitleSave(input));
+                        self.controller.text_confirmation = true;
                         return None;
                     }
                 }
@@ -791,6 +810,10 @@ impl App {
                 None
             }
             Control::ControllerBack => {
+                if self.controller.text_confirmation {
+                    self.controller.text_confirmation = false;
+                    return None;
+                }
                 if self.controller.plan_pending {
                     return None;
                 }

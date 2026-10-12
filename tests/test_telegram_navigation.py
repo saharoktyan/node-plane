@@ -59,8 +59,7 @@ class NavigationPathTests(TestCase):
                     'node_return': {'node_key': 'lv1', 'callback': origin}}
             path = parent_path('node_manage:lv1', 'en', data)
             callbacks = [p.callback for p in path]
-            self.assertEqual(callbacks[:2], ['admin_menu', 'admin_settings'])
-            self.assertEqual(callbacks[2], origin if origin == 'updates_nodes:1' else 'updates')
+            self.assertEqual(callbacks[:2], ['admin_menu', 'updates'])
             self.assertIn(origin, callbacks)
             self.assertNotIn('admin_nodes', callbacks)
             self.assertEqual(callbacks[-2:], ['admin_node:lv1', 'node_manage:lv1'])

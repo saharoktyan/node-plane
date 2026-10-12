@@ -37,7 +37,8 @@ async def main() -> None:
             bot.session.middleware(TelegramTimings())
             await register_commands(bot)
             backend = BackendClient(session, base_url, adapter_token)
-            dispatcher = Dispatcher()
+            from aiogram.fsm.storage.memory import SimpleEventIsolation
+            dispatcher = Dispatcher(events_isolation=SimpleEventIsolation())
             dispatcher.update.outer_middleware(ActionTimings())
             dispatcher.update.outer_middleware(CallbackAnswerScope())
             dispatcher.update.outer_middleware(BackendMiddleware(backend))
@@ -63,7 +64,7 @@ async def main() -> None:
             dispatcher.include_router(admin_alerts.router)
             dispatcher.include_router(admin_system_cleanup.router)
             
-            delivery_task = asyncio.create_task(delivery_loop(bot, backend))
+            delivery_task = asyncio.create_task(delivery_loop(bot, backend, dispatcher))
             try:
                 update_panels.configure(Path(os.environ.get('NODE_PLANE_SHARED_DIR', '/opt/node-plane/shared'))
                     / 'data' / 'telegram-update-panels.sqlite3')

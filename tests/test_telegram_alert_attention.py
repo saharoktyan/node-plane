@@ -39,7 +39,7 @@ class AlertAttentionTests(IsolatedAsyncioTestCase):
         screen, rows = draw.await_args.args[2:4]
         buttons = {b.callback_data:b for row in screen.fallback_rows(rows) for b in row}
         self.assertEqual(buttons['alerts'].style, 'danger')
-        self.assertEqual(next(b.style for b in buttons.values() if b.callback_data.startswith('updates')), 'primary')
+        self.assertNotIn('updates', buttons)
 
     async def test_dismiss_reads_new_state_and_keeps_alert_visible(self):
         alert = dict(title='Latvia', node_key='lv1', kind='awg_down', event_id='event')

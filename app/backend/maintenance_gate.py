@@ -15,5 +15,5 @@ def admit(conn, *, allow_restore=False):
         updating = conn.execute('SELECT job_id FROM backend_controller_update_gate WHERE id=1').fetchone()
         raise AccessDenied('update_pending' if updating else 'system_cleanup_in_progress', 409)
     if not allow_restore and conn.execute("""SELECT id FROM backend_backup_jobs
-        WHERE action='restore' AND status IN ('awaiting_executor','running') LIMIT 1""").fetchone():
+        WHERE action='restore' AND status IN ('awaiting_executor','running') AND COALESCE(phase,'') != 'reconnecting' LIMIT 1""").fetchone():
         raise AccessDenied('restore_in_progress', 409)

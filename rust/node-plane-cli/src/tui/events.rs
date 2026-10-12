@@ -22,7 +22,14 @@ impl App {
                 match update {
                     crate::nodes::Update::Controller(profile, command, value) => {
                         if matches!(command, crate::controller::Command::Probe) {
-                            if profile == self.form.saved.as_ref().map(|p| p.id) {
+                            if profile == self.form.saved.as_ref().map(|p| p.id)
+                                || value["external_removal"] == true
+                                    && self.form.saved.as_ref().is_some_and(|saved| {
+                                        value["host"] == saved.host
+                                            && value["port"] == saved.port
+                                            && value["user"] == saved.user
+                                    })
+                            {
                                 if value["installed"] == true {
                                     self.remember_installed();
                                     if matches!(self.screen, Screen::Controller)
@@ -46,6 +53,31 @@ impl App {
                                     }
                                 } else {
                                     self.confirmed_installation = None;
+                                    if value["external_removal"] != true {
+                                        return;
+                                    }
+                                    self.installed_profile = None;
+                                    self.error.clear();
+                                    if let Some(saved) = &mut self.form.saved {
+                                        saved.installed = false;
+                                        if let Some(entry) = self
+                                            .connections
+                                            .installations
+                                            .iter_mut()
+                                            .find(|entry| entry.id == saved.id)
+                                        {
+                                            entry.installed = false;
+                                        }
+                                    }
+                                    self.controller = crate::controller::Browser {
+                                        profile: self.form.saved.as_ref().map(|p| p.id),
+                                        removed: true,
+                                        ..Default::default()
+                                    };
+                                    self.screen = Screen::Controller;
+                                    if let Err(error) = self.connections.save(&self.state_dir) {
+                                        self.error = error.to_string();
+                                    }
                                 }
                             }
                             return;

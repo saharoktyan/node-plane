@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Fix Workstation announcements and account selection when creating profiles.
+- Serialize Telegram interactions, refresh member menus after account changes, and confirm bot-name and request-message edits.
+- Reconnect nodes during backup restoration and report partial recovery per node.
+- Move Telegram Updates and Backups into the administrator menu.
+- Detect controllers removed by another Workstation, color diagnostic totals and the farewell, and keep installation-default counters in one group.
+
 ## 0.4.3-alpha.91 - 2026-10-12
 
 - Fence controller removal verification before shutdown and stop polling the deleted backend after removal.

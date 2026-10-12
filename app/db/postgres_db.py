@@ -10,7 +10,7 @@ from config import POSTGRES_DSN
 _WORKER_CONNECTIONS = ContextVar('worker_connections', default=False)
 WORK_CHANNEL = 'node_plane_work'
 DELIVERY_CHANNEL = 'node_plane_delivery'
-_DELIVERY_TABLES = ('backend_alert_deliveries', 'backend_announcement_deliveries')
+_DELIVERY_TABLES = ('backend_alert_deliveries', 'backend_announcement_deliveries', 'backend_account_menu_refresh')
 _QUEUE_TABLES = ('backend_operation_tasks', 'backend_node_jobs', 'backend_node_settings_tasks',
     'backend_agent_rollouts', 'backend_node_bootstraps', 'backend_node_removals',
     'backend_config_issuances', 'backend_temporary_configs', 'backend_update_jobs',

@@ -6,6 +6,7 @@ use uuid::Uuid;
 #[derive(Clone)]
 pub enum Command {
     Probe,
+    Presence,
     Overview,
     Updates,
     Defaults,
@@ -55,7 +56,9 @@ impl Command {
     pub fn request(&self) -> Result<(Method, String, Option<Value>, Option<Uuid>)> {
         let root = "/api/v1/system/cleanup";
         Ok(match self {
-            Self::Probe => anyhow::bail!("Installation detection uses the SSH connection"),
+            Self::Probe | Self::Presence => {
+                anyhow::bail!("Installation detection uses the SSH connection")
+            }
             Self::UpdateResult(id) => (
                 Method::GET,
                 format!("/api/v1/system/updates/jobs/{id}"),
@@ -272,6 +275,7 @@ pub struct Browser {
     pub ssh_key: Option<Value>,
     pub notice: String,
     pub defaults_advanced: bool,
+    pub text_confirmation: bool,
     pub defaults_input: Option<(&'static str, String)>,
     pub defaults_baseline: Option<Value>,
     pub backups: Option<Value>,
@@ -441,7 +445,7 @@ impl Browser {
                 self.branch_confirmation = false;
                 self.selected = 0;
             }
-            Command::Probe => {}
+            Command::Probe | Command::Presence => {}
             Command::Overview => {
                 self.job = value.get("latest_job").filter(|v| !v.is_null()).cloned();
                 self.overview = Some(value);
