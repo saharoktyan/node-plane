@@ -250,6 +250,13 @@ impl App {
                                 self.nodes_selected = usize::from(view.confirmation.is_some());
                             } else if let Some(previous) = &self.nodes.maintenance {
                                 view.scroll = previous.scroll;
+                                view.section = previous.section;
+                            }
+                            if view.confirmation.is_none()
+                                && let Some(previous) = &self.nodes.maintenance
+                                && previous.key == view.key
+                            {
+                                view.section = previous.section;
                             }
                             self.nodes.maintenance = Some(view);
                         }

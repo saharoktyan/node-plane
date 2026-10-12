@@ -8,12 +8,21 @@ pub enum Mode {
     RegistryOnly,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Section {
+    #[default]
+    Root,
+    Reinstall,
+    Removal,
+}
+
 #[derive(Clone, Debug)]
 pub struct Browser {
     pub key: String,
     pub snapshot: Value,
     pub confirmation: Option<Mode>,
     pub scroll: usize,
+    pub section: Section,
 }
 impl Browser {
     pub fn new(key: String, snapshot: Value, confirmation: Option<Mode>) -> Result<Self> {
@@ -26,6 +35,11 @@ impl Browser {
             snapshot,
             confirmation,
             scroll: 0,
+            section: if confirmation.is_some() {
+                Section::Removal
+            } else {
+                Section::Root
+            },
         })
     }
     pub fn removed(&self) -> bool {

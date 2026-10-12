@@ -192,7 +192,6 @@ impl App {
             | Control::AccessNew
             | Control::AccessField(..)
             | Control::AccessSave
-            | Control::AccessDevices
             | Control::AccessDeviceItem(..)
             | Control::AccessDeviceNew
             | Control::AccessDeviceEdit
@@ -201,6 +200,9 @@ impl App {
             | Control::AccessDeviceDelete
             | Control::AccessDeviceConfirm
             | Control::AccessDevicePage(..)
+            | Control::AccessDurationCustom
+            | Control::AccessDurationInput
+            | Control::AccessDurationApply
             | Control::AccessExpiryMenu
             | Control::AccessExpiry(..)
             | Control::AccessExpiryPage(..)
@@ -335,6 +337,7 @@ impl App {
             | Control::NodesEditReset
             | Control::NodesEditBack
             | Control::NodesApply
+            | Control::NodesMaintenanceSection(_)
             | Control::NodesMaintenance
             | Control::NodesRemove(..)
             | Control::NodesRemoveConfirm

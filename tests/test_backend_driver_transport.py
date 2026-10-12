@@ -95,7 +95,8 @@ class BackendDriverTransportTests(unittest.TestCase):
                             ('runtime_root', 'ok', '/opt/node-plane-runtime'),
                             ('xray_config', 'ok', '/private/xray/config.json'),
                             ('awg_config', 'missing', '/private/awg/wg0.conf'),
-                            ('runtime_version', 'ok', '0.4.3'))])
+                            ('runtime_version', 'ok', '0.4.3'),
+                            ('port:tcp:443', 'ok', 'Managed listener'))])
 
         server = grpc.server(ThreadPoolExecutor(max_workers=2))
         provisioning_service_pb2_grpc.add_ProvisioningServiceServicer_to_server(Provisioning(), server)
@@ -161,7 +162,7 @@ class BackendDriverTransportTests(unittest.TestCase):
                                 'xray_config_present': True, 'awg_config_present': False})
         self.assertEqual(diagnostics, {'node_key': 'node', 'docker': 'ok',
             'runtime_root': 'ok', 'xray_config': 'ok', 'awg_config': 'missing',
-            'runtime_version': '0.4.3'})
+            'runtime_version': '0.4.3', 'checks': [{'id': 'port:tcp:443', 'status': 'ok', 'detail': 'Managed listener'}]})
         self.assertEqual(public['public_key'], 'a' * 43)
 
     def test_diagnostics_reject_legacy_response_without_agent_items(self):

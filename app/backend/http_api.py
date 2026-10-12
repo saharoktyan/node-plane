@@ -1492,10 +1492,10 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
             from .node_probe import probe
             try:
                 observation = probe(node, driver)
-                return {**result, 'checks': server_checks(observation),
+                return {**result, 'checks': [*result.get('checks', []), *server_checks(observation)],
                         'checked_at': observation['checked_at'], 'observation': observation}
             except Exception:
-                return {**result, 'checks': [{'id': 'live_services', 'status': 'warning',
+                return {**result, 'checks': [*result.get('checks', []), {'id': 'live_services', 'status': 'warning',
                         'detail': 'Expanded live inspection unavailable; basic file diagnostics only'}]}
         try:
             if node_driver is None:

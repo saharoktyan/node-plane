@@ -582,7 +582,23 @@ pub fn run(mut request: Request) -> Result<()> {
                         value.extend(text.chars().filter(|c| !c.is_control()).take(remaining));
                     }
                 } else if matches!(app.screen, Screen::Access) && !app.exit {
-                    if let Some(Control::AccessField(index)) =
+                    if app.access_controls().get(app.access.selected)
+                        == Some(&Control::AccessDurationInput)
+                    {
+                        if let Some(input) = app
+                            .access
+                            .editor
+                            .as_mut()
+                            .and_then(|editor| editor.duration_input.as_mut())
+                        {
+                            let remaining = 32usize.saturating_sub(input.len());
+                            input.extend(
+                                text.chars()
+                                    .filter(char::is_ascii_alphanumeric)
+                                    .take(remaining),
+                            );
+                        }
+                    } else if let Some(Control::AccessField(index)) =
                         app.access_controls().get(app.access.selected).copied()
                     {
                         if let Some(editor) = &mut app.access.editor {

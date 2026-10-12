@@ -139,6 +139,14 @@ impl App {
                 }
                 None
             }
+            Control::NodesMaintenanceSection(section) => {
+                if let Some(view) = &mut self.nodes.maintenance {
+                    view.section = section;
+                    view.scroll = 0;
+                    self.nodes_selected = 0;
+                }
+                None
+            }
             Control::NodesMaintenance => {
                 if let Some(node) = &self.nodes.card {
                     self.nodes_requested =
@@ -287,6 +295,11 @@ impl App {
                     if view.confirmation.take().is_some() {
                         return None;
                     }
+                    if view.section != crate::node_maintenance::Section::Root && !view.removed() {
+                        view.section = crate::node_maintenance::Section::Root;
+                        view.scroll = 0;
+                        return None;
+                    }
                     let removed = view.removed();
                     self.nodes.maintenance = None;
                     if removed {
@@ -384,7 +397,6 @@ impl App {
                 if let Some(node) = &self.nodes.card {
                     self.nodes_requested =
                         Some(crate::nodes::Command::ProtocolAction(node.clone(), action));
-                    self.nodes.maintenance = None;
                 }
                 None
             }

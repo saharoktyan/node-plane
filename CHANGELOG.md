@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.3-alpha.89 - 2026-10-12
+
+- Remove user-device management from Workstation administration and add custom access durations with H/D/M/Y units.
+- Keep selected subsection labels visible and reserve footer space only for available actions.
+- Group node diagnostics, reinstall and removal under Maintenance; include configured TCP/UDP port checks and colored diagnostic statuses.
+
 ## 0.4.3-alpha.88 - 2026-10-12
 
 - Add a Windows Start menu shortcut for Workstation, launching in Windows Terminal when available and removing it on uninstall.

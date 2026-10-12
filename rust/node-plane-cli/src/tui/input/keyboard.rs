@@ -198,6 +198,34 @@ impl App {
                 _ => {}
             }
         }
+        if controls.get(self.access.selected) == Some(&Control::AccessDurationInput)
+            && let Some(input) = self
+                .access
+                .editor
+                .as_mut()
+                .and_then(|editor| editor.duration_input.as_mut())
+        {
+            match key.code {
+                KeyCode::Char(c)
+                    if !key.modifiers.contains(KeyModifiers::CONTROL)
+                        && c.is_ascii_alphanumeric() =>
+                {
+                    if input.len() < 32 {
+                        input.push(c);
+                    }
+                    return;
+                }
+                KeyCode::Backspace => {
+                    input.pop();
+                    return;
+                }
+                KeyCode::Enter => {
+                    self.activate(Control::AccessDurationApply);
+                    return;
+                }
+                _ => {}
+            }
+        }
         if let Some(Control::AccessField(index)) = controls.get(self.access.selected).copied()
             && let Some(editor) = &mut self.access.editor
         {
@@ -228,7 +256,9 @@ impl App {
                 if let Some(editor) = &mut self.access.editor
                     && editor.expiry_view
                 {
-                    editor.expiry_view = false;
+                    if editor.duration_input.take().is_none() {
+                        editor.expiry_view = false;
+                    }
                     self.access.selected = 0;
                     return;
                 }

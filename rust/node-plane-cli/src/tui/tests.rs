@@ -315,7 +315,7 @@ fn profile_management_actions_use_two_columns() {
             hit.area.x >= 26 && !matches!(hit.control, Control::AccessBack | Control::WindowClose)
         })
         .collect();
-    assert_eq!(controls.len(), 7);
+    assert_eq!(controls.len(), 6);
     for pair in controls.chunks(2) {
         if pair.len() == 2 {
             assert_eq!(pair[0].area.y, pair[1].area.y);
@@ -969,9 +969,14 @@ fn unified_profile_card_has_account_and_vpn_actions_without_tabs() {
             .any(|hit| matches!(hit.control, Control::AccessTab(_) | Control::AccessNew))
     );
     assert!(
-        app.hits
+        !terminal
+            .backend()
+            .buffer()
+            .content
             .iter()
-            .any(|hit| hit.control == Control::AccessDevices)
+            .map(|cell| cell.symbol())
+            .collect::<String>()
+            .contains("Devices")
     );
     app.activate(Control::AccessAccountAction(true));
     app.activate(Control::AccessAccountConfirm);
@@ -4000,7 +4005,7 @@ fn node_card_arrows_follow_button_geometry_after_resize() {
             .unwrap();
         let count = app.nodes_controls().len();
         let areas: Vec<_> = app.nodes_hits().iter().map(|hit| hit.area).collect();
-        assert_eq!(count, 7);
+        assert_eq!(count, 6);
         let row_starts: Vec<_> = (0..count - 1)
             .filter(|&i| i == 0 || areas[i].y != areas[i - 1].y)
             .collect();
@@ -4906,5 +4911,113 @@ fn traffic_collection_reserves_a_disabled_slot_while_loading() {
     assert_eq!(
         app.controller_root_controls(false)[0].0,
         "Traffic collection: Off"
+    );
+}
+
+#[test]
+fn custom_duration_accepts_units_and_rejects_invalid_or_overflowing_values() {
+    let now = std::time::UNIX_EPOCH;
+    assert_eq!(
+        crate::access::expiry_from_duration("12H", now).unwrap(),
+        "1970-01-01T12:00:00Z"
+    );
+    assert_eq!(
+        crate::access::expiry_from_duration("7d", now).unwrap(),
+        crate::access::expiry_after(7, now).unwrap()
+    );
+    assert_eq!(
+        crate::access::expiry_from_duration("1M", now).unwrap(),
+        crate::access::expiry_after(30, now).unwrap()
+    );
+    assert_eq!(
+        crate::access::expiry_from_duration("1Y", now).unwrap(),
+        crate::access::expiry_after(365, now).unwrap()
+    );
+    for input in ["", "0D", "-1H", "1.5D", "1Q", "é", "18446744073709551615Y"] {
+        assert!(crate::access::expiry_from_duration(input, now).is_err());
+    }
+    let mut app = test_profile_app();
+    app.screen = Screen::Access;
+    app.access.editor = Some(crate::access::Editor::new(None, None));
+    app.access.editor.as_mut().unwrap().expiry_view = true;
+    app.activate(Control::AccessDurationCustom);
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    for c in "12H".chars() {
+        app.access_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+    }
+    app.activate(Control::AccessDurationApply);
+    let editor = app.access.editor.as_ref().unwrap();
+    assert!(!editor.expiry_view && editor.duration_input.is_none() && !editor.fields[1].is_empty());
+}
+
+#[test]
+fn maintenance_groups_danger_and_reinstall_and_back_restores_parent() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Nodes;
+    let mut node = browser_node("lv1", "Europe");
+    node.agent = crate::nodes::AgentState::Ready;
+    node.protocols = vec!["awg".into()];
+    app.nodes.card = Some(node);
+    app.nodes.maintenance = Some(
+        crate::node_maintenance::Browser::new(
+            "lv1".into(),
+            serde_json::json!({"node_key":"lv1","status":"ready"}),
+            None,
+        )
+        .unwrap(),
+    );
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    assert!(app.hits.iter().any(|h| h.control
+        == Control::NodesMaintenanceSection(crate::node_maintenance::Section::Removal)));
+    assert!(!app.hits.iter().any(|h| matches!(
+        h.control,
+        Control::NodesRemove(_) | Control::NodesProtocolAction(_)
+    )));
+    app.activate(Control::NodesMaintenanceSection(
+        crate::node_maintenance::Section::Removal,
+    ));
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    assert!(
+        app.hits
+            .iter()
+            .any(|h| matches!(h.control, Control::NodesRemove(_)))
+    );
+    app.activate(Control::NodesBack);
+    assert_eq!(
+        app.nodes.maintenance.as_ref().unwrap().section,
+        crate::node_maintenance::Section::Root
+    );
+    assert!(
+        !node_card_actions(app.nodes.card.as_ref().unwrap(), None)
+            .iter()
+            .any(|(_, control)| *control == Control::NodesDiagnostics)
+    );
+}
+
+#[test]
+fn selected_subsection_keeps_theme_label_with_pointer_elsewhere() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Access;
+    app.access.editor = Some(crate::access::Editor::new(None, None));
+    app.access.editor.as_mut().unwrap().grants_view = true;
+    app.pointer_active = true;
+    app.pointer_position = Some((0, 0).into());
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    let area = app
+        .hits
+        .iter()
+        .find(|h| h.control == Control::AccessGrantMode(false))
+        .unwrap()
+        .area;
+    assert_eq!(
+        terminal.backend().buffer()[(area.x, area.y)].fg,
+        Color::White
+    );
+    assert!(
+        (area.x + 1..area.right() - 1)
+            .any(|x| terminal.backend().buffer()[(x, area.y + 1)].fg == Color::Cyan)
     );
 }

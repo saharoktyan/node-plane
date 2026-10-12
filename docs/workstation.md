@@ -59,6 +59,8 @@ On startup the content area stays empty until you choose a section. If installat
 
 Automatic check, backup and alert preferences appear when the corresponding feature is enabled. Select an interval directly; backups also offer a retention count. **Node Plane Settings → Basic** contains installation defaults and general controller options.
 
+In profile access settings, **Duration → Custom duration** accepts whole-number values with H (hours), D (days), M (30 days) or Y (365 days), such as `12H` or `1M`. User devices are managed by their owner in the Telegram bot. Server **Maintenance** groups diagnostics, reinstall and reset/removal; diagnostics also check configured TCP and UDP ports.
+
 ## Install a controller
 
 Choose **Install Node Plane**, fill the connection and installation fields, review the request and continue. Progress shows the current step and a log path. After completion, create a node in **Nodes** and run **Server setup**. Follow [Nodes](nodes.md) and [Access](access.md) for the remaining actions.

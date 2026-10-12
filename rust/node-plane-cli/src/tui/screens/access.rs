@@ -13,7 +13,14 @@ pub(in crate::tui) fn draw_access_grants(
         .into_iter()
         .enumerate()
     {
-        draw_button(frame, tabs[index], label, editor.future_view == future);
+        draw_choice_button(
+            frame,
+            tabs[index],
+            label,
+            app.access_controls().get(app.access.selected)
+                == Some(&Control::AccessGrantMode(future)),
+            editor.future_view == future,
+        );
         hits.push(Hit {
             area: tabs[index],
             control: Control::AccessGrantMode(future),
@@ -176,6 +183,46 @@ pub(in crate::tui) fn draw_access_expiry(
     sections: [Rect; 3],
     hits: &mut Vec<Hit>,
 ) {
+    if let Some(input) = app
+        .access
+        .editor
+        .as_ref()
+        .and_then(|e| e.duration_input.as_ref())
+    {
+        frame.render_widget(
+            Paragraph::new("Enter duration: 12H, 7D, 1M or 1Y. M = 30 days; Y = 365 days."),
+            sections[0],
+        );
+        let field = Rect::new(sections[1].x, sections[1].y, sections[1].width, 3);
+        draw_field(
+            frame,
+            field,
+            "Duration",
+            input,
+            app.access_controls().get(app.access.selected) == Some(&Control::AccessDurationInput),
+        );
+        hits.push(Hit {
+            area: field,
+            control: Control::AccessDurationInput,
+        });
+        if !app.error.is_empty() {
+            frame.render_widget(
+                Paragraph::new(app.error.as_str()).style(Style::default().fg(Color::Red)),
+                Rect::new(field.x, field.bottom(), field.width, 2),
+            );
+        }
+        draw_access_buttons(
+            frame,
+            app,
+            sections[2],
+            &[
+                ("Apply", Control::AccessDurationApply),
+                ("Cancel", Control::AccessExpiryBack),
+            ],
+            hits,
+        );
+        return;
+    }
     frame.render_widget(
         Paragraph::new("Access duration · starts now").style(Style::default().fg(Color::Cyan)),
         sections[0],
@@ -186,7 +233,7 @@ pub(in crate::tui) fn draw_access_expiry(
         ("7 days", Control::AccessExpiry(Some(7))),
         ("30 days", Control::AccessExpiry(Some(30))),
         ("90 days", Control::AccessExpiry(Some(90))),
-        ("Custom date", Control::AccessExpiryBack),
+        ("Custom duration", Control::AccessDurationCustom),
     ];
     let capacity = (usize::from(sections[1].height / 3).max(1) * 2).min(6);
     app.access_capacity.set(capacity);
@@ -396,12 +443,60 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
     let block = section_block(" Access ");
     let inner = block.inner(right);
     frame.render_widget(block, right);
-    let account_actions = matches!(app.access.tab, Tab::Accounts | Tab::Profiles)
-        && app.access.card.is_some()
-        && app.access.account_action.is_none()
-        && app.access.profile_action.is_none()
-        && app.access.editor.is_none()
-        && app.access.devices.is_none();
+    let footer_height = if let Some(editor) = &app.access.editor {
+        if editor.expiry_view {
+            if editor.duration_input.is_some() || inner.height < 12 {
+                3
+            } else {
+                0
+            }
+        } else if editor.grants_view {
+            let count = if editor.future_view {
+                editor.regions.len() + 1
+            } else {
+                editor.nodes.len()
+            };
+            let capacity = usize::from(inner.height.saturating_sub(6) / 3).max(1);
+            if editor.future_view {
+                if count > capacity { 3 } else { 0 }
+            } else if count > capacity {
+                6
+            } else {
+                3
+            }
+        } else {
+            6
+        }
+    } else if let Some(card) = &app.access.card {
+        let count = if app.access.decision.is_some()
+            || app.access.account_action.is_some()
+            || app.access.profile_action.is_some()
+        {
+            1
+        } else {
+            let mut count =
+                usize::from(app.access.tab != Tab::Requests || card["status"] == "pending");
+            if app.access.tab == Tab::Accounts || card.get("_account").is_some() {
+                count += 2;
+            }
+            if app.access.tab == Tab::Accounts {
+                count += 1;
+            }
+            if app.access.tab == Tab::Profiles && card["deleting"] != true {
+                count += 3;
+            }
+            if app.access.tab == Tab::Requests && card["status"] == "pending" {
+                count += 2;
+            }
+            count
+        };
+        count.div_ceil(if inner.width >= 32 { 2 } else { 1 }) as u16 * 3
+    } else if app.access.filtered().len() <= usize::from(inner.height.saturating_sub(9) / 3).max(1)
+    {
+        3
+    } else {
+        6
+    };
     let sections = Layout::vertical([
         Constraint::Length(
             if app.access.card.is_some()
@@ -421,17 +516,7 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
             },
         ),
         Constraint::Min(0),
-        Constraint::Length(if account_actions {
-            12
-        } else if app.access.card.is_none()
-            && app.access.editor.is_none()
-            && app.access.devices.is_none()
-            && app.access.filtered().len() <= usize::from(inner.height.saturating_sub(9) / 3).max(1)
-        {
-            3
-        } else {
-            6
-        }),
+        Constraint::Length(footer_height),
     ])
     .split(inner);
     if app.access.devices.is_some() {
@@ -660,7 +745,6 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
             }
             if app.access.tab == Tab::Profiles && card["deleting"] != true {
                 buttons.extend([
-                    ("Devices", Control::AccessDevices),
                     ("Edit", Control::AccessEdit),
                     (
                         if card["frozen"] == true {

@@ -170,6 +170,7 @@ pub struct Editor {
     pub future_view: bool,
     pub expiry_view: bool,
     pub expiry_page: usize,
+    pub duration_input: Option<String>,
 }
 impl Editor {
     pub fn new(source: Option<Value>, owner: Option<String>) -> Self {
@@ -196,6 +197,7 @@ impl Editor {
             future_view: false,
             expiry_view: false,
             expiry_page: 0,
+            duration_input: None,
         }
     }
     pub fn dirty(&self) -> bool {
@@ -461,10 +463,42 @@ impl Devices {
 
 // UTC Gregorian date from Unix seconds; presets do not require an OS date command.
 pub fn expiry_after(days: u32, now: std::time::SystemTime) -> anyhow::Result<String> {
+    expiry_after_seconds(u64::from(days) * 86400, now)
+}
+
+pub fn expiry_from_duration(input: &str, now: std::time::SystemTime) -> anyhow::Result<String> {
+    let input = input.trim();
+    anyhow::ensure!(input.is_ascii(), "Use a number followed by H, D, M or Y");
+    let (amount, unit) = input.split_at(
+        input
+            .len()
+            .checked_sub(1)
+            .ok_or_else(|| anyhow::anyhow!("Enter a duration, for example 12H, 7D, 1M or 1Y"))?,
+    );
+    let amount = amount
+        .parse::<u64>()
+        .map_err(|_| anyhow::anyhow!("Enter a positive whole number followed by H, D, M or Y"))?;
+    anyhow::ensure!(amount > 0, "Duration must be greater than zero");
+    let factor = match unit.to_ascii_uppercase().as_str() {
+        "H" => 3600,
+        "D" => 86400,
+        "M" => 30 * 86400,
+        "Y" => 365 * 86400,
+        _ => anyhow::bail!("Use H (hours), D (days), M (30 days), or Y (365 days)"),
+    };
+    expiry_after_seconds(
+        amount
+            .checked_mul(factor)
+            .ok_or_else(|| anyhow::anyhow!("Duration is too large"))?,
+        now,
+    )
+}
+
+fn expiry_after_seconds(duration: u64, now: std::time::SystemTime) -> anyhow::Result<String> {
     let seconds = now
         .duration_since(std::time::UNIX_EPOCH)?
         .as_secs()
-        .checked_add(u64::from(days) * 86400)
+        .checked_add(duration)
         .ok_or_else(|| anyhow::anyhow!("Date overflow"))?;
     let day = i64::try_from(seconds / 86400)?;
     let z = day + 719468;

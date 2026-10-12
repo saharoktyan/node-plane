@@ -85,7 +85,13 @@ pub(in crate::tui) fn draw_node_editor(
         let tabs = Layout::horizontal([Constraint::Fill(1); 3]).split(sections[0]);
         for (index, tab) in Tab::ALL.iter().enumerate() {
             let control = Control::NodesEditTab(*tab);
-            draw_button(frame, tabs[index], tab.label(), selected(control));
+            draw_choice_button(
+                frame,
+                tabs[index],
+                tab.label(),
+                selected(control),
+                editor.tab == *tab,
+            );
             hits.push(Hit {
                 area: tabs[index],
                 control,
@@ -354,15 +360,14 @@ pub(in crate::tui) fn draw_node_diagnostics(
                     .count()
             ))];
             lines.extend(checks.iter().take(visible).map(|check| {
-                Line::from(format!(
-                    "{} · {}",
-                    check["status"].as_str().unwrap_or("unknown").to_uppercase(),
+                status_line(
+                    check["status"].as_str().unwrap_or("unknown"),
                     check["id"]
                         .as_str()
                         .unwrap_or("Check")
                         .replace(':', " · ")
-                        .replace('_', " ")
-                ))
+                        .replace('_', " "),
+                )
             }));
             if checks.len() > visible {
                 lines.push(Line::from(format!(
@@ -380,10 +385,7 @@ pub(in crate::tui) fn draw_node_diagnostics(
             ]
             .into_iter()
             .map(|(key, label)| {
-                Line::from(format!(
-                    "{} · {label}",
-                    facts[key].as_str().unwrap_or("unknown").to_uppercase()
-                ))
+                status_line(facts[key].as_str().unwrap_or("unknown"), label.to_owned())
             })
             .chain(std::iter::once(Line::from(format!(
                 "Version: {}",
@@ -484,7 +486,14 @@ pub(in crate::tui) fn draw_node_maintenance(
         .card
         .as_ref()
         .map_or(view.key.as_str(), |node| node.title.as_str());
-    let block = section_block(format!(" {title} · Node maintenance "));
+    let block = section_block(format!(
+        " {title} · Maintenance{} ",
+        match view.section {
+            crate::node_maintenance::Section::Root => "",
+            crate::node_maintenance::Section::Reinstall => " · Reinstall",
+            crate::node_maintenance::Section::Removal => " · Reset & removal",
+        }
+    ));
     let inner = block.inner(right);
     frame.render_widget(block, right);
     let mut actions = Vec::new();
@@ -551,6 +560,49 @@ pub(in crate::tui) fn draw_node_maintenance(
         Control::NodesBack,
         false,
     ));
+    if view.confirmation.is_none() && !view.removed() {
+        use crate::node_maintenance::Section;
+        match view.section {
+            Section::Root => {
+                let reinstall = actions.iter().any(|(_, control, _)| {
+                    matches!(control, Control::NodesProtocolAction("reinstall_keep"))
+                });
+                actions.retain(|(_, control, _)| {
+                    matches!(
+                        control,
+                        Control::NodesDiagnostics | Control::NodesRefresh | Control::NodesBack
+                    )
+                });
+                let mut groups = Vec::new();
+                if reinstall {
+                    groups.push((
+                        "Reinstall",
+                        Control::NodesMaintenanceSection(Section::Reinstall),
+                        false,
+                    ));
+                }
+                groups.push((
+                    "Reset & removal",
+                    Control::NodesMaintenanceSection(Section::Removal),
+                    true,
+                ));
+                actions.splice(0..0, groups);
+            }
+            Section::Reinstall => actions.retain(|(_, control, _)| {
+                matches!(
+                    control,
+                    Control::NodesProtocolAction("reinstall_keep" | "reinstall_clean")
+                        | Control::NodesBack
+                )
+            }),
+            Section::Removal => actions.retain(|(_, control, _)| {
+                matches!(
+                    control,
+                    Control::NodesRemove(_) | Control::NodesRefresh | Control::NodesBack
+                )
+            }),
+        }
+    }
     let labels: Vec<_> = actions
         .iter()
         .map(|(label, control, _)| (*label, *control))
@@ -668,7 +720,6 @@ pub(in crate::tui) fn node_card_actions(
         }
     }
     actions.push(("Temporary configs", Control::NodeTemporary));
-    actions.push(("Diagnostic", Control::NodesDiagnostics));
     actions.push(("Maintenance", Control::NodesMaintenance));
     actions.extend([
         ("Refresh", Control::NodesRefresh),
@@ -1154,4 +1205,20 @@ pub(in crate::tui) fn wizard_controls(wizard: &crate::node_wizard::Wizard) -> Ve
     }
     controls.extend(buttons.into_iter().map(|(_, c)| c));
     controls
+}
+
+pub(in crate::tui) fn status_line(status: &str, label: String) -> Line<'static> {
+    let (name, color) = match status {
+        "ok" | "ready" | "valid" | "succeeded" => ("OK", Color::Green),
+        "error" | "failed" | "missing" | "invalid" => ("Failed", Color::Red),
+        "warning" | "unknown" => ("Warning", Color::Yellow),
+        _ => (status, Color::Yellow),
+    };
+    Line::from(vec![
+        Span::styled(
+            name.to_owned(),
+            Style::default().fg(color).add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(format!(" · {label}")),
+    ])
 }

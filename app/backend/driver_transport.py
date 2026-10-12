@@ -98,7 +98,10 @@ class GrpcIntentDriver:
                 'runtime_root': items['runtime_root'].status,
                 'xray_config': items['xray_config'].status,
                 'awg_config': items['awg_config'].status,
-                'runtime_version': version.summary.strip()[:64] if version.status == 'ok' else None}
+                'runtime_version': version.summary.strip()[:64] if version.status == 'ok' else None,
+                'checks': [{'id': item.kind, 'status': item.status, 'detail': item.summary}
+                           for item in response.items if item.kind.startswith('port:')
+                           and item.status in {'ok', 'warning', 'error'}]}
 
     def prepare_node(self, node_key):
         """Prepare an already installed, unmanaged agent for a first apply."""

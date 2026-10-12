@@ -30,7 +30,7 @@ use agent::v1::{
     DeleteRuntimeRequest, DeleteRuntimeResponse, DiagnosticItem, InitXrayRequest, InitXrayResponse,
     InstallDockerRequest, InstallDockerResponse, ListRemoteProfilesRequest,
     ListRemoteProfilesResponse, LocalHealth, OpenPortsRequest, OpenPortsResponse,
-    PathExistsRequest, PathExistsResponse, PortStatus, RefreshAwgConfigRequest,
+    PathExistsRequest, PathExistsResponse, PortCheckSpec, PortStatus, RefreshAwgConfigRequest,
     RefreshAwgConfigResponse, RemoteProfileRecord, RemoveAuthorizedKeyRequest,
     RemoveAuthorizedKeyResponse, RunDiagnosticsRequest, RunDiagnosticsResponse,
     RuntimeCommandResponse, RuntimeFacts, RuntimeFileSpec, SyncNodeEnvRequest, SyncNodeEnvResponse,
@@ -477,7 +477,7 @@ impl AgentState {
                 .map(|output| output.status.success())
                 .unwrap_or(false);
 
-        let items = vec![
+        let mut items = vec![
             DiagnosticItem {
                 kind: "docker".to_string(),
                 status: if docker_available { "ok" } else { "missing" }.to_string(),
@@ -505,7 +505,7 @@ impl AgentState {
                     "invalid"
                 }
                 .to_string(),
-                summary: xray_config_path,
+                summary: xray_config_path.clone(),
                 detail: String::new(),
             },
             DiagnosticItem {
@@ -518,7 +518,7 @@ impl AgentState {
                     "invalid"
                 }
                 .to_string(),
-                summary: awg_config_path,
+                summary: awg_config_path.clone(),
                 detail: String::new(),
             },
             DiagnosticItem {
@@ -538,6 +538,27 @@ impl AgentState {
             },
         ];
 
+        let ports = diagnostic_ports(
+            &fs::read_to_string(&xray_config_path).unwrap_or_default(),
+            &fs::read_to_string(&awg_config_path).unwrap_or_default(),
+        );
+        for port in self.check_ports(CheckPortsRequest { items: ports }).items {
+            items.push(DiagnosticItem {
+                kind: format!(
+                    "port:{}:{}",
+                    if port.kind == "awg" { "udp" } else { "tcp" },
+                    port.port
+                ),
+                status: match port.status.as_str() {
+                    "managed" => "ok",
+                    "free" => "warning",
+                    _ => "error",
+                }
+                .into(),
+                summary: port.summary,
+                detail: port.detail,
+            });
+        }
         let summary = format!(
             "runtime_root={}, xray_config={}, awg_config={}, version={}",
             if runtime_root_exists {
@@ -2439,8 +2460,51 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn diagnostic_ports(xray: &str, awg: &str) -> Vec<PortCheckSpec> {
+    let mut ports = std::collections::BTreeSet::new();
+    if let Ok(config) = serde_json::from_str::<Value>(xray)
+        && let Some(inbounds) = config["inbounds"].as_array()
+    {
+        for inbound in inbounds {
+            if inbound["protocol"] == "vless"
+                && let Some(port) = inbound["port"].as_u64().filter(|p| *p > 0 && *p <= 65535)
+            {
+                ports.insert(("xray".to_string(), port as u32));
+            }
+        }
+    }
+    let mut interface = false;
+    for line in awg.lines().map(str::trim) {
+        if line.starts_with('[') {
+            interface = line.eq_ignore_ascii_case("[Interface]");
+        } else if interface
+            && let Some((key, value)) = line.split_once('=')
+            && key.trim() == "ListenPort"
+            && let Ok(port) = value.trim().parse::<u16>()
+            && port > 0
+        {
+            ports.insert(("awg".to_string(), u32::from(port)));
+        }
+    }
+    ports
+        .into_iter()
+        .map(|(kind, port)| PortCheckSpec { kind, port })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn diagnostic_ports_use_configured_protocol_ports_and_ignore_peers() {
+        let ports = super::diagnostic_ports(
+            r#"{"inbounds":[{"protocol":"vless","port":443},{"protocol":"vless","port":443},{"protocol":"socks","port":1080}]}"#,
+            "[Interface]\nListenPort = 51820\n[Peer]\nListenPort = 1111",
+        );
+        assert_eq!(ports.len(), 2);
+        assert!(ports.iter().any(|p| p.kind == "awg" && p.port == 51820));
+        assert!(ports.iter().any(|p| p.kind == "xray" && p.port == 443));
+    }
+
     use super::{AgentConfig, AgentState, awg_config_uses_port, xray_config_uses_port};
 
     #[test]

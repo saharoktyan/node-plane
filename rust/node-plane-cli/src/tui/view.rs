@@ -729,7 +729,9 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
             if hovered_hit.is_some_and(|hovered| hovered.area == hit.area) {
                 continue;
             }
-            let chosen = choice_selected(&app.controller, hit.control);
+            let chosen = choice_selected(&app.controller, hit.control)
+                || matches!(hit.control,Control::AccessGrantMode(future) if app.access.editor.as_ref().is_some_and(|e|e.future_view==future))
+                || matches!(hit.control,Control::NodesEditTab(tab) if app.nodes.editor.as_ref().is_some_and(|e|e.tab==tab));
             for y in rect.y..rect.bottom() {
                 for x in rect.x..rect.right() {
                     let cell = &mut frame.buffer_mut()[(x, y)];

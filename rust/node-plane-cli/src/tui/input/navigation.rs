@@ -95,6 +95,7 @@ impl App {
                         | Control::NodesRecovery(_, _)
                         | Control::NodesDiagnosticItem(_)
                         | Control::NodesRecoveryConfirm
+                        | Control::NodesMaintenanceSection(_)
                         | Control::NodesMaintenance
                         | Control::NodesRemove(_)
                         | Control::NodesRemoveConfirm
@@ -500,7 +501,7 @@ impl App {
         // Focus is deliberately separate from activation: no network requests,
         // toggles, page changes or writes happen when the pointer moves.
         match control {
-            Control::AccessSearch | Control::AccessField(_) => {
+            Control::AccessSearch | Control::AccessField(_) | Control::AccessDurationInput => {
                 if let Some(index) = self.access_controls().iter().position(|c| *c == control) {
                     self.access.selected = index;
                 }

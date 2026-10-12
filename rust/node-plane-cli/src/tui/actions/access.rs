@@ -134,13 +134,6 @@ impl App {
                 }
                 None
             }
-            Control::AccessDevices => {
-                if let Some(id) = self.access.card.as_ref().and_then(|v| v["id"].as_str()) {
-                    self.access.notice.clear();
-                    self.access_command(crate::access::Command::Devices(id.into()));
-                }
-                None
-            }
             Control::AccessDeviceItem(index) => {
                 if let Some(devices) = &mut self.access.devices {
                     devices.card = devices.items.get(index).cloned();
@@ -208,6 +201,35 @@ impl App {
                 self.access.selected = 0;
                 None
             }
+            Control::AccessDurationCustom => {
+                if let Some(editor) = &mut self.access.editor {
+                    editor.duration_input = Some(String::new());
+                }
+                self.access.selected = 0;
+                None
+            }
+            Control::AccessDurationInput => {
+                self.focus(control);
+                None
+            }
+            Control::AccessDurationApply => {
+                if let Some(editor) = &mut self.access.editor
+                    && let Some(input) = &editor.duration_input
+                {
+                    match crate::access::expiry_from_duration(input, std::time::SystemTime::now()) {
+                        Ok(date) => {
+                            editor.fields[1] = date;
+                            editor.duration_input = None;
+                            editor.expiry_view = false;
+                            editor.key = uuid::Uuid::new_v4();
+                            self.access.selected = 0;
+                            self.error.clear();
+                        }
+                        Err(error) => self.error = error.to_string(),
+                    }
+                }
+                None
+            }
             Control::AccessExpiryMenu => {
                 if let Some(editor) = &mut self.access.editor {
                     editor.expiry_view = true;
@@ -248,10 +270,13 @@ impl App {
                 None
             }
             Control::AccessExpiryBack => {
-                if let Some(editor) = &mut self.access.editor {
+                if let Some(editor) = &mut self.access.editor
+                    && editor.duration_input.take().is_none()
+                {
                     editor.expiry_view = false;
                 }
                 self.access.selected = 0;
+                self.error.clear();
                 None
             }
             Control::AccessAccountAction(role) => {
@@ -460,7 +485,6 @@ impl App {
                         | Control::AccessSave
                         | Control::AccessProfileAction(_)
                         | Control::AccessAccountAction(_)
-                        | Control::AccessDevices
                         | Control::AccessDeviceItem(_)
                         | Control::AccessDeviceNew
                         | Control::AccessDeviceEdit
@@ -469,6 +493,9 @@ impl App {
                         | Control::AccessDeviceDelete
                         | Control::AccessDeviceConfirm
                         | Control::AccessDevicePage(_)
+                        | Control::AccessDurationCustom
+                        | Control::AccessDurationInput
+                        | Control::AccessDurationApply
                         | Control::AccessExpiryMenu
                         | Control::AccessExpiry(_)
                         | Control::AccessExpiryPage(_)
