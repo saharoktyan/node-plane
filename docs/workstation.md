@@ -18,6 +18,8 @@ Allow at least **70 columns × 30 rows**. Use a larger terminal for tables and l
 node-plane --state-dir /path/to/workstation-data
 ```
 
+On Windows, the installer adds **Node Plane Workstation** to the Start menu. Find it through Windows Search to open Workstation in a terminal. Updating preserves the shortcut; uninstalling Workstation removes it.
+
 ## Connect to a controller
 
 Create an installation profile with a name, host/IP, SSH port and user. On first connection, verify the displayed host-key fingerprint against a trusted source. Enter the SSH password or use the available key-based access.

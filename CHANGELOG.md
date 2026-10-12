@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.3-alpha.88 - 2026-10-12
+
+- Add a Windows Start menu shortcut for Workstation, launching in Windows Terminal when available and removing it on uninstall.
+
 ## 0.4.3-alpha.87 - 2026-10-12
 
 - Preserve mouse hover after clicks and repaint it after control geometry changes.

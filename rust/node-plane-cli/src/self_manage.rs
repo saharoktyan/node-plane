@@ -137,7 +137,12 @@ fn uninstall_dist() -> Result<()> {
         fs::remove_file(updater_path)?;
     }
     #[cfg(windows)]
-    self_replace::self_delete()?;
+    {
+        if let Some(appdata) = dirs::data_dir() {
+            remove_start_menu_shortcut(&appdata)?;
+        }
+        self_replace::self_delete()?;
+    }
     #[cfg(not(windows))]
     fs::remove_file(executable)?;
 
@@ -168,6 +173,16 @@ fn uninstall_dist() -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(any(windows, test))]
+fn remove_start_menu_shortcut(appdata: &Path) -> Result<()> {
+    let shortcut = appdata.join("Microsoft/Windows/Start Menu/Programs/Node Plane Workstation.lnk");
+    match fs::remove_file(shortcut) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error).context("Could not remove the Workstation Start menu shortcut"),
+    }
 }
 
 fn home() -> Result<PathBuf> {
@@ -261,6 +276,19 @@ pub fn restart_workstation(executable: &Path, state_dir: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn shortcut_removal_preserves_other_start_menu_entries() {
+        let root = tempfile::tempdir().unwrap();
+        let programs = root.path().join("Microsoft/Windows/Start Menu/Programs");
+        std::fs::create_dir_all(&programs).unwrap();
+        std::fs::write(programs.join("Node Plane Workstation.lnk"), "shortcut").unwrap();
+        std::fs::write(programs.join("Other.lnk"), "other").unwrap();
+        super::remove_start_menu_shortcut(root.path()).unwrap();
+        assert!(!programs.join("Node Plane Workstation.lnk").exists());
+        assert!(programs.join("Other.lnk").exists());
+        super::remove_start_menu_shortcut(root.path()).unwrap();
+    }
+
     use super::*;
 
     #[test]

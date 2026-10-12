@@ -41,6 +41,35 @@ if (-not $Tag) {
     $Tag = $release.tag_name
 }
 
+function Install-WorkstationShortcut {
+    # Use the stable cargo-dist install path, rather than PATH in this process:
+    # the installer updates PATH for future shells only.
+    $installDir = Join-Path $env:USERPROFILE '.local\bin'
+    if ($env:CARGO_DIST_INSTALL_DIR) { $installDir = $env:CARGO_DIST_INSTALL_DIR }
+    if ($env:CARGO_DIST_FORCE_INSTALL_DIR) { $installDir = $env:CARGO_DIST_FORCE_INSTALL_DIR }
+    $executable = Join-Path $installDir 'node-plane.exe'
+    if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {
+        throw "Installed Workstation executable not found: $executable"
+    }
+    $programs = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
+    New-Item -ItemType Directory -Path $programs -Force | Out-Null
+    $shell = New-Object -ComObject WScript.Shell
+    $shortcut = $shell.CreateShortcut((Join-Path $programs 'Node Plane Workstation.lnk'))
+    $terminal = Get-Command wt.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($terminal) {
+        $shortcut.TargetPath = $terminal.Source
+        $shortcut.Arguments = '-w new new-tab --title "Node Plane Workstation" -d "{0}" "{1}"' -f $env:USERPROFILE, $executable
+    } else {
+        # Console applications open in Windows' configured terminal host.
+        $shortcut.TargetPath = $executable
+        $shortcut.Arguments = ''
+    }
+    $shortcut.WorkingDirectory = $env:USERPROFILE
+    $shortcut.Description = 'Node Plane Workstation'
+    $shortcut.IconLocation = "$executable,0"
+    $shortcut.Save()
+}
+
 $installer = Join-Path ([IO.Path]::GetTempPath()) "node-plane-installer-$([guid]::NewGuid()).ps1"
 try {
     Write-Host "[2/3] Downloading the release installer for $Tag..."
@@ -49,7 +78,8 @@ try {
     Write-Host '[3/3] Installing Workstation...'
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer
     if ($LASTEXITCODE -ne 0) { throw "Workstation installer failed (exit $LASTEXITCODE)." }
-    Write-Host 'Open a new terminal, then run: node-plane'
+    Install-WorkstationShortcut
+    Write-Host 'Open Node Plane Workstation from the Windows Start menu, or run: node-plane'
 } finally {
     Remove-Item -LiteralPath $installer -ErrorAction SilentlyContinue
 }
