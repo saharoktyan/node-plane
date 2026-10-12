@@ -25,6 +25,20 @@ class DevicesPostgresTests(unittest.TestCase):
     setUp = fixture.BackupsPostgresTests.setUp
     drop_schema = fixture.BackupsPostgresTests.drop_schema
 
+    def test_awg_grant_waits_for_first_named_device(self):
+        profile_id = ProfileRepository(self.db).create_profile(runtime_name='alice', display_name='Alice')
+        with self.db.transaction() as conn:
+            conn.execute("INSERT INTO backend_nodes(key,title,region,protocols_json) VALUES ('node','Node','Europe','[\"awg\"]')")
+            conn.execute("INSERT INTO backend_grants VALUES (?,'node','awg')", (profile_id,))
+            self.assertEqual(OperationRepository.record(conn, self.actor, profile_id, set())['status'], 'no_targets')
+        OperationRepository(self.db).initialize_schema()
+        self.assertEqual(DeviceRepository(self.db).list_for_profile(profile_id), [])
+        created = DeviceCommands(self.db).execute(self.actor, str(uuid4()), action='create',
+            profile_id=profile_id, revision=1, display_name='My phone')
+        with self.db.connect() as conn:
+            tasks = conn.execute("SELECT device_id FROM backend_operation_tasks WHERE protocol='awg'").fetchall()
+        self.assertEqual([task['device_id'] for task in tasks], [created['device']['id']])
+
     def test_concurrent_custom_devices_share_parent_revision_fence(self):
         profile_id = ProfileRepository(self.db).create_profile(runtime_name='alice', display_name='Alice')
         start = threading.Barrier(2)
@@ -71,6 +85,9 @@ class DevicesPostgresTests(unittest.TestCase):
         with self.db.transaction() as conn:
             conn.execute("INSERT INTO backend_nodes(key,title,region,protocols_json) VALUES ('node','Node','Europe','[\"awg\"]')")
             conn.execute("INSERT INTO backend_grants VALUES (?,'node','awg')",(profile_id,))
+            # Seed a pre-device peer before simulating the historical schema.
+            DeviceRepository.ensure_default(conn, conn.execute(
+                'SELECT * FROM backend_profiles WHERE id=?', (profile_id,)).fetchone())
             OperationRepository.record(conn,self.actor,profile_id,set())
             task = dict(conn.execute('SELECT * FROM backend_operation_tasks LIMIT 1').fetchone())
             conn.execute('DROP INDEX backend_operation_task_target')
@@ -166,11 +183,14 @@ class DevicesPostgresTests(unittest.TestCase):
         with self.db.connect() as conn:
             self.assertEqual(conn.execute('SELECT runtime_name FROM backend_devices WHERE id=?', (device_id,)).fetchone()['runtime_name'], 'alice')
 
-    def test_existing_grant_migration_and_v1_backup_are_compatible(self):
+    def test_legacy_default_device_and_v1_backup_are_compatible(self):
         profile_id = ProfileRepository(self.db).create_profile(runtime_name='legacy_awg', display_name='Legacy')
         with self.db.transaction() as conn:
             conn.execute("INSERT INTO backend_nodes(key,title,region,protocols_json) VALUES ('node','Node','Europe','[\"awg\"]')")
             conn.execute("INSERT INTO backend_grants VALUES (?,'node','awg')", (profile_id,))
+            # A historical installation already adopted its default device.
+            DeviceRepository.ensure_default(conn, conn.execute(
+                'SELECT * FROM backend_profiles WHERE id=?', (profile_id,)).fetchone())
         OperationRepository(self.db).initialize_schema()
         device = DeviceRepository(self.db).list_for_profile(profile_id)[0]
         backup_id = self.service.create_snapshot()['backup_id']

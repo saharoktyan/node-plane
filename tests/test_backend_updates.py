@@ -10,6 +10,16 @@ from backend.agent_rollout import AgentRolloutService
 
 
 class BackendUpdateTests(TestCase):
+    def test_catalog_pages_use_cache_but_update_admission_fetches_fresh(self):
+        service = self.service()
+        service.versions(self.actor)
+        self.updater.list_available_versions.assert_called_once_with(use_cache=True)
+        self.updater.list_available_versions.return_value = {'status': 'ok', 'versions': []}
+        with self.assertRaises(AccessDenied) as rejected:
+            service.queue(self.actor, str(uuid4()), 'version', target_ref='v0.4.3-alpha.19', branch='dev')
+        self.assertEqual(rejected.exception.code, 'update_target_blocked')
+        self.updater.list_available_versions.assert_called_with(branch='dev')
+
     setUp = BackendHTTPTests.setUp
 
     def service(self, **driver):

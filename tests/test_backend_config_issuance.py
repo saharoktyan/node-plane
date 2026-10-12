@@ -39,6 +39,11 @@ class BackendConfigIssuanceTests(unittest.TestCase):
     def setup_ready_profile(self, protocol='xray'):
         profile_id = ProfileRepository(self.db).create_profile(runtime_name='alice',
             display_name='Alice', owner_account_id=self.admin.id)
+        if protocol == 'awg':
+            # Keep coverage of configurations issued for an existing legacy peer.
+            from backend.devices import DeviceRepository
+            with self.db.transaction() as conn:
+                DeviceRepository.ensure_default(conn, conn.execute('SELECT * FROM backend_profiles WHERE id=?', (profile_id,)).fetchone())
         settings = {'public_host': 'node.example', 'awg_port': 51820,
                     'xray_sni': 'www.cloudflare.com',
                     'xray_tcp_port': 443, 'xray_xhttp_port': 8443, 'xray_xhttp_path': '/assets'}

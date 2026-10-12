@@ -18,7 +18,7 @@ class NodeOverviewService:
             node = conn.execute('SELECT * FROM backend_nodes WHERE key = ?', (node_key,)).fetchone()
             if node is None:
                 raise AccessDenied('resource_not_found', 404)
-            settings_tasks = conn.execute('''SELECT revision, status FROM backend_node_settings_tasks
+            settings_tasks = conn.execute('''SELECT * FROM backend_node_settings_tasks
                 WHERE node_key = ? ORDER BY revision DESC, id DESC''', (node_key,)).fetchall()
             grants = conn.execute('''SELECT g.profile_id, g.protocol, p.frozen, p.expires_at,
                 p.desired_revision, d.profile_id AS deleting
@@ -39,6 +39,9 @@ class NodeOverviewService:
 
         current_settings = next((task['status'] for task in settings_tasks
             if task['revision'] == node['desired_revision']), None)
+        from .node_settings import NodeSettingsService
+        active_settings = next((task for task in settings_tasks
+            if task['status'] in {'awaiting_executor', 'running', 'blocked'}), None)
         try:
             _snapshot(node)
             settings_complete = True
@@ -76,6 +79,10 @@ class NodeOverviewService:
         for grant in grants:
             peers = ([d['id'] for d in devices if d['profile_id']==grant['profile_id']]
                      if grant['protocol']=='awg' else [''])
+            # AWG permission alone does not provision a peer. There is no
+            # runtime state to evaluate until the first device is requested.
+            if not peers:
+                continue
             peer_tasks = [latest.get((grant['profile_id'],grant['protocol'],peer)) for peer in peers]
             expires_at = grant['expires_at']
             active = not grant['frozen'] and not grant['deleting'] and (
@@ -105,6 +112,7 @@ class NodeOverviewService:
                 'state': state, 'desired_revision': node['desired_revision'],
                 'applied_revision': node['applied_revision'],
                 'settings_task_status': current_settings,
+                'settings_operation': NodeSettingsService.public(active_settings) if active_settings else None,
                 'removal_status': removal_status,
                 'settings_complete': settings_complete,
                 'access_total': len(grants), 'last_job': dict(job) if job else None,

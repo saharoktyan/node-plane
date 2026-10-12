@@ -90,8 +90,12 @@ async def show_picker(chat_id, user_id, message_id, profile_id, node_key, bot, b
     items.sort(key=lambda d: (d['display_name'].casefold(), d['id']))
     for item in items:
         await remember_label(state, 'devices', item['id'], item['display_name'])
-    if len(items) == 1 and returning:
+    if len(items) <= 1 and returning:
         await user.show_profile(chat_id, user_id, message_id, profile_id, bot, backend, state)
+        return
+    if not items:
+        await prompt_name(chat_id, user_id, message_id, profile_id, None, bot, backend, state,
+                          node_key=node_key, first_device=True)
         return
     if len(items) == 1 and not force:
         await select_device(chat_id, user_id, message_id, profile_id, node_key,
@@ -126,7 +130,7 @@ async def select_device(chat_id, user_id, message_id, profile_id, node_key, devi
              [user.button(user_id, tr(locale, 'back'), 'device_picker_back', profile_id, node_key)]], state, message_id)
 
 
-async def prompt_name(chat_id, user_id, message_id, profile_id, device_id, bot, backend, state, *, node_key=None):
+async def prompt_name(chat_id, user_id, message_id, profile_id, device_id, bot, backend, state, *, node_key=None, first_device=False):
     if device_id:
         item = await get_device(backend, user_id, profile_id, device_id)
         revision = item['revision']
@@ -136,13 +140,16 @@ async def prompt_name(chat_id, user_id, message_id, profile_id, device_id, bot, 
         profile = await backend.request('GET', f'/api/v1/profiles/{profile_id}', telegram_user_id=user_id)
         revision = profile['desired_revision']
     await state.update_data(device_name_draft={'profile_id': profile_id, 'device_id': device_id,
-        'revision': revision, 'owner': user_id, 'message_id': message_id, 'node_key': node_key})
+        'revision': revision, 'owner': user_id, 'message_id': message_id, 'node_key': node_key,
+        'first_device': first_device})
     await state.set_state(DeviceName.waiting)
     locale = await locale_for(state)
-    await render(bot, chat_id, Screen(tr(locale, 'devices.rename' if device_id else 'devices.add'),
-        (tr(locale, 'devices.name_prompt'),), embedded_buttons=True, navigation=True),
-        [[user.button(user_id, tr(locale, 'back'), 'device_card' if device_id else ('device_picker' if node_key else 'device_list'),
-            profile_id, *((device_id,) if device_id else ((node_key,) if node_key else ())))]], state, message_id)
+    back = user.button(user_id, tr(locale, 'back'), 'profile', profile_id) if first_device else user.button(
+        user_id, tr(locale, 'back'), 'device_card' if device_id else ('device_picker' if node_key else 'device_list'),
+        profile_id, *((device_id,) if device_id else ((node_key,) if node_key else ())))
+    await render(bot, chat_id, Screen(tr(locale, 'devices.first' if first_device else 'devices.rename' if device_id else 'devices.add'),
+        (*((tr(locale, 'devices.first_hint'),) if first_device else ()), tr(locale, 'devices.name_prompt')),
+        embedded_buttons=True, navigation=True), [[back]], state, message_id)
 
 
 @router.message(DeviceName.waiting, F.text, ~F.text.startswith('/'))
@@ -171,7 +178,7 @@ async def name_message(message, bot, backend, state):
             'revision_conflict': 'devices.changed'}.get(error.code, 'action.error.retry')
         await render(bot, message.chat.id, Screen(tr(locale, 'devices.add' if not device_id else 'devices.rename'),
             (tr(locale, key), tr(locale, 'devices.name_prompt')), embedded_buttons=True, navigation=True),
-            [[user.button(message.from_user.id, tr(locale, 'back'), 'device_list', profile_id)]],
+            [[user.button(message.from_user.id, tr(locale, 'back'), 'profile' if draft.get('node_key') else 'device_list', profile_id)]],
             state, draft['message_id'])
         if error.code == 'revision_conflict' or error.status in {401, 403, 404}:
             await state.set_state(None)
@@ -179,6 +186,11 @@ async def name_message(message, bot, backend, state):
     await state.set_state(None)
     await state.update_data(device_name_draft=None)
     if draft.get('node_key'):
+        if draft.get('first_device'):
+            await remember_label(state, 'devices', result['device']['id'], result['device']['display_name'])
+            await select_device(message.chat.id, message.from_user.id, draft['message_id'], profile_id,
+                draft['node_key'], result['device']['id'], bot, backend, state)
+            return
         await show_picker(message.chat.id, message.from_user.id, draft['message_id'], profile_id,
             draft['node_key'], bot, backend, state)
         return

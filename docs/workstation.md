@@ -35,6 +35,10 @@ The header shows connection and loading status. SSH connections are reused acros
 - In the sidebar profile selector, **← / →** switches the installation profile while keeping focus on its name.
 - A **×** marks an unavailable action. Controller sections become available after installation is confirmed.
 
+## Installation diagnostics
+
+Diagnostic first checks the controller over SSH, including services, PostgreSQL and published schema checksums. When the backend is reachable, it checks registered servers in batches: agents, selected protocol containers/configuration structure, versions and host resources. Results from every page are included in the final scrollable report. Missing or incomplete server coverage produces a warning; controller-only results do not certify the entire installation. Recovery of a stopped controller service requires a separate confirmation.
+
 ## Sections
 
 | Section | Purpose |
@@ -44,7 +48,7 @@ The header shows connection and loading status. SSH connections are reused acros
 | Nodes | Search nodes by name/region/code, create a node, run setup, edit settings and diagnose operations |
 | Access | Manage user profiles, access requests, grants and devices |
 | Temporary configs | Create, retrieve and revoke short-lived configurations |
-| Diagnostic | Check controller health and inspect recovery options |
+| Diagnostic | Check controller services/schema and all registered servers; inspect recovery options |
 | Settings | Local installation profiles, appearance, Workstation updates, connection/security and session information |
 
 On startup the content area stays empty until you choose a section. If installation detection is unconfirmed, use **Check installation**.

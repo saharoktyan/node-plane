@@ -645,7 +645,8 @@ def apply_node_settings(intent, path, runner):
                 connection.execute('''INSERT INTO node_settings_fence(node_key, revision, command_id)
                     VALUES (?, ?, ?) ON CONFLICT(node_key) DO UPDATE SET revision = excluded.revision,
                     command_id = excluded.command_id''', (intent['node_key'], intent['revision'], intent['command_id']))
-            response = runner(intent, lock.fileno())
+            with settings_progress(intent, path):
+                response = runner(intent, lock.fileno())
             if (not isinstance(response, dict) or set(response) != {'summary', 'payload_json'}
                     or any(not isinstance(value, str) for value in response.values())):
                 raise ValueError('invalid node settings result')
@@ -766,6 +767,28 @@ def inspect_node_settings_for_repair(intent):
                                  capture_output=True, text=True, timeout=30).stdout.strip() == 'true'
                   for name in containers)
     return {'config_matches': matches, 'containers_running': running}
+
+
+@contextmanager
+def settings_progress(intent, path):
+    keys = ('NODE_PLANE_OPERATION_PROGRESS_FILE', 'NODE_PLANE_OPERATION_PROGRESS_ID')
+    previous = {key: os.environ.get(key) for key in keys}
+    try:
+        identity = str(UUID(intent['command_id']))
+    except ValueError:
+        # Legacy command identities remain valid; observation is optional.
+        yield
+        return
+    os.environ[keys[0]] = str(Path(path).parent / 'operation-progress' / (identity + '.json'))
+    os.environ[keys[1]] = identity
+    try:
+        yield
+    finally:
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
 
 def installation_step(stage):

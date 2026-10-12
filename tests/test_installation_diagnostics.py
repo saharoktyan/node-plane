@@ -80,6 +80,15 @@ class InstallationDiagnosticsTests(unittest.TestCase):
             self.assertEqual(check['status'], 'error')
             self.assertIn('other installation', check['detail'])
 
+    def test_schema_mismatch_is_reported_and_does_not_offer_service_repair(self):
+        with patch.object(diagnostics, 'installed_database', return_value={'status':'ok','schema_valid':False,'maintenance':False}), \
+             patch.object(diagnostics, 'unit_state', return_value={'LoadState':'loaded','ActiveState':'failed'}), \
+             patch.object(diagnostics.urllib.request, 'urlopen', side_effect=OSError):
+            report = diagnostics.observe()
+        self.assertEqual(report['scope'], 'controller')
+        self.assertEqual(next(c for c in report['checks'] if c['id']=='schema')['status'], 'error')
+        self.assertFalse(any('repair' in check for check in report['checks']))
+
     def test_recovery_rechecks_after_diagnosis_and_rejects_unknown_units(self):
         conn, driver, state = self.database_case()
         with patch.dict(sys.modules, {'config': SimpleNamespace(POSTGRES_DSN='secret'), 'psycopg': driver}), \

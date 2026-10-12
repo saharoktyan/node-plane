@@ -13,19 +13,20 @@ class BackendDeviceIdentityTests(unittest.TestCase):
     prepare = test_backend_operations.BackendOperationTests.prepare
     grants = test_backend_operations.BackendOperationTests.grants
 
-    def test_first_awg_grant_adopts_identity_without_extra_tasks(self):
+    def test_first_awg_grant_does_not_create_device_or_peer_even_after_restart(self):
         profile_id = self.prepare()
         result = self.grants(profile_id, 1, [{'node_key': 'node', 'protocol': 'awg'}])
         self.assertEqual(result.status_code, 200, result.text)
-        row = self.db.connection.execute('SELECT * FROM backend_devices WHERE profile_id=?', (profile_id,)).fetchone()
-        profile = self.db.connection.execute('SELECT * FROM backend_profiles WHERE id=?', (profile_id,)).fetchone()
-        self.assertEqual(row['runtime_name'], profile['runtime_name'])
-        self.assertEqual(row['display_name'], 'Device 1')
+        self.assertEqual(DeviceRepository(self.db).list_for_profile(profile_id), [])
         tasks = self.db.connection.execute('SELECT intent_json FROM backend_operation_tasks').fetchall()
-        self.assertEqual(len(tasks), 1)
-        self.assertEqual(json.loads(tasks[0]['intent_json'])['runtime_name'], row['runtime_name'])
+        self.assertEqual(len(tasks), 0)
+        self.assertEqual(result.json()['runtime_status'], 'no_targets')
+        overview = self.client.get('/api/v1/nodes/node/overview', headers=self.headers_for())
+        self.assertEqual(overview.status_code, 200, overview.text)
+        self.assertEqual(overview.json()['attention'], 0)
+        self.assertEqual(overview.json()['pending'], 0)
         OperationRepository(self.db).initialize_schema()
-        self.assertEqual(self.db.connection.execute('SELECT COUNT(*) FROM backend_devices').fetchone()[0], 1)
+        self.assertEqual(self.db.connection.execute('SELECT COUNT(*) FROM backend_devices').fetchone()[0], 0)
 
     def test_xray_only_profile_has_no_automatic_device(self):
         profile_id = self.prepare()
@@ -33,9 +34,10 @@ class BackendDeviceIdentityTests(unittest.TestCase):
         self.assertEqual(DeviceRepository(self.db).list_for_profile(profile_id), [])
 
     def test_migration_adopts_historical_awg_after_grants_removed(self):
-        profile_id = self.prepare()
+        profile_id = self.prepare(with_device=True)
         self.grants(profile_id, 1, [{'node_key': 'node', 'protocol': 'awg'}])
         self.grants(profile_id, 2, [])
+        self.db.connection.execute("UPDATE backend_operation_tasks SET device_id='' WHERE protocol='awg'")
         self.db.connection.execute('DELETE FROM backend_devices')
         before = self.db.connection.execute('SELECT intent_json FROM backend_operation_tasks ORDER BY id').fetchall()
         OperationRepository(self.db).initialize_schema()
@@ -46,7 +48,7 @@ class BackendDeviceIdentityTests(unittest.TestCase):
         self.assertEqual([row[0] for row in before], [row[0] for row in after])
 
     def test_retired_device_is_not_recreated_on_profile_edit(self):
-        profile_id = self.prepare()
+        profile_id = self.prepare(with_device=True)
         self.grants(profile_id, 1, [{'node_key': 'node', 'protocol': 'awg'}])
         self.db.connection.execute("UPDATE backend_devices SET status='retired'")
         OperationRepository(self.db).initialize_schema()
@@ -57,7 +59,7 @@ class BackendDeviceIdentityTests(unittest.TestCase):
         self.assertEqual([row[0] for row in rows], ['retired'])
 
     def test_list_authorizes_parent_and_hides_runtime_identity(self):
-        profile_id = self.prepare()
+        profile_id = self.prepare(with_device=True)
         self.grants(profile_id, 1, [{'node_key': 'node', 'protocol': 'awg'}])
         path = f'/api/v1/profiles/{profile_id}/devices'
         response = self.client.get(path, headers=self.headers_for())

@@ -7,6 +7,8 @@ import re
 import threading
 import json
 import urllib.request
+from copy import deepcopy
+from time import monotonic
 from datetime import datetime, timezone
 from typing import Dict, List
 
@@ -17,6 +19,9 @@ from services.backups import maybe_create_pre_action_backup
 UPDATE_UNIT_PREFIX = "node-plane-update"
 _log = logging.getLogger("updates")
 _update_run_lock = threading.Lock()
+_catalog_lock = threading.Lock()
+_catalog_cache = {}
+CATALOG_TTL_SECONDS = 60
 
 
 def _utcnow_iso() -> str:
@@ -242,6 +247,11 @@ def check_for_updates(timeout: int = 60, branch: str | None = None) -> Dict[str,
     result.setdefault("source_dir", _effective_source_root())
     result["checked_at"] = _utcnow_iso()
     app_settings.record_update_check(result)
+    if result.get('status') in {'available', 'up_to_date'}:
+        with _catalog_lock:
+            for key in list(_catalog_cache):
+                if key[0] == selected_branch:
+                    _catalog_cache.pop(key)
     return result
 
 
@@ -267,8 +277,27 @@ def get_release_changelog(ref: str) -> str:
         return ''
 
 
-def list_available_versions(branch: str | None = None, timeout: int = 60) -> Dict[str, object]:
+def list_available_versions(branch: str | None = None, timeout: int = 60, *, use_cache: bool = False) -> Dict[str, object]:
     selected_branch = str(branch or app_settings.get_updates_branch()).strip().lower() or "main"
+    if not use_cache:
+        # Update admission always validates against a fresh catalog.
+        return _list_available_versions(selected_branch, timeout)
+    key = (selected_branch, APP_ROOT, APP_SEMVER, APP_COMMIT,
+           os.environ.get('NODE_PLANE_GITHUB_REPO', 'saharoktyan/node-plane'))
+    # Coalesce concurrent screen/page requests into one catalog fetch.
+    with _catalog_lock:
+        cached = _catalog_cache.get(key)
+        if cached and monotonic() - cached[0] < CATALOG_TTL_SECONDS:
+            return deepcopy(cached[1])
+        value = _list_available_versions(selected_branch, timeout)
+        if value.get('status') == 'ok':
+            _catalog_cache[key] = (monotonic(), deepcopy(value))
+        else:
+            _catalog_cache.pop(key, None)
+        return value
+
+
+def _list_available_versions(selected_branch: str, timeout: int) -> Dict[str, object]:
     try:
         env = os.environ.copy()
         env["NODE_PLANE_SOURCE_DIR"] = _effective_source_root()

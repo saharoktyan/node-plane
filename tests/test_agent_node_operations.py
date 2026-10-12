@@ -28,11 +28,14 @@ class AgentNodeOperationTests(unittest.TestCase):
                     self.assertEqual(facts[protocol + '_running'], running)
 
     def test_host_metrics_use_available_memory_and_runtime_filesystem(self):
-        with patch.object(MODULE.Path,'read_text',return_value='MemTotal: 1000 kB\nMemAvailable: 200 kB\n'), \
-             patch.object(MODULE.os,'statvfs',return_value=SimpleNamespace(f_blocks=100,f_bavail=7)), \
+        with patch.object(MODULE.Path,'read_text',side_effect=['MemTotal: 1000 kB\nMemAvailable: 200 kB\n', '86400.9 1000']), \
+             patch.object(MODULE.os,'statvfs',return_value=SimpleNamespace(f_blocks=100,f_bavail=7,f_frsize=4096)), \
              patch.object(MODULE.os,'getloadavg',return_value=(4.5,2,1)), \
              patch.object(MODULE.os,'cpu_count',return_value=2):
-            self.assertEqual(MODULE.host_metrics(),{'ram_used_percent':80.0,'disk_free_percent':7.0,'load1':4.5,'cpus':2})
+            self.assertEqual(MODULE.host_metrics(),{'ram_used_percent':80.0,'disk_free_percent':7.0,
+                'load1':4.5,'load5':2,'load15':1,'cpus':2,'uptime_seconds':86400,
+                'ram_total_bytes':1024000,'ram_available_bytes':204800,
+                'disk_total_bytes':409600,'disk_free_bytes':28672})
 
     def test_missing_host_measurements_are_not_reported_as_healthy_zero(self):
         with patch.object(MODULE.Path,'read_text',side_effect=OSError), \

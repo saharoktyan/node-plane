@@ -63,10 +63,9 @@ class DeviceRepository:
         # been removed. Adoption must not issue any new mutation or rotate keys.
         profiles = conn.execute('''SELECT p.* FROM backend_profiles p
             WHERE NOT EXISTS (SELECT 1 FROM backend_devices d WHERE d.profile_id=p.id)
-            AND (EXISTS (SELECT 1 FROM backend_grants g WHERE g.profile_id=p.id AND g.protocol='awg')
-                OR EXISTS (SELECT 1 FROM backend_operation_tasks t
+            AND EXISTS (SELECT 1 FROM backend_operation_tasks t
                     JOIN backend_operations o ON o.id=t.operation_id
-                    WHERE o.profile_id=p.id AND t.protocol='awg'))
+                    WHERE o.profile_id=p.id AND t.protocol='awg' AND t.device_id='')
             ORDER BY p.id''').fetchall()
         for profile in profiles:
             cls.ensure_default(conn, profile)

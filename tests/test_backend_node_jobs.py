@@ -7,6 +7,7 @@ from tests.test_backend_identity import Database
 from backend.identity_repository import SQLIdentityRepository
 from backend.authorization import Actor, Account, Principal, PrincipalKind, ADMIN_PERMISSIONS, AccessDenied
 from backend.profiles import ProfileRepository
+from backend.devices import DeviceRepository
 from backend.profile_commands import ProfileCommands
 from backend.nodes import NodeService
 from backend.node_settings import NodeSettingsService
@@ -96,6 +97,9 @@ class BackendNodeJobTests(unittest.TestCase):
 
     def test_reinstall_fences_config_issuance_and_reprovisions_with_new_revision(self):
         profile = ProfileRepository(self.db).create_profile(runtime_name='alice', display_name='Alice', owner_account_id=self.actor.account.id)
+        # This scenario covers a previously provisioned AWG device.
+        DeviceRepository.ensure_default(self.db.connection, self.db.connection.execute(
+            'SELECT * FROM backend_profiles WHERE id=?', (profile,)).fetchone())
         self.db.connection.execute('INSERT INTO backend_grants VALUES (?, ?, ?)', (profile, 'n1', 'awg'))
         key = str(uuid4())
         job = self.queue(key=key)

@@ -90,18 +90,27 @@ def host_metrics():
         total, available = memory['MemTotal'], memory['MemAvailable']
         if total > 0 and 0 <= available <= total:
             metrics['ram_used_percent'] = round(100 * (total - available) / total, 1)
+            metrics['ram_total_bytes'] = total * 1024
+            metrics['ram_available_bytes'] = available * 1024
     except (OSError, ValueError, KeyError, IndexError):
         pass
     try:
         disk = os.statvfs(ROOT)
         if disk.f_blocks > 0:
             metrics['disk_free_percent'] = round(100 * disk.f_bavail / disk.f_blocks, 1)
+            metrics['disk_total_bytes'] = disk.f_blocks * disk.f_frsize
+            metrics['disk_free_bytes'] = disk.f_bavail * disk.f_frsize
     except OSError:
         pass
     try:
-        metrics['load1'] = round(os.getloadavg()[0], 2)
+        for key, value in zip(('load1', 'load5', 'load15'), os.getloadavg()):
+            metrics[key] = round(value, 2)
         metrics['cpus'] = os.cpu_count() or 1
     except OSError:
+        pass
+    try:
+        metrics['uptime_seconds'] = int(float(Path('/proc/uptime').read_text().split()[0]))
+    except (OSError, ValueError, IndexError):
         pass
     return metrics
 

@@ -20,6 +20,7 @@ from .routers import navigation
 from . import update_panels
 from .polling import BotTokenConflict, CONFLICT_EXIT_CODE, guarded_polling
 from .timings import ActionTimings, TelegramTimings
+from .callback_answers import CallbackAnswerScope, ConcurrentCallbackAnswers
 
 async def main() -> None:
     logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(levelname)s | %(name)s | %(message)s')
@@ -32,11 +33,13 @@ async def main() -> None:
     base_url = os.environ.get('NODE_PLANE_BACKEND_URL', 'http://127.0.0.1:8080')
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
         async with Bot(token=token) as bot:
+            bot.session.middleware(ConcurrentCallbackAnswers())
             bot.session.middleware(TelegramTimings())
             await register_commands(bot)
             backend = BackendClient(session, base_url, adapter_token)
             dispatcher = Dispatcher()
             dispatcher.update.outer_middleware(ActionTimings())
+            dispatcher.update.outer_middleware(CallbackAnswerScope())
             dispatcher.update.outer_middleware(BackendMiddleware(backend))
             dispatcher.update.outer_middleware(LocaleMiddleware())
             dispatcher.update.outer_middleware(NotificationStateMiddleware())

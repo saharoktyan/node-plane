@@ -21,6 +21,19 @@ Timing entries start with `NP_TIMING`. Telegram entries share an `action_id`:
 - `telegram`: one Telegram API call, including retries performed by the session.
 - `action`: total update-handler duration, outcome and sums for the stages above.
 
+Empty callback acknowledgements run concurrently with screen loading. The action
+scope waits for them before completion, so aiogram's handler duration can remain
+longer than the time required to submit the screen. `screen_submitted` entries and
+the action summary's `screen_submitted_ms` report the time from handler entry until
+Telegram accepts the latest screen message. This still excludes display latency
+on the user's device. Text, alert and URL callback answers remain synchronous.
+
+Catalog browsing uses a successful snapshot for up to 60 seconds, shared between
+pages and concurrent requests. The first request after expiration fetches the
+catalog. Successful explicit update checks invalidate the branch's snapshot in
+the API process. Automatic checks in the separate worker become visible through
+the catalog's TTL. Update admission always fetches a fresh catalog.
+
 `GetUpdates` long polling is excluded. Background refreshes and deliveries outside
 an active action use `action_id=-`. Stage sums can exceed total time when requests
 run concurrently; they are not a serial decomposition. Rendering performed inside

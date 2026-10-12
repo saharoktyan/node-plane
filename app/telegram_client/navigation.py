@@ -26,6 +26,9 @@ def parent_path(callback, locale, data):
             return (*menu, Breadcrumb(tr(locale, 'home.get_config'), callback))
         if name in {'account_info', 'account_profile'}:
             return (*menu, Breadcrumb(tr(locale, 'home.account'), callback))
+        if name in {'account_details', 'account_nodes_page'} and len(args) >= 2:
+            return (*menu, member(tr(locale, 'home.account'), 'account_profile', args[0], args[1]),
+                    Breadcrumb(tr(locale, 'account.details'), callback))
         if name == 'member_settings':
             return (*menu, Breadcrumb(tr(locale, 'home.settings'), callback))
         if name in {'node', 'protocol', 'device_picker', 'device_picker_back'} and len(args) >= 2:
@@ -38,7 +41,7 @@ def parent_path(callback, locale, data):
                 return (*path, member(tr(locale, 'protocol.awg'), 'protocol', profile, key, 'awg'),
                         member(tr(locale, 'devices.title'), 'device_picker', profile, key))
             if len(args) == 3 and args[2] in {'awg', 'xray'}:
-                return (*path, Breadcrumb(tr(locale, 'protocol.' + args[2]), callback))
+                return (*path, Breadcrumb(tr(locale, 'transport.title' if args[2] == 'xray' else 'protocol.awg'), callback))
             return ()
         if name in {'device_profiles', 'device_list'}:
             return (*menu, Breadcrumb(tr(locale, 'devices.title'), callback))

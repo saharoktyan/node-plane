@@ -430,6 +430,50 @@ async fn discover(
 
 /// Inventory and explicit recovery through existing backend contracts. No
 /// installation dispatch is replayed and no generic unlock endpoint exists.
+pub async fn diagnose_servers(
+    request: &Request,
+    session: &mut SshSession,
+    tx: &mpsc::Sender<Event>,
+) -> Result<Vec<Value>> {
+    let session_id = Uuid::new_v4();
+    let credential = backend::authenticate(session, session_id, &request.workflow.account, tx).await?;
+    let result = async {
+        let mut checks = Vec::new();
+        let mut offset = 0;
+        let mut seen = std::collections::HashSet::new();
+        let mut expected_total = None;
+        for _ in 0..200 {
+            let _ = tx.send(Event::Stage(format!("Checking agents and protocols · {} servers checked", seen.len())));
+            let page = backend::request(session, &credential, Method::GET,
+                &format!("/api/v1/system/recovery/fleet?offset={offset}"), None, None).await?;
+            let total = page["total"].as_u64().context("Invalid server diagnostic total")?;
+            if expected_total.is_some_and(|previous| previous != total) {
+                anyhow::bail!("Server registry changed during diagnostics; repeat the check");
+            }
+            expected_total = Some(total);
+            for item in page["items"].as_array().context("Invalid server diagnostic page")? {
+                let key = item["node_key"].as_str().context("Missing server identity")?;
+                ensure!(seen.insert(key.to_string()), "Repeated server diagnostic page");
+                for check in item["checks"].as_array().context("Invalid server checks")? {
+                    checks.push(json!({"id":format!("server:{key}:{}", text(&check["id"])),
+                        "status":check["status"], "detail":format!("{} · {}: {}",text(&item["title"]),text(&check["id"]),text(&check["detail"]))}));
+                }
+            }
+            if page["next_offset"].is_null() {
+                ensure!(seen.len() as u64 == total, "Server diagnostics are incomplete");
+                checks.push(json!({"id":"servers:coverage","status":"ok","detail":format!("All {total} registered servers checked")}));
+                return Ok(checks);
+            }
+            let next = page["next_offset"].as_u64().context("Invalid server diagnostic offset")?;
+            ensure!(next > offset, "Server diagnostic pagination did not advance");
+            offset = next;
+        }
+        anyhow::bail!("Server diagnostics reached the page limit; coverage is incomplete")
+    }.await;
+    let _ = backend::revoke(session, session_id).await;
+    result
+}
+
 pub async fn recover_operations(
     request: &Request,
     session: &mut SshSession,

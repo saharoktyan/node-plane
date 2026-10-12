@@ -102,9 +102,11 @@ class NodeSettingsService:
 
     @staticmethod
     def public(row):
+        from .installation_progress import read_progress
         result = json.loads(row['result_json']) if row['result_json'] else {}
         return {'id': row['id'], 'node_key': row['node_key'], 'revision': row['revision'],
-                'status': row['status'], **({'error_code': result['error_code']} if 'error_code' in result else {})}
+                'status': row['status'], 'progress': read_progress(row),
+                **({'error_code': result['error_code']} if 'error_code' in result else {})}
 
     def get(self, actor, task_id):
         require_permission(actor, 'nodes.manage')
@@ -309,7 +311,9 @@ class NodeSettingsExecutor:
         if row is None:
             return False
         try:
-            result = self.driver.apply_node_settings(row['id'], json.loads(row['intent_json']))
+            from .installation_progress import observe_node_job
+            with observe_node_job(dict(row, action='apply_settings'), self.driver):
+                result = self.driver.apply_node_settings(row['id'], json.loads(row['intent_json']))
         except Exception as error:
             from .recovery import failure_code
             result = json.dumps({'error_code': failure_code(error)})

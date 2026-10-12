@@ -305,7 +305,9 @@ pub(in crate::tui) fn draw_node_diagnostics(
         }
         actions.push(("Refresh", Control::NodesDiagnostics));
     } else {
-        let content = Layout::vertical([Constraint::Length(6), Constraint::Min(1)]).split(rows[0]);
+        let diagnostic_height = facts["checks"].as_array().filter(|items| !items.is_empty())
+            .map_or(6, |items| (items.len() + 2).min(usize::from(rows[0].height.saturating_sub(5)))) as u16;
+        let content = Layout::vertical([Constraint::Length(diagnostic_height), Constraint::Min(1)]).split(rows[0]);
         let lines = if let Some(error) = facts["error_code"].as_str() {
             vec![
                 Line::from(format!(
@@ -318,6 +320,21 @@ pub(in crate::tui) fn draw_node_diagnostics(
                 )),
                 Line::from("Recovery operations are listed below."),
             ]
+        } else if let Some(checks) = facts["checks"].as_array().filter(|items| !items.is_empty()) {
+            let mut checks: Vec<_> = checks.iter().collect();
+            checks.sort_by_key(|check| match check["status"].as_str() { Some("error") => 0, Some("warning") => 1, _ => 2 });
+            let capacity = usize::from(content[0].height).saturating_sub(1);
+            let visible = if checks.len() > capacity { capacity.saturating_sub(1) } else { capacity };
+            let mut lines = vec![Line::from(format!("Errors: {} · Warnings: {}",
+                checks.iter().filter(|check| check["status"] == "error").count(),
+                checks.iter().filter(|check| check["status"] == "warning").count()))];
+            lines.extend(checks.iter().take(visible).map(|check| Line::from(format!("{} · {}",
+                check["status"].as_str().unwrap_or("unknown").to_uppercase(),
+                check["id"].as_str().unwrap_or("Check").replace(':', " · ").replace('_', " ")))));
+            if checks.len() > visible {
+                lines.push(Line::from(format!("{} more checks · enlarge the terminal or run installation Diagnostics", checks.len() - visible)));
+            }
+            lines
         } else {
             [
                 ("docker", "Docker"),

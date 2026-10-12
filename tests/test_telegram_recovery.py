@@ -10,6 +10,27 @@ from tests import test_telegram_client as fixture
 class RecoveryScreenTests(IsolatedAsyncioTestCase):
     setUp = fixture.TelegramFlowTests.setUp
 
+    async def test_fleet_diagnostics_show_coverage_details_and_server_navigation(self):
+        backend = SimpleNamespace(request=AsyncMock(return_value={
+            'errors': 1, 'warnings': 0, 'total': 8, 'offset': 0, 'page_size': 5, 'next_offset': 5,
+            'items': [{'node_key': 'lv1', 'title': 'Test server', 'checks': [
+                {'id': 'awg:running', 'status': 'error', 'detail': 'Container stopped'},
+                {'id': 'agent', 'status': 'ok', 'detail': 'Responding'}]}]}))
+        for locale in ('en', 'ru'):
+            self.state_data['locale'] = locale
+            with patch.object(recovery, 'render', new_callable=AsyncMock) as draw:
+                await recovery.fleet_diagnostics(self.query, recovery.RecoveryFleet(), self.bot, backend, self.state)
+            screen, rows = draw.call_args.args[2:4]
+            self.assertIn('1/8', screen.lines[0])
+            self.assertIn(recovery.RecoveryFleet(offset=5).pack(), [b.callback_data for row in rows for b in row])
+            self.assertTrue(screen.rich(rows).blocks)
+            callback = screen.sections[0].sections[0].inline_rows[0][2].callback_data
+            self.query.data = callback
+            with patch.object(recovery, 'render', new_callable=AsyncMock) as detail:
+                await recovery.recovery_detail(self.query, self.bot, self.state)
+            self.assertIn('Container stopped', detail.call_args.args[2].lines)
+            self.assertEqual(detail.call_args.args[3][0][0].callback_data, recovery.RecoveryFleet().pack())
+
     async def test_audit_is_rich_in_both_languages_with_collapsed_attribution(self):
         event = {'occurred_at': '2026-10-07T12:00:00+00:00', 'account_label': '@operator',
             'action': 'POST /api/v1/system/updates/run', 'phase': 'completed', 'http_status': 202,

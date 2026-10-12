@@ -12,8 +12,8 @@ The navigation line at the top shows your location. Click a parent item to retur
 
 ## User actions
 
-- **Get config:** choose a server, protocol and Xray transport when choices are available. For AWG, choose a device when there is more than one. Download the file, use the URI or scan the QR with a compatible VPN client.
-- **Profile:** view access status, expiry, allowed protocols and available device actions.
+- **Get config:** choose a server, protocol and Xray transport when choices are available. On your first AWG request, enter a name for your device. Access approval alone does not create a device. When you have several devices, choose one. The preparation screen refreshes automatically while the device and configuration are being prepared; Back returns to the server list. Download the file, use the URI or scan the QR with a compatible VPN client.
+- **Profile:** view access status, expiry, server count and total traffic. **Details** opens account information, configuration statistics and the server/protocol breakdown.
 - **Settings:** change available personal preferences.
 - **Notifications:** read administrator announcements. This section is hidden when empty. **Close** closes the message; **Dismiss** also removes it from your notification list.
 
@@ -28,7 +28,17 @@ The administrator menu provides servers, profiles, access requests, updates, set
 3. [Configure installation defaults and policies](settings.md).
 4. [Update, back up and inspect alerts](maintenance.md).
 
+Overview shows server/profile counts, queued/running/blocked maintenance tasks, alerts needing attention, automatic backup settings, the last backup task and the last known update check. Empty request/problem-server entries are hidden. Open Recovery, Alerts, Updates or Backups directly from the summary. Refresh reloads saved state; server availability is checked separately with Probe. The `/status` command opens this same overview.
+
+In a server card, **Probe** reads the agent and Docker state, selected protocol containers and configuration structure, configured TCP/UDP ports, host resources and agent/runtime versions. The result includes its observation time and response duration. Missing measurements are unknown; unselected protocols are omitted. Probe does not apply settings or verify a VPN connection from a client.
+
 Temporary configurations are available in administrator settings. They have their own list and revocation actions; see [Temporary configurations](temporary-configs.md).
+
+## Diagnostics
+
+Controller diagnostics checks release files, environment keys, PostgreSQL, published migration checksums, systemd services, backend readiness and blocked maintenance jobs. **Server diagnostics** opens live checks for five servers per page: agent connectivity/version, Docker, selected protocol containers/configuration structure, pending settings, runtime version and host resource pressure. A failure on one server preserves results for the others. Disabled servers are marked as skipped. Each page states how many registered servers it covers; it is not a fleet-wide health certificate. Open a check for its explanation or the server card for recovery.
+
+These checks inspect local services and configuration structure. A real VPN client connection remains a separate end-to-end test.
 
 ## Operation progress
 

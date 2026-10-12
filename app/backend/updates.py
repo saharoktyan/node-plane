@@ -63,7 +63,7 @@ class UpdateService:
 
     def versions(self, actor, offset=0, limit=8):
         require_permission(actor, 'settings.manage')
-        value = self.updater.list_available_versions()
+        value = self.updater.list_available_versions(use_cache=True)
         items = value.get('versions', [])
         return {'status': value.get('status'), 'branch': value.get('branch'),
                 'items': items[offset:offset + limit], 'offset': offset,

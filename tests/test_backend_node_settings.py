@@ -13,6 +13,25 @@ from tests.test_backend_http import BackendHTTPTests
 class BackendNodeSettingsTests(unittest.TestCase):
     setUp = BackendHTTPTests.setUp
 
+    def test_overview_exposes_pending_operation_and_reads_its_verified_progress(self):
+        import os
+        import tempfile
+        from unittest.mock import patch
+        from backend.installation_progress import progress_path, write_stage
+        self.create()
+        queued = self.queue().json()
+        headers = {**self.headers, 'X-Node-Plane-Telegram-User-ID': '101'}
+        overview = self.client.get('/api/v1/nodes/n1/overview', headers=headers).json()
+        self.assertEqual(overview['settings_operation']['id'], queued['id'])
+        self.assertEqual(overview['settings_operation']['status'], 'awaiting_executor')
+        self.db.connection.execute("UPDATE backend_node_settings_tasks SET status='running' WHERE id=?", (queued['id'],))
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {'NODE_PLANE_SHARED_DIR': directory}):
+            write_stage(progress_path(queued['id']), queued['id'], 'protocol_deploy')
+            response = self.client.get('/api/v1/node-settings-operations/' + queued['id'], headers=headers)
+            self.assertEqual(response.json()['progress']['stage'], 'protocol_deploy')
+            overview = self.client.get('/api/v1/nodes/n1/overview', headers=headers).json()
+            self.assertEqual(overview['settings_operation']['progress']['stage'], 'protocol_deploy')
+
     def test_verified_auto_fallback_is_persisted_without_rewriting_command(self):
         self.create()
         with self.db.transaction() as conn:

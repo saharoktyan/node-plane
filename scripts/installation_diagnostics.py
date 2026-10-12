@@ -68,7 +68,14 @@ def database(action=None):
             count = conn.execute(f"SELECT COUNT(*) FROM {table} WHERE status='blocked'").fetchone()[0]
             if count:
                 blocked[table.removeprefix('backend_')] = count
-        return {'status': 'ok', 'maintenance': maintenance, 'blocked': blocked}
+        try:
+            from db import get_db
+            from db.migrations import check_schema
+            check_schema(get_db())
+            schema_valid = True
+        except Exception:
+            schema_valid = False
+        return {'status': 'ok', 'maintenance': maintenance, 'blocked': blocked, 'schema_valid': schema_valid}
 
 
 def installed_database(action=None):
@@ -122,7 +129,10 @@ def observe():
     db = installed_database()
     add('database', 'ok' if db['status'] == 'ok' else 'error',
         'PostgreSQL connection and maintenance schema verified' if db['status'] == 'ok' else 'PostgreSQL or installed maintenance schema unavailable; inspect configuration/dependencies')
-    permitted = db.get('status') == 'ok' and not db.get('maintenance', True)
+    permitted = db.get('status') == 'ok' and not db.get('maintenance', True) and db.get('schema_valid', True)
+    if 'schema_valid' in db:
+        add('schema', 'ok' if db['schema_valid'] else 'error',
+            'Published schema revisions and checksums verified' if db['schema_valid'] else 'Schema revisions or checksums do not match the installed release')
     if db.get('maintenance'):
         add('maintenance', 'warning', 'Controller maintenance is active or blocked; automatic service recovery is unavailable')
     for unit in UNITS:
@@ -148,7 +158,7 @@ def observe():
         add('blocked:' + table, 'warning', f'{table}: {count} blocked operations; preserve identity and use operation-specific recovery')
     errors = sum(c['status'] == 'error' for c in checks)
     warnings = sum(c['status'] == 'warning' for c in checks)
-    return {'version': 1, 'checks': checks, 'errors': errors, 'warnings': warnings}
+    return {'version': 1, 'scope': 'controller', 'checks': checks, 'errors': errors, 'warnings': warnings}
 
 
 def main():

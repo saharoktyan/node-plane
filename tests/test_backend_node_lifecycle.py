@@ -26,7 +26,7 @@ class BackendNodeLifecycleTests(unittest.TestCase):
             frozenset({'maintenance.manage'}), self.admin.id), self.admin)
 
     def test_drain_supersedes_queued_ensure_and_revokes_historical_targets(self):
-        profile = self.prepare()
+        profile = self.prepare(with_device=True)
         self.grants(profile, 1, [{'node_key': 'node', 'protocol': 'awg'}])
         self.grants(profile, 2, [])
         self.grants(profile, 3, [{'node_key': 'node', 'protocol': 'awg'}])
@@ -50,13 +50,13 @@ class BackendNodeLifecycleTests(unittest.TestCase):
         self.assertEqual(self.grants(profile, 5, [{'node_key': 'node', 'protocol': 'awg'}]).status_code, 422)
 
     def test_drain_without_profiles_is_ready_for_later_runtime_cleanup(self):
-        self.prepare()
+        self.prepare(with_device=True)
         lifecycle = NodeLifecycle(self.db)
         self.assertEqual(lifecycle.start_drain(self.actor(), 'node')['operation_ids'], [])
         self.assertTrue(lifecycle.drain_status(self.actor(), 'node')['revocations_complete'])
 
     def test_maintenance_counts_profiles_once_across_protocols(self):
-        profile = self.prepare()
+        profile = self.prepare(with_device=True)
         lifecycle = NodeLifecycle(self.db)
         self.assertEqual(lifecycle.overview(self.actor(), 'node')['affected_profiles'], 0)
         self.grants(profile, 1, [{'node_key': 'node', 'protocol': 'awg'},
@@ -68,7 +68,7 @@ class BackendNodeLifecycleTests(unittest.TestCase):
         self.assertEqual(response.json()['affected_profiles'], 1)
 
     def test_cleanup_retry_cannot_advance_past_observed_phase(self):
-        self.prepare()
+        self.prepare(with_device=True)
         lifecycle = NodeLifecycle(self.db)
         lifecycle.start_drain(self.actor(), 'node')
         calls = []
@@ -89,7 +89,7 @@ class BackendNodeLifecycleTests(unittest.TestCase):
         self.assertEqual(calls, ['prepare', 'delete_runtime'])
 
     def test_rejected_uninstall_can_retry_but_transport_failure_stays_uncertain(self):
-        self.prepare()
+        self.prepare(with_device=True)
         lifecycle = NodeLifecycle(self.db)
         lifecycle.start_drain(self.actor(), 'node')
         class Driver:
@@ -115,7 +115,7 @@ class BackendNodeLifecycleTests(unittest.TestCase):
         self.assertEqual(lifecycle.overview(self.actor(), 'node')['cleanup_phase'], 'uninstall_uncertain')
 
     def test_drain_waits_for_active_agent_rollout(self):
-        self.prepare()
+        self.prepare(with_device=True)
         rollout_id = str(uuid4())
         with self.db.transaction() as conn:
             conn.execute('''INSERT INTO backend_agent_rollouts
@@ -131,7 +131,7 @@ class BackendNodeLifecycleTests(unittest.TestCase):
         self.assertEqual(lifecycle.start_drain(self.actor(), 'node')['status'], 'draining')
 
     def test_blocked_delete_does_not_claim_revocation_complete(self):
-        profile = self.prepare()
+        profile = self.prepare(with_device=True)
         self.grants(profile, 1, [{'node_key': 'node', 'protocol': 'awg'}])
         lifecycle = NodeLifecycle(self.db)
         lifecycle.start_drain(self.actor(), 'node')
@@ -143,7 +143,7 @@ class BackendNodeLifecycleTests(unittest.TestCase):
         self.assertEqual(status['blocked_tasks'], 1)
 
     def test_drain_retries_revocation_for_target_without_current_grant(self):
-        profile = self.prepare()
+        profile = self.prepare(with_device=True)
         self.grants(profile, 1, [{'node_key': 'node', 'protocol': 'xray'}])
         self.grants(profile, 2, [])
         driver = FakeDriver()
@@ -158,7 +158,7 @@ class BackendNodeLifecycleTests(unittest.TestCase):
         self.assertEqual(driver.calls[-1][1]['desired_revision'], 4)
 
     def test_drain_rolls_back_when_outbox_fails(self):
-        profile = self.prepare()
+        profile = self.prepare(with_device=True)
         self.grants(profile, 1, [{'node_key': 'node', 'protocol': 'awg'}])
         with self.db.transaction() as conn:
             conn.execute('''CREATE TRIGGER fail_drain BEFORE INSERT ON backend_node_drains
@@ -170,7 +170,7 @@ class BackendNodeLifecycleTests(unittest.TestCase):
         self.assertEqual(self.db.connection.execute('SELECT desired_revision FROM backend_profiles WHERE id = ?', (profile,)).fetchone()[0], 2)
 
     def test_drain_rejects_non_admin(self):
-        self.prepare()
+        self.prepare(with_device=True)
         account = self.identities.resolve_telegram(102)
         with self.db.transaction() as conn:
             conn.execute("UPDATE backend_accounts SET status = 'approved' WHERE id = ?", (account.id,))
@@ -182,7 +182,7 @@ class BackendNodeLifecycleTests(unittest.TestCase):
         self.assertEqual(self.db.connection.execute('SELECT enabled FROM backend_nodes WHERE key = ?', ('node',)).fetchone()[0], 1)
 
     def test_cleanup_requires_confirmed_revocation_and_advances_one_phase(self):
-        profile = self.prepare()
+        profile = self.prepare(with_device=True)
         self.grants(profile, 1, [{'node_key': 'node', 'protocol': 'awg'}])
         lifecycle = NodeLifecycle(self.db)
         lifecycle.start_drain(self.actor(), 'node')
@@ -208,7 +208,7 @@ class BackendNodeLifecycleTests(unittest.TestCase):
         self.assertIsNotNone(self.db.connection.execute('SELECT key FROM backend_nodes WHERE key = ?', ('node',)).fetchone())
 
     def test_cleanup_failure_retries_safe_phases_but_not_ambiguous_uninstall(self):
-        self.prepare()
+        self.prepare(with_device=True)
         lifecycle = NodeLifecycle(self.db)
         lifecycle.start_drain(self.actor(), 'node')
         calls = []
@@ -240,7 +240,7 @@ class BackendNodeLifecycleTests(unittest.TestCase):
         self.assertEqual(len({command for command, _ in calls}), 1)
 
     def test_profile_edits_after_cleanup_starts_do_not_address_fenced_node(self):
-        profile = self.prepare()
+        profile = self.prepare(with_device=True)
         self.grants(profile, 1, [{'node_key': 'node', 'protocol': 'xray'}])
         lifecycle = NodeLifecycle(self.db)
         lifecycle.start_drain(self.actor(), 'node')
@@ -258,7 +258,7 @@ class BackendNodeLifecycleTests(unittest.TestCase):
             (operation_id,)).fetchone()[0], 0)
 
     def test_registry_only_removal_retains_uncertainty_and_never_dispatches_again(self):
-        profile = self.prepare()
+        profile = self.prepare(with_device=True)
         self.grants(profile, 1, [{'node_key': 'node', 'protocol': 'awg'}])
         lifecycle = NodeLifecycle(self.db)
         reason = 'VPS subscription expired and agent is unreachable'
@@ -279,7 +279,7 @@ class BackendNodeLifecycleTests(unittest.TestCase):
         self.assertEqual(edited.json()['runtime_status'], 'no_targets')
 
     def test_registry_only_requires_reason_and_admin(self):
-        self.prepare()
+        self.prepare(with_device=True)
         lifecycle = NodeLifecycle(self.db)
         for reason in ('', 'too short', 'x' * 501):
             with self.assertRaises(Exception):
@@ -295,7 +295,7 @@ class BackendNodeLifecycleTests(unittest.TestCase):
         self.assertIsNotNone(self.db.connection.execute('SELECT key FROM backend_nodes WHERE key = ?', ('node',)).fetchone())
 
     def test_registry_retirement_http_uses_worker_lock_and_explicit_confirmation(self):
-        self.prepare()
+        self.prepare(with_device=True)
         payload = {'reason': 'Hosting expired; explicitly leave remote runtime unverified.',
                    'accept_unverified_runtime': True}
         with tempfile.TemporaryDirectory() as shared, patch.dict(os.environ, {'NODE_PLANE_SHARED_DIR': shared}):
@@ -319,7 +319,7 @@ class BackendNodeLifecycleTests(unittest.TestCase):
                 headers=self.headers_for(), json=payload).json(), result.json())
 
     def test_verified_retirement_requires_uninstall_and_host_evidence(self):
-        self.prepare()
+        self.prepare(with_device=True)
         lifecycle = NodeLifecycle(self.db)
         class Verifier:
             calls = 0

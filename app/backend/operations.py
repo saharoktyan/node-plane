@@ -78,9 +78,6 @@ class OperationRepository:
         grants = conn.execute('SELECT node_key, protocol FROM backend_grants WHERE profile_id = ?', (profile_id,)).fetchall()
         current_targets = {(r['node_key'], r['protocol']) for r in grants}
         targets = previous_targets | current_targets
-        if any(protocol == 'awg' for _, protocol in targets):
-            from .devices import DeviceRepository
-            DeviceRepository.ensure_default(conn, profile)
         now = datetime.now(timezone.utc)
         active = not profile['frozen'] and (profile['expires_at'] is None or datetime.fromisoformat(profile['expires_at']) > now)
         conn.execute("""INSERT INTO backend_profile_identities(profile_id, xray_uuid, xray_short_id)
@@ -89,6 +86,8 @@ class OperationRepository:
         operation_id = str(uuid4())
         actionable_targets = []
         for node_key, protocol in sorted(targets):
+            if protocol == 'awg' and not conn.execute('SELECT 1 FROM backend_devices WHERE profile_id=?', (profile_id,)).fetchone():
+                continue
             conn.execute('UPDATE backend_nodes SET enabled = enabled WHERE key = ?', (node_key,))
             # Once cleanup starts, the agent has a durable mutation fence.
             # Later edits of this profile must not create impossible work for

@@ -10,6 +10,50 @@ from tests import test_telegram_client
 
 
 class TelegramDeviceTests(IsolatedAsyncioTestCase):
+    async def test_empty_awg_picker_prompts_name_without_creating_device(self):
+        backend = SimpleNamespace(request=AsyncMock(side_effect=[{'items': []}, {'desired_revision': 7}]))
+        with patch.object(user_devices, 'render', new_callable=AsyncMock) as draw, patch.object(user, 'issue', new_callable=AsyncMock) as issue:
+            await user_devices.show_picker(123, 123, 77, 'profile', 'node', self.bot, backend, self.state)
+            self.assertEqual(draw.call_args.args[2].title, user.tr('en', 'devices.first'))
+            self.assertTrue(all(call.args[0] == 'GET' for call in backend.request.call_args_list))
+            issue.assert_not_awaited()
+        result = {'device': {'id': 'new', 'display_name': 'My phone'}}
+        backend.request.side_effect = None
+        backend.request.return_value = result
+        message = SimpleNamespace(text='My phone', delete=AsyncMock(), from_user=SimpleNamespace(id=123),
+                                  chat=SimpleNamespace(id=123, type='private'))
+        with patch.object(user_devices, 'select_device', new_callable=AsyncMock) as select:
+            await user_devices.name_message(message, self.bot, backend, self.state)
+            self.assertEqual(select.call_args.args[3:6], ('profile', 'node', 'new'))
+            self.assertEqual(backend.request.call_args.args[0], 'POST')
+            self.assertEqual(backend.request.call_args.kwargs['body'], {'display_name': 'My phone'})
+
+    async def test_awg_peer_preparation_retries_with_same_command_and_back_to_servers(self):
+        backend = SimpleNamespace(issue=AsyncMock(side_effect=BackendError('profile_not_synced', 409)))
+        with patch.object(user, 'render', new_callable=AsyncMock) as draw, patch.object(user, 'schedule_refresh') as refresh:
+            await user.issue(123, 123, 77, 'profile', 'node', 'awg', 'vpn', self.bot, backend, self.state, device_id='phone')
+            first_key = backend.issue.call_args.kwargs['command_key']
+            self.assertIn(user.tr('en', 'config.awg_preparing'), draw.call_args.args[2].lines)
+            back = user.actions[draw.call_args.args[3][-1][0].callback_data[2:]]
+            self.assertEqual((back.name, back.args), ('profile', ('profile',)))
+            await refresh.call_args.args[1]()
+            self.assertEqual(backend.issue.call_args.kwargs['command_key'], first_key)
+
+    async def test_awg_generation_polls_existing_issuance_without_reposting(self):
+        backend = SimpleNamespace(issue=AsyncMock(return_value={'id': 'issuance'}),
+            issuance=AsyncMock(return_value={'status': 'running', 'profile_id': 'profile', 'node_key': 'node',
+                                            'protocol': 'awg', 'transport': 'vpn', 'device_id': 'phone'}))
+        with patch.object(user, 'render', new_callable=AsyncMock), patch.object(user, 'schedule_refresh') as refresh:
+            await user.issue(123, 123, 77, 'profile', 'node', 'awg', 'vpn', self.bot, backend, self.state, device_id='phone')
+            backend.issuance.side_effect = BackendError('backend_unavailable', 503)
+            await refresh.call_args.args[1]()
+            backend.issuance.side_effect = None
+            backend.issuance.return_value = {**backend.issuance.return_value, 'status': 'succeeded'}
+            backend.artifact = AsyncMock(return_value={'filename': 'phone.vpn', 'content': 'vpn://config'})
+            self.state_data['_navigation_devices'] = {'phone': 'My phone'}
+            await refresh.call_args.args[1]()
+        backend.issue.assert_awaited_once()
+        self.assertIsNone(self.state_data['awg_issuance_request'])
     setUp = test_telegram_client.TelegramFlowTests.setUp
 
     def backend(self, items):
@@ -67,11 +111,13 @@ class TelegramDeviceTests(IsolatedAsyncioTestCase):
             actions = [user.actions[b.callback_data[2:]] for row in draw.call_args.args[3] for b in row]
             self.assertEqual(sum(a.name == 'device_pick' for a in actions), 10)
             self.assertTrue(any(a.name == 'device_picker_page' for a in actions))
-            backend.request.return_value = {'items': []}
+            backend.request.side_effect = [{'items': []}, {'desired_revision': 7}]
             await user_devices.show_picker(123, 123, 77, 'profile', 'node', self.bot, backend, self.state)
             self.assertTrue(draw.call_args.args[2].lines)
             actions = [user.actions[b.callback_data[2:]] for row in draw.call_args.args[3] for b in row]
-            self.assertIn('device_create', [a.name for a in actions])
+            self.assertEqual(self.state_data['device_name_draft']['node_key'], 'node')
+            self.assertTrue(self.state_data['device_name_draft']['first_device'])
+            self.assertEqual([a.name for a in actions], ['profile'])
 
     async def test_pending_server_changes_offer_retry_instead_of_generic_error(self):
         with patch.object(user, 'issue', new_callable=AsyncMock,
@@ -160,6 +206,7 @@ class TelegramDeviceTests(IsolatedAsyncioTestCase):
         with patch.object(backend, 'request', new_callable=AsyncMock) as request:
             await backend.issue(123, 'profile', 'node', 'awg', 'vpn', device_id='phone')
             self.assertEqual(request.call_args.kwargs['body']['device_id'], 'phone')
+            self.assertNotIn('wait=true', request.call_args.args[1])
             await backend.issue(123, 'profile', 'node', 'xray', 'tcp')
             self.assertNotIn('device_id', request.call_args.kwargs['body'])
 

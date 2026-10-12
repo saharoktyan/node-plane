@@ -22,6 +22,7 @@ class RenderRecoveryTests(IsolatedAsyncioTestCase):
             me=AsyncMock(return_value={'role': 'admin', 'status': 'approved',
                 'locale': 'en', 'locale_selected': True}),
             bot_title=AsyncMock(return_value={'title': 'Node Plane'}),
+            notifications=AsyncMock(return_value={'total': 0, 'items': []}),
             admin_nodes=AsyncMock(return_value={'items': [{'key': 'lv1'}]}))
         await user.start_cmd(message, self.bot, backend, self.state)
         self.bot.edit_message_text.assert_not_awaited()
@@ -239,6 +240,7 @@ class RenderRecoveryTests(IsolatedAsyncioTestCase):
         backend = SimpleNamespace(resolve=AsyncMock(),
             me=AsyncMock(return_value={'role': 'admin', 'status': 'approved', 'locale': 'en', 'locale_selected': True}),
             bot_title=AsyncMock(return_value={'title': 'Node Plane'}),
+            notifications=AsyncMock(return_value={'total': 0, 'items': []}),
             system_version=AsyncMock(return_value={'version': '0.4.3-alpha.22'}))
         for command in (user.start_cmd, user.id_cmd, user.version_cmd):
             with self.subTest(command=command.__name__):

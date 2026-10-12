@@ -22,7 +22,8 @@ from ..backend import BackendClient, BackendError
 from ..screens import Screen, Section, Table, server_label
 from ..i18n import normalize_locale, tr
 from .callbacks import HomeCallback
-from .common import render
+from .common import render, schedule_refresh
+from uuid import uuid4
 from ..navigation import remember_node, remember_label, parent_path
 
 router = Router()
@@ -396,7 +397,7 @@ async def show_account_profile(chat_id: int, user_id: int, message_id: int,
                                profile_id: str, bot: Bot, backend: BackendClient,
                                state: FSMContext, *, username: str | None = None,
                                back_to: str = 'home', page_index: int = 0,
-                               servers_open: bool = False) -> None:
+                               servers_open: bool = False, details: bool = False) -> None:
     locale = normalize_locale((await state.get_data()).get('locale'))
     summary = await backend.member_profile_summary(user_id, profile_id)
     nodes, page_index, pages = server_page(summary['nodes'], page_index)
@@ -407,6 +408,18 @@ async def show_account_profile(chat_id: int, user_id: int, message_id: int,
     access = Section(tr(locale, 'account.rich.access'), tables=(Table(facts, (
         (tr(locale, 'account.rich.status'), status),
         (tr(locale, 'account.rich.expiry'), summary['expires_at'][:10] + ' UTC' if summary.get('expires_at') else tr(locale, 'profile.layout.unlimited')))),))
+    if not details:
+        traffic = profile_traffic_section(summary, locale)
+        compact_access = Section(access.title, tables=(Table(facts, (
+            *access.tables[0].rows,
+            (tr(locale, 'admin.nodes'), str(summary.get('node_count', len(summary['nodes'])))))),))
+        compact_traffic = Section(traffic.title, traffic.lines) if traffic else None
+        await render(bot, chat_id, Screen(tr(locale, 'account.profile_title'),
+            (summary['display_name'],), sections=(compact_access, *((compact_traffic,) if compact_traffic else ())),
+            embedded_buttons=True, navigation=True),
+            [[button(user_id, tr(locale, 'account.details'), 'account_details', profile_id, back_to)],
+             [button(user_id, tr(locale, 'back'), back_to)]], state, message_id)
+        return
     identity = Section(tr(locale, 'account.rich.identity'), tables=(Table(facts, (
         (tr(locale, 'account.rich.username'), '@' + username if username else '—'),
         (tr(locale, 'account.rich.telegram_id'), str(user_id)),
@@ -428,9 +441,9 @@ async def show_account_profile(chat_id: int, user_id: int, message_id: int,
         rows=server_pagination(user_id, locale, page_index, pages,
             'account_nodes_page', profile_id, back_to))
     sections = (access, identity, statistics, *((traffic,) if traffic else ()), servers)
-    await render(bot, chat_id, Screen(tr(locale, 'account.profile_title'),
+    await render(bot, chat_id, Screen(tr(locale, 'account.details'),
         (summary['display_name'],), sections=sections, embedded_buttons=True, navigation=True),
-        [[button(user_id, tr(locale, 'back'), back_to)]], state, message_id)
+        [[button(user_id, tr(locale, 'back'), 'account_profile', profile_id, back_to)]], state, message_id)
 
 
 def profile_traffic_section(summary, locale):
@@ -593,10 +606,12 @@ async def show_protocol(chat_id: int, user_id: int, message_id: int, profile_id:
     rows = [[button(user_id, tr(locale, f'transport.{kind}'), 'issue',
                     profile_id, node_key, 'xray', kind) for kind in transports],
             [button(user_id, tr(locale, 'back'), 'profile', profile_id)]]
-    await render(bot, chat_id, Screen(tr(locale, 'xray.title', node=server_label(node)),
+    destination = button(user_id, tr(locale, 'transport.title'), 'protocol', profile_id, node_key, 'xray')
+    breadcrumbs = parent_path(destination.callback_data, locale, await state.get_data())[:-1]
+    await render(bot, chat_id, Screen(tr(locale, 'transport.title'),
         (tr(locale, 'transport.choose'),), sections=(Section(tr(locale, 'ui.transport_help'),
             (tr(locale, 'ui.transport_help_text'),), collapsed=True),),
-        embedded_buttons=True, navigation=True), rows, state, message_id)
+        embedded_buttons=True, navigation=True, breadcrumbs=breadcrumbs), rows, state, message_id)
 
 
 
@@ -608,8 +623,16 @@ async def show_issuance(chat_id: int, user_id: int, message_id: int,
     try:
         await _render_issuance(chat_id, user_id, message_id, issuance_id,
                                bot, backend, state, view_token)
-    except BackendError:
+    except BackendError as exc:
         if (await state.get_data()).get('issuance_poll_token') == view_token:
+            pending = (await state.get_data()).get('awg_issuance_request')
+            if pending and pending.get('issuance_id') == issuance_id:
+                await show_awg_waiting(chat_id, user_id, message_id, pending['profile_id'], bot, state,
+                    lambda: show_issuance(chat_id, user_id, message_id, issuance_id, bot, backend, state),
+                    transient=exc.status >= 500 or exc.status == 429)
+                if exc.status < 500 and exc.status != 429:
+                    await state.update_data(awg_issuance_request=None)
+                return
             raise
 
 
@@ -641,7 +664,10 @@ async def _render_issuance(chat_id: int, user_id: int, message_id: int,
                          else 'config.import_awg_vpn' if uri else 'config.import_awg_conf')
         title = artifact.get('display_name') or tr(locale, 'config.ready')
         breadcrumbs = ()
-        if device_back:
+        if result['protocol'] == 'xray':
+            title = tr(locale, 'transport.' + result['transport'])
+            breadcrumbs = parent_path(rows[0][0].callback_data, locale, await state.get_data())
+        elif device_back:
             data = await state.get_data()
             title = data.get('_navigation_devices', {}).get(result['device_id'])
             if not title:
@@ -690,9 +716,26 @@ async def _render_issuance(chat_id: int, user_id: int, message_id: int,
             (tr(locale, 'config.unavailable'),), embedded_buttons=True, navigation=True),
             rows, state, message_id)
     else:
-        rows.insert(0, [button(user_id, tr(locale, 'config.refresh'), 'issuance', issuance_id)])
+        rows = [[button(user_id, tr(locale, 'config.refresh'), 'issuance', issuance_id)],
+                [button(user_id, tr(locale, 'back'), 'profile', profile_id)]]
         await render(bot, chat_id, Screen(tr(locale, 'config.preparing_title'),
-            (tr(locale, 'config.pending'),), embedded_buttons=True), rows, state, message_id)
+            (tr(locale, 'config.awg_preparing' if result['protocol'] == 'awg' else 'config.pending'),),
+            embedded_buttons=True, navigation=True), rows, state, message_id)
+        schedule_refresh(state, lambda: show_issuance(chat_id, user_id, message_id, issuance_id, bot, backend, state))
+    if result['status'] in {'succeeded', 'blocked', 'superseded', 'failed'}:
+        pending = (await state.get_data()).get('awg_issuance_request')
+        if pending and pending.get('issuance_id') == issuance_id:
+            await state.update_data(awg_issuance_request=None)
+
+
+async def show_awg_waiting(chat_id, user_id, message_id, profile_id, bot, state, refresh, *, transient=True):
+    locale = normalize_locale((await state.get_data()).get('locale'))
+    await render(bot, chat_id, Screen(tr(locale, 'config.preparing_title' if transient else 'config.not_ready'),
+        (tr(locale, 'config.awg_preparing' if transient else 'config.unavailable'),),
+        embedded_buttons=True, navigation=True),
+        [[button(user_id, tr(locale, 'back'), 'profile', profile_id)]], state, message_id)
+    if transient:
+        schedule_refresh(state, refresh)
 
 
 async def issue(chat_id: int, user_id: int, message_id: int, profile_id: str,
@@ -701,19 +744,34 @@ async def issue(chat_id: int, user_id: int, message_id: int, profile_id: str,
     locale = normalize_locale((await state.get_data()).get('locale'))
     poll_token = secrets.token_urlsafe(16)
     await state.update_data(issuance_poll_token=poll_token)
+    awg_request = None
+    if protocol == 'awg':
+        identity = [profile_id, node_key, transport, device_id]
+        awg_request = (await state.get_data()).get('awg_issuance_request')
+        if not awg_request or awg_request['identity'] != identity:
+            awg_request = {'identity': identity, 'profile_id': profile_id, 'command_key': str(uuid4())}
+            await state.update_data(awg_issuance_request=awg_request)
+        if awg_request.get('issuance_id'):
+            await show_issuance(chat_id, user_id, message_id, awg_request['issuance_id'], bot, backend, state)
+            return
 
     async def owns_screen():
         return (await state.get_data()).get('issuance_poll_token') == poll_token
 
     try:
         await render(bot, chat_id, Screen(tr(locale, 'config.preparing_title'),
-            (tr(locale, 'config.preparing'),), embedded_buttons=True, navigation=True),
+            (tr(locale, 'config.awg_preparing' if protocol == 'awg' else 'config.preparing'),), embedded_buttons=True, navigation=True),
             [[button(user_id, tr(locale, 'back'),
-                     'device_picker_back' if device_id else ('profile' if protocol == 'awg' else 'protocol'), profile_id,
-                     *((node_key,) if device_id else (() if protocol == 'awg' else (node_key, protocol))))]], state, message_id)
+                     'profile' if protocol == 'awg' else 'protocol', profile_id,
+                     *(() if protocol == 'awg' else (node_key, protocol)))]], state, message_id)
         queued = await backend.issue(user_id, profile_id, node_key, protocol, transport,
-            **({'device_id': device_id} if device_id else {}))
+            **({'device_id': device_id} if device_id else {}),
+            **({'command_key': awg_request['command_key']} if awg_request else {}))
         if not await owns_screen():
+            return
+        if awg_request:
+            await state.update_data(awg_issuance_request=dict(awg_request, issuance_id=queued['id']))
+            await show_issuance(chat_id, user_id, message_id, queued['id'], bot, backend, state)
             return
         if queued.get('status') in {'succeeded', 'blocked', 'superseded', 'failed'}:
             await show_issuance(chat_id, user_id, message_id, queued['id'], bot, backend, state)
@@ -729,8 +787,16 @@ async def issue(chat_id: int, user_id: int, message_id: int, profile_id: str,
             await asyncio.sleep(1)
         if await owns_screen():
             await show_issuance(chat_id, user_id, message_id, queued['id'], bot, backend, state)
-    except BackendError:
+    except BackendError as exc:
         if await owns_screen():
+            if protocol == 'awg':
+                pending = exc.code in {'profile_not_synced', 'node_settings_pending'} or exc.status >= 500 or exc.status == 429
+                await show_awg_waiting(chat_id, user_id, message_id, profile_id, bot, state,
+                    lambda: issue(chat_id, user_id, message_id, profile_id, node_key, protocol, transport,
+                        bot, backend, state, device_id=device_id), transient=pending)
+                if not pending:
+                    await state.update_data(awg_issuance_request=None)
+                return
             raise
 
 
@@ -944,10 +1010,14 @@ async def user_action_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
             await show_account_profile(chat_id, user_id, message_id, action.args[0],
                 bot, backend, state, username=query.from_user.username,
                 back_to=action.args[1])
+        elif action.name == 'account_details':
+            await show_account_profile(chat_id, user_id, message_id, action.args[0],
+                bot, backend, state, username=query.from_user.username,
+                back_to=action.args[1], details=True)
         elif action.name == 'account_nodes_page':
             await show_account_profile(chat_id, user_id, message_id, action.args[0],
                 bot, backend, state, username=query.from_user.username,
-                back_to=action.args[1], page_index=int(action.args[2]), servers_open=True)
+                back_to=action.args[1], page_index=int(action.args[2]), servers_open=True, details=True)
         elif action.name == 'account_stats':
             await show_account_stats(chat_id, user_id, message_id, action.args[0],
                 bot, backend, state, back_to=action.args[1])
@@ -1037,8 +1107,9 @@ async def show_admin_menu(chat_id: int, user_id: int, message_id: int,
                 (tr(locale, 'admin.rich.item'), tr(locale, 'admin.rich.value')),
                 ((tr(locale, 'admin.nodes'), f"{overview['nodes_enabled']}/{overview['nodes_total']}"),
                  (tr(locale, 'admin.profiles'), f"{overview['profiles_active']}/{overview['profiles_total']}"),
-                 (tr(locale, 'admin.requests'), str(overview['pending_requests'])),
-                 (tr(locale, 'admin.status.open_problems'), str(len(overview['problem_nodes']))))),)))
+                 *(((tr(locale, 'admin.rich.frozen'), str(overview['profiles_frozen'])),) if overview.get('profiles_frozen') else ()),
+                 *(((tr(locale, 'admin.requests'), str(overview['pending_requests'])),) if overview['pending_requests'] else ()),
+                 *(((tr(locale, 'admin.status.open_problems'), str(len(overview['problem_nodes']))),) if overview['problem_nodes'] else ()))),)))
         attention_lines, attention_buttons = [], []
         if overview['pending_requests']:
             attention_lines.append(tr(locale, 'admin.status.pending', count=overview['pending_requests']))
@@ -1053,6 +1124,8 @@ async def show_admin_menu(chat_id: int, user_id: int, message_id: int,
     else:
         sections.append(Section(tr(locale, 'admin.rich.overview'),
                                 (tr(locale, 'admin.rich.overview_unavailable'),)))
+    if isinstance(overview, dict):
+        sections.extend(admin_operation_sections(overview, locale))
     sections.extend((
         Section(tr(locale, 'admin.rich.management'), rows=((
             InlineKeyboardButton(text=tr(locale, 'admin.profiles'), callback_data=AdminProfilesCallback().pack()),
@@ -1062,14 +1135,57 @@ async def show_admin_menu(chat_id: int, user_id: int, message_id: int,
              if isinstance(overview, dict) else ''), rows=((requests_button,),)),)
           if isinstance(overview, dict) and overview['pending_requests'] else ()),
         Section(tr(locale, 'admin.rich.system'), rows=((
-            InlineKeyboardButton(text=tr(locale, 'admin.status'), callback_data='admin_status'),
             InlineKeyboardButton(text=tr(locale, 'admin.settings'), callback_data=AdminSettingsCallback().pack(),
-                style='danger' if isinstance(overview, dict) and overview.get('unacknowledged_alerts') else None)),
+                style='danger' if isinstance(overview, dict) and overview.get('unacknowledged_alerts') else None),),
             (InlineKeyboardButton(text=tr(locale, 'announce.title'), callback_data='announce_menu'),))),
     ))
     await render(bot, chat_id, Screen(f"{tr(locale, 'admin.menu')} · {bot_title}",
         sections=tuple(sections), embedded_buttons=True, navigation=True),
-        [[button(user_id, tr(locale, 'back'), 'home')]], state, message_id)
+        [[InlineKeyboardButton(text=tr(locale, 'admin.status.refresh'), callback_data='admin_menu'),
+          button(user_id, tr(locale, 'back'), 'home')]], state, message_id)
+
+
+def admin_operation_sections(overview, locale):
+    from .admin_recovery import RecoveryPage, RecoveryDiagnostics
+    from .callbacks import UpdatesCallback
+    sections = []
+    tasks = overview.get('tasks', {})
+    if tasks:
+        rows = ((InlineKeyboardButton(text=tr(locale, 'recovery.title'),
+            callback_data=RecoveryPage().pack(), style='danger' if tasks.get('blocked') else None),),) if any(tasks.values()) else ()
+        sections.append(Section(tr(locale, 'admin.overview.tasks'), tables=(Table(
+            (tr(locale, 'admin.rich.item'), tr(locale, 'admin.rich.value')),
+            tuple((tr(locale, 'admin.overview.' + key), str(tasks.get(key, 0)))
+                  for key in ('queued', 'running', 'blocked'))),), rows=rows))
+    alerts = overview.get('unacknowledged_alerts', 0)
+    if alerts:
+        sections.append(Section(tr(locale, 'alerts.title'),
+            (tr(locale, 'admin.overview.alerts', count=alerts),), rows=((
+                InlineKeyboardButton(text=tr(locale, 'alerts.title'), callback_data='alerts', style='danger'),),)))
+    backup, updates = overview.get('backup'), overview.get('updates')
+    if backup is not None or updates is not None:
+        lines = []
+        if overview.get('version'):
+            branch = 'dev' if (updates or {}).get('branch') == 'dev' else 'stable'
+            lines.append(f"{branch} · {overview['version']}")
+        if updates is not None:
+            lines.append(tr(locale, 'admin.overview.update_available', version=updates.get('latest_version') or '—')
+                         if updates.get('available') else tr(locale, 'admin.overview.update_checked'
+                             if updates.get('status') == 'up_to_date' else 'admin.overview.update_unknown'
+                             if updates.get('status', 'never') == 'never' else 'admin.overview.update_failed'))
+            if updates.get('last_checked_at'):
+                lines.append(tr(locale, 'admin.overview.last_check', time=updates['last_checked_at'][:19].replace('T', ' ') + ' UTC'))
+        if backup is not None:
+            lines.append(tr(locale, 'admin.overview.backup_on' if backup.get('enabled') else 'admin.overview.backup_off'))
+            job = backup.get('last_job')
+            lines.append(tr(locale, 'admin.overview.backup_job', status=tr(locale, 'operation.' + job['status']),
+                time=job['created_at'][:19].replace('T', ' ') + ' UTC') if job else tr(locale, 'admin.overview.backup_none'))
+        sections.append(Section(tr(locale, 'admin.overview.maintenance'), tuple(lines), rows=(
+            (InlineKeyboardButton(text=tr(locale, 'settings.admin.updates'), callback_data=UpdatesCallback().pack(),
+                style='primary' if (updates or {}).get('available') else None),
+             InlineKeyboardButton(text=tr(locale, 'backups.title'), callback_data='backups')),
+            (InlineKeyboardButton(text=tr(locale, 'recovery.controller'), callback_data=RecoveryDiagnostics().pack()),))))
+    return sections
 
 
 @router.callback_query(F.data == 'admin_status')
@@ -1082,40 +1198,8 @@ async def admin_status_cb(query: CallbackQuery, bot: Bot, backend: BackendClient
 
 async def show_admin_status(chat_id: int, user_id: int, message_id: int,
                             bot: Bot, backend: BackendClient, state: FSMContext) -> None:
-    from .callbacks import RequestsCallback
-    locale = normalize_locale((await state.get_data()).get('locale'))
-    overview = await backend.admin_overview(user_id)
-    lines = [tr(locale, 'admin.status.version', version=overview['version']),
-             tr(locale, 'admin.status.nodes', active=overview['nodes_enabled'],
-                total=overview['nodes_total']),
-             tr(locale, 'admin.status.profiles', active=overview['profiles_active'],
-                total=overview['profiles_total']),
-             tr(locale, 'admin.status.frozen', count=overview['profiles_frozen']),
-             tr(locale, 'admin.status.pending', count=overview['pending_requests']),
-             tr(locale, 'admin.status.problems', count=len(overview['problem_nodes']))]
-    rows = []
-    if overview['pending_requests']:
-        rows.append([InlineKeyboardButton(text=tr(locale, 'admin.requests'),
-            callback_data=RequestsCallback().pack())])
-    if overview['problem_nodes']:
-        rows.append([InlineKeyboardButton(text=tr(locale, 'admin.status.open_problems'),
-            callback_data='admin_problem_nodes')])
-    attention = tuple(tuple(row) for row in rows)
-    rows = [[InlineKeyboardButton(text=tr(locale, 'admin.status.refresh'),
-        callback_data='admin_status')],
-        [InlineKeyboardButton(text=tr(locale, 'back'), callback_data='admin_menu')]]
-    sections = [Section(tr(locale, 'admin.rich.overview'), tables=(Table(
-        (tr(locale, 'admin.rich.item'), tr(locale, 'admin.rich.value')),
-        ((tr(locale, 'admin.nodes'), f"{overview['nodes_enabled']}/{overview['nodes_total']}"),
-         (tr(locale, 'admin.profiles'), f"{overview['profiles_active']}/{overview['profiles_total']}"),
-         (tr(locale, 'admin.rich.frozen'), str(overview['profiles_frozen'])),
-         (tr(locale, 'admin.requests'), str(overview['pending_requests'])),
-         (tr(locale, 'admin.status.open_problems'), str(len(overview['problem_nodes']))))),))]
-    if attention:
-        sections.append(Section(tr(locale, 'admin.rich.attention'), rows=attention))
-    sections.append(Section(tr(locale, 'nodes.rich.technical'), collapsed=True, lines=(lines[0],)))
-    await render(bot, chat_id, Screen(tr(locale, 'admin.status.title'),
-        sections=tuple(sections), embedded_buttons=True, navigation=True), rows[-2:], state, message_id)
+    # Keep old buttons and /status usable after merging Status into Overview.
+    await show_admin_menu(chat_id, user_id, message_id, bot, backend, state)
 
 
 @router.callback_query(F.data == 'admin_problem_nodes')

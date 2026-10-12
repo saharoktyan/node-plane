@@ -211,7 +211,7 @@ class ProfileRecoveryTests(TestCase):
         from backend.executor import IntentExecutor
         from tests.test_backend_executor import FakeDriver
         from unittest.mock import Mock
-        profile = self.prepare()
+        profile = self.prepare(with_device=True)
         first = self.grants(profile,1,[{'node_key':'node','protocol':'awg'}]).json()
         driver = FakeDriver(failure=True)
         IntentExecutor(self.db,driver).run_one()

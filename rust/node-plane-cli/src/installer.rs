@@ -184,6 +184,22 @@ async fn run(
             .iter()
             .any(|check| check.id == "api" && check.status == "ok")
         {
+            stage("Checking registered servers, agents, protocols and host resources");
+            match crate::workstation::diagnose_servers(request, session, tx).await {
+                Ok(checks) => {
+                    for value in checks {
+                        let check: DiagnosticCheck = serde_json::from_value(value)?;
+                        report.errors += usize::from(check.status == "error");
+                        report.warnings += usize::from(check.status == "warning");
+                        report.checks.push(check);
+                    }
+                }
+                Err(_) => {
+                    report.warnings += 1;
+                    report.checks.push(DiagnosticCheck { id: "servers:coverage".into(), status: "warning".into(),
+                        detail: "Server diagnostics unavailable or incomplete. The health of the entire installation is not confirmed; inspect server cards or repeat diagnostics.".into(), repair: None });
+                }
+            }
             stage("Inspecting queued and blocked backend operations");
             match crate::workstation::recover_operations(request, session, tx).await {
                 Ok(detail) => report.checks.push(DiagnosticCheck {
@@ -198,6 +214,10 @@ async fn run(
                         detail: "Backend operation inventory unavailable. Check administrator selection and whether the installed backend supports recovery inventory. No operation was replayed.".into(), repair: None });
                 }
             }
+        } else {
+            report.warnings += 1;
+            report.checks.push(DiagnosticCheck { id: "servers:coverage".into(), status: "warning".into(),
+                detail: "Backend API unavailable; only controller host checks were performed.".into(), repair: None });
         }
         let text = report.render();
         ensure!(report.errors == 0, "{text}");
@@ -563,9 +583,9 @@ impl Diagnosis {
             if self.errors > 0 {
                 "Installation needs attention"
             } else if self.warnings > 0 {
-                "Installation is usable; follow-up required"
+                "Checks completed with warnings"
             } else {
-                "Installation is healthy"
+                "All installation checks passed"
             }
             .into(),
             "Suggested Fixes".into(),

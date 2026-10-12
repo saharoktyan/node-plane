@@ -15,6 +15,20 @@ SPEC.loader.exec_module(MODULE)
 
 
 class AgentNodeSettingsIntentTests(unittest.TestCase):
+    def test_settings_command_publishes_progress_without_changing_its_identity(self):
+        from uuid import uuid4
+        identity = str(uuid4())
+        intent = self.intent(command_id=identity)
+        def runner(value, fd):
+            self.assertEqual(value['command_id'], identity)
+            MODULE.installation_step('protocol_deploy')
+            receipt = self.journal.parent / 'operation-progress' / (identity + '.json')
+            self.assertEqual(json.loads(receipt.read_text()), {'operation_id': identity, 'stage': 'protocol_deploy'})
+            return self.runner(value, fd)
+        with patch.dict(os.environ, {'NODE_PLANE_OPERATION_PROGRESS_ID': 'previous'}):
+            MODULE.apply_node_settings(intent, self.journal, runner)
+            self.assertEqual(os.environ['NODE_PLANE_OPERATION_PROGRESS_ID'], 'previous')
+
     def test_selected_fallback_port_is_durable_and_recovered_without_replay(self):
         intent = self.intent()
         intent['settings'].update(awg_port=443, awg_i1_preset='quic', awg_port_mode='auto')

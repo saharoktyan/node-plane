@@ -8,6 +8,7 @@ from tests import test_backend_node_jobs
 from tests.test_backend_executor import FakeDriver
 from backend.executor import IntentExecutor
 from backend.profiles import ProfileRepository
+from backend.devices import DeviceRepository
 from backend.node_removal import NodeRemovalService
 from backend.authorization import AccessDenied
 from backend.removal_inventory import inventory_digest
@@ -57,6 +58,9 @@ class BackendNodeRemovalTests(unittest.TestCase):
 
     def test_uncertain_revocation_reports_blocked_instead_of_waiting_forever(self):
         profile = ProfileRepository(self.db).create_profile(runtime_name='alice', display_name='Alice')
+        # This scenario covers a previously provisioned AWG device.
+        DeviceRepository.ensure_default(self.db.connection, self.db.connection.execute(
+            'SELECT * FROM backend_profiles WHERE id=?', (profile,)).fetchone())
         self.db.connection.execute('INSERT INTO backend_grants VALUES (?, ?, ?)', (profile, 'n1', 'awg'))
         worker = NodeRemovalService(self.db, verifier_factory=self.verifier)
         worker.request(self.actor, 'n1')
@@ -132,6 +136,9 @@ class BackendNodeRemovalTests(unittest.TestCase):
 
     def test_removal_waits_for_revocations_before_runtime_cleanup(self):
         profile = ProfileRepository(self.db).create_profile(runtime_name='alice', display_name='Alice')
+        # This scenario covers a previously provisioned AWG device.
+        DeviceRepository.ensure_default(self.db.connection, self.db.connection.execute(
+            'SELECT * FROM backend_profiles WHERE id=?', (profile,)).fetchone())
         self.db.connection.execute('INSERT INTO backend_grants VALUES (?, ?, ?)', (profile, 'n1', 'awg'))
         phases = []
         worker = NodeRemovalService(self.db,
@@ -154,6 +161,8 @@ class BackendNodeRemovalTests(unittest.TestCase):
                 profile = ProfileRepository(self.db).create_profile(
                     runtime_name='alice', display_name='Alice')
                 with self.db.transaction() as conn:
+                    DeviceRepository.ensure_default(conn, conn.execute(
+                        'SELECT * FROM backend_profiles WHERE id=?', (profile,)).fetchone())
                     for protocol in ('awg', 'xray'):
                         conn.execute('INSERT INTO backend_grants VALUES (?, ?, ?)',
                                      (profile, 'n1', protocol))

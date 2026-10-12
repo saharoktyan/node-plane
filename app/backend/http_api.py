@@ -241,6 +241,11 @@ class AdminOverviewOutput(BaseModel):
     profiles_frozen: int
     pending_requests: int
     problem_nodes: list[ProblemNodeOutput]
+    unacknowledged_alerts: int = 0
+    checked_at: str | None = None
+    tasks: dict[str, int] = Field(default_factory=dict)
+    backup: dict = Field(default_factory=dict)
+    updates: dict = Field(default_factory=dict)
 
 
 class UpdatePreferencesInput(BaseModel):
@@ -456,6 +461,7 @@ class AdminNodeOverviewOutput(BaseModel):
     desired_revision: int
     applied_revision: int
     settings_task_status: str | None
+    settings_operation: dict | None = None
     settings_complete: bool
     access_total: int
     ready: int
@@ -483,6 +489,38 @@ class NodeRuntimeObservation(BaseModel):
     settings_verified: bool
 
 
+class ProbePortOutput(BaseModel):
+    transport: str
+    network: Literal['tcp', 'udp']
+    port: int | None
+
+
+class ProbeProtocolOutput(BaseModel):
+    protocol: Literal['xray', 'awg']
+    installed: bool | None
+    running: bool | None
+    config_valid: bool | None
+    ports: list[ProbePortOutput]
+
+
+class NodeProbeOutput(BaseModel):
+    node_key: str
+    title: str
+    checked_at: str
+    response_ms: int
+    agent_reachable: bool
+    docker: bool | None
+    agent_version: str
+    runtime_version: str
+    desired_runtime_version: str
+    runtime_drift: bool | None
+    host_metrics: dict[str, float]
+    protocols: list[ProbeProtocolOutput]
+    desired_revision: int
+    applied_revision: int
+    settings_pending: bool
+
+
 class NodeDiagnosticsOutput(BaseModel):
     node_key: str
     docker: Literal['ok', 'missing', 'invalid']
@@ -490,6 +528,9 @@ class NodeDiagnosticsOutput(BaseModel):
     xray_config: Literal['ok', 'missing', 'invalid']
     awg_config: Literal['ok', 'missing', 'invalid']
     runtime_version: str | None
+    checks: list[dict] = Field(default_factory=list)
+    checked_at: str | None = None
+    observation: NodeProbeOutput | None = None
 
 
 class NodeSettingsTaskOutput(BaseModel):
@@ -498,6 +539,7 @@ class NodeSettingsTaskOutput(BaseModel):
     revision: int
     status: str
     error_code: str | None = None
+    progress: dict[str, str] | None = None
 
 
 class NodeActionInput(BaseModel):
@@ -1366,6 +1408,22 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
                 raise AccessDenied('node_agent_unconfigured', 409) from None
             raise AccessDenied('node_agent_unavailable', 503) from None
 
+    @app.get('/api/v1/nodes/{node_key}/probe', response_model=NodeProbeOutput)
+    def probe_node(node_key: str, current=Depends(actor)):
+        node = nodes.get(current, node_key)
+        from .node_probe import probe
+        try:
+            if node_driver is not None:
+                return probe(node, node_driver)
+            from .driver_transport import GrpcIntentDriver, local_channel
+            with local_channel('127.0.0.1:50051') as channel:
+                return probe(node, GrpcIntentDriver(channel, timeout=15))
+        except Exception as failure:
+            import grpc
+            if isinstance(failure, grpc.RpcError) and failure.code() == grpc.StatusCode.FAILED_PRECONDITION:
+                raise AccessDenied('node_agent_unconfigured', 409) from None
+            raise AccessDenied('node_agent_unavailable', 503) from None
+
     @app.post('/api/v1/nodes/{node_key}/bootstrap', status_code=202)
     def bootstrap_node(node_key: str, body: NodeActionInput,
                        idempotency_key: str | None = Header(default=None), current=Depends(actor)):
@@ -1425,13 +1483,24 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
 
     @app.get('/api/v1/nodes/{node_key}/diagnostics', response_model=NodeDiagnosticsOutput)
     def get_node_diagnostics(node_key: str, current=Depends(actor)):
-        nodes.get(current, node_key)
+        node = nodes.get(current, node_key)
+        def inspect(driver):
+            result = driver.diagnose_node(node_key)
+            from .installation_diagnostics import server_checks
+            from .node_probe import probe
+            try:
+                observation = probe(node, driver)
+                return {**result, 'checks': server_checks(observation),
+                        'checked_at': observation['checked_at'], 'observation': observation}
+            except Exception:
+                return {**result, 'checks': [{'id': 'live_services', 'status': 'warning',
+                        'detail': 'Expanded live inspection unavailable; basic file diagnostics only'}]}
         try:
             if node_driver is None:
                 from .driver_transport import GrpcIntentDriver, local_channel
                 with local_channel('127.0.0.1:50051') as channel:
-                    return GrpcIntentDriver(channel).diagnose_node(node_key)
-            return node_driver.diagnose_node(node_key)
+                    return inspect(GrpcIntentDriver(channel, timeout=10))
+            return inspect(node_driver)
         except Exception as failure:
             import grpc
             from .driver_transport import AgentNotConfigured
@@ -1836,6 +1905,17 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
             return module.observe()
         except Exception:
             raise AccessDenied('diagnostics_unavailable', 503) from None
+
+    @app.get('/api/v1/system/recovery/fleet')
+    def recovery_fleet(offset: int = Query(default=0, ge=0, le=1000000), current=Depends(actor)):
+        require_permission(current, 'maintenance.manage')
+        require_permission(current, 'nodes.manage')
+        from .installation_diagnostics import FleetDiagnostics
+        if node_driver is not None:
+            return FleetDiagnostics(db, node_driver).observe(current, offset)
+        from .driver_transport import GrpcIntentDriver, local_channel
+        with local_channel('127.0.0.1:50051') as channel:
+            return FleetDiagnostics(db, GrpcIntentDriver(channel, timeout=10)).observe(current, offset)
 
     @app.post('/api/v1/system/recovery/{kind}/{identity}/{action}')
     def recover_operation(kind: str, identity: UUID, action: str, current=Depends(actor)):

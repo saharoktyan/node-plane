@@ -48,12 +48,34 @@ _DRAFT_FIELDS = ('title', 'region', 'flag', 'notes', 'transport', 'ssh_target',
 
 
 async def editable_node(user_id, node_key, backend, state):
-    node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=user_id)
+    node, operation = await asyncio.gather(
+        backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=user_id),
+        current_settings_operation(user_id, node_key, backend))
+    node = dict(node, _settings_operation=operation)
     await remember_node(state, node)
     draft = (await state.get_data()).get('node_settings_draft')
     if draft and draft['node_key'] == node_key:
         node = {**node, **deepcopy(draft['values'])}
     return node
+
+
+async def current_settings_operation(user_id, node_key, backend):
+    getter = getattr(backend, 'node_overview', None)
+    if getter is None:
+        return None
+    try:
+        overview = await getter(user_id, node_key)
+    except BackendError:
+        return None
+    return (overview or {}).get('settings_operation')
+
+
+def apply_progress_callback(operation_id, node_key):
+    # Long server keys otherwise overflow Telegram's 64-byte callback limit.
+    # The operation endpoint supplies the authoritative server key on opening.
+    if len(f'node_apply_status:{operation_id}:{node_key}'.encode()) > 64:
+        node_key = ''
+    return NodeApplyStatusCallback(operation_id=operation_id, node_key=node_key).pack()
 
 
 async def change_node_draft(user_id, node_key, values, backend, state, *, baseline_node=None):
@@ -71,6 +93,10 @@ async def change_node_draft(user_id, node_key, values, backend, state, *, baseli
 
 
 async def draft_controls(node, state, locale):
+    operation = node.get('_settings_operation')
+    if operation and operation.get('status') in {'awaiting_executor', 'running', 'blocked'}:
+        return [[InlineKeyboardButton(text=tr(locale, 'nodes.apply.progress'),
+            callback_data=apply_progress_callback(operation['id'], node['key']), style='primary')]]
     draft = (await state.get_data()).get('node_settings_draft')
     if draft and draft['node_key'] == node['key'] and draft['values'] != draft['baseline']:
         return [[InlineKeyboardButton(text=tr(locale, 'nodes.draft.save_only' if not node['applied_revision'] else 'nodes.draft.save'), callback_data=f'node_draft_save:{node["key"]}', style='primary'),
@@ -891,9 +917,13 @@ async def show_admin_node(chat_id, user_id, message_id, node_key, bot, backend, 
         lines.append(tr(locale, 'nodes.card.summary_unavailable'))
     install_rows.append((InlineKeyboardButton(text=tr(locale, 'nodes.card.probe'), callback_data=ProbeNodeCallback(node_key=node_key).pack()),))
     sections.insert(0, Section(tr(locale, 'nodes.rich.installation'), rows=tuple(install_rows)))
+    operation = (overview or {}).get('settings_operation')
+    progress_rows = ((InlineKeyboardButton(text=tr(locale, 'nodes.apply.progress'),
+        callback_data=apply_progress_callback(operation['id'], node_key), style='primary'),),) if operation else ()
     sections.insert(1, Section(tr(locale, 'nodes.rich.configuration'),
+        (tr(locale, 'nodes.apply.state.' + operation['status']),) if operation and operation['status'] in {'awaiting_executor', 'running'} else
         (tr(locale, 'nodes.rich.pending'),) if pending else (),
-        rows=((InlineKeyboardButton(text=tr(locale, 'nodes.card.settings'), callback_data=NodeSettingsCallback(node_key=node_key).pack(), style='primary' if pending else None),),)))
+        rows=(*progress_rows, (InlineKeyboardButton(text=tr(locale, 'nodes.card.settings'), callback_data=NodeSettingsCallback(node_key=node_key).pack(), style='primary' if pending and not operation else None),))))
     if node.get('notes'):
         sections.append(Section(tr(locale, 'nodes.settings.field.notes'), (node['notes'],), collapsed=True))
     traffic = node_traffic_section(overview.get('traffic') if overview else None, locale)
@@ -960,7 +990,9 @@ async def show_node_settings(chat_id, user_id, message_id, node_key, bot, backen
     await state.set_state(None)
     await state.update_data(node_settings_view='root')
     controls = await draft_controls(node, state, locale)
+    operation = node.get('_settings_operation')
     sections = ([Section(tr(locale, 'nodes.rich.configuration'),
+        (tr(locale, 'nodes.apply.state.' + operation['status']),) if operation and operation['status'] in {'awaiting_executor', 'running'} else
         (tr(locale, 'nodes.rich.pending'),),
         rows=tuple(tuple(row) for row in controls))] if controls else []) + [
         Section(tr(locale, 'node_tools.general'), rows=((InlineKeyboardButton(text=tr(locale, 'profile.layout.edit'), callback_data=f'node_section:general:{node_key}'),),)),
@@ -970,6 +1002,8 @@ async def show_node_settings(chat_id, user_id, message_id, node_key, bot, backen
             (InlineKeyboardButton(text=tr(locale, 'nodes.rich.protocol_options'), callback_data=NodeProtocolsCallback(node_key=node_key).pack()),)))]
     await render(bot, chat_id, Screen(tr(locale, 'nodes.settings.title'), sections=tuple(sections), embedded_buttons=True, navigation=True),
         [[InlineKeyboardButton(text=tr(locale, 'nodes.card.back_to_server'), callback_data=AdminNodeCallback(node_key=node_key).pack())]], state, message_id)
+    if (node.get('_settings_operation') or {}).get('status') in {'awaiting_executor', 'running'}:
+        schedule_refresh(state, lambda: show_node_settings(chat_id, user_id, message_id, node_key, bot, backend, state))
 
 
 async def show_node_connection(chat_id, user_id, message_id, node_key, bot, backend, state):
@@ -1268,29 +1302,65 @@ async def probe_node_cb(query: CallbackQuery, callback_data: ProbeNodeCallback, 
     back = [[InlineKeyboardButton(text=tr(locale, 'back'),
         callback_data=AdminNodeCallback(node_key=node_key).pack())]]
     try:
-        observation = await backend.node_runtime(user_id, node_key)
-        agent_state = observation['health_state']
-        if agent_state == 'degraded' and not observation.get('runtime_version'):
-            # Older agents used absence of the runtime directory as agent health.
-            agent_state = 'running'
-        if agent_state not in {'running', 'degraded'}:
-            agent_state = 'unknown'
-        lines = (tr(locale, 'nodes.probe.agent', value=tr(locale, 'nodes.probe.state.' + agent_state)),
-            tr(locale, 'nodes.probe.agent_version', value=observation.get('agent_version') or '—'),
-            tr(locale, 'nodes.probe.version', value=observation.get('runtime_version') or '—'),
-            tr(locale, 'nodes.probe.xray', value=tr(locale,
-                'nodes.probe.present' if observation['xray_config_present'] else 'nodes.probe.missing')),
-            tr(locale, 'nodes.probe.awg', value=tr(locale,
-                'nodes.probe.present' if observation['awg_config_present'] else 'nodes.probe.missing')),
-        )
+        observation = await backend.node_probe(user_id, node_key)
+        def status(value):
+            return tr(locale, 'nodes.probe.ok' if value is True else 'nodes.probe.failed' if value is False else 'nodes.probe.unknown')
+        lines = [tr(locale, 'nodes.probe.agent_reachable')]
+        if observation['protocols']:
+            lines.append(status(observation.get('docker')) + ' · Docker')
+        lines.append(tr(locale, 'nodes.probe.checked', time=observation['checked_at'][:19].replace('T', ' ') + ' UTC',
+                        ms=observation['response_ms']))
+        if observation.get('settings_pending'):
+            lines.append(tr(locale, 'nodes.probe.pending_revision',
+                applied=observation['applied_revision'], desired=observation['desired_revision']))
+        if observation['protocols'] and observation.get('runtime_drift') is True:
+            lines.append(tr(locale, 'nodes.probe.drift'))
+        protocols = []
+        for item in observation['protocols']:
+            facts = [status(item.get(key)) + ' · ' + tr(locale, 'nodes.probe.' + key)
+                     for key in ('installed', 'running', 'config_valid')]
+            ports = [' / '.join(filter(None, (port['transport'].upper(), port['network'].upper()))) +
+                     ' ' + str(port['port'] or '—') for port in item['ports']]
+            if ports:
+                facts.append(tr(locale, 'nodes.probe.ports', value=' · '.join(ports)))
+            protocols.append(Section(tr(locale, 'protocol.' + item['protocol']), tuple(facts), heading_size=3))
+        services = Section(tr(locale, 'nodes.rich.services'),
+            () if protocols else (tr(locale, 'nodes.probe.agent_only'),), sections=tuple(protocols))
+        metrics = observation.get('host_metrics', {})
+        resources = []
+        for key in ('ram_used_percent', 'disk_free_percent'):
+            if key in metrics:
+                value = f"{metrics[key]:g}%"
+                total_key = 'ram_total_bytes' if key == 'ram_used_percent' else 'disk_total_bytes'
+                free_key = 'ram_available_bytes' if key == 'ram_used_percent' else 'disk_free_bytes'
+                total, free = metrics.get(total_key), metrics.get(free_key)
+                if total and free is not None and free <= total:
+                    amount = total - free if key == 'ram_used_percent' else free
+                    value += f" · {format_size(int(amount))} / {format_size(int(total))}"
+                resources.append((tr(locale, 'nodes.probe.' + key), value))
+        if 'load1' in metrics:
+            load = ' / '.join(str(metrics.get(key, '—')) for key in ('load1', 'load5', 'load15'))
+            cpus = f"{metrics['cpus']:g}" if 'cpus' in metrics else '—'
+            resources.append((tr(locale, 'nodes.probe.load'), load + ' · ' + tr(locale, 'nodes.probe.cpus', count=cpus)))
+        if 'uptime_seconds' in metrics:
+            minutes = int(metrics['uptime_seconds']) // 60
+            resources.append((tr(locale, 'nodes.probe.uptime'), f"{minutes // 1440}d {minutes // 60 % 24}h {minutes % 60}m"))
+        versions = [tr(locale, 'nodes.probe.agent_version', value=observation.get('agent_version') or '—'),
+            tr(locale, 'nodes.probe.version', value=observation.get('runtime_version') or '—')]
+        if observation.get('desired_runtime_version'):
+            versions.append(tr(locale, 'nodes.probe.expected_version', value=observation['desired_runtime_version']))
+        versions.append(tr(locale, 'nodes.probe.note'))
+        sections = [services]
+        if resources:
+            sections.append(Section(tr(locale, 'nodes.probe.resources'), tables=(Table(
+                (tr(locale, 'admin.rich.item'), tr(locale, 'admin.rich.value')), tuple(resources)),)))
+        sections.append(Section(tr(locale, 'nodes.rich.technical'), collapsed=True, lines=tuple(versions)))
         await render(bot, query.message.chat.id,
-            Screen(tr(locale, 'nodes.probe.title'), (lines[0],), sections=(
-                Section(tr(locale, 'nodes.rich.services'), lines=lines[3:5]),
-                Section(tr(locale, 'nodes.rich.technical'), collapsed=True, lines=lines[1:3]),
-            ), embedded_buttons=True, navigation=True),
-            [[InlineKeyboardButton(text=tr(locale, 'nodes.diagnostics.open'),
-                callback_data=f'node_diagnostics:{node_key}')], *back], state,
-            query.message.message_id)
+            Screen(tr(locale, 'nodes.probe.title'), tuple(lines), sections=tuple(sections),
+                embedded_buttons=True, navigation=True),
+            [[InlineKeyboardButton(text=tr(locale, 'admin.status.refresh'), callback_data=ProbeNodeCallback(node_key=node_key).pack()),
+              InlineKeyboardButton(text=tr(locale, 'nodes.diagnostics.open'), callback_data=f'node_diagnostics:{node_key}')],
+             *back], state, query.message.message_id)
     except BackendError as exc:
         cause = exc.code if exc.code in {'node_agent_unconfigured',
             'node_agent_unavailable', 'driver_unavailable'} else 'unknown'
@@ -1321,6 +1391,21 @@ async def node_diagnostics_cb(query: CallbackQuery, bot: Bot,
                 callback_data=f'bootstrap_menu:{node_key}')], back],
             state, query.message.message_id)
         return
+    if result.get('checks') and result.get('observation'):
+        from .admin_recovery import server_check_name, detail_link
+        sections = []
+        for check in sorted(result['checks'], key=lambda c: {'error':0,'warning':1,'ok':2}[c['status']]):
+            name = server_check_name(locale, check['id'])
+            link = await detail_link(state, name, (check['detail'],), f'node_diagnostics:{node_key}')
+            sections.append(Section('', inline_rows=((tr(locale, 'recovery.check.' + check['status']), ' · ',
+                InlineKeyboardButton(text=name + ' →', callback_data=link)),), bold_first_line=True))
+        await render(bot, query.message.chat.id, Screen(tr(locale, 'nodes.diagnostics.title'),
+            (tr(locale, 'recovery.diagnostic_summary', errors=sum(c['status']=='error' for c in result['checks']),
+                warnings=sum(c['status']=='warning' for c in result['checks'])),),
+            sections=tuple(sections), embedded_buttons=True, navigation=True),
+            [[InlineKeyboardButton(text=tr(locale, 'nodes.diagnostics.refresh'), callback_data=f'node_diagnostics:{node_key}')], back],
+            state, query.message.message_id)
+        return
     lines = [tr(locale, 'nodes.diagnostics.field.' + field,
         value=tr(locale, 'nodes.diagnostics.status.' + result[field]))
         for field in ('docker', 'runtime_root', 'xray_config', 'awg_config')]
@@ -1341,14 +1426,24 @@ async def apply_node_cb(query: CallbackQuery, callback_data: ApplyNodeCallback, 
     draft = (await state.get_data()).get('node_settings_draft')
     if (draft and draft['node_key'] == callback_data.node_key
             and draft['values'] != draft['baseline']):
+        active = await current_settings_operation(query.from_user.id, callback_data.node_key, backend)
+        if active:
+            await show_node_apply_status(query.message.chat.id, query.from_user.id, query.message.message_id,
+                active['id'], callback_data.node_key, bot, backend, state)
+            return
         await _save_node_draft(query, bot, backend, state, callback_data.node_key)
         return
     await apply_node(query.message.chat.id, query.from_user.id, query.message.message_id, callback_data.node_key, bot, backend, state)
 
 async def apply_node(chat_id, user_id, message_id, node_key, bot, backend, state, revision=None):
     locale = normalize_locale((await state.get_data()).get('locale'))
-    node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=user_id)
+    node, active = await asyncio.gather(
+        backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=user_id),
+        current_settings_operation(user_id, node_key, backend))
     await remember_node(state, node)
+    if active:
+        await show_node_apply_status(chat_id, user_id, message_id, active['id'], node_key, bot, backend, state)
+        return False
     if not node['applied_revision']:
         from .admin_node_tools import show_install
         await show_install(chat_id, user_id, message_id, node_key, bot, backend, state)
@@ -1357,53 +1452,58 @@ async def apply_node(chat_id, user_id, message_id, node_key, bot, backend, state
         revision = node['desired_revision']
     try:
         operation = await backend.apply_node_settings(user_id, node_key, revision)
-    except BackendError:
+    except BackendError as exc:
+        if exc.code == 'node_settings_operation_pending':
+            active = await current_settings_operation(user_id, node_key, backend)
+            if active:
+                await show_node_apply_status(chat_id, user_id, message_id, active['id'], node_key, bot, backend, state)
+                return False
         await render(bot, chat_id, Screen(tr(locale, 'nodes.apply.blocked_title'),
             (tr(locale, 'nodes.apply.queue_failed'),), embedded_buttons=True, navigation=True),
             [[InlineKeyboardButton(text=tr(locale, 'back'),
                 callback_data=NodeSettingsCallback(node_key=node_key).pack())]],
             state, message_id)
         return False
-    await render(bot, chat_id, Screen(tr(locale, 'nodes.apply.running_title'),
-        (tr(locale, 'nodes.apply.running'),), embedded_buttons=True, navigation=True),
-        [[InlineKeyboardButton(text=tr(locale, 'back'),
-            callback_data=NodeSettingsCallback(node_key=node_key).pack())]], state, message_id)
-    
-    for _ in range(30):
-        try:
-            s = await backend.node_settings_operation(user_id, operation['id'])
-        except BackendError:
-            break
-        if s['status'] == 'succeeded':
-            await show_node_settings(chat_id, user_id, message_id, node_key, bot, backend, state)
-            return True
-        if s['status'] in {'blocked', 'superseded'}: break
-        await asyncio.sleep(1)
-        
     await show_node_apply_status(chat_id, user_id, message_id, operation['id'], node_key, bot, backend, state)
     return False
 
 @router.callback_query(NodeApplyStatusCallback.filter())
 async def node_apply_status_cb(query: CallbackQuery, callback_data: NodeApplyStatusCallback, bot: Bot, backend: BackendClient, state: FSMContext):
     await query.answer()
-    await show_node_apply_status(query.message.chat.id, query.from_user.id, query.message.message_id, callback_data.operation_id, callback_data.node_key, bot, backend, state)
+    node_key = callback_data.node_key
+    if not node_key:
+        try:
+            operation = await backend.node_settings_operation(query.from_user.id, callback_data.operation_id)
+        except BackendError:
+            locale = normalize_locale((await state.get_data()).get('locale'))
+            await render(bot, query.message.chat.id, Screen(tr(locale, 'nodes.apply.blocked_title'),
+                (tr(locale, 'nodes.apply.status_unavailable'),), embedded_buttons=True, navigation=True),
+                [[InlineKeyboardButton(text=tr(locale, 'nodes.apply.refresh'), callback_data=apply_progress_callback(callback_data.operation_id, ''))],
+                 [InlineKeyboardButton(text=tr(locale, 'back'), callback_data=AdminNodesCallback().pack())]], state, query.message.message_id)
+            return
+        node_key = operation['node_key']
+    await show_node_apply_status(query.message.chat.id, query.from_user.id, query.message.message_id, callback_data.operation_id, node_key, bot, backend, state)
 
 async def show_node_apply_status(chat_id, user_id, message_id, operation_id, node_key, bot, backend, state):
     locale = normalize_locale((await state.get_data()).get('locale'))
     try:
         s = await backend.node_settings_operation(user_id, operation_id)
-    except BackendError:
+    except BackendError as exc:
         await render(bot, chat_id, Screen(tr(locale, 'nodes.apply.blocked_title'),
             (tr(locale, 'nodes.apply.status_unavailable'),), embedded_buttons=True, navigation=True),
             [[InlineKeyboardButton(text=tr(locale, 'nodes.apply.refresh'),
-                callback_data=NodeApplyStatusCallback(operation_id=operation_id,
-                    node_key=node_key).pack())],
+                callback_data=apply_progress_callback(operation_id, node_key))],
              [InlineKeyboardButton(text=tr(locale, 'back'),
                 callback_data=NodeSettingsCallback(node_key=node_key).pack())]],
             state, message_id)
+        if exc.status >= 500 or exc.status == 429:
+            schedule_refresh(state, lambda: show_node_apply_status(chat_id, user_id, message_id, operation_id, node_key, bot, backend, state))
         return
     if s['status'] == 'succeeded':
-        await show_node_settings(chat_id, user_id, message_id, node_key, bot, backend, state)
+        await render(bot, chat_id, Screen(tr(locale, 'nodes.apply.complete'),
+            (tr(locale, 'nodes.apply.success'),), embedded_buttons=True, navigation=True),
+            [[InlineKeyboardButton(text=tr(locale, 'nodes.card.back_to_server'), callback_data=AdminNodeCallback(node_key=node_key).pack())],
+             [InlineKeyboardButton(text=tr(locale, 'nodes.card.settings'), callback_data=NodeSettingsCallback(node_key=node_key).pack())]], state, message_id)
         return
     rows = [[InlineKeyboardButton(text=tr(locale, 'back'),
         callback_data=NodeSettingsCallback(node_key=node_key).pack())]]
@@ -1416,12 +1516,17 @@ async def show_node_apply_status(chat_id, user_id, message_id, operation_id, nod
         return
     if s['status'] in {'blocked', 'superseded'}:
         await render(bot, chat_id, Screen(tr(locale, 'nodes.apply.blocked_title'),
-            (tr(locale, 'nodes.apply.blocked'),), embedded_buttons=True, navigation=True), rows, state, message_id)
+            (tr(locale, 'nodes.apply.blocked'),
+             *((tr(locale, 'installation_progress.' + s['progress']['stage']),) if s.get('progress') else ()),
+             *((s['error_code'],) if s.get('error_code') else ())), embedded_buttons=True, navigation=True), rows, state, message_id)
         return
     rows.insert(0, [InlineKeyboardButton(text=tr(locale, 'nodes.apply.refresh'),
-        callback_data=NodeApplyStatusCallback(operation_id=operation_id, node_key=node_key).pack())])
+        callback_data=apply_progress_callback(operation_id, node_key))])
     await render(bot, chat_id, Screen(tr(locale, 'nodes.apply.running_title'),
-        (tr(locale, 'nodes.apply.pending'),), embedded_buttons=True, navigation=True), rows, state, message_id)
+        (tr(locale, 'nodes.apply.state.' + s['status']),
+         *((tr(locale, 'installation_progress.' + s['progress']['stage']),) if s.get('progress') else ())),
+        embedded_buttons=True, navigation=True), rows, state, message_id)
+    schedule_refresh(state, lambda: show_node_apply_status(chat_id, user_id, message_id, operation_id, node_key, bot, backend, state))
 
 @router.callback_query(NodeMaintenanceCallback.filter())
 async def node_maintenance_cb(query: CallbackQuery, callback_data: NodeMaintenanceCallback, bot: Bot, backend: BackendClient, state: FSMContext):

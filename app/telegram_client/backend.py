@@ -26,6 +26,10 @@ class BackendClient:
     async def node_services(self, user_id, node_key):
         return await self.request('GET', f'/api/v1/nodes/{node_key}/services', telegram_user_id=user_id)
 
+    async def node_probe(self, user_id, node_key):
+        return await self.request('GET', f'/api/v1/nodes/{node_key}/probe', telegram_user_id=user_id,
+                                  timeout_seconds=20)
+
     async def node_action(self, user_id, node_key, action, revision, command_key):
         return await self.request('POST', f'/api/v1/nodes/{node_key}/actions',
             telegram_user_id=user_id, body={'action': action, 'revision': revision},
@@ -264,13 +268,15 @@ class BackendClient:
                                   telegram_user_id=telegram_user_id)
 
     async def issue(self, telegram_user_id: int, profile_id: str, node_key: str,
-                    protocol: str, transport: str, *, device_id: str | None = None) -> dict:
+                    protocol: str, transport: str, *, device_id: str | None = None,
+                    command_key: str | None = None) -> dict:
         body = {'node_key': node_key, 'protocol': protocol, 'transport': transport}
         if device_id is not None:
             body['device_id'] = device_id
-        return await self.request('POST', f'/api/v1/profiles/{profile_id}/config-issuances?wait=true',
+        suffix = '' if protocol == 'awg' else '?wait=true'
+        return await self.request('POST', f'/api/v1/profiles/{profile_id}/config-issuances{suffix}',
             telegram_user_id=telegram_user_id, command=True,
-            body=body)
+            body=body, command_key=command_key)
 
     async def node_creation_options(self, telegram_user_id: int) -> dict:
         return await self.request('GET', '/api/v1/nodes/creation-options', telegram_user_id=telegram_user_id)

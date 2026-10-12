@@ -22,6 +22,10 @@ class RecoveryDiagnostics(CallbackData, prefix='recdiag'):
     pass
 
 
+class RecoveryFleet(CallbackData, prefix='recfleet'):
+    offset: int = 0
+
+
 class RecoveryHistory(CallbackData, prefix='rechist'):
     offset: int = 0
 
@@ -238,7 +242,7 @@ def diagnostic_name(locale, identity):
     names = {'file:current': 'installation', 'file:current/.venv/bin/python': 'python',
         'file:shared/.env': 'environment', 'environment': 'environment_keys',
         'release:current/VERSION': 'version', 'release:current/BUILD_COMMIT': 'build',
-        'disk': 'disk', 'database': 'database', 'maintenance': 'maintenance',
+        'disk': 'disk', 'database': 'database', 'schema': 'schema', 'maintenance': 'maintenance',
         'worker': 'worker', 'api': 'api', 'telegram_polling': 'telegram', 'unit:node-plane-backend.service': 'backend',
         'unit:node-plane-driver.service': 'driver', 'unit:node-plane-telegram.service': 'telegram',
         'unit:node-plane-backend-worker.service': 'worker'}
@@ -274,9 +278,65 @@ async def controller_diagnostics(query: CallbackQuery, bot: Bot, backend: Backen
         sections.append(Section('', inline_rows=((tr(locale, 'recovery.check.' + check['status']), ' · ',
                 InlineKeyboardButton(text=name + ' →', callback_data=link)),), bold_first_line=True,
             sections=(Section('', lines=(shorten_label(check['detail'], 120),)),) if check['status'] != 'ok' else ()))
-    rows = [[InlineKeyboardButton(text=tr(locale, 'recovery.refresh'), callback_data=RecoveryDiagnostics().pack())],
+    rows = [[InlineKeyboardButton(text=tr(locale, 'diagnostics.servers'), callback_data=RecoveryFleet().pack())],
+            [InlineKeyboardButton(text=tr(locale, 'recovery.refresh'), callback_data=RecoveryDiagnostics().pack())],
             [InlineKeyboardButton(text=tr(locale, 'back'), callback_data=RecoveryPage().pack())]]
     await render(bot, query.message.chat.id, Screen(tr(locale, 'recovery.controller'), lines=lines,
+        sections=tuple(sections), embedded_buttons=True, navigation=True), rows, state, query.message.message_id)
+
+
+def server_check_name(locale, identity):
+    protocol, _, field = identity.partition(':')
+    if protocol in {'awg', 'xray'}:
+        return tr(locale, 'protocol.' + protocol) + ' · ' + tr(locale, 'nodes.probe.' + field)
+    labels = {'agent': 'diagnostics.agent', 'agent_version': 'diagnostics.agent_version', 'docker': 'diagnostics.docker',
+        'settings': 'diagnostics.settings', 'runtime_version': 'diagnostics.runtime',
+        'ram_used_percent': 'nodes.probe.ram_used_percent', 'disk_free_percent': 'nodes.probe.disk_free_percent',
+        'load1': 'nodes.probe.load', 'disabled': 'diagnostics.disabled',
+        'registry': 'diagnostics.registry', 'operations': 'diagnostics.operations', 'live_services': 'diagnostics.live'}
+    return tr(locale, labels[identity]) if identity in labels else identity
+
+
+@router.callback_query(RecoveryFleet.filter())
+async def fleet_diagnostics(query: CallbackQuery, callback_data: RecoveryFleet, bot: Bot,
+                            backend: BackendClient, state: FSMContext):
+    from .callbacks import AdminNodeCallback
+    await query.answer()
+    locale = normalize_locale((await state.get_data()).get('locale'))
+    try:
+        page = await backend.request('GET', f'/api/v1/system/recovery/fleet?offset={callback_data.offset}',
+                                     telegram_user_id=query.from_user.id, timeout_seconds=30)
+    except BackendError:
+        await render(bot, query.message.chat.id, Screen(tr(locale, 'diagnostics.servers'),
+            (tr(locale, 'diagnostics.unavailable'),), embedded_buttons=True, navigation=True),
+            [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data=RecoveryDiagnostics().pack())]],
+            state, query.message.message_id)
+        return
+    sections = []
+    back = RecoveryFleet(offset=page['offset']).pack()
+    for item in page['items']:
+        checks = []
+        for check in sorted(item['checks'], key=lambda c: {'error':0,'warning':1,'ok':2}[c['status']]):
+            name = server_check_name(locale, check['id'])
+            link = await detail_link(state, item['title'] + ' · ' + name, (check['detail'],), back)
+            checks.append(Section('', inline_rows=((tr(locale, 'recovery.check.' + check['status']), ' · ',
+                InlineKeyboardButton(text=name + ' →', callback_data=link)),), bold_first_line=True))
+        sections.append(Section(item['title'], sections=tuple(checks), heading_size=3,
+            rows=((InlineKeyboardButton(text=tr(locale, 'diagnostics.open_server'),
+                callback_data=AdminNodeCallback(node_key=item['node_key']).pack()),),)))
+    rows = []
+    pages = []
+    if page['offset']:
+        pages.append(InlineKeyboardButton(text='←', callback_data=RecoveryFleet(offset=max(0,page['offset']-page['page_size'])).pack()))
+    if page.get('next_offset') is not None:
+        pages.append(InlineKeyboardButton(text='→', callback_data=RecoveryFleet(offset=page['next_offset']).pack()))
+    if pages:
+        rows.append(pages)
+    rows += [[InlineKeyboardButton(text=tr(locale, 'recovery.refresh'), callback_data=back)],
+             [InlineKeyboardButton(text=tr(locale, 'back'), callback_data=RecoveryDiagnostics().pack())]]
+    lines = (tr(locale, 'diagnostics.coverage', checked=len(page['items']), total=page['total']),
+             tr(locale, 'recovery.diagnostic_summary', errors=page['errors'], warnings=page['warnings']))
+    await render(bot, query.message.chat.id, Screen(tr(locale, 'diagnostics.servers'), lines,
         sections=tuple(sections), embedded_buttons=True, navigation=True), rows, state, query.message.message_id)
 
 

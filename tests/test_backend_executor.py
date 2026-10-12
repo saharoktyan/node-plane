@@ -31,7 +31,7 @@ class BackendExecutorTests(unittest.TestCase):
             frozenset({'maintenance.manage'}), account.id), account)
 
     def test_admin_repair_supersedes_old_revisions_and_queues_current_state(self):
-        profile = self.prepare()
+        profile = self.prepare(with_device=True)
         grant = [{'node_key': 'node', 'protocol': 'awg'}]
         first = self.grants(profile, 1, grant).json()
         self.grants(profile, 2, [])
@@ -57,7 +57,7 @@ class BackendExecutorTests(unittest.TestCase):
         self.assertFalse(worker.run_one())
 
     def test_repair_requires_admin_and_preserves_block_on_remote_failure(self):
-        profile = self.prepare()
+        profile = self.prepare(with_device=True)
         first = self.grants(profile, 1, [{'node_key': 'node', 'protocol': 'awg'}]).json()
         task_id = self.db.connection.execute('SELECT id FROM backend_operation_tasks WHERE operation_id = ?',
                                              (first['operation_id'],)).fetchone()[0]
@@ -77,7 +77,7 @@ class BackendExecutorTests(unittest.TestCase):
         self.assertEqual(self.db.connection.execute('SELECT status FROM backend_operation_tasks WHERE id = ?', (task_id,)).fetchone()[0], 'blocked')
 
     def test_repair_can_complete_after_backend_commit_failure(self):
-        profile = self.prepare()
+        profile = self.prepare(with_device=True)
         first = self.grants(profile, 1, [{'node_key': 'node', 'protocol': 'awg'}]).json()
         task_id = self.db.connection.execute('SELECT id FROM backend_operation_tasks WHERE operation_id = ?',
                                              (first['operation_id'],)).fetchone()[0]
@@ -103,7 +103,7 @@ class BackendExecutorTests(unittest.TestCase):
         self.assertEqual(self.db.connection.execute('SELECT desired_revision FROM backend_profiles WHERE id = ?', (profile,)).fetchone()[0], 3)
 
     def test_live_inspection_is_visible_but_does_not_unblock_uncertain_task(self):
-        profile = self.prepare()
+        profile = self.prepare(with_device=True)
         result = self.grants(profile, 1, [{'node_key': 'node', 'protocol': 'awg'}]).json()
         driver = FakeDriver(failure=True)
         executor = IntentExecutor(self.db, driver)
@@ -130,7 +130,7 @@ class BackendExecutorTests(unittest.TestCase):
         self.assertNotIn('raw transport detail', raw.text)
 
     def test_confirmed_success_recovers_without_repeating_remote_command(self):
-        profile = self.prepare()
+        profile = self.prepare(with_device=True)
         first = self.grants(profile, 1, [{'node_key': 'node', 'protocol': 'awg'}]).json()
         self.grants(profile, 2, [])
         driver = FakeDriver(failure=True)
@@ -154,7 +154,7 @@ class BackendExecutorTests(unittest.TestCase):
         self.assertEqual(driver.calls[-1][1]['action'], 'delete')
 
     def test_failed_missing_and_running_journal_entries_keep_node_blocked(self):
-        profile = self.prepare()
+        profile = self.prepare(with_device=True)
         self.grants(profile, 1, [{'node_key': 'node', 'protocol': 'awg'}])
         self.grants(profile, 2, [])
         driver = FakeDriver(failure=True)
@@ -173,7 +173,7 @@ class BackendExecutorTests(unittest.TestCase):
         self.assertEqual(len(driver.calls), 1)
 
     def test_revision_order_stable_xray_identity_and_private_result(self):
-        profile = self.prepare()
+        profile = self.prepare(with_device=True)
         grant = [{'node_key': 'node', 'protocol': 'xray'}]
         first = self.grants(profile, 1, grant).json()
         self.grants(profile, 2, [])
@@ -193,7 +193,7 @@ class BackendExecutorTests(unittest.TestCase):
         self.assertNotIn('xray_uuid', result.text)
 
     def test_timeout_blocks_later_revocation_without_blind_retry(self):
-        profile = self.prepare()
+        profile = self.prepare(with_device=True)
         grant = [{'node_key': 'node', 'protocol': 'awg'}]
         first = self.grants(profile, 1, grant).json()
         self.grants(profile, 2, [])
@@ -207,7 +207,7 @@ class BackendExecutorTests(unittest.TestCase):
         self.assertNotIn('private transport', result.text)
 
     def test_crash_recovery_blocks_running_task_and_node(self):
-        profile = self.prepare()
+        profile = self.prepare(with_device=True)
         self.grants(profile, 1, [{'node_key': 'node', 'protocol': 'awg'}])
         self.grants(profile, 2, [])
         with self.db.transaction() as conn:
@@ -219,7 +219,7 @@ class BackendExecutorTests(unittest.TestCase):
         self.assertEqual(self.db.connection.execute("SELECT COUNT(*) FROM backend_operation_tasks WHERE status = 'blocked'").fetchone()[0], 1)
 
     def test_expired_pending_ensure_is_never_dispatched(self):
-        profile = self.prepare()
+        profile = self.prepare(with_device=True)
         self.grants(profile, 1, [{'node_key': 'node', 'protocol': 'awg'}])
         with self.db.transaction() as conn:
             row = conn.execute('SELECT id, intent_json FROM backend_operation_tasks').fetchone()
@@ -234,7 +234,7 @@ class BackendExecutorTests(unittest.TestCase):
 
     def test_expiry_queues_durable_revocation_once_and_extension_restores_access(self):
         from datetime import datetime, timedelta, timezone
-        profile = self.prepare()
+        profile = self.prepare(with_device=True)
         self.db.connection.execute('UPDATE backend_profiles SET owner_account_id = NULL WHERE id = ?', (profile,))
         self.grants(profile, 1, [{'node_key': 'node', 'protocol': 'awg'}])
         future = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
@@ -263,7 +263,7 @@ class BackendExecutorTests(unittest.TestCase):
         self.assertEqual(worker.queue_expired_profiles(), 0)
 
     def test_expiry_without_targets_or_already_revoked_revision_does_not_loop(self):
-        profile = self.prepare()
+        profile = self.prepare(with_device=True)
         self.db.connection.execute('UPDATE backend_profiles SET owner_account_id = NULL WHERE id = ?', (profile,))
         worker = IntentExecutor(self.db, FakeDriver())
         self.client.patch(f'/api/v1/profiles/{profile}', headers=self.headers_for(1),

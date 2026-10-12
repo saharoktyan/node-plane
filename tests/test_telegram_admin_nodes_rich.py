@@ -9,6 +9,67 @@ from telegram_client.i18n import tr
 
 
 class AdminNodeRichTests(IsolatedAsyncioTestCase):
+    async def test_status_lookup_retries_transient_errors_but_stops_on_denial(self):
+        from telegram_client.backend import BackendError
+        for status in (503, 403):
+            self.backend.node_settings_operation = AsyncMock(side_effect=BackendError('unavailable', status))
+            with patch.object(nodes, 'render', new_callable=AsyncMock), patch.object(nodes, 'schedule_refresh') as refresh:
+                await nodes.show_node_apply_status(123, 123, 77, 'settings-task', 'msk1', self.bot, self.backend, self.state)
+                self.assertEqual(refresh.called, status == 503)
+
+    async def test_long_node_key_progress_callback_resolves_node_from_operation(self):
+        from uuid import uuid4
+        identity, key = str(uuid4()), 'long-server-key'
+        callback = nodes.apply_progress_callback(identity, key)
+        self.assertLessEqual(len(callback.encode()), 64)
+        parsed = nodes.NodeApplyStatusCallback.unpack(callback)
+        self.backend.node_settings_operation = AsyncMock(return_value={'node_key': key})
+        with patch.object(nodes, 'show_node_apply_status', new_callable=AsyncMock) as progress:
+            await nodes.node_apply_status_cb(self.query, parsed, self.bot, self.backend, self.state)
+            self.assertEqual(progress.call_args.args[4], key)
+
+    async def test_active_settings_replace_apply_and_save_with_progress(self):
+        operation = {'id': 'settings-task', 'status': 'running'}
+        self.overview['settings_operation'] = operation
+        self.backend.apply_node_settings = AsyncMock()
+        self.backend.node_settings_operation = AsyncMock(return_value={**operation,
+            'progress': {'stage': 'protocol_deploy'}})
+        with patch.object(nodes, 'render', new_callable=AsyncMock) as draw, patch.object(nodes, 'schedule_refresh') as refresh:
+            await nodes.show_node_settings(123, 123, 77, 'msk1', self.bot, self.backend, self.state)
+            callbacks = self.callbacks(draw)
+            self.assertTrue(any(c.startswith('node_apply_status:') for c in callbacks))
+            self.assertFalse(any(c.startswith('apply_node:') or c.startswith('node_draft_save:') for c in callbacks))
+            await nodes.apply_node(123, 123, 77, 'msk1', self.bot, self.backend, self.state)
+            self.assertIn(tr('en', 'installation_progress.protocol_deploy'), draw.call_args.args[2].lines)
+            self.assertTrue(refresh.called)
+        self.backend.apply_node_settings.assert_not_awaited()
+
+    async def test_apply_queues_once_and_returns_an_observed_progress_screen(self):
+        self.backend.apply_node_settings = AsyncMock(return_value={'id': 'settings-task'})
+        self.backend.node_settings_operation = AsyncMock(return_value={'id': 'settings-task', 'status': 'awaiting_executor'})
+        with patch.object(nodes, 'render', new_callable=AsyncMock) as draw, patch.object(nodes, 'schedule_refresh') as refresh:
+            await nodes.apply_node(123, 123, 77, 'msk1', self.bot, self.backend, self.state)
+            self.assertIn(tr('en', 'nodes.apply.state.awaiting_executor'), draw.call_args.args[2].lines)
+            refresh.assert_called_once()
+        self.backend.apply_node_settings.assert_awaited_once()
+        self.backend.node_settings_operation.assert_awaited_once()
+
+    async def test_completed_apply_shows_result_and_stops_refreshing(self):
+        self.backend.node_settings_operation = AsyncMock(return_value={'status': 'succeeded'})
+        with patch.object(nodes, 'render', new_callable=AsyncMock) as draw, patch.object(nodes, 'schedule_refresh') as refresh:
+            await nodes.show_node_apply_status(123, 123, 77, 'settings-task', 'msk1', self.bot, self.backend, self.state)
+            self.assertEqual(draw.call_args.args[2].title, tr('en', 'nodes.apply.complete'))
+            refresh.assert_not_called()
+
+    async def test_queue_race_opens_existing_settings_operation(self):
+        from telegram_client.backend import BackendError
+        self.backend.node_overview.side_effect = [self.overview,
+            {**self.overview, 'settings_operation': {'id': 'existing', 'status': 'running'}}]
+        self.backend.apply_node_settings = AsyncMock(side_effect=BackendError('node_settings_operation_pending', 409))
+        with patch.object(nodes, 'show_node_apply_status', new_callable=AsyncMock) as progress:
+            await nodes.apply_node(123, 123, 77, 'msk1', self.bot, self.backend, self.state)
+            self.assertEqual(progress.call_args.args[3], 'existing')
+
     async def test_node_card_loads_node_and_overview_concurrently(self):
         import asyncio
         node_started, overview_started = asyncio.Event(), asyncio.Event()

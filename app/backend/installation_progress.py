@@ -102,7 +102,7 @@ def observe_node_job(row, driver):
     path = progress_path(row['id'])
     getter = getattr(driver, 'node_action_progress', None)
     if (path is None or not callable(getter) or row['action'] not in
-            {'bootstrap', 'install_docker', 'reinstall_keep', 'reinstall_clean', 'sync_env', 'sync_xray'}):
+            {'bootstrap', 'install_docker', 'reinstall_keep', 'reinstall_clean', 'sync_env', 'sync_xray', 'apply_settings'}):
         yield
         return
     stop = threading.Event()
@@ -117,7 +117,8 @@ def observe_node_job(row, driver):
                 # Observability must never change execution or recovery.
                 pass
     try:
-        write_stage(path, row['id'], 'docker_install' if row['action'] == 'install_docker' else 'runtime_sync')
+        write_stage(path, row['id'], 'protocol_settings' if row['action'] == 'apply_settings' else
+                    'docker_install' if row['action'] == 'install_docker' else 'runtime_sync')
     except OSError:
         pass
     thread = threading.Thread(target=observe, name='node-installation-progress', daemon=True)

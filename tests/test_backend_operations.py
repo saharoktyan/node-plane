@@ -10,11 +10,15 @@ class BackendOperationTests(unittest.TestCase):
     headers_for = test_backend_profile_commands.BackendProfileCommandTests.headers_for
     create = test_backend_profile_commands.BackendProfileCommandTests.create
 
-    def prepare(self):
+    def prepare(self, *, with_device=False):
         profile = self.create().json()['profile']['id']
         with self.db.transaction() as conn:
             conn.execute('INSERT INTO backend_nodes(key, title, region, protocols_json) VALUES (?, ?, ?, ?)',
                          ('node', 'Node', 'test', json.dumps(['awg', 'xray'])))
+            if with_device:
+                # These fixtures exercise existing peers from older installs.
+                from backend.devices import DeviceRepository
+                DeviceRepository.ensure_default(conn, conn.execute('SELECT * FROM backend_profiles WHERE id=?', (profile,)).fetchone())
         return profile
 
     def grants(self, profile, revision, grants, key=None):
@@ -29,7 +33,7 @@ class BackendOperationTests(unittest.TestCase):
         return response.json()
 
     def test_outbox_revokes_removed_and_historical_targets(self):
-        profile = self.prepare()
+        profile = self.prepare(with_device=True)
         first = self.grants(profile, 1, [{'node_key': 'node', 'protocol': 'awg'}]).json()
         self.assertEqual(first['runtime_status'], 'awaiting_executor')
         self.assertEqual(self.operation(first)['tasks'][0]['action'], 'ensure')
@@ -50,7 +54,7 @@ class BackendOperationTests(unittest.TestCase):
             self.assertEqual(self.operation(result)['tasks'][0]['action'], action)
 
     def test_replay_does_not_duplicate_operation_or_task(self):
-        profile = self.prepare()
+        profile = self.prepare(with_device=True)
         key = str(uuid4())
         grants = [{'node_key': 'node', 'protocol': 'awg'}]
         first = self.grants(profile, 1, grants, key)
@@ -60,7 +64,7 @@ class BackendOperationTests(unittest.TestCase):
         self.assertEqual(self.db.connection.execute('SELECT COUNT(*) FROM backend_operations').fetchone()[0], 2)
 
     def test_outbox_failure_rolls_back_desired_state_and_idempotency_record(self):
-        profile = self.prepare()
+        profile = self.prepare(with_device=True)
         with self.db.transaction() as conn:
             conn.execute("""CREATE TRIGGER fail_outbox BEFORE INSERT ON backend_operation_tasks
                 BEGIN SELECT RAISE(ABORT, 'private database detail'); END""")

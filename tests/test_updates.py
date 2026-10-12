@@ -20,6 +20,54 @@ if REPO_ROOT not in sys.path:
 
 
 class UpdatesTests(unittest.TestCase):
+    def test_catalog_cache_reuses_snapshots_expires_and_keeps_branches_separate(self):
+        value = {'status': 'ok', 'versions': [{'ref': 'v1'}]}
+        with patch.object(self.updates, '_list_available_versions', return_value=value) as fetch, \
+                patch.object(self.updates, 'monotonic', return_value=100) as clock:
+            first = self.updates.list_available_versions('dev', use_cache=True)
+            first['versions'][0]['ref'] = 'mutated'
+            self.assertEqual(self.updates.list_available_versions('dev', use_cache=True)['versions'][0]['ref'], 'v1')
+            fetch.assert_called_once()
+            self.updates.list_available_versions('main', use_cache=True)
+            self.assertEqual(fetch.call_count, 2)
+            clock.return_value = 161
+            self.updates.list_available_versions('dev', use_cache=True)
+            self.assertEqual(fetch.call_count, 3)
+            self.updates.list_available_versions('dev')
+            self.assertEqual(fetch.call_count, 4)
+
+    def test_catalog_errors_are_not_cached(self):
+        with patch.object(self.updates, '_list_available_versions', return_value={'status': 'error'}) as fetch:
+            self.updates.list_available_versions('dev', use_cache=True)
+            self.updates.list_available_versions('dev', use_cache=True)
+            self.assertEqual(fetch.call_count, 2)
+
+    def test_successful_update_check_invalidates_catalog_snapshot(self):
+        proc = SimpleNamespace(returncode=0, stdout='CHECK_UPDATES|up_to_date\n', stderr='')
+        with patch.object(self.updates, '_list_available_versions', return_value={'status': 'ok', 'versions': []}) as fetch, \
+                patch.object(self.updates, '_run_cmd', return_value=proc), \
+                patch.object(self.app_settings, 'record_update_check'):
+            self.updates.list_available_versions('dev', use_cache=True)
+            self.updates.check_for_updates(branch='dev')
+            self.updates.list_available_versions('dev', use_cache=True)
+            self.assertEqual(fetch.call_count, 2)
+
+    def test_concurrent_catalog_reads_share_one_fetch(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Event
+        entered, release = Event(), Event()
+        def fetch(*args):
+            entered.set()
+            self.assertTrue(release.wait(3))
+            return {'status': 'ok', 'versions': []}
+        with patch.object(self.updates, '_list_available_versions', side_effect=fetch) as catalog, ThreadPoolExecutor(2) as pool:
+            first = pool.submit(self.updates.list_available_versions, 'dev', use_cache=True)
+            self.assertTrue(entered.wait(3))
+            second = pool.submit(self.updates.list_available_versions, 'dev', use_cache=True)
+            release.set()
+            self.assertEqual(first.result(), second.result())
+            catalog.assert_called_once()
+
     def setUp(self) -> None:
         self.tmpdir = tempfile.TemporaryDirectory()
         base = self.tmpdir.name

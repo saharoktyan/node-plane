@@ -7,6 +7,19 @@ from tests import test_backend_devices
 
 
 class BackendDeviceCommandTests(unittest.TestCase):
+    def test_first_named_device_provisions_awg_only_after_creation(self):
+        profile = self.prepare()
+        granted = self.grants(profile, 1, [{'node_key': 'node', 'protocol': 'awg'}])
+        self.assertEqual(granted.status_code, 200)
+        self.assertEqual(DeviceRepository(self.db).list_for_profile(profile), [])
+        created = self.add(profile, 'My laptop', 2)
+        self.assertEqual(created.status_code, 201, created.text)
+        device = created.json()['device']
+        self.assertEqual(device['display_name'], 'My laptop')
+        self.assertEqual(len(DeviceRepository(self.db).list_for_profile(profile)), 1)
+        tasks = self.db.connection.execute('SELECT protocol,device_id FROM backend_operation_tasks').fetchall()
+        self.assertEqual([(row['protocol'], row['device_id']) for row in tasks], [('awg', device['id'])])
+
     setUp = test_backend_devices.BackendDeviceIdentityTests.setUp
     headers_for = test_backend_devices.BackendDeviceIdentityTests.headers_for
     create = test_backend_devices.BackendDeviceIdentityTests.create
@@ -49,7 +62,7 @@ class BackendDeviceCommandTests(unittest.TestCase):
         self.assertEqual(self.db.connection.execute('SELECT COUNT(*) FROM backend_devices').fetchone()[0], 0)
 
     def test_rename_preserves_runtime_and_does_not_create_remote_tasks(self):
-        profile = self.prepare()
+        profile = self.prepare(with_device=True)
         self.grants(profile, 1, [{'node_key': 'node', 'protocol': 'awg'}])
         device = DeviceRepository(self.db).list_for_profile(profile)[0]
         before = list(self.db.connection.execute('SELECT intent_json FROM backend_operation_tasks'))
@@ -64,7 +77,7 @@ class BackendDeviceCommandTests(unittest.TestCase):
         self.assertEqual([r[0] for r in before], [r[0] for r in self.db.connection.execute('SELECT intent_json FROM backend_operation_tasks')])
 
     def test_delete_waits_for_all_remote_revocations(self):
-        profile = self.prepare()
+        profile = self.prepare(with_device=True)
         self.grants(profile, 1, [{'node_key': 'node', 'protocol': 'awg'}])
         device = DeviceRepository(self.db).list_for_profile(profile)[0]
         path = f'/api/v1/profiles/{profile}/devices/{device["id"]}'

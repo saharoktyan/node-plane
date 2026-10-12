@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.4.3-alpha.81 - 2026-10-12
+
+- Extend installation diagnostics with bounded live server checks and explicit coverage in Telegram and Workstation.
+- Check published database migration checksums and report agent/protocol/resource issues without replaying operations.
+
+- Merge Telegram Status into an expanded administrator Overview with maintenance tasks, alerts, backup policy and known update state.
+- Expand read-only server probes with selected protocol/container checks, configured ports, host resources, runtime drift and observation timing.
+
+- Hide empty request and problem-node rows in Telegram administration summaries.
+- Create the first AWG device only when a user requests its configuration, prompting for a device name.
+- Generate AWG configurations asynchronously with automatically refreshed waiting screens and a Back action to the server list.
+
+- Use Transport → TCP/XHTTP navigation on VLESS configuration screens and remove the redundant artifact-name heading.
+
+- Show automatically refreshed node settings application progress and reopen active operations instead of offering duplicate apply commands.
+- Publish settings application stages from the agent through the backend operation summary.
+- Simplify the member profile and move account information, configuration statistics and server breakdown into Details.
+
+- Cache successful version catalogs for 60 seconds when browsing update pages, while validating update targets against a fresh catalog.
+- Overlap empty Telegram callback acknowledgements with screen loading and retain synchronous text, alert and URL responses.
+- Record screen submission latency separately from total update-handler duration.
+
 ## 0.4.3-alpha.80 - 2026-10-12
 
 - Include the Telegram credential validation library in controller installation archives.

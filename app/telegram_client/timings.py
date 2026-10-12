@@ -31,8 +31,10 @@ def route(path):
 @dataclass
 class Measurement:
     id: str = field(default_factory=lambda: uuid4().hex)
+    started: float = field(default_factory=perf_counter)
     totals: dict = field(default_factory=dict)
     closed: bool = False
+    screen_submitted_ms: float | None = None
 
 
 def record(stage, started, detail='', request_id='-'):
@@ -53,7 +55,7 @@ class ActionTimings(BaseMiddleware):
             return await handler(event, data)
         measurement = Measurement()
         token = CURRENT.set(measurement)
-        started = perf_counter()
+        started = measurement.started
         callback = getattr(event, 'callback_query', None)
         action = label((callback.data or '').split(':')[0]) if callback else 'message'
         outcome = 'error'
@@ -62,8 +64,9 @@ class ActionTimings(BaseMiddleware):
             outcome = 'ok'
             return result
         finally:
-            LOGGER.info('NP_TIMING action_id=%s stage=action action=%s outcome=%s total_ms=%.3f stages_ms=%s',
+            LOGGER.info('NP_TIMING action_id=%s stage=action action=%s outcome=%s total_ms=%.3f screen_submitted_ms=%s stages_ms=%s',
                         measurement.id, action, outcome, (perf_counter() - started) * 1000,
+                        measurement.screen_submitted_ms,
                         {key: round(value, 3) for key, value in measurement.totals.items()})
             measurement.closed = True
             CURRENT.reset(token)
@@ -76,6 +79,13 @@ class TelegramTimings(BaseRequestMiddleware):
             return await make_request(bot, method)
         started = perf_counter()
         try:
-            return await make_request(bot, method)
+            result = await make_request(bot, method)
+            current = CURRENT.get()
+            if (current and not current.closed and type(method).__name__ in {
+                    'EditMessageText', 'SendMessage', 'SendRichMessage', 'EditMessageCaption', 'SendPhoto'}):
+                current.screen_submitted_ms = round((perf_counter() - current.started) * 1000, 3)
+                LOGGER.info('NP_TIMING action_id=%s stage=screen_submitted elapsed_ms=%.3f detail=%s',
+                            current.id, current.screen_submitted_ms, type(method).__name__)
+            return result
         finally:
             record('telegram', started, type(method).__name__)
