@@ -32,7 +32,6 @@ pub enum Command {
     BackupQueue(Value, Uuid),
     BackupJob(Uuid),
     UpdateVersions(usize),
-    UpdateComponents,
     UpdateResult(Uuid),
     UpdateDismiss(Uuid),
     UpdateCheck,
@@ -67,12 +66,6 @@ impl Command {
                 Method::POST,
                 format!("/api/v1/system/updates/jobs/{id}/dismiss"),
                 Some(json!({})),
-                None,
-            ),
-            Self::UpdateComponents => (
-                Method::GET,
-                "/api/v1/system/updates/rollout".into(),
-                None,
                 None,
             ),
             Self::UpdateVersions(offset) => (
@@ -436,11 +429,6 @@ impl Browser {
                     list.push(json!(id));
                     updates["dismissed_job_ids"] = json!(list);
                 }
-            }
-            Command::UpdateComponents => {
-                self.components = Some(value);
-                self.components_page = 0;
-                self.selected = 0;
             }
             Command::UpdateVersions(_) => {
                 self.versions = Some(value);

@@ -22,6 +22,8 @@ class AdminSettingsRichTests(IsolatedAsyncioTestCase):
             recovery_rows = [row for section in screen.sections for row in section.rows
                 if any(b.callback_data == settings.RecoveryPage().pack() for b in row)]
             self.assertEqual([len(row) for row in recovery_rows], [1])
+            from telegram_client.routers.admin_recovery import RecoveryDiagnostics
+            self.assertNotIn(RecoveryDiagnostics().pack(), [b.callback_data for row in screen.fallback_rows(rows) for b in row])
             callbacks = [b.callback_data for row in screen.fallback_rows(rows) for b in row]
             for value in ('bot_title_settings', 'backups', 'alerts', 'traffic', 'system_cleanup', 'admin_menu'):
                 self.assertIn(value, callbacks)
@@ -91,10 +93,23 @@ class AdminSettingsRichTests(IsolatedAsyncioTestCase):
             self.assertEqual([b.callback_data for b in choices if b.style == 'primary'], ['upd_act:auto_interval_360'])
             self.assertEqual(rows[-1][0].callback_data, 'updates')
             screen.rich(rows)
-        self.query.data = 'upd_act:auto_interval_15'
+        self.query.data = 'upd_act:auto_interval_60'
         with patch.object(settings, 'show_auto_check', new_callable=AsyncMock):
             await settings.update_action_cb(self.query, settings.UpdateActionCallback.unpack(self.query.data), self.bot, backend, self.state)
-        backend.update_preferences.assert_awaited_once_with(123, {'auto_check_interval_minutes':15})
+        backend.update_preferences.assert_awaited_once_with(123, {'auto_check_interval_minutes':60})
+
+    async def test_auto_check_disabled_hides_frequency_and_stale_fifteen_minute_button_only_refreshes(self):
+        backend = SimpleNamespace(updates_overview=AsyncMock(return_value={'auto_check_enabled':False}), update_preferences=AsyncMock())
+        with patch.object(settings, 'render', new_callable=AsyncMock) as draw:
+            await settings.show_auto_check(self.query, self.bot, backend, self.state)
+        screen, rows = draw.call_args.args[2:4]
+        self.assertEqual(len(screen.sections), 1)
+        self.assertFalse(any(b.callback_data.startswith('upd_act:auto_interval_') for row in screen.fallback_rows(rows) for b in row))
+        self.query.data = 'upd_act:auto_interval_15'
+        with patch.object(settings, 'show_auto_check', new_callable=AsyncMock) as refresh:
+            await settings.update_action_cb(self.query, settings.UpdateActionCallback.unpack(self.query.data), self.bot, backend, self.state)
+        refresh.assert_awaited_once()
+        backend.update_preferences.assert_not_called()
 
     async def test_update_notification_close_preserves_control_panel(self):
         self.state_data['control_message_id'] = 999

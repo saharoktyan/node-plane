@@ -39,12 +39,14 @@ The header shows connection and loading status. SSH connections are reused acros
 
 Diagnostic first checks the controller over SSH, including services, PostgreSQL and published schema checksums. When the backend is reachable, it checks registered servers in batches: agents, selected protocol containers/configuration structure, versions and host resources. Results from every page are included in the final scrollable report. Missing or incomplete server coverage produces a warning; controller-only results do not certify the entire installation. Recovery of a stopped controller service requires a separate confirmation.
 
+The **Offer service and operation recovery** option retains its last selection across Workstation sessions. Each recovery action has its own confirmation.
+
 ## Sections
 
 | Section | Purpose |
 | --- | --- |
 | Install Node Plane / Node Plane Settings | Install a controller; configure defaults, policies, monitoring, backups and reset/removal |
-| Node Plane Updates | Check releases, choose a branch, update components and inspect results |
+| Node Plane Updates | Check releases, choose a branch, update the installation and inspect results or failed nodes |
 | Nodes | Search nodes by name/region/code, create a node, run setup, edit settings and diagnose operations |
 | Access | Manage user profiles, access requests, grants and devices |
 | Temporary configs | Create, retrieve and revoke short-lived configurations |

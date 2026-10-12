@@ -118,29 +118,20 @@ async def confirm_latest(query, bot, backend, state):
         [tr(lang, 'update_tools.target', value=target['version']), tr(lang, 'updates.rich.stack_warning')])
 
 
+def failed_update_nodes(overview):
+    return [item for item in (overview.get('latest_job') or {}).get('items', [])
+            if item.get('node_key') and item['node_key'] != '@driver'
+            and item.get('status') in {'blocked', 'failed', 'superseded'}]
+
+
 async def show_fleet(query, bot, backend, state, page=0, opened=False):
     lang = await locale(state)
-    value = await backend.update_rollout(query.from_user.id)
-    callbacks = await node_links(state, value['nodes'], f'fleet_nodes:{page}')
-    lines = [tr(lang, 'updates.rich.component.driver') + ' · ' + state_label(lang, value['driver_status'])]
-    rows = []
-    latest = value.get('latest_job')
-    pending = latest and latest['status'] in {'awaiting_executor', 'running'}
-    if pending:
-        rows.append([button(tr(lang, 'update_tools.progress'), f"update_job:{latest['id']}")])
-    else:
-        if value['agents_required']:
-            rows.append([button(tr(lang, 'update_tools.agents'), 'ufleet_confirm:agents', style='primary')])
-        if value['runtimes_required']:
-            rows.append([button(tr(lang, 'update_tools.runtimes'), 'ufleet_confirm:runtimes', style='primary')])
-    if latest and not pending and latest['id'] not in value.get('dismissed_job_ids', []):
-        rows.append([button(tr(lang, 'update_tools.result'), f"update_job:{latest['id']}")])
-    if pending:
-        rows.append([button(tr(lang, 'updates.refresh'), 'ufleet')])
-    rows.append([button(tr(lang, 'back'), UpdatesCallback().pack())])
-    await render(bot, query.message.chat.id, Screen(tr(lang, 'update_tools.fleet'), tuple(lines),
-        sections=(server_sections(lang, value['nodes'], page, 'fleet_nodes', opened=opened, callbacks=callbacks),), embedded_buttons=True, navigation=True),
-                 rows, state, query.message.message_id)
+    value = await backend.updates_overview(query.from_user.id)
+    nodes = failed_update_nodes(value)
+    callbacks = await node_links(state, nodes, f'fleet_nodes:{page}')
+    await render(bot, query.message.chat.id, Screen(tr(lang, 'update_tools.fleet'),
+        sections=(server_sections(lang, nodes, page, 'fleet_nodes', opened=opened, callbacks=callbacks),),
+        embedded_buttons=True, navigation=True), [[button(tr(lang, 'back'), UpdatesCallback().pack())]], state, query.message.message_id)
 
 
 def state_label(lang, status):
@@ -223,11 +214,11 @@ async def show_overview(query, bot, backend, state, page=0, opened=False):
     sections[0] = Section(sections[0].title, tables=sections[0].tables, inline_rows=((
         latest_version + ' · ' + tr(lang, 'updates.rich.last_check', value=checked) + ' · ', check),))
     sections.append(Section('', rows=tuple(action_rows)))
-    nodes = [n for n in fleet.get('nodes', []) if n.get('agent_status') == 'required']
+    nodes = failed_update_nodes(overview)
     callbacks = await node_links(state, nodes, f'updates_nodes:{page}')
     if nodes:
         sections.append(server_sections(lang, nodes, page, 'updates_nodes', opened=opened,
-            title_key='updates.rich.outdated_servers', callbacks=callbacks))
+            title_key='update_tools.fleet', callbacks=callbacks))
     sections.append(Section(tr(lang, 'updates.rich.checks'), rows=((
         button(tr(lang, 'updates.auto_on' if overview.get('auto_check_enabled') else 'updates.auto_off'),
             UpdateActionCallback(action='auto_check').pack()).model_copy(update={
@@ -235,10 +226,11 @@ async def show_overview(query, bot, backend, state, page=0, opened=False):
     sections.append(Section(tr(lang, 'updates.rich.selection'), rows=((
         button(tr(lang, 'updates.choose_branch'), UpdateActionCallback(action='branch_menu').pack()),
         button(tr(lang, 'update_tools.versions'), 'uv_page:0')),)))
-    component_actions = [(button(tr(lang, 'update_tools.fleet'), 'ufleet'),)]
+    component_actions = []
     if latest and not active and latest['id'] not in overview.get('dismissed_job_ids', []):
         component_actions.append((button(tr(lang, 'update_tools.result'), f"update_job:{latest['id']}"),))
-    sections.append(Section(tr(lang, 'updates.rich.component_actions'), rows=tuple(component_actions)))
+    if component_actions:
+        sections.append(Section(tr(lang, 'updates.rich.component_actions'), rows=tuple(component_actions)))
     lines = (('dev' if overview.get('branch') == 'dev' else 'stable') + ' · ' +
              (overview.get('current_version') or '—'),)
     if latest and latest['status'] in {'partial', 'rolled_back', 'blocked'}:
@@ -351,17 +343,13 @@ async def update_tools_cb(query: CallbackQuery, bot: Bot, backend: BackendClient
         elif query.data == 'ufleet':
             await show_fleet(query, bot, backend, state)
         elif query.data.startswith('ufleet_confirm:'):
-            kind = query.data.split(':')[1]
-            value = await backend.update_rollout(query.from_user.id)
-            if kind not in {'agents', 'runtimes'} or not value[kind + '_required']:
-                return await show_fleet(query, bot, backend, state)
-            await confirm(query, bot, state, {'kind': kind},
-                [tr(lang, 'update_tools.batch_note'),
-                 tr(lang, 'update_tools.agents' if kind == 'agents' else 'update_tools.runtimes')])
+            return await show_overview(query, bot, backend, state)
         elif query.data.startswith('update_submit:'):
             draft = (await state.get_data()).get('update_draft')
             if not draft or draft['nonce'] != query.data.split(':')[1]:
                 return await show_versions(query, bot, backend, state)
+            if draft['body'].get('kind') not in {'stack', 'version'}:
+                return await show_overview(query, bot, backend, state)
             job = await backend.run_update(query.from_user.id, draft['body'], draft['key'])
             await show_job(query, bot, backend, state, job['id'])
         elif query.data.startswith('update_cancel:'):

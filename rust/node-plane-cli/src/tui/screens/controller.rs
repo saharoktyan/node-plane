@@ -178,6 +178,9 @@ pub(in crate::tui) fn backup_catalog_controls(value: &serde_json::Value) -> Vec<
 }
 
 pub(in crate::tui) fn update_result_available(value: &serde_json::Value) -> bool {
+    if update_operation_active(&value["latest_job"]["status"]) {
+        return false;
+    }
     let Some(id) = value
         .pointer("/latest_job/id")
         .and_then(serde_json::Value::as_str)
@@ -187,6 +190,28 @@ pub(in crate::tui) fn update_result_available(value: &serde_json::Value) -> bool
     !value["dismissed_job_ids"]
         .as_array()
         .is_some_and(|items| items.iter().any(|item| item == id))
+}
+pub(in crate::tui) fn failed_update_nodes(value: &serde_json::Value) -> Vec<serde_json::Value> {
+    value
+        .pointer("/latest_job/items")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|item| {
+            item["node_key"]
+                .as_str()
+                .is_some_and(|key| key != "@driver")
+                && matches!(
+                    item["status"].as_str(),
+                    Some("blocked" | "failed" | "superseded")
+                )
+        })
+        .map(|item| {
+            let mut item = item.clone();
+            item["key"] = item["node_key"].clone();
+            item
+        })
+        .collect()
 }
 
 pub(in crate::tui) fn update_operation_active(value: &serde_json::Value) -> bool {
@@ -785,36 +810,15 @@ pub(in crate::tui) fn draw_controller(
             controls.push(("Dismiss".into(), Control::ControllerUpdateDismiss));
         }
     } else if let Some(components) = &state.components {
-        let status = |value: &serde_json::Value| match value.as_str() {
-            Some("current") => "Up to date",
-            Some("required") => "Outdated",
-            _ => "Unknown",
-        };
-        text = format!("Driver · {}", status(&components["driver_status"]));
-        if let Some(job) = components.get("latest_job").filter(|v| v.is_object()) {
-            text.push_str(&format!(
-                "\nLast update · {}",
-                job["status"].as_str().unwrap_or("Unknown")
-            ));
-        }
+        text = "Failed node updates. Open a server to inspect its failure and retry setup for the installed release.".into();
         if let Some(items) = components["nodes"].as_array() {
             let start = state.components_page * 5;
             for (index, item) in items.iter().enumerate().skip(start).take(5) {
-                let current =
-                    item["agent_status"] == "current" && item["runtime_status"] == "current";
                 controls.push((
                     format!(
                         "{} · {}",
                         item["title"].as_str().unwrap_or("Server"),
-                        if current {
-                            "Up to date"
-                        } else if item["agent_status"] == "unknown"
-                            || item["runtime_status"] == "unknown"
-                        {
-                            "Unknown"
-                        } else {
-                            "Outdated"
-                        }
+                        item["status"].as_str().unwrap_or("Failed")
                     ),
                     Control::ControllerComponentNode(index),
                 ));
@@ -829,14 +833,8 @@ pub(in crate::tui) fn draw_controller(
                 controls.push(("Next page".into(), Control::ControllerComponentPage(true)));
             }
         }
-        if components
-            .get("latest_job")
-            .is_some_and(|job| update_operation_active(&job["status"]))
-        {
-            controls.push(("Refresh".into(), Control::ControllerComponents));
-        }
     } else if let Some(versions) = &state.versions {
-        text = "Select an update version. Older versions may be incompatible and break the installation. The update requires confirmation before starting.".into();
+        text = "Select an update version. Older versions may be incompatible and break the installation.".into();
         if let Some(items) = versions["items"].as_array() {
             for (index, item) in items.iter().enumerate() {
                 controls.push((
@@ -889,34 +887,7 @@ pub(in crate::tui) fn draw_controller(
                 text.push_str(&format!("\n{error}"));
             }
         }
-        controls.push(("Check for updates".into(), Control::ControllerUpdateCheck));
-        if value["update_available"] == true {
-            controls.push(("To latest".into(), Control::ControllerUpdateLatest));
-        }
-        controls.push((
-            "Choose version / rollback".into(),
-            Control::ControllerVersions,
-        ));
-        controls.push(("Components".into(), Control::ControllerComponents));
-        if update_result_available(value) {
-            controls.push(("Update result".into(), Control::ControllerUpdateResult));
-        }
-        controls.push(("Change branch".into(), Control::ControllerUpdateBranch));
-        controls.push((
-            format!(
-                "Auto-check: {}",
-                if value["auto_check_enabled"] == true {
-                    "On"
-                } else {
-                    "Off"
-                }
-            ),
-            Control::ControllerUpdateAuto,
-        ));
-        controls.push((
-            format!("Interval: {} minutes", value["auto_check_interval_minutes"]),
-            Control::ControllerUpdateInterval,
-        ));
+        controls = app.controller_updates_actions();
     } else if state.removed || !app.controller_ready() && !state.verifying {
         text.push_str(if state.removed {
             "Bye-bye! Node Plane has been removed."
@@ -1033,7 +1004,22 @@ pub(in crate::tui) fn draw_controller(
     let rows = if grid {
         defaults_rows(&control_ids, parts[0].width)
     } else {
-        (0..controls.len()).map(|index| vec![index]).collect()
+        let mut rows = Vec::new();
+        let mut index = 0;
+        while index < controls.len() {
+            let mut row = vec![index];
+            if matches!(controls[index].1, Control::ControllerUpdateInterval(_)) {
+                while index + 1 < controls.len()
+                    && matches!(controls[index + 1].1, Control::ControllerUpdateInterval(_))
+                {
+                    index += 1;
+                    row.push(index);
+                }
+            }
+            rows.push(row);
+            index += 1;
+        }
+        rows
     };
     let selected_row = rows
         .iter()
@@ -1076,6 +1062,17 @@ pub(in crate::tui) fn draw_controller(
                 );
             } else if control == Control::ControllerPhrase {
                 draw_field(frame, rect, label, &state.phrase, index == state.selected);
+            } else if let Control::ControllerUpdateInterval(minutes) = control {
+                draw_choice_button(
+                    frame,
+                    rect,
+                    label,
+                    index == state.selected && !app.controller_sidebar,
+                    state
+                        .updates
+                        .as_ref()
+                        .is_some_and(|v| v["auto_check_interval_minutes"] == minutes),
+                );
             } else {
                 draw_button_color(
                     frame,

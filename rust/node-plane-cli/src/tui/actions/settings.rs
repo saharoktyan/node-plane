@@ -146,7 +146,7 @@ impl App {
                 if let Some(position) = self.form.visible().iter().position(|&i| i == 11) {
                     self.quick_focus = false;
                     self.form.selected = position + 1;
-                    toggle_repair(&mut self.form.fields[11]);
+                    self.toggle_diagnostic_recovery();
                 }
                 None
             }

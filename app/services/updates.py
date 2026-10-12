@@ -511,7 +511,7 @@ def get_updates_overview(*, refresh_run: bool = True) -> Dict[str, str | bool]:
         "update_supported": is_manual_update_supported(),
         "auto_check_enabled": state.get("auto_check_enabled", "0") == "1",
         "auto_check_interval_minutes": int(state["auto_check_interval_minutes"])
-            if state.get("auto_check_interval_minutes") in {"15", "60", "360", "1440"} else 60,
+            if state.get("auto_check_interval_minutes") in {"60", "360", "1440"} else 60,
         "last_checked_at": state.get("last_checked_at", "") if checked_for_selection else "",
         "last_status": last_status,
         "update_available": update_available,

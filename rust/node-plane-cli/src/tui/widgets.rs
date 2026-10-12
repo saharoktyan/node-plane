@@ -148,6 +148,23 @@ pub(super) fn dialog(frame: &mut Frame, area: Rect, title: &str) -> [Rect; 2] {
 pub(super) fn draw_button(frame: &mut Frame, area: Rect, label: &str, selected: bool) {
     draw_button_color(frame, area, label, selected, Color::Cyan);
 }
+pub(super) fn draw_choice_button(
+    frame: &mut Frame,
+    area: Rect,
+    label: &str,
+    focused: bool,
+    chosen: bool,
+) {
+    draw_button(frame, area, label, focused);
+    if chosen && !focused {
+        frame.render_widget(
+            Paragraph::new(label)
+                .alignment(ratatui::layout::Alignment::Center)
+                .style(Style::default().fg(Color::Cyan).bg(Color::Reset)),
+            Block::bordered().inner(area),
+        );
+    }
+}
 pub(super) fn draw_button_color(
     frame: &mut Frame,
     area: Rect,
@@ -219,9 +236,7 @@ pub(super) fn button_pair(
         control: controls.1,
     });
 }
-pub(super) fn toggle_repair(value: &mut String) {
-    *value = if value == "true" { "false" } else { "true" }.into();
-}
+
 pub(super) fn cycle_channel(value: &mut String, backwards: bool) {
     *value = match value.as_str() {
         "main" => "dev",

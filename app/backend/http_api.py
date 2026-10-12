@@ -253,7 +253,7 @@ class AdminOverviewOutput(BaseModel):
 class UpdatePreferencesInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
     auto_check_enabled: bool | None = Field(default=None, strict=True)
-    auto_check_interval_minutes: Literal[15, 60, 360, 1440] | None = None
+    auto_check_interval_minutes: Literal[60, 360, 1440] | None = None
     branch: Literal['main', 'dev'] | None = None
     dev_track: Literal['tag', 'head'] | None = None
 

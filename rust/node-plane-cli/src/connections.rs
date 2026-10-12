@@ -91,6 +91,8 @@ pub struct Connections {
     pub theme: Option<String>,
     #[serde(default)]
     pub hide_quick_start: bool,
+    #[serde(default)]
+    pub diagnostic_recovery: bool,
 }
 fn default_accent() -> String {
     "terminal".into()
@@ -115,6 +117,7 @@ impl Default for Connections {
             accent: default_accent(),
             theme: None,
             hide_quick_start: false,
+            diagnostic_recovery: false,
         }
     }
 }

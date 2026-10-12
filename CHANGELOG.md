@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.3-alpha.84 - 2026-10-12
+
+- Simplify Updates to saved results and failed-node recovery, with one-hour, six-hour and daily automatic checks.
+- Give Workstation workflows action-specific confirmations and persist diagnostic recovery preferences.
+- Load controller statistics when Workstation returns automatically to Node Plane Settings after an operation.
+
 ## 0.4.3-alpha.83 - 2026-10-12
 
 - Include known Telegram usernames in Workstation registration identities and simplify administrator Overview with conditional tasks, alerts/requests and an inline refresh timestamp.

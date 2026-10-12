@@ -103,13 +103,16 @@ class UpdatesTests(unittest.TestCase):
 
     def test_auto_check_frequency_is_persisted_and_validated(self):
         self.assertEqual(self.app_settings.get_updates_check_interval_minutes(), 60)
-        for minutes in (15, 60, 360, 1440):
+        for minutes in (60, 360, 1440):
             self.app_settings.set_updates_check_interval_minutes(minutes)
             self.assertEqual(self.app_settings.get_updates_check_interval_minutes(), minutes)
             self.assertEqual(self.updates.get_updates_overview()['auto_check_interval_minutes'], minutes)
-        for invalid in (True, 10, 60.0, '60'):
+        for invalid in (True, 10, 15, 60.0, '60'):
             with self.assertRaises(ValueError):
                 self.app_settings.set_updates_check_interval_minutes(invalid)
+        self.app_settings._meta_set(self.app_settings._UPDATES_CHECK_INTERVAL_KEY, '15')
+        self.assertEqual(self.app_settings.get_updates_check_interval_minutes(), 60)
+        self.assertEqual(self.updates.get_updates_overview()['auto_check_interval_minutes'], 60)
 
     def test_display_reads_settings_in_one_connection_without_host_commands(self):
         self.app_settings.get_update_state()  # Warm the schema check.

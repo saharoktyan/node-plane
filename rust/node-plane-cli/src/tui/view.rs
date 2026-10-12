@@ -311,18 +311,13 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
         }
         Screen::EditInstallation => draw_editor(frame, app, rows[1], &mut hits),
         Screen::Confirm => {
-            let action = app.form.action.label();
-            let target = if app.form.action == Action::PrepareNode {
-                format!(
-                    "Prepare {} using controller {}?",
-                    app.form.fields[8], app.form.fields[0]
-                )
-            } else {
-                format!("{action} on {}?", app.form.fields[0])
-            };
+            let (title, description) = app.workflow_confirmation();
             let popup = centered(rows[1], 80, 16);
-            let sections = dialog(frame, popup, " Confirm ");
-            frame.render_widget(Paragraph::new(format!("{target}\n\nSSH user: {}\nFirst connection: confirm the host fingerprint, then enter the SSH password if needed.\nPrivate keys stay on the machine that owns them.",app.form.fields[2])).wrap(Wrap{trim:false}),sections[0]);
+            let sections = dialog(frame, popup, &format!(" {title} "));
+            frame.render_widget(
+                Paragraph::new(description).wrap(Wrap { trim: false }),
+                sections[0],
+            );
             button_pair(
                 frame,
                 sections[1],
@@ -436,7 +431,7 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
                 "Tab / ↑ / ↓: select   Enter / click: open   Ctrl+F: search   ← / →: pages   Esc: list / sidebar"
             }
             Screen::Form => {
-                "Click: select   Tab: move   Arrows: actions / fields   Enter: continue   M: manage installation   Esc: sidebar / exit"
+                "Click: select   Tab: move   Arrows: actions / fields   Enter: continue   Esc: sidebar / exit"
             }
             Screen::SettingsPage(SettingsPage::Session) => "Enter / Esc: back   Ctrl+C: exit",
             Screen::SettingsPage(SettingsPage::Appearance) => {

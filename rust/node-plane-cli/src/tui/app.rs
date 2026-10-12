@@ -94,6 +94,8 @@ impl App {
     }
     pub(super) fn load_connections(&mut self, request: &Request) -> Result<()> {
         self.connections = Connections::load(&self.state_dir)?;
+        self.form.fields[11] =
+            (self.connections.diagnostic_recovery || request.workflow.repair).to_string();
         let catalog = theme::load(&self.state_dir)?;
         self.themes = catalog.themes;
         if !catalog.warnings.is_empty() {
@@ -135,6 +137,59 @@ impl App {
     pub(super) fn actions_enabled(&self) -> bool {
         self.form.saved.is_some()
     }
+    pub(super) fn workflow_confirmation(&self) -> (&'static str, String) {
+        let host = &self.form.fields[0];
+        let release = if self.form.fields[4].is_empty() {
+            "latest release"
+        } else {
+            &self.form.fields[4]
+        };
+        match self.form.action {
+            Action::Install => (
+                "Install Node Plane?",
+                format!(
+                    "Install {release} on {host}.\n\nPrepare PostgreSQL, controller services, the Telegram bot and driver.\nSSH user: {}",
+                    self.form.fields[2]
+                ),
+            ),
+            Action::Update => (
+                "Update Node Plane?",
+                format!(
+                    "Update {host} to {release}.\n\nController services restart during the update. Managed nodes update to the matching release. Failed node updates are reported separately."
+                ),
+            ),
+            Action::Diagnose => (
+                "Run installation diagnostics?",
+                format!(
+                    "Check controller services, database schema, registered servers and interrupted operations on {host}.\n\n{}",
+                    if self.form.fields[11] == "true" {
+                        "Offer recovery actions with separate confirmation."
+                    } else {
+                        "Show the diagnostic report."
+                    }
+                ),
+            ),
+            Action::PrepareNode => (
+                "Prepare node SSH?",
+                format!(
+                    "Prepare SSH access to {} from controller {host}.\n\nAuthorize the controller public key on the node for installation and maintenance.",
+                    self.form.fields[8]
+                ),
+            ),
+        }
+    }
+    pub(super) fn toggle_diagnostic_recovery(&mut self) {
+        let mut next = self.connections.clone();
+        next.diagnostic_recovery = self.form.fields[11] != "true";
+        match next.save(&self.state_dir) {
+            Ok(()) => {
+                self.form.fields[11] = next.diagnostic_recovery.to_string();
+                self.connections = next;
+                self.error.clear();
+            }
+            Err(error) => self.error = error.to_string(),
+        }
+    }
     pub(super) fn close_result(&mut self, key: KeyEvent) -> bool {
         if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
             self.exit = true;
@@ -171,9 +226,11 @@ impl App {
         self.exit = false;
         self.exit_confirm = false;
         self.stop.store(false, Ordering::Relaxed);
-        if updated {
+        if updated || matches!(self.screen, Screen::Controller) {
             self.open_controller();
-            self.controller_command(crate::controller::Command::Updates);
+            if updated {
+                self.controller_command(crate::controller::Command::Updates);
+            }
         }
         true
     }

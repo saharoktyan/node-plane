@@ -69,7 +69,7 @@ impl App {
                 | Control::ControllerDefaultsMode
                 | Control::ControllerDefaultsAdvanced
                 | Control::ControllerUpdateAuto
-                | Control::ControllerUpdateInterval
+                | Control::ControllerUpdateInterval(_)
                 | Control::ControllerUpdateCheck
                 | Control::ControllerUpdateLatest
                 | Control::ControllerBackupAuto
@@ -279,7 +279,7 @@ impl App {
             | Control::ControllerUpdateCheck
             | Control::ControllerUpdateLatest
             | Control::ControllerUpdateAuto
-            | Control::ControllerUpdateInterval
+            | Control::ControllerUpdateInterval(_)
             | Control::ControllerSection(..)
             | Control::ControllerCheck
             | Control::ControllerNew

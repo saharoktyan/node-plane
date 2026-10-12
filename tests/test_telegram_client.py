@@ -498,22 +498,20 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             message=SimpleNamespace(chat=SimpleNamespace(id=123, type='private'),
                                     message_id=77))
 
-    async def test_update_actions_hidden_when_live_commits_are_current(self):
+    async def test_failed_node_list_has_no_whole_component_update_actions(self):
         from telegram_client.routers import admin_updates
-        backend = SimpleNamespace(update_rollout=AsyncMock(return_value={
-            'desired_version': '0.4.3', 'desired_commit': 'a' * 40,
-            'driver_status': 'current', 'driver': {'commit': 'a' * 40},
-            'nodes': [{'key': 'lv1', 'title': 'Latvia', 'region': 'Europe', 'agent_status': 'current', 'runtime_status': 'current'}],
-            'agents_required': False, 'runtimes_required': False, 'latest_job': None}))
+        backend = SimpleNamespace(updates_overview=AsyncMock(return_value={'latest_job':None}))
         with patch.object(admin_updates, 'render', new_callable=AsyncMock) as draw:
             await admin_updates.show_fleet(self.query, self.bot, backend, self.state)
         callbacks = [b.callback_data for row in draw.call_args.args[3] for b in row]
         self.assertNotIn('ufleet_confirm:agents', callbacks)
         self.assertNotIn('ufleet_confirm:runtimes', callbacks)
-        backend.update_rollout.return_value['agents_required'] = True
+        backend.updates_overview.return_value['latest_job'] = {'items':[{'node_key':'lv1','title':'Latvia','status':'blocked'}]}
         with patch.object(admin_updates, 'render', new_callable=AsyncMock) as draw:
             await admin_updates.show_fleet(self.query, self.bot, backend, self.state)
-        self.assertIn('ufleet_confirm:agents', [b.callback_data for row in draw.call_args.args[3] for b in row])
+        screen, rows = draw.call_args.args[2:4]
+        self.assertIn('Latvia', screen.plain())
+        self.assertFalse(any(b.callback_data.startswith('ufleet_confirm:') for row in screen.fallback_rows(rows) for b in row))
 
     async def test_announcement_double_tap_reuses_command_key(self):
         from telegram_client.routers import admin_announcements

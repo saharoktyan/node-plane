@@ -8,9 +8,9 @@ Use the controller settings and updates screens in either interface. Read confir
 
 Workstation: **Node Plane Updates**. Telegram: administrator **Updates**.
 
-The screen shows the branch, installed version, component state, latest known release and last check time. Run **Check** to query releases. Configure **Auto checks** to enable scheduled checks and choose their frequency; administrators receive a notification when a new release is found.
+The screen shows the branch, installed version, component state, latest known release and last check time. Run **Check** to query releases. Enable **Auto checks** and choose **1 hour**, **6 hours** or **1 day**; frequency controls appear while automatic checks are enabled. Administrators receive a notification when a new release is found.
 
-Review an update and start it. Progress shows component steps. **Components** and **Update result** provide node/component outcomes. Dismiss a result to remove its shortcut from Updates. Changing branch or rolling back requires a separate confirmation because it can break installation compatibility.
+Review an update and start it. Progress shows component steps. **Update results** appears when a completed result is available; Dismiss removes its shortcut from Updates. Failed node updates are shown separately, with links to their server cards for diagnostics and setup recovery. Changing branch or rolling back requires a separate confirmation because it can break installation compatibility.
 
 A controller update can restart the bot. Reopen Updates if progress is interrupted. Do not start another update while the existing outcome is uncertain.
 

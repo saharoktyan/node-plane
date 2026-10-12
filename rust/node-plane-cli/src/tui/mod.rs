@@ -790,7 +790,7 @@ pub fn run(mut request: Request) -> Result<()> {
                                     && app.form.visible().get(app.form.selected - 1)
                                         == Some(&11) =>
                             {
-                                toggle_repair(&mut app.form.fields[11]);
+                                app.toggle_diagnostic_recovery();
                             }
                             KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                                 app.form.append(&c.to_string())

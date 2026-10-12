@@ -84,7 +84,8 @@ class UpdatesRichTests(IsolatedAsyncioTestCase):
             agent_status='required', runtime_status='current') for i in range(11)],
             'driver_status': 'current', 'agents_required': True}
         overview = {'update_supported': True, 'update_available': True, 'current_version': 'old',
-            'remote_label': 'new', 'auto_check_enabled': True}
+            'remote_label': 'new', 'auto_check_enabled': True,
+            'latest_job':dict(id='failed-job', status='partial', items=[dict(node_key=n['key'], title=n['title'], region=n['region'], flag=n['flag'], status='blocked') for n in fleet['nodes']])}
         backend = SimpleNamespace(updates_overview=AsyncMock(return_value=overview),
             update_rollout=AsyncMock(return_value=fleet))
         for lang in ('en', 'ru'):
@@ -102,7 +103,7 @@ class UpdatesRichTests(IsolatedAsyncioTestCase):
             self.assertTrue(all(not section.collapsed for section in screen.sections[3:]))
             self.assertIn('stable · old', screen.lines)
             callbacks = [b.callback_data for row in screen.fallback_rows(rows) for b in row]
-            for action in ('ufleet', 'uv_page:0', 'upd_act:branch_menu', 'upd_act:run', 'upd_act:check'):
+            for action in ('uv_page:0', 'upd_act:branch_menu', 'upd_act:run', 'upd_act:check'):
                 self.assertIn(action, callbacks)
             self.assertNotIn('upd_act:cleanup_menu', callbacks)
             self.assertEqual(screen.sections[0].inline_rows[0][-1].callback_data, 'upd_act:check')
@@ -120,32 +121,30 @@ class UpdatesRichTests(IsolatedAsyncioTestCase):
         fleet = {'nodes': [dict(key=key, title=key, agent_status=status) for key, status in
             [('old', 'required'), ('new', 'current'), ('offline', 'unknown')]], 'driver_status': 'current'}
         overview = {'current_version': '0.4.3', 'latest_job': dict(kind='stack', id='previous',
-            status='succeeded', result={}, items=[dict(node_key='removed', status='succeeded')])}
+            status='partial', result={}, items=[dict(node_key='old', title='old', status='blocked'), dict(node_key='removed', status='succeeded')])}
         backend = SimpleNamespace(updates_overview=AsyncMock(return_value=overview),
             update_rollout=AsyncMock(return_value=fleet))
         with patch.object(updates, 'render', new_callable=AsyncMock) as draw:
             await updates.show_overview(self.query, self.bot, backend, self.state)
         screen = draw.call_args.args[2]
         servers = screen.sections[2]
-        self.assertEqual(servers.title, updates.tr('en', 'updates.rich.outdated_servers'))
+        self.assertEqual(servers.title, updates.tr('en', 'update_tools.fleet'))
         self.assertEqual(len(servers.sections[0].sections), 1)
         token = servers.sections[0].sections[0].inline_rows[0][0].callback_data.split(':')[1]
         self.assertEqual(self.state_data['update_node_links'][token],
                          {'node_key': 'old', 'callback': 'updates_nodes:0'})
-        self.assertEqual(len(screen.lines), 1)
+        self.assertEqual(len(screen.lines), 2)
         self.assertEqual(updates.state_label('en', 'current'), 'Up to date')
 
     async def test_compact_fleet_combines_runtime_and_preserves_inline_node_navigation(self):
-        fleet = dict(desired_version='v', desired_commit='hash', driver_status='current',
-            driver={}, agents_required=False, runtimes_required=True, latest_job=None,
-            nodes=[dict(key='n1', title='Latvia', region='Europe', agent_status='current', runtime_status='required')])
-        backend = SimpleNamespace(update_rollout=AsyncMock(return_value=fleet))
+        backend = SimpleNamespace(updates_overview=AsyncMock(return_value={
+            'latest_job':{'items':[dict(node_key='n1', title='Latvia', region='Europe', status='blocked')]}}))
         with patch.object(updates, 'render', new_callable=AsyncMock) as draw:
             await updates.show_fleet(self.query, self.bot, backend, self.state)
         screen, rows = draw.call_args.args[2:4]
         self.assertNotIn('ufleet', [b.callback_data for row in rows for b in row])
         entry = screen.sections[0].sections[0].sections[0]
-        self.assertEqual(entry.inline_rows[0][2], updates.state_label('en', 'required'))
+        self.assertEqual(entry.inline_rows[0][2], updates.state_label('en', 'blocked'))
         self.assertEqual(entry.title, '')
         token = entry.inline_rows[0][0].callback_data.split(':')[1]
         self.assertEqual(self.state_data['update_node_links'][token]['callback'], 'fleet_nodes:0')
@@ -172,6 +171,15 @@ class UpdatesRichTests(IsolatedAsyncioTestCase):
             await updates.show_overview(self.query, self.bot, backend, self.state)
         screen, rows = draw.call_args.args[2:4]
         self.assertIn('update_job:j2', [b.callback_data for row in screen.fallback_rows(rows) for b in row])
+
+    async def test_retired_component_confirmation_cannot_start_an_update(self):
+        self.state_data['update_draft'] = {'nonce':'old', 'body':{'kind':'agents'}, 'key':'key'}
+        backend = SimpleNamespace(run_update=AsyncMock())
+        self.query.data = 'update_submit:old'
+        with patch.object(updates, 'show_overview', new_callable=AsyncMock) as show:
+            await updates.update_tools_cb(self.query, self.bot, backend, self.state)
+        backend.run_update.assert_not_called()
+        show.assert_awaited_once()
 
     async def test_check_row_reports_latest_version_and_completed_check_without_hash(self):
         overview = dict(branch='dev', current_version='1.0', current_label='1.0 · deadbeef',
@@ -261,8 +269,8 @@ class UpdatesRichTests(IsolatedAsyncioTestCase):
         callbacks = [b.callback_data for row in screen.fallback_rows(rows) for b in row]
         self.assertNotIn('upd_act:run', callbacks)
         self.assertIn('upd_act:check', callbacks)
-        self.assertIn('ufleet', callbacks)
-        self.assertNotIn(updates.tr('en', 'updates.rich.outdated_servers'),
+        self.assertNotIn('ufleet', callbacks)
+        self.assertNotIn(updates.tr('en', 'update_tools.fleet'),
             [section.title for section in screen.sections])
 
     async def test_returning_to_updates_restores_persisted_progress_button(self):

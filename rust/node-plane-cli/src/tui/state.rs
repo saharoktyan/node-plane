@@ -147,7 +147,7 @@ pub(super) enum Control {
     ControllerUpdateBranch,
     ControllerUpdateBranchConfirm(bool),
     ControllerUpdateAuto,
-    ControllerUpdateInterval,
+    ControllerUpdateInterval(u32),
     NewInstallationConfirm(bool),
     QuickStartToggle,
     QuickStartClose,

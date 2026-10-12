@@ -1152,9 +1152,85 @@ fn update_refresh_controls_are_only_shown_while_an_operation_runs() {
         "nodes":[], "latest_job":{"status":"awaiting_executor"}
     }));
     assert!(
-        app.controller_controls()
+        !app.controller_controls()
             .contains(&Control::ControllerComponents)
     );
+}
+
+#[test]
+fn update_intervals_share_one_row_and_only_the_selected_text_keeps_the_accent() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Controller;
+    app.form.select_action(Action::Update);
+    app.controller.updates =
+        Some(serde_json::json!({"auto_check_enabled":true,"auto_check_interval_minutes":360}));
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    let choices: Vec<_> = app
+        .hits
+        .iter()
+        .filter(|hit| matches!(hit.control, Control::ControllerUpdateInterval(_)))
+        .collect();
+    assert_eq!(choices.len(), 3);
+    assert!(choices.iter().all(|hit| hit.area.y == choices[0].area.y));
+    let chosen = choices
+        .iter()
+        .find(|hit| hit.control == Control::ControllerUpdateInterval(360))
+        .unwrap();
+    assert_eq!(
+        terminal.backend().buffer()[(chosen.area.x, chosen.area.y)].fg,
+        Color::White
+    );
+    assert!((chosen.area.x + 1..chosen.area.right() - 1).any(|x| {
+        let cell = &terminal.backend().buffer()[(x, chosen.area.y + 1)];
+        cell.symbol() == "6" && cell.fg == Color::Cyan
+    }));
+    app.activate(Control::ControllerUpdateInterval(1440));
+    assert!(
+        matches!(&app.nodes_requested, Some(crate::nodes::Command::Controller(_, crate::controller::Command::UpdatePreferences(v))) if v["auto_check_interval_minutes"] == 1440)
+    );
+    app.nodes_requested = None;
+    app.controller.updates.as_mut().unwrap()["auto_check_enabled"] = false.into();
+    assert!(
+        !app.controller_controls()
+            .iter()
+            .any(|control| matches!(control, Control::ControllerUpdateInterval(_)))
+    );
+    app.activate(Control::ControllerUpdateInterval(60));
+    assert!(app.nodes_requested.is_none());
+}
+
+#[test]
+fn diagnostic_recovery_preference_survives_reopening_workstation() {
+    let state = tempfile::tempdir().unwrap();
+    let mut app = test_profile_app();
+    app.state_dir = state.path().into();
+    app.form.fields[11] = "false".into();
+    app.toggle_diagnostic_recovery();
+    assert!(Connections::load(state.path()).unwrap().diagnostic_recovery);
+    let mut request = test_request();
+    request.state_dir = state.path().into();
+    let mut reopened = App::new(&request);
+    reopened.load_connections(&request).unwrap();
+    assert_eq!(reopened.form.fields[11], "true");
+    reopened.toggle_diagnostic_recovery();
+    assert!(!Connections::load(state.path()).unwrap().diagnostic_recovery);
+}
+
+#[test]
+fn workflow_confirmation_explains_the_selected_action_without_installation_boilerplate() {
+    let mut app = test_profile_app();
+    let mut titles = std::collections::HashSet::new();
+    app.form.fields[6] = "SECRET_TOKEN".into();
+    for action in Action::ALL {
+        app.form.select_action(action);
+        let (title, description) = app.workflow_confirmation();
+        titles.insert(title);
+        assert!(!description.contains("First connection"));
+        assert!(!description.contains("SECRET_TOKEN"));
+        assert!(description.contains("controller.example"));
+    }
+    assert_eq!(titles.len(), 4);
 }
 
 #[test]
@@ -3149,6 +3225,19 @@ fn result_close_returns_to_actions_for_success_and_failure_and_preserves_profile
                     ))
                 ));
             }
+            if installed {
+                assert_eq!(
+                    app.controller.profile,
+                    app.form.saved.as_ref().map(|p| p.id)
+                );
+                assert!(matches!(
+                    app.nodes_requested,
+                    Some(crate::nodes::Command::Controller(
+                        _,
+                        crate::controller::Command::Overview
+                    ))
+                ));
+            }
             assert!(app.stage.is_empty() && app.error.is_empty());
             assert!(app.password.is_empty() && app.form.fields[6].is_empty());
             assert_eq!(app.result_scroll, 0);
@@ -3174,6 +3263,39 @@ fn result_escape_returns_home_and_ctrl_c_requires_exit_confirmation() {
     app.exit = false;
     assert!(app.close_result(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
     assert!(matches!(app.screen, Screen::Controller) && !app.exit);
+}
+
+#[test]
+fn automatic_settings_return_loads_and_displays_controller_statistics() {
+    for key in [KeyCode::Enter, KeyCode::Esc] {
+        let mut app = test_profile_app();
+        let state = tempfile::tempdir().unwrap();
+        app.state_dir = state.path().into();
+        app.form.select_action(Action::Install);
+        app.event(Event::Finished(Ok("Done".into())));
+        assert!(app.close_result(KeyEvent::new(key, KeyModifiers::NONE)));
+        let command = app.nodes_requested.take().unwrap();
+        assert!(matches!(
+            command,
+            crate::nodes::Command::Controller(_, crate::controller::Command::Overview)
+        ));
+        app.event(Event::Nodes(crate::nodes::Update::Controller(app.controller.profile,
+            crate::controller::Command::Overview,
+            serde_json::json!({"supported":true,"counts":{"accounts":2,"profiles":3,"nodes":4},"latest_job":null}))));
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+        terminal
+            .draw(|frame| app.hits = draw_content(frame, &app))
+            .unwrap();
+        let text: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(text.contains("Accounts: 2 · Profiles: 3 · Nodes: 4"));
+        assert!(!text.contains("Loading installation…"));
+    }
 }
 
 #[test]

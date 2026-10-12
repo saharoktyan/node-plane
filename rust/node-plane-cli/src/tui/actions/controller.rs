@@ -494,7 +494,12 @@ impl App {
                 None
             }
             Control::ControllerComponents => {
-                self.controller_command(crate::controller::Command::UpdateComponents);
+                let nodes = failed_update_nodes(self.controller.updates.as_ref()?);
+                if !nodes.is_empty() {
+                    self.controller.components = Some(serde_json::json!({"nodes":nodes}));
+                    self.controller.components_page = 0;
+                    self.controller.selected = 0;
+                }
                 None
             }
             Control::ControllerComponentPage(next) => {
@@ -580,7 +585,7 @@ impl App {
             Control::ControllerUpdates
             | Control::ControllerUpdateCheck
             | Control::ControllerUpdateAuto
-            | Control::ControllerUpdateInterval => {
+            | Control::ControllerUpdateInterval(_) => {
                 let command = match control {
                     Control::ControllerUpdates => crate::controller::Command::Updates,
                     Control::ControllerUpdateCheck => crate::controller::Command::UpdateCheck,
@@ -590,17 +595,15 @@ impl App {
                             Control::ControllerUpdateAuto => {
                                 serde_json::json!({"auto_check_enabled": value["auto_check_enabled"] != true})
                             }
-                            _ => {
-                                let current =
-                                    value["auto_check_interval_minutes"].as_u64().unwrap_or(60);
-                                let next = match current {
-                                    15 => 60,
-                                    60 => 360,
-                                    360 => 1440,
-                                    _ => 15,
-                                };
-                                serde_json::json!({"auto_check_interval_minutes":next})
+                            Control::ControllerUpdateInterval(minutes) => {
+                                if value["auto_check_enabled"] != true
+                                    || ![60, 360, 1440].contains(&minutes)
+                                {
+                                    return None;
+                                }
+                                serde_json::json!({"auto_check_interval_minutes":minutes})
                             }
+                            _ => return None,
                         };
                         crate::controller::Command::UpdatePreferences(patch)
                     }
@@ -1074,12 +1077,6 @@ impl App {
             if start + 5 < count {
                 controls.push(Control::ControllerComponentPage(true));
             }
-            if components
-                .get("latest_job")
-                .is_some_and(|job| update_operation_active(&job["status"]))
-            {
-                controls.push(Control::ControllerComponents);
-            }
             controls.push(Control::ControllerBack);
             return controls;
         }
@@ -1097,25 +1094,12 @@ impl App {
             controls.push(Control::ControllerBack);
             return controls;
         }
-        if let Some(updates) = &state.updates {
-            let mut controls = vec![
-                Control::ControllerUpdateCheck,
-                Control::ControllerVersions,
-                Control::ControllerComponents,
-                Control::ControllerUpdateBranch,
-                Control::ControllerUpdateAuto,
-                Control::ControllerUpdateInterval,
-            ];
-            if update_result_available(updates) {
-                controls.insert(3, Control::ControllerUpdateResult);
-            }
-            if updates["update_available"] == true {
-                controls.insert(1, Control::ControllerUpdateLatest);
-            }
-            if self.form.action != Action::Update {
-                controls.push(Control::ControllerBack);
-            }
-            return controls;
+        if state.updates.is_some() {
+            return self
+                .controller_updates_actions()
+                .into_iter()
+                .map(|(_, control)| control)
+                .collect();
         }
         if self.form.action == Action::Update {
             return vec![Control::ControllerUpdates];
@@ -1154,6 +1138,53 @@ impl App {
                 .into_iter()
                 .map(|(_, control)| control),
         );
+        controls
+    }
+    pub(in crate::tui) fn controller_updates_actions(&self) -> Vec<(String, Control)> {
+        let Some(value) = &self.controller.updates else {
+            return Vec::new();
+        };
+        let active = value
+            .get("latest_job")
+            .is_some_and(|job| update_operation_active(&job["status"]));
+        let mut controls = vec![("Check for updates".into(), Control::ControllerUpdateCheck)];
+        if value["update_available"] == true && !active {
+            controls.push(("To latest".into(), Control::ControllerUpdateLatest));
+        }
+        controls.extend([
+            (
+                "Choose version / rollback".into(),
+                Control::ControllerVersions,
+            ),
+            ("Change branch".into(), Control::ControllerUpdateBranch),
+            (
+                format!(
+                    "Auto-check: {}",
+                    if value["auto_check_enabled"] == true {
+                        "On"
+                    } else {
+                        "Off"
+                    }
+                ),
+                Control::ControllerUpdateAuto,
+            ),
+        ]);
+        if value["auto_check_enabled"] == true {
+            controls.extend([(60, "1 hour"), (360, "6 hours"), (1440, "1 day")].map(
+                |(minutes, label)| (label.into(), Control::ControllerUpdateInterval(minutes)),
+            ));
+        }
+        if active {
+            controls.push(("Update progress".into(), Control::ControllerUpdateResult));
+        } else if update_result_available(value) {
+            controls.push(("Update results".into(), Control::ControllerUpdateResult));
+        }
+        if !failed_update_nodes(value).is_empty() {
+            controls.push(("Failed node updates".into(), Control::ControllerComponents));
+        }
+        if self.form.action != Action::Update {
+            controls.push(("Back".into(), Control::ControllerBack));
+        }
         controls
     }
     pub(in crate::tui) fn controller_root_controls(&self, active: bool) -> Vec<(String, Control)> {
