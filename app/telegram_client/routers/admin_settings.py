@@ -16,7 +16,7 @@ from ..screens import Screen, Section, Table, format_size
 from ..i18n import normalize_locale, tr
 from .callbacks import AdminSettingsCallback, RequestPolicyCallback, UpdatesCallback
 from .common import render
-from .admin_recovery import RecoveryPage
+from .admin_recovery import RecoveryPage, RecoveryDiagnostics
 
 router = Router()
 
@@ -92,7 +92,8 @@ async def admin_settings_cb(query: CallbackQuery, bot: Bot,
             (InlineKeyboardButton(text=tr(locale, 'temporary.title'),callback_data='temporary:list:0'),))),
         Section(tr(locale, 'settings.rich.monitoring'), rows=(tuple(rows[2]),)),
         Section(tr(locale, 'settings.rich.maintenance'), rows=(tuple(rows[1]), tuple(rows[3]),
-            (InlineKeyboardButton(text=tr(locale, 'recovery.title'), callback_data=RecoveryPage().pack()),),
+            (InlineKeyboardButton(text=tr(locale, 'recovery.title'), callback_data=RecoveryPage().pack()),
+             InlineKeyboardButton(text=tr(locale, 'recovery.controller'), callback_data=RecoveryDiagnostics().pack())),
             (InlineKeyboardButton(text=tr(locale, 'defaults.title'), callback_data='idefault:open'),))),
         Section(tr(locale, 'settings.rich.danger'), collapsed=True, rows=(tuple(rows[4]),)))
     await render(bot, query.message.chat.id, Screen(tr(locale, 'settings.admin.title'),

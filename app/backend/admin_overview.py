@@ -17,6 +17,9 @@ class AdminOverviewService:
         with self.db.connect() as conn:
             from .alerts import AlertService
             alert_count = sum(not r['dismissed'] for r in AlertService.active(conn, actor.account.id))
+            alerts_enabled = bool(AlertService._policy(conn)['enabled'])
+            from .access_requests import AccessRequestService
+            requests_enabled = AccessRequestService._policy(conn)['enabled']
             nodes = conn.execute('SELECT key, title, region, flag, enabled FROM backend_nodes ORDER BY region, title, key').fetchall()
             profiles = conn.execute('''SELECT p.frozen, p.expires_at, d.profile_id AS deleting
                 FROM backend_profiles p LEFT JOIN backend_profile_deletions d ON d.profile_id = p.id''').fetchall()
@@ -47,6 +50,8 @@ class AdminOverviewService:
             for p in profiles)
         return {
             'unacknowledged_alerts': alert_count,
+            'alerts_enabled': alerts_enabled,
+            'requests_enabled': requests_enabled,
             'checked_at': now.isoformat(),
             'tasks': {key: sum(row['count'] for row in task_counts if row['status'] in states)
                       for key, states in {'queued': {'queued','awaiting_executor'},

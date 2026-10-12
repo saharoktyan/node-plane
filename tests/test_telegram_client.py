@@ -230,7 +230,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         overview = {'version': '0.4.3', 'nodes_enabled': 2, 'nodes_total': 3,
             'profiles_active': 4, 'profiles_total': 5, 'profiles_frozen': 1,
             'pending_requests': 2, 'problem_nodes': [{'key': 'lv1', 'title': 'Latvia'}],
-            'tasks': {'queued': 1, 'running': 2, 'blocked': 1}, 'unacknowledged_alerts': 2,
+            'tasks': {'queued': 1, 'running': 2, 'blocked': 1}, 'unacknowledged_alerts': 2, 'alerts_enabled': True,
             'backup': {'enabled': True, 'last_job': None},
             'updates': {'available': True, 'latest_version': '0.4.4', 'branch': 'dev'}}
         backend = SimpleNamespace(admin_overview=AsyncMock(return_value=overview),
@@ -243,12 +243,32 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             self.assertEqual(screen.sections[0].tables[0].rows[0][1], '2/3')
             callbacks = [b.callback_data for row in screen.fallback_rows(rows) for b in row]
             self.assertIn('admin_problem_nodes', callbacks)
-            self.assertIn('alerts', callbacks)
-            self.assertIn('backups', callbacks)
+            self.assertIn('admin_alerts', callbacks)
+            self.assertNotIn('backups', callbacks)
+            self.assertNotIn('updates', callbacks)
             self.assertNotIn('admin_status', callbacks)
-            self.assertIn('0.4.4', screen.plain())
-            self.assertTrue(any(s.title == user.tr(locale, 'admin.overview.tasks') for s in screen.sections))
+            self.assertNotIn('0.4.4', screen.plain())
+            self.assertFalse(any(s.title == user.tr(locale, 'admin.overview.tasks') for s in screen.sections))
+            self.assertIn((user.tr(locale, 'admin.overview.running'), '2'), screen.sections[0].tables[0].rows)
+            self.assertEqual(screen.sections[0].inline_rows[0][-1].callback_data, 'admin_menu')
+            self.assertEqual(len(rows[0]), 1)
             screen.rich(rows)
+
+    async def test_admin_overview_hides_disabled_attention_and_zero_tasks(self):
+        overview = {'nodes_enabled':1, 'nodes_total':1, 'profiles_active':1, 'profiles_total':1,
+            'pending_requests':2, 'requests_enabled':False, 'problem_nodes':[],
+            'unacknowledged_alerts':3, 'alerts_enabled':False,
+            'tasks':{'queued':0, 'running':0, 'blocked':0}, 'checked_at':'2026-10-12T12:34:56+00:00'}
+        backend = SimpleNamespace(admin_overview=AsyncMock(return_value=overview), bot_title=AsyncMock(return_value={'title':'Test'}))
+        with patch.object(user, 'render', new_callable=AsyncMock) as draw:
+            await user.show_admin_menu(123, 123, 77, self.bot, backend, self.state)
+        screen, rows = draw.call_args.args[2:4]
+        callbacks = [b.callback_data for row in screen.fallback_rows(rows) for b in row]
+        self.assertNotIn('requests', callbacks)
+        self.assertNotIn('admin_alerts', callbacks)
+        self.assertEqual(len(screen.sections[0].tables[0].rows), 2)
+        self.assertIn('2026-10-12 12:34:56 UTC', screen.plain())
+        self.assertFalse(any(b.callback_data == 'admin_menu' for row in rows for b in row))
 
     async def test_problem_nodes_group_regions_and_clamp_page_after_recovery(self):
         affected = [{'key': f'n{i:02}', 'title': f'Node {i:02}', 'region': 'Europe', 'flag': '🌍'} for i in range(11)]
@@ -292,7 +312,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             self.assertEqual(table.cells[0][0].text, user.tr(locale, 'admin.rich.item'))
             attention = next(section for section in screen.sections
                 if section.title == user.tr(locale, 'admin.rich.attention'))
-            self.assertEqual([button.style for button in attention.rows[0]], ['primary', 'primary'])
+            self.assertEqual([button.style for button in attention.rows[0]], ['primary'])
             self.assertTrue(screen.embedded_buttons)
             self.assertEqual([block.type for block in blocks[-2:]], ['divider', 'buttons'])
             self.assertEqual(sum(block.type == 'divider' for block in blocks), 1)

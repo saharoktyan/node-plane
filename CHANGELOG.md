@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.3-alpha.83 - 2026-10-12
+
+- Include known Telegram usernames in Workstation registration identities and simplify administrator Overview with conditional tasks, alerts/requests and an inline refresh timestamp.
+- Offer available Workstation updates on the startup idle screen after connection checks finish, and use action-specific confirmation titles.
+
 ## 0.4.3-alpha.82 - 2026-10-12
 
 - Fix Workstation controller removal confirmation requests and keep removal progress updating across preparation and shutdown.

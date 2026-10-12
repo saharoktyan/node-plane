@@ -242,6 +242,8 @@ class AdminOverviewOutput(BaseModel):
     pending_requests: int
     problem_nodes: list[ProblemNodeOutput]
     unacknowledged_alerts: int = 0
+    alerts_enabled: bool = False
+    requests_enabled: bool = True
     checked_at: str | None = None
     tasks: dict[str, int] = Field(default_factory=dict)
     backup: dict = Field(default_factory=dict)

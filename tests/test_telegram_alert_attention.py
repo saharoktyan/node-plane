@@ -9,6 +9,28 @@ from telegram_client import alert_delivery
 class AlertAttentionTests(IsolatedAsyncioTestCase):
     setUp = fixture.TelegramFlowTests.setUp
 
+    async def test_admin_alerts_keep_direct_navigation_and_hide_dismissed_conditions(self):
+        from telegram_client.navigation import screen_parents
+        alert = dict(title='Latvia', node_key='lv1', kind='awg_down', event_id='event')
+        backend = SimpleNamespace(alerts_overview=AsyncMock(return_value={
+            'enabled': True, 'active': [alert, {**alert, 'title':'Dismissed', 'dismissed':True}]}))
+        for locale in ('en', 'ru'):
+            self.state_data['locale'] = locale
+            self.query.data = 'admin_alerts'
+            with patch.object(admin_alerts, 'render', new_callable=AsyncMock) as draw:
+                await admin_alerts.alerts_cb(self.query, self.bot, backend, self.state)
+            screen, rows = draw.await_args.args[2:4]
+            self.assertIn('Latvia', screen.plain())
+            self.assertNotIn('Dismissed', screen.plain())
+            self.assertEqual(rows[-1][0].callback_data, 'admin_menu')
+            self.assertEqual([p.callback for p in screen_parents(screen, rows, locale, {})], ['admin_menu'])
+            callbacks = [b.callback_data for row in screen.fallback_rows(rows) for b in row]
+            self.assertIn('admin_alert_dismiss:event', callbacks)
+        backend.alerts_overview.return_value['enabled'] = False
+        with patch.object(admin_alerts, 'render', new_callable=AsyncMock) as draw:
+            await admin_alerts.alerts_cb(self.query, self.bot, backend, self.state)
+        self.assertNotIn('Latvia', draw.await_args.args[2].plain())
+
     async def test_settings_buttons_use_current_backend_attention(self):
         backend = SimpleNamespace(system_attention=AsyncMock(return_value={
             'update_available':True, 'unacknowledged_alerts':1}))

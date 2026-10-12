@@ -1080,8 +1080,9 @@ async def user_action_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
 async def show_admin_menu(chat_id: int, user_id: int, message_id: int,
                           bot: Bot, backend: BackendClient,
                           state: FSMContext) -> None:
-    from .callbacks import (AdminNodesCallback,
-                            AdminProfilesCallback, AdminSettingsCallback, RequestsCallback)
+    from datetime import datetime, timezone
+    from .callbacks import (AdminNodesCallback, AdminProfilesCallback,
+                            AdminSettingsCallback, RequestsCallback)
     locale = normalize_locale((await state.get_data()).get('locale'))
     async def optional_read(read):
         try:
@@ -1091,101 +1092,61 @@ async def show_admin_menu(chat_id: int, user_id: int, message_id: int,
 
     title, overview = await asyncio.gather(optional_read(backend.bot_title(user_id)),
         optional_read(backend.admin_overview(user_id)), return_exceptions=True)
-    # Authorization failures must never be disguised as an unavailable summary.
     for result in (title, overview):
         if isinstance(result, BackendError) and result.status in {401, 403}:
             raise result
         if isinstance(result, Exception) and not isinstance(result, BackendError):
             raise result
     bot_title = title['title'] if isinstance(title, dict) else tr(locale, 'home.title')
-    requests_button = InlineKeyboardButton(text=tr(locale, 'admin.requests'),
-        callback_data=RequestsCallback().pack())
+    refresh = InlineKeyboardButton(text=tr(locale, 'admin.status.refresh'), callback_data='admin_menu')
+    checked = '—'
+    if isinstance(overview, dict) and overview.get('checked_at'):
+        try:
+            checked = datetime.fromisoformat(overview['checked_at'].replace('Z', '+00:00')).astimezone(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
+        except (ValueError, TypeError):
+            pass
+    inline = ((tr(locale, 'admin.overview.checked_at', time=checked) + ' · ', refresh),)
     sections = []
+    requests = isinstance(overview, dict) and overview.get('requests_enabled', True) and overview['pending_requests']
+    alerts = isinstance(overview, dict) and overview.get('alerts_enabled', False) and overview.get('unacknowledged_alerts', 0)
     if isinstance(overview, dict):
-        sections.append(Section(tr(locale, 'admin.rich.overview'),
-            tables=(Table(
-                (tr(locale, 'admin.rich.item'), tr(locale, 'admin.rich.value')),
-                ((tr(locale, 'admin.nodes'), f"{overview['nodes_enabled']}/{overview['nodes_total']}"),
-                 (tr(locale, 'admin.profiles'), f"{overview['profiles_active']}/{overview['profiles_total']}"),
-                 *(((tr(locale, 'admin.rich.frozen'), str(overview['profiles_frozen'])),) if overview.get('profiles_frozen') else ()),
-                 *(((tr(locale, 'admin.requests'), str(overview['pending_requests'])),) if overview['pending_requests'] else ()),
-                 *(((tr(locale, 'admin.status.open_problems'), str(len(overview['problem_nodes']))),) if overview['problem_nodes'] else ()))),)))
+        values = [(tr(locale, 'admin.nodes'), f"{overview['nodes_enabled']}/{overview['nodes_total']}"),
+                  (tr(locale, 'admin.profiles'), f"{overview['profiles_active']}/{overview['profiles_total']}")]
+        if overview.get('profiles_frozen'):
+            values.append((tr(locale, 'admin.rich.frozen'), str(overview['profiles_frozen'])))
+        if requests:
+            values.append((tr(locale, 'admin.requests'), str(requests)))
+        if overview['problem_nodes']:
+            values.append((tr(locale, 'admin.status.open_problems'), str(len(overview['problem_nodes']))))
+        for key in ('queued', 'running', 'blocked'):
+            if (overview.get('tasks') or {}).get(key):
+                values.append((tr(locale, 'admin.overview.' + key), str(overview['tasks'][key])))
+        sections.append(Section(tr(locale, 'admin.rich.overview'), tables=(Table(
+            (tr(locale, 'admin.rich.item'), tr(locale, 'admin.rich.value')), tuple(values)),), inline_rows=inline))
         attention_lines, attention_buttons = [], []
-        if overview['pending_requests']:
-            attention_lines.append(tr(locale, 'admin.status.pending', count=overview['pending_requests']))
-            attention_buttons.append(requests_button.model_copy(update={'style': 'primary'}))
         if overview['problem_nodes']:
             attention_lines.append(tr(locale, 'admin.status.problems', count=len(overview['problem_nodes'])))
-            attention_buttons.append(InlineKeyboardButton(text=tr(locale, 'admin.status.open_problems'),
-                callback_data='admin_problem_nodes', style='primary'))
+            attention_buttons.append(InlineKeyboardButton(text=tr(locale, 'admin.status.open_problems'), callback_data='admin_problem_nodes', style='primary'))
+        if alerts:
+            attention_lines.append(tr(locale, 'admin.overview.alerts', count=alerts))
+            attention_buttons.append(InlineKeyboardButton(text=tr(locale, 'alerts.title'), callback_data='admin_alerts', style='danger'))
         if attention_buttons:
-            sections.append(Section(tr(locale, 'admin.rich.attention'), tuple(attention_lines),
-                                    (tuple(attention_buttons),)))
+            sections.append(Section(tr(locale, 'admin.rich.attention'), tuple(attention_lines), rows=(tuple(attention_buttons),)))
     else:
         sections.append(Section(tr(locale, 'admin.rich.overview'),
-                                (tr(locale, 'admin.rich.overview_unavailable'),)))
-    if isinstance(overview, dict):
-        sections.extend(admin_operation_sections(overview, locale))
-    sections.extend((
-        Section(tr(locale, 'admin.rich.management'), rows=((
-            InlineKeyboardButton(text=tr(locale, 'admin.profiles'), callback_data=AdminProfilesCallback().pack()),
-            InlineKeyboardButton(text=tr(locale, 'admin.nodes'), callback_data=AdminNodesCallback().pack())),)),
-        *((Section(tr(locale, 'admin.rich.access_management') +
-            (' · ' + tr(locale, 'requests.pending_count', count=overview['pending_requests'])
-             if isinstance(overview, dict) else ''), rows=((requests_button,),)),)
-          if isinstance(overview, dict) and overview['pending_requests'] else ()),
-        Section(tr(locale, 'admin.rich.system'), rows=((
-            InlineKeyboardButton(text=tr(locale, 'admin.settings'), callback_data=AdminSettingsCallback().pack(),
-                style='danger' if isinstance(overview, dict) and overview.get('unacknowledged_alerts') else None),),
-            (InlineKeyboardButton(text=tr(locale, 'announce.title'), callback_data='announce_menu'),))),
-    ))
+            (tr(locale, 'admin.rich.overview_unavailable'),), inline_rows=inline))
+    sections.append(Section(tr(locale, 'admin.rich.management'), rows=((
+        InlineKeyboardButton(text=tr(locale, 'admin.profiles'), callback_data=AdminProfilesCallback().pack()),
+        InlineKeyboardButton(text=tr(locale, 'admin.nodes'), callback_data=AdminNodesCallback().pack())),)))
+    if requests:
+        sections.append(Section(tr(locale, 'admin.rich.access_management') + ' · ' + tr(locale, 'requests.pending_count', count=requests), rows=((
+            InlineKeyboardButton(text=tr(locale, 'admin.requests'), callback_data=RequestsCallback().pack(), style='primary'),),)))
+    sections.append(Section(tr(locale, 'admin.rich.system'), rows=((
+        InlineKeyboardButton(text=tr(locale, 'admin.settings'), callback_data=AdminSettingsCallback().pack()),),
+        (InlineKeyboardButton(text=tr(locale, 'announce.title'), callback_data='announce_menu'),))))
     await render(bot, chat_id, Screen(f"{tr(locale, 'admin.menu')} · {bot_title}",
         sections=tuple(sections), embedded_buttons=True, navigation=True),
-        [[InlineKeyboardButton(text=tr(locale, 'admin.status.refresh'), callback_data='admin_menu'),
-          button(user_id, tr(locale, 'back'), 'home')]], state, message_id)
-
-
-def admin_operation_sections(overview, locale):
-    from .admin_recovery import RecoveryPage, RecoveryDiagnostics
-    from .callbacks import UpdatesCallback
-    sections = []
-    tasks = overview.get('tasks', {})
-    if tasks:
-        rows = ((InlineKeyboardButton(text=tr(locale, 'recovery.title'),
-            callback_data=RecoveryPage().pack(), style='danger' if tasks.get('blocked') else None),),) if any(tasks.values()) else ()
-        sections.append(Section(tr(locale, 'admin.overview.tasks'), tables=(Table(
-            (tr(locale, 'admin.rich.item'), tr(locale, 'admin.rich.value')),
-            tuple((tr(locale, 'admin.overview.' + key), str(tasks.get(key, 0)))
-                  for key in ('queued', 'running', 'blocked'))),), rows=rows))
-    alerts = overview.get('unacknowledged_alerts', 0)
-    if alerts:
-        sections.append(Section(tr(locale, 'alerts.title'),
-            (tr(locale, 'admin.overview.alerts', count=alerts),), rows=((
-                InlineKeyboardButton(text=tr(locale, 'alerts.title'), callback_data='alerts', style='danger'),),)))
-    backup, updates = overview.get('backup'), overview.get('updates')
-    if backup is not None or updates is not None:
-        lines = []
-        if overview.get('version'):
-            branch = 'dev' if (updates or {}).get('branch') == 'dev' else 'stable'
-            lines.append(f"{branch} · {overview['version']}")
-        if updates is not None:
-            lines.append(tr(locale, 'admin.overview.update_available', version=updates.get('latest_version') or '—')
-                         if updates.get('available') else tr(locale, 'admin.overview.update_checked'
-                             if updates.get('status') == 'up_to_date' else 'admin.overview.update_unknown'
-                             if updates.get('status', 'never') == 'never' else 'admin.overview.update_failed'))
-            if updates.get('last_checked_at'):
-                lines.append(tr(locale, 'admin.overview.last_check', time=updates['last_checked_at'][:19].replace('T', ' ') + ' UTC'))
-        if backup is not None:
-            lines.append(tr(locale, 'admin.overview.backup_on' if backup.get('enabled') else 'admin.overview.backup_off'))
-            job = backup.get('last_job')
-            lines.append(tr(locale, 'admin.overview.backup_job', status=tr(locale, 'operation.' + job['status']),
-                time=job['created_at'][:19].replace('T', ' ') + ' UTC') if job else tr(locale, 'admin.overview.backup_none'))
-        sections.append(Section(tr(locale, 'admin.overview.maintenance'), tuple(lines), rows=(
-            (InlineKeyboardButton(text=tr(locale, 'settings.admin.updates'), callback_data=UpdatesCallback().pack(),
-                style='primary' if (updates or {}).get('available') else None),
-             InlineKeyboardButton(text=tr(locale, 'backups.title'), callback_data='backups')),
-            (InlineKeyboardButton(text=tr(locale, 'recovery.controller'), callback_data=RecoveryDiagnostics().pack()),))))
-    return sections
+        [[button(user_id, tr(locale, 'back'), 'home')]], state, message_id)
 
 
 @router.callback_query(F.data == 'admin_status')

@@ -306,31 +306,13 @@ pub fn run(mut request: Request) -> Result<()> {
             }
         }
         if (offer || app.self_requested)
-            && app.prompt.is_none()
-            && !app.exit
-            && matches!(
-                app.screen,
-                Screen::Form | Screen::Settings | Screen::SettingsPage(SettingsPage::Updates)
-            )
+            && receiver.is_none()
+            && self_confirmation.is_none()
+            && let Some(answer) = app.offer_workstation_update()
         {
             offer = false;
             app.self_requested = false;
-            if let Some(release) = &app.self_release {
-                let (reply, answer) = mpsc::channel();
-                app.prompt = Some((
-                    Prompt::ConfirmAction {
-                        title: "Update workstation?".into(),
-                        description: format!(
-                            "{} → {}\nWorkstation is updated on this computer. Restart TUI afterwards. Server installations and saved profiles are retained.",
-                            env!("CARGO_PKG_VERSION"),
-                            release.tag_name
-                        ),
-                    },
-                    reply,
-                ));
-                app.trust = false;
-                self_confirmation = Some(answer);
-            }
+            self_confirmation = Some(answer);
         }
         if let Some(answer) = &self_confirmation
             && let Ok(value) = answer.try_recv()

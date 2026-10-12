@@ -80,4 +80,6 @@ The optional `section_border` field sets decorative section borders separately f
 
 Open **Settings → Workstation updates**. This updates the local application. **Node Plane Updates** updates the server installation.
 
+Workstation checks for updates at startup and offers an available version after any connection check finishes. You can decline and return to **Settings → Workstation updates** later.
+
 For configurations, use **Copy URI** or **Save files** where offered. Telegram also provides QR delivery. See [Temporary configurations](temporary-configs.md) and [Troubleshooting](troubleshooting.md).

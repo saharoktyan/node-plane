@@ -17,6 +17,58 @@ fn header_status_tracks_installation_probe_and_connection() {
 }
 
 #[test]
+fn startup_update_offer_waits_for_connection_then_opens_on_idle_with_its_own_title() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Idle;
+    app.self_release = Some(
+        serde_json::from_value(serde_json::json!({
+            "tag_name":"v99.0.0", "draft":false, "prerelease":false
+        }))
+        .unwrap(),
+    );
+    app.nodes_busy = true;
+    assert!(app.offer_workstation_update().is_none());
+    assert!(app.prompt.is_none());
+    app.nodes_busy = false;
+    app.probe_requested = true;
+    assert!(app.offer_workstation_update().is_none());
+    app.probe_requested = false;
+    app.nodes_requested = Some(crate::nodes::Command::Controller(
+        app.controller.profile,
+        crate::controller::Command::Overview,
+    ));
+    assert!(app.offer_workstation_update().is_none());
+    app.nodes_requested = None;
+    app.screen = Screen::Running;
+    assert!(app.offer_workstation_update().is_none());
+    app.screen = Screen::Idle;
+    let answer = app.offer_workstation_update().unwrap();
+    assert!(
+        matches!(&app.prompt, Some((Prompt::ConfirmAction { title, .. }, _)) if title == "Update Workstation?")
+    );
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 40)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    let text: String = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect();
+    assert!(text.contains("Update Workstation?"));
+    assert!(text.contains("v99.0.0"));
+    assert!(!text.contains("Connection confirmation"));
+    app.prompt
+        .take()
+        .unwrap()
+        .1
+        .send(Answer::Confirm(false))
+        .unwrap();
+    assert!(matches!(answer.recv().unwrap(), Answer::Confirm(false)));
+    assert!(matches!(app.screen, Screen::Idle));
+}
+
+#[test]
 fn header_close_uses_confirmation_and_red_hover() {
     let mut app = test_profile_app();
     app.screen = Screen::Idle;

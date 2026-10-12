@@ -1,6 +1,39 @@
 use super::super::*;
 
 impl App {
+    pub(in crate::tui) fn offer_workstation_update(&mut self) -> Option<mpsc::Receiver<Answer>> {
+        if self.prompt.is_some()
+            || self.exit
+            || self.nodes_busy
+            || self.probe_requested
+            || self.nodes_requested.is_some()
+            || !matches!(
+                self.screen,
+                Screen::Idle
+                    | Screen::Form
+                    | Screen::Settings
+                    | Screen::SettingsPage(SettingsPage::Updates)
+            )
+        {
+            return None;
+        }
+        let release = self.self_release.as_ref()?;
+        let (reply, answer) = mpsc::channel();
+        self.prompt = Some((
+            Prompt::ConfirmAction {
+                title: "Update Workstation?".into(),
+                description: format!(
+                    "{} → {}\nWorkstation is updated on this computer. Restart TUI afterwards. Server installations and saved profiles are retained.",
+                    env!("CARGO_PKG_VERSION"),
+                    release.tag_name
+                ),
+            },
+            reply,
+        ));
+        self.trust = false;
+        Some(answer)
+    }
+
     pub(in crate::tui) fn activate_settings(&mut self, control: Control) -> Option<KeyEvent> {
         match control {
             Control::QuickProfile => {

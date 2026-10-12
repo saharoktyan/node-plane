@@ -50,6 +50,7 @@ def parent_path(callback, locale, data):
                     Breadcrumb(tr(locale, 'navigation.device'), callback))
         return ()
     roots = {'admin_menu': admin, 'admin_settings': settings,
+             'admin_alerts': (*admin, Breadcrumb(tr(locale, 'alerts.title'), 'admin_alerts')),
              'admin_nodes': servers, 'admin_profiles': profiles,
              'accounts': (*admin, Breadcrumb(tr(locale, 'accounts.title'), 'accounts')),
              'requests': (*admin, Breadcrumb(tr(locale, 'requests.title'), 'requests')),

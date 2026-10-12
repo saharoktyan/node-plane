@@ -18,6 +18,9 @@ def button(text, data):
 
 
 @router.callback_query(F.data == "alerts")
+@router.callback_query(F.data == "admin_alerts")
+@router.callback_query(F.data.startswith("admin_alerts_active:"))
+@router.callback_query(F.data.startswith("admin_alert_dismiss:"))
 @router.callback_query(F.data.startswith("alert_pref:"))
 @router.callback_query(F.data.startswith("alerts_active:"))
 @router.callback_query(F.data.startswith("alert_dismiss:"))
@@ -27,9 +30,10 @@ async def alerts_cb(
 ):
     await query.answer()
     locale = normalize_locale((await state.get_data()).get("locale"))
+    from_admin = query.data.startswith('admin_alert')
     try:
         value = await backend.alerts_overview(query.from_user.id)
-        if query.data.startswith('alert_dismiss:'):
+        if query.data.startswith(('alert_dismiss:', 'admin_alert_dismiss:')):
             await backend.dismiss_alert(query.from_user.id, query.data.split(':', 1)[1])
             value = await backend.alerts_overview(query.from_user.id)
         if query.data == 'alerts_preview_notice':
@@ -56,15 +60,17 @@ async def alerts_cb(
                 raise ValueError('invalid preference')
             await backend.alert_preferences(query.from_user.id, change)
             value = await backend.alerts_overview(query.from_user.id)
-        if query.data.startswith(("alerts_active:", 'alert_dismiss:')) or query.data == 'alerts_preview_list':
+        if from_admin or query.data.startswith(("alerts_active:", 'alert_dismiss:')) or query.data == 'alerts_preview_list':
             preview = query.data == 'alerts_preview_list'
             if preview:
                 value['active'] = [{'title':tr(locale, 'alerts.example_server'),
                     'kind':kind, 'preview':True} for kind in ('node_unreachable', 'disk_low')]
-            requested = query.data.split(':')[1] if query.data.startswith('alerts_active:') else '0'
+            requested = query.data.split(':')[1] if query.data.startswith(('alerts_active:', 'admin_alerts_active:')) else '0'
             if not requested.isdecimal() or len(requested) > 6:
                 raise ValueError('invalid page')
             active = value['active']
+            if from_admin:
+                active = [item for item in active if not item.get('dismissed')] if value['enabled'] else []
             offset = min(int(requested) // 8, max(0, (len(active) - 1) // 8)) * 8
             sections = []
             for item in active[offset:offset + 8]:
@@ -74,7 +80,7 @@ async def alerts_cb(
                     actions.append(button(tr(locale, 'alerts.rich.open'), AdminNodeCallback(node_key=item['node_key']).pack()))
                 if not item.get('dismissed') and (item.get('event_id') or preview):
                     actions.append(button(tr(locale, 'alerts.dismiss'),
-                        'alerts' if preview else 'alert_dismiss:' + item['event_id']))
+                        'alerts' if preview else ('admin_alert_dismiss:' if from_admin else 'alert_dismiss:') + item['event_id']))
                 lines = (server_label(item) + ' · ' + tr(locale, 'alerts.condition.' + item['kind']),)
                 if item.get('dismissed'):
                     lines += (tr(locale, 'alerts.dismissed'),)
@@ -83,14 +89,15 @@ async def alerts_cb(
                     sections=(Section(tr(locale, 'alerts.rich.observations'), details, collapsed=True),)
                         if details else (), divider_after=True))
             nav = []
+            page_prefix = 'admin_alerts_active:' if from_admin else 'alerts_active:'
             if offset:
-                nav.append(button('←', f'alerts_active:{offset - 8}'))
+                nav.append(button('←', f'{page_prefix}{offset - 8}'))
             if offset + 8 < len(active):
-                nav.append(button('→', f'alerts_active:{offset + 8}'))
+                nav.append(button('→', f'{page_prefix}{offset + 8}'))
             rows = [nav] if nav else []
-            rows.append([button(tr(locale, 'back'), 'alerts')])
+            rows.append([button(tr(locale, 'back'), 'admin_menu' if from_admin else 'alerts')])
             await render(bot, query.message.chat.id,
-                Screen(tr(locale, 'alerts.active_title'),
+                Screen(tr(locale, 'alerts.title' if from_admin else 'alerts.active_title'),
                     (tr(locale, 'alerts.preview_note'),) if preview else (tr(locale, 'alerts.none'),) if not active else (),
                     sections=tuple(sections), embedded_buttons=True, navigation=True),
                 rows, state, query.message.message_id)
@@ -131,7 +138,7 @@ async def alerts_cb(
             bot,
             query.message.chat.id,
             Screen(tr(locale, "alerts.title"), (tr(locale, "alerts.error"),), embedded_buttons=True, navigation=True),
-            [[button(tr(locale, "back"), AdminSettingsCallback().pack())]],
+            [[button(tr(locale, "back"), 'admin_menu' if from_admin else AdminSettingsCallback().pack())]],
             state,
             query.message.message_id,
         )

@@ -562,18 +562,15 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
         // Modal hit targets replace background controls, including outside clicks.
         hits.clear();
         let popup = centered(area, 84, 20);
-        let sections = dialog(
-            frame,
-            popup,
-            if matches!(prompt, Prompt::SelectAdministrator { .. }) {
-                " Choose administrator "
-            } else {
-                " Connection confirmation "
-            },
-        );
+        let title = match prompt {
+            Prompt::SelectAdministrator { .. } => "Choose administrator",
+            Prompt::ConfirmAction { title, .. } => title,
+            _ => "Connection confirmation",
+        };
+        let sections = dialog(frame, popup, &format!(" {title} "));
         let text = match prompt {
             Prompt::SelectAdministrator { .. } => "Select the account to bind to this workstation key.\n↑ / ↓ · Enter to select · Esc to cancel".into(),
-            Prompt::ConfirmAction { title, description } => format!("{title}\n\n{description}"),
+            Prompt::ConfirmAction { description, .. } => description.clone(),
             Prompt::HostKey { host, fingerprint } => format!(
                 "First connection to {host}\n\nSSH fingerprint:\n{fingerprint}\n\nCompare it with a trusted provider/source before accepting."
             ),

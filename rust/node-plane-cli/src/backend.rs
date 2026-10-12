@@ -23,6 +23,34 @@ impl fmt::Display for AdminSelection {
 }
 impl std::error::Error for AdminSelection {}
 
+fn administrator_label(choice: &Value, id: &str) -> String {
+    let telegram_id = choice["telegram_id"]
+        .as_str()
+        .map(str::to_owned)
+        .or_else(|| {
+            choice["telegram_id"]
+                .as_u64()
+                .map(|value| value.to_string())
+        });
+    let label = if let Some(telegram_id) = telegram_id {
+        let mut label = format!("Telegram ID: {telegram_id}");
+        if let Some(username) = choice["username"]
+            .as_str()
+            .filter(|value| !value.is_empty())
+        {
+            label.push_str(&format!(" · @{}", username.trim_start_matches('@')));
+        }
+        label
+    } else {
+        choice["label"].as_str().unwrap_or(id).to_owned()
+    };
+    label
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(200)
+        .collect()
+}
+
 #[derive(Clone, Deserialize)]
 pub struct Credential {
     pub token: Zeroizing<String>,
@@ -165,13 +193,7 @@ pub async fn helper(session: &mut SshSession, mut input: Value) -> Result<Value>
                 .filter_map(|choice| {
                     let id = choice["account_id"].as_str()?;
                     Uuid::parse_str(id).ok()?;
-                    let label: String = choice["label"]
-                        .as_str()
-                        .unwrap_or(id)
-                        .chars()
-                        .filter(|c| !c.is_control())
-                        .take(200)
-                        .collect();
+                    let label = administrator_label(choice, id);
                     Some((id.to_owned(), label))
                 })
                 .collect();
@@ -535,6 +557,21 @@ fn ensure_api_path(path: &str) -> std::result::Result<(), ApiError> {
 mod tests {
     use super::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    #[test]
+    fn administrator_identity_includes_known_username_and_supports_older_controllers() {
+        assert_eq!(
+            administrator_label(&json!({"telegram_id":"101","username":"operator"}), "id"),
+            "Telegram ID: 101 · @operator"
+        );
+        assert_eq!(
+            administrator_label(&json!({"telegram_id":102,"username":null}), "id"),
+            "Telegram ID: 102"
+        );
+        assert_eq!(
+            administrator_label(&json!({"label":"103 · @legacy"}), "id"),
+            "103 · @legacy"
+        );
+    }
     #[test]
     fn cached_authorization_is_bounded_and_cannot_select_another_account() {
         let mut auth = Authorization {

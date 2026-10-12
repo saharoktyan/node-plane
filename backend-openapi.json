@@ -8881,6 +8881,16 @@
             "title": "Unacknowledged Alerts",
             "default": 0
           },
+          "alerts_enabled": {
+            "type": "boolean",
+            "title": "Alerts Enabled",
+            "default": false
+          },
+          "requests_enabled": {
+            "type": "boolean",
+            "title": "Requests Enabled",
+            "default": true
+          },
           "checked_at": {
             "anyOf": [
               {

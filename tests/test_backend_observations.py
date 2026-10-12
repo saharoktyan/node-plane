@@ -15,6 +15,16 @@ class ObservationTests(TestCase):
     create = BackendNodeTests.create
     admin_headers = BackendNodeTests.admin_headers
 
+    def test_overview_publishes_actual_alert_and_request_policy_switches(self):
+        with self.db.transaction() as conn:
+            conn.execute("INSERT INTO backend_system_settings VALUES ('alert_policy',?)", (json.dumps({'enabled':False}),))
+            conn.execute("INSERT INTO backend_system_settings VALUES ('access_requests_enabled','0')")
+        with TestClient(create_app(self.db)) as client:
+            response = client.get('/api/v1/admin/overview', headers=self.admin_headers())
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertFalse(response.json()['alerts_enabled'])
+            self.assertFalse(response.json()['requests_enabled'])
+
     def test_probe_filters_secrets_and_invalid_metrics_without_changing_settings(self):
         self.assertEqual(self.create().status_code, 201)
         facts = {'docker': True, 'xray_installed': True, 'xray_running': True,
@@ -128,4 +138,6 @@ class ObservationTests(TestCase):
         self.assertEqual(data['updates']['latest_version'], '9.0')
         self.assertEqual([node['key'] for node in data['problem_nodes']], ['lv1'])
         self.assertIn('unacknowledged_alerts', data)
+        self.assertIn('alerts_enabled', data)
+        self.assertTrue(data['requests_enabled'])
         driver.inspect_node_services.assert_not_called()
