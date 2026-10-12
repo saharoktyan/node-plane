@@ -142,6 +142,20 @@ impl App {
                 self.controller_command(crate::controller::Command::Alerts);
                 None
             }
+            Control::ControllerAlertInterval(minutes) => {
+                if matches!(minutes, 5 | 15)
+                    && self
+                        .controller
+                        .alerts
+                        .as_ref()
+                        .is_some_and(|v| v["enabled"] == true)
+                {
+                    self.controller_command(crate::controller::Command::AlertPreferences(
+                        serde_json::json!({"interval_minutes":minutes}),
+                    ));
+                }
+                None
+            }
             Control::ControllerAlertToggle(key) => {
                 if let Some(value) = &self.controller.alerts {
                     let patch = if key == "interval_minutes" {
@@ -266,6 +280,9 @@ impl App {
                 None
             }
             Control::ControllerDefaultsInputApply => {
+                if !defaults_input_changed(&self.controller) {
+                    return None;
+                }
                 if let Some((key, input)) = self.controller.defaults_input.clone() {
                     if key == "gate_message" {
                         self.controller_command(crate::controller::Command::PolicySave(
@@ -381,8 +398,16 @@ impl App {
                 None
             }
             Control::ControllerDefaultsReset => {
+                let viewport = self
+                    .manual_viewport
+                    .get()
+                    .unwrap_or(self.controller_viewport.get());
                 self.controller.defaults = self.controller.defaults_baseline.clone();
-                self.controller.selected = 0;
+                self.controller.selected = self
+                    .controller
+                    .selected
+                    .min(defaults_controls(&self.controller).len().saturating_sub(2));
+                self.manual_viewport.set(Some(viewport));
                 None
             }
             Control::ControllerDefaultsSave => {
@@ -394,8 +419,8 @@ impl App {
             Control::ControllerBackups
             | Control::ControllerBackupCreate
             | Control::ControllerBackupAuto
-            | Control::ControllerBackupInterval
-            | Control::ControllerBackupKeep
+            | Control::ControllerBackupInterval(_)
+            | Control::ControllerBackupKeep(_)
             | Control::ControllerBackupCatalog(_)
             | Control::ControllerBackupDetail(_)
             | Control::ControllerBackupRestore
@@ -434,12 +459,17 @@ impl App {
                             Control::ControllerBackupAuto => {
                                 serde_json::json!({"enabled":value["enabled"] != true})
                             }
-                            Control::ControllerBackupInterval => {
-                                serde_json::json!({"interval_hours":match value["interval_hours"].as_u64().unwrap_or(24) {6 => 12,12 => 24,_ => 6}})
+                            Control::ControllerBackupInterval(hours)
+                                if value["enabled"] == true && matches!(hours, 6 | 12 | 24) =>
+                            {
+                                serde_json::json!({"interval_hours":hours})
                             }
-                            _ => {
-                                serde_json::json!({"keep_count":match value["keep_count"].as_u64().unwrap_or(10) {5 => 10,10 => 20,_ => 5}})
+                            Control::ControllerBackupKeep(count)
+                                if value["enabled"] == true && matches!(count, 5 | 10 | 20) =>
+                            {
+                                serde_json::json!({"keep_count":count})
                             }
+                            _ => return None,
                         };
                         Command::BackupPreferences(patch)
                     }
@@ -781,8 +811,8 @@ impl App {
                     self.controller.selected = 0;
                     return None;
                 }
-                if self.controller.defaults_input.take().is_some() {
-                    self.controller.selected = 0;
+                if let Some((key, _)) = self.controller.defaults_input.take() {
+                    self.action_focus = Some(Control::ControllerDefaultsField(key));
                     self.error.clear();
                     return None;
                 }
@@ -996,11 +1026,12 @@ impl App {
             return alert_controls(state);
         }
         if state.defaults_input.is_some() {
-            return vec![
-                Control::ControllerDefaultsInput,
-                Control::ControllerDefaultsInputApply,
-                Control::ControllerBack,
-            ];
+            let mut controls = vec![Control::ControllerDefaultsInput];
+            if defaults_input_changed(state) {
+                controls.push(Control::ControllerDefaultsInputApply);
+            }
+            controls.push(Control::ControllerBack);
+            return controls;
         }
         if state.bot_title.is_some() {
             return vec![Control::ControllerBotTitleEdit, Control::ControllerBack];
@@ -1033,16 +1064,8 @@ impl App {
         if let Some(catalog) = &state.backup_catalog {
             return backup_catalog_controls(catalog);
         }
-        if state.backups.is_some() {
-            return vec![
-                Control::ControllerBackupCreate,
-                Control::ControllerBackupCatalog(0),
-                Control::ControllerBackupAuto,
-                Control::ControllerBackupInterval,
-                Control::ControllerBackupKeep,
-                Control::ControllerBackups,
-                Control::ControllerBack,
-            ];
+        if let Some(value) = &state.backups {
+            return backup_preferences_controls(value);
         }
         if let Some(result) = &state.update_result {
             let count = result["items"].as_array().map_or(0, Vec::len);

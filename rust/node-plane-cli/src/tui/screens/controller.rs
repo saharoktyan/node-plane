@@ -52,11 +52,14 @@ pub(in crate::tui) fn compact_history_item(
 }
 
 pub(in crate::tui) fn alert_controls(state: &crate::controller::Browser) -> Vec<Control> {
-    let mut controls = vec![
-        Control::ControllerAlertToggle("enabled"),
-        Control::ControllerAlertToggle("interval_minutes"),
-        Control::ControllerAlertToggle("notify_resolved"),
-    ];
+    let mut controls = vec![Control::ControllerAlertToggle("enabled")];
+    if state.alerts.as_ref().is_some_and(|v| v["enabled"] == true) {
+        controls.extend([
+            Control::ControllerAlertInterval(5),
+            Control::ControllerAlertInterval(15),
+            Control::ControllerAlertToggle("notify_resolved"),
+        ]);
+    }
     if let Some(items) = state.alerts.as_ref().and_then(|v| v["active"].as_array()) {
         let start = state.alerts_page * 5;
         for (index, item) in items.iter().enumerate().skip(start).take(5) {
@@ -131,11 +134,18 @@ pub(in crate::tui) fn defaults_rows(controls: &[Control], width: u16) -> Vec<Vec
         if *control == Control::ControllerBack {
             continue;
         }
-        if *control == Control::ControllerDefaultsAdvanced {
+        if matches!(
+            control,
+            Control::ControllerDefaultsAdvanced | Control::ControllerDefaultsSave
+        ) {
             if !pending.is_empty() {
                 rows.push(std::mem::take(&mut pending));
             }
-            rows.push(vec![index]);
+            if *control == Control::ControllerDefaultsSave {
+                pending.push(index);
+            } else {
+                rows.push(vec![index]);
+            }
         } else {
             pending.push(index);
             if pending.len() == columns {
@@ -236,7 +246,7 @@ pub(in crate::tui) fn draw_controller(
     } else {
         right
     };
-    let parts = dialog(
+    let mut parts = dialog(
         frame,
         right,
         if app.controller_ready() {
@@ -250,6 +260,7 @@ pub(in crate::tui) fn draw_controller(
             " Node Plane "
         },
     );
+    parts[0].height += parts[1].height;
     let state = &app.controller;
     let mut text = String::new();
     let mut controls: Vec<(String, Control)> = Vec::new();
@@ -531,6 +542,7 @@ pub(in crate::tui) fn draw_controller(
                         if value[key] == true { "On" } else { "Off" }
                     ),
                 },
+                Control::ControllerAlertInterval(minutes) => format!("{minutes} min"),
                 Control::ControllerAlertDismiss(index) => format!(
                     "Dismiss · {}",
                     value["active"][index]["title"].as_str().unwrap_or("Server")
@@ -549,13 +561,14 @@ pub(in crate::tui) fn draw_controller(
             "bot_title" => "Bot name".into(),
             _ => format!("Installation defaults · {key}"),
         };
-        controls.extend([
-            ("Value".into(), Control::ControllerDefaultsInput),
-            (
+        controls.push(("Value".into(), Control::ControllerDefaultsInput));
+        if defaults_input_changed(state) {
+            controls.push((
                 "Apply to draft".into(),
                 Control::ControllerDefaultsInputApply,
-            ),
-        ]);
+            ));
+        }
+        controls.push(("Cancel".into(), Control::ControllerBack));
     } else if let Some(value) = state.policies.as_ref().filter(|_| app.requests_settings) {
         text = "Requests settings".into();
         let status = |enabled: bool| if enabled { "On" } else { "Off" };
@@ -710,8 +723,9 @@ pub(in crate::tui) fn draw_controller(
         }
     } else if let Some(value) = &state.backups {
         text = format!(
-            "Backups: {} · {} bytes",
-            value["count"], value["size_bytes"]
+            "Backups: {} · {}",
+            value["count"],
+            format_backup_size(value["size_bytes"].as_u64().unwrap_or(0))
         );
         if let Some(job) = &state.backup_job {
             text.push_str(&format!(
@@ -726,11 +740,11 @@ pub(in crate::tui) fn draw_controller(
                 text.push_str(&format!("\n{error}"));
             }
         }
-        controls.extend([
-            ("Create backup".into(), Control::ControllerBackupCreate),
-            ("Saved backups".into(), Control::ControllerBackupCatalog(0)),
-            (
-                format!(
+        for control in backup_preferences_controls(value) {
+            let label = match control {
+                Control::ControllerBackupCreate => "Create backup".into(),
+                Control::ControllerBackupCatalog(_) => "Backups list".into(),
+                Control::ControllerBackupAuto => format!(
                     "Auto backups: {}",
                     if value["enabled"] == true {
                         "On"
@@ -738,18 +752,19 @@ pub(in crate::tui) fn draw_controller(
                         "Off"
                     }
                 ),
-                Control::ControllerBackupAuto,
-            ),
-            (
-                format!("Interval: {} hours", value["interval_hours"]),
-                Control::ControllerBackupInterval,
-            ),
-            (
-                format!("Keep: {} backups", value["keep_count"]),
-                Control::ControllerBackupKeep,
-            ),
-            ("Refresh".into(), Control::ControllerBackups),
-        ]);
+                Control::ControllerBackupInterval(hours) => {
+                    if hours == 24 {
+                        "1 day".into()
+                    } else {
+                        format!("{hours} hours")
+                    }
+                }
+                Control::ControllerBackupKeep(count) => count.to_string(),
+                Control::ControllerBackups => "Refresh".into(),
+                _ => continue,
+            };
+            controls.push((label, control));
+        }
     } else if let Some(result) = &state.update_result {
         text = format!(
             "{} · {}\n{}",
@@ -975,7 +990,9 @@ pub(in crate::tui) fn draw_controller(
         controls.push(("Back".into(), Control::ControllerBack));
     }
     // Back is pinned in the common footer, outside this scrollable list.
-    controls.retain(|(_, control)| *control != Control::ControllerBack);
+    controls.retain(|(_, control)| {
+        *control != Control::ControllerBack || state.defaults_input.is_some()
+    });
     let text_height = (text.lines().count() as u16 + 1).min(parts[0].height.saturating_sub(3));
     let lines: Vec<Line> = text
         .lines()
@@ -1008,9 +1025,16 @@ pub(in crate::tui) fn draw_controller(
         let mut index = 0;
         while index < controls.len() {
             let mut row = vec![index];
-            if matches!(controls[index].1, Control::ControllerUpdateInterval(_)) {
+            if choice_row_label(controls[index].1).is_some()
+                || state.defaults_input.is_some()
+                    && controls[index].1 == Control::ControllerDefaultsInputApply
+            {
                 while index + 1 < controls.len()
-                    && matches!(controls[index + 1].1, Control::ControllerUpdateInterval(_))
+                    && (choice_row_label(controls[index].1).is_some()
+                        && choice_row_label(controls[index + 1].1)
+                            == choice_row_label(controls[index].1)
+                        || state.defaults_input.is_some()
+                            && controls[index + 1].1 == Control::ControllerBack)
                 {
                     index += 1;
                     row.push(index);
@@ -1029,18 +1053,32 @@ pub(in crate::tui) fn draw_controller(
     let offset = app.viewport(automatic, rows.len(), capacity);
     app.controller_viewport.set(offset);
     for (row, indices) in rows.iter().enumerate().skip(offset).take(capacity) {
-        let cells = Layout::horizontal(vec![Constraint::Fill(1); indices.len()])
-            .spacing(1)
-            .split(Rect::new(
-                parts[0].x,
-                parts[0].y + text_height + (row - offset) as u16 * 3,
-                parts[0].width,
-                3,
-            ));
+        let row_label = choice_row_label(controls[indices[0]].1);
+        let cells = Layout::horizontal(vec![
+            Constraint::Fill(1);
+            indices.len() + usize::from(row_label.is_some())
+        ])
+        .spacing(1)
+        .split(Rect::new(
+            parts[0].x,
+            parts[0].y + text_height + (row - offset) as u16 * 3,
+            parts[0].width,
+            3,
+        ));
+        if let Some(label) = row_label {
+            draw_button_color(frame, cells[0], label, false, Color::DarkGray);
+            let inner = Block::bordered().inner(cells[0]);
+            frame.render_widget(
+                Paragraph::new(label)
+                    .alignment(ratatui::layout::Alignment::Center)
+                    .style(Style::default().fg(Color::DarkGray)),
+                inner,
+            );
+        }
         for (column, &index) in indices.iter().enumerate() {
             let (label, control) = &controls[index];
             let control = *control;
-            let rect = cells[column];
+            let rect = cells[column + usize::from(row_label.is_some())];
             if rect.bottom() > parts[0].bottom() {
                 continue;
             }
@@ -1062,16 +1100,20 @@ pub(in crate::tui) fn draw_controller(
                 );
             } else if control == Control::ControllerPhrase {
                 draw_field(frame, rect, label, &state.phrase, index == state.selected);
-            } else if let Control::ControllerUpdateInterval(minutes) = control {
+            } else if choice_row_label(control).is_some()
+                || matches!(
+                    control,
+                    Control::ControllerUpdateAuto
+                        | Control::ControllerBackupAuto
+                        | Control::ControllerAlertToggle("enabled")
+                )
+            {
                 draw_choice_button(
                     frame,
                     rect,
                     label,
                     index == state.selected && !app.controller_sidebar,
-                    state
-                        .updates
-                        .as_ref()
-                        .is_some_and(|v| v["auto_check_interval_minutes"] == minutes),
+                    choice_selected(state, control),
                 );
             } else {
                 draw_button_color(
@@ -1092,13 +1134,6 @@ pub(in crate::tui) fn draw_controller(
                         )
                     {
                         Color::Red
-                    } else if control == Control::ControllerUpdateAuto
-                        && state
-                            .updates
-                            .as_ref()
-                            .is_some_and(|v| v["auto_check_enabled"] == true)
-                    {
-                        Color::Green
                     } else {
                         Color::Cyan
                     },
@@ -1110,4 +1145,98 @@ pub(in crate::tui) fn draw_controller(
             });
         }
     }
+}
+
+pub(in crate::tui) fn format_backup_size(bytes: u64) -> String {
+    for (unit, divisor) in [
+        ("GiB", 1u64 << 30),
+        ("MiB", 1u64 << 20),
+        ("KiB", 1u64 << 10),
+    ] {
+        if bytes >= divisor {
+            return format!("{:.1} {unit}", bytes as f64 / divisor as f64);
+        }
+    }
+    format!("{bytes} B")
+}
+pub(in crate::tui) fn backup_preferences_controls(value: &serde_json::Value) -> Vec<Control> {
+    let mut controls = vec![
+        Control::ControllerBackupCreate,
+        Control::ControllerBackupCatalog(0),
+        Control::ControllerBackupAuto,
+    ];
+    if value["enabled"] == true {
+        controls.extend([6, 12, 24].map(Control::ControllerBackupInterval));
+        controls.extend([5, 10, 20].map(Control::ControllerBackupKeep));
+    }
+    controls.extend([Control::ControllerBackups, Control::ControllerBack]);
+    controls
+}
+pub(in crate::tui) fn choice_row_label(control: Control) -> Option<&'static str> {
+    match control {
+        Control::ControllerUpdateInterval(_)
+        | Control::ControllerBackupInterval(_)
+        | Control::ControllerAlertInterval(_) => Some("Interval:"),
+        Control::ControllerBackupKeep(_) => Some("Keep:"),
+        _ => None,
+    }
+}
+pub(in crate::tui) fn choice_selected(
+    state: &crate::controller::Browser,
+    control: Control,
+) -> bool {
+    match control {
+        Control::ControllerUpdateInterval(n) => state
+            .updates
+            .as_ref()
+            .is_some_and(|v| v["auto_check_interval_minutes"] == n),
+        Control::ControllerUpdateAuto => state
+            .updates
+            .as_ref()
+            .is_some_and(|v| v["auto_check_enabled"] == true),
+        Control::ControllerBackupInterval(n) => state
+            .backups
+            .as_ref()
+            .is_some_and(|v| v["interval_hours"] == n),
+        Control::ControllerBackupKeep(n) => {
+            state.backups.as_ref().is_some_and(|v| v["keep_count"] == n)
+        }
+        Control::ControllerBackupAuto => {
+            state.backups.as_ref().is_some_and(|v| v["enabled"] == true)
+        }
+        Control::ControllerAlertInterval(n) => state
+            .alerts
+            .as_ref()
+            .is_some_and(|v| v["interval_minutes"] == n),
+        Control::ControllerAlertToggle("enabled") => {
+            state.alerts.as_ref().is_some_and(|v| v["enabled"] == true)
+        }
+        _ => false,
+    }
+}
+pub(in crate::tui) fn defaults_input_changed(state: &crate::controller::Browser) -> bool {
+    let Some((key, input)) = &state.defaults_input else {
+        return false;
+    };
+    let value = match *key {
+        "bot_title" => state.bot_title.as_ref().map(|v| &v["title"]),
+        "gate_message" => state
+            .policies
+            .as_ref()
+            .map(|v| &v["requests"]["gate_message"]),
+        _ => state.defaults.as_ref().map(|v| &v["settings"][key]),
+    };
+    value.is_some_and(|v| {
+        if key.ends_with("port") && input.trim().parse::<u64>().ok() == v.as_u64() {
+            return false;
+        }
+        input.trim()
+            != v.as_str().map(str::to_owned).unwrap_or_else(|| {
+                if v.is_null() {
+                    String::new()
+                } else {
+                    v.to_string()
+                }
+            })
+    })
 }

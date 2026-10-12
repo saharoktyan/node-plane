@@ -11,13 +11,13 @@ pub(in crate::tui) fn draw_temporary(
     let block = section_block(" Temporary configurations ");
     let inner = block.inner(right);
     frame.render_widget(block, right);
-    let rows = Layout::vertical([
+    let mut rows = Layout::vertical([
         Constraint::Length(2),
         Constraint::Min(1),
-        Constraint::Length(6),
+        Constraint::Length(3),
     ])
     .split(inner);
-    let capacity = usize::from(rows[1].height).max(1);
+    let mut capacity = usize::from(rows[1].height).max(1);
     app.temporary.capacity.set(capacity);
     let browser = &app.temporary;
     let selected = |i| !app.temporary_sidebar && browser.selected == i;
@@ -196,6 +196,19 @@ pub(in crate::tui) fn draw_temporary(
     if browser.view != View::List {
         actions.push(("Back", Control::TemporaryBack));
     }
+    let action_rows = actions
+        .iter()
+        .filter(|(_, control)| !is_back_control(*control))
+        .count()
+        .div_ceil(2);
+    rows = Layout::vertical([
+        Constraint::Length(2),
+        Constraint::Min(1),
+        Constraint::Length(action_rows as u16 * 3),
+    ])
+    .split(inner);
+    capacity = usize::from(rows[1].height).max(1);
+    app.temporary.capacity.set(capacity);
     if !choices.is_empty() {
         app.content_overflow.set(choices.len() > capacity);
         let first = browser

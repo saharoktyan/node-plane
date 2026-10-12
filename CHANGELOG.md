@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.3-alpha.85 - 2026-10-12
+
+- Color diagnostic status markers and add labeled choices for automatic checks, backups and alerts.
+- Hide disabled automation preferences, format backup sizes, and simplify Basic settings and draft dialogs.
+- Keep draft actions together, preserve scrolling after reset, and use the full list height.
+- Require a Workstation restart after updating the local application and simplify its header and exit prompt.
+- Keep automatic update choices in the selected theme color during mouse navigation.
+
 ## 0.4.3-alpha.84 - 2026-10-12
 
 - Simplify Updates to saved results and failed-node recovery, with one-hour, six-hour and daily automatic checks.

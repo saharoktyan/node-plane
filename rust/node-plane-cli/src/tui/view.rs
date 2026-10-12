@@ -44,6 +44,9 @@ pub(super) fn terminal_too_small(area: Rect) -> bool {
 
 pub(super) fn draw(frame: &mut Frame, app: &App) -> Vec<Hit> {
     let area = frame.area();
+    if app.restart_required {
+        return draw_restart(frame, app);
+    }
     if !terminal_too_small(area) {
         return draw_content(frame, app);
     }
@@ -71,7 +74,7 @@ pub(super) fn draw_exit_dialog(frame: &mut Frame, app: &App, hits: &mut Vec<Hit>
     let area = frame.area();
     hits.clear();
     let popup = centered(area, 78, 12);
-    let sections = dialog(frame, popup, " Close Node Plane? ");
+    let sections = dialog(frame, popup, " Close the workstation? ");
     let text = if app.controller.verifying
         || app
             .controller
@@ -89,9 +92,9 @@ pub(super) fn draw_exit_dialog(frame: &mut Frame, app: &App, hits: &mut Vec<Hit>
     } else if app.unsaved_changes() {
         "Close Workstation? Unsaved profile or server changes will be discarded."
     } else if matches!(app.screen, Screen::EditInstallation) {
-        "Close the assistant? Unsaved installation changes will be discarded."
+        "Close the workstation? Unsaved installation changes will be discarded."
     } else {
-        "Close the assistant? Your saved installations will be available next time."
+        "Close the workstation?"
     };
     frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: false }), sections[0]);
     button_pair(
@@ -114,6 +117,9 @@ pub(super) fn apply_theme(frame: &mut Frame, app: &App) {
 }
 
 pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
+    if app.restart_required {
+        return draw_restart(frame, app);
+    }
     app.content_overflow.set(false);
     app.list_max_viewport.set(0);
     app.list_viewport.set(0);
@@ -184,7 +190,7 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
         .set(usize::from(rows[1].height.saturating_sub(10)).max(1));
     let header = Layout::horizontal([Constraint::Min(0), Constraint::Length(6)]).split(rows[0]);
     frame.render_widget(
-        Paragraph::new("Node Plane | Workstation assistant").style(
+        Paragraph::new("Node Plane | Workstation").style(
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
@@ -375,12 +381,12 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
             ])
             .split(inner);
             frame.render_widget(
-                Paragraph::new(summary)
+                Paragraph::new(diagnostic_lines(&summary))
                     .style(Style::default().fg(color))
                     .wrap(Wrap { trim: false }),
                 sections[0],
             );
-            let paragraph = Paragraph::new(details).wrap(Wrap { trim: false });
+            let paragraph = Paragraph::new(diagnostic_lines(&details)).wrap(Wrap { trim: false });
             let maximum = paragraph
                 .line_count(sections[1].width)
                 .saturating_sub(usize::from(sections[1].height));
@@ -508,7 +514,9 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
                 None
             }
         });
-    if let Some(control) = back {
+    if let Some(control) = back.filter(|_| {
+        app.controller.defaults_input.is_none() || !matches!(app.screen, Screen::Controller)
+    }) {
         let mut selected = match app.screen {
             Screen::Controller => {
                 !app.controller_sidebar
@@ -722,6 +730,7 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
             if hovered_hit.is_some_and(|hovered| hovered.area == hit.area) {
                 continue;
             }
+            let chosen = choice_selected(&app.controller, hit.control);
             for y in rect.y..rect.bottom() {
                 for x in rect.x..rect.right() {
                     let cell = &mut frame.buffer_mut()[(x, y)];
@@ -730,7 +739,11 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
                         "┌" | "┐" | "└" | "┘" | "╭" | "╮" | "╰" | "╯" | "─" | "│"
                     ) {
                         cell.fg = Color::White;
-                    } else if y > rect.y && y + 1 < rect.bottom() && cell.fg == Color::Cyan {
+                    } else if !chosen
+                        && y > rect.y
+                        && y + 1 < rect.bottom()
+                        && cell.fg == Color::Cyan
+                    {
                         cell.fg = Color::Gray;
                         cell.modifier.remove(Modifier::BOLD);
                     }
@@ -1212,4 +1225,52 @@ pub(super) fn draw_navigation(
         control: Control::Settings,
     });
     columns[1]
+}
+
+fn draw_restart(frame: &mut Frame, app: &App) -> Vec<Hit> {
+    let popup = centered(frame.area(), 70, 12);
+    let sections = dialog(frame, popup, " Workstation updated ");
+    frame.render_widget(
+        Paragraph::new("Restart the workstation to use the updated version.")
+            .wrap(Wrap { trim: false }),
+        sections[0],
+    );
+    let area = centered(sections[1], 20, 3);
+    draw_button(frame, area, "Restart", true);
+    apply_theme(frame, app);
+    vec![Hit {
+        area,
+        control: Control::Restart,
+    }]
+}
+
+pub(super) fn diagnostic_lines(text: &str) -> Vec<Line<'_>> {
+    text.lines()
+        .map(|line| {
+            let prefix = line.trim_start();
+            let color = if prefix.starts_with("[OK]") {
+                Some(Color::Green)
+            } else if prefix.starts_with("[FAIL]") || prefix.starts_with("[ERROR]") {
+                Some(Color::Red)
+            } else if prefix.starts_with("[WARN]") || prefix.starts_with("[WARNING]") {
+                Some(Color::Yellow)
+            } else {
+                None
+            };
+            if let Some(color) = color {
+                let start = line.len() - prefix.len();
+                let end = start + prefix.find(']').unwrap() + 1;
+                Line::from(vec![
+                    Span::raw(&line[..start]),
+                    Span::styled(
+                        &line[start..end],
+                        Style::default().fg(color).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw(&line[end..]),
+                ])
+            } else {
+                Line::from(line)
+            }
+        })
+        .collect()
 }

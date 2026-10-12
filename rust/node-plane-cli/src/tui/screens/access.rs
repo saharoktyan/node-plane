@@ -421,7 +421,17 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
             },
         ),
         Constraint::Min(0),
-        Constraint::Length(if account_actions { 12 } else { 6 }),
+        Constraint::Length(if account_actions {
+            12
+        } else if app.access.card.is_none()
+            && app.access.editor.is_none()
+            && app.access.devices.is_none()
+            && app.access.filtered().len() <= usize::from(inner.height.saturating_sub(9) / 3).max(1)
+        {
+            3
+        } else {
+            6
+        }),
     ])
     .split(inner);
     if app.access.devices.is_some() {

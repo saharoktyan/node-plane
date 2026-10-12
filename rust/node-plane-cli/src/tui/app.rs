@@ -30,6 +30,8 @@ impl App {
             nodes_capacity: std::cell::Cell::new(10),
             self_release: None,
             self_status: "Checking for workstation updates…".into(),
+            restart_required: false,
+            restart_requested: false,
             self_requested: false,
             self_check_requested: false,
             form: Form::new(r),

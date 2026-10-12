@@ -156,11 +156,16 @@ pub(super) fn draw_choice_button(
     chosen: bool,
 ) {
     draw_button(frame, area, label, focused);
-    if chosen && !focused {
+    if chosen {
         frame.render_widget(
             Paragraph::new(label)
                 .alignment(ratatui::layout::Alignment::Center)
-                .style(Style::default().fg(Color::Cyan).bg(Color::Reset)),
+                .style(
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .bg(Color::Reset)
+                        .add_modifier(Modifier::BOLD),
+                ),
             Block::bordered().inner(area),
         );
     }

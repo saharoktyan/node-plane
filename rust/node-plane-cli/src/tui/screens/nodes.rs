@@ -704,8 +704,15 @@ pub(in crate::tui) fn draw_nodes(frame: &mut Frame, app: &App, area: Rect, hits:
     });
     let button_rows = if card.is_some() {
         adaptive_button_rows(inner.width, &actions)
-    } else {
+    } else if app
+        .nodes
+        .pages(usize::from(inner.height.saturating_sub(6)).max(1))
+        .len()
+        > 1
+    {
         2
+    } else {
+        1
     };
     if usize::from(inner.height) < button_rows * 3 + 2 {
         frame.render_widget(

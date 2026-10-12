@@ -55,6 +55,8 @@ The **Offer service and operation recovery** option retains its last selection a
 
 On startup the content area stays empty until you choose a section. If installation detection is unconfirmed, use **Check installation**.
 
+Automatic check, backup and alert preferences appear when the corresponding feature is enabled. Select an interval directly; backups also offer a retention count. **Node Plane Settings → Basic** contains installation defaults and general controller options.
+
 ## Install a controller
 
 Choose **Install Node Plane**, fill the connection and installation fields, review the request and continue. Progress shows the current step and a log path. After completion, create a node in **Nodes** and run **Server setup**. Follow [Nodes](nodes.md) and [Access](access.md) for the remaining actions.
@@ -83,5 +85,7 @@ The optional `section_border` field sets decorative section borders separately f
 Open **Settings → Workstation updates**. This updates the local application. **Node Plane Updates** updates the server installation.
 
 Workstation checks for updates at startup and offers an available version after any connection check finishes. You can decline and return to **Settings → Workstation updates** later.
+
+After a successful local update, select **Restart** to open the updated Workstation. Other actions remain unavailable until restart.
 
 For configurations, use **Copy URI** or **Save files** where offered. Telegram also provides QR delivery. See [Temporary configurations](temporary-configs.md) and [Troubleshooting](troubleshooting.md).

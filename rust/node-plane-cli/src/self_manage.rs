@@ -237,6 +237,28 @@ pub fn execute(command: &Command) -> Result<()> {
     Ok(())
 }
 
+/// Reopen the saved installation catalog without replaying a workflow command.
+pub fn restart_workstation(executable: &Path, state_dir: &Path) -> Result<()> {
+    let mut command = std::process::Command::new(executable);
+    command.arg("--state-dir").arg(state_dir);
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        Err(command.exec()).context("Could not restart the workstation")
+    }
+    #[cfg(not(unix))]
+    {
+        let status = command
+            .status()
+            .context("Could not restart the workstation")?;
+        ensure!(
+            status.success(),
+            "Restarted workstation exited with {status}"
+        );
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

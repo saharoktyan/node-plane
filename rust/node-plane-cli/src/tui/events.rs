@@ -298,6 +298,11 @@ impl App {
                 self.trust = false;
             }
             Event::Finished(result) => {
+                if self.restart_required {
+                    self.outcome = Some(result);
+                    self.screen = Screen::Finished;
+                    return;
+                }
                 self.ignore_nodes_updates = false;
                 if !self.nodes_busy && self.form.action == Action::Install && result.is_ok() {
                     self.remember_installed();

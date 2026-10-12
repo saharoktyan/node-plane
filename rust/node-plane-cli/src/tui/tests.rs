@@ -4532,3 +4532,224 @@ fn profile_switch_restores_selector_focus_after_sidebar_changes() {
             .any(|c| matches!(c, Control::CycleProfile(_)))
     );
 }
+
+#[test]
+fn update_choices_keep_theme_text_after_pointer_focus_changes() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Controller;
+    app.form.select_action(Action::Update);
+    app.connections.accent = "#ae78cd".into();
+    app.controller.updates = Some(serde_json::json!({
+        "auto_check_enabled":true,"auto_check_interval_minutes":360
+    }));
+    app.pointer_active = true;
+    app.pointer_position = Some((0, 0).into());
+    let accent = Color::Rgb(174, 120, 205);
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    for control in [
+        Control::ControllerUpdateAuto,
+        Control::ControllerUpdateInterval(360),
+    ] {
+        let area = app
+            .hits
+            .iter()
+            .find(|hit| hit.control == control)
+            .unwrap()
+            .area;
+        assert_eq!(
+            terminal.backend().buffer()[(area.x, area.y)].fg,
+            Color::White
+        );
+        assert!((area.x + 1..area.right() - 1).any(|x| {
+            let cell = &terminal.backend().buffer()[(x, area.y + 1)];
+            cell.symbol() != " " && cell.fg == accent
+        }));
+        app.hovered = Some(control);
+        app.pointer_position = Some((area.x + 1, area.y + 1).into());
+        terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+        assert_eq!(terminal.backend().buffer()[(area.x, area.y)].fg, accent);
+        assert!((area.x + 1..area.right() - 1).all(|x| {
+            let cell = &terminal.backend().buffer()[(x, area.y + 1)];
+            cell.symbol() == " " || cell.fg == accent
+        }));
+        app.pointer_position = Some((0, 0).into());
+        terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    }
+}
+
+#[test]
+fn successful_workstation_update_requires_restart_without_confirming_installation() {
+    let mut app = test_profile_app();
+    app.form.select_action(Action::Install);
+    app.confirmed_installation = None;
+    app.restart_required = true;
+    app.event(Event::Finished(Ok("Workstation updated".into())));
+    assert!(app.confirmed_installation.is_none());
+    for size in [(120, 40), (60, 20)] {
+        let mut terminal =
+            Terminal::new(ratatui::backend::TestBackend::new(size.0, size.1)).unwrap();
+        terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+        assert!(app.hits.len() == 1 && app.hits[0].control == Control::Restart);
+    }
+    for control in [Control::WindowClose, Control::Controller, Control::Close] {
+        app.activate(control);
+        assert!(!app.restart_requested && !app.exit);
+        assert!(matches!(app.screen, Screen::Finished));
+    }
+    app.activate(Control::Restart);
+    assert!(app.restart_requested);
+}
+
+#[test]
+fn diagnostic_status_prefixes_have_semantic_colors_only_on_the_status() {
+    let lines =
+        diagnostic_lines("[OK] disk ready\n[WARN] low space\n[FAIL] backend down\nPlain text");
+    for (line, color) in lines.iter().zip([Color::Green, Color::Yellow, Color::Red]) {
+        assert_eq!(line.spans[1].style.fg, Some(color));
+        assert!(line.spans[2].style.fg.is_none());
+    }
+    assert!(lines[3].spans[0].style.fg.is_none());
+}
+
+#[test]
+fn backup_and_alert_choices_are_hidden_until_enabled_and_submit_exact_values() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Controller;
+    app.controller.backups =
+        Some(serde_json::json!({"enabled":false,"interval_hours":12,"keep_count":10}));
+    assert!(!app.controller_controls().iter().any(|c| matches!(
+        c,
+        Control::ControllerBackupInterval(_) | Control::ControllerBackupKeep(_)
+    )));
+    app.activate(Control::ControllerBackupInterval(24));
+    assert!(app.nodes_requested.is_none());
+    app.controller.backups.as_mut().unwrap()["enabled"] = true.into();
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    for choices in [
+        vec![
+            Control::ControllerBackupInterval(6),
+            Control::ControllerBackupInterval(12),
+            Control::ControllerBackupInterval(24),
+        ],
+        vec![
+            Control::ControllerBackupKeep(5),
+            Control::ControllerBackupKeep(10),
+            Control::ControllerBackupKeep(20),
+        ],
+    ] {
+        let areas: Vec<_> = choices
+            .iter()
+            .map(|c| app.hits.iter().find(|h| h.control == *c).unwrap().area)
+            .collect();
+        assert!(areas.iter().all(|r| r.y == areas[0].y));
+        let label_area = Rect::new(27, areas[0].y, areas[0].x - 27, 3);
+        assert!(
+            !app.hits
+                .iter()
+                .any(|h| h.area.intersects(label_area) && h.area.x >= 27)
+        );
+    }
+    app.activate(Control::ControllerBackupKeep(20));
+    assert!(
+        matches!(&app.nodes_requested,Some(crate::nodes::Command::Controller(_,crate::controller::Command::BackupPreferences(v))) if v["keep_count"]==20)
+    );
+    app.nodes_requested = None;
+    app.controller.backups = None;
+    app.controller.alerts = Some(serde_json::json!({"enabled":false,"active":[]}));
+    assert!(!app.controller_controls().iter().any(|c| matches!(
+        c,
+        Control::ControllerAlertInterval(_) | Control::ControllerAlertToggle("notify_resolved")
+    )));
+    app.controller.alerts.as_mut().unwrap()["enabled"] = true.into();
+    app.activate(Control::ControllerAlertInterval(15));
+    assert!(
+        matches!(&app.nodes_requested,Some(crate::nodes::Command::Controller(_,crate::controller::Command::AlertPreferences(v))) if v["interval_minutes"]==15)
+    );
+    assert_eq!(format_backup_size(2486), "2.4 KiB");
+}
+
+#[test]
+fn defaults_dialog_has_cancel_and_apply_only_after_a_change() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Controller;
+    app.controller.defaults = Some(serde_json::json!({"settings":{"xray_sni":"example.com"}}));
+    app.controller.defaults_baseline = app.controller.defaults.clone();
+    app.activate(Control::ControllerDefaultsField("xray_sni"));
+    assert!(
+        !app.controller_controls()
+            .contains(&Control::ControllerDefaultsInputApply)
+    );
+    app.controller.defaults_input.as_mut().unwrap().1 = "other.example".into();
+    assert!(
+        app.controller_controls()
+            .contains(&Control::ControllerDefaultsInputApply)
+    );
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    let apply = app
+        .hits
+        .iter()
+        .find(|h| h.control == Control::ControllerDefaultsInputApply)
+        .unwrap()
+        .area;
+    let cancel = app
+        .hits
+        .iter()
+        .find(|h| h.control == Control::ControllerBack)
+        .unwrap()
+        .area;
+    assert_eq!(apply.y, cancel.y);
+    assert_eq!(cancel.height, 3);
+    app.activate(Control::ControllerBack);
+    assert_eq!(app.controller.defaults, app.controller.defaults_baseline);
+}
+
+#[test]
+fn defaults_save_reset_have_their_own_row_and_reset_preserves_scroll() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Controller;
+    app.controller.defaults = Some(
+        serde_json::json!({"protocols":["awg","xray"],"xray_transports":["tcp","xhttp"],"settings":{"awg_port_mode":"auto","xray_sni":"old"}}),
+    );
+    app.controller.defaults_baseline = app.controller.defaults.clone();
+    app.controller.defaults.as_mut().unwrap()["settings"]["xray_sni"] = "new".into();
+    app.controller.defaults_advanced = true;
+    let controls = defaults_controls(&app.controller);
+    let rows = defaults_rows(&controls, 100);
+    let row = rows
+        .iter()
+        .find(|row| {
+            row.iter()
+                .any(|&i| controls[i] == Control::ControllerDefaultsSave)
+        })
+        .unwrap();
+    assert_eq!(row.len(), 2);
+    assert!(
+        row.iter()
+            .any(|&i| controls[i] == Control::ControllerDefaultsReset)
+    );
+    app.manual_viewport.set(Some(3));
+    app.controller.selected = controls.len() - 2;
+    app.activate(Control::ControllerDefaultsReset);
+    assert_eq!(app.manual_viewport.get(), Some(3));
+    assert!(app.controller.selected > 0);
+}
+
+#[test]
+fn list_actions_use_the_bottom_row_when_no_pagination_is_needed() {
+    let mut app = test_profile_app();
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+    for (screen, control) in [
+        (Screen::Temporary, Control::TemporaryNew),
+        (Screen::Access, Control::AccessRefresh),
+        (Screen::Nodes, Control::NodesNew),
+    ] {
+        app.screen = screen;
+        terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+        let area = app.hits.iter().find(|h| h.control == control).unwrap().area;
+        // The main panel ends above the hint: only its border remains below the action.
+        assert_eq!(area.bottom(), 36);
+    }
+}

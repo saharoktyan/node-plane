@@ -36,13 +36,19 @@ impl App {
     }
 
     fn activate_inner(&mut self, control: Control) -> Option<KeyEvent> {
+        if self.restart_required {
+            self.restart_requested |= control == Control::Restart;
+            return None;
+        }
         if control == Control::WindowClose {
             self.exit = true;
             self.exit_confirm = false;
             self.hovered = None;
             return None;
         }
-        self.manual_viewport.set(None);
+        if control != Control::ControllerDefaultsReset {
+            self.manual_viewport.set(None);
+        }
         if matches!(self.screen, Screen::Access)
             && !matches!(
                 control,
@@ -73,9 +79,10 @@ impl App {
                 | Control::ControllerUpdateCheck
                 | Control::ControllerUpdateLatest
                 | Control::ControllerBackupAuto
-                | Control::ControllerBackupInterval
-                | Control::ControllerBackupKeep
+                | Control::ControllerBackupInterval(_)
+                | Control::ControllerBackupKeep(_)
                 | Control::ControllerAlertToggle(_)
+                | Control::ControllerAlertInterval(_)
                 | Control::ControllerComponentPage(_)
                 | Control::ControllerVersionsPage(_)
                 | Control::ControllerHistoryPage(_)
@@ -237,6 +244,7 @@ impl App {
             | Control::ControllerHistoryPage(..)
             | Control::ControllerAlerts
             | Control::ControllerAlertToggle(..)
+            | Control::ControllerAlertInterval(_)
             | Control::ControllerAlertDismiss(..)
             | Control::ControllerAlertPage(..)
             | Control::ControllerBotTitle
@@ -259,8 +267,8 @@ impl App {
             | Control::ControllerBackups
             | Control::ControllerBackupCreate
             | Control::ControllerBackupAuto
-            | Control::ControllerBackupInterval
-            | Control::ControllerBackupKeep
+            | Control::ControllerBackupInterval(_)
+            | Control::ControllerBackupKeep(_)
             | Control::ControllerBackupCatalog(..)
             | Control::ControllerBackupDetail(..)
             | Control::ControllerBackupRestore
@@ -418,7 +426,7 @@ impl App {
                 KeyCode::Enter
             }
 
-            Control::Close => KeyCode::Enter,
+            Control::Close | Control::Restart => KeyCode::Enter,
             Control::Page(next) => {
                 if next {
                     KeyCode::Right

@@ -100,6 +100,7 @@ impl Drop for TerminalGuard {
 }
 
 pub fn run(mut request: Request) -> Result<()> {
+    let executable = std::env::current_exe()?;
     let guard = TerminalGuard::enter()?;
     let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
     let mut app = App::new(&request);
@@ -130,6 +131,25 @@ pub fn run(mut request: Request) -> Result<()> {
     let mut pending_input = None;
     let mut input_timing = None;
     loop {
+        if app.restart_required {
+            terminal.draw(|frame| app.hits = draw(frame, &app))?;
+            match event::read()? {
+                TermEvent::Key(key)
+                    if key.kind != KeyEventKind::Release
+                        && matches!(key.code, KeyCode::Enter | KeyCode::Char('r')) =>
+                {
+                    app.activate(Control::Restart);
+                }
+                TermEvent::Mouse(mouse) => {
+                    app.mouse(mouse);
+                }
+                _ => {}
+            }
+            if app.restart_requested {
+                break;
+            }
+            continue;
+        }
         let selected = app.form.saved.as_ref().map(|p| {
             (
                 p.id,
@@ -343,6 +363,13 @@ pub fn run(mut request: Request) -> Result<()> {
                         if self_updating && let Event::Finished(result) = &value {
                             self_updating = false;
                             if result.is_ok() {
+                                app.restart_required = true;
+                                app.scrollbar.set(None);
+                                app.scroll_drag = None;
+                                app.prompt = None;
+                                app.exit = false;
+                                app.discard = None;
+                                app.qr_visible = false;
                                 app.self_release = None;
                                 app.self_status =
                                     "Updated; restart TUI to use the new version.".into();
@@ -367,6 +394,9 @@ pub fn run(mut request: Request) -> Result<()> {
         }
         if finished {
             receiver = None;
+        }
+        if app.restart_required {
+            continue;
         }
         if qr_was_visible != app.qr_visible || previous_accent != app.connections.accent {
             terminal.clear()?;
@@ -1055,6 +1085,9 @@ pub fn run(mut request: Request) -> Result<()> {
         worker.join().map_err(|_| {
             anyhow::anyhow!("Operation worker failed; diagnose the server before retrying.")
         })?;
+    }
+    if app.restart_requested {
+        return crate::self_manage::restart_workstation(&executable, &app.state_dir);
     }
     if let Some(result) = app.outcome {
         match result {

@@ -69,7 +69,7 @@ pub(super) enum ControllerSection {
 impl ControllerSection {
     pub(super) fn label(self) -> &'static str {
         match self {
-            Self::Installation => "Installation",
+            Self::Installation => "Basic",
             Self::Policies => "Policies",
             Self::Monitoring => "Monitoring",
             Self::Removal => "Reset & removal",
@@ -79,6 +79,7 @@ impl ControllerSection {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Control {
     WindowClose,
+    Restart,
     ControllerSection(ControllerSection),
     Controller,
     ControllerScope,
@@ -107,6 +108,7 @@ pub(super) enum Control {
     ControllerAnnouncementRefresh,
     ControllerHistoryItem(usize),
     ControllerHistoryPage(bool),
+    ControllerAlertInterval(u32),
     ControllerAlertToggle(&'static str),
     ControllerAlertDismiss(usize),
     ControllerAlertPage(bool),
@@ -128,8 +130,8 @@ pub(super) enum Control {
     ControllerBackups,
     ControllerBackupCreate,
     ControllerBackupAuto,
-    ControllerBackupInterval,
-    ControllerBackupKeep,
+    ControllerBackupInterval(u32),
+    ControllerBackupKeep(u32),
     ControllerBackupCatalog(usize),
     ControllerBackupDetail(usize),
     ControllerBackupRestore,
@@ -531,6 +533,8 @@ pub(super) struct App {
     pub(super) nodes_capacity: std::cell::Cell<usize>,
     pub(super) self_release: Option<crate::self_manage::Release>,
     pub(super) self_status: String,
+    pub(super) restart_required: bool,
+    pub(super) restart_requested: bool,
     pub(super) self_requested: bool,
     pub(super) self_check_requested: bool,
     pub(super) form: Form,
