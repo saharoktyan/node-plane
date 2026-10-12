@@ -50,6 +50,7 @@ impl App {
         self.action_focus = None;
         match bar.target {
             ScrollTarget::Result => self.result_scroll = next,
+            ScrollTarget::NodeDiagnostics => self.nodes.diagnostic_scroll.set(next),
             ScrollTarget::NodeCard => self.nodes.card_scroll = next,
             ScrollTarget::Maintenance => {
                 if let Some(view) = &mut self.nodes.maintenance {

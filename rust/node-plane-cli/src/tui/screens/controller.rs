@@ -249,7 +249,7 @@ pub(in crate::tui) fn draw_controller(
     let mut parts = dialog(
         frame,
         right,
-        if app.controller_ready() {
+        if app.controller_ready() || app.controller.verifying {
             if app.form.action == Action::Update {
                 " Node Plane Updates "
             } else {
@@ -264,7 +264,13 @@ pub(in crate::tui) fn draw_controller(
     let state = &app.controller;
     let mut text = String::new();
     let mut controls: Vec<(String, Control)> = Vec::new();
-    if state.plan_pending {
+    if state.removed {
+        text = "Bye-bye! Node Plane has been removed.".into();
+        controls.extend([
+            ("New installation".into(), Control::ControllerNew),
+            ("Check installation".into(), Control::ControllerCheck),
+        ]);
+    } else if state.plan_pending {
         text = "Preparing confirmation…".into();
     } else if state.removal_active() {
         let empty = serde_json::json!({});

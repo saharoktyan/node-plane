@@ -94,6 +94,7 @@ class InstallationMaintenanceTests(unittest.TestCase):
         subprocess.run(["bash", "-n", str(script)], check=True)
         text = script.read_text()
         self.assertIn("node-plane-backend-worker.timer", text)
+        self.assertIn("systemctl reset-failed node-plane-lease-expiry.service node-plane-lease-expiry.timer", text)
         self.assertNotIn("prune", text)
         self.assertNotIn("SOURCE_ROOT", text)
         self.assertEqual(script.stat().st_mode & 0o777, 0o700)

@@ -294,18 +294,20 @@ pub struct Browser {
 }
 impl Browser {
     pub fn removal_active(&self) -> bool {
-        self.verifying
-            || self.job.as_ref().is_some_and(|job| {
-                job["action"] == "remove"
-                    && matches!(
-                        job["status"].as_str(),
-                        Some("queued" | "running" | "blocked" | "awaiting_shutdown")
-                    )
-            })
+        !self.removed
+            && (self.verifying
+                || self.job.as_ref().is_some_and(|job| {
+                    job["action"] == "remove"
+                        && matches!(
+                            job["status"].as_str(),
+                            Some("queued" | "running" | "blocked" | "awaiting_shutdown")
+                        )
+                }))
     }
 
     pub fn removal_ready(&self) -> bool {
-        !self.verifying
+        !self.removed
+            && !self.verifying
             && self.job.as_ref().is_some_and(|job| {
                 job["status"] == "awaiting_shutdown"
                     && job["cancel_requested"] != true
@@ -538,6 +540,9 @@ impl Browser {
         }
     }
     pub fn poll(&self) -> Option<Command> {
+        if self.removed {
+            return None;
+        }
         // Cleanup must keep progressing even if an older subsection is still loaded.
         if self.verifying && !self.removed {
             if self.verification_timed_out() {

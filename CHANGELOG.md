@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.3-alpha.91 - 2026-10-12
+
+- Fence controller removal verification before shutdown and stop polling the deleted backend after removal.
+- Clear removed installation state and stale failed systemd unit state.
+- Recognize managed VLESS listeners during diagnostics, scroll all server checks, and preserve Appearance scroll during theme changes and Settings hover.
+
 ## 0.4.3-alpha.90 - 2026-10-12
 
 - Replace server-settings pagination with scrolling and an adaptive two-column parameter grid.

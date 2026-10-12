@@ -233,6 +233,8 @@ class InstallationMaintenance:
         lines += [
             "rm -f -- /usr/local/bin/node-plane-driver",
             "systemctl daemon-reload",
+            "systemctl reset-failed " + " ".join(shlex.quote(unit) for unit in UNITS) + " >/dev/null 2>&1 || true",
+            "systemctl reset-failed node-plane-lease-expiry.service node-plane-lease-expiry.timer >/dev/null 2>&1 || true",
         ]
         targets = [shared] if not shared.is_relative_to(base) else []
         targets.append(base)

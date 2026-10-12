@@ -276,6 +276,7 @@ pub(super) enum ScrollTarget {
     List,
     Result,
     NodeCard,
+    NodeDiagnostics,
     Maintenance,
     Temporary,
 }
@@ -585,6 +586,7 @@ pub(super) struct App {
     pub(super) session_id: uuid::Uuid,
     pub(super) settings_selected: usize,
     pub(super) settings_profile: usize,
+    pub(super) appearance_viewport: std::cell::Cell<usize>,
     pub(super) accent_input: String,
     pub(super) themes: Vec<theme::Theme>,
     pub(super) editor: Option<(Option<uuid::Uuid>, Vec<String>, usize)>,

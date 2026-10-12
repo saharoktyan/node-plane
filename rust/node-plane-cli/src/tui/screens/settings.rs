@@ -58,11 +58,14 @@ pub(in crate::tui) fn draw_appearance(
     frame.render_widget(Block::bordered().title(" Appearance · Themes "), right);
     let content = Block::bordered().inner(right);
     let capacity = usize::from(content.height / 3).max(1);
-    let offset = app
-        .settings_selected
-        .saturating_sub(capacity)
-        .min((app.themes.len() + 2).saturating_sub(capacity));
+    let selected = app.settings_selected.saturating_sub(1);
+    let offset = if selected < app.themes.len() + 2 {
+        viewport_start(app.appearance_viewport.get(), selected, capacity)
+    } else {
+        app.appearance_viewport.get()
+    };
     let offset = app.viewport(offset, app.themes.len() + 2, capacity);
+    app.appearance_viewport.set(offset);
     let mut entries: Vec<(String, String, Control)> = app
         .themes
         .iter()

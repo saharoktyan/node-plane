@@ -55,7 +55,9 @@ impl App {
                         {
                             return;
                         }
-                        self.remember_installed();
+                        if !matches!(&command, crate::controller::Command::Verify(_)) {
+                            self.remember_installed();
+                        }
                         let shutdown = matches!(&command, crate::controller::Command::Shutdown(..));
                         self.controller.apply(command, value);
                         if shutdown
@@ -68,6 +70,21 @@ impl App {
                         if self.controller.removed {
                             self.installed_profile = None;
                             self.confirmed_installation = None;
+                            self.probe_requested = false;
+                            if let Some(saved) = &mut self.form.saved {
+                                saved.installed = false;
+                            }
+                            if let Some(saved) = self
+                                .connections
+                                .installations
+                                .iter_mut()
+                                .find(|saved| Some(saved.id) == profile)
+                            {
+                                saved.installed = false;
+                            }
+                            if let Err(error) = self.connections.save(&self.state_dir) {
+                                self.error = error.to_string();
+                            }
                             if let Some(id) = profile
                                 && let Err(error) = crate::controller::Browser::forget_verification(
                                     &self.state_dir,
@@ -214,6 +231,7 @@ impl App {
                             .is_none_or(|old| old.key != item.key)
                         {
                             self.nodes.card_scroll = 0;
+                            self.nodes.diagnostic_scroll.set(0);
                         }
                         if let Some(existing) =
                             self.nodes.items.iter_mut().find(|n| n.key == item.key)

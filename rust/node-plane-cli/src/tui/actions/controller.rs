@@ -764,6 +764,21 @@ impl App {
                     .and_then(|j| j["id"].as_str())
                     .and_then(|s| uuid::Uuid::parse_str(s).ok())
                 {
+                    if control == Control::ControllerShutdown {
+                        if self.nodes_busy {
+                            return None;
+                        }
+                        let saved = self.form.saved.clone()?;
+                        if let Err(error) =
+                            self.controller.save_verification(&self.state_dir, &saved)
+                        {
+                            self.error = format!("Could not save removal verification: {error}");
+                            return None;
+                        }
+                        self.controller.verifying = true;
+                        self.controller.verification_started = Some(std::time::Instant::now());
+                        self.probe_requested = false;
+                    }
                     let key = uuid::Uuid::new_v4();
                     self.controller_command(if control == Control::ControllerShutdown {
                         crate::controller::Command::Shutdown(id, key)
@@ -863,7 +878,15 @@ impl App {
         }
     }
     pub(in crate::tui) fn controller_command(&mut self, command: crate::controller::Command) {
-        if self.nodes_busy {
+        if self.nodes_busy
+            || self.controller.removed && !matches!(command, crate::controller::Command::Probe)
+            || self.controller.verifying
+                && !matches!(
+                    command,
+                    crate::controller::Command::Verify(_)
+                        | crate::controller::Command::Shutdown(..)
+                )
+        {
             return;
         }
         self.nodes_requested = Some(crate::nodes::Command::Controller(
@@ -877,6 +900,8 @@ impl App {
             .saved
             .as_ref()
             .is_some_and(|p| self.confirmed_installation == Some(p.id))
+            && !self.controller.verifying
+            && !self.controller.removed
     }
     pub(in crate::tui) fn has_installation(&self) -> bool {
         self.form
@@ -965,6 +990,13 @@ impl App {
     }
     pub(in crate::tui) fn controller_controls(&self) -> Vec<Control> {
         let state = &self.controller;
+        if state.removed {
+            return vec![
+                Control::ControllerNew,
+                Control::ControllerCheck,
+                Control::ControllerBack,
+            ];
+        }
         if state.plan_pending {
             return Vec::new();
         }

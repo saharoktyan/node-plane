@@ -80,6 +80,7 @@ impl App {
             session_id: uuid::Uuid::new_v4(),
             settings_selected: 0,
             settings_profile: 0,
+            appearance_viewport: std::cell::Cell::new(0),
             accent_input: String::new(),
             themes: theme::defaults(),
             editor: None,

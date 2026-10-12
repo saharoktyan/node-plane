@@ -175,7 +175,11 @@ pub fn run(mut request: Request) -> Result<()> {
             app.access = crate::access::Browser::default();
             app.temporary = crate::temporary::Browser::default();
         }
-        if app.probe_requested && !app.nodes_busy && app.nodes_requested.is_none() {
+        if app.probe_requested
+            && !app.controller.verifying
+            && !app.nodes_busy
+            && app.nodes_requested.is_none()
+        {
             app.probe_requested = false;
             app.controller_command(crate::controller::Command::Probe);
         }

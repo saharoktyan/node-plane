@@ -5122,3 +5122,136 @@ fn node_settings_save_reset_share_a_single_footer_row() {
     assert_eq!(save.height, 3);
     assert_eq!(save.bottom(), 36);
 }
+
+#[test]
+fn removal_survives_lost_shutdown_response_and_stops_backend_polling_after_verification() {
+    let mut app = test_profile_app();
+    let state = tempfile::tempdir().unwrap();
+    app.state_dir = state.path().into();
+    app.remember_installed();
+    app.open_controller();
+    app.nodes_requested = None;
+    app.controller.overview = Some(
+        serde_json::json!({"deployment":{"base_dir":"/opt/node-plane","shared_dir":"/opt/node-plane/shared","units":["node-plane-backend.service"]}}),
+    );
+    app.controller.job = Some(
+        serde_json::json!({"id":uuid::Uuid::new_v4(),"action":"remove","status":"awaiting_shutdown","phase":"shutdown"}),
+    );
+    app.activate(Control::ControllerShutdown);
+    assert!(app.controller.verifying);
+    assert!(matches!(
+        app.nodes_requested.take(),
+        Some(crate::nodes::Command::Controller(
+            _,
+            crate::controller::Command::Shutdown(..)
+        ))
+    ));
+    let profile = app.controller.profile;
+    assert!(
+        state
+            .path()
+            .join(format!("controller-removal-{}.json", profile.unwrap()))
+            .exists()
+    );
+    app.nodes_busy = true;
+    app.nodes_background = true;
+    app.event(Event::Finished(Err("Shutdown response lost".into())));
+    assert!(matches!(
+        app.controller.poll(),
+        Some(crate::controller::Command::Verify(_))
+    ));
+    let command = app.controller.poll().unwrap();
+    app.event(Event::Nodes(crate::nodes::Update::Controller(
+        profile,
+        command,
+        serde_json::json!({"removed":true}),
+    )));
+    assert!(app.controller.removed);
+    assert!(!app.controller.removal_active());
+    assert!(app.controller.poll().is_none());
+    assert!(!app.form.saved.as_ref().unwrap().installed);
+    assert!(
+        !app.connections
+            .installations
+            .iter()
+            .find(|p| Some(p.id) == profile)
+            .unwrap()
+            .installed
+    );
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    let text = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(|c| c.symbol())
+        .collect::<String>();
+    assert!(text.contains("Bye-bye!"));
+    assert!(
+        !app.hits
+            .iter()
+            .any(|h| h.control == Control::ControllerShutdown)
+    );
+    app.controller_command(crate::controller::Command::Overview);
+    assert!(app.nodes_requested.is_none());
+}
+
+#[test]
+fn appearance_keeps_scroll_after_theme_click_and_hovering_settings() {
+    let mut app = test_profile_app();
+    let state = tempfile::tempdir().unwrap();
+    app.state_dir = state.path().into();
+    app.themes = (0..15)
+        .map(|i| {
+            let mut t = theme::defaults()[0].clone();
+            t.id = format!("theme{i}");
+            t.name = format!("Theme {i}");
+            t.accent = "#123456".into();
+            t
+        })
+        .collect();
+    app.screen = Screen::SettingsPage(SettingsPage::Appearance);
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(80, 30)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    app.manual_viewport.set(Some(2));
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    app.activate(Control::Accent(5));
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    assert_eq!(app.list_viewport.get(), 2);
+    app.manual_viewport.set(None);
+    app.focus(Control::Settings);
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    assert_eq!(app.list_viewport.get(), 2);
+}
+
+#[test]
+fn node_diagnostics_scrolls_all_checks_without_truncation() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Nodes;
+    app.nodes_sidebar = false;
+    app.nodes.card = Some(browser_node("lv1", "Europe"));
+    app.nodes.diagnostics = Some((
+        serde_json::json!({"checks":(0..50).map(|i|serde_json::json!({"id":format!("check_{i}"),"status":"ok"})).collect::<Vec<_>>()}),
+        serde_json::json!({"items":[],"total":0}),
+    ));
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(80, 30)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    assert!(
+        matches!(app.scrollbar.get(),Some(bar) if matches!(bar.target,ScrollTarget::NodeDiagnostics))
+    );
+    app.nodes_key(KeyCode::End.into());
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    let text = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(|c| c.symbol())
+        .collect::<String>();
+    assert!(text.contains("check 49"));
+    assert!(!text.contains("more checks"));
+    assert!(app.nodes.diagnostic_scroll.get() > 0);
+    app.nodes_key(KeyCode::Home.into());
+    assert_eq!(app.nodes.diagnostic_scroll.get(), 0);
+}

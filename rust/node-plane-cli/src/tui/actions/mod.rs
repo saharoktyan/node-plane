@@ -48,7 +48,11 @@ impl App {
         }
         if !matches!(
             control,
-            Control::ControllerDefaultsReset | Control::NodesEditReset
+            Control::ControllerDefaultsReset
+                | Control::NodesEditReset
+                | Control::Accent(_)
+                | Control::AccentInput
+                | Control::SaveAccent
         ) {
             self.manual_viewport.set(None);
         }

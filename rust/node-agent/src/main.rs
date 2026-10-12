@@ -193,6 +193,7 @@ struct AgentState {
 
 fn xray_config_uses_port(raw: &str, kind: &str, port: u32) -> bool {
     let tag = match kind {
+        "xray" => "",
         "xray_tcp" => "reality-tcp",
         "xray_xhttp" => "reality-xhttp",
         _ => return false,
@@ -202,8 +203,11 @@ fn xray_config_uses_port(raw: &str, kind: &str, port: u32) -> bool {
     };
     config["inbounds"].as_array().is_some_and(|inbounds| {
         inbounds.iter().any(|inbound| {
-            inbound["tag"].as_str() == Some(tag)
-                && inbound["port"].as_u64() == Some(u64::from(port))
+            (if kind == "xray" {
+                inbound["protocol"] == "vless"
+            } else {
+                inbound["tag"].as_str() == Some(tag)
+            }) && inbound["port"].as_u64() == Some(u64::from(port))
         })
     })
 }
@@ -230,7 +234,7 @@ impl AgentState {
 
     fn port_is_managed(&self, kind: &str, port: u32) -> bool {
         match kind {
-            "xray_tcp" | "xray_xhttp" => {
+            "xray" | "xray_tcp" | "xray_xhttp" => {
                 let container = self.node_env_value("XRAY_CONTAINER_NAME", "xray");
                 let config_path = self.node_env_value("XRAY_CONFIG", &self.config.xray_config_path);
                 Self::container_running(&container)
@@ -1686,6 +1690,7 @@ rm -f /etc/systemd/system/node-plane-agent.service "$1" "$2" "$3" "$4" "$5"
 rm -rf "$6" "$7" /etc/node-plane/operation-progress
 rmdir /etc/node-plane/tls /etc/node-plane 2>/dev/null || true
 systemctl daemon-reload
+systemctl reset-failed node-plane-lease-expiry.service node-plane-lease-expiry.timer node-plane-leased-awg.service node-plane-leased-xray.service node-plane-agent.service 2>/dev/null || true
 if [ -n "$9" ]; then
     for file in "$8" /root/.ssh/authorized_keys /home/*/.ssh/authorized_keys; do
         [ -f "$file" ] || continue
@@ -2494,6 +2499,15 @@ fn diagnostic_ports(xray: &str, awg: &str) -> Vec<PortCheckSpec> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn generic_xray_diagnostic_ports_recognize_vless_but_not_other_listeners() {
+        let raw = r#"{"inbounds":[{"protocol":"vless","tag":"reality-tcp","port":443},{"protocol":"vless","tag":"reality-xhttp","port":8443},{"protocol":"socks","tag":"","port":1080}]}"#;
+        assert!(super::xray_config_uses_port(raw, "xray", 443));
+        assert!(super::xray_config_uses_port(raw, "xray", 8443));
+        assert!(!super::xray_config_uses_port(raw, "xray", 1080));
+        assert!(!super::xray_config_uses_port(raw, "xray", 9443));
+    }
+
     #[test]
     fn diagnostic_ports_use_configured_protocol_ports_and_ignore_peers() {
         let ports = super::diagnostic_ports(

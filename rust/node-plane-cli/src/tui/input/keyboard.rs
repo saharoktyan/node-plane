@@ -495,6 +495,25 @@ impl App {
             self.activate(Control::NodesBack);
             return;
         }
+        if self.nodes.diagnostics.is_some()
+            && self.nodes.diagnostic_item.is_none()
+            && self.nodes.recovery_confirm.is_none()
+        {
+            let current = self.nodes.diagnostic_scroll.get();
+            let step = self.nodes.diagnostic_visible.get().max(1);
+            let maximum = self.nodes.diagnostic_max_scroll.get();
+            let next = match key.code {
+                KeyCode::PageUp => Some(current.saturating_sub(step)),
+                KeyCode::PageDown => Some(current.saturating_add(step).min(maximum)),
+                KeyCode::Home => Some(0),
+                KeyCode::End => Some(maximum),
+                _ => None,
+            };
+            if let Some(next) = next {
+                self.nodes.diagnostic_scroll.set(next);
+                return;
+            }
+        }
         if self.nodes.diagnostics.is_none()
             && let Some(view) = &mut self.nodes.maintenance
         {

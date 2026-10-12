@@ -372,6 +372,9 @@ pub struct Browser {
     pub recovery_confirm: Option<(Value, String)>,
     pub diagnostic_item: Option<Value>,
     pub diagnostic_page: usize,
+    pub diagnostic_scroll: std::cell::Cell<usize>,
+    pub diagnostic_max_scroll: std::cell::Cell<usize>,
+    pub diagnostic_visible: std::cell::Cell<usize>,
     pub maintenance: Option<crate::node_maintenance::Browser>,
     pub card_scroll: usize,
 }

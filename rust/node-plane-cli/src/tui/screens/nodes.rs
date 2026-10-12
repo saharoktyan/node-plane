@@ -290,12 +290,14 @@ pub(in crate::tui) fn draw_node_diagnostics(
         }
         actions.push(("Refresh", Control::NodesDiagnostics));
     } else {
-        let diagnostic_height = facts["checks"]
+        let diagnostic_height = if inventory["items"]
             .as_array()
-            .filter(|items| !items.is_empty())
-            .map_or(6, |items| {
-                (items.len() + 2).min(usize::from(rows[0].height.saturating_sub(5)))
-            }) as u16;
+            .is_none_or(|items| items.is_empty())
+        {
+            rows[0].height
+        } else {
+            rows[0].height.saturating_sub(5).max(1)
+        };
         let content = Layout::vertical([Constraint::Length(diagnostic_height), Constraint::Min(1)])
             .split(rows[0]);
         let lines = if let Some(error) = facts["error_code"].as_str() {
@@ -317,12 +319,6 @@ pub(in crate::tui) fn draw_node_diagnostics(
                 Some("warning") => 1,
                 _ => 2,
             });
-            let capacity = usize::from(content[0].height).saturating_sub(1);
-            let visible = if checks.len() > capacity {
-                capacity.saturating_sub(1)
-            } else {
-                capacity
-            };
             let mut lines = vec![Line::from(format!(
                 "Errors: {} · Warnings: {}",
                 checks
@@ -334,7 +330,7 @@ pub(in crate::tui) fn draw_node_diagnostics(
                     .filter(|check| check["status"] == "warning")
                     .count()
             ))];
-            lines.extend(checks.iter().take(visible).map(|check| {
+            lines.extend(checks.iter().map(|check| {
                 status_line(
                     check["status"].as_str().unwrap_or("unknown"),
                     check["id"]
@@ -344,12 +340,6 @@ pub(in crate::tui) fn draw_node_diagnostics(
                         .replace('_', " "),
                 )
             }));
-            if checks.len() > visible {
-                lines.push(Line::from(format!(
-                    "{} more checks · enlarge the terminal or run installation Diagnostics",
-                    checks.len() - visible
-                )));
-            }
             lines
         } else {
             [
@@ -371,7 +361,20 @@ pub(in crate::tui) fn draw_node_diagnostics(
             ))))
             .collect()
         };
-        frame.render_widget(Paragraph::new(lines), content[0]);
+        let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
+        let maximum = paragraph
+            .line_count(content[0].width)
+            .saturating_sub(usize::from(content[0].height));
+        let scroll = app.nodes.diagnostic_scroll.get().min(maximum);
+        app.nodes.diagnostic_scroll.set(scroll);
+        app.nodes.diagnostic_max_scroll.set(maximum);
+        app.nodes
+            .diagnostic_visible
+            .set(usize::from(content[0].height));
+        frame.render_widget(
+            paragraph.scroll((scroll.min(u16::MAX as usize) as u16, 0)),
+            content[0],
+        );
         let capacity = usize::from(content[1].height).max(1);
         app.nodes_capacity.set(capacity);
         let items = inventory["items"]
@@ -416,6 +419,14 @@ pub(in crate::tui) fn draw_node_diagnostics(
                 control: Control::NodesDiagnosticItem(position),
             });
             index += 1;
+        }
+        if maximum > 0 {
+            app.register_scroll(
+                scroll,
+                maximum,
+                usize::from(content[0].height),
+                ScrollTarget::NodeDiagnostics,
+            );
         }
         let offset = inventory["offset"].as_u64().unwrap_or(0);
         if page > 0 || offset > 0 {
