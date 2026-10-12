@@ -93,7 +93,6 @@ impl App {
             self.hovered = control;
             return None;
         }
-        self.hovered = None;
         if event.kind != MouseEventKind::Down(MouseButton::Left) {
             return None;
         }
@@ -103,10 +102,11 @@ impl App {
             .rev()
             .find(|hit| hit.area.contains((event.column, event.row).into()))?
             .control;
+        self.hovered = Some(control);
         self.activate(control)
     }
     pub(in crate::tui) fn refresh_scroll_hover(&mut self) -> bool {
-        if self.manual_viewport.get().is_none() || !self.pointer_active {
+        if !self.pointer_active {
             return false;
         }
         let control = self.pointer_position.and_then(|position| {

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.3-alpha.87 - 2026-10-12
+
+- Preserve mouse hover after clicks and repaint it after control geometry changes.
+- Reserve a disabled Traffic collection button while policy settings are loading.
+
 ## 0.4.3-alpha.86 - 2026-10-12
 
 - Include the member username in profile navigation and simplify Workstation node-creation guidance and inline navigation.

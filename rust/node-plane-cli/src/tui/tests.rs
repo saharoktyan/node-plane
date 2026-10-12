@@ -4839,3 +4839,72 @@ fn completed_setup_refreshes_card_and_queued_setup_hides_start_button() {
     app.event(Event::Nodes(crate::nodes::Update::Operation(operation)));
     assert!(matches!(&app.nodes_requested,Some(crate::nodes::Command::Card(key)) if key=="lv1"));
 }
+
+#[test]
+fn mouse_click_release_keeps_hover_with_a_stationary_pointer() {
+    let mut app = test_profile_app();
+    let state = tempfile::tempdir().unwrap();
+    app.state_dir = state.path().into();
+    app.themes = theme::defaults();
+    app.screen = Screen::SettingsPage(SettingsPage::Appearance);
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    let area = app
+        .hits
+        .iter()
+        .find(|h| h.control == Control::Accent(1))
+        .unwrap()
+        .area;
+    for kind in [
+        MouseEventKind::Moved,
+        MouseEventKind::Down(MouseButton::Left),
+        MouseEventKind::Up(MouseButton::Left),
+    ] {
+        app.mouse(MouseEvent {
+            kind,
+            column: area.x + 1,
+            row: area.y + 1,
+            modifiers: KeyModifiers::NONE,
+        });
+        terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+        app.refresh_scroll_hover();
+        terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+        assert!(app.hovered == Some(Control::Accent(1)));
+        assert_ne!(
+            terminal.backend().buffer()[(area.x, area.y)].fg,
+            Color::White
+        );
+    }
+    app.hovered = None;
+    assert!(app.refresh_scroll_hover());
+    assert!(app.hovered == Some(Control::Accent(1)));
+}
+
+#[test]
+fn traffic_collection_reserves_a_disabled_slot_while_loading() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Controller;
+    app.controller_section = Some(ControllerSection::Policies);
+    let controls = app.controller_root_controls(false);
+    assert_eq!(controls[0].0, "Please wait");
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    assert!(
+        !app.hits
+            .iter()
+            .any(|h| h.control == Control::ControllerPolicyToggle("traffic"))
+    );
+    app.activate(Control::ControllerPolicyToggle("traffic"));
+    assert!(app.nodes_requested.is_none());
+    app.controller.policies = Some(serde_json::json!({"traffic":{"enabled":false}}));
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    assert!(
+        app.hits
+            .iter()
+            .any(|h| h.control == Control::ControllerPolicyToggle("traffic"))
+    );
+    assert_eq!(
+        app.controller_root_controls(false)[0].0,
+        "Traffic collection: Off"
+    );
+}

@@ -1243,6 +1243,11 @@ impl App {
                         ),
                         Control::ControllerPolicyToggle("traffic"),
                     ));
+                } else {
+                    items.push((
+                        "Please wait".into(),
+                        Control::ControllerPolicyToggle("traffic"),
+                    ));
                 }
                 items.push(("Requests settings".into(), Control::ControllerPolicies));
                 items

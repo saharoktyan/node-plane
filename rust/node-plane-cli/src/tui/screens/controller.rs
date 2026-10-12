@@ -1082,6 +1082,16 @@ pub(in crate::tui) fn draw_controller(
             if rect.bottom() > parts[0].bottom() {
                 continue;
             }
+            if control == Control::ControllerPolicyToggle("traffic") && state.policies.is_none() {
+                draw_button_color(frame, rect, label, false, Color::DarkGray);
+                frame.render_widget(
+                    Paragraph::new(label.as_str())
+                        .alignment(ratatui::layout::Alignment::Center)
+                        .style(Style::default().fg(Color::DarkGray)),
+                    Block::bordered().inner(rect),
+                );
+                continue;
+            }
             if control == Control::ControllerDefaultsInput {
                 draw_field(
                     frame,
