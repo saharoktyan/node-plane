@@ -77,7 +77,6 @@ pub(super) fn is_back_control(control: Control) -> bool {
         Control::ControllerBack
             | Control::NodesBack
             | Control::NodesEditBack
-            | Control::WizardBack
             | Control::AccessBack
             | Control::AccessExpiryBack
             | Control::AccessGrantBack

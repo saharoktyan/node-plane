@@ -193,7 +193,7 @@ pub(in crate::tui) fn draw_temporary(
             }
         }
     }
-    if browser.view != View::List {
+    if browser.view != View::List || browser.filter.is_some() {
         actions.push(("Back", Control::TemporaryBack));
     }
     let action_rows = actions

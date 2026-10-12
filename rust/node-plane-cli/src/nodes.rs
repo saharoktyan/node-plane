@@ -90,7 +90,10 @@ impl Node {
         self.state() == "applying"
             || operation.is_some_and(|operation| {
                 operation.node_key == self.key
-                    && matches!(operation.status.as_str(), "awaiting_executor" | "running")
+                    && matches!(
+                        operation.status.as_str(),
+                        "awaiting_executor" | "queued" | "running"
+                    )
             })
     }
     pub fn can_bootstrap(&self) -> bool {

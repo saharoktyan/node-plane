@@ -128,20 +128,7 @@ impl App {
                 let Some(wizard) = &self.node_wizard else {
                     return false;
                 };
-                let mut controls: Vec<_> = (0..wizard.choices().len())
-                    .map(Control::WizardChoice)
-                    .collect();
-                if wizard.step == crate::node_wizard::Step::Created {
-                    controls = vec![Control::WizardOpen, Control::WizardCancel];
-                } else if wizard.selection_step() {
-                    controls.extend([Control::WizardBack, Control::WizardCancel]);
-                } else {
-                    controls.extend([
-                        Control::WizardNext,
-                        Control::WizardBack,
-                        Control::WizardCancel,
-                    ]);
-                }
+                let controls = wizard_controls(wizard);
                 (controls, wizard.selected, 0)
             }
             Screen::Settings if self.settings_selected > 0 => (
@@ -596,17 +583,7 @@ impl App {
                 } else if matches!(self.screen, Screen::NodeWizard)
                     && let Some(wizard) = &mut self.node_wizard
                 {
-                    let mut controls: Vec<_> = (0..wizard.choices().len())
-                        .map(Control::WizardChoice)
-                        .collect();
-                    if wizard.step == crate::node_wizard::Step::Created {
-                        controls = vec![Control::WizardOpen, Control::WizardCancel];
-                    } else {
-                        if !wizard.selection_step() {
-                            controls.push(Control::WizardNext);
-                        }
-                        controls.extend([Control::WizardBack, Control::WizardCancel]);
-                    }
+                    let controls = wizard_controls(wizard);
                     if let Some(index) = controls.iter().position(|c| *c == control) {
                         wizard.selected = index;
                     }

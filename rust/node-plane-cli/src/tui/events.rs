@@ -116,7 +116,10 @@ impl App {
                     }
                     crate::nodes::Update::Temporary(command, value) => {
                         use crate::temporary::{Command, View};
-                        self.temporary.selected = 0;
+                        if !matches!(&command, Command::Card(id) if self.temporary.card.as_ref().is_some_and(|v|v["id"] == id.as_str()))
+                        {
+                            self.temporary.selected = 0;
+                        }
                         match command {
                             Command::List { .. } => {
                                 self.temporary.items =
@@ -252,6 +255,28 @@ impl App {
                         }
                     }
                     crate::nodes::Update::Operation(operation) => {
+                        let finished_setup =
+                            matches!(
+                                operation.kind.as_str(),
+                                "agent-rollouts" | "node-bootstraps"
+                            ) && matches!(
+                                operation.status.as_str(),
+                                "succeeded" | "failed" | "blocked"
+                            ) && self.nodes.operation.as_ref().is_some_and(|old| {
+                                old.id == operation.id
+                                    && matches!(
+                                        old.status.as_str(),
+                                        "queued" | "awaiting_executor" | "running"
+                                    )
+                            }) && self
+                                .nodes
+                                .card
+                                .as_ref()
+                                .is_some_and(|n| n.key == operation.node_key);
+                        if finished_setup {
+                            self.nodes_requested =
+                                Some(crate::nodes::Command::Card(operation.node_key.clone()));
+                        }
                         if operation.kind == "agent-rollouts" && operation.status == "succeeded" {
                             if let Some(node) = self
                                 .nodes

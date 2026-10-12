@@ -399,6 +399,12 @@ async def show_account_profile(chat_id: int, user_id: int, message_id: int,
                                back_to: str = 'home', page_index: int = 0,
                                servers_open: bool = False, details: bool = False) -> None:
     locale = normalize_locale((await state.get_data()).get('locale'))
+    from ..screens import Breadcrumb
+    profile_label = tr(locale, 'home.account') + (' · ' + username.lstrip('@') if username else '')
+    profile_path = (
+        Breadcrumb(tr(locale, 'navigation.menu'), button(user_id, tr(locale, 'navigation.menu'), 'home').callback_data),
+        Breadcrumb(profile_label, button(user_id, profile_label, 'account_profile', profile_id, back_to).callback_data),
+    )
     summary = await backend.member_profile_summary(user_id, profile_id)
     nodes, page_index, pages = server_page(summary['nodes'], page_index)
     status_key = ('profile.frozen' if summary['frozen'] else
@@ -416,7 +422,7 @@ async def show_account_profile(chat_id: int, user_id: int, message_id: int,
         compact_traffic = Section(traffic.title, traffic.lines) if traffic else None
         await render(bot, chat_id, Screen(tr(locale, 'account.profile_title'),
             (summary['display_name'],), sections=(compact_access, *((compact_traffic,) if compact_traffic else ())),
-            embedded_buttons=True, navigation=True),
+            embedded_buttons=True, navigation=True, breadcrumbs=profile_path),
             [[button(user_id, tr(locale, 'account.details'), 'account_details', profile_id, back_to)],
              [button(user_id, tr(locale, 'back'), back_to)]], state, message_id)
         return
@@ -442,7 +448,8 @@ async def show_account_profile(chat_id: int, user_id: int, message_id: int,
             'account_nodes_page', profile_id, back_to))
     sections = (access, identity, statistics, *((traffic,) if traffic else ()), servers)
     await render(bot, chat_id, Screen(tr(locale, 'account.details'),
-        (summary['display_name'],), sections=sections, embedded_buttons=True, navigation=True),
+        (summary['display_name'],), sections=sections, embedded_buttons=True, navigation=True,
+        breadcrumbs=(*profile_path, Breadcrumb(tr(locale, "account.details"), None))),
         [[button(user_id, tr(locale, 'back'), 'account_profile', profile_id, back_to)]], state, message_id)
 
 

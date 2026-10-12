@@ -722,6 +722,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             await user.user_action_cb(self.query, self.bot, backend, self.state)
             profile_screen = render.call_args.args[2]
             self.assertIn(('Telegram username', '@alice'), profile_screen.sections[1].tables[0].rows)
+            self.assertEqual([crumb.label for crumb in profile_screen.breadcrumbs], ['Menu', 'Profile · alice', 'Details'])
             self.assertFalse(profile_screen.sections[0].collapsed)
             self.assertIn(('Configs issued', '3'), profile_screen.sections[2].tables[0].rows)
             self.assertEqual([section.title for section in profile_screen.sections[:3]], ['Access', 'Account', 'Statistics'])

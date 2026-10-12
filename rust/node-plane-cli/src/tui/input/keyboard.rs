@@ -378,14 +378,8 @@ impl App {
             self.screen = Screen::Nodes;
             return;
         };
-        let choices = wizard.choices().len();
-        let created = wizard.step == crate::node_wizard::Step::Created;
-        let selection = wizard.selection_step();
-        let count = if created {
-            2
-        } else {
-            choices + if selection { 2 } else { 3 }
-        };
+        let controls = wizard_controls(wizard);
+        let count = controls.len();
         match key.code {
             KeyCode::Esc => {
                 self.activate(Control::WizardBack);
@@ -407,24 +401,7 @@ impl App {
                 wizard.append(&c.to_string());
             }
             KeyCode::Enter | KeyCode::Char(' ') => {
-                let selected = wizard.selected;
-                let control = if created {
-                    if selected == 0 {
-                        Control::WizardOpen
-                    } else {
-                        Control::WizardCancel
-                    }
-                } else if selected < choices {
-                    Control::WizardChoice(selected)
-                } else if selection {
-                    [Control::WizardBack, Control::WizardCancel][selected - choices]
-                } else {
-                    [
-                        Control::WizardNext,
-                        Control::WizardBack,
-                        Control::WizardCancel,
-                    ][selected - choices]
-                };
+                let control = controls[wizard.selected.min(count - 1)];
                 self.activate(control);
             }
             _ => {}

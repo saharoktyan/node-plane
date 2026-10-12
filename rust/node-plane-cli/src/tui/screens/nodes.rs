@@ -20,7 +20,11 @@ pub(in crate::tui) fn draw_node_editor(
     let sections = Layout::vertical([
         Constraint::Length(3),
         Constraint::Min(0),
-        Constraint::Length(9),
+        Constraint::Length(if editor.review.is_none() && editor.dirty() {
+            6
+        } else {
+            3
+        }),
     ])
     .split(inner);
     let selected = |control| app.nodes_controls().get(app.nodes_selected) == Some(&control);
@@ -239,7 +243,7 @@ pub(in crate::tui) fn draw_node_diagnostics(
     let Some((facts, inventory)) = &app.nodes.diagnostics else {
         return;
     };
-    let rows = Layout::vertical([Constraint::Min(1), Constraint::Length(6)]).split(inner);
+    let rows = Layout::vertical([Constraint::Min(1), Constraint::Length(3)]).split(inner);
     let selected = |i| !app.nodes_sidebar && app.nodes_selected == i;
     let mut index = 0;
     let mut actions = Vec::new();
@@ -975,12 +979,13 @@ pub(in crate::tui) fn draw_node_wizard(
     let outer = section_block(format!(" New node · {} ", wizard.title()));
     let inner = outer.inner(right);
     frame.render_widget(outer, right);
-    let rows = Layout::vertical([
+    let mut rows = Layout::vertical([
         Constraint::Length(2),
         Constraint::Min(1),
         Constraint::Length(3),
     ])
-    .split(inner);
+    .split(inner)
+    .to_vec();
     let note = match wizard.step {
         Step::Transport if !wizard.options.local_available => {
             "A local node already exists. Add another host using SSH."
@@ -993,7 +998,11 @@ pub(in crate::tui) fn draw_node_wizard(
         Step::Host => "VPN address: a domain or IP. Examples: vpn.example.com or 203.0.113.10",
         Step::Protocols => "Select protocols, or leave both off for an agent-only node.",
         Step::Created => "The node is saved. Open its card to install the agent and VPN protocols.",
-        _ => "Back keeps your inputs. Creation does not install anything on the host.",
+        Step::Key => "Enter a unique server code. Example: ru1",
+        Step::Title => "Enter the server name. Example: Saint Petersburg #1",
+        Step::Region | Step::CustomRegion => "Choose a region or enter your own. Example: Europe",
+        Step::Flag => "Enter a flag or leave it empty. Example: 🇷🇺",
+        Step::Review => "Check the settings before creating the node.",
     };
     frame.render_widget(
         Paragraph::new(note)
@@ -1002,6 +1011,30 @@ pub(in crate::tui) fn draw_node_wizard(
         rows[0],
     );
     let choices = wizard.choices();
+    let scrolling_footer = matches!(wizard.step, Step::Template | Step::Region)
+        && choices.len() > usize::from(rows[1].height / 3);
+    if scrolling_footer {
+        rows[1].height += rows[2].height;
+    }
+    let capacity = usize::from(rows[1].height / 3).max(1);
+    let count = choices.len() + usize::from(scrolling_footer);
+    let first = app.viewport(
+        wizard
+            .selected
+            .min(count.saturating_sub(1))
+            .saturating_sub(capacity - 1),
+        count,
+        capacity,
+    );
+    if scrolling_footer {
+        app.register_scroll(
+            first,
+            count.saturating_sub(capacity),
+            capacity,
+            ScrollTarget::List,
+        );
+    }
+
     if matches!(wizard.step, Step::Review) {
         frame.render_widget(
             Paragraph::new(wizard.summary()).wrap(Wrap { trim: false }),
@@ -1018,13 +1051,7 @@ Code: {}",
             rows[1],
         );
     } else {
-        let capacity = (rows[1].height / 3).max(1) as usize;
-        app.content_overflow.set(choices.len() > capacity);
-        let first = wizard
-            .selected
-            .min(choices.len().saturating_sub(1))
-            .saturating_sub(capacity - 1);
-        let first = app.viewport(first, choices.len(), capacity);
+        app.content_overflow.set(count > capacity);
         for (index, label) in choices.iter().enumerate().skip(first).take(capacity) {
             let area = Rect::new(
                 rows[1].x,
@@ -1052,44 +1079,79 @@ Code: {}",
             draw_field(frame, area, wizard.title(), text, true);
         }
     }
-    let buttons = if wizard.step == Step::Created {
-        vec![
-            ("Open node card", Control::WizardOpen),
-            ("Nodes", Control::WizardCancel),
-        ]
-    } else if wizard.selection_step() {
-        vec![
-            ("← Back", Control::WizardBack),
-            ("Cancel", Control::WizardCancel),
-        ]
+    let buttons = wizard_buttons(wizard);
+    let footer = if scrolling_footer {
+        if choices.len() < first || choices.len() >= first + capacity {
+            return;
+        }
+        Rect::new(
+            rows[1].x,
+            rows[1].y + (choices.len() - first) as u16 * 3,
+            rows[1].width,
+            3,
+        )
     } else {
-        vec![
-            (
-                if wizard.step == Step::Review {
-                    "Create node"
-                } else if wizard.step == Step::Flag {
-                    "Next / Skip"
-                } else {
-                    "Continue"
-                },
-                Control::WizardNext,
-            ),
-            ("← Back", Control::WizardBack),
-            ("Cancel", Control::WizardCancel),
-        ]
+        rows[2]
     };
-    let columns = action_areas(
-        frame.area(),
-        rows[2],
-        buttons.iter().map(|(_, control)| *control),
-        1,
-    );
+    let columns = Layout::horizontal(buttons.iter().map(|(_, control)| {
+        if *control == Control::WizardBack {
+            Constraint::Length(5)
+        } else {
+            Constraint::Fill(1)
+        }
+    }))
+    .spacing(1)
+    .split(footer);
     for (index, (label, control)) in buttons.into_iter().enumerate() {
-        let selected = wizard.selected == choices.len() + index;
+        let selected = wizard_controls(wizard).get(wizard.selected) == Some(&control);
         draw_button(frame, columns[index], label, selected);
         hits.push(Hit {
             area: columns[index],
             control,
         });
     }
+}
+
+pub(in crate::tui) fn wizard_buttons(
+    wizard: &crate::node_wizard::Wizard,
+) -> Vec<(&'static str, Control)> {
+    use crate::node_wizard::Step;
+    if wizard.step == Step::Created {
+        return vec![
+            ("Open node card", Control::WizardOpen),
+            ("Nodes", Control::WizardCancel),
+        ];
+    }
+    let mut buttons = Vec::new();
+    if wizard.step != Step::Transport {
+        buttons.push(("←", Control::WizardBack));
+    }
+    if !wizard.selection_step() {
+        buttons.push((
+            if wizard.step == Step::Review {
+                "Create node"
+            } else if wizard.step == Step::Flag {
+                "Next / Skip"
+            } else {
+                "Continue"
+            },
+            Control::WizardNext,
+        ));
+    }
+    buttons.push(("Cancel", Control::WizardCancel));
+    buttons
+}
+pub(in crate::tui) fn wizard_controls(wizard: &crate::node_wizard::Wizard) -> Vec<Control> {
+    let mut controls: Vec<_> = (0..wizard.choices().len())
+        .map(Control::WizardChoice)
+        .collect();
+    let mut buttons = wizard_buttons(wizard);
+    if let Some(index) = buttons
+        .iter()
+        .position(|(_, control)| *control == Control::WizardNext)
+    {
+        buttons.swap(0, index);
+    }
+    controls.extend(buttons.into_iter().map(|(_, c)| c));
+    controls
 }

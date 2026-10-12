@@ -488,7 +488,6 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
                 Control::ControllerBack
                     | Control::NodesBack
                     | Control::NodesEditBack
-                    | Control::WizardBack
                     | Control::AccessBack
                     | Control::AccessExpiryBack
                     | Control::AccessGrantBack

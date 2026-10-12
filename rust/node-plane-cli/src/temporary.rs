@@ -56,6 +56,19 @@ pub struct Browser {
     pub notice: String,
 }
 impl Browser {
+    pub fn poll(&self) -> Option<Command> {
+        let card = self.card.as_ref()?;
+        if self.view == View::Card
+            && matches!(
+                card["status"].as_str(),
+                Some("queued" | "issuing" | "revoking" | "expiry_pending")
+            )
+        {
+            Some(Command::Card(card["id"].as_str()?.into()))
+        } else {
+            None
+        }
+    }
     pub fn list(&self) -> Command {
         Command::List {
             node: self.filter.as_ref().map(|n| n.key.clone()),

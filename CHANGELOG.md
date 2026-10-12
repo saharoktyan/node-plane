@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.3-alpha.86 - 2026-10-12
+
+- Include the member username in profile navigation and simplify Workstation node-creation guidance and inline navigation.
+- Scroll long wizard choices together with their footer and use available space in node settings and diagnostics.
+- Refresh server cards after setup, follow temporary configuration progress, and restore the originating server card on Back.
+
 ## 0.4.3-alpha.85 - 2026-10-12
 
 - Color diagnostic status markers and add labeled choices for automatic checks, backups and alerts.

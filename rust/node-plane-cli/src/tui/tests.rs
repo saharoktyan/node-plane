@@ -4753,3 +4753,89 @@ fn list_actions_use_the_bottom_row_when_no_pagination_is_needed() {
         assert_eq!(area.bottom(), 36);
     }
 }
+
+#[test]
+fn wizard_footer_is_inline_and_scrolls_after_long_choices() {
+    let mut app = test_profile_app();
+    let templates: Vec<_> = (0..20).map(|i| serde_json::json!({"code":format!("n{i}"),"title":format!("Node {i}"),"region":"Europe","flag":"","draft":{}})).collect();
+    let options = serde_json::from_value(serde_json::json!({"local_available":true,"defaults":{"protocols":[],"xray_transports":[],"settings":{}},"templates":templates})).unwrap();
+    app.node_wizard = Some(crate::node_wizard::Wizard::new(options).unwrap());
+    app.screen = Screen::NodeWizard;
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    assert!(!app.hits.iter().any(|h| h.control == Control::WizardBack));
+    app.node_wizard.as_mut().unwrap().step = crate::node_wizard::Step::Title;
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    let back = app
+        .hits
+        .iter()
+        .find(|h| h.control == Control::WizardBack)
+        .unwrap()
+        .area;
+    for control in [Control::WizardNext, Control::WizardCancel] {
+        let area = app.hits.iter().find(|h| h.control == control).unwrap().area;
+        assert_eq!(area.y, back.y);
+        assert!(area.width > back.width);
+    }
+    assert_eq!(back.width, 5);
+    app.node_wizard.as_mut().unwrap().step = crate::node_wizard::Step::Template;
+    app.node_wizard.as_mut().unwrap().selected = 0;
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    assert!(!app.hits.iter().any(|h| h.control == Control::WizardCancel));
+    assert!(app.scrollbar.get().is_some());
+    app.manual_viewport.set(Some(100));
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    assert!(app.hits.iter().any(|h| h.control == Control::WizardCancel));
+}
+
+#[test]
+fn temporary_progress_polls_preserve_focus_and_node_return() {
+    let mut app = test_profile_app();
+    let node = browser_node("lv1", "Europe");
+    app.nodes.card = Some(node.clone());
+    app.open_temporary(Some(node));
+    app.nodes_requested = None;
+    app.activate(Control::TemporaryBack);
+    assert!(matches!(app.screen, Screen::Nodes));
+    assert_eq!(app.nodes.card.as_ref().unwrap().key, "lv1");
+    app.screen = Screen::Temporary;
+    app.temporary.view = crate::temporary::View::Card;
+    app.temporary.card = Some(serde_json::json!({"id":"temp1","status":"issuing"}));
+    app.temporary.selected = 2;
+    assert!(
+        matches!(app.temporary.poll(),Some(crate::temporary::Command::Card(id)) if id=="temp1")
+    );
+    app.event(Event::Nodes(crate::nodes::Update::Temporary(
+        crate::temporary::Command::Card("temp1".into()),
+        serde_json::json!({"id":"temp1","status":"active"}),
+    )));
+    assert_eq!(app.temporary.selected, 2);
+    assert!(app.temporary.poll().is_none());
+}
+
+#[test]
+fn completed_setup_refreshes_card_and_queued_setup_hides_start_button() {
+    let mut app = test_profile_app();
+    let node = browser_node("lv1", "Europe");
+    app.nodes.card = Some(node);
+    app.nodes.operation = Some(crate::nodes::Operation {
+        kind: "node-bootstraps".into(),
+        id: uuid::Uuid::new_v4(),
+        node_key: "lv1".into(),
+        status: "queued".into(),
+        error: String::new(),
+        command_id: None,
+        action: String::new(),
+    });
+    let node = app.nodes.card.as_ref().unwrap();
+    assert!(node.needs_observation(app.nodes.operation.as_ref()));
+    assert!(
+        !node_card_actions(node, app.nodes.operation.as_ref())
+            .iter()
+            .any(|(_, c)| matches!(c, Control::NodesSetup | Control::NodesBootstrap))
+    );
+    let mut operation = app.nodes.operation.clone().unwrap();
+    operation.status = "succeeded".into();
+    app.event(Event::Nodes(crate::nodes::Update::Operation(operation)));
+    assert!(matches!(&app.nodes_requested,Some(crate::nodes::Command::Card(key)) if key=="lv1"));
+}

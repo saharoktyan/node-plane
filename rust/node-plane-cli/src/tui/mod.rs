@@ -123,6 +123,7 @@ pub fn run(mut request: Request) -> Result<()> {
     let mut self_confirmation: Option<mpsc::Receiver<Answer>> = None;
     let mut self_updating = false;
     let mut last_controller_poll = std::time::Instant::now();
+    let mut last_temporary_poll = std::time::Instant::now();
     let mut last_access_poll = std::time::Instant::now();
     let mut last_node_observation = std::time::Instant::now();
     let mut qr_was_visible = false;
@@ -244,6 +245,16 @@ pub fn run(mut request: Request) -> Result<()> {
             }
         }
         if !app.nodes_busy
+            && app.nodes_requested.is_none()
+            && matches!(app.screen, Screen::Temporary)
+            && last_temporary_poll.elapsed() >= Duration::from_secs(3)
+        {
+            last_temporary_poll = std::time::Instant::now();
+            if let Some(command) = app.temporary.poll() {
+                app.temporary_command(command);
+            }
+        }
+        if !app.nodes_busy
             && let Some(command) = app.nodes_requested.take()
         {
             let mut next = app.next_request();
@@ -262,6 +273,7 @@ pub fn run(mut request: Request) -> Result<()> {
                     let observing = matches!(
                         command,
                         crate::nodes::Command::Observe(..)
+                            | crate::nodes::Command::Temporary(crate::temporary::Command::Card(_))
                             | crate::nodes::Command::MaintenancePoll(_)
                             | crate::nodes::Command::Controller(..)
                             | crate::nodes::Command::Access(

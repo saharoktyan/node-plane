@@ -20,6 +20,14 @@ impl App {
                     self.qr_visible = false;
                     return None;
                 }
+                if self.temporary.view == crate::temporary::View::List
+                    && self.temporary.filter.is_some()
+                {
+                    self.screen = Screen::Nodes;
+                    self.nodes_sidebar = false;
+                    self.action_focus = Some(Control::NodeTemporary);
+                    return None;
+                }
                 self.temporary.back();
                 if self.temporary.view == crate::temporary::View::List {
                     self.temporary_command(self.temporary.list());
