@@ -63,6 +63,18 @@ class ControllerReleaseTests(unittest.TestCase):
                                 capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_packaged_installer_can_source_its_libraries(self):
+        destination = self.root / 'installer'
+        release.extract(self.archive, destination)
+        script = (destination / 'scripts/install.sh').read_text()
+        # Execute the real startup through the sourced libraries, without any
+        # installation side effects or host dependencies.
+        startup = script.split('FROM_SOURCE=0', 1)[0]
+        probe = destination / 'scripts/startup-probe.sh'
+        probe.write_text(startup + '\nvalid_telegram_bot_token 123456:abcdefghijklmnopqrst\nvalid_telegram_admin_ids 123456\n')
+        result = subprocess.run(['bash', str(probe)], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_reusing_package_does_not_copy_venv_secrets_or_untracked_files(self):
         installed = self.root / 'installed'
         release.extract(self.archive, installed)
@@ -205,6 +217,8 @@ trap 'on_error $?' ERR
                 manifest['files'].pop(name)
         contents.pop('scripts/lib/archive_agent_journals.py')
         manifest['files'].pop('scripts/lib/archive_agent_journals.py')
+        contents.pop('scripts/lib/install_credentials.sh')
+        manifest['files'].pop('scripts/lib/install_credentials.sh')
         manifest.update(ref='v0.4.3-alpha.51', version='0.4.3-alpha.51')
         contents['VERSION'] = b'0.4.3-alpha.51\n'
         manifest['files']['VERSION'] = hashlib.sha256(contents['VERSION']).hexdigest()

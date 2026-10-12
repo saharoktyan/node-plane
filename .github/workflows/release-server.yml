@@ -24,7 +24,10 @@ jobs:
           key: server-linux-amd64
           mode: restore
       - name: Build server artifacts
-        run: bash scripts/build_release_stack.sh
+        # Exercise the packaged installer before publishing its archive.
+        run: |
+          python3 -m unittest tests.test_controller_release
+          bash scripts/build_release_stack.sh
       - uses: actions/upload-artifact@v7
         with:
           name: artifacts-server

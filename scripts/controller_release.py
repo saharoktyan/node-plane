@@ -23,7 +23,7 @@ SCRIPTS = {
     'install_telegram_client_systemd.sh', 'postgres_runtime.sh', 'python_runtime.sh',
     'uv_runtime.sh', 'release_retention.py', 'run_node_driver.sh', 'run_node_agent.sh',
     'lib/agent_ssh.sh', 'lib/install_progress.sh', 'lib/stack_update.sh', 'lib/controller_archive.sh',
-    'lib/archive_agent_journals.py',
+    'lib/archive_agent_journals.py', 'lib/install_credentials.sh',
 }
 ROOT_FILES = {'VERSION', 'LICENSE', '.env.example', 'requirements.txt',
               'requirements-backend.txt', 'requirements-telegram.txt'}
@@ -126,6 +126,10 @@ def verify(archive_path, ref=None, commit=None):
     # became mandatory in alpha.52; its absence in older packages is intentional.
     required = set(REQUIRED)
     version = tuple(int(value or 0) for value in TAG.fullmatch(manifest['ref']).groups())
+    # Credential validation is included starting with alpha.80. Keep older
+    # packages readable for rollback and existing release selection.
+    if version < (0, 4, 3, 0) or (version[:3] == (0, 4, 3) and version[3] in range(1, 80)):
+        required.discard('scripts/lib/install_credentials.sh')
     if version < (0, 4, 3, 0) or (version[:3] == (0, 4, 3) and version[3] in range(1, 52)):
         required.discard('scripts/lib/archive_agent_journals.py')
     # Runtime assets were accidentally omitted through alpha.53. Old archives

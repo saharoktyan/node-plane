@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.3-alpha.80 - 2026-10-12
+
+- Include the Telegram credential validation library in controller installation archives.
+- Exercise packaged installer startup and runtime library completeness in release CI.
+
 ## 0.4.3-alpha.79 - 2026-10-12
 
 - Add opt-in action and stage timings for Telegram, backend API and Workstation.
