@@ -96,6 +96,7 @@ pub async fn connect(
     options: &SshOptions,
     interaction: Arc<dyn Interaction>,
 ) -> Result<SshSession> {
+    let _timing = crate::timings::Stage::new("ssh_connect_and_authenticate");
     validate_options(options)?;
     let state_dir = options.state_dir.clone();
     let key = Arc::new(
@@ -283,6 +284,7 @@ impl SshSession {
     /// the workstation or exposing the API on the controller's public network.
     /// The destination is intentionally fixed: this is not a general forwarding API.
     pub async fn backend_stream(&self) -> Result<russh::ChannelStream<client::Msg>> {
+        let _timing = crate::timings::Stage::new("ssh_forward");
         let channel = timeout(
             AUTH_TIMEOUT,
             self.session

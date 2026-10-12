@@ -823,6 +823,9 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
 
     @app.middleware('http')
     async def request_context(request: Request, call_next):
+        from time import perf_counter
+        started = perf_counter()
+        handler_ms = 0.0
         request.state.request_id = str(uuid4())
         audit_context = None
         audit_action = None
@@ -861,7 +864,14 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
             if cleaning:
                 response = error(request,'system_cleanup_in_progress',409)
             else:
-                response = error(request,'restore_in_progress',409) if restoring else await call_next(request)
+                if restoring:
+                    response = error(request,'restore_in_progress',409)
+                else:
+                    handler_started = perf_counter()
+                    try:
+                        response = await call_next(request)
+                    finally:
+                        handler_ms = (perf_counter() - handler_started) * 1000
         except Exception as exc:
             # Do not serialize DB exceptions, request bodies or credentials.
             import logging
@@ -885,6 +895,14 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
                 # failed and invite replay just because result auditing failed.
                 import logging
                 logging.getLogger(__name__).error('Workstation audit outcome unconfirmed request_id=%s', request.state.request_id)
+        if os.environ.get('NODE_PLANE_TIMINGS') == '1':
+            import logging
+            route = request.scope.get('route')
+            total_ms = (perf_counter() - started) * 1000
+            logging.getLogger('uvicorn.error').info(
+                'NP_TIMING stage=api method=%s route=%s status=%s request_id=%s total_ms=%.3f handler_ms=%.3f middleware_ms=%.3f',
+                request.method, getattr(route, 'path', 'unmatched'), response.status_code,
+                request.state.request_id, total_ms, handler_ms, total_ms - handler_ms)
         return response
 
     @app.exception_handler(AccessDenied)

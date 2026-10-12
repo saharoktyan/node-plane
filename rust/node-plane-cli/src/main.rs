@@ -16,6 +16,7 @@ mod progress;
 mod self_manage;
 mod ssh;
 mod temporary;
+mod timings;
 mod tui;
 mod workstation;
 

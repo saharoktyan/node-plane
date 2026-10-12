@@ -128,6 +128,7 @@ pub fn run(mut request: Request) -> Result<()> {
     let mut qr_needs_redraw = false;
     let mut previous_accent = app.connections.accent.clone();
     let mut pending_input = None;
+    let mut input_timing = None;
     loop {
         let selected = app.form.saved.as_ref().map(|p| {
             (
@@ -394,6 +395,7 @@ pub fn run(mut request: Request) -> Result<()> {
         // Graphics persist outside the cell buffer. Sending the same image on
         // every idle tick clears and uploads it again, causing visible flicker.
         if !app.qr_visible || qr_needs_redraw {
+            let draw_timing = crate::timings::Stage::new("tui_draw");
             app.restore_navigation_context();
             terminal.draw(|frame| app.hits = draw(frame, &app))?;
             if app.restore_return_focus()
@@ -403,6 +405,8 @@ pub fn run(mut request: Request) -> Result<()> {
                 terminal.draw(|frame| app.hits = draw(frame, &app))?;
             }
             qr_needs_redraw = false;
+            drop(draw_timing);
+            drop(input_timing.take());
         }
         if pending_input.is_none() && !event::poll(Duration::from_millis(100))? {
             continue;
@@ -413,6 +417,17 @@ pub fn run(mut request: Request) -> Result<()> {
             Some(input) => input,
             None => event::read()?,
         };
+        if matches!(
+            input,
+            TermEvent::Key(_)
+                | TermEvent::Paste(_)
+                | TermEvent::Mouse(crossterm::event::MouseEvent {
+                    kind: MouseEventKind::Down(_),
+                    ..
+                })
+        ) {
+            input_timing = Some(crate::timings::Stage::new("input_to_next_frame"));
+        }
         if matches!(input, TermEvent::Mouse(mouse) if mouse.kind == MouseEventKind::Moved) {
             // Keep only the latest queued pointer position. Preserve clicks,
             // keys and resize events in order instead of consuming them here.

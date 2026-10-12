@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.3-alpha.79 - 2026-10-12
+
+- Add opt-in action and stage timings for Telegram, backend API and Workstation.
+- Correlate backend calls with request IDs and separate SSH forwarding, HTTP response, decoding and TUI drawing durations.
+- Document measurement setup, timing boundaries and CPU sampling with pidstat.
+
 ## 0.4.3-alpha.78 - 2026-10-12
 
 - Verify the persistent worker service after installation and report Telegram polling conflicts explicitly.

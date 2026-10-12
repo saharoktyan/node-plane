@@ -21,6 +21,23 @@ from fastapi.testclient import TestClient
 
 
 class BackendHTTPTests(unittest.TestCase):
+    def test_opt_in_timings_correlate_requests_and_do_not_log_inputs(self):
+        import os
+        from unittest.mock import patch
+        headers = {**self.headers, 'X-Node-Plane-Telegram-User-ID': '101'}
+        with patch.dict(os.environ, {'NODE_PLANE_TIMINGS': '1'}), self.assertLogs('uvicorn.error', 'INFO') as logs:
+            response = self.client.get('/api/v1/me?private=do-not-log', headers=headers)
+            rejected = self.client.get('/api/v1/me')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(rejected.status_code, 401)
+        text = '\n'.join(logs.output)
+        self.assertIn('request_id=' + response.headers['X-Request-ID'], text)
+        self.assertIn('request_id=' + rejected.headers['X-Request-ID'], text)
+        self.assertIn('handler_ms=', text)
+        self.assertIn('middleware_ms=', text)
+        self.assertNotIn('do-not-log', text)
+        self.assertNotIn(self.headers['Authorization'], text)
+
     def test_workstation_can_read_policies_and_edit_bot_title(self):
         from backend.workstation_cli import SCOPES
         _, token = self.credentials.issue(PrincipalKind.ACCOUNT, SCOPES, account_id=self.admin.id)

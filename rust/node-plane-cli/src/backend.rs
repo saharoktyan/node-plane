@@ -101,6 +101,7 @@ impl ApiError {
 }
 
 pub async fn helper(session: &mut SshSession, mut input: Value) -> Result<Value> {
+    let _timing = crate::timings::Stage::new("authorization_helper");
     // Lookup and enrollment audit use the live credential's session, while their
     // command IDs continue to identify each separate operation.
     if matches!(
@@ -348,6 +349,7 @@ pub async fn request_revision(
     revision: Option<u64>,
 ) -> std::result::Result<Value, ApiError> {
     ensure_api_path(path)?;
+    let _timing = crate::timings::Stage::new("backend_request").endpoint(method.as_str(), path);
     let timeout = if method == Method::GET {
         Duration::from_secs(15)
     } else {
@@ -399,9 +401,11 @@ async fn exchange_revision<S>(
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
+    let handshake_timing = crate::timings::Stage::new("http_handshake");
     let (mut sender, connection) = hyper::client::conn::http1::handshake(TokioIo::new(stream))
         .await
         .map_err(|_| transport_error())?;
+    drop(handshake_timing);
     let driver = AbortDriver(tokio::spawn(async move {
         let _ = connection.await;
     }));
@@ -427,10 +431,18 @@ where
         let request = request
             .body(Full::new(Bytes::from(bytes)))
             .map_err(|_| transport_error())?;
+        let headers_timing = crate::timings::Stage::new("http_response_headers");
         let response = sender
             .send_request(request)
             .await
             .map_err(|_| transport_error())?;
+        drop(headers_timing);
+        let body_timing = crate::timings::Stage::new("http_response_body").request_id(
+            response
+                .headers()
+                .get("X-Request-ID")
+                .and_then(|value| value.to_str().ok()),
+        );
         let status = response.status().as_u16();
         let mut body = response.into_body();
         let mut bytes = Zeroizing::new(Vec::new());
@@ -446,10 +458,13 @@ where
                 bytes.extend_from_slice(&data);
             }
         }
+        drop(body_timing);
+        let decode_timing = crate::timings::Stage::new("response_decode");
         let value: Value = serde_json::from_slice(&bytes).map_err(|_| ApiError {
             status: Some(status),
             code: "invalid_backend_response".into(),
         })?;
+        drop(decode_timing);
         if !(200..300).contains(&status) {
             let code = value
                 .pointer("/error/code")

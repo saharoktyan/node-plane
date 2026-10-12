@@ -152,6 +152,9 @@ async def remember_media(state, result, uploads, cache):
     await state.update_data(rich_media_cache=dict(list(cache.items())[-30:]))
 
 async def render(bot: Bot, chat_id: int, screen: Screen, rows: list[list[InlineKeyboardButton]], state: FSMContext, message_id: int | None = None) -> bool:
+    from time import perf_counter
+    from ..timings import record
+    preparation_started = perf_counter()
     cancel_refresh(state)
     markup = InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
     # Explicitly clear an old inline keyboard when switching from an admin
@@ -177,6 +180,7 @@ async def render(bot: Bot, chat_id: int, screen: Screen, rows: list[list[InlineK
     rich_content = screen.rich(rows)
     cache = dict(data.get('rich_media_cache', {}))
     rich_content, uploads = reuse_media(rich_content, cache)
+    record('render_prepare', preparation_started)
 
     async def remember_navigation(control_id, rich):
         if not parents:

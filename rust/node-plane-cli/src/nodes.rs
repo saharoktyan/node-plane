@@ -881,6 +881,19 @@ fn close_session(
 }
 
 async fn execute(
+    request: Request,
+    command: Command,
+    tx: &mpsc::Sender<Event>,
+    session: &mut SshSession,
+) -> Result<String> {
+    crate::timings::action(
+        "workstation_action",
+        execute_inner(request, command, tx, session),
+    )
+    .await
+}
+
+async fn execute_inner(
     mut request: Request,
     command: Command,
     tx: &mpsc::Sender<Event>,
