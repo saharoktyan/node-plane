@@ -71,10 +71,6 @@ impl App {
                             })
                             .unwrap_or(pages.len().saturating_sub(1));
                     }
-                    Screen::Nodes if self.nodes.editor.is_some() => {
-                        self.nodes.editor.as_mut().unwrap().page =
-                            next / self.nodes_capacity.get().max(1)
-                    }
                     Screen::Access => {
                         let page = next / self.access_capacity.get().max(1);
                         if let Some(devices) = &mut self.access.devices {

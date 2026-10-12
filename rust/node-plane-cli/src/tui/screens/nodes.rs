@@ -6,7 +6,7 @@ pub(in crate::tui) fn draw_node_editor(
     area: Rect,
     hits: &mut Vec<Hit>,
 ) {
-    use crate::node_editor::{Editor, Tab};
+    use crate::node_editor::Tab;
     let Some(editor) = &app.nodes.editor else {
         return;
     };
@@ -20,10 +20,10 @@ pub(in crate::tui) fn draw_node_editor(
     let sections = Layout::vertical([
         Constraint::Length(3),
         Constraint::Min(0),
-        Constraint::Length(if editor.review.is_none() && editor.dirty() {
-            6
-        } else {
+        Constraint::Length(if editor.review.is_some() || editor.dirty() {
             3
+        } else {
+            0
         }),
     ])
     .split(inner);
@@ -110,96 +110,77 @@ pub(in crate::tui) fn draw_node_editor(
                 content[1],
             );
         }
-        let fields = editor.field_indices();
+        let items = node_editor_items(editor);
+        let columns = if content[0].width >= 64 { 2 } else { 1 };
+        let rows = items.len().div_ceil(columns);
         let capacity = usize::from(content[0].height / 3).max(1);
         app.nodes_capacity.set(capacity);
-        let pages = if editor.tab == Tab::Protocols {
-            (if editor.protocols.iter().any(|p| p == "xray") {
-                4usize
-            } else {
-                2
-            })
-            .div_ceil(capacity)
-        } else {
-            fields.len().div_ceil(capacity)
-        }
-        .max(1);
-        let page = editor.page.min(pages - 1);
-        if editor.tab == Tab::Protocols {
-            let count = if editor.protocols.iter().any(|p| p == "xray") {
-                4
-            } else {
-                2
-            };
-            let first = app.viewport(page * capacity, count, capacity);
-            for (row, index) in (0..count).skip(first).take(capacity).enumerate() {
-                let (value, name) = [
-                    ("awg", "AmneziaWG"),
-                    ("xray", "VLESS"),
-                    ("tcp", "TCP"),
-                    ("xhttp", "XHTTP"),
-                ][index];
-                let enabled = if index < 2 {
-                    &editor.protocols
-                } else {
-                    &editor.transports
-                }
-                .iter()
-                .any(|v| v == value);
-                let control = Control::NodesEditToggle(index >= 2, index % 2);
-                let rect = Rect::new(
+        app.nodes_editor_width.set(content[0].width);
+        let selected_row = app
+            .nodes_selected
+            .saturating_sub(3)
+            .min(items.len().saturating_sub(1))
+            / columns;
+        let first = app.viewport(
+            viewport_start(app.list_viewport.get(), selected_row, capacity),
+            rows,
+            capacity,
+        );
+        for row in first..(first + capacity).min(rows) {
+            let count = (items.len() - row * columns).min(columns);
+            let cells = Layout::horizontal(vec![Constraint::Fill(1); count])
+                .spacing(1)
+                .split(Rect::new(
                     content[0].x,
-                    content[0].y + row as u16 * 3,
+                    content[0].y + (row - first) as u16 * 3,
                     content[0].width,
                     3,
-                );
+                ));
+            for (column, &control) in items.iter().skip(row * columns).take(count).enumerate() {
+                let rect = cells[column];
                 if rect.bottom() > content[0].bottom() {
-                    break;
+                    continue;
                 }
-                draw_button(
-                    frame,
-                    rect,
-                    &format!("{} {name}", if enabled { "✓" } else { "○" }),
-                    selected(control),
-                );
+                match control {
+                    Control::NodesEditToggle(transport, index) => {
+                        let (value, name) = if transport {
+                            [("tcp", "TCP"), ("xhttp", "XHTTP")][index]
+                        } else {
+                            [("awg", "AmneziaWG"), ("xray", "VLESS")][index]
+                        };
+                        let enabled = if transport {
+                            &editor.transports
+                        } else {
+                            &editor.protocols
+                        }
+                        .iter()
+                        .any(|v| v == value);
+                        draw_button(
+                            frame,
+                            rect,
+                            &format!("{} {name}", if enabled { "✓" } else { "○" }),
+                            selected(control),
+                        );
+                    }
+                    Control::NodesEditChoice(index) => {
+                        let field = &editor.fields[index];
+                        draw_button(
+                            frame,
+                            rect,
+                            &format!("{}: {}", field.label, field.value),
+                            selected(control),
+                        );
+                    }
+                    Control::NodesEditField(index) => {
+                        let field = &editor.fields[index];
+                        draw_field(frame, rect, field.label, &field.value, selected(control));
+                    }
+                    _ => {}
+                }
                 hits.push(Hit {
                     area: rect,
                     control,
                 });
-            }
-        } else {
-            let first = app.viewport(page * capacity, fields.len(), capacity);
-            for (row, &index) in fields.iter().skip(first).take(capacity).enumerate() {
-                let field = &editor.fields[index];
-                let rect = Rect::new(
-                    content[0].x,
-                    content[0].y + row as u16 * 3,
-                    content[0].width,
-                    3,
-                );
-                if rect.bottom() > content[0].bottom() {
-                    break;
-                }
-                if let Some(_choices) = Editor::choices(field.key) {
-                    let control = Control::NodesEditChoice(index);
-                    draw_button(
-                        frame,
-                        rect,
-                        &format!("{}: {}", field.label, field.value),
-                        selected(control),
-                    );
-                    hits.push(Hit {
-                        area: rect,
-                        control,
-                    });
-                } else {
-                    let control = Control::NodesEditField(index);
-                    draw_field(frame, rect, field.label, &field.value, selected(control));
-                    hits.push(Hit {
-                        area: rect,
-                        control,
-                    });
-                }
             }
         }
         if editor.dirty() {
@@ -207,12 +188,6 @@ pub(in crate::tui) fn draw_node_editor(
                 ("Save", Control::NodesEditSave),
                 ("Reset draft", Control::NodesEditReset),
             ]);
-        }
-        if editor.page > 0 {
-            buttons.push(("Previous page", Control::NodesEditPage(false)));
-        }
-        if editor.page + 1 < pages {
-            buttons.push(("Next page", Control::NodesEditPage(true)));
         }
         buttons.push(("Back", Control::NodesEditBack));
     }
@@ -1221,4 +1196,44 @@ pub(in crate::tui) fn status_line(status: &str, label: String) -> Line<'static> 
         ),
         Span::raw(format!(" · {label}")),
     ])
+}
+
+pub(in crate::tui) fn node_editor_items(editor: &crate::node_editor::Editor) -> Vec<Control> {
+    if editor.tab == crate::node_editor::Tab::Protocols {
+        let mut items = vec![
+            Control::NodesEditToggle(false, 0),
+            Control::NodesEditToggle(false, 1),
+        ];
+        if editor.protocols.iter().any(|p| p == "xray") {
+            items.extend([
+                Control::NodesEditToggle(true, 0),
+                Control::NodesEditToggle(true, 1),
+            ]);
+        }
+        items
+    } else {
+        editor
+            .field_indices()
+            .into_iter()
+            .map(|i| {
+                if crate::node_editor::Editor::choices(editor.fields[i].key).is_some() {
+                    Control::NodesEditChoice(i)
+                } else {
+                    Control::NodesEditField(i)
+                }
+            })
+            .collect()
+    }
+}
+pub(in crate::tui) fn node_editor_controls(editor: &crate::node_editor::Editor) -> Vec<Control> {
+    let mut controls: Vec<_> = crate::node_editor::Tab::ALL
+        .into_iter()
+        .map(Control::NodesEditTab)
+        .collect();
+    controls.extend(node_editor_items(editor));
+    if editor.dirty() {
+        controls.extend([Control::NodesEditSave, Control::NodesEditReset]);
+    }
+    controls.push(Control::NodesEditBack);
+    controls
 }

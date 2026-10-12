@@ -27,6 +27,7 @@ impl App {
             action_focus: None,
             nodes_sidebar: false,
             nodes_updates_origin: false,
+            nodes_editor_width: std::cell::Cell::new(64),
             nodes_capacity: std::cell::Cell::new(10),
             self_release: None,
             self_status: "Checking for workstation updates…".into(),

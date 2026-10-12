@@ -46,7 +46,10 @@ impl App {
             self.hovered = None;
             return None;
         }
-        if control != Control::ControllerDefaultsReset {
+        if !matches!(
+            control,
+            Control::ControllerDefaultsReset | Control::NodesEditReset
+        ) {
             self.manual_viewport.set(None);
         }
         if matches!(self.screen, Screen::Access)
@@ -61,7 +64,6 @@ impl App {
             control,
             Control::NodesEditChoice(_)
                 | Control::NodesEditToggle(_, _)
-                | Control::NodesEditPage(_)
                 | Control::AccessGrant(_, _)
                 | Control::AccessRule(_, _)
                 | Control::AccessGrantAll(_)
@@ -331,7 +333,6 @@ impl App {
             | Control::NodesEditField(..)
             | Control::NodesEditChoice(..)
             | Control::NodesEditToggle(..)
-            | Control::NodesEditPage(..)
             | Control::NodesEditSave
             | Control::NodesEditConfirm
             | Control::NodesEditReset

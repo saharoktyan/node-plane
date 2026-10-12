@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.3-alpha.90 - 2026-10-12
+
+- Replace server-settings pagination with scrolling and an adaptive two-column parameter grid.
+- Keep all parameters reachable with arrow keys and reserve only one row for Save and Reset draft.
+
 ## 0.4.3-alpha.89 - 2026-10-12
 
 - Remove user-device management from Workstation administration and add custom access durations with H/D/M/Y units.

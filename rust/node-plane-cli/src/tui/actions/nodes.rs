@@ -13,7 +13,6 @@ impl App {
             Control::NodesEditTab(tab) => {
                 if let Some(editor) = &mut self.nodes.editor {
                     editor.tab = tab;
-                    editor.page = 0;
                 }
                 self.nodes_selected = 0;
                 None
@@ -63,29 +62,6 @@ impl App {
                         transport,
                     );
                 }
-                None
-            }
-            Control::NodesEditPage(next) => {
-                if let Some(editor) = &mut self.nodes.editor {
-                    let count = if editor.tab == crate::node_editor::Tab::Protocols {
-                        if editor.protocols.iter().any(|p| p == "xray") {
-                            4
-                        } else {
-                            2
-                        }
-                    } else {
-                        editor.field_indices().len()
-                    };
-                    let last = count
-                        .div_ceil(self.nodes_capacity.get().max(1))
-                        .saturating_sub(1);
-                    editor.page = if next {
-                        (editor.page + 1).min(last)
-                    } else {
-                        editor.page.saturating_sub(1)
-                    };
-                }
-                self.nodes_selected = 0;
                 None
             }
             Control::NodesEditSave => {
@@ -450,6 +426,11 @@ impl App {
         }
     }
     pub(in crate::tui) fn nodes_controls(&self) -> Vec<Control> {
+        if let Some(editor) = &self.nodes.editor
+            && editor.review.is_none()
+        {
+            return node_editor_controls(editor);
+        }
         self.nodes_hits().iter().map(|hit| hit.control).collect()
     }
 }

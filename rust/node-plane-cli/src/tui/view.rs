@@ -433,6 +433,9 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
             Screen::Temporary => {
                 "Tab / arrows: select   Enter / click: open   PgUp / PgDn: scroll   Esc: back / sidebar"
             }
+            Screen::Nodes if app.nodes.editor.is_some() => {
+                "Tab / arrows: select   Wheel / scrollbar: scroll   Enter / click: change   Esc: back"
+            }
             Screen::Nodes => {
                 "Tab / ↑ / ↓: select   Enter / click: open   Ctrl+F: search   ← / →: pages   Esc: list / sidebar"
             }

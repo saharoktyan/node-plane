@@ -84,7 +84,6 @@ impl App {
                         | Control::NodesEditField(_)
                         | Control::NodesEditChoice(_)
                         | Control::NodesEditToggle(_, _)
-                        | Control::NodesEditPage(_)
                         | Control::NodesEditSave
                         | Control::NodesEditConfirm
                         | Control::NodesEditReset
@@ -108,6 +107,49 @@ impl App {
             .collect()
     }
     pub(in crate::tui) fn nodes_move_direction(&mut self, direction: KeyCode) {
+        if let Some(editor) = &self.nodes.editor
+            && editor.review.is_none()
+        {
+            let width = self.nodes_editor_width.get();
+            let controls = node_editor_controls(editor);
+            let items = node_editor_items(editor);
+            let columns = if width >= 64 { 2 } else { 1 };
+            let mut areas: Vec<_> = Layout::horizontal([Constraint::Fill(1); 3])
+                .spacing(1)
+                .split(Rect::new(0, 0, width, 3))
+                .iter()
+                .copied()
+                .collect();
+            for row in 0..items.len().div_ceil(columns) {
+                let count = (items.len() - row * columns).min(columns);
+                areas.extend(
+                    Layout::horizontal(vec![Constraint::Fill(1); count])
+                        .spacing(1)
+                        .split(Rect::new(0, 3 + row as u16 * 3, width, 3))
+                        .iter()
+                        .copied(),
+                );
+            }
+            let y = 3 + items.len().div_ceil(columns) as u16 * 3;
+            if editor.dirty() {
+                areas.extend(
+                    Layout::horizontal([Constraint::Fill(1); 2])
+                        .split(Rect::new(0, y, width, 3))
+                        .iter()
+                        .copied(),
+                );
+            }
+            areas.push(Rect::new(width.saturating_sub(7), y + 3, 7, 3));
+            if let Some(index) = directional_index(
+                &areas,
+                self.nodes_selected.min(controls.len() - 1),
+                direction,
+            ) {
+                self.nodes_selected = index;
+                self.manual_viewport.set(None);
+            }
+            return;
+        }
         let areas: Vec<_> = self.nodes_hits().iter().map(|hit| hit.area).collect();
         let selected = self.nodes_selected.min(areas.len().saturating_sub(1));
         if let Some(index) = directional_index(&areas, selected, direction) {
@@ -338,7 +380,6 @@ impl App {
             control
         } else {
             match control {
-                Control::NodesEditPage(next) => Control::NodesEditPage(!next),
                 Control::AccessGrantPage(next) => Control::AccessGrantPage(!next),
                 Control::AccessPage(next) => Control::AccessPage(!next),
                 Control::AccessDevicePage(next) => Control::AccessDevicePage(!next),

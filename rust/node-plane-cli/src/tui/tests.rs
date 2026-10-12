@@ -1693,7 +1693,7 @@ fn unmodified_editors_leave_without_warning_and_review_back_preserves_draft() {
     assert!(app.nodes.editor.as_ref().unwrap().dirty());
 }
 #[test]
-fn node_settings_paginate_small_terminals_and_save_requires_review() {
+fn node_settings_scroll_small_terminals_and_save_requires_review() {
     let mut app = test_profile_app();
     app.screen = Screen::Nodes;
     app.nodes.editor = Some(node_settings_editor());
@@ -5020,4 +5020,105 @@ fn selected_subsection_keeps_theme_label_with_pointer_elsewhere() {
         (area.x + 1..area.right() - 1)
             .any(|x| terminal.backend().buffer()[(x, area.y + 1)].fg == Color::Cyan)
     );
+}
+
+#[test]
+fn node_settings_grid_scrolls_without_page_buttons_or_reserved_footer() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Nodes;
+    app.nodes_sidebar = false;
+    app.nodes.editor = Some(node_settings_editor());
+    app.nodes.editor.as_mut().unwrap().protocols = vec!["awg".into(), "xray".into()];
+    app.nodes.editor.as_mut().unwrap().source["protocols"] = serde_json::json!(["awg", "xray"]);
+    app.nodes.editor.as_mut().unwrap().tab = crate::node_editor::Tab::Advanced;
+    let mut wide = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+    wide.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    let fields: Vec<_> = app
+        .hits
+        .iter()
+        .filter(|h| {
+            matches!(
+                h.control,
+                Control::NodesEditField(_) | Control::NodesEditChoice(_)
+            )
+        })
+        .collect();
+    assert_eq!(
+        fields.len(),
+        node_editor_items(app.nodes.editor.as_ref().unwrap()).len()
+    );
+    assert_eq!(fields[0].area.y, fields[1].area.y);
+    assert!(fields[0].area.right() < fields[1].area.x);
+    assert!(app.scrollbar.get().is_none());
+    let text = wide
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(|c| c.symbol())
+        .collect::<String>();
+    assert!(!text.contains("Next page") && !text.contains("Previous page"));
+    let mut narrow = Terminal::new(ratatui::backend::TestBackend::new(80, 30)).unwrap();
+    narrow.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    assert!(app.scrollbar.get().is_some());
+    let visible: Vec<_> = app
+        .hits
+        .iter()
+        .filter(|h| {
+            matches!(
+                h.control,
+                Control::NodesEditField(_) | Control::NodesEditChoice(_)
+            )
+        })
+        .collect();
+    assert!(
+        visible
+            .windows(2)
+            .all(|pair| pair[1].area.y > pair[0].area.y)
+    );
+    let last = visible.last().unwrap().control;
+    app.nodes_selected = app
+        .nodes_controls()
+        .iter()
+        .position(|c| *c == last)
+        .unwrap();
+    app.nodes_key(KeyCode::Down.into());
+    narrow.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    assert!(app.list_viewport.get() > 0);
+    assert!(matches!(
+        app.nodes_controls()[app.nodes_selected],
+        Control::NodesEditField(_) | Control::NodesEditChoice(_)
+    ));
+    app.manual_viewport.set(Some(100));
+    narrow.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    assert_eq!(app.list_viewport.get(), app.list_max_viewport.get());
+    wide.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    assert_eq!(app.list_viewport.get(), 0);
+    assert!(app.scrollbar.get().is_none());
+}
+
+#[test]
+fn node_settings_save_reset_share_a_single_footer_row() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Nodes;
+    app.nodes.editor = Some(node_settings_editor());
+    app.nodes.editor.as_mut().unwrap().fields[0].value = "New name".into();
+    app.nodes.editor.as_mut().unwrap().changed();
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    let save = app
+        .hits
+        .iter()
+        .find(|h| h.control == Control::NodesEditSave)
+        .unwrap()
+        .area;
+    let reset = app
+        .hits
+        .iter()
+        .find(|h| h.control == Control::NodesEditReset)
+        .unwrap()
+        .area;
+    assert_eq!(save.y, reset.y);
+    assert_eq!(save.height, 3);
+    assert_eq!(save.bottom(), 36);
 }
