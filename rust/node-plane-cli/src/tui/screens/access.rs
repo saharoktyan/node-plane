@@ -825,7 +825,7 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
             ("owner_account_id", "Account"),
             ("expires_at", "Expires"),
         ] {
-            if !card[key].is_null() && !(app.access.tab == Tab::Requests && key == "status") {
+            if !(card[key].is_null() || app.access.tab == Tab::Requests && key == "status") {
                 lines.push(Line::from(format!("{title}: {}", text(&card[key]))));
             }
         }
