@@ -27,6 +27,24 @@ class RouterStartupTests(TestCase):
 
 
 class TelegramFlowTests(IsolatedAsyncioTestCase):
+    async def test_quick_start_home_button_reaches_the_guide(self):
+        from telegram_client.routers import quick_start
+        backend = SimpleNamespace(notifications=AsyncMock(return_value={'total': 0, 'items': []}),
+            me=AsyncMock(return_value={'role': 'admin', 'status': 'approved'}),
+            bot_title=AsyncMock(return_value={'title': 'Node Plane'}),
+            request=AsyncMock(return_value={'steps': [{'key': 'defaults', 'complete': False}],
+                'next_step': 'defaults', 'node_key': None, 'profile_id': None}))
+        with patch.object(user, 'render', new_callable=AsyncMock) as home:
+            await user.show_home(123, 123, self.bot, backend, self.state, 77)
+        rows = home.call_args.args[3]
+        self.query.data = next(b.callback_data for row in rows for b in row
+            if b.callback_data.startswith('u:') and user.actions[b.callback_data[2:]].name == 'quick_start')
+        with patch.object(quick_start, 'render', new_callable=AsyncMock) as guide:
+            await user.user_action_cb(self.query, self.bot, backend, self.state)
+        backend.request.assert_awaited_once_with('GET', '/api/v1/system/onboarding', telegram_user_id=123)
+        self.assertEqual(guide.call_args.args[2].title, 'Quick Start')
+        self.assertTrue(any(b.callback_data == 'quick_start_defaults' for row in guide.call_args.args[3] for b in row))
+
     async def test_admin_quick_start_only_reads_nodes_when_requested(self):
         backend = SimpleNamespace(notifications=AsyncMock(return_value={'total': 0, 'items': []}),
             me=AsyncMock(return_value={'role': 'admin', 'status': 'approved'}),

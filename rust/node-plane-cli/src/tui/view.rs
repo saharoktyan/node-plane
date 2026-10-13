@@ -213,9 +213,7 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
         rows[0],
     );
     match app.screen {
-        Screen::Idle => {
-            draw_navigation(frame, app, rows[1], &mut hits);
-        }
+        Screen::Idle => draw_quick_start(frame, app, rows[1], &mut hits),
         Screen::QuickStart => draw_quick_start(frame, app, rows[1], &mut hits),
         Screen::Form => draw_form(frame, app, rows[1], &mut hits),
         Screen::NewInstallation => {
@@ -419,9 +417,7 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
     } else {
         match app.screen {
             Screen::Idle => "↑ / ↓: select section   Enter / →: open   F1: Quick Start   Esc: exit",
-            Screen::QuickStart => {
-                "Tab / arrows: select   Enter: action   Space: don't show again   Esc: close"
-            }
+            Screen::QuickStart => "Tab / arrows: select   Enter: action   Esc: close",
             Screen::NodeWizard => {
                 "Tab / arrows: select   Enter / click: continue   Esc: previous step   Ctrl+C: exit"
             }

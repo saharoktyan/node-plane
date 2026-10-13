@@ -22,6 +22,8 @@ def parent_path(callback, locale, data):
             return menu
         if name == 'admin_menu':
             return admin
+        if name == 'quick_start':
+            return (*admin, Breadcrumb(tr(locale, 'quick_start.title'), callback))
         if name in {'profiles', 'profile'}:
             return (*menu, Breadcrumb(tr(locale, 'home.get_config'), callback))
         if name in {'account_info', 'account_profile'}:
@@ -49,7 +51,9 @@ def parent_path(callback, locale, data):
             return (*menu, member(tr(locale, 'devices.title'), 'device_list', args[0]),
                     Breadcrumb(tr(locale, 'navigation.device'), callback))
         return ()
-    roots = {'admin_menu': admin, 'admin_settings': settings,
+    roots = {'quick_start': (*admin, Breadcrumb(tr(locale, 'quick_start.title'), 'quick_start')),
+             'quick_start_defaults': (*admin, Breadcrumb(tr(locale, 'quick_start.title'), 'quick_start')),
+             'admin_menu': admin, 'admin_settings': settings,
              'admin_alerts': (*admin, Breadcrumb(tr(locale, 'alerts.title'), 'admin_alerts')),
              'admin_nodes': servers, 'admin_profiles': profiles,
              'accounts': (*admin, Breadcrumb(tr(locale, 'accounts.title'), 'accounts')),

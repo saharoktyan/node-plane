@@ -176,11 +176,9 @@ impl App {
                 }
                 return None;
             }
-            Control::QuickStartToggle => {
-                self.connections.hide_quick_start = !self.connections.hide_quick_start;
-                if let Err(error) = self.connections.save(&self.state_dir) {
-                    self.error = error.to_string();
-                }
+            Control::QuickStartRefresh => {
+                self.controller.profile = self.form.saved.as_ref().map(|p| p.id);
+                self.controller_command(crate::controller::Command::Onboarding);
                 return None;
             }
             Control::QuickStartClose => {

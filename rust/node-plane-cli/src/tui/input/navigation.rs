@@ -366,6 +366,8 @@ impl App {
                         | Control::Temporary
                         | Control::Settings
                         | Control::QuickProfile
+                        | Control::QuickStartRefresh
+                        | Control::QuickStartAction
                 )
             })
             .collect();

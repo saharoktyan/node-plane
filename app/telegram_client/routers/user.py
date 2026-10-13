@@ -300,6 +300,7 @@ async def show_home(chat_id: int, user_id: int, bot: Bot, backend: BackendClient
             embedded_buttons=True, navigation=True), rows[-1:], state, message_id)
     else:
         await render(bot, chat_id, Screen(bot_title, lines, embedded_buttons=True), rows, state, message_id)
+    await state.update_data(home_panel_active=True)
 
 
 async def show_language_picker(chat_id: int, user_id: int, bot: Bot,
@@ -997,6 +998,9 @@ async def user_action_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
             finally:
                 logging.getLogger(__name__).info('Language selection transition finished in %.3fs',
                                                 time.monotonic() - started)
+        elif action.name == 'quick_start':
+            from .quick_start import show
+            await show(chat_id, user_id, message_id, bot, backend, state)
         elif action.name == 'profiles':
             await show_profiles(chat_id, user_id, message_id, bot, backend, state)
         elif action.name == 'profile':
@@ -1166,6 +1170,7 @@ async def show_admin_menu(chat_id: int, user_id: int, message_id: int,
     await render(bot, chat_id, Screen(f"{tr(locale, 'admin.menu')} · {bot_title}",
         sections=tuple(sections), embedded_buttons=True, navigation=True),
         [[button(user_id, tr(locale, 'back'), 'home')]], state, message_id)
+    await state.update_data(admin_panel_active=True)
 
 
 @router.callback_query(F.data == 'admin_status')
@@ -1261,6 +1266,9 @@ async def admin_menu_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
     await query.answer()
     account = await backend.me(query.from_user.id)
     if account['role'] != 'admin' or account['status'] != 'approved':
+        from ..access_guard import leave_admin_panel
+        await leave_admin_panel(bot, backend, state, query.from_user.id,
+            query.message.chat.id, query.message.message_id, account)
         return
     await state.set_state(None)
     await show_admin_menu(query.message.chat.id, query.from_user.id,

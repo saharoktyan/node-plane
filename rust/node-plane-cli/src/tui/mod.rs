@@ -123,6 +123,7 @@ pub fn run(mut request: Request) -> Result<()> {
     let mut self_confirmation: Option<mpsc::Receiver<Answer>> = None;
     let mut self_updating = false;
     let mut last_presence_check = std::time::Instant::now();
+    let mut last_onboarding_poll = std::time::Instant::now();
     let mut last_controller_poll = std::time::Instant::now();
     let mut last_temporary_poll = std::time::Instant::now();
     let mut last_access_poll = std::time::Instant::now();
@@ -177,6 +178,7 @@ pub fn run(mut request: Request) -> Result<()> {
             app.temporary = crate::temporary::Browser::default();
         }
         if app.probe_requested
+            && receiver.is_none()
             && !app.controller.verifying
             && !app.nodes_busy
             && app.nodes_requested.is_none()
@@ -186,6 +188,7 @@ pub fn run(mut request: Request) -> Result<()> {
         }
         app.ssh_state = nodes_worker.state();
         if last_presence_check.elapsed() >= Duration::from_secs(30)
+            && receiver.is_none()
             && app.ssh_state == crate::nodes::ConnectionState::Connected
             && app.has_installation()
             && !app.controller.removal_active()
@@ -274,9 +277,12 @@ pub fn run(mut request: Request) -> Result<()> {
                 app.temporary_command(command);
             }
         }
-        if !app.nodes_busy
-            && let Some(command) = app.nodes_requested.take()
-        {
+        if app.onboarding_poll_ready(last_onboarding_poll.elapsed(), receiver.is_some()) {
+            last_onboarding_poll = std::time::Instant::now();
+            app.controller.profile = app.form.saved.as_ref().map(|p| p.id);
+            app.controller_command(crate::controller::Command::Onboarding);
+        }
+        if let Some(command) = app.take_browser_request(receiver.is_some()) {
             let mut next = app.next_request();
             next.action = Action::Diagnose;
             next.host = app.form.fields[0].clone();

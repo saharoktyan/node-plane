@@ -97,6 +97,32 @@ impl App {
             result_page_size: std::cell::Cell::new(1),
         }
     }
+    pub(super) fn take_browser_request(
+        &mut self,
+        operation_active: bool,
+    ) -> Option<crate::nodes::Command> {
+        // All operations share one event receiver. Do not replace it while a workflow owns it.
+        if operation_active || self.nodes_busy {
+            return None;
+        }
+        self.nodes_requested.take()
+    }
+
+    pub(super) fn onboarding_poll_ready(
+        &self,
+        elapsed: std::time::Duration,
+        operation_active: bool,
+    ) -> bool {
+        matches!(self.screen, Screen::Idle | Screen::QuickStart)
+            && self.controller_ready()
+            && !operation_active
+            && !self.nodes_busy
+            && self.nodes_requested.is_none()
+            && self.prompt.is_none()
+            && !self.exit
+            && elapsed >= std::time::Duration::from_secs(1)
+    }
+
     pub(super) fn open_quick_start(&mut self) {
         let previous = std::mem::replace(&mut self.screen, Screen::QuickStart);
         if !matches!(previous, Screen::QuickStart) {

@@ -172,6 +172,8 @@ async def _render(bot: Bot, chat_id: int, screen: Screen, rows: list[list[Inline
     
     data = await state.get_data()
     parents = screen_parents(screen, rows, normalize_locale(data.get('locale')), data)
+    await state.update_data(home_panel_active=False,
+        admin_panel_active=any(p.callback == 'admin_menu' for p in parents))
     navigation_nonce = uuid4().hex[:12]
     screen = replace(screen, breadcrumbs=parents, breadcrumb_more=
         'nav_more:' + navigation_nonce if parents and (screen.navigation_return or not (screen.files or screen.qr)) else None)

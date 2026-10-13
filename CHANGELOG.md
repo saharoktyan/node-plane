@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 1.0.0-alpha.3 - 2026-10-13
+
+- Return revoked Telegram administrators from open admin panels and drafts to the current member menu; recheck stale admin navigation before handling it.
+- Refresh the open Telegram home menu after administrator promotion or demotion without requiring /start, including menus without breadcrumbs.
+- Route the owner-bound Quick Start button to the guide.
+- Keep background presence requests from replacing the event receiver of an active Workstation update.
+- Show Quick Start progress beside the Workstation sidebar when no section is selected; refresh once per second only while visible.
+
 ## 1.0.0-alpha.2 - 2026-10-13
 
 - Restore the previous AWG container correctly after deployment failure on Bash 5.2 by returning explicit Docker command status from the EXIT trap.

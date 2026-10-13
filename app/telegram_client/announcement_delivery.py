@@ -33,6 +33,7 @@ async def refresh_menu(bot, backend, dispatcher):
     from aiogram.fsm.context import FSMContext
     from aiogram.fsm.storage.base import StorageKey
     from .routers.user import show_home
+    from .access_guard import leave_admin_panel, admin_panel
     delivery = (await backend.request('POST', '/api/v1/integrations/telegram/menu-refresh/claim')).get('delivery')
     if not delivery:
         return False
@@ -43,10 +44,23 @@ async def refresh_menu(bot, backend, dispatcher):
         async with dispatcher.fsm.events_isolation.lock(key=key):
             state = FSMContext(storage=dispatcher.storage, key=key)
             data = await state.get_data()
+            previous = (data.get('home_presentation') or {}).get('account') or {}
+            lost_access = (account.get('role') != 'admin' or account.get('status') != 'approved') and (
+                previous.get('role') == 'admin' or admin_panel(data))
             await state.update_data(home_presentation=None)
             parents = (data.get('navigation_screen') or {}).get('parents') or []
-            if data.get('control_message_id') and len(parents) == 1 and str(parents[0].get('callback', '')).startswith('u:'):
-                await show_home(recipient, recipient, bot, backend, state, data['control_message_id'], account=account)
+            if data.get('control_message_id') and lost_access:
+                await leave_admin_panel(bot, backend, state, recipient, recipient,
+                    data['control_message_id'], account)
+            elif data.get('control_message_id') and (data.get('home_panel_active')
+                    or len(parents) == 1 and str(parents[0].get('callback', '')).startswith('u:')):
+                try:
+                    await show_home(recipient, recipient, bot, backend, state, data['control_message_id'], account=account)
+                except Exception:
+                    # Rendering clears the screen marker before Telegram accepts the edit.
+                    # Keep this queued home refresh retryable if delivery fails.
+                    await state.update_data(home_panel_active=True)
+                    raise
     await backend.request('POST', f"/api/v1/integrations/telegram/menu-refresh/{account['id']}/ack?revision={delivery['revision']}")
     return True
 

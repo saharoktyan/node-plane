@@ -777,9 +777,6 @@ impl App {
             KeyCode::Tab | KeyCode::BackTab => self.confirm = !self.confirm,
             KeyCode::Down | KeyCode::Right => self.confirm = true,
             KeyCode::Up | KeyCode::Left => self.confirm = false,
-            KeyCode::Char(' ') => {
-                self.activate(Control::QuickStartToggle);
-            }
             KeyCode::Enter => {
                 self.activate(if self.confirm {
                     Control::QuickStartClose

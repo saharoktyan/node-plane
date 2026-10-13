@@ -808,18 +808,18 @@ fn mouse_wheel_pans_without_changing_keyboard_selection() {
     assert!(app.nodes_requested.is_none());
 }
 #[test]
-fn idle_only_exposes_sidebar_and_arrows_do_not_open_sections() {
+fn idle_exposes_sidebar_and_quick_start_without_opening_sections_on_arrows() {
     let mut app = test_profile_app();
     app.screen = Screen::Idle;
     let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 40)).unwrap();
     terminal
         .draw(|frame| app.hits = draw_content(frame, &app))
         .unwrap();
-    assert!(
-        app.hits
-            .iter()
-            .all(|hit| hit.area.x < 26 || hit.control == Control::WindowClose)
-    );
+    assert!(app.hits.iter().all(|hit| hit.area.x < 26
+        || matches!(
+            hit.control,
+            Control::WindowClose | Control::QuickStartAction | Control::QuickStartRefresh
+        )));
     app.idle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
     assert!(matches!(app.screen, Screen::Idle));
     assert!(app.nodes_requested.is_none());
@@ -5375,4 +5375,126 @@ fn quick_start_continue_preserves_an_unsaved_node_draft() {
         "changed.example.com"
     );
     assert!(app.error.contains("current draft"));
+}
+
+#[test]
+fn browser_presence_cannot_replace_a_running_update_receiver() {
+    let mut app = test_profile_app();
+    app.form.action = Action::Update;
+    app.screen = Screen::Running;
+    app.nodes_busy = false; // The workflow owns the receiver, not a browser command.
+    app.nodes_requested = Some(crate::nodes::Command::Controller(
+        app.controller.profile,
+        crate::controller::Command::Presence,
+    ));
+    app.event(Event::Stage("Updating components".into()));
+    let id = uuid::Uuid::new_v4();
+    app.event(Event::Update(crate::workstation::UpdateSnapshot {
+        id,
+        status: "running".into(),
+        phase: "core".into(),
+        components: vec![("backend".into(), "succeeded".into())],
+        nodes: vec![],
+        error: String::new(),
+        rollback: String::new(),
+    }));
+    assert!(app.take_browser_request(true).is_none());
+    assert_eq!(app.update.as_ref().unwrap().id, id);
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    let text: String = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|c| c.symbol())
+        .collect();
+    assert!(text.contains("Controller stack"));
+    assert!(!text.contains("Update preparation"));
+    assert!(app.nodes_requested.is_some());
+    assert!(matches!(app.screen, Screen::Running));
+    app.event(Event::Finished(Ok("Whole-stack update complete".into())));
+    assert!(matches!(app.screen, Screen::Finished));
+    assert!(app.take_browser_request(false).is_some());
+    assert!(app.outcome.as_ref().unwrap().is_ok());
+}
+
+#[test]
+fn idle_shows_live_quick_start_with_the_sidebar_and_keyboard_actions() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Idle;
+    app.controller.onboarding = Some(serde_json::json!({"steps":[
+        {"key":"defaults","complete":true}, {"key":"node","complete":false}],
+        "next_step":"node"}));
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    let text: String = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|c| c.symbol())
+        .collect();
+    assert!(text.contains("Quick Start"));
+    assert!(text.contains("✓ Confirm installation defaults"));
+    assert!(text.contains("○ Create your first VPN node"));
+    assert!(app.hits.iter().any(|h| h.control == Control::Settings));
+    app.idle_selection = app
+        .idle_controls()
+        .iter()
+        .position(|c| *c == Control::QuickStartAction)
+        .unwrap();
+    app.idle_key(KeyCode::Enter.into());
+    assert!(matches!(app.screen, Screen::Nodes));
+    assert!(matches!(
+        app.nodes_requested,
+        Some(crate::nodes::Command::CreationOptions)
+    ));
+}
+
+#[test]
+fn quick_start_polls_each_second_only_while_visible_and_idle() {
+    let mut app = test_profile_app();
+    let elapsed = std::time::Duration::from_secs(1);
+    for screen in [Screen::Idle, Screen::QuickStart] {
+        app.screen = screen;
+        assert!(app.onboarding_poll_ready(elapsed, false));
+        assert!(!app.onboarding_poll_ready(std::time::Duration::from_millis(999), false));
+        assert!(!app.onboarding_poll_ready(elapsed, true));
+    }
+    for screen in [
+        Screen::Nodes,
+        Screen::Controller,
+        Screen::Access,
+        Screen::Running,
+    ] {
+        app.screen = screen;
+        assert!(!app.onboarding_poll_ready(elapsed, false));
+    }
+    app.screen = Screen::Idle;
+    app.nodes_busy = true;
+    assert!(!app.onboarding_poll_ready(elapsed, false));
+}
+
+#[test]
+fn onboarding_background_refresh_keeps_idle_screen_and_sidebar_selection() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Idle;
+    app.controller.profile = app.form.saved.as_ref().map(|p| p.id);
+    app.idle_selection = 2;
+    app.nodes_busy = true;
+    app.nodes_background = true;
+    app.event(Event::Nodes(crate::nodes::Update::Controller(
+        app.controller.profile,
+        crate::controller::Command::Onboarding,
+        serde_json::json!({"steps":[{"key":"defaults","complete":true}],"next_step":"node"}),
+    )));
+    app.event(Event::Finished(Ok("".into())));
+    assert!(matches!(app.screen, Screen::Idle));
+    assert_eq!(app.idle_selection, 2);
+    assert_eq!(
+        app.controller.onboarding.as_ref().unwrap()["next_step"],
+        "node"
+    );
+    assert!(!app.nodes_busy);
 }
