@@ -471,7 +471,14 @@ where
         while let Some(frame) = body.frame().await {
             let frame = frame.map_err(|_| transport_error())?;
             if let Ok(data) = frame.into_data() {
-                if bytes.len() + data.len() > 1024 * 1024 {
+                let limit = if path.starts_with("/api/v1/system/backups/catalog/")
+                    && path.ends_with("/export")
+                {
+                    64 * 1024 * 1024
+                } else {
+                    1024 * 1024
+                };
+                if bytes.len() + data.len() > limit {
                     return Err(ApiError {
                         status: Some(status),
                         code: "response_too_large".into(),

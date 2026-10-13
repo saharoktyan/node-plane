@@ -185,8 +185,19 @@ class BackupService:
         path = self._path(backup_id)
         if path.is_symlink() or not path.is_file():
             raise AccessDenied("resource_not_found", 404)
+        return self.decode_snapshot(path.read_bytes())
+
+    @staticmethod
+    def decode_snapshot(content):
         try:
-            payload = json.loads(path.read_bytes())
+            payload = json.loads(content)
+            if set(payload) != {'format', 'created_at', 'trigger', 'app_version', 'checksum', 'tables'}:
+                raise ValueError()
+            if any(not isinstance(payload[key], str) or not payload[key] or len(payload[key]) > 255
+                   for key in ('created_at', 'trigger', 'app_version', 'checksum')):
+                raise ValueError()
+            if datetime.fromisoformat(payload['created_at']).tzinfo is None:
+                raise ValueError()
             legacy = payload['format'] == 'node-plane-backend-v1'
             from .grant_policies import TABLE_COLUMNS, canonical_region
             old_policy = payload['format'] in ('node-plane-backend-v1', 'node-plane-backend-v2')
@@ -233,8 +244,53 @@ class BackupService:
                 for table, columns in TABLE_COLUMNS.items():
                     payload['tables'][table] = {'columns': columns, 'rows': rows[table]}
             return payload
-        except (ValueError, KeyError, TypeError):
+        except (ValueError, KeyError, TypeError, RecursionError):
             raise AccessDenied("backup_invalid", 409) from None
+
+    def export_snapshot(self, actor, backup_id):
+        require_permission(actor, 'settings.manage')
+        self._load(backup_id)
+        return self._path(backup_id).read_bytes()
+
+    def import_snapshot(self, actor, content):
+        require_permission(actor, 'settings.manage')
+        if len(content) > 64 * 1024 * 1024:
+            raise AccessDenied('backup_too_large', 413)
+        value = self.decode_snapshot(content)
+        with self.db.transaction() as conn:
+            from .maintenance_gate import admit
+            admit(conn)
+            account = conn.execute('SELECT role,status FROM backend_accounts WHERE id=?', (actor.account.id,)).fetchone()
+            if account is None or account['role'] != 'admin' or account['status'] != 'approved':
+                raise AccessDenied('permission_denied')
+            # Serialize imports and deduplicate by snapshot content, independent
+            # of the filename chosen on another controller.
+            conn.execute("INSERT INTO backend_system_settings(key,value) VALUES ('backup_import_lock','1') ON CONFLICT(key) DO NOTHING")
+            conn.execute("UPDATE backend_system_settings SET value=value WHERE key='backup_import_lock'")
+            for path in self.root.glob('*.json'):
+                try:
+                    if self._load(path.stem)['checksum'] == value['checksum']:
+                        return self.detail(actor, path.stem)
+                except (AccessDenied, OSError):
+                    continue
+            self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
+            backup_id = str(uuid4())
+            temp = self.root / f'.{backup_id}.tmp'
+            try:
+                fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+                with os.fdopen(fd, 'wb') as stream:
+                    stream.write(content)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.replace(temp, self._path(backup_id))
+                fd = os.open(self.root, os.O_RDONLY)
+                try:
+                    os.fsync(fd)
+                finally:
+                    os.close(fd)
+            finally:
+                temp.unlink(missing_ok=True)
+        return self.detail(actor, backup_id)
 
     def detail(self, actor, backup_id):
         require_permission(actor, "settings.manage")
@@ -446,7 +502,7 @@ class BackupService:
                     rows = [r for r in rows if r["key"] not in {
                         "backup_last_scheduled", "traffic_last_scan", "traffic_cursor",
                         "traffic_generation"
-                    } and not r["key"].startswith(("traffic_consent:", "traffic_consent_generation:"))]
+                    } and not r["key"].startswith(("traffic_consent:", "traffic_consent_generation:", "telegram_retry_until:"))]
                 rows.sort(key=lambda row: encoded(row))
                 tables[table] = {"columns": columns, "rows": rows}
         checksum = hashlib.sha256(encoded(tables)).hexdigest()
@@ -524,6 +580,26 @@ class BackupService:
                 ).fetchall()
             }
             tables = payload["tables"]
+            remap = {}
+            for identity in identities:
+                conflict = next((row for row in tables['backend_external_identities']['rows']
+                    if (row['provider'], row['subject']) == (identity['provider'], identity['subject'])), None)
+                if conflict and conflict['account_id'] != actor.account.id:
+                    old = next((row for row in tables['backend_accounts']['rows']
+                        if row['id'] == conflict['account_id']), None)
+                    if identity['provider'] != 'telegram' or not old or old['role'] != 'admin' or old['status'] != 'approved':
+                        raise AccessDenied('backup_identity_conflict', 409)
+                    remap[old['id']] = actor.account.id
+            if len(remap) > 1:
+                raise AccessDenied('backup_identity_conflict', 409)
+            # A freshly installed controller gives the same Telegram operator a
+            # new account UUID. Keep current authentication and restore ownership
+            # from that operator's former administrator account.
+            for data in tables.values():
+                for row in data['rows']:
+                    for key in ('account_id', 'owner_account_id', 'decided_by'):
+                        if row.get(key) in remap:
+                            row[key] = remap[row[key]]
             recovery = [{"node_key": row["key"], "status": "pending"}
                         for row in tables["backend_nodes"]["rows"] if row["enabled"]]
             # Preserve the restoring administrator and its Telegram mapping so
@@ -531,7 +607,7 @@ class BackupService:
             tables["backend_accounts"]["rows"] = [
                 r
                 for r in tables["backend_accounts"]["rows"]
-                if r["id"] != actor.account.id
+                if r["id"] != actor.account.id and r['id'] not in remap
             ] + [current]
             for identity in identities:
                 conflict = next(

@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 1.0.0-alpha.1 - 2026-10-13
+
+- Fix member profile Details navigation and unknown traffic counters; keep Updates/Backups directly under the Telegram admin panel, including error returns and backup catalog breadcrumbs.
+
+- Restore manual AWG 3.1 profiles with shared validation, ordinary revisioned settings application and preservation of server/peer identities.
+- Add Workstation snapshot download/import and restoration across a fresh controller for the same Telegram administrator.
+- Defer definite Telegram rate-limit rejections durably while preserving unknown delivery outcomes.
+- Add resumable Quick Start guides based on controller progress, and select stable installations in stable Workstation builds.
+
+- Fix inherited public addresses in node editors, preserve omitted settings in API patches, keep AWG port selection consistent, honor the configured VLESS fingerprint, reject invalid settings before saving, and verify node environment and AWG preset/interface during settings recovery.
+
+- Require full Python, PostgreSQL, Docker and native Workstation checks before release publication; commit driver/agent dependency lockfiles and use locked Rust builds.
+- Refresh AWG 3.1 profile generation with independent padding, randomized headers and timing ranges; validate padding limits and rekey deadlines while preserving existing profiles on update.
 - Fix Workstation announcements and account selection when creating profiles.
 - Serialize Telegram interactions, refresh member menus after account changes, and confirm bot-name and request-message edits.
 - Reconnect nodes during backup restoration and report partial recovery per node.

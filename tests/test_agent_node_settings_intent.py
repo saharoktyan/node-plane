@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import os
+import shlex
 from pathlib import Path
 import subprocess
 import tempfile
@@ -53,7 +54,7 @@ class AgentNodeSettingsIntentTests(unittest.TestCase):
         awg = root / 'wg0.conf'
         env.write_text(f'XRAY_CONFIG={root / "xray.json"}\nAWG_CONFIG={awg}\nXRAY_CONTAINER_NAME=xray\nAWG_CONTAINER_NAME=awg\n')
         (root / 'awg_ports.py').write_text('def select_port(*args):\n    return 8443\n')
-        (root / 'init-awg.sh').write_text(f'#!/bin/bash\nsource "{env}"\nprintf "[Interface]\\nListenPort = %s\\n" "$AWG_SERVER_PORT" > "{awg}"\n')
+        (root / 'init-awg.sh').write_text(f'#!/bin/bash\nsource "{env}"\nprintf "[Interface]\\nListenPort = %s\\nI1 = <b 0xc000000001><rc 8><r 900>\\n" "$AWG_SERVER_PORT" > "{awg}"\n')
         (root / 'apply-node-settings.sh').write_text('#!/bin/sh\nexit 0\n')
         for name in ('init-awg.sh', 'apply-node-settings.sh'):
             (root / name).chmod(0o755)
@@ -228,3 +229,121 @@ printf '[Interface]\\nListenPort = 51820\\n' > '{awg}'
         self.assertEqual(launched.count('init-xray.sh'), 1)
         self.assertEqual(launched.count('init-awg.sh'), 1)
         self.assertEqual(launched.count('apply-node-settings.sh'), 2)
+
+    def test_environment_verification_covers_endpoint_port_interface_preset_and_fingerprint(self):
+        intent = self.intent()
+        intent['settings'].update(awg_public_host='awg.example', awg_interface='vpn0',
+            awg_i1_preset='dns', xray_fingerprint='firefox')
+        env = Path(self.temp.name) / 'node.env'
+        values = {'SERVER_KEY': 'n1', 'AWG_SERVER_IP': 'awg.example', 'AWG_SERVER_PORT': '51820',
+                  'AWG_IFACE': 'vpn0', 'AWG_I1_PRESET': 'dns', 'XRAY_FP': 'firefox'}
+        def write(settings):
+            env.write_text(''.join(f'{key}={value}\n' for key, value in settings.items()))
+        write(values)
+        MODULE.verify_node_settings_environment(intent, env)
+        for field in values:
+            with self.subTest(field=field):
+                write({**values, field: 'old'})
+                with self.assertRaises(ValueError):
+                    MODULE.verify_node_settings_environment(intent, env)
+
+    def test_config_verification_rejects_old_preset_or_interface(self):
+        intent = self.intent()
+        intent['protocols'] = ['awg']
+        intent['settings'].update(awg_i1_preset='dns', awg_interface='vpn0')
+        path = Path(self.temp.name) / 'vpn0.conf'
+        path.write_text('[Interface]\nListenPort = 51820\nI1 = <b 0xc000000001><rc 8><r 900>\n')
+        with self.assertRaises(ValueError):
+            MODULE.verify_node_settings_config(intent, '', path)
+        path.write_text('[Interface]\nListenPort = 51820\nI1 = <rc 2><b 0x01000001000000000000><r 32>\n')
+        MODULE.verify_node_settings_config(intent, '', path)
+        old = path.with_name('wg0.conf')
+        old.write_text(path.read_text())
+        with self.assertRaises(ValueError):
+            MODULE.verify_node_settings_config(intent, '', old)
+
+    def test_repair_does_not_accept_matching_configs_with_old_endpoint(self):
+        intent = self.intent()
+        env = Path(self.temp.name) / 'node.env'
+        env.write_text('SERVER_KEY=n1\nAWG_SERVER_IP=old.example\nAWG_SERVER_PORT=51820\n'
+                       'AWG_IFACE=wg0\nAWG_I1_PRESET=quic\nXRAY_FP=chrome\n')
+        with patch.object(MODULE, 'verify_node_settings_config') as verify, patch.object(
+                MODULE.subprocess, 'run', side_effect=[
+                    subprocess.CompletedProcess([], 0, '/tmp/xray.json\n/tmp/wg0.conf\nxray\nawg\n'),
+                    subprocess.CompletedProcess([], 0, 'n1\nold.example\n51820\nwg0\nquic\nchrome\n'),
+                    subprocess.CompletedProcess([], 0, 'true\n'),
+                    subprocess.CompletedProcess([], 0, 'true\n')]):
+            result = MODULE.inspect_node_settings_for_repair(intent, env_path=env)
+        self.assertFalse(result['config_matches'])
+        self.assertTrue(result['containers_running'])
+        verify.assert_not_called()
+
+    def test_real_settings_script_preserves_identities_and_updates_protocol_parameters(self):
+        root = Path(self.temp.name)
+        assets = Path(__file__).resolve().parents[1] / 'runtime_assets'
+        env = root / 'node.env'
+        xray = root / 'xray.json'
+        awg = root / 'wg0.conf'
+        env.write_text(f'XRAY_CONFIG={xray}\nAWG_CONFIG={awg}\nXRAY_CONTAINER_NAME=xray\nAWG_CONTAINER_NAME=awg\n')
+        data = {'inbounds': [
+            {'tag': tag, 'port': port, 'settings': {'clients': [{'id': 'existing-user'}]},
+             'streamSettings': {'realitySettings': {'privateKey': 'existing-server-key',
+                 'shortIds': ['existing-short-id'], 'serverNames': ['old.example'], 'dest': 'old.example:443'},
+                 **({'xhttpSettings': {'path': '/old'}} if tag == 'reality-xhttp' else {})}}
+            for tag, port in [('reality-tcp', 443), ('reality-xhttp', 8443)]]}
+        xray.write_text(json.dumps(data))
+        profile = subprocess.check_output(['python3', str(assets / 'awg_profile.py'), 'init', str(awg), 'quic'], text=True)
+        peers = '\n# existing-device\n[Peer]\nPublicKey = existing-peer\nPresharedKey = existing-psk\nAllowedIPs = 10.8.1.2/32\n'
+        awg.write_text('[Interface]\nPrivateKey = existing-server\nListenPort = 51820\n' + profile + peers)
+        script = (assets / 'apply-node-settings.sh').read_text().replace(
+            'source /etc/node-plane/node.env', f'source {shlex.quote(str(env))}').replace(
+            '/opt/node-plane-runtime/', str(root) + '/')
+        (root / 'apply-node-settings.sh').write_text(script)
+        (root / 'awg_profile.py').write_text((assets / 'awg_profile.py').read_text())
+        for name in ('deploy-xray.sh', 'deploy-awg.sh'):
+            (root / name).write_text('#!/bin/sh\nexit 0\n')
+            (root / name).chmod(0o755)
+        (root / 'apply-node-settings.sh').chmod(0o755)
+        intent = self.intent()
+        intent['settings'].update(public_host='new.example', xray_host='vless.example',
+            xray_sni='www.example.com', xray_fingerprint='firefox', xray_tcp_port=1443,
+            xray_xhttp_port=2443, xray_xhttp_path='/new', awg_public_host='awg.example',
+            awg_interface='vpn0', awg_port=5300, awg_i1_preset='dns', awg_port_mode='manual')
+        real_run = subprocess.run
+        def run(args, **kwargs):
+            if args[0] in {'ufw', 'docker'}:
+                return subprocess.CompletedProcess(args, 0, 'true\n' if args[0] == 'docker' else '')
+            return real_run(args, **kwargs)
+        with patch.object(MODULE.subprocess, 'run', side_effect=run):
+            result = MODULE.run_node_settings(intent, 0, env_path=env, root=root)
+        self.assertEqual(json.loads(result['payload_json'])['settings_sha256'], MODULE.node_settings_digest(intent))
+        updated = json.loads(xray.read_text())
+        for inbound in updated['inbounds']:
+            self.assertEqual(inbound['settings']['clients'], [{'id': 'existing-user'}])
+            self.assertEqual(inbound['streamSettings']['realitySettings']['privateKey'], 'existing-server-key')
+            self.assertEqual(inbound['streamSettings']['realitySettings']['shortIds'], ['existing-short-id'])
+        new_awg = root / 'vpn0.conf'
+        self.assertIn('PrivateKey = existing-server', new_awg.read_text())
+        self.assertIn(peers, new_awg.read_text())
+        MODULE.verify_node_settings_environment(intent, env)
+        MODULE.verify_node_settings_config(intent, xray, new_awg)
+        # Explicit profiles may use custom CPS patterns unrelated to the preset.
+        manual = MODULE.awg_profile_module().new_profile('quic')
+        manual['I1'] = '<r 80>'
+        intent['settings']['awg_parameters'] = manual
+        with patch.object(MODULE.subprocess, 'run', side_effect=run):
+            MODULE.run_node_settings(intent, 0, env_path=env, root=root)
+        self.assertIn(peers, new_awg.read_text())
+        self.assertIn('PrivateKey = existing-server', new_awg.read_text())
+        MODULE.verify_node_settings_config(intent, xray, new_awg)
+        modified = dict(manual, Jc=str(int(manual['Jc']) + 1))
+        wrong = dict(intent, settings=dict(intent['settings'], awg_parameters=modified))
+        with self.assertRaises(ValueError):
+            MODULE.verify_node_settings_config(wrong, xray, new_awg)
+        self.assertEqual((root / '.node-plane-i1-preset').read_text().strip(), 'manual')
+        intent['settings']['awg_parameters'] = {}
+        with patch.object(MODULE.subprocess, 'run', side_effect=run):
+            MODULE.run_node_settings(intent, 0, env_path=env, root=root)
+        self.assertEqual((root / '.node-plane-i1-preset').read_text().strip(), 'dns')
+        self.assertIn('I1 = <rc 2><b 0x01000001000000000000>', new_awg.read_text())
+        self.assertIn(peers, new_awg.read_text())

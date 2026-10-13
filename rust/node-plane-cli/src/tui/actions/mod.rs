@@ -8,10 +8,15 @@ use super::*;
 
 impl App {
     pub(in crate::tui) fn unsaved_changes(&self) -> bool {
-        (matches!(self.screen, Screen::Controller)
+        let screen = if matches!(self.screen, Screen::QuickStart) {
+            self.quick_start_return.as_ref().unwrap_or(&self.screen)
+        } else {
+            &self.screen
+        };
+        (matches!(screen, Screen::Controller)
             && self.controller.defaults.is_some()
             && self.controller.defaults != self.controller.defaults_baseline)
-            || (matches!(self.screen, Screen::Access)
+            || (matches!(screen, Screen::Access)
                 && (self.access.editor.as_ref().is_some_and(|e| e.dirty())
                     || self
                         .access
@@ -25,7 +30,7 @@ impl App {
                                     .and_then(|v| v["display_name"].as_str())
                                     .unwrap_or("")
                         })))
-            || (matches!(self.screen, Screen::Nodes)
+            || (matches!(screen, Screen::Nodes)
                 && self.nodes.editor.as_ref().is_some_and(|e| e.dirty()))
     }
     pub(in crate::tui) fn activate(&mut self, control: Control) -> Option<KeyEvent> {
@@ -179,10 +184,45 @@ impl App {
                 return None;
             }
             Control::QuickStartClose => {
-                self.screen = Screen::Idle;
+                self.screen = self.quick_start_return.take().unwrap_or(Screen::Idle);
                 return None;
             }
             Control::QuickStartAction => {
+                if self.unsaved_changes() {
+                    self.screen = self.quick_start_return.take().unwrap_or(Screen::Form);
+                    self.error =
+                        "Save or discard the current draft before continuing Quick Start.".into();
+                    return None;
+                }
+                self.quick_start_return = None;
+                if self.controller_ready() {
+                    if let Some(guide) = &self.controller.onboarding {
+                        let step = guide["next_step"].as_str().unwrap_or("done");
+                        let node = guide["node_key"].as_str().map(str::to_owned);
+                        match step {
+                            "defaults" => self
+                                .controller_command(crate::controller::Command::OnboardingDefaults),
+                            "node" => {
+                                self.open_nodes();
+                                self.activate(Control::NodesNew);
+                            }
+                            "protocols" => {
+                                self.open_nodes();
+                                if let Some(key) = node {
+                                    self.nodes_requested = Some(crate::nodes::Command::Card(key));
+                                }
+                            }
+                            "access" | "config" => self.open_access(),
+                            _ => {
+                                self.screen = Screen::Controller;
+                            }
+                        }
+                    } else {
+                        self.controller.profile = self.form.saved.as_ref().map(|p| p.id);
+                        self.controller_command(crate::controller::Command::Onboarding);
+                    }
+                    return None;
+                }
                 self.screen = Screen::Form;
                 self.begin_edit(true);
                 return None;
@@ -282,6 +322,8 @@ impl App {
             | Control::ControllerBackupDetail(..)
             | Control::ControllerBackupRestore
             | Control::ControllerBackupDelete
+            | Control::ControllerBackupExport
+            | Control::ControllerBackupImport
             | Control::ControllerUpdateResult
             | Control::ControllerUpdateDismiss
             | Control::ControllerUpdateBranch

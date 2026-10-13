@@ -127,7 +127,7 @@ async def navigation_cb(query, bot, state, dispatcher=None, **handler_data):
     if action == 'nav_more':
         # Every destination comes from the structural, read-only route registry.
         rows = [[InlineKeyboardButton(text=p['label'], callback_data=p['callback'])]
-                for p in saved['parents']]
+                for p in saved['parents'] if p.get('callback')]
         rows.append([InlineKeyboardButton(text=tr(locale, 'back'), callback_data='nav_return:' + nonce)])
         screen = Screen(tr(locale, 'navigation.title'),
                         sections=(Section(saved['title']),), embedded_buttons=True, navigation=True)

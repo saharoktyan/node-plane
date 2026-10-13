@@ -78,6 +78,9 @@ class CoreReliabilityPostgresTests(unittest.TestCase):
         return profile
 
     def grant(self, profile, revision=1, key=None):
+        from backend.devices import DeviceRepository
+        with self.db.transaction() as conn:
+            DeviceRepository.ensure_default(conn, ProfileRepository(self.db).get(profile))
         return ProfileCommands(self.db).execute(self.actor, key or str(uuid4()),
             action='grants', profile_id=profile, revision=revision,
             values={'grants': [{'node_key': 'node', 'protocol': 'awg'}]})
@@ -411,6 +414,9 @@ class CoreReliabilityPostgresTests(unittest.TestCase):
 
     def test_crash_during_restore_rolls_back_and_next_worker_completes(self):
         profile = self.create_target()
+        # This fixture tests database rollback, with no live node to reconnect.
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_nodes SET enabled=0 WHERE key='node'")
         backup_id = self.service.create_snapshot()['backup_id']
         checksum = self.service.detail(self.actor, backup_id)['checksum']
         with self.db.transaction() as conn:
@@ -432,6 +438,7 @@ class CoreReliabilityPostgresTests(unittest.TestCase):
     def test_restore_with_bound_node_inventory_clears_old_host_binding(self):
         self.create_target()
         with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_nodes SET enabled=0 WHERE key='node'")
             conn.execute("INSERT INTO backend_node_removal_inventories VALUES ('node','{}')")
         backup_id = self.service.create_snapshot()['backup_id']
         checksum = self.service.detail(self.actor, backup_id)['checksum']

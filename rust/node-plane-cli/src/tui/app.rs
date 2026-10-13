@@ -37,6 +37,7 @@ impl App {
             self_check_requested: false,
             form: Form::new(r),
             screen: Screen::Form,
+            quick_start_return: None,
             error: String::new(),
             stage: String::new(),
             tracker: Tracker::default(),
@@ -96,6 +97,18 @@ impl App {
             result_page_size: std::cell::Cell::new(1),
         }
     }
+    pub(super) fn open_quick_start(&mut self) {
+        let previous = std::mem::replace(&mut self.screen, Screen::QuickStart);
+        if !matches!(previous, Screen::QuickStart) {
+            self.quick_start_return = Some(previous);
+        }
+        if self.controller_ready() {
+            self.controller.onboarding = None;
+            self.controller.profile = self.form.saved.as_ref().map(|p| p.id);
+            self.controller_command(crate::controller::Command::Onboarding);
+        }
+    }
+
     pub(super) fn load_connections(&mut self, request: &Request) -> Result<()> {
         self.connections = Connections::load(&self.state_dir)?;
         self.form.fields[11] =

@@ -6,7 +6,7 @@ Privileged Rust gRPC executor on each managed node. It reports facts and health,
 
 ```sh
 scripts/run_node_agent.sh
-cargo test --manifest-path rust/node-agent/Cargo.toml
+cargo test --locked --manifest-path rust/node-agent/Cargo.toml
 ```
 
 Configuration defaults to `/etc/node-plane/agent.toml`. Environment overrides include `NODE_AGENT_CONFIG_PATH`, `NODE_AGENT_NODE_KEY`, `NODE_AGENT_LISTEN_ADDR` and `NODE_AGENT_HEARTBEAT_SECONDS`.

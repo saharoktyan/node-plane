@@ -223,12 +223,14 @@ class DockerRuntimeTests(unittest.TestCase):
         for directory in ('xray', 'amnezia-awg/data', 'awg-clients', 'unrelated'):
             self.assertTrue((self.root / directory / 'sentinel').exists())
 
-    def awg_pair(self, preset):
+    def awg_pair(self, preset, *, timing=None, parameters=None):
         network = self.network()
         keys = [AWG.new_private_key(), AWG.new_private_key()]
         public = [docker('run', '--rm', '-i', '--network', 'none', '--entrypoint', 'awg', AWG_IMAGE,
             'pubkey', input=key + '\n').stdout.strip() for key in keys]
-        protection = AWG.new_profile(preset)
+        protection = dict(parameters) if parameters is not None else AWG.new_profile(preset)
+        protection.update(timing or {})
+        AWG.validate(protection)
         psk = base64.b64encode(os.urandom(32)).decode()
         names = [self.prefix + '-server-' + preset, self.prefix + '-client-' + preset]
         for index, suffix in enumerate(('server-' + preset, 'client-' + preset)):
@@ -247,6 +249,15 @@ class DockerRuntimeTests(unittest.TestCase):
                 '--device-cgroup-rule', 'c 10:200 rwm', '-e', 'WG_I_PREFER_BUGGY_USERSPACE_TO_POLISHED_KMOD=1',
                 '-v', f'{directory}:/config:ro', command=('sh', '-c', script))
         return names
+
+    def test_explicit_manual_awg31_profile_transfers_traffic(self):
+        profile = AWG.new_profile('quic')
+        profile.update(Jc='4', Jmin='50', Jmax='100', H1='10-20', H2='30-40',
+            H3='50-60', H4='70-80', I1='<r 80>', RekeyAfterTime='100-110', RejectAfterTime='220-240')
+        server, client = self.awg_pair('manual', parameters=profile)
+        for size in (64, 1200):
+            result = docker('exec', client, 'ping', '-c', '3', '-W', '2', '-s', str(size), '10.88.0.1')
+            self.assertIn('0% packet loss', result.stdout)
 
     def test_awg_all_cps_presets_transfer_small_large_packets_and_parallel_load(self):
         for preset in ('quic', 'dns', 'chaos'):
@@ -279,6 +290,26 @@ class DockerRuntimeTests(unittest.TestCase):
         docker('exec', server, 'awg', 'setconf', 'awg0', '/config/peer.conf')
         docker('exec', client, 'awg', 'setconf', 'awg0', '/config/peer.conf')
         docker('exec', client, 'ping', '-c', '3', '-W', '2', '10.88.0.1')
+
+    def test_awg_randomized_rekey_preserves_tunnel_across_multiple_handshakes(self):
+        # Shorten only this disposable fixture's windows; production defaults
+        # and host clocks remain unchanged. Exercise renewal past hard expiry.
+        server, client = self.awg_pair('quic', timing={
+            'RekeyAfterTime': '3-4', 'RejectAfterTime': '12-15',
+            'RekeyTimeout': '1-2', 'KeepaliveTimeout': '1-2',
+            'MaxHandshakeAttempts': '8-12',
+        })
+        docker('exec', client, 'ping', '-c', '1', '-W', '2', '10.88.0.1')
+        def handshake():
+            values = docker('exec', client, 'awg', 'show', 'awg0', 'latest-handshakes').stdout.split()
+            self.assertEqual(len(values), 2)
+            return int(values[1])
+        first = handshake()
+        self.assertGreater(first, 0)
+        result = docker('exec', client, 'ping', '-c', '35', '-i', '0.5', '-s', '1100', '-W', '2', '10.88.0.1')
+        self.assertIn('0% packet loss', result.stdout)
+        self.assertGreaterEqual(handshake() - first, 8)
+        self.assertEqual(len(docker('exec', server, 'awg', 'show', 'awg0', 'peers').stdout.split()), 1)
 
     def test_temporary_awg_expiry_disconnects_peer_and_preserves_other_peer(self):
         server,client = self.awg_pair('quic')

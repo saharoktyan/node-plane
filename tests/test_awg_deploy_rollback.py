@@ -27,7 +27,8 @@ class AwgDeployRollbackTests(unittest.TestCase):
                 ["python3", str(ASSETS / "awg_profile.py"), "init", str(config)], text=True
             )
             old_lines = [line for line in profile.splitlines() if not line.startswith((
-                "HeaderProtectionKey =", "ContentPaddingAddition =", "RandomTrailers =", "DisableCookies ="
+                "HeaderProtectionKey =", "ContentPaddingAddition =", "RandomTrailers =", "DisableCookies =",
+                "RekeyAfterTime =", "RekeyTimeout =", "RejectAfterTime =", "KeepaliveTimeout =", "MaxHandshakeAttempts ="
             ))]
             original = "[Interface]\nPrivateKey = oldserver\nAddress = 10.8.1.1/24\nListenPort = 51820\n" + "\n".join(old_lines) + "\n"
             config.write_text(original, encoding="utf-8")

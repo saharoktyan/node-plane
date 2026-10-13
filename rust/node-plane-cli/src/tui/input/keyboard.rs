@@ -471,7 +471,9 @@ impl App {
                 KeyCode::Char(c)
                     if !key.modifiers.contains(KeyModifiers::CONTROL) && !c.is_control() =>
                 {
-                    if editor.fields[*index].value.chars().count() < 255 {
+                    if editor.fields[*index].value.chars().count()
+                        < editor.fields[*index].input_limit()
+                    {
                         editor.fields[*index].value.push(c);
                         editor.changed();
                     }
@@ -770,7 +772,7 @@ impl App {
     fn quick_start_key_inner(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Esc => {
-                self.screen = Screen::Form;
+                self.screen = self.quick_start_return.take().unwrap_or(Screen::Form);
             }
             KeyCode::Tab | KeyCode::BackTab => self.confirm = !self.confirm,
             KeyCode::Down | KeyCode::Right => self.confirm = true,

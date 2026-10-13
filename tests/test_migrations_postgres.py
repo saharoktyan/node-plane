@@ -35,7 +35,7 @@ class MigrationsPostgresTests(unittest.TestCase):
         identity=str(uuid4())
         with self.db.transaction() as conn:
             conn.execute("INSERT INTO backend_node_jobs VALUES (?,'n1','actor','key','sync_runtime',1,'{}','blocked',NULL)",(identity,))
-        self.assertEqual(migrate(self.db)['applied'],[5])
+        self.assertEqual(migrate(self.db)['applied'],[revision.number for revision in REVISIONS[4:]])
         with self.db.transaction() as conn:
             self.assertEqual(conn.execute('SELECT status FROM backend_node_jobs WHERE id=?',(identity,)).fetchone()['status'],'blocked')
             conn.execute('INSERT INTO backend_recovery_audit VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
@@ -148,6 +148,8 @@ class MigrationsPostgresTests(unittest.TestCase):
         admin = bootstrap_admin(SQLIdentityRepository(self.db),101,self.db)
         profile = ProfileRepository(self.db).create_profile(runtime_name='peer',display_name='Peer')
         with self.db.transaction() as conn:
+            from backend.devices import DeviceRepository
+            DeviceRepository.ensure_default(conn, ProfileRepository(self.db).get(profile))
             conn.execute("INSERT INTO backend_nodes(key,title,region,protocols_json) VALUES ('node','Node','Europe','[\"awg\"]')")
             conn.execute("INSERT INTO backend_grants VALUES (?,'node','awg')",(profile,))
             OperationRepository.record(conn,Actor(Principal('local',PrincipalKind.SERVICE,ADMIN_PERMISSIONS),admin),profile,set())

@@ -204,6 +204,27 @@ class AdminNodeRichTests(IsolatedAsyncioTestCase):
         screen, rows = draw.call_args.args[2:4]
         return [b.callback_data for row in screen.fallback_rows(rows) for b in row]
 
+    async def test_public_address_draft_updates_inherited_protocol_hosts_and_keeps_overrides(self):
+        self.node['settings'].update(xray_host='vless.example', awg_public_host='node.example.test')
+        await nodes.change_node_draft(123, 'msk1', {'settings': {
+            **self.node['settings'], 'public_host': 'new.example'}}, self.backend, self.state)
+        displayed = await nodes.editable_node(123, 'msk1', self.backend, self.state)
+        self.assertEqual(displayed['settings']['awg_public_host'], 'new.example')
+        self.assertEqual(displayed['settings']['xray_host'], 'vless.example')
+        await nodes.change_node_draft(123, 'msk1', {'settings': {
+            **displayed['settings'], 'public_host': 'next.example'}}, self.backend, self.state)
+        self.assertEqual(self.data['node_settings_draft']['values']['settings']['awg_public_host'], 'next.example')
+        self.assertEqual(self.node['settings']['public_host'], 'node.example.test')
+
+    async def test_enabling_awg_does_not_inject_a_manual_port(self):
+        self.node.update(protocols=['xray'], xray_transports=['tcp'], settings={'public_host': 'node.example'})
+        with patch.object(nodes, 'show_node_protocols', new_callable=AsyncMock):
+            await nodes.toggle_node_feature(123, 123, 77, 'msk1', 'awg', False,
+                self.bot, self.backend, self.state)
+        settings = self.data['node_settings_draft']['values']['settings']
+        self.assertNotIn('awg_port', settings)
+        self.assertNotIn('awg_port_mode', settings)
+
     async def test_landing_card_has_common_actions_and_no_hidden_agent_rpc(self):
         for locale in ('ru', 'en'):
             self.data['locale'] = locale
@@ -263,7 +284,7 @@ class AdminNodeRichTests(IsolatedAsyncioTestCase):
 
     async def test_protocol_settings_have_tables_and_all_existing_edit_actions(self):
         expected = {'general': {'title', 'flag', 'region', 'notes'}, 'connection': {'public_host'},
-            'awg': {'awg_public_host', 'awg_port', 'awg_interface', 'awg_i1_preset'},
+            'awg': {'awg_public_host', 'awg_port', 'awg_interface', 'awg_i1_preset', 'awg_parameters'},
             'xray': {'xray_host', 'xray_sni', 'xray_tcp_port', 'xray_xhttp_port', 'xray_fingerprint', 'xray_xhttp_path'}}
         for locale in ('ru', 'en'):
             self.data['locale'] = locale

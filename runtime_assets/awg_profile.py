@@ -5,7 +5,6 @@ from __future__ import annotations
 import base64
 import binascii
 import os
-import random
 import re
 import secrets
 import sys
@@ -14,6 +13,16 @@ from pathlib import Path
 LEGACY_FIELDS = ("Jc", "Jmin", "Jmax", "S1", "S2", "S3", "S4", "H1", "H2", "H3", "H4", "I1", "I2", "I3", "I4", "I5")
 AWG3_FIELDS = ("HeaderProtectionKey", "ContentPaddingAddition", "RekeyAfterTime", "RekeyTimeout", "RejectAfterTime", "KeepaliveTimeout", "MaxHandshakeAttempts", "RandomTrailers", "DisableCookies")
 ALL_FIELDS = LEGACY_FIELDS + AWG3_FIELDS
+TIMING_FIELDS = AWG3_FIELDS[2:7]
+# The pinned engine uses 12-byte header nonces and a 1700-byte iOS receive
+# buffer. Bound server padding for clients on every supported platform.
+PADDING_LIMITS = {"S1": 1700 - 148, "S2": 1700 - 92, "S3": 1700 - 64,
+                  "S4": 32}  # NP policy: limit overhead on every data packet.
+GENERATED_HEADER_MAX = 2**31 - 1  # Also fits signed client configuration editors.
+
+
+def _random_int(low: int, high: int) -> int:
+    return low + secrets.randbelow(high - low + 1)
 
 
 def new_private_key() -> str:
@@ -47,18 +56,18 @@ def protocol_version(values: dict[str, str]) -> str:
     return "2"
 
 
-def _range(value: str, maximum: int) -> tuple[int, int]:
-    if not re.fullmatch(r"\d+(?:-\d+)?", value):
+def _range(value: str, maximum: int, minimum: int = 0) -> tuple[int, int]:
+    if not re.fullmatch(r"[0-9]+(?:-[0-9]+)?", value):
         raise ValueError(f"Invalid numeric range: {value!r}")
     parts = [int(part) for part in value.split("-", 1)]
     low, high = parts[0], parts[-1]
-    if low > high or high > maximum:
+    if low < minimum or low > high or high > maximum:
         raise ValueError(f"Out-of-range value: {value!r}")
     return low, high
 
 
 def _single(value: str, maximum: int) -> int:
-    if not value.isdecimal() or int(value) > maximum:
+    if not re.fullmatch(r"[0-9]+", value) or int(value) > maximum:
         raise ValueError(f"Invalid integer: {value!r}")
     return int(value)
 
@@ -73,10 +82,12 @@ def validate(values: dict[str, str], *, require_31: bool = True) -> None:
     if _single(values["Jmin"], 65535) > _single(values["Jmax"], 65535):
         raise ValueError("Jmin exceeds Jmax")
     _single(values["Jc"], 65535)
-    for key in ("S1", "S2", "S3", "S4"):
-        size = _single(values[key], 65535)
+    for key, maximum in PADDING_LIMITS.items():
+        size = _single(values[key], maximum)
         if version == "3.1" and size < 12:
             raise ValueError(f"Invalid {key} for header protection")
+    if int(values["S1"]) + 56 == int(values["S2"]):
+        raise ValueError("S1 and S2 produce equal handshake packet sizes")
     ranges = [_range(values[key], 4294967295) for key in ("H1", "H2", "H3", "H4")]
     for index, (low, high) in enumerate(ranges):
         if any(low <= other_high and other_low <= high for other_low, other_high in ranges[:index]):
@@ -97,31 +108,54 @@ def validate(values: dict[str, str], *, require_31: bool = True) -> None:
             raise ValueError("Invalid HeaderProtectionKey") from exc
         if len(key_bytes) != 32:
             raise ValueError("HeaderProtectionKey must contain 32 bytes")
-        for key in AWG3_FIELDS[1:7]:
+        if values.get("ContentPaddingAddition"):
+            _range(values["ContentPaddingAddition"], 65535)
+        for key in TIMING_FIELDS:
             if values.get(key):
-                _range(values[key], 65535)
+                _range(values[key], 65535, minimum=1)
+        # Missing timing fields retain the pinned engine's 120s/180s defaults.
+        rekey_high = _range(values.get("RekeyAfterTime") or "120", 65535, 1)[1]
+        reject_low = _range(values.get("RejectAfterTime") or "180", 65535, 1)[0]
+        if rekey_high >= reject_low:
+            raise ValueError("RekeyAfterTime must finish before RejectAfterTime")
 
 
 def _i_values(preset: str) -> dict[str, str]:
     if preset == "dns":
         return {"I1": "<rc 2><b 0x01000001000000000000><r 32>", "I2": "<rc 2><b 0x01000001000000000000><r 64>", "I3": "<r 48>", "I4": "<r 80>", "I5": "<r 40>"}
     if preset == "chaos":
-        return {"I1": f"<b 0x{secrets.token_hex(4)}><rc 4><r {random.randint(500, 900)}>", **{f"I{i}": f"<r {random.randint(100, 900)}>" for i in range(2, 6)}}
+        return {"I1": f"<b 0x{secrets.token_hex(4)}><rc 4><r {_random_int(500, 900)}>", **{f"I{i}": f"<r {_random_int(100, 900)}>" for i in range(2, 6)}}
     if preset != "quic":
         raise ValueError(f"Unknown I1 preset: {preset}")
     return {"I1": "<b 0xc000000001><rc 8><r 900>", "I2": "<b 0x40><rc 4><r 100>", "I3": "<r 900>", "I4": "<r 100>", "I5": "<r 900>"}
 
 
 def new_profile(preset: str) -> dict[str, str]:
-    s = str(random.randint(16, 32))
-    jmin = random.randint(40, 100)
+    s1, s2 = _random_int(16, 128), _random_int(16, 128)
+    while s1 + 56 == s2:
+        s2 = _random_int(16, 128)
+    jmin = _random_int(40, 100)
+    # Separate bands guarantee distinct single-value headers without retries.
+    # Avoid wide H ranges with RandomTrailers: padded data can be mistaken for
+    # handshake packets by the engine's receive classifier.
+    band = (GENERATED_HEADER_MAX - 4) // 4
+    headers = {f"H{i + 1}": str(_random_int(5 + i * band, 4 + (i + 1) * band))
+               for i in range(4)}
+    padding_low = _random_int(8, 24)
+    rekey_low, rekey_high = _random_int(100, 115), _random_int(125, 145)
     values = {
-        "Jc": str(random.randint(3, 7)), "Jmin": str(jmin), "Jmax": str(random.randint(jmin + 40, 160)),
-        **{f"S{i}": s for i in range(1, 5)},
-        **{f"H{i}": str(i) for i in range(1, 5)},
+        "Jc": str(_random_int(3, 7)), "Jmin": str(jmin), "Jmax": str(_random_int(jmin + 40, 250)),
+        "S1": str(s1), "S2": str(s2), "S3": str(_random_int(12, 48)),
+        "S4": str(_random_int(12, 32)),
+        **headers,
         **_i_values(preset),
         "HeaderProtectionKey": base64.b64encode(secrets.token_bytes(32)).decode("ascii"),
-        "ContentPaddingAddition": "16-64",
+        "ContentPaddingAddition": f"{padding_low}-{_random_int(padding_low + 8, 64)}",
+        "RekeyAfterTime": f"{rekey_low}-{rekey_high}",
+        "RejectAfterTime": f"{_random_int(180, 200)}-{_random_int(220, 260)}",
+        "RekeyTimeout": f"{_random_int(3, 5)}-{_random_int(6, 8)}",
+        "KeepaliveTimeout": f"{_random_int(8, 10)}-{_random_int(12, 18)}",
+        "MaxHandshakeAttempts": f"{_random_int(16, 20)}-{_random_int(24, 32)}",
         "RandomTrailers": "on", "DisableCookies": "off",
     }
     validate(values)
@@ -170,8 +204,8 @@ def main() -> None:
     if sys.argv[1:] == ["genkey"]:
         print(new_private_key())
         return
-    if len(sys.argv) < 3 or sys.argv[1] not in ("init", "migrate", "regenerate", "validate"):
-        raise SystemExit("Usage: awg_profile.py genkey | init|migrate|regenerate|validate PATH [PRESET]")
+    if len(sys.argv) < 3 or sys.argv[1] not in ("init", "migrate", "regenerate", "validate", "apply"):
+        raise SystemExit("Usage: awg_profile.py genkey | init|migrate|regenerate|validate PATH [PRESET] | apply PATH PARAMETERS_JSON")
     action, path = sys.argv[1], Path(sys.argv[2])
     preset = sys.argv[3] if len(sys.argv) > 3 else "quic"
     if action == "init":
@@ -182,7 +216,17 @@ def main() -> None:
     if action == "validate":
         validate(interface_values(original))
         return
-    updated = migrate(original, preset) if action == "migrate" else replace_interface_values(original, new_profile(preset))
+    if action == 'apply':
+        import json
+        values = json.loads(Path(sys.argv[3]).read_text())
+        if not isinstance(values, dict) or set(values) - set(ALL_FIELDS) or any(
+                not isinstance(value, str) or not value or len(value) > 4096
+                or any(ord(c) < 32 or ord(c) > 126 for c in value) for value in values.values()):
+            raise ValueError('invalid manual AWG parameters')
+        validate(values)
+        updated = replace_interface_values(original, {key: values.get(key, '') for key in ALL_FIELDS})
+    else:
+        updated = migrate(original, preset) if action == "migrate" else replace_interface_values(original, new_profile(preset))
     if updated != original:
         backup = path.with_name(path.name + ".pre-awg31")
         if not backup.exists():

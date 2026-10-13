@@ -5,6 +5,35 @@ use std::{
 };
 use zeroize::Zeroizing;
 
+pub fn default_branch() -> &'static str {
+    if env!("CARGO_PKG_VERSION").contains('-') {
+        "dev"
+    } else {
+        "main"
+    }
+}
+
+pub fn validate_install_channel(version: &str, branch: &str, tag: &str) -> Result<()> {
+    ensure!(
+        version.contains('-') || (branch != "dev" && !tag.contains('-')),
+        "Development releases require a development Workstation build."
+    );
+    Ok(())
+}
+
+#[cfg(test)]
+mod channel_tests {
+    use super::*;
+    #[test]
+    fn stable_workstation_requires_stable_installation_channel_and_tag() {
+        assert!(validate_install_channel("1.0.0", "main", "v1.0.0").is_ok());
+        assert!(validate_install_channel("1.0.0", "dev", "").is_err());
+        assert!(validate_install_channel("1.0.0", "main", "v1.0.0-alpha.1").is_err());
+        assert!(validate_install_channel("1.0.0-alpha.1", "dev", "v1.0.0-alpha.1").is_ok());
+        assert!(validate_install_channel("1.0.0-alpha.1", "main", "v1.0.0").is_ok());
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Action {
     Install,
@@ -99,6 +128,7 @@ impl Request {
             );
         }
         if self.action == Action::Install {
+            validate_install_channel(env!("CARGO_PKG_VERSION"), &self.branch, &self.tag)?;
             ensure!(
                 !self.admin_ids.chars().any(char::is_control),
                 "Administrator IDs must fit on a single line."
@@ -239,6 +269,7 @@ mod tests {
             bot_token: Zeroizing::new("123:abcdefghijklmnopqrstuvwx".into()),
             workflow: WorkflowOptions::default(),
         };
+        r.branch = default_branch().into();
         assert!(r.validate().is_ok());
         for token in [
             "123456",

@@ -2945,3 +2945,47 @@ CATALOG['ru'].update({
     'system_cleanup.keep_nodes_warning': 'VPN-конфиги на нодах останутся. Контроллер потеряет их записи и больше не сможет ими управлять.',
     'system_cleanup.shutdown_accepted': 'Удаляем Node Plane… Сообщение обновится после проверки удаления.',
 })
+
+CATALOG['ru'].update({
+    'nodes.awg.parameters': 'Параметры AWG',
+    'nodes.settings.field.awg_parameters': 'Ручные параметры',
+    'nodes.awg.manual': 'Ручной профиль',
+    'nodes.awg.generated': 'Автогенерация по пресету',
+    'nodes.awg.parameters_prompt': 'Отправьте полный блок параметр = значение, включая параметры AWG 3.1. Можно скопировать текущие значения ниже. Отправьте auto для возврата к автогенерации. После применения импортируйте новые клиентские конфиги. Серверные ключи и устройства сохранятся.',
+    'nodes.awg.parameters_invalid': 'Не удалось проверить профиль AWG. Нужен полный набор Jc, Jmin, Jmax, S1–S4, H1–H4, I1–I5, HeaderProtectionKey, RandomTrailers и DisableCookies. Проверьте диапазоны, пересечения H и значения таймеров. Серверные и клиентские ключи сюда добавлять не нужно.',
+})
+CATALOG['en'].update({
+    'nodes.awg.parameters': 'AWG parameters',
+    'nodes.settings.field.awg_parameters': 'Manual parameters',
+    'nodes.awg.manual': 'Manual profile',
+    'nodes.awg.generated': 'Generated from preset',
+    'nodes.awg.parameters_prompt': 'Send a complete parameter = value block, including AWG 3.1 fields. Copy the current values below to edit them. Send auto to return to generation. Import fresh client configs after applying changes. Server keys and devices are preserved.',
+    'nodes.awg.parameters_invalid': 'Invalid AWG profile. Include Jc, Jmin, Jmax, S1–S4, H1–H4, I1–I5, HeaderProtectionKey, RandomTrailers and DisableCookies. Check ranges, overlapping H values and timers. Do not include server or client identity keys.',
+})
+
+CATALOG['ru'].update({
+    'quick_start.title': 'Быстрый старт', 'quick_start.progress': 'Прогресс установки',
+    'quick_start.defaults': 'Настройки будущих нод', 'quick_start.node': 'Первая VPN-нода',
+    'quick_start.protocols': 'Установка агента и протоколов', 'quick_start.access': 'Доступ своему профилю',
+    'quick_start.config': 'Устройство и конфиг', 'quick_start.continue': 'Продолжить',
+    'quick_start.refresh': 'Проверить прогресс', 'quick_start.use_defaults': 'Использовать текущие настройки',
+    'quick_start.note.defaults': 'Админ-панель → Настройки → Параметры новых нод. Проверьте протоколы, транспорты и пресеты. Можно принять текущие настройки кнопкой ниже.',
+    'quick_start.note.node': 'Админ-панель → Серверы → Добавить сервер. Выберите локальную ноду для установки на контроллере или SSH для другого сервера.',
+    'quick_start.note.protocols': 'Откройте карточку ноды, установите агент и запустите установку протоколов. Дождитесь успешного завершения.',
+    'quick_start.note.access': 'Админ-панель → Профили → Ваш профиль → Доступ. Добавьте первую ноду и сохраните изменения.',
+    'quick_start.note.config': 'Главное меню → Конфиги. Выберите свой профиль и ноду. Для AWG сначала создайте устройство. Импортируйте полученный конфиг и проверьте соединение.',
+    'quick_start.note.done': 'Конфиг сформирован. Импортируйте его в VPN-клиент и проверьте соединение. Руководство можно открыть снова из главного меню.',
+})
+CATALOG['en'].update({
+    'quick_start.title': 'Quick Start', 'quick_start.progress': 'Installation progress',
+    'quick_start.defaults': 'Defaults for future nodes', 'quick_start.node': 'First VPN node',
+    'quick_start.protocols': 'Agent and protocol setup', 'quick_start.access': 'Access for your profile',
+    'quick_start.config': 'Device and configuration', 'quick_start.continue': 'Continue',
+    'quick_start.refresh': 'Check progress', 'quick_start.use_defaults': 'Use current defaults',
+    'quick_start.note.defaults': 'Admin panel → Settings → Installation defaults. Review protocols, transports and presets, or accept current defaults below.',
+    'quick_start.note.node': 'Admin panel → Servers → Add server. Choose Local to run on the controller, or SSH for another server.',
+    'quick_start.note.protocols': 'Open the node card, install its agent and bootstrap protocols. Wait for successful completion.',
+    'quick_start.note.access': 'Admin panel → Profiles → Your profile → Access. Add the first node and save changes.',
+    'quick_start.note.config': 'Main menu → Configurations. Select your profile and node. Create a device first for AWG. Import the configuration and test connectivity.',
+    'quick_start.note.done': 'Configuration generated. Import it into your VPN client and test connectivity. Reopen this guide from the main menu at any time.',
+})

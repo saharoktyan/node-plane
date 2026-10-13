@@ -14,13 +14,33 @@ PYTHONPATH=app .venv/bin/python -m unittest discover -s tests
 
 Select narrower test modules while developing. PostgreSQL integration requires a disposable DSN and a separate process; see [Database](database.md).
 
+## Continuous integration
+
+Every pull request and push to `dev`/`main` runs the server/Python and Workstation workflows. Tag releases call the same workflows and require both to succeed before packaging and publication.
+
+- Python unit/contract tests run on Python 3.11 and 3.12, with all runtime/development dependencies and uv installed.
+- All `test_*_postgres.py` modules run separately on both Python versions against a disposable PostgreSQL 16 service. They cover migrations, races, recovery, delivery, workers and process interruption. Unit tests' database doubles never share that process.
+- Docker tests run against the pinned Xray/AWG images and a freshly built agent: protocol traffic, expiry/revocation, cleanup, mTLS and SIGKILL recovery. Only disposable test resources are used.
+- Driver and agent run format, clippy and their full Rust tests. Existing server clippy warnings remain visible; Workstation clippy rejects warnings.
+- Workstation runs its existing native tests and installer checks on Linux, macOS and Windows, on every change because backend contracts can affect it too.
+
+The Python CI runner discovers every `test_*.py` module. PostgreSQL modules use the `_postgres` suffix; Docker modules use `_docker` or the explicit agent-fault module. Missing dependencies, empty suites and unexpected skipped tests fail the check. Run each suite in a fresh process:
+
+```sh
+.venv/bin/python scripts/run_ci_tests.py unit
+NODE_PLANE_TEST_POSTGRES_DSN=postgresql://... .venv/bin/python scripts/run_ci_tests.py postgres
+NODE_PLANE_TEST_DOCKER=1 .venv/bin/python scripts/run_ci_tests.py docker
+```
+
+The Docker suite requires the cached pinned images, `node-plane-release-builder:bookworm` built from `scripts/Dockerfile.release`, and a current debug agent binary. Real QEMU boot checks below and interactive Telegram/terminal acceptance remain separate release acceptance steps; automated CI does not certify them.
+
 ## Rust
 
 ```sh
-cargo test --manifest-path rust/node-plane-cli/Cargo.toml
-cargo clippy --manifest-path rust/node-plane-cli/Cargo.toml --all-targets -- -D warnings
-cargo test --manifest-path rust/node-driver/Cargo.toml
-cargo test --manifest-path rust/node-agent/Cargo.toml
+cargo test --locked --manifest-path rust/node-plane-cli/Cargo.toml
+cargo clippy --locked --manifest-path rust/node-plane-cli/Cargo.toml --all-targets -- -D warnings
+cargo test --locked --manifest-path rust/node-driver/Cargo.toml
+cargo test --locked --manifest-path rust/node-agent/Cargo.toml
 ```
 
 Socket/wire tests need permission to create local listeners. A restricted environment may prevent those tests; record exclusions rather than describing a partial run as full integration acceptance.

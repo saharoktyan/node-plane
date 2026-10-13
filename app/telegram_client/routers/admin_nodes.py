@@ -88,6 +88,9 @@ async def change_node_draft(user_id, node_key, values, backend, state, *, baseli
         draft = {'node_key': node_key, 'revision': node['desired_revision'],
                  'baseline': baseline, 'values': deepcopy(baseline), 'command_key': str(uuid4())}
     draft = deepcopy(draft)
+    if 'settings' in values:
+        from node_public_settings import merge_settings
+        values = {**values, 'settings': merge_settings(draft['values']['settings'], values['settings'])}
     draft['values'].update(deepcopy(values))
     await state.update_data(node_settings_draft=draft, node_region_confirmation=None)
 
@@ -1066,6 +1069,7 @@ async def edit_node_field_cb(query: CallbackQuery, callback_data: EditNodeFieldC
     user_id = query.from_user.id
     node_key, field = callback_data.node_key, callback_data.field
     allowed = {'title', 'region', 'flag', 'notes', 'public_host', 'awg_port', 'awg_public_host', 'awg_interface', 'awg_i1_preset', 'xray_host', 'xray_fingerprint', 'xray_sni', 'xray_tcp_port', 'xray_xhttp_port', 'xray_xhttp_path', 'ssh_target'}
+    allowed.add('awg_parameters')
     if field not in allowed:
         await show_node_settings(query.message.chat.id, user_id, query.message.message_id, node_key, bot, backend, state)
         return
@@ -1083,6 +1087,21 @@ async def edit_node_field_cb(query: CallbackQuery, callback_data: EditNodeFieldC
     
     current = node.get(field) if field in {'title', 'region', 'flag', 'notes'} else node['settings'].get(field)
     locale = normalize_locale((await state.get_data()).get('locale'))
+    if field == 'awg_parameters':
+        if not current:
+            try:
+                facts = await backend.node_services(user_id, node_key)
+                current = facts.get('awg_parameters', {})
+            except BackendError:
+                current = {}
+        block = '\n'.join(f'{key} = {value}' for key, value in (current or {}).items())
+        await render(bot, query.message.chat.id, Screen(tr(locale, 'nodes.awg.parameters'),
+            (tr(locale, 'nodes.awg.parameters_prompt'),), sections=(
+                Section(tr(locale, 'nodes.rich.current_value'), lines=(block or 'auto',)),),
+            embedded_buttons=True, navigation=True),
+            [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data=f'node_section:awg:{node_key}')]],
+            state, query.message.message_id)
+        return
     if field == 'region':
         await state.set_state(None)
         choices = [InlineKeyboardButton(text=f'{icon} {tr(locale, "region." + token)}',
@@ -1168,7 +1187,18 @@ async def process_node_edit(message: Message, bot: Bot, backend: BackendClient, 
         await state.set_state(None)
         await show_section(message.chat.id, user_id, message_id, data.get('edit_section', 'general'), node_key, bot, backend, state)
         return
-    if field.endswith('_port'):
+    if field == 'awg_parameters':
+        from awg_parameters import parse_parameters
+        try:
+            parsed = parse_parameters(value)
+        except ValueError:
+            locale = normalize_locale(data.get('locale'))
+            await render(bot, message.chat.id, Screen(tr(locale, 'nodes.awg.parameters'),
+                (tr(locale, 'nodes.awg.parameters_invalid'),), embedded_buttons=True, navigation=True),
+                [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data=f'node_section:awg:{node_key}')]],
+                state, message_id)
+            return
+    elif field.endswith('_port'):
         if not value.isdecimal() or not 1 <= int(value) <= 65535:
             locale = normalize_locale(data.get('locale'))
             await render(bot, message.chat.id, Screen(tr(locale, 'nodes.settings.invalid_port'),
@@ -1277,7 +1307,8 @@ async def toggle_node_feature(chat_id, user_id, message_id, node_key, kind, tran
         transports.update({'tcp', 'xhttp'})
     
     settings = dict(node['settings'])
-    if 'awg' in protocols: settings.setdefault('awg_port', 51820)
+    # Let the backend choose AWG defaults and its preset-specific automatic port.
+    # A hard-coded port here would turn a newly enabled AWG protocol into manual mode.
     if 'xray' in protocols:
         for f, d in {'xray_sni': 'www.cloudflare.com', 'xray_tcp_port': 443, 'xray_xhttp_port': 8443, 'xray_xhttp_path': '/assets'}.items():
             settings.setdefault(f, d)

@@ -181,8 +181,9 @@ class BackendClient:
         return await self.request('GET', '/api/v1/integrations/telegram/deliveries/wait',
                                   timeout_seconds=35)
 
-    async def alert_ack(self,delivery_id,key,status):
-        return await self.request('POST',f'/api/v1/integrations/telegram/alerts/{delivery_id}/ack',body={'status':status},command=True,command_key=key)
+    async def alert_ack(self,delivery_id,key,status,retry_after=None):
+        body = {'status':status, **({'retry_after':retry_after} if retry_after is not None else {})}
+        return await self.request('POST',f'/api/v1/integrations/telegram/alerts/{delivery_id}/ack',body=body,command=True,command_key=key)
 
     async def announcement_create(self, user_id, text, key):
         return await self.request('POST','/api/v1/announcements',telegram_user_id=user_id,body={'text':text},command=True,command_key=key)
@@ -193,9 +194,9 @@ class BackendClient:
     async def announcement_claim(self, key):
         return await self.request('POST','/api/v1/integrations/telegram/announcements/claim',command=True,command_key=key)
 
-    async def announcement_ack(self, delivery_id, key, status):
+    async def announcement_ack(self, delivery_id, key, status, retry_after=None):
         return await self.request('POST',f'/api/v1/integrations/telegram/announcements/{delivery_id}/ack',
-                                  body={'status':status},command=True,command_key=key)
+                                  body={'status':status, **({'retry_after':retry_after} if retry_after is not None else {})},command=True,command_key=key)
 
     async def set_locale(self, telegram_user_id: int, locale: str) -> dict:
         return await self.request('PATCH', '/api/v1/me/preferences', telegram_user_id=telegram_user_id,

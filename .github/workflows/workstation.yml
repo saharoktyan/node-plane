@@ -3,28 +3,15 @@ name: Workstation checks
 on:
   push:
     branches: [dev, main]
-    paths:
-      - 'rust/node-plane-cli/**'
-      - 'dist-workspace.toml'
-      - 'scripts/install_workstation.sh'
-      - 'scripts/install_workstation.ps1'
-      - 'tests/workstation_installer_windows.ps1'
-      - '.github/workflows/workstation.yml'
   pull_request:
-    paths:
-      - 'rust/node-plane-cli/**'
-      - 'dist-workspace.toml'
-      - 'scripts/install_workstation.sh'
-      - 'scripts/install_workstation.ps1'
-      - 'tests/workstation_installer_windows.ps1'
-      - '.github/workflows/workstation.yml'
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
 
 concurrency:
-  group: workstation-checks-${{ github.event_name }}-${{ github.ref }}
+  group: ${{ github.workflow }}-workstation-checks-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:

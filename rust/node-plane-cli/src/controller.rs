@@ -8,6 +8,8 @@ pub enum Command {
     Probe,
     Presence,
     Overview,
+    Onboarding,
+    OnboardingDefaults,
     Updates,
     Defaults,
     Policies,
@@ -29,6 +31,8 @@ pub enum Command {
     BackupCatalog(usize),
     BackupDetail(Uuid),
     BackupDelete(Uuid, String),
+    BackupExport(Uuid, std::path::PathBuf),
+    BackupImport(std::path::PathBuf),
     BackupPreferences(Value),
     BackupQueue(Value, Uuid),
     BackupJob(Uuid),
@@ -56,6 +60,13 @@ impl Command {
     pub fn request(&self) -> Result<(Method, String, Option<Value>, Option<Uuid>)> {
         let root = "/api/v1/system/cleanup";
         Ok(match self {
+            Self::Onboarding => (Method::GET, "/api/v1/system/onboarding".into(), None, None),
+            Self::OnboardingDefaults => (
+                Method::POST,
+                "/api/v1/system/onboarding/defaults".into(),
+                Some(json!({})),
+                None,
+            ),
             Self::Probe | Self::Presence => {
                 anyhow::bail!("Installation detection uses the SSH connection")
             }
@@ -93,6 +104,18 @@ impl Command {
             Self::BackupDetail(id) => (
                 Method::GET,
                 format!("/api/v1/system/backups/catalog/{id}"),
+                None,
+                None,
+            ),
+            Self::BackupExport(id, _) => (
+                Method::GET,
+                format!("/api/v1/system/backups/catalog/{id}/export"),
+                None,
+                None,
+            ),
+            Self::BackupImport(_) => (
+                Method::POST,
+                "/api/v1/system/backups/import".into(),
                 None,
                 None,
             ),
@@ -256,6 +279,7 @@ pub struct Browser {
     pub plan_pending: bool,
     pub profile: Option<Uuid>,
     pub overview: Option<Value>,
+    pub onboarding: Option<Value>,
     pub updates: Option<Value>,
     pub branch_confirmation: bool,
     pub defaults: Option<Value>,
@@ -392,6 +416,9 @@ impl Browser {
                 self.defaults = Some(value);
                 self.selected = 0;
             }
+            Command::Onboarding | Command::OnboardingDefaults => {
+                self.onboarding = Some(value);
+            }
             Command::Backups | Command::BackupPreferences(_) => {
                 self.backup_job = value.get("last_job").filter(|v| v.is_object()).cloned();
                 self.backups = Some(value);
@@ -407,8 +434,9 @@ impl Browser {
                 self.backups = Some(value);
                 self.selected = 0;
             }
-            Command::BackupDetail(_) => {
+            Command::BackupDetail(_) | Command::BackupImport(_) | Command::BackupExport(_, _) => {
                 self.backup_detail = Some(value);
+                self.defaults_input = None;
                 self.selected = 0;
             }
             Command::BackupQueue(_, _) => {

@@ -68,6 +68,11 @@ impl Editor {
             ("awg_port", "AWG UDP port", true),
             ("awg_port_mode", "AWG port mode", true),
             ("awg_i1_preset", "AWG I-parameters", true),
+            (
+                "awg_parameters",
+                "AWG profile: paste key=value; auto resets",
+                true,
+            ),
         ] {
             let value = if setting {
                 &source["settings"][key]
@@ -82,6 +87,11 @@ impl Editor {
             let value = match value {
                 Value::String(s) => s.clone(),
                 Value::Number(n) => n.to_string(),
+                Value::Object(values) if key == "awg_parameters" && !values.is_empty() => values
+                    .iter()
+                    .map(|(key, value)| format!("{key} = {}", value.as_str().unwrap_or("")))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
                 _ => String::new(),
             };
             let value = if value.is_empty() {
@@ -94,6 +104,7 @@ impl Editor {
                     "awg_i1_preset" => "quic",
                     "awg_port_mode" => "auto",
                     "awg_port" => "443",
+                    "awg_parameters" => "auto",
                     _ => "",
                 }
                 .to_owned()
@@ -222,6 +233,7 @@ impl Editor {
         let mut settings_changed = false;
         for field in &self.fields {
             let newly_enabled = field.setting
+                && field.key != "awg_parameters"
                 && ["xray", "awg"].iter().any(|p| {
                     field.key.starts_with(p)
                         && self.protocols.iter().any(|v| v == p)
@@ -246,7 +258,9 @@ impl Editor {
                     field.value.as_str()
                 };
                 ensure!(!input.trim().is_empty(), "{} is required", field.label);
-                let value = if field.key.ends_with("_port") {
+                let value = if field.key == "awg_parameters" {
+                    parse_awg_parameters(input)?
+                } else if field.key.ends_with("_port") {
                     json!(
                         input
                             .trim()
@@ -275,6 +289,36 @@ impl Editor {
             }
         }
         if settings_changed {
+            let old_host = &self.source["settings"]["public_host"];
+            let host = settings.get("public_host").cloned().unwrap_or(Value::Null);
+            if &host != old_host {
+                for key in ["xray_host", "awg_public_host"] {
+                    if self.source["settings"].get(key).unwrap_or(old_host) == old_host
+                        && settings.get(key).unwrap_or(old_host) == old_host
+                    {
+                        settings.insert(key.into(), host.clone());
+                    }
+                }
+            }
+            let changed_port = self
+                .fields
+                .iter()
+                .any(|f| f.key == "awg_port" && f.value != f.baseline);
+            let changed_mode = self
+                .fields
+                .iter()
+                .any(|f| f.key == "awg_port_mode" && f.value != f.baseline);
+            if changed_port && !changed_mode {
+                settings.insert("awg_port_mode".into(), json!("manual"));
+            }
+            if settings.get("awg_port_mode") == Some(&json!("auto"))
+                && ((!changed_port && changed_mode)
+                    || (!changed_port
+                        && settings.get("awg_i1_preset")
+                            != self.source["settings"].get("awg_i1_preset")))
+            {
+                settings.remove("awg_port");
+            }
             body["settings"] = json!(settings);
         }
         if protocols_changed {
@@ -295,6 +339,59 @@ impl Editor {
             key: self.key,
             apply_key: self.apply_key,
         })
+    }
+}
+
+pub fn parse_awg_parameters(text: &str) -> Result<Value> {
+    if text.trim().eq_ignore_ascii_case("auto") {
+        return Ok(json!({}));
+    }
+    let mut values = serde_json::Map::new();
+    for line in text
+        .lines()
+        .map(str::trim)
+        .filter(|s| !s.is_empty() && !s.starts_with('#'))
+    {
+        let (key, value) = line
+            .split_once('=')
+            .ok_or_else(|| anyhow::anyhow!("Expected AWG parameter = value"))?;
+        let (key, value) = (key.trim(), value.trim());
+        ensure!(
+            !value.is_empty() && !values.contains_key(key),
+            "Empty or duplicate AWG parameter"
+        );
+        values.insert(key.into(), json!(value));
+    }
+    ensure!(
+        !values.is_empty(),
+        "Paste a complete AWG profile or type auto"
+    );
+    Ok(Value::Object(values))
+}
+
+impl Field {
+    pub fn input_limit(&self) -> usize {
+        if self.key == "awg_parameters" {
+            16384
+        } else {
+            255
+        }
+    }
+    pub fn append_paste(&mut self, text: &str) {
+        let remaining = self
+            .input_limit()
+            .saturating_sub(self.value.chars().count());
+        if self.key == "awg_parameters" {
+            // A paste supplies a complete profile, replacing the observed or saved block.
+            self.value = text
+                .chars()
+                .filter(|c| !c.is_control() || *c == '\n')
+                .take(self.input_limit())
+                .collect();
+        } else {
+            self.value
+                .extend(text.chars().filter(|c| !c.is_control()).take(remaining));
+        }
     }
 }
 fn same_selection(items: &[String], source: &Value) -> bool {
@@ -370,5 +467,69 @@ mod tests {
                 .iter()
                 .all(|i| editor.fields[*i].key.starts_with("awg"))
         );
+    }
+
+    #[test]
+    fn public_address_change_propagates_inherited_hosts_and_preserves_custom_hosts() {
+        let mut node = source();
+        node["settings"]["xray_host"] = json!("vless.test");
+        let mut editor = Editor::new(node, &defaults()).unwrap();
+        editor
+            .fields
+            .iter_mut()
+            .find(|f| f.key == "public_host")
+            .unwrap()
+            .value = "new.test".into();
+        let draft = editor.draft().unwrap();
+        assert_eq!(draft.body["settings"]["awg_public_host"], "new.test");
+        assert_eq!(draft.body["settings"]["xray_host"], "vless.test");
+        assert_eq!(draft.body["settings"]["awg_port"], 443);
+    }
+
+    #[test]
+    fn port_edit_selects_manual_mode_and_preset_edit_reselects_automatic_port() {
+        let mut editor = Editor::new(source(), &defaults()).unwrap();
+        editor
+            .fields
+            .iter_mut()
+            .find(|f| f.key == "awg_port")
+            .unwrap()
+            .value = "51111".into();
+        let draft = editor.draft().unwrap();
+        assert_eq!(draft.body["settings"]["awg_port_mode"], "manual");
+        assert_eq!(draft.body["settings"]["awg_port"], 51111);
+        editor.reset();
+        editor
+            .fields
+            .iter_mut()
+            .find(|f| f.key == "awg_i1_preset")
+            .unwrap()
+            .value = "dns".into();
+        let draft = editor.draft().unwrap();
+        assert_eq!(draft.body["settings"]["awg_port_mode"], "auto");
+        assert!(draft.body["settings"].get("awg_port").is_none());
+        editor.reset();
+        assert!(editor.draft().is_err());
+    }
+
+    #[test]
+    fn manual_awg_block_paste_keeps_newlines_and_serializes_without_identity_keys() {
+        let mut editor = Editor::new(source(), &defaults()).unwrap();
+        let field = editor
+            .fields
+            .iter_mut()
+            .find(|f| f.key == "awg_parameters")
+            .unwrap();
+        field.value = "Jc = 2\nI1 = <r 40>".into();
+        field.append_paste("Jc = 3\nI1 = <r 80>\n");
+        assert_eq!(field.value, "Jc = 3\nI1 = <r 80>\n");
+        let draft = editor.draft().unwrap();
+        assert_eq!(
+            draft.body["settings"]["awg_parameters"],
+            json!({"Jc":"3", "I1":"<r 80>"})
+        );
+        // Full profile validation belongs to the backend.
+        assert!(parse_awg_parameters("Jc = 3\nJc = 4").is_err());
+        assert_eq!(parse_awg_parameters("auto").unwrap(), json!({}));
     }
 }

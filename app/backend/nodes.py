@@ -10,6 +10,7 @@ import re
 from uuid import UUID
 
 from domain_names import valid_sni
+from node_public_settings import merge_settings
 
 from .authorization import AccessDenied, require_permission
 from .profiles import _cursor, _page
@@ -18,7 +19,7 @@ from .profiles import _cursor, _page
 _KEY = re.compile(r'[A-Za-z0-9][A-Za-z0-9_-]{0,63}\Z')
 _SETTINGS = frozenset({'public_host', 'xray_host', 'xray_sni', 'xray_tcp_port',
                        'xray_xhttp_port', 'xray_xhttp_path', 'awg_public_host', 'awg_port',
-                       'xray_fingerprint', 'awg_interface', 'awg_i1_preset', 'awg_port_mode'})
+                       'xray_fingerprint', 'awg_interface', 'awg_i1_preset', 'awg_port_mode', 'awg_parameters'})
 _PORTS = frozenset({'xray_tcp_port', 'xray_xhttp_port', 'awg_port'})
 _SSH_TARGET = re.compile(r'(?:[A-Za-z_][A-Za-z0-9._-]*@)?(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:]+\])\Z')
 
@@ -93,12 +94,26 @@ def _validate(values, *, create):
         if not isinstance(settings, dict) or set(settings) - _SETTINGS:
             raise AccessDenied('invalid_input', 422)
         for field, value in settings.items():
+            if field == 'awg_parameters':
+                from awg_parameters import validate_parameters
+                try:
+                    validate_parameters(value)
+                except ValueError:
+                    raise AccessDenied('invalid_awg_parameters', 422) from None
+                continue
             if field in _PORTS:
                 if type(value) is not int or not 1 <= value <= 65535:
                     raise AccessDenied('invalid_input', 422)
             elif not isinstance(value, str) or not value.strip() or len(value) > 255 or any(ord(c) < 32 for c in value):
                 raise AccessDenied('invalid_input', 422)
             if field == 'xray_sni' and not valid_sni(value):
+                raise AccessDenied('invalid_input', 422)
+            if field not in _PORTS and any(ord(c) < 33 or ord(c) > 126 for c in value):
+                raise AccessDenied('invalid_input', 422)
+            if field in {'public_host', 'xray_host', 'awg_public_host'} and (
+                    not re.fullmatch(r'[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?', value) or '..' in value):
+                raise AccessDenied('invalid_input', 422)
+            if field == 'xray_xhttp_path' and not re.fullmatch(r'/[A-Za-z0-9/_~.%+-]*', value):
                 raise AccessDenied('invalid_input', 422)
             if field == 'awg_interface' and not re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]{0,14}', value):
                 raise AccessDenied('invalid_input', 422)
@@ -294,6 +309,9 @@ class NodeService:
                 if supplied.get('awg_port_mode') == 'auto':
                     inherited.pop('awg_port', None)
                 values['settings'] = protocol_defaults({**inherited, **supplied}, values['protocols'])
+                _validate({'settings': values['settings']}, create=False)
+                if 'xray' in values['protocols'] and values['settings']['xray_tcp_port'] == values['settings']['xray_xhttp_port']:
+                    raise AccessDenied('invalid_input', 422)
                 values.setdefault('xray_transports', (defaults['xray_transports'] or ['tcp', 'xhttp']) if 'xray' in values['protocols'] else [])
                 inserted = conn.execute('''INSERT INTO backend_nodes
                     (key, title, region, flag, enabled, protocols_json, xray_transports_json, settings_json)
@@ -327,12 +345,18 @@ class NodeService:
                     require_permission(actor, 'grants.manage')
                     if not values.get('confirm_access_change'):
                         raise AccessDenied('region_policy_review_required', 409)
-                next_values = self.public(connection)
+                previous_values = self.public(connection)
+                next_values = dict(previous_values)
                 next_values.update(values)
+                if 'settings' in values:
+                    next_values['settings'] = merge_settings(previous_values['settings'], values['settings'])
                 from .installation_defaults import local_available
                 if next_values['transport'] in {None, 'local'} and not local_available(conn, node_key):
                     raise AccessDenied('local_node_exists', 409)
                 next_values['settings'] = protocol_defaults(next_values['settings'], next_values['protocols'])
+                _validate({'settings': next_values['settings']}, create=False)
+                if 'xray' in next_values['protocols'] and next_values['settings']['xray_tcp_port'] == next_values['settings']['xray_xhttp_port']:
+                    raise AccessDenied('invalid_input', 422)
                 if 'protocols' in values and 'xray_transports' not in values and 'xray' in values['protocols'] and not next_values['xray_transports']:
                     next_values['xray_transports'] = ['tcp', 'xhttp']
                 if (next_values['transport'] == 'ssh') != bool(next_values['ssh_target']):
@@ -344,7 +368,6 @@ class NodeService:
                         WHERE node_key = ?''', (node_key,)).fetchall()
                     if any(grant['protocol'] not in next_values['protocols'] for grant in active_grants):
                         raise AccessDenied('node_protocol_in_use', 409)
-                previous_values = self.public(connection)
                 runtime_changed = any(next_values[field] != previous_values[field]
                     for field in ('protocols', 'xray_transports', 'settings', 'transport', 'ssh_target'))
                 conn.execute('''UPDATE backend_nodes SET title = ?, region = ?, flag = ?,

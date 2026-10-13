@@ -74,6 +74,69 @@ class BackendBackupsTests(unittest.TestCase):
             self.actor, result["backup_id"]
         )["checksum"]
 
+    def test_export_import_is_portable_idempotent_and_does_not_restore(self):
+        identity, checksum = self.snapshot()
+        content = self.service.export_snapshot(self.actor, identity)
+        with tempfile.TemporaryDirectory() as destination:
+            target = TestService(BackupDatabase(self.db), destination)
+            before = self.db.connection.execute('SELECT count(*) FROM backend_accounts').fetchone()[0]
+            imported = target.import_snapshot(self.actor, content)
+            self.assertEqual(imported['checksum'], checksum)
+            self.assertEqual(target.import_snapshot(self.actor, content)['id'], imported['id'])
+            self.assertEqual(target.export_snapshot(self.actor, imported['id']), content)
+            self.assertEqual(target._path(imported['id']).stat().st_mode & 0o777, 0o600)
+            self.assertEqual(self.db.connection.execute('SELECT count(*) FROM backend_accounts').fetchone()[0], before)
+            self.assertEqual(len(list(target.root.glob('*.json'))), 1)
+
+    def test_import_rejects_corruption_without_creating_a_catalog_entry(self):
+        identity, _ = self.snapshot()
+        payload = json.loads(self.service.export_snapshot(self.actor, identity))
+        payload['checksum'] = '0' * 64
+        with tempfile.TemporaryDirectory() as destination:
+            target = TestService(BackupDatabase(self.db), destination)
+            with self.assertRaises(AccessDenied) as failure:
+                target.import_snapshot(self.actor, encoded(payload))
+            self.assertEqual(failure.exception.code, 'backup_invalid')
+            self.assertEqual(list(target.root.glob('*.json')), [])
+
+    def test_restore_on_new_controller_preserves_same_telegram_admin_and_profile_ownership(self):
+        from dataclasses import replace
+        profile_id = ProfileRepository(self.db).ensure_account_profile(self.admin.id)
+        backup_id, checksum = self.snapshot()
+        new_id = str(uuid4())
+        self.db.connection.execute("INSERT INTO backend_accounts(id,role,status) VALUES (?,'admin','approved')", (new_id,))
+        self.db.connection.execute("UPDATE backend_external_identities SET account_id=? WHERE provider='telegram' AND subject='101'", (new_id,))
+        self.db.connection.commit()
+        actor = Actor(self.actor.principal, replace(self.admin, id=new_id))
+        job = self.service.queue(actor, str(uuid4()), 'restore', backup_id, checksum)
+        self.assertTrue(self.service.run_one())
+        self.assertTrue(self.service.run_one())
+        self.assertEqual(self.service.get(actor, job['id'])['phase'], 'restored')
+        self.assertEqual(self.identities.find_telegram_account(101).id, new_id)
+        self.assertEqual(ProfileRepository(self.db).get(profile_id)['owner_account_id'], new_id)
+        self.assertIsNone(self.db.connection.execute('SELECT id FROM backend_accounts WHERE id=?', (self.admin.id,)).fetchone())
+
+    def test_http_import_and_export_validate_authentication_and_return_original_snapshot(self):
+        from unittest.mock import patch
+        from fastapi.testclient import TestClient
+        from backend.http_api import create_app
+        identity, _ = self.snapshot()
+        content = self.service.export_snapshot(self.actor, identity)
+        headers = {**self.headers, 'X-Node-Plane-Telegram-User-ID': '101'}
+        with tempfile.TemporaryDirectory() as destination, patch.dict(os.environ, {'NODE_PLANE_SHARED_DIR': destination}), \
+                patch.object(BackupService, '_columns', TestService._columns), TestClient(create_app(self.db)) as client:
+            imported = client.post('/api/v1/system/backups/import', headers=headers, content=content)
+            self.assertEqual(imported.status_code, 201, imported.text)
+            path = f'/api/v1/system/backups/catalog/{imported.json()["id"]}/export'
+            exported = client.get(path, headers=headers)
+            self.assertEqual(exported.status_code, 200, exported.text)
+            self.assertEqual(exported.content, content)
+            self.assertEqual(exported.headers['Cache-Control'], 'no-store')
+            self.assertIn('attachment', exported.headers['Content-Disposition'])
+            self.assertEqual(client.get(path).status_code, 401)
+            bad = client.post('/api/v1/system/backups/import', headers=headers, content=b'{}')
+            self.assertEqual(bad.status_code, 409, bad.text)
+
     def test_delete_requires_original_checksum_and_rejects_traversal(self):
         identity, checksum = self.snapshot()
         with self.assertRaises(AccessDenied) as failure:

@@ -302,6 +302,23 @@ impl App {
                     return None;
                 }
                 if let Some((key, input)) = self.controller.defaults_input.clone() {
+                    if key == "backup_import_path" {
+                        self.controller_command(crate::controller::Command::BackupImport(
+                            input.trim().into(),
+                        ));
+                        return None;
+                    }
+                    if key == "backup_export_path" {
+                        let id = self.controller.backup_detail.as_ref()?["id"]
+                            .as_str()?
+                            .parse()
+                            .ok()?;
+                        self.controller_command(crate::controller::Command::BackupExport(
+                            id,
+                            input.trim().into(),
+                        ));
+                        return None;
+                    }
                     if key == "gate_message" {
                         if input.trim().is_empty() || input.chars().count() > 500 {
                             self.error = "Enter a message from 1 to 500 characters".into();
@@ -433,6 +450,17 @@ impl App {
                 if let Some(value) = &self.controller.defaults {
                     self.controller_command(crate::controller::Command::DefaultsSave(serde_json::json!({"protocols":value["protocols"],"xray_transports":value["xray_transports"],"settings":value["settings"]}),value["revision"].as_u64()?));
                 }
+                None
+            }
+            Control::ControllerBackupExport | Control::ControllerBackupImport => {
+                let (key, path) = if control == Control::ControllerBackupImport {
+                    ("backup_import_path", String::new())
+                } else {
+                    let id = self.controller.backup_detail.as_ref()?["id"].as_str()?;
+                    ("backup_export_path", format!("node-plane-backup-{id}.json"))
+                };
+                self.controller.defaults_input = Some((key, path));
+                self.controller.selected = 0;
                 None
             }
             Control::ControllerBackups
@@ -1109,11 +1137,16 @@ impl App {
             return if detail["compatible"] == true {
                 vec![
                     Control::ControllerBackupRestore,
+                    Control::ControllerBackupExport,
                     Control::ControllerBackupDelete,
                     Control::ControllerBack,
                 ]
             } else {
-                vec![Control::ControllerBackupDelete, Control::ControllerBack]
+                vec![
+                    Control::ControllerBackupExport,
+                    Control::ControllerBackupDelete,
+                    Control::ControllerBack,
+                ]
             };
         }
         if let Some(catalog) = &state.backup_catalog {

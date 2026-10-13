@@ -71,6 +71,23 @@ class AlertTests(unittest.TestCase):
             "SELECT kind,resolved FROM backend_alert_events ORDER BY created_at"
         ).fetchall()
 
+    def test_alert_rate_limit_pauses_announcements_on_the_same_adapter(self):
+        from backend.announcements import AnnouncementService
+        self.driver.inspect_node_services.return_value = {**HEALTHY, 'xray_running': False}
+        self.scan()
+        key = str(uuid4())
+        delivery = self.service.claim(self.transport, key)
+        self.assertIsNotNone(delivery)
+        self.service.acknowledge(self.transport, delivery['id'], key, 'retry', 60)
+        self.assertIsNone(self.service.claim(self.transport, str(uuid4())))
+        member = fixture.BackendHTTPTests.register(self, 102).json()
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_accounts SET status='approved' WHERE id=?", (member['id'],))
+        announcements = AnnouncementService(self.db)
+        queued = announcements.queue(self.actor, 'Hello', str(uuid4()))
+        self.assertEqual(queued['total'], 1)
+        self.assertIsNone(announcements.claim(self.transport, str(uuid4())))
+
     def test_fault_and_recovery_emit_only_on_transitions(self):
         self.driver.inspect_node_services.return_value = {
             **HEALTHY,

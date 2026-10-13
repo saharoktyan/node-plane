@@ -258,6 +258,9 @@ class AnnouncementService:
             from .maintenance_gate import active
             if active(conn):
                 return None
+            from .telegram_delivery_retry import remaining
+            if remaining(conn, principal, timestamp):
+                return None
             self._expire(conn, timestamp)
             if conn.execute(
                 "SELECT 1 FROM backend_backup_jobs WHERE action='restore' AND status IN ('awaiting_executor','running')"
@@ -326,10 +329,10 @@ class AnnouncementService:
             "silent": bool(json.loads(silent["value"])) if silent else False,
         }
 
-    def acknowledge(self, principal, delivery_id, key, status):
+    def acknowledge(self, principal, delivery_id, key, status, retry_after=None):
         self._transport(principal)
-        if status not in {"sent", "failed", "unknown"}:
-            raise AccessDenied("invalid_input", 422)
+        from .telegram_delivery_retry import validate_ack, defer
+        validate_ack(status, retry_after)
         with self.db.transaction() as conn:
             row = conn.execute(
                 "SELECT * FROM backend_announcement_deliveries WHERE id=? AND adapter_id=? AND claim_id=?",
@@ -337,6 +340,12 @@ class AnnouncementService:
             ).fetchone()
             if not row:
                 raise AccessDenied("resource_not_found", 404)
+            if status == 'retry':
+                if row['status'] == 'claimed':
+                    defer(conn, 'backend_announcement_deliveries', delivery_id, principal, retry_after)
+                elif row['status'] != 'queued':
+                    raise AccessDenied('delivery_finalized', 409)
+                return {'status': 'retry'}
             if row["status"] != "claimed":
                 if row["status"] != status:
                     raise AccessDenied("delivery_finalized", 409)

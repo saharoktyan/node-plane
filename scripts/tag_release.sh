@@ -17,7 +17,7 @@ Usage:
   scripts/tag_release.sh vX.Y.Z[-alpha.N] [options]
 
 Options:
-  --skip-tests         Do not run preflight checks (python tests + cargo check)
+  --skip-tests         Do not run preflight checks (Python and all Rust tests)
   --no-build           Do not build/package release artifacts
   --no-tag             Do not create a git tag (prep-only mode)
   --publish            Upload local artifacts to an existing CI-created GitHub release
@@ -166,10 +166,10 @@ python3 -m compileall -q app/telegram_client
 run_preflight_checks() {
   set_step "python tests"
   python3 -m unittest discover -s tests
-  set_step "cargo check node-driver"
-  (cd rust/node-driver && cargo check)
-  set_step "cargo check node-agent"
-  (cd rust/node-agent && cargo check)
+  set_step "cargo test node-driver"
+  (cd rust/node-driver && cargo test --locked)
+  set_step "cargo test node-agent"
+  (cd rust/node-agent && cargo test --locked)
   set_step "cargo test workstation assistant"
   (cd rust/node-plane-cli && cargo test --locked)
 }
@@ -193,9 +193,9 @@ build_release_artifacts() {
   mkdir -p "$release_dir"
 
   set_step "cargo build --release node-driver"
-  (cd rust/node-driver && cargo build --release)
+  (cd rust/node-driver && cargo build --release --locked)
   set_step "cargo build --release node-agent"
-  (cd rust/node-agent && cargo build --release)
+  (cd rust/node-agent && cargo build --release --locked)
   set_step "cargo build --release workstation assistant"
   (cd rust/node-plane-cli && cargo build --release --locked)
 

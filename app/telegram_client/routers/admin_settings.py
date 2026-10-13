@@ -429,7 +429,7 @@ async def updates_menu_cb(query: CallbackQuery, bot: Bot,
         await render(bot, query.message.chat.id,
             Screen(tr(locale, 'updates.unavailable'), (_friendly_error(locale, exc),), embedded_buttons=True, navigation=True),
             [[InlineKeyboardButton(text=tr(locale, 'back'),
-                callback_data=AdminSettingsCallback().pack())]], state,
+                callback_data='admin_menu')]], state,
             query.message.message_id)
 
 

@@ -59,10 +59,14 @@ def inspect():
     except (OSError, ValueError, KeyError, TypeError):
         pass
     entropy = []
+    awg_parameters = {}
     try:
         text = Path(awg).read_text()
         avalid = bool(re.search(r'(?m)^PrivateKey\s*=\s*\S+', text)) and 'HeaderProtectionKey' in text
         entropy = [line for line in text.splitlines() if re.match(r'^(S[1-4]|H[1-4]|I[1-5]|RandomTrailers|DisableCookies)\s*=', line)]
+        profile = intents.awg_profile_module()
+        values = profile.interface_values(text)
+        awg_parameters = {key: values[key] for key in profile.ALL_FIELDS if values.get(key)}
     except OSError:
         pass
     def container(name):
@@ -76,6 +80,7 @@ def inspect():
     return {'docker': docker, 'xray_config_valid': bool(xvalid), 'awg_config_valid': avalid,
             'xray_installed': xinstalled, 'awg_installed': ainstalled,
             'xray_running': xrunning, 'awg_running': arunning, 'entropy': entropy,
+            'awg_parameters': awg_parameters,
             'host_metrics': host_metrics(), 'inspection_available': True}
 
 

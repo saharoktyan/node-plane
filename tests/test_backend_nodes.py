@@ -72,6 +72,79 @@ class BackendNodeTests(unittest.TestCase):
         response = self.create(body={'key': 'old', 'title': 'Old', 'region': 'EU', 'protocols': []})
         self.assertEqual(response.json()['error']['code'], 'node_key_retired')
 
+    def test_partial_settings_preserve_custom_fields_and_update_inherited_hosts(self):
+        body = {'key': 'lv1', 'title': 'Custom', 'region': 'EU', 'protocols': ['awg', 'xray'],
+            'settings': {'public_host': 'old.example', 'xray_sni': 'example.com',
+                'xray_fingerprint': 'firefox', 'xray_tcp_port': 1443, 'xray_xhttp_port': 2443,
+                'xray_xhttp_path': '/custom', 'awg_port': 51111, 'awg_interface': 'vpn0',
+                'awg_i1_preset': 'dns'}}
+        original = self.create(body).json()['settings']
+        changed = self.edit(1, {'settings': {'public_host': 'new.example'}})
+        self.assertEqual(changed.status_code, 200, changed.text)
+        expected = {**original, 'public_host': 'new.example', 'xray_host': 'new.example',
+                    'awg_public_host': 'new.example'}
+        self.assertEqual(changed.json()['settings'], expected)
+        again = self.edit(2, {'settings': {'xray_sni': 'www.example.com'}})
+        self.assertEqual(again.json()['settings'], {**expected, 'xray_sni': 'www.example.com'})
+
+    def test_full_editor_payload_updates_inherited_hosts_and_preserves_overrides(self):
+        settings = self.create().json()['settings']
+        settings.update(public_host='new.example', xray_host='vless.example')
+        first = self.edit(1, {'settings': settings})
+        self.assertEqual(first.status_code, 200, first.text)
+        self.assertEqual(first.json()['settings']['awg_public_host'], 'new.example')
+        self.assertEqual(first.json()['settings']['xray_host'], 'vless.example')
+        settings = first.json()['settings']
+        settings['public_host'] = 'next.example'
+        second = self.edit(2, {'settings': settings})
+        self.assertEqual(second.json()['settings']['awg_public_host'], 'next.example')
+        self.assertEqual(second.json()['settings']['xray_host'], 'vless.example')
+
+    def test_awg_port_changes_follow_manual_and_automatic_modes(self):
+        self.create()
+        # A patch to a different field must preserve a previously selected fallback.
+        fallback = self.edit(1, {'settings': {'awg_port': 8443, 'awg_port_mode': 'auto'}})
+        self.assertEqual(fallback.json()['settings']['awg_port'], 8443)
+        host = self.edit(2, {'settings': {'public_host': 'next.example'}})
+        self.assertEqual(host.json()['settings']['awg_port'], 8443)
+        preset = self.edit(3, {'settings': {'awg_i1_preset': 'dns'}})
+        self.assertEqual(preset.json()['settings']['awg_port'], 53)
+        manual = self.edit(4, {'settings': {'awg_port': 51111}})
+        self.assertEqual(manual.json()['settings']['awg_port_mode'], 'manual')
+        kept = self.edit(5, {'settings': {'awg_i1_preset': 'quic'}})
+        self.assertEqual(kept.json()['settings']['awg_port'], 51111)
+        auto = self.edit(6, {'settings': {'awg_port_mode': 'auto'}})
+        self.assertEqual(auto.json()['settings']['awg_port'], 443)
+        self.assertEqual(auto.json()['settings']['awg_port_mode'], 'auto')
+
+    def test_invalid_effective_settings_are_rejected_before_saving(self):
+        self.create()
+        for changes in ({'public_host': 'bad host'}, {'awg_public_host': 'bad;host'},
+                        {'xray_xhttp_path': 'missing/slash'}, {'xray_tcp_port': 8443}):
+            with self.subTest(changes=changes):
+                response = self.edit(1, {'settings': changes})
+                self.assertEqual(response.status_code, 422, response.text)
+                node = self.client.get('/api/v1/nodes/lv1', headers=self.admin_headers()).json()
+                self.assertEqual(node['desired_revision'], 1)
+
+    def test_manual_awg_profile_is_persisted_validated_and_can_return_to_auto(self):
+        from awg_parameters import profile_module
+        from backend.node_settings import _snapshot
+        self.create()
+        values = profile_module().new_profile('dns')
+        edited = self.edit(1, {'settings': {'awg_parameters': values}})
+        self.assertEqual(edited.status_code, 200, edited.text)
+        self.assertEqual(edited.json()['settings']['awg_parameters'], values)
+        with self.db.connect() as conn:
+            row = conn.execute("SELECT * FROM backend_nodes WHERE key='lv1'").fetchone()
+            self.assertEqual(_snapshot(row)['settings']['awg_parameters'], values)
+        invalid = self.edit(2, {'settings': {'awg_parameters': {**values, 'H2': values['H1']}}})
+        self.assertEqual(invalid.status_code, 422, invalid.text)
+        self.assertEqual(invalid.json()['error']['code'], 'invalid_awg_parameters')
+        automatic = self.edit(2, {'settings': {'awg_parameters': {}}})
+        self.assertEqual(automatic.status_code, 200, automatic.text)
+        self.assertEqual(automatic.json()['settings']['awg_parameters'], {})
+
     def test_access_validation_and_active_grant_guard(self):
         member = self.register(102).json()
         self.db.connection.execute("UPDATE backend_accounts SET status = 'approved' WHERE id = ?", (member['id'],))

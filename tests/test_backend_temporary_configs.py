@@ -35,7 +35,7 @@ class TemporaryConfigTests(unittest.TestCase):
                 base.states[identity] = {'status':'active','expires_at':expiry,'enforcement_ready':True}
             return base.receipts[identity]
         base.node_action = action
-        base.refresh_awg_config = lambda *args: {'wg_conf':'[Interface]\nPrivateKey = secret\n','vpn_key':'vpn://secret'}
+        base.refresh_awg_config = lambda *args: {'wg_conf':'[Interface]\nPrivateKey = secret\n\n[Peer]\nEndpoint = node.example:51820\n','vpn_key':'vpn://secret'}
         self.driver = base
         self.service = TemporaryConfigService(self.db,base)
 
@@ -58,6 +58,32 @@ class TemporaryConfigTests(unittest.TestCase):
         self.assertEqual(len({i['runtime_name'] for i in intents}),2)
         self.assertNotEqual(first['id'],second['id'])
         self.assertNotIn('runtime_name',first)
+
+    def test_temporary_awg_download_rejects_a_stale_runtime_endpoint(self):
+        self.prepare('awg')
+        config = self.create('awg')
+        self.service.run_one()
+        self.driver.refresh_awg_config = lambda *args: {'wg_conf':
+            '[Interface]\nPrivateKey = secret\n\n[Peer]\nEndpoint = old.example:51820\n',
+            'vpn_key': 'vpn://secret'}
+        with self.assertRaises(AccessDenied) as failure:
+            self.service.artifact(self.actor, config['id'])
+        self.assertEqual(failure.exception.code, 'config_stale')
+
+    def test_temporary_vless_honors_fingerprint_and_rejects_stale_runtime_settings(self):
+        self.prepare()
+        with self.db.transaction() as conn:
+            settings = json.loads(conn.execute("SELECT settings_json FROM backend_nodes WHERE key='n1'").fetchone()[0])
+            settings['xray_fingerprint'] = 'firefox'
+            conn.execute("UPDATE backend_nodes SET settings_json=? WHERE key='n1'", (json.dumps(settings),))
+        config = self.create()
+        self.service.run_one()
+        with self.assertRaises(AccessDenied) as failure:
+            self.service.artifact(self.actor, config['id'])
+        self.assertEqual(failure.exception.code, 'config_stale')
+        read_metadata = self.driver.read_xray_public
+        self.driver.read_xray_public = lambda key: {**read_metadata(key), 'fingerprint': 'firefox'}
+        self.assertIn('fp=firefox', self.service.artifact(self.actor, config['id'])['content'])
 
     def test_stopped_or_unsupported_enforcement_blocks_issuance_and_recovers_read_only(self):
         self.prepare()

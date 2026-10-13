@@ -172,6 +172,9 @@ async def show_section(chat_id, user_id, message_id, section, node_key, bot, bac
         sections = (group('nodes.rich.connection', ('awg_public_host', 'awg_port')),
             group('nodes.rich.obscuration', ('awg_i1_preset',), extra=((
                 button(locale, 'node_tools.regenerate_entropy', f'node_action:regenerate_entropy:{node_key}'),),)),
+            Section(tr(locale, 'nodes.awg.parameters'), heading_size=3,
+                lines=(tr(locale, 'nodes.awg.manual' if node['settings'].get('awg_parameters') else 'nodes.awg.generated'),),
+                rows=((field_button('awg_parameters'),),)),
             group('nodes.rich.advanced', ('awg_interface',), extra=((
                 button(locale, 'node_tools.entropy', f'node_view:entropy:{node_key}'),),), collapsed=True))
         preferred = {'quic': 443, 'dns': 53}.get(node['settings'].get('awg_i1_preset', 'quic'))

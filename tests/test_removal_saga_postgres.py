@@ -37,6 +37,9 @@ class RemovalSagaPostgresTests(unittest.TestCase):
     def grant(self, node='node'):
         profile = ProfileRepository(self.db).create_profile(runtime_name='p_' + uuid4().hex,
             display_name='Test profile')
+        from backend.devices import DeviceRepository
+        with self.db.transaction() as conn:
+            DeviceRepository.ensure_default(conn, ProfileRepository(self.db).get(profile))
         ProfileCommands(self.db).execute(self.actor, str(uuid4()), action='grants', profile_id=profile,
             revision=1, values={'grants': [{'node_key': node, 'protocol': protocol} for protocol in ('awg', 'xray')]})
         return profile
@@ -244,7 +247,9 @@ class RemovalSagaPostgresTests(unittest.TestCase):
         self.assertEqual(SQLIdentityRepository(self.db).find_telegram_account(101).id, self.admin.id)
         self.assertEqual(events, ['clear'])
         with self.db.connect() as conn:
-            for table in ('backend_profiles', 'backend_nodes', 'backend_node_removal_inventories'):
+            profiles = conn.execute('SELECT owner_account_id FROM backend_profiles').fetchall()
+            self.assertEqual([row['owner_account_id'] for row in profiles], [self.admin.id])
+            for table in ('backend_nodes', 'backend_node_removal_inventories'):
                 self.assertEqual(conn.execute(f'SELECT COUNT(*) AS count FROM {table}').fetchone()['count'], 0)
             self.assertEqual(conn.execute('SELECT value FROM unrelated_application').fetchone()['value'], 'preserve')
         self.assertFalse(service.run_one())
@@ -253,7 +258,11 @@ class RemovalSagaPostgresTests(unittest.TestCase):
         service, events = self.controller()
         plan = service.plan(self.actor, 'remove', False)
         job = service.queue(self.actor, plan['id'], plan['confirmation_phrase'], str(uuid4()))
-        for _ in range(3):
+        # Full removal no longer creates a pre-reset backup. Advance until
+        # preparation completes, and retain the shutdown authorization boundary.
+        for _ in range(4):
+            if service.get(self.actor, job['id'])['status'] == 'awaiting_shutdown':
+                break
             self.assertTrue(service.run_one())
         self.assertEqual(service.get(self.actor, job['id'])['status'], 'awaiting_shutdown')
         self.assertFalse(service.run_one())

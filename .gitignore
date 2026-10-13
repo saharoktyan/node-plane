@@ -32,6 +32,8 @@ rust/node-agent/target/
 rust/node-plane-cli/target/
 /target/
 !rust/node-plane-cli/Cargo.lock
+!rust/node-driver/Cargo.lock
+!rust/node-agent/Cargo.lock
 
 .env
 .env.*

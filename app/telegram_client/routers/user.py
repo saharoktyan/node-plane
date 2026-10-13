@@ -288,6 +288,7 @@ async def show_home(chat_id: int, user_id: int, bot: Bot, backend: BackendClient
         rows.append([button(user_id, tr(locale, 'home.settings'), 'member_settings')])
     if account['role'] == 'admin' and account['status'] == 'approved':
         rows.append([button(user_id, tr(locale, 'home.admin'), 'admin_menu')])
+        rows.append([button(user_id, tr(locale, 'quick_start.title'), 'quick_start')])
     if account['status'] == 'approved':
         rows.insert(2, [button(user_id, tr(locale, 'devices.title'), 'device_profiles')])
         if notifications.get('total', 0):
@@ -449,7 +450,7 @@ async def show_account_profile(chat_id: int, user_id: int, message_id: int,
     sections = (access, identity, statistics, *((traffic,) if traffic else ()), servers)
     await render(bot, chat_id, Screen(tr(locale, 'account.details'),
         (summary['display_name'],), sections=sections, embedded_buttons=True, navigation=True,
-        breadcrumbs=(*profile_path, Breadcrumb(tr(locale, "account.details"), None))),
+        breadcrumbs=profile_path),
         [[button(user_id, tr(locale, 'back'), 'account_profile', profile_id, back_to)]], state, message_id)
 
 
@@ -461,10 +462,13 @@ def profile_traffic_section(summary, locale):
     tables = ()
     if traffic['status'] in {'current', 'unknown'} and traffic.get('items'):
         items = traffic['items']
-        total = sum(item['uplink_bytes'] + item['downlink_bytes'] for item in items)
-        lines.append(tr(locale, 'traffic.month_total', month=traffic.get('month') or '—', total=_traffic_bytes(total)))
+        known = all(traffic_item_total(item) is not None for item in items)
+        if known:
+            total = sum(traffic_item_total(item) for item in items)
+            lines.append(tr(locale, 'traffic.month_total', month=traffic.get('month') or '—', total=_traffic_bytes(total)))
         tables = (Table((tr(locale, 'profile.rich.protocols'), tr(locale, 'account.rich.traffic')),
-            tuple((tr(locale, 'protocol.' + item['protocol']), _traffic_bytes(item['uplink_bytes'] + item['downlink_bytes'])) for item in items)),)
+            tuple((tr(locale, 'protocol.' + item['protocol']),
+                _traffic_bytes(traffic_item_total(item)) if traffic_item_total(item) is not None else tr(locale, 'account.rich.waiting')) for item in items)),)
     return Section(tr(locale, 'traffic.title'), tuple(lines), tables=tables)
 
 
@@ -478,7 +482,7 @@ def profile_server_section(summary, node, locale, *, divider_after=False):
         item = next((item for item in traffic.get('nodes', [])
             if item['node_key'] == node['key'] and item['protocol'] == protocol), None)
         rows.append((tr(locale, 'protocol.' + protocol),
-            _traffic_bytes(item['uplink_bytes'] + item['downlink_bytes']) if item else tr(locale, 'account.rich.waiting')))
+            _traffic_bytes(traffic_item_total(item)) if item and traffic_item_total(item) is not None else tr(locale, 'account.rich.waiting')))
         stale |= bool(item and item['status'] != 'current')
     compact = ' · '.join(f'{label}: {value}' for label, value in rows)
     return Section(server_label(node), (compact, *((tr(locale, 'traffic.node_unknown'),) if stale else ())),
@@ -510,7 +514,7 @@ def profile_statistics(summary: dict, locale: str) -> tuple[str, ...]:
     traffic = summary.get('traffic')
     if traffic:
         lines += (tr(locale, 'traffic.status.' + traffic['status']),)
-        if traffic['items']:
+        if traffic['items'] and all(traffic_item_total(item) is not None for item in traffic['items']):
             lines += (tr(locale, 'traffic.month_total', month=traffic.get('month') or '—',
                 total=_traffic_bytes(sum(item['uplink_bytes'] + item['downlink_bytes']
                     for item in traffic['items']))),)
@@ -527,7 +531,7 @@ def profile_node_traffic(summary: dict, node: dict, locale: str) -> tuple[str, .
             continue
         item = next((item for item in traffic.get('nodes', [])
                      if item['node_key'] == node['key'] and item['protocol'] == protocol), None)
-        if item is None:
+        if item is None or traffic_item_total(item) is None:
             lines.append(tr(locale, 'traffic.node_waiting', protocol=label))
             continue
         lines.append(tr(locale, 'traffic.node_month', protocol=label,
@@ -537,6 +541,11 @@ def profile_node_traffic(summary: dict, node: dict, locale: str) -> tuple[str, .
         if item['status'] != 'current':
             lines.append(tr(locale, 'traffic.node_unknown'))
     return tuple(lines)
+
+
+def traffic_item_total(item):
+    upload, download = item.get('uplink_bytes'), item.get('downlink_bytes')
+    return upload + download if upload is not None and download is not None else None
 
 
 def _traffic_bytes(value: int) -> str:

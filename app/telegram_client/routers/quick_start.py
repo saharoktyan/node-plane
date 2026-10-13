@@ -1,0 +1,48 @@
+"""Resumable administrator guide using existing settings and setup screens."""
+from aiogram import F, Router
+from aiogram.types import InlineKeyboardButton
+
+from ..i18n import normalize_locale, tr
+from ..screens import Screen, Section
+from .common import render
+from .callbacks import NewNodeCallback, AdminNodeCallback
+
+router = Router()
+
+
+async def show(chat_id, user_id, message_id, bot, backend, state):
+    locale = normalize_locale((await state.get_data()).get('locale'))
+    value = await backend.request('GET', '/api/v1/system/onboarding', telegram_user_id=user_id)
+    lines = tuple(('✓ ' if step['complete'] else '○ ') + tr(locale, 'quick_start.' + step['key'])
+                  for step in value['steps'])
+    step = value['next_step']
+    from .user import button as member_button
+    callback = {'defaults': 'idefault:open', 'node': NewNodeCallback().pack(),
+        'protocols': AdminNodeCallback(node_key=value['node_key']).pack() if value['node_key'] else 'admin_nodes',
+        'access': 'admin_profiles', 'config': member_button(user_id, tr(locale, 'quick_start.continue'), 'profiles').callback_data}.get(step)
+    rows = []
+    if callback and len(callback.encode()) > 64:
+        callback = 'admin_nodes'
+    if callback:
+        rows.append([InlineKeyboardButton(text=tr(locale, 'quick_start.continue'), callback_data=callback, style='primary')])
+    if step == 'defaults':
+        rows.append([InlineKeyboardButton(text=tr(locale, 'quick_start.use_defaults'), callback_data='quick_start_defaults')])
+    rows.append([InlineKeyboardButton(text=tr(locale, 'quick_start.refresh'), callback_data='quick_start')])
+    rows.append([InlineKeyboardButton(text=tr(locale, 'setup.close'), callback_data='admin_menu')])
+    await render(bot, chat_id, Screen(tr(locale, 'quick_start.title'),
+        (tr(locale, 'quick_start.note.' + (step or 'done')),), sections=(
+            Section(tr(locale, 'quick_start.progress'), lines=lines),), embedded_buttons=True, navigation=True),
+        rows, state, message_id)
+
+
+@router.callback_query(F.data == 'quick_start')
+async def guide(query, bot, backend, state):
+    await query.answer()
+    await show(query.message.chat.id, query.from_user.id, query.message.message_id, bot, backend, state)
+
+
+@router.callback_query(F.data == 'quick_start_defaults')
+async def use_defaults(query, bot, backend, state):
+    await query.answer()
+    await backend.request('POST', '/api/v1/system/onboarding/defaults', telegram_user_id=query.from_user.id, body={})
+    await show(query.message.chat.id, query.from_user.id, query.message.message_id, bot, backend, state)

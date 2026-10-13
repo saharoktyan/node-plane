@@ -7,12 +7,12 @@ usage() {
 Usage: bash install_workstation.sh [--channel dev|stable] [--tag vX.Y.Z[-alpha.N]]
 
 Installs Workstation on Linux x86_64 or macOS (Intel/Apple Silicon) and configures PATH.
-The default dev channel includes alpha releases. An exact tag overrides discovery.
+The default stable channel selects stable releases. Use --channel dev for alpha builds.
 Saved installation profiles and SSH keys are retained.
 EOF
 }
 
-channel=dev
+channel=stable
 tag=
 while [[ $# -gt 0 ]]; do
   case "$1" in

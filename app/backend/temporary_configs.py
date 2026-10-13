@@ -318,6 +318,10 @@ class TemporaryConfigService:
                 raise AccessDenied('config_stale',409)
         if row['protocol']=='awg':
             config = driver.refresh_awg_config(row['node_key'],receipt['wg_conf'],node['title']+' · Temporary')
+            settings = json.loads(node['settings_json'])
+            host = settings.get('awg_public_host', settings['public_host'])
+            if f'Endpoint = {host}:{settings.get("awg_port", 51820)}' not in config['wg_conf'].splitlines():
+                raise AccessDenied('config_stale',409)
             files = [{'filename':'Temporary AmneziaWG.'+ext,'content':config[key]} for ext,key in (('vpn','vpn_key'),('conf','wg_conf'))]
             content = config['wg_conf'] if row['transport']=='conf' else config['vpn_key']
         else:
@@ -326,7 +330,8 @@ class TemporaryConfigService:
             if (metadata['sni'] != settings['xray_sni'] or
                     metadata['tcp_port'] != settings['xray_tcp_port'] or
                     metadata['xhttp_port'] != settings['xray_xhttp_port'] or
-                    metadata['xhttp_path'] != settings['xray_xhttp_path']):
+                    metadata['xhttp_path'] != settings['xray_xhttp_path'] or
+                    metadata['fingerprint'] != settings.get('xray_fingerprint','chrome')):
                 raise AccessDenied('config_stale',409)
             host = settings.get('xray_host',settings['public_host'])
             port = metadata['tcp_port'] if row['transport']=='tcp' else metadata['xhttp_port']

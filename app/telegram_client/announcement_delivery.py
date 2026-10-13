@@ -24,7 +24,8 @@ async def deliver_one(bot, backend):
     status = await send_notification(
         bot, delivery["telegram_user_id"], screen, delivery["silent"], rows=rows
     )
-    await backend.announcement_ack(delivery["id"], key, status)
+    options = {'retry_after': status.retry_after} if hasattr(status, 'retry_after') else {}
+    await backend.announcement_ack(delivery["id"], key, status, **options)
     return True
 
 
@@ -76,7 +77,9 @@ async def delivery_loop(bot, backend, dispatcher=None):
             await asyncio.sleep(0.1)
         else:
             try:
-                await backend.wait_deliveries()
+                hint = await backend.wait_deliveries()
+                if isinstance(hint, dict) and hint.get('retry_after'):
+                    await asyncio.sleep(min(hint['retry_after'], 60))
             except Exception:
                 # Includes older controllers and interrupted long polls.
                 await asyncio.sleep(5)

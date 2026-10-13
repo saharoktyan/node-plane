@@ -1900,6 +1900,7 @@ fn repeated_custom_accents_persist_and_render_each_selected_color() {
 #[test]
 fn quick_start_keyboard_opens_profile_and_escape_closes_guide() {
     let mut app = test_profile_app();
+    app.confirmed_installation = None;
     let directory = tempfile::tempdir().unwrap();
     app.state_dir = directory.path().into();
     app.connections.save(&app.state_dir).unwrap();
@@ -2586,9 +2587,9 @@ fn channel_selector_cycles_only_supported_channels_and_mouse_updates_both_forms(
         .unwrap()
         .area;
     click(&mut app, (arrow.x, arrow.y));
-    assert_eq!(app.form.fields[3], "dev");
+    assert_eq!(app.form.fields[3], crate::config::default_branch());
     app.form.append("invalid-channel");
-    assert_eq!(app.form.fields[3], "dev");
+    assert_eq!(app.form.fields[3], crate::config::default_branch());
     app.begin_edit(false);
     app.editor.as_mut().unwrap().2 = 4;
     terminal
@@ -2655,7 +2656,7 @@ fn action_specific_fields_do_not_edit_hidden_credentials() {
     assert!(form.action == Action::Diagnose);
     form.cycle(false);
     assert!(form.action == Action::Install);
-    assert_eq!(form.fields[3], "dev");
+    assert_eq!(form.fields[3], crate::config::default_branch());
     form.cycle(false);
     assert!(form.action == Action::Update);
     assert!(form.fields[3].is_empty());
@@ -5339,4 +5340,39 @@ fn installation_defaults_count_fields_as_one_group() {
         app.list_position(Control::ControllerDefaultsSave, &controls),
         None
     );
+}
+
+#[test]
+fn quick_start_returns_to_previous_screen_on_escape_and_close() {
+    for close in [false, true] {
+        let mut app = test_profile_app();
+        app.screen = Screen::Nodes;
+        app.open_quick_start();
+        app.open_quick_start(); // F1 again must preserve the original destination.
+        if close {
+            app.activate(Control::QuickStartClose);
+        } else {
+            app.quick_start_key(KeyCode::Esc.into());
+        }
+        assert!(matches!(app.screen, Screen::Nodes));
+        assert!(app.quick_start_return.is_none());
+    }
+}
+
+#[test]
+fn quick_start_continue_preserves_an_unsaved_node_draft() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Nodes;
+    let mut editor = node_settings_editor();
+    editor.fields[0].value = "changed.example.com".into();
+    app.nodes.editor = Some(editor);
+    assert!(app.unsaved_changes());
+    app.open_quick_start();
+    app.activate(Control::QuickStartAction);
+    assert!(matches!(app.screen, Screen::Nodes));
+    assert_eq!(
+        app.nodes.editor.as_ref().unwrap().fields[0].value,
+        "changed.example.com"
+    );
+    assert!(app.error.contains("current draft"));
 }

@@ -23,6 +23,10 @@ cd /opt/node-plane/current
 
 ## Backups
 
+Workstation: **Node Plane Settings → Backups → Backups list → Download backup** saves a snapshot to a local JSON file. **Import backup from file** adds a validated snapshot to the selected controller's catalog without restoring it. Open the imported entry and choose Restore separately. Downloads refuse to overwrite existing files; imports validate the checksum and deduplicate identical snapshots. Limit: 64 MiB. The HTTP API provides authenticated export/import endpoints for the same workflow.
+
+For a replacement controller, install Node Plane, sign in as the same Telegram administrator, import the snapshot and restore it. The current administrator's authentication is retained and ownership is transferred from their former administrator UUID. Restore SSH access to the nodes on the replacement controller first: the snapshot does not transfer private key files from the previous host. Review node reconnect results and obtain new workstation account credentials after restore. This is a manual recovery workflow; fully automated installation from a snapshot remains future work.
+
 Telegram: administrator **Backups**. Open **Backups** to create a configuration backup, inspect the catalog or restore a selected backup. **Auto backups** controls scheduled backups, frequency and retention. Download sensitive backups to protected storage outside the controller.
 
 A configuration backup is not a complete host image. It does not preserve temporary credentials or replace your server/database disaster-recovery plan. Restoration can change accounts, profile grants and settings; review its plan and resolve outstanding work first.

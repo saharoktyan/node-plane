@@ -387,6 +387,9 @@ class AlertService:
             from .maintenance_gate import active
             if active(conn):
                 return None
+            from .telegram_delivery_retry import remaining
+            if remaining(conn, principal, timestamp):
+                return None
             conn.execute(
                 "UPDATE backend_alert_deliveries SET status='unknown' WHERE status='claimed' AND claimed_until<=?",
                 (timestamp.isoformat(),),
@@ -470,10 +473,10 @@ class AlertService:
             },
         }
 
-    def acknowledge(self, principal, delivery_id, key, status):
+    def acknowledge(self, principal, delivery_id, key, status, retry_after=None):
         AnnouncementService._transport(principal)
-        if status not in {"sent", "failed", "unknown"}:
-            raise AccessDenied("invalid_input", 422)
+        from .telegram_delivery_retry import validate_ack, defer
+        validate_ack(status, retry_after)
         with self.db.transaction() as conn:
             row = conn.execute(
                 "SELECT status FROM backend_alert_deliveries WHERE id=? AND adapter_id=? AND claim_id=?",
@@ -481,6 +484,12 @@ class AlertService:
             ).fetchone()
             if not row:
                 raise AccessDenied("resource_not_found", 404)
+            if status == 'retry':
+                if row['status'] == 'claimed':
+                    defer(conn, 'backend_alert_deliveries', delivery_id, principal, retry_after)
+                elif row['status'] != 'queued':
+                    raise AccessDenied('delivery_finalized', 409)
+                return {'status': 'retry'}
             if row["status"] != "claimed" and row["status"] != status:
                 raise AccessDenied("delivery_finalized", 409)
             conn.execute(

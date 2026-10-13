@@ -45,8 +45,8 @@ SHORT_COMMIT="${COMMIT:0:12}"
 }
 
 mkdir -p "$OUT_DIR"
-cargo build --release --manifest-path rust/node-driver/Cargo.toml
-cargo build --release --manifest-path rust/node-agent/Cargo.toml
+cargo build --locked --release --manifest-path rust/node-driver/Cargo.toml
+cargo build --locked --release --manifest-path rust/node-agent/Cargo.toml
 
 DRIVER_NAME="node-plane-driver-linux-amd64"
 AGENT_NAME="node-plane-agent-linux-amd64"

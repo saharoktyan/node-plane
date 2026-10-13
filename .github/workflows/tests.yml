@@ -1,0 +1,169 @@
+name: Server and Python checks
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-server-tests-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python ${{ matrix.python }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.11', '3.12']
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt -r requirements-dev.txt uv==0.12.23
+      - name: Shell syntax
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+          for directory in ('scripts', 'runtime_assets'):
+              for path in sorted(Path(directory).rglob('*.sh')):
+                  subprocess.run(['bash', '-n', str(path)], check=True)
+          PY
+      - name: Full Python unit and contract suite
+        run: python scripts/run_ci_tests.py unit
+
+  postgres:
+    name: PostgreSQL 16 / Python ${{ matrix.python }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.11', '3.12']
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: node_plane_test
+          POSTGRES_PASSWORD: ci-fixture-only
+          POSTGRES_DB: node_plane_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U node_plane_test -d node_plane_test"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: Full PostgreSQL integration and process-fault suite
+        env:
+          NODE_PLANE_TEST_POSTGRES_DSN: postgresql://node_plane_test:ci-fixture-only@127.0.0.1:5432/node_plane_test
+        run: python scripts/run_ci_tests.py postgres
+
+  rust:
+    name: Rust ${{ matrix.crate }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        crate: [node-driver, node-agent]
+    defaults:
+      run:
+        working-directory: rust/${{ matrix.crate }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Install protobuf compiler
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - name: Rust toolchain
+        run: rustup toolchain install 1.90.0 --profile minimal --component rustfmt --component clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust/${{ matrix.crate }}
+          shared-key: server-tests-${{ matrix.crate }}
+      - name: Format
+        run: cargo +1.90.0 fmt --check
+      - name: Clippy
+        # Server crates have existing warnings, including tonic-generated code.
+        # Keep diagnostics visible without treating that baseline as a test failure.
+        run: cargo +1.90.0 clippy --locked --all-targets
+      - name: Full Rust test suite
+        run: cargo +1.90.0 test --locked -- --test-threads=1
+
+  docker:
+    name: Docker runtime and agent faults
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install -r requirements.txt -r requirements-dev.txt
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
+      - name: Rust toolchain
+        run: rustup toolchain install 1.90.0 --profile minimal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust/node-agent
+          shared-key: docker-agent-tests
+      - name: Build current agent
+        run: cargo +1.90.0 build --locked --manifest-path rust/node-agent/Cargo.toml
+      - name: Prepare isolated runtime fixtures
+        run: |
+          docker pull ghcr.io/xtls/xray-core:26.3.27
+          docker pull amneziavpn/amneziawg-go:3.1.20260828@sha256:cbafc02b8373a83f428272db6d8001b37bc02e6211cbd8c0cb4e2e3759b12b72
+          docker build -t node-plane-release-builder:bookworm -f scripts/Dockerfile.release .
+      - name: Full Docker runtime and mTLS/SIGKILL suite
+        env:
+          NODE_PLANE_TEST_DOCKER: '1'
+        run: python scripts/run_ci_tests.py docker
+
+  passed:
+    name: Server and Python tests passed
+    if: ${{ always() }}
+    needs: [python, postgres, rust, docker]
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Require every suite to pass
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python - <<'PY'
+          import json, os
+          results = json.loads(os.environ['RESULTS'])
+          failed = [name for name, value in results.items() if value['result'] != 'success']
+          if failed:
+              raise SystemExit('Required suites did not pass: ' + ', '.join(failed))
+          PY

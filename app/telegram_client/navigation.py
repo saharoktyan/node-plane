@@ -61,7 +61,6 @@ def parent_path(callback, locale, data):
     if callback in {'updates', 'backups'}:
         return (*admin, Breadcrumb(tr(locale, callback + '.title'), callback))
     settings_pages = {
-        'updates': 'updates.title', 'backups': 'backups.title',
         'temporary:list:0': 'temporary.title',
         'alerts': 'alerts.title', 'traffic': 'traffic.title',
         'bot_title_settings': 'bot_title.title', 'request_policy': 'request_policy.title',
@@ -90,9 +89,13 @@ def parent_path(callback, locale, data):
                            else 'idefault:main', locale, data)
     if callback == 'backup_settings':
         return (*parent_path('backups', locale, data), Breadcrumb(tr(locale, 'backups.settings'), callback))
-    if callback.startswith(('backup_list:', 'backup_detail:')):
-        return (*parent_path('backups', locale, data), Breadcrumb(tr(locale,
-            'backups.details' if callback.startswith('backup_detail:') else 'backups.restore'), callback))
+    if callback.startswith('backup_list:'):
+        return (*parent_path('backups', locale, data), Breadcrumb(tr(locale, 'backups.restore'), callback))
+    if callback.startswith('backup_detail:'):
+        offset = data.get('backup_offset', 0)
+        offset = offset if type(offset) is int and offset >= 0 else 0
+        return (*parent_path(f'backup_list:{offset}', locale, data),
+                Breadcrumb(tr(locale, 'backups.details'), callback))
     if callback.startswith('backup_job:'):
         return (*parent_path('backups', locale, data), Breadcrumb(tr(locale, 'backups.result'), callback))
     if callback == 'upd_act:auto_check':

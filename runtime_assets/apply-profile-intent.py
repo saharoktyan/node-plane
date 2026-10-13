@@ -551,6 +551,13 @@ def expire_leases(path, runner, now=None):
             return {'expired': expired, 'pending': pending}
 
 
+def awg_profile_module():
+    spec = importlib.util.spec_from_file_location('awg_settings_profile', Path(__file__).with_name('awg_profile.py'))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def validate_node_settings(intent):
     if not isinstance(intent, dict) or set(intent) != {'kind', 'node_key', 'command_id', 'revision', 'protocols', 'settings'}:
         raise ValueError('invalid node settings intent')
@@ -567,7 +574,7 @@ def validate_node_settings(intent):
     settings = intent['settings']
     fields = {'public_host', 'xray_host', 'xray_sni', 'xray_tcp_port', 'xray_xhttp_port',
               'xray_xhttp_path', 'awg_public_host', 'awg_port',
-              'xray_fingerprint', 'awg_interface', 'awg_i1_preset', 'awg_port_mode'}
+              'xray_fingerprint', 'awg_interface', 'awg_i1_preset', 'awg_port_mode', 'awg_parameters'}
     if not isinstance(settings, dict) or set(settings) - fields:
         raise ValueError('invalid settings')
     required = {'public_host'}
@@ -578,6 +585,16 @@ def validate_node_settings(intent):
     if not required <= set(settings):
         raise ValueError('node settings are incomplete')
     for field, value in settings.items():
+        if field == 'awg_parameters':
+            profile = awg_profile_module()
+            if not isinstance(value, dict) or set(value) - set(profile.ALL_FIELDS):
+                raise ValueError('unknown AWG parameters')
+            if value:
+                if any(not isinstance(v, str) or not v or len(v) > 4096
+                       or any(ord(c) < 32 or ord(c) > 126 for c in v) for v in value.values()):
+                    raise ValueError('invalid AWG parameter value')
+                profile.validate(value)
+            continue
         if field.endswith('_port'):
             if type(value) is not int or not 1 <= value <= 65535:
                 raise ValueError('invalid port')
@@ -585,7 +602,7 @@ def validate_node_settings(intent):
               or any(ord(char) < 33 or ord(char) > 126 for char in value)):
             raise ValueError('invalid text setting')
         if field in {'public_host', 'xray_host', 'xray_sni', 'awg_public_host'} and (
-                not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9.-]*[A-Za-z0-9]', value)
+                not re.fullmatch(r'[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?', value)
                 or '..' in value):
             raise ValueError('invalid host setting')
         if field == 'xray_xhttp_path' and not re.fullmatch(r'/[A-Za-z0-9/_~.%+-]*', value):
@@ -748,16 +765,57 @@ def verify_node_settings_config(intent, xray_path, awg_path):
         awg_config = Path(awg_path).read_text()
         if not re.search(r'(?m)^ListenPort\s*=\s*' + str(settings['awg_port']) + r'\s*$', awg_config):
             raise ValueError('AWG port verification failed')
+        if Path(awg_path).name != settings.get('awg_interface', 'wg0') + '.conf':
+            raise ValueError('AWG interface config verification failed')
+        if settings.get('awg_parameters'):
+            profile = awg_profile_module()
+            actual = profile.interface_values(awg_config)
+            profile.validate(actual)
+            if any(actual.get(key, '') != settings['awg_parameters'].get(key, '') for key in profile.ALL_FIELDS):
+                raise ValueError('manual AWG parameters verification failed')
+        elif 'awg_i1_preset' in settings:
+            match = re.search(r'(?m)^I1[ \t]*=[ \t]*([^\r\n]+)$', awg_config.split('[Peer]', 1)[0])
+            if not match:
+                raise ValueError('AWG preset verification failed')
+            i1 = match.group(1).strip()
+            preset = ('quic' if i1.startswith('<b 0xc000000001>') else
+                      'dns' if i1.startswith('<rc 2><b 0x01000001000000000000>') else 'chaos')
+            if preset != settings['awg_i1_preset']:
+                raise ValueError('AWG preset verification failed')
 
 
-def inspect_node_settings_for_repair(intent):
-    env_path = Path('/etc/node-plane/node.env')
+def verify_node_settings_environment(intent, env_path):
+    """The endpoint and client options live in node.env, outside protocol configs."""
+    settings = intent['settings']
+    expected = {'SERVER_KEY': intent['node_key']}
+    if 'awg' in intent['protocols']:
+        expected.update(AWG_SERVER_IP=settings.get('awg_public_host', settings['public_host']),
+            AWG_SERVER_PORT=str(settings['awg_port']), AWG_IFACE=settings.get('awg_interface', 'wg0'),
+            AWG_I1_PRESET=settings.get('awg_i1_preset', 'quic'))
+    if 'xray' in intent['protocols']:
+        expected['XRAY_FP'] = settings.get('xray_fingerprint', 'chrome')
+    script = 'source "$1"; ' + '; '.join(f'printf "%s\\n" "${{{key}:-}}"' for key in expected)
+    if 'awg' in intent['protocols']:
+        script += '; printf "%s\\n" "${AWG_PARAMETERS_FILE:-}"'
+    values = subprocess.run(['bash', '-c', script, 'node-settings-environment', str(env_path)],
+        check=True, capture_output=True, text=True, timeout=30).stdout.splitlines()
+    if 'awg' in intent['protocols']:
+        parameters_path = values.pop() if values else ''
+        parameters = json.loads(Path(parameters_path).read_text()) if parameters_path else {}
+        if parameters != settings.get('awg_parameters', {}):
+            raise ValueError('manual AWG environment verification failed')
+    if values != list(expected.values()):
+        raise ValueError('node environment differs from requested settings')
+
+
+def inspect_node_settings_for_repair(intent, *, env_path=Path('/etc/node-plane/node.env')):
     paths = subprocess.run(['bash', '-c', 'source "$1"; printf "%s\n%s\n%s\n%s\n" "${XRAY_CONFIG:-/opt/node-plane-runtime/xray/config.json}" "${AWG_CONFIG:-/opt/node-plane-runtime/amnezia-awg/data/wg0.conf}" "${XRAY_CONTAINER_NAME:-xray}" "${AWG_CONTAINER_NAME:-amnezia-awg}"',
                             'node-settings-paths', str(env_path)], check=True, capture_output=True,
                            text=True, timeout=30).stdout.splitlines()
     if len(paths) != 4:
         raise ValueError('invalid node environment')
     try:
+        verify_node_settings_environment(intent, env_path)
         verify_node_settings_config(intent, paths[0], paths[1])
         matches = True
     except (OSError, ValueError, KeyError, TypeError):
@@ -848,6 +906,15 @@ def run_node_settings(intent, lock_fd, *, env_path=Path('/etc/node-plane/node.en
         'AWG_I1_PRESET': settings.get('awg_i1_preset', 'quic'),
         'XRAY_FP': settings.get('xray_fingerprint', 'chrome'),
     }
+    parameters_path = env_path.with_name('awg-parameters.json')
+    with tempfile.NamedTemporaryFile(mode='w', dir=env_path.parent, delete=False) as staged:
+        json.dump(settings.get('awg_parameters', {}), staged, sort_keys=True)
+        staged.flush()
+        os.fsync(staged.fileno())
+        parameters_staged = Path(staged.name)
+    parameters_staged.chmod(0o600)
+    os.replace(parameters_staged, parameters_path)
+    replacements['AWG_PARAMETERS_FILE'] = str(parameters_path)
     new_awg_path = awg_path.with_name(settings.get('awg_interface', 'wg0') + '.conf')
     if awg_path != new_awg_path and awg_path.exists():
         # Preserve server and peer identities when changing interface names.
@@ -912,6 +979,7 @@ def run_node_settings(intent, lock_fd, *, env_path=Path('/etc/node-plane/node.en
     # The apply script only reports success after protocol config edits and
     # deployment. Read the resulting files independently before acknowledgment.
     installation_step('protocol_verify')
+    verify_node_settings_environment(intent, env_path)
     verify_node_settings_config(intent, xray_path, awg_path)
     for container in ([paths[2]] if 'xray' in intent['protocols'] else []) + ([paths[3]] if 'awg' in intent['protocols'] else []):
         state = subprocess.run(['docker', 'inspect', '-f', '{{.State.Running}}', container],

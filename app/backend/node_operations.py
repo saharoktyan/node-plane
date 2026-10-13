@@ -76,6 +76,8 @@ class NodeOperations:
                 raise AccessDenied('config_not_supported', 422)
             if action == 'regenerate_entropy' and 'awg' not in json.loads(node['protocols_json']):
                 raise AccessDenied('config_not_supported', 422)
+            if action == 'regenerate_entropy' and json.loads(node['settings_json']).get('awg_parameters'):
+                raise AccessDenied('awg_manual_parameters_active', 409)
             snapshot = ({'node_key': node_key, 'revision': node['desired_revision'],
                          'protocols': json.loads(node['protocols_json']), 'settings': json.loads(node['settings_json'])}
                         if action in {'install_docker', 'sync_runtime', 'cleanup_runtime'} else _snapshot(node))

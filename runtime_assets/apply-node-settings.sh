@@ -75,7 +75,17 @@ if [[ "$APPLY_AWG" == true ]]; then
       *) CURRENT_PRESET=chaos ;;
     esac
   fi
-  if [[ "$CURRENT_PRESET" != "${AWG_I1_PRESET:-quic}" ]]; then
+  MANUAL_PARAMETERS=0
+  if [[ -n "${AWG_PARAMETERS_FILE:-}" ]]; then
+    MANUAL_PARAMETERS="$(python3 -c 'import json,sys; print(int(bool(json.load(open(sys.argv[1])))))' "$AWG_PARAMETERS_FILE")"
+  fi
+  if [[ "$MANUAL_PARAMETERS" == 1 ]]; then
+    if ! python3 /opt/node-plane-runtime/awg_profile.py apply "$CFG" "$AWG_PARAMETERS_FILE" >/dev/null; then
+      cp -p "$AWG_BACKUP" "$CFG"
+      echo "Manual AWG parameters failed validation; previous config restored" >&2
+      exit 1
+    fi
+  elif [[ "$CURRENT_PRESET" != "${AWG_I1_PRESET:-quic}" ]]; then
     if ! python3 /opt/node-plane-runtime/awg_profile.py regenerate "$CFG" "${AWG_I1_PRESET:-quic}" >/dev/null; then
       cp -p "$AWG_BACKUP" "$CFG"
       echo "AWG entropy update failed; previous config restored" >&2
@@ -102,6 +112,10 @@ PY
     exit 1
   fi
   rm -f "$AWG_BACKUP"
-  printf '%s\n' "${AWG_I1_PRESET:-quic}" > "$PRESET_FILE"
+  if [[ "$MANUAL_PARAMETERS" == 1 ]]; then
+    printf 'manual\n' > "$PRESET_FILE"
+  else
+    printf '%s\n' "${AWG_I1_PRESET:-quic}" > "$PRESET_FILE"
+  fi
 fi
 echo "Node settings applied"

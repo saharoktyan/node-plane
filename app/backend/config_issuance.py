@@ -229,7 +229,8 @@ class ConfigIssuanceService:
             metadata['tcp_port'] != settings['xray_tcp_port'] or
             metadata['xhttp_port'] != settings['xray_xhttp_port'] or
             metadata['xhttp_path'] != settings['xray_xhttp_path'] or
-            metadata['flow'] != 'xtls-rprx-vision' or metadata['fingerprint'] != 'chrome'):
+            metadata['flow'] != 'xtls-rprx-vision' or
+            metadata['fingerprint'] != settings.get('xray_fingerprint', 'chrome')):
             raise ValueError('Xray runtime differs from applied node settings')
         return metadata, None
 
@@ -316,7 +317,7 @@ class ConfigIssuanceService:
         host = settings.get('xray_host', settings['public_host'])
         port = metadata['tcp_port'] if row['transport'] == 'tcp' else metadata['xhttp_port']
         params = (f'encryption=none&security=reality&sni={quote(metadata["sni"], safe="")}'
-                  f'&fp=chrome&pbk={metadata["public_key"]}&sid={metadata["short_id"]}')
+                  f'&fp={quote(metadata["fingerprint"], safe="")}&pbk={metadata["public_key"]}&sid={metadata["short_id"]}')
         if row['transport'] == 'tcp':
             params += '&type=tcp&flow=xtls-rprx-vision'
         else:

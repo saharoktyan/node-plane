@@ -15,6 +15,56 @@ from tests.test_backend_http import BackendHTTPTests
 class BackendConfigIssuanceTests(unittest.TestCase):
     setUp = BackendHTTPTests.setUp
 
+    def test_edited_endpoint_is_used_by_new_configs_and_old_issuances_are_stale(self):
+        from backend.node_settings import NodeSettingsExecutor, _digest
+        for protocol, transport in (('xray', 'tcp'), ('xray', 'xhttp'), ('awg', 'conf')):
+            with self.subTest(protocol=protocol, transport=transport):
+                self.setUp()
+                profile_id = self.setup_ready_profile(protocol)
+                driver = self.driver()
+                driver.apply_node_settings = lambda command_id, intent: json.dumps({
+                    'node_key': intent['node_key'], 'revision': intent['revision'],
+                    'settings_sha256': _digest(intent)})
+                headers = {**self.headers, 'X-Node-Plane-Telegram-User-ID': '101'}
+                path = f'/api/v1/profiles/{profile_id}/config-issuances?wait=true'
+                with TestClient(create_app(self.db, node_driver=driver)) as client:
+                    old = client.post(path, headers={**headers, 'Idempotency-Key': str(uuid4())},
+                        json={'node_key': 'n1', 'protocol': protocol, 'transport': transport})
+                    self.assertEqual(old.json()['status'], 'succeeded', old.text)
+                    node = client.get('/api/v1/nodes/n1', headers=headers).json()
+                    settings = {**node['settings'], 'public_host': 'new.example'}
+                    if protocol == 'xray':
+                        settings['xray_fingerprint'] = 'firefox'
+                    updated = client.patch('/api/v1/nodes/n1', headers={**headers,
+                        'Idempotency-Key': str(uuid4()), 'If-Match': '"1"'}, json={'settings': settings})
+                    self.assertEqual(updated.status_code, 200, updated.text)
+                    # Runtime must acknowledge the changed settings before issuance.
+                    waiting = client.post(path, headers={**headers, 'Idempotency-Key': str(uuid4())},
+                        json={'node_key': 'n1', 'protocol': protocol, 'transport': transport})
+                    self.assertEqual(waiting.status_code, 409, waiting.text)
+                    queued = client.post('/api/v1/nodes/n1/apply-settings', headers={**headers,
+                        'Idempotency-Key': str(uuid4()), 'If-Match': '"2"'})
+                    self.assertEqual(queued.status_code, 202, queued.text)
+                    self.assertTrue(NodeSettingsExecutor(self.db, driver).run_one())
+                    if protocol == 'awg':
+                        driver.refresh_awg_config = lambda *args: {'wg_conf':
+                            '[Interface]\nPrivateKey = private\n\n[Peer]\nEndpoint = new.example:51820\n',
+                            'vpn_key': 'vpn://new'}
+                    else:
+                        original_metadata = driver.read_xray_public
+                        driver.read_xray_public = lambda key: {**original_metadata(key), 'fingerprint': 'firefox'}
+                    current = client.post(path, headers={**headers, 'Idempotency-Key': str(uuid4())},
+                        json={'node_key': 'n1', 'protocol': protocol, 'transport': transport})
+                    self.assertEqual(current.json()['status'], 'succeeded', current.text)
+                    artifact = client.get(f'/api/v1/config-issuances/{current.json()["id"]}/artifact', headers=headers)
+                    self.assertEqual(artifact.status_code, 200, artifact.text)
+                    self.assertIn('new.example', artifact.json()['content'])
+                    self.assertNotIn('node.example', artifact.json()['content'])
+                    if protocol == 'xray':
+                        self.assertIn('fp=firefox', artifact.json()['content'])
+                    stale = client.get(f'/api/v1/config-issuances/{old.json()["id"]}/artifact', headers=headers)
+                    self.assertEqual(stale.status_code, 409, stale.text)
+
     def test_wait_completes_live_checks_without_waiting_for_worker(self):
         profile_id = self.setup_ready_profile()
         driver = self.driver()
@@ -51,7 +101,8 @@ class BackendConfigIssuanceTests(unittest.TestCase):
             conn.execute('''INSERT INTO backend_nodes (key, title, region, enabled,
                 protocols_json, xray_transports_json, desired_revision, applied_revision, settings_json)
                 VALUES (?, ?, ?, 1, ?, ?, 1, 1, ?)''',
-                ('n1', 'Latvia #1', 'EU', json.dumps([protocol]), '["tcp","xhttp"]', json.dumps(settings)))
+                ('n1', 'Latvia #1', 'EU', json.dumps([protocol]),
+                 json.dumps(['tcp', 'xhttp'] if protocol == 'xray' else []), json.dumps(settings)))
             conn.execute('INSERT INTO backend_grants(profile_id, node_key, protocol) VALUES (?, ?, ?)',
                          (profile_id, 'n1', protocol))
             actor = Actor(Principal('test', PrincipalKind.ACCOUNT,

@@ -1,7 +1,7 @@
 # Bootstrap the cargo-dist installer for the newest published Workstation release.
 param(
     [ValidateSet('dev', 'stable')]
-    [string]$Channel = 'dev',
+    [string]$Channel = 'stable',
     [string]$Tag = ''
 )
 

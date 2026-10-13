@@ -68,10 +68,12 @@ def _snapshot(node):
         raise AccessDenied('node_settings_incomplete', 422)
     _validate({'settings': settings}, create=False)
     for field, value in settings.items():
+        if field == 'awg_parameters':
+            continue
         if not field.endswith('_port') and any(ord(char) < 33 or ord(char) > 126 for char in value):
             raise AccessDenied('invalid_input', 422)
         if field in {'public_host', 'xray_host', 'xray_sni', 'awg_public_host'} and (
-            not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9.-]*[A-Za-z0-9]', value)
+            not re.fullmatch(r'[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?', value)
             or '..' in value):
             raise AccessDenied('invalid_input', 422)
         if field == 'xray_xhttp_path' and not re.fullmatch(r'/[A-Za-z0-9/_~.%+-]*', value):

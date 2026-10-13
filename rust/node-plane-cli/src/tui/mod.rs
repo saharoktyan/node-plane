@@ -660,11 +660,7 @@ pub fn run(mut request: Request) -> Result<()> {
                         app.nodes_controls().get(app.nodes_selected).copied()
                         && let Some(editor) = &mut app.nodes.editor
                     {
-                        let remaining =
-                            255usize.saturating_sub(editor.fields[index].value.chars().count());
-                        editor.fields[index]
-                            .value
-                            .extend(text.chars().filter(|c| !c.is_control()).take(remaining));
+                        editor.fields[index].append_paste(&text);
                         editor.changed();
                     }
                 } else if matches!(app.screen, Screen::Form) && !app.exit {
@@ -711,7 +707,7 @@ pub fn run(mut request: Request) -> Result<()> {
                     continue;
                 }
                 if key.code == KeyCode::F(1) {
-                    app.screen = Screen::QuickStart;
+                    app.open_quick_start();
                     continue;
                 }
                 if matches!(app.screen, Screen::Idle) {

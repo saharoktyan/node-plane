@@ -159,7 +159,13 @@ impl App {
                     }
                 } else if let Some(position) = self.form.visible().iter().position(|&i| i == 3) {
                     self.form.selected = position + 1;
-                    cycle_channel(&mut self.form.fields[3], backwards);
+                    if self.form.action == Action::Install
+                        && crate::config::default_branch() == "main"
+                    {
+                        self.form.fields[3] = "main".into();
+                    } else {
+                        cycle_channel(&mut self.form.fields[3], backwards);
+                    }
                 }
                 None
             }

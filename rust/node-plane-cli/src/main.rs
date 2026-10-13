@@ -68,7 +68,7 @@ enum Command {
     Install {
         #[command(flatten)]
         connection: Connection,
-        #[arg(long, default_value = "dev")]
+        #[arg(long, default_value = config::default_branch())]
         branch: String,
         /// Exact release version; omit to install the latest release in the channel.
         #[arg(long, default_value = "")]
@@ -146,7 +146,7 @@ fn entry() -> Result<()> {
         user: "root".into(),
         state_dir: state,
         tag: String::new(),
-        branch: "dev".into(),
+        branch: config::default_branch().into(),
         admin_ids: String::new(),
         bot_token: Zeroizing::new(String::new()),
         workflow: WorkflowOptions::default(),

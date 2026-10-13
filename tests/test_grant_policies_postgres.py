@@ -19,8 +19,13 @@ class GrantPoliciesPostgresTests(unittest.TestCase):
     drop_schema = fixture.BackupsPostgresTests.drop_schema
 
     def profile(self):
-        return ProfileCommands(self.db).execute(self.actor, str(uuid4()), action='create',
+        profile = ProfileCommands(self.db).execute(self.actor, str(uuid4()), action='create',
             values={'display_name': 'Alice'})['profile']['id']
+        from backend.devices import DeviceRepository
+        from backend.profiles import ProfileRepository
+        with self.db.transaction() as conn:
+            DeviceRepository.ensure_default(conn, ProfileRepository(self.db).get(profile))
+        return profile
 
     def values(self, protocols=None):
         return {'explicit_grants': [], 'rules': [{'scope': 'all', 'region_id': None,

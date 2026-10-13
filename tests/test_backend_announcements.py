@@ -110,6 +110,42 @@ class AnnouncementTests(unittest.TestCase):
         self.assertIsNone(self.service.claim(self.transport, key))
         self.assertEqual(self.service.get(self.actor, job["id"])["counts"]["sent"], 1)
 
+    def test_definite_rate_limit_defers_claim_and_survives_adapter_restart(self):
+        self.service.queue(self.actor, 'Hello', str(uuid4()))
+        key = str(uuid4())
+        delivery = self.service.claim(self.transport, key)
+        self.service.acknowledge(self.transport, delivery['id'], key, 'retry', 30)
+        first_until = self.db.connection.execute("SELECT value FROM backend_system_settings WHERE key=?",
+            ('telegram_retry_until:' + self.transport.id,)).fetchone()[0]
+        self.service.acknowledge(self.transport, delivery['id'], key, 'retry', 30)
+        self.assertEqual(self.db.connection.execute("SELECT value FROM backend_system_settings WHERE key=?",
+            ('telegram_retry_until:' + self.transport.id,)).fetchone()[0], first_until)
+        restarted = AnnouncementService(self.db)
+        self.assertIsNone(restarted.claim(self.transport, str(uuid4())))
+        hint = self.client.get('/api/v1/integrations/telegram/deliveries/wait?timeout=1', headers=self.headers)
+        self.assertEqual(hint.status_code, 200, hint.text)
+        self.assertFalse(hint.json()['ready'])
+        self.assertGreater(hint.json()['retry_after'], 0)
+        self.db.connection.execute("UPDATE backend_system_settings SET value='2020-01-01T00:00:00+00:00' WHERE key=?",
+            ('telegram_retry_until:' + self.transport.id,))
+        self.db.connection.commit()
+        next_key = str(uuid4())
+        claimed = restarted.claim(self.transport, next_key)
+        self.assertEqual(claimed['id'], delivery['id'])
+        restarted.acknowledge(self.transport, claimed['id'], next_key, 'sent')
+        self.assertIsNone(restarted.claim(self.transport, str(uuid4())))
+
+    def test_retry_delay_is_required_and_unknown_delivery_cannot_be_requeued(self):
+        self.service.queue(self.actor, 'Hello', str(uuid4()))
+        key = str(uuid4())
+        delivery = self.service.claim(self.transport, key)
+        for delay in (None, 0, True, -1):
+            with self.assertRaises(AccessDenied):
+                self.service.acknowledge(self.transport, delivery['id'], key, 'retry', delay)
+        self.service.acknowledge(self.transport, delivery['id'], key, 'unknown')
+        with self.assertRaises(AccessDenied):
+            self.service.acknowledge(self.transport, delivery['id'], key, 'retry', 30)
+
     def test_interrupted_delivery_expires_unknown_without_replay(self):
         job = self.service.queue(self.actor, "Hello", str(uuid4()))
         delivery = self.service.claim(self.transport, str(uuid4()))

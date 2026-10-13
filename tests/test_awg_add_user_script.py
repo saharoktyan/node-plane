@@ -77,6 +77,11 @@ class AwgAddUserScriptTests(unittest.TestCase):
             self.assertIn("HeaderProtectionKey = ", result.stdout)
             self.assertIn("RandomTrailers = on", result.stdout)
             self.assertIn("I5 = ", result.stdout)
+            # All randomized timing windows must reach the downloadable config.
+            for field in ('RekeyAfterTime', 'RekeyTimeout', 'RejectAfterTime',
+                          'KeepaliveTimeout', 'MaxHandshakeAttempts'):
+                value = next(line for line in profile.splitlines() if line.startswith(field + ' = '))
+                self.assertIn(value, result.stdout)
             self.assertIn("\nvpn://", result.stdout)
             self.assertEqual(config.read_text(encoding="utf-8").count("# msk1-alice"), 1)
 

@@ -137,6 +137,8 @@ pub(super) enum Control {
     ControllerBackupDetail(usize),
     ControllerBackupRestore,
     ControllerBackupDelete,
+    ControllerBackupExport,
+    ControllerBackupImport,
     ControllerVersions,
     ControllerComponents,
     ControllerUpdateResult,
@@ -404,12 +406,12 @@ impl Form {
             if !profile.branch.is_empty() {
                 profile.branch.clone()
             } else if action == Action::Install {
-                "dev".into()
+                crate::config::default_branch().into()
             } else {
                 String::new()
             }
         } else if self.action == Action::Install {
-            "dev".into()
+            crate::config::default_branch().into()
         } else {
             String::new()
         };
@@ -480,7 +482,7 @@ impl Form {
         self.fields[1] = profile.port.to_string();
         self.fields[2] = profile.user.clone();
         self.fields[3] = if profile.branch.is_empty() && self.action == Action::Install {
-            "dev".into()
+            crate::config::default_branch().into()
         } else {
             profile.branch.clone()
         };
@@ -544,6 +546,7 @@ pub(super) struct App {
     pub(super) self_check_requested: bool,
     pub(super) form: Form,
     pub(super) screen: Screen,
+    pub(super) quick_start_return: Option<Screen>,
     pub(super) error: String,
     pub(super) stage: String,
     pub(super) tracker: Tracker,

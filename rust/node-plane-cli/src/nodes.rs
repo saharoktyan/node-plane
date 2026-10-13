@@ -998,9 +998,26 @@ async fn execute_inner(
                             format!("This will send the message to {recipients} eligible users."))?,
                             "Announcement cancelled");
                     }
-                    let (method, path, body, key) = command.request()?;
+                    let (method, path, mut body, key) = command.request()?;
+                    if let crate::controller::Command::BackupImport(file) = &command {
+                        use std::io::Read;
+                        let mut content = Vec::new();
+                        std::fs::File::open(file)?.take(64 * 1024 * 1024 + 1).read_to_end(&mut content)?;
+                        ensure!(content.len() <= 64 * 1024 * 1024, "Backup exceeds 64 MiB");
+                        body = Some(serde_json::from_slice(&content)?);
+                    }
                     let revision = match &command { crate::controller::Command::DefaultsSave(_,revision) => Some(*revision), _ => None };
                     let mut value = backend::request_revision(session, &credential, method, &path, body, key, revision).await.map_err(|error| anyhow::Error::new(error).context(if matches!(&command, crate::controller::Command::BackupQueue(_, _)) { "Backup submission failed or is unconfirmed. Refresh Backups before submitting another operation." } else { "Controller request failed" }))?;
+                    if let crate::controller::Command::BackupExport(id, file) = &command {
+                        use std::io::Write;
+                        let parent = file.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or_else(|| std::path::Path::new("."));
+                        let mut staged = tempfile::NamedTempFile::new_in(parent)?;
+                        staged.write_all(&serde_json::to_vec_pretty(&value)?)?;
+                        staged.as_file().sync_all()?;
+                        staged.persist_noclobber(file).map_err(|e| e.error)?;
+                        value = backend::request(session, &credential, Method::GET, &format!("/api/v1/system/backups/catalog/{id}"), None, None).await?;
+                        value["exported_path"] = json!(file.display().to_string());
+                    }
                     if matches!(&command, crate::controller::Command::UpdateCheck | crate::controller::Command::UpdatePreferences(_)) {
                         value = backend::request(session, &credential, Method::GET, "/api/v1/system/updates", None, None).await?;
                     }
@@ -1208,7 +1225,11 @@ async fn execute_inner(
                 Command::EditContext(key) => {
                     let source = backend::request(session, &credential, Method::GET, &format!("/api/v1/nodes/{key}"), None, None).await?;
                     ensure!(source["key"] == key, "Backend returned another server");
-                    let defaults = backend::request(session, &credential, Method::GET, "/api/v1/system/installation-defaults", None, None).await?;
+                    let mut defaults = backend::request(session, &credential, Method::GET, "/api/v1/system/installation-defaults", None, None).await?;
+                    if let Ok(facts) = backend::request(session, &credential, Method::GET, &format!("/api/v1/nodes/{key}/services"), None, None).await
+                        && facts["awg_parameters"].as_object().is_some_and(|v| !v.is_empty()) {
+                        defaults["settings"]["awg_parameters"] = facts["awg_parameters"].clone();
+                    }
                     let _ = tx.send(Event::Nodes(Update::EditContext(source, defaults)));
                 }
                 Command::EditReview(draft) => {

@@ -17,6 +17,7 @@ from .routers import user, admin_requests, admin_profiles, admin_nodes, admin_se
 from .routers import user_devices
 from .routers import admin_installation_defaults
 from .routers import navigation
+from .routers import quick_start
 from . import update_panels
 from .polling import BotTokenConflict, CONFLICT_EXIT_CODE, guarded_polling
 from .timings import ActionTimings, TelegramTimings
@@ -47,6 +48,7 @@ async def main() -> None:
             dispatcher.update.outer_middleware(navigation.NavigationGuardMiddleware())
             
             dispatcher.include_router(navigation.router)
+            dispatcher.include_router(quick_start.router)
             dispatcher.include_router(user.router)
             dispatcher.include_router(user_devices.router)
             dispatcher.include_router(admin_installation_defaults.router)

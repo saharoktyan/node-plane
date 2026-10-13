@@ -55,8 +55,9 @@ def breadcrumb_text(parents, title, more_callback=None, limit=48):
         parts.extend([RichTextButton(button=RichMessageButton(text='…',
             callback_data=more_callback, style='link')), ' › '])
     for parent, label in zip(visible, labels):
-        parts.extend([RichTextButton(button=RichMessageButton(text=label,
-            callback_data=parent.callback, style='link')), ' › '])
+        entry = RichTextButton(button=RichMessageButton(text=label,
+            callback_data=parent.callback, style='link')) if parent.callback else label
+        parts.extend([entry, ' › '])
     parts.append(RichTextBold(text=title))
     return parts
 
@@ -257,8 +258,9 @@ class Screen:
                         yield [InlineKeyboardButton(text=row[0], callback_data=callback)]
                 yield from section_rows(section.sections)
                 yield from (list(row) for row in section.rows)
-        parents = [[InlineKeyboardButton(text=p.label, callback_data=p.callback)
-                    for p in self.breadcrumbs]] if self.breadcrumbs else []
+        parent_buttons = [InlineKeyboardButton(text=p.label, callback_data=p.callback)
+                          for p in self.breadcrumbs if p.callback]
+        parents = [parent_buttons] if parent_buttons else []
         return [*parents, *section_rows(self.sections), *(list(row) for row in self.uri_rows), *rows]
 
     def plain_entities(self) -> list[MessageEntity] | None:

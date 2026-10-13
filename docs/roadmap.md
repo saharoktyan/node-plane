@@ -4,9 +4,7 @@ This file lists planned work and acceptance gates. User guides describe implemen
 
 ## Interactive Quick Start Guides
 
-Create separate guided flows for Workstation and an administrator's first `/start` in Telegram. Each uses the actual interface to configure installation defaults, create the first local node, run setup and grant profile access.
-
-The guide must support existing installations, skipping completed actions, resuming after interruption and leaving without losing ordinary navigation. Telegram should demonstrate the clickable location path. Tutorial completion must reflect successful operations, not merely visited screens.
+Workstation F1 and the administrator's Telegram home menu open guides derived from controller state. They navigate to existing screens for defaults, node creation, setup and grants; configuration delivery uses Telegram. Completed operations are skipped on reopening. Remaining guide work: visual acceptance across supported clients and improving the first-installation connection prompts after tester feedback.
 
 ## Release acceptance
 

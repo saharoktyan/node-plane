@@ -6,7 +6,7 @@ Rust gRPC transport between backend-owned execution intents and node agents. The
 
 ```sh
 scripts/run_node_driver.sh
-cargo test --manifest-path rust/node-driver/Cargo.toml
+cargo test --locked --manifest-path rust/node-driver/Cargo.toml
 ```
 
 | Setting | Purpose |

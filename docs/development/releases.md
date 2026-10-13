@@ -4,11 +4,15 @@
 
 ## Artifacts and CI
 
+Publication requires the reusable server/Python checks and the native Workstation matrix to pass for the tagged commit. Unit, real PostgreSQL and Docker suites run separately; unexpected Python test skips fail CI. See [Testing](testing.md#continuous-integration). All three Rust binaries have committed Cargo lockfiles; build and test with `--locked`.
+
 `dist-workspace.toml` configures cargo-dist for Workstation. The release workflow builds Linux x64, macOS Intel/Apple Silicon and Windows x64 archives, shell/PowerShell installers and checksums.
 
 The server job builds the controller archive plus Linux amd64 driver/agent archives. Server artifacts run alongside Workstation builds and join the same GitHub release. Rust dependency caches are shared across tag builds. Pull requests run release planning; pushing a version tag triggers publication.
 
 The controller archive contains the Python application, operational scripts and runtime assets. Its extraction policy validates paths/types and required resources without rejecting additional safe files merely because the installer does not know their names. Do not use a developer source archive as an installed controller runtime.
+
+For the first stable release, use the [1.0.0 acceptance checklist](release-1.0.0-acceptance.md). Automated results and manual acceptance are recorded separately.
 
 ## Prepare a release
 

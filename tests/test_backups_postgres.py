@@ -50,6 +50,27 @@ class BackupsPostgresTests(unittest.TestCase):
         with self.base.transaction() as conn:
             conn.execute(f'DROP SCHEMA {self.schema} CASCADE')
 
+    def test_portable_import_restores_same_telegram_admin_with_new_uuid(self):
+        from dataclasses import replace
+        from backend.profiles import ProfileRepository
+        profile = ProfileRepository(self.db).ensure_account_profile(self.admin.id)
+        original = self.service.create_snapshot()['backup_id']
+        content = self.service.export_snapshot(self.actor, original)
+        target = BackupService(self.db, self.service.root / 'imported')
+        imported = target.import_snapshot(self.actor, content)
+        self.assertEqual(target.import_snapshot(self.actor, content)['id'], imported['id'])
+        new_id = str(uuid4())
+        with self.db.transaction() as conn:
+            conn.execute("INSERT INTO backend_accounts(id,role,status) VALUES (?,'admin','approved')", (new_id,))
+            conn.execute("UPDATE backend_external_identities SET account_id=? WHERE provider='telegram' AND subject='101'", (new_id,))
+        actor = Actor(self.actor.principal, replace(self.admin, id=new_id))
+        job = target.queue(actor, str(uuid4()), 'restore', imported['id'], imported['checksum'])
+        self.assertTrue(target.run_one())
+        self.assertTrue(target.run_one())
+        self.assertEqual(target.get(actor, job['id'])['status'], 'succeeded')
+        self.assertEqual(SQLIdentityRepository(self.db).find_telegram_account(101).id, new_id)
+        self.assertEqual(ProfileRepository(self.db).get(profile)['owner_account_id'], new_id)
+
     def test_restore_after_verified_node_removal_preserves_admin_and_restores_profile(self):
         profile = ProfileRepository(self.db).create_profile(runtime_name='alice', display_name='Alice')
         backup_id = self.service.create_snapshot()['backup_id']

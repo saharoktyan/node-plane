@@ -44,5 +44,6 @@ async def deliver_one(bot, backend):
         options['rows'] = [[InlineKeyboardButton(text=tr(normalize_locale(delivery.get('locale')), 'setup.close'),
             callback_data='update_notice_close')]]
     status = await send_notification(bot, delivery["telegram_user_id"], alert_screen(delivery), **options)
-    await backend.alert_ack(delivery["id"], key, status)
+    options = {'retry_after': status.retry_after} if hasattr(status, 'retry_after') else {}
+    await backend.alert_ack(delivery["id"], key, status, **options)
     return True

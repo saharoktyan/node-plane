@@ -176,4 +176,4 @@ class UpdateRecoveryPostgresTests(unittest.TestCase):
                 response = client.post(path, headers=headers)
                 self.assertEqual(response.status_code, 200, response.text)
                 self.assertEqual(response.json()['status'], 'cancelled')
-        self.assertIsNone(self.gate())
+                self.assertIsNone(self.gate())

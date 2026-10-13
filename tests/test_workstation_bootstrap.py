@@ -42,8 +42,8 @@ shutil.copyfile(root / name, destination)
         return subprocess.run(['bash', str(SCRIPT), *args], env=self.env,
                               text=True, capture_output=True, timeout=10)
 
-    def test_default_channel_selects_newest_alpha_and_cleans_downloads(self):
-        result = self.run_installer()
+    def test_explicit_dev_channel_selects_newest_alpha_and_cleans_downloads(self):
+        result = self.run_installer('--channel', 'dev')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(self.marker.exists())
         self.assertIn('[4/4]', result.stdout)
@@ -67,7 +67,7 @@ shutil.copyfile(root / name, destination)
 
     def test_stable_selection_and_invalid_arguments(self):
         (self.root / 'releases.json').write_text(json.dumps({'tag_name': 'v0.4.3'}))
-        result = self.run_installer('--channel', 'stable')
+        result = self.run_installer()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('/releases/latest', self.requests.read_text())
         for args in (('--tag', '../../bad'), ('--channel', 'unknown'), ('--tag',)):
@@ -88,7 +88,7 @@ shutil.copyfile(root / name, destination)
         uname.chmod(0o755)
         (self.root / 'node-plane-cli-installer.sh').write_text(
             '#!/bin/sh\nprintf installed > "$TEST_INSTALL_MARKER"\n')
-        result = self.run_installer()
+        result = self.run_installer('--channel', 'dev')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(self.marker.exists())
         self.assertIn('node-plane-cli-installer.sh', self.requests.read_text())
@@ -96,7 +96,7 @@ shutil.copyfile(root / name, destination)
 
     def test_generated_installer_failure_is_not_replayed_as_legacy_install(self):
         (self.root / 'node-plane-cli-installer.sh').write_text('#!/bin/sh\nexit 7\n')
-        result = self.run_installer()
+        result = self.run_installer('--channel', 'dev')
         self.assertEqual(result.returncode, 7)
         self.assertFalse(self.marker.exists())
         self.assertNotIn(ASSET, self.requests.read_text())

@@ -279,20 +279,21 @@ trap 'on_error $?' ERR
         self.assertFalse((self.root / 'wrong-commit').exists())
 
     def test_release_catalog_ignores_missing_assets_and_peels_annotated_tags(self):
+        branch = 'dev' if '-alpha.' in self.tag else 'main'
         entries = [{'tag_name': self.tag, 'assets': [{'name': release.ASSET}, {'name': 'SHA256SUMS.txt'}]},
                    {'tag_name': 'v0.0.1-alpha.1', 'assets': []},
                    {'tag_name': 'v9.9.9', 'assets': [{'name': release.ASSET}, {'name': 'SHA256SUMS.txt'}]}]
         refs = f"{'b' * 40}\trefs/tags/{self.tag}\n{self.commit}\trefs/tags/{self.tag}^{{}}\n"
         with patch.object(release.subprocess, 'check_output', return_value=refs.encode()), \
              patch.object(release, 'fetch', return_value=json.dumps(entries).encode()):
-            items = release.catalog('dev')
+            items = release.catalog(branch)
         self.assertEqual(items, [{'ref': self.tag, 'version': self.tag[1:], 'commit': self.commit}])
         installed = self.root / 'installed'
         release.extract(self.archive, installed)
         for listing in (False, True):
             stdout = io.StringIO()
             with patch.object(release, 'catalog', return_value=items), contextlib.redirect_stdout(stdout):
-                release.check('dev', installed, listing)
+                release.check(branch, installed, listing)
             self.assertIn('LIST_VERSIONS|ok' if listing else 'CHECK_UPDATES|up_to_date', stdout.getvalue())
             self.assertIn(self.commit, stdout.getvalue())
 

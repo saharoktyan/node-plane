@@ -128,6 +128,8 @@ class ProcessFaultPostgresTests(unittest.TestCase):
     def scenario(self, boundary, confirmed):
         profile = ProfileRepository(self.db).create_profile(runtime_name='kill_test', display_name='Kill test')
         with self.db.transaction() as conn:
+            from backend.devices import DeviceRepository
+            DeviceRepository.ensure_default(conn, ProfileRepository(self.db).get(profile))
             conn.execute("INSERT INTO backend_nodes(key,title,region,protocols_json) VALUES ('node','Test','Europe','[\"awg\"]')")
         ProfileCommands(self.db).execute(self.actor, str(uuid4()), action='grants',
             profile_id=profile, revision=1, values={'grants': [{'node_key': 'node', 'protocol': 'awg'}]})
@@ -182,6 +184,8 @@ class ProcessFaultPostgresTests(unittest.TestCase):
         from backend.driver_transport import GrpcIntentDriver
         profile = ProfileRepository(self.db).create_profile(runtime_name='rpc_test', display_name='RPC test')
         with self.db.transaction() as conn:
+            from backend.devices import DeviceRepository
+            DeviceRepository.ensure_default(conn, ProfileRepository(self.db).get(profile))
             conn.execute("INSERT INTO backend_nodes(key,title,region,protocols_json) VALUES ('node','Test','Europe','[\"awg\"]')")
         ProfileCommands(self.db).execute(self.actor, str(uuid4()), action='grants', profile_id=profile,
             revision=1, values={'grants': [{'node_key': 'node', 'protocol': 'awg'}]})

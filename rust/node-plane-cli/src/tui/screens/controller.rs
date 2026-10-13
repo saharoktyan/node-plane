@@ -576,12 +576,19 @@ pub(in crate::tui) fn draw_controller(
         text = match *key {
             "gate_message" => "Message for users requesting access".into(),
             "bot_title" => "Bot name".into(),
+            "backup_import_path" => "Import backup · local JSON file path. Import adds it to the catalog; restore is a separate action.".into(),
+            "backup_export_path" => "Download backup · local JSON file path. Existing files are not overwritten.".into(),
             _ => format!("Installation defaults · {key}"),
         };
         controls.push(("Value".into(), Control::ControllerDefaultsInput));
         if defaults_input_changed(state) {
             controls.push((
-                "Apply to draft".into(),
+                (if key.starts_with("backup_") {
+                    "Transfer file"
+                } else {
+                    "Apply to draft"
+                })
+                .into(),
                 Control::ControllerDefaultsInputApply,
             ));
         }
@@ -712,6 +719,10 @@ pub(in crate::tui) fn draw_controller(
         if detail["compatible"] == true {
             controls.push(("Restore backup".into(), Control::ControllerBackupRestore));
         }
+        if let Some(path) = detail["exported_path"].as_str() {
+            text.push_str(&format!("\nDownloaded: {path}"));
+        }
+        controls.push(("Download backup".into(), Control::ControllerBackupExport));
         controls.push(("Delete backup".into(), Control::ControllerBackupDelete));
     } else if let Some(catalog) = &state.backup_catalog {
         text = format!("Backups: {}", catalog["total"]);
@@ -787,6 +798,7 @@ pub(in crate::tui) fn draw_controller(
             let label = match control {
                 Control::ControllerBackupCreate => "Create backup".into(),
                 Control::ControllerBackupCatalog(_) => "Backups list".into(),
+                Control::ControllerBackupImport => "Import backup from file".into(),
                 Control::ControllerBackupAuto => format!(
                     "Auto backups: {}",
                     if value["enabled"] == true {
@@ -1223,6 +1235,7 @@ pub(in crate::tui) fn backup_preferences_controls(value: &serde_json::Value) -> 
     let mut controls = vec![
         Control::ControllerBackupCreate,
         Control::ControllerBackupCatalog(0),
+        Control::ControllerBackupImport,
         Control::ControllerBackupAuto,
     ];
     if value["enabled"] == true {
@@ -1278,6 +1291,9 @@ pub(in crate::tui) fn defaults_input_changed(state: &crate::controller::Browser)
     let Some((key, input)) = &state.defaults_input else {
         return false;
     };
+    if key.starts_with("backup_") {
+        return !input.trim().is_empty();
+    }
     let value = match *key {
         "bot_title" => state.bot_title.as_ref().map(|v| &v["title"]),
         "gate_message" => state

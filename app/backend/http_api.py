@@ -127,7 +127,8 @@ class AnnouncementInput(BaseModel):
 
 class AnnouncementDeliveryInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    status: Literal['sent', 'failed', 'unknown']
+    status: Literal['sent', 'failed', 'unknown', 'retry']
+    retry_after: StrictInt | None = Field(default=None, ge=1, le=86400)
 
 
 class AlertPreferencesInput(BaseModel):
@@ -366,6 +367,7 @@ class NodeSettingsInput(BaseModel):
     xray_fingerprint: Literal['chrome', 'firefox', 'safari', 'ios', 'android', 'edge', 'random', 'randomized'] | None = None
     awg_interface: StrictStr | None = None
     awg_i1_preset: Literal['quic', 'dns', 'chaos'] | None = None
+    awg_parameters: dict[StrictStr, StrictStr] | None = None
 
 
 class NodeCreateInput(BaseModel):
@@ -430,7 +432,7 @@ class AdminNodeOutput(BaseModel):
     xray_transports: list[str]
     desired_revision: int
     applied_revision: int
-    settings: dict[str, str | int]
+    settings: dict[str, str | int | dict[str, str]]
     transport: str | None = None
     ssh_target: str | None = None
     notes: str = ''
@@ -1177,6 +1179,10 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
         generation = wakeup.snapshot() if wakeup else 0
         with db.connect() as conn:
             from .maintenance_gate import active
+            from .telegram_delivery_retry import remaining
+            retry_after = remaining(conn, principal)
+            if retry_after:
+                return {'ready': False, 'retry_after': retry_after}
             restoring = conn.execute("SELECT 1 FROM backend_backup_jobs WHERE action='restore' "
                 "AND status IN ('awaiting_executor','running') LIMIT 1").fetchone()
             ready = not active(conn) and (bool(conn.execute(
@@ -1228,7 +1234,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     def acknowledge_alert(delivery_id:UUID,body:AnnouncementDeliveryInput,request:Request,principal=Depends(authenticate)):
         if header(request,'X-Node-Plane-Telegram-User-ID') is not None:
             raise AccessDenied('invalid_input',422)
-        return alerts.acknowledge(principal,str(delivery_id),header(request,'Idempotency-Key'),body.status)
+        return alerts.acknowledge(principal,str(delivery_id),header(request,'Idempotency-Key'),body.status,body.retry_after)
 
     @app.post('/api/v1/announcements', status_code=202)
     def announcement_create(body: AnnouncementInput, request: Request, current=Depends(actor)):
@@ -1248,7 +1254,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     def ack_announcement(delivery_id: UUID, body: AnnouncementDeliveryInput, request: Request, principal=Depends(authenticate)):
         if header(request,'X-Node-Plane-Telegram-User-ID') is not None:
             raise AccessDenied('invalid_input',422)
-        return announcements.acknowledge(principal,str(delivery_id),header(request,'Idempotency-Key'),body.status)
+        return announcements.acknowledge(principal,str(delivery_id),header(request,'Idempotency-Key'),body.status,body.retry_after)
 
     @app.post('/api/v1/me/access-requests', response_model=AccessRequestOutput, status_code=201)
     def create_access_request(request: Request,
@@ -1986,6 +1992,20 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
         with maintenance_lock(current), track(db,current,'update',str(job_id),'recheck'), live_updates() as service:
             return service.recheck(current, str(job_id))
 
+    @app.get('/api/v1/system/onboarding')
+    def onboarding_progress(current=Depends(actor)):
+        from .onboarding import progress
+        return progress(db, current)
+
+    @app.post('/api/v1/system/onboarding/defaults')
+    def onboarding_defaults(current=Depends(actor)):
+        from .installation_defaults import InstallationDefaults
+        service = InstallationDefaults(db)
+        values = service.get(current)
+        service.update(current, {key: values[key] for key in ('protocols', 'xray_transports', 'settings')}, values['revision'])
+        from .onboarding import progress
+        return progress(db, current)
+
     @app.get('/api/v1/system/backups')
     def get_backups(current=Depends(actor)):
         return backup_service.overview(current)
@@ -1997,6 +2017,24 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     @app.get('/api/v1/system/backups/catalog/{backup_id}')
     def backup_detail(backup_id:UUID,current=Depends(actor)):
         return backup_service.detail(current,str(backup_id))
+
+    @app.get('/api/v1/system/backups/catalog/{backup_id}/export')
+    def export_backup(backup_id: UUID, current=Depends(actor)):
+        return Response(backup_service.export_snapshot(current, str(backup_id)),
+            media_type='application/json', headers={'Content-Disposition':
+                f'attachment; filename="node-plane-backup-{backup_id}.json"', 'Cache-Control': 'no-store'})
+
+    @app.post('/api/v1/system/backups/import', status_code=201)
+    async def import_backup(request: Request, current=Depends(actor)):
+        from .authorization import require_permission
+        require_permission(current, 'settings.manage')
+        content = bytearray()
+        async for chunk in request.stream():
+            content.extend(chunk)
+            if len(content) > 64 * 1024 * 1024:
+                raise AccessDenied('backup_too_large', 413)
+        from starlette.concurrency import run_in_threadpool
+        return await run_in_threadpool(backup_service.import_snapshot, current, bytes(content))
 
     @app.post('/api/v1/system/backups/catalog/{backup_id}/delete')
     def delete_backup(backup_id: UUID, body: BackupDeleteInput, current=Depends(actor)):

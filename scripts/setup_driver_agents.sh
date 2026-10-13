@@ -682,9 +682,9 @@ build_local_binaries() {
   check_local_build_resources
   export CARGO_BUILD_JOBS="${NODE_PLANE_BUILD_JOBS:-1}"
   set_step "build node-driver binary"
-  (cd "${APP_ROOT}/rust/node-driver" && cargo build --release)
+  (cd "${APP_ROOT}/rust/node-driver" && cargo build --release --locked)
   set_step "build node-agent binary"
-  (cd "${APP_ROOT}/rust/node-agent" && cargo build --release)
+  (cd "${APP_ROOT}/rust/node-agent" && cargo build --release --locked)
   driver_bin_path="${APP_ROOT}/rust/node-driver/target/release/node-plane-driver"
   agent_bin_path="${APP_ROOT}/rust/node-agent/target/release/node-plane-agent"
 }
