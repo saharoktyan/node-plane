@@ -110,12 +110,29 @@ impl App {
         self.nodes_requested.take()
     }
 
+    pub(super) fn quick_start_identity(&self) -> Option<String> {
+        self.form
+            .saved
+            .as_ref()
+            .map(|saved| format!("{}:{}", saved.id, saved.account))
+    }
+    pub(super) fn quick_start_completed(&self) -> bool {
+        self.controller
+            .onboarding
+            .as_ref()
+            .is_some_and(|guide| guide["workstation_completed"] == true)
+            || self
+                .quick_start_identity()
+                .is_some_and(|key| self.connections.completed_quick_starts.contains(&key))
+    }
+
     pub(super) fn onboarding_poll_ready(
         &self,
         elapsed: std::time::Duration,
         operation_active: bool,
     ) -> bool {
-        matches!(self.screen, Screen::Idle | Screen::QuickStart)
+        !self.quick_start_completed()
+            && matches!(self.screen, Screen::Idle | Screen::QuickStart)
             && self.controller_ready()
             && self.controller.updates.as_ref().is_none_or(|value| {
                 crate::nodes::controller_branch(value)
@@ -130,6 +147,9 @@ impl App {
     }
 
     pub(super) fn open_quick_start(&mut self) {
+        if self.quick_start_completed() {
+            return;
+        }
         let previous = std::mem::replace(&mut self.screen, Screen::QuickStart);
         if !matches!(previous, Screen::QuickStart) {
             self.quick_start_return = Some(previous);

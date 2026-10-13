@@ -314,6 +314,8 @@ async def show_bootstrap(chat_id, user_id, message_id, job, bot, backend, state)
              'protocols': 'node_tools.protocols_stage', 'done': 'node_tools.done.bootstrap'}[phase]
     lines = (tr(locale, 'operation.' + job['status']),
              f"{min(stages.index(phase) + 1, 3)}/3 · {tr(locale, label)}")
+    if job.get('waiting_for_agent'):
+        lines += (tr(locale, 'node_tools.waiting_agent'),)
     if job['status'] == 'blocked':
         lines += (error(locale, BackendError(job.get('error_code') or 'bootstrap_unconfirmed', 409)),)
         if job.get('error_code'):
@@ -329,7 +331,7 @@ async def show_bootstrap(chat_id, user_id, message_id, job, bot, backend, state)
     rows.append([button(locale, 'back', AdminNodeCallback(node_key=job['node_key']).pack())])
     await render(bot, chat_id, Screen(tr(locale, 'node_tools.bootstrap'), lines,
         embedded_buttons=True, navigation=True), rows, state, message_id)
-    if job['status'] in {'awaiting_executor', 'running'}:
+    if job['status'] in {'awaiting_executor', 'running', 'blocked'}:
         async def refresh():
             latest = await backend.node_bootstrap(user_id, job['id'])
             await show_bootstrap(chat_id, user_id, message_id, latest, bot, backend, state)

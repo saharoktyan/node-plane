@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
-from config import UPDATE_BRANCH
+from config import UPDATE_BRANCH, APP_SEMVER
 
 from .authorization import require_permission
 
@@ -58,7 +58,7 @@ class AdminOverviewService:
                           'running': {'running','awaiting_shutdown'}, 'blocked': {'blocked'}}.items()},
             'backup': {'enabled': bool(json.loads(policy['value']).get('enabled')) if policy else False,
                        'last_job': dict(backup) if backup else None},
-            'updates': {'available': meta.get('updates_update_available') == '1',
+            'updates': {'available': known_update_available(meta),
                         'latest_version': meta.get('updates_remote_version') or None,
                         'last_checked_at': meta.get('updates_last_checked_at') or None,
                         'status': meta.get('updates_last_status', 'never'),
@@ -72,3 +72,10 @@ class AdminOverviewService:
             'problem_nodes': [{'key': node['key'], 'title': node['title'], 'region': node['region'], 'flag': node['flag']}
                               for node in nodes if node['key'] in problem_keys],
         }
+
+
+def known_update_available(meta):
+    from services.release_versions import _compare_versions
+    remote = meta.get('updates_remote_version')
+    return bool(meta.get('updates_update_available') == '1' and remote
+                and _compare_versions(remote, APP_SEMVER) > 0)

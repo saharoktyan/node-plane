@@ -49,13 +49,24 @@ def grant_list(grants):
     return [{'node_key': node, 'protocol': protocol} for node, protocol in sorted(grants)]
 
 
-def read(conn, profile_id):
+def raw_read(conn, profile_id):
     row = conn.execute('SELECT * FROM backend_grant_policies WHERE profile_id=?', (profile_id,)).fetchone()
     if row:
         return {'explicit_grants': json.loads(row['explicit_json']),
                 'rules': json.loads(row['rules_json']), 'exclusions': json.loads(row['exclusions_json'])}
     grants = conn.execute('SELECT node_key,protocol FROM backend_grants WHERE profile_id=? ORDER BY node_key,protocol', (profile_id,)).fetchall()
     return {'explicit_grants': [dict(g) for g in grants], 'rules': [], 'exclusions': []}
+
+
+def is_admin_profile(conn, profile_id):
+    return bool(conn.execute("""SELECT 1 FROM backend_profiles p JOIN backend_accounts a ON a.id=p.owner_account_id
+        WHERE p.id=? AND a.role='admin'""", (profile_id,)).fetchone())
+
+
+def read(conn, profile_id):
+    if is_admin_profile(conn, profile_id):
+        return {'explicit_grants': [], 'rules': [{'scope':'all', 'region_id':None, 'protocols':['awg','xray']}], 'exclusions': []}
+    return raw_read(conn, profile_id)
 
 
 def store(conn, profile_id, values):
@@ -124,8 +135,15 @@ def derived(conn, values, region_override=None, preview_node=None):
 
 
 def materialize(conn, profile_id):
+    if is_admin_profile(conn, profile_id) and not conn.execute('SELECT 1 FROM backend_grant_policies WHERE profile_id=?', (profile_id,)).fetchone():
+        # Preserve the previous member policy for a later demotion.
+        store(conn, profile_id, raw_read(conn, profile_id))
     values = read(conn, profile_id)
     effective = grant_set(values['explicit_grants']) | derived(conn, values)
+    if is_admin_profile(conn, profile_id):
+        ready = {row['key'] for row in conn.execute('SELECT key FROM backend_nodes WHERE applied_revision>0').fetchall()}
+        effective = {grant for grant in effective if grant[0] in ready}
+
     if conn.execute('SELECT 1 FROM backend_profile_deletions WHERE profile_id=?', (profile_id,)).fetchone():
         effective = set()
     previous = grant_set(conn.execute('SELECT node_key,protocol FROM backend_grants WHERE profile_id=?', (profile_id,)).fetchall())
@@ -148,7 +166,9 @@ def reconcile(conn, actor):
     """Refresh derived grants and enqueue the ordinary revision-fenced outbox."""
     from .operations import OperationRepository
     changed = set()
-    for row in conn.execute('SELECT profile_id FROM backend_grant_policies ORDER BY profile_id').fetchall():
+    for row in conn.execute("""SELECT profile_id FROM backend_grant_policies UNION SELECT p.id AS profile_id
+        FROM backend_profiles p JOIN backend_accounts a ON a.id=p.owner_account_id WHERE a.role='admin'
+        ORDER BY profile_id""").fetchall():
         profile_id = row['profile_id']
         previous = OperationRepository.targets(conn, profile_id)
         if materialize(conn, profile_id):
@@ -160,7 +180,7 @@ def reconcile(conn, actor):
 
 def forget_node(conn, node_key):
     for row in conn.execute('SELECT profile_id FROM backend_grant_policies').fetchall():
-        values = read(conn, row['profile_id'])
+        values = raw_read(conn, row['profile_id'])
         for field in ('explicit_grants', 'exclusions'):
             values[field] = [g for g in values[field] if g['node_key'] != node_key]
         store(conn, row['profile_id'], values)
@@ -212,7 +232,7 @@ class GrantPolicies:
             if not profile:
                 raise AccessDenied('resource_not_found', 404)
             values = read(conn, profile_id)
-            return {'revision': profile['desired_revision'], **values,
+            return {'revision': profile['desired_revision'], 'permanent': is_admin_profile(conn, profile_id), **values,
                     'inherited_grants': grant_list(derived(conn, values))}
 
     def preview_region(self, actor, node_key, title):

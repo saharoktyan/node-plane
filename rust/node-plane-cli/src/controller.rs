@@ -10,6 +10,7 @@ pub enum Command {
     Overview,
     Onboarding,
     OnboardingDefaults,
+    OnboardingComplete,
     Updates,
     Defaults,
     Policies,
@@ -61,6 +62,12 @@ impl Command {
         let root = "/api/v1/system/cleanup";
         Ok(match self {
             Self::Onboarding => (Method::GET, "/api/v1/system/onboarding".into(), None, None),
+            Self::OnboardingComplete => (
+                Method::POST,
+                "/api/v1/system/onboarding/complete/workstation".into(),
+                Some(serde_json::json!({})),
+                None,
+            ),
             Self::OnboardingDefaults => (
                 Method::POST,
                 "/api/v1/system/onboarding/defaults".into(),
@@ -416,7 +423,7 @@ impl Browser {
                 self.defaults = Some(value);
                 self.selected = 0;
             }
-            Command::Onboarding | Command::OnboardingDefaults => {
+            Command::Onboarding | Command::OnboardingDefaults | Command::OnboardingComplete => {
                 self.onboarding = Some(value);
             }
             Command::Backups | Command::BackupPreferences(_) => {
@@ -593,9 +600,7 @@ impl Browser {
                 .and_then(|id| Uuid::parse_str(id).ok())
                 .map(Command::Job);
         }
-        if let Some(job) = &self.backup_job
-            && self.backups.is_some()
-        {
+        if let Some(job) = &self.backup_job {
             return if matches!(
                 job["status"].as_str(),
                 Some("awaiting_executor" | "running")
@@ -607,6 +612,14 @@ impl Browser {
             } else {
                 None
             };
+        }
+        if let Some(job) = &self.announcement_job
+            && job["status"] == "running"
+        {
+            return job["id"]
+                .as_str()
+                .and_then(|id| Uuid::parse_str(id).ok())
+                .map(Command::AnnouncementStatus);
         }
         if let Some(result) = &self.update_result {
             return if matches!(
@@ -790,10 +803,7 @@ mod tests {
         assert_eq!(path, "/api/v1/system/backups/jobs");
         assert_eq!(value.unwrap(), body);
         assert_eq!(key, Some(id));
-        let mut browser = Browser {
-            backups: Some(json!({})),
-            ..Default::default()
-        };
+        let mut browser = Browser::default();
         browser.apply(
             Command::BackupQueue(body, id),
             json!({"id":backup,"status":"running"}),

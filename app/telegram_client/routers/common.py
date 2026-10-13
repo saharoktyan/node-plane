@@ -1,7 +1,7 @@
 from aiogram import BaseMiddleware, Bot
 import asyncio
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, TelegramObject
-from aiogram.exceptions import TelegramBadRequest, TelegramNotFound, TelegramNetworkError
+from aiogram.exceptions import TelegramBadRequest, TelegramNotFound, TelegramNetworkError, TelegramRetryAfter
 import logging
 import hashlib
 from dataclasses import replace
@@ -53,10 +53,13 @@ def schedule_refresh(state, refresh, *, interval=3):
                 await refresh()
                 return
             except BackendError as exc:
-                if exc.status < 500 and exc.status != 429:
+                if exc.status < 500 and exc.status != 429 and exc.code not in {'node_agent_unavailable', 'node_agent_unconfigured'}:
                     update_panels.forget(state)
                     return
                 logging.getLogger(__name__).warning('Panel refresh temporarily unavailable; retrying')
+            except TelegramRetryAfter as exc:
+                delay = max(interval or 3, exc.retry_after)
+                logging.getLogger(__name__).warning('Panel refresh rate-limited; waiting before retrying')
             except (ClientError, asyncio.TimeoutError, TelegramNetworkError):
                 logging.getLogger(__name__).warning('Panel refresh connection unavailable; retrying')
             except Exception as exc:
@@ -229,7 +232,7 @@ async def _render(bot: Bot, chat_id: int, screen: Screen, rows: list[list[Inline
             await state.update_data(control_message_id=existing)
             await remember_navigation(existing, True)
             return True
-        except (TelegramBadRequest, TelegramNotFound, TelegramNetworkError) as exc:
+        except (TelegramBadRequest, TelegramNotFound, TelegramNetworkError, TelegramRetryAfter) as exc:
             if 'message is not modified' in str(exc).lower():
                 await remember_navigation(existing, True)
                 return True
@@ -250,7 +253,7 @@ async def _render(bot: Bot, chat_id: int, screen: Screen, rows: list[list[Inline
         sent = await bot.send_rich_message(chat_id=chat_id,
             rich_message=rich_content, reply_markup=rich_markup, request_timeout=10)
         await remember_media(state, sent, uploads, cache)
-    except (TelegramBadRequest, TelegramNotFound, TelegramNetworkError) as exc:
+    except (TelegramBadRequest, TelegramNotFound, TelegramNetworkError, TelegramRetryAfter) as exc:
         rich = False
         log_rich_failure('send', exc)
         sent = await bot.send_message(chat_id=chat_id,
@@ -273,7 +276,7 @@ async def send_notice(bot: Bot, chat_id: int, screen: Screen, markup: InlineKeyb
     rich_markup = InlineKeyboardMarkup(inline_keyboard=[]) if screen.embedded_buttons else markup
     try:
         await bot.send_rich_message(chat_id=chat_id, rich_message=screen.rich(rows), reply_markup=rich_markup, request_timeout=10)
-    except (TelegramBadRequest, TelegramNotFound, TelegramNetworkError) as exc:
+    except (TelegramBadRequest, TelegramNotFound, TelegramNetworkError, TelegramRetryAfter) as exc:
         log_rich_failure('notice', exc)
         fallback_rows = screen.fallback_rows(rows)
         fallback_markup = InlineKeyboardMarkup(inline_keyboard=fallback_rows) if fallback_rows else None

@@ -29,6 +29,7 @@ class ProfileRichTests(IsolatedAsyncioTestCase):
                       for i in range(23)]
         self.grants = [{'node_key': node['key'], 'protocol': 'awg'} for node in self.nodes]
         self.backend = SimpleNamespace(
+            me=AsyncMock(return_value={'id':'viewer'}),
             request=AsyncMock(return_value=self.profile),
             profile_grants=AsyncMock(return_value={'items': self.grants}),
             profile_access_policy=AsyncMock(side_effect=lambda *_: {'revision': self.profile['desired_revision'],

@@ -18,7 +18,7 @@ class BackendProfileCommandTests(unittest.TestCase):
 
     def create(self, key=None, **fields):
         return self.client.post('/api/v1/profiles', headers=self.headers_for(key=key),
-                                json={'display_name': 'Alice', 'owner_account_id': self.admin.id, **fields})
+                                json={'display_name': 'Alice', 'owner_account_id': None, **fields})
 
     def test_create_replay_and_conflict(self):
         key = str(uuid4())
@@ -136,8 +136,8 @@ class BackendProfileCommandTests(unittest.TestCase):
         self.assertEqual(self.db.connection.execute('SELECT COUNT(*) FROM backend_grants WHERE profile_id = ?', (new_id,)).fetchone()[0], 0)
 
     def test_deletion_preserves_admin_and_member_with_another_profile(self):
-        admin_profile = self.create().json()['profile']['id']
-        self.assertEqual(self.client.delete(f'/api/v1/profiles/{admin_profile}', headers=self.headers_for(1)).status_code, 200)
+        admin_profile = self.create(owner_account_id=self.admin.id).json()['profile']['id']
+        self.assertEqual(self.client.delete(f'/api/v1/profiles/{admin_profile}', headers=self.headers_for(1)).status_code, 409)
         self.assertEqual(self.identities.get_account(self.admin.id).status, 'approved')
         member = self.identities.resolve_telegram(102)
         self.db.connection.execute("UPDATE backend_accounts SET status = 'approved' WHERE id = ?", (member.id,))
@@ -163,10 +163,10 @@ class BackendProfileCommandTests(unittest.TestCase):
 
 
     def test_admin_duration_is_permanent_and_combined_edit_is_atomic(self):
-        blocked = self.create(expires_at='2099-01-01T00:00:00Z')
+        blocked = self.create(owner_account_id=self.admin.id, expires_at='2099-01-01T00:00:00Z')
         self.assertEqual(blocked.status_code, 422)
         self.assertEqual(blocked.json()['error']['code'], 'admin_expiry_forbidden')
-        profile = self.create().json()['profile']['id']
+        profile = self.create(owner_account_id=self.admin.id).json()['profile']['id']
         path = f'/api/v1/profiles/{profile}'
         blocked = self.client.patch(path, headers=self.headers_for(1), json={'expires_at': '2099-01-01T00:00:00Z'})
         self.assertEqual(blocked.status_code, 422)

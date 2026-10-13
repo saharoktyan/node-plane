@@ -41,3 +41,5 @@ Expiry and revocation remove runtime authorization. New VLESS connections are bl
 Review the affected access and confirm deletion. Progress refreshes while the operation runs. A blocked revocation requires recovery; closing the screen does not complete or cancel it.
 
 Deletion of a saved Workstation installation profile is a local preference action. It does not delete a user, VPN profile or controller.
+
+Administrator VPN profiles have permanent access to every current and future server once its protocols are installed. Their access rules cannot be edited, and administrators cannot be frozen, blocked or deleted. Demote an administrator before applying these restrictions; demotion restores the previous member access policy. Profile deletion progress refreshes automatically while its panel is open, until all remote revocations are confirmed.

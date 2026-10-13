@@ -8,6 +8,20 @@ pub(in crate::tui) fn draw_access_grants(
 ) {
     use crate::access::text;
     let editor = app.access.editor.as_ref().unwrap();
+    if editor.permanent_access {
+        frame.render_widget(
+            Paragraph::new("Administrator access to all current and future servers is permanent.")
+                .wrap(Wrap { trim: false }),
+            sections[1],
+        );
+        let area = centered(sections[2], 18, 3);
+        draw_button(frame, area, "Back", true);
+        hits.push(Hit {
+            area,
+            control: Control::AccessGrantBack,
+        });
+        return;
+    }
     let tabs = Layout::horizontal([Constraint::Fill(1); 2]).split(sections[0]);
     for (index, (label, future)) in [("Servers", false), ("Current & future servers", true)]
         .into_iter()
@@ -590,12 +604,14 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
                 ),
             );
         }
-        let buttons = [
-            ("Duration", Control::AccessExpiryMenu),
+        let mut buttons = vec![
             ("Access", Control::AccessGrants),
             ("Save", Control::AccessSave),
             ("Cancel", Control::AccessBack),
         ];
+        if !editor.permanent_access {
+            buttons.insert(0, ("Duration", Control::AccessExpiryMenu));
+        }
         let columns = action_areas(
             frame.area(),
             sections[2],
@@ -721,41 +737,41 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
         } else {
             if app.access.tab == Tab::Accounts || card.get("_account").is_some() {
                 let account = card.get("_account").unwrap_or(card);
-                buttons.extend([
-                    (
-                        if account["role"] == "admin" {
-                            "Make member"
-                        } else {
-                            "Make admin"
-                        },
-                        Control::AccessAccountAction(true),
-                    ),
-                    (
+                buttons.push((
+                    if account["role"] == "admin" {
+                        "Make member"
+                    } else {
+                        "Make admin"
+                    },
+                    Control::AccessAccountAction(true),
+                ));
+                if account["role"] != "admin" {
+                    buttons.push((
                         if account["status"] == "approved" {
                             "Block"
                         } else {
                             "Approve"
                         },
                         Control::AccessAccountAction(false),
-                    ),
-                ]);
+                    ));
+                }
                 if app.access.tab == Tab::Accounts {
                     buttons.push(("Edit access", Control::AccessEdit));
                 }
             }
             if app.access.tab == Tab::Profiles && card["deleting"] != true {
-                buttons.extend([
-                    ("Edit", Control::AccessEdit),
-                    (
+                buttons.push(("Edit", Control::AccessEdit));
+                if card["_account"]["role"] != "admin" {
+                    buttons.push((
                         if card["frozen"] == true {
                             "Unfreeze"
                         } else {
                             "Freeze"
                         },
                         Control::AccessProfileAction(false),
-                    ),
-                    ("Delete", Control::AccessProfileAction(true)),
-                ]);
+                    ));
+                    buttons.push(("Delete", Control::AccessProfileAction(true)));
+                }
             }
             if app.access.tab == Tab::Requests && card["status"] == "pending" {
                 buttons.extend([

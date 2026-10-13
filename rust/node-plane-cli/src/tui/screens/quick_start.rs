@@ -50,11 +50,7 @@ pub(in crate::tui) fn draw_quick_start(
         "1. Create a connection profile with your VPS address, SSH port and user.\n2. Select Install Node Plane and enter your Telegram ID and BotFather token.\n3. Confirm the server fingerprint and enter the SSH password when requested.\n4. After installation press F1 to continue with defaults, your first node and access.\n\nPasswords and bot tokens are not saved on disk.".into()
     };
     frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: false }), sections[0]);
-    let controls = if idle {
-        (Control::QuickStartRefresh, Control::QuickStartAction)
-    } else {
-        (Control::QuickStartClose, Control::QuickStartAction)
-    };
+    let controls = (Control::QuickStartRefresh, Control::QuickStartAction);
     let next_label = if app.controller_ready() {
         if app
             .controller
@@ -69,7 +65,21 @@ pub(in crate::tui) fn draw_quick_start(
     } else {
         "Quick start"
     };
-    if idle {
+    let complete = next_label == "Done";
+    if complete || !idle {
+        let area = centered(sections[1], 18, 3);
+        draw_button(
+            frame,
+            area,
+            next_label,
+            !idle
+                || app.idle_controls().get(app.idle_selection) == Some(&Control::QuickStartAction),
+        );
+        hits.push(Hit {
+            area,
+            control: Control::QuickStartAction,
+        });
+    } else {
         let strip = centered(sections[1], 36, 3);
         let buttons = Layout::horizontal([
             Constraint::Fill(1),
@@ -85,14 +95,5 @@ pub(in crate::tui) fn draw_quick_start(
             draw_button(frame, area, label, selected == Some(control));
             hits.push(Hit { area, control });
         }
-    } else {
-        button_pair(
-            frame,
-            sections[1],
-            ("Close", next_label),
-            app.confirm,
-            controls,
-            hits,
-        );
     }
 }

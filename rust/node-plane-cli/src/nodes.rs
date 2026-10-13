@@ -92,7 +92,7 @@ impl Node {
                 operation.node_key == self.key
                     && matches!(
                         operation.status.as_str(),
-                        "awaiting_executor" | "queued" | "running"
+                        "awaiting_executor" | "queued" | "running" | "blocked"
                     )
             })
     }
@@ -1126,10 +1126,19 @@ async fn execute_inner(
                         let account = backend::request(session, &credential, Method::GET, &format!("/api/v1/accounts/{owner}"), None, None).await?;
                         value["_account"] = account;
                     }
-                    if matches!(&command, crate::access::Command::ProfileProgress(_) | crate::access::Command::Card(crate::access::Tab::Profiles, _)) && value["deleting"] == true {
+                    if matches!(&command, crate::access::Command::ProfileProgress(_) | crate::access::Command::Card(crate::access::Tab::Profiles, _)) {
                         let id = value["id"].as_str().context("Missing profile identity")?;
                         let operation = backend::request(session, &credential, Method::GET, &format!("/api/v1/profiles/{id}/operation"), None, None).await?;
                         value["operation"] = operation;
+                    }
+                    if matches!(&command, crate::access::Command::Mutate { .. })
+                        && let Some(id) = value["profile"]["id"].as_str() {
+                            let operation = backend::request(session, &credential, Method::GET, &format!("/api/v1/profiles/{id}/operation"), None, None).await?;
+                            value["profile"]["operation"] = operation;
+                        if let Some(owner) = value["profile"]["owner_account_id"].as_str() {
+                            let account = backend::request(session, &credential, Method::GET, &format!("/api/v1/accounts/{owner}"), None, None).await?;
+                            value["profile"]["_account"] = account;
+                        }
                     }
                     if let crate::access::Command::Devices(profile) | crate::access::Command::DeviceMutate { profile, .. } = &command {
                         let result = if matches!(command, crate::access::Command::DeviceMutate { .. }) { value.clone() } else { Value::Null };

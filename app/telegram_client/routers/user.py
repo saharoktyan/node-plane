@@ -255,7 +255,7 @@ async def show_home(chat_id: int, user_id: int, bot: Bot, backend: BackendClient
         except TimeoutError:
             raise BackendError('backend_unavailable', 503) from None
         await state.update_data(home_presentation={'user_id': user_id,
-            'account': {'status': account['status'], 'role': account['role']},
+            'account': {'status': account['status'], 'role': account['role'], 'onboarding_completed': account.get('onboarding_completed', False)},
             'title': title, 'notifications_count': notifications.get('total', 0)})
     bot_title = title['title']
     rows: list[list[InlineKeyboardButton]] = []
@@ -274,7 +274,7 @@ async def show_home(chat_id: int, user_id: int, bot: Bot, backend: BackendClient
         rows.append([button(user_id, tr(locale, 'home.get_config'), 'profiles').model_copy(update={'style': 'primary'})])
         rows.append([button(user_id, tr(locale, 'home.account'), 'account_info')])
         lines = (tr(locale, 'home.choose'),)
-        if quick_start and account['role'] == 'admin':
+        if quick_start and account['role'] == 'admin' and not account.get('onboarding_completed', False):
             try:
                 async with asyncio.timeout(3.0):
                     nodes_page = await backend.admin_nodes(user_id, limit=1)
@@ -288,7 +288,8 @@ async def show_home(chat_id: int, user_id: int, bot: Bot, backend: BackendClient
         rows.append([button(user_id, tr(locale, 'home.settings'), 'member_settings')])
     if account['role'] == 'admin' and account['status'] == 'approved':
         rows.append([button(user_id, tr(locale, 'home.admin'), 'admin_menu')])
-        rows.append([button(user_id, tr(locale, 'quick_start.title'), 'quick_start')])
+        if not account.get('onboarding_completed', False):
+            rows.append([button(user_id, tr(locale, 'quick_start.title'), 'quick_start')])
     if account['status'] == 'approved':
         rows.insert(2, [button(user_id, tr(locale, 'devices.title'), 'device_profiles')])
         if notifications.get('total', 0):
@@ -1161,12 +1162,12 @@ async def show_admin_menu(chat_id: int, user_id: int, message_id: int,
     if requests:
         sections.append(Section(tr(locale, 'admin.rich.access_management') + ' · ' + tr(locale, 'requests.pending_count', count=requests), rows=((
             InlineKeyboardButton(text=tr(locale, 'admin.requests'), callback_data=RequestsCallback().pack(), style='primary'),),)))
-    sections.append(Section(tr(locale, 'admin.rich.system'), rows=((
-        InlineKeyboardButton(text=tr(locale, 'admin.settings'), callback_data=AdminSettingsCallback().pack()),),
+    sections.append(Section(tr(locale, 'admin.rich.system'), rows=(
         (InlineKeyboardButton(text=tr(locale, 'settings.admin.updates'), callback_data='updates',
             style='primary' if isinstance(overview, dict) and (overview.get('updates') or {}).get('available') else None),
          InlineKeyboardButton(text=tr(locale, 'backups.title'), callback_data='backups')),
-        (InlineKeyboardButton(text=tr(locale, 'announce.title'), callback_data='announce_menu'),))))
+        (InlineKeyboardButton(text=tr(locale, 'announce.title'), callback_data='announce_menu'),),
+        (InlineKeyboardButton(text=tr(locale, 'admin.settings'), callback_data=AdminSettingsCallback().pack()),))))
     await render(bot, chat_id, Screen(f"{tr(locale, 'admin.menu')} · {bot_title}",
         sections=tuple(sections), embedded_buttons=True, navigation=True),
         [[button(user_id, tr(locale, 'back'), 'home')]], state, message_id)

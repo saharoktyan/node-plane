@@ -776,11 +776,7 @@ impl App {
             KeyCode::Down | KeyCode::Right => self.confirm = true,
             KeyCode::Up | KeyCode::Left => self.confirm = false,
             KeyCode::Enter => {
-                self.activate(if self.confirm {
-                    Control::QuickStartClose
-                } else {
-                    Control::QuickStartAction
-                });
+                self.activate(Control::QuickStartAction);
             }
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.exit = true;

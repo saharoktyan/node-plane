@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 1.0.0-alpha.5 - 2026-10-14
+
+- Protect administrator profiles from deletion, freezing, blocking and access revocation; apply a permanent all-server rule after protocol installation and retain the previous member policy on demotion.
+- Move Telegram administrator Settings to the last System row.
+- Refresh backup, announcement, profile synchronization and deletion progress automatically; keep Server setup observation alive across recoverable agent outages and show these as waiting instead of a failed installation.
+
+- Persist Quick Start completion separately for Telegram and Workstation; hide completed guides, remove NPW Close and disable its F1 shortcut after Done.
+- Return Telegram Quick Start to the home menu with matching breadcrumbs; require completed AWG or VLESS configuration issuance before Telegram Done.
+- Stop highlighting administrator Updates when its cached release is already installed or older.
+
 ## 1.0.0-alpha.4 - 2026-10-13
 
 - Run release-helper Python preflight through the CI runner, keeping infrastructure suites separate from unit database doubles.

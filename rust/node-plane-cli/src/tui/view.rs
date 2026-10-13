@@ -217,7 +217,13 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
         rows[0],
     );
     match app.screen {
-        Screen::Idle => draw_quick_start(frame, app, rows[1], &mut hits),
+        Screen::Idle => {
+            if app.quick_start_completed() {
+                draw_navigation(frame, app, rows[1], &mut hits);
+            } else {
+                draw_quick_start(frame, app, rows[1], &mut hits);
+            }
+        }
         Screen::QuickStart => draw_quick_start(frame, app, rows[1], &mut hits),
         Screen::Form => draw_form(frame, app, rows[1], &mut hits),
         Screen::NewInstallation => {
@@ -420,6 +426,9 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
         app.error.as_str()
     } else {
         match app.screen {
+            Screen::Idle if app.quick_start_completed() => {
+                "↑ / ↓: select section   Enter / →: open   Esc: exit"
+            }
             Screen::Idle => "↑ / ↓: select section   Enter / →: open   F1: Quick Start   Esc: exit",
             Screen::QuickStart => "Tab / arrows: select   Enter: action   Esc: close",
             Screen::NodeWizard => {

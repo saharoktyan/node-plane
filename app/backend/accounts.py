@@ -111,6 +111,8 @@ class AccountService:
                 raise AccessDenied('revision_conflict', 412)
             next_role = role if role is not None else row['role']
             next_status = status if status is not None else row['status']
+            if row['role'] == 'admin' and next_status != 'approved':
+                raise AccessDenied('self_admin_revocation' if account_id == actor.account.id else 'admin_block_forbidden', 409)
             if (next_role, next_status) != (row['role'], row['status']):
                 if account_id == actor.account.id and (next_role, next_status) != ('admin', 'approved'):
                     raise AccessDenied('self_admin_revocation', 409)
@@ -130,6 +132,9 @@ class AccountService:
             if next_role == 'admin':
                 from .profile_commands import ProfileCommands
                 ProfileCommands.restore_admin_expiries(conn, actor, account_id)
+            elif row['role'] == 'admin':
+                from .grant_policies import reconcile
+                reconcile(conn, actor)
             result = self.public(self._read(conn, account_id))
             conn.execute('''INSERT INTO backend_account_commands
                 (actor_account_id, command_key, target_account_id, input_json, result_json)

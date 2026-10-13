@@ -96,7 +96,8 @@ class BootstrapTests(unittest.TestCase):
         self.service.driver = SimpleNamespace(inspect_node_services=unavailable)
         parent = self.queue()
         self.assertTrue(self.service.run_one())
-        self.assertEqual(self.service.get(self.actor, parent['id'])['error_code'], 'node_agent_unavailable')
+        self.assertTrue(self.service.get(self.actor, parent['id'])['waiting_for_agent'])
+        self.assertIsNone(self.service.get(self.actor, parent['id'])['error_code'])
         self.assertFalse(self.service.run_one())
         with self.db.connect() as conn:
             self.assertEqual(conn.execute('SELECT COUNT(*) FROM backend_agent_rollouts').fetchone()[0], 0)
@@ -107,7 +108,8 @@ class BootstrapTests(unittest.TestCase):
         self.service.driver = SimpleNamespace(inspect_node_services=lambda key: (_ for _ in ()).throw(TimeoutError()))
         self.assertTrue(self.service.run_one())
         blocked = self.service.get(self.actor, parent['id'])
-        self.assertEqual((blocked['phase'], blocked['status'], blocked['child_id']), ('docker', 'blocked', None))
+        self.assertEqual((blocked['phase'], blocked['status'], blocked['child_id']), ('docker', 'awaiting_executor', None))
+        self.assertTrue(blocked['waiting_for_agent'])
         self.assertFalse(self.service.run_one())
         self.service.driver = SimpleNamespace(inspect_node_services=lambda key: {'docker': True})
         self.assertTrue(self.service.run_one())
@@ -146,7 +148,8 @@ class BootstrapTests(unittest.TestCase):
         self.service.driver = SimpleNamespace(inspect_node_services=inspect)
         parent = self.queue()
         self.assertTrue(self.service.run_one())
-        self.assertEqual(self.service.get(self.actor, parent['id'])['error_code'], 'node_agent_unavailable')
+        self.assertTrue(self.service.get(self.actor, parent['id'])['waiting_for_agent'])
+        self.assertIsNone(self.service.get(self.actor, parent['id'])['error_code'])
         with self.db.connect() as conn:
             self.assertEqual(conn.execute('SELECT COUNT(*) FROM backend_agent_rollouts').fetchone()[0], 0)
 

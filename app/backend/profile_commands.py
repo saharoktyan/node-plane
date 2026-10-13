@@ -128,6 +128,14 @@ class ProfileCommands:
                     raise AccessDenied('invalid_revision', 422)
                 if row['desired_revision'] != revision:
                     raise AccessDenied('revision_conflict', 412)
+                from .grant_policies import is_admin_profile
+                owner_admin = is_admin_profile(conn, profile_id)
+                if action == 'delete' and (row['owner_account_id'] == actor.account.id or owner_admin):
+                    raise AccessDenied('admin_profile_protected', 409)
+                if owner_admin and action == 'edit' and values.get('frozen') is True:
+                    raise AccessDenied('admin_freeze_forbidden', 422)
+                if owner_admin and (action in {'grants', 'policy'} or 'grants' in values or 'access_policy' in values):
+                    raise AccessDenied('admin_access_permanent', 422)
                 if action == 'delete':
                     if values:
                         raise AccessDenied('invalid_input', 422)
@@ -191,6 +199,9 @@ class ProfileCommands:
                 if action == 'grants' or (action == 'edit' and editing_grants):
                     from .grant_policies import replace_explicit
                     replace_explicit(conn, profile_id, seen)
+            if action == 'create':
+                from .grant_policies import materialize
+                materialize(conn, profile_id)
             result = self.result(conn, profile_id)
             operation = OperationRepository.record(conn, actor, profile_id, previous_targets)
             if action == 'delete':
@@ -222,13 +233,18 @@ class ProfileCommands:
         from .authorization import Account, Actor, Principal, PrincipalKind
         rows = conn.execute('''SELECT p.id, p.owner_account_id FROM backend_profiles p
             JOIN backend_accounts a ON a.id = p.owner_account_id
-            WHERE a.role = 'admin' AND p.expires_at IS NOT NULL
+            WHERE a.role = 'admin'
             AND NOT EXISTS (SELECT 1 FROM backend_profile_deletions d WHERE d.profile_id = p.id)''').fetchall()
         for row in rows:
             if account_id is not None and row['owner_account_id'] != account_id:
                 continue
             previous = OperationRepository.targets(conn, row['id'])
-            conn.execute('UPDATE backend_profiles SET expires_at = NULL, desired_revision = desired_revision + 1 WHERE id = ?', (row['id'],))
+            profile = conn.execute('SELECT frozen,expires_at FROM backend_profiles WHERE id=?', (row['id'],)).fetchone()
+            from .grant_policies import materialize
+            changed = materialize(conn, row['id'])
+            if not changed and not profile['frozen'] and profile['expires_at'] is None:
+                continue
+            conn.execute('UPDATE backend_profiles SET frozen=0, expires_at=NULL, desired_revision=desired_revision+1 WHERE id=?', (row['id'],))
             attributed = actor or Actor(Principal('admin-permanent-access', PrincipalKind.ACCOUNT,
                 frozenset(), row['owner_account_id']), Account(row['owner_account_id']))
             OperationRepository.record(conn, attributed, row['id'], previous)

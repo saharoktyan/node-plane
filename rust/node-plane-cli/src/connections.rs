@@ -92,6 +92,8 @@ pub struct Connections {
     #[serde(default)]
     pub hide_quick_start: bool,
     #[serde(default)]
+    pub completed_quick_starts: Vec<String>,
+    #[serde(default)]
     pub diagnostic_recovery: bool,
 }
 fn default_accent() -> String {
@@ -117,6 +119,7 @@ impl Default for Connections {
             accent: default_accent(),
             theme: None,
             hide_quick_start: false,
+            completed_quick_starts: Vec::new(),
             diagnostic_recovery: false,
         }
     }

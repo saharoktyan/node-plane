@@ -915,7 +915,11 @@ impl App {
                     || self.controller.defaults.take().is_some()
                     || self.controller.backup_detail.take().is_some()
                     || self.controller.backup_catalog.take().is_some()
-                    || self.controller.backups.take().is_some()
+                    || self.controller.backups.take().is_some_and(|_| {
+                        self.controller.backup_job = None;
+                        true
+                    })
+                    || self.controller.backup_job.take().is_some()
                     || self.controller.update_result.take().is_some()
                     || self.controller.components.take().is_some()
                     || self.controller.versions.take().is_some()
@@ -1023,6 +1027,7 @@ impl App {
         self.controller.recovery_history = None;
         self.controller.history_detail = None;
         self.controller.backups = None;
+        self.controller.backup_job = None;
         self.controller.backup_catalog = None;
         self.controller.backup_detail = None;
         self.controller.announcement_overview = None;
@@ -1166,6 +1171,9 @@ impl App {
         }
         if let Some(value) = &state.backups {
             return backup_preferences_controls(value);
+        }
+        if state.backup_job.is_some() {
+            return vec![Control::ControllerRefresh, Control::ControllerBack];
         }
         if let Some(result) = &state.update_result {
             let count = result["items"].as_array().map_or(0, Vec::len);

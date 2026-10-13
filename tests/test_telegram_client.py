@@ -45,6 +45,32 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         self.assertEqual(guide.call_args.args[2].title, 'Quick Start')
         self.assertTrue(any(b.callback_data == 'quick_start_defaults' for row in guide.call_args.args[3] for b in row))
 
+    async def test_finished_quick_start_has_done_and_home_breadcrumbs(self):
+        from telegram_client.routers import quick_start
+        backend = SimpleNamespace(request=AsyncMock(return_value={'steps': [], 'next_step': None, 'node_key': None}))
+        with patch.object(quick_start, 'render', new_callable=AsyncMock) as draw:
+            await quick_start.show(123, 123, 77, self.bot, backend, self.state)
+        screen, rows = draw.call_args.args[2:4]
+        self.assertTrue(any(b.callback_data == 'quick_start_done' for row in rows for b in row))
+        home = user.actions[rows[-1][0].callback_data[2:]]
+        self.assertEqual(home.name, 'home')
+        self.assertEqual(user.actions[screen.breadcrumbs[0].callback[2:]].name, 'home')
+        self.assertFalse(any(b.text == 'Close' for row in rows for b in row))
+
+    async def test_completed_guide_is_hidden_from_home_and_stale_callback(self):
+        from telegram_client.routers import quick_start
+        backend = SimpleNamespace(notifications=AsyncMock(return_value={'total':0}),
+            me=AsyncMock(return_value={'role':'admin','status':'approved','onboarding_completed':True}),
+            bot_title=AsyncMock(return_value={'title':'Node Plane'}),
+            request=AsyncMock(return_value={'completed':True}))
+        with patch.object(user, 'render', new_callable=AsyncMock) as draw:
+            await user.show_home(123, 123, self.bot, backend, self.state, 77)
+        self.assertFalse(any(b.callback_data.startswith('u:') and user.actions[b.callback_data[2:]].name == 'quick_start' for row in draw.call_args.args[3] for b in row))
+        with patch.object(user, 'show_home', new_callable=AsyncMock) as home, patch.object(quick_start, 'render', new_callable=AsyncMock) as guide:
+            await quick_start.show(123,123,77,self.bot,backend,self.state)
+        home.assert_awaited_once()
+        guide.assert_not_awaited()
+
     async def test_admin_quick_start_only_reads_nodes_when_requested(self):
         backend = SimpleNamespace(notifications=AsyncMock(return_value={'total': 0, 'items': []}),
             me=AsyncMock(return_value={'role': 'admin', 'status': 'approved'}),

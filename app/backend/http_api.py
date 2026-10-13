@@ -37,6 +37,7 @@ from .config_issuance import ConfigIssuanceService
 from .agent_rollout import AgentRolloutService
 from .node_lifecycle import NodeLifecycle
 from .admin_overview import AdminOverviewService
+from .onboarding import completed as onboarding_completed
 from .node_overview import NodeOverviewService
 from .system_settings import SystemSettingsService
 from .traffic import TrafficService
@@ -61,6 +62,7 @@ class AccountOutput(BaseModel):
 
 
 class MeOutput(AccountOutput):
+    onboarding_completed: bool = False
     announcement_silent: bool = False
     traffic_available: bool = False
     permissions: list[str]
@@ -1067,6 +1069,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
             permissions.append(permission)
         return MeOutput(id=current.account.id, role=current.account.role, status=current.account.status,
                         permissions=permissions,
+                        onboarding_completed=onboarding_completed(db, current.account.id, 'telegram'),
                         **system_settings.member_preferences(current),
                         **identities.telegram_details_for_account(current.account.id))
 
@@ -1088,6 +1091,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
             permissions.append(permission)
         return MeOutput(id=current.account.id, role=current.account.role, status=current.account.status,
                         permissions=permissions,
+                        onboarding_completed=onboarding_completed(db, current.account.id, 'telegram'),
                         **system_settings.member_preferences(current),
                         **identities.telegram_details_for_account(current.account.id))
 
@@ -1996,6 +2000,11 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     def onboarding_progress(current=Depends(actor)):
         from .onboarding import progress
         return progress(db, current)
+
+    @app.post('/api/v1/system/onboarding/complete/{client}')
+    def complete_onboarding(client: str, current=Depends(actor)):
+        from .onboarding import finish
+        return finish(db, current, client)
 
     @app.post('/api/v1/system/onboarding/defaults')
     def onboarding_defaults(current=Depends(actor)):

@@ -181,11 +181,10 @@ impl App {
                 self.controller_command(crate::controller::Command::Onboarding);
                 return None;
             }
-            Control::QuickStartClose => {
-                self.screen = self.quick_start_return.take().unwrap_or(Screen::Idle);
-                return None;
-            }
             Control::QuickStartAction => {
+                if self.quick_start_completed() {
+                    return None;
+                }
                 if self.unsaved_changes() {
                     self.screen = self.quick_start_return.take().unwrap_or(Screen::Form);
                     self.error =
@@ -212,7 +211,10 @@ impl App {
                             }
                             "access" => self.open_access(),
                             "config" | "done" => {
-                                self.screen = return_screen.unwrap_or(Screen::Idle);
+                                self.quick_start_return = return_screen;
+                                self.controller_command(
+                                    crate::controller::Command::OnboardingComplete,
+                                );
                             }
                             _ => {
                                 self.screen = Screen::Controller;

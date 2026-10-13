@@ -9,7 +9,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton
 from ..backend import BackendClient, BackendError
 from ..i18n import normalize_locale, tr
 from ..screens import Screen, Section, Table, format_size
-from .common import render
+from .common import render, schedule_refresh
 
 router = Router()
 
@@ -173,6 +173,8 @@ async def result(query, bot, backend, state, job_id):
          (tr(lang, 'command.rich.description'), tr(lang,
             'backups.create' if job['action'] == 'create' else 'backups.restore')))),)),)
     await draw(query, bot, state, "backups.result", lines[1:], rows, sections)
+    if job["status"] in {"awaiting_executor", "running"}:
+        schedule_refresh(state, lambda: result(query, bot, backend, state, job_id))
 
 
 @router.callback_query(F.data == "backups")

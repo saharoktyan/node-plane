@@ -91,7 +91,27 @@ impl App {
                             self.remember_installed();
                         }
                         let shutdown = matches!(&command, crate::controller::Command::Shutdown(..));
+                        let guide = matches!(
+                            &command,
+                            crate::controller::Command::Onboarding
+                                | crate::controller::Command::OnboardingDefaults
+                                | crate::controller::Command::OnboardingComplete
+                        );
                         self.controller.apply(command, value);
+                        if guide && self.quick_start_completed() {
+                            if let Some(key) = self.quick_start_identity()
+                                && !self.connections.completed_quick_starts.contains(&key)
+                            {
+                                self.connections.completed_quick_starts.push(key);
+                                if let Err(error) = self.connections.save(&self.state_dir) {
+                                    self.error = error.to_string();
+                                }
+                            }
+                            if matches!(self.screen, Screen::QuickStart) {
+                                self.screen =
+                                    self.quick_start_return.take().unwrap_or(Screen::Idle);
+                            }
+                        }
                         if shutdown
                             && let Some(saved) = &self.form.saved
                             && let Err(error) =

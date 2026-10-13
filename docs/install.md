@@ -70,6 +70,8 @@ Administrators can open **Quick Start** from the bot's main menu. NPW shows prog
 
 The NPW guide checks server defaults, the first node, applied protocols and profile access. **Confirm installation defaults for servers** accepts values from **Install Node Plane → Basic → Installation defaults**. **Continue** opens the next step and reuses the selected profile before installation. Create user devices and obtain ordinary configurations in the Telegram bot, whose guide also checks issuance. Import the configuration into a VPN client and verify connectivity yourself.
 
+After **Done**, this guide stays hidden for the administrator in that installation. NPW completion disables F1 and is separate from Telegram completion; the bot requires successful AWG or VLESS configuration issuance.
+
 ## Files and services
 
 | Location | Contents |

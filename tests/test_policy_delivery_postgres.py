@@ -137,15 +137,24 @@ class TrafficPolicyPostgresTests(unittest.TestCase):
         self.collect()
         self.assertEqual(self.row()['uplink_bytes'], 150)
 
+    def use_member_profile(self):
+        member = SQLIdentityRepository(self.db).resolve_telegram(102)
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_accounts SET status='approved' WHERE id=?", (member.id,))
+            conn.execute('UPDATE backend_profiles SET owner_account_id=? WHERE id=?', (member.id, self.profile))
+
     def test_revoked_grant_during_read_is_not_recorded(self):
+        self.use_member_profile()
         self.during_read(lambda: self.command('grants', {'grants': []}))
         self.assertIsNone(self.row())
 
     def test_profile_freeze_during_read_is_not_recorded(self):
+        self.use_member_profile()
         self.during_read(lambda: self.command('edit', {'frozen': True}))
         self.assertIsNone(self.row())
 
     def test_profile_deletion_during_read_is_not_recorded(self):
+        self.use_member_profile()
         self.during_read(lambda: self.command('delete'))
         self.assertIsNone(self.row())
 

@@ -124,7 +124,7 @@ class ObservationTests(TestCase):
         with self.db.transaction() as conn:
             conn.execute("INSERT INTO backend_system_settings VALUES ('backup_policy',?)", (json.dumps({'enabled': True}),))
             conn.execute("INSERT INTO schema_meta VALUES ('updates_update_available','1')")
-            conn.execute("INSERT INTO schema_meta VALUES ('updates_remote_version','9.0')")
+            conn.execute("INSERT INTO schema_meta VALUES ('updates_remote_version','9.0.0')")
             conn.execute("INSERT INTO backend_agent_rollouts (id,node_key,actor_account_id,command_key,intent_json,status) VALUES (?,'lv1',?,?,'{}','blocked')",
                          (str(uuid4()), self.admin.id, str(uuid4())))
         driver = SimpleNamespace(inspect_node_services=Mock(side_effect=AssertionError('No implicit probes')))
@@ -135,7 +135,7 @@ class ObservationTests(TestCase):
         self.assertEqual(data['tasks']['blocked'], 1)
         self.assertTrue(data['backup']['enabled'])
         self.assertTrue(data['updates']['available'])
-        self.assertEqual(data['updates']['latest_version'], '9.0')
+        self.assertEqual(data['updates']['latest_version'], '9.0.0')
         self.assertEqual([node['key'] for node in data['problem_nodes']], ['lv1'])
         self.assertIn('unacknowledged_alerts', data)
         self.assertIn('alerts_enabled', data)

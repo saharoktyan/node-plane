@@ -12,7 +12,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, Message
 from ..backend import BackendClient, BackendError
 from ..i18n import normalize_locale, tr
 from ..screens import Screen, Section, Table
-from .common import render
+from .common import render, schedule_refresh
 
 router = Router()
 
@@ -77,6 +77,8 @@ async def result(query, bot, backend, state, job_id):
         state,
         query.message.message_id,
     )
+    if value["status"] == "running":
+        schedule_refresh(state, lambda: result(query, bot, backend, state, job_id))
 
 
 @router.callback_query(F.data == "announce_menu")

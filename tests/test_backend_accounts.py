@@ -74,7 +74,11 @@ class BackendAccountTests(unittest.TestCase):
         revoked = self.client.patch(f'/api/v1/accounts/{self.admin.id}',
             headers={**member_admin_headers, 'If-Match': f'"{own["revision"]}"',
                      'Idempotency-Key': str(uuid4())}, json={'status': 'disabled'})
-        self.assertEqual(revoked.status_code, 200, revoked.text)
+        self.assertEqual(revoked.status_code, 409, revoked.text)
+        self.assertEqual(revoked.json()['error']['code'], 'admin_block_forbidden')
+        demoted = self.client.patch(f'/api/v1/accounts/{self.admin.id}',
+            headers={**member_admin_headers, 'If-Match': f'"{own["revision"]}"', 'Idempotency-Key': str(uuid4())}, json={'role':'member'})
+        self.assertEqual(demoted.status_code, 200, demoted.text)
         self.assertEqual(self.client.get('/api/v1/accounts', headers=self.headers_for(101)).status_code, 403)
         remaining = self.client.get(f"/api/v1/accounts/{member['id']}", headers=member_admin_headers).json()
         self.assertEqual(self.patch_account(member['id'], remaining['revision'], {'status': 'disabled'}, telegram_id=102).json()['error']['code'], 'self_admin_revocation')

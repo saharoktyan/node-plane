@@ -41,3 +41,40 @@ class BackendOnboardingTests(unittest.TestCase):
             self.db.connection.execute("UPDATE backend_nodes SET desired_revision=2 WHERE key='n1'")
             self.db.connection.commit()
             self.assertEqual(client.get('/api/v1/system/onboarding', headers=headers).json()['next_step'], 'protocols')
+
+    def test_done_refuses_incomplete_guide(self):
+        for client in ('telegram', 'workstation'):
+            response = self.client.post('/api/v1/system/onboarding/complete/' + client, headers=self.headers_for_admin())
+            self.assertEqual(response.status_code, 409, response.text)
+        self.assertFalse(self.client.get('/api/v1/me', headers=self.headers_for_admin()).json()['onboarding_completed'])
+
+    def check_protocol_completion(self, protocol, transport):
+        profile = issuance_fixture.BackendConfigIssuanceTests.setup_ready_profile(self, protocol)
+        driver = issuance_fixture.BackendConfigIssuanceTests.driver(self)
+        headers = self.headers_for_admin()
+        with TestClient(create_app(self.db, node_driver=driver)) as client:
+            client.post('/api/v1/system/onboarding/defaults', headers=headers)
+            workstation = client.post('/api/v1/system/onboarding/complete/workstation', headers=headers)
+            self.assertEqual(workstation.status_code, 200, workstation.text)
+            self.assertTrue(workstation.json()['workstation_completed'])
+            self.assertFalse(workstation.json()['completed'])
+            self.assertEqual(client.post('/api/v1/system/onboarding/complete/telegram', headers=headers).status_code, 409)
+            response = client.post(f'/api/v1/profiles/{profile}/config-issuances?wait=true',
+                headers={**headers, 'Idempotency-Key': str(uuid4())},
+                json={'node_key':'n1', 'protocol': protocol, 'transport': transport})
+            self.assertEqual(response.json()['status'], 'succeeded', response.text)
+            done = client.post('/api/v1/system/onboarding/complete/telegram', headers=headers)
+            self.assertEqual(done.status_code, 200, done.text)
+            self.assertTrue(done.json()['completed'])
+            self.assertTrue(client.get('/api/v1/me', headers=headers).json()['onboarding_completed'])
+            self.db.connection.execute("UPDATE backend_nodes SET desired_revision=2 WHERE key='n1'")
+            self.db.connection.commit()
+        with TestClient(create_app(self.db, node_driver=driver)) as restarted:
+            self.assertTrue(restarted.get('/api/v1/system/onboarding', headers=headers).json()['completed'])
+            self.assertEqual(restarted.post('/api/v1/system/onboarding/complete/telegram', headers=headers).status_code, 200)
+
+    def test_vless_issuance_without_device_completes_telegram_guide(self):
+        self.check_protocol_completion('xray', 'tcp')
+
+    def test_awg_issuance_with_device_completes_telegram_guide(self):
+        self.check_protocol_completion('awg', 'conf')

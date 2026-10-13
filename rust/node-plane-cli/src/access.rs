@@ -165,6 +165,7 @@ pub struct Editor {
     pub regions: Vec<Value>,
     pub policy: Value,
     pub baseline_policy: Value,
+    pub permanent_access: bool,
     pub grants_view: bool,
     pub grants_page: usize,
     pub future_view: bool,
@@ -192,6 +193,7 @@ impl Editor {
             regions: Vec::new(),
             policy: json!({"explicit_grants": [], "rules": [], "exclusions": []}),
             baseline_policy: json!({"explicit_grants": [], "rules": [], "exclusions": []}),
+            permanent_access: false,
             grants_view: false,
             grants_page: 0,
             future_view: false,
@@ -279,6 +281,9 @@ impl Editor {
         )
     }
     pub fn toggle_grant(&mut self, node: &str, protocol: &str) {
+        if self.permanent_access {
+            return;
+        }
         let granted = self.granted(node, protocol);
         for key in ["explicit_grants", "exclusions"] {
             self.policy[key]
@@ -357,6 +362,9 @@ impl Editor {
         })
     }
     pub fn toggle_rule(&mut self, region: Option<&str>, protocol: &str) {
+        if self.permanent_access {
+            return;
+        }
         let rules = self.policy["rules"].as_array_mut().unwrap();
         if let Some(index) = rules.iter().position(|r| r["region_id"].as_str() == region) {
             let protocols = rules[index]["protocols"].as_array_mut().unwrap();
@@ -380,7 +388,9 @@ impl Editor {
         anyhow::ensure!(!self.fields[0].trim().is_empty(), "Enter a profile name");
         let mut body = json!({"display_name": self.fields[0].trim(),
             "expires_at": if self.fields[1].trim().is_empty() { Value::Null } else { json!(self.fields[1].trim()) }});
-        body["access_policy"] = self.policy.clone();
+        if !self.permanent_access {
+            body["access_policy"] = self.policy.clone();
+        }
         if self.source.is_none() {
             body["owner_account_id"] = self
                 .owner
@@ -567,7 +577,11 @@ impl Browser {
     pub fn poll(&self) -> Option<Command> {
         let card = self.card.as_ref()?;
         (self.tab == Tab::Profiles
-            && card["deleting"] == true
+            && (card["deleting"] == true
+                || matches!(
+                    card["operation"]["status"].as_str(),
+                    Some("awaiting_executor" | "running" | "blocked")
+                ))
             && self.devices.is_none()
             && self.editor.is_none()
             && self.profile_action.is_none()
@@ -611,13 +625,16 @@ impl Browser {
                         editor.policy[key] = value["policy"][key].clone();
                     }
                 }
+                editor.permanent_access = value["policy"]["permanent"] == true;
                 editor.baseline_policy = editor.policy.clone();
                 self.editor = Some(editor);
             }
             Command::Mutate { delete, .. } => {
                 self.tab = Tab::Profiles;
                 let mut profile = value["profile"].clone();
-                if let Some(account) = self.card.as_ref().and_then(|card| card.get("_account")) {
+                if profile.get("_account").is_none()
+                    && let Some(account) = self.card.as_ref().and_then(|card| card.get("_account"))
+                {
                     profile["_account"] = account.clone();
                 }
                 self.card = Some(profile);

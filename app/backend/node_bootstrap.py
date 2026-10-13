@@ -24,8 +24,14 @@ class NodeBootstrapService:
 
     @staticmethod
     def public(row):
-        return {key: row[key] for key in ('id', 'node_key', 'revision', 'phase',
+        result = {key: row[key] for key in ('id', 'node_key', 'revision', 'phase',
                 'status', 'child_id', 'child_kind', 'error_code')}
+        result['waiting_for_agent'] = (row['status'] == 'blocked' and not row['child_id']
+            and row['error_code'] == 'node_agent_unavailable' and row['phase'] in {'agent', 'docker', 'protocols'})
+        if result['waiting_for_agent']:
+            result['status'] = 'awaiting_executor'
+            result['error_code'] = None
+        return result
 
     def get(self, actor, identity):
         require_permission(actor, 'nodes.manage')
@@ -144,7 +150,7 @@ class NodeBootstrapService:
         if row['status'] == 'blocked':
             # A failed read-only probe has no command outcome to recover.
             # Observe connectivity again before resuming the same coordinator.
-            if row['error_code'] == 'node_agent_unavailable' and row['phase'] in {'agent', 'docker'}:
+            if row['error_code'] == 'node_agent_unavailable' and row['phase'] in {'agent', 'docker', 'protocols'}:
                 try:
                     self.driver.inspect_node_services(row['node_key'])
                 except Exception:
@@ -175,7 +181,10 @@ class NodeBootstrapService:
                 self._change(row, phase='protocols')
                 return True
         if row['phase'] == 'protocols' and node['applied_revision'] == node['desired_revision']:
-            facts = self.driver.inspect_node_services(row['node_key'])
+            try:
+                facts = self.driver.inspect_node_services(row['node_key'])
+            except Exception:
+                raise AccessDenied('node_agent_unavailable', 503) from None
             import json
             protocols = json.loads(node['protocols_json'])
             if protocols and all(facts.get(p + '_config_valid') is True and

@@ -749,12 +749,18 @@ pub(in crate::tui) fn draw_controller(
                 ));
             }
         }
-    } else if let Some(value) = &state.backups {
-        text = format!(
-            "Backups: {} · {}",
-            value["count"],
-            format_backup_size(value["size_bytes"].as_u64().unwrap_or(0))
-        );
+    } else if state.backups.is_some() || state.backup_job.is_some() {
+        text = state
+            .backups
+            .as_ref()
+            .map(|value| {
+                format!(
+                    "Backups: {} · {}",
+                    value["count"],
+                    format_backup_size(value["size_bytes"].as_u64().unwrap_or(0))
+                )
+            })
+            .unwrap_or_else(|| "Backup operation".into());
         if let Some(job) = &state.backup_job {
             text.push_str(&format!(
                 "\n{} · {}",
@@ -794,31 +800,35 @@ pub(in crate::tui) fn draw_controller(
                 text.push_str(&format!("\n{error}"));
             }
         }
-        for control in backup_preferences_controls(value) {
-            let label = match control {
-                Control::ControllerBackupCreate => "Create backup".into(),
-                Control::ControllerBackupCatalog(_) => "Backups list".into(),
-                Control::ControllerBackupImport => "Import backup from file".into(),
-                Control::ControllerBackupAuto => format!(
-                    "Auto backups: {}",
-                    if value["enabled"] == true {
-                        "On"
-                    } else {
-                        "Off"
+        if let Some(value) = &state.backups {
+            for control in backup_preferences_controls(value) {
+                let label = match control {
+                    Control::ControllerBackupCreate => "Create backup".into(),
+                    Control::ControllerBackupCatalog(_) => "Backups list".into(),
+                    Control::ControllerBackupImport => "Import backup from file".into(),
+                    Control::ControllerBackupAuto => format!(
+                        "Auto backups: {}",
+                        if value["enabled"] == true {
+                            "On"
+                        } else {
+                            "Off"
+                        }
+                    ),
+                    Control::ControllerBackupInterval(hours) => {
+                        if hours == 24 {
+                            "1 day".into()
+                        } else {
+                            format!("{hours} hours")
+                        }
                     }
-                ),
-                Control::ControllerBackupInterval(hours) => {
-                    if hours == 24 {
-                        "1 day".into()
-                    } else {
-                        format!("{hours} hours")
-                    }
-                }
-                Control::ControllerBackupKeep(count) => count.to_string(),
-                Control::ControllerBackups => "Refresh".into(),
-                _ => continue,
-            };
-            controls.push((label, control));
+                    Control::ControllerBackupKeep(count) => count.to_string(),
+                    Control::ControllerBackups => "Refresh".into(),
+                    _ => continue,
+                };
+                controls.push((label, control));
+            }
+        } else {
+            controls.push(("Refresh".into(), Control::ControllerRefresh));
         }
     } else if let Some(result) = &state.update_result {
         text = format!(

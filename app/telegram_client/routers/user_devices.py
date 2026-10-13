@@ -10,7 +10,7 @@ from ..i18n import normalize_locale, tr
 from ..screens import Screen, Section
 from ..navigation import remember_label, parent_path
 from . import user
-from .common import render
+from .common import render, schedule_refresh
 
 router = Router()
 
@@ -82,6 +82,8 @@ async def show_card(chat_id, user_id, message_id, profile_id, device_id, bot, ba
         sections=(Section(tr(locale, 'devices.access'), (tr(locale, 'devices.access_text'),)),)
             if item['status'] == 'active' else (),
         embedded_buttons=True, navigation=True), rows, state, message_id)
+    if item['status'] == 'deleting':
+        schedule_refresh(state, lambda: show_card(chat_id, user_id, message_id, profile_id, device_id, bot, backend, state))
 
 
 async def show_picker(chat_id, user_id, message_id, profile_id, node_key, bot, backend, state, *, force=False, page=0, returning=False):

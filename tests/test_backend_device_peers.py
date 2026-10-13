@@ -196,6 +196,7 @@ class BackendDevicePeerTests(unittest.TestCase):
         self.finish()
         queued = self.issue(self.extra_id)
         self.issuances.run_one(queued['id'])
+        self.db.connection.execute('UPDATE backend_profiles SET owner_account_id=NULL WHERE id=?', (self.profile_id,))
         result = ProfileCommands(self.db).execute(self.actor,str(uuid4()),action='delete',
             profile_id=self.profile_id,revision=2,values={})
         self.assertEqual(result['runtime_status'],'awaiting_executor')

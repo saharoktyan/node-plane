@@ -138,3 +138,37 @@ class AutoRefreshTests(IsolatedAsyncioTestCase):
         backend.node_job.assert_awaited_once_with(123,'job')
         self.assertEqual(schedule.call_count,1)
         self.assertIn('installed',draw.call_args.args[2].plain().lower())
+
+    async def test_agent_wait_never_flashes_blocked_and_keeps_polling(self):
+        state=SimpleNamespace(get_data=AsyncMock(return_value={'locale':'en'}), update_data=AsyncMock())
+        job={'id':'job','node_key':'lv1','phase':'docker','status':'awaiting_executor','waiting_for_agent':True,'error_code':'node_agent_unavailable'}
+        backend=SimpleNamespace(node_bootstrap=AsyncMock(return_value={**job,'phase':'done','status':'succeeded','waiting_for_agent':False,'error_code':None}))
+        with patch.object(admin_node_tools,'render',new_callable=AsyncMock) as draw, patch.object(admin_node_tools,'schedule_refresh') as schedule:
+            await admin_node_tools.show_bootstrap(1,1,7,job,SimpleNamespace(),backend,state)
+            text=draw.call_args.args[2].plain().lower()
+            self.assertIn('waiting for the agent',text)
+            self.assertNotIn('blocked',text)
+            self.assertNotIn('failed',text)
+            await schedule.call_args.args[1]()
+            self.assertEqual(schedule.call_count,1)
+            self.assertIn('succeeded',draw.call_args.args[2].plain().lower())
+
+    async def test_backup_creation_refreshes_until_terminal(self):
+        from telegram_client.routers import admin_backups
+        query=SimpleNamespace(from_user=SimpleNamespace(id=1), message=SimpleNamespace(chat=SimpleNamespace(id=1),message_id=7))
+        state=SimpleNamespace(get_data=AsyncMock(return_value={'locale':'en'}))
+        backend=SimpleNamespace(backup_job=AsyncMock(return_value={'id':'job','status':'running','action':'create','result':{}}))
+        with patch.object(admin_backups,'draw',new_callable=AsyncMock), patch.object(admin_backups,'schedule_refresh') as schedule:
+            await admin_backups.result(query,SimpleNamespace(),backend,state,'job')
+            backend.backup_job.return_value={'id':'job','status':'succeeded','action':'create','result':{'status':'success'}}
+            await schedule.call_args.args[1]()
+            self.assertEqual(schedule.call_count,1)
+            self.assertEqual(backend.backup_job.await_count,2)
+
+    async def test_progress_observer_survives_telegram_flood_limit(self):
+        from aiogram.exceptions import TelegramRetryAfter
+        state=SimpleNamespace()
+        read=AsyncMock(side_effect=[TelegramRetryAfter(method=SimpleNamespace(),message='rate limit',retry_after=.01),None])
+        common.schedule_refresh(state,read,interval=.001)
+        await asyncio.sleep(.04)
+        self.assertEqual(read.await_count,2)

@@ -66,7 +66,9 @@ class NodeOverviewService:
         if rollout:
             state = 'applying'
         if bootstrap:
-            state = 'needs_attention' if bootstrap['status'] == 'blocked' else 'applying'
+            from .node_bootstrap import NodeBootstrapService
+            observed = NodeBootstrapService.public(bootstrap)
+            state = 'needs_attention' if observed['status'] == 'blocked' else 'applying'
         removal_status = removal['status'] if removal else None
         if removal_status in {'queued', 'running', 'blocked'}:
             state = 'deletion_blocked' if removal_status == 'blocked' else 'deleting'

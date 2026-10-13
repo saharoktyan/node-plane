@@ -5340,20 +5340,14 @@ fn installation_defaults_count_fields_as_one_group() {
 }
 
 #[test]
-fn quick_start_returns_to_previous_screen_on_escape_and_close() {
-    for close in [false, true] {
-        let mut app = test_profile_app();
-        app.screen = Screen::Nodes;
-        app.open_quick_start();
-        app.open_quick_start(); // F1 again must preserve the original destination.
-        if close {
-            app.activate(Control::QuickStartClose);
-        } else {
-            app.quick_start_key(KeyCode::Esc.into());
-        }
-        assert!(matches!(app.screen, Screen::Nodes));
-        assert!(app.quick_start_return.is_none());
-    }
+fn quick_start_returns_to_previous_screen_on_escape() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Nodes;
+    app.open_quick_start();
+    app.open_quick_start();
+    app.quick_start_key(KeyCode::Esc.into());
+    assert!(matches!(app.screen, Screen::Nodes));
+    assert!(app.quick_start_return.is_none());
 }
 
 #[test]
@@ -5606,6 +5600,68 @@ fn workstation_quick_start_finishes_without_device_creation() {
     assert!(!text.contains("Progress refreshes"));
     app.nodes_requested = None;
     app.activate(Control::QuickStartAction);
+    assert!(matches!(
+        app.nodes_requested,
+        Some(crate::nodes::Command::Controller(
+            _,
+            crate::controller::Command::OnboardingComplete
+        ))
+    ));
+}
+
+#[test]
+fn done_hides_guide_after_backend_ack_and_survives_restart() {
+    let state = tempfile::tempdir().unwrap();
+    let mut app = test_profile_app();
+    app.state_dir = state.path().into();
+    app.screen = Screen::QuickStart;
+    let profile = app.form.saved.as_ref().unwrap().id;
+    app.controller.profile = Some(profile);
+    app.event(Event::Nodes(crate::nodes::Update::Controller(
+        Some(profile),
+        crate::controller::Command::OnboardingComplete,
+        serde_json::json!({"workstation_completed":true, "next_step":"config"}),
+    )));
     assert!(matches!(app.screen, Screen::Idle));
-    assert!(app.nodes_requested.is_none());
+    assert!(app.quick_start_completed());
+    assert!(!app.onboarding_poll_ready(std::time::Duration::from_secs(1), false));
+    app.open_quick_start();
+    assert!(matches!(app.screen, Screen::Idle));
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    let text: String = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|c| c.symbol())
+        .collect();
+    assert!(!text.contains("Quick Start"));
+    assert!(
+        !app.hits
+            .iter()
+            .any(|h| h.control == Control::QuickStartAction)
+    );
+    app.connections = Connections::load(&app.state_dir).unwrap();
+    app.controller.onboarding = None;
+    assert!(app.quick_start_completed());
+    app.open_quick_start();
+    assert!(matches!(app.screen, Screen::Idle));
+}
+
+#[test]
+fn admin_profile_card_hides_freeze_block_and_delete() {
+    let mut app = App::new(&test_request());
+    app.screen = Screen::Access;
+    app.access.tab = crate::access::Tab::Profiles;
+    app.access.card = Some(
+        serde_json::json!({"id":"admin-profile","display_name":"Admin", "owner_account_id":"admin", "frozen":false, "_account":{"id":"admin","role":"admin","status":"approved","revision":1}}),
+    );
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 50)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    assert!(!app.hits.iter().any(|h| matches!(
+        h.control,
+        Control::AccessProfileAction(_) | Control::AccessAccountAction(false)
+    )));
+    assert!(app.hits.iter().any(|h| h.control == Control::AccessEdit));
 }

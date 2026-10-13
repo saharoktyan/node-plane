@@ -874,8 +874,11 @@ async def show_profile_management(chat_id, user_id, message_id, profile_id, bot,
         if profile.get('owner_account_id'):
             rows.append([InlineKeyboardButton(text=tr(locale, 'profile.role.title'),
                 callback_data=f'prof_role:{profile_id}')])
-        rows.append([InlineKeyboardButton(text=tr(locale, 'profile.admin.delete'),
-            callback_data=f'prof_del:{profile_id}', style='danger')])
+        if not await _owner_is_admin(backend, user_id, profile):
+            me = await backend.me(user_id) if profile.get('owner_account_id') else {}
+            if profile.get('owner_account_id') != me.get('id'):
+                rows.append([InlineKeyboardButton(text=tr(locale, 'profile.admin.delete'),
+                    callback_data=f'prof_del:{profile_id}', style='danger')])
     rows.append([InlineKeyboardButton(text=tr(locale, 'profile.layout.technical'),
         callback_data=f'prof_tech:{profile_id}', style='link')])
     rows.append([InlineKeyboardButton(text=tr(locale, 'back'),
@@ -1037,6 +1040,10 @@ async def set_profile_state_cb(query: CallbackQuery, bot: Bot, backend: BackendC
 async def profile_operation_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
                                 state: FSMContext):
     await query.answer()
+    await show_profile_operation(query, bot, backend, state)
+
+
+async def show_profile_operation(query, bot, backend, state):
     profile_id = query.data.split(':', 1)[1]
     operation = await backend.profile_operation(query.from_user.id, profile_id)
     locale = await _locale(state)
@@ -1054,6 +1061,8 @@ async def profile_operation_cb(query: CallbackQuery, bot: Bot, backend: BackendC
         [[InlineKeyboardButton(text=tr(locale, 'profile.admin.refresh'), callback_data=f'prof_op:{profile_id}')],
          [InlineKeyboardButton(text=tr(locale, 'back'), callback_data=f'prof_tech:{profile_id}')]],
         state, query.message.message_id)
+    if status in {'awaiting_executor', 'running', 'blocked'}:
+        schedule_refresh(state, lambda: show_profile_operation(query, bot, backend, state))
 
 
 @router.callback_query(F.data.startswith('admin_profile_edit:'))
@@ -1089,7 +1098,7 @@ async def show_profile_edit_menu(chat_id: int, user_id: int, message_id: int,
             () if owner_admin else ((InlineKeyboardButton(text=tr(locale, 'profile.layout.change_expiry'),
                 callback_data=f'prof_expiry:{profile_id}'),),)),
         Section(tr(locale, 'profile.admin.status_title'),
-            rows=(_status_buttons(profile, locale),)))
+            rows=() if owner_admin else (_status_buttons(profile, locale),)))
     await render(bot, chat_id, Screen(tr(locale, 'profile.layout.edit'), sections=sections,
         embedded_buttons=True, navigation=True),
         [[InlineKeyboardButton(text=tr(locale, 'back'),
@@ -1366,6 +1375,13 @@ async def grant_nodes_cb(query: CallbackQuery, callback_data: GrantNodesCallback
 async def show_grant_nodes(chat_id: int, user_id: int, message_id: int,
                            profile_id: str, bot: Bot, backend: BackendClient,
                            state: FSMContext) -> None:
+    profile = await backend.request('GET', f'/api/v1/profiles/{profile_id}', telegram_user_id=user_id)
+    if await _owner_is_admin(backend, user_id, profile):
+        locale = await _locale(state)
+        await render(bot, chat_id, Screen(tr(locale, 'profile.layout.access'),
+            (tr(locale, 'profile.admin.all_servers_permanent'),), embedded_buttons=True, navigation=True),
+            [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data=AdminProfileCallback(profile_id=profile_id).pack())]], state, message_id)
+        return
     data = await _ensure_grant_draft(backend, user_id, profile_id, state)
     nodes = await _all_nodes(backend, user_id)
     locale = await _locale(state)

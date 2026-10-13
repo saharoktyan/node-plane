@@ -154,7 +154,6 @@ pub(super) enum Control {
     ControllerUpdateAuto,
     ControllerUpdateInterval(u32),
     NewInstallationConfirm(bool),
-    QuickStartClose,
     QuickStartAction,
     QuickStartRefresh,
     Action(Action),

@@ -2,7 +2,7 @@
 import json
 from datetime import datetime, timezone
 
-from .authorization import require_permission
+from .authorization import require_permission, AccessDenied
 
 
 def progress(db, actor):
@@ -30,5 +30,27 @@ def progress(db, actor):
     steps = [{'key': key, 'complete': bool(complete)} for key, complete in (
         ('defaults', configured), ('node', node is not None), ('protocols', applied),
         ('access', profile is not None), ('config', issued))]
-    return {'steps': steps, 'next_step': next((s['key'] for s in steps if not s['complete']), None),
+    return {'completed': completed(db, actor.account.id, 'telegram'),
+            'workstation_completed': completed(db, actor.account.id, 'workstation'), 'steps': steps, 'next_step': next((s['key'] for s in steps if not s['complete']), None),
             'node_key': node['key'] if node else None, 'profile_id': profile['id'] if profile else None}
+
+
+def completed(db, account_id, client):
+    with db.connect() as conn:
+        return bool(conn.execute("SELECT 1 FROM backend_system_settings WHERE key=?",
+            ('onboarding.completed.' + client + '.' + account_id,)).fetchone())
+
+
+def finish(db, actor, client):
+    require_permission(actor, 'nodes.manage')
+    value = progress(db, actor)
+    if client not in {'telegram', 'workstation'}:
+        raise AccessDenied('invalid_input', 422)
+    if not completed(db, actor.account.id, client):
+        required = [step for step in value['steps'] if client == 'telegram' or step['key'] != 'config']
+        if not all(step['complete'] for step in required):
+            raise AccessDenied('onboarding_incomplete', 409)
+        with db.transaction() as conn:
+            conn.execute('INSERT INTO backend_system_settings(key,value) VALUES (?,?) ON CONFLICT(key) DO NOTHING',
+                ('onboarding.completed.' + client + '.' + actor.account.id, '1'))
+    return progress(db, actor)

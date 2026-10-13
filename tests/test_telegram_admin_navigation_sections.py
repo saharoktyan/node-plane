@@ -27,6 +27,12 @@ class AdminNavigationSectionsTests(IsolatedAsyncioTestCase):
             self.assertIsNone(buttons['backups'].style)
             self.assertEqual(rows[-1][0].callback_data.startswith('u:'), True)
 
+    def test_stale_update_flag_does_not_highlight_current_or_older_release(self):
+        from backend.admin_overview import known_update_available
+        with patch('backend.admin_overview.APP_SEMVER', '1.0.0-alpha.4'):
+            for remote, available in [('1.0.0-alpha.3',False), ('1.0.0-alpha.4',False), ('1.0.0-alpha.5',True), ('',False)]:
+                self.assertEqual(known_update_available({'updates_update_available':'1','updates_remote_version':remote}), available)
+
     async def test_updates_overview_failure_returns_to_admin_panel(self):
         backend = SimpleNamespace()
         for locale in ('ru', 'en'):

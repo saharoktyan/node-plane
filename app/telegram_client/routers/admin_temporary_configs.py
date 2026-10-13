@@ -11,7 +11,7 @@ from ..backend import BackendClient, BackendError
 from ..i18n import normalize_locale, tr
 from ..screens import Screen
 from .callbacks import AdminSettingsCallback
-from .common import render
+from .common import render, schedule_refresh
 
 router = Router()
 ROOT = '/api/v1/system/temporary-configs'
@@ -124,6 +124,8 @@ async def card(query, bot, backend, state, identity, show=False):
             uri_rows=((button(locale,'config.link.send','plain:'+identity),),),
             files=tuple((f['filename'],f['content'].encode()) for f in artifact['files']),files_title=tr(locale,'ui.config_files'))
     rich = await draw(query,bot,state,'temporary.title',lines,rows,**kwargs)
+    if not show and item['status'] in {'queued', 'issuing', 'revoking', 'expiry_pending'}:
+        schedule_refresh(state, lambda: card(query, bot, backend, state, identity))
     if show and rich is False:
         for name,content in kwargs['files']:
             await bot.send_document(query.message.chat.id,BufferedInputFile(content,name))
