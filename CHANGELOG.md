@@ -4,6 +4,7 @@
 
 ## 1.0.0-alpha.4 - 2026-10-13
 
+- Run release-helper Python preflight through the CI runner, keeping infrastructure suites separate from unit database doubles.
 - Separate stable/dev Workstation installations, launchers, local data and self-update receipts; restrict installation, updates and controller management to the matching channel.
 - Copy connection profiles between NPW channels without sharing SSH keys or operation journals; allow an explicit controller-channel transition through Node Plane Updates.
 - Fix Back from unconfirmed installation management, align installation buttons and reuse the selected profile in Quick Start.

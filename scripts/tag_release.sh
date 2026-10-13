@@ -165,7 +165,7 @@ python3 -m compileall -q app/telegram_client
 
 run_preflight_checks() {
   set_step "python tests"
-  python3 -m unittest discover -s tests
+  python3 scripts/run_ci_tests.py unit
   set_step "cargo test node-driver"
   (cd rust/node-driver && cargo test --locked)
   set_step "cargo test node-agent"
