@@ -2070,7 +2070,7 @@ dependencies = [
 
 [[package]]
 name = "node-plane-cli"
-version = "1.0.0-alpha.7"
+version = "1.0.0-alpha.8"
 dependencies = [
  "anyhow",
  "arboard",

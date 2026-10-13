@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 1.0.0-alpha.8 - 2026-10-13
+
+- Fix a Clippy warning in the Workstation access screen that failed lint on all CI operating systems.
+- Pin the repository Rust toolchain to 1.90.0, matching the version used by CI for local and CI lint consistency.
+
 ## 1.0.0-alpha.7 - 2026-10-13
 
 - Complete Quick Start automatically and permanently, restore the empty Workstation panel after completion or dismissal, and preserve documentation list scroll positions.
