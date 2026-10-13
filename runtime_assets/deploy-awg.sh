@@ -3,21 +3,22 @@ set -euo pipefail
 source /etc/node-plane/node.env
 
 docker_cmd() {
+  # Bare return can inherit the pending EXIT status on Bash 5.2 during rollback.
   if docker info >/dev/null 2>&1; then
     docker "$@"
-    return
+    return $?
   fi
   if command -v sudo >/dev/null 2>&1; then
     sudo systemctl enable --now docker >/dev/null 2>&1 || sudo service docker start >/dev/null 2>&1 || true
     if sudo docker info >/dev/null 2>&1; then
       sudo docker "$@"
-      return
+      return $?
     fi
   fi
   systemctl enable --now docker >/dev/null 2>&1 || service docker start >/dev/null 2>&1 || true
   if docker info >/dev/null 2>&1; then
     docker "$@"
-    return
+    return $?
   fi
   echo "Docker daemon is unavailable for this session." >&2
   id >&2 || true
@@ -75,7 +76,7 @@ NEW_CONTAINER_ATTEMPTED=0
 ROLLBACK_NEEDED=1
 restore_previous() {
   if [[ "$ROLLBACK_NEEDED" != 1 ]]; then
-    return
+    return $?
   fi
   set +e
   cp -p "$CFG_BACKUP" "$CFG"

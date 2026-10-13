@@ -28,6 +28,9 @@ class MemberProfileSummaryTests(unittest.TestCase):
         db.backend_name = 'postgres'
         class MigrationConnection:
             def execute(self, sql, params=()):
+                # This fresh SQLite fixture already has a nullable account_id.
+                if sql == 'ALTER TABLE backend_traffic_usage ALTER COLUMN account_id DROP NOT NULL':
+                    return db.connection.execute('SELECT 1')
                 if sql.startswith('ALTER TABLE ') and ' ADD COLUMN IF NOT EXISTS ' in sql:
                     table = sql.split()[2]
                     column = sql.split()[8]

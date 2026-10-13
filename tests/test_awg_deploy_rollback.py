@@ -54,6 +54,8 @@ class AwgDeployRollbackTests(unittest.TestCase):
                 (ASSETS / "deploy-awg.sh").read_text(encoding="utf-8")
                 .replace("source /etc/node-plane/node.env", f"source {shlex.quote(str(node_env))}")
                 .replace("if [[ ! -c /dev/net/tun ]]; then", "if false; then")
+                # A host unit must not make this fake deployment invoke real runtime files.
+                .replace("if [[ -f /etc/systemd/system/node-plane-leased-awg.service ]]; then", "if false; then")
                 .replace("/opt/node-plane-runtime/awg_profile.py", str(ASSETS / "awg_profile.py")),
                 encoding="utf-8",
             )

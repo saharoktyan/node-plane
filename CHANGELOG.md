@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 1.0.0-alpha.2 - 2026-10-13
+
+- Restore the previous AWG container correctly after deployment failure on Bash 5.2 by returning explicit Docker command status from the EXIT trap.
+- Make migration and rollback fixtures independent of host SQLite capabilities and installed units; simplify AWG port selection for the CI clippy version.
+
 ## 1.0.0-alpha.1 - 2026-10-13
 
 - Fix member profile Details navigation and unknown traffic counters; keep Updates/Backups directly under the Telegram admin panel, including error returns and backup catalog breadcrumbs.

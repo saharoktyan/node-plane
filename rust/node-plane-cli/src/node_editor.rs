@@ -312,10 +312,10 @@ impl Editor {
                 settings.insert("awg_port_mode".into(), json!("manual"));
             }
             if settings.get("awg_port_mode") == Some(&json!("auto"))
-                && ((!changed_port && changed_mode)
-                    || (!changed_port
-                        && settings.get("awg_i1_preset")
-                            != self.source["settings"].get("awg_i1_preset")))
+                && !changed_port
+                && (changed_mode
+                    || settings.get("awg_i1_preset")
+                        != self.source["settings"].get("awg_i1_preset"))
             {
                 settings.remove("awg_port");
             }

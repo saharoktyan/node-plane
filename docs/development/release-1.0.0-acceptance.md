@@ -1,6 +1,6 @@
 # 1.0.0 acceptance
 
-This checklist accompanies preparation of the first stable release. The first manual acceptance build is `1.0.0-alpha.1` in the dev channel; the target stable version remains `1.0.0`. This document does not record publication or approval of the manual checks below.
+This checklist accompanies preparation of the first stable release. The current manual acceptance build is `1.0.0-alpha.2` in the dev channel; the target stable version remains `1.0.0`. This document does not record publication or approval of the manual checks below.
 
 ## Automated evidence
 
