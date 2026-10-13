@@ -251,6 +251,7 @@ class Worker:
         self.system_cleanup = SystemCleanupService(self.executor.db, self.executor.driver)
 
     def recover(self):
+        self.node_jobs.repair_removed_runtime_state()
         for service in (self.update_executor, self.executor, self.node_executor,
                         self.node_jobs, self.config_executor, self.temporary_executor,
                         self.rollout_executor):

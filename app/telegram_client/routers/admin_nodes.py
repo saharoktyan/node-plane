@@ -379,6 +379,8 @@ async def render_wizard_step(chat_id: int, bot: Bot, state: FSMContext,
     locale = normalize_locale(data.get('locale'))
     current = data.get('wizard_data', {}).get('ssh_target' if step == 'target' else step)
     lines = [tr(locale, f'node.wizard.{step}.prompt')]
+    if step == 'public_host' and data.get('wizard_data', {}).get('transport') == 'local':
+        lines.append(tr(locale, 'node.wizard.local_address'))
     if current:
         lines.append(tr(locale, 'node.wizard.current', value=current))
     if error:

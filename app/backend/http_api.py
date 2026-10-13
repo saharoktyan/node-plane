@@ -1401,6 +1401,19 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
                 node['overview'] = node_overview.get(current, node['key'])
         return result
 
+    @app.patch('/api/v1/system/controller-address')
+    def controller_address(body: dict, current=Depends(actor)):
+        from .authorization import require_permission
+        from .nodes import _validate
+        require_permission(current, 'nodes.manage')
+        if set(body) != {'host'}:
+            raise AccessDenied('invalid_input', 422)
+        values = _validate({'settings': {'public_host': body['host']}}, create=False)
+        with db.transaction() as conn:
+            conn.execute("INSERT INTO backend_system_settings(key,value) VALUES ('controller.public_host',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (values['settings']['public_host'],))
+        return {'host': values['settings']['public_host']}
+
     @app.get('/api/v1/nodes/creation-options')
     def node_creation_options(current=Depends(actor)):
         return installation_defaults.creation_options(current)
@@ -2005,6 +2018,11 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     def complete_onboarding(client: str, current=Depends(actor)):
         from .onboarding import finish
         return finish(db, current, client)
+
+    @app.post('/api/v1/system/onboarding/dismiss/{client}')
+    def dismiss_onboarding(client: str, current=Depends(actor)):
+        from .onboarding import dismiss
+        return dismiss(db, current, client)
 
     @app.post('/api/v1/system/onboarding/defaults')
     def onboarding_defaults(current=Depends(actor)):

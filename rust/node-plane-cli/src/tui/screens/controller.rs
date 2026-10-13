@@ -240,7 +240,15 @@ pub(in crate::tui) fn draw_controller(
             && app.controller.announcement_preview.is_none()
             && app.controller.announcement_job.is_none())
     {
-        let popup = centered(right, 76, 13);
+        let popup = centered(
+            right,
+            76,
+            if app.controller.defaults_input.is_some() {
+                10
+            } else {
+                13
+            },
+        );
         frame.render_widget(Clear, popup);
         popup
     } else {
@@ -586,7 +594,7 @@ pub(in crate::tui) fn draw_controller(
                 (if key.starts_with("backup_") {
                     "Transfer file"
                 } else {
-                    "Apply to draft"
+                    "Continue"
                 })
                 .into(),
                 Control::ControllerDefaultsInputApply,
@@ -941,9 +949,18 @@ pub(in crate::tui) fn draw_controller(
         }
     } else if let Some(value) = &state.updates {
         text = format!(
-            "{} · {}\nLatest: {}\nLast check: {}\n{}",
-            value["branch"].as_str().unwrap_or("—"),
+            "{} · {}\nLatest: {} · {}\nLast check: {}\n{}",
+            if value["branch"] == "main" {
+                "stable"
+            } else {
+                "dev"
+            },
             value["current_version"].as_str().unwrap_or("—"),
+            if value["branch"] == "main" {
+                "stable"
+            } else {
+                "dev"
+            },
             value["remote_version"].as_str().unwrap_or("—"),
             value["last_checked_at"].as_str().unwrap_or("—"),
             value["last_error"].as_str().unwrap_or("")
@@ -1064,6 +1081,64 @@ pub(in crate::tui) fn draw_controller(
     controls.retain(|(_, control)| {
         *control != Control::ControllerBack || state.defaults_input.is_some()
     });
+    if let Some((_, input)) = &state.defaults_input {
+        let text_height = (text.lines().count() as u16 + 1).min(
+            parts[0]
+                .height
+                .saturating_sub(if state.text_confirmation { 3 } else { 6 }),
+        );
+        frame.render_widget(
+            Paragraph::new(text).wrap(Wrap { trim: false }),
+            Rect::new(parts[0].x, parts[0].y, parts[0].width, text_height),
+        );
+        if !state.text_confirmation {
+            let index = controls
+                .iter()
+                .position(|(_, c)| *c == Control::ControllerDefaultsInput)
+                .unwrap_or(0);
+            let rect = Rect::new(parts[0].x, parts[0].y + text_height, parts[0].width, 3);
+            draw_field(frame, rect, "Value", input, state.selected == index);
+            hits.push(Hit {
+                area: rect,
+                control: Control::ControllerDefaultsInput,
+            });
+        }
+        let footer_y = parts[0].y + text_height + if state.text_confirmation { 0 } else { 3 };
+        let footer = Rect::new(
+            parts[0].x,
+            footer_y.min(parts[0].bottom().saturating_sub(3)),
+            parts[0].width,
+            3,
+        );
+        let cells = Layout::horizontal([Constraint::Length(5), Constraint::Fill(1)])
+            .spacing(1)
+            .split(footer);
+        for (slot, control, label) in [
+            (0, Control::ControllerBack, "←"),
+            (
+                1,
+                if state.text_confirmation {
+                    Control::ControllerTextConfirm
+                } else {
+                    Control::ControllerDefaultsInputApply
+                },
+                if state.text_confirmation {
+                    "Confirm"
+                } else {
+                    "Continue"
+                },
+            ),
+        ] {
+            if let Some(index) = controls.iter().position(|(_, value)| *value == control) {
+                draw_button(frame, cells[slot], label, state.selected == index);
+                hits.push(Hit {
+                    area: cells[slot],
+                    control,
+                });
+            }
+        }
+        return;
+    }
     let text_height = (text.lines().count() as u16 + 1).min(parts[0].height.saturating_sub(3));
     let lines: Vec<Line> = text
         .lines()

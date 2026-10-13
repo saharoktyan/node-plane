@@ -17,8 +17,9 @@ class AdminSettingsRichTests(IsolatedAsyncioTestCase):
             with patch.object(settings, 'render', new_callable=AsyncMock) as draw:
                 await settings.admin_settings_cb(self.query, self.bot, SimpleNamespace(), self.state)
             screen, rows = draw.call_args.args[2:4]
-            self.assertEqual(len(screen.sections), 4)
-            self.assertTrue(screen.sections[-1].collapsed)
+            self.assertEqual(len(screen.sections), 5)
+            self.assertTrue(screen.sections[3].collapsed)
+            self.assertEqual(screen.sections[4].inline_rows[0][0].callback_data, "admin_documentation")
             recovery_rows = [row for section in screen.sections for row in section.rows
                 if any(b.callback_data == settings.RecoveryPage().pack() for b in row)]
             self.assertEqual([len(row) for row in recovery_rows], [1])

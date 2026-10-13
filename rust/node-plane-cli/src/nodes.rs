@@ -1007,7 +1007,8 @@ async fn execute_inner(
             let _ = tx.send(Event::Nodes(Update::Controller(*profile, crate::controller::Command::Verify(deployment.clone()), value)));
             return Ok("Removal verification finished".into());
         }
-        if !backend::authorized(session, &request.workflow.account) {
+        let fresh_authorization = !backend::authorized(session, &request.workflow.account);
+        if fresh_authorization {
             let _ = tx.send(Event::Stage("Authorizing the controller administrator".into()));
         }
         let credential = match backend::authenticate(session, id, &request.workflow.account, tx).await {
@@ -1027,6 +1028,14 @@ async fn execute_inner(
                     let _ = tx.send(Event::Nodes(Update::Controller(*profile, crate::controller::Command::Updates, updates.clone())));
                 }
                 return Err(error);
+            }
+            if fresh_authorization && !request.host.contains(':') {
+                // Publish the selected installation address for Telegram’s local-node shorthand.
+                // Older controllers may not expose this optional metadata endpoint yet.
+                if let Err(error) = backend::request(session, &credential, Method::PATCH, "/api/v1/system/controller-address", Some(json!({"host":request.host})), None).await
+                    && error.status != Some(404) {
+                    return Err(error.into());
+                }
             }
             let setup = matches!(&command, Command::Setup(_));
             let protocol_action = match &command { Command::ProtocolAction(_, action) => Some(*action), _ => None };
@@ -1231,7 +1240,10 @@ async fn execute_inner(
                     }
 
                 }
-                Command::Create(draft) => {
+                Command::Create(mut draft) => {
+                    if draft.body["transport"] == "local" && draft.body["settings"]["public_host"] == "." {
+                        draft.body["settings"]["public_host"] = json!(request.host);
+                    }
                     ensure!(SavedCreation::pending(&request, &credential.account_id)?.is_none(), "Resolve the previous node creation before submitting another");
                     let mut saved = SavedCreation { host:request.host.clone(), port:request.port, user:request.user.clone(),
                         account_id:credential.account_id.clone(), draft, status:"unconfirmed".into() };

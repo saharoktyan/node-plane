@@ -29,11 +29,11 @@ pub fn default_state_dir(channel: &str) -> Result<PathBuf> {
     let root = dirs::data_local_dir().ok_or_else(|| {
         anyhow::anyhow!("Cannot locate your private application data directory. Use --state-dir.")
     })?;
-    // Keep the existing development catalog and keys at their historical location.
+    // Stable and development workstations keep separate private catalogs.
     Ok(root.join(if channel == "dev" {
-        "node-plane"
+        "node-plane-dev"
     } else {
-        "node-plane-stable"
+        "node-plane"
     }))
 }
 
@@ -225,14 +225,15 @@ impl Request {
 
     pub fn env_file(&self) -> Zeroizing<String> {
         Zeroizing::new(format!(
-            "BOT_TOKEN={}\nADMIN_IDS={}\nMODE=simple\nNODE_PLANE_BASE_DIR=/opt/node-plane\nNODE_PLANE_APP_DIR=/opt/node-plane/current\nNODE_PLANE_SHARED_DIR=/opt/node-plane/shared\nSSH_KEY=/opt/node-plane/shared/ssh/id_ed25519\nDB_BACKEND=postgres\nNODE_PLANE_UPDATE_BRANCH={}\n",
+            "BOT_TOKEN={}\nADMIN_IDS={}\nMODE=simple\nNODE_PLANE_BASE_DIR=/opt/node-plane\nNODE_PLANE_APP_DIR=/opt/node-plane/current\nNODE_PLANE_SHARED_DIR=/opt/node-plane/shared\nSSH_KEY=/opt/node-plane/shared/ssh/id_ed25519\nDB_BACKEND=postgres\nNODE_PLANE_UPDATE_BRANCH={}\nNODE_PLANE_CONTROLLER_HOST={}\n",
             *self.bot_token,
             self.admin_ids
                 .split(',')
                 .map(str::trim)
                 .collect::<Vec<_>>()
                 .join(","),
-            self.branch
+            self.branch,
+            self.host
         ))
     }
 }

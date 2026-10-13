@@ -35,7 +35,7 @@ class NodeOverviewService:
             job = conn.execute('SELECT id, action, revision, status FROM backend_node_jobs WHERE node_key = ? ORDER BY revision DESC, id DESC LIMIT 1', (node_key,)).fetchone()
             removal = conn.execute('SELECT status FROM backend_node_removals WHERE node_key = ?', (node_key,)).fetchone()
             rollout = conn.execute("SELECT id, status FROM backend_agent_rollouts WHERE node_key = ? AND status IN ('awaiting_executor', 'running') LIMIT 1", (node_key,)).fetchone()
-            bootstrap = conn.execute("SELECT id,node_key,phase,status,child_id,child_kind,error_code FROM backend_node_bootstraps WHERE node_key=? AND status IN ('awaiting_executor','running','blocked') LIMIT 1", (node_key,)).fetchone()
+            bootstrap = conn.execute("SELECT id,node_key,revision,phase,status,child_id,child_kind,error_code FROM backend_node_bootstraps WHERE node_key=? AND status IN ('awaiting_executor','running','blocked') LIMIT 1", (node_key,)).fetchone()
 
         current_settings = next((task['status'] for task in settings_tasks
             if task['revision'] == node['desired_revision']), None)

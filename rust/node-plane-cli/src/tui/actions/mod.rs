@@ -177,8 +177,13 @@ impl App {
                 return None;
             }
             Control::QuickStartRefresh => {
-                self.controller.profile = self.form.saved.as_ref().map(|p| p.id);
-                self.controller_command(crate::controller::Command::Onboarding);
+                let (reply, answer) = mpsc::channel();
+                self.prompt = Some((Prompt::ConfirmAction {
+                    title: "Dismiss Quick Start?".into(),
+                    description: "This guide will no longer appear for this installation, including via F1.".into(),
+                }, reply));
+                self.trust = false;
+                self.quick_start_dismiss = Some(answer);
                 return None;
             }
             Control::QuickStartAction => {
@@ -420,6 +425,7 @@ impl App {
             | Control::CycleProfile(..)
             | Control::Settings
             | Control::SettingsPage(..)
+            | Control::Documentation(..)
             | Control::Accent(..)
             | Control::AccentInput
             | Control::SaveAccent

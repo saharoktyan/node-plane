@@ -48,6 +48,18 @@ class BackendOnboardingTests(unittest.TestCase):
             self.assertEqual(response.status_code, 409, response.text)
         self.assertFalse(self.client.get('/api/v1/me', headers=self.headers_for_admin()).json()['onboarding_completed'])
 
+    def test_dismiss_is_permanent_even_without_nodes_and_after_restart(self):
+        headers = self.headers_for_admin()
+        for client in ('telegram', 'workstation'):
+            result = self.client.post('/api/v1/system/onboarding/dismiss/' + client, headers=headers)
+            self.assertEqual(result.status_code, 200, result.text)
+        with TestClient(create_app(self.db)) as restarted:
+            value = restarted.get('/api/v1/system/onboarding', headers=headers).json()
+            self.assertTrue(value['completed'])
+            self.assertTrue(value['workstation_completed'])
+            self.assertNotIn('access', [step['key'] for step in value['steps']])
+        self.assertEqual(self.client.post('/api/v1/system/onboarding/dismiss/other', headers=headers).status_code, 422)
+
     def check_protocol_completion(self, protocol, transport):
         profile = issuance_fixture.BackendConfigIssuanceTests.setup_ready_profile(self, protocol)
         driver = issuance_fixture.BackendConfigIssuanceTests.driver(self)

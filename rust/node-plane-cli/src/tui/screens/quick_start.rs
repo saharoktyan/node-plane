@@ -18,7 +18,6 @@ pub(in crate::tui) fn draw_quick_start(
                 ("defaults", "Confirm installation defaults for servers"),
                 ("node", "Create your first VPN node"),
                 ("protocols", "Install agent and protocols"),
-                ("access", "Grant your profile access"),
             ];
             let mut text = String::new();
             for (key, label) in labels {
@@ -36,7 +35,6 @@ pub(in crate::tui) fn draw_quick_start(
                 "defaults" => "\nContinue accepts current defaults. To customize them, open Install Node Plane → Basic → Installation defaults first.",
                 "node" => "\nContinue opens the node creation wizard. Choose Local for a node on this controller.",
                 "protocols" => "\nContinue opens the node. Set up its agent, then bootstrap protocols. Wait for a successful operation.",
-                "access" => "\nContinue opens Access. Select your profile → Grants and add this node. Save and wait for application.",
                 "config" => "\nServer setup is complete.",
                 _ => "\nServer setup is complete.",
             });
@@ -45,9 +43,9 @@ pub(in crate::tui) fn draw_quick_start(
             "Continue loads progress from the controller.".into()
         }
     } else if app.form.saved.is_some() {
-        "1. Continue opens Install Node Plane for the selected profile.\n2. Enter your Telegram administrator ID and BotFather token, then review the installation.\n3. Confirm the server fingerprint and enter the SSH password when requested.\n4. After installation return here for server defaults, your first node and access.".into()
+        "1. Continue opens Install Node Plane for the selected profile.\n2. Enter your Telegram administrator ID and BotFather token, then review the installation.\n3. Confirm the server fingerprint and enter the SSH password when requested.\n4. After installation return here for server defaults, your first node.".into()
     } else {
-        "1. Create a connection profile with your VPS address, SSH port and user.\n2. Select Install Node Plane and enter your Telegram ID and BotFather token.\n3. Confirm the server fingerprint and enter the SSH password when requested.\n4. After installation press F1 to continue with defaults, your first node and access.\n\nPasswords and bot tokens are not saved on disk.".into()
+        "1. Create a connection profile with your VPS address, SSH port and user.\n2. Select Install Node Plane and enter your Telegram ID and BotFather token.\n3. Confirm the server fingerprint and enter the SSH password when requested.\n4. After installation press F1 to continue with defaults, your first node.\n\nPasswords and bot tokens are not saved on disk.".into()
     };
     frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: false }), sections[0]);
     let controls = (Control::QuickStartRefresh, Control::QuickStartAction);
@@ -66,7 +64,7 @@ pub(in crate::tui) fn draw_quick_start(
         "Quick start"
     };
     let complete = next_label == "Done";
-    if complete || !idle {
+    if complete {
         let area = centered(sections[1], 18, 3);
         draw_button(
             frame,
@@ -89,7 +87,7 @@ pub(in crate::tui) fn draw_quick_start(
         .split(strip);
         let selected = app.idle_controls().get(app.idle_selection).copied();
         for (area, label, control) in [
-            (buttons[0], "Refresh", controls.0),
+            (buttons[0], "Dismiss", controls.0),
             (buttons[2], next_label, controls.1),
         ] {
             draw_button(frame, area, label, selected == Some(control));

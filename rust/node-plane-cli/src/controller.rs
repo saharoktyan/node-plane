@@ -11,6 +11,7 @@ pub enum Command {
     Onboarding,
     OnboardingDefaults,
     OnboardingComplete,
+    OnboardingDismiss,
     Updates,
     Defaults,
     Policies,
@@ -62,6 +63,12 @@ impl Command {
         let root = "/api/v1/system/cleanup";
         Ok(match self {
             Self::Onboarding => (Method::GET, "/api/v1/system/onboarding".into(), None, None),
+            Self::OnboardingDismiss => (
+                Method::POST,
+                "/api/v1/system/onboarding/dismiss/workstation".into(),
+                Some(json!({})),
+                None,
+            ),
             Self::OnboardingComplete => (
                 Method::POST,
                 "/api/v1/system/onboarding/complete/workstation".into(),
@@ -423,7 +430,10 @@ impl Browser {
                 self.defaults = Some(value);
                 self.selected = 0;
             }
-            Command::Onboarding | Command::OnboardingDefaults | Command::OnboardingComplete => {
+            Command::Onboarding
+            | Command::OnboardingDefaults
+            | Command::OnboardingComplete
+            | Command::OnboardingDismiss => {
                 self.onboarding = Some(value);
             }
             Command::Backups | Command::BackupPreferences(_) => {

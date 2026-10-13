@@ -21,6 +21,18 @@ class BootstrapTests(unittest.TestCase):
     def queue(self):
         return self.service.queue(self.actor, 'n1', 1, str(uuid4()))
 
+    def test_overview_can_read_active_bootstrap_and_recoverable_agent_wait(self):
+        from backend.node_overview import NodeOverviewService
+        parent = self.queue()
+        overview = NodeOverviewService(self.db).get(self.actor, 'n1')
+        self.assertEqual(overview['bootstrap']['id'], parent['id'])
+        self.assertEqual(overview['state'], 'applying')
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_node_bootstraps SET status='blocked',error_code='node_agent_unavailable',phase='agent' WHERE id=?", (parent['id'],))
+        overview = NodeOverviewService(self.db).get(self.actor, 'n1')
+        self.assertEqual(overview['state'], 'applying')
+        self.assertTrue(overview['bootstrap']['waiting_for_agent'])
+
     def test_existing_agent_and_docker_are_observed_before_protocols(self):
         parent = self.queue()
         self.assertTrue(self.service.run_one())

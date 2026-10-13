@@ -40,6 +40,37 @@ class BackendNodeJobTests(unittest.TestCase):
             self.assertEqual(json.loads(node['settings_json'])['awg_port'], 8443)
             self.assertEqual(node['desired_revision'], node['applied_revision'])
 
+    def test_protocol_cleanup_resets_installation_and_apply_cannot_wait_forever(self):
+        from backend.node_overview import NodeOverviewService
+        from backend.node_settings import NodeSettingsExecutor
+        job = self.queue('cleanup_runtime')
+        class Driver:
+            def node_action(self, task_id, action, intent):
+                return {'node_key': 'n1', 'action': action, 'revision': intent['revision'], 'result': {'cleaned': True}}
+            def inspect_node(self, node_key):
+                return {'health_state': 'running', 'xray_config_present': False, 'awg_config_present': False}
+        driver = Driver()
+        self.assertTrue(NodeOperations(self.db, driver).run_one())
+        self.assertEqual(NodeOverviewService(self.db).get(self.actor, 'n1')['state'], 'not_installed')
+        node = NodeService(self.db).get(self.actor, 'n1')
+        self.assertEqual(node['applied_revision'], 0)
+        task = NodeSettingsService(self.db).queue(self.actor, 'n1', revision=node['desired_revision'], command_key=str(uuid4()))
+        self.assertTrue(NodeSettingsExecutor(self.db, driver).run_one())
+        result = NodeSettingsService(self.db).get(self.actor, task['id'])
+        self.assertEqual(result['status'], 'superseded')
+        self.assertEqual(result['error_code'], 'node_installation_required')
+
+    def test_old_cleanup_receipt_repairs_only_runtime_not_reinstalled_since(self):
+        job = self.queue('cleanup_runtime')
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_node_jobs SET status='succeeded',result_json=? WHERE id=?", ('{"cleaned":true}',job['id']))
+        self.jobs.repair_removed_runtime_state()
+        self.assertEqual(NodeService(self.db).get(self.actor,'n1')['applied_revision'], 0)
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_nodes SET desired_revision=3,applied_revision=3,enabled=0 WHERE key='n1'")
+        self.jobs.repair_removed_runtime_state()
+        self.assertEqual(NodeService(self.db).get(self.actor,'n1')['applied_revision'], 3)
+
     def test_removal_status_overrides_installation_and_settings_state(self):
         from backend.node_removal import NodeRemovalService
         from backend.node_overview import NodeOverviewService

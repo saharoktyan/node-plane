@@ -544,7 +544,7 @@ configure_env() {
   set_step "read installer environment"
 
   local bot_token admin_ids base_dir app_dir shared_dir source_dir install_mode ssh_key image_repo image_tag update_branch install_ref latest_install_ref
-  local db_backend postgres_dsn
+  local db_backend postgres_dsn controller_host
   bot_token="$(read_env_value BOT_TOKEN)"
   admin_ids="$(read_env_value ADMIN_IDS)"
   base_dir="$(read_env_value NODE_PLANE_BASE_DIR)"
@@ -741,6 +741,10 @@ configure_env() {
     set_env_value NODE_PLANE_IMAGE_TAG "$image_tag"
   fi
 
+  controller_host="$(read_env_value NODE_PLANE_CONTROLLER_HOST)"
+  if [ -n "$controller_host" ]; then
+    set_env_value NODE_PLANE_CONTROLLER_HOST "$controller_host"
+  fi
   set_env_value BOT_TOKEN "$bot_token"
   set_env_value ADMIN_IDS "$admin_ids"
   set_env_value DB_BACKEND "$db_backend"

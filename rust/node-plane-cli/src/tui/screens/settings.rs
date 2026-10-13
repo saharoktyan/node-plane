@@ -1,5 +1,93 @@
 use super::super::*;
 
+pub(in crate::tui) const DOCUMENTS: &[(&str, &str, &str)] = &[
+    (
+        "install",
+        "Installation and Quick Start",
+        "Set up your first controller and node",
+    ),
+    (
+        "workstation",
+        "Workstation",
+        "Profiles, SSH connections and installation management",
+    ),
+    ("telegram", "Telegram bot", "Navigation and daily use"),
+    (
+        "nodes",
+        "Nodes and server setup",
+        "Create nodes and install agents and protocols",
+    ),
+    (
+        "protocols",
+        "VLESS and AmneziaWG",
+        "Protocol settings and client configurations",
+    ),
+    (
+        "access",
+        "Accounts, profiles and access",
+        "Manage users, devices and permissions",
+    ),
+    ("settings", "Settings", "Controller defaults and policies"),
+    (
+        "maintenance",
+        "Updates, backups and recovery",
+        "Maintain and restore an installation",
+    ),
+    (
+        "temporary-configs",
+        "Temporary configurations",
+        "Issue access with a limited lifetime",
+    ),
+    (
+        "troubleshooting",
+        "Diagnostics and troubleshooting",
+        "Investigate connection and installation problems",
+    ),
+];
+
+pub(in crate::tui) fn draw_documentation(
+    frame: &mut Frame,
+    app: &App,
+    area: Rect,
+    hits: &mut Vec<Hit>,
+) {
+    let right = draw_navigation(frame, app, area, hits);
+    let sections = dialog(frame, right, " Documentation ");
+    let capacity = usize::from(sections[0].height / 3).max(1);
+    let selected = app.settings_selected.saturating_sub(1);
+    let offset = app.viewport(
+        selected.saturating_add(1).saturating_sub(capacity),
+        DOCUMENTS.len(),
+        capacity,
+    );
+    for (index, (_, title, description)) in DOCUMENTS.iter().enumerate().skip(offset).take(capacity)
+    {
+        let rect = Rect::new(
+            sections[0].x,
+            sections[0].y + (index - offset) as u16 * 3,
+            sections[0].width,
+            3,
+        );
+        draw_field(
+            frame,
+            rect,
+            &format!("↗ {title}"),
+            description,
+            selected == index,
+        );
+        hits.push(Hit {
+            area: rect,
+            control: Control::Documentation(index),
+        });
+    }
+    let back = centered(sections[1], 18, 3);
+    draw_button(frame, back, "Back", selected == DOCUMENTS.len());
+    hits.push(Hit {
+        area: back,
+        control: Control::Settings,
+    });
+}
+
 pub(in crate::tui) fn draw_settings(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
     let right = draw_navigation(frame, app, area, hits);
     dialog(frame, right, " Settings ");
@@ -24,10 +112,18 @@ pub(in crate::tui) fn draw_settings(frame: &mut Frame, app: &App, area: Rect, hi
                 "{} saved installations · select, edit or remove",
                 app.connections.installations.len()
             ),
-            SettingsPage::Updates => format!("{} · {}", env!("CARGO_PKG_VERSION"), app.self_status),
+            SettingsPage::Updates => format!(
+                "{} · {} · {}",
+                crate::config::workstation_channel(),
+                env!("CARGO_PKG_VERSION"),
+                app.self_status
+            ),
             SettingsPage::Security => "SSH identity and trusted hosts".into(),
             SettingsPage::Session => "Session identity and local diagnostic paths".into(),
-            SettingsPage::About => "Version, documentation and license".into(),
+            SettingsPage::About => "Version and license".into(),
+            SettingsPage::Documentation => {
+                "Guides and troubleshooting · opens in your browser".into()
+            }
         };
         let rect = Rect::new(
             sections[0].x,

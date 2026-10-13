@@ -175,20 +175,64 @@ def remove_protocol_runtime(lock_fd):
             shutil.rmtree(directory)
 
 
+def managed_ports():
+    """Only running containers with verified configuration mounts own a port."""
+    owned = set()
+    try:
+        xray, awg, xc, ac = environment()
+        ids = command(['docker', 'ps', '-aq']).split()
+        if not ids:
+            return owned
+        records = json.loads(command(['docker', 'container', 'inspect', *ids]))
+        for record in records:
+            if not record.get('State', {}).get('Running'):
+                continue
+            name = record['Name'].lstrip('/')
+            kind = 'xray' if name == xc else 'awg' if name == ac else None
+            if kind is None:
+                continue
+            source, destination = (str(Path(xray).parent), '/etc/xray') if kind == 'xray' else (str(Path(awg).parent), '/opt/amnezia/awg')
+            if not any(m.get('Type') == 'bind' and m.get('Source') == source and m.get('Destination') == destination for m in record.get('Mounts', [])):
+                continue
+            if kind == 'xray':
+                data = json.loads(Path(xray).read_text())
+                for item in data.get('inbounds', []):
+                    if item.get('protocol') == 'vless' and type(item.get('port')) is int:
+                        owned.add(('tcp', item['port']))
+            else:
+                # Read the actual Docker publication, including auto-port fallback.
+                mappings = dict(record.get('HostConfig', {}).get('PortBindings') or {})
+                mappings.update({key: value for key, value in (record.get('NetworkSettings', {}).get('Ports') or {}).items() if value})
+                for protocol, bindings in mappings.items():
+                    if protocol.endswith('/udp'):
+                        for binding in bindings or []:
+                            if binding.get('HostPort'):
+                                owned.add(('udp', int(binding['HostPort'])))
+                if record.get('HostConfig', {}).get('NetworkMode') == 'host':
+                    match = re.search(r'(?m)^ListenPort\s*=\s*(\d+)\s*$', Path(awg).read_text())
+                    if match:
+                        owned.add(('udp', int(match[1])))
+    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
+        pass
+    return owned
+
+
 def run(action, intent, lock_fd):
     if action == 'cleanup_runtime':
         remove_protocol_runtime(lock_fd)
         return {'cleaned': True}
     if action == 'check_ports':
         statuses = []
+        owned = managed_ports()
         for protocol, port in ports(intent):
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM if protocol == 'tcp' else socket.SOCK_DGRAM) as probe:
                 try:
                     probe.bind(('0.0.0.0', port))
                     status = 'free'
                 except OSError:
-                    # A listener can be our own container; do not call it an installation failure.
-                    status = 'listening'
+                    status = 'busy'
+            if (protocol, port) in owned:
+                status = 'managed'
             statuses.append({'protocol': protocol, 'port': port, 'status': status})
         return {'ports': statuses}
     if action == 'open_ports':

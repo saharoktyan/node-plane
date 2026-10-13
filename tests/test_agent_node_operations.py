@@ -13,6 +13,25 @@ SPEC.loader.exec_module(MODULE)
 
 
 class AgentNodeOperationTests(unittest.TestCase):
+    def test_managed_ports_verify_mounts_running_state_and_actual_publications(self):
+        xray = Path('/owned/xray/config.json')
+        awg = Path('/owned/awg/wg0.conf')
+        records = [
+            {'Name':'/xray','State':{'Running':True},'Mounts':[{'Type':'bind','Source':'/owned/xray','Destination':'/etc/xray'}]},
+            {'Name':'/amnezia-awg','State':{'Running':True},'Mounts':[{'Type':'bind','Source':'/owned/awg','Destination':'/opt/amnezia/awg'}],
+             'NetworkSettings':{'Ports':{'443/udp':[{'HostPort':'8443'}]}}},
+        ]
+        with patch.object(MODULE,'environment',return_value=(str(xray),str(awg),'xray','amnezia-awg')), \
+             patch.object(MODULE,'command',side_effect=['one two',json.dumps(records)]), \
+             patch.object(MODULE.Path,'read_text',return_value=json.dumps({'inbounds':[
+                 {'protocol':'vless','port':443},{'protocol':'socks','port':1080}]})):
+            self.assertEqual(MODULE.managed_ports(), {('tcp',443),('udp',8443)})
+        records[0]['Mounts'] = []
+        records[1]['State']['Running'] = False
+        with patch.object(MODULE,'environment',return_value=(str(xray),str(awg),'xray','amnezia-awg')), \
+             patch.object(MODULE,'command',side_effect=['one two',json.dumps(records)]):
+            self.assertEqual(MODULE.managed_ports(), set())
+
     def test_inspection_distinguishes_absent_stopped_and_running_containers(self):
         for code, output, installed, running in [(1, '', False, False), (0, 'false', True, False), (0, 'true', True, True)]:
             with self.subTest(installed=installed, running=running), \

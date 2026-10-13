@@ -211,6 +211,13 @@ impl App {
                     .chain([Control::Settings])
                     .collect(),
             ),
+            Screen::SettingsPage(SettingsPage::Documentation) => (
+                self.settings_selected.saturating_sub(1),
+                (0..DOCUMENTS.len())
+                    .map(Control::Documentation)
+                    .chain([Control::Settings])
+                    .collect(),
+            ),
             Screen::SettingsPage(_) => (
                 self.settings_selected.saturating_sub(1),
                 vec![Control::Settings],

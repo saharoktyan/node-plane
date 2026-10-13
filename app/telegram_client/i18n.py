@@ -2951,7 +2951,7 @@ CATALOG['ru'].update({
     'nodes.settings.field.awg_parameters': 'Ручные параметры',
     'nodes.awg.manual': 'Ручной профиль',
     'nodes.awg.generated': 'Автогенерация по пресету',
-    'nodes.awg.parameters_prompt': 'Отправьте полный блок параметр = значение, включая параметры AWG 3.1. Можно скопировать текущие значения ниже. Отправьте auto для возврата к автогенерации. После применения импортируйте новые клиентские конфиги. Серверные ключи и устройства сохранятся.',
+    'nodes.awg.parameters_prompt': 'Отправьте полный блок параметр = значение, включая параметры AWG 3.1. Можно скопировать текущие значения ниже. Отправьте auto для возврата к автогенерации.',
     'nodes.awg.parameters_invalid': 'Не удалось проверить профиль AWG. Нужен полный набор Jc, Jmin, Jmax, S1–S4, H1–H4, I1–I5, HeaderProtectionKey, RandomTrailers и DisableCookies. Проверьте диапазоны, пересечения H и значения таймеров. Серверные и клиентские ключи сюда добавлять не нужно.',
 })
 CATALOG['en'].update({
@@ -2959,7 +2959,7 @@ CATALOG['en'].update({
     'nodes.settings.field.awg_parameters': 'Manual parameters',
     'nodes.awg.manual': 'Manual profile',
     'nodes.awg.generated': 'Generated from preset',
-    'nodes.awg.parameters_prompt': 'Send a complete parameter = value block, including AWG 3.1 fields. Copy the current values below to edit them. Send auto to return to generation. Import fresh client configs after applying changes. Server keys and devices are preserved.',
+    'nodes.awg.parameters_prompt': 'Send a complete parameter = value block, including AWG 3.1 fields. Copy the current values below to edit them. Send auto to return to generation.',
     'nodes.awg.parameters_invalid': 'Invalid AWG profile. Include Jc, Jmin, Jmax, S1–S4, H1–H4, I1–I5, HeaderProtectionKey, RandomTrailers and DisableCookies. Check ranges, overlapping H values and timers. Do not include server or client identity keys.',
 })
 
@@ -2988,4 +2988,25 @@ CATALOG['en'].update({
     'quick_start.note.access': 'Admin panel → Profiles → Your profile → Access. Add the first node and save changes.',
     'quick_start.note.config': 'Main menu → Configurations. Select your profile and node. Create a device first for AWG. Import the configuration and test connectivity.',
     'quick_start.note.done': 'Configuration generated. Import it into your VPN client and test connectivity.',
+})
+
+CATALOG['ru'].update({
+    'documentation.title': 'Документация',
+    'nodes.settings.field.awg_port_mode': 'Выбор UDP-порта',
+    'node.wizard.local_address': 'Для локальной ноды можно отправить . — будет использован адрес контроллера из профиля установки.',
+    'quick_start.dismiss': 'Скрыть руководство',
+    'quick_start.dismiss_note': 'Скрыть Quick Start навсегда? Руководство больше не будет появляться.',
+    'node_tools.port.listening': 'порт занят другим процессом',
+    'node_tools.port.managed': 'используется VPN-протоколом этой ноды',
+    'node_tools.port.busy': 'порт занят другим процессом',
+})
+CATALOG['en'].update({
+    'documentation.title': 'Documentation',
+    'nodes.settings.field.awg_port_mode': 'UDP port selection',
+    'node.wizard.local_address': 'For a local node, send . to use the controller address from its installation profile.',
+    'quick_start.dismiss': 'Dismiss',
+    'quick_start.dismiss_note': 'Dismiss Quick Start permanently? This guide will no longer appear.',
+    'node_tools.port.listening': 'port is occupied by another process',
+    'node_tools.port.managed': 'used by this node’s VPN protocol',
+    'node_tools.port.busy': 'port is occupied by another process',
 })

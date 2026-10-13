@@ -138,7 +138,7 @@ async def show_section(chat_id, user_id, message_id, section, node_key, bot, bac
     fields = {'general': ('title', 'flag', 'region', 'notes'),
               'connection': ('public_host',),
               'xray': ('xray_host', 'xray_sni', 'xray_fingerprint', 'xray_tcp_port', 'xray_xhttp_port', 'xray_xhttp_path'),
-              'awg': ('awg_public_host', 'awg_interface', 'awg_port', 'awg_i1_preset')}
+              'awg': ('awg_public_host', 'awg_interface', 'awg_port', 'awg_port_mode', 'awg_i1_preset')}
     if section not in fields:
         return
     locale = normalize_locale((await state.get_data()).get('locale'))
@@ -149,34 +149,26 @@ async def show_section(chat_id, user_id, message_id, section, node_key, bot, bac
     await state.update_data(edit_section=section, node_settings_view=section)
     def field_button(field):
         return button(locale, 'nodes.settings.field.' + field,
-                      EditNodeFieldCallback(node_key=node_key, field=field).pack())
+                      EditNodeFieldCallback(node_key=node_key, field='awg_port' if field == 'awg_port_mode' else field).pack())
     defaults = {'xray_fingerprint': 'chrome', 'awg_interface': 'wg0', 'awg_i1_preset': 'quic'}
     if node['settings'].get('awg_port_mode') == 'auto':
         defaults['awg_port'] = tr(locale, 'nodes.awg.port_automatic')
     def group(title, selected, *, extra=(), collapsed=False):
-        buttons = [field_button(field) for field in selected]
-        rows = [tuple(buttons[index:index + 2]) for index in range(0, len(buttons), 2)]
-        rows.extend(extra)
+        rows = list(extra)
         return Section(tr(locale, title), collapsed=collapsed, heading_size=3 if section in {'awg', 'xray'} else 2,
             tables=(Table((tr(locale, 'account.rich.field'), tr(locale, 'account.rich.value')),
-                tuple((tr(locale, 'nodes.settings.field.' + field), str(node.get(field, node['settings'].get(field, defaults.get(field, '—'))) or '—')) for field in selected)),) if selected else (), rows=tuple(rows))
+                tuple((tr(locale, 'nodes.settings.field.' + field), str(node.get(field, node['settings'].get(field, defaults.get(field, '—'))) or '—')) for field in selected),
+                row_callbacks=tuple(field_button(field).callback_data for field in selected)),) if selected else (), rows=tuple(rows))
     if section == 'general':
         sections = (group('nodes.rich.name_region', ('title', 'region', 'flag')), group('nodes.settings.field.notes', ('notes',), collapsed=True))
     elif section == 'connection':
         sections = (group('nodes.rich.connection', ('public_host',)),)
     elif section == 'xray':
-        sections = (group('nodes.rich.connection', ('xray_host', 'xray_sni')),
-            group('node_tools.ports', ('xray_tcp_port', 'xray_xhttp_port')),
-            group('nodes.rich.advanced', ('xray_fingerprint', 'xray_xhttp_path'), collapsed=True))
+        sections = (group('node_tools.xray', fields['xray']),)
     else:
-        sections = (group('nodes.rich.connection', ('awg_public_host', 'awg_port')),
-            group('nodes.rich.obscuration', ('awg_i1_preset',), extra=((
-                button(locale, 'node_tools.regenerate_entropy', f'node_action:regenerate_entropy:{node_key}'),),)),
-            Section(tr(locale, 'nodes.awg.parameters'), heading_size=3,
-                lines=(tr(locale, 'nodes.awg.manual' if node['settings'].get('awg_parameters') else 'nodes.awg.generated'),),
-                rows=((field_button('awg_parameters'),),)),
-            group('nodes.rich.advanced', ('awg_interface',), extra=((
-                button(locale, 'node_tools.entropy', f'node_view:entropy:{node_key}'),),), collapsed=True))
+        sections = (group('node_tools.awg', fields['awg']),
+            Section('', rows=((field_button('awg_parameters'),),
+                (button(locale, 'node_tools.entropy', f'node_view:entropy:{node_key}'),))))
         preferred = {'quic': 443, 'dns': 53}.get(node['settings'].get('awg_i1_preset', 'quic'))
         actual = node['settings'].get('awg_port')
         if node['settings'].get('awg_port_mode') == 'auto' and actual and preferred and actual != preferred:
@@ -215,6 +207,7 @@ async def view_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state:
             facts = await backend.node_services(query.from_user.id, node_key)
             if view == 'entropy':
                 lines = facts['entropy'] or [tr(locale, 'node_tools.no_config')]
+                rows.append([button(locale, 'node_tools.regenerate_entropy', f'node_action:regenerate_entropy:{node_key}')])
             elif view == 'runtime':
                 lines = [tr(locale, 'node_tools.drift' if facts['runtime_drift'] else 'node_tools.current')]
                 sections = [Section(tr(locale, 'node_tools.runtime'), tables=(Table(
@@ -374,7 +367,8 @@ async def show_job(chat_id, user_id, message_id, job, bot, state, backend=None):
         rows.append([button(locale, 'node_tools.refresh', 'node_job:' + job['id'])])
     if job['status'] == 'blocked':
         rows.append([button(locale, 'node_tools.resolve', 'node_resolve:' + job['id'])])
-    rows.append([button(locale, 'back', AdminNodeCallback(node_key=job['node_key']).pack())])
+    rows.append([button(locale, 'back', f"node_view:ports:{job['node_key']}"
+        if job['action'] in {'check_ports', 'open_ports'} else AdminNodeCallback(node_key=job['node_key']).pack())])
     await render(bot, chat_id, Screen(tr(locale, 'node_tools.' + job['action']), tuple(lines), sections=tuple(sections), embedded_buttons=True, navigation=True), rows, state, message_id)
     if backend is not None and job['status'] in {'awaiting_executor', 'running'}:
         async def refresh():

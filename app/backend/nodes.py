@@ -259,7 +259,18 @@ class NodeService:
         key = _command_key(command_key)
         if action not in {'create', 'edit'}:
             raise ValueError('unsupported node command')
-        values = _validate(dict(values), create=action == 'create')
+        values = dict(values)
+        if action == 'create' and isinstance(values.get('settings'), dict) and values['settings'].get('public_host') == '.':
+            if values.get('transport', 'local') != 'local':
+                raise AccessDenied('invalid_input', 422)
+            import os
+            with self.db.connect() as conn:
+                address = conn.execute("SELECT value FROM backend_system_settings WHERE key='controller.public_host'").fetchone()
+            host = address['value'] if address else os.environ.get('NODE_PLANE_CONTROLLER_HOST', '')
+            if not host:
+                raise AccessDenied('controller_address_unavailable', 422)
+            values['settings'] = dict(values['settings'], public_host=host)
+        values = _validate(values, create=action == 'create')
         if action == 'edit' and (type(revision) is not int or revision < 1):
             raise AccessDenied('invalid_revision', 422)
         input_json = json.dumps({'action': action, 'node_key': node_key, 'revision': revision,

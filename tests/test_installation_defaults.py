@@ -13,6 +13,21 @@ class InstallationDefaultsTests(unittest.TestCase):
         return self.client.put('/api/v1/system/installation-defaults',
             headers=self.admin_headers(**{'If-Match': f'"{revision}"'}), json=body)
 
+    def test_local_dot_resolves_installation_address_for_both_protocols(self):
+        result = self.client.patch('/api/v1/system/controller-address', headers=self.admin_headers(), json={'host': '203.0.113.19'})
+        self.assertEqual(result.status_code, 200, result.text)
+        created = self.create({'key':'local','title':'Local','region':'EU','transport':'local',
+            'protocols':['awg','xray'], 'settings':{'public_host':'.'}})
+        self.assertEqual(created.status_code, 201, created.text)
+        settings = created.json()['settings']
+        for key in ('public_host','awg_public_host','xray_host'):
+            self.assertEqual(settings[key], '203.0.113.19')
+        remote = self.create({'key':'remote','title':'Remote','region':'EU','transport':'ssh',
+            'ssh_target':'root@remote.example','protocols':['awg'], 'settings':{'public_host':'.'}})
+        self.assertEqual(remote.status_code, 422)
+        invalid = self.client.patch('/api/v1/system/controller-address', headers=self.admin_headers(), json={'host':'bad/host'})
+        self.assertEqual(invalid.status_code, 422)
+
     def test_xray_defaults_are_complete_and_preserve_custom_values(self):
         expected = {'xray_sni': 'www.cloudflare.com', 'xray_fingerprint': 'chrome',
             'xray_tcp_port': 443, 'xray_xhttp_port': 8443, 'xray_xhttp_path': '/assets'}

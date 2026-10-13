@@ -38,6 +38,7 @@ impl NodeSnapshot {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UpdateSnapshot {
     pub id: Uuid,
+    pub target: String,
     pub status: String,
     pub phase: String,
     pub components: Vec<(String, String)>,
@@ -86,6 +87,15 @@ impl UpdateSnapshot {
         nodes.sort_by(|a, b| (&a.region, &a.title, &a.key).cmp(&(&b.region, &b.title, &b.key)));
         Ok(Self {
             id: expected,
+            target: format!(
+                "{} · {}",
+                if value["branch"] == "main" {
+                    "stable"
+                } else {
+                    "dev"
+                },
+                text(&result["resolved_ref"]).trim_start_matches('v')
+            ),
             status: text(&value["status"]),
             phase: text(&result["phase"]),
             components: ["backend", "worker", "driver", "telegram"]

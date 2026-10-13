@@ -9,6 +9,20 @@ class AutoRefreshTests(IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         await common.shutdown_refreshes()
 
+    async def test_port_operations_poll_to_result_and_return_to_ports(self):
+        for action in ('check_ports','open_ports'):
+            state = SimpleNamespace(get_data=AsyncMock(return_value={'locale':'en'}), update_data=AsyncMock())
+            job = {'id':'ports1','node_key':'lv1','action':action,'status':'running'}
+            backend = SimpleNamespace(node_job=AsyncMock(return_value=dict(job,status='succeeded',result={})))
+            with patch.object(admin_node_tools,'render',new_callable=AsyncMock) as draw, patch.object(admin_node_tools,'schedule_refresh') as schedule:
+                await admin_node_tools.show_job(1,1,7,job,SimpleNamespace(),state,backend=backend)
+                refresh = schedule.call_args.args[1]
+                schedule.reset_mock()
+                await refresh()
+                backend.node_job.assert_awaited_once_with(1,'ports1')
+                schedule.assert_not_called()
+                self.assertEqual(draw.call_args.args[3][-1][0].callback_data,'node_view:ports:lv1')
+
     async def test_profile_deletion_refreshes_until_finished(self):
         state = SimpleNamespace(get_data=AsyncMock(return_value={'locale':'en'}))
         backend = SimpleNamespace(request=AsyncMock(return_value={'id':'p1','display_name':'Phone','deleting':True}),

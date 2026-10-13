@@ -1044,6 +1044,12 @@ async def user_action_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
                 bot, backend, state, back_to=action.args[1])
         elif action.name == 'member_settings':
             await show_member_settings(chat_id, user_id, message_id, bot, backend, state)
+        elif action.name == 'documentation':
+            from ..documentation import section, title
+            locale = normalize_locale((await state.get_data()).get('locale'))
+            await render(bot, chat_id, Screen(title(locale), sections=(section(locale),),
+                embedded_buttons=True, navigation=True),
+                [[button(user_id, tr(locale, 'back'), 'member_settings')]], state, message_id)
         elif action.name == 'announcement_silent':
             await backend.set_announcement_silent(user_id, action.args[0] == 'true')
             await show_member_settings(chat_id, user_id, message_id, bot, backend, state)
@@ -1256,6 +1262,8 @@ async def show_member_settings(chat_id: int, user_id: int, message_id: int,
                 .model_copy(update={'style': 'primary' if not silent else None}),
             button(user_id, tr(locale, 'ui.disable_sound'), 'announcement_silent', 'true')
                 .model_copy(update={'style': 'primary' if silent else None}),),))]
+    from ..documentation import title
+    sections.append(Section('', inline_rows=((button(user_id, title(locale), 'documentation'),),)))
     await render(bot, chat_id, Screen(tr(locale, 'settings.title'),
         sections=tuple(sections), embedded_buttons=True, navigation=True),
         [[button(user_id, tr(locale, 'back'), 'home')]], state, message_id)

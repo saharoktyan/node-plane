@@ -29,7 +29,7 @@ def progress(db, actor):
             (profile['id'], node['key'], profile['desired_revision'], node['desired_revision'])).fetchone())
     steps = [{'key': key, 'complete': bool(complete)} for key, complete in (
         ('defaults', configured), ('node', node is not None), ('protocols', applied),
-        ('access', profile is not None), ('config', issued))]
+        ('config', issued))]
     return {'completed': completed(db, actor.account.id, 'telegram'),
             'workstation_completed': completed(db, actor.account.id, 'workstation'), 'steps': steps, 'next_step': next((s['key'] for s in steps if not s['complete']), None),
             'node_key': node['key'] if node else None, 'profile_id': profile['id'] if profile else None}
@@ -53,4 +53,14 @@ def finish(db, actor, client):
         with db.transaction() as conn:
             conn.execute('INSERT INTO backend_system_settings(key,value) VALUES (?,?) ON CONFLICT(key) DO NOTHING',
                 ('onboarding.completed.' + client + '.' + actor.account.id, '1'))
+    return progress(db, actor)
+
+
+def dismiss(db, actor, client):
+    require_permission(actor, 'nodes.manage')
+    if client not in {'telegram', 'workstation'}:
+        raise AccessDenied('invalid_input', 422)
+    with db.transaction() as conn:
+        conn.execute('INSERT INTO backend_system_settings(key,value) VALUES (?,?) ON CONFLICT(key) DO NOTHING',
+            ('onboarding.completed.' + client + '.' + actor.account.id, '1'))
     return progress(db, actor)

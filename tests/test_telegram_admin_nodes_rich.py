@@ -381,7 +381,7 @@ class AdminNodeRichTests(IsolatedAsyncioTestCase):
             self.assertEqual(screen.sections[0].tables[0].rows[0][:2], ('443', 'tcp'))
             self.assertTrue(screen.sections[-1].collapsed)
             self.assertIn('job1', screen.sections[-1].lines[0])
-            self.assertEqual(rows[-1][0].callback_data, 'admin_node:msk1')
+            self.assertEqual(rows[-1][0].callback_data, 'node_view:ports:msk1')
             screen.rich(rows)
 
     async def test_rollout_progress_retains_refresh_and_collapses_identifier(self):

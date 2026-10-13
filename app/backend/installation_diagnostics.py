@@ -85,12 +85,14 @@ class FleetDiagnostics:
             if state is None:
                 checks.append({'id': 'registry', 'status': 'error',
                                'detail': 'Saved server metadata unavailable or changed during diagnostics; refresh the registry'})
-            elif not node['enabled']:
-                checks.append({'id': 'disabled', 'status': 'warning', 'detail': 'Server disabled; live inspection skipped'})
             else:
                 try:
-                    observation = probe(node, self.driver)
+                    observation = probe(dict(node, protocols=[]) if not node['applied_revision'] else node, self.driver)
                     checks = server_checks(observation)
+                    if not node['enabled']:
+                        checks.append({'id': 'disabled', 'status': 'warning', 'detail':
+                            'VPN protocols are not installed; agent inspected separately' if not node['applied_revision']
+                            else 'VPN access is disabled; agent inspected separately'})
                 except Exception:
                     checks = [{'id': 'agent', 'status': 'warning' if not node['applied_revision'] else 'error',
                                'detail': 'Live inspection unavailable; inspect agent setup and controller driver connectivity'}]

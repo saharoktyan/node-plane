@@ -86,7 +86,7 @@ class ObservationTests(TestCase):
         self.assertEqual(page['total'], 2)
         self.assertEqual(len(page['items']), 2)
         self.assertEqual(page['errors'], 1)
-        driver.inspect_node_services.assert_called_once_with('lv1')
+        self.assertEqual({call.args[0] for call in driver.inspect_node_services.call_args_list}, {'disabled','lv1'})
         self.assertNotIn('PRIVATE', response.text)
 
     def test_fleet_pages_do_not_probe_servers_outside_the_requested_page(self):
@@ -103,7 +103,7 @@ class ObservationTests(TestCase):
         self.assertEqual(response.json()['total'], 7)
         self.assertEqual(len(response.json()['items']), 2)
         self.assertIsNone(response.json()['next_offset'])
-        driver.inspect_node_services.assert_not_called()
+        self.assertEqual({call.args[0] for call in driver.inspect_node_services.call_args_list}, {'other5','lv1'})
 
     def test_invalid_server_metadata_does_not_hide_other_diagnostic_results(self):
         self.create()
@@ -117,7 +117,7 @@ class ObservationTests(TestCase):
         self.assertEqual(len(response.json()['items']), 2)
         self.assertEqual(response.json()['errors'], 1)
         self.assertIn('registry', [c['id'] for item in response.json()['items'] for c in item['checks']])
-        driver.inspect_node_services.assert_not_called()
+        driver.inspect_node_services.assert_called_once_with('other')
 
     def test_overview_exposes_maintenance_and_blocked_agent_installation_without_probing(self):
         self.create()

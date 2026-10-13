@@ -182,6 +182,14 @@ impl App {
                 self.settings_selected - 1,
                 1,
             ),
+            Screen::SettingsPage(SettingsPage::Documentation) if self.settings_selected > 0 => (
+                (0..DOCUMENTS.len())
+                    .map(Control::Documentation)
+                    .chain([Control::Settings])
+                    .collect(),
+                self.settings_selected - 1,
+                1,
+            ),
             Screen::SettingsPage(SettingsPage::Profiles) if self.settings_selected > 0 => {
                 (self.profile_controls(), self.settings_selected - 1, 1)
             }
@@ -588,12 +596,14 @@ impl App {
                 self.quick_focus = false;
                 self.form.selected = self.form.count() - 1;
             }
+            Control::Documentation(index) => self.settings_selected = index + 1,
             Control::Accent(index) => self.settings_selected = index + 1,
             Control::AccentInput => self.settings_selected = self.themes.len() + 1,
             Control::Settings if matches!(self.screen, Screen::SettingsPage(_)) => {
                 self.settings_selected =
                     match self.screen {
                         Screen::SettingsPage(SettingsPage::Appearance) => self.themes.len() + 3,
+                        Screen::SettingsPage(SettingsPage::Documentation) => DOCUMENTS.len() + 1,
                         Screen::SettingsPage(SettingsPage::Profiles) => {
                             self.profile_controls().len()
                         }

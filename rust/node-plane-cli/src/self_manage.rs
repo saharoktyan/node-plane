@@ -298,8 +298,9 @@ pub fn update(release: &Release) -> Result<String> {
         return Ok("Workstation is already up to date.".into());
     };
     Ok(format!(
-        "Workstation updated to {}. Restart TUI to use the new version.",
-        result.new_version_tag
+        "Workstation updated to {} · {}. Restart TUI to use the new version.",
+        crate::config::workstation_channel(),
+        result.new_version_tag.trim_start_matches('v')
     ))
 }
 

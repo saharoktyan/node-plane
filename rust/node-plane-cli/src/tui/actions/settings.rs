@@ -23,9 +23,11 @@ impl App {
             Prompt::ConfirmAction {
                 title: "Update Workstation?".into(),
                 description: format!(
-                    "{} → {}\nWorkstation is updated on this computer. Restart TUI afterwards. Server installations and saved profiles are retained.",
+                    "{} · {} → {} · {}\nWorkstation is updated on this computer. Restart TUI afterwards. Server installations and saved profiles are retained.",
+                    crate::config::workstation_channel(),
                     env!("CARGO_PKG_VERSION"),
-                    release.tag_name
+                    crate::config::workstation_channel(),
+                    release.tag_name.trim_start_matches('v')
                 ),
             },
             reply,
@@ -61,6 +63,29 @@ impl App {
                 self.screen = Screen::SettingsPage(page);
                 self.settings_selected = 1;
                 self.error.clear();
+                None
+            }
+            Control::Documentation(index) => {
+                if let Some((name, _, _)) = DOCUMENTS.get(index) {
+                    let url = format!(
+                        "https://github.com/saharoktyan/node-plane/blob/{}/docs/{name}.md",
+                        crate::config::default_branch()
+                    );
+                    let program = if cfg!(target_os = "macos") {
+                        "open"
+                    } else {
+                        "xdg-open"
+                    };
+                    if let Err(error) = std::process::Command::new(program)
+                        .arg(url)
+                        .stdin(std::process::Stdio::null())
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
+                        .spawn()
+                    {
+                        self.error = format!("Cannot open documentation: {error}");
+                    }
+                }
                 None
             }
             Control::Accent(index) => {

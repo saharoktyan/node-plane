@@ -38,6 +38,7 @@ impl App {
             form: Form::new(r),
             screen: Screen::Form,
             quick_start_return: None,
+            quick_start_dismiss: None,
             error: String::new(),
             stage: String::new(),
             tracker: Tracker::default(),
@@ -111,19 +112,21 @@ impl App {
     }
 
     pub(super) fn quick_start_identity(&self) -> Option<String> {
-        self.form
-            .saved
-            .as_ref()
-            .map(|saved| format!("{}:{}", saved.id, saved.account))
+        self.form.saved.as_ref().map(|saved| saved.id.to_string())
     }
     pub(super) fn quick_start_completed(&self) -> bool {
-        self.controller
-            .onboarding
-            .as_ref()
-            .is_some_and(|guide| guide["workstation_completed"] == true)
+        self.connections.hide_quick_start
             || self
-                .quick_start_identity()
-                .is_some_and(|key| self.connections.completed_quick_starts.contains(&key))
+                .controller
+                .onboarding
+                .as_ref()
+                .is_some_and(|guide| guide["workstation_completed"] == true)
+            || self.quick_start_identity().is_some_and(|key| {
+                self.connections
+                    .completed_quick_starts
+                    .iter()
+                    .any(|saved| saved == &key || saved.starts_with(&format!("{key}:")))
+            })
     }
 
     pub(super) fn onboarding_poll_ready(

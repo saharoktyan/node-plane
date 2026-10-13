@@ -56,7 +56,8 @@ fn startup_update_offer_waits_for_connection_then_opens_on_idle_with_its_own_tit
         .map(|cell| cell.symbol())
         .collect();
     assert!(text.contains("Update Workstation?"));
-    assert!(text.contains("v99.0.0"));
+    assert!(text.contains("99.0.0"));
+    assert!(text.contains(crate::config::workstation_channel()));
     assert!(!text.contains("Connection confirmation"));
     app.prompt
         .take()
@@ -1914,6 +1915,7 @@ fn quick_start_keyboard_opens_profile_and_escape_closes_guide() {
     assert!(app.confirm);
     app.quick_start_key(KeyCode::Left.into());
     assert!(!app.confirm);
+    app.quick_start_key(KeyCode::Right.into());
     app.quick_start_key(KeyCode::Enter.into());
     assert!(matches!(app.screen, Screen::Form));
     assert!(app.editor.is_none());
@@ -2570,7 +2572,7 @@ fn finished_diagnostics_keep_summary_and_buttons_outside_scrollable_output() {
     assert_eq!(app.result_scroll, 0);
 }
 #[test]
-fn channel_fields_are_fixed_to_the_matching_workstation_and_keep_accent_titles() {
+fn channel_fields_are_fixed_to_the_matching_workstation_and_look_disabled() {
     let mut app = App::new(&test_request());
     app.begin_edit(true);
     assert_eq!(
@@ -2598,7 +2600,7 @@ fn channel_fields_are_fixed_to_the_matching_workstation_and_keep_accent_titles()
         .area;
     assert_eq!(
         terminal.backend().buffer()[(field.x + 1, field.y)].fg,
-        Color::Cyan
+        Color::DarkGray
     );
 }
 
@@ -2661,6 +2663,7 @@ fn action_specific_fields_do_not_edit_hidden_credentials() {
 #[test]
 fn update_node_pages_render_and_resize_without_leaking_other_pages() {
     let snapshot = crate::workstation::UpdateSnapshot {
+        target: "dev · 1.0.0-alpha.5".into(),
         id: uuid::Uuid::new_v4(),
         status: "running".into(),
         phase: "agents".into(),
@@ -5381,6 +5384,7 @@ fn browser_presence_cannot_replace_a_running_update_receiver() {
     app.event(Event::Stage("Updating components".into()));
     let id = uuid::Uuid::new_v4();
     app.event(Event::Update(crate::workstation::UpdateSnapshot {
+        target: "dev · 1.0.0-alpha.5".into(),
         id,
         status: "running".into(),
         phase: "core".into(),
@@ -5664,4 +5668,96 @@ fn admin_profile_card_hides_freeze_block_and_delete() {
         Control::AccessProfileAction(_) | Control::AccessAccountAction(false)
     )));
     assert!(app.hits.iter().any(|h| h.control == Control::AccessEdit));
+}
+
+#[test]
+fn completed_guide_survives_empty_registry_and_changed_account_selector() {
+    let mut app = test_profile_app();
+    let profile = app.form.saved.as_ref().unwrap().id;
+    app.connections
+        .completed_quick_starts
+        .push(format!("{profile}:previous-account"));
+    app.form.saved.as_mut().unwrap().account = "new-selector".into();
+    app.controller.onboarding =
+        Some(serde_json::json!({"workstation_completed":false,"next_step":"node","node_key":null}));
+    app.screen = Screen::Idle;
+    assert!(app.quick_start_completed());
+    app.open_quick_start();
+    assert!(matches!(app.screen, Screen::Idle));
+    assert!(!app.onboarding_poll_ready(std::time::Duration::from_secs(2), false));
+}
+
+#[test]
+fn wizard_pairs_only_matching_regions_when_wide_and_pairs_protocols() {
+    let mut app = test_profile_app();
+    let templates: Vec<_> = [("lv","Europe","🇱🇻"),("de","Europe","🇩🇪"),("sg","Asia","🇸🇬"),("us","North America","🇺🇸")]
+        .into_iter().map(|(code, region, flag)| serde_json::json!({"code":code,"title":code,"region":region,"flag":flag,"draft":{}})).collect();
+    let options = serde_json::from_value(serde_json::json!({"local_available":true,"defaults":{"protocols":[],"xray_transports":[],"settings":{}},"templates":templates})).unwrap();
+    app.node_wizard = Some(crate::node_wizard::Wizard::new(options).unwrap());
+    app.node_wizard.as_mut().unwrap().step = crate::node_wizard::Step::Template;
+    app.screen = Screen::NodeWizard;
+    for width in [140, 70] {
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(width, 40)).unwrap();
+        terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+        let choice = |index| {
+            app.hits
+                .iter()
+                .find(|hit| hit.control == Control::WizardChoice(index))
+                .unwrap()
+                .area
+        };
+        if width == 140 {
+            assert_eq!(choice(0).y, choice(1).y);
+        } else {
+            assert_ne!(choice(0).y, choice(1).y);
+        }
+        assert_ne!(choice(1).y, choice(2).y);
+        assert_ne!(choice(2).y, choice(3).y);
+    }
+    app.node_wizard.as_mut().unwrap().step = crate::node_wizard::Step::Protocols;
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(140, 40)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    let choices: Vec<_> = app
+        .hits
+        .iter()
+        .filter(|hit| matches!(hit.control, Control::WizardChoice(_)))
+        .collect();
+    assert_eq!(choices[0].area.y, choices[1].area.y);
+}
+
+#[test]
+fn controller_text_dialogs_use_small_back_arrow_before_primary_action() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Controller;
+    app.controller.policies = Some(serde_json::json!({"requests":{"gate_message":"Original"}}));
+    app.activate(Control::ControllerGateMessage);
+    app.controller.defaults_input.as_mut().unwrap().1 = "New text".into();
+    for confirm in [false, true] {
+        app.controller.text_confirmation = confirm;
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+        terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+        let back = app
+            .hits
+            .iter()
+            .find(|hit| hit.control == Control::ControllerBack)
+            .unwrap()
+            .area;
+        let primary = app
+            .hits
+            .iter()
+            .find(|hit| {
+                hit.control
+                    == if confirm {
+                        Control::ControllerTextConfirm
+                    } else {
+                        Control::ControllerDefaultsInputApply
+                    }
+            })
+            .unwrap()
+            .area;
+        assert_eq!(back.width, 5);
+        assert_eq!(back.y, primary.y);
+        assert!(back.right() < primary.x);
+        assert!(primary.y.saturating_sub(back.y) < 4);
+    }
 }

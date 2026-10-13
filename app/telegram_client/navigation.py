@@ -51,7 +51,7 @@ def parent_path(callback, locale, data):
             return (*menu, member(tr(locale, 'devices.title'), 'device_list', args[0]),
                     Breadcrumb(tr(locale, 'navigation.device'), callback))
         return ()
-    if callback in {'quick_start', 'quick_start_defaults', 'quick_start_done'} and data.get('quick_start_home'):
+    if callback in {'quick_start', 'quick_start_defaults', 'quick_start_done', 'quick_start_dismiss'} and data.get('quick_start_home'):
         return (*parent_path(data['quick_start_home'], locale, data), Breadcrumb(tr(locale, 'quick_start.title'), 'quick_start'))
     roots = {'quick_start': (*admin, Breadcrumb(tr(locale, 'quick_start.title'), 'quick_start')),
              'quick_start_defaults': (*admin, Breadcrumb(tr(locale, 'quick_start.title'), 'quick_start')),
@@ -68,6 +68,7 @@ def parent_path(callback, locale, data):
         return (*admin, Breadcrumb(tr(locale, callback + '.title'), callback))
     settings_pages = {
         'temporary:list:0': 'temporary.title',
+        'admin_documentation': 'documentation.title',
         'alerts': 'alerts.title', 'traffic': 'traffic.title',
         'bot_title_settings': 'bot_title.title', 'request_policy': 'request_policy.title',
         'idefault:open': 'defaults.title', 'idefault:main': 'defaults.title',

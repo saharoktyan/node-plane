@@ -27,14 +27,16 @@ pub(super) enum SettingsPage {
     Security,
     Session,
     About,
+    Documentation,
 }
 impl SettingsPage {
-    pub(super) const ALL: [Self; 6] = [
+    pub(super) const ALL: [Self; 7] = [
         Self::Profiles,
         Self::Updates,
         Self::Security,
         Self::Session,
         Self::Appearance,
+        Self::Documentation,
         Self::About,
     ];
     pub(super) fn label(self) -> &'static str {
@@ -45,6 +47,7 @@ impl SettingsPage {
             Self::Security => "Connection & security",
             Self::Session => "Diagnostics & session",
             Self::About => "About",
+            Self::Documentation => "Documentation",
         }
     }
 }
@@ -247,6 +250,7 @@ pub(super) enum Control {
     CycleProfile(bool),
     Settings,
     SettingsPage(SettingsPage),
+    Documentation(usize),
     Accent(usize),
     AccentInput,
     SaveAccent,
@@ -546,6 +550,7 @@ pub(super) struct App {
     pub(super) form: Form,
     pub(super) screen: Screen,
     pub(super) quick_start_return: Option<Screen>,
+    pub(super) quick_start_dismiss: Option<mpsc::Receiver<Answer>>,
     pub(super) error: String,
     pub(super) stage: String,
     pub(super) tracker: Tracker,

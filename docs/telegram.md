@@ -28,7 +28,7 @@ The administrator menu provides servers, profiles, access requests, updates, set
 3. [Configure installation defaults and policies](settings.md).
 4. [Update, back up and inspect alerts](maintenance.md).
 
-Overview shows server/profile counts and adds rows for queued, running or blocked tasks when present. Pending requests appear when request intake is enabled and the queue is nonempty. Alerts appears when monitoring is enabled and active alerts remain undismissed. Both lists return directly to the administrator menu. The last check time and Refresh link are below the table. Settings contains updates, backups, controller diagnostics, recovery and monitoring preferences. The `/status` command opens Overview.
+Overview shows server/profile counts and adds rows for queued, running or blocked tasks when present. Pending requests appear when request intake is enabled and the queue is nonempty. Alerts appears when monitoring is enabled and active alerts remain undismissed. Both lists return directly to the administrator menu. The last check time and Refresh link are below the table. Updates and Backups are in the administrator menu’s System section. Settings contains controller diagnostics, recovery, monitoring preferences and a Documentation text link to individual GitHub guides. The `/status` command opens Overview.
 
 In a server card, **Probe** reads the agent and Docker state, selected protocol containers and configuration structure, configured TCP/UDP ports, host resources and agent/runtime versions. The result includes its observation time and response duration. Missing measurements are unknown; unselected protocols are omitted. Probe does not apply settings or verify a VPN connection from a client.
 

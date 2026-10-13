@@ -1014,7 +1014,7 @@ pub(in crate::tui) fn draw_node_wizard(
     };
     let right = draw_navigation(frame, app, area, hits);
     let right = if wizard.field().is_some() {
-        let popup = centered(right, 76, 13);
+        let popup = centered(right, 76, 10);
         frame.render_widget(Clear, popup);
         popup
     } else {
@@ -1039,6 +1039,9 @@ pub(in crate::tui) fn draw_node_wizard(
         Step::Target => {
             "Root access or passwordless sudo is required. Example: root@node.example.com"
         }
+        Step::Host if wizard.transport == "local" => {
+            "VPN address: domain or IP. Enter . to use this controller profile’s address."
+        }
         Step::Host => "VPN address: a domain or IP. Examples: vpn.example.com or 203.0.113.10",
         Step::Protocols => "Select protocols, or leave both off for an agent-only node.",
         Step::Created => "The node is saved. Open its card to install the agent and VPN protocols.",
@@ -1055,16 +1058,40 @@ pub(in crate::tui) fn draw_node_wizard(
         rows[0],
     );
     let choices = wizard.choices();
+    let mut choice_rows: Vec<Vec<usize>> = Vec::new();
+    let mut choice = 0;
+    while choice < choices.len() {
+        let mut row = vec![choice];
+        if rows[1].width >= 64
+            && choice + 1 < choices.len()
+            && (wizard.step == Step::Protocols
+                || wizard.step == Step::Template
+                    && wizard
+                        .options
+                        .templates
+                        .get(choice)
+                        .zip(wizard.options.templates.get(choice + 1))
+                        .is_some_and(|(left, right)| left.region == right.region))
+        {
+            choice += 1;
+            row.push(choice);
+        }
+        choice_rows.push(row);
+        choice += 1;
+    }
     let scrolling_footer = matches!(wizard.step, Step::Template | Step::Region)
-        && choices.len() > usize::from(rows[1].height / 3);
+        && choice_rows.len() > usize::from(rows[1].height / 3);
     if scrolling_footer {
         rows[1].height += rows[2].height;
     }
     let capacity = usize::from(rows[1].height / 3).max(1);
-    let count = choices.len() + usize::from(scrolling_footer);
+    let count = choice_rows.len() + usize::from(scrolling_footer);
+    let selected_row = choice_rows
+        .iter()
+        .position(|row| row.contains(&wizard.selected))
+        .unwrap_or(choice_rows.len());
     let first = app.viewport(
-        wizard
-            .selected
+        selected_row
             .min(count.saturating_sub(1))
             .saturating_sub(capacity - 1),
         count,
@@ -1096,18 +1123,28 @@ Code: {}",
         );
     } else {
         app.content_overflow.set(count > capacity);
-        for (index, label) in choices.iter().enumerate().skip(first).take(capacity) {
-            let area = Rect::new(
+        for (row_index, indices) in choice_rows.iter().enumerate().skip(first).take(capacity) {
+            let strip = Rect::new(
                 rows[1].x,
-                rows[1].y + ((index - first) * 3) as u16,
+                rows[1].y + ((row_index - first) * 3) as u16,
                 rows[1].width,
                 3.min(rows[1].height),
             );
-            draw_button(frame, area, label, wizard.selected == index);
-            hits.push(Hit {
-                area,
-                control: Control::WizardChoice(index),
-            });
+            let cells = Layout::horizontal(vec![Constraint::Fill(1); indices.len()])
+                .spacing(1)
+                .split(strip);
+            for (column, &index) in indices.iter().enumerate() {
+                draw_button(
+                    frame,
+                    cells[column],
+                    &choices[index],
+                    wizard.selected == index,
+                );
+                hits.push(Hit {
+                    area: cells[column],
+                    control: Control::WizardChoice(index),
+                });
+            }
         }
         if let Some(text) = wizard.field() {
             let area = if choices.is_empty() {
@@ -1125,12 +1162,12 @@ Code: {}",
     }
     let buttons = wizard_buttons(wizard);
     let footer = if scrolling_footer {
-        if choices.len() < first || choices.len() >= first + capacity {
+        if choice_rows.len() < first || choice_rows.len() >= first + capacity {
             return;
         }
         Rect::new(
             rows[1].x,
-            rows[1].y + (choices.len() - first) as u16 * 3,
+            rows[1].y + (choice_rows.len() - first) as u16 * 3,
             rows[1].width,
             3,
         )

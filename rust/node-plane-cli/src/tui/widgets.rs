@@ -209,6 +209,35 @@ pub(super) fn button_pair(
     controls: (Control, Control),
     hits: &mut Vec<Hit>,
 ) {
+    if labels.1 == "Cancel" {
+        let cells = Layout::horizontal([Constraint::Length(5), Constraint::Fill(1)])
+            .spacing(1)
+            .split(centered(area, area.width, 3));
+        draw_button(frame, cells[0], "←", !first);
+        draw_button_color(
+            frame,
+            cells[1],
+            labels.0,
+            first,
+            if matches!(
+                controls.0,
+                Control::ConfirmDelete(true) | Control::Discard(true)
+            ) {
+                Color::Red
+            } else {
+                Color::Cyan
+            },
+        );
+        hits.push(Hit {
+            area: cells[0],
+            control: controls.1,
+        });
+        hits.push(Hit {
+            area: cells[1],
+            control: controls.0,
+        });
+        return;
+    }
     let strip = centered(area, 36, 3);
     let buttons = Layout::horizontal([
         Constraint::Fill(1),
@@ -249,13 +278,17 @@ pub(super) fn draw_channel(
     _editor: bool,
     _hits: &mut Vec<Hit>,
 ) {
-    draw_field(
-        frame,
-        area,
-        "Controller channel",
-        if value.is_empty() { "Installed" } else { value },
-        selected,
+    let block = Block::bordered()
+        .title("Controller channel")
+        .border_style(Style::default().fg(Color::DarkGray));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    frame.render_widget(
+        Paragraph::new(if value.is_empty() { "Installed" } else { value })
+            .style(Style::default().fg(Color::DarkGray)),
+        inner,
     );
+    let _ = selected;
 }
 pub(super) fn viewport_start(current: usize, selected: usize, capacity: usize) -> usize {
     if selected < current {

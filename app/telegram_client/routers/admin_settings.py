@@ -13,6 +13,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 from ..backend import BackendClient, BackendError
 from ..screens import Screen, Section, Table, format_size
+from ..documentation import title as documentation_title
 from ..i18n import normalize_locale, tr
 from .callbacks import AdminSettingsCallback, RequestPolicyCallback, UpdatesCallback
 from .common import render
@@ -91,9 +92,24 @@ async def admin_settings_cb(query: CallbackQuery, bot: Bot,
         Section(tr(locale, 'settings.rich.maintenance'), rows=(tuple(rows[2]),
             (InlineKeyboardButton(text=tr(locale, 'recovery.title'), callback_data=RecoveryPage().pack()),),
             (InlineKeyboardButton(text=tr(locale, 'defaults.title'), callback_data='idefault:open'),))),
-        Section(tr(locale, 'settings.rich.danger'), collapsed=True, rows=(tuple(rows[3]),)))
+        Section(tr(locale, 'settings.rich.danger'), collapsed=True, rows=(tuple(rows[3]),)),
+        Section('', inline_rows=((InlineKeyboardButton(
+            text=documentation_title(locale),
+            callback_data='admin_documentation', style='link'),),)))
     await render(bot, query.message.chat.id, Screen(tr(locale, 'settings.admin.title'),
         sections=sections, embedded_buttons=True, navigation=True), rows[-1:], state, query.message.message_id)
+
+
+@router.callback_query(F.data == 'admin_documentation')
+async def documentation_cb(query: CallbackQuery, bot: Bot, state: FSMContext) -> None:
+    from ..documentation import section, title
+    await query.answer()
+    await state.set_state(None)
+    locale = await _locale(state)
+    await render(bot, query.message.chat.id, Screen(title(locale),
+        sections=(section(locale),), embedded_buttons=True, navigation=True),
+        [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data=AdminSettingsCallback().pack())]],
+        state, query.message.message_id)
 
 
 @router.callback_query(F.data == 'bot_title_settings')

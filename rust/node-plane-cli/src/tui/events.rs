@@ -96,6 +96,7 @@ impl App {
                             crate::controller::Command::Onboarding
                                 | crate::controller::Command::OnboardingDefaults
                                 | crate::controller::Command::OnboardingComplete
+                                | crate::controller::Command::OnboardingDismiss
                         );
                         self.controller.apply(command, value);
                         if guide && self.quick_start_completed() {

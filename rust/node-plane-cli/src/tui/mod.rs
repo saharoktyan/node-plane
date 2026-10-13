@@ -130,11 +130,40 @@ pub fn run(mut request: Request) -> Result<()> {
     let mut last_node_observation = std::time::Instant::now();
     let mut qr_was_visible = false;
     let mut qr_needs_redraw = false;
+    let mut previous_templates = None;
     let mut previous_accent = app.connections.accent.clone();
     let mut pending_input = None;
     let mut input_timing = None;
     loop {
         app.finish_profile_copy();
+        if let Some(answer) = app
+            .quick_start_dismiss
+            .as_ref()
+            .and_then(|receiver| receiver.try_recv().ok())
+        {
+            app.quick_start_dismiss = None;
+            if matches!(answer, Answer::Confirm(true)) {
+                if app.controller_ready() {
+                    app.controller_command(crate::controller::Command::OnboardingDismiss);
+                } else if let Some(key) = app.quick_start_identity() {
+                    app.connections.completed_quick_starts.push(key);
+                    if let Err(error) = app.connections.save(&app.state_dir) {
+                        app.error = error.to_string();
+                    }
+                    if matches!(app.screen, Screen::QuickStart) {
+                        app.screen = app.quick_start_return.take().unwrap_or(Screen::Idle);
+                    }
+                } else {
+                    app.connections.hide_quick_start = true;
+                    if let Err(error) = app.connections.save(&app.state_dir) {
+                        app.error = error.to_string();
+                    }
+                    if matches!(app.screen, Screen::QuickStart) {
+                        app.screen = app.quick_start_return.take().unwrap_or(Screen::Idle);
+                    }
+                }
+            }
+        }
         if app.restart_required {
             terminal.draw(|frame| app.hits = draw(frame, &app))?;
             match event::read()? {
@@ -449,6 +478,20 @@ pub fn run(mut request: Request) -> Result<()> {
             qr_was_visible = app.qr_visible;
             previous_accent = app.connections.accent.clone();
         }
+        let templates = app
+            .node_wizard
+            .as_ref()
+            .filter(|wizard| {
+                matches!(app.screen, Screen::NodeWizard)
+                    && wizard.step == crate::node_wizard::Step::Template
+            })
+            .map(|wizard| (wizard.selected, app.manual_viewport.get()));
+        if templates != previous_templates && (templates.is_some() || previous_templates.is_some())
+        {
+            // Regional-indicator pairs must be redrawn together after list movement.
+            terminal.clear()?;
+        }
+        previous_templates = templates;
         // Graphics persist outside the cell buffer. Sending the same image on
         // every idle tick clears and uploads it again, causing visible flicker.
         if !app.qr_visible || qr_needs_redraw {
@@ -997,6 +1040,27 @@ pub fn run(mut request: Request) -> Result<()> {
                             app.settings_profile = app.settings_selected - 1;
                         }
                     }
+                    Screen::SettingsPage(SettingsPage::Documentation) => match key.code {
+                        KeyCode::Esc => app.open_settings(),
+                        KeyCode::Down | KeyCode::Tab => {
+                            app.settings_selected =
+                                (app.settings_selected + 1).min(DOCUMENTS.len() + 1)
+                        }
+                        KeyCode::Up | KeyCode::BackTab => {
+                            app.settings_selected = app.settings_selected.saturating_sub(1).max(1)
+                        }
+                        KeyCode::Enter if app.settings_selected <= DOCUMENTS.len() => {
+                            app.activate(Control::Documentation(
+                                app.settings_selected.saturating_sub(1),
+                            ));
+                        }
+                        KeyCode::Enter => app.open_settings(),
+                        _ if quit => {
+                            app.exit = true;
+                            app.exit_confirm = false;
+                        }
+                        _ => {}
+                    },
                     Screen::SettingsPage(SettingsPage::Security | SettingsPage::About) => {
                         match key.code {
                             KeyCode::Esc | KeyCode::Enter => app.open_settings(),

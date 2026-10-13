@@ -109,14 +109,15 @@ pub(in crate::tui) fn draw_update(
 ) {
     use ratatui::widgets::{Cell, Row, Table};
     let sections = Layout::vertical([
-        Constraint::Length(4),
+        Constraint::Length(5),
         Constraint::Length(7),
         Constraint::Min(2),
     ])
     .split(area);
     frame.render_widget(
         Paragraph::new(format!(
-            "Operation: {}\n{} · {}\nController: {}/4 complete{}",
+            "{}\nOperation: {}\n{} · {}\nController: {}/4 complete{}",
+            snapshot.target,
             snapshot.id,
             snapshot.status,
             snapshot.phase,

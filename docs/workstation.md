@@ -55,7 +55,7 @@ The **Offer service and operation recovery** option retains its last selection a
 | Diagnostic | Check controller services/schema and all registered servers; inspect recovery options |
 | Settings | Local installation profiles, appearance, Workstation updates, connection/security and session information |
 
-On startup Quick Start appears beside the sidebar. In NPW it ends after granting profile access; create user devices and obtain ordinary configurations in the Telegram bot. If installation detection is unconfirmed, use **Check installation**.
+On startup Quick Start appears beside the sidebar. In NPW it ends after installing the node protocols; create user devices and obtain ordinary configurations in the Telegram bot. Select **Done** after setup or confirm **Dismiss** to hide the guide permanently. Removing nodes does not restore it, and F1 no longer opens it. If installation detection is unconfirmed, use **Check installation**.
 
 Automatic check, backup and alert preferences appear when the corresponding feature is enabled. Select an interval directly; backups also offer a retention count. **Node Plane Settings → Basic** contains installation defaults and general controller options.
 
@@ -71,7 +71,7 @@ Open **Node Plane Settings → Reset & removal**, choose whether to uninstall no
 
 ## Appearance and local files
 
-Workstation stores its connection preferences, SSH material, logs and themes in the OS local data directory under `node-plane` for dev and `node-plane-stable` for stable, or the directory supplied by `--state-dir`. Keep this directory private.
+Workstation stores its connection preferences, SSH material, logs and themes in the OS local data directory under `node-plane-dev` for dev and `node-plane` for stable, or the directory supplied by `--state-dir`. Keep this directory private.
 
 Open **Settings → Appearance** to choose a theme or custom accent. Built-in theme files are created in `themes/` without overwriting existing files. Add a JSON file there and restart Workstation to load a custom theme:
 
@@ -88,7 +88,7 @@ The optional `section_border` field sets decorative section borders separately f
 
 Dev NPW installs and manages dev controllers; stable NPW manages stable controllers. The form channel is fixed by the build. Management checks the installed controller version: changing the update preference alone does not unlock access. Installation detection and diagnostics without recovery remain available.
 
-Installers use separate `$HOME/.local/share/node-plane-workstation/dev` and `stable` directories, updater receipts and launch commands. Dev keeps its existing local data directory, `node-plane`; stable uses `node-plane-stable`. Each NPW only updates within its own channel.
+Installers use separate `$HOME/.local/share/node-plane-workstation/dev` and `stable` directories, updater receipts and launch commands. Dev uses the local data directory `node-plane-dev`; stable uses `node-plane`. Each NPW only updates within its own channel.
 
 To transition:
 
@@ -107,3 +107,5 @@ Workstation checks for updates at startup and offers an available version after 
 After a successful local update, select **Restart** to open the updated Workstation. Other actions remain unavailable until restart.
 
 For configurations, use **Copy URI** or **Save files** where offered. Telegram also provides QR delivery. See [Temporary configurations](temporary-configs.md) and [Troubleshooting](troubleshooting.md).
+
+Open **Settings → Documentation** to select a named guide with a short description; Enter or click opens its GitHub page in your browser. For a local node, entering `.` as its public address uses the controller address saved in the selected installation profile.

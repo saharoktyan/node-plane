@@ -144,6 +144,30 @@ pub(in crate::tui) fn draw_access_buttons(
     buttons: &[(&str, Control)],
     hits: &mut Vec<Hit>,
 ) {
+    if buttons.len() == 2
+        && let Some((index, (_, back))) = buttons
+            .iter()
+            .enumerate()
+            .find(|(_, (label, _))| *label == "Cancel")
+    {
+        let primary = buttons[1 - index];
+        let cells = Layout::horizontal([Constraint::Length(5), Constraint::Fill(1)])
+            .spacing(1)
+            .split(centered(area, area.width, 3));
+        for (rect, label, control) in [(cells[0], "←", *back), (cells[1], primary.0, primary.1)] {
+            draw_button(
+                frame,
+                rect,
+                label,
+                app.access_controls().get(app.access.selected) == Some(&control),
+            );
+            hits.push(Hit {
+                area: rect,
+                control,
+            });
+        }
+        return;
+    }
     let back = buttons.iter().find(|(label, _)| *label == "Back");
     let remaining: Vec<_> = buttons
         .iter()
@@ -230,7 +254,7 @@ pub(in crate::tui) fn draw_access_expiry(
             app,
             sections[2],
             &[
-                ("Apply", Control::AccessDurationApply),
+                ("Continue", Control::AccessDurationApply),
                 ("Cancel", Control::AccessExpiryBack),
             ],
             hits,
@@ -454,6 +478,18 @@ pub(in crate::tui) fn draw_access_devices(
 pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
     use crate::access::{Tab, label, text};
     let right = draw_navigation(frame, app, area, hits);
+    let right = if app
+        .access
+        .editor
+        .as_ref()
+        .is_some_and(|editor| editor.duration_input.is_some())
+    {
+        let popup = centered(right, 76, if app.error.is_empty() { 11 } else { 13 });
+        frame.render_widget(Clear, popup);
+        popup
+    } else {
+        right
+    };
     let block = section_block(" Access ");
     let inner = block.inner(right);
     frame.render_widget(block, right);

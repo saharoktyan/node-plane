@@ -277,6 +277,9 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
                 &mut hits,
             );
         }
+        Screen::SettingsPage(SettingsPage::Documentation) => {
+            draw_documentation(frame, app, rows[1], &mut hits);
+        }
         Screen::SettingsPage(SettingsPage::Session) => {
             draw_session_info(frame, app, rows[1], &mut hits)
         }
@@ -285,8 +288,17 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
             let sections = dialog(frame, right, " Workstation updates ");
             frame.render_widget(
                 Paragraph::new(format!(
-                    "Installed: {}\n{}\n\nUpdates affect this workstation only.",
+                    "Installed: {} · {}\n{}\n{}\n\nUpdates affect this workstation only.",
+                    crate::config::workstation_channel(),
                     env!("CARGO_PKG_VERSION"),
+                    app.self_release
+                        .as_ref()
+                        .map(|release| format!(
+                            "Available: {} · {}",
+                            crate::config::workstation_channel(),
+                            release.tag_name.trim_start_matches('v')
+                        ))
+                        .unwrap_or_default(),
                     app.self_status
                 ))
                 .wrap(Wrap { trim: false }),
@@ -452,6 +464,9 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
                 "Click: select   Tab: move   Arrows: actions / fields   Enter: continue   Esc: sidebar / exit"
             }
             Screen::SettingsPage(SettingsPage::Session) => "Enter / Esc: back   Ctrl+C: exit",
+            Screen::SettingsPage(SettingsPage::Documentation) => {
+                "Enter / click: open document in browser   Esc: settings"
+            }
             Screen::SettingsPage(SettingsPage::Appearance) => {
                 "Tab / arrows: select   Enter / click: apply   Custom color: #RRGGBB   Esc: settings"
             }
@@ -525,8 +540,11 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
                 None
             }
         });
-    if let Some(control) = back.filter(|_| {
-        app.controller.defaults_input.is_none() || !matches!(app.screen, Screen::Controller)
+    if let Some(control) = back.filter(|control| {
+        (app.controller.defaults_input.is_none() || !matches!(app.screen, Screen::Controller))
+            && !hits
+                .iter()
+                .any(|hit| hit.control == *control && hit.area.width == 5)
     }) {
         let mut selected = match app.screen {
             Screen::Controller => {
@@ -913,6 +931,10 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
             .iter()
             .copied()
             .map(Control::SettingsPage)
+            .collect(),
+        Screen::SettingsPage(SettingsPage::Documentation) => (0..DOCUMENTS.len())
+            .map(Control::Documentation)
+            .chain([Control::Settings])
             .collect(),
         Screen::SettingsPage(SettingsPage::Appearance) => (0..app.themes.len())
             .map(Control::Accent)

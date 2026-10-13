@@ -28,6 +28,15 @@ class NodeOperations:
                 UNIQUE(actor_id, command_key)
             )''')
 
+    def repair_removed_runtime_state(self):
+        """Correct legacy cleanup receipts without restarting or replaying work."""
+        with self.db.transaction() as conn:
+            conn.execute("""UPDATE backend_nodes SET applied_revision=0
+                WHERE enabled=0 AND applied_revision>0 AND EXISTS (
+                    SELECT 1 FROM backend_node_jobs j WHERE j.node_key=backend_nodes.key
+                    AND j.action='cleanup_runtime' AND j.status='succeeded'
+                    AND j.revision>=backend_nodes.applied_revision)""")
+
     @staticmethod
     def public(row):
         return {key: row[key] for key in ('id', 'node_key', 'action', 'revision', 'status')} | {
@@ -132,6 +141,9 @@ class NodeOperations:
                     json.loads(row['intent_json']), result['result'])
             conn.execute("UPDATE backend_node_jobs SET status = 'succeeded', result_json = ? WHERE id = ?",
                          (json.dumps(result['result']), row['id']))
+            if row['action'] == 'cleanup_runtime':
+                conn.execute('UPDATE backend_nodes SET applied_revision = 0, enabled = 0 WHERE key = ? AND desired_revision = ?',
+                             (row['node_key'], row['revision']))
             if row['action'] in INVALIDATE and row['action'] != 'cleanup_runtime':
                 conn.execute('UPDATE backend_nodes SET applied_revision = ?, enabled = 1 WHERE key = ? AND desired_revision = ?',
                              (row['revision'], row['node_key'], row['revision']))

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 1.0.0-alpha.6 - 2026-10-13
+
+- Fix node overview during active bootstrap and settings application after protocol cleanup; recover old cleanup receipts without replaying operations and inspect the retained agent separately.
+- Persist Workstation Quick Start completion across administrator selection, remove its access checkpoint and add confirmed permanent dismissal to both clients.
+- Add named documentation links to Telegram settings and a Workstation Documentation list with descriptions and browser opening.
+- Edit Telegram node settings through table row links, keep AWG manual parameters and entropy actions separate, and return live port operations to their Ports screen with verified runtime ownership results.
+- Compact Workstation text dialogs, use a small Back arrow before Continue/Confirm, dim the fixed controller channel, group matching-region templates and protocols in wide layouts, and redraw flag pairs after template movement.
+- Use `node-plane` for stable Workstation data and `node-plane-dev` for dev; resolve local-node `.` addresses from installation profiles and show update versions with their dev/stable channel.
+
 ## 1.0.0-alpha.5 - 2026-10-13
 
 - Protect administrator profiles from deletion, freezing, blocking and access revocation; apply a permanent all-server rule after protocol installation and retain the previous member policy on demotion.
