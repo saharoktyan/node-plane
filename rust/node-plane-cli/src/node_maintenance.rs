@@ -157,7 +157,7 @@ mod tests {
     use super::*;
     use serde_json::json;
     #[test]
-    fn only_active_worker_removal_is_polled_and_terminal_modes_remain_distinct() {
+    fn pending_and_blocked_removal_are_polled_and_terminal_modes_remain_distinct() {
         let mut state = Browser::new("lv1".into(), json!({"node_key":"lv1","status":"draining","removal_status":"running","cleanup_phase":"uninstall_scheduled"}), None).unwrap();
         assert!(state.active());
         assert!(
@@ -170,7 +170,7 @@ mod tests {
         assert!(!state.active());
         state.confirmation = None;
         state.snapshot["removal_status"] = json!("blocked");
-        assert!(!state.active());
+        assert!(state.active());
         assert!(state.blocked());
         for status in ["removed", "removed_registry_only", "removed_unprovisioned"] {
             state.snapshot = json!({"node_key":"lv1","status":status});
