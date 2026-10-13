@@ -21,6 +21,43 @@ class BackendAccessRequestTests(unittest.TestCase):
             headers={**self.member_headers(101), 'Idempotency-Key': key or str(uuid4())},
             json={'decision': decision})
 
+    def test_decision_edits_all_registered_notices_and_refreshes_requester(self):
+        account = self.register(102).json()
+        request_id = self.request_access(102).json()['id']
+        root = '/api/v1/integrations/telegram/access-decisions'
+        for chat_id, message_id in ((101, 8), (103, 9)):
+            response = self.client.post(f'{root}/{request_id}/messages', headers=self.headers,
+                json={'chat_id': chat_id, 'message_id': message_id, 'locale': 'en'})
+            self.assertEqual(response.status_code, 200, response.text)
+        self.assertIsNone(self.client.post(root + '/claim', headers=self.headers).json()['delivery'])
+        self.assertEqual(self.decision(request_id, 'approve').status_code, 200)
+        seen = []
+        for _ in range(2):
+            item = self.client.post(root + '/claim', headers=self.headers).json()['delivery']
+            self.assertEqual(item['decision'], 'approved')
+            self.assertEqual(item['surface'], 'telegram')
+            self.assertEqual(item['decider']['telegram_user_id'], 101)
+            seen.append((item['chat_id'], item['message_id']))
+            response = self.client.post(f"{root}/{request_id}/ack?chat_id={item['chat_id']}&message_id={item['message_id']}",
+                headers=self.headers, json={})
+            self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(seen, [(101, 8), (103, 9)])
+        self.assertIsNone(self.client.post(root + '/claim', headers=self.headers).json()['delivery'])
+        refresh = self.client.post('/api/v1/integrations/telegram/menu-refresh/claim', headers=self.headers).json()['delivery']
+        self.assertEqual(refresh['account']['id'], account['id'])
+        self.assertEqual(refresh['account']['status'], 'approved')
+
+    def test_notice_recipients_follow_roles_instead_of_bootstrap_env_ids(self):
+        account = self.register(102, username='new_admin').json()
+        details = self.client.get('/api/v1/accounts/' + account['id'], headers=self.member_headers(101)).json()
+        root = '/api/v1/integrations/telegram/access-decisions/recipients'
+        self.assertEqual(self.client.get(root, headers=self.headers).json()['items'], [101])
+        response = self.client.patch('/api/v1/accounts/' + account['id'],
+            headers={**self.member_headers(101), 'If-Match': f'"{details["revision"]}"', 'Idempotency-Key': str(uuid4())},
+            json={'role': 'admin', 'status': 'approved'})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.client.get(root, headers=self.headers).json()['items'], [101, 102])
+
     def test_request_approval_is_atomic_and_does_not_grant_vpn_access(self):
         account = self.register(102).json()
         key = str(uuid4())

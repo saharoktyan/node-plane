@@ -86,7 +86,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
                           draw.call_args.args[2].lines)
             self.assertIn('Bootstrap', user.tr('en', 'home.admin_quick_start'))
 
-    async def test_get_config_back_uses_home_presentation_without_backend_reads(self):
+    async def test_get_config_back_refreshes_title_but_reuses_account_presentation(self):
         backend = SimpleNamespace(notifications=AsyncMock(return_value={'total': 0, 'items': []}),
             me=AsyncMock(return_value={'role': 'member', 'status': 'approved'}),
             bot_title=AsyncMock(return_value={'title': 'Node Plane'}),
@@ -95,11 +95,12 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             await user.show_home(123, 123, self.bot, backend, self.state, 77)
             backend.me.reset_mock()
             backend.bot_title.reset_mock()
+            backend.bot_title.return_value = {'title': 'Updated name'}
             self.query.data = user.button(123, 'Back', 'home').callback_data
             await user.user_action_cb(self.query, self.bot, backend, self.state)
-            self.assertEqual(draw.call_args.args[2].title, 'Node Plane')
+            self.assertEqual(draw.call_args.args[2].title, 'Updated name')
             backend.me.assert_not_awaited()
-            backend.bot_title.assert_not_awaited()
+            backend.bot_title.assert_awaited_once_with(123)
             # Menu presentation never supplies profile/access data.
             self.query.data = user.button(123, 'Get config', 'profiles').callback_data
             await user.user_action_cb(self.query, self.bot, backend, self.state)
@@ -994,7 +995,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         sound = sections[1].rows[0][0]
         self.assertEqual(sound.text, 'Enable')
         self.assertEqual(user.actions[sound.callback_data[2:]].args, ('false',))
-        self.assertEqual(len(sections), 3)
+        self.assertEqual(len(sections), 2)
 
     async def test_language_and_sound_choices_highlight_only_the_saved_value(self):
         for locale in ('ru', 'en'):
@@ -1345,6 +1346,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
 
     async def test_request_notification_has_direct_approve_and_reject_actions(self):
         backend = SimpleNamespace(
+            request=AsyncMock(return_value={"items": [123]}),
             me=AsyncMock(return_value={
                 'role': 'admin', 'status': 'approved', 'locale': 'en'}),
             access_request_policy=AsyncMock(return_value={'notify_requests': True}),
@@ -1357,14 +1359,15 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         markup = send_notice.call_args.args[3]
         callbacks = [button.callback_data for row in markup.inline_keyboard
                      for button in row]
-        self.assertEqual(len(callbacks), 3)
+        self.assertEqual(len(callbacks), 4)
+        self.assertIn('notification_close', callbacks)
         self.assertTrue(any(value.startswith('notification_decide:') and 'approve' in value
                             for value in callbacks))
         self.assertTrue(any(value.startswith('notification_decide:') and 'reject' in value
                             for value in callbacks))
 
     async def test_request_notification_without_username_shows_telegram_id(self):
-        backend = SimpleNamespace(me=AsyncMock(return_value={'role':'admin','status':'approved','locale':'en'}),
+        backend = SimpleNamespace(request=AsyncMock(return_value={"items": [123]}), me=AsyncMock(return_value={'role':'admin','status':'approved','locale':'en'}),
             access_request_policy=AsyncMock(return_value={'notify_requests':True}),
             pending_access_request=AsyncMock(return_value={'id':'r','account_id':'a','first_name':'Alice','telegram_user_id':456}))
         with patch.dict('os.environ', {'ADMIN_IDS':'123'}), patch.object(admin_requests,'send_notice',new_callable=AsyncMock) as send:
@@ -1373,6 +1376,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
 
     async def test_request_notification_respects_admin_preference(self):
         backend = SimpleNamespace(
+            request=AsyncMock(return_value={"items": [123]}),
             me=AsyncMock(return_value={
                 'role': 'admin', 'status': 'approved', 'locale': 'en'}),
             access_request_policy=AsyncMock(return_value={'notify_requests': False}))

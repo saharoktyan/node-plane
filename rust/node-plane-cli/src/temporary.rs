@@ -56,6 +56,32 @@ pub struct Browser {
     pub notice: String,
 }
 impl Browser {
+    pub fn wizard(&self) -> bool {
+        matches!(
+            self.view,
+            View::Server | View::Protocol | View::Transport | View::Duration | View::Confirm
+        )
+    }
+    pub fn first_step(&self) -> bool {
+        if self.view == View::Server {
+            return true;
+        }
+        if self.filter.is_none() {
+            return false;
+        }
+        match self.view {
+            View::Protocol => true,
+            View::Transport => self
+                .node
+                .as_ref()
+                .is_some_and(|node| node.protocols.len() == 1),
+            View::Duration => self.node.as_ref().is_some_and(|node| {
+                node.protocols.len() == 1
+                    && (self.protocol == "awg" || node.xray_transports.len() == 1)
+            }),
+            _ => false,
+        }
+    }
     pub fn poll(&self) -> Option<Command> {
         let card = self.card.as_ref()?;
         if self.view == View::Card

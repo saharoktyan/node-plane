@@ -174,7 +174,7 @@ async def _render(bot: Bot, chat_id: int, screen: Screen, rows: list[list[Inline
     rich_markup = InlineKeyboardMarkup(inline_keyboard=[]) if screen.embedded_buttons else markup
     
     data = await state.get_data()
-    parents = screen_parents(screen, rows, normalize_locale(data.get('locale')), data)
+    parents = () if getattr(screen, 'standalone', False) else screen_parents(screen, rows, normalize_locale(data.get('locale')), data)
     await state.update_data(home_panel_active=False,
         admin_panel_active=any(p.callback == 'admin_menu' for p in parents))
     navigation_nonce = uuid4().hex[:12]
@@ -271,16 +271,16 @@ async def _render(bot: Bot, chat_id: int, screen: Screen, rows: list[list[Inline
         await state.update_data(notification_closed=True)
     return rich
 
-async def send_notice(bot: Bot, chat_id: int, screen: Screen, markup: InlineKeyboardMarkup | None = None) -> None:
+async def send_notice(bot: Bot, chat_id: int, screen: Screen, markup: InlineKeyboardMarkup | None = None):
     rows = markup.inline_keyboard if markup else []
     rich_markup = InlineKeyboardMarkup(inline_keyboard=[]) if screen.embedded_buttons else markup
     try:
-        await bot.send_rich_message(chat_id=chat_id, rich_message=screen.rich(rows), reply_markup=rich_markup, request_timeout=10)
+        return await bot.send_rich_message(chat_id=chat_id, rich_message=screen.rich(rows), reply_markup=rich_markup, request_timeout=10)
     except (TelegramBadRequest, TelegramNotFound, TelegramNetworkError, TelegramRetryAfter) as exc:
         log_rich_failure('notice', exc)
         fallback_rows = screen.fallback_rows(rows)
         fallback_markup = InlineKeyboardMarkup(inline_keyboard=fallback_rows) if fallback_rows else None
-        await bot.send_message(chat_id=chat_id, text=screen.plain(), reply_markup=fallback_markup, request_timeout=15)
+        return await bot.send_message(chat_id=chat_id, text=screen.plain(), reply_markup=fallback_markup, request_timeout=15)
 
 class BackendMiddleware(BaseMiddleware):
     def __init__(self, backend: BackendClient):

@@ -374,9 +374,16 @@ async def notification_close_cb(query: CallbackQuery, bot: Bot, state: FSMContex
 
 
 async def notify_admins(bot: Bot, backend: BackendClient, request_id: str):
-    for raw_id in os.environ.get('ADMIN_IDS', '').split(','):
+    try:
+        admin_ids = (await backend.request('GET', '/api/v1/integrations/telegram/access-decisions/recipients'))['items']
+    except BackendError as error:
+        if error.status != 404:
+            logging.getLogger(__name__).warning('Access request notification recipients unavailable')
+            return
+        admin_ids = os.environ.get('ADMIN_IDS', '').split(',')
+    for raw_id in admin_ids:
         try:
-            admin_id = int(raw_id.strip())
+            admin_id = int(str(raw_id).strip())
             admin = await backend.me(admin_id)
             if admin['role'] != 'admin' or admin['status'] != 'approved':
                 continue
@@ -400,8 +407,12 @@ async def notify_admins(bot: Bot, backend: BackendClient, request_id: str):
                         decision='reject').pack(), style='danger')], [
                 InlineKeyboardButton(text=tr(locale, 'requests.review_button'),
                     callback_data=NotificationReviewCallback(
-                        request_id=request_id).pack())]])
-            await send_notice(bot, admin_id, notice, markup)
+                        request_id=request_id).pack()),
+                InlineKeyboardButton(text=tr(locale, 'setup.close'), callback_data='notification_close')]])
+            sent = await send_notice(bot, admin_id, notice, markup)
+            if type(getattr(sent, 'message_id', None)) is int:
+                await backend.request('POST', f'/api/v1/integrations/telegram/access-decisions/{request_id}/messages',
+                    body={'chat_id': admin_id, 'message_id': sent.message_id, 'locale': locale})
         except (ValueError, BackendError, TelegramAPIError):
             continue
 

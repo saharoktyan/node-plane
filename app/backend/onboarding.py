@@ -30,6 +30,12 @@ def progress(db, actor):
     steps = [{'key': key, 'complete': bool(complete)} for key, complete in (
         ('defaults', configured), ('node', node is not None), ('protocols', applied),
         ('config', issued))]
+    for client in ('telegram', 'workstation'):
+        required = [step for step in steps if client == 'telegram' or step['key'] != 'config']
+        if all(step['complete'] for step in required):
+            with db.transaction() as conn:
+                conn.execute('INSERT INTO backend_system_settings(key,value) VALUES (?,?) ON CONFLICT(key) DO NOTHING',
+                    ('onboarding.completed.' + client + '.' + actor.account.id, '1'))
     return {'completed': completed(db, actor.account.id, 'telegram'),
             'workstation_completed': completed(db, actor.account.id, 'workstation'), 'steps': steps, 'next_step': next((s['key'] for s in steps if not s['complete']), None),
             'node_key': node['key'] if node else None, 'profile_id': profile['id'] if profile else None}

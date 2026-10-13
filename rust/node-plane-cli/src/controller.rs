@@ -26,6 +26,9 @@ pub enum Command {
     AlertDismiss(Uuid),
     BotTitle,
     BotTitleSave(String),
+    TelegramSettings,
+    TelegramToken(zeroize::Zeroizing<String>),
+    TelegramAdmin(bool, u64, Uuid),
     SshKey,
     PolicySave(&'static str, Value),
     DefaultsSave(Value, u64),
@@ -81,7 +84,11 @@ impl Command {
                 Some(json!({})),
                 None,
             ),
-            Self::Probe | Self::Presence => {
+            Self::Probe
+            | Self::Presence
+            | Self::TelegramSettings
+            | Self::TelegramToken(_)
+            | Self::TelegramAdmin(..) => {
                 anyhow::bail!("Installation detection uses the SSH connection")
             }
             Self::UpdateResult(id) => (
@@ -310,6 +317,7 @@ pub struct Browser {
     pub alerts_page: usize,
     pub alerts_unread: u64,
     pub bot_title: Option<Value>,
+    pub telegram_settings: Option<Value>,
     pub ssh_key: Option<Value>,
     pub notice: String,
     pub defaults_advanced: bool,
@@ -370,6 +378,10 @@ impl Browser {
                 | Command::AnnouncementStatus(_)
         );
         match command {
+            Command::TelegramSettings | Command::TelegramToken(_) | Command::TelegramAdmin(..) => {
+                self.telegram_settings = Some(value);
+                self.defaults_input = None;
+            }
             Command::BotTitle | Command::BotTitleSave(_) => {
                 self.bot_title = Some(value);
                 self.defaults_input = None;
@@ -547,8 +559,8 @@ impl Browser {
             .ok_or_else(|| anyhow::anyhow!("Missing removal manifest"))?;
         verification_script(&overview["deployment"])?;
         let data = json!({"version":1,"host":installation.host,"port":installation.port,"user":installation.user,"overview":overview,"job":self.job});
-        std::fs::create_dir_all(state)?;
-        let mut temporary = tempfile::NamedTempFile::new_in(state)?;
+        let state = crate::state_layout::directory(state, "operations")?;
+        let mut temporary = tempfile::NamedTempFile::new_in(&state)?;
         temporary.write_all(&serde_json::to_vec(&data)?)?;
         temporary.as_file().sync_all()?;
         temporary.persist(state.join(format!("controller-removal-{}.json", installation.id)))?;
@@ -559,7 +571,11 @@ impl Browser {
         state: &std::path::Path,
         installation: &crate::connections::Installation,
     ) -> Result<()> {
-        let path = state.join(format!("controller-removal-{}.json", installation.id));
+        if !state.try_exists()? {
+            return Ok(());
+        }
+        let path = crate::state_layout::directory(state, "operations")?
+            .join(format!("controller-removal-{}.json", installation.id));
         if !path.try_exists()? {
             return Ok(());
         }
@@ -581,7 +597,11 @@ impl Browser {
         Ok(())
     }
     pub fn forget_verification(state: &std::path::Path, id: Uuid) -> Result<()> {
-        let path = state.join(format!("controller-removal-{id}.json"));
+        if !state.try_exists()? {
+            return Ok(());
+        }
+        let path = crate::state_layout::directory(state, "operations")?
+            .join(format!("controller-removal-{id}.json"));
         match std::fs::remove_file(path) {
             Ok(()) => Ok(()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -997,6 +1017,7 @@ mod tests {
         assert!(
             !state
                 .path()
+                .join("operations")
                 .join(format!("controller-removal-{}.json", installation.id))
                 .exists()
         );

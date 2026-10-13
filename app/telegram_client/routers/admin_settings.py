@@ -95,9 +95,19 @@ async def admin_settings_cb(query: CallbackQuery, bot: Bot,
         Section(tr(locale, 'settings.rich.danger'), collapsed=True, rows=(tuple(rows[3]),)),
         Section('', inline_rows=((InlineKeyboardButton(
             text=documentation_title(locale),
-            callback_data='admin_documentation', style='link'),),)))
+            callback_data='admin_documentation', style='link'), ' · ', InlineKeyboardButton(text=tr(locale, 'about.title'), callback_data='admin_about', style='link')),)))
     await render(bot, query.message.chat.id, Screen(tr(locale, 'settings.admin.title'),
         sections=sections, embedded_buttons=True, navigation=True), rows[-1:], state, query.message.message_id)
+
+
+@router.callback_query(F.data == 'admin_about')
+async def about_cb(query: CallbackQuery, bot: Bot, state: FSMContext) -> None:
+    from config import APP_VERSION
+    await query.answer()
+    locale = await _locale(state)
+    await render(bot, query.message.chat.id, Screen(tr(locale, 'about.title'), (f'Node Plane · {APP_VERSION}',),
+        sections=(Section('', inline_rows=((InlineKeyboardButton(text=tr(locale, 'about.repository'), url='https://github.com/saharoktyan/node-plane', style='link'),),)),),
+        embedded_buttons=True, navigation=True), [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data=AdminSettingsCallback().pack())]], state, query.message.message_id)
 
 
 @router.callback_query(F.data == 'admin_documentation')

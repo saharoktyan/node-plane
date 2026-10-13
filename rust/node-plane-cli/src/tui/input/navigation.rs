@@ -112,25 +112,26 @@ impl App {
         {
             let width = self.nodes_editor_width.get();
             let controls = node_editor_controls(editor);
-            let items = node_editor_items(editor);
-            let columns = if width >= 64 { 2 } else { 1 };
-            let mut areas: Vec<_> = Layout::horizontal([Constraint::Fill(1); 3])
-                .spacing(1)
-                .split(Rect::new(0, 0, width, 3))
-                .iter()
-                .copied()
-                .collect();
-            for row in 0..items.len().div_ceil(columns) {
-                let count = (items.len() - row * columns).min(columns);
+            let mut areas: Vec<_> = Layout::horizontal(vec![
+                Constraint::Fill(1);
+                crate::node_editor::Tab::ALL.len()
+            ])
+            .spacing(1)
+            .split(Rect::new(0, 0, width, 3))
+            .iter()
+            .copied()
+            .collect();
+            let mut y = 3;
+            for (controls, height) in node_editor_rows(editor, width) {
                 areas.extend(
-                    Layout::horizontal(vec![Constraint::Fill(1); count])
+                    Layout::horizontal(vec![Constraint::Fill(1); controls.len()])
                         .spacing(1)
-                        .split(Rect::new(0, 3 + row as u16 * 3, width, 3))
+                        .split(Rect::new(0, y, width, height))
                         .iter()
                         .copied(),
                 );
+                y += height;
             }
-            let y = 3 + items.len().div_ceil(columns) as u16 * 3;
             if editor.dirty() {
                 areas.extend(
                     Layout::horizontal([Constraint::Fill(1); 2])

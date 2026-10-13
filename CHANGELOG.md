@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 1.0.0-alpha.7 - 2026-10-13
+
+- Complete Quick Start automatically and permanently, restore the empty Workstation panel after completion or dismissal, and preserve documentation list scroll positions.
+- Organize Workstation operation journals and logs into private subdirectories, migrating existing files without losing resumable operations.
+- Restore full Back and Cancel buttons inside wizards and dialogs, compact confirmations, support multiline notes and announcements, and refine templates, pagination and toggle colors.
+- Fix profile viewing and creation, preserve wizard drafts, and retain permanent administrator access when editing profiles.
+- Add privileged Workstation management of the Telegram token and administrator list with validation, confirmations and session checks.
+- Deliver access decisions to administrator notices with the deciding administrator, Workstation attribution and Close buttons; refresh requester access messages and add Close/Dismiss notification actions.
+- Refresh bot names in open menus, add administrator About links, show profile traffic counters, and correct protocol editing, repair navigation and extended node diagnostics.
+- Update English and Russian documentation and add regression coverage for the coordinated backend, Telegram and Workstation changes.
+
 ## 1.0.0-alpha.6 - 2026-10-13
 
 - Fix node overview during active bootstrap and settings application after protocol cleanup; recover old cleanup receipts without replaying operations and inspect the retained agent separately.

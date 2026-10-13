@@ -101,6 +101,13 @@ impl App {
             return;
         }
         match key.code {
+            KeyCode::Enter if controls[current] == Control::ControllerAnnouncementInput => {
+                if let Some(value) = &mut self.controller.announcement_draft
+                    && value.chars().count() < 3000
+                {
+                    value.push('\n');
+                }
+            }
             KeyCode::Enter => {
                 self.activate(controls[current]);
             }
@@ -256,10 +263,7 @@ impl App {
                 if let Some(editor) = &mut self.access.editor
                     && editor.expiry_view
                 {
-                    if editor.duration_input.take().is_none() {
-                        editor.expiry_view = false;
-                    }
-                    self.access.selected = 0;
+                    self.activate(Control::AccessExpiryBack);
                     return;
                 }
                 if let Some(editor) = &mut self.access.editor
@@ -270,7 +274,18 @@ impl App {
                     return;
                 }
                 if self.access.editor.is_some() {
-                    self.activate(Control::AccessBack);
+                    self.activate(
+                        if self
+                            .access
+                            .editor
+                            .as_ref()
+                            .is_some_and(|editor| editor.creation_step.is_some())
+                        {
+                            Control::AccessWizardBack
+                        } else {
+                            Control::AccessBack
+                        },
+                    );
                     return;
                 }
                 if self.access.profile_action.take().is_some()
@@ -468,6 +483,17 @@ impl App {
             && let Some(editor) = &mut self.nodes.editor
         {
             match key.code {
+                KeyCode::Enter
+                    if matches!(editor.fields[*index].key, "notes" | "awg_parameters") =>
+                {
+                    if editor.fields[*index].value.chars().count()
+                        < editor.fields[*index].input_limit()
+                    {
+                        editor.fields[*index].value.push('\n');
+                        editor.changed();
+                    }
+                    return;
+                }
                 KeyCode::Char(c)
                     if !key.modifiers.contains(KeyModifiers::CONTROL) && !c.is_control() =>
                 {

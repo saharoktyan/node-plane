@@ -157,6 +157,7 @@ impl Command {
     }
 }
 pub struct Editor {
+    pub creation_step: Option<u8>,
     pub source: Option<Value>,
     pub owner: Option<String>,
     pub fields: [String; 2],
@@ -172,6 +173,7 @@ pub struct Editor {
     pub expiry_view: bool,
     pub expiry_page: usize,
     pub duration_input: Option<String>,
+    pub duration_draft: String,
 }
 impl Editor {
     pub fn new(source: Option<Value>, owner: Option<String>) -> Self {
@@ -185,6 +187,7 @@ impl Editor {
             })
             .unwrap_or_default();
         Self {
+            creation_step: source.is_none().then_some(0),
             source,
             owner,
             fields,
@@ -200,6 +203,7 @@ impl Editor {
             expiry_view: false,
             expiry_page: 0,
             duration_input: None,
+            duration_draft: String::new(),
         }
     }
     pub fn dirty(&self) -> bool {
@@ -387,7 +391,7 @@ impl Editor {
     pub fn save(&self) -> anyhow::Result<Command> {
         anyhow::ensure!(!self.fields[0].trim().is_empty(), "Enter a profile name");
         let mut body = json!({"display_name": self.fields[0].trim(),
-            "expires_at": if self.fields[1].trim().is_empty() { Value::Null } else { json!(self.fields[1].trim()) }});
+            "expires_at": if self.permanent_access || self.fields[1].trim().is_empty() { Value::Null } else { json!(self.fields[1].trim()) }});
         if !self.permanent_access {
             body["access_policy"] = self.policy.clone();
         }
@@ -544,6 +548,7 @@ pub struct Browser {
     pub notice: String,
     pub owner_filter: Option<String>,
     pub creating_profile: bool,
+    pub profile_draft: Option<Editor>,
     pub editor: Option<Editor>,
     pub devices: Option<Devices>,
     pub account_action: Option<(Value, Uuid)>,
@@ -625,7 +630,15 @@ impl Browser {
                         editor.policy[key] = value["policy"][key].clone();
                     }
                 }
-                editor.permanent_access = value["policy"]["permanent"] == true;
+                editor.permanent_access = value["policy"]["permanent"] == true
+                    || value["owner_account"]["role"] == "admin";
+                if let Some(draft) = self.profile_draft.take() {
+                    editor.fields = draft.fields;
+                    editor.policy = draft.policy;
+                }
+                if editor.permanent_access {
+                    editor.fields[1].clear();
+                }
                 editor.baseline_policy = editor.policy.clone();
                 self.editor = Some(editor);
             }
@@ -692,15 +705,10 @@ impl Browser {
                 self.tab = tab;
                 self.card = Some(value);
             }
-            Command::Decision { approve, .. } => {
+            Command::Decision { .. } => {
                 self.card = Some(value);
                 self.decision = None;
-                self.notice = if approve {
-                    "Access approved."
-                } else {
-                    "Request rejected."
-                }
-                .into();
+                self.notice.clear();
             }
         }
         if keep_focus {
@@ -720,6 +728,13 @@ pub fn text(value: &Value) -> String {
 pub fn label(tab: Tab, item: &Value) -> String {
     if item["_account_only"] == true {
         return format!("{} · No VPN access", text(&item["display_name"]));
+    }
+    if tab == Tab::Requests && item.get("_account").is_some() {
+        return format!(
+            "{} · {}",
+            label(Tab::Accounts, &item["_account"]),
+            text(&item["status"])
+        );
     }
     match tab {
         Tab::Profiles => format!(

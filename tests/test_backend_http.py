@@ -65,6 +65,8 @@ class BackendHTTPTests(unittest.TestCase):
             profile = ProfileRepository(self.db).owned(account_id, after='', limit=10)[0]
             response = self.client.get('/api/v1/profiles/' + profile['id'], headers=headers)
             self.assertEqual(response.status_code, 200, response.text)
+            operation = self.client.get('/api/v1/profiles/' + profile['id'] + '/operation', headers=headers)
+            self.assertEqual(operation.status_code, 200, operation.text)
 
     def test_api_routes_are_unique_and_manual_release_cleanup_is_removed(self):
         pairs = [(method, route.path) for route in self.client.app.routes

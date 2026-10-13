@@ -71,12 +71,16 @@ impl App {
                         "https://github.com/saharoktyan/node-plane/blob/{}/docs/{name}.md",
                         crate::config::default_branch()
                     );
-                    let program = if cfg!(target_os = "macos") {
-                        "open"
+                    let mut command = if cfg!(target_os = "windows") {
+                        let mut command = std::process::Command::new("cmd");
+                        command.args(["/C", "start", ""]);
+                        command
+                    } else if cfg!(target_os = "macos") {
+                        std::process::Command::new("open")
                     } else {
-                        "xdg-open"
+                        std::process::Command::new("xdg-open")
                     };
-                    if let Err(error) = std::process::Command::new(program)
+                    if let Err(error) = command
                         .arg(url)
                         .stdin(std::process::Stdio::null())
                         .stdout(std::process::Stdio::null())

@@ -34,9 +34,17 @@ impl App {
                 && self.nodes.editor.as_ref().is_some_and(|e| e.dirty()))
     }
     pub(in crate::tui) fn activate(&mut self, control: Control) -> Option<KeyEvent> {
+        let previous_key = self.navigation_key();
+        let previous_viewport = self.manual_viewport.get();
         self.remember_navigation_focus(Some(control));
         let result = self.activate_inner(control);
         self.restore_navigation_context();
+        if previous_key.is_some()
+            && previous_key == self.navigation_key()
+            && !is_page_control(control)
+        {
+            self.manual_viewport.set(previous_viewport);
+        }
         result
     }
 
@@ -58,6 +66,7 @@ impl App {
                 | Control::Accent(_)
                 | Control::AccentInput
                 | Control::SaveAccent
+                | Control::Documentation(_)
         ) {
             self.manual_viewport.set(None);
         }
@@ -178,10 +187,14 @@ impl App {
             }
             Control::QuickStartRefresh => {
                 let (reply, answer) = mpsc::channel();
-                self.prompt = Some((Prompt::ConfirmAction {
-                    title: "Dismiss Quick Start?".into(),
-                    description: "This guide will no longer appear for this installation, including via F1.".into(),
-                }, reply));
+                self.prompt = Some((
+                    Prompt::ConfirmAction {
+                        title: "Dismiss Quick Start?".into(),
+                        description: "This guide will no longer appear for this installation."
+                            .into(),
+                    },
+                    reply,
+                ));
                 self.trust = false;
                 self.quick_start_dismiss = Some(answer);
                 return None;
@@ -248,6 +261,8 @@ impl App {
             | Control::AccessGrantAll(..)
             | Control::AccessEdit
             | Control::AccessNew
+            | Control::AccessWizardNext
+            | Control::AccessWizardBack
             | Control::AccessField(..)
             | Control::AccessSave
             | Control::AccessDeviceItem(..)
@@ -296,7 +311,6 @@ impl App {
             | Control::ControllerAnnouncement
             | Control::ControllerAnnouncementCompose
             | Control::ControllerAnnouncementPreview
-            | Control::ControllerAnnouncementEdit
             | Control::ControllerAnnouncementSend
             | Control::ControllerAnnouncementInput
             | Control::ControllerAnnouncementRefresh
@@ -311,6 +325,10 @@ impl App {
             | Control::ControllerSshKey
             | Control::ControllerGateMessage
             | Control::ControllerBotTitleEdit
+            | Control::ControllerTelegram
+            | Control::ControllerTelegramToken
+            | Control::ControllerTelegramAdminAdd
+            | Control::ControllerTelegramAdminRemove(_)
             | Control::ControllerSshKeyCopy
             | Control::ControllerPolicies
             | Control::ControllerPolicyToggle(..)

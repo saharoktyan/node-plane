@@ -130,7 +130,6 @@ pub fn run(mut request: Request) -> Result<()> {
     let mut last_node_observation = std::time::Instant::now();
     let mut qr_was_visible = false;
     let mut qr_needs_redraw = false;
-    let mut previous_templates = None;
     let mut previous_accent = app.connections.accent.clone();
     let mut pending_input = None;
     let mut input_timing = None;
@@ -478,20 +477,6 @@ pub fn run(mut request: Request) -> Result<()> {
             qr_was_visible = app.qr_visible;
             previous_accent = app.connections.accent.clone();
         }
-        let templates = app
-            .node_wizard
-            .as_ref()
-            .filter(|wizard| {
-                matches!(app.screen, Screen::NodeWizard)
-                    && wizard.step == crate::node_wizard::Step::Template
-            })
-            .map(|wizard| (wizard.selected, app.manual_viewport.get()));
-        if templates != previous_templates && (templates.is_some() || previous_templates.is_some())
-        {
-            // Regional-indicator pairs must be redrawn together after list movement.
-            terminal.clear()?;
-        }
-        previous_templates = templates;
         // Graphics persist outside the cell buffer. Sending the same image on
         // every idle tick clears and uploads it again, causing visible flicker.
         if !app.qr_visible || qr_needs_redraw {
@@ -650,6 +635,16 @@ pub fn run(mut request: Request) -> Result<()> {
                         app.controller
                             .phrase
                             .extend(text.chars().filter(|c| !c.is_control()).take(remaining));
+                    } else if app.controller_controls().get(app.controller.selected)
+                        == Some(&Control::ControllerAnnouncementInput)
+                        && let Some(value) = &mut app.controller.announcement_draft
+                    {
+                        let remaining = 3000usize.saturating_sub(value.chars().count());
+                        value.extend(
+                            text.chars()
+                                .filter(|c| !c.is_control() || *c == '\n')
+                                .take(remaining),
+                        );
                     } else if app.controller_controls().get(app.controller.selected)
                         == Some(&Control::ControllerDefaultsInput)
                         && let Some((_, value)) = &mut app.controller.defaults_input

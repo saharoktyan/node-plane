@@ -3010,3 +3010,19 @@ CATALOG['en'].update({
     'node_tools.port.managed': 'used by this node’s VPN protocol',
     'node_tools.port.busy': 'port is occupied by another process',
 })
+
+CATALOG['ru'].update({
+    'requests.decision.approved': 'Доступ одобрил {actor}',
+    'requests.decision.rejected': 'Заявку отклонил {actor}',
+    'requests.via_workstation': ' через Workstation',
+})
+CATALOG['en'].update({
+    'requests.decision.approved': 'Access was approved by {actor}',
+    'requests.decision.rejected': 'Access was rejected by {actor}',
+    'requests.via_workstation': ' via Workstation',
+})
+
+CATALOG['ru'].update({'about.title':'О проекте','about.repository':'Репозиторий на GitHub','devices.management':'Управление устройством', 'nodes.awg.mode.auto':'Автоматически', 'nodes.awg.mode.manual':'Вручную'})
+CATALOG['en'].update({'about.title':'About','about.repository':'GitHub repository','devices.management':'Device management', 'nodes.awg.mode.auto':'Automatic', 'nodes.awg.mode.manual':'Manual'})
+CATALOG['ru'].update({'account.traffic_total': 'Трафик · всего', 'account.traffic_awg': 'Трафик · AWG', 'account.traffic_vless': 'Трафик · VLESS'})
+CATALOG['en'].update({'account.traffic_total': 'Traffic · total', 'account.traffic_awg': 'Traffic · AWG', 'account.traffic_vless': 'Traffic · VLESS'})

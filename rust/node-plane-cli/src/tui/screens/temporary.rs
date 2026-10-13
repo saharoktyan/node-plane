@@ -8,6 +8,13 @@ pub(in crate::tui) fn draw_temporary(
 ) {
     use crate::temporary::View;
     let right = draw_navigation(frame, app, area, hits);
+    let right = if matches!(app.temporary.view, View::Confirm | View::Revoke) {
+        let popup = centered(right, 78, 12);
+        frame.render_widget(Clear, popup);
+        popup
+    } else {
+        right
+    };
     let block = section_block(" Temporary configurations ");
     let inner = block.inner(right);
     frame.render_widget(block, right);
@@ -166,7 +173,11 @@ pub(in crate::tui) fn draw_temporary(
                 }
                 match browser.view {
                     View::Revoke => {
+                        lines.clear();
                         lines.push(Line::from("Revoke access to this configuration?"));
+                        if card["protocol"] == "xray" {
+                            lines.push(Line::from(crate::temporary::NOTICE));
+                        }
                         actions.push(("Revoke", Control::TemporaryConfirm));
                     }
                     View::Artifact => {
@@ -194,11 +205,20 @@ pub(in crate::tui) fn draw_temporary(
         }
     }
     if browser.view != View::List || browser.filter.is_some() {
-        actions.push(("Back", Control::TemporaryBack));
+        actions.push((
+            if browser.first_step() || browser.view == View::Revoke {
+                "Cancel"
+            } else {
+                "Back"
+            },
+            Control::TemporaryBack,
+        ));
     }
     let action_rows = actions
         .iter()
-        .filter(|(_, control)| !is_back_control(*control))
+        .filter(|(_, control)| {
+            !is_back_control(*control) || browser.wizard() || browser.view == View::Revoke
+        })
         .count()
         .div_ceil(2);
     rows = Layout::vertical([
@@ -262,12 +282,16 @@ pub(in crate::tui) fn draw_temporary(
             rows[1],
         );
     }
-    let areas = action_areas(
-        frame.area(),
-        rows[2],
-        actions.iter().map(|(_, control)| *control),
-        2,
-    );
+    let areas = if browser.wizard() || browser.view == View::Revoke {
+        button_areas(rows[2], actions.len(), 2)
+    } else {
+        action_areas(
+            frame.area(),
+            rows[2],
+            actions.iter().map(|(_, control)| *control),
+            2,
+        )
+    };
     // Keep action indexes after every choice, including choices outside the viewport.
     for (i, (label, control)) in actions.into_iter().enumerate() {
         let index = choices.len() + i;

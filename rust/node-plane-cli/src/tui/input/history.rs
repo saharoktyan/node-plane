@@ -10,7 +10,7 @@ pub(in crate::tui) struct Bookmark {
 }
 
 impl App {
-    fn navigation_key(&self) -> Option<String> {
+    pub(in crate::tui) fn navigation_key(&self) -> Option<String> {
         let profile = self.form.saved.as_ref().map(|p| p.id);
         let value_id = |value: &Option<serde_json::Value>| {
             value
@@ -107,6 +107,15 @@ impl App {
                     "card"
                 } else {
                     "list"
+                };
+                let detail = if let Some(step) = state
+                    .editor
+                    .as_ref()
+                    .and_then(|editor| editor.creation_step)
+                {
+                    format!("{detail}:{step}")
+                } else {
+                    detail.to_owned()
                 };
                 format!(
                     "access:{:?}:{}:{detail}",

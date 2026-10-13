@@ -126,6 +126,10 @@ impl Default for Connections {
 }
 impl Connections {
     pub fn load(state: &Path) -> Result<Self> {
+        if state.try_exists()? {
+            crate::state_layout::directory(state, "operations")?;
+            crate::state_layout::directory(state, "logs")?;
+        }
         let path = state.join("installations.json");
         if !path.try_exists()? {
             return Ok(Self::default());
@@ -255,7 +259,7 @@ impl Connections {
             return Ok(false);
         }
         let mut records = Vec::new();
-        for entry in fs::read_dir(state)? {
+        for entry in fs::read_dir(crate::state_layout::directory(state, "operations")?)? {
             let path = entry?.path();
             let name = path
                 .file_name()

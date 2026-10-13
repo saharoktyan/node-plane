@@ -96,6 +96,34 @@ pub(super) fn action_areas(
         .iter()
         .filter(|control| !is_back_control(**control))
         .count();
+    let pages: Vec<_> = controls
+        .iter()
+        .enumerate()
+        .filter(|(_, control)| is_page_control(**control))
+        .map(|(index, _)| index)
+        .collect();
+    if pages.len() == 2 && area.height >= 6 && count > 2 {
+        let page_cells = button_areas(Rect::new(area.x, area.y, area.width, 3), 2, 1);
+        let mut other_cells = button_areas(
+            Rect::new(area.x, area.y + 3, area.width, area.height - 3),
+            count - 2,
+            max_rows.saturating_sub(1).max(1),
+        )
+        .into_iter();
+        return controls
+            .iter()
+            .enumerate()
+            .map(|(index, control)| {
+                if is_back_control(*control) {
+                    pinned_back_area(screen)
+                } else if let Some(position) = pages.iter().position(|page| *page == index) {
+                    page_cells[position]
+                } else {
+                    other_cells.next().unwrap()
+                }
+            })
+            .collect();
+    }
     let mut grid = button_areas(area, count, max_rows).into_iter();
     controls
         .into_iter()
@@ -107,6 +135,24 @@ pub(super) fn action_areas(
             }
         })
         .collect()
+}
+
+pub(super) fn is_page_control(control: Control) -> bool {
+    matches!(
+        control,
+        Control::ControllerHistoryPage(_)
+            | Control::ControllerAlertPage(_)
+            | Control::ControllerComponentPage(_)
+            | Control::ControllerVersionsPage(_)
+            | Control::NodesDiagnosticPage(_)
+            | Control::AccessPage(_)
+            | Control::AccessDevicePage(_)
+            | Control::AccessExpiryPage(_)
+            | Control::AccessGrantPage(_)
+            | Control::TemporaryPage(_)
+            | Control::NodesPage(_)
+            | Control::Page(_)
+    )
 }
 
 pub(super) fn button_areas(area: Rect, count: usize, max_rows: usize) -> Vec<Rect> {
@@ -155,7 +201,26 @@ pub(super) fn draw_choice_button(
     chosen: bool,
 ) {
     draw_button(frame, area, label, focused);
-    if chosen {
+    if let Some((prefix, value)) = label
+        .rsplit_once(": ")
+        .filter(|(_, value)| matches!(*value, "On" | "Off"))
+    {
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(format!("{prefix}: "), Style::default().fg(Color::White)),
+                Span::styled(
+                    value,
+                    Style::default().fg(if value == "On" {
+                        Color::Cyan
+                    } else {
+                        Color::White
+                    }),
+                ),
+            ]))
+            .alignment(ratatui::layout::Alignment::Center),
+            Block::bordered().inner(area),
+        );
+    } else if chosen {
         frame.render_widget(
             Paragraph::new(label)
                 .alignment(ratatui::layout::Alignment::Center)
@@ -209,35 +274,6 @@ pub(super) fn button_pair(
     controls: (Control, Control),
     hits: &mut Vec<Hit>,
 ) {
-    if labels.1 == "Cancel" {
-        let cells = Layout::horizontal([Constraint::Length(5), Constraint::Fill(1)])
-            .spacing(1)
-            .split(centered(area, area.width, 3));
-        draw_button(frame, cells[0], "←", !first);
-        draw_button_color(
-            frame,
-            cells[1],
-            labels.0,
-            first,
-            if matches!(
-                controls.0,
-                Control::ConfirmDelete(true) | Control::Discard(true)
-            ) {
-                Color::Red
-            } else {
-                Color::Cyan
-            },
-        );
-        hits.push(Hit {
-            area: cells[0],
-            control: controls.1,
-        });
-        hits.push(Hit {
-            area: cells[1],
-            control: controls.0,
-        });
-        return;
-    }
     let strip = centered(area, 36, 3);
     let buttons = Layout::horizontal([
         Constraint::Fill(1),
@@ -331,7 +367,7 @@ pub(super) fn draw_navigation_button(frame: &mut Frame, area: Rect, label: &str,
 pub(super) fn draw_field(frame: &mut Frame, rect: Rect, label: &str, value: &str, selected: bool) {
     let style = Style::default().fg(if selected { Color::Cyan } else { Color::White });
     frame.render_widget(
-        Paragraph::new(value).block(
+        Paragraph::new(value).wrap(Wrap { trim: false }).block(
             Block::bordered()
                 .title(label)
                 .title_style(Style::default().fg(Color::Cyan))

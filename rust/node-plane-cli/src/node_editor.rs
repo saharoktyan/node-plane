@@ -8,14 +8,21 @@ pub enum Tab {
     General,
     Protocols,
     Advanced,
+    AwgParameters,
 }
 impl Tab {
-    pub const ALL: [Self; 3] = [Self::General, Self::Protocols, Self::Advanced];
+    pub const ALL: [Self; 4] = [
+        Self::General,
+        Self::Protocols,
+        Self::Advanced,
+        Self::AwgParameters,
+    ];
     pub fn label(self) -> &'static str {
         match self {
             Self::General => "General",
             Self::Protocols => "Protocols",
             Self::Advanced => "Advanced options",
+            Self::AwgParameters => "Manual AWG parameters",
         }
     }
 }
@@ -65,14 +72,11 @@ impl Editor {
             ("xray_xhttp_path", "XHTTP path", true),
             ("xray_fingerprint", "Xray fingerprint", true),
             ("awg_public_host", "AWG public address", true),
+            ("awg_interface", "AWG interface", true),
             ("awg_port", "AWG UDP port", true),
             ("awg_port_mode", "AWG port mode", true),
             ("awg_i1_preset", "AWG I-parameters", true),
-            (
-                "awg_parameters",
-                "AWG profile: paste key=value; auto resets",
-                true,
-            ),
+            ("awg_parameters", "AWG parameters", true),
         ] {
             let value = if setting {
                 &source["settings"][key]
@@ -104,6 +108,7 @@ impl Editor {
                     "awg_i1_preset" => "quic",
                     "awg_port_mode" => "auto",
                     "awg_port" => "443",
+                    "awg_interface" => "wg0",
                     "awg_parameters" => "auto",
                     _ => "",
                 }
@@ -158,9 +163,13 @@ impl Editor {
                         && (field.key != "ssh_target" || self.source["transport"] == "ssh")
                 }
                 Tab::Protocols => false,
+                Tab::AwgParameters => {
+                    field.key == "awg_parameters" && self.protocols.iter().any(|p| p == "awg")
+                }
                 Tab::Advanced => {
                     field.setting
                         && field.key != "public_host"
+                        && field.key != "awg_parameters"
                         && (if field.key.starts_with("xray") {
                             self.protocols.iter().any(|p| p == "xray")
                         } else {
@@ -371,7 +380,9 @@ pub fn parse_awg_parameters(text: &str) -> Result<Value> {
 
 impl Field {
     pub fn input_limit(&self) -> usize {
-        if self.key == "awg_parameters" {
+        if self.key == "notes" {
+            2000
+        } else if self.key == "awg_parameters" {
             16384
         } else {
             255
@@ -389,8 +400,11 @@ impl Field {
                 .take(self.input_limit())
                 .collect();
         } else {
-            self.value
-                .extend(text.chars().filter(|c| !c.is_control()).take(remaining));
+            self.value.extend(
+                text.chars()
+                    .filter(|c| !c.is_control() || self.key == "notes" && *c == '\n')
+                    .take(remaining),
+            );
         }
     }
 }

@@ -144,45 +144,47 @@ pub(in crate::tui) fn draw_access_buttons(
     buttons: &[(&str, Control)],
     hits: &mut Vec<Hit>,
 ) {
-    if buttons.len() == 2
-        && let Some((index, (_, back))) = buttons
-            .iter()
-            .enumerate()
-            .find(|(_, (label, _))| *label == "Cancel")
-    {
-        let primary = buttons[1 - index];
-        let cells = Layout::horizontal([Constraint::Length(5), Constraint::Fill(1)])
-            .spacing(1)
-            .split(centered(area, area.width, 3));
-        for (rect, label, control) in [(cells[0], "←", *back), (cells[1], primary.0, primary.1)] {
-            draw_button(
-                frame,
-                rect,
-                label,
-                app.access_controls().get(app.access.selected) == Some(&control),
-            );
-            hits.push(Hit {
-                area: rect,
-                control,
-            });
-        }
-        return;
-    }
-    let back = buttons.iter().find(|(label, _)| *label == "Back");
+    let back = buttons.iter().find(|(label, control)| {
+        *label == "Back"
+            && *control != Control::AccessWizardBack
+            && app.access.editor.is_none()
+            && !app.access.creating_profile
+            && app.access.decision.is_none()
+    });
     let remaining: Vec<_> = buttons
         .iter()
         .copied()
-        .filter(|(label, _)| *label != "Back")
+        .filter(|(_, control)| back.is_none_or(|(_, back_control)| control != back_control))
         .collect();
     let buttons = remaining.as_slice();
-    let columns = if area.width >= 32 { 2 } else { 1 };
-    let rows =
-        Layout::vertical(vec![Constraint::Length(3); buttons.len().div_ceil(columns)]).split(area);
+    let pages: Vec<_> = buttons
+        .iter()
+        .enumerate()
+        .filter(|(_, (_, control))| is_page_control(*control))
+        .map(|(index, _)| index)
+        .collect();
+    let cells = if pages.len() == 2 && buttons.len() > 2 && area.height >= 6 {
+        let page_cells = button_areas(Rect::new(area.x, area.y, area.width, 3), 2, 1);
+        let mut others = button_areas(
+            Rect::new(area.x, area.y + 3, area.width, area.height - 3),
+            buttons.len() - 2,
+            usize::from((area.height - 3) / 3).max(1),
+        )
+        .into_iter();
+        (0..buttons.len())
+            .map(|index| {
+                if let Some(slot) = pages.iter().position(|page| *page == index) {
+                    page_cells[slot]
+                } else {
+                    others.next().unwrap()
+                }
+            })
+            .collect()
+    } else {
+        button_areas(area, buttons.len(), usize::from(area.height / 3).max(1))
+    };
     for (index, (label, control)) in buttons.iter().enumerate() {
-        let row = index / columns;
-        let count = (buttons.len() - row * columns).min(columns);
-        let cells = Layout::horizontal(vec![Constraint::Fill(1); count]).split(rows[row]);
-        let rect = cells[index % columns];
+        let rect = cells[index];
         if rect.height < 3 {
             continue;
         }
@@ -255,7 +257,7 @@ pub(in crate::tui) fn draw_access_expiry(
             sections[2],
             &[
                 ("Continue", Control::AccessDurationApply),
-                ("Cancel", Control::AccessExpiryBack),
+                ("Back", Control::AccessExpiryBack),
             ],
             hits,
         );
@@ -478,7 +480,19 @@ pub(in crate::tui) fn draw_access_devices(
 pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
     use crate::access::{Tab, label, text};
     let right = draw_navigation(frame, app, area, hits);
-    let right = if app
+    let confirmation = app.access.decision.is_some()
+        || app.access.account_action.is_some()
+        || app.access.profile_action.is_some()
+        || app
+            .access
+            .devices
+            .as_ref()
+            .is_some_and(|devices| devices.delete_key.is_some());
+    let right = if confirmation {
+        let popup = centered(right, 78, 12);
+        frame.render_widget(Clear, popup);
+        popup
+    } else if app
         .access
         .editor
         .as_ref()
@@ -493,6 +507,61 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
     let block = section_block(" Access ");
     let inner = block.inner(right);
     frame.render_widget(block, right);
+    if confirmation {
+        let (question, confirm) = if let Some(approve) = app.access.decision {
+            (
+                if approve {
+                    "Approve this access request?"
+                } else {
+                    "Reject this access request?"
+                },
+                Control::AccessConfirm,
+            )
+        } else if let Some((body, _)) = &app.access.account_action {
+            (
+                match (body["role"].as_str(), body["status"].as_str()) {
+                    (Some("admin"), _) => "Grant administrator rights?",
+                    (Some(_), _) => "Remove administrator rights?",
+                    (_, Some("disabled")) => {
+                        "Block this account? Bot and API access will be disabled.\nVPN access is retained; use Freeze to suspend it."
+                    }
+                    _ => "Approve this account?",
+                },
+                Control::AccessAccountConfirm,
+            )
+        } else if let Some(delete) = app.access.profile_action {
+            (
+                if delete {
+                    "Delete this profile and revoke its access?"
+                } else if app
+                    .access
+                    .card
+                    .as_ref()
+                    .is_some_and(|card| card["frozen"] == true)
+                {
+                    "Unfreeze this profile?"
+                } else {
+                    "Freeze this profile and suspend its access?"
+                },
+                Control::AccessProfileConfirm,
+            )
+        } else {
+            (
+                "Delete this device and revoke its access?",
+                Control::AccessDeviceConfirm,
+            )
+        };
+        let rows = Layout::vertical([Constraint::Min(0), Constraint::Length(3)]).split(inner);
+        frame.render_widget(Paragraph::new(question).wrap(Wrap { trim: false }), rows[0]);
+        draw_access_buttons(
+            frame,
+            app,
+            rows[1],
+            &[("Cancel", Control::AccessBack), ("Confirm", confirm)],
+            hits,
+        );
+        return;
+    }
     let footer_height = if let Some(editor) = &app.access.editor {
         if editor.expiry_view {
             if editor.duration_input.is_some() || inner.height < 12 {
@@ -582,6 +651,61 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
             draw_access_grants(frame, app, [sections[0], sections[1], sections[2]], hits);
             return;
         }
+        if let Some(step) = editor.creation_step {
+            frame.render_widget(
+                Paragraph::new(format!("Create profile · Step {}/3", step + 1))
+                    .style(Style::default().fg(Color::Cyan)),
+                sections[0],
+            );
+            if step == 0 {
+                let field = Rect::new(sections[1].x, sections[1].y, sections[1].width, 3);
+                draw_field(
+                    frame,
+                    field,
+                    "Profile name",
+                    &editor.fields[0],
+                    app.access_controls().get(app.access.selected)
+                        == Some(&Control::AccessField(0)),
+                );
+                hits.push(Hit {
+                    area: field,
+                    control: Control::AccessField(0),
+                });
+            } else {
+                let text = if step == 1 {
+                    "Configure access and duration, then continue to review.".to_owned()
+                } else {
+                    format!(
+                        "Name: {}\nExpires: {}\nAccess rules: {}\nExplicit grants: {}\n\nCreate this profile?",
+                        editor.fields[0],
+                        if editor.fields[1].is_empty() {
+                            "Unlimited"
+                        } else {
+                            &editor.fields[1]
+                        },
+                        editor.policy["rules"].as_array().map_or(0, Vec::len),
+                        editor.policy["explicit_grants"]
+                            .as_array()
+                            .map_or(0, Vec::len)
+                    )
+                };
+                frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: false }), sections[1]);
+            }
+            let mut buttons = vec![("Back", Control::AccessWizardBack)];
+            if step == 1 && !editor.permanent_access {
+                buttons.extend([
+                    ("Duration", Control::AccessExpiryMenu),
+                    ("Access", Control::AccessGrants),
+                ]);
+            }
+            buttons.push(if step == 2 {
+                ("Create profile", Control::AccessSave)
+            } else {
+                ("Continue", Control::AccessWizardNext)
+            });
+            draw_access_buttons(frame, app, sections[2], &buttons, hits);
+            return;
+        }
         let labels = ["Profile name", "Expires at (UTC)"];
         frame.render_widget(
             Paragraph::new(if editor.source.is_some() {
@@ -648,12 +772,7 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
         if !editor.permanent_access {
             buttons.insert(0, ("Duration", Control::AccessExpiryMenu));
         }
-        let columns = action_areas(
-            frame.area(),
-            sections[2],
-            buttons.iter().map(|(_, control)| *control),
-            2,
-        );
+        let columns = button_areas(sections[2], buttons.len(), 2);
         for (index, (label, control)) in buttons.into_iter().enumerate() {
             draw_button(
                 frame,
@@ -669,7 +788,7 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
         return;
     }
     let tabs = Layout::horizontal([Constraint::Fill(1); 2]).split(sections[0]);
-    if app.access.card.is_none() {
+    if app.access.card.is_none() && !app.access.creating_profile {
         for (index, tab) in Tab::ALL.into_iter().enumerate() {
             draw_button(
                 frame,
@@ -706,7 +825,7 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
             ("owner_account_id", "Account"),
             ("expires_at", "Expires"),
         ] {
-            if !card[key].is_null() {
+            if !card[key].is_null() && !(app.access.tab == Tab::Requests && key == "status") {
                 lines.push(Line::from(format!("{title}: {}", text(&card[key]))));
             }
         }
@@ -837,7 +956,7 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
             frame,
             content[0],
             if app.access.tab == Tab::Accounts && !app.access.notice.is_empty() {
-                "Select an account · Search"
+                "Create profile · Choose account · Search"
             } else {
                 "Search"
             },

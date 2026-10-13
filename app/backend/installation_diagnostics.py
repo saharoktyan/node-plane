@@ -59,7 +59,7 @@ class FleetDiagnostics:
     def __init__(self, db, driver):
         self.db, self.driver = db, driver
 
-    def observe(self, actor, offset=0, limit=5):
+    def observe(self, actor, offset=0, limit=5, *, node_key=None):
         require_permission(actor, 'maintenance.manage')
         require_permission(actor, 'nodes.manage')
         with self.db.connect() as conn:
@@ -67,6 +67,9 @@ class FleetDiagnostics:
             offset = min(offset, max(0, (total - 1) // limit * limit))
             keys = [row['key'] for row in conn.execute(
                 'SELECT key FROM backend_nodes ORDER BY region,title,key LIMIT ? OFFSET ?', (limit, offset)).fetchall()]
+            if node_key is not None:
+                NodeService(self.db).get(actor, node_key)
+                keys, total, offset = [node_key], 1, 0
         nodes = []
         for key in keys:
             try:

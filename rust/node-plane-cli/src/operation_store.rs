@@ -35,21 +35,23 @@ impl UpdateRecord {
         self.host.eq_ignore_ascii_case(&r.host) && self.port == r.port && self.user == r.user
     }
     pub fn path(&self, state: &Path) -> PathBuf {
-        state.join(format!("update-{}.json", self.id))
+        state
+            .join("operations")
+            .join(format!("update-{}.json", self.id))
     }
     pub fn save(&self, state: &Path) -> Result<()> {
-        ssh::secure_state_directory(state)?;
+        let directory = crate::state_layout::directory(state, "operations")?;
         let path = self.path(state);
         if path.exists() {
             ssh::secure_file(&path)?;
         }
-        let mut temporary = NamedTempFile::new_in(state)?;
+        let mut temporary = NamedTempFile::new_in(&directory)?;
         ssh::secure_file(temporary.path())?;
         temporary.write_all(&serde_json::to_vec(self)?)?;
         temporary.as_file().sync_all()?;
         temporary.persist(&path).map_err(|error| error.error)?;
         #[cfg(unix)]
-        File::open(state)?.sync_all()?;
+        File::open(&directory)?.sync_all()?;
         Ok(())
     }
     pub fn load(path: &Path) -> Result<Self> {
@@ -75,8 +77,9 @@ impl UpdateRecord {
     }
 }
 pub fn unfinished(request: &Request) -> Result<Option<UpdateRecord>> {
+    let directory = crate::state_layout::directory(&request.state_dir, "operations")?;
     if let Some(id) = request.workflow.operation {
-        let record = UpdateRecord::load(&request.state_dir.join(format!("update-{id}.json")))?;
+        let record = UpdateRecord::load(&directory.join(format!("update-{id}.json")))?;
         ensure!(
             record.matches(request),
             "Saved update belongs to another controller SSH address/user."
@@ -84,7 +87,7 @@ pub fn unfinished(request: &Request) -> Result<Option<UpdateRecord>> {
         return Ok(Some(record));
     }
     let mut found = None;
-    for item in std::fs::read_dir(&request.state_dir)? {
+    for item in std::fs::read_dir(&directory)? {
         let path = item?.path();
         let name = path
             .file_name()

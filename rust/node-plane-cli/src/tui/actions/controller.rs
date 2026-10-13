@@ -36,12 +36,6 @@ impl App {
                 }
                 None
             }
-            Control::ControllerAnnouncementEdit => {
-                self.controller.announcement_preview = None;
-                self.controller.announcement_key = Some(uuid::Uuid::new_v4());
-                self.controller.selected = 0;
-                None
-            }
             Control::ControllerAnnouncementSend => {
                 if let (Some(preview), Some(text)) = (
                     &self.controller.announcement_preview,
@@ -200,6 +194,36 @@ impl App {
                 self.controller_command(crate::controller::Command::BotTitle);
                 None
             }
+            Control::ControllerTelegram => {
+                self.controller_command(crate::controller::Command::TelegramSettings);
+                None
+            }
+            Control::ControllerTelegramToken | Control::ControllerTelegramAdminAdd => {
+                self.controller.defaults_input = Some((
+                    if control == Control::ControllerTelegramToken {
+                        "telegram_token"
+                    } else {
+                        "telegram_admin"
+                    },
+                    String::new(),
+                ));
+                self.controller.selected = 0;
+                None
+            }
+            Control::ControllerTelegramAdminRemove(index) => {
+                let telegram_id = self.controller.telegram_settings.as_ref()?["admins"]
+                    .as_array()?
+                    .get(index)?["telegram_user_id"]
+                    .as_str()?
+                    .parse::<u64>()
+                    .ok()?;
+                self.controller_command(crate::controller::Command::TelegramAdmin(
+                    false,
+                    telegram_id,
+                    uuid::Uuid::new_v4(),
+                ));
+                None
+            }
             Control::ControllerSshKey => {
                 self.controller_command(crate::controller::Command::SshKey);
                 None
@@ -302,6 +326,29 @@ impl App {
                     return None;
                 }
                 if let Some((key, input)) = self.controller.defaults_input.clone() {
+                    if key == "telegram_token" {
+                        if let Some((_, value)) = &mut self.controller.defaults_input {
+                            zeroize::Zeroize::zeroize(value);
+                        }
+                        self.controller.defaults_input = None;
+                        self.controller_command(crate::controller::Command::TelegramToken(
+                            zeroize::Zeroizing::new(input),
+                        ));
+                        return None;
+                    }
+                    if key == "telegram_admin" {
+                        match input.trim().parse::<u64>() {
+                            Ok(id) if id > 0 => {
+                                self.controller_command(crate::controller::Command::TelegramAdmin(
+                                    true,
+                                    id,
+                                    uuid::Uuid::new_v4(),
+                                ))
+                            }
+                            _ => self.error = "Enter a positive Telegram user ID.".into(),
+                        }
+                        return None;
+                    }
                     if key == "backup_import_path" {
                         self.controller_command(crate::controller::Command::BackupImport(
                             input.trim().into(),
@@ -888,7 +935,10 @@ impl App {
                     self.controller.selected = 0;
                     return None;
                 }
-                if let Some((key, _)) = self.controller.defaults_input.take() {
+                if let Some((key, mut value)) = self.controller.defaults_input.take() {
+                    if key == "telegram_token" {
+                        zeroize::Zeroize::zeroize(&mut value);
+                    }
                     self.action_focus = Some(Control::ControllerDefaultsField(key));
                     self.error.clear();
                     return None;
@@ -910,6 +960,7 @@ impl App {
                     return None;
                 }
                 if self.controller.alerts.take().is_some()
+                    || self.controller.telegram_settings.take().is_some()
                     || self.controller.bot_title.take().is_some()
                     || self.controller.ssh_key.take().is_some()
                     || self.controller.defaults.take().is_some()
@@ -1021,6 +1072,7 @@ impl App {
         self.controller.defaults_input = None;
         self.controller.policies = None;
         self.controller.bot_title = None;
+        self.controller.telegram_settings = None;
         self.controller.ssh_key = None;
         self.controller.alerts = None;
         self.controller.workstation_audit = None;
@@ -1103,11 +1155,7 @@ impl App {
             return controls;
         }
         if state.announcement_preview.is_some() {
-            return vec![
-                Control::ControllerAnnouncementSend,
-                Control::ControllerAnnouncementEdit,
-                Control::ControllerBack,
-            ];
+            return vec![Control::ControllerBack, Control::ControllerAnnouncementSend];
         }
         if state.announcement_draft.is_some() {
             return vec![
@@ -1135,6 +1183,18 @@ impl App {
         }
         if state.bot_title.is_some() {
             return vec![Control::ControllerBotTitleEdit, Control::ControllerBack];
+        }
+        if let Some(value) = &state.telegram_settings {
+            let mut controls = vec![
+                Control::ControllerTelegramToken,
+                Control::ControllerTelegramAdminAdd,
+            ];
+            controls.extend(
+                (0..value["admins"].as_array().map_or(0, Vec::len))
+                    .map(Control::ControllerTelegramAdminRemove),
+            );
+            controls.push(Control::ControllerBack);
+            return controls;
         }
         if state.ssh_key.is_some() {
             return vec![Control::ControllerSshKeyCopy, Control::ControllerBack];
@@ -1348,6 +1408,7 @@ impl App {
             Some(Installation) => vec![
                 ("Installation defaults".into(), Control::ControllerDefaults),
                 ("Bot name".into(), Control::ControllerBotTitle),
+                ("Telegram".into(), Control::ControllerTelegram),
                 ("SSH key".into(), Control::ControllerSshKey),
                 ("New installation".into(), Control::ControllerNew),
             ],

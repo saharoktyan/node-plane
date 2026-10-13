@@ -1067,11 +1067,12 @@ async def _prompt_node_ssh_target(chat_id, message_id, node_key, node, bot, stat
 
 @router.callback_query(EditNodeFieldCallback.filter())
 async def edit_node_field_cb(query: CallbackQuery, callback_data: EditNodeFieldCallback, bot: Bot, backend: BackendClient, state: FSMContext):
-    await query.answer()
+    if not (query.data or '').startswith('node_awg_mode:'):
+        await query.answer()
     user_id = query.from_user.id
     node_key, field = callback_data.node_key, callback_data.field
     allowed = {'title', 'region', 'flag', 'notes', 'public_host', 'awg_port', 'awg_public_host', 'awg_interface', 'awg_i1_preset', 'xray_host', 'xray_fingerprint', 'xray_sni', 'xray_tcp_port', 'xray_xhttp_port', 'xray_xhttp_path', 'ssh_target'}
-    allowed.add('awg_parameters')
+    allowed.update({'awg_parameters', 'awg_port_mode'})
     if field not in allowed:
         await show_node_settings(query.message.chat.id, user_id, query.message.message_id, node_key, bot, backend, state)
         return
@@ -1089,6 +1090,13 @@ async def edit_node_field_cb(query: CallbackQuery, callback_data: EditNodeFieldC
     
     current = node.get(field) if field in {'title', 'region', 'flag', 'notes'} else node['settings'].get(field)
     locale = normalize_locale((await state.get_data()).get('locale'))
+    if field == 'awg_port_mode':
+        await state.set_state(None)
+        rows = [[InlineKeyboardButton(text=tr(locale, 'nodes.awg.mode.' + mode), callback_data=f'node_awg_mode:{mode}:{node_key}',
+            style='primary' if mode == (current or 'auto') else None) for mode in ('auto', 'manual')],
+            [InlineKeyboardButton(text=tr(locale, 'back'), callback_data=f'node_section:awg:{node_key}')]]
+        await render(bot, query.message.chat.id, Screen(tr(locale, 'nodes.settings.field.awg_port_mode'), embedded_buttons=True, navigation=True), rows, state, query.message.message_id)
+        return
     if field == 'awg_parameters':
         if not current:
             try:
@@ -1130,12 +1138,32 @@ async def edit_node_field_cb(query: CallbackQuery, callback_data: EditNodeFieldC
     await render(bot, query.message.chat.id,
         Screen(tr(locale, 'nodes.settings.edit_title',
                 field=tr(locale, 'nodes.settings.field.' + field)),
-            (tr(locale, 'nodes.settings.send_value'),), sections=(
+            sections=(
                 Section(tr(locale, 'nodes.rich.current_value'), lines=(str(current or '—'),)),),
             embedded_buttons=True, navigation=True),
         [[InlineKeyboardButton(text=tr(locale, 'back'),
-            callback_data=f'node_section:{(await state.get_data()).get("edit_section", "general")}:{node_key}')]],
+            callback_data=(EditNodeFieldCallback(node_key=node_key, field='awg_port_mode').pack()
+                if (query.data or '').startswith('node_awg_mode:') else
+                f'node_section:{(await state.get_data()).get("edit_section", "general")}:{node_key}'))]],
         state, query.message.message_id)
+
+
+@router.callback_query(F.data.startswith('node_awg_mode:'))
+async def edit_awg_mode_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
+    await query.answer()
+    _, mode, node_key = query.data.split(':', 2)
+    data = await state.get_data()
+    if data.get('edit_node_key') != node_key or data.get('edit_field') != 'awg_port_mode' or mode not in {'auto','manual'}:
+        return
+    if mode == 'manual':
+        await edit_node_field_cb(query, EditNodeFieldCallback(node_key=node_key,field='awg_port'), bot, backend, state)
+        return
+    node = await editable_node(query.from_user.id,node_key,backend,state)
+    settings = dict(node['settings'], awg_port_mode='auto')
+    settings.pop('awg_port',None)
+    await change_node_draft(query.from_user.id,node_key,{'settings':settings},backend,state,baseline_node=node)
+    from .admin_node_tools import show_section
+    await show_section(query.message.chat.id,query.from_user.id,query.message.message_id,'awg',node_key,bot,backend,state)
 
 
 @router.callback_query(F.data.startswith('node_region:'))

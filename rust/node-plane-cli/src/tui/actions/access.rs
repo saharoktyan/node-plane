@@ -102,6 +102,39 @@ impl App {
                 }
                 None
             }
+            Control::AccessWizardNext => {
+                if let Some(editor) = &mut self.access.editor {
+                    if editor.fields[0].trim().is_empty() {
+                        self.error = "Enter a profile name.".into();
+                        return None;
+                    }
+                    if let Some(step) = &mut editor.creation_step {
+                        *step = (*step + 1).min(2);
+                    }
+                    self.access.selected = 0;
+                    self.error.clear();
+                }
+                None
+            }
+            Control::AccessWizardBack => {
+                if self
+                    .access
+                    .editor
+                    .as_ref()
+                    .is_some_and(|editor| editor.creation_step == Some(0))
+                {
+                    self.access.profile_draft = self.access.editor.take();
+                    self.access.creating_profile = true;
+                    self.access.tab = crate::access::Tab::Accounts;
+                    self.access_command(crate::access::Command::List(self.access.tab));
+                } else if let Some(editor) = &mut self.access.editor
+                    && let Some(step) = &mut editor.creation_step
+                {
+                    *step = step.saturating_sub(1);
+                }
+                self.access.selected = 0;
+                None
+            }
             Control::AccessNew => {
                 if self.access.tab == crate::access::Tab::Accounts
                     || self.access.owner_filter.is_some()
@@ -116,6 +149,8 @@ impl App {
                     self.access_command(crate::access::Command::EditContext { id: None, owner });
                 } else {
                     self.access.creating_profile = true;
+                    self.access.items.clear();
+                    self.access.page = 0;
                     self.access.card = None;
                     self.access.editor = None;
                     self.access.search.clear();
@@ -207,7 +242,7 @@ impl App {
             }
             Control::AccessDurationCustom => {
                 if let Some(editor) = &mut self.access.editor {
-                    editor.duration_input = Some(String::new());
+                    editor.duration_input = Some(editor.duration_draft.clone());
                 }
                 self.access.selected = 0;
                 None
@@ -222,6 +257,7 @@ impl App {
                 {
                     match crate::access::expiry_from_duration(input, std::time::SystemTime::now()) {
                         Ok(date) => {
+                            editor.duration_draft = input.clone();
                             editor.fields[1] = date;
                             editor.duration_input = None;
                             editor.expiry_view = false;
@@ -274,10 +310,12 @@ impl App {
                 None
             }
             Control::AccessExpiryBack => {
-                if let Some(editor) = &mut self.access.editor
-                    && editor.duration_input.take().is_none()
-                {
-                    editor.expiry_view = false;
+                if let Some(editor) = &mut self.access.editor {
+                    if let Some(input) = editor.duration_input.take() {
+                        editor.duration_draft = input;
+                    } else {
+                        editor.expiry_view = false;
+                    }
                 }
                 self.access.selected = 0;
                 self.error.clear();
@@ -395,6 +433,7 @@ impl App {
             Control::AccessBack => {
                 if self.access.creating_profile {
                     self.access.creating_profile = false;
+                    self.access.profile_draft = None;
                     self.access.tab = crate::access::Tab::Profiles;
                     self.access.notice.clear();
                     self.access_command(crate::access::Command::List(self.access.tab));
@@ -506,6 +545,8 @@ impl App {
                         | Control::AccessConfirm
                         | Control::AccessEdit
                         | Control::AccessNew
+                        | Control::AccessWizardNext
+                        | Control::AccessWizardBack
                         | Control::AccessField(_)
                         | Control::AccessSave
                         | Control::AccessProfileAction(_)

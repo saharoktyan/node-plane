@@ -31,7 +31,8 @@ LEGACY_SCOPES = frozenset({'maintenance.manage', 'settings.manage'})
 LEGACY_NODE_SCOPES = LEGACY_SCOPES | {'nodes.manage'}
 LEGACY_ACCESS_SCOPES = LEGACY_NODE_SCOPES | {'accounts.manage', 'profiles.manage', 'access_requests.manage', 'grants.manage'}
 LEGACY_PROFILE_SCOPES = LEGACY_ACCESS_SCOPES | {'profiles.self.read'}
-SCOPES = LEGACY_PROFILE_SCOPES | {'account.self.read', 'access_requests.self.read'}
+LEGACY_OBSERVATION_SCOPES = LEGACY_PROFILE_SCOPES | {'account.self.read', 'access_requests.self.read'}
+SCOPES = LEGACY_OBSERVATION_SCOPES | {'operations.read'}
 LIFETIME = timedelta(hours=1)
 MAX_REQUEST_BYTES = 16_384
 MAX_SESSION_BYTES = 16_384
@@ -61,12 +62,23 @@ def validate_request(request) -> dict:
         raise WorkstationError('invalid_request')
     action = request.get('action')
     allowed = {'version', 'action'}
-    if action in {'authenticate', 'revoke', 'lookup-update', 'lookup-node', 'lookup-node-create', 'audit-enrollment', 'revoke-access', 'restore-access'}:
+    if action in {'authenticate', 'revoke', 'lookup-update', 'lookup-node', 'lookup-node-create', 'audit-enrollment', 'revoke-access', 'restore-access', 'telegram-settings', 'telegram-token', 'telegram-admin-add', 'telegram-admin-remove'}:
         _uuid(request.get('session_id'))
         allowed.add('session_id')
     elif action != 'list':
         raise WorkstationError('invalid_request')
-    if action == 'audit-enrollment':
+    if action == 'telegram-token':
+        allowed.add('token')
+        if not isinstance(request.get('token'), str) or not re.fullmatch(r'[1-9][0-9]{0,19}:[A-Za-z0-9_-]{20,100}', request['token']):
+            raise WorkstationError('invalid_bot_token')
+    elif action in {'telegram-admin-add', 'telegram-admin-remove'}:
+        allowed |= {'telegram_id', 'command_id'}
+        _uuid(request.get('command_id'))
+        try:
+            validate_telegram_id(request.get('telegram_id'))
+        except AccessDenied:
+            raise WorkstationError('invalid_request') from None
+    elif action == 'audit-enrollment':
         _uuid(request.get('command_id'))
         allowed |= {'command_id', 'target', 'key_fingerprint', 'outcome'}
         if (not isinstance(request.get('target'), str)
@@ -166,7 +178,7 @@ class SessionStore:
             _uuid(value.get('account_id'))
             token = value.get('token')
             match = TOKEN_PATTERN.fullmatch(token) if isinstance(token, str) else None
-            if match is None or value.get('credential_id') != match[1] or value.get('scopes') not in (sorted(SCOPES), sorted(LEGACY_PROFILE_SCOPES), sorted(LEGACY_ACCESS_SCOPES), sorted(LEGACY_NODE_SCOPES), sorted(LEGACY_SCOPES)):
+            if match is None or value.get('credential_id') != match[1] or value.get('scopes') not in (sorted(SCOPES), sorted(LEGACY_OBSERVATION_SCOPES), sorted(LEGACY_PROFILE_SCOPES), sorted(LEGACY_ACCESS_SCOPES), sorted(LEGACY_NODE_SCOPES), sorted(LEGACY_SCOPES)):
                 raise WorkstationError('session_state_invalid')
             expires_at = datetime.fromisoformat(value['expires_at'])
             if expires_at.tzinfo is None or type(value.get('revoked', False)) is not bool:
@@ -353,7 +365,7 @@ class WorkstationService:
                 return {'version': VERSION, 'ok': True, 'session_id': session_id, 'revoked': revoked}
             if previous is not None and previous.get('revoked'):
                 raise WorkstationError('session_revoked')
-            if request['action'] in {'lookup-update', 'lookup-node', 'lookup-node-create', 'audit-enrollment'}:
+            if request['action'] in {'lookup-update', 'lookup-node', 'lookup-node-create', 'audit-enrollment', 'telegram-settings', 'telegram-token', 'telegram-admin-add', 'telegram-admin-remove'}:
                 if previous is None:
                     raise WorkstationError('session_not_found')
                 try:
@@ -364,6 +376,22 @@ class WorkstationService:
                 if (principal.kind != PrincipalKind.ACCOUNT or principal.account_id != previous['account_id']
                         or principal.scopes != SCOPES):
                     raise WorkstationError('session_state_invalid')
+                if request['action'].startswith('telegram-'):
+                    from backend import telegram_configuration
+                    import config
+                    actor = resolve_actor(principal, self.identities)
+                    path = Path(config.SHARED_ROOT) / '.env'
+                    try:
+                        if request['action'] == 'telegram-settings':
+                            value = telegram_configuration.overview(self.db, actor, path)
+                        else:
+                            value = telegram_configuration.change(self.db, actor, self.identities, path, request)
+                            context = self.audit.context(principal.id)
+                            if context:
+                                self.audit.record(context, 'Telegram configuration ' + request['action'], 'completed')
+                    except AccessDenied as error:
+                        raise WorkstationError(error.code) from None
+                    return {'version': VERSION, 'ok': True, **value}
                 if request['action'] == 'lookup-node-create':
                     with self.db.connect() as conn:
                         row = conn.execute('SELECT result_json FROM backend_node_commands WHERE actor_account_id=? AND command_key=?',

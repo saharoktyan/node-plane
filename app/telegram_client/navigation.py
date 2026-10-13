@@ -68,7 +68,7 @@ def parent_path(callback, locale, data):
         return (*admin, Breadcrumb(tr(locale, callback + '.title'), callback))
     settings_pages = {
         'temporary:list:0': 'temporary.title',
-        'admin_documentation': 'documentation.title',
+        'admin_documentation': 'documentation.title', 'admin_about': 'about.title',
         'alerts': 'alerts.title', 'traffic': 'traffic.title',
         'bot_title_settings': 'bot_title.title', 'request_policy': 'request_policy.title',
         'idefault:open': 'defaults.title', 'idefault:main': 'defaults.title',

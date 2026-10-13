@@ -195,7 +195,12 @@ impl Wizard {
             }
             Step::Template => {
                 if index == self.options.templates.len() {
-                    self.template = None;
+                    if self.template.take().is_some() {
+                        self.key.clear();
+                        self.title.clear();
+                        self.region.clear();
+                        self.flag.clear();
+                    }
                     self.set_step(Step::Key);
                 } else {
                     let t = &self.options.templates[index];
@@ -417,6 +422,25 @@ mod tests {
         serde_json::from_value(json!({"local_available":local_available,
             "defaults":{"protocols":["awg","xray"],"xray_transports":["xhttp"],"settings":{"awg_i1_preset":"dns","awg_port_mode":"auto"}},
             "templates":[{"code":"lv","title":"Latvia","region":"Europe","flag":"🇱🇻","draft":{"key":"lv3","title":"Latvia #3"}}]})).unwrap()
+    }
+    #[test]
+    fn switching_from_preset_to_custom_clears_preset_identity_but_keeps_custom_draft() {
+        let mut wizard = Wizard::new(options(false)).unwrap();
+        wizard.choose(0).unwrap();
+        wizard.choose(0).unwrap();
+        assert_eq!(wizard.key, "lv3");
+        wizard.back();
+        wizard.choose(1).unwrap();
+        assert!(
+            wizard.key.is_empty()
+                && wizard.title.is_empty()
+                && wizard.region.is_empty()
+                && wizard.flag.is_empty()
+        );
+        wizard.append("custom1");
+        wizard.back();
+        wizard.choose(1).unwrap();
+        assert_eq!(wizard.key, "custom1");
     }
     #[test]
     fn existing_local_is_not_offered_and_ssh_template_needs_only_addresses() {

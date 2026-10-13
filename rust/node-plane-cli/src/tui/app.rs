@@ -116,6 +116,7 @@ impl App {
     }
     pub(super) fn quick_start_completed(&self) -> bool {
         self.connections.hide_quick_start
+            || !self.connections.completed_quick_starts.is_empty()
             || self
                 .controller
                 .onboarding

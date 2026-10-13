@@ -284,7 +284,7 @@ class AdminNodeRichTests(IsolatedAsyncioTestCase):
 
     async def test_protocol_settings_have_tables_and_all_existing_edit_actions(self):
         expected = {'general': {'title', 'flag', 'region', 'notes'}, 'connection': {'public_host'},
-            'awg': {'awg_public_host', 'awg_port', 'awg_interface', 'awg_i1_preset', 'awg_parameters'},
+            'awg': {'awg_public_host', 'awg_port', 'awg_port_mode', 'awg_interface', 'awg_i1_preset', 'awg_parameters'},
             'xray': {'xray_host', 'xray_sni', 'xray_tcp_port', 'xray_xhttp_port', 'xray_fingerprint', 'xray_xhttp_path'}}
         for locale in ('ru', 'en'):
             self.data['locale'] = locale
@@ -303,9 +303,10 @@ class AdminNodeRichTests(IsolatedAsyncioTestCase):
                 self.assertTrue(any(s.tables for s in groups))
                 headings = [b.size for b in screen.rich(rows).blocks if b.type == 'heading']
                 self.assertEqual(headings[0], 1)
-                self.assertIn(2, headings)
                 if section in {'awg', 'xray'}:
-                    self.assertIn(3, headings)
+                    self.assertEqual(headings, [1])
+                else:
+                    self.assertIn(2, headings)
                 self.assertEqual(rows[-1][0].callback_data, 'node_settings:msk1')
 
     async def test_region_presets_and_other_keep_node_flag_and_draft(self):

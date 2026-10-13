@@ -32,6 +32,7 @@ class DeliveryLoopTests(unittest.IsolatedAsyncioTestCase):
         backend = AsyncMock()
         backend.wait_deliveries.side_effect = asyncio.CancelledError
         with patch('telegram_client.announcement_delivery.deliver_one', new=AsyncMock(return_value=False)), \
+             patch('telegram_client.access_decision_delivery.deliver_one', new=AsyncMock(return_value=False)), \
              patch('telegram_client.alert_delivery.deliver_one', new=AsyncMock(return_value=False)), \
              patch('telegram_client.announcement_delivery.asyncio.sleep', new=AsyncMock()) as sleep:
             with self.assertRaises(asyncio.CancelledError):
@@ -43,6 +44,7 @@ class DeliveryLoopTests(unittest.IsolatedAsyncioTestCase):
         backend = AsyncMock()
         backend.wait_deliveries.side_effect = OSError('API restart')
         with patch('telegram_client.announcement_delivery.deliver_one', new=AsyncMock(return_value=False)), \
+             patch('telegram_client.access_decision_delivery.deliver_one', new=AsyncMock(return_value=False)), \
              patch('telegram_client.alert_delivery.deliver_one', new=AsyncMock(return_value=False)), \
              patch('telegram_client.announcement_delivery.asyncio.sleep', new=AsyncMock(side_effect=asyncio.CancelledError)) as sleep:
             with self.assertRaises(asyncio.CancelledError):

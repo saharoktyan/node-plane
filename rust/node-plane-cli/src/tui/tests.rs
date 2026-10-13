@@ -2409,7 +2409,7 @@ fn deleting_saved_profiles_preserves_host_trust_and_operation_history() {
         );
         assert_eq!(hosts.contains_key("[other.example]:2222"), delete_active);
         assert!(hosts.contains_key("[other.example]:22"));
-        for name in ["id_ed25519", "update-operation.json"] {
+        for name in ["id_ed25519", "operations/update-operation.json"] {
             assert_eq!(
                 std::fs::read_to_string(dir.path().join(name)).unwrap(),
                 "keep"
@@ -4587,7 +4587,9 @@ fn update_choices_keep_theme_text_after_pointer_focus_changes() {
         assert_eq!(terminal.backend().buffer()[(area.x, area.y)].fg, accent);
         assert!((area.x + 1..area.right() - 1).all(|x| {
             let cell = &terminal.backend().buffer()[(x, area.y + 1)];
-            cell.symbol() == " " || cell.fg == accent
+            cell.symbol() == " "
+                || cell.fg == accent
+                || control == Control::ControllerUpdateAuto && cell.fg == Color::White
         }));
         app.pointer_position = Some((0, 0).into());
         terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
@@ -4788,12 +4790,20 @@ fn wizard_footer_is_inline_and_scrolls_after_long_choices() {
         .find(|h| h.control == Control::WizardBack)
         .unwrap()
         .area;
-    for control in [Control::WizardNext, Control::WizardCancel] {
-        let area = app.hits.iter().find(|h| h.control == control).unwrap().area;
-        assert_eq!(area.y, back.y);
-        assert!(area.width > back.width);
-    }
-    assert_eq!(back.width, 5);
+    let next = app
+        .hits
+        .iter()
+        .find(|h| h.control == Control::WizardNext)
+        .unwrap()
+        .area;
+    assert_eq!(next.y, back.y);
+    assert!(next.width.abs_diff(back.width) <= 1);
+    assert!(back.width > 5);
+    assert!(
+        !app.hits
+            .iter()
+            .any(|hit| hit.control == Control::WizardCancel)
+    );
     app.node_wizard.as_mut().unwrap().step = crate::node_wizard::Step::Template;
     app.node_wizard.as_mut().unwrap().selected = 0;
     terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
@@ -4801,7 +4811,7 @@ fn wizard_footer_is_inline_and_scrolls_after_long_choices() {
     assert!(app.scrollbar.get().is_some());
     app.manual_viewport.set(Some(100));
     terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
-    assert!(app.hits.iter().any(|h| h.control == Control::WizardCancel));
+    assert!(app.hits.iter().any(|h| h.control == Control::WizardBack));
 }
 
 #[test]
@@ -5161,6 +5171,7 @@ fn removal_survives_lost_shutdown_response_and_stops_backend_polling_after_verif
     assert!(
         state
             .path()
+            .join("operations")
             .join(format!("controller-removal-{}.json", profile.unwrap()))
             .exists()
     );
@@ -5726,7 +5737,7 @@ fn wizard_pairs_only_matching_regions_when_wide_and_pairs_protocols() {
 }
 
 #[test]
-fn controller_text_dialogs_use_small_back_arrow_before_primary_action() {
+fn controller_text_dialogs_use_full_back_button_before_primary_action() {
     let mut app = test_profile_app();
     app.screen = Screen::Controller;
     app.controller.policies = Some(serde_json::json!({"requests":{"gate_message":"Original"}}));
@@ -5755,9 +5766,131 @@ fn controller_text_dialogs_use_small_back_arrow_before_primary_action() {
             })
             .unwrap()
             .area;
-        assert_eq!(back.width, 5);
+        assert!(back.width > 5);
         assert_eq!(back.y, primary.y);
         assert!(back.right() < primary.x);
         assert!(primary.y.saturating_sub(back.y) < 4);
     }
+}
+
+#[test]
+fn automatic_quick_start_completion_survives_restart_without_done() {
+    let state = tempfile::tempdir().unwrap();
+    let mut app = test_profile_app();
+    app.state_dir = state.path().into();
+    app.screen = Screen::QuickStart;
+    let profile = app.form.saved.as_ref().unwrap().id;
+    app.controller.profile = Some(profile);
+    app.event(Event::Nodes(crate::nodes::Update::Controller(
+        Some(profile),
+        crate::controller::Command::Onboarding,
+        serde_json::json!({"workstation_completed":true,"next_step":"done"}),
+    )));
+    let saved = crate::connections::Connections::load(state.path()).unwrap();
+    assert!(!saved.completed_quick_starts.is_empty());
+    let mut restarted = test_profile_app();
+    restarted.connections = saved;
+    restarted.form.saved = None;
+    restarted.screen = Screen::Idle;
+    assert!(restarted.quick_start_completed());
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+    terminal
+        .draw(|frame| restarted.hits = draw(frame, &restarted))
+        .unwrap();
+    let text: String = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|c| c.symbol())
+        .collect();
+    assert!(!text.contains("Quick Start"));
+    assert!(!text.contains("F1:"));
+    assert!(
+        !restarted
+            .hits
+            .iter()
+            .any(|hit| hit.control == Control::QuickStartAction)
+    );
+}
+
+#[test]
+fn token_editor_masks_secret_and_cancel_discards_it() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Controller;
+    app.controller.telegram_settings =
+        Some(serde_json::json!({"admins":[],"token_configured":true}));
+    app.activate(Control::ControllerTelegramToken);
+    app.controller.defaults_input.as_mut().unwrap().1 = "123456:private_token_test".into();
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    let text: String = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|c| c.symbol())
+        .collect();
+    assert!(!text.contains("private_token_test"));
+    assert!(text.contains('•'));
+    let cancel = app
+        .hits
+        .iter()
+        .find(|hit| hit.control == Control::ControllerBack)
+        .unwrap();
+    assert!(cancel.area.width > 5);
+    app.activate(Control::ControllerBack);
+    assert!(app.controller.defaults_input.is_none());
+    assert!(app.controller.telegram_settings.is_some());
+}
+
+#[test]
+fn notes_accept_newlines_and_manual_awg_has_its_own_tab() {
+    let source = serde_json::json!({"key":"de1","title":"Germany","region":"Europe","flag":"DE","notes":"line one",
+        "transport":"local","desired_revision":1,"applied_revision":0,"protocols":["awg"],"xray_transports":[],"settings":{"public_host":"vpn.example"}});
+    let mut app = test_profile_app();
+    app.screen = Screen::Nodes;
+    app.nodes.editor =
+        Some(crate::node_editor::Editor::new(source, &serde_json::json!({})).unwrap());
+    let index = app
+        .nodes
+        .editor
+        .as_ref()
+        .unwrap()
+        .fields
+        .iter()
+        .position(|field| field.key == "notes")
+        .unwrap();
+    app.nodes_selected = app
+        .nodes_controls()
+        .iter()
+        .position(|control| *control == Control::NodesEditField(index))
+        .unwrap();
+    app.nodes_key(KeyCode::Enter.into());
+    app.nodes_key(KeyCode::Char('x').into());
+    assert_eq!(
+        app.nodes.editor.as_ref().unwrap().fields[index].value,
+        "line one\nx"
+    );
+    let rows = node_editor_rows(app.nodes.editor.as_ref().unwrap(), 90);
+    let (controls, height) = rows
+        .iter()
+        .find(|(controls, _)| controls.contains(&Control::NodesEditField(index)))
+        .unwrap();
+    assert_eq!(controls.len(), 1);
+    assert!(*height > 3);
+    let editor = app.nodes.editor.as_mut().unwrap();
+    editor.tab = crate::node_editor::Tab::Advanced;
+    assert!(
+        !editor
+            .field_indices()
+            .iter()
+            .any(|index| editor.fields[*index].key == "awg_parameters")
+    );
+    editor.tab = crate::node_editor::Tab::AwgParameters;
+    assert_eq!(editor.field_indices().len(), 1);
+    assert_eq!(
+        editor.fields[editor.field_indices()[0]].key,
+        "awg_parameters"
+    );
 }

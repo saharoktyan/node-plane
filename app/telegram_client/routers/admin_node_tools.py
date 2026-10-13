@@ -149,7 +149,7 @@ async def show_section(chat_id, user_id, message_id, section, node_key, bot, bac
     await state.update_data(edit_section=section, node_settings_view=section)
     def field_button(field):
         return button(locale, 'nodes.settings.field.' + field,
-                      EditNodeFieldCallback(node_key=node_key, field='awg_port' if field == 'awg_port_mode' else field).pack())
+                      EditNodeFieldCallback(node_key=node_key, field=field).pack())
     defaults = {'xray_fingerprint': 'chrome', 'awg_interface': 'wg0', 'awg_i1_preset': 'quic'}
     if node['settings'].get('awg_port_mode') == 'auto':
         defaults['awg_port'] = tr(locale, 'nodes.awg.port_automatic')
@@ -164,9 +164,9 @@ async def show_section(chat_id, user_id, message_id, section, node_key, bot, bac
     elif section == 'connection':
         sections = (group('nodes.rich.connection', ('public_host',)),)
     elif section == 'xray':
-        sections = (group('node_tools.xray', fields['xray']),)
+        sections = (group('', fields['xray']),)
     else:
-        sections = (group('node_tools.awg', fields['awg']),
+        sections = (group('', fields['awg']),
             Section('', rows=((field_button('awg_parameters'),),
                 (button(locale, 'node_tools.entropy', f'node_view:entropy:{node_key}'),))))
         preferred = {'quic': 443, 'dns': 53}.get(node['settings'].get('awg_i1_preset', 'quic'))
@@ -174,7 +174,7 @@ async def show_section(chat_id, user_id, message_id, section, node_key, bot, bac
         if node['settings'].get('awg_port_mode') == 'auto' and actual and preferred and actual != preferred:
             sections = (Section('', (tr(locale, 'nodes.awg.port_fallback', port=actual, preferred=preferred),)), *sections)
     if section in {'awg', 'xray'}:
-        sections = (Section(tr(locale, 'nodes.draft.protocol_settings'),
+        sections = (Section('',
             heading_size=2, sections=sections),)
     await render(bot, chat_id, Screen(tr(locale, 'nodes.rich.connection' if section == 'connection' else 'node_tools.' + section),
         sections=sections, embedded_buttons=True, navigation=True),
@@ -203,7 +203,23 @@ async def view_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state:
     try:
         node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=query.from_user.id)
         await remember_node(state, node)
-        if view in {'runtime', 'diagnostics', 'entropy'}:
+        if view == 'diagnostics':
+            from urllib.parse import quote
+            from .admin_recovery import detail_link, server_check_name
+            page = await backend.request('GET', '/api/v1/system/recovery/fleet?node_key=' + quote(node_key, safe=''),
+                telegram_user_id=query.from_user.id, timeout_seconds=30)
+            item = page['items'][0]
+            checks = []
+            for check in sorted(item['checks'], key=lambda c: {'error': 0, 'warning': 1, 'ok': 2}[c['status']]):
+                name = server_check_name(locale, check['id'])
+                link = await detail_link(state, item['title'] + ' · ' + name,
+                    (check['detail'],), query.data)
+                checks.append(Section('', inline_rows=((tr(locale, 'recovery.check.' + check['status']), ' · ',
+                    InlineKeyboardButton(text=name + ' →', callback_data=link)),), bold_first_line=True))
+            sections = [Section(item['title'], sections=tuple(checks), heading_size=3)]
+            lines = [tr(locale, 'recovery.diagnostic_summary', errors=item['errors'], warnings=item['warnings'])]
+            rows.append([button(locale, 'node_tools.refresh', query.data)])
+        elif view in {'runtime', 'entropy'}:
             facts = await backend.node_services(query.from_user.id, node_key)
             if view == 'entropy':
                 lines = facts['entropy'] or [tr(locale, 'node_tools.no_config')]
@@ -249,9 +265,7 @@ async def show_action_confirmation(chat_id, message_id, node, action, bot, state
     await remember_node(state, node)
     await state.update_data(node_job_draft={'node_key': node_key, 'action': action,
         'revision': node['desired_revision'], 'command_key': str(uuid4())})
-    back = (AdminNodeCallback(node_key=node_key).pack() if action == 'bootstrap' else
-            f'bootstrap_menu:{node_key}' if action in {'reinstall_clean', 'reinstall_keep', 'install_docker'} else
-            f'node_tools:{node_key}')
+    back = job_parent(action, node_key)
     rows = [[button(locale, 'back', back),
              button(locale, 'node_tools.confirm', 'node_job_submit',
                 style='danger' if action in {'reinstall_clean', 'cleanup_runtime'} else 'primary')]]
@@ -338,6 +352,22 @@ async def bootstrap_status_cb(query: CallbackQuery, bot: Bot, backend: BackendCl
     await show_bootstrap(query.message.chat.id, query.from_user.id, query.message.message_id, job, bot, backend, state)
 
 
+def job_parent(action, node_key):
+    if action in {'check_ports', 'open_ports'}:
+        return f'node_view:ports:{node_key}'
+    if action in {'sync_env', 'sync_xray', 'reconcile_access'}:
+        return f'node_view:repair:{node_key}'
+    if action == 'sync_runtime':
+        return f'node_view:runtime:{node_key}'
+    if action == 'regenerate_entropy':
+        return f'node_view:entropy:{node_key}'
+    if action in {'reinstall_clean', 'reinstall_keep', 'install_docker'}:
+        return f'bootstrap_menu:{node_key}'
+    if action == 'cleanup_runtime':
+        return f'node_tools:{node_key}'
+    return AdminNodeCallback(node_key=node_key).pack()
+
+
 async def show_job(chat_id, user_id, message_id, job, bot, state, backend=None):
     await remember_label(state, 'node_jobs', job['id'], job['node_key'])
     locale = normalize_locale((await state.get_data()).get('locale'))
@@ -367,8 +397,7 @@ async def show_job(chat_id, user_id, message_id, job, bot, state, backend=None):
         rows.append([button(locale, 'node_tools.refresh', 'node_job:' + job['id'])])
     if job['status'] == 'blocked':
         rows.append([button(locale, 'node_tools.resolve', 'node_resolve:' + job['id'])])
-    rows.append([button(locale, 'back', f"node_view:ports:{job['node_key']}"
-        if job['action'] in {'check_ports', 'open_ports'} else AdminNodeCallback(node_key=job['node_key']).pack())])
+    rows.append([button(locale, 'back', job_parent(job['action'], job['node_key']))])
     await render(bot, chat_id, Screen(tr(locale, 'node_tools.' + job['action']), tuple(lines), sections=tuple(sections), embedded_buttons=True, navigation=True), rows, state, message_id)
     if backend is not None and job['status'] in {'awaiting_executor', 'running'}:
         async def refresh():

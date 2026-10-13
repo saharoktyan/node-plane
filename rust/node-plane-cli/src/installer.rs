@@ -26,11 +26,9 @@ struct Journal {
 }
 impl Journal {
     fn open(request: &Request) -> Result<Self> {
-        ssh::secure_state_directory(&request.state_dir)?;
+        let directory = crate::state_layout::directory(&request.state_dir, "logs")?;
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis();
-        let path = request
-            .state_dir
-            .join(format!("operation-{timestamp}-{}.log", std::process::id()));
+        let path = directory.join(format!("operation-{timestamp}-{}.log", std::process::id()));
         let mut options = OpenOptions::new();
         options.create_new(true).write(true);
         #[cfg(unix)]

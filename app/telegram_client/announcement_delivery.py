@@ -20,7 +20,9 @@ async def deliver_one(bot, backend):
         tr(delivery.get("locale"), "announce.notification"), (delivery["text"],)
     )
     rows = [[InlineKeyboardButton(text=tr(delivery.get("locale"), "announce.close"),
-        callback_data="announce_close:" + delivery["id"])]]
+        callback_data="announce_close:" + delivery["id"]),
+        InlineKeyboardButton(text=tr(delivery.get("locale"), "announce.dismiss"),
+        callback_data="announce_dismiss:" + delivery["id"])]]
     status = await send_notification(
         bot, delivery["telegram_user_id"], screen, delivery["silent"], rows=rows
     )
@@ -53,7 +55,8 @@ async def refresh_menu(bot, backend, dispatcher):
                 await leave_admin_panel(bot, backend, state, recipient, recipient,
                     data['control_message_id'], account)
             elif data.get('control_message_id') and (data.get('home_panel_active')
-                    or len(parents) == 1 and str(parents[0].get('callback', '')).startswith('u:')):
+                    or 'home_panel_active' not in data and len(parents) == 1
+                    and str(parents[0].get('callback', '')).startswith('u:')):
                 try:
                     await show_home(recipient, recipient, bot, backend, state, data['control_message_id'], account=account)
                 except Exception:
@@ -67,6 +70,7 @@ async def refresh_menu(bot, backend, dispatcher):
 
 async def delivery_loop(bot, backend, dispatcher=None):
     from .alert_delivery import deliver_one as deliver_alert
+    from .access_decision_delivery import deliver_one as deliver_access_decision
 
     while True:
         worked = False
@@ -77,10 +81,13 @@ async def delivery_loop(bot, backend, dispatcher=None):
             except Exception:
                 refresh_failed = True
                 logging.getLogger(__name__).warning("Account menu refresh requires attention")
-        for delivery in (deliver_alert, deliver_one):
+        for delivery in (deliver_access_decision, deliver_alert, deliver_one):
             try:
-                worked = await delivery(bot, backend) or worked
+                result = (await delivery(bot, backend, dispatcher)
+                          if delivery is deliver_access_decision else await delivery(bot, backend))
+                worked = result or worked
             except Exception:  # noqa: BLE001 -- continue independent transports
+                refresh_failed = True
                 logging.getLogger(__name__).warning(
                     "Notification delivery requires attention"
                 )

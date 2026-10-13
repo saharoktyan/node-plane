@@ -75,6 +75,11 @@ class BackendOnboardingTests(unittest.TestCase):
                 headers={**headers, 'Idempotency-Key': str(uuid4())},
                 json={'node_key':'n1', 'protocol': protocol, 'transport': transport})
             self.assertEqual(response.json()['status'], 'succeeded', response.text)
+            # Completion is remembered without a Done callback, including
+            # when setup later becomes incomplete after removal or revision changes.
+            observed = client.get('/api/v1/system/onboarding', headers=headers).json()
+            self.assertTrue(observed['completed'])
+            self.assertTrue(observed['workstation_completed'])
             done = client.post('/api/v1/system/onboarding/complete/telegram', headers=headers)
             self.assertEqual(done.status_code, 200, done.text)
             self.assertTrue(done.json()['completed'])

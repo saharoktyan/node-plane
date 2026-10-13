@@ -1067,6 +1067,9 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
             except AccessDenied:
                 continue
             permissions.append(permission)
+        if 'nodes.manage' in permissions:
+            from .onboarding import progress
+            progress(db, current)
         return MeOutput(id=current.account.id, role=current.account.role, status=current.account.status,
                         permissions=permissions,
                         onboarding_completed=onboarding_completed(db, current.account.id, 'telegram'),
@@ -1193,7 +1196,8 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
                 "SELECT 1 FROM backend_alert_deliveries WHERE status='queued' LIMIT 1").fetchone())
                 or not restoring and (bool(conn.execute(
                     "SELECT 1 FROM backend_announcement_deliveries WHERE status='queued' LIMIT 1").fetchone())
-                    or bool(conn.execute("SELECT 1 FROM backend_account_menu_refresh LIMIT 1").fetchone())))
+                    or bool(conn.execute("SELECT 1 FROM backend_account_menu_refresh LIMIT 1").fetchone())
+                    or bool(conn.execute("SELECT 1 FROM backend_access_request_messages WHERE status='queued' LIMIT 1").fetchone())))
         if ready:
             return {'ready': True}
         if wakeup:
@@ -1203,6 +1207,26 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
             time.sleep(timeout)
         # This is a hint only. Claim endpoints recheck eligibility and authorization.
         return {'ready': False}
+
+    @app.get('/api/v1/integrations/telegram/access-decisions/recipients')
+    def access_notice_recipients(current=Depends(authenticate)):
+        from .access_decision_delivery import recipients
+        return recipients(db, current)
+
+    @app.post('/api/v1/integrations/telegram/access-decisions/{request_id}/messages')
+    def register_access_notice(request_id: UUID, body: dict, principal=Depends(authenticate)):
+        from .access_decision_delivery import register
+        return register(db, principal, str(request_id), body)
+
+    @app.post('/api/v1/integrations/telegram/access-decisions/claim')
+    def claim_access_decision(principal=Depends(authenticate)):
+        from .access_decision_delivery import claim
+        return claim(db, principal)
+
+    @app.post('/api/v1/integrations/telegram/access-decisions/{request_id}/ack')
+    def ack_access_decision(request_id: UUID, chat_id: int, message_id: int, principal=Depends(authenticate)):
+        from .access_decision_delivery import acknowledge
+        return acknowledge(db, principal, str(request_id), chat_id, message_id)
 
     @app.post('/api/v1/integrations/telegram/menu-refresh/claim')
     def claim_menu_refresh(request: Request, principal=Depends(authenticate)):
@@ -1957,15 +1981,15 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
             raise AccessDenied('diagnostics_unavailable', 503) from None
 
     @app.get('/api/v1/system/recovery/fleet')
-    def recovery_fleet(offset: int = Query(default=0, ge=0, le=1000000), current=Depends(actor)):
+    def recovery_fleet(offset: int = Query(default=0, ge=0, le=1000000), node_key: str | None = None, current=Depends(actor)):
         require_permission(current, 'maintenance.manage')
         require_permission(current, 'nodes.manage')
         from .installation_diagnostics import FleetDiagnostics
         if node_driver is not None:
-            return FleetDiagnostics(db, node_driver).observe(current, offset)
+            return FleetDiagnostics(db, node_driver).observe(current, offset, node_key=node_key)
         from .driver_transport import GrpcIntentDriver, local_channel
         with local_channel('127.0.0.1:50051') as channel:
-            return FleetDiagnostics(db, GrpcIntentDriver(channel, timeout=10)).observe(current, offset)
+            return FleetDiagnostics(db, GrpcIntentDriver(channel, timeout=10)).observe(current, offset, node_key=node_key)
 
     @app.post('/api/v1/system/recovery/{kind}/{identity}/{action}')
     def recover_operation(kind: str, identity: UUID, action: str, current=Depends(actor)):

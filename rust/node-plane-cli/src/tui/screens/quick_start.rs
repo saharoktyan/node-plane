@@ -45,7 +45,7 @@ pub(in crate::tui) fn draw_quick_start(
     } else if app.form.saved.is_some() {
         "1. Continue opens Install Node Plane for the selected profile.\n2. Enter your Telegram administrator ID and BotFather token, then review the installation.\n3. Confirm the server fingerprint and enter the SSH password when requested.\n4. After installation return here for server defaults, your first node.".into()
     } else {
-        "1. Create a connection profile with your VPS address, SSH port and user.\n2. Select Install Node Plane and enter your Telegram ID and BotFather token.\n3. Confirm the server fingerprint and enter the SSH password when requested.\n4. After installation press F1 to continue with defaults, your first node.\n\nPasswords and bot tokens are not saved on disk.".into()
+        "1. Create a connection profile with your VPS address, SSH port and user.\n2. Select Install Node Plane and enter your Telegram ID and BotFather token.\n3. Confirm the server fingerprint and enter the SSH password when requested.\n4. After installation return here to continue with defaults, your first node.\n\nPasswords and bot tokens are not saved on disk.".into()
     };
     frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: false }), sections[0]);
     let controls = (Control::QuickStartRefresh, Control::QuickStartAction);

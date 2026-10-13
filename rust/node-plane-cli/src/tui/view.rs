@@ -227,7 +227,7 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
         Screen::QuickStart => draw_quick_start(frame, app, rows[1], &mut hits),
         Screen::Form => draw_form(frame, app, rows[1], &mut hits),
         Screen::NewInstallation => {
-            let popup = centered(rows[1], 80, 14);
+            let popup = centered(rows[1], 78, 12);
             let sections = dialog(frame, popup, " New installation ");
             frame.render_widget(Paragraph::new(format!("Create a new Node Plane installation on {} using this saved profile.\n\nUse this after the previous installation was removed. A new administrator binding will be created. Existing installations are not overwritten.",app.form.fields[0])).wrap(Wrap{trim:false}),sections[0]);
             button_pair(
@@ -259,7 +259,7 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
         }
         Screen::DeleteInstallation(id) => {
             let right = draw_navigation(frame, app, rows[1], &mut hits);
-            let sections = dialog(frame, centered(right, 72, 13), " Delete saved profile ");
+            let sections = dialog(frame, centered(right, 78, 12), " Delete saved profile ");
             let name = app
                 .connections
                 .installations
@@ -338,7 +338,7 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
         Screen::EditInstallation => draw_editor(frame, app, rows[1], &mut hits),
         Screen::Confirm => {
             let (title, description) = app.workflow_confirmation();
-            let popup = centered(rows[1], 80, 16);
+            let popup = centered(rows[1], 78, 12);
             let sections = dialog(frame, popup, &format!(" {title} "));
             frame.render_widget(
                 Paragraph::new(description).wrap(Wrap { trim: false }),
@@ -441,7 +441,7 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
             Screen::Idle if app.quick_start_completed() => {
                 "↑ / ↓: select section   Enter / →: open   Esc: exit"
             }
-            Screen::Idle => "↑ / ↓: select section   Enter / →: open   F1: Quick Start   Esc: exit",
+            Screen::Idle => "↑ / ↓: select section   Enter / →: open   Esc: exit",
             Screen::QuickStart => "Tab / arrows: select   Enter: action   Esc: close",
             Screen::NodeWizard => {
                 "Tab / arrows: select   Enter / click: continue   Esc: previous step   Ctrl+C: exit"
@@ -497,6 +497,11 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
             }
         }
     };
+    let hint = if !app.quick_start_completed() {
+        format!("{hint}   F1: Quick Start")
+    } else {
+        hint.to_owned()
+    };
     frame.render_widget(
         Paragraph::new(hint)
             .style(Style::default().fg(if app.error.is_empty() {
@@ -542,6 +547,26 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
         });
     if let Some(control) = back.filter(|control| {
         (app.controller.defaults_input.is_none() || !matches!(app.screen, Screen::Controller))
+            && !(matches!(app.screen, Screen::Controller)
+                && app.controller.announcement_draft.is_some()
+                && app.controller.announcement_job.is_none())
+            && !(matches!(app.screen, Screen::Access)
+                && (app.access.editor.is_some()
+                    || app.access.creating_profile
+                    || app.access.decision.is_some()
+                    || app.access.account_action.is_some()
+                    || app.access.profile_action.is_some()
+                    || app.access.devices.as_ref().is_some_and(|devices| {
+                        devices.editor.is_some() || devices.delete_key.is_some()
+                    })))
+            && !(matches!(app.screen, Screen::Nodes)
+                && app
+                    .nodes
+                    .editor
+                    .as_ref()
+                    .is_some_and(|editor| editor.review.is_some()))
+            && !(matches!(app.screen, Screen::Temporary)
+                && (app.temporary.wizard() || app.temporary.view == crate::temporary::View::Revoke))
             && !hits
                 .iter()
                 .any(|hit| hit.control == *control && hit.area.width == 5)
@@ -593,7 +618,15 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
     if let Some((prompt, _)) = &app.prompt {
         // Modal hit targets replace background controls, including outside clicks.
         hits.clear();
-        let popup = centered(area, 84, 20);
+        let popup = centered(
+            area,
+            78,
+            if matches!(prompt, Prompt::ConfirmAction { .. }) {
+                12
+            } else {
+                20
+            },
+        );
         let title = match prompt {
             Prompt::SelectAdministrator { .. } => "Choose administrator",
             Prompt::ConfirmAction { title, .. } => title,
@@ -707,7 +740,7 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
     }
     if app.discard.is_some() {
         hits.clear();
-        let popup = centered(area, 68, 10);
+        let popup = centered(area, 78, 12);
         frame.render_widget(Clear, popup);
         let sections = dialog(frame, popup, " Unsaved changes ");
         frame.render_widget(
@@ -718,7 +751,7 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
         button_pair(
             frame,
             sections[1],
-            ("Discard", "Keep editing"),
+            ("Discard", "Cancel"),
             app.discard_confirm,
             (Control::Discard(true), Control::Discard(false)),
             &mut hits,
@@ -1263,7 +1296,7 @@ pub(super) fn draw_navigation(
 }
 
 fn draw_restart(frame: &mut Frame, app: &App) -> Vec<Hit> {
-    let popup = centered(frame.area(), 70, 12);
+    let popup = centered(frame.area(), 78, 12);
     let sections = dialog(frame, popup, " Workstation updated ");
     frame.render_widget(
         Paragraph::new("Restart the workstation to use the updated version.")

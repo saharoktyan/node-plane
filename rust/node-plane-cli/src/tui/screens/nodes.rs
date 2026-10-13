@@ -78,11 +78,11 @@ pub(in crate::tui) fn draw_node_editor(
         );
         frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), content);
         buttons.extend([
-            ("Confirm", Control::NodesEditConfirm),
             ("Back", Control::NodesEditBack),
+            ("Confirm", Control::NodesEditConfirm),
         ]);
     } else {
-        let tabs = Layout::horizontal([Constraint::Fill(1); 3]).split(sections[0]);
+        let tabs = Layout::horizontal(vec![Constraint::Fill(1); Tab::ALL.len()]).split(sections[0]);
         for (index, tab) in Tab::ALL.iter().enumerate() {
             let control = Control::NodesEditTab(*tab);
             draw_choice_button(
@@ -110,37 +110,43 @@ pub(in crate::tui) fn draw_node_editor(
                 content[1],
             );
         }
-        let items = node_editor_items(editor);
-        let columns = if content[0].width >= 64 { 2 } else { 1 };
-        let rows = items.len().div_ceil(columns);
+        let groups = node_editor_rows(editor, content[0].width);
         let capacity = usize::from(content[0].height / 3).max(1);
         app.nodes_capacity.set(capacity);
         app.nodes_editor_width.set(content[0].width);
-        let selected_row = app
-            .nodes_selected
-            .saturating_sub(3)
-            .min(items.len().saturating_sub(1))
-            / columns;
-        let first = app.viewport(
+        let current = app.nodes_controls().get(app.nodes_selected).copied();
+        let selected_row = groups
+            .iter()
+            .position(|(controls, _)| current.is_some_and(|c| controls.contains(&c)))
+            .unwrap_or(0);
+        let mut first = app.viewport(
             viewport_start(app.list_viewport.get(), selected_row, capacity),
-            rows,
+            groups.len(),
             capacity,
         );
-        for row in first..(first + capacity).min(rows) {
-            let count = (items.len() - row * columns).min(columns);
-            let cells = Layout::horizontal(vec![Constraint::Fill(1); count])
+        if app.manual_viewport.get().is_none() {
+            while first < selected_row
+                && groups[first..=selected_row]
+                    .iter()
+                    .map(|(_, height)| *height)
+                    .sum::<u16>()
+                    > content[0].height
+            {
+                first += 1;
+            }
+            app.list_viewport.set(first);
+        }
+        let mut y = content[0].y;
+        for (controls, height) in groups.iter().skip(first) {
+            if y + *height > content[0].bottom() {
+                break;
+            }
+            let cells = Layout::horizontal(vec![Constraint::Fill(1); controls.len()])
                 .spacing(1)
-                .split(Rect::new(
-                    content[0].x,
-                    content[0].y + (row - first) as u16 * 3,
-                    content[0].width,
-                    3,
-                ));
-            for (column, &control) in items.iter().skip(row * columns).take(count).enumerate() {
+                .split(Rect::new(content[0].x, y, content[0].width, *height));
+            y += *height;
+            for (column, &control) in controls.iter().enumerate() {
                 let rect = cells[column];
-                if rect.bottom() > content[0].bottom() {
-                    continue;
-                }
                 match control {
                     Control::NodesEditToggle(transport, index) => {
                         let (value, name) = if transport {
@@ -191,12 +197,16 @@ pub(in crate::tui) fn draw_node_editor(
         }
         buttons.push(("Back", Control::NodesEditBack));
     }
-    let cells = action_areas(
-        frame.area(),
-        sections[2],
-        buttons.iter().map(|(_, control)| *control),
-        2,
-    );
+    let cells = if editor.review.is_some() {
+        button_areas(sections[2], buttons.len(), 1)
+    } else {
+        action_areas(
+            frame.area(),
+            sections[2],
+            buttons.iter().map(|(_, control)| *control),
+            2,
+        )
+    };
     for (index, (label, control)) in buttons.iter().enumerate() {
         draw_button(frame, cells[index], label, selected(*control));
         hits.push(Hit {
@@ -1045,10 +1055,10 @@ pub(in crate::tui) fn draw_node_wizard(
         Step::Host => "VPN address: a domain or IP. Examples: vpn.example.com or 203.0.113.10",
         Step::Protocols => "Select protocols, or leave both off for an agent-only node.",
         Step::Created => "The node is saved. Open its card to install the agent and VPN protocols.",
-        Step::Key => "Enter a unique server code. Example: ru1",
-        Step::Title => "Enter the server name. Example: Saint Petersburg #1",
+        Step::Key => "Enter a unique server code. Example: de1",
+        Step::Title => "Enter the server name. Example: Frankfurt #1",
         Step::Region | Step::CustomRegion => "Choose a region or enter your own. Example: Europe",
-        Step::Flag => "Enter a flag or leave it empty. Example: 🇷🇺",
+        Step::Flag => "Enter a flag or leave it empty. Example: 🇩🇪",
         Step::Review => "Check the settings before creating the node.",
     };
     frame.render_widget(
@@ -1175,11 +1185,8 @@ Code: {}",
         rows[2]
     };
     let columns = Layout::horizontal(buttons.iter().map(|(_, control)| {
-        if *control == Control::WizardBack {
-            Constraint::Length(5)
-        } else {
-            Constraint::Fill(1)
-        }
+        let _ = control;
+        Constraint::Fill(1)
     }))
     .spacing(1)
     .split(footer);
@@ -1205,7 +1212,7 @@ pub(in crate::tui) fn wizard_buttons(
     }
     let mut buttons = Vec::new();
     if wizard.step != Step::Transport {
-        buttons.push(("←", Control::WizardBack));
+        buttons.push(("Back", Control::WizardBack));
     }
     if !wizard.selection_step() {
         buttons.push((
@@ -1219,7 +1226,9 @@ pub(in crate::tui) fn wizard_buttons(
             Control::WizardNext,
         ));
     }
-    buttons.push(("Cancel", Control::WizardCancel));
+    if wizard.step == Step::Transport {
+        buttons.push(("Cancel", Control::WizardCancel));
+    }
     buttons
 }
 pub(in crate::tui) fn wizard_controls(wizard: &crate::node_wizard::Wizard) -> Vec<Control> {
@@ -1280,6 +1289,40 @@ pub(in crate::tui) fn node_editor_items(editor: &crate::node_editor::Editor) -> 
             .collect()
     }
 }
+pub(in crate::tui) fn node_editor_rows(
+    editor: &crate::node_editor::Editor,
+    width: u16,
+) -> Vec<(Vec<Control>, u16)> {
+    let columns = if width >= 64 { 2 } else { 1 };
+    let mut rows = Vec::new();
+    let mut pending = Vec::new();
+    for control in node_editor_items(editor) {
+        let multiline = match control {
+            Control::NodesEditField(index) => match editor.fields[index].key {
+                "notes" => Some(6),
+                "awg_parameters" => Some(12),
+                _ => None,
+            },
+            _ => None,
+        };
+        if let Some(height) = multiline {
+            if !pending.is_empty() {
+                rows.push((std::mem::take(&mut pending), 3));
+            }
+            rows.push((vec![control], height));
+        } else {
+            pending.push(control);
+            if pending.len() == columns {
+                rows.push((std::mem::take(&mut pending), 3));
+            }
+        }
+    }
+    if !pending.is_empty() {
+        rows.push((pending, 3));
+    }
+    rows
+}
+
 pub(in crate::tui) fn node_editor_controls(editor: &crate::node_editor::Editor) -> Vec<Control> {
     let mut controls: Vec<_> = crate::node_editor::Tab::ALL
         .into_iter()

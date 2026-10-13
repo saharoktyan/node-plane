@@ -188,7 +188,9 @@ struct SavedOperation {
 }
 impl SavedOperation {
     fn path(&self, state: &std::path::Path) -> std::path::PathBuf {
-        state.join(format!("node-operation-{}.json", self.operation.id))
+        state
+            .join("operations")
+            .join(format!("node-operation-{}.json", self.operation.id))
     }
     fn save(request: &Request, account_id: &str, operation: &Operation) -> Result<()> {
         use std::io::Write;
@@ -199,11 +201,15 @@ impl SavedOperation {
             account_id: account_id.into(),
             operation: operation.clone(),
         };
+        crate::state_layout::directory(&request.state_dir, "operations")?;
         let path = record.path(&request.state_dir);
         if path.exists() {
             ssh::secure_file(&path)?;
         }
-        let mut temporary = tempfile::NamedTempFile::new_in(&request.state_dir)?;
+        let mut temporary = tempfile::NamedTempFile::new_in(crate::state_layout::directory(
+            &request.state_dir,
+            "operations",
+        )?)?;
         ssh::secure_file(temporary.path())?;
         temporary.write_all(&serde_json::to_vec(&record)?)?;
         temporary.as_file().sync_all()?;
@@ -212,7 +218,10 @@ impl SavedOperation {
     }
     fn latest(request: &Request, account_id: &str, key: &str) -> Result<Option<Operation>> {
         let mut latest = None;
-        for item in std::fs::read_dir(&request.state_dir)? {
+        for item in std::fs::read_dir(crate::state_layout::directory(
+            &request.state_dir,
+            "operations",
+        )?)? {
             let path = item?.path();
             let name = path
                 .file_name()
@@ -266,6 +275,7 @@ impl SavedCreation {
     fn path(&self, request: &Request) -> std::path::PathBuf {
         request
             .state_dir
+            .join("operations")
             .join(format!("node-creation-{}.json", self.draft.command_id))
     }
     fn save(&self, request: &Request) -> Result<()> {
@@ -274,7 +284,10 @@ impl SavedCreation {
         if path.exists() {
             ssh::secure_file(&path)?;
         }
-        let mut temporary = tempfile::NamedTempFile::new_in(&request.state_dir)?;
+        let mut temporary = tempfile::NamedTempFile::new_in(crate::state_layout::directory(
+            &request.state_dir,
+            "operations",
+        )?)?;
         ssh::secure_file(temporary.path())?;
         temporary.write_all(&serde_json::to_vec(self)?)?;
         temporary.as_file().sync_all()?;
@@ -282,7 +295,10 @@ impl SavedCreation {
         Ok(())
     }
     fn pending(request: &Request, account_id: &str) -> Result<Option<Self>> {
-        for entry in std::fs::read_dir(&request.state_dir)? {
+        for entry in std::fs::read_dir(crate::state_layout::directory(
+            &request.state_dir,
+            "operations",
+        )?)? {
             let path = entry?.path();
             let name = path
                 .file_name()
@@ -1041,6 +1057,27 @@ async fn execute_inner(
             let protocol_action = match &command { Command::ProtocolAction(_, action) => Some(*action), _ => None };
             match command {
                 Command::Controller(profile, command) => {
+                    if matches!(&command, crate::controller::Command::TelegramSettings | crate::controller::Command::TelegramToken(_) | crate::controller::Command::TelegramAdmin(..)) {
+                        let mut input = json!({"version":1,"session_id":id,"action":"telegram-settings"});
+                        match &command {
+                            crate::controller::Command::TelegramToken(token) => {
+                                ensure!(events::confirm(tx, "Change bot token?", "Verify and save the new token, then restart the Telegram bot.".into())?, "Token change cancelled");
+                                input["action"] = json!("telegram-token");
+                                input["token"] = json!(token.as_str());
+                            }
+                            crate::controller::Command::TelegramAdmin(add, telegram_id, key) => {
+                                ensure!(events::confirm(tx, if *add { "Add administrator?" } else { "Remove administrator?" },
+                                    format!("{} administrator rights for Telegram ID {telegram_id}.", if *add { "Grant" } else { "Remove" }))?, "Administrator change cancelled");
+                                input["action"] = json!(if *add { "telegram-admin-add" } else { "telegram-admin-remove" });
+                                input["telegram_id"] = json!(telegram_id);
+                                input["command_id"] = json!(key);
+                            }
+                            _ => {}
+                        }
+                        let value = backend::helper(session, input).await?;
+                        let _ = tx.send(Event::Nodes(Update::Controller(profile, command, value)));
+                        return Ok("Telegram configuration loaded".into());
+                    }
                     if matches!(&command, crate::controller::Command::Abort(_)) {
                         ensure!(events::confirm(tx, "Cancel removal?", "Keep the controller and stop further removal preparation. Nodes already removed cannot be restored by cancellation.".into())?, "Removal cancellation declined");
                     }
@@ -1052,10 +1089,10 @@ async fn execute_inner(
                         ensure!(events::confirm(tx, if restore { "Restore backup?" } else { "Create backup?" }, if restore { "Controller accounts, profiles, nodes and settings will be replaced with this backup. VPN access will be reconciled after restoration." } else { "Create a backup of controller data and settings." }.into())?, "Backup action cancelled");
                         use std::io::Write;
                         std::fs::create_dir_all(&request.state_dir)?;
-                        let mut file = tempfile::NamedTempFile::new_in(&request.state_dir)?;
+                        let mut file = tempfile::NamedTempFile::new_in(crate::state_layout::directory(&request.state_dir, "operations")?)?;
                         file.write_all(&serde_json::to_vec(&json!({"host":request.host,"port":request.port,"user":request.user,"account":credential.account_id,"command_id":key,"body":body}))?)?;
                         file.as_file().sync_all()?;
-                        file.persist(request.state_dir.join(format!("backup-command-{key}.json")))?;
+                        file.persist(crate::state_layout::directory(&request.state_dir, "operations")?.join(format!("backup-command-{key}.json")))?;
                     }
                     if let crate::controller::Command::UpdatePreferences(value) = &command
                         && value.get("branch").is_some() {
@@ -1102,7 +1139,7 @@ async fn execute_inner(
                     return Ok("Controller state loaded".into());
                 }
                 Command::Access(command) => {
-                    if let crate::access::Command::EditContext { id, .. } = &command {
+                    if let crate::access::Command::EditContext { id, owner } = &command {
                         let mut context = json!({});
                         for (name, root) in [("nodes", "/api/v1/nodes"), ("regions", "/api/v1/regions")] {
                             let mut items = Vec::new(); let mut cursor = None::<String>; let mut seen = BTreeSet::new();
@@ -1116,6 +1153,9 @@ async fn execute_inner(
                                 ensure!(seen.insert(next.clone()), "Access pagination did not advance");
                             }
                             context[name] = json!(items);
+                        }
+                        if let Some(owner) = owner {
+                            context["owner_account"] = backend::request(session, &credential, Method::GET, &format!("/api/v1/accounts/{owner}"), None, None).await?;
                         }
                         if let Some(id) = id {
                             context["profile"] = backend::request(session, &credential, Method::GET,
@@ -1155,6 +1195,10 @@ async fn execute_inner(
                         let profile_value = backend::request(session, &credential, Method::GET, &format!("/api/v1/profiles/{profile}"), None, None).await?;
                         let operation = backend::request(session, &credential, Method::GET, &format!("/api/v1/profiles/{profile}/operation"), None, None).await?;
                         value = json!({"profile": profile_value, "devices": devices, "operation": operation, "result":result});
+                    }
+                    if matches!(&command, crate::access::Command::Decision { .. })
+                        && let Some(account) = value["account_id"].as_str() {
+                            value["_account"] = backend::request(session, &credential, Method::GET, &format!("/api/v1/accounts/{account}"), None, None).await?;
                     }
                     if let crate::access::Command::List(tab) = &command {
                         let mut cursors = BTreeSet::new();

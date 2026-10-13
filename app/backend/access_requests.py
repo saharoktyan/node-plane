@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import json
 from uuid import UUID, uuid4
 
 from .authorization import AccessDenied, require_permission
@@ -21,6 +22,8 @@ class AccessRequestService:
 
     def initialize_schema(self):
         with self.db.transaction() as conn:
+            from db.migration_revisions.r0007_account_menu_refresh import upgrade
+            upgrade(conn)
             conn.execute('''CREATE TABLE IF NOT EXISTS backend_system_settings (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
@@ -40,6 +43,8 @@ class AccessRequestService:
                 ON backend_access_requests(account_id) WHERE status = 'pending' ''')
             conn.execute('''CREATE INDEX IF NOT EXISTS idx_backend_access_requests_status
                 ON backend_access_requests(status, id)''')
+            from db.migration_revisions.r0008_access_decision_delivery import upgrade
+            upgrade(conn)
 
     @staticmethod
     def _policy(conn):
@@ -220,8 +225,16 @@ class AccessRequestService:
                 (status, now, actor.account.id, key, request_id))
             conn.execute('UPDATE backend_accounts SET status = ?, revision = revision + 1 WHERE id = ?',
                          (status, row['account_id']))
+            revision = conn.execute('SELECT revision FROM backend_accounts WHERE id=?', (row['account_id'],)).fetchone()['revision']
+            conn.execute('INSERT INTO backend_account_menu_refresh(account_id,revision) VALUES (?,?) ON CONFLICT(account_id) DO UPDATE SET revision=excluded.revision', (row['account_id'], revision))
             if decision == 'approve':
                 from .profiles import ProfileRepository
                 ProfileRepository.ensure_account_profile_in_transaction(conn, row['account_id'])
+            from .accounts import AccountService
+            from .authorization import PrincipalKind
+            decider = AccountService.public(AccountService._read(conn, actor.account.id))
+            conn.execute('INSERT INTO backend_access_decision_details(request_id,decider_json,surface) VALUES (?,?,?)',
+                (request_id, json.dumps(decider), 'workstation' if actor.principal.kind == PrincipalKind.ACCOUNT else 'telegram'))
+            conn.execute("UPDATE backend_access_request_messages SET status='queued' WHERE request_id=? AND status='pending'", (request_id,))
             result = conn.execute('SELECT * FROM backend_access_requests WHERE id = ?', (request_id,)).fetchone()
             return self.public(result)

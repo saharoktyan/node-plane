@@ -238,8 +238,12 @@ async def show_home(chat_id: int, user_id: int, bot: Bot, backend: BackendClient
     if (cached_navigation and account is None and presentation and
             presentation.get('user_id') == user_id and
             presentation['account']['status'] == 'approved'):
-        account, title = presentation['account'], presentation['title']
-        notifications = {'total': presentation.get('notifications_count', 0)}
+        account = presentation['account']
+        async with asyncio.timeout(ONBOARDING_TIMEOUT):
+            title, notifications = await asyncio.gather(
+                backend.bot_title(user_id), backend.notifications(user_id, limit=1))
+        await state.update_data(home_presentation={**presentation, 'title': title,
+            'notifications_count': notifications.get('total', 0)})
     else:
         try:
             async with asyncio.timeout(ONBOARDING_TIMEOUT):
@@ -283,7 +287,7 @@ async def show_home(chat_id: int, user_id: int, bot: Bot, backend: BackendClient
             except Exception:
                 pass
     if account['status'] == 'approved':
-        rows[-1].append(button(user_id, tr(locale, 'home.settings'), 'member_settings'))
+        rows[-1].append(button(user_id, tr(locale, 'devices.title'), 'device_profiles'))
     else:
         rows.append([button(user_id, tr(locale, 'home.settings'), 'member_settings')])
     if account['role'] == 'admin' and account['status'] == 'approved':
@@ -291,14 +295,14 @@ async def show_home(chat_id: int, user_id: int, bot: Bot, backend: BackendClient
         if not account.get('onboarding_completed', False):
             rows.append([button(user_id, tr(locale, 'quick_start.title'), 'quick_start')])
     if account['status'] == 'approved':
-        rows.insert(2, [button(user_id, tr(locale, 'devices.title'), 'device_profiles')])
+        rows.insert(2, [button(user_id, tr(locale, 'home.settings'), 'member_settings')])
         if notifications.get('total', 0):
             rows.insert(3, [button(user_id, tr(locale, 'announce.inbox'), 'notification_inbox')])
     if account['status'] != 'approved':
         request_rows = tuple(tuple(row) for row in rows[:-1])
         await render(bot, chat_id, Screen(bot_title,
             sections=(Section(tr(locale, 'home.access_title'), lines, rows=request_rows),),
-            embedded_buttons=True, navigation=True), rows[-1:], state, message_id)
+            embedded_buttons=True, navigation=True, standalone=True), rows[-1:], state, message_id)
     else:
         await render(bot, chat_id, Screen(bot_title, lines, embedded_buttons=True), rows, state, message_id)
     await state.update_data(home_panel_active=True)
@@ -440,6 +444,7 @@ async def show_account_profile(chat_id: int, user_id: int, message_id: int,
         (tr(locale, 'protocol.xray'), str(summary.get('xray_count', 0))),
         (tr(locale, 'protocol.awg'), str(summary.get('awg_count', 0))),
         (tr(locale, 'account.rich.issued'), str(summary.get('issued_count', 0))),
+        *profile_traffic_statistics(summary, locale),
         (tr(locale, 'account.rich.last'), (summary.get('last_issued_at') or '')[:16].replace('T', ' ') or '—'))),))
     traffic = profile_traffic_section(summary, locale)
     servers = Section(tr(locale, 'account.access_title'),
@@ -454,6 +459,18 @@ async def show_account_profile(chat_id: int, user_id: int, message_id: int,
         (summary['display_name'],), sections=sections, embedded_buttons=True, navigation=True,
         breadcrumbs=profile_path),
         [[button(user_id, tr(locale, 'back'), 'account_profile', profile_id, back_to)]], state, message_id)
+
+
+def profile_traffic_statistics(summary, locale):
+    traffic = summary.get('traffic') or {}
+    items = traffic.get('items') or []
+    available = traffic.get('status') in {'current', 'unknown'}
+    totals = {item['protocol']: traffic_item_total(item) for item in items} if available else {}
+    total = (sum(totals.values()) if totals and all(value is not None for value in totals.values()) else None)
+    labels = (('account.traffic_total', total), ('account.traffic_awg', totals.get('awg')),
+              ('account.traffic_vless', totals.get('xray')))
+    return tuple((tr(locale, label), _traffic_bytes(value) if value is not None else
+                  tr(locale, 'account.rich.waiting')) for label, value in labels)
 
 
 def profile_traffic_section(summary, locale):
@@ -939,6 +956,20 @@ async def close_announcement_message(query: CallbackQuery, bot: Bot) -> None:
         pass
 
 
+@router.callback_query(F.data.startswith('announce_dismiss:'))
+async def dismiss_announcement_message(query: CallbackQuery, bot: Bot,
+        backend: BackendClient, state: FSMContext) -> None:
+    if query.message is None or query.from_user is None or query.message.chat.type != 'private':
+        return
+    await query.answer()
+    await backend.dismiss_notification(query.from_user.id, query.data.split(':', 1)[1])
+    await state.update_data(home_presentation=None)
+    try:
+        await bot.delete_message(query.message.chat.id, query.message.message_id)
+    except TelegramAPIError:
+        pass
+
+
 @router.callback_query(F.data.startswith('u:'))
 async def user_action_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
                          state: FSMContext) -> None:
@@ -1045,11 +1076,8 @@ async def user_action_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
         elif action.name == 'member_settings':
             await show_member_settings(chat_id, user_id, message_id, bot, backend, state)
         elif action.name == 'documentation':
-            from ..documentation import section, title
-            locale = normalize_locale((await state.get_data()).get('locale'))
-            await render(bot, chat_id, Screen(title(locale), sections=(section(locale),),
-                embedded_buttons=True, navigation=True),
-                [[button(user_id, tr(locale, 'back'), 'member_settings')]], state, message_id)
+            # Older panels can still contain a cached documentation callback.
+            await show_member_settings(chat_id, user_id, message_id, bot, backend, state)
         elif action.name == 'announcement_silent':
             await backend.set_announcement_silent(user_id, action.args[0] == 'true')
             await show_member_settings(chat_id, user_id, message_id, bot, backend, state)
@@ -1262,8 +1290,6 @@ async def show_member_settings(chat_id: int, user_id: int, message_id: int,
                 .model_copy(update={'style': 'primary' if not silent else None}),
             button(user_id, tr(locale, 'ui.disable_sound'), 'announcement_silent', 'true')
                 .model_copy(update={'style': 'primary' if silent else None}),),))]
-    from ..documentation import title
-    sections.append(Section('', inline_rows=((button(user_id, title(locale), 'documentation'),),)))
     await render(bot, chat_id, Screen(tr(locale, 'settings.title'),
         sections=tuple(sections), embedded_buttons=True, navigation=True),
         [[button(user_id, tr(locale, 'back'), 'home')]], state, message_id)

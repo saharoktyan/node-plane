@@ -78,9 +78,7 @@ async def show_card(chat_id, user_id, message_id, profile_id, device_id, bot, ba
         rows.append([user.button(user_id, tr(locale, 'devices.refresh'), 'device_card', profile_id, device_id)])
     rows.append([user.button(user_id, tr(locale, 'back'), 'device_list', profile_id)])
     await render(bot, chat_id, Screen(item['display_name'],
-        (tr(locale, 'devices.status.' + item['status']),),
-        sections=(Section(tr(locale, 'devices.access'), (tr(locale, 'devices.access_text'),)),)
-            if item['status'] == 'active' else (),
+        (tr(locale, 'devices.management') if item['status'] == 'active' else tr(locale, 'devices.status.' + item['status']),),
         embedded_buttons=True, navigation=True), rows, state, message_id)
     if item['status'] == 'deleting':
         schedule_refresh(state, lambda: show_card(chat_id, user_id, message_id, profile_id, device_id, bot, backend, state))

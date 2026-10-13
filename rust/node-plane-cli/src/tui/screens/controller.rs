@@ -242,11 +242,17 @@ pub(in crate::tui) fn draw_controller(
     {
         let popup = centered(
             right,
-            76,
-            if app.controller.defaults_input.is_some() {
+            if app.controller.text_confirmation {
+                78
+            } else {
+                76
+            },
+            if app.controller.text_confirmation {
+                12
+            } else if app.controller.defaults_input.is_some() {
                 10
             } else {
-                13
+                18
             },
         );
         frame.render_widget(Clear, popup);
@@ -475,12 +481,11 @@ pub(in crate::tui) fn draw_controller(
             preview["text"].as_str().unwrap_or("")
         );
         controls.extend([
+            ("Back".into(), Control::ControllerBack),
             (
                 "Send announcement".into(),
                 Control::ControllerAnnouncementSend,
             ),
-            ("Edit".into(), Control::ControllerAnnouncementEdit),
-            ("Back".into(), Control::ControllerBack),
         ]);
     } else if let Some(draft) = &state.announcement_draft {
         text = "Write an announcement (up to 3000 characters).\nThe message will be sent to eligible users.".into();
@@ -584,6 +589,8 @@ pub(in crate::tui) fn draw_controller(
         text = match *key {
             "gate_message" => "Message for users requesting access".into(),
             "bot_title" => "Bot name".into(),
+            "telegram_token" => "New bot token from BotFather. The token is hidden; saving restarts the bot.".into(),
+            "telegram_admin" => "Telegram user ID of the administrator to add".into(),
             "backup_import_path" => "Import backup · local JSON file path. Import adds it to the catalog; restore is a separate action.".into(),
             "backup_export_path" => "Download backup · local JSON file path. Existing files are not overwritten.".into(),
             _ => format!("Installation defaults · {key}"),
@@ -622,6 +629,39 @@ pub(in crate::tui) fn draw_controller(
         ]);
 
         controls.push(("Request message".into(), Control::ControllerGateMessage));
+    } else if let Some(value) = &state.telegram_settings {
+        text = format!(
+            "Bot token: {}",
+            if value["token_configured"] == true {
+                "configured"
+            } else {
+                "missing"
+            }
+        );
+        if value["restart_pending"] == true {
+            text.push_str("\nConfiguration saved. Restart the Telegram service to apply it.");
+        }
+        controls.extend([
+            ("Change bot token".into(), Control::ControllerTelegramToken),
+            (
+                "Add administrator".into(),
+                Control::ControllerTelegramAdminAdd,
+            ),
+        ]);
+        if let Some(admins) = value["admins"].as_array() {
+            for (index, admin) in admins.iter().enumerate() {
+                let id = admin["telegram_user_id"].as_str().unwrap_or("");
+                let name = admin["username"]
+                    .as_str()
+                    .filter(|s| !s.is_empty())
+                    .map(|name| format!("@{name} · "))
+                    .unwrap_or_default();
+                controls.push((
+                    format!("Remove · {name}{id}"),
+                    Control::ControllerTelegramAdminRemove(index),
+                ));
+            }
+        }
     } else if let Some(value) = &state.bot_title {
         text = format!("Bot name: {}", value["title"].as_str().unwrap_or(""));
         controls.push(("Edit name".into(), Control::ControllerBotTitleEdit));
@@ -1079,9 +1119,82 @@ pub(in crate::tui) fn draw_controller(
     }
     // Back is pinned in the common footer, outside this scrollable list.
     controls.retain(|(_, control)| {
-        *control != Control::ControllerBack || state.defaults_input.is_some()
+        *control != Control::ControllerBack
+            || state.defaults_input.is_some()
+            || state.announcement_preview.is_some()
     });
-    if let Some((_, input)) = &state.defaults_input {
+    if state.announcement_preview.is_some() && state.announcement_job.is_none() {
+        let rows = Layout::vertical([Constraint::Min(0), Constraint::Length(3)]).split(parts[0]);
+        frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: false }), rows[0]);
+        let cells = button_areas(rows[1], 2, 1);
+        for (index, (label, control)) in [
+            ("Back", Control::ControllerBack),
+            ("Send announcement", Control::ControllerAnnouncementSend),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            draw_button(
+                frame,
+                cells[index],
+                label,
+                app.controller_controls().get(state.selected) == Some(&control),
+            );
+            hits.push(Hit {
+                area: cells[index],
+                control,
+            });
+        }
+        return;
+    }
+    if let Some(draft) = &state.announcement_draft
+        && state.announcement_preview.is_none()
+        && state.announcement_job.is_none()
+    {
+        let rows = Layout::vertical([
+            Constraint::Length(2),
+            Constraint::Min(3),
+            Constraint::Length(3),
+        ])
+        .spacing(1)
+        .split(parts[0]);
+        frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: false }), rows[0]);
+        draw_field(
+            frame,
+            rows[1],
+            "Message",
+            draft,
+            app.controller_controls().get(state.selected)
+                == Some(&Control::ControllerAnnouncementInput),
+        );
+        hits.push(Hit {
+            area: rows[1],
+            control: Control::ControllerAnnouncementInput,
+        });
+        let buttons = Layout::horizontal([Constraint::Fill(1); 2])
+            .spacing(1)
+            .split(rows[2]);
+        for (index, (label, control)) in [
+            ("Cancel", Control::ControllerBack),
+            ("Preview", Control::ControllerAnnouncementPreview),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            draw_button(
+                frame,
+                buttons[index],
+                label,
+                app.controller_controls().get(state.selected) == Some(&control),
+            );
+            hits.push(Hit {
+                area: buttons[index],
+                control,
+            });
+        }
+        return;
+    }
+    if let Some((key, input)) = &state.defaults_input {
         let text_height = (text.lines().count() as u16 + 1).min(
             parts[0]
                 .height
@@ -1097,7 +1210,14 @@ pub(in crate::tui) fn draw_controller(
                 .position(|(_, c)| *c == Control::ControllerDefaultsInput)
                 .unwrap_or(0);
             let rect = Rect::new(parts[0].x, parts[0].y + text_height, parts[0].width, 3);
-            draw_field(frame, rect, "Value", input, state.selected == index);
+            let hidden;
+            let value = if *key == "telegram_token" {
+                hidden = "•".repeat(input.chars().count());
+                hidden.as_str()
+            } else {
+                input.as_str()
+            };
+            draw_field(frame, rect, "Value", value, state.selected == index);
             hits.push(Hit {
                 area: rect,
                 control: Control::ControllerDefaultsInput,
@@ -1110,11 +1230,19 @@ pub(in crate::tui) fn draw_controller(
             parts[0].width,
             3,
         );
-        let cells = Layout::horizontal([Constraint::Length(5), Constraint::Fill(1)])
+        let cells = Layout::horizontal([Constraint::Fill(1), Constraint::Fill(1)])
             .spacing(1)
             .split(footer);
         for (slot, control, label) in [
-            (0, Control::ControllerBack, "←"),
+            (
+                0,
+                Control::ControllerBack,
+                if state.text_confirmation {
+                    "Back"
+                } else {
+                    "Cancel"
+                },
+            ),
             (
                 1,
                 if state.text_confirmation {
@@ -1145,7 +1273,13 @@ pub(in crate::tui) fn draw_controller(
         .enumerate()
         .map(|(index, line)| {
             if state.removed && index == 0 {
-                Line::styled(line.to_owned(), Style::default().fg(Color::Red))
+                Line::from(vec![
+                    Span::styled("Bye-bye!", Style::default().fg(Color::Red)),
+                    Span::styled(
+                        line.strip_prefix("Bye-bye!").unwrap_or(line).to_owned(),
+                        Style::default().fg(Color::White),
+                    ),
+                ])
             } else if state.history_detail.is_some() && index == 0
                 || state.plan.is_some() && index == 1
             {
@@ -1175,6 +1309,13 @@ pub(in crate::tui) fn draw_controller(
         let mut index = 0;
         while index < controls.len() {
             let mut row = vec![index];
+            if is_page_control(controls[index].1)
+                && index + 1 < controls.len()
+                && is_page_control(controls[index + 1].1)
+            {
+                index += 1;
+                row.push(index);
+            }
             if choice_row_label(controls[index].1).is_some()
                 || state.defaults_input.is_some()
                     && matches!(
@@ -1268,7 +1409,8 @@ pub(in crate::tui) fn draw_controller(
                     control,
                     Control::ControllerUpdateAuto
                         | Control::ControllerBackupAuto
-                        | Control::ControllerAlertToggle("enabled")
+                        | Control::ControllerAlertToggle(_)
+                        | Control::ControllerPolicyToggle(_)
                 )
             {
                 draw_choice_button(
@@ -1382,7 +1524,7 @@ pub(in crate::tui) fn defaults_input_changed(state: &crate::controller::Browser)
     let Some((key, input)) = &state.defaults_input else {
         return false;
     };
-    if key.starts_with("backup_") {
+    if key.starts_with("backup_") || key.starts_with("telegram_") {
         return !input.trim().is_empty();
     }
     let value = match *key {

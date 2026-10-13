@@ -174,6 +174,7 @@ class Screen:
     breadcrumbs: tuple[Breadcrumb, ...] = ()
     breadcrumb_more: str | None = None
     navigation_return: str | None = None
+    standalone: bool = False
 
     def rich(self, rows=()) -> InputRichMessage:
         blocks = ([InputRichBlockParagraph(text=breadcrumb_text(self.breadcrumbs,

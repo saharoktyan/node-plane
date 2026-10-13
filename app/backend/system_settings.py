@@ -126,9 +126,18 @@ class SystemSettingsService:
         with self.db.transaction() as conn:
             from .maintenance_gate import admit
             admit(conn)
+            conn.execute("UPDATE backend_account_guard SET revision=revision+1 WHERE id=1")
+            current = conn.execute("SELECT role,status FROM backend_accounts WHERE id=?", (actor.account.id,)).fetchone()
+            if not current or (current['role'], current['status']) != ('admin', 'approved'):
+                raise AccessDenied('permission_denied', 403)
             conn.execute(
                 """INSERT INTO backend_system_settings(key, value) VALUES ('bot_menu_title', ?)
                 ON CONFLICT(key) DO UPDATE SET value = excluded.value""",
                 (normalized,),
             )
+            # A later title change must not be acknowledged by an older refresh.
+            conn.execute("UPDATE backend_accounts SET revision=revision+1 WHERE status='approved'")
+            conn.execute("""INSERT INTO backend_account_menu_refresh(account_id,revision)
+                SELECT id,revision FROM backend_accounts WHERE status='approved'
+                ON CONFLICT(account_id) DO UPDATE SET revision=excluded.revision""")
         return {"title": normalized}

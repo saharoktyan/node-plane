@@ -34,6 +34,7 @@ The header shows connection and loading status. SSH connections are reused acros
 - **Tab / Shift+Tab** move focus. Hovering the pointer changes focus; clicking activates.
 - The mouse wheel scrolls long pages. Use the scrollbar to move through a page.
 - **Back** returns to the parent menu. **Esc** backs out of a submenu or closes the current section; from the empty workspace it opens the exit confirmation.
+- In wizards, **Cancel** closes the first step; **Back** returns one step and keeps the draft. Confirmation dialogs use full text buttons.
 - In the sidebar profile selector, **← / →** switches the installation profile while keeping focus on its name.
 - A **×** marks an unavailable action. Controller sections become available after installation is confirmed.
 
@@ -55,9 +56,13 @@ The **Offer service and operation recovery** option retains its last selection a
 | Diagnostic | Check controller services/schema and all registered servers; inspect recovery options |
 | Settings | Local installation profiles, appearance, Workstation updates, connection/security and session information |
 
-On startup Quick Start appears beside the sidebar. In NPW it ends after installing the node protocols; create user devices and obtain ordinary configurations in the Telegram bot. Select **Done** after setup or confirm **Dismiss** to hide the guide permanently. Removing nodes does not restore it, and F1 no longer opens it. If installation detection is unconfirmed, use **Check installation**.
+Quick Start appears beside the sidebar until setup is complete or you confirm **Dismiss**. Completion is saved automatically, including when you do not select **Done**. Removing nodes does not restore it. In NPW the guide ends after installing the node protocols; create user devices and obtain ordinary configurations in the Telegram bot. If installation detection is unconfirmed, use **Check installation**.
 
 Automatic check, backup and alert preferences appear when the corresponding feature is enabled. Select an interval directly; backups also offer a retention count. **Node Plane Settings → Basic** contains installation defaults and general controller options.
+
+Open **Node Plane Settings → Basic → Telegram** to change the bot token or add/remove administrators by Telegram ID. Known usernames appear in the list. The token is hidden, verified before saving and never included in local operation journals. Changing the token restarts the Telegram service; administrator changes apply immediately. Your own administrator rights cannot be removed here.
+
+Server notes and announcements support **Enter** for newlines and wrap long lines automatically. Manual AWG settings have their own **Manual AWG parameters** tab in the node editor.
 
 In profile access settings, **Duration → Custom duration** accepts whole-number values with H (hours), D (days), M (30 days) or Y (365 days), such as `12H` or `1M`. User devices are managed by their owner in the Telegram bot. Server **Maintenance** groups diagnostics, reinstall and reset/removal; diagnostics also check configured TCP and UDP ports.
 
@@ -72,6 +77,8 @@ Open **Node Plane Settings → Reset & removal**, choose whether to uninstall no
 ## Appearance and local files
 
 Workstation stores its connection preferences, SSH material, logs and themes in the OS local data directory under `node-plane-dev` for dev and `node-plane` for stable, or the directory supplied by `--state-dir`. Keep this directory private.
+
+Operation records are stored in `operations/`, and operation logs in `logs/`. Older journals in the data directory are migrated automatically; conflicting copies are retained for inspection.
 
 Open **Settings → Appearance** to choose a theme or custom accent. Built-in theme files are created in `themes/` without overwriting existing files. Add a JSON file there and restart Workstation to load a custom theme:
 

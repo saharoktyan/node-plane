@@ -6,6 +6,17 @@ from telegram_client.routers import common, admin_node_tools, admin_nodes, admin
 
 
 class AutoRefreshTests(IsolatedAsyncioTestCase):
+    async def test_repair_operations_poll_and_return_to_repair(self):
+        for action in ('sync_env', 'sync_xray', 'reconcile_access'):
+            state = SimpleNamespace(get_data=AsyncMock(return_value={'locale': 'en'}), update_data=AsyncMock())
+            job = {'id': 'repair1', 'node_key': 'lv1', 'action': action, 'status': 'running'}
+            backend = SimpleNamespace(node_job=AsyncMock(return_value=dict(job, status='succeeded', result={})))
+            with patch.object(admin_node_tools, 'render', new_callable=AsyncMock) as draw, patch.object(admin_node_tools, 'schedule_refresh') as schedule:
+                await admin_node_tools.show_job(1, 1, 7, job, SimpleNamespace(), state, backend=backend)
+                self.assertEqual(draw.call_args.args[3][-1][0].callback_data, 'node_view:repair:lv1')
+                await schedule.call_args.args[1]()
+                backend.node_job.assert_awaited_once_with(1, 'repair1')
+                self.assertEqual(draw.call_args.args[3][-1][0].callback_data, 'node_view:repair:lv1')
     async def asyncTearDown(self):
         await common.shutdown_refreshes()
 
