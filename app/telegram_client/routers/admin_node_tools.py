@@ -422,7 +422,7 @@ async def resolve_do_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, 
 async def removal_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
     await query.answer()
     await advance_removal(query.message.chat.id, query.from_user.id, query.message.message_id,
-                          query.data.split(':', 1)[1], bot, backend, state)
+                          query.data.split(':', 1)[1], bot, backend, state, observe=True)
 
 
 @router.callback_query(F.data.startswith('remove_retry:'))
@@ -432,13 +432,18 @@ async def removal_retry_cb(query: CallbackQuery, bot: Bot, backend: BackendClien
                           query.data.split(':', 1)[1], bot, backend, state, retry=True)
 
 
-async def advance_removal(chat_id, user_id, message_id, node_key, bot, backend, state, retry=False):
+async def advance_removal(chat_id, user_id, message_id, node_key, bot, backend, state, retry=False, observe=False):
     from .callbacks import AdminNodesCallback, ConfirmRegistryRemovalCallback
     locale = normalize_locale((await state.get_data()).get('locale'))
     rows = [[button(locale, 'node_tools.refresh', f'remove_progress:{node_key}')]]
     allow_registry = True
+    polling = False
     try:
-        result = await backend.remove_node_step(user_id, node_key, retry=retry)
+        if observe:
+            result = await backend.request('GET', f'/api/v1/nodes/{node_key}/removal', telegram_user_id=user_id)
+        else:
+            result = await backend.remove_node_step(user_id, node_key, retry=retry)
+        polling = result.get('removal_status') in {'queued', 'running', 'blocked'}
         if result.get('error_code'):
             raise BackendError(result['error_code'], 409)
         if result['status'] in {'removed', 'removed_registry_only', 'removed_unprovisioned'}:
@@ -457,6 +462,7 @@ async def advance_removal(chat_id, user_id, message_id, node_key, bot, backend, 
             lines.append(tr(locale, 'nodes.maintenance.phase', value=tr(locale,
                 'nodes.maintenance.phase.' + (result['cleanup_phase'] or 'not_started'))))
     except BackendError as exc:
+        polling = polling or exc.status >= 500 or exc.status == 429
         allow_registry = exc.code not in {'resource_not_found', 'permission_denied', 'account_disabled'}
         rows = [[button(locale, 'node_tools.retry', f'remove_retry:{node_key}', style='danger')]]
         if exc.code in {'node_agent_unavailable', 'node_agent_unconfigured'}:
@@ -479,3 +485,5 @@ async def advance_removal(chat_id, user_id, message_id, node_key, bot, backend, 
         (lines[0],), sections=(Section(tr(locale, 'nodes.rich.next_step'),
             lines=tuple(lines[1:]), rows=tuple(tuple(row) for row in rows[:-1])),),
         embedded_buttons=True, navigation=True), rows[-1:], state, message_id)
+    if polling:
+        schedule_refresh(state, lambda: advance_removal(chat_id, user_id, message_id, node_key, bot, backend, state, observe=True))

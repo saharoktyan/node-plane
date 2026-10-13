@@ -52,7 +52,7 @@ impl Browser {
         self.confirmation.is_none()
             && matches!(
                 self.snapshot["removal_status"].as_str(),
-                Some("queued" | "running")
+                Some("queued" | "running" | "blocked")
             )
     }
     pub fn blocked(&self) -> bool {

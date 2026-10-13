@@ -2,9 +2,10 @@
 
 ## Unreleased
 
-## 1.0.0-alpha.5 - 2026-10-14
+## 1.0.0-alpha.5 - 2026-10-13
 
 - Protect administrator profiles from deletion, freezing, blocking and access revocation; apply a permanent all-server rule after protocol installation and retain the previous member policy on demotion.
+- Refresh node removal progress through read-only status requests without repeating removal commands.
 - Move Telegram administrator Settings to the last System row.
 - Refresh backup, announcement, profile synchronization and deletion progress automatically; keep Server setup observation alive across recoverable agent outages and show these as waiting instead of a failed installation.
 

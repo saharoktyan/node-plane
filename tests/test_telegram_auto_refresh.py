@@ -172,3 +172,15 @@ class AutoRefreshTests(IsolatedAsyncioTestCase):
         common.schedule_refresh(state,read,interval=.001)
         await asyncio.sleep(.04)
         self.assertEqual(read.await_count,2)
+
+    async def test_node_removal_progress_reads_until_complete_without_requeue(self):
+        state=SimpleNamespace(get_data=AsyncMock(return_value={'locale':'en'}))
+        backend=SimpleNamespace(remove_node_step=AsyncMock(return_value={'node_key':'lv1','status':'draining','removal_status':'running','revocations_complete':False,'pending_tasks':2}),
+            request=AsyncMock(return_value={'node_key':'lv1','status':'removed'}))
+        with patch.object(admin_node_tools,'render',new_callable=AsyncMock) as draw, patch.object(admin_node_tools,'schedule_refresh') as schedule:
+            await admin_node_tools.advance_removal(1,1,7,'lv1',SimpleNamespace(),backend,state)
+            await schedule.call_args.args[1]()
+            self.assertEqual(schedule.call_count,1)
+            backend.remove_node_step.assert_awaited_once_with(1,'lv1',retry=False)
+            backend.request.assert_awaited_once_with('GET','/api/v1/nodes/lv1/removal',telegram_user_id=1)
+            self.assertIn('removed',draw.call_args.args[2].plain().lower())
