@@ -668,9 +668,7 @@ impl App {
         match key.code {
             KeyCode::Down | KeyCode::Tab => *selected = (*selected + 1).min(8),
             KeyCode::Up | KeyCode::BackTab => *selected = selected.saturating_sub(1),
-            KeyCode::Left | KeyCode::Right if *selected == 4 => {
-                cycle_channel(&mut fields[4], key.code == KeyCode::Left)
-            }
+            KeyCode::Left | KeyCode::Right if *selected == 4 => {}
             KeyCode::Right if *selected == 7 => *selected = 8,
             KeyCode::Left if *selected == 8 => *selected = 7,
             KeyCode::Char(c)

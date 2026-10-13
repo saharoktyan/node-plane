@@ -11,6 +11,8 @@ rust/node-plane-cli/target/debug/node-plane
 
 Run `node-plane --help` for command-line options. `--state-dir` selects private local data; `--no-tui` uses concise terminal output. Never use production connection state in destructive test fixtures.
 
+Build channel follows the package version: prereleases are dev, stable versions are stable. Installation and controller operations enforce this channel. Installed commands are `node-plane-dev` and `node-plane-stable`; local state and updater receipts are separate. See the user guide for profile copying and explicit controller transitions.
+
 ## Source layout
 
 - `tui/`: application state, event loop, view/widgets/themes, screens, input and actions.

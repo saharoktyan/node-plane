@@ -315,7 +315,7 @@ pub(in crate::tui) fn draw_controller(
             .as_ref()
             .and_then(|value| value["branch"].as_str())
             .unwrap_or("main");
-        let next = if current == "main" { "dev" } else { "main" };
+        let next = crate::config::default_branch();
         text = format!(
             "Switch update branch from {current} to {next}? This can make an update incompatible and break the installation."
         );
@@ -956,6 +956,12 @@ pub(in crate::tui) fn draw_controller(
             if let Some(error) = job["error_code"].as_str() {
                 text.push_str(&format!("\n{error}"));
             }
+        }
+        if value["branch"]
+            .as_str()
+            .is_some_and(|branch| branch != crate::config::default_branch())
+        {
+            text.push_str(&format!("\n\nThis NPW manages {} controllers. Switch the controller to this channel before using other sections.", crate::config::workstation_channel()));
         }
         controls = app.controller_updates_actions();
     } else if state.removed || !app.controller_ready() && !state.verifying {

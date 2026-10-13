@@ -559,11 +559,11 @@ impl App {
                 self.controller.branch_confirmation = false;
                 self.controller.selected = 0;
                 if confirm && let Some(value) = &self.controller.updates {
-                    let branch = if value["branch"] == "main" {
-                        "dev"
-                    } else {
-                        "main"
-                    };
+                    let branch = crate::config::default_branch();
+                    if value["branch"] == branch {
+                        self.error = "Copy this profile to the other NPW channel in Settings → Profiles, then switch the controller from that NPW.".into();
+                        return None;
+                    }
                     self.controller_command(crate::controller::Command::UpdatePreferences(
                         serde_json::json!({"branch":branch}),
                     ));
@@ -734,8 +734,10 @@ impl App {
                 None
             }
             Control::Controller => {
+                let return_form = matches!(self.screen, Screen::Form) && !self.controller_ready();
                 self.form.select_action(Action::Install);
                 self.open_controller();
+                self.controller_return_form = return_form;
                 None
             }
             Control::ControllerScope => {
@@ -838,6 +840,15 @@ impl App {
                 None
             }
             Control::ControllerBack => {
+                if self.controller_return_form
+                    && !self.controller_ready()
+                    && !self.controller.removal_active()
+                {
+                    self.controller_return_form = false;
+                    self.screen = Screen::Form;
+                    self.nodes_requested = None;
+                    return None;
+                }
                 if self.controller.text_confirmation {
                     self.controller.text_confirmation = false;
                     return None;
@@ -984,6 +995,7 @@ impl App {
         }
     }
     pub(in crate::tui) fn open_controller(&mut self) {
+        self.controller_return_form = false;
         if !self.actions_enabled() {
             return;
         }
@@ -1255,6 +1267,21 @@ impl App {
         let Some(value) = &self.controller.updates else {
             return Vec::new();
         };
+        if value["branch"]
+            .as_str()
+            .is_some_and(|branch| branch != crate::config::default_branch())
+        {
+            return vec![
+                (
+                    format!(
+                        "Switch controller to {} NPW channel",
+                        crate::config::workstation_channel()
+                    ),
+                    Control::ControllerUpdateBranch,
+                ),
+                ("Back".into(), Control::ControllerBack),
+            ];
+        }
         let active = value
             .get("latest_job")
             .is_some_and(|job| update_operation_active(&job["status"]));
@@ -1267,7 +1294,6 @@ impl App {
                 "Choose version / rollback".into(),
                 Control::ControllerVersions,
             ),
-            ("Change branch".into(), Control::ControllerUpdateBranch),
             (
                 format!(
                     "Auto-check: {}",

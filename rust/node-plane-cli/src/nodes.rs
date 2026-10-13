@@ -920,6 +920,57 @@ async fn observe_controller_removal(
     }
 }
 
+pub(crate) fn controller_branch(updates: &Value) -> Result<&str> {
+    updates["current_version"]
+        .as_str()
+        .and_then(|version| semver::Version::parse(version.trim_start_matches('v')).ok())
+        .map(|version| {
+            if version.pre.is_empty() {
+                "main"
+            } else {
+                "dev"
+            }
+        })
+        .or_else(|| updates["branch"].as_str())
+        .context("Controller did not report its channel")
+}
+
+pub(crate) fn validate_controller_channel(
+    command: &Command,
+    installed: &str,
+    expected: &str,
+) -> Result<()> {
+    ensure!(
+        matches!(installed, "main" | "dev"),
+        "Controller reported an unsupported channel."
+    );
+    let migration_view = matches!(
+        command,
+        Command::Controller(
+            _,
+            crate::controller::Command::Updates
+                | crate::controller::Command::UpdateResult(_)
+                | crate::controller::Command::UpdateVersions(_)
+                | crate::controller::Command::UpdateCheck
+        )
+    );
+    let migration_request = matches!(command, Command::Controller(_, crate::controller::Command::UpdatePreferences(value))
+        if value.as_object().is_some_and(|v| v.len() == 1) && value["branch"] == expected);
+    ensure!(
+        installed == expected || migration_view || migration_request,
+        "Controller channel is {installed}; this NPW manages {expected}. Open Node Plane Updates and switch the controller to this NPW channel, or use the matching NPW."
+    );
+    if let Command::Controller(_, crate::controller::Command::UpdatePreferences(value)) = command
+        && let Some(branch) = value["branch"].as_str()
+    {
+        ensure!(
+            branch == expected,
+            "Transfer the profile to the matching NPW before switching controller channels."
+        );
+    }
+    Ok(())
+}
+
 async fn execute_inner(
     mut request: Request,
     command: Command,
@@ -969,6 +1020,14 @@ async fn execute_inner(
             }
         };
         let result = async {
+            let updates = backend::request(session, &credential, Method::GET, "/api/v1/system/updates", None, None).await?;
+            let installed_branch = controller_branch(&updates)?;
+            if let Err(error) = validate_controller_channel(&command, installed_branch, crate::config::default_branch()) {
+                if let Command::Controller(profile, _) = &command {
+                    let _ = tx.send(Event::Nodes(Update::Controller(*profile, crate::controller::Command::Updates, updates.clone())));
+                }
+                return Err(error);
+            }
             let setup = matches!(&command, Command::Setup(_));
             let protocol_action = match &command { Command::ProtocolAction(_, action) => Some(*action), _ => None };
             match command {
@@ -1659,5 +1718,74 @@ mod tests {
             "node_agent_unavailable"
         );
         assert!(operation(&value, "node-jobs", "other").is_err());
+    }
+}
+
+#[cfg(test)]
+mod channel_policy_tests {
+    use super::*;
+    #[test]
+    fn installed_version_is_authoritative_during_a_channel_transition() {
+        assert_eq!(
+            controller_branch(&json!({"current_version":"1.0.0","branch":"dev"})).unwrap(),
+            "main"
+        );
+        assert_eq!(
+            controller_branch(&json!({"current_version":"v1.0.0-alpha.3","branch":"main"}))
+                .unwrap(),
+            "dev"
+        );
+        assert_eq!(controller_branch(&json!({"branch":"dev"})).unwrap(), "dev");
+        assert!(controller_branch(&json!({})).is_err());
+    }
+    #[test]
+    fn mismatched_controller_only_allows_transition_to_this_workstations_channel() {
+        for (installed, expected) in [("main", "dev"), ("dev", "main")] {
+            assert!(validate_controller_channel(&Command::List, installed, expected).is_err());
+            assert!(validate_controller_channel(&Command::List, expected, expected).is_ok());
+            assert!(
+                validate_controller_channel(
+                    &Command::Controller(None, crate::controller::Command::Updates),
+                    installed,
+                    expected
+                )
+                .is_ok()
+            );
+            assert!(
+                validate_controller_channel(
+                    &Command::Controller(
+                        None,
+                        crate::controller::Command::UpdatePreferences(json!({"branch":expected}))
+                    ),
+                    installed,
+                    expected
+                )
+                .is_ok()
+            );
+            assert!(
+                validate_controller_channel(
+                    &Command::Controller(
+                        None,
+                        crate::controller::Command::UpdatePreferences(json!({"branch":installed}))
+                    ),
+                    installed,
+                    expected
+                )
+                .is_err()
+            );
+            assert!(
+                validate_controller_channel(
+                    &Command::Controller(
+                        None,
+                        crate::controller::Command::UpdatePreferences(
+                            json!({"branch":expected,"auto_check_enabled":true})
+                        )
+                    ),
+                    installed,
+                    expected
+                )
+                .is_err()
+            );
+        }
     }
 }

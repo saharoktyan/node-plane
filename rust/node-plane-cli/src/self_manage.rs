@@ -82,18 +82,22 @@ fn newer(tag: &str, current: &str) -> bool {
 }
 
 pub fn discover() -> Result<Option<Release>> {
-    let current = env!("CARGO_PKG_VERSION");
-    let alpha = current.contains("-alpha.");
     let releases: Vec<Release> = client()?
         .get(format!("{REPO}/releases?per_page=100"))
         .send()?
         .error_for_status()?
         .json()?;
-    Ok(releases
+    Ok(select_release(releases, env!("CARGO_PKG_VERSION")))
+}
+
+fn select_release(releases: Vec<Release>, current: &str) -> Option<Release> {
+    let alpha = current.contains('-');
+    releases
         .into_iter()
         .filter_map(|mut release| {
             if release.draft
-                || (!alpha && release.prerelease)
+                || release.prerelease != alpha
+                || release.tag_name.contains('-') != alpha
                 || !newer(&release.tag_name, current)
                 || !has_platform_artifacts(&release)
             {
@@ -102,7 +106,48 @@ pub fn discover() -> Result<Option<Release>> {
             release.dist_managed = true;
             Some(release)
         })
-        .max_by_key(|r| semver::Version::parse(r.tag_name.trim_start_matches('v')).ok()))
+        .max_by_key(|r| semver::Version::parse(r.tag_name.trim_start_matches('v')).ok())
+}
+
+/// Called before starting any threads. Channel installers use isolated receipts.
+pub fn prepare_channel_receipt_environment() -> Result<()> {
+    if std::env::var_os("AXOUPDATER_CONFIG_PATH").is_some()
+        || std::env::var_os("AXOUPDATER_CONFIG_WORKING_DIR").is_some()
+    {
+        return Ok(());
+    }
+    let root = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| {
+            if cfg!(windows) {
+                std::env::var_os("LOCALAPPDATA").map(PathBuf::from)
+            } else {
+                dirs::home_dir().map(|p| p.join(".config"))
+            }
+        })
+        .context("Cannot locate Workstation install receipts")?;
+    let base = root
+        .join("node-plane-workstation")
+        .join(crate::config::workstation_channel());
+    let receipts = base.join(DIST_APP);
+    let receipt = receipts.join(format!("{DIST_APP}-receipt.json"));
+    if !receipt.is_file() {
+        return Ok(());
+    }
+    let value: serde_json::Value = serde_json::from_slice(&fs::read(&receipt)?)?;
+    let executable = std::env::current_exe()?.canonicalize()?;
+    let prefix = value["install_prefix"]
+        .as_str()
+        .context("Invalid Workstation install receipt")?;
+    if fs::canonicalize(prefix).ok().as_deref() != executable.parent() {
+        return Ok(());
+    }
+    // This runs at process startup, before the TUI/network workers are created.
+    unsafe {
+        std::env::set_var("AXOUPDATER_CONFIG_PATH", receipts);
+        std::env::set_var("XDG_CONFIG_HOME", base);
+    }
+    Ok(())
 }
 
 fn dist_updater() -> Option<axoupdater::AxoUpdater> {
@@ -139,12 +184,41 @@ fn uninstall_dist() -> Result<()> {
     #[cfg(windows)]
     {
         if let Some(appdata) = dirs::data_dir() {
-            remove_start_menu_shortcut(&appdata)?;
+            let separate = std::env::var_os("AXOUPDATER_CONFIG_PATH").is_some();
+            remove_start_menu_shortcut(
+                &appdata,
+                if separate {
+                    Some(crate::config::workstation_channel())
+                } else {
+                    None
+                },
+            )?;
         }
         self_replace::self_delete()?;
     }
     #[cfg(not(windows))]
-    fs::remove_file(executable)?;
+    {
+        let launcher = format!("node-plane-{}", crate::config::workstation_channel());
+        for alias in [
+            parent.join(&launcher),
+            home()?.join(".local/bin").join(&launcher),
+        ] {
+            if fs::read_link(&alias).ok().as_deref() == Some(executable.as_path()) {
+                fs::remove_file(alias)?;
+            }
+        }
+        fs::remove_file(executable)?;
+    }
+    #[cfg(windows)]
+    {
+        let launcher = parent.join(format!(
+            "node-plane-{}.cmd",
+            crate::config::workstation_channel()
+        ));
+        if launcher.is_file() {
+            fs::remove_file(launcher)?;
+        }
+    }
 
     // Retain cargo-dist's env scripts: shell startup files source these and
     // ~/.local/bin can contain other applications. Retain user data as before.
@@ -176,8 +250,14 @@ fn uninstall_dist() -> Result<()> {
 }
 
 #[cfg(any(windows, test))]
-fn remove_start_menu_shortcut(appdata: &Path) -> Result<()> {
-    let shortcut = appdata.join("Microsoft/Windows/Start Menu/Programs/Node Plane Workstation.lnk");
+fn remove_start_menu_shortcut(appdata: &Path, channel: Option<&str>) -> Result<()> {
+    let name = channel.map_or_else(
+        || "Node Plane Workstation.lnk".to_string(),
+        |channel| format!("Node Plane Workstation ({channel}).lnk"),
+    );
+    let shortcut = appdata
+        .join("Microsoft/Windows/Start Menu/Programs")
+        .join(name);
     match fs::remove_file(shortcut) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -283,10 +363,10 @@ mod tests {
         std::fs::create_dir_all(&programs).unwrap();
         std::fs::write(programs.join("Node Plane Workstation.lnk"), "shortcut").unwrap();
         std::fs::write(programs.join("Other.lnk"), "other").unwrap();
-        super::remove_start_menu_shortcut(root.path()).unwrap();
+        super::remove_start_menu_shortcut(root.path(), None).unwrap();
         assert!(!programs.join("Node Plane Workstation.lnk").exists());
         assert!(programs.join("Other.lnk").exists());
-        super::remove_start_menu_shortcut(root.path()).unwrap();
+        super::remove_start_menu_shortcut(root.path(), None).unwrap();
     }
 
     use super::*;
@@ -321,5 +401,57 @@ mod tests {
             name: "dist-manifest.json".into(),
         });
         assert!(has_platform_artifacts(&release));
+    }
+    #[test]
+    fn discovery_never_crosses_channels_even_when_stable_is_newer() {
+        fn complete(tag: &str, pre: bool) -> Release {
+            let mut release: Release = serde_json::from_value(
+                serde_json::json!({"tag_name":tag,"draft":false,"prerelease":pre}),
+            )
+            .unwrap();
+            let archive = platform_archive();
+            release.assets = [
+                archive.clone(),
+                format!("{archive}.sha256"),
+                "dist-manifest.json".into(),
+            ]
+            .into_iter()
+            .map(|name| Asset { name })
+            .collect();
+            release
+        }
+        let releases = vec![complete("v1.0.0-alpha.4", true), complete("v1.0.0", false)];
+        assert_eq!(
+            select_release(releases.clone(), "1.0.0-alpha.3")
+                .unwrap()
+                .tag_name,
+            "v1.0.0-alpha.4"
+        );
+        assert_eq!(
+            select_release(releases, "0.9.0").unwrap().tag_name,
+            "v1.0.0"
+        );
+        assert!(select_release(vec![complete("v1.0.0", false)], "1.0.0-alpha.3").is_none());
+        assert!(select_release(vec![complete("v2.0.0-alpha.1", true)], "1.0.0").is_none());
+    }
+    #[test]
+    fn channel_shortcut_uninstall_preserves_the_other_channel() {
+        let root = tempfile::tempdir().unwrap();
+        let programs = root.path().join("Microsoft/Windows/Start Menu/Programs");
+        fs::create_dir_all(&programs).unwrap();
+        for channel in ["dev", "stable"] {
+            fs::write(
+                programs.join(format!("Node Plane Workstation ({channel}).lnk")),
+                "fixture",
+            )
+            .unwrap();
+        }
+        remove_start_menu_shortcut(root.path(), Some("dev")).unwrap();
+        assert!(!programs.join("Node Plane Workstation (dev).lnk").exists());
+        assert!(
+            programs
+                .join("Node Plane Workstation (stable).lnk")
+                .exists()
+        );
     }
 }

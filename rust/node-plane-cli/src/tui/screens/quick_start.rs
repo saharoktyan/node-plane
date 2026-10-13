@@ -15,14 +15,12 @@ pub(in crate::tui) fn draw_quick_start(
     let text = if app.controller_ready() {
         if let Some(value) = &app.controller.onboarding {
             let labels = [
-                ("defaults", "Confirm installation defaults"),
+                ("defaults", "Confirm installation defaults for servers"),
                 ("node", "Create your first VPN node"),
                 ("protocols", "Install agent and protocols"),
                 ("access", "Grant your profile access"),
-                ("config", "Create a device and obtain a configuration"),
             ];
-            let mut text =
-                String::from("Progress refreshes every second while this guide is open.\n\n");
+            let mut text = String::new();
             for (key, label) in labels {
                 let done = value["steps"].as_array().is_some_and(|steps| {
                     steps
@@ -30,21 +28,26 @@ pub(in crate::tui) fn draw_quick_start(
                         .any(|v| v["key"] == key && v["complete"] == true)
                 });
                 text.push_str(&format!("{} {label}\n", if done { "✓" } else { "○" }));
+                if key == "defaults" {
+                    text.push_str("  Install Node Plane → Basic → Installation defaults\n");
+                }
             }
             text.push_str(match value["next_step"].as_str().unwrap_or("done") {
-                "defaults" => "\nContinue accepts current defaults. To customize them, open Controller → Installation defaults first.",
+                "defaults" => "\nContinue accepts current defaults. To customize them, open Install Node Plane → Basic → Installation defaults first.",
                 "node" => "\nContinue opens the node creation wizard. Choose Local for a node on this controller.",
                 "protocols" => "\nContinue opens the node. Set up its agent, then bootstrap protocols. Wait for a successful operation.",
                 "access" => "\nContinue opens Access. Select your profile → Grants and add this node. Save and wait for application.",
-                "config" => "\nContinue opens Access to create an AWG device. Obtain your configuration in the Telegram bot: Main menu → Configurations. Import it into a VPN client and test connectivity. The guide checks completed issuance.",
-                _ => "\nConfiguration issued. Import it into a client and test connectivity from your network.",
+                "config" => "\nServer setup is complete.",
+                _ => "\nServer setup is complete.",
             });
             text
         } else {
             "Continue loads progress from the controller.".into()
         }
+    } else if app.form.saved.is_some() {
+        "1. Continue opens Install Node Plane for the selected profile.\n2. Enter your Telegram administrator ID and BotFather token, then review the installation.\n3. Confirm the server fingerprint and enter the SSH password when requested.\n4. After installation return here for server defaults, your first node and access.".into()
     } else {
-        "1. Create a connection profile with your VPS address, SSH port and user.\n2. Select Install Node Plane and enter your Telegram ID and BotFather token.\n3. Confirm the server fingerprint and enter the SSH password when requested.\n4. After installation press F1 to continue with defaults, your first node, access and configuration.\n\nPasswords and bot tokens are not saved on disk.".into()
+        "1. Create a connection profile with your VPS address, SSH port and user.\n2. Select Install Node Plane and enter your Telegram ID and BotFather token.\n3. Confirm the server fingerprint and enter the SSH password when requested.\n4. After installation press F1 to continue with defaults, your first node and access.\n\nPasswords and bot tokens are not saved on disk.".into()
     };
     frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: false }), sections[0]);
     let controls = if idle {
@@ -53,7 +56,16 @@ pub(in crate::tui) fn draw_quick_start(
         (Control::QuickStartClose, Control::QuickStartAction)
     };
     let next_label = if app.controller_ready() {
-        "Continue"
+        if app
+            .controller
+            .onboarding
+            .as_ref()
+            .is_some_and(|guide| matches!(guide["next_step"].as_str(), Some("config" | "done")))
+        {
+            "Done"
+        } else {
+            "Continue"
+        }
     } else {
         "Quick start"
     };

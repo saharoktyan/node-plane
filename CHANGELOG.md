@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 1.0.0-alpha.4 - 2026-10-13
+
+- Separate stable/dev Workstation installations, launchers, local data and self-update receipts; restrict installation, updates and controller management to the matching channel.
+- Copy connection profiles between NPW channels without sharing SSH keys or operation journals; allow an explicit controller-channel transition through Node Plane Updates.
+- Fix Back from unconfirmed installation management, align installation buttons and reuse the selected profile in Quick Start.
+- Color the fixed channel field consistently, clarify server defaults and their menu path, and end NPW Quick Start at profile access; user devices and ordinary configurations remain in Telegram.
+
 ## 1.0.0-alpha.3 - 2026-10-13
 
 - Return revoked Telegram administrators from open admin panels and drafts to the current member menu; recheck stale admin navigation before handling it.
@@ -240,6 +247,11 @@
 - Keep RU/EN localization and backend authorization across the migrated screens.
 
 ## Unreleased
+
+- Separate stable/dev Workstation installations, launchers, local data and self-update receipts; restrict installation, updates and controller management to the matching channel.
+- Copy connection profiles between NPW channels without sharing SSH keys or operation journals; allow an explicit controller-channel transition through Node Plane Updates.
+- Fix Back from unconfirmed installation management, align installation buttons and reuse the selected profile in Quick Start.
+- Color the fixed channel field consistently, clarify server defaults and their menu path, and end NPW Quick Start at profile access; user devices and ordinary configurations remain in Telegram.
 
 ## 0.4.1-alpha.22 - 2026-09-26
 

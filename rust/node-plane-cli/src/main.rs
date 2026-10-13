@@ -126,19 +126,15 @@ fn main() {
     }
 }
 fn entry() -> Result<()> {
+    self_manage::prepare_channel_receipt_environment()?;
     let cli = Cli::parse();
     if let Some(Command::SelfManage { command }) = &cli.command {
         return self_manage::execute(command);
     }
-    let state = cli.state_dir.unwrap_or(
-        dirs::data_local_dir()
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "Cannot locate your private application data directory. Use --state-dir."
-                )
-            })?
-            .join("node-plane"),
-    );
+    let state = match cli.state_dir {
+        Some(state) => state,
+        None => config::default_state_dir(config::workstation_channel())?,
+    };
     let mut request = Request {
         action: Action::Install,
         host: String::new(),

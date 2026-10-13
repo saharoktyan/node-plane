@@ -208,6 +208,40 @@ impl Connections {
         FileExt::unlock(&lock)?;
         Ok(())
     }
+    /// Copy only connection metadata. Keys and operation journals stay in their own installation.
+    pub fn copy_installation(profile: &Installation, target: &Path, branch: &str) -> Result<()> {
+        ensure!(
+            matches!(branch, "main" | "dev"),
+            "Target channel must be main or dev."
+        );
+        let mut profile = profile.clone();
+        profile.branch = branch.into();
+        profile.validate()?;
+        let mut destination = Self::load(target)?;
+        if let Some(existing) = destination
+            .installations
+            .iter()
+            .find(|p| p.id == profile.id)
+        {
+            ensure!(
+                existing == &profile,
+                "A different profile with this ID already exists in the destination. It was not replaced."
+            );
+            return Ok(());
+        }
+        ensure!(
+            !destination.installations.iter().any(|p| p.matches(
+                &profile.host,
+                profile.port,
+                &profile.user
+            )),
+            "A profile for this server already exists in the destination. It was not replaced."
+        );
+        destination.selected = Some(profile.id);
+        destination.installations.push(profile);
+        destination.save(target)
+    }
+
     pub fn import_update_history(&mut self, state: &Path) -> Result<bool> {
         // An existing preferences file, including an intentionally empty list,
         // is authoritative. History migration must never resurrect deleted profiles.
@@ -386,5 +420,51 @@ mod tests {
                 .is_empty()
         );
         assert_eq!(fs::read(record.path(dir.path())).unwrap(), before);
+    }
+    #[test]
+    fn channel_profile_copy_preserves_identity_source_and_destination_without_journals() {
+        let source = tempfile::tempdir().unwrap();
+        let target = tempfile::tempdir().unwrap();
+        let mut profile = installation("controller.example");
+        profile.branch = "dev".into();
+        profile.account = Uuid::new_v4().to_string();
+        profile.installed = true;
+        let mut store = Connections::default();
+        store.installations.push(profile.clone());
+        store.selected = Some(profile.id);
+        store.save(source.path()).unwrap();
+        fs::write(source.path().join("id_ed25519"), "private fixture").unwrap();
+        fs::write(source.path().join("update-pending.json"), "pending fixture").unwrap();
+        Connections::copy_installation(&profile, target.path(), "main").unwrap();
+        let copied = Connections::load(target.path())
+            .unwrap()
+            .active()
+            .unwrap()
+            .clone();
+        assert_eq!(copied.id, profile.id);
+        assert_eq!(copied.account, profile.account);
+        assert_eq!(copied.branch, "main");
+        assert!(copied.installed);
+        assert_eq!(
+            Connections::load(source.path()).unwrap().active().unwrap(),
+            &profile
+        );
+        assert!(!target.path().join("id_ed25519").exists());
+        assert!(!target.path().join("update-pending.json").exists());
+        let before = fs::read(target.path().join("installations.json")).unwrap();
+        Connections::copy_installation(&profile, target.path(), "main").unwrap();
+        assert_eq!(
+            fs::read(target.path().join("installations.json")).unwrap(),
+            before
+        );
+        profile.name = "conflicting replacement".into();
+        assert!(Connections::copy_installation(&profile, target.path(), "main").is_err());
+        assert_eq!(
+            fs::read(target.path().join("installations.json")).unwrap(),
+            before
+        );
+        let mut duplicate = copied;
+        duplicate.id = Uuid::new_v4();
+        assert!(Connections::copy_installation(&duplicate, target.path(), "main").is_err());
     }
 }

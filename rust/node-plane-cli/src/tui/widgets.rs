@@ -241,56 +241,21 @@ pub(super) fn button_pair(
     });
 }
 
-pub(super) fn cycle_channel(value: &mut String, backwards: bool) {
-    *value = match value.as_str() {
-        "main" => "dev",
-        "dev" => "main",
-        _ if backwards => "main",
-        _ => "dev",
-    }
-    .into();
-}
 pub(super) fn draw_channel(
     frame: &mut Frame,
     area: Rect,
     value: &str,
     selected: bool,
-    editor: bool,
-    hits: &mut Vec<Hit>,
+    _editor: bool,
+    _hits: &mut Vec<Hit>,
 ) {
-    let block = Block::bordered()
-        .title(" Update channel · ← / → ")
-        .border_style(Style::default().fg(if selected { Color::Cyan } else { Color::Gray }));
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-    let parts = Layout::horizontal([
-        Constraint::Length(3),
-        Constraint::Min(0),
-        Constraint::Length(3),
-    ])
-    .split(inner);
-    frame.render_widget(
-        Paragraph::new("←").alignment(ratatui::layout::Alignment::Center),
-        parts[0],
+    draw_field(
+        frame,
+        area,
+        "Controller channel",
+        if value.is_empty() { "Installed" } else { value },
+        selected,
     );
-    frame.render_widget(
-        Paragraph::new(if value.is_empty() { "Installed" } else { value })
-            .alignment(ratatui::layout::Alignment::Center),
-        parts[1],
-    );
-    frame.render_widget(
-        Paragraph::new("→").alignment(ratatui::layout::Alignment::Center),
-        parts[2],
-    );
-    // Arrow hits follow the field hit so clicks change the choice immediately.
-    hits.push(Hit {
-        area: parts[0],
-        control: Control::Channel(editor, true),
-    });
-    hits.push(Hit {
-        area: parts[2],
-        control: Control::Channel(editor, false),
-    });
 }
 pub(super) fn viewport_start(current: usize, selected: usize, capacity: usize) -> usize {
     if selected < current {

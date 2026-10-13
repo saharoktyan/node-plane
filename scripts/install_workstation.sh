@@ -8,6 +8,7 @@ Usage: bash install_workstation.sh [--channel dev|stable] [--tag vX.Y.Z[-alpha.N
 
 Installs Workstation on Linux x86_64 or macOS (Intel/Apple Silicon) and configures PATH.
 The default stable channel selects stable releases. Use --channel dev for alpha builds.
+Stable and dev installations are separate. Run node-plane-stable or node-plane-dev.
 Saved installation profiles and SSH keys are retained.
 EOF
 }
@@ -51,7 +52,7 @@ if [[ -z "$tag" ]]; then
   tags="$(grep -oE '"tag_name"[[:space:]]*:[[:space:]]*"v[0-9]+\.[0-9]+\.[0-9]+(-alpha\.[0-9]+)?"' "$tmp_dir/releases.json" \
     | sed -E 's/^.*:[[:space:]]*"([^"]+)"$/\1/' || true)"
   while IFS= read -r candidate; do
-    if [[ -n "$candidate" && ( "$channel" == dev || "$candidate" != *-alpha.* ) ]]; then
+    if [[ -n "$candidate" && (( "$channel" == dev && "$candidate" == *-alpha.* ) || ( "$channel" == stable && "$candidate" != *-alpha.* )) ]]; then
       tag="$candidate"
       break
     fi
@@ -61,12 +62,24 @@ else
   echo "[1/4] Using release $tag"
 fi
 
+if [[ ( "$channel" == dev && "$tag" != *-alpha.* ) || ( "$channel" == stable && "$tag" == *-alpha.* ) ]]; then
+  echo 'The release tag must match the requested Workstation channel.' >&2
+  exit 1
+fi
+
 base="https://github.com/saharoktyan/node-plane/releases/download/$tag"
 echo "[2/4] Downloading the release installer for $tag…"
 if download "$base/node-plane-cli-installer.sh" "$tmp_dir/installer.sh"; then
   echo '[3/4] Starting the cargo-dist installer…'
-  sh "$tmp_dir/installer.sh"
-  echo '[4/4] Workstation installed. Open a new terminal, then run: node-plane'
+  install_dir="${NODE_PLANE_CLI_INSTALL_DIR:-${CARGO_DIST_FORCE_INSTALL_DIR:-${CARGO_DIST_INSTALL_DIR:-$HOME/.local/share/node-plane-workstation/$channel}}}"
+  receipt_base="${XDG_CONFIG_HOME:-$HOME/.config}/node-plane-workstation/$channel"
+  XDG_CONFIG_HOME="$receipt_base" CARGO_DIST_FORCE_INSTALL_DIR="$install_dir" NODE_PLANE_CLI_INSTALL_DIR="$install_dir" sh "$tmp_dir/installer.sh"
+  [[ -x "$install_dir/node-plane" ]] || { echo 'Installed Workstation executable is missing.' >&2; exit 1; }
+  install_dir="$(cd "$install_dir" && pwd -P)"
+  mkdir -p "$HOME/.local/bin"
+  ln -sfn "$install_dir/node-plane" "$install_dir/node-plane-$channel"
+  ln -sfn "$install_dir/node-plane" "$HOME/.local/bin/node-plane-$channel"
+  echo "[4/4] Workstation installed. Open a new terminal, then run: node-plane-$channel"
   exit 0
 fi
 

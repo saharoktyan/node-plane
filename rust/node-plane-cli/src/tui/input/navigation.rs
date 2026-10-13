@@ -578,16 +578,6 @@ impl App {
                     editor.2 = index;
                 }
             }
-            Control::Channel(editor, _) => {
-                if editor {
-                    if let Some(editor) = &mut self.editor {
-                        editor.2 = 4;
-                    }
-                } else if let Some(index) = self.form.visible().iter().position(|&i| i == 3) {
-                    self.quick_focus = false;
-                    self.form.selected = index + 1;
-                }
-            }
             Control::RepairMode => {
                 if let Some(index) = self.form.visible().iter().position(|&i| i == 11) {
                     self.quick_focus = false;

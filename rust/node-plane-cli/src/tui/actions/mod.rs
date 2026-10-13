@@ -192,7 +192,7 @@ impl App {
                         "Save or discard the current draft before continuing Quick Start.".into();
                     return None;
                 }
-                self.quick_start_return = None;
+                let return_screen = self.quick_start_return.take();
                 if self.controller_ready() {
                     if let Some(guide) = &self.controller.onboarding {
                         let step = guide["next_step"].as_str().unwrap_or("done");
@@ -210,7 +210,10 @@ impl App {
                                     self.nodes_requested = Some(crate::nodes::Command::Card(key));
                                 }
                             }
-                            "access" | "config" => self.open_access(),
+                            "access" => self.open_access(),
+                            "config" | "done" => {
+                                self.screen = return_screen.unwrap_or(Screen::Idle);
+                            }
                             _ => {
                                 self.screen = Screen::Controller;
                             }
@@ -221,8 +224,12 @@ impl App {
                     }
                     return None;
                 }
+                self.form.select_action(Action::Install);
                 self.screen = Screen::Form;
-                self.begin_edit(true);
+                self.form.selected = 1;
+                if self.form.saved.is_none() {
+                    self.begin_edit(true);
+                }
                 return None;
             }
             Control::AccessGrants
@@ -419,11 +426,11 @@ impl App {
             | Control::SelfUpdate
             | Control::CheckWorkstationUpdates
             | Control::Installation(..)
+            | Control::TransferInstallation
             | Control::UseInstallation
             | Control::EditInstallation
             | Control::NewInstallation
             | Control::RepairMode
-            | Control::Channel(..)
             | Control::EditField(..)
             | Control::SaveInstallation
             | Control::CancelEdit => return self.activate_settings(control),

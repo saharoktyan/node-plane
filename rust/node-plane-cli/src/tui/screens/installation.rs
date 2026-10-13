@@ -47,13 +47,17 @@ pub(in crate::tui) fn draw_form(frame: &mut Frame, app: &App, area: Rect, hits: 
     if app.form.action == Action::Install
         && sections[0].height >= (app.form.visible().len() as u16 + 1) * 3
     {
-        let manage = Rect::new(
-            sections[0].x,
-            sections[0].bottom() - 3,
-            sections[0].width,
+        let manage = centered(
+            Rect::new(
+                sections[0].x,
+                sections[0].bottom() - 3,
+                sections[0].width,
+                3,
+            ),
+            18,
             3,
         );
-        draw_button(frame, manage, "Manage installed Node Plane", false);
+        draw_button(frame, manage, "Manage installed", false);
         hits.push(Hit {
             area: manage,
             control: Control::Controller,

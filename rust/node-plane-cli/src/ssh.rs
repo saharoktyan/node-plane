@@ -1161,7 +1161,14 @@ mod tests {
                         } else if path == "/api/v1/system/updates" {
                             (
                                 200,
-                                serde_json::json!({"branch":"dev","update_available":false,"update_supported":true}),
+                                if fixture_home.join("controller-updates").exists() {
+                                    serde_json::from_slice(
+                                        &fs::read(fixture_home.join("controller-updates")).unwrap(),
+                                    )
+                                    .unwrap()
+                                } else {
+                                    serde_json::json!({"branch":"dev","update_available":false,"update_supported":true})
+                                },
                             )
                         } else if path == "/api/v1/system/updates/rollout" {
                             (
@@ -1663,11 +1670,65 @@ mod tests {
                 fs::read_to_string(server.home.join("api-requests"))
                     .unwrap()
                     .lines()
+                    .filter(|line| line.starts_with("GET /api/v1/nodes?")
+                        || line.starts_with("GET /api/v1/nodes "))
                     .count(),
-                3
+                2
             );
             worker.shutdown().unwrap();
         }
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn cached_controller_session_blocks_management_until_runtime_matches_channel() {
+            let server = MockServer::start().await;
+            let state = tempfile::tempdir().unwrap();
+            prepare_nodes_fixture(&server, state.path());
+            let mut worker = crate::nodes::Worker::new().unwrap();
+            let (result, _) = nodes_command(
+                &worker,
+                nodes_request(&server, state.path()),
+                crate::nodes::Command::List,
+            )
+            .await;
+            assert!(result.is_ok(), "{result:?}");
+            let requests_path = server.home.join("api-requests");
+            fs::write(&requests_path, "").unwrap();
+            // Update preference already matches NPW, but the running release is stable.
+            fs::write(
+                server.home.join("controller-updates"),
+                r#"{"current_version":"1.0.0","branch":"dev"}"#,
+            )
+            .unwrap();
+            let (result, _) = nodes_command(
+                &worker,
+                nodes_request(&server, state.path()),
+                crate::nodes::Command::List,
+            )
+            .await;
+            assert!(result.unwrap_err().contains("Controller channel is main"));
+            let requests = fs::read_to_string(&requests_path).unwrap();
+            assert!(!requests.contains("GET /api/v1/nodes"));
+            let (result, _) = nodes_command(
+                &worker,
+                nodes_request(&server, state.path()),
+                crate::nodes::Command::Controller(None, crate::controller::Command::Updates),
+            )
+            .await;
+            assert!(result.is_ok(), "{result:?}");
+            fs::write(
+                server.home.join("controller-updates"),
+                r#"{"current_version":"1.0.0-alpha.3","branch":"dev"}"#,
+            )
+            .unwrap();
+            let (result, _) = nodes_command(
+                &worker,
+                nodes_request(&server, state.path()),
+                crate::nodes::Command::List,
+            )
+            .await;
+            assert!(result.is_ok(), "{result:?}");
+            worker.shutdown().unwrap();
+        }
+
         #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
         async fn first_nodes_connection_binds_selected_admin_and_reuses_binding() {
             let server = MockServer::start().await;

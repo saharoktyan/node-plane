@@ -190,7 +190,11 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
         .set(usize::from(rows[1].height.saturating_sub(10)).max(1));
     let header = Layout::horizontal([Constraint::Min(0), Constraint::Length(6)]).split(rows[0]);
     frame.render_widget(
-        Paragraph::new("Node Plane | Workstation").style(
+        Paragraph::new(format!(
+            "Node Plane | Workstation · {}",
+            crate::config::workstation_channel()
+        ))
+        .style(
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),

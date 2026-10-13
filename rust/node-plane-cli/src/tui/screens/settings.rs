@@ -196,6 +196,14 @@ pub(in crate::tui) fn draw_profiles(frame: &mut Frame, app: &App, area: Rect, hi
             ("Use", Control::UseInstallation),
             ("Edit", Control::EditInstallation),
             ("New", Control::NewInstallation),
+            (
+                if crate::config::workstation_channel() == "dev" {
+                    "Copy to stable NPW"
+                } else {
+                    "Copy to dev NPW"
+                },
+                Control::TransferInstallation,
+            ),
             ("Delete", Control::DeleteInstallation),
             ("Back", Control::Settings),
         ]

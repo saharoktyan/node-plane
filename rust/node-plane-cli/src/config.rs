@@ -13,11 +13,42 @@ pub fn default_branch() -> &'static str {
     }
 }
 
-pub fn validate_install_channel(version: &str, branch: &str, tag: &str) -> Result<()> {
+pub fn workstation_channel() -> &'static str {
+    if default_branch() == "dev" {
+        "dev"
+    } else {
+        "stable"
+    }
+}
+
+pub fn default_state_dir(channel: &str) -> Result<PathBuf> {
     ensure!(
-        version.contains('-') || (branch != "dev" && !tag.contains('-')),
-        "Development releases require a development Workstation build."
+        matches!(channel, "dev" | "stable"),
+        "Workstation channel must be dev or stable."
     );
+    let root = dirs::data_local_dir().ok_or_else(|| {
+        anyhow::anyhow!("Cannot locate your private application data directory. Use --state-dir.")
+    })?;
+    // Keep the existing development catalog and keys at their historical location.
+    Ok(root.join(if channel == "dev" {
+        "node-plane"
+    } else {
+        "node-plane-stable"
+    }))
+}
+
+pub fn validate_install_channel(version: &str, branch: &str, tag: &str) -> Result<()> {
+    let expected = if version.contains('-') { "dev" } else { "main" };
+    ensure!(
+        branch == expected,
+        "This Workstation build manages the {expected} controller channel. Transfer the profile to the matching Workstation to change channels."
+    );
+    if !tag.is_empty() {
+        ensure!(
+            tag.contains('-') == version.contains('-'),
+            "The release tag must match this Workstation's channel."
+        );
+    }
     Ok(())
 }
 
@@ -30,7 +61,7 @@ mod channel_tests {
         assert!(validate_install_channel("1.0.0", "dev", "").is_err());
         assert!(validate_install_channel("1.0.0", "main", "v1.0.0-alpha.1").is_err());
         assert!(validate_install_channel("1.0.0-alpha.1", "dev", "v1.0.0-alpha.1").is_ok());
-        assert!(validate_install_channel("1.0.0-alpha.1", "main", "v1.0.0").is_ok());
+        assert!(validate_install_channel("1.0.0-alpha.1", "main", "v1.0.0").is_err());
     }
 }
 

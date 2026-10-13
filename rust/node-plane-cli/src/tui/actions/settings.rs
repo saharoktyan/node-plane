@@ -128,6 +128,44 @@ impl App {
                 self.settings_selected = index + 1;
                 None
             }
+            Control::TransferInstallation => {
+                if let Some(profile) = self
+                    .connections
+                    .installations
+                    .get(self.settings_profile)
+                    .cloned()
+                {
+                    let channel = if crate::config::workstation_channel() == "dev" {
+                        "stable"
+                    } else {
+                        "dev"
+                    };
+                    match crate::config::default_state_dir(channel) {
+                        Ok(target) => {
+                            if target == self.state_dir {
+                                self.error = "The destination is this installation's state directory. Use distinct state directories.".into();
+                                return None;
+                            }
+                            let (reply, answer) = mpsc::channel();
+                            self.prompt = Some((
+                                Prompt::ConfirmAction {
+                                    title: format!("Copy profile to {channel} NPW?"),
+                                    description: format!(
+                                        "{} → {}\n\nConnection address, administrator identity and profile name are copied. The source is kept. SSH keys and operation journals are not copied. Open or restart {channel} NPW, confirm its SSH access, then use Node Plane Updates to switch the controller to that channel before managing it.",
+                                        profile.name,
+                                        target.display()
+                                    ),
+                                },
+                                reply,
+                            ));
+                            self.trust = false;
+                            self.profile_copy = Some((profile, target, answer));
+                        }
+                        Err(error) => self.error = error.to_string(),
+                    }
+                }
+                None
+            }
             Control::UseInstallation => {
                 if let Err(error) = self.use_selected() {
                     self.error = error.to_string();
@@ -147,25 +185,6 @@ impl App {
                     self.quick_focus = false;
                     self.form.selected = position + 1;
                     self.toggle_diagnostic_recovery();
-                }
-                None
-            }
-            Control::Channel(editor, backwards) => {
-                self.quick_focus = false;
-                if editor {
-                    if let Some((_, fields, selected)) = &mut self.editor {
-                        *selected = 4;
-                        cycle_channel(&mut fields[4], backwards);
-                    }
-                } else if let Some(position) = self.form.visible().iter().position(|&i| i == 3) {
-                    self.form.selected = position + 1;
-                    if self.form.action == Action::Install
-                        && crate::config::default_branch() == "main"
-                    {
-                        self.form.fields[3] = "main".into();
-                    } else {
-                        cycle_channel(&mut self.form.fields[3], backwards);
-                    }
                 }
                 None
             }
@@ -202,6 +221,30 @@ impl App {
         self.screen = Screen::Settings;
         self.error.clear();
     }
+    pub(in crate::tui) fn finish_profile_copy(&mut self) {
+        let Some((profile, target, answer)) = self.profile_copy.take() else {
+            return;
+        };
+        match answer.try_recv() {
+            Ok(Answer::Confirm(true)) => {
+                let branch = if crate::config::default_branch() == "dev" {
+                    "main"
+                } else {
+                    "dev"
+                };
+                self.error = match Connections::copy_installation(&profile, &target, branch) {
+                    Ok(()) => format!(
+                        "Profile copied to {}. Open the matching NPW and switch the controller channel in Node Plane Updates.",
+                        target.display()
+                    ),
+                    Err(error) => error.to_string(),
+                };
+            }
+            Err(mpsc::TryRecvError::Empty) => self.profile_copy = Some((profile, target, answer)),
+            _ => {}
+        }
+    }
+
     pub(in crate::tui) fn profile_controls(&self) -> Vec<Control> {
         let mut controls: Vec<_> = (0..self.connections.installations.len())
             .map(Control::Installation)
@@ -211,6 +254,7 @@ impl App {
                 Control::UseInstallation,
                 Control::EditInstallation,
                 Control::NewInstallation,
+                Control::TransferInstallation,
                 Control::DeleteInstallation,
             ]);
         } else {
@@ -384,7 +428,7 @@ impl App {
             )
         };
         if new {
-            fields[4] = "dev".into();
+            fields[4] = crate::config::default_branch().into();
         }
         self.editor = Some((id, fields, 0));
         if new {

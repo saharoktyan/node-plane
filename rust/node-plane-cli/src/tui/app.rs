@@ -53,6 +53,7 @@ impl App {
             installed_profile: None,
             fresh_installation: false,
             controller_sidebar: false,
+            controller_return_form: false,
             controller_section: None,
             requests_settings: false,
             confirmed_installation: None,
@@ -85,6 +86,7 @@ impl App {
             accent_input: String::new(),
             themes: theme::defaults(),
             editor: None,
+            profile_copy: None,
             exit: false,
             exit_confirm: false,
             discard: None,
@@ -115,6 +117,10 @@ impl App {
     ) -> bool {
         matches!(self.screen, Screen::Idle | Screen::QuickStart)
             && self.controller_ready()
+            && self.controller.updates.as_ref().is_none_or(|value| {
+                crate::nodes::controller_branch(value)
+                    .is_ok_and(|branch| branch == crate::config::default_branch())
+            })
             && !operation_active
             && !self.nodes_busy
             && self.nodes_requested.is_none()

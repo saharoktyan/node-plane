@@ -9,16 +9,16 @@ Workstation is the administrator's terminal interface. It connects to a Linux co
 Use the [README installation commands](../README.md#install-workstation), then run:
 
 ```sh
-node-plane
+node-plane-dev
 ```
 
 Allow at least **70 columns × 30 rows**. Use a larger terminal for tables and long forms. To select a separate local data directory:
 
 ```sh
-node-plane --state-dir /path/to/workstation-data
+node-plane-dev --state-dir /path/to/workstation-data
 ```
 
-On Windows, the installer adds **Node Plane Workstation** to the Start menu. Find it through Windows Search to open Workstation in a terminal. Updating preserves the shortcut; uninstalling Workstation removes it.
+For stable, run `node-plane-stable`. On Windows, the installer adds **Node Plane Workstation (dev)** or **Node Plane Workstation (stable)** to the Start menu. Find it through Windows Search to open Workstation in a terminal. Updating preserves the shortcut; uninstalling Workstation removes it.
 
 ## Connect to a controller
 
@@ -50,12 +50,12 @@ The **Offer service and operation recovery** option retains its last selection a
 | Install Node Plane / Node Plane Settings | Install a controller; configure defaults, policies, monitoring, backups and reset/removal |
 | Node Plane Updates | Check releases, choose a branch, update the installation and inspect results or failed nodes |
 | Nodes | Search nodes by name/region/code, create a node, run setup, edit settings and diagnose operations |
-| Access | Manage user profiles, access requests, grants and devices |
+| Access | Manage user profiles, access requests and grants |
 | Temporary configs | Create, retrieve and revoke short-lived configurations |
 | Diagnostic | Check controller services/schema and all registered servers; inspect recovery options |
 | Settings | Local installation profiles, appearance, Workstation updates, connection/security and session information |
 
-On startup the content area stays empty until you choose a section. If installation detection is unconfirmed, use **Check installation**.
+On startup Quick Start appears beside the sidebar. In NPW it ends after granting profile access; create user devices and obtain ordinary configurations in the Telegram bot. If installation detection is unconfirmed, use **Check installation**.
 
 Automatic check, backup and alert preferences appear when the corresponding feature is enabled. Select an interval directly; backups also offer a retention count. **Node Plane Settings → Basic** contains installation defaults and general controller options.
 
@@ -71,7 +71,7 @@ Open **Node Plane Settings → Reset & removal**, choose whether to uninstall no
 
 ## Appearance and local files
 
-Workstation stores its connection preferences, SSH material, logs and themes in the OS local data directory under `node-plane`, or the directory supplied by `--state-dir`. Keep this directory private.
+Workstation stores its connection preferences, SSH material, logs and themes in the OS local data directory under `node-plane` for dev and `node-plane-stable` for stable, or the directory supplied by `--state-dir`. Keep this directory private.
 
 Open **Settings → Appearance** to choose a theme or custom accent. Built-in theme files are created in `themes/` without overwriting existing files. Add a JSON file there and restart Workstation to load a custom theme:
 
@@ -83,6 +83,20 @@ Open **Settings → Appearance** to choose a theme or custom accent. Built-in th
 ```
 
 The optional `section_border` field sets decorative section borders separately from the accent. Use a short name and `#RRGGBB` colors. Invalid theme files are skipped with a warning.
+
+## Stable and dev channels
+
+Dev NPW installs and manages dev controllers; stable NPW manages stable controllers. The form channel is fixed by the build. Management checks the installed controller version: changing the update preference alone does not unlock access. Installation detection and diagnostics without recovery remain available.
+
+Installers use separate `$HOME/.local/share/node-plane-workstation/dev` and `stable` directories, updater receipts and launch commands. Dev keeps its existing local data directory, `node-plane`; stable uses `node-plane-stable`. Each NPW only updates within its own channel.
+
+To transition:
+
+1. In the source NPW open **Settings → Profiles**, select the profile and choose **Copy to stable NPW** or **Copy to dev NPW**.
+2. Open or restart the target NPW. Connection metadata and the selected account are copied; the original profile stays. SSH keys, host fingerprints and operation journals are not copied: verify the server fingerprint and provide SSH access again if needed.
+3. In **Node Plane Updates**, confirm switching the controller to this NPW's channel, select a release and update the installation. Until the runtime is updated, only the transition is available; ordinary management is blocked.
+
+Copying uses the target NPW's standard local data directory and refuses conflicting profiles. Transition requires a published target-channel release. Copying a profile does not reinstall the controller or move its database.
 
 ## Update Workstation
 

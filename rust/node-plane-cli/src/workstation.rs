@@ -229,6 +229,8 @@ pub(crate) async fn prepare_node(
     let credential =
         backend::authenticate(controller, session_id, &request.workflow.account, tx).await?;
     let result=async {
+        let updates = backend::request(controller, &credential, Method::GET, "/api/v1/system/updates", None, None).await?;
+        crate::nodes::validate_controller_channel(&crate::nodes::Command::List, crate::nodes::controller_branch(&updates)?, crate::config::default_branch())?;
         let response=backend::request(controller,&credential,Method::GET,"/api/v1/system/ssh-key",None,None).await?;
         let public=response["public_key"].as_str().context("Controller did not return its SSH public key")?;
         let key=russh::keys::PublicKey::from_openssh(public).context("Controller returned an invalid SSH public key")?;
@@ -329,6 +331,7 @@ async fn discover(
     let branch = overview["branch"]
         .as_str()
         .context("Backend did not report its update channel")?;
+    crate::config::validate_install_channel(env!("CARGO_PKG_VERSION"), branch, &request.tag)?;
     ensure!(
         request.branch.is_empty() || request.branch == branch,
         "The requested branch differs from the installed channel. Change the channel in the bot first."
@@ -484,6 +487,10 @@ pub async fn recover_operations(
     let credential =
         backend::authenticate(session, session_id, &request.workflow.account, tx).await?;
     let result = async {
+        if request.workflow.repair {
+            let updates = backend::request(session, &credential, Method::GET, "/api/v1/system/updates", None, None).await?;
+            crate::nodes::validate_controller_channel(&crate::nodes::Command::List, crate::nodes::controller_branch(&updates)?, crate::config::default_branch())?;
+        }
         let mut lines = vec!["Operation recovery".to_string()];
         let mut offset = 0;
         let mut reviewed = std::collections::HashSet::new();
@@ -663,6 +670,11 @@ async fn update(
     }
     let mut credential = backend::authenticate(session, auth_id, account, tx).await?;
     let mut record = if let Some(record) = previous {
+        crate::config::validate_install_channel(
+            env!("CARGO_PKG_VERSION"),
+            &record.intent.branch,
+            "",
+        )?;
         ensure!(
             credential.account_id == record.account_id,
             "Update account changed; the previous operation was not replayed."

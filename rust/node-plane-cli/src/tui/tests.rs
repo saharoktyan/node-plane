@@ -510,7 +510,7 @@ fn detached_back_does_not_reserve_a_grid_slot() {
 }
 
 #[test]
-fn saved_profile_actions_render_as_two_complete_rows() {
+fn saved_profile_actions_include_channel_copy_without_overlapping_back() {
     let mut app = test_profile_app();
     app.screen = Screen::SettingsPage(SettingsPage::Profiles);
     let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
@@ -524,16 +524,20 @@ fn saved_profile_actions_render_as_two_complete_rows() {
             .unwrap()
             .area
     };
-    let first = rect(Control::UseInstallation);
-    let second = rect(Control::EditInstallation);
-    let third = rect(Control::NewInstallation);
-    let fourth = rect(Control::DeleteInstallation);
-    assert_eq!(first.x, third.x);
-    assert_eq!(first.width, third.width);
-    assert_eq!(second.x, fourth.x);
-    assert_eq!(second.width, fourth.width);
-    assert_eq!(first.y, second.y);
-    assert_eq!(third.y, fourth.y);
+    let areas = [
+        Control::UseInstallation,
+        Control::EditInstallation,
+        Control::NewInstallation,
+        Control::TransferInstallation,
+        Control::DeleteInstallation,
+    ]
+    .map(rect);
+    for (i, area) in areas.iter().enumerate() {
+        assert!(area.width > 0 && area.height > 0);
+        for other in &areas[i + 1..] {
+            assert!(area.intersection(*other).is_empty());
+        }
+    }
     assert_eq!(
         app.hits
             .iter()
@@ -1911,7 +1915,8 @@ fn quick_start_keyboard_opens_profile_and_escape_closes_guide() {
     app.quick_start_key(KeyCode::Left.into());
     assert!(!app.confirm);
     app.quick_start_key(KeyCode::Enter.into());
-    assert!(app.editor.is_some());
+    assert!(matches!(app.screen, Screen::Form));
+    assert!(app.editor.is_none());
     app.screen = Screen::QuickStart;
     app.quick_start_key(KeyCode::Esc.into());
     assert!(matches!(app.screen, Screen::Form));
@@ -2565,46 +2570,38 @@ fn finished_diagnostics_keep_summary_and_buttons_outside_scrollable_output() {
     assert_eq!(app.result_scroll, 0);
 }
 #[test]
-fn channel_selector_cycles_only_supported_channels_and_mouse_updates_both_forms() {
-    let mut value = String::new();
-    cycle_channel(&mut value, false);
-    assert_eq!(value, "dev");
-    cycle_channel(&mut value, false);
-    assert_eq!(value, "main");
-    cycle_channel(&mut value, true);
-    assert_eq!(value, "dev");
-    let mut app = test_profile_app();
-    app.form.saved.as_mut().unwrap().branch.clear();
-    app.form.fields[3].clear();
+fn channel_fields_are_fixed_to_the_matching_workstation_and_keep_accent_titles() {
+    let mut app = App::new(&test_request());
+    app.begin_edit(true);
+    assert_eq!(
+        app.editor.as_ref().unwrap().1[4],
+        crate::config::default_branch()
+    );
+    app.editor.as_mut().unwrap().2 = 4;
+    app.installation_editor_key(KeyCode::Right.into());
+    app.installation_editor_key(KeyCode::Left.into());
+    app.installation_editor_key(KeyCode::Char('m').into());
+    assert_eq!(
+        app.editor.as_ref().unwrap().1[4],
+        crate::config::default_branch()
+    );
+    app.editor.as_mut().unwrap().2 = 0;
     let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
     terminal
         .draw(|frame| app.hits = draw_content(frame, &app))
         .unwrap();
-    let arrow = app
+    let field = app
         .hits
         .iter()
-        .find(|hit| matches!(hit.control, Control::Channel(false, false)))
+        .find(|h| h.control == Control::EditField(4))
         .unwrap()
         .area;
-    click(&mut app, (arrow.x, arrow.y));
-    assert_eq!(app.form.fields[3], crate::config::default_branch());
-    app.form.append("invalid-channel");
-    assert_eq!(app.form.fields[3], crate::config::default_branch());
-    app.begin_edit(false);
-    app.editor.as_mut().unwrap().2 = 4;
-    terminal
-        .draw(|frame| app.hits = draw_content(frame, &app))
-        .unwrap();
-    let arrow = app
-        .hits
-        .iter()
-        .find(|hit| matches!(hit.control, Control::Channel(true, true)))
-        .unwrap()
-        .area;
-    click(&mut app, (arrow.x, arrow.y));
-    assert_eq!(app.editor.as_ref().unwrap().1[4], "main");
-    assert_eq!(app.editor.as_ref().unwrap().2, 4);
+    assert_eq!(
+        terminal.backend().buffer()[(field.x + 1, field.y)].fg,
+        Color::Cyan
+    );
 }
+
 #[test]
 fn running_panel_centers_the_stage_and_prints_it_only_once() {
     let r = Request {
@@ -4060,13 +4057,13 @@ fn profile_actions_use_spatial_navigation_without_wrapping_rows() {
         assert_eq!(app.settings_selected, 3); // Edit, on the same row.
         app.settings_selected = 2;
         assert!(app.move_spatial(KeyCode::Down));
-        assert_eq!(app.settings_selected, 4); // New, directly below Use in the 2x2 grid.
+        assert_eq!(app.settings_selected, 5); // Copy, below Use.
         assert!(app.move_spatial(KeyCode::Down));
-        assert_eq!(app.settings_selected, 6); // Pinned Back, below actions.
+        assert_eq!(app.settings_selected, 7); // Pinned Back, below actions.
         assert!(app.move_spatial(KeyCode::Right));
-        assert_eq!(app.settings_selected, 6); // No jump to another row.
+        assert_eq!(app.settings_selected, 7); // No jump to another row.
         assert!(app.move_spatial(KeyCode::Up));
-        assert_eq!(app.settings_selected, 5); // Delete, above Back.
+        assert_eq!(app.settings_selected, 6); // Delete, above Back.
         assert!(matches!(
             app.screen,
             Screen::SettingsPage(SettingsPage::Profiles)
@@ -5497,4 +5494,118 @@ fn onboarding_background_refresh_keeps_idle_screen_and_sidebar_selection() {
         "node"
     );
     assert!(!app.nodes_busy);
+}
+
+#[test]
+fn unconfirmed_manage_back_returns_to_install_form_with_equal_button_widths() {
+    let mut app = test_profile_app();
+    app.confirmed_installation = None;
+    app.form.saved.as_mut().unwrap().installed = false;
+    app.screen = Screen::Form;
+    app.form.fields[6] = "unsaved fixture token".into();
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 50)).unwrap();
+    terminal
+        .draw(|frame| app.hits = draw_content(frame, &app))
+        .unwrap();
+    let manage = app
+        .hits
+        .iter()
+        .find(|h| h.control == Control::Controller)
+        .unwrap()
+        .area;
+    let next = app
+        .hits
+        .iter()
+        .find(|h| h.control == Control::Continue)
+        .unwrap()
+        .area;
+    assert_eq!(manage.width, next.width);
+    app.activate(Control::Controller);
+    assert!(matches!(app.screen, Screen::Controller));
+    app.activate(Control::ControllerBack);
+    assert!(matches!(app.screen, Screen::Form));
+    assert_eq!(app.form.fields[6], "unsaved fixture token");
+    assert!(app.nodes_requested.is_none());
+}
+
+#[test]
+fn quick_start_reuses_selected_profile_before_installation_and_creates_only_if_missing() {
+    let mut app = test_profile_app();
+    let id = app.form.saved.as_ref().unwrap().id;
+    app.confirmed_installation = None;
+    app.form.saved.as_mut().unwrap().installed = false;
+    app.screen = Screen::Idle;
+    app.activate(Control::QuickStartAction);
+    assert!(matches!(app.screen, Screen::Form));
+    assert_eq!(app.form.saved.as_ref().unwrap().id, id);
+    assert!(app.editor.is_none());
+    assert_eq!(app.connections.installations.len(), 1);
+    app.form.saved = None;
+    app.activate(Control::QuickStartAction);
+    assert!(matches!(app.screen, Screen::EditInstallation));
+    assert!(app.editor.as_ref().unwrap().0.is_none());
+}
+
+#[test]
+fn profile_transfer_requires_confirmation_and_does_not_modify_the_source() {
+    let mut app = test_profile_app();
+    let source = tempfile::tempdir().unwrap();
+    let target = tempfile::tempdir().unwrap();
+    app.state_dir = source.path().into();
+    app.connections.save(&app.state_dir).unwrap();
+    let before = std::fs::read(source.path().join("installations.json")).unwrap();
+    app.activate(Control::TransferInstallation);
+    assert!(app.prompt.is_some());
+    app.profile_copy.as_mut().unwrap().1 = target.path().into();
+    app.prompt_key(KeyCode::Char('n').into());
+    app.finish_profile_copy();
+    assert!(!target.path().join("installations.json").exists());
+    app.activate(Control::TransferInstallation);
+    app.profile_copy.as_mut().unwrap().1 = target.path().into();
+    app.prompt_key(KeyCode::Char('y').into());
+    app.finish_profile_copy();
+    let destination = Connections::load(target.path()).unwrap();
+    assert_eq!(destination.installations.len(), 1);
+    assert_eq!(
+        destination.installations[0].id,
+        app.connections.installations[0].id
+    );
+    assert_eq!(
+        destination.installations[0].branch,
+        if crate::config::default_branch() == "dev" {
+            "main"
+        } else {
+            "dev"
+        }
+    );
+    assert_eq!(
+        std::fs::read(source.path().join("installations.json")).unwrap(),
+        before
+    );
+}
+
+#[test]
+fn workstation_quick_start_finishes_without_device_creation() {
+    let mut app = test_profile_app();
+    app.screen = Screen::QuickStart;
+    app.controller.onboarding = Some(serde_json::json!({"steps":[
+        {"key":"defaults","complete":true}, {"key":"node","complete":true},
+        {"key":"protocols","complete":true}, {"key":"access","complete":true},
+        {"key":"config","complete":false}], "next_step":"config"}));
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    let text: String = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|c| c.symbol())
+        .collect();
+    assert!(text.contains("Server setup is complete"));
+    assert!(!text.contains("Create a device"));
+    assert!(!text.contains("Progress refreshes"));
+    app.nodes_requested = None;
+    app.activate(Control::QuickStartAction);
+    assert!(matches!(app.screen, Screen::Idle));
+    assert!(app.nodes_requested.is_none());
 }

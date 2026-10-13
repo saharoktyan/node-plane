@@ -134,6 +134,7 @@ pub fn run(mut request: Request) -> Result<()> {
     let mut pending_input = None;
     let mut input_timing = None;
     loop {
+        app.finish_profile_copy();
         if app.restart_required {
             terminal.draw(|frame| app.hits = draw(frame, &app))?;
             match event::read()? {
@@ -869,7 +870,7 @@ pub fn run(mut request: Request) -> Result<()> {
                                     && app.form.visible().get(app.form.selected - 1)
                                         == Some(&3) =>
                             {
-                                cycle_channel(&mut app.form.fields[3], key.code == KeyCode::Left);
+                                app.form.fields[3] = crate::config::default_branch().into();
                             }
                             KeyCode::Left | KeyCode::Right | KeyCode::Char(' ')
                                 if app.form.selected > 0

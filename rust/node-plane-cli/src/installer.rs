@@ -149,6 +149,20 @@ async fn run(
         let mut report = diagnosis(session, journal, tx).await?;
         let before = report.render();
         if request.workflow.repair {
+            let version = report
+                .checks
+                .iter()
+                .find(|check| check.id == "release:current/VERSION" && check.status == "ok")
+                .and_then(|check| check.detail.strip_prefix("current/VERSION: "))
+                .context(
+                    "Cannot confirm the installed controller channel; service recovery is blocked.",
+                )?;
+            let updates = serde_json::json!({"current_version": version});
+            crate::nodes::validate_controller_channel(
+                &crate::nodes::Command::List,
+                crate::nodes::controller_branch(&updates)?,
+                crate::config::default_branch(),
+            )?;
             for check in &report.checks {
                 let Some(unit) = &check.repair else { continue };
                 ensure!(
@@ -227,6 +241,33 @@ async fn run(
         let text = report.render();
         ensure!(report.errors == 0, "{text}");
         return Ok(text);
+    }
+    stage("Checking the existing controller channel");
+    let metadata = checked(
+        session,
+        r#"python3 - <<'NODE_PLANE_CHANNEL'
+from pathlib import Path
+base = Path('/opt/node-plane')
+if (base / 'current').exists() or (base / '.node-plane-installation.json').exists():
+    version = (base / 'current/VERSION').read_text().strip()
+    print('NODE_PLANE_EXISTING_VERSION ' + version)
+NODE_PLANE_CHANNEL
+"#,
+        None,
+        journal,
+        false,
+        tx,
+    )
+    .await?;
+    if let Some(version) = metadata
+        .iter()
+        .find_map(|line| line.strip_prefix("NODE_PLANE_EXISTING_VERSION "))
+    {
+        crate::nodes::validate_controller_channel(
+            &crate::nodes::Command::List,
+            crate::nodes::controller_branch(&serde_json::json!({"current_version": version}))?,
+            crate::config::default_branch(),
+        )?;
     }
     stage("Checking installation paths and installing missing prerequisites");
     checked(session, PREPARE_HOST, None, journal, false, tx).await?;

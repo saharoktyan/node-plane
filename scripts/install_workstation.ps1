@@ -22,7 +22,7 @@ if (-not $Tag) {
     $release = $null
     foreach ($r in $releases) {
         if ($r.draft) { continue }
-        if ($Channel -ne 'dev' -and $r.prerelease) { continue }
+        if (($Channel -eq 'dev') -ne [bool]$r.prerelease) { continue }
         $hasInstaller = $false
         if ($null -ne $r.assets) {
             foreach ($a in $r.assets) {
@@ -41,12 +41,20 @@ if (-not $Tag) {
     $Tag = $release.tag_name
 }
 
+if (($Channel -eq 'dev') -ne ($Tag -match '-alpha\.')) {
+    throw 'The release tag must match the requested Workstation channel.'
+}
+$channelInstallDir = Join-Path $env:USERPROFILE ".local\share\node-plane-workstation\$Channel"
+if ($env:CARGO_DIST_INSTALL_DIR) { $channelInstallDir = $env:CARGO_DIST_INSTALL_DIR }
+if ($env:CARGO_DIST_FORCE_INSTALL_DIR) { $channelInstallDir = $env:CARGO_DIST_FORCE_INSTALL_DIR }
+if ($env:NODE_PLANE_CLI_INSTALL_DIR) { $channelInstallDir = $env:NODE_PLANE_CLI_INSTALL_DIR }
+$receiptBase = if ($env:XDG_CONFIG_HOME) { $env:XDG_CONFIG_HOME } else { $env:LOCALAPPDATA }
+$channelReceiptBase = Join-Path $receiptBase "node-plane-workstation\$Channel"
+
 function Install-WorkstationShortcut {
     # Use the stable cargo-dist install path, rather than PATH in this process:
     # the installer updates PATH for future shells only.
-    $installDir = Join-Path $env:USERPROFILE '.local\bin'
-    if ($env:CARGO_DIST_INSTALL_DIR) { $installDir = $env:CARGO_DIST_INSTALL_DIR }
-    if ($env:CARGO_DIST_FORCE_INSTALL_DIR) { $installDir = $env:CARGO_DIST_FORCE_INSTALL_DIR }
+    $installDir = $channelInstallDir
     $executable = Join-Path $installDir 'node-plane.exe'
     if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {
         throw "Installed Workstation executable not found: $executable"
@@ -54,7 +62,7 @@ function Install-WorkstationShortcut {
     $programs = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
     New-Item -ItemType Directory -Path $programs -Force | Out-Null
     $shell = New-Object -ComObject WScript.Shell
-    $shortcut = $shell.CreateShortcut((Join-Path $programs 'Node Plane Workstation.lnk'))
+    $shortcut = $shell.CreateShortcut((Join-Path $programs ("Node Plane Workstation ($Channel).lnk")))
     $terminal = Get-Command wt.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($terminal) {
         $shortcut.TargetPath = $terminal.Source
@@ -76,10 +84,24 @@ try {
     $uri = "https://github.com/saharoktyan/node-plane/releases/download/$Tag/node-plane-cli-installer.ps1"
     Invoke-WebRequest -UseBasicParsing -Uri $uri -Headers $headers -OutFile $installer
     Write-Host '[3/3] Installing Workstation...'
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer
-    if ($LASTEXITCODE -ne 0) { throw "Workstation installer failed (exit $LASTEXITCODE)." }
+    $previousConfig = $env:XDG_CONFIG_HOME
+    $previousForce = $env:CARGO_DIST_FORCE_INSTALL_DIR
+    $previousSpecific = $env:NODE_PLANE_CLI_INSTALL_DIR
+    try {
+        $env:XDG_CONFIG_HOME = $channelReceiptBase
+        $env:CARGO_DIST_FORCE_INSTALL_DIR = $channelInstallDir
+        $env:NODE_PLANE_CLI_INSTALL_DIR = $channelInstallDir
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer
+        if ($LASTEXITCODE -ne 0) { throw "Workstation installer failed (exit $LASTEXITCODE)." }
+    } finally {
+        $env:XDG_CONFIG_HOME = $previousConfig
+        $env:CARGO_DIST_FORCE_INSTALL_DIR = $previousForce
+        $env:NODE_PLANE_CLI_INSTALL_DIR = $previousSpecific
+    }
+    $launcher = Join-Path $channelInstallDir "node-plane-$Channel.cmd"
+    Set-Content -LiteralPath $launcher -Encoding ASCII -Value '@"%~dp0node-plane.exe" %*'
     Install-WorkstationShortcut
-    Write-Host 'Open Node Plane Workstation from the Windows Start menu, or run: node-plane'
+    Write-Host "Open Node Plane Workstation ($Channel) from the Windows Start menu, or run: node-plane-$Channel"
 } finally {
     Remove-Item -LiteralPath $installer -ErrorAction SilentlyContinue
 }
