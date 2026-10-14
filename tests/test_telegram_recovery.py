@@ -130,6 +130,25 @@ class RecoveryScreenTests(IsolatedAsyncioTestCase):
         await admin_settings.ssh_key_plain_close_cb(self.query, self.bot)
         self.bot.delete_message.assert_awaited_with(self.query.message.chat.id, self.query.message.message_id)
 
+    async def test_long_removal_identity_uses_bounded_callback_and_exact_confirmed_target(self):
+        node = 'node-' + 'a' * 80
+        page = {'items':[{'id':node,'kind':'removal','node_key':node,'status':'blocked','actions':['resume'],'error_code':'node_cleanup_unavailable','next_step':'removal'}], 'total':1,'offset':0,'page_size':10,'maintenance_active':False}
+        backend = SimpleNamespace(request=AsyncMock(return_value=page))
+        with patch.object(recovery,'render',new_callable=AsyncMock) as render:
+            await recovery.show(self.query,self.bot,backend,self.state)
+        rows = render.call_args.args[2].sections[0].rows
+        callback = recovery.RecoveryAction.unpack(rows[0][0].callback_data)
+        self.assertLessEqual(len(callback.pack().encode()),64)
+        backend.request.reset_mock()
+        with patch.object(recovery,'render',new_callable=AsyncMock) as render:
+            await recovery.recovery_action(self.query,callback,self.bot,backend,self.state)
+        backend.request.assert_not_called()
+        self.assertIn(node,render.call_args.args[2].plain())
+        backend.request.return_value = {'status':'queued'}
+        with patch.object(recovery,'show',new_callable=AsyncMock):
+            await recovery.recovery_action(self.query,callback.model_copy(update={'confirm':1}),self.bot,backend,self.state)
+        backend.request.assert_awaited_once_with('POST',f'/api/v1/system/recovery/removal/{node}/resume',telegram_user_id=self.query.from_user.id)
+
     async def test_confirmation_precedes_cancel_and_uses_existing_contract(self):
         identity = str(uuid4())
         for locale in ('en', 'ru'):

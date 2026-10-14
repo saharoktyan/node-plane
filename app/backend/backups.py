@@ -505,7 +505,12 @@ class BackupService:
             raise AccessDenied("resource_not_found", 404)
         return self._public(row)
 
-    def create_snapshot(self, trigger="manual", prune=True, name=""):
+    def create_snapshot(self, trigger="manual", prune=True, name="", snapshot_id=None):
+        if snapshot_id and self._path(snapshot_id).is_file():
+            existing = self._load(snapshot_id)
+            if existing["trigger"] != trigger or existing.get("name", "") != name:
+                raise AccessDenied("backup_identity_conflict", 409)
+            return {"status": "success", "backup_id": snapshot_id}
         from config import APP_VERSION
 
         with self.db.transaction() as conn:
@@ -534,7 +539,7 @@ class BackupService:
                 if table == "backend_system_settings":
                     rows = [r for r in rows if r["key"] not in {
                         "backup_last_scheduled", "traffic_last_scan", "traffic_cursor",
-                        "traffic_generation"
+                        "traffic_generation", "controller_cpu_sample", "alert_last_cpu_scan"
                     } and not r["key"].startswith(("traffic_consent:", "traffic_consent_generation:", "telegram_retry_until:"))]
                 rows.sort(key=lambda row: encoded(row))
                 tables[table] = {"columns": columns, "rows": rows}
@@ -549,7 +554,7 @@ class BackupService:
                     return {"status": "duplicate", "backup_id": path.stem}
             except AccessDenied:
                 pass
-        backup_id = str(uuid4())
+        backup_id = snapshot_id or str(uuid4())
         payload = {
             "format": "node-plane-backend-v3",
             "created_at": now(),
@@ -560,7 +565,7 @@ class BackupService:
         }
         if name:
             payload["name"] = name
-        temp = self.root / f".{backup_id}.tmp"
+        temp = self.root / f".{backup_id}.{uuid4().hex}.tmp"
         fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
         with os.fdopen(fd, "wb") as stream:
             stream.write(encoded(payload))
@@ -782,7 +787,7 @@ class BackupService:
             if job["action"] == "create":
                 with self.db.connect() as conn:
                     label = conn.execute("SELECT name FROM backend_backup_labels WHERE job_id=?", (job["id"],)).fetchone()
-                result = self.create_snapshot(name=label["name"] if label else "")
+                result = self.create_snapshot(name=label["name"] if label else "", snapshot_id=job["id"])
                 with self.db.transaction() as conn:
                     conn.execute(
                         "UPDATE backend_backup_jobs SET status='succeeded',result_json=? WHERE id=?",
@@ -846,7 +851,7 @@ class BackupService:
             with self.db.transaction() as conn:
                 conn.execute(
                     "UPDATE backend_backup_jobs SET status='blocked',result_json=? WHERE id=?",
-                    (json.dumps({"status": "failed", "code": code}), job["id"]),
+                    (json.dumps({**(json.loads(job["result_json"]) if job["result_json"] else {}), "status": "failed", "code": code}), job["id"]),
                 )
             return True
 

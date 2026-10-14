@@ -15,6 +15,38 @@ impl App {
                 self.controller_command(crate::controller::Command::WorkstationAudit(0));
                 None
             }
+            Control::ControllerRecoveryInventory(offset)
+            | Control::ControllerRecoveryPage(offset) => {
+                if matches!(self.screen, Screen::Form) && self.form.action == Action::Diagnose {
+                    self.controller.profile = self.form.saved.as_ref().map(|p| p.id);
+                    self.controller.recovery_inventory = None;
+                    self.controller.workstation_audit = None;
+                    self.controller.recovery_history = None;
+                    self.controller.history_detail = None;
+                    self.screen = Screen::Controller;
+                    self.controller_sidebar = false;
+                }
+                self.controller_command(crate::controller::Command::RecoveryInventory(offset));
+                None
+            }
+            Control::ControllerRecoveryAction(index, action) => {
+                if let Some(page) = &self.controller.recovery_inventory {
+                    let item = &page["items"][index];
+                    if let (Some(kind), Some(id), Some(action)) = (
+                        item["kind"].as_str(),
+                        item["id"].as_str(),
+                        item["actions"][action].as_str(),
+                    ) {
+                        self.controller_command(crate::controller::Command::RecoveryAction(
+                            kind.into(),
+                            id.into(),
+                            action.into(),
+                            page["offset"].as_u64().unwrap_or(0) as usize,
+                        ));
+                    }
+                }
+                None
+            }
             Control::ControllerRecoveryHistory => {
                 self.controller_command(crate::controller::Command::RecoveryHistory(0));
                 None
@@ -154,7 +186,7 @@ impl App {
                 None
             }
             Control::ControllerAlertInterval(minutes) => {
-                if matches!(minutes, 5 | 15)
+                if matches!(minutes, 3 | 5 | 10)
                     && self
                         .controller
                         .alerts
@@ -170,7 +202,7 @@ impl App {
             Control::ControllerAlertToggle(key) => {
                 if let Some(value) = &self.controller.alerts {
                     let patch = if key == "interval_minutes" {
-                        serde_json::json!({"interval_minutes":if value["interval_minutes"] == 5 {15}else{5}})
+                        serde_json::json!({"interval_minutes":match value["interval_minutes"].as_u64() { Some(3) => 5, Some(5) => 10, _ => 3 }})
                     } else {
                         serde_json::json!({key:value[key] != true})
                     };
@@ -934,6 +966,14 @@ impl App {
             Control::ControllerBack => {
                 self.controller_navigation_revision =
                     self.controller_navigation_revision.wrapping_add(1);
+                if self.form.action == Action::Diagnose && matches!(self.screen, Screen::Controller)
+                {
+                    self.controller.recovery_inventory = None;
+                    self.screen = Screen::Form;
+                    self.form.selected = self.form.count() - 2;
+                    self.controller.selected = 0;
+                    return None;
+                }
                 if self.controller_return_form
                     && !self.controller_ready()
                     && !self.controller.removal_active()
@@ -959,7 +999,8 @@ impl App {
                     self.controller.selected = 0;
                     return None;
                 }
-                if self.controller.workstation_audit.take().is_some()
+                if self.controller.recovery_inventory.take().is_some()
+                    || self.controller.workstation_audit.take().is_some()
                     || self.controller.recovery_history.take().is_some()
                 {
                     self.controller.selected = 0;
@@ -1129,6 +1170,7 @@ impl App {
         self.controller.alerts = None;
         self.controller.workstation_audit = None;
         self.controller.recovery_history = None;
+        self.controller.recovery_inventory = None;
         self.controller.history_detail = None;
         self.controller.backups = None;
         self.controller.backup_job = None;
@@ -1188,6 +1230,12 @@ impl App {
                 Control::ControllerUpdateBranchConfirm(true),
                 Control::ControllerUpdateBranchConfirm(false),
             ];
+        }
+        if let Some(page) = &state.recovery_inventory {
+            return recovery_controls(page)
+                .into_iter()
+                .map(|(_, control)| control)
+                .collect();
         }
         if state.history_detail.is_some() {
             return vec![Control::ControllerBack];

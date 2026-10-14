@@ -24,14 +24,26 @@ def alert_screen(delivery):
             embedded_buttons=True)
     lines = [
         tr(locale, "alerts.node", title=event["payload"]["node_title"]),
-        tr(locale, "alerts.condition." + event["kind"]),
+        tr(locale, ("alerts.condition.resolved." if event["resolved"] else "alerts.condition.") + event["kind"]),
         tr(locale, "alerts.observed", at=event["at"][:19].replace("T", " ")),
     ]
-    if "value" in event["payload"]:
-        lines.append(tr(locale, "alerts.value", value=event["payload"]["value"]))
+    payload = event['payload']
+    if 'value' in payload:
+        import math
+        value = payload['value']
+        measured = f'{value:g}' if type(value) in {int, float} and math.isfinite(value) else '—'
+        kind = event['kind']
+        if kind in {'disk_low', 'ram_high', 'cpu_high'}:
+            lines.append(tr(locale, 'alerts.value.' + kind, value=measured))
+        elif kind == 'load_high':
+            lines.append(tr(locale, 'alerts.value.load_high', value=measured, cpus=payload.get('cpus', '—')))
+        else:
+            lines.append(tr(locale, 'alerts.value', value=measured))
+    if event['kind'] == 'cpu_high' and not event['resolved']:
+        lines.append(tr(locale, 'alerts.severity.' + payload.get('severity', 'warning')))
     return Screen(
         tr(locale, "alerts.recovered" if event["resolved"] else "alerts.problem"),
-        tuple(lines),
+        tuple(lines), embedded_buttons=True,
     )
 
 
@@ -41,7 +53,7 @@ async def deliver_one(bot, backend):
     delivery = value.get("delivery")
     if not delivery:
         return False
-    options = {}
+    options = {'rows': [[InlineKeyboardButton(text=tr(normalize_locale(delivery.get('locale')), 'setup.close'), callback_data='update_notice_close')]]}
     if delivery['event']['kind'] == 'update_available':
         options['rows'] = []
         url = delivery['event']['payload'].get('release_url')

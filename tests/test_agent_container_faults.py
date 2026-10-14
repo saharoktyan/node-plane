@@ -96,7 +96,7 @@ class AgentContainerFaultTests(unittest.TestCase):
         cls.temp = tempfile.TemporaryDirectory(prefix='node-plane-agent-fault-')
         cls.addClassCleanup(cls.temp.cleanup)
         cls.root = Path(cls.temp.name)
-        binary = REPO / 'rust/node-agent/target/debug/node-plane-agent'
+        binary = Path(os.environ.get('NODE_PLANE_TEST_AGENT_BINARY', REPO / 'rust/node-agent/target/debug/node-plane-agent'))
         if not binary.is_file():
             raise RuntimeError('Build the current Rust agent first')
         shutil.copy(binary, cls.root / 'agent-bin')
@@ -239,6 +239,28 @@ tls_client_ca_path = "/test/ca.crt"
     def count(self):
         return docker('exec',self.name,'sh','-c',
                       'if [ -f /test/counter ]; then wc -l < /test/counter; else echo 0; fi').stdout.strip()
+
+    def test_cpu_rpc_warms_up_then_reports_a_fresh_minute_average_without_runtime_mutation(self):
+        import json
+        request = self.pb.BackendNodeActionRequest(node_key='fault-node',action='host_metrics',intent_json='{}')
+        first = json.loads(self.stub.BackendNodeAction(request,timeout=2).payload_json)
+        self.assertEqual(first['node_key'],'fault-node')
+        self.assertEqual(first['host_metrics'],{})
+        deadline = time.monotonic()+70
+        while True:
+            result = json.loads(self.stub.BackendNodeAction(request,timeout=2).payload_json)
+            metrics = result['host_metrics']
+            if 'cpu_used_percent' in metrics:
+                break
+            if time.monotonic() >= deadline:
+                self.fail('Agent did not publish a complete CPU sample window')
+            time.sleep(.5)
+        self.assertGreaterEqual(metrics['cpu_sample_window_seconds'],60)
+        self.assertLessEqual(metrics['cpu_sample_window_seconds'],75)
+        self.assertGreaterEqual(metrics['cpu_used_percent'],0)
+        self.assertLessEqual(metrics['cpu_used_percent'],100)
+        self.assertLessEqual(metrics['cpu_sample_age_seconds'],15)
+        self.assertEqual(self.count(),'0')
 
     def test_agent_sigkill_before_mutation_orphan_completes_once_and_recovers(self):
         self.mode('before_mutation')

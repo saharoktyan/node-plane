@@ -19,6 +19,8 @@ pub enum Command {
     WorkstationAudit(usize),
     WorkstationAuditErrors(usize),
     RecoveryHistory(usize),
+    RecoveryInventory(usize),
+    RecoveryAction(String, String, String, usize),
     AnnouncementOverview,
     AnnouncementPreview(String),
     AnnouncementCreate(String, Uuid, u64),
@@ -179,6 +181,18 @@ impl Command {
                 None,
                 None,
             ),
+            Self::RecoveryInventory(offset) => (
+                Method::GET,
+                format!("/api/v1/system/recovery?offset={offset}"),
+                None,
+                None,
+            ),
+            Self::RecoveryAction(kind, id, action, _) => (
+                Method::POST,
+                crate::workstation::recovery_path(kind, id, action)?,
+                None,
+                None,
+            ),
             Self::RecoveryHistory(offset) => (
                 Method::GET,
                 format!("/api/v1/system/recovery/history?offset={offset}"),
@@ -315,6 +329,7 @@ pub struct Browser {
     pub alerts: Option<Value>,
     pub workstation_audit: Option<Value>,
     pub recovery_history: Option<Value>,
+    pub recovery_inventory: Option<Value>,
     pub history_detail: Option<(&'static str, usize)>,
     pub announcement_overview: Option<Value>,
     pub announcement_draft: Option<String>,
@@ -416,12 +431,32 @@ impl Browser {
                 self.selected = 0;
             }
             Command::WorkstationAudit(_) | Command::WorkstationAuditErrors(_) => {
+                self.recovery_inventory = None;
                 self.workstation_audit = Some(value);
                 self.recovery_history = None;
                 self.history_detail = None;
                 self.selected = 0;
             }
+            Command::RecoveryInventory(_) | Command::RecoveryAction(..) => {
+                let mut value = value;
+                if value.get("recovery_result").is_none()
+                    && let Some(result) = self
+                        .recovery_inventory
+                        .as_ref()
+                        .and_then(|p| p.get("recovery_result"))
+                {
+                    value["recovery_result"] = result.clone();
+                }
+                let first_page = self.recovery_inventory.is_none();
+                self.recovery_inventory = Some(value);
+                self.workstation_audit = None;
+                self.recovery_history = None;
+                if first_page || matches!(command, Command::RecoveryAction(..)) {
+                    self.selected = 0;
+                }
+            }
             Command::RecoveryHistory(_) => {
+                self.recovery_inventory = None;
                 self.recovery_history = Some(value);
                 self.workstation_audit = None;
                 self.history_detail = None;
@@ -654,6 +689,11 @@ impl Browser {
                 .as_str()
                 .and_then(|id| Uuid::parse_str(id).ok())
                 .map(Command::Job);
+        }
+        if let Some(page) = &self.recovery_inventory {
+            return Some(Command::RecoveryInventory(
+                page["offset"].as_u64().unwrap_or(0) as usize,
+            ));
         }
         if let Some(job) = &self.backup_job {
             return if matches!(

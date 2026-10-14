@@ -51,6 +51,24 @@ class ObservationTests(TestCase):
         after = dict(self.db.connection.execute("SELECT * FROM backend_nodes WHERE key='lv1'").fetchone())
         self.assertEqual(before, after)
 
+    def test_cpu_mean_and_thresholds_are_shared_by_probe_and_fleet_diagnostics(self):
+        from backend.installation_diagnostics import server_checks
+        self.create()
+        driver = SimpleNamespace(inspect_node_services=Mock())
+        with TestClient(create_app(self.db,node_driver=driver)) as client:
+            for percent,expected in [(20,'ok'),(85,'warning'),(95,'error')]:
+                driver.inspect_node_services.return_value = {'host_metrics':{'cpu_used_percent':percent,'cpu_sample_window_seconds':60,'cpu_sample_age_seconds':1}}
+                response = client.get('/api/v1/nodes/lv1/probe',headers=self.admin_headers())
+                self.assertEqual(response.status_code,200,response.text)
+                self.assertEqual(response.json()['host_metrics']['cpu_used_percent'],percent)
+                check = next(c for c in server_checks(response.json()) if c['id']=='cpu_used_percent')
+                self.assertEqual(check['status'],expected)
+                self.assertIn('1-minute average',check['detail'])
+                self.assertIn('%',check['detail'])
+            driver.inspect_node_services.return_value = {'host_metrics':{'cpu_used_percent':99,'cpu_sample_window_seconds':60,'cpu_sample_age_seconds':30}}
+            response = client.get('/api/v1/nodes/lv1/probe',headers=self.admin_headers())
+            self.assertNotIn('cpu_used_percent',response.json()['host_metrics'])
+
     def test_agent_only_probe_has_no_failing_protocols_and_keeps_unknowns(self):
         self.create()
         self.db.connection.execute("UPDATE backend_nodes SET protocols_json='[]' WHERE key='lv1'")

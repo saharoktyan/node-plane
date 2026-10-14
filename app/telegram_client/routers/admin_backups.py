@@ -87,7 +87,7 @@ async def catalog(query, bot, backend, state, offset):
     rows = [
         [
             button(
-                f"{tr(lang, 'backups.kind.' + item.get('kind', 'automatic'))} · {item['created_at'][:19]} · {item['app_version']}" + (f" · {item['name']}" if item.get('name') else ""),
+                f"{tr(lang, 'backups.kind.' + item.get('kind', 'automatic'))} · {item['created_at'][:19]} · {item['app_version'].split(' · ', 1)[0]}" + (f" · {item['name']}" if item.get('name') else ""),
                 f"backup_detail:{item['id']}",
             )
         ]

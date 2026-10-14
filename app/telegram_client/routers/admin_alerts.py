@@ -115,7 +115,7 @@ async def alerts_cb(
         sections = [Section(tr(locale, 'alerts.rich.monitoring'),
             (tr(locale, 'alerts.last', at=(last.get('at') or '—')[:19],
                 status=tr(locale, 'alerts.status.' + last.get('status', 'never'))),), rows=(choices('enabled'),)),
-            Section(tr(locale, 'alerts.rich.interval'), rows=(intervals,)),
+            Section(tr(locale, 'alerts.rich.interval'), (tr(locale, 'alerts.cpu_schedule'),), rows=(intervals,)),
             Section(tr(locale, 'alerts.rich.recovery'), rows=(choices('notify_resolved'),))]
         if value['active_count']:
             sections.append(Section(tr(locale, 'admin.rich.attention'),

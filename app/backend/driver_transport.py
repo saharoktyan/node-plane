@@ -41,6 +41,17 @@ class GrpcIntentDriver:
             intent_json='{}', recover=True), timeout=min(self.timeout, 2))
         return json.loads(response.result_json)
 
+    def host_metrics(self, node_key):
+        """Cheap read of the agent's rolling CPU sample; never synchronize runtime files."""
+        from driver.v1 import runtime_service_pb2
+        import json
+        response = self.runtime.BackendNodeAction(runtime_service_pb2.BackendNodeActionRequest(
+            node_key=node_key, action='host_metrics', intent_json='{}'), timeout=min(self.timeout, 2))
+        result = json.loads(response.result_json)
+        if result.get('node_key') != node_key:
+            raise ValueError('invalid host measurement identity')
+        return result
+
     def inspect_node_services(self, node_key):
         from driver.v1 import runtime_service_pb2
         import json
@@ -100,7 +111,7 @@ class GrpcIntentDriver:
                 'awg_config': items['awg_config'].status,
                 'runtime_version': version.summary.strip()[:64] if version.status == 'ok' else None,
                 'checks': [{'id': item.kind, 'status': item.status, 'detail': item.summary}
-                           for item in response.items if item.kind.startswith('port:')
+                           for item in response.items if (item.kind.startswith('port:') or item.kind == 'cpu_used_percent')
                            and item.status in {'ok', 'warning', 'error'}]}
 
     def prepare_node(self, node_key):

@@ -44,4 +44,4 @@ These checks inspect local services and configuration structure. A real VPN clie
 
 Active setup, update, deletion and cleanup screens refresh their progress. Leaving the screen does not cancel an accepted operation. Reopen its status to check the outcome. If a job is blocked, inspect its reason and diagnostics before starting another mutation.
 
-Update notifications and alerts have their own close/dismiss actions. Closing a notification preserves the menu you were using. Dismissing alert attention does not repair the underlying condition.
+Update, alert and recovery notifications have a Close action. Alerts retain their separate Inbox; Dismiss remains available in the alert list. Closing a notification preserves the menu you were using. Dismissing alert attention does not repair the underlying condition.

@@ -7,7 +7,9 @@ use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+mod host_metrics;
 
 use chrono::Utc;
 use serde::Deserialize;
@@ -189,6 +191,7 @@ struct AgentState {
     config: AgentConfig,
     last_seen_at: Arc<Mutex<String>>,
     instance_id: String,
+    cpu: Arc<Mutex<host_metrics::CpuSampler>>,
 }
 
 fn xray_config_uses_port(raw: &str, kind: &str, port: u32) -> bool {
@@ -281,6 +284,7 @@ impl AgentState {
     fn new(config: AgentConfig) -> Self {
         Self {
             config,
+            cpu: Arc::new(Mutex::new(host_metrics::CpuSampler::default())),
             last_seen_at: Arc::new(Mutex::new(Utc::now().to_rfc3339())),
             instance_id: fs::read_to_string("/proc/sys/kernel/random/uuid")
                 .map(|value| value.trim().to_string())
@@ -288,6 +292,13 @@ impl AgentState {
                     format!("{}-{}", std::process::id(), Utc::now().timestamp_micros())
                 }),
         }
+    }
+
+    fn cpu_metrics(&self) -> Value {
+        self.cpu
+            .lock()
+            .map(|sampler| sampler.metrics(Instant::now()))
+            .unwrap_or_else(|_| serde_json::json!({}))
     }
 
     fn mark_heartbeat(&self) {
@@ -541,6 +552,32 @@ impl AgentState {
                 },
             },
         ];
+
+        let cpu = self.cpu_metrics();
+        let (status, summary) = if let Some(value) = cpu["cpu_used_percent"].as_f64() {
+            (
+                if value >= 95.0 {
+                    "error"
+                } else if value >= 85.0 {
+                    "warning"
+                } else {
+                    "ok"
+                },
+                format!("CPU used (1-minute average): {value:.1}%; warning ≥85%, error ≥95%"),
+            )
+        } else {
+            (
+                "warning",
+                "Fresh CPU average unavailable; one minute of uninterrupted samples is required"
+                    .into(),
+            )
+        };
+        items.push(DiagnosticItem {
+            kind: "cpu_used_percent".into(),
+            status: status.into(),
+            summary,
+            detail: String::new(),
+        });
 
         let ports = diagnostic_ports(
             &fs::read_to_string(&xray_config_path).unwrap_or_default(),
@@ -1749,6 +1786,12 @@ impl NodeAgentService for NodeAgentApi {
         if req.node_key != self.state.config.node_key {
             return Err(Status::failed_precondition("agent node identity mismatch"));
         }
+        if req.action == "host_metrics" {
+            return Ok(Response::new(RuntimeCommandResponse {
+                summary: "host CPU observation".into(),
+                payload_json: serde_json::json!({"node_key": self.state.config.node_key, "host_metrics": self.state.cpu_metrics()}).to_string(),
+            }));
+        }
         if req.action == "operation_progress" {
             if !req.recover {
                 return Err(Status::invalid_argument("progress is read-only"));
@@ -1762,6 +1805,7 @@ impl NodeAgentService for NodeAgentApi {
                 payload_json: value.to_string(),
             }));
         }
+        let inspect = req.action == "inspect";
         let state = self.state.clone();
         let output = tokio::task::spawn_blocking(move || {
             state.run_runtime_command(
@@ -1777,8 +1821,16 @@ impl NodeAgentService for NodeAgentApi {
         .await
         .map_err(|_| Status::internal("node operation worker unavailable"))?
         .map_err(|_| Status::failed_precondition("node operation needs attention"))?;
-        let value: Value = serde_json::from_str(&output)
+        let mut value: Value = serde_json::from_str(&output)
             .map_err(|_| Status::internal("invalid node operation response"))?;
+        if inspect
+            && let (Some(metrics), Some(cpu)) = (
+                value.get_mut("host_metrics").and_then(Value::as_object_mut),
+                self.state.cpu_metrics().as_object(),
+            )
+        {
+            metrics.extend(cpu.iter().map(|(key, value)| (key.clone(), value.clone())));
+        }
         Ok(Response::new(RuntimeCommandResponse {
             summary: "backend node operation completed".into(),
             payload_json: value.to_string(),
@@ -2430,6 +2482,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr: SocketAddr = config.listen_addr.parse()?;
     print_startup(&config);
 
+    let sampler = state.cpu.clone();
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(Duration::from_secs(host_metrics::SAMPLE_SECONDS));
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            ticker.tick().await;
+            let raw = fs::read_to_string("/proc/stat").ok();
+            if let Ok(mut sampler) = sampler.lock() {
+                sampler.observe(raw.as_deref(), Instant::now());
+            }
+        }
+    });
+
     let mut ticker = tokio::time::interval(Duration::from_secs(config.heartbeat_seconds));
 
     tokio::spawn(async move {
@@ -2499,6 +2564,49 @@ fn diagnostic_ports(xray: &str, awg: &str) -> Vec<PortCheckSpec> {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn host_metric_rpc_is_bound_to_node_and_does_not_need_runtime_files() {
+        use super::{NodeAgentApi, NodeAgentService, agent};
+        use serde_json::Value;
+        use std::time::{Duration, Instant};
+        use tonic::Request;
+        let state = AgentState::new(AgentConfig {
+            node_key: "cpu-node".into(),
+            ..AgentConfig::default()
+        });
+        let now = Instant::now();
+        let start = now - Duration::from_secs(60);
+        for second in (0..=60).step_by(5) {
+            state.cpu.lock().unwrap().observe(
+                Some(&format!("cpu {} 0 0 {}", second * 9, second)),
+                start + Duration::from_secs(second),
+            );
+        }
+        let api = NodeAgentApi { state };
+        let request = |node_key: &str| {
+            Request::new(agent::v1::BackendNodeActionRequest {
+                node_key: node_key.into(),
+                action: "host_metrics".into(),
+                ..Default::default()
+            })
+        };
+        let value: Value = serde_json::from_str(
+            &api.backend_node_action(request("cpu-node"))
+                .await
+                .unwrap()
+                .into_inner()
+                .payload_json,
+        )
+        .unwrap();
+        assert_eq!(value["node_key"], "cpu-node");
+        assert_eq!(value["host_metrics"]["cpu_used_percent"], 90.0);
+        assert!(
+            api.backend_node_action(request("other-node"))
+                .await
+                .is_err()
+        );
+    }
+
     #[test]
     fn generic_xray_diagnostic_ports_recognize_vless_but_not_other_listeners() {
         let raw = r#"{"inbounds":[{"protocol":"vless","tag":"reality-tcp","port":443},{"protocol":"vless","tag":"reality-xhttp","port":8443},{"protocol":"socks","tag":"","port":1080}]}"#;

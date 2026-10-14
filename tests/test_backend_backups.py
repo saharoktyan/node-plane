@@ -68,6 +68,29 @@ class BackendBackupsTests(unittest.TestCase):
             Principal("test", PrincipalKind.SERVICE, ADMIN_PERMISSIONS), self.admin
         )
 
+    def test_create_job_adopts_its_exact_snapshot_after_lost_result(self):
+        from unittest.mock import patch
+        job = self.service.queue(self.actor, str(uuid4()), 'create', name='Manual')
+        result = self.service.create_snapshot(name='Manual', snapshot_id=job['id'])
+        self.db.connection.execute("UPDATE backend_backup_jobs SET status='blocked' WHERE id=?", (job['id'],))
+        from backend.recovery import act
+        act(self.db, self.actor, None, 'backup', job['id'], 'resume')
+        self.assertTrue(self.service.run_one())
+        self.assertEqual(self.service.get(self.actor, job['id'])['result']['backup_id'], result['backup_id'])
+        self.assertEqual(len(list(self.service.root.glob('*.json'))), 1)
+
+    def test_reconnect_error_retains_child_checkpoint(self):
+        from unittest.mock import patch
+        job = self.service.queue(self.actor, str(uuid4()), 'create')
+        checkpoint = {'nodes':[{'node_key':'node','job_id':str(uuid4()),'status':'pending'}]}
+        self.db.connection.execute("UPDATE backend_backup_jobs SET action='restore',status='running',phase='reconnecting',result_json=? WHERE id=?", (json.dumps(checkpoint),job['id']))
+        with patch.object(self.service, '_recover_nodes', side_effect=TimeoutError('never expose')):
+            self.service.run_one()
+        result = self.service.get(self.actor,job['id'])
+        self.assertEqual(result['status'],'blocked')
+        self.assertEqual(result['result']['nodes'],checkpoint['nodes'])
+        self.assertNotIn('never expose',str(result))
+
     def snapshot(self):
         result = self.service.create_snapshot()
         return result["backup_id"], self.service.detail(

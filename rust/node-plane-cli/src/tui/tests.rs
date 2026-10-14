@@ -4711,10 +4711,16 @@ fn backup_and_alert_choices_are_hidden_until_enabled_and_submit_exact_values() {
         Control::ControllerAlertInterval(_) | Control::ControllerAlertToggle("notify_resolved")
     )));
     app.controller.alerts.as_mut().unwrap()["enabled"] = true.into();
+    for minutes in [3, 5, 10] {
+        app.nodes_requested = None;
+        app.activate(Control::ControllerAlertInterval(minutes));
+        assert!(
+            matches!(&app.nodes_requested,Some(crate::nodes::Command::Controller(_,crate::controller::Command::AlertPreferences(v))) if v["interval_minutes"]==minutes)
+        );
+    }
+    app.nodes_requested = None;
     app.activate(Control::ControllerAlertInterval(15));
-    assert!(
-        matches!(&app.nodes_requested,Some(crate::nodes::Command::Controller(_,crate::controller::Command::AlertPreferences(v))) if v["interval_minutes"]==15)
-    );
+    assert!(app.nodes_requested.is_none());
     assert_eq!(format_backup_size(2486), "2.4 KiB");
 }
 
@@ -6140,4 +6146,118 @@ fn backspace_navigates_outside_inputs_and_keeps_text_deletion_inside() {
     key.code = KeyCode::Backspace;
     app.normalize_backspace(&mut key);
     assert_eq!(key.code, KeyCode::Backspace);
+}
+
+#[test]
+fn recovery_panel_refresh_keeps_focus_and_uses_current_backend_actions() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Controller;
+    let id = uuid::Uuid::new_v4();
+    let page = serde_json::json!({"items":[{"id":id,"kind":"settings","node_key":"n1","status":"blocked","actions":["recheck","resolve"],"error_code":"outcome_unconfirmed","next_step":"journal"}],"total":1,"offset":0,"page_size":10});
+    app.controller.apply(
+        crate::controller::Command::RecoveryInventory(0),
+        page.clone(),
+    );
+    app.controller.selected = 1;
+    app.controller
+        .apply(crate::controller::Command::RecoveryInventory(0), page);
+    assert_eq!(app.controller.selected, 1);
+    assert!(
+        app.controller_controls()
+            .contains(&Control::ControllerRecoveryAction(0, 1))
+    );
+    app.activate_controller(Control::ControllerRecoveryAction(0, 1));
+    assert!(
+        matches!(&app.nodes_requested,Some(crate::nodes::Command::Controller(_,crate::controller::Command::RecoveryAction(kind,identity,action,0))) if kind=="settings" && identity==&id.to_string() && action=="resolve")
+    );
+    app.activate_controller(Control::ControllerBack);
+    assert!(app.controller.recovery_inventory.is_none());
+    assert!(app.controller.poll().is_none());
+}
+
+#[test]
+fn backup_export_detail_shows_absolute_saved_path() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Controller;
+    app.controller.backup_detail = Some(
+        serde_json::json!({"id":uuid::Uuid::new_v4(),"app_version":"1.0.0 · abcd","created_at":"now","exported_path":"/tmp/node-plane-backup.json","compatible":true}),
+    );
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    let text: String = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect();
+    assert!(text.contains("Saved to: /tmp/node-plane-backup.json"));
+}
+
+#[test]
+fn audit_titles_survive_new_api_and_older_controller_responses() {
+    use super::screens::{audit_title, compact_history_item};
+    let item = serde_json::json!({"title":"Update profile · @member","action":"PATCH /api/v1/profiles/uuid","account_label":"@operator","phase":"completed"});
+    assert!(
+        compact_history_item(&item, true)
+            .0
+            .contains("@operator → Update profile · @member")
+    );
+    let legacy = serde_json::json!({"action":"POST /api/v1/system/updates/check"});
+    assert_eq!(audit_title(&legacy), "Check controller updates");
+    assert_eq!(
+        audit_title(
+            &serde_json::json!({"title":"","action":"PATCH /api/v1/system/alerts/preferences"})
+        ),
+        "Change alert settings"
+    );
+}
+
+#[test]
+fn operations_open_from_diagnostic_and_back_returns_to_its_form() {
+    let mut app = test_profile_app();
+    app.form.select_action(Action::Diagnose);
+    app.screen = Screen::Form;
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    assert!(
+        app.hits
+            .iter()
+            .any(|hit| hit.control == Control::ControllerRecoveryInventory(0))
+    );
+    app.activate(Control::ControllerRecoveryInventory(0));
+    assert!(matches!(app.screen, Screen::Controller));
+    assert!(matches!(
+        app.nodes_requested,
+        Some(crate::nodes::Command::Controller(
+            _,
+            crate::controller::Command::RecoveryInventory(0)
+        ))
+    ));
+    app.controller.recovery_inventory =
+        Some(serde_json::json!({"items":[],"offset":0,"total":0,"page_size":10}));
+    app.activate(Control::ControllerBack);
+    assert!(matches!(app.screen, Screen::Form));
+    assert!(app.form.action == Action::Diagnose);
+    assert_eq!(app.form.selected, app.form.count() - 2);
+    assert!(app.controller.recovery_inventory.is_none());
+}
+
+#[test]
+fn alert_descriptions_use_clear_units_for_cpu_memory_disk_and_load() {
+    use super::screens::alert_description;
+    for (kind, expected) in [
+        ("disk_low", "Disk space available: 3.0%"),
+        ("ram_high", "RAM used: 3.0%"),
+        ("cpu_high", "CPU used (1-minute average): 3.0%"),
+        (
+            "load_high",
+            "Load average (1 minute): 3.00; logical CPUs: 2",
+        ),
+    ] {
+        assert!(
+            alert_description(&serde_json::json!({"kind":kind,"payload":{"value":3,"cpus":2}}))
+                .contains(expected)
+        );
+    }
 }

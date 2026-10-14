@@ -962,6 +962,12 @@ pub fn run(mut request: Request) -> Result<()> {
                                     app.form.fields[index].pop();
                                 }
                             }
+                            KeyCode::Enter
+                                if app.form.action == Action::Diagnose
+                                    && app.form.selected == app.form.count() - 2 =>
+                            {
+                                app.activate(Control::ControllerRecoveryInventory(0));
+                            }
                             KeyCode::Enter => {
                                 if app.form.selected + 1 < app.form.count() {
                                     app.form.next();

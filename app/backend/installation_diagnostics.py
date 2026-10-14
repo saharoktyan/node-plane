@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 from .authorization import AccessDenied, require_permission
 from .node_probe import probe
+from .host_resources import cpu_metrics, CPU_WARNING, CPU_CRITICAL
 from .nodes import NodeService
 from .node_overview import NodeOverviewService
 
@@ -34,6 +35,13 @@ def server_checks(observation):
         if observation['runtime_drift'] is True:
             checks[-1].update(status='warning', detail='Runtime differs from the controller release; inspect Updates')
     metrics = observation['host_metrics']
+    cpu = cpu_metrics(metrics)
+    if cpu is None:
+        add('cpu_used_percent', 'warning', 'Fresh CPU average unavailable; the agent needs one minute of uninterrupted samples')
+    else:
+        value = cpu['cpu_used_percent']
+        add('cpu_used_percent', 'error' if value >= CPU_CRITICAL else 'warning' if value >= CPU_WARNING else 'ok',
+            f'CPU used (1-minute average): {value:g}%; warning ≥{CPU_WARNING}%, error ≥{CPU_CRITICAL}%')
     for key in ('ram_used_percent', 'disk_free_percent', 'load1'):
         value = metrics.get(key)
         if value is None or key == 'load1' and 'cpus' not in metrics:

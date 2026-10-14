@@ -80,3 +80,39 @@ class AlertsRichTests(IsolatedAsyncioTestCase):
         with patch.object(alerts, 'render', new_callable=AsyncMock) as draw:
             await alerts.alerts_cb(self.query, self.bot, backend, self.state)
         self.assertEqual(draw.call_args.args[2].sections, ())
+
+
+class AlertNoticeTests(IsolatedAsyncioTestCase):
+    async def test_alert_and_recovery_have_only_close_and_explicit_percentages(self):
+        from telegram_client import alert_delivery
+        for resolved in (False,True):
+            event = {'node_key':'lv1','kind':'disk_low','resolved':resolved,'at':'2026-10-14T10:00:00+00:00',
+                     'payload':{'node_title':'Latvia #1','value':18 if resolved else 3}}
+            delivery = {'id':'notice','telegram_user_id':101,'locale':'en','event':event}
+            backend = SimpleNamespace(alert_claim=AsyncMock(return_value={'delivery':delivery}),alert_ack=AsyncMock())
+            with patch.object(alert_delivery,'send_notification',new_callable=AsyncMock,return_value='sent') as send:
+                await alert_delivery.deliver_one(SimpleNamespace(),backend)
+            screen = send.call_args.args[2]
+            text = screen.plain()
+            self.assertIn('Disk space available: '+('18%' if resolved else '3%'),text)
+            self.assertEqual([b.callback_data for row in send.call_args.kwargs['rows'] for b in row],['update_notice_close'])
+            self.assertEqual(screen.rich(send.call_args.kwargs['rows']).blocks[-1].type,'buttons')
+            self.assertNotIn('Measured value',text)
+
+    async def test_all_resource_notices_show_units_and_recovery_is_not_a_failure(self):
+        from telegram_client.alert_delivery import alert_screen
+        for locale in ('en','ru'):
+            for kind in ('disk_low','ram_high','cpu_high','load_high'):
+                for resolved in (False,True):
+                    screen = alert_screen({'locale':locale,'event':{'kind':kind,'resolved':resolved,'at':'2026-10-14T10:00:00Z',
+                        'payload':{'node_title':'Node','value':3,'cpus':2,'severity':'critical'}}})
+                    text = screen.plain()
+                    self.assertNotIn('alerts.',text)
+                    if kind == 'load_high':
+                        self.assertIn('CPU',text)
+                        self.assertIn('2',text)
+                    else:
+                        self.assertIn('3%',text)
+                    if resolved:
+                        self.assertNotIn('Severity:',text)
+                        self.assertNotIn('Уровень:',text)

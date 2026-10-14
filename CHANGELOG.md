@@ -1,6 +1,14 @@
 # Changelog
 
-## Unreleased
+## 1.0.0-alpha.12 - 2026-10-14
+
+- Sample CPU every 5 seconds, report a rolling minute average throughout node/controller diagnostics and check CPU alerts every 30 seconds independently of service checks and provisioning. Notify severity transitions and recovery with current measurements, explicit units and Close-only alert/recovery messages; preserve the separate alert Inbox.
+
+- Add a live Operations panel under Workstation Diagnostic, with explicit recovery confirmations, saved phases and dependent operation IDs. Extend recovery to node removal and backup jobs; preserve restore checkpoints and adopt the exact backup after a lost result.
+- Preserve human-readable audit titles and the errors filter in API responses; accept 3/5/10-minute alert intervals consistently in the API and workstation.
+- Keep backup lists compact by omitting the version commit hash; show the absolute saved path after downloading a backup in the workstation.
+
+- Observe an already dispatched update before rejecting a new target, close its local record when the backend confirms a terminal result, and omit misleading Resume instructions for completed failures. Include `--no-tui` in console resume hints and distinguish missing, terminal and non-stack tasks in the repair utility.
 
 ## 1.0.0-alpha.11 - 2026-10-14
 

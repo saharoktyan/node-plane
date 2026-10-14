@@ -9,15 +9,16 @@ from uuid import UUID, uuid4
 import grpc
 
 from .announcements import AnnouncementService
+from .host_resources import cpu_metrics, CHECK_SECONDS, CPU_WARNING, CPU_CRITICAL, CPU_RECOVERED
 from .authorization import AccessDenied, require_permission
 
 DEFAULT_POLICY = {"enabled": False, "interval_minutes": 5, "notify_resolved": True}
-RESOURCE_TYPES = {"disk_low", "ram_high", "load_high"}
+RESOURCE_TYPES = {"disk_low", "ram_high", "load_high", "cpu_high"}
 
 
 class AlertService:
-    def __init__(self, db, driver=None):
-        self.db, self.driver = db, driver
+    def __init__(self, db, driver=None, stop=None):
+        self.db, self.driver, self.stop = db, driver, stop
 
     def initialize_schema(self):
         with self.db.transaction() as conn:
@@ -101,12 +102,15 @@ class AlertService:
                 JOIN backend_alert_events e ON e.id=d.event_id WHERE e.kind!='update_available' GROUP BY d.status"""
             ).fetchall():
                 counts[entry["status"]] = entry["count"]
+            cpu_scan = conn.execute("SELECT value FROM backend_system_settings WHERE key='alert_last_cpu_scan'").fetchone()
             return {
                 **self._policy(conn),
                 "active_count": len(state),
                 "unacknowledged_count": sum(not r['dismissed'] for r in state),
                 "active": [dict(r) for r in state],
                 "last_scan": json.loads(row["value"]) if row else None,
+                "last_cpu_scan": json.loads(cpu_scan["value"]) if cpu_scan else None,
+                "cpu_sample_seconds": 5, "cpu_window_seconds": 60, "cpu_check_seconds": CHECK_SECONDS,
                 "delivery_counts": counts,
             }
 
@@ -115,12 +119,12 @@ class AlertService:
         saved = conn.execute('SELECT value FROM backend_system_settings WHERE key=?',
             ('alerts.dismissed.' + account_id,)).fetchone()
         dismissed = set(json.loads(saved['value'])) if saved else set()
-        rows = conn.execute('''SELECT s.node_key,s.kind,s.first_seen_at,s.last_seen_at,n.title,n.flag,
+        rows = conn.execute('''SELECT s.node_key,s.kind,s.first_seen_at,s.last_seen_at,s.payload_json,n.title,n.flag,
             (SELECT e.id FROM backend_alert_events e WHERE e.node_key=s.node_key
-             AND e.kind=s.kind AND e.resolved=0 AND e.created_at=s.first_seen_at LIMIT 1) AS event_id
+             AND e.kind=s.kind AND e.resolved=0 ORDER BY e.created_at DESC,e.id DESC LIMIT 1) AS event_id
             FROM backend_alert_state s JOIN backend_nodes n ON n.key=s.node_key
             WHERE n.enabled=1 ORDER BY s.node_key,s.kind''').fetchall()
-        return [{**dict(row), 'dismissed': row['event_id'] in dismissed} for row in rows]
+        return [{**{key:row[key] for key in row.keys() if key != 'payload_json'}, 'payload':json.loads(row['payload_json']), 'dismissed': row['event_id'] in dismissed} for row in rows]
 
     def dismiss(self, actor, event_id):
         require_permission(actor, 'settings.manage')
@@ -185,24 +189,61 @@ class AlertService:
                     "value": metrics["load1"],
                     "cpus": metrics["cpus"],
                 }
+        cpu = cpu_metrics(metrics)
+        if cpu is not None:
+            known.add('cpu_high')
+            value = cpu['cpu_used_percent']
+            if value < CPU_RECOVERED:
+                known.add('cpu_below_recovery')
+            if value >= CPU_WARNING:
+                failures['cpu_high'] = {'value': value, 'window_seconds': cpu['cpu_sample_window_seconds'],
+                    'severity': 'critical' if value >= CPU_CRITICAL else 'warning'}
         return failures, known
+
+    @staticmethod
+    def measurements(observation):
+        metrics = observation.get('host_metrics') or {}
+        if not isinstance(metrics, dict):
+            return {}
+        measured = {}
+        for kind, key in [('disk_low','disk_free_percent'), ('ram_high','ram_used_percent')]:
+            value = metrics.get(key)
+            if type(value) in {int,float} and math.isfinite(value) and 0 <= value <= 100:
+                measured[kind] = {'value': value}
+        value, cpus = metrics.get('load1'), metrics.get('cpus')
+        if type(value) in {int,float} and math.isfinite(value) and value >= 0 and type(cpus) is int and cpus > 0:
+            measured['load_high'] = {'value': value, 'cpus': cpus}
+        cpu = cpu_metrics(metrics)
+        if cpu is not None:
+            measured['cpu_high'] = {'value': cpu['cpu_used_percent'], 'window_seconds': cpu['cpu_sample_window_seconds']}
+        return measured
+
+    def _observe_cpu(self, node):
+        if self.stop is not None and self.stop.is_set():
+            return {}, set(), {}
+        try:
+            observation = self.driver.host_metrics(node['key'])
+            failures, known = self.classify(observation, [])
+            return {kind: value for kind, value in failures.items() if kind == 'cpu_high'}, known & {'cpu_high', 'cpu_below_recovery'}, self.measurements(observation)
+        except Exception:
+            # A missing CPU capability or unavailable sample is never proof of an outage.
+            return {}, set(), {}
 
     def _observe(self, node):
         try:
-            return self.classify(
-                self.driver.inspect_node_services(node["key"]),
-                json.loads(node["protocols_json"]),
-            )
+            observation = self.driver.inspect_node_services(node['key'])
+            failures, known = self.classify(observation, json.loads(node['protocols_json']))
+            return failures, known, self.measurements(observation)
         except grpc.RpcError as exc:
             if exc.code() in {
                 grpc.StatusCode.UNAVAILABLE,
                 grpc.StatusCode.DEADLINE_EXCEEDED,
                 grpc.StatusCode.FAILED_PRECONDITION,
             }:
-                return {"node_unreachable": {}}, {"node_unreachable"}
-            return {}, set()
+                return {"node_unreachable": {}}, {"node_unreachable"}, {}
+            return {}, set(), {}
         except Exception:  # noqa: BLE001 -- malformed observations stay unknown
-            return {}, set()
+            return {}, set(), {}
 
     @staticmethod
     def _event(conn, node, kind, payload, resolved, timestamp):
@@ -226,7 +267,8 @@ class AlertService:
                 (str(uuid4()), event_id, admin["id"], admin["subject"], "queued"),
             )
 
-    def scheduled(self):
+    def scheduled(self, cpu_only=False):
+        scan_key = "alert_last_cpu_scan" if cpu_only else "alert_last_scan"
         timestamp = datetime.now(timezone.utc)
         with self.db.connect() as conn:
             from .maintenance_gate import active
@@ -234,13 +276,13 @@ class AlertService:
                 return False
             policy = self._policy(conn)
             row = conn.execute(
-                "SELECT value FROM backend_system_settings WHERE key='alert_last_scan'"
+                "SELECT value FROM backend_system_settings WHERE key=?", (scan_key,)
             ).fetchone()
             last = json.loads(row["value"]) if row else None
             if not policy["enabled"] or (
                 last
                 and datetime.fromisoformat(last["at"])
-                > timestamp - timedelta(minutes=policy["interval_minutes"])
+                > timestamp - (timedelta(seconds=CHECK_SECONDS) if cpu_only else timedelta(minutes=policy["interval_minutes"]))
             ):
                 return False
             if conn.execute(
@@ -264,18 +306,17 @@ class AlertService:
             if nodes:
                 self.driver.binary_info()
                 with ThreadPoolExecutor(max_workers=min(4, len(nodes))) as pool:
-                    results = list(pool.map(self._observe, nodes))
+                    results = list(pool.map(self._observe_cpu if cpu_only else self._observe, nodes))
                 self.driver.binary_info()
             if any(
                 (
-                    {
+                    ({'cpu_high'} if cpu_only else {
                         "node_unreachable",
                         *RESOURCE_TYPES,
                         *[p + "_down" for p in json.loads(node["protocols_json"])],
-                    }
-                    - known
+                    }) - known
                 )
-                for node, (_, known) in zip(nodes, results)
+                for node, (_, known, _) in zip(nodes, results)
             ):
                 status = "partial"
         except Exception:  # noqa: BLE001 -- persist a sanitized failed scan
@@ -296,7 +337,9 @@ class AlertService:
                 ).fetchone()
             ):
                 return False
-            for node, (failures, known) in zip(nodes, results):
+            fast_row = conn.execute("SELECT value FROM backend_system_settings WHERE key='alert_last_cpu_scan'").fetchone() if not cpu_only else None
+            newer_cpu_scan = bool(fast_row and datetime.fromisoformat(json.loads(fast_row['value'])['at']) > timestamp)
+            for node, (failures, known, measured) in zip(nodes, results):
                 current = conn.execute(
                     "SELECT enabled,desired_revision,applied_revision FROM backend_nodes WHERE key=?",
                     (node["key"],),
@@ -315,8 +358,19 @@ class AlertService:
                         (node["key"],),
                     ).fetchall()
                 }
+                cpu_previous = previous.get('cpu_high')
+                if newer_cpu_scan or cpu_previous and cpu_previous['last_seen_at'] > timestamp.isoformat():
+                    # A slower full inspection must not overwrite a newer fast CPU check.
+                    failures.pop('cpu_high', None)
+                    known -= {'cpu_high', 'cpu_below_recovery'}
                 for kind, payload in failures.items():
-                    if kind not in previous:
+                    severity_changed = False
+                    if kind == 'cpu_high' and kind in previous:
+                        before = json.loads(previous[kind]['payload_json'])
+                        if before.get('severity') == 'critical' and payload['value'] >= 90:
+                            payload['severity'] = 'critical'
+                        severity_changed = before.get('severity') != payload['severity']
+                    if kind not in previous or severity_changed:
                         self._event(
                             conn, node, kind, payload, False, timestamp.isoformat()
                         )
@@ -340,12 +394,15 @@ class AlertService:
                         )
                         continue
                     if kind in known and kind not in failures:
+                        if kind == 'cpu_high' and 'cpu_below_recovery' not in known:
+                            conn.execute("UPDATE backend_alert_state SET last_seen_at=? WHERE node_key=? AND kind='cpu_high'", (timestamp.isoformat(),node['key']))
+                            continue
                         if policy["notify_resolved"]:
                             self._event(
                                 conn,
                                 node,
                                 kind,
-                                json.loads(row["payload_json"]),
+                                measured.get(kind, {}),
                                 True,
                                 timestamp.isoformat(),
                             )
@@ -356,9 +413,9 @@ class AlertService:
             conn.execute("""DELETE FROM backend_alert_state WHERE NOT EXISTS
                 (SELECT 1 FROM backend_nodes n WHERE n.key=backend_alert_state.node_key AND n.enabled=1)""")
             conn.execute(
-                "INSERT INTO backend_system_settings VALUES ('alert_last_scan',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                "INSERT INTO backend_system_settings VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                 (
-                    json.dumps(
+                    scan_key, json.dumps(
                         {
                             "at": timestamp.isoformat(),
                             "status": status,

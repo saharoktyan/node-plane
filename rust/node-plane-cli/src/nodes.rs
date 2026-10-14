@@ -1103,6 +1103,19 @@ async fn execute_inner(
                             format!("This will send the message to {recipients} eligible users."))?,
                             "Announcement cancelled");
                     }
+                    if let crate::controller::Command::RecoveryAction(kind, id, action, offset) = &command {
+                        let explanation = match action.as_str() { "recheck" => "Check the recorded result of this exact command. Missing evidence keeps it blocked.", "resolve" => "Recover the exact driver journal before reconciling current settings. Unconfirmed outcomes stay blocked.", "resume" => "Continue the saved operation checkpoint, preserving existing child commands.", "cancel" => "Cancel only before execution. The backend checks this boundary again.", _ => anyhow::bail!("Unsupported recovery action") };
+                        if !events::confirm(tx, "Recover this operation?", format!("{kind}: {id}\n\n{explanation}"))? { return Ok("Recovery cancelled".into()); }
+                        let (method, path, body, key) = command.request()?;
+                        let note = match backend::request(session, &credential, method, &path, body, key).await {
+                            Ok(result) => format!("Operation {id}: {}", result["status"].as_str().unwrap_or("result unconfirmed")),
+                            Err(error) => format!("Recovery was not confirmed: {error}. Refresh this operation before trying again."),
+                        };
+                        let mut page = backend::request(session, &credential, Method::GET, &format!("/api/v1/system/recovery?offset={offset}"), None, None).await?;
+                        page["recovery_result"] = json!(note);
+                        let _ = tx.send(Event::Nodes(Update::Controller(profile, command, page)));
+                        return Ok("Recovery state loaded".into());
+                    }
                     let (method, path, mut body, key) = command.request()?;
                     if let crate::controller::Command::BackupImport(file) = &command {
                         use std::io::Read;
@@ -1121,7 +1134,7 @@ async fn execute_inner(
                         staged.as_file().sync_all()?;
                         staged.persist_noclobber(file).map_err(|e| e.error)?;
                         value = backend::request(session, &credential, Method::GET, &format!("/api/v1/system/backups/catalog/{id}"), None, None).await?;
-                        value["exported_path"] = json!(file.display().to_string());
+                        value["exported_path"] = json!(std::fs::canonicalize(file)?.display().to_string());
                     }
                     if matches!(&command, crate::controller::Command::UpdateCheck | crate::controller::Command::UpdatePreferences(_)) {
                         value = backend::request(session, &credential, Method::GET, "/api/v1/system/updates", None, None).await?;

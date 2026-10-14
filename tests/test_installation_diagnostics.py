@@ -51,6 +51,18 @@ class InstallationDiagnosticsTests(unittest.TestCase):
         self.assertTrue(any('FOR UPDATE' in statement for statement in sql))
         self.assertFalse(any(statement.startswith(('DELETE', 'UPDATE', 'INSERT')) for statement in sql))
 
+    def test_controller_cpu_requires_current_boot_fresh_sample_and_a_full_window(self):
+        from datetime import datetime, timedelta, timezone
+        sample = {'boot_id':'boot','at':datetime.now(timezone.utc).isoformat(),
+                  'host_metrics':{'cpu_used_percent':96,'cpu_sample_window_seconds':60,'cpu_sample_age_seconds':0}}
+        with patch.object(diagnostics.Path,'read_text',return_value='boot'):
+            self.assertEqual(diagnostics.controller_cpu(sample),96)
+            for key,value in [('cpu_used_percent',True),('cpu_sample_window_seconds',5),('cpu_sample_age_seconds',20),('cpu_sample_age_seconds',True)]:
+                changed = {**sample,'host_metrics':{**sample['host_metrics'],key:value}}
+                self.assertIsNone(diagnostics.controller_cpu(changed))
+            self.assertIsNone(diagnostics.controller_cpu({**sample,'at':(datetime.now(timezone.utc)-timedelta(minutes=2)).isoformat()}))
+            self.assertIsNone(diagnostics.controller_cpu({**sample,'boot_id':'other-boot'}))
+
     def test_command_timeout_does_not_leak_output_or_credentials(self):
         import subprocess
         with patch.object(diagnostics.subprocess, 'run', side_effect=subprocess.TimeoutExpired('secret', 5)):

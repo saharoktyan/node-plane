@@ -3043,3 +3043,74 @@ CATALOG['ru'].update({'accounts.open_profile':'Открыть профиль','p
 
 CATALOG['en']['updates.notice.full_release'] = 'Full release on GitHub'
 CATALOG['ru']['updates.notice.full_release'] = 'Полный релиз на GitHub'
+
+CATALOG['en'].update({
+    'recovery.action.resume': 'Continue saved operation',
+    'recovery.action.cancel': 'Cancel before execution',
+    'recovery.explain.backup.resume': 'Continue the saved backup phase. Existing child commands keep their identity; the restored database is not imported again.',
+    'recovery.explain.backup.cancel': 'Cancel this backup operation only before execution. The backend checks that no phase has started.',
+    'recovery.explain.removal.resume': 'Continue removal from its saved phase, checking revocations, command journals and independent removal evidence.',
+})
+CATALOG['ru'].update({
+    'recovery.action.resume': 'Продолжить сохранённую операцию',
+    'recovery.action.cancel': 'Отменить до выполнения',
+    'recovery.explain.backup.resume': 'Продолжить сохранённый этап бэкапа. Начатые команды сохранят идентификаторы; восстановленная база не импортируется повторно.',
+    'recovery.explain.backup.cancel': 'Отменить операцию бэкапа только до выполнения. Бэкенд проверит, что ни один этап не начат.',
+    'recovery.explain.removal.resume': 'Продолжить удаление с сохранённого этапа, проверяя отзыв доступа, журналы команд и независимые подтверждения удаления.',
+})
+
+CATALOG['en'].update({
+    'nodes.probe.cpu_used_percent': 'CPU used · 1-minute average',
+    'nodes.probe.cpu_unavailable': 'Fresh average unavailable',
+    'recovery.diagnostic.cpu': 'CPU used · 1-minute average',
+    'recovery.diagnostic.load': 'Load average',
+    'alerts.condition.cpu_high': 'Sustained high CPU usage',
+    'alerts.condition.node_unreachable': 'Node agent is unavailable',
+    'alerts.value.disk_low': 'Disk space available: {value}%',
+    'alerts.value.ram_high': 'RAM used: {value}%',
+    'alerts.value.cpu_high': 'CPU used (1-minute average): {value}%',
+    'alerts.value.load_high': 'Load average (1 minute): {value}; logical CPUs: {cpus}',
+    'alerts.severity.warning': 'Severity: warning',
+    'alerts.severity.critical': 'Severity: critical',
+    'alerts.recovered': 'Alert resolved',
+    'alerts.rich.interval': 'Full service checks',
+    'alerts.cpu_schedule': 'CPU is sampled every 5 seconds and checked every 30 seconds using a 1-minute average.',
+    'alerts.thresholds': 'CPU: warning at 85%, critical at 95% (1-minute average); recovery below 80%. Disk: less than 10% free. RAM: 90% used. Load average: at least 2 per logical CPU. Notifications are sent on condition changes; repeated checks do not resend the same alert.',
+})
+CATALOG['ru'].update({
+    'nodes.probe.cpu_used_percent': 'CPU занят · среднее за минуту',
+    'nodes.probe.cpu_unavailable': 'Свежее среднее недоступно',
+    'recovery.diagnostic.cpu': 'CPU занят · среднее за минуту',
+    'recovery.diagnostic.load': 'Load average',
+    'alerts.condition.cpu_high': 'Устойчивая высокая загрузка CPU',
+    'alerts.condition.node_unreachable': 'Агент ноды недоступен',
+    'alerts.value.disk_low': 'Свободно на диске: {value}%',
+    'alerts.value.ram_high': 'RAM занято: {value}%',
+    'alerts.value.cpu_high': 'CPU занят (среднее за минуту): {value}%',
+    'alerts.value.load_high': 'Load average (1 минута): {value}; логических CPU: {cpus}',
+    'alerts.severity.warning': 'Уровень: предупреждение',
+    'alerts.severity.critical': 'Уровень: критический',
+    'alerts.recovered': 'Проблема устранена',
+    'alerts.rich.interval': 'Полные проверки служб',
+    'alerts.cpu_schedule': 'CPU измеряется каждые 5 секунд и проверяется каждые 30 секунд по среднему за минуту.',
+    'alerts.thresholds': 'CPU: предупреждение от 85%, критический уровень от 95% (среднее за минуту); восстановление ниже 80%. Диск: свободно менее 10%. RAM: занято от 90%. Load average: от 2 на логический CPU. Уведомления приходят при изменении состояния; повторные проверки не дублируют тот же алерт.',
+})
+
+CATALOG['en'].update({
+    'alerts.condition.resolved.node_unreachable': 'Node agent is responding again',
+    'alerts.condition.resolved.xray_down': 'VLESS is running again',
+    'alerts.condition.resolved.awg_down': 'AmneziaWG is running again',
+    'alerts.condition.resolved.disk_low': 'Available disk space has recovered',
+    'alerts.condition.resolved.ram_high': 'RAM usage has returned to normal',
+    'alerts.condition.resolved.load_high': 'Load average has returned to normal',
+    'alerts.condition.resolved.cpu_high': 'CPU usage has returned to normal',
+})
+CATALOG['ru'].update({
+    'alerts.condition.resolved.node_unreachable': 'Агент ноды снова отвечает',
+    'alerts.condition.resolved.xray_down': 'VLESS снова работает',
+    'alerts.condition.resolved.awg_down': 'AmneziaWG снова работает',
+    'alerts.condition.resolved.disk_low': 'Свободного места на диске снова достаточно',
+    'alerts.condition.resolved.ram_high': 'Использование RAM вернулось в норму',
+    'alerts.condition.resolved.load_high': 'Load average вернулся в норму',
+    'alerts.condition.resolved.cpu_high': 'Загрузка CPU вернулась в норму',
+})

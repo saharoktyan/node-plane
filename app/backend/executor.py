@@ -121,6 +121,15 @@ class IntentExecutor:
             operation = OperationRepository.record(conn, actor, row['profile_id'],
                 OperationRepository.targets(conn, row['profile_id']))
             conn.execute('UPDATE backend_profile_deletions SET operation_id=? WHERE profile_id=?', (operation['id'],row['profile_id']))
+            # Replace restore dependencies in the same transaction as retiring their fence.
+            for item in affected:
+                parents = conn.execute('''SELECT b.job_id FROM backend_backup_revocations b
+                    JOIN backend_backup_jobs j ON j.id=b.job_id
+                    WHERE b.operation_id=? AND j.status='blocked' AND j.phase='revoking' ''', (item['operation_id'],)).fetchall()
+                for parent in parents:
+                    conn.execute('INSERT INTO backend_backup_revocations(job_id,operation_id) VALUES (?,?) ON CONFLICT DO NOTHING', (parent['job_id'],operation['id']))
+                    conn.execute('DELETE FROM backend_backup_revocations WHERE job_id=? AND operation_id=?', (parent['job_id'],item['operation_id']))
+
             from .account_deletions import settle
             settle(conn)
             conn.execute("""INSERT INTO backend_repairs(task_id, actor_id, operation_id, observation_json, created_at)
@@ -381,7 +390,14 @@ def main():
         if args.daemon:
             from .worker_wakeup import Wakeup
             wake = stack.enter_context(Wakeup(db.dsn))
-            run_daemon(worker, lock.fileno(), stop, lambda timeout: wake.wait(timeout, stop))
+            from .host_resources import monitor
+            cpu_monitor = threading.Thread(target=monitor, args=(db, GrpcIntentDriver(channel, timeout=2), stop), name='host-cpu-monitor', daemon=True)
+            cpu_monitor.start()
+            try:
+                run_daemon(worker, lock.fileno(), stop, lambda timeout: wake.wait(timeout, stop))
+            finally:
+                stop.set()
+                cpu_monitor.join(timeout=8)
         else:
             worker.recover()
             worker.cycle(stop)

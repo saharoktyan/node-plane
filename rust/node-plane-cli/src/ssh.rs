@@ -1158,6 +1158,16 @@ mod tests {
                             )
                         } else if path == "/api/v1/system/updates/check" {
                             (200, serde_json::json!({"status":"success"}))
+                        } else if path.starts_with("/api/v1/system/updates/jobs/")
+                            && fixture_home.join("stack-job").exists()
+                        {
+                            (
+                                200,
+                                serde_json::from_slice(
+                                    &fs::read(fixture_home.join("stack-job")).unwrap(),
+                                )
+                                .unwrap(),
+                            )
                         } else if path == "/api/v1/system/updates" {
                             (
                                 200,
@@ -1623,6 +1633,76 @@ mod tests {
             );
             assert!(!actions.iter().any(|value| value["action"] == "revoke"));
             worker.shutdown().unwrap();
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn selecting_new_target_first_observes_old_update_without_replaying_it() {
+            use crate::events::{Answer, Event, Prompt};
+            use crate::operation_store::{Intent, UpdateRecord};
+            for status in ["rolled_back", "running", "blocked"] {
+                let server = MockServer::start().await;
+                let state = tempfile::tempdir().unwrap();
+                prepare_nodes_fixture(&server, state.path());
+                let mut request = nodes_request(&server, state.path());
+                request.action = crate::config::Action::Update;
+                request.tag = "v1.0.0-alpha.11".into();
+                let local_id = uuid::Uuid::new_v4();
+                let job_id = uuid::Uuid::new_v4();
+                request.workflow.operation = Some(local_id);
+                let record = UpdateRecord {
+                    version: 1,
+                    id: local_id,
+                    host: request.host.clone(),
+                    port: request.port,
+                    user: request.user.clone(),
+                    account_id: "00000000-0000-4000-8000-000000000001".into(),
+                    intent: Intent {
+                        kind: "stack".into(),
+                        target_ref: "v1.0.0-alpha.10".into(),
+                        branch: "dev".into(),
+                    },
+                    dispatch_started: true,
+                    job_id: Some(job_id),
+                    complete: false,
+                };
+                record.save(state.path()).unwrap();
+                fs::write(server.home.join("stack-job"), serde_json::json!({"id":job_id,"kind":"stack","status":status,"branch":"dev","items":[],"result":{"phase":"core","error_code":"core_update_failed","rollback_status":"succeeded"}}).to_string()).unwrap();
+                let mut worker = crate::nodes::Worker::new().unwrap();
+                let (tx, rx) = std::sync::mpsc::channel();
+                worker.workflow(request, tx).unwrap();
+                let result = tokio::task::spawn_blocking(move || {
+                    loop {
+                        match rx.recv_timeout(Duration::from_secs(10)).unwrap() {
+                            Event::Finished(result) => break result,
+                            Event::Prompt(prompt, reply) => {
+                                reply
+                                    .send(match prompt {
+                                        Prompt::HostKey { .. } => Answer::Confirm(true),
+                                        _ => Answer::Cancel,
+                                    })
+                                    .unwrap();
+                            }
+                            _ => {}
+                        }
+                    }
+                })
+                .await
+                .unwrap();
+                let error = result.unwrap_err();
+                let saved = UpdateRecord::load(&record.path(state.path())).unwrap();
+                assert_eq!(saved.complete, status == "rolled_back");
+                if status == "rolled_back" {
+                    assert!(error.contains("restoration"), "{error}");
+                    assert!(!error.contains("Resume:"), "{error}");
+                } else {
+                    assert!(error.contains("still unfinished"), "{error}");
+                }
+                let requests = fs::read_to_string(server.home.join("api-requests")).unwrap();
+                assert!(requests.contains(&format!("GET /api/v1/system/updates/jobs/{job_id}")));
+                assert!(!requests.contains("POST /api/v1/system/updates/run"));
+                assert!(!requests.contains("/recheck"));
+                worker.shutdown().unwrap();
+            }
         }
         #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
         async fn rejected_cached_credential_is_discarded_without_replaying_request() {

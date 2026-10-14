@@ -122,7 +122,26 @@ pub(in crate::tui) fn draw_form(frame: &mut Frame, app: &App, area: Rect, hits: 
             draw_field(frame, rect, label, &value, selected);
         }
     }
-    let button = centered(sections[1], 18, 3);
+    let button_area = if app.form.action == Action::Diagnose {
+        let buttons = Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .spacing(1)
+            .split(sections[1]);
+        let operations = centered(buttons[0], 24, 3);
+        draw_button(
+            frame,
+            operations,
+            "Operations",
+            app.form.selected == app.form.count() - 2,
+        );
+        hits.push(Hit {
+            area: operations,
+            control: Control::ControllerRecoveryInventory(0),
+        });
+        buttons[1]
+    } else {
+        sections[1]
+    };
+    let button = centered(button_area, 18, 3);
     draw_button(
         frame,
         button,

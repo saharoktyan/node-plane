@@ -46,6 +46,22 @@ class BackupsPostgresTests(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         self.service = BackupService(self.db, directory.name)
 
+    def test_recovery_cancels_only_undispatched_restore_and_adopts_manual_snapshot(self):
+        from backend.recovery import overview, act
+        backup = self.service.create_snapshot()['backup_id']
+        checksum = self.service.detail(self.actor,backup)['checksum']
+        pending = self.service.queue(self.actor,str(uuid4()),'restore',backup,checksum)
+        self.assertEqual(overview(self.db,self.actor)['items'][0]['actions'],['cancel'])
+        self.assertEqual(act(self.db,self.actor,None,'backup',pending['id'],'cancel')['status'],'cancelled')
+        job = self.service.queue(self.actor,str(uuid4()),'create',name='Recovery')
+        artifact = self.service.create_snapshot(name='Recovery',snapshot_id=job['id'])
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_backup_jobs SET status='blocked' WHERE id=?",(job['id'],))
+        self.assertEqual(act(self.db,self.actor,None,'backup',job['id'],'resume')['status'],'running')
+        self.service.run_one()
+        self.assertEqual(self.service.get(self.actor,job['id'])['result']['backup_id'],artifact['backup_id'])
+        self.assertEqual(len(list(self.service.root.glob('*.json'))),2)
+
     def drop_schema(self):
         with self.base.transaction() as conn:
             conn.execute(f'DROP SCHEMA {self.schema} CASCADE')

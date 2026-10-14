@@ -16,6 +16,8 @@ def probe(node, driver):
               'ram_total_bytes': (0, None), 'ram_available_bytes': (0, None),
               'disk_total_bytes': (0, None), 'disk_free_bytes': (0, None)}
     raw = facts.get('host_metrics')
+    from .host_resources import cpu_metrics
+    metrics.update(cpu_metrics(raw) or {})
     for key, (low, high) in ranges.items():
         value = raw.get(key) if isinstance(raw, dict) else None
         if type(value) in {int, float} and math.isfinite(value) and value >= low and (high is None or value <= high):

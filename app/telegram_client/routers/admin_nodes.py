@@ -1388,7 +1388,8 @@ async def probe_node_cb(query: CallbackQuery, callback_data: ProbeNodeCallback, 
         services = Section(tr(locale, 'nodes.rich.services'),
             () if protocols else (tr(locale, 'nodes.probe.agent_only'),), sections=tuple(protocols))
         metrics = observation.get('host_metrics', {})
-        resources = []
+        resources = [(tr(locale, 'nodes.probe.cpu_used_percent'),
+            f"{metrics['cpu_used_percent']:g}%" if 'cpu_used_percent' in metrics else tr(locale, 'nodes.probe.cpu_unavailable'))]
         for key in ('ram_used_percent', 'disk_free_percent'):
             if key in metrics:
                 value = f"{metrics[key]:g}%"

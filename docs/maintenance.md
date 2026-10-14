@@ -51,3 +51,5 @@ Open **Reset & removal** in Node Plane Settings or the bot's cleanup settings. R
 **Full removal** stops and removes owned controller resources. The plan identifies affected nodes and data. External database hosting, unrelated containers and shared host packages are not automatically removed. The final goodbye is shown after the owned-resource verification succeeds.
 
 After removal, Workstation disables controller actions. Use a new-installation action if you want to install again under the same local connection profile.
+
+CPU monitoring samples every 5 seconds and checks a rolling 1-minute average every 30 seconds, independently of the selected 3/5/10-minute full service-check interval. CPU warning starts at 85%, critical at 95%, and recovery requires less than 80%. Missing, incomplete or stale samples stay unknown. Notifications report changes and current recovery measurements, with a Close button that deletes only the message; alert Inbox and Dismiss behavior are unchanged.

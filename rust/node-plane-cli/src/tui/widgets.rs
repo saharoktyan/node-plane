@@ -140,7 +140,8 @@ pub(super) fn action_areas(
 pub(super) fn is_page_control(control: Control) -> bool {
     matches!(
         control,
-        Control::ControllerHistoryPage(_)
+        Control::ControllerRecoveryPage(_)
+            | Control::ControllerHistoryPage(_)
             | Control::ControllerAlertPage(_)
             | Control::ControllerComponentPage(_)
             | Control::ControllerVersionsPage(_)

@@ -212,6 +212,7 @@ pub async fn execute_connected(
         .is_err_and(|error| !format!("{error:#}").contains("Saved operation:"))
         && request.action == Action::Update
         && let Ok(Some(record)) = operation_store::unfinished(&request)
+        && !record.complete
     {
         let error = result.unwrap_err();
         result = Err(anyhow::anyhow!(
@@ -530,7 +531,8 @@ pub async fn recover_operations(
                     let action = action.as_str().context("Invalid recovery action")?;
                     let path = recovery_path(&kind, &id, action)?;
                     let explanation = match action {
-                        "cancel" => "Cancel only an update that has not started; the backend rechecks the execution boundary.",
+                        "resume" => "Continue the saved operation checkpoint. Previously dispatched commands retain their identity and require confirmed journal evidence.",
+                        "cancel" => "Cancel only an operation that has not started; the backend rechecks the execution boundary.",
                         "recheck" if kind == "agent" => "Verify the configured agent identity and current build. The installer will not run again.",
                         "recheck" if kind == "bootstrap" => "Check the recorded installation step. A confirmed result lets setup continue.",
                         "recheck" if kind != "update" => "Read the saved result of this exact command. Missing evidence keeps the block.",
@@ -574,11 +576,25 @@ pub async fn recover_operations(
     result
 }
 
-fn recovery_path(kind: &str, id: &str, action: &str) -> Result<String> {
+pub(crate) fn recovery_path(kind: &str, id: &str, action: &str) -> Result<String> {
+    if kind == "removal" && action == "resume" {
+        ensure!(
+            !id.is_empty()
+                && id.len() <= 100
+                && id
+                    .bytes()
+                    .all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-'),
+            "Invalid removal identity"
+        );
+        return Ok(format!("/api/v1/system/recovery/removal/{id}/resume"));
+    }
     let id = Uuid::parse_str(id).context("Invalid recovery operation identity")?;
     match (kind, action) {
         ("update", "cancel" | "recheck") => {
             Ok(format!("/api/v1/system/updates/jobs/{id}/{action}"))
+        }
+        ("backup", "resume" | "cancel") => {
+            Ok(format!("/api/v1/system/recovery/backup/{id}/{action}"))
         }
         ("node" | "settings" | "profile" | "bootstrap", "resolve" | "recheck")
         | ("agent", "recheck") => Ok(format!("/api/v1/system/recovery/{kind}/{id}/{action}")),
@@ -586,7 +602,7 @@ fn recovery_path(kind: &str, id: &str, action: &str) -> Result<String> {
     }
 }
 
-fn recovery_reason(code: &str) -> &str {
+pub(crate) fn recovery_reason(code: &str) -> &str {
     match code {
         "waiting_worker" => "Waiting for the worker.",
         "operation_running" => "The operation is in progress.",
@@ -609,7 +625,7 @@ fn recovery_reason(code: &str) -> &str {
     }
 }
 
-fn recovery_hint(hint: &str) -> &str {
+pub(crate) fn recovery_hint(hint: &str) -> &str {
     match hint {
         "maintenance" => "Finish controller maintenance before recovering this operation.",
         "child" => "Recover the installation step, then check the parent operation again.",
@@ -707,7 +723,8 @@ async fn update(
             "The unfinished update uses a different branch. Resume it without a new --branch selection."
         );
         ensure!(
-            request.tag.is_empty()
+            record.dispatch_started
+                || request.tag.is_empty()
                 || request.tag.trim_start_matches('v')
                     == record.intent.target_ref.trim_start_matches('v'),
             "The unfinished update uses a different target. Resume that operation before selecting another release."
@@ -876,6 +893,12 @@ async fn update(
                         let _ = backend::revoke(session, auth_id).await;
                         return snapshot.outcome();
                     }
+                    ensure!(
+                        request.tag.is_empty()
+                            || request.tag.trim_start_matches('v')
+                                == record.intent.target_ref.trim_start_matches('v'),
+                        "The previous update is still unfinished. Resume it before selecting another release."
+                    );
                     if snapshot.status == "blocked" {
                         if !rechecked
                             && snapshot.phase == "core"
@@ -960,7 +983,7 @@ async fn reconnect(
 }
 fn resume_message(request: &Request, record: &UpdateRecord, reason: &str) -> String {
     format!(
-        "{reason}\nResume: node-plane update {} --user {} --port {} --operation {}\nUse the same --state-dir: {}\nSaved operation: {}",
+        "{reason}\nResume: node-plane --no-tui update {} --user {} --port {} --operation {}\nUse the same --state-dir: {}\nSaved operation: {}",
         request.host,
         request.user,
         request.port,

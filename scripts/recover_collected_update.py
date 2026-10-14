@@ -18,6 +18,16 @@ class RecoveryRefused(ValueError):
     """A specific evidence check failed; safe to show without database details."""
 
 
+def inspect_update(db, identity):
+    identity = str(UUID(str(identity)))
+    with db.connect() as conn:
+        row = conn.execute('SELECT id,kind,status FROM backend_update_jobs WHERE id=?', (identity,)).fetchone()
+        gate = conn.execute('SELECT job_id FROM backend_controller_update_gate WHERE id=1').fetchone()
+    return {'requested_job_id':identity, 'found':row is not None,
+            'kind':row['kind'] if row else None, 'status':row['status'] if row else None,
+            'gate_job_id':gate['job_id'] if gate else None}
+
+
 def recover(db, shared, identity, execute=None):
     execute = execute or subprocess.run
     identity = str(UUID(str(identity)))
@@ -28,8 +38,12 @@ def recover(db, shared, identity, execute=None):
         with db.transaction() as conn:
             conn.execute('UPDATE backend_account_guard SET revision=revision+1 WHERE id=1')
             row = conn.execute('SELECT * FROM backend_update_jobs WHERE id=?', (identity,)).fetchone()
-            if not row or row['kind'] != 'stack' or row['status'] not in {'running', 'blocked'}:
-                raise RecoveryRefused('This is not an unfinished stack update')
+            if not row:
+                raise RecoveryRefused('No backend update has this ID; use job_id from the workstation journal, not its local id')
+            if row['kind'] != 'stack':
+                raise RecoveryRefused('This backend update is not a stack update')
+            if row['status'] not in {'running', 'blocked'}:
+                raise RecoveryRefused('This backend update is not unfinished; inspect its recorded status and resume observation in Workstation')
             plan = json.loads(row['result_json'] or '{}')
             if not isinstance(plan, dict):
                 raise RecoveryRefused('The stored update plan is invalid')
@@ -73,9 +87,11 @@ def recover(db, shared, identity, execute=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('operation_id', type=UUID)
+    parser.add_argument('operation_id', type=UUID,
+                        help='Backend task UUID (job_id in the Workstation journal, not its local id)')
     parser.add_argument('--shared-dir', type=Path, required=True,
                         help='Installed controller shared directory, e.g. /opt/node-plane/shared')
+    parser.add_argument('--inspect', action='store_true', help='Only read backend task status and the current update gate')
     args = parser.parse_args()
     app_dir = Path.cwd()
     if not (app_dir / 'app/backend/updates.py').is_file():
@@ -90,7 +106,7 @@ def main():
     from config import SHARED_ROOT
     from db import get_db
     try:
-        result = recover(get_db(), SHARED_ROOT, args.operation_id)
+        result = inspect_update(get_db(), args.operation_id) if args.inspect else recover(get_db(), SHARED_ROOT, args.operation_id)
     except BlockingIOError:
         parser.exit(1, 'The backend worker is busy. Retry after its current check finishes.\n')
     except RecoveryRefused as exc:

@@ -62,7 +62,7 @@ class WorkstationAudit:
             target = '@' + identity['username'].lstrip('@') if identity and identity['username'] else identity['subject'] if identity and identity['subject'] else account_id
             name = 'profile' if resource == 'profiles' else 'account'
             if len(parts) > 2:
-                names = {'grants': 'Change profile access', 'access-policy': 'Change profile access policy', 'devices': 'Manage profile devices'}
+                names = {'grants': 'Change profile access', 'access-policy': 'Change profile access policy', 'devices': 'Manage profile devices', 'name': 'Rename profile', 'freeze': 'Freeze profile', 'unfreeze': 'Unfreeze profile', 'block': 'Block account', 'unblock': 'Unblock account', 'role': 'Change administrator rights', 'permissions': 'Change administrator rights'}
                 title = names.get(parts[2], 'Manage profile ' + parts[2].replace('-', ' '))
             else:
                 title = verbs.get(method, 'Manage') + ' ' + name
@@ -78,6 +78,7 @@ class WorkstationAudit:
                 'system/backups/preferences': 'Change automatic backup settings', 'system/traffic/preferences': 'Change traffic collection settings',
                 'announcements': 'Send announcement', 'announcements/preview': 'Preview announcement',
                 'system/installation-defaults': 'Change server installation defaults',
+                'system/alerts/preferences': 'Change alert settings', 'system/alerts/refresh': 'Refresh alert status', 'system/telegram/token': 'Change bot token',
                 'system/updates/run':'Run controller update', 'system/updates/check':'Check controller updates'}
             suffix = path.removeprefix('/api/v1/')
             categories = {'system':'controller settings','access-requests':'access request','devices':'device','temporary-configs':'temporary configuration','operations':'operation','announcements':'announcement','integrations':'integration','me':'account settings','onboarding':'Quick Start'}

@@ -7574,7 +7574,6 @@
             "required": true,
             "schema": {
               "type": "string",
-              "format": "uuid",
               "title": "Identity"
             }
           },
@@ -9772,8 +9771,9 @@
               {
                 "type": "integer",
                 "enum": [
+                  3,
                   5,
-                  15
+                  10
                 ]
               },
               {
@@ -12476,7 +12476,8 @@
               "enum": [
                 "cancel",
                 "recheck",
-                "resolve"
+                "resolve",
+                "resume"
               ]
             },
             "type": "array",
@@ -13007,6 +13008,11 @@
       },
       "WorkstationAuditItemOutput": {
         "properties": {
+          "title": {
+            "type": "string",
+            "title": "Title",
+            "default": ""
+          },
           "occurred_at": {
             "type": "string",
             "title": "Occurred At"
@@ -13153,6 +13159,11 @@
           "total": {
             "type": "integer",
             "title": "Total"
+          },
+          "errors_only": {
+            "type": "boolean",
+            "title": "Errors Only",
+            "default": false
           }
         },
         "type": "object",

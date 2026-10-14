@@ -103,6 +103,9 @@ pub(super) enum Control {
     ControllerAudit,
     ControllerAuditFilter(bool),
     ControllerRecoveryHistory,
+    ControllerRecoveryInventory(usize),
+    ControllerRecoveryPage(usize),
+    ControllerRecoveryAction(usize, usize),
     ControllerAnnouncement,
     ControllerAnnouncementCompose,
     ControllerAnnouncementInput,
@@ -381,7 +384,7 @@ impl Form {
         }
     }
     pub(super) fn count(&self) -> usize {
-        self.visible().len() + 2
+        self.visible().len() + 2 + usize::from(self.action == Action::Diagnose)
     }
     pub(super) fn visible(&self) -> Vec<usize> {
         let all: &[usize] = match self.action {

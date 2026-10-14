@@ -42,6 +42,8 @@ The header shows connection and loading status. SSH connections are reused acros
 
 Diagnostic first checks the controller over SSH, including services, PostgreSQL and published schema checksums. When the backend is reachable, it checks registered servers in batches: agents, selected protocol containers/configuration structure, versions and host resources. Results from every page are included in the final scrollable report. Missing or incomplete server coverage produces a warning; controller-only results do not certify the entire installation. Recovery of a stopped controller service requires a separate confirmation.
 
+Open **Diagnostic → Operations** to see queued, running and blocked tasks. The panel updates while open and shows the saved phase, reason and dependent operation. **Check result** reads the exact command journal; **Recover journal** reconciles only after the uncertain command is retired. **Continue** resumes a saved removal or backup checkpoint, while **Cancel before execution** is available only before dispatch. Each action requires confirmation and the backend checks its current eligibility again. Incomplete evidence keeps the task blocked.
+
 The **Offer service and operation recovery** option retains its last selection across Workstation sessions. Each recovery action has its own confirmation.
 
 ## Sections

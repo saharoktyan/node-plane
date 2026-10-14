@@ -7,6 +7,8 @@ never edits environment files, operation journals, grants or maintenance gates.
 """
 import argparse
 import json
+import math
+from datetime import datetime, timezone
 import os
 from pathlib import Path
 import shutil
@@ -75,7 +77,9 @@ def database(action=None):
             schema_valid = True
         except Exception:
             schema_valid = False
-        return {'status': 'ok', 'maintenance': maintenance, 'blocked': blocked, 'schema_valid': schema_valid}
+        cpu_row = conn.execute("SELECT value FROM backend_system_settings WHERE key='controller_cpu_sample'").fetchone()
+        return {'status': 'ok', 'maintenance': maintenance, 'blocked': blocked, 'schema_valid': schema_valid,
+                'cpu_sample': json.loads(cpu_row[0]) if cpu_row else None}
 
 
 def installed_database(action=None):
@@ -93,6 +97,23 @@ def installed_database(action=None):
         return json.loads(result.stdout) if result.returncode == 0 else {'status': 'unavailable'}
     except (OSError, ValueError, subprocess.TimeoutExpired):
         return {'status': 'unavailable'}
+
+
+def controller_cpu(sample):
+    try:
+        if sample['boot_id'] != Path('/proc/sys/kernel/random/boot_id').read_text().strip():
+            return None
+        metrics = sample['host_metrics']
+        sample_age = metrics['cpu_sample_age_seconds']
+        if type(sample_age) not in {int,float} or not math.isfinite(sample_age):
+            return None
+        age = (datetime.now(timezone.utc)-datetime.fromisoformat(sample['at'])).total_seconds() + sample_age
+        value, window = metrics['cpu_used_percent'], metrics['cpu_sample_window_seconds']
+        if any(type(v) not in {int, float} or not math.isfinite(v) for v in (value, window, age)):
+            return None
+        return value if 0 <= value <= 100 and 60 <= window <= 75 and 0 <= age <= 15 else None
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
 
 
 def observe():
@@ -127,6 +148,15 @@ def observe():
     add('disk', 'error' if usage.free < 256 * 1024**2 else 'ok',
         f'Free disk: {usage.free / 1024**3:.2f} GiB ({usage.free * 100 / usage.total:.1f}%)')
     db = installed_database()
+    cpu = controller_cpu(db.get('cpu_sample'))
+    add('cpu_used_percent', 'warning' if cpu is None else 'error' if cpu >= 95 else 'warning' if cpu >= 85 else 'ok',
+        'Fresh CPU average unavailable; the monitoring worker needs one minute of uninterrupted samples' if cpu is None else f'CPU used (1-minute average): {cpu:g}%; warning ≥85%, error ≥95%')
+    try:
+        load = os.getloadavg()
+        cpus = os.cpu_count() or 1
+        add('load1', 'warning' if load[0]/cpus >= 2 else 'ok', f'Load average (1/5/15 min): {load[0]:g} / {load[1]:g} / {load[2]:g}; CPUs: {cpus}; warning ≥2 per CPU')
+    except OSError:
+        add('load1', 'warning', 'Host load measurement unavailable')
     add('database', 'ok' if db['status'] == 'ok' else 'error',
         'PostgreSQL connection and maintenance schema verified' if db['status'] == 'ok' else 'PostgreSQL or installed maintenance schema unavailable; inspect configuration/dependencies')
     permitted = db.get('status') == 'ok' and not db.get('maintenance', True) and db.get('schema_valid', True)

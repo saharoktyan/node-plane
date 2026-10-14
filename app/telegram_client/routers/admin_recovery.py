@@ -8,7 +8,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton
 from ..backend import BackendClient, BackendError
 from ..i18n import normalize_locale, tr
 from ..screens import Screen, Section, Table, shorten_label
-from .common import render
+from .common import render, schedule_refresh
 from .callbacks import AdminSettingsCallback
 
 router = Router()
@@ -44,7 +44,14 @@ class RecoveryAction(CallbackData, prefix='recact'):
 
 def action_path(kind, identity, action):
     from uuid import UUID
+    if kind == 'removal' and action == 'resume':
+        import re
+        if not re.fullmatch(r'[A-Za-z0-9_-]{1,100}', identity):
+            raise ValueError('invalid node identity')
+        return f'/api/v1/system/recovery/removal/{identity}/resume'
     identity = str(UUID(identity))
+    if kind == 'backup' and action in {'resume', 'cancel'}:
+        return f'/api/v1/system/recovery/backup/{identity}/{action}'
     if kind == 'update' and action in {'cancel', 'recheck'}:
         return f'/api/v1/system/updates/jobs/{identity}/{action}'
     if kind in {'node', 'settings', 'profile', 'agent', 'bootstrap'} and action in {'recheck', 'resolve'}:
@@ -64,13 +71,20 @@ async def show(query, bot, backend, state, offset=0, note=''):
             [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data=AdminSettingsCallback().pack())]], state, query.message.message_id)
         return
     sections = []
+    action_tokens = {}
+    previous_tokens = (await state.get_data()).get('recovery_removal_tokens', {})
     if note:
         sections.append(Section(tr(locale, 'recovery.result'), (note,)))
     if page['maintenance_active']:
         sections.append(Section(tr(locale, 'recovery.maintenance'), (tr(locale, 'recovery.maintenance_text'),)))
     for item in page['items']:
+        identity = item['id']
+        if item['kind'] == 'removal':
+            token = next((token for token, node in previous_tokens.items() if node == identity), None) or uuid4().hex[:12]
+            action_tokens[token] = identity
+            identity = token
         rows = [tuple(InlineKeyboardButton(text=tr(locale, 'recovery.action.' + action),
-                    callback_data=RecoveryAction(kind=item['kind'], id=item['id'], action=action).pack(),
+                    callback_data=RecoveryAction(kind=item['kind'], id=identity, action=action).pack(),
                     style='danger' if action == 'cancel' else 'primary')
                 for action in item['actions'])] if item['actions'] else []
         code = item.get('error_code', '')
@@ -102,8 +116,11 @@ async def show(query, bot, backend, state, offset=0, note=''):
                    [InlineKeyboardButton(text=tr(locale, 'audit.title'), callback_data=AuditPage().pack())],
                    [InlineKeyboardButton(text=tr(locale, 'recovery.refresh'), callback_data=RecoveryPage(offset=page['offset']).pack())],
                    [InlineKeyboardButton(text=tr(locale, 'back'), callback_data=AdminSettingsCallback().pack())]]
+    await state.update_data(recovery_removal_tokens=action_tokens)
     await render(bot, query.message.chat.id, Screen(tr(locale, 'recovery.title'), sections=tuple(sections),
         embedded_buttons=True, navigation=True), navigation, state, query.message.message_id)
+    if any(item['status'] in {'queued', 'awaiting_executor', 'running'} for item in page['items']):
+        schedule_refresh(state, lambda: show(query, bot, backend, state, page['offset'], note))
 
 
 @router.callback_query(RecoveryPage.filter())
@@ -120,7 +137,12 @@ async def recovery_action(query: CallbackQuery, callback_data: RecoveryAction, b
     await query.answer()
     locale = normalize_locale((await state.get_data()).get('locale'))
     try:
-        path = action_path(callback_data.kind, callback_data.id, callback_data.action)
+        identity = callback_data.id
+        if callback_data.kind == 'removal':
+            identity = (await state.get_data()).get('recovery_removal_tokens', {}).get(identity)
+            if not identity:
+                raise ValueError('expired recovery selection')
+        path = action_path(callback_data.kind, identity, callback_data.action)
     except ValueError:
         await show(query, bot, backend, state)
         return
@@ -131,7 +153,7 @@ async def recovery_action(query: CallbackQuery, callback_data: RecoveryAction, b
                     style='danger' if callback_data.action == 'cancel' else 'primary')],
                 [InlineKeyboardButton(text=tr(locale, 'back'), callback_data=RecoveryPage().pack())]]
         await render(bot, query.message.chat.id, Screen(tr(locale, 'recovery.confirm'),
-            (tr(locale, 'recovery.explain.' + callback_data.kind + '.' + callback_data.action) if callback_data.kind in {'settings', 'profile', 'agent', 'bootstrap'} else tr(locale, 'recovery.explain.' + callback_data.action), callback_data.id),
+            (tr(locale, 'recovery.explain.' + callback_data.kind + '.' + callback_data.action) if callback_data.kind in {'settings', 'profile', 'agent', 'bootstrap', 'backup', 'removal'} else tr(locale, 'recovery.explain.' + callback_data.action), identity),
             embedded_buttons=True, navigation=True), rows, state, query.message.message_id)
         return
     try:
@@ -242,7 +264,7 @@ def diagnostic_name(locale, identity):
     names = {'file:current': 'installation', 'file:current/.venv/bin/python': 'python',
         'file:shared/.env': 'environment', 'environment': 'environment_keys',
         'release:current/VERSION': 'version', 'release:current/BUILD_COMMIT': 'build',
-        'disk': 'disk', 'database': 'database', 'schema': 'schema', 'maintenance': 'maintenance',
+        'cpu_used_percent': 'cpu', 'load1': 'load', 'disk': 'disk', 'database': 'database', 'schema': 'schema', 'maintenance': 'maintenance',
         'worker': 'worker', 'api': 'api', 'telegram_polling': 'telegram', 'unit:node-plane-backend.service': 'backend',
         'unit:node-plane-driver.service': 'driver', 'unit:node-plane-telegram.service': 'telegram',
         'unit:node-plane-backend-worker.service': 'worker'}
@@ -292,7 +314,7 @@ def server_check_name(locale, identity):
     labels = {'agent': 'diagnostics.agent', 'agent_version': 'diagnostics.agent_version', 'docker': 'diagnostics.docker',
         'settings': 'diagnostics.settings', 'runtime_version': 'diagnostics.runtime',
         'ram_used_percent': 'nodes.probe.ram_used_percent', 'disk_free_percent': 'nodes.probe.disk_free_percent',
-        'load1': 'nodes.probe.load', 'disabled': 'diagnostics.disabled',
+        'cpu_used_percent': 'nodes.probe.cpu_used_percent', 'load1': 'nodes.probe.load', 'disabled': 'diagnostics.disabled',
         'registry': 'diagnostics.registry', 'operations': 'diagnostics.operations', 'live_services': 'diagnostics.live'}
     return tr(locale, labels[identity]) if identity in labels else identity
 

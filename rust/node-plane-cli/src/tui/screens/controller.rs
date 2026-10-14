@@ -1,5 +1,51 @@
 use super::super::*;
 
+pub(in crate::tui) fn recovery_controls(page: &serde_json::Value) -> Vec<(String, Control)> {
+    let mut controls = Vec::new();
+    for (index, item) in page["items"].as_array().into_iter().flatten().enumerate() {
+        for (action, value) in item["actions"].as_array().into_iter().flatten().enumerate() {
+            let label = match value.as_str().unwrap_or("") {
+                "recheck" => "Check result",
+                "resolve" => "Recover journal",
+                "resume" => "Continue",
+                "cancel" => "Cancel before execution",
+                _ => continue,
+            };
+            controls.push((
+                format!(
+                    "{} · {}: {label}",
+                    item["kind"].as_str().unwrap_or("Operation"),
+                    item["node_key"]
+                        .as_str()
+                        .filter(|v| !v.is_empty())
+                        .unwrap_or("Controller")
+                ),
+                Control::ControllerRecoveryAction(index, action),
+            ));
+        }
+    }
+    let offset = page["offset"].as_u64().unwrap_or(0) as usize;
+    let size = page["page_size"].as_u64().unwrap_or(10) as usize;
+    if offset > 0 {
+        controls.push((
+            "Previous page".into(),
+            Control::ControllerRecoveryPage(offset.saturating_sub(size)),
+        ));
+    }
+    if offset + size < page["total"].as_u64().unwrap_or(0) as usize {
+        controls.push((
+            "Next page".into(),
+            Control::ControllerRecoveryPage(offset + size),
+        ));
+    }
+    controls.push((
+        "Refresh".into(),
+        Control::ControllerRecoveryInventory(offset),
+    ));
+    controls.push(("Back".into(), Control::ControllerBack));
+    controls
+}
+
 pub(in crate::tui) fn history_controls(page: &serde_json::Value) -> Vec<Control> {
     let mut controls: Vec<_> = (0..page["items"].as_array().map_or(0, Vec::len))
         .map(Control::ControllerHistoryItem)
@@ -16,6 +62,52 @@ pub(in crate::tui) fn history_controls(page: &serde_json::Value) -> Vec<Control>
     controls
 }
 
+pub(in crate::tui) fn audit_title(item: &serde_json::Value) -> String {
+    if let Some(title) = item["title"].as_str().filter(|v| !v.is_empty()) {
+        return title.into();
+    }
+    let action = item["action"].as_str().unwrap_or("Unknown operation");
+    let Some((method, path)) = action.split_once(" /api/v1/") else {
+        return action.into();
+    };
+    let verb = match method {
+        "POST" => "Create",
+        "PATCH" | "PUT" => "Update",
+        "DELETE" => "Delete",
+        _ => "Inspect",
+    };
+    let parts: Vec<_> = path.split('/').collect();
+    match path {
+        "system/updates/check" => "Check controller updates".into(),
+        "system/updates/run" => "Run controller update".into(),
+        "system/alerts/preferences" => "Change alert settings".into(),
+        "system/backups/preferences" => "Change automatic backup settings".into(),
+        "system/backups/jobs" => "Run backup operation".into(),
+        "system/traffic/preferences" => "Change traffic collection settings".into(),
+        "system/bot-title" => "Change bot name".into(),
+        "announcements" => "Send announcement".into(),
+        "announcements/preview" => "Preview announcement".into(),
+        _ => {
+            let resource = match parts[0] {
+                "profiles" => "profile",
+                "accounts" => "account",
+                "nodes" => "server",
+                "access-requests" => "access request",
+                "devices" => "device",
+                "system" => "controller settings",
+                "operations" => "operation",
+                "temporary-configs" => "temporary configuration",
+                _ => "controller settings",
+            };
+            let detail = parts
+                .get(2)
+                .map(|s| format!(" · {}", s.replace('-', " ")))
+                .unwrap_or_default();
+            format!("{verb} {resource}{detail}")
+        }
+    }
+}
+
 pub(in crate::tui) fn compact_history_item(
     item: &serde_json::Value,
     audit: bool,
@@ -26,7 +118,7 @@ pub(in crate::tui) fn compact_history_item(
             .filter(|v| !v.is_empty())
             .or_else(|| item["account_id"].as_str())
             .unwrap_or("Administrator");
-        let action = item["title"].as_str().unwrap_or("Action");
+        let action = audit_title(item);
         let phase = item["phase"]
             .as_str()
             .filter(|v| !v.is_empty())
@@ -49,6 +141,34 @@ pub(in crate::tui) fn compact_history_item(
         let time = item["created_at"].as_str().unwrap_or("").to_string();
         (head, time)
     }
+}
+
+pub(in crate::tui) fn alert_description(item: &serde_json::Value) -> String {
+    let kind = item["kind"].as_str().unwrap_or("");
+    let label = match kind {
+        "cpu_high" => "Sustained high CPU usage",
+        "disk_low" => "Low disk space",
+        "ram_high" => "High RAM usage",
+        "load_high" => "High load average",
+        "node_unreachable" => "Node agent is unavailable",
+        "xray_down" => "VLESS is not running",
+        "awg_down" => "AmneziaWG is not running",
+        _ => "Server needs attention",
+    };
+    let Some(value) = item["payload"]["value"].as_f64().filter(|v| v.is_finite()) else {
+        return label.into();
+    };
+    let measurement = match kind {
+        "disk_low" => format!("Disk space available: {value:.1}%"),
+        "ram_high" => format!("RAM used: {value:.1}%"),
+        "cpu_high" => format!("CPU used (1-minute average): {value:.1}%"),
+        "load_high" => format!(
+            "Load average (1 minute): {value:.2}; logical CPUs: {}",
+            item["payload"]["cpus"]
+        ),
+        _ => return label.into(),
+    };
+    format!("{label} · {measurement}")
 }
 
 pub(in crate::tui) fn alert_controls(state: &crate::controller::Browser) -> Vec<Control> {
@@ -286,6 +406,8 @@ pub(in crate::tui) fn draw_controller(
         if app.controller_ready() || app.controller.verifying {
             if app.form.action == Action::Update {
                 " Node Plane Updates "
+            } else if app.form.action == Action::Diagnose {
+                " Diagnostic · Operations "
             } else {
                 app.controller_section
                     .map_or("Node Plane Settings", ControllerSection::label)
@@ -343,6 +465,35 @@ pub(in crate::tui) fn draw_controller(
             "\nCancellation keeps the controller; nodes already removed are not restored.",
         );
         controls = app.controller_removal_controls();
+    } else if let Some(page) = &state.recovery_inventory {
+        text = format!("Operations · {} active tasks\n", page["total"]);
+        if let Some(result) = page["recovery_result"].as_str() {
+            text.push_str(&format!("\n{result}\n"));
+        }
+        if page["total"] == 0 {
+            text.push_str("\nNo queued, running or blocked operations.");
+        }
+        for item in page["items"].as_array().into_iter().flatten() {
+            text.push_str(&format!(
+                "\n{} · {} · {}\nOperation: {}\n{}\n{}\n",
+                item["kind"].as_str().unwrap_or("Operation"),
+                item["node_key"]
+                    .as_str()
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or("Controller"),
+                item["status"].as_str().unwrap_or("unknown"),
+                item["id"].as_str().unwrap_or(""),
+                crate::workstation::recovery_reason(item["error_code"].as_str().unwrap_or("")),
+                crate::workstation::recovery_hint(item["next_step"].as_str().unwrap_or(""))
+            ));
+            if let Some(phase) = item["phase"].as_str().filter(|s| !s.is_empty()) {
+                text.push_str(&format!("Phase: {phase}\n"));
+            }
+            if let Some(child) = item["related_id"].as_str().filter(|s| !s.is_empty()) {
+                text.push_str(&format!("Dependent operation: {child}\n"));
+            }
+        }
+        controls = recovery_controls(page);
     } else if state.branch_confirmation {
         let current = state
             .updates
@@ -388,7 +539,7 @@ pub(in crate::tui) fn draw_controller(
             text = if audit {
                 format!(
                     "{}\n{} · {}\nAccount: {} · {}\nSSH: {} · {}\nRequest: {}\nCommand: {}\nHTTP: {}\nTarget: {}\nKey: {}\nOutcome: {}\nEndpoint: {}",
-                    field("title"),
+                    audit_title(item),
                     field("phase"),
                     field("occurred_at"),
                     field("account_label"),
@@ -554,17 +705,21 @@ pub(in crate::tui) fn draw_controller(
         ]);
     } else if let Some(value) = &state.alerts {
         text = format!(
-            "Active: {} · Unread: {}\nLast scan: {}",
+            "Active: {} · Unread: {}\nLast full check: {}\nLast CPU check: {}",
             value["active_count"],
             value["unacknowledged_count"],
-            value["last_scan"].as_str().unwrap_or("Never")
+            value["last_scan"]["at"].as_str().unwrap_or("Never"),
+            value["last_cpu_scan"]["at"].as_str().unwrap_or("Never")
         );
+        if value["cpu_check_seconds"] == 30 {
+            text.push_str("\nCPU: sample every 5 seconds · average over 1 minute · check every 30 seconds\nWarning ≥85% · critical ≥95% · recovery <80%");
+        }
         if let Some(items) = value["active"].as_array() {
             for item in items.iter().skip(state.alerts_page * 5).take(5) {
                 text.push_str(&format!(
                     "\n\n{} · {}{}\nSince: {}",
                     item["title"].as_str().unwrap_or("Server"),
-                    item["kind"].as_str().unwrap_or("Alert"),
+                    alert_description(item),
                     if item["dismissed"] == true {
                         " · Dismissed"
                     } else {
@@ -577,7 +732,7 @@ pub(in crate::tui) fn draw_controller(
         for control in alert_controls(state) {
             let label = match control {
                 Control::ControllerAlertToggle(key) => match key {
-                    "interval_minutes" => format!("Check every {} minutes", value[key]),
+                    "interval_minutes" => format!("Service checks every {} minutes", value[key]),
                     "enabled" => {
                         format!("Alerts: {}", if value[key] == true { "On" } else { "Off" })
                     }
@@ -812,6 +967,9 @@ pub(in crate::tui) fn draw_controller(
                 "Automatic"
             }
         ));
+        if let Some(path) = detail["exported_path"].as_str() {
+            text.push_str(&format!("\nSaved to: {path}"));
+        }
         if let Some(name) = detail["name"].as_str().filter(|name| !name.is_empty()) {
             text.push_str(&format!("\nName: {name}"));
         }
@@ -829,7 +987,12 @@ pub(in crate::tui) fn draw_controller(
                             "Automatic"
                         },
                         item["created_at"].as_str().unwrap_or(""),
-                        item["app_version"].as_str().unwrap_or(""),
+                        item["app_version"]
+                            .as_str()
+                            .unwrap_or("")
+                            .split(" · ")
+                            .next()
+                            .unwrap_or(""),
                         item["name"]
                             .as_str()
                             .filter(|s| !s.is_empty())

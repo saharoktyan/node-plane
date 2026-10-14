@@ -609,6 +609,12 @@ impl App {
                     self.form.selected = index + 1;
                 }
             }
+            Control::ControllerRecoveryInventory(_)
+                if matches!(self.screen, Screen::Form) && self.form.action == Action::Diagnose =>
+            {
+                self.quick_focus = false;
+                self.form.selected = self.form.count() - 2;
+            }
             Control::Continue => {
                 self.quick_focus = false;
                 self.form.selected = self.form.count() - 1;

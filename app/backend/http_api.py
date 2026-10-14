@@ -143,7 +143,7 @@ class AnnouncementDeliveryInput(BaseModel):
 class AlertPreferencesInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
     enabled: StrictBool | None = None
-    interval_minutes: Literal[5,15] | None = None
+    interval_minutes: Literal[3,5,10] | None = None
     notify_resolved: StrictBool | None = None
 
 
@@ -274,7 +274,7 @@ class RecoveryItemOutput(BaseModel):
     status: str
     node_key: str
     error_code: str
-    actions: list[Literal['cancel', 'recheck', 'resolve']]
+    actions: list[Literal['cancel', 'recheck', 'resolve', 'resume']]
     phase: str = ''
     subject_id: str = ''
     related_id: str = ''
@@ -291,6 +291,7 @@ class RecoveryOverviewOutput(BaseModel):
 
 
 class WorkstationAuditItemOutput(BaseModel):
+    title: str = ''
     occurred_at: str
     session_id: str
     account_id: str
@@ -312,6 +313,7 @@ class WorkstationAuditPageOutput(BaseModel):
     offset: int
     page_size: int
     total: int
+    errors_only: bool = False
 
 
 class UpdateRunInput(BaseModel):
@@ -906,15 +908,17 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
                             request_id=request.state.request_id, command_id=audit_command)
             restoring = False
             cleaning = False
+            operation_recovery = False
             if request.method not in {'GET','HEAD','OPTIONS'}:
                 import re
                 update_recovery = bool(re.fullmatch(r'/api/v1/system/updates/jobs/[0-9a-fA-F-]{36}/(cancel|recheck)', request.url.path))
-                allowed = request.url.path.startswith('/api/v1/system/cleanup/') or request.url.path.endswith('/ack') or update_recovery
+                operation_recovery = bool(re.fullmatch(r'/api/v1/system/recovery/(node|settings|profile|agent|bootstrap|removal|backup)/[A-Za-z0-9_-]{1,100}/(cancel|resume|resolve|recheck)', request.url.path))
+                allowed = operation_recovery or request.url.path.startswith('/api/v1/system/cleanup/') or request.url.path.endswith('/ack') or update_recovery
                 if not allowed:
                     from .maintenance_gate import active
                     with db.connect() as conn:
                         cleaning = bool(active(conn))
-            if request.method not in {'GET','HEAD','OPTIONS'} and request.url.path != '/api/v1/system/backups/jobs':
+            if request.method not in {'GET','HEAD','OPTIONS'} and request.url.path != '/api/v1/system/backups/jobs' and not operation_recovery:
                 with db.connect() as conn:
                     restoring = bool(conn.execute("SELECT 1 FROM backend_backup_jobs WHERE action='restore' AND status IN ('awaiting_executor','running') LIMIT 1").fetchone())
             if cleaning:
@@ -2004,7 +2008,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
             return FleetDiagnostics(db, GrpcIntentDriver(channel, timeout=10)).observe(current, offset, node_key=node_key)
 
     @app.post('/api/v1/system/recovery/{kind}/{identity}/{action}')
-    def recover_operation(kind: str, identity: UUID, action: str, current=Depends(actor)):
+    def recover_operation(kind: str, identity: str, action: str, current=Depends(actor)):
         from .recovery import act
         with maintenance_lock(current):
             if node_driver is not None:

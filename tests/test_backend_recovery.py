@@ -220,9 +220,73 @@ class ProfileRecoveryTests(TestCase):
         item = overview(self.db,actor)['items'][0]
         self.assertEqual((item['subject_id'],item['actions']), (profile,['recheck','resolve']))
         driver.resolve = Mock(return_value={'disk_present':False,'live_present':False,'identity_matches':False,'config_available':False})
+        restore = str(uuid4())
+        self.db.connection.execute("INSERT INTO backend_backup_jobs VALUES (?,?,?,'restore',NULL,NULL,'blocked','revoking',NULL,'now')", (restore,self.admin.id,str(uuid4())))
+        self.db.connection.execute('INSERT INTO backend_backup_revocations VALUES (?,?)',(restore,first['operation_id']))
         result = act(self.db,actor,driver,'profile',task,'resolve')
+        dependencies = self.db.connection.execute('SELECT operation_id FROM backend_backup_revocations WHERE job_id=?',(restore,)).fetchall()
+        self.assertEqual([item['operation_id'] for item in dependencies],[result['replacement_id']])
+
         self.assertEqual(result['status'],'superseded')
         self.assertIsNotNone(result['replacement_id'])
         driver.resolve.assert_called_once()
         self.assertEqual(len(driver.calls),1)  # recovery did not replay the original mutation
         self.assertEqual(history(self.db,actor)['items'][0]['operation_id'],task)
+
+
+class ParentRecoveryTests(TestCase):
+    setUp = fixture.BackendUpdateTests.setUp
+    service = fixture.BackendUpdateTests.service
+
+    def test_removal_resumes_same_node_and_refuses_unrelated_maintenance(self):
+        from backend.recovery import act, history
+        from backend.authorization import AccessDenied
+        from unittest.mock import Mock
+        self.service()
+        self.db.connection.execute("INSERT INTO backend_nodes(key,title,region,protocols_json,xray_transports_json) VALUES ('n1','Node','EU','[]','[]')")
+        self.db.connection.execute("INSERT INTO backend_node_removals VALUES ('n1',?,'blocked','node_cleanup_unavailable')", (self.admin.id,))
+        self.assertEqual(overview(self.db,self.actor)['items'][0]['actions'], ['resume'])
+        driver = Mock()
+        result = act(self.db,self.actor,driver,'removal','n1','resume')
+        self.assertEqual(result['status'], 'queued')
+        self.assertEqual(history(self.db,self.actor)['items'][0]['operation_id'],'n1')
+        driver.assert_not_called()
+        with self.assertRaises(AccessDenied):
+            act(self.db,self.actor,driver,'removal','n1','resume')
+        self.db.connection.execute("UPDATE backend_node_removals SET status='blocked'")
+        self.db.connection.execute('INSERT INTO backend_controller_update_gate VALUES (1,?)', (str(uuid4()),))
+        self.assertEqual(overview(self.db,self.actor)['items'][0]['actions'], [])
+        with self.assertRaises(AccessDenied):
+            act(self.db,self.actor,driver,'removal','n1','resume')
+
+    def test_pending_restore_can_be_cancelled_via_http_without_bypassing_other_gate(self):
+        from unittest.mock import patch
+        import tempfile
+        self.service()
+        identity = str(uuid4())
+        self.db.connection.execute("INSERT INTO backend_backup_jobs VALUES (?,?,?,'restore',NULL,NULL,'awaiting_executor',NULL,NULL,'now')", (identity,self.admin.id,str(uuid4())))
+        headers = {**self.headers,'X-Node-Plane-Telegram-User-ID':'101'}
+        page = self.client.get('/api/v1/system/recovery',headers=headers).json()
+        self.assertTrue(page['maintenance_active'])
+        self.assertEqual(page['items'][0]['actions'], ['cancel'])
+        with tempfile.TemporaryDirectory() as root, patch.dict('os.environ', {'NODE_PLANE_SHARED_DIR':root}):
+            from pathlib import Path
+            (Path(root)/'data').mkdir()
+            response = self.client.post(f'/api/v1/system/recovery/backup/{identity}/cancel',headers=headers)
+            self.assertEqual(response.status_code,200,response.text)
+            self.assertEqual(response.json()['status'],'cancelled')
+            self.assertEqual(self.client.post(f'/api/v1/system/recovery/backup/{identity}/resume',headers=headers).status_code,409)
+
+    def test_restore_reconnect_checkpoint_is_preserved_and_missing_evidence_has_no_resume(self):
+        from backend.recovery import act
+        import json
+        self.service()
+        identity = str(uuid4())
+        checkpoint = json.dumps({'status':'failed','code':'backup_failed','nodes':[{'node_key':'n1','job_id':str(uuid4()),'status':'pending'}]})
+        self.db.connection.execute("INSERT INTO backend_backup_jobs VALUES (?,?,?,'restore',NULL,NULL,'blocked','reconnecting',?,'now')", (identity,self.admin.id,str(uuid4()),checkpoint))
+        self.assertEqual(overview(self.db,self.actor)['items'][0]['actions'], ['resume'])
+        result = act(self.db,self.actor,None,'backup',identity,'resume')
+        self.assertEqual(result['status'],'running')
+        self.assertEqual(self.db.connection.execute('SELECT result_json FROM backend_backup_jobs WHERE id=?',(identity,)).fetchone()['result_json'],checkpoint)
+        self.db.connection.execute("UPDATE backend_backup_jobs SET status='blocked',result_json='{}'")
+        self.assertEqual(overview(self.db,self.actor)['items'][0]['actions'], [])

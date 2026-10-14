@@ -65,6 +65,19 @@ class CollectedUpdateRecoveryTests(TestCase):
         self.assertIsNotNone(self.db.connection.execute('SELECT job_id FROM backend_controller_update_gate').fetchone())
         self.assertEqual(service.get(self.actor,job['id'])['status'],'running')
 
+    def test_inspection_distinguishes_missing_and_terminal_tasks_without_changing_gate(self):
+        service,job,_,_ = self.prepare()
+        guard = self.db.connection.execute('SELECT revision FROM backend_account_guard WHERE id=1').fetchone()['revision']
+        missing = recovery.inspect_update(self.db,uuid4())
+        self.assertFalse(missing['found'])
+        self.assertEqual(missing['gate_job_id'],job['id'])
+        self.db.connection.execute("UPDATE backend_update_jobs SET status='rolled_back' WHERE id=?",(job['id'],))
+        self.db.connection.commit()
+        result = recovery.inspect_update(self.db,job['id'])
+        self.assertEqual(result['status'],'rolled_back')
+        self.assertEqual(self.db.connection.execute('SELECT revision FROM backend_account_guard WHERE id=1').fetchone()['revision'],guard)
+        self.assertIsNotNone(self.db.connection.execute('SELECT job_id FROM backend_controller_update_gate').fetchone())
+
     def test_cli_runs_real_recovery_from_parsed_arguments_to_committed_result(self):
         service,job,shared,_ = self.prepare()
         app = shared/'current'

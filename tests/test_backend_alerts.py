@@ -27,6 +27,7 @@ HEALTHY = {
         "ram_used_percent": 40,
         "load1": 0.1,
         "cpus": 2,
+        "cpu_used_percent": 20, "cpu_sample_window_seconds": 60, "cpu_sample_age_seconds": 0,
     },
 }
 
@@ -239,6 +240,67 @@ class AlertTests(unittest.TestCase):
         with self.db.transaction() as conn:
             conn.execute("UPDATE backend_system_settings SET value=? WHERE key='alert_policy'", (json.dumps({'enabled':True,'notify_resolved':True,'interval_minutes':15}),))
             self.assertEqual(self.service._policy(conn)['interval_minutes'],10)
+
+    def test_interval_choices_are_accepted_by_the_http_schema(self):
+        headers = {**self.headers, 'X-Node-Plane-Telegram-User-ID':'101'}
+        for minutes in (3,5,10):
+            response = self.client.patch('/api/v1/system/alerts/preferences',headers=headers,json={'interval_minutes':minutes})
+            self.assertEqual(response.status_code,200,response.text)
+            self.assertEqual(response.json()['interval_minutes'],minutes)
+        self.assertEqual(self.client.patch('/api/v1/system/alerts/preferences',headers=headers,json={'interval_minutes':15}).status_code,422)
+
+    def test_cpu_checks_run_every_thirty_seconds_independently_of_service_interval(self):
+        from datetime import datetime, timedelta, timezone
+        start = datetime.now(timezone.utc)
+        self.service.preferences(self.actor, {'interval_minutes':10})
+        self.driver.host_metrics = Mock(return_value={'host_metrics':{**HEALTHY['host_metrics'],'cpu_used_percent':96}})
+        with patch('backend.alerts.datetime') as clock:
+            clock.fromisoformat = datetime.fromisoformat
+            clock.now.return_value = start
+            self.assertTrue(self.service.scheduled())
+            self.assertTrue(self.service.scheduled(cpu_only=True))
+            self.assertEqual(self.driver.inspect_node_services.call_count,1)
+            clock.now.return_value = start + timedelta(seconds=29)
+            self.assertFalse(self.service.scheduled(cpu_only=True))
+            clock.now.return_value = start + timedelta(seconds=30)
+            self.assertTrue(self.service.scheduled(cpu_only=True))
+            self.assertFalse(self.service.scheduled())
+        self.assertEqual([(e['kind'],e['resolved']) for e in self.events()],[('cpu_high',0)])
+
+    def test_cpu_severity_changes_unknown_samples_and_recovery_use_current_measurements(self):
+        from datetime import datetime, timedelta, timezone
+        start = datetime.now(timezone.utc)
+        self.driver.host_metrics = Mock()
+        samples = [86,96,94,89,82,None,79]
+        with patch('backend.alerts.datetime') as clock:
+            clock.fromisoformat = datetime.fromisoformat
+            for index,value in enumerate(samples):
+                clock.now.return_value = start + timedelta(seconds=index*30)
+                self.driver.host_metrics.return_value = {'host_metrics':{**HEALTHY['host_metrics'], 'cpu_used_percent':value}}
+                self.assertTrue(self.service.scheduled(cpu_only=True))
+                if value is None:
+                    self.assertEqual(self.service.overview(self.actor)['active_count'],1)
+        events = self.db.connection.execute("SELECT resolved,payload_json FROM backend_alert_events WHERE kind='cpu_high' ORDER BY created_at").fetchall()
+        self.assertEqual([e['resolved'] for e in events],[0,0,0,1])
+        payloads = [json.loads(e['payload_json']) for e in events]
+        self.assertEqual([p.get('severity') for p in payloads[:3]],['warning','critical','warning'])
+        self.assertEqual(payloads[-1]['value'],79)
+        self.assertEqual(self.service.overview(self.actor)['active_count'],0)
+
+    def test_cpu_short_stale_or_malformed_windows_are_unknown(self):
+        for key,value in [('cpu_sample_window_seconds',10),('cpu_sample_age_seconds',16),('cpu_used_percent',True),('cpu_used_percent',float('nan')),('cpu_used_percent',101)]:
+            metrics = {**HEALTHY['host_metrics'],key:value}
+            failures,known = self.service.classify({'host_metrics':metrics},[])
+            self.assertNotIn('cpu_high',known)
+            self.assertNotIn('cpu_high',failures)
+
+    def test_resource_recovery_notifies_with_new_value_instead_of_old_alarm_value(self):
+        self.driver.inspect_node_services.return_value = {**HEALTHY,'host_metrics':{**HEALTHY['host_metrics'],'disk_free_percent':3}}
+        self.scan()
+        self.driver.inspect_node_services.return_value = {**HEALTHY,'host_metrics':{**HEALTHY['host_metrics'],'disk_free_percent':18}}
+        self.scan()
+        row = self.db.connection.execute("SELECT payload_json FROM backend_alert_events WHERE kind='disk_low' AND resolved=1").fetchone()
+        self.assertEqual(json.loads(row['payload_json'])['value'],18)
 
     def test_preferences_and_interval_are_enforced(self):
         self.assertTrue(self.service.scheduled())

@@ -105,6 +105,7 @@ impl App {
                 | Control::ControllerAlertInterval(_)
                 | Control::ControllerComponentPage(_)
                 | Control::ControllerVersionsPage(_)
+                | Control::ControllerRecoveryPage(_)
                 | Control::ControllerHistoryPage(_)
                 | Control::ControllerAlertPage(_)
                 | Control::SaveAccent
@@ -314,6 +315,9 @@ impl App {
             | Control::TemporaryConfirm => return self.activate_temporary(control),
             Control::ControllerAudit
             | Control::ControllerAuditFilter(_)
+            | Control::ControllerRecoveryPage(_)
+            | Control::ControllerRecoveryInventory(_)
+            | Control::ControllerRecoveryAction(..)
             | Control::ControllerRecoveryHistory
             | Control::ControllerAnnouncement
             | Control::ControllerAnnouncementCompose

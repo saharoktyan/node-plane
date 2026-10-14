@@ -34,16 +34,16 @@ def _json(value):
     return result if isinstance(result, dict) else {}
 
 
-def _maintenance(conn):
+def _maintenance(conn, exclude_backup=None):
     gate = conn.execute('SELECT job_id FROM backend_controller_update_gate WHERE id=1').fetchone()
-    other = bool(conn.execute("SELECT id FROM backend_system_cleanup_jobs WHERE status IN ('queued','running','awaiting_shutdown','blocked') LIMIT 1").fetchone()) or bool(conn.execute("SELECT id FROM backend_backup_jobs WHERE action='restore' AND status IN ('awaiting_executor','running') LIMIT 1").fetchone())
+    other = bool(conn.execute("SELECT id FROM backend_system_cleanup_jobs WHERE status IN ('queued','running','awaiting_shutdown','blocked') LIMIT 1").fetchone()) or bool(conn.execute("SELECT id FROM backend_backup_jobs WHERE action='restore' AND status IN ('awaiting_executor','running') AND id!=? LIMIT 1", (exclude_backup or '',)).fetchone())
     return gate, other
 
 
 def _item(conn, row, actor, gate, other):
     kind, identity, status = row['kind'], row['id'], row['status']
     result = _json(row['result_json'])
-    code = result.get('error_code') or row['stored_error'] or ''
+    code = result.get('error_code') or result.get('code') or row['stored_error'] or ''
     phase, subject, related_id, related_kind = '', '', '', ''
     if kind == 'agent':
         failure = conn.execute('SELECT code FROM backend_agent_rollout_failures WHERE task_id=?', (identity,)).fetchone()
@@ -54,6 +54,17 @@ def _item(conn, row, actor, gate, other):
     elif kind == 'profile':
         profile = conn.execute('SELECT o.profile_id FROM backend_operations o JOIN backend_operation_tasks t ON t.operation_id=o.id WHERE t.id=?', (identity,)).fetchone()
         subject = profile['profile_id'] if profile else ''
+    if kind == 'backup':
+        _, other = _maintenance(conn, exclude_backup=identity)
+        other = other or bool(conn.execute("SELECT 1 FROM backend_backup_jobs WHERE id!=? AND status IN ('awaiting_executor','running') LIMIT 1", (identity,)).fetchone())
+        job = conn.execute('SELECT action,phase FROM backend_backup_jobs WHERE id=?', (identity,)).fetchone()
+        phase = job['phase'] or ''
+        child = conn.execute('''SELECT t.id FROM backend_backup_revocations b JOIN backend_operation_tasks t ON t.operation_id=b.operation_id WHERE b.job_id=? AND t.status='blocked' ORDER BY t.id LIMIT 1''', (identity,)).fetchone()
+        if child:
+            related_id, related_kind = child['id'], 'profile'
+    elif kind == 'removal':
+        cleanup = conn.execute('SELECT phase FROM backend_node_cleanup WHERE node_key=?', (identity,)).fetchone()
+        phase = cleanup['phase'] if cleanup else ''
     code = code if isinstance(code, str) and re.fullmatch(r'[a-z0-9_]{1,100}', code) else ''
     code = code or ('outcome_unconfirmed' if status == 'blocked' else 'waiting_worker' if status in {'queued', 'awaiting_executor'} else 'operation_running')
     actions = []
@@ -63,8 +74,20 @@ def _item(conn, row, actor, gate, other):
         job = conn.execute('SELECT kind FROM backend_update_jobs WHERE id=?', (identity,)).fetchone()
         if status == 'blocked' and job['kind'] == 'stack' and result.get('phase') == 'core' and result.get('unit_name'):
             actions.append('recheck')
+    elif kind == 'backup' and not gate and not other and 'settings.manage' in actor.principal.scopes:
+        if status == 'awaiting_executor' and not phase:
+            actions = ['cancel']
+        elif status == 'blocked':
+            # Continue only a saved checkpoint; never restart a restored database.
+            states = {r['status'] for r in conn.execute('''SELECT o.status FROM backend_backup_revocations b
+                JOIN backend_operations o ON o.id=b.operation_id WHERE b.job_id=?''', (identity,)).fetchall()}
+            if not phase or phase == 'revoking' and not (states - {'succeeded', 'no_targets'}) or phase == 'reconnecting' and isinstance(result.get('nodes'), list):
+                actions = ['resume']
     elif status == 'blocked' and not gate and not other:
-        if kind in {'node', 'settings'} and 'nodes.manage' in actor.principal.scopes:
+        if kind == 'removal' and 'nodes.manage' in actor.principal.scopes:
+            if conn.execute('SELECT 1 FROM backend_nodes WHERE key=?', (identity,)).fetchone():
+                actions = ['resume']
+        elif kind in {'node', 'settings'} and 'nodes.manage' in actor.principal.scopes:
             actions = ['recheck', 'resolve']
             if kind == 'settings' and any(conn.execute(f"SELECT 1 FROM {table} WHERE node_key=? AND status IN ('awaiting_executor','running','blocked') LIMIT 1", (row['node_key'],)).fetchone() for table in ('backend_node_jobs','backend_agent_rollouts','backend_node_bootstraps','backend_operation_tasks')):
                 actions.remove('resolve')
@@ -75,7 +98,7 @@ def _item(conn, row, actor, gate, other):
             if kind == 'bootstrap' and not related_id:
                 actions.append('resolve')
     hint = ('maintenance' if (gate or other) and kind != 'update' else
-            'child' if kind == 'bootstrap' and related_id else
+            'child' if related_id else
             'agent' if kind == 'agent' else
             'bootstrap' if kind == 'bootstrap' else
             'journal' if actions else kind if status == 'blocked' else 'worker')
@@ -113,23 +136,28 @@ def overview(db, actor, offset=0, node_key=None):
 def act(db, actor, driver, kind, identity, action):
     """Caller holds worker flock. Only the named command can change."""
     require_permission(actor, 'maintenance.manage')
-    if kind not in {'node', 'settings', 'profile', 'agent', 'bootstrap'} or action not in {'recheck', 'resolve'}:
+    if kind not in {'node', 'settings', 'profile', 'agent', 'bootstrap', 'removal', 'backup'} or action not in {'recheck', 'resolve', 'resume', 'cancel'}:
         raise AccessDenied('invalid_input', 422)
     try:
-        identity = str(UUID(identity))
+        if kind == 'removal':
+            if not isinstance(identity, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,100}', identity):
+                raise ValueError('invalid node identity')
+        else:
+            identity = str(UUID(identity))
     except (ValueError, TypeError):
         raise AccessDenied('invalid_input', 422) from None
     table = TABLES[kind]
+    identity_column = 'node_key' if kind == 'removal' else 'id'
     with db.transaction() as conn:
         from .maintenance_gate import admit
-        admit(conn)
+        admit(conn, allow_restore=kind == 'backup')
         account = conn.execute('UPDATE backend_accounts SET role=role WHERE id=? RETURNING role,status', (actor.account.id,)).fetchone()
         if not account or account['role'] != 'admin' or account['status'] != 'approved':
             raise AccessDenied('permission_denied')
-        row = conn.execute(f'SELECT * FROM {table} WHERE id=?', (identity,)).fetchone()
+        row = conn.execute(f'SELECT * FROM {table} WHERE {identity_column}=?', (identity,)).fetchone()
         if row is None:
             raise AccessDenied('resource_not_found', 404)
-        if row['status'] != 'blocked':
+        if row['status'] != 'blocked' and not (kind == 'backup' and row['status'] == 'awaiting_executor' and action == 'cancel'):
             raise AccessDenied('task_not_blocked', 409)
         gate, other = _maintenance(conn)
         inventory = conn.execute(f"SELECT * FROM ({_sql()}) inventory WHERE kind=? AND id=?", (kind, identity)).fetchone()
@@ -138,9 +166,18 @@ def act(db, actor, driver, kind, identity, action):
         event = str(uuid4())
         conn.execute('INSERT INTO backend_recovery_audit VALUES (?,?,?,?,?,?,?,?)',
             (event, actor.account.id, kind, identity, action, 'admitted', row['status'], datetime.now(timezone.utc).isoformat()))
+        if kind == 'removal':
+            conn.execute("UPDATE backend_node_removals SET status='queued',error_code=NULL,actor_id=? WHERE node_key=? AND status='blocked'", (actor.account.id, identity))
+        elif kind == 'backup':
+            conn.execute('UPDATE backend_backup_jobs SET status=?,actor_id=? WHERE id=? AND status=?',
+                ('cancelled' if action == 'cancel' else 'running', actor.account.id, identity, row['status']))
+
     observation, replacement = None, None
     try:
-        if kind == 'node':
+        if kind in {'backup', 'removal'}:
+            # The saved checkpoint was queued atomically with admission above.
+            pass
+        elif kind == 'node':
             from .node_operations import NodeOperations
             service = NodeOperations(db, driver)
             if action == 'resolve':
@@ -213,7 +250,7 @@ def act(db, actor, driver, kind, identity, action):
 
 def _audit_result(db, event, outcome, table, identity):
     with db.transaction() as conn:
-        status = conn.execute(f'SELECT status FROM {table} WHERE id=?', (identity,)).fetchone()['status']
+        status = conn.execute(f"SELECT status FROM {table} WHERE {'node_key' if table == 'backend_node_removals' else 'id'}=?", (identity,)).fetchone()['status']
         conn.execute('UPDATE backend_recovery_audit SET outcome=?,status=? WHERE id=?',
                      ('still_blocked' if outcome == 'confirmed' and status == 'blocked' else outcome, status, event))
     return status
@@ -231,7 +268,7 @@ def history(db, actor, offset=0):
             table = TABLES.get(item['kind'])
             if table and item['kind'] not in {'update', 'backup'}:
                 node = conn.execute(f'SELECT o.node_key,n.title FROM {table} o '
-                    'LEFT JOIN backend_nodes n ON n.key=o.node_key WHERE o.id=?',
+                    f"LEFT JOIN backend_nodes n ON n.key=o.node_key WHERE o.{'node_key' if item['kind'] == 'removal' else 'id'}=?",
                     (item['operation_id'],)).fetchone()
                 if node:
                     item.update(node_key=node['node_key'], node_title=node['title'])
