@@ -36,7 +36,8 @@ async def show(chat_id, user_id, message_id, bot, backend, state):
         rows.append([InlineKeyboardButton(text=tr(locale, 'quick_start.done'), callback_data='quick_start_done', style='primary')])
     else:
         rows.append([InlineKeyboardButton(text=tr(locale, 'quick_start.dismiss'), callback_data='quick_start_dismiss')])
-    rows.append([member_button(user_id, tr(locale, 'back'), 'home')])
+    if step is not None:
+        rows.append([member_button(user_id, tr(locale, 'back'), 'home')])
     await render(bot, chat_id, Screen(tr(locale, 'quick_start.title'),
         (tr(locale, 'quick_start.note.' + (step or 'done')),), sections=(
             Section(tr(locale, 'quick_start.progress'), lines=lines),), embedded_buttons=True, navigation=True, breadcrumbs=(

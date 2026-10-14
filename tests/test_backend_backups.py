@@ -172,16 +172,17 @@ class BackendBackupsTests(unittest.TestCase):
         self.assertEqual(overview['size_bytes'], total)
         self.assertEqual(self.service.catalog(self.actor, limit=1)['total_size_bytes'], total)
 
-    def test_private_snapshot_deduplicates_and_excludes_credentials(self):
+    def test_manual_snapshots_are_distinct_and_scheduled_snapshots_deduplicate(self):
         backup_id, _ = self.snapshot()
         path = self.service._path(backup_id)
         self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
         self.assertNotIn(self.token, path.read_text())
         self.assertNotIn("backend_credentials", json.loads(path.read_text())["tables"])
-        self.assertEqual(
-            self.service.create_snapshot(),
-            {"status": "duplicate", "backup_id": backup_id},
-        )
+        manual = self.service.create_snapshot()
+        self.assertEqual(manual['status'], 'success')
+        self.assertNotEqual(manual['backup_id'], backup_id)
+        automatic = self.service.create_snapshot('scheduled')
+        self.assertEqual(self.service.create_snapshot('scheduled'), {'status':'duplicate','backup_id':automatic['backup_id']})
 
     def device_profile(self):
         profile_id = ProfileRepository(self.db).create_profile(runtime_name='existing_awg', display_name='Alice')
@@ -191,6 +192,33 @@ class BackendBackupsTests(unittest.TestCase):
             profile = conn.execute('SELECT * FROM backend_profiles WHERE id=?', (profile_id,)).fetchone()
             DeviceRepository.ensure_default(conn, profile)
         return profile_id
+
+    def test_retention_only_prunes_automatic_backups_and_manual_names_survive_export(self):
+        self.service.preferences(self.actor, {'keep_count': 5})
+        manual = [self.service.create_snapshot(name='Manual '+str(index))['backup_id'] for index in range(3)]
+        for index in range(8):
+            with self.db.transaction() as conn:
+                conn.execute("INSERT INTO backend_system_settings(key,value) VALUES ('test_change',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(index),))
+            self.service.create_snapshot('scheduled')
+        catalog = self.service.catalog(self.actor, limit=100)['items']
+        self.assertEqual(len([item for item in catalog if item['kind']=='automatic']), 5)
+        self.assertEqual({item['id'] for item in catalog if item['kind']=='manual'}, set(manual))
+        self.assertEqual(self.service.detail(self.actor, manual[0])['name'], 'Manual 0')
+        payload = self.service.decode_snapshot(self.service.export_snapshot(self.actor,manual[0]))
+        self.assertEqual(payload['name'], 'Manual 0')
+        self.service.delete(self.actor,manual[0],payload['checksum'])
+        self.assertFalse(self.service._path(manual[0]).exists())
+
+    def test_named_backup_command_is_idempotent_and_worker_keeps_label(self):
+        key=str(uuid4())
+        job=self.service.queue(self.actor,key,'create',name='Before changes')
+        self.assertEqual(self.service.queue(self.actor,key,'create',name='Before changes')['id'],job['id'])
+        with self.assertRaises(AccessDenied) as failure:
+            self.service.queue(self.actor,key,'create',name='Other name')
+        self.assertEqual(failure.exception.code,'idempotency_conflict')
+        self.service.run_one()
+        result=self.service.get(self.actor,job['id'])['result']
+        self.assertEqual(self.service.detail(self.actor,result['backup_id'])['name'],'Before changes')
 
     def test_device_snapshot_preserves_identity_name_and_tombstone(self):
         profile_id = self.device_profile()

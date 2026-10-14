@@ -151,11 +151,27 @@ pub(in crate::tui) fn draw_access_buttons(
             && !app.access.creating_profile
             && app.access.decision.is_none()
     });
-    let remaining: Vec<_> = buttons
+    let mut remaining: Vec<_> = buttons
         .iter()
         .copied()
         .filter(|(_, control)| back.is_none_or(|(_, back_control)| control != back_control))
         .collect();
+    let profile_card = app.access.tab == crate::access::Tab::Profiles
+        && app.access.card.is_some()
+        && app.access.editor.is_none()
+        && app.access.result.is_none()
+        && app.access.provision.is_none()
+        && app.access.account_action.is_none()
+        && app.access.profile_action.is_none()
+        && app.access.devices.is_none();
+    if profile_card
+        && let Some(index) = remaining
+            .iter()
+            .position(|(_, control)| *control == Control::AccessRefresh)
+    {
+        let refresh = remaining.remove(index);
+        remaining.push(refresh);
+    }
     let buttons = remaining.as_slice();
     let pages: Vec<_> = buttons
         .iter()
@@ -163,7 +179,20 @@ pub(in crate::tui) fn draw_access_buttons(
         .filter(|(_, (_, control))| is_page_control(*control))
         .map(|(index, _)| index)
         .collect();
-    let cells = if pages.len() == 2 && buttons.len() > 2 && area.height >= 6 {
+    let cells = if profile_card {
+        let mut cells = Vec::new();
+        for (row, group) in buttons.chunks(2).enumerate() {
+            let rect = Rect::new(area.x, area.y + row as u16 * 3, area.width, 3);
+            cells.extend(
+                Layout::horizontal(vec![Constraint::Fill(1); group.len()])
+                    .spacing(1)
+                    .split(rect)
+                    .iter()
+                    .copied(),
+            );
+        }
+        cells
+    } else if pages.len() == 2 && buttons.len() > 2 && area.height >= 6 {
         let page_cells = button_areas(Rect::new(area.x, area.y, area.width, 3), 2, 1);
         let mut others = button_areas(
             Rect::new(area.x, area.y + 3, area.width, area.height - 3),
@@ -480,6 +509,117 @@ pub(in crate::tui) fn draw_access_devices(
 pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
     use crate::access::{Tab, label, text};
     let right = draw_navigation(frame, app, area, hits);
+    if app.access.result.is_some() || app.access.provision.is_some() {
+        let popup = centered(right, 78, 14);
+        frame.render_widget(Clear, popup);
+        let block = section_block(if app.access.result.is_some() {
+            " Result "
+        } else {
+            " New profile "
+        });
+        let inner = block.inner(popup);
+        frame.render_widget(block, popup);
+        let rows = Layout::vertical([Constraint::Min(0), Constraint::Length(3)]).split(inner);
+        if let Some(result) = &app.access.result {
+            frame.render_widget(
+                Paragraph::new(result.as_str()).wrap(Wrap { trim: false }),
+                rows[0],
+            );
+            draw_access_buttons(
+                frame,
+                app,
+                rows[1],
+                &[(
+                    if result.starts_with("Account and VPN profile") {
+                        "Open profile"
+                    } else {
+                        "Close"
+                    },
+                    Control::AccessResultClose,
+                )],
+                hits,
+            );
+        } else if let Some(draft) = &app.access.provision {
+            if draft.confirm {
+                frame.render_widget(Paragraph::new(format!("Create an approved account and VPN profile for {}?\nAn existing account will keep its profile and access.",draft.identity)).wrap(Wrap { trim:false }),rows[0]);
+                draw_access_buttons(
+                    frame,
+                    app,
+                    rows[1],
+                    &[
+                        ("Back", Control::AccessProvisionCancel),
+                        ("Create", Control::AccessProvisionSubmit),
+                    ],
+                    hits,
+                );
+            } else {
+                let content = Layout::vertical([
+                    Constraint::Length(2),
+                    Constraint::Length(3),
+                    Constraint::Min(0),
+                ])
+                .split(rows[0]);
+                frame.render_widget(
+                    Paragraph::new("Enter a Telegram ID or a known @username."),
+                    content[0],
+                );
+                draw_field(
+                    frame,
+                    content[1],
+                    "Telegram ID / @username",
+                    &draft.identity,
+                    app.access.selected == 0,
+                );
+                hits.push(Hit {
+                    area: content[1],
+                    control: Control::AccessIdentity,
+                });
+                if !app.error.is_empty() {
+                    frame.render_widget(
+                        Paragraph::new(app.error.as_str()).wrap(Wrap { trim: false }),
+                        content[2],
+                    );
+                }
+                draw_access_buttons(
+                    frame,
+                    app,
+                    rows[1],
+                    &[
+                        ("Cancel", Control::AccessProvisionCancel),
+                        ("Continue", Control::AccessProvisionNext),
+                    ],
+                    hits,
+                );
+            }
+        }
+        return;
+    }
+    if app
+        .access
+        .editor
+        .as_ref()
+        .is_some_and(|editor| editor.grants_view && editor.permanent_access)
+    {
+        let popup = centered(right, 78, 12);
+        frame.render_widget(Clear, popup);
+        let block = section_block(" Access ");
+        let inner = block.inner(popup);
+        frame.render_widget(block, popup);
+        let rows = Layout::vertical([Constraint::Min(0), Constraint::Length(3)]).split(inner);
+        frame.render_widget(
+            Paragraph::new("Administrators have permanent access to all servers.")
+                .wrap(Wrap { trim: false }),
+            rows[0],
+        );
+        draw_access_buttons(
+            frame,
+            app,
+            rows[1],
+            &[("Close", Control::AccessGrantBack)],
+            hits,
+        );
+        return;
+    }
     let confirmation = app.access.decision.is_some()
         || app.access.account_action.is_some()
         || app.access.profile_action.is_some()
@@ -532,7 +672,7 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
         } else if let Some(delete) = app.access.profile_action {
             (
                 if delete {
-                    "Delete this profile and revoke its access?"
+                    "Delete this account, its VPN profile and all devices?"
                 } else if app
                     .access
                     .card
@@ -736,7 +876,7 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
                     app.access_controls().get(app.access.selected)
                         == Some(&Control::AccessField(index)),
                 );
-                if index == 0 {
+                if index == 0 && editor.name_editable {
                     hits.push(Hit {
                         area: rect,
                         control: Control::AccessField(index),
@@ -836,7 +976,7 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
                     .unwrap_or("awaiting_executor");
                 lines.push(Line::from(
                     if matches!(status, "succeeded" | "no_targets") {
-                        "Profile deleted.".into()
+                        "Account and VPN profile deleted.".into()
                     } else {
                         format!("Removal: {status}")
                     },
@@ -879,7 +1019,7 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
             ];
         } else if let Some(delete) = app.access.profile_action {
             lines.push(Line::from(if delete {
-                "Delete this profile and revoke its access?"
+                "Delete this account, its VPN profile and all devices?"
             } else if card["frozen"] == true {
                 "Unfreeze this profile?"
             } else {

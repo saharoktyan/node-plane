@@ -75,10 +75,11 @@ class BackendOnboardingTests(unittest.TestCase):
                 headers={**headers, 'Idempotency-Key': str(uuid4())},
                 json={'node_key':'n1', 'protocol': protocol, 'transport': transport})
             self.assertEqual(response.json()['status'], 'succeeded', response.text)
-            # Completion is remembered without a Done callback, including
-            # when setup later becomes incomplete after removal or revision changes.
+            # Issuance completes the steps, but Telegram keeps the guide until acknowledged.
             observed = client.get('/api/v1/system/onboarding', headers=headers).json()
-            self.assertTrue(observed['completed'])
+            self.assertFalse(observed['completed'])
+            self.assertIsNone(observed['next_step'])
+            self.assertFalse(client.get('/api/v1/me', headers=headers).json()['onboarding_completed'])
             self.assertTrue(observed['workstation_completed'])
             done = client.post('/api/v1/system/onboarding/complete/telegram', headers=headers)
             self.assertEqual(done.status_code, 200, done.text)

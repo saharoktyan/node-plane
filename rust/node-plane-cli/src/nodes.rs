@@ -1163,6 +1163,13 @@ async fn execute_inner(
                             context["policy"] = backend::request(session, &credential, Method::GET,
                                 &format!("/api/v1/profiles/{id}/access-policy"), None, None).await?;
                             ensure!(context["profile"]["desired_revision"] == context["policy"]["revision"], "Profile changed; reopen the editor");
+                            if let Some(owner)=context["profile"]["owner_account_id"].as_str() {
+                                let account=backend::request(session,&credential,Method::GET,&format!("/api/v1/accounts/{owner}"),None,None).await?;
+                                let me=backend::request(session,&credential,Method::GET,"/api/v1/me",None,None).await?;
+                                context["name_editable"]=json!(account["role"]!="admin" || account["id"]==me["id"]);
+                                context["owner_account"]=account;
+                            }
+
                         }
                         let _ = tx.send(Event::Nodes(Update::Access(command, context)));
                         return Ok("Access options loaded".into());

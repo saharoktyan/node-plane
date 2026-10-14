@@ -55,8 +55,7 @@ class ProfileRepository:
         fallback = f"{'Admin' if account['role'] == 'admin' else 'User'} {account['subject'] or account_id}"
         name = account['username'] or fallback
         existing = conn.execute('''SELECT p.id, p.display_name FROM backend_profiles p
-            WHERE p.owner_account_id = ? AND NOT EXISTS
-                (SELECT 1 FROM backend_profile_deletions d WHERE d.profile_id = p.id)
+            WHERE p.owner_account_id = ?
             ORDER BY p.id LIMIT 1''',
                                 (account_id,)).fetchone()
         if existing:
@@ -130,6 +129,8 @@ class ProfileRepository:
             DeviceRepository.create_schema(conn)
             from .grant_policies import create_schema
             create_schema(conn)
+            from db.migration_revisions.r0011_account_deletions import create_schema
+            create_schema(conn)
             # Repair accounts left approved by older profile-deletion commands.
             self.revoke_orphaned_members(conn)
         from .node_lifecycle import NodeLifecycle
@@ -157,6 +158,9 @@ class ProfileRepository:
             admit(conn)
             if owner_account_id is not None and conn.execute('SELECT id FROM backend_accounts WHERE id = ?', (owner_account_id,)).fetchone() is None:
                 raise ValueError('owner account does not exist')
+            if owner_account_id is None:
+                owner_account_id = str(uuid4())
+                conn.execute("INSERT INTO backend_accounts(id,status) VALUES (?,'approved')", (owner_account_id,))
             conn.execute('''INSERT INTO backend_profiles
                 (id, runtime_name, display_name, owner_account_id, created_at)
                 VALUES (?, ?, ?, ?, ?)''',

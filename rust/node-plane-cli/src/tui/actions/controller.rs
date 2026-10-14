@@ -3,6 +3,14 @@ use super::super::*;
 impl App {
     pub(in crate::tui) fn activate_controller(&mut self, control: Control) -> Option<KeyEvent> {
         match control {
+            Control::ControllerAuditFilter(errors) => {
+                self.controller_command(if errors {
+                    crate::controller::Command::WorkstationAuditErrors(0)
+                } else {
+                    crate::controller::Command::WorkstationAudit(0)
+                });
+                None
+            }
             Control::ControllerAudit => {
                 self.controller_command(crate::controller::Command::WorkstationAudit(0));
                 None
@@ -125,7 +133,16 @@ impl App {
                     });
                 if let Some((offset, audit)) = page_request {
                     self.controller_command(if audit {
-                        crate::controller::Command::WorkstationAudit(offset)
+                        if self
+                            .controller
+                            .workstation_audit
+                            .as_ref()
+                            .is_some_and(|page| page["errors_only"] == true)
+                        {
+                            crate::controller::Command::WorkstationAuditErrors(offset)
+                        } else {
+                            crate::controller::Command::WorkstationAudit(offset)
+                        }
                     } else {
                         crate::controller::Command::RecoveryHistory(offset)
                     });
@@ -299,6 +316,13 @@ impl App {
                 }
                 None
             }
+            Control::ControllerBackupCreate => {
+                self.controller.defaults_input = Some(("backup_name", String::new()));
+                self.controller.backup_create_key = Some(uuid::Uuid::new_v4());
+                self.controller.selected = 0;
+                self.error.clear();
+                None
+            }
             Control::ControllerDefaultsInput => {
                 self.controller.selected = 0;
                 None
@@ -326,6 +350,21 @@ impl App {
                     return None;
                 }
                 if let Some((key, input)) = self.controller.defaults_input.clone() {
+                    if key == "backup_name" {
+                        if input.chars().count() > 128 {
+                            self.error = "Use a backup name up to 128 characters.".into();
+                            return None;
+                        }
+                        let command_key = *self
+                            .controller
+                            .backup_create_key
+                            .get_or_insert_with(uuid::Uuid::new_v4);
+                        self.controller_command(crate::controller::Command::BackupQueue(
+                            serde_json::json!({"action":"create","name":input.trim()}),
+                            command_key,
+                        ));
+                        return None;
+                    }
                     if key == "telegram_token" {
                         if let Some((_, value)) = &mut self.controller.defaults_input {
                             zeroize::Zeroize::zeroize(value);
@@ -511,7 +550,6 @@ impl App {
                 None
             }
             Control::ControllerBackups
-            | Control::ControllerBackupCreate
             | Control::ControllerBackupAuto
             | Control::ControllerBackupInterval(_)
             | Control::ControllerBackupKeep(_)
@@ -886,6 +924,11 @@ impl App {
                 }
                 None
             }
+            Control::ControllerBack if self.controller.telegram_result.is_some() => {
+                self.controller.telegram_result = None;
+                self.controller.selected = 0;
+                None
+            }
             Control::ControllerBack => {
                 if self.controller_return_form
                     && !self.controller_ready()
@@ -1006,6 +1049,10 @@ impl App {
         {
             return;
         }
+        if let crate::controller::Command::TelegramAdmin(add, _, _) = &command {
+            self.controller.telegram_role_pending = Some(*add);
+            self.controller.defaults_input = None;
+        }
         self.nodes_requested = Some(crate::nodes::Command::Controller(
             self.form.saved.as_ref().map(|p| p.id),
             command,
@@ -1110,6 +1157,9 @@ impl App {
     }
     pub(in crate::tui) fn controller_controls(&self) -> Vec<Control> {
         let state = &self.controller;
+        if state.telegram_result.is_some() {
+            return vec![Control::ControllerBack];
+        }
         if state.removed {
             return vec![
                 Control::ControllerNew,
@@ -1138,7 +1188,12 @@ impl App {
             return vec![Control::ControllerBack];
         }
         if let Some(audit) = &state.workstation_audit {
-            return history_controls(audit);
+            let mut controls = vec![
+                Control::ControllerAuditFilter(false),
+                Control::ControllerAuditFilter(true),
+            ];
+            controls.extend(history_controls(audit));
+            return controls;
         }
         if let Some(history) = &state.recovery_history {
             return history_controls(history);

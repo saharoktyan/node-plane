@@ -97,12 +97,11 @@ class BackendAccountTests(unittest.TestCase):
         member = self.register(102).json()
         account = self.client.get(f"/api/v1/accounts/{member['id']}", headers=self.headers_for(101)).json()
         approved = self.patch_account(member['id'], account['revision'], {'status': 'approved'}).json()
-        created = self.client.post('/api/v1/profiles', headers={**self.headers_for(101), 'Idempotency-Key': str(uuid4())},
-            json={'display_name': 'Member', 'owner_account_id': member['id'], 'expires_at': '2099-01-01T00:00:00Z'})
-        self.assertEqual(created.status_code, 201, created.text)
-        profile = created.json()['profile']['id']
+        profile = self.db.connection.execute('SELECT id FROM backend_profiles WHERE owner_account_id=?',(member['id'],)).fetchone()[0]
+        changed = self.client.patch(f'/api/v1/profiles/{profile}', headers={**self.headers_for(101), 'If-Match':'"1"', 'Idempotency-Key':str(uuid4())},json={'expires_at':'2099-01-01T00:00:00Z'})
+        self.assertEqual(changed.status_code,200,changed.text)
         promoted = self.patch_account(member['id'], approved['revision'], {'role': 'admin'})
         self.assertEqual(promoted.status_code, 200, promoted.text)
         row = self.db.connection.execute('SELECT expires_at, desired_revision FROM backend_profiles WHERE id = ?', (profile,)).fetchone()
         self.assertIsNone(row['expires_at'])
-        self.assertEqual(row['desired_revision'], 2)
+        self.assertEqual(row['desired_revision'], 3)

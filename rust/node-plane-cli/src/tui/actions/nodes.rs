@@ -12,6 +12,15 @@ impl App {
             }
             Control::NodesEditTab(tab) => {
                 if let Some(editor) = &mut self.nodes.editor {
+                    if tab == crate::node_editor::Tab::AwgParameters {
+                        self.manual_awg_original = editor
+                            .fields
+                            .iter()
+                            .find(|field| field.key == "awg_parameters")
+                            .map(|field| field.value.clone());
+                    } else {
+                        self.manual_awg_original = None;
+                    }
                     editor.tab = tab;
                 }
                 self.nodes_selected = 0;
@@ -92,6 +101,20 @@ impl App {
                     editor.reset();
                 }
                 self.error.clear();
+                None
+            }
+            Control::NodesEditBack if self.manual_awg_original.is_some() => {
+                if let Some(editor) = &mut self.nodes.editor {
+                    if let Some(field) = editor
+                        .fields
+                        .iter_mut()
+                        .find(|field| field.key == "awg_parameters")
+                    {
+                        field.value = self.manual_awg_original.take().unwrap();
+                    }
+                    editor.tab = crate::node_editor::Tab::Advanced;
+                }
+                self.nodes_selected = 0;
                 None
             }
             Control::NodesEditBack => {

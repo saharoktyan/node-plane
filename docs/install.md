@@ -68,7 +68,7 @@ Open the bot from an administrator account and send `/start`. Create a [node](no
 
 Administrators can open **Quick Start** from the bot's main menu. NPW shows progress to the right of the sidebar when no section is selected; press **F1** to open the guide from another section. NPW refreshes progress every second while the guide is visible and stops polling when you leave it.
 
-The NPW guide checks server defaults, the first node, applied protocols and profile access. **Confirm installation defaults for servers** accepts values from **Install Node Plane → Basic → Installation defaults**. **Continue** opens the next step and reuses the selected profile before installation. Create user devices and obtain ordinary configurations in the Telegram bot, whose guide also checks issuance. Import the configuration into a VPN client and verify connectivity yourself.
+The NPW guide checks server defaults, the first node and applied protocols. **Confirm installation defaults for servers** accepts values from **Node Plane Settings → Basic → Installation defaults**. **Continue** opens the next step and reuses the selected profile before installation. Create user devices and obtain ordinary configurations in the Telegram bot, whose guide also checks issuance. Import the configuration into a VPN client and verify connectivity yourself.
 
 After **Done**, this guide stays hidden for the administrator in that installation. NPW completion disables F1 and is separate from Telegram completion; the bot requires successful AWG or VLESS configuration issuance.
 

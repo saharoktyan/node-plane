@@ -4,6 +4,8 @@ use super::*;
 impl App {
     pub(super) fn new(r: &Request) -> Self {
         Self {
+            manual_awg_original: None,
+            text_input: std::cell::RefCell::new(Default::default()),
             focus_history: std::collections::HashMap::new(),
             navigation_context: None,
             return_focus: None,

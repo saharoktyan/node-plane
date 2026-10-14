@@ -6,7 +6,7 @@ Controller settings are shared by Telegram and Workstation. Workstation's own ap
 
 ## Installation defaults
 
-Open **Node Plane Settings → Installation → Installation defaults** in Workstation or installation defaults in the bot's administrator settings.
+Open **Node Plane Settings → Basic → Installation defaults** in Workstation or installation defaults in the bot's administrator settings.
 
 Choose protocols, Xray transports and port modes. Expand **Advanced options** for SNI, fingerprint, XHTTP path and AWG parameters. In Telegram, clickable parameter labels open their editors. Auto AWG mode displays the preset's port preference.
 

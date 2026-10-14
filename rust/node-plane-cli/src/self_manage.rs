@@ -198,10 +198,14 @@ fn uninstall_dist() -> Result<()> {
     }
     #[cfg(not(windows))]
     {
-        let launcher = format!("node-plane-{}", crate::config::workstation_channel());
+        let launcher = if crate::config::workstation_channel() == "dev" {
+            "node-plane-dev"
+        } else {
+            "node-plane"
+        };
         for alias in [
-            parent.join(&launcher),
-            home()?.join(".local/bin").join(&launcher),
+            parent.join(launcher),
+            home()?.join(".local/bin").join(launcher),
         ] {
             if fs::read_link(&alias).ok().as_deref() == Some(executable.as_path()) {
                 fs::remove_file(alias)?;
@@ -211,10 +215,11 @@ fn uninstall_dist() -> Result<()> {
     }
     #[cfg(windows)]
     {
-        let launcher = parent.join(format!(
-            "node-plane-{}.cmd",
-            crate::config::workstation_channel()
-        ));
+        let launcher = parent.join(if crate::config::workstation_channel() == "dev" {
+            "node-plane-dev.cmd"
+        } else {
+            "node-plane.cmd"
+        });
         if launcher.is_file() {
             fs::remove_file(launcher)?;
         }
@@ -253,16 +258,28 @@ fn uninstall_dist() -> Result<()> {
 fn remove_start_menu_shortcut(appdata: &Path, channel: Option<&str>) -> Result<()> {
     let name = channel.map_or_else(
         || "Node Plane Workstation.lnk".to_string(),
-        |channel| format!("Node Plane Workstation ({channel}).lnk"),
+        |channel| {
+            if channel == "dev" {
+                "Node Plane (Dev).lnk".into()
+            } else {
+                "Node Plane.lnk".into()
+            }
+        },
     );
-    let shortcut = appdata
-        .join("Microsoft/Windows/Start Menu/Programs")
-        .join(name);
-    match fs::remove_file(shortcut) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error).context("Could not remove the Workstation Start menu shortcut"),
+    let legacy = channel.map(|channel| format!("Node Plane Workstation ({channel}).lnk"));
+    for name in std::iter::once(name).chain(legacy) {
+        let shortcut = appdata
+            .join("Microsoft/Windows/Start Menu/Programs")
+            .join(name);
+        match fs::remove_file(shortcut) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(error).context("Could not remove the Workstation Start menu shortcut");
+            }
+        }
     }
+    Ok(())
 }
 
 fn home() -> Result<PathBuf> {

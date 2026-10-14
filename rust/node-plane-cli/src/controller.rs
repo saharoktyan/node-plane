@@ -17,6 +17,7 @@ pub enum Command {
     Policies,
     Alerts,
     WorkstationAudit(usize),
+    WorkstationAuditErrors(usize),
     RecoveryHistory(usize),
     AnnouncementOverview,
     AnnouncementPreview(String),
@@ -166,6 +167,12 @@ impl Command {
                 None,
             ),
             Self::SshKey => (Method::GET, "/api/v1/system/ssh-key".into(), None, None),
+            Self::WorkstationAuditErrors(offset) => (
+                Method::GET,
+                format!("/api/v1/system/workstation-audit?offset={offset}&errors_only=true"),
+                None,
+                None,
+            ),
             Self::WorkstationAudit(offset) => (
                 Method::GET,
                 format!("/api/v1/system/workstation-audit?offset={offset}"),
@@ -317,6 +324,8 @@ pub struct Browser {
     pub alerts_page: usize,
     pub alerts_unread: u64,
     pub bot_title: Option<Value>,
+    pub telegram_result: Option<String>,
+    pub telegram_role_pending: Option<bool>,
     pub telegram_settings: Option<Value>,
     pub ssh_key: Option<Value>,
     pub notice: String,
@@ -325,6 +334,7 @@ pub struct Browser {
     pub defaults_input: Option<(&'static str, String)>,
     pub defaults_baseline: Option<Value>,
     pub backups: Option<Value>,
+    pub backup_create_key: Option<Uuid>,
     pub backup_catalog: Option<Value>,
     pub backup_detail: Option<Value>,
     pub backup_job: Option<Value>,
@@ -378,7 +388,20 @@ impl Browser {
                 | Command::AnnouncementStatus(_)
         );
         match command {
-            Command::TelegramSettings | Command::TelegramToken(_) | Command::TelegramAdmin(..) => {
+            Command::TelegramAdmin(add, _, _) => {
+                self.telegram_settings = Some(value);
+                self.defaults_input = None;
+                self.telegram_role_pending = None;
+                self.telegram_result = Some(
+                    if add {
+                        "Administrator rights granted."
+                    } else {
+                        "Administrator rights revoked."
+                    }
+                    .into(),
+                );
+            }
+            Command::TelegramSettings | Command::TelegramToken(_) => {
                 self.telegram_settings = Some(value);
                 self.defaults_input = None;
             }
@@ -392,7 +415,7 @@ impl Browser {
                 self.notice.clear();
                 self.selected = 0;
             }
-            Command::WorkstationAudit(_) => {
+            Command::WorkstationAudit(_) | Command::WorkstationAuditErrors(_) => {
                 self.workstation_audit = Some(value);
                 self.recovery_history = None;
                 self.history_detail = None;
@@ -469,6 +492,8 @@ impl Browser {
                 self.selected = 0;
             }
             Command::BackupQueue(_, _) => {
+                self.defaults_input = None;
+                self.backup_create_key = None;
                 self.backup_job = Some(value);
                 self.backup_detail = None;
                 self.backup_catalog = None;

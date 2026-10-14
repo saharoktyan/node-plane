@@ -294,9 +294,9 @@ pub(in crate::tui) fn draw_profiles(frame: &mut Frame, app: &App, area: Rect, hi
             ("New", Control::NewInstallation),
             (
                 if crate::config::workstation_channel() == "dev" {
-                    "Copy to stable NPW"
+                    "Copy to Node Plane"
                 } else {
-                    "Copy to dev NPW"
+                    "Copy to Node Plane (Dev)"
                 },
                 Control::TransferInstallation,
             ),

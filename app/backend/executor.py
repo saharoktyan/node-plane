@@ -74,6 +74,8 @@ class IntentExecutor:
         conn.execute('UPDATE backend_operations SET status = ? WHERE id = ?', (status, operation_id))
         from .devices import DeviceRepository
         DeviceRepository.settle_deletions(conn)
+        from .account_deletions import settle
+        settle(conn)
 
     def resolve_blocked(self, actor, task_id):
         """Trusted admin repair after agent restart; serialized by worker flock.
@@ -118,6 +120,9 @@ class IntentExecutor:
                 raise AccessDenied('resource_not_found', 404)
             operation = OperationRepository.record(conn, actor, row['profile_id'],
                 OperationRepository.targets(conn, row['profile_id']))
+            conn.execute('UPDATE backend_profile_deletions SET operation_id=? WHERE profile_id=?', (operation['id'],row['profile_id']))
+            from .account_deletions import settle
+            settle(conn)
             conn.execute("""INSERT INTO backend_repairs(task_id, actor_id, operation_id, observation_json, created_at)
                 VALUES (?, ?, ?, ?, ?)""", (task_id, actor.account.id, operation['id'],
                 json.dumps(observation, sort_keys=True), datetime.now(timezone.utc).isoformat()))
@@ -292,6 +297,8 @@ class Worker:
         from .devices import DeviceRepository
         with self.executor.db.transaction() as conn:
             DeviceRepository.settle_deletions(conn)
+            from .account_deletions import settle
+            settle(conn)
         self.node_executor.reconcile_completed()
         self.executor.inspect_blocked()
         self.drain(stop)

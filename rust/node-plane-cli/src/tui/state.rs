@@ -101,6 +101,7 @@ pub(super) enum Control {
     ControllerPolicies,
     ControllerAlerts,
     ControllerAudit,
+    ControllerAuditFilter(bool),
     ControllerRecoveryHistory,
     ControllerAnnouncement,
     ControllerAnnouncementCompose,
@@ -208,6 +209,11 @@ pub(super) enum Control {
     AccessConfirm,
     AccessEdit,
     AccessNew,
+    AccessIdentity,
+    AccessProvisionNext,
+    AccessProvisionSubmit,
+    AccessProvisionCancel,
+    AccessResultClose,
     AccessWizardNext,
     AccessWizardBack,
     AccessField(usize),
@@ -521,6 +527,8 @@ impl Drop for Form {
 }
 
 pub(super) struct App {
+    pub(super) manual_awg_original: Option<String>,
+    pub(super) text_input: std::cell::RefCell<super::text_input::TextInput>,
     pub(super) focus_history: std::collections::HashMap<String, super::input::history::Bookmark>,
     pub(super) navigation_context: Option<String>,
     pub(super) return_focus: Option<Control>,

@@ -50,6 +50,12 @@ class SQLIdentityRepository:
                 PRIMARY KEY(principal_id, command_key)
             )""")
 
+        with self.db.transaction() as conn:
+            from db.migration_revisions.r0011_account_deletions import create_schema
+            create_schema(conn)
+            from db.migration_revisions.r0007_account_menu_refresh import upgrade
+            upgrade(conn)
+
         from .system_cleanup import SystemCleanupService
         SystemCleanupService(self.db).initialize_schema()
         from .backups import BackupService

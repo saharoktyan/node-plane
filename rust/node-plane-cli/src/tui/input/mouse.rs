@@ -2,6 +2,9 @@ use super::super::*;
 
 impl App {
     pub(in crate::tui) fn mouse(&mut self, event: MouseEvent) -> Option<KeyEvent> {
+        if self.text_input.borrow_mut().mouse(event) {
+            return None;
+        }
         // Releasing a mouse button must not restore an unrelated keyboard focus.
         self.pointer_active = true;
         self.pointer_position = Some((event.column, event.row).into());

@@ -225,6 +225,8 @@ async def _clear_flow(state: FSMContext) -> None:
 
 
 def _profile_error(locale: str, error: BackendError) -> str:
+    if error.code == 'admin_name_owner_only':
+        return tr(locale, 'profile.error.admin_name_owner_only')
     if error.status == 412:
         return tr(locale, 'profile.admin.error_changed')
     if error.status == 503:
@@ -278,19 +280,18 @@ async def add_profile_user_text(message: Message, bot: Bot, backend: BackendClie
         return
     from aiogram.exceptions import TelegramAPIError
     try:
-        person = await bot.get_chat(int(value))
-        account = await backend.resolve(int(value), username=person.username,
-            first_name=person.first_name, last_name=person.last_name)
-        if account['status'] != 'approved':
-            current = await backend.request('GET', f'/api/v1/accounts/{account["id"]}',
-                                            telegram_user_id=message.from_user.id)
-            await backend.request('PATCH', f'/api/v1/accounts/{account["id"]}',
-                telegram_user_id=message.from_user.id, command=True,
-                revision=current['revision'], body={'status': 'approved'})
-        profiles = await backend.profiles(int(value))
+        try:
+            person = await bot.get_chat(int(value))
+        except TelegramAPIError:
+            person = None
+        if person is not None:
+            await backend.resolve(int(value), username=person.username,
+                first_name=person.first_name, last_name=person.last_name)
+        result = await backend.request('POST', '/api/v1/accounts',
+            telegram_user_id=message.from_user.id, command=True, body={'identity':value})
         await _clear_flow(state)
         await start_profile_setup(message.chat.id, message.from_user.id, data.get('control_message_id'),
-            profiles['items'][0]['id'], bot, backend, state)
+            result['profile']['id'], bot, backend, state)
     except (BackendError, TelegramAPIError):
         await render(bot, message.chat.id, Screen(tr(locale, 'profile.create.title'),
             (tr(locale, 'profile.create.telegram_failed'),), embedded_buttons=True, navigation=True),
@@ -324,7 +325,7 @@ async def account_cb(query: CallbackQuery, callback_data: AccountCallback,
     account = await backend.request('GET', f'/api/v1/accounts/{callback_data.account_id}',
                                     telegram_user_id=query.from_user.id)
     locale = await _locale(state)
-    rows = [[InlineKeyboardButton(text=tr(locale, 'accounts.new_profile'),
+    rows = [[InlineKeyboardButton(text=tr(locale, 'accounts.open_profile'),
         callback_data=NewProfileCallback(account_id=account['id']).pack(), style='primary')],
         [InlineKeyboardButton(text=tr(locale, 'back'), callback_data=AccountsCallback().pack())]]
     await render(bot, query.message.chat.id,
@@ -336,18 +337,14 @@ async def account_cb(query: CallbackQuery, callback_data: AccountCallback,
 
 @router.callback_query(NewProfileCallback.filter())
 async def new_profile_cb(query: CallbackQuery, callback_data: NewProfileCallback,
-                         bot: Bot, state: FSMContext) -> None:
+                         bot: Bot, backend: BackendClient, state: FSMContext) -> None:
+    """Old account-card callbacks open the account's existing profile."""
     await query.answer()
     await _clear_flow(state)
-    await state.set_state(ProfileDraftState.waiting_for_name)
-    await state.update_data(profile_account_id=callback_data.account_id,
-                            profile_command_key=str(uuid4()))
-    locale = await _locale(state)
-    await render(bot, query.message.chat.id,
-        Screen(tr(locale, 'profile.create.title'), (tr(locale, 'profile.create.name_prompt'),), embedded_buttons=True, navigation=True),
-        [[InlineKeyboardButton(text=tr(locale, 'back'),
-            callback_data=AccountCallback(account_id=callback_data.account_id).pack())]],
-        state, query.message.message_id)
+    account = await backend.request('GET', f'/api/v1/accounts/{callback_data.account_id}',
+                                    telegram_user_id=query.from_user.id)
+    await show_admin_profile(query.message.chat.id, query.from_user.id,
+        query.message.message_id, account['profile_id'], bot, backend, state)
 
 
 @router.message(ProfileDraftState.waiting_for_name, F.text)
@@ -884,7 +881,7 @@ async def show_profile_management(chat_id, user_id, message_id, profile_id, bot,
     rows.append([InlineKeyboardButton(text=tr(locale, 'back'),
         callback_data=AdminProfileCallback(profile_id=profile_id).pack())])
     await render(bot, chat_id, Screen(tr(locale, 'profile.layout.management'),
-        (profile['display_name'],), embedded_buttons=True, navigation=True), rows, state, message_id)
+        embedded_buttons=True, navigation=True), rows, state, message_id)
 
 
 @router.callback_query(F.data.startswith('prof_tech:'))
@@ -896,7 +893,7 @@ async def profile_technical_cb(query: CallbackQuery, bot: Bot, backend: BackendC
         backend.request('GET', f'/api/v1/profiles/{profile_id}', telegram_user_id=query.from_user.id),
         backend.profile_operation(query.from_user.id, profile_id))
     locale = await _locale(state)
-    lines = (profile['display_name'], tr(locale, 'profile.admin.id', id=profile['id']),
+    lines = (tr(locale, 'profile.admin.id', id=profile['id']),
         tr(locale, 'profile.rich.owner', value=profile.get('owner_account_id') or '—'),
         tr(locale, 'profile.rich.revision', value=profile['desired_revision']))
     rows = []
@@ -1089,16 +1086,18 @@ async def show_profile_edit_menu(chat_id: int, user_id: int, message_id: int,
     await state.update_data(admin_promotion=None, profile_expiry=None, delete_profile_id=None,
         edit_profile_id=None, draft_grants=None, original_grants=None, edit_profile_revision=None)
     owner_admin = await _owner_is_admin(backend, user_id, profile)
+    me = await backend.me(user_id) if owner_admin else {}
+    can_rename = not owner_admin or profile.get('owner_account_id') == me.get('id')
     sections = (Section(tr(locale, 'profile.rich.identity'), (profile['display_name'],),
-        ((InlineKeyboardButton(text=tr(locale, 'profile.admin.rename'),
+        () if not can_rename else ((InlineKeyboardButton(text=tr(locale, 'profile.admin.rename'),
             callback_data=f'admin_profile_rename:{profile_id}'),),)),
         Section(tr(locale, 'profile.layout.expiry'),
             (tr(locale, 'setup.admin_permanent') if owner_admin else _expiry_label(profile.get('expires_at')) if profile.get('expires_at') else
                 tr(locale, 'profile.layout.unlimited'),),
             () if owner_admin else ((InlineKeyboardButton(text=tr(locale, 'profile.layout.change_expiry'),
                 callback_data=f'prof_expiry:{profile_id}'),),)),
-        Section(tr(locale, 'profile.admin.status_title'),
-            rows=() if owner_admin else (_status_buttons(profile, locale),)))
+        *((Section(tr(locale, 'profile.admin.status_title'),
+            rows=(_status_buttons(profile, locale),)),) if not owner_admin else ()))
     await render(bot, chat_id, Screen(tr(locale, 'profile.layout.edit'), sections=sections,
         embedded_buttons=True, navigation=True),
         [[InlineKeyboardButton(text=tr(locale, 'back'),
@@ -1127,8 +1126,7 @@ async def delete_profile_confirm_cb(query: CallbackQuery, bot: Bot,
         callback_data=f'prof_manage:{profile_id}')]]
     await render(bot, query.message.chat.id,
         Screen(tr(locale, 'profile.admin.delete_title'),
-            (tr(locale, 'profile.admin.name', name=profile['display_name']),
-             tr(locale, 'profile.admin.delete_warning')), embedded_buttons=True, navigation=True),
+            (tr(locale, 'profile.admin.delete_warning'),), embedded_buttons=True, navigation=True),
         rows, state, query.message.message_id)
 
 

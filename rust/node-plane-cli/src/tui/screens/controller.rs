@@ -26,7 +26,7 @@ pub(in crate::tui) fn compact_history_item(
             .filter(|v| !v.is_empty())
             .or_else(|| item["account_id"].as_str())
             .unwrap_or("Administrator");
-        let action = item["action"].as_str().unwrap_or("Action");
+        let action = item["title"].as_str().unwrap_or("Action");
         let phase = item["phase"]
             .as_str()
             .filter(|v| !v.is_empty())
@@ -39,7 +39,7 @@ pub(in crate::tui) fn compact_history_item(
         let node = item["node_title"]
             .as_str()
             .or_else(|| item["node_key"].as_str());
-        let action = item["action"].as_str().filter(|v| !v.is_empty());
+        let action = item["title"].as_str().filter(|v| !v.is_empty());
         let head = match (node, action) {
             (Some(node), Some(action)) => format!("{kind} · {node} → {action} · {status}"),
             (Some(node), None) => format!("{kind} · {node} · {status}"),
@@ -235,6 +235,25 @@ pub(in crate::tui) fn draw_controller(
     hits: &mut Vec<Hit>,
 ) {
     let right = draw_navigation(frame, app, area, hits);
+    if let Some(result) = &app.controller.telegram_result {
+        let popup = centered(right, 78, 12);
+        frame.render_widget(Clear, popup);
+        let block = section_block(" Result ");
+        let inner = block.inner(popup);
+        frame.render_widget(block, popup);
+        let rows = Layout::vertical([Constraint::Min(0), Constraint::Length(3)]).split(inner);
+        frame.render_widget(
+            Paragraph::new(result.as_str()).wrap(Wrap { trim: false }),
+            rows[0],
+        );
+        draw_button(frame, rows[1], "Close", true);
+        hits.push(Hit {
+            area: rows[1],
+            control: Control::ControllerBack,
+        });
+        return;
+    }
+
     let right = if app.controller.defaults_input.is_some()
         || (app.controller.announcement_draft.is_some()
             && app.controller.announcement_preview.is_none()
@@ -367,8 +386,8 @@ pub(in crate::tui) fn draw_controller(
             };
             text = if audit {
                 format!(
-                    "{}\n{} · {}\nAccount: {} · {}\nSSH: {} · {}\nRequest: {}\nCommand: {}\nHTTP: {}\nTarget: {}\nKey: {}\nOutcome: {}",
-                    field("action"),
+                    "{}\n{} · {}\nAccount: {} · {}\nSSH: {} · {}\nRequest: {}\nCommand: {}\nHTTP: {}\nTarget: {}\nKey: {}\nOutcome: {}\nEndpoint: {}",
+                    field("title"),
                     field("phase"),
                     field("occurred_at"),
                     field("account_label"),
@@ -383,7 +402,8 @@ pub(in crate::tui) fn draw_controller(
                         .unwrap_or_else(|| "—".into()),
                     field("target"),
                     field("key_fingerprint"),
-                    field("outcome")
+                    field("outcome"),
+                    field("action")
                 )
             } else {
                 let subject = item["node_title"]
@@ -404,6 +424,10 @@ pub(in crate::tui) fn draw_controller(
             };
         }
     } else if let Some(page) = &state.workstation_audit {
+        controls.extend([
+            ("All".into(), Control::ControllerAuditFilter(false)),
+            ("Errors".into(), Control::ControllerAuditFilter(true)),
+        ]);
         text = format!(
             "Workstation audit · {} events · page {}",
             page["total"],
@@ -591,6 +615,7 @@ pub(in crate::tui) fn draw_controller(
             "bot_title" => "Bot name".into(),
             "telegram_token" => "New bot token from BotFather. The token is hidden; saving restarts the bot.".into(),
             "telegram_admin" => "Telegram user ID of the administrator to add".into(),
+            "backup_name" => "Optional name for this manual backup (up to 128 characters). Skip to create it without a name.".into(),
             "backup_import_path" => "Import backup · local JSON file path. Import adds it to the catalog; restore is a separate action.".into(),
             "backup_export_path" => "Download backup · local JSON file path. Existing files are not overwritten.".into(),
             _ => format!("Installation defaults · {key}"),
@@ -598,7 +623,13 @@ pub(in crate::tui) fn draw_controller(
         controls.push(("Value".into(), Control::ControllerDefaultsInput));
         if defaults_input_changed(state) {
             controls.push((
-                (if key.starts_with("backup_") {
+                (if *key == "backup_name" {
+                    if state.defaults_input.as_ref().unwrap().1.trim().is_empty() {
+                        "Skip"
+                    } else {
+                        "Create backup"
+                    }
+                } else if key.starts_with("backup_") {
                     "Transfer file"
                 } else {
                     "Continue"
@@ -772,6 +803,17 @@ pub(in crate::tui) fn draw_controller(
         }
         controls.push(("Download backup".into(), Control::ControllerBackupExport));
         controls.push(("Delete backup".into(), Control::ControllerBackupDelete));
+        text.push_str(&format!(
+            "\nType: {}",
+            if detail["kind"] == "manual" {
+                "Manual"
+            } else {
+                "Automatic"
+            }
+        ));
+        if let Some(name) = detail["name"].as_str().filter(|name| !name.is_empty()) {
+            text.push_str(&format!("\nName: {name}"));
+        }
     } else if let Some(catalog) = &state.backup_catalog {
         text = format!("Backups: {}", catalog["total"]);
         for control in backup_catalog_controls(catalog) {
@@ -779,9 +821,19 @@ pub(in crate::tui) fn draw_controller(
                 let item = &catalog["items"][index];
                 controls.push((
                     format!(
-                        "{} · {}",
+                        "{} · {} · {}{}",
+                        if item["kind"] == "manual" {
+                            "Manual"
+                        } else {
+                            "Automatic"
+                        },
                         item["created_at"].as_str().unwrap_or(""),
-                        item["app_version"].as_str().unwrap_or("")
+                        item["app_version"].as_str().unwrap_or(""),
+                        item["name"]
+                            .as_str()
+                            .filter(|s| !s.is_empty())
+                            .map(|s| format!(" · {s}"))
+                            .unwrap_or_default()
                     ),
                     control,
                 ));
@@ -1159,13 +1211,14 @@ pub(in crate::tui) fn draw_controller(
         .spacing(1)
         .split(parts[0]);
         frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: false }), rows[0]);
-        draw_field(
+        draw_multiline(
             frame,
             rows[1],
             "Message",
             draft,
             app.controller_controls().get(state.selected)
                 == Some(&Control::ControllerAnnouncementInput),
+            app,
         );
         hits.push(Hit {
             area: rows[1],
@@ -1309,6 +1362,13 @@ pub(in crate::tui) fn draw_controller(
         let mut index = 0;
         while index < controls.len() {
             let mut row = vec![index];
+            if matches!(controls[index].1, Control::ControllerAuditFilter(_))
+                && index + 1 < controls.len()
+                && matches!(controls[index + 1].1, Control::ControllerAuditFilter(_))
+            {
+                index += 1;
+                row.push(index);
+            }
             if is_page_control(controls[index].1)
                 && index + 1 < controls.len()
                 && is_page_control(controls[index + 1].1)
@@ -1407,7 +1467,8 @@ pub(in crate::tui) fn draw_controller(
             } else if choice_row_label(control).is_some()
                 || matches!(
                     control,
-                    Control::ControllerUpdateAuto
+                    Control::ControllerAuditFilter(_)
+                        | Control::ControllerUpdateAuto
                         | Control::ControllerBackupAuto
                         | Control::ControllerAlertToggle(_)
                         | Control::ControllerPolicyToggle(_)
@@ -1418,7 +1479,13 @@ pub(in crate::tui) fn draw_controller(
                     rect,
                     label,
                     index == state.selected && !app.controller_sidebar,
-                    choice_selected(state, control),
+                    match control {
+                        Control::ControllerAuditFilter(errors) => state
+                            .workstation_audit
+                            .as_ref()
+                            .is_some_and(|page| (page["errors_only"] == true) == errors),
+                        _ => choice_selected(state, control),
+                    },
                 );
             } else {
                 draw_button_color(
@@ -1521,6 +1588,13 @@ pub(in crate::tui) fn choice_selected(
     }
 }
 pub(in crate::tui) fn defaults_input_changed(state: &crate::controller::Browser) -> bool {
+    if state
+        .defaults_input
+        .as_ref()
+        .is_some_and(|(key, _)| *key == "backup_name")
+    {
+        return true;
+    }
     let Some((key, input)) = &state.defaults_input else {
         return false;
     };

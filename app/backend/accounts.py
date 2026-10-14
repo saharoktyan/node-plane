@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import re
+from contextlib import contextmanager
 from uuid import UUID
 
 from .authorization import AccessDenied, require_permission
@@ -40,17 +42,32 @@ class AccountService:
         for key in ('username', 'first_name', 'last_name', 'language_code', 'locale', 'locale_selected'):
             if key in row.keys():
                 result[key] = bool(row[key]) if key == 'locale_selected' else row[key]
+        if 'profile_id' in row.keys():
+            result['profile_id'] = row['profile_id']
+        result['deleted'] = bool(row['deleted']) if 'deleted' in row.keys() else False
         return result
 
     @staticmethod
     def _read(conn, account_id):
-        return conn.execute('''SELECT a.id, a.role, a.status, a.revision,
+        row = conn.execute('''SELECT a.id, a.role, a.status, a.revision,
             i.subject AS telegram_subject, d.username, d.first_name, d.last_name,
-            d.language_code, d.locale, d.locale_selected
+            d.language_code, d.locale, d.locale_selected,
+            (SELECT p.id FROM backend_profiles p WHERE p.owner_account_id=a.id ORDER BY p.id LIMIT 1) AS profile_id
             FROM backend_accounts a
             LEFT JOIN backend_external_identities i ON i.account_id = a.id AND i.provider = 'telegram'
             LEFT JOIN backend_telegram_identity_details d ON d.subject = i.subject
             WHERE a.id = ?''', (account_id,)).fetchone()
+        if row is None:
+            return None
+        result = dict(row)
+        deletion = conn.execute('SELECT telegram_json,completed_at FROM backend_account_deletions WHERE account_id=?', (account_id,)).fetchone()
+        if deletion:
+            saved = json.loads(deletion['telegram_json'])
+            result['telegram_subject'] = str(saved['telegram_user_id']) if saved.get('telegram_user_id') else None
+            for field in ('username','first_name','last_name','language_code','locale','locale_selected'):
+                result[field] = saved.get(field)
+            result['deleted'] = deletion['completed_at'] is not None
+        return result
 
     def get(self, actor, account_id):
         require_permission(actor, 'accounts.manage')
@@ -72,8 +89,68 @@ class AccountService:
                 FROM backend_accounts a
                 LEFT JOIN backend_external_identities i ON i.account_id = a.id AND i.provider = 'telegram'
                 LEFT JOIN backend_telegram_identity_details d ON d.subject = i.subject
-                WHERE a.id > ? ORDER BY a.id LIMIT ?''', (after, limit + 1)).fetchall()
+                WHERE a.id > ? AND NOT EXISTS (SELECT 1 FROM backend_account_deletions x WHERE x.account_id=a.id) ORDER BY a.id LIMIT ?''', (after, limit + 1)).fetchall()
         return _page([self.public(row) for row in rows], limit, 'accounts', 'id')
+
+    def provision_profile(self, actor, identity, command_key):
+        """Provision one account and its default VPN profile as one command."""
+        require_permission(actor, 'accounts.manage')
+        require_permission(actor, 'profiles.manage')
+        key = _key(command_key)
+        if not isinstance(identity, str):
+            raise AccessDenied('invalid_telegram_identity', 422)
+        identity = identity.strip()
+        if not re.fullmatch(r'[1-9][0-9]{0,15}|@[A-Za-z0-9_]{5,32}', identity):
+            raise AccessDenied('invalid_telegram_identity', 422)
+        input_json = json.dumps({'action': 'provision_profile', 'identity': identity.lower()}, sort_keys=True)
+        with self.db.transaction() as conn:
+            from .maintenance_gate import admit
+            admit(conn)
+            conn.execute('UPDATE backend_account_guard SET revision=revision+1 WHERE id=1')
+            current = conn.execute('SELECT role,status FROM backend_accounts WHERE id=?', (actor.account.id,)).fetchone()
+            if not current or (current['role'], current['status']) != ('admin', 'approved'):
+                raise AccessDenied('permission_denied')
+            previous = conn.execute('SELECT input_json,result_json FROM backend_account_commands WHERE actor_account_id=? AND command_key=?', (actor.account.id, key)).fetchone()
+            if previous:
+                if previous['input_json'] != input_json:
+                    raise AccessDenied('idempotency_conflict', 409)
+                return json.loads(previous['result_json'])
+            class BoundDatabase:
+                @contextmanager
+                def connect(self):
+                    yield conn
+                transaction = connect
+            local = BoundDatabase()
+            from .identity_repository import SQLIdentityRepository
+            identities = SQLIdentityRepository(local)
+            if identity.startswith('@'):
+                matches = conn.execute("""SELECT subject FROM backend_telegram_identity_details
+                    WHERE LOWER(username)=?""", (identity[1:].lower(),)).fetchall()
+                if len(matches) != 1:
+                    raise AccessDenied('telegram_id_required', 422)
+                user_id = int(matches[0]['subject'])
+            else:
+                user_id = int(identity)
+            from .authorization import validate_telegram_id
+            validate_telegram_id(user_id)
+            account = identities.find_telegram_account(user_id) or identities._resolve(conn, user_id)
+            if account.status == 'disabled':
+                raise AccessDenied('account_disabled', 409)
+            pending = conn.execute("SELECT id FROM backend_access_requests WHERE account_id=? AND status='pending'", (account.id,)).fetchone()
+            if pending:
+                from .access_requests import AccessRequestService
+                AccessRequestService(local).decide(actor, pending['id'], 'approve', key)
+            elif account.status != 'approved':
+                conn.execute("UPDATE backend_accounts SET status='approved',revision=revision+1 WHERE id=?", (account.id,))
+                revision = conn.execute('SELECT revision FROM backend_accounts WHERE id=?', (account.id,)).fetchone()['revision']
+                conn.execute("""INSERT INTO backend_account_menu_refresh(account_id,revision) VALUES (?,?)
+                    ON CONFLICT(account_id) DO UPDATE SET revision=excluded.revision""", (account.id, revision))
+            from .profiles import ProfileRepository
+            profile_id = ProfileRepository.ensure_account_profile_in_transaction(conn, account.id)
+            profile = conn.execute('SELECT * FROM backend_profiles WHERE id=?', (profile_id,)).fetchone()
+            result = {'account': self.public(self._read(conn, account.id)), 'profile': ProfileRepository.public(profile)}
+            conn.execute('INSERT INTO backend_account_commands VALUES (?,?,?,?,?)', (actor.account.id, key, account.id, input_json, json.dumps(result, sort_keys=True)))
+            return result
 
     def update(self, actor, account_id, *, role=None, status=None, revision, command_key):
         require_permission(actor, 'accounts.manage')
@@ -107,6 +184,8 @@ class AccountService:
             row = self._read(conn, account_id)
             if row is None:
                 raise AccessDenied('resource_not_found', 404)
+            if conn.execute('SELECT 1 FROM backend_account_deletions WHERE account_id=?', (account_id,)).fetchone():
+                raise AccessDenied('account_deleting', 409)
             if row['revision'] != revision:
                 raise AccessDenied('revision_conflict', 412)
             next_role = role if role is not None else row['role']
@@ -129,6 +208,8 @@ class AccountService:
                     WHERE id = ?''', (next_role, next_status, account_id))
                 conn.execute("""INSERT INTO backend_account_menu_refresh(account_id,revision) VALUES (?,?)
                     ON CONFLICT(account_id) DO UPDATE SET revision=excluded.revision""", (account_id, revision + 1))
+            from .profiles import ProfileRepository
+            ProfileRepository.ensure_account_profile_in_transaction(conn, account_id)
             if next_role == 'admin':
                 from .profile_commands import ProfileCommands
                 ProfileCommands.restore_admin_expiries(conn, actor, account_id)

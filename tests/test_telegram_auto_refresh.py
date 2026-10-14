@@ -45,7 +45,7 @@ class AutoRefreshTests(IsolatedAsyncioTestCase):
             backend.profile_operation.return_value={'status':'succeeded','tasks':[]}
             schedule.reset_mock()
             await admin_profiles.show_profile_deletion(1,1,7,'p1',SimpleNamespace(),backend,state)
-            self.assertIn('Profile deleted',draw.call_args.args[2].plain())
+            self.assertIn('Account and VPN profile deleted',draw.call_args.args[2].plain())
             schedule.assert_not_called()
 
     async def test_refresh_observes_once_and_navigation_cancels_inflight_read(self):

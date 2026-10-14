@@ -39,6 +39,7 @@ TABLES = (
     "backend_access_requests",
 )
 CLEAR = (
+    "backend_account_deletions",
     "backend_account_menu_refresh",
     "backend_node_bootstraps",
     "backend_temporary_configs",
@@ -112,6 +113,10 @@ class BackupService:
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS backend_backup_revocations (job_id TEXT NOT NULL, operation_id TEXT NOT NULL, PRIMARY KEY(job_id,operation_id))"
             )
+
+            conn.execute('''CREATE TABLE IF NOT EXISTS backend_backup_labels (
+                job_id TEXT PRIMARY KEY REFERENCES backend_backup_jobs(id) ON DELETE CASCADE,
+                name TEXT NOT NULL)''')
 
     def _columns(self, conn, table):
         return [
@@ -191,10 +196,12 @@ class BackupService:
     def decode_snapshot(content):
         try:
             payload = json.loads(content)
-            if set(payload) != {'format', 'created_at', 'trigger', 'app_version', 'checksum', 'tables'}:
+            if set(payload) - {'name'} != {'format', 'created_at', 'trigger', 'app_version', 'checksum', 'tables'}:
                 raise ValueError()
             if any(not isinstance(payload[key], str) or not payload[key] or len(payload[key]) > 255
                    for key in ('created_at', 'trigger', 'app_version', 'checksum')):
+                raise ValueError()
+            if 'name' in payload and (not isinstance(payload['name'], str) or len(payload['name']) > 128):
                 raise ValueError()
             if datetime.fromisoformat(payload['created_at']).tzinfo is None:
                 raise ValueError()
@@ -269,7 +276,8 @@ class BackupService:
             conn.execute("UPDATE backend_system_settings SET value=value WHERE key='backup_import_lock'")
             for path in self.root.glob('*.json'):
                 try:
-                    if self._load(path.stem)['checksum'] == value['checksum']:
+                    previous = self._load(path.stem)
+                    if all(previous.get(field) == value.get(field) for field in ('checksum','trigger','name','created_at')):
                         return self.detail(actor, path.stem)
                 except (AccessDenied, OSError):
                     continue
@@ -306,6 +314,8 @@ class BackupService:
             "created_at": value["created_at"],
             "app_version": value["app_version"],
             "trigger": value["trigger"],
+            "kind": "manual" if value["trigger"] == "manual" else "automatic",
+            "name": value.get("name", ""),
             "checksum": value["checksum"],
             "size_bytes": self._path(backup_id).stat().st_size,
             "compatible": compatible,
@@ -340,6 +350,9 @@ class BackupService:
                             "id": path.stem,
                             "created_at": value["created_at"],
                             "app_version": value["app_version"],
+                            "trigger": value["trigger"],
+                            "kind": "manual" if value["trigger"] == "manual" else "automatic",
+                            "name": value.get("name", ""),
                             "size_bytes": path.stat().st_size,
                         }
                     )
@@ -404,7 +417,7 @@ class BackupService:
             ).fetchone()
         )
 
-    def queue(self, actor, key, action, backup_id=None, checksum=None):
+    def queue(self, actor, key, action, backup_id=None, checksum=None, name=None):
         require_permission(actor, "settings.manage")
         try:
             key = str(UUID(key))
@@ -414,6 +427,9 @@ class BackupService:
             action == "create" and (backup_id or checksum)
         ):
             raise AccessDenied("invalid_input", 422)
+        if name is not None and (action != "create" or not isinstance(name, str) or len(name) > 128):
+            raise AccessDenied("invalid_input", 422)
+        name = (name or "").strip()
         with self.db.transaction() as conn:
             from .maintenance_gate import admit
             # This endpoint checks its own pending job below, allowing a retry
@@ -424,6 +440,9 @@ class BackupService:
                 (actor.account.id, key),
             ).fetchone()
             if prior:
+                label = conn.execute("SELECT name FROM backend_backup_labels WHERE job_id=?", (prior["id"],)).fetchone()
+                if (label["name"] if label else "") != name:
+                    raise AccessDenied("idempotency_conflict", 409)
                 if (prior["action"], prior["backup_id"], prior["checksum"]) != (
                     action,
                     backup_id,
@@ -457,6 +476,8 @@ class BackupService:
                     now(),
                 ),
             )
+            if name:
+                conn.execute("INSERT INTO backend_backup_labels(job_id,name) VALUES (?,?)", (job_id, name))
             return {
                 "id": job_id,
                 "action": action,
@@ -484,13 +505,15 @@ class BackupService:
             raise AccessDenied("resource_not_found", 404)
         return self._public(row)
 
-    def create_snapshot(self, trigger="manual", prune=True):
+    def create_snapshot(self, trigger="manual", prune=True, name=""):
         from config import APP_VERSION
 
         with self.db.transaction() as conn:
             # One consistent PostgreSQL snapshot across every configuration table.
             conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
             tables = {}
+            deleted_accounts = {r['account_id'] for r in conn.execute('SELECT account_id FROM backend_account_deletions').fetchall()}
+            deleted_profiles = {r['id'] for r in conn.execute('SELECT id,owner_account_id FROM backend_profiles').fetchall() if r['owner_account_id'] in deleted_accounts}
             for table in TABLES:
                 columns = self._columns(conn, table)
                 if not columns:
@@ -498,6 +521,16 @@ class BackupService:
                 rows = [
                     dict(r) for r in conn.execute(f"SELECT * FROM {table}").fetchall()
                 ]
+                if table == "backend_accounts":
+                    rows = [r for r in rows if r['id'] not in deleted_accounts]
+                elif table == "backend_profiles":
+                    rows = [r for r in rows if r['id'] not in deleted_profiles]
+                elif table in {"backend_external_identities", "backend_access_requests"}:
+                    rows = [r for r in rows if r['account_id'] not in deleted_accounts]
+                if table == "backend_access_requests":
+                    rows = [{**r,'decided_by':None} if r.get('decided_by') in deleted_accounts else r for r in rows]
+                elif table in {"backend_devices", "backend_profile_identities", "backend_grants", "backend_grant_policies"}:
+                    rows = [r for r in rows if r['profile_id'] not in deleted_profiles]
                 if table == "backend_system_settings":
                     rows = [r for r in rows if r["key"] not in {
                         "backup_last_scheduled", "traffic_last_scan", "traffic_cursor",
@@ -511,7 +544,8 @@ class BackupService:
             self.root.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True
         )[:1]:
             try:
-                if self._load(path.stem)["checksum"] == checksum:
+                previous = self._load(path.stem)
+                if trigger != "manual" and previous["trigger"] != "manual" and previous["checksum"] == checksum:
                     return {"status": "duplicate", "backup_id": path.stem}
             except AccessDenied:
                 pass
@@ -524,6 +558,8 @@ class BackupService:
             "checksum": checksum,
             "tables": tables,
         }
+        if name:
+            payload["name"] = name
         temp = self.root / f".{backup_id}.tmp"
         fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
         with os.fdopen(fd, "wb") as stream:
@@ -537,12 +573,20 @@ class BackupService:
         finally:
             os.close(fd)
         if prune:
-            files = sorted(
-                self.root.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True
-            )
-            for path in files[self.settings()["keep_count"] :]:
-                if not path.is_symlink():
-                    path.unlink()
+            files = []
+            with self.db.connect() as conn:
+                in_use = {row['backup_id'] for row in conn.execute("SELECT backup_id FROM backend_backup_jobs WHERE status IN ('awaiting_executor','running','blocked')").fetchall()}
+            for path in self.root.glob("*.json"):
+                try:
+                    value = self._load(path.stem)
+                    if value['trigger'] != 'manual':
+                        files.append((value['created_at'], path))
+                except (AccessDenied, OSError):
+                    continue
+            files.sort(key=lambda item: item[0], reverse=True)
+            for _, path in files[self.settings()["keep_count"] :]:
+                if path.stem not in in_use:
+                    path.unlink(missing_ok=True)
         return {"status": "success", "backup_id": backup_id}
 
     def _restore(self, job, actor):
@@ -736,7 +780,9 @@ class BackupService:
             ):
                 raise AccessDenied("permission_denied")
             if job["action"] == "create":
-                result = self.create_snapshot()
+                with self.db.connect() as conn:
+                    label = conn.execute("SELECT name FROM backend_backup_labels WHERE job_id=?", (job["id"],)).fetchone()
+                result = self.create_snapshot(name=label["name"] if label else "")
                 with self.db.transaction() as conn:
                     conn.execute(
                         "UPDATE backend_backup_jobs SET status='succeeded',result_json=? WHERE id=?",

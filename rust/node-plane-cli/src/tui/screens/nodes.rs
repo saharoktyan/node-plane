@@ -11,6 +11,59 @@ pub(in crate::tui) fn draw_node_editor(
         return;
     };
     let right = draw_navigation(frame, app, area, hits);
+    if editor.tab == Tab::AwgParameters && editor.review.is_none() {
+        let popup = centered(right, 95, 22);
+        frame.render_widget(Clear, popup);
+        let block = section_block(" Manual AWG parameters ");
+        let inner = block.inner(popup);
+        frame.render_widget(block, popup);
+        let rows = Layout::vertical([Constraint::Min(0), Constraint::Length(3)])
+            .spacing(1)
+            .split(inner);
+        if let Some((index, field)) = editor
+            .fields
+            .iter()
+            .enumerate()
+            .find(|(_, field)| field.key == "awg_parameters")
+        {
+            let control = Control::NodesEditField(index);
+            draw_multiline(
+                frame,
+                rows[0],
+                field.label,
+                &field.value,
+                app.nodes_controls().get(app.nodes_selected) == Some(&control),
+                app,
+            );
+            hits.push(Hit {
+                area: rows[0],
+                control,
+            });
+        }
+        let cells = Layout::horizontal([Constraint::Fill(1); 2])
+            .spacing(1)
+            .split(rows[1]);
+        for (index, (label, control)) in [
+            ("Cancel", Control::NodesEditBack),
+            ("Continue", Control::NodesEditTab(Tab::Advanced)),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            draw_button(
+                frame,
+                cells[index],
+                label,
+                app.nodes_controls().get(app.nodes_selected) == Some(&control),
+            );
+            hits.push(Hit {
+                area: cells[index],
+                control,
+            });
+        }
+        return;
+    }
+
     let block = section_block(format!(
         " {} · Settings ",
         editor.source["title"].as_str().unwrap_or("Server")
@@ -148,6 +201,9 @@ pub(in crate::tui) fn draw_node_editor(
             for (column, &control) in controls.iter().enumerate() {
                 let rect = cells[column];
                 match control {
+                    Control::NodesEditTab(Tab::AwgParameters) => {
+                        draw_button(frame, rect, "Manual AWG parameters", selected(control));
+                    }
                     Control::NodesEditToggle(transport, index) => {
                         let (value, name) = if transport {
                             [("tcp", "TCP"), ("xhttp", "XHTTP")][index]
@@ -179,7 +235,18 @@ pub(in crate::tui) fn draw_node_editor(
                     }
                     Control::NodesEditField(index) => {
                         let field = &editor.fields[index];
-                        draw_field(frame, rect, field.label, &field.value, selected(control));
+                        if matches!(field.key, "notes" | "awg_parameters") {
+                            draw_multiline(
+                                frame,
+                                rect,
+                                field.label,
+                                &field.value,
+                                selected(control),
+                                app,
+                            );
+                        } else {
+                            draw_field(frame, rect, field.label, &field.value, selected(control));
+                        }
                     }
                     _ => {}
                 }
@@ -1299,7 +1366,7 @@ pub(in crate::tui) fn node_editor_rows(
     for control in node_editor_items(editor) {
         let multiline = match control {
             Control::NodesEditField(index) => match editor.fields[index].key {
-                "notes" => Some(6),
+                "notes" => Some(10),
                 "awg_parameters" => Some(12),
                 _ => None,
             },
@@ -1320,15 +1387,36 @@ pub(in crate::tui) fn node_editor_rows(
     if !pending.is_empty() {
         rows.push((pending, 3));
     }
+    if editor.tab == crate::node_editor::Tab::Advanced {
+        rows.push((
+            vec![Control::NodesEditTab(
+                crate::node_editor::Tab::AwgParameters,
+            )],
+            3,
+        ));
+    }
     rows
 }
 
 pub(in crate::tui) fn node_editor_controls(editor: &crate::node_editor::Editor) -> Vec<Control> {
+    if editor.tab == crate::node_editor::Tab::AwgParameters && editor.review.is_none() {
+        let mut controls = node_editor_items(editor);
+        controls.extend([
+            Control::NodesEditBack,
+            Control::NodesEditTab(crate::node_editor::Tab::Advanced),
+        ]);
+        return controls;
+    }
     let mut controls: Vec<_> = crate::node_editor::Tab::ALL
         .into_iter()
         .map(Control::NodesEditTab)
         .collect();
     controls.extend(node_editor_items(editor));
+    if editor.tab == crate::node_editor::Tab::Advanced {
+        controls.push(Control::NodesEditTab(
+            crate::node_editor::Tab::AwgParameters,
+        ));
+    }
     if editor.dirty() {
         controls.extend([Control::NodesEditSave, Control::NodesEditReset]);
     }

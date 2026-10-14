@@ -28,6 +28,10 @@ impl Tab {
 }
 #[derive(Clone)]
 pub enum Command {
+    Provision {
+        identity: String,
+        key: Uuid,
+    },
     EditContext {
         id: Option<String>,
         owner: Option<String>,
@@ -66,6 +70,12 @@ pub enum Command {
 impl Command {
     pub fn request(&self) -> (hyper::Method, String, Option<Value>, Option<Uuid>) {
         match self {
+            Self::Provision { identity, key } => (
+                hyper::Method::POST,
+                "/api/v1/accounts".into(),
+                Some(json!({"identity":identity})),
+                Some(*key),
+            ),
             Self::EditContext { .. } => (
                 hyper::Method::GET,
                 "/api/v1/nodes?limit=100".into(),
@@ -167,6 +177,7 @@ pub struct Editor {
     pub policy: Value,
     pub baseline_policy: Value,
     pub permanent_access: bool,
+    pub name_editable: bool,
     pub grants_view: bool,
     pub grants_page: usize,
     pub future_view: bool,
@@ -197,6 +208,7 @@ impl Editor {
             policy: json!({"explicit_grants": [], "rules": [], "exclusions": []}),
             baseline_policy: json!({"explicit_grants": [], "rules": [], "exclusions": []}),
             permanent_access: false,
+            name_editable: true,
             grants_view: false,
             grants_page: 0,
             future_view: false,
@@ -535,8 +547,17 @@ fn expiry_after_seconds(duration: u64, now: std::time::SystemTime) -> anyhow::Re
     ))
 }
 
+pub struct ProvisionDraft {
+    pub identity: String,
+    pub key: Uuid,
+    pub confirm: bool,
+}
+
 #[derive(Default)]
 pub struct Browser {
+    pub provision: Option<ProvisionDraft>,
+    pub result: Option<String>,
+    pub role_pending: Option<bool>,
     pub profile: Option<Uuid>,
     pub tab: Tab,
     pub items: Vec<Value>,
@@ -619,6 +640,17 @@ impl Browser {
         };
         self.selected = 0;
         match command {
+            Command::Provision { .. } => {
+                self.provision = None;
+                self.tab = Tab::Profiles;
+                let mut profile = value["profile"].clone();
+                profile["_account"] = value["account"].clone();
+                self.card = Some(profile);
+                self.result = Some(
+                    "Account and VPN profile are ready. Open the profile to configure access."
+                        .into(),
+                );
+            }
             Command::ProfileProgress(_) => unreachable!(),
             Command::EditContext { owner, .. } => {
                 let source = (!value["profile"].is_null()).then(|| value["profile"].clone());
@@ -630,6 +662,7 @@ impl Browser {
                         editor.policy[key] = value["policy"][key].clone();
                     }
                 }
+                editor.name_editable = value["name_editable"] != false;
                 editor.permanent_access = value["policy"]["permanent"] == true
                     || value["owner_account"]["role"] == "admin";
                 if let Some(draft) = self.profile_draft.take() {
@@ -684,7 +717,18 @@ impl Browser {
                     };
                 }
             }
-            Command::AccountMutate { .. } => {
+            Command::AccountMutate { body, .. } => {
+                if let Some(role) = body["role"].as_str() {
+                    self.role_pending = None;
+                    self.result = Some(
+                        if role == "admin" {
+                            "Administrator rights granted."
+                        } else {
+                            "Administrator rights revoked."
+                        }
+                        .into(),
+                    );
+                }
                 if self.tab == Tab::Profiles
                     && let Some(card) = &mut self.card
                 {
@@ -771,6 +815,16 @@ pub fn label(tab: Tab, item: &Value) -> String {
             )
         ),
     }
+}
+
+pub fn role_error(error: &str) -> String {
+    if error.contains("self_admin_revocation") {"You cannot revoke your own administrator rights."}
+    else if error.contains("last_admin_required") {"At least one administrator must remain."}
+    else if error.contains("revision_conflict") {"The account changed. Refresh it and try again."}
+    else if error.contains("permission_denied") || error.contains("invalid_token") {"You do not have permission to change administrator rights. Reconnect to refresh your session."}
+    else if error.contains("request_pending") {"Review this account's pending access request before changing administrator rights."}
+    else if error.contains("resource_not_found") {"The account was not found. Administrator rights were not changed."}
+    else {"Administrator rights could not be updated. The result is unconfirmed; refresh the account before trying again."}.into()
 }
 
 #[cfg(test)]

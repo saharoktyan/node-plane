@@ -247,11 +247,20 @@ pub(in crate::tui) fn draw_temporary(
             let i = index - first;
             let rect = Rect::new(rows[1].x, rows[1].y + i as u16, rows[1].width, 1);
             frame.render_widget(
-                Paragraph::new(label.as_str()).style(Style::default().fg(if selected(index) {
-                    Color::Cyan
-                } else {
-                    Color::White
-                })),
+                Paragraph::new(Line::from(vec![
+                    Span::styled(
+                        if selected(index) { "→" } else { " " },
+                        Style::default().fg(Color::White),
+                    ),
+                    Span::styled(
+                        label.as_str(),
+                        Style::default().fg(if selected(index) {
+                            Color::Cyan
+                        } else {
+                            Color::White
+                        }),
+                    ),
+                ])),
                 rect,
             );
             hits.push(Hit {

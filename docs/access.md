@@ -2,7 +2,7 @@
 
 # Profiles and access
 
-An account identifies a person and their role. A VPN profile holds that person's VPN access, expiry, devices and grants. Both interfaces present these together under profiles. A Workstation installation profile is a local connection entry and is unrelated to VPN access.
+An account identifies a person and their role. A VPN profile holds that person's VPN access, expiry, devices and grants. Every account has exactly one VPN profile, including accounts without server access. Both interfaces present them together under profiles. A Workstation installation profile is a local connection entry and is unrelated to VPN access.
 
 ## Requests
 
@@ -36,9 +36,9 @@ An administrator role grants management permissions. Change a role only for some
 
 Expiry and revocation remove runtime authorization. New VLESS connections are blocked, but established connections may continue until they disconnect. See [Temporary configurations](temporary-configs.md) for the same limitation on short-lived access.
 
-## Delete a profile
+## Delete an account
 
-Review the affected access and confirm deletion. Progress refreshes while the operation runs. A blocked revocation requires recovery; closing the screen does not complete or cancel it.
+**Delete account** removes the account, its VPN profile and devices. A later request creates a new account and profile with new IDs. **Freeze** and **Block** preserve the existing account and profile. Review the affected access and confirm deletion. Progress refreshes while the operation runs. A blocked revocation requires recovery; closing the screen does not complete or cancel it.
 
 Deletion of a saved Workstation installation profile is a local preference action. It does not delete a user, VPN profile or controller.
 

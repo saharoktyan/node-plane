@@ -136,28 +136,56 @@ impl App {
                 None
             }
             Control::AccessNew => {
-                if self.access.tab == crate::access::Tab::Accounts
-                    || self.access.owner_filter.is_some()
-                {
-                    let owner = self.access.owner_filter.clone().or_else(|| {
-                        self.access
-                            .card
-                            .as_ref()
-                            .and_then(|v| v["id"].as_str())
-                            .map(str::to_owned)
-                    });
-                    self.access_command(crate::access::Command::EditContext { id: None, owner });
-                } else {
-                    self.access.creating_profile = true;
-                    self.access.items.clear();
-                    self.access.page = 0;
-                    self.access.card = None;
-                    self.access.editor = None;
-                    self.access.search.clear();
-                    self.access.notice = "Choose the account for the new profile.".into();
-                    self.access.tab = crate::access::Tab::Accounts;
-                    self.access_command(crate::access::Command::List(self.access.tab));
+                self.access.provision = Some(crate::access::ProvisionDraft {
+                    identity: String::new(),
+                    key: uuid::Uuid::new_v4(),
+                    confirm: false,
+                });
+                self.access.result = None;
+                self.access.selected = 0;
+                self.error.clear();
+                None
+            }
+            Control::AccessIdentity => {
+                self.focus(control);
+                None
+            }
+            Control::AccessProvisionNext => {
+                if let Some(draft) = &mut self.access.provision {
+                    if draft.identity.trim().is_empty() {
+                        self.error = "Enter a Telegram ID or @username.".into();
+                    } else {
+                        draft.confirm = true;
+                        self.error.clear();
+                        self.access.selected = 0;
+                    }
                 }
+                None
+            }
+            Control::AccessProvisionSubmit => {
+                if let Some(draft) = &self.access.provision {
+                    self.access_command(crate::access::Command::Provision {
+                        identity: draft.identity.trim().into(),
+                        key: draft.key,
+                    });
+                }
+                None
+            }
+            Control::AccessProvisionCancel => {
+                if let Some(draft) = &mut self.access.provision {
+                    if draft.confirm {
+                        draft.confirm = false;
+                    } else {
+                        self.access.provision = None;
+                    }
+                }
+                self.access.selected = 0;
+                self.error.clear();
+                None
+            }
+            Control::AccessResultClose => {
+                self.access.result = None;
+                self.access.selected = 0;
                 None
             }
             Control::AccessField(_) => {
@@ -341,12 +369,15 @@ impl App {
                     && let (Some(id), Some(revision)) =
                         (card["id"].as_str(), card["revision"].as_u64())
                 {
-                    self.access_command(crate::access::Command::AccountMutate {
+                    self.access.role_pending = body["role"].as_str().map(|role| role == "admin");
+                    let command = crate::access::Command::AccountMutate {
                         id: id.into(),
                         revision,
                         body: body.clone(),
                         key: *key,
-                    });
+                    };
+                    self.access.account_action = None;
+                    self.access_command(command);
                 }
                 None
             }
@@ -429,6 +460,13 @@ impl App {
                     .unwrap_or(crate::access::Command::List(self.access.tab));
                 self.access_command(command);
                 None
+            }
+            Control::AccessBack if self.access.result.is_some() => {
+                self.access.result = None;
+                None
+            }
+            Control::AccessBack if self.access.provision.is_some() => {
+                self.activate_access(Control::AccessProvisionCancel)
             }
             Control::AccessBack => {
                 if self.access.creating_profile {
@@ -530,6 +568,23 @@ impl App {
         self.access_command(crate::access::Command::List(self.access.tab));
     }
     pub(in crate::tui) fn access_controls(&self) -> Vec<Control> {
+        if self.access.result.is_some() {
+            return vec![Control::AccessResultClose];
+        }
+        if let Some(draft) = &self.access.provision {
+            return if draft.confirm {
+                vec![
+                    Control::AccessProvisionCancel,
+                    Control::AccessProvisionSubmit,
+                ]
+            } else {
+                vec![
+                    Control::AccessIdentity,
+                    Control::AccessProvisionCancel,
+                    Control::AccessProvisionNext,
+                ]
+            };
+        }
         self.hits
             .iter()
             .filter_map(|hit| {

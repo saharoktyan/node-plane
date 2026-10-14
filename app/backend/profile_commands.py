@@ -16,6 +16,8 @@ class ProfileCommands:
         self.db = db
 
     def initialize_schema(self):
+        from .credentials import CredentialService
+        CredentialService(self.db).initialize_schema()
         OperationRepository(self.db).initialize_schema()
         with self.db.transaction() as conn:
             conn.execute('''CREATE TABLE IF NOT EXISTS backend_profile_commands (
@@ -92,6 +94,13 @@ class ProfileCommands:
                 owner = values.get('owner_account_id')
                 if owner is not None and conn.execute('UPDATE backend_accounts SET status = status WHERE id = ? RETURNING id', (owner,)).fetchone() is None:
                     raise AccessDenied('owner_not_found', 422)
+                if owner is not None and conn.execute('SELECT 1 FROM backend_account_deletions WHERE account_id=?', (owner,)).fetchone():
+                    raise AccessDenied('account_deleting', 409)
+                if owner is None:
+                    owner = str(uuid4())
+                    conn.execute("INSERT INTO backend_accounts(id,status) VALUES (?,'approved')", (owner,))
+                elif conn.execute('SELECT id FROM backend_profiles WHERE owner_account_id=? LIMIT 1', (owner,)).fetchone():
+                    raise AccessDenied('account_profile_exists', 409)
                 policy = values.get('access_policy')
                 if policy is not None:
                     require_permission(actor, 'grants.manage')
@@ -117,7 +126,7 @@ class ProfileCommands:
             else:
                 if revision is None:
                     raise AccessDenied('revision_required', 428)
-                row = conn.execute('''SELECT p.desired_revision, p.owner_account_id, d.profile_id AS deleting
+                row = conn.execute('''SELECT p.desired_revision, p.owner_account_id, p.display_name, d.profile_id AS deleting
                     FROM backend_profiles p LEFT JOIN backend_profile_deletions d ON d.profile_id = p.id
                     WHERE p.id = ?''', (profile_id,)).fetchone()
                 if row is None:
@@ -132,6 +141,10 @@ class ProfileCommands:
                 owner_admin = is_admin_profile(conn, profile_id)
                 if action == 'delete' and (row['owner_account_id'] == actor.account.id or owner_admin):
                     raise AccessDenied('admin_profile_protected', 409)
+                if (owner_admin and action == 'edit' and 'display_name' in values
+                        and str(values['display_name']).strip() != row['display_name']
+                        and row['owner_account_id'] != actor.account.id):
+                    raise AccessDenied('admin_name_owner_only', 403)
                 if owner_admin and action == 'edit' and values.get('frozen') is True:
                     raise AccessDenied('admin_freeze_forbidden', 422)
                 if owner_admin and (action in {'grants', 'policy'} or 'grants' in values or 'access_policy' in values):
@@ -195,7 +208,9 @@ class ProfileCommands:
                 if cursor.fetchone() is None:
                     raise AccessDenied('revision_conflict', 412)
                 if action == 'delete' and row['owner_account_id']:
-                    ProfileRepository.revoke_orphaned_members(conn, row['owner_account_id'])
+                    from .account_deletions import begin
+                    begin(conn, row['owner_account_id'])
+                    conn.execute("UPDATE backend_devices SET status='deleting',revision=revision+1 WHERE profile_id=? AND status='active'", (profile_id,))
                 if action == 'grants' or (action == 'edit' and editing_grants):
                     from .grant_policies import replace_explicit
                     replace_explicit(conn, profile_id, seen)
@@ -207,6 +222,8 @@ class ProfileCommands:
             if action == 'delete':
                 conn.execute('''UPDATE backend_profile_deletions SET operation_id = ?
                     WHERE profile_id = ?''', (operation['id'], profile_id))
+                from .account_deletions import settle
+                settle(conn)
             result['operation_id'] = operation['id']
             result['runtime_status'] = operation['status']
             conn.execute('''UPDATE backend_profile_commands SET result_json = ?

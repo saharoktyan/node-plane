@@ -9,6 +9,7 @@ from tests import test_backend_http
 
 class BackendProfileCommandTests(unittest.TestCase):
     setUp = test_backend_http.BackendHTTPTests.setUp
+    register = test_backend_http.BackendHTTPTests.register
 
     def headers_for(self, revision=None, key=None):
         headers = {**self.headers, 'X-Node-Plane-Telegram-User-ID': '101', 'Idempotency-Key': key or str(uuid4())}
@@ -118,6 +119,10 @@ class BackendProfileCommandTests(unittest.TestCase):
         self.assertEqual(first.status_code, 200, first.text)
         self.assertEqual(self.client.delete(path, headers=headers).json(), first.json())
         member_headers = {**self.headers, 'X-Node-Plane-Telegram-User-ID': '102'}
+        self.assertIsNone(self.identities.find_telegram_account(102))
+        self.assertEqual(self.identities.get_account(member.id).status, 'disabled')
+        fresh = self.register(102).json()
+        self.assertNotEqual(fresh['id'], member.id)
         me = self.client.get('/api/v1/me', headers=member_headers).json()
         self.assertEqual(me['status'], 'pending')
         self.assertNotIn('profiles.self.read', me['permissions'])
@@ -127,26 +132,43 @@ class BackendProfileCommandTests(unittest.TestCase):
         approved = self.client.post(f"/api/v1/access-requests/{request['id']}/decision",
             headers=self.headers_for(), json={'decision': 'approve'})
         self.assertEqual(approved.status_code, 200, approved.text)
-        new_id = repo.ensure_account_profile(member.id)
+        new_id = repo.ensure_account_profile(fresh['id'])
         self.assertNotEqual(new_id, old_id)
-        self.assertEqual(repo.ensure_account_profile(member.id), new_id)
+        self.assertEqual(repo.ensure_account_profile(fresh['id']), new_id)
         new_runtime = self.db.connection.execute('SELECT runtime_name FROM backend_profiles WHERE id = ?', (new_id,)).fetchone()[0]
         self.assertNotEqual(new_runtime, old_runtime)
         self.assertEqual(self.client.get('/api/v1/me', headers=member_headers).json()['status'], 'approved')
         self.assertEqual(self.db.connection.execute('SELECT COUNT(*) FROM backend_grants WHERE profile_id = ?', (new_id,)).fetchone()[0], 0)
 
-    def test_deletion_preserves_admin_and_member_with_another_profile(self):
+    def test_deletion_protects_admin_and_one_account_cannot_have_two_profiles(self):
         admin_profile = self.create(owner_account_id=self.admin.id).json()['profile']['id']
         self.assertEqual(self.client.delete(f'/api/v1/profiles/{admin_profile}', headers=self.headers_for(1)).status_code, 409)
         self.assertEqual(self.identities.get_account(self.admin.id).status, 'approved')
         member = self.identities.resolve_telegram(102)
         self.db.connection.execute("UPDATE backend_accounts SET status = 'approved' WHERE id = ?", (member.id,))
         one = self.create(owner_account_id=member.id).json()['profile']['id']
-        two = self.create(owner_account_id=member.id).json()['profile']['id']
+        self.assertEqual(self.create(owner_account_id=member.id).status_code, 409)
         self.assertEqual(self.client.delete(f'/api/v1/profiles/{one}', headers=self.headers_for(1)).status_code, 200)
-        self.assertEqual(self.identities.get_account(member.id).status, 'approved')
-        self.assertEqual(self.client.delete(f'/api/v1/profiles/{two}', headers=self.headers_for(1)).status_code, 200)
-        self.assertEqual(self.identities.get_account(member.id).status, 'pending')
+        self.assertEqual(self.identities.get_account(member.id).status, 'disabled')
+        self.assertIsNone(self.identities.find_telegram_account(102))
+
+    def test_freeze_and_block_preserve_account_profile_and_devices(self):
+        from backend.profiles import ProfileRepository
+        member = self.identities.resolve_telegram(102)
+        self.db.connection.execute("UPDATE backend_accounts SET status='approved' WHERE id=?", (member.id,))
+        profile_id = ProfileRepository(self.db).ensure_account_profile(member.id)
+        path = f'/api/v1/profiles/{profile_id}'
+        self.assertEqual(self.client.patch(path, headers=self.headers_for(1), json={'frozen':True}).status_code, 200)
+        account = self.client.get(f'/api/v1/accounts/{member.id}', headers=self.headers_for()).json()
+        blocked = self.client.patch(f'/api/v1/accounts/{member.id}', headers=self.headers_for(account['revision']), json={'status':'disabled'})
+        self.assertEqual(blocked.status_code, 200, blocked.text)
+        self.assertEqual(self.identities.find_telegram_account(102).id, member.id)
+        self.assertEqual(ProfileRepository(self.db).ensure_account_profile(member.id), profile_id)
+        self.assertFalse(self.db.connection.execute('SELECT 1 FROM backend_account_deletions').fetchone())
+        restored = self.client.patch(f'/api/v1/accounts/{member.id}', headers=self.headers_for(blocked.json()['revision']), json={'status':'approved'})
+        self.assertEqual(restored.status_code, 200, restored.text)
+        self.assertEqual(self.client.patch(path, headers=self.headers_for(2), json={'frozen':False}).status_code, 200)
+        self.assertEqual(self.identities.find_telegram_account(102).id, member.id)
 
     def test_schema_repairs_legacy_orphan_approval_once(self):
         from backend.profiles import ProfileRepository

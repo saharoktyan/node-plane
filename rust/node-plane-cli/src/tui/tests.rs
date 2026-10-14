@@ -5279,29 +5279,27 @@ fn node_diagnostics_scrolls_all_checks_without_truncation() {
 }
 
 #[test]
-fn new_profile_selects_account_then_opens_editor_and_can_cancel() {
+fn new_profile_provisions_account_in_a_dialog_and_preserves_identity_on_back() {
     let mut app = test_profile_app();
     app.open_access();
     app.nodes_requested = None;
     app.activate(Control::AccessNew);
-    assert!(app.access.creating_profile);
-    assert!(matches!(
-        app.nodes_requested.take(),
-        Some(crate::nodes::Command::Access(crate::access::Command::List(
-            crate::access::Tab::Accounts
-        )))
-    ));
-    app.access.items =
-        vec![serde_json::json!({"id":"owner", "role":"member", "status":"approved"})];
-    app.activate(Control::AccessItem(0));
-    assert!(!app.access.creating_profile);
+    assert!(app.access.provision.is_some());
+    assert!(app.nodes_requested.is_none());
+    app.access.provision.as_mut().unwrap().identity = "123456".into();
+    app.activate(Control::AccessProvisionNext);
+    assert!(app.access.provision.as_ref().unwrap().confirm);
+    app.activate(Control::AccessProvisionCancel);
+    assert!(!app.access.provision.as_ref().unwrap().confirm);
+    assert_eq!(app.access.provision.as_ref().unwrap().identity, "123456");
+    app.activate(Control::AccessProvisionNext);
+    app.activate(Control::AccessProvisionSubmit);
     assert!(
-        matches!(app.nodes_requested.take(), Some(crate::nodes::Command::Access(crate::access::Command::EditContext {id:None, owner:Some(owner)})) if owner == "owner")
+        matches!(app.nodes_requested.take(),Some(crate::nodes::Command::Access(crate::access::Command::Provision{identity,..})) if identity=="123456")
     );
-    app.activate(Control::AccessNew);
-    app.activate(Control::AccessBack);
-    assert!(!app.access.creating_profile);
-    assert_eq!(app.access.tab, crate::access::Tab::Profiles);
+    app.activate(Control::AccessProvisionCancel);
+    app.activate(Control::AccessProvisionCancel);
+    assert!(app.access.provision.is_none());
 }
 
 #[test]
@@ -5893,4 +5891,47 @@ fn notes_accept_newlines_and_manual_awg_has_its_own_tab() {
         editor.fields[editor.field_indices()[0]].key,
         "awg_parameters"
     );
+}
+
+#[test]
+fn role_change_errors_close_confirmation_and_show_result_in_both_paths() {
+    let mut app = test_profile_app();
+    app.nodes_busy = true;
+    app.access_busy = true;
+    app.access.role_pending = Some(false);
+    app.event(Event::Finished(Err(
+        "Backend refused the request: self_admin_revocation (HTTP 409)".into(),
+    )));
+    assert!(app.access.result.as_ref().unwrap().contains("your own"));
+    assert!(app.access.account_action.is_none());
+    assert!(app.error.is_empty());
+    assert!(app.access_controls() == vec![Control::AccessResultClose]);
+    app.activate(Control::AccessResultClose);
+    assert!(app.access.result.is_none());
+    app.nodes_busy = true;
+    app.nodes_background = true;
+    app.controller.telegram_role_pending = Some(false);
+    app.event(Event::Finished(Err("self_admin_revocation".into())));
+    assert!(
+        app.controller
+            .telegram_result
+            .as_ref()
+            .unwrap()
+            .contains("your own")
+    );
+    assert!(app.error.is_empty());
+}
+#[test]
+fn backspace_navigates_outside_inputs_and_keeps_text_deletion_inside() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Access;
+    app.access.result = Some("Result".into());
+    let mut key = KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE);
+    app.normalize_backspace(&mut key);
+    assert_eq!(key.code, KeyCode::Esc);
+    app.access.result = None;
+    app.activate(Control::AccessNew);
+    key.code = KeyCode::Backspace;
+    app.normalize_backspace(&mut key);
+    assert_eq!(key.code, KeyCode::Backspace);
 }

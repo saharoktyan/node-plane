@@ -3026,3 +3026,15 @@ CATALOG['ru'].update({'about.title':'О проекте','about.repository':'Ре
 CATALOG['en'].update({'about.title':'About','about.repository':'GitHub repository','devices.management':'Device management', 'nodes.awg.mode.auto':'Automatic', 'nodes.awg.mode.manual':'Manual'})
 CATALOG['ru'].update({'account.traffic_total': 'Трафик · всего', 'account.traffic_awg': 'Трафик · AWG', 'account.traffic_vless': 'Трафик · VLESS'})
 CATALOG['en'].update({'account.traffic_total': 'Traffic · total', 'account.traffic_awg': 'Traffic · AWG', 'account.traffic_vless': 'Traffic · VLESS'})
+
+CATALOG['en'].update({'about.description': 'Centralized VPN management with a controller, multiple nodes, a Telegram bot and a terminal workstation.', 'backups.name': 'Backup name', 'backups.name_prompt': 'Send a name for this manual backup (up to 128 characters), or skip.', 'backups.skip': 'Skip', 'backups.kind.manual': 'Manual', 'backups.kind.automatic': 'Automatic'})
+CATALOG['ru'].update({'about.description': 'Централизованное управление VPN с контроллером, несколькими нодами, Telegram-ботом и терминальной рабочей станцией.', 'backups.name': 'Название бэкапа', 'backups.name_prompt': 'Отправьте название ручного бэкапа (до 128 символов) или пропустите этот шаг.', 'backups.skip': 'Пропустить', 'backups.kind.manual': 'Ручной', 'backups.kind.automatic': 'Автоматический'})
+
+CATALOG['en']['profile.error.admin_name_owner_only'] = 'Only the owner can rename an administrator profile.'
+CATALOG['ru']['profile.error.admin_name_owner_only'] = 'Имя профиля администратора может изменить только его владелец.'
+
+CATALOG['en']['backups.kind'] = 'Type'
+CATALOG['ru']['backups.kind'] = 'Тип'
+
+CATALOG['en'].update({'accounts.open_profile':'Open profile','profile.admin.delete':'Delete account','profile.admin.delete_title':'Delete account','profile.admin.delete_done':'Account and VPN profile deleted.','profile.admin.delete_warning':'The account, VPN profile and all devices will be deleted. Server access will be revoked.','profile.admin.delete_queued':'Account access is closed. Node cleanup: {status}.'})
+CATALOG['ru'].update({'accounts.open_profile':'Открыть профиль','profile.admin.delete':'Удалить аккаунт','profile.admin.delete_title':'Удаление аккаунта','profile.admin.delete_done':'Аккаунт и VPN-профиль удалены.','profile.admin.delete_warning':'Аккаунт, VPN-профиль и все устройства будут удалены. Доступ к серверам будет отозван.','profile.admin.delete_queued':'Доступ аккаунта закрыт. Очистка нод: {status}.'})

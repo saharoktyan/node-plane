@@ -72,6 +72,8 @@ class MeOutput(AccountOutput):
 
 
 class AdminAccountOutput(AccountOutput):
+    deleted: bool = False
+    profile_id: str | None = None
     revision: int
     telegram_user_id: int | None
     username: str | None = None
@@ -85,6 +87,11 @@ class AdminAccountOutput(AccountOutput):
 class AccountPage(BaseModel):
     items: list[AdminAccountOutput]
     next_cursor: str | None
+
+
+class AccountProvisionInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    identity: StrictStr = Field(min_length=1, max_length=64)
 
 
 class AccountEditInput(BaseModel):
@@ -329,6 +336,7 @@ class BackupDeleteInput(BaseModel):
 class BackupCommandInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
     action: Literal['create','restore']
+    name: StrictStr | None = Field(default=None, max_length=128)
     backup_id: UUID | None = None
     checksum: StrictStr | None = Field(default=None,pattern=r'^[0-9a-f]{64}$')
 
@@ -1748,6 +1756,10 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
                       cursor: Annotated[str | None, Query(max_length=512)] = None):
         return accounts.list(current, limit=limit, cursor=cursor)
 
+    @app.post('/api/v1/accounts', status_code=201)
+    def provision_account(body: AccountProvisionInput, request: Request, current=Depends(actor)):
+        return accounts.provision_profile(current, body.identity, header(request, 'Idempotency-Key'))
+
     @app.get('/api/v1/accounts/{account_id}', response_model=AdminAccountOutput)
     def get_account(account_id: UUID, response: Response, current=Depends(actor)):
         result = accounts.get(current, str(account_id))
@@ -2098,7 +2110,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     @app.post('/api/v1/system/backups/jobs',status_code=202)
     def backup_command(body:BackupCommandInput,request:Request,current=Depends(actor)):
         return backup_service.queue(current,header(request,'Idempotency-Key'),body.action,
-                                    str(body.backup_id) if body.backup_id else None,body.checksum)
+                                    str(body.backup_id) if body.backup_id else None,body.checksum,body.name)
 
     @app.get('/api/v1/system/backups/jobs/{job_id}')
     def backup_job(job_id:UUID,current=Depends(actor)):

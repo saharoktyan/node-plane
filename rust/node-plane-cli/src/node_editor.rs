@@ -11,12 +11,7 @@ pub enum Tab {
     AwgParameters,
 }
 impl Tab {
-    pub const ALL: [Self; 4] = [
-        Self::General,
-        Self::Protocols,
-        Self::Advanced,
-        Self::AwgParameters,
-    ];
+    pub const ALL: [Self; 3] = [Self::General, Self::Protocols, Self::Advanced];
     pub fn label(self) -> &'static str {
         match self {
             Self::General => "General",

@@ -1,6 +1,66 @@
 use super::super::*;
 
 impl App {
+    pub(in crate::tui) fn normalize_backspace(&self, key: &mut KeyEvent) {
+        if key.code != KeyCode::Backspace {
+            return;
+        }
+        let input = if self.exit || self.discard.is_some() {
+            false
+        } else if let Some((prompt, _)) = &self.prompt {
+            matches!(prompt, Prompt::Password { .. })
+        } else {
+            match self.screen {
+                Screen::Controller => matches!(
+                    self.controller_controls().get(self.controller.selected),
+                    Some(
+                        Control::ControllerDefaultsInput
+                            | Control::ControllerAnnouncementInput
+                            | Control::ControllerPhrase
+                    )
+                ),
+                Screen::Access => matches!(
+                    self.access_controls().get(self.access.selected),
+                    Some(
+                        Control::AccessSearch
+                            | Control::AccessField(_)
+                            | Control::AccessDeviceName
+                            | Control::AccessDurationInput
+                            | Control::AccessIdentity
+                    )
+                ),
+                Screen::Nodes => matches!(
+                    self.nodes_controls().get(self.nodes_selected),
+                    Some(Control::NodesSearch | Control::NodesEditField(_))
+                ),
+                Screen::NodeWizard => self
+                    .node_wizard
+                    .as_ref()
+                    .is_some_and(|wizard| wizard.field().is_some()),
+                Screen::Form => {
+                    self.form.selected > 0
+                        && self
+                            .form
+                            .visible()
+                            .get(self.form.selected - 1)
+                            .is_some_and(|index| !matches!(index, 3 | 11))
+                }
+                Screen::EditInstallation => {
+                    self.editor.as_ref().is_some_and(|(_, fields, selected)| {
+                        *selected < fields.len() && *selected != 4
+                    })
+                }
+                Screen::SettingsPage(SettingsPage::Appearance) => {
+                    self.settings_selected == self.themes.len() + 1
+                }
+                _ => false,
+            }
+        };
+        if !input {
+            key.code = KeyCode::Esc;
+        }
+    }
+
     pub(in crate::tui) fn appearance_key(&mut self, key: KeyCode) {
         self.remember_navigation_focus(None);
         self.appearance_key_inner(key);
@@ -100,6 +160,15 @@ impl App {
             }
             return;
         }
+        if controls[current] == Control::ControllerAnnouncementInput
+            && let Some(value) = &mut self.controller.announcement_draft
+            && self
+                .text_input
+                .borrow_mut()
+                .edit("Message", value, key, 3000)
+        {
+            return;
+        }
         match key.code {
             KeyCode::Enter if controls[current] == Control::ControllerAnnouncementInput => {
                 if let Some(value) = &mut self.controller.announcement_draft
@@ -183,6 +252,38 @@ impl App {
     }
 
     fn access_key_inner(&mut self, key: KeyEvent) {
+        if self.access.result.is_some()
+            && matches!(key.code, KeyCode::Esc | KeyCode::Backspace | KeyCode::Enter)
+        {
+            self.activate(Control::AccessResultClose);
+            return;
+        }
+        if self.access.provision.is_some() {
+            if key.code == KeyCode::Esc {
+                self.activate(Control::AccessProvisionCancel);
+                return;
+            }
+            if self.access_controls().get(self.access.selected) == Some(&Control::AccessIdentity)
+                && let Some(draft) = &mut self.access.provision
+            {
+                match key.code {
+                    KeyCode::Char(c) if !c.is_control() && draft.identity.chars().count() < 64 => {
+                        draft.identity.push(c);
+                        return;
+                    }
+                    KeyCode::Backspace => {
+                        draft.identity.pop();
+                        return;
+                    }
+                    KeyCode::Enter => {
+                        self.activate(Control::AccessProvisionNext);
+                        return;
+                    }
+                    _ => {}
+                }
+            }
+        }
+
         let controls = self.access_controls();
         if controls.get(self.access.selected) == Some(&Control::AccessDeviceName)
             && let Some(editor) = self.access.devices.as_mut().and_then(|d| d.editor.as_mut())
@@ -482,6 +583,18 @@ impl App {
         if let Some(Control::NodesEditField(index)) = controls.get(selected)
             && let Some(editor) = &mut self.nodes.editor
         {
+            if matches!(editor.fields[*index].key, "notes" | "awg_parameters") {
+                let limit = editor.fields[*index].input_limit();
+                if self.text_input.borrow_mut().edit(
+                    editor.fields[*index].label,
+                    &mut editor.fields[*index].value,
+                    key,
+                    limit,
+                ) {
+                    editor.changed();
+                    return;
+                }
+            }
             match key.code {
                 KeyCode::Enter
                     if matches!(editor.fields[*index].key, "notes" | "awg_parameters") =>

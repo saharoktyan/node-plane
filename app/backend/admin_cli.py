@@ -138,6 +138,7 @@ def main():
             print(f'Administrator account: {account.id}')
         elif args.command == 'create-account':
             account = identities.create_account(status=args.status)
+            ProfileRepository(db).ensure_account_profile(account.id)
             print(f'Account ID: {account.id}')
         elif args.command == 'link-telegram':
             from uuid import UUID

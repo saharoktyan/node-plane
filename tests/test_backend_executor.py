@@ -30,6 +30,38 @@ class BackendExecutorTests(unittest.TestCase):
         return Actor(Principal('local-repair', PrincipalKind.ACCOUNT,
             frozenset({'maintenance.manage'}), account.id), account)
 
+    def test_account_deletion_waits_for_runtime_cleanup_and_repair(self):
+        from backend.profiles import ProfileRepository
+        from uuid import uuid4
+        member = self.identities.resolve_telegram(102)
+        self.db.connection.execute("UPDATE backend_accounts SET status='approved' WHERE id=?", (member.id,))
+        profile = self.prepare(with_device=True)
+        self.db.connection.execute('UPDATE backend_profiles SET owner_account_id=? WHERE id=?', (member.id,profile))
+        driver = FakeDriver()
+        worker = IntentExecutor(self.db, driver)
+        self.grants(profile, 1, [{'node_key':'node','protocol':'awg'}])
+        while worker.run_one():
+            pass
+        deletion = self.client.delete(f'/api/v1/profiles/{profile}', headers=self.headers_for(2))
+        self.assertEqual(deletion.status_code,200,deletion.text)
+        self.assertEqual(self.identities.get_account(member.id).status,'disabled')
+        self.assertEqual(self.identities.find_telegram_account(102).id,member.id)
+        self.assertEqual(ProfileRepository(self.db).ensure_account_profile(member.id),profile)
+        driver.failure = True
+        self.assertTrue(worker.run_one())
+        self.assertEqual(self.identities.find_telegram_account(102).id,member.id)
+        task = self.db.connection.execute("SELECT id FROM backend_operation_tasks WHERE status='blocked'").fetchone()[0]
+        driver.resolve = lambda *_: {'disk_present':True,'live_present':True,'identity_matches':True,'config_available':True}
+        worker.resolve_blocked(self.actor(),task)
+        driver.failure = False
+        while worker.run_one():
+            pass
+        self.assertIsNone(self.identities.find_telegram_account(102))
+        self.assertEqual(self.db.connection.execute('SELECT status FROM backend_devices WHERE profile_id=?',(profile,)).fetchone()[0],'retired')
+        fresh = self.client.post('/api/v1/integrations/telegram/identities/resolve', headers={**self.headers,'Idempotency-Key':str(uuid4())},json={'telegram_user_id':102}).json()
+        self.assertNotEqual(fresh['id'],member.id)
+        self.assertNotEqual(ProfileRepository(self.db).ensure_account_profile(fresh['id']),profile)
+
     def test_admin_repair_supersedes_old_revisions_and_queues_current_state(self):
         profile = self.prepare(with_device=True)
         grant = [{'node_key': 'node', 'protocol': 'awg'}]

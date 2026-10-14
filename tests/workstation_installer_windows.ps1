@@ -51,7 +51,7 @@ try {
     if ($downloads[$downloads.Count - 1] -notlike '*/v0.4.3-alpha.66/node-plane-cli-installer.ps1') {
         throw "Wrong development release: $($downloads[$downloads.Count - 1])"
     }
-    $linkPath = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Node Plane Workstation (dev).lnk'
+    $linkPath = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Node Plane (Dev).lnk'
     $shell = New-Object -ComObject WScript.Shell
     $link = $shell.CreateShortcut($linkPath)
     if ($link.TargetPath -ne $terminalPath -or $link.Arguments -notlike ('*"' + $executable + '"*')) {
@@ -64,11 +64,11 @@ try {
     if ($stableDir -eq $devDir) { throw 'Channels share an installation directory.' }
     if ((Get-Content -LiteralPath (Join-Path $devDir 'receipt-path')) -eq (Get-Content -LiteralPath (Join-Path $stableDir 'receipt-path'))) { throw 'Channels share their receipt directory.' }
     if (-not (Test-Path -LiteralPath (Join-Path $devDir 'node-plane-dev.cmd'))) { throw 'Dev launcher missing.' }
-    if (-not (Test-Path -LiteralPath (Join-Path $stableDir 'node-plane-stable.cmd'))) { throw 'Stable launcher missing.' }
+    if (-not (Test-Path -LiteralPath (Join-Path $stableDir 'node-plane.cmd'))) { throw 'Stable launcher missing.' }
     if ($downloads[$downloads.Count - 1] -notlike '*/v0.4.3/node-plane-cli-installer.ps1') {
         throw "Wrong stable release: $($downloads[$downloads.Count - 1])"
     }
-    $linkPath = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Node Plane Workstation (stable).lnk'
+    $linkPath = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Node Plane.lnk'
     if (-not (Test-Path -LiteralPath $linkPath)) { throw 'Start menu shortcut missing.' }
     $shell = New-Object -ComObject WScript.Shell
     $link = $shell.CreateShortcut($linkPath)

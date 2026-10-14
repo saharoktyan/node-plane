@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 1.0.0-alpha.9 - 2026-10-14
+
+- Pair accounts with one VPN profile, add a Telegram ID/known username provisioning wizard, and delete the account and profile together after confirmed node revocations. Freeze and Block preserve both entities. Preserve legacy runtime identities while normalizing profile ownership, retain inaccessible deletion receipts, and refresh the deleted user's bot screen with a new pending identity.
+- Add optional manual backup names and manual/automatic labels. Automatic retention prunes only automatic backups; manual backups remain until explicitly deleted.
+- Add cursor-aware multiline editing, scrolling and scrollbars to notes, announcements and manual AWG parameters; increase notes height and open manual AWG parameters from Advanced options.
+- Keep the completed Telegram Quick Start available until Done or entry into the administrator menu, and correct the Workstation installation-defaults path.
+- Display all administrator-rights outcomes in result dialogs, group profile actions in pairs, show permanent administrator access in a compact dialog, and protect administrator profile names from other administrators.
+- Add human-readable Workstation audit actions and targets with All/Errors filters, persistent On highlighting, temporary-configuration focus markers, and Backspace navigation outside text inputs.
+- Refine Telegram About and profile management text, and hide traffic statistics when collection is disabled.
+- Name the regular Workstation Node Plane and the development version Node Plane (Dev), update launchers, documentation and API contracts, and add Python, PostgreSQL and Rust regression coverage.
+- Account/profile migration 11 requires a reader supporting revision 11; application rollback to alpha.8 or older is unsupported after it is applied.
+
 ## 1.0.0-alpha.8 - 2026-10-13
 
 - Fix a Clippy warning in the Workstation access screen that failed lint on all CI operating systems.

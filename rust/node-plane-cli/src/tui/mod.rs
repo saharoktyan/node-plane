@@ -10,8 +10,10 @@ mod input;
 mod screens;
 #[cfg(test)]
 mod tests;
+mod text_input;
 mod theme;
 mod widgets;
+use text_input::draw_multiline;
 
 use screens::*;
 use theme::SECTION_BORDER;
@@ -62,7 +64,8 @@ impl TerminalGuard {
             io::stdout(),
             EnterAlternateScreen,
             EnableBracketedPaste,
-            EnableMouseCapture
+            EnableMouseCapture,
+            crossterm::cursor::SetCursorStyle::BlinkingBar
         ) {
             let _ = execute!(
                 io::stdout(),
@@ -94,7 +97,8 @@ impl Drop for TerminalGuard {
             io::stdout(),
             DisableMouseCapture,
             DisableBracketedPaste,
-            LeaveAlternateScreen
+            LeaveAlternateScreen,
+            crossterm::cursor::SetCursorStyle::DefaultUserShape
         );
     }
 }
@@ -639,12 +643,9 @@ pub fn run(mut request: Request) -> Result<()> {
                         == Some(&Control::ControllerAnnouncementInput)
                         && let Some(value) = &mut app.controller.announcement_draft
                     {
-                        let remaining = 3000usize.saturating_sub(value.chars().count());
-                        value.extend(
-                            text.chars()
-                                .filter(|c| !c.is_control() || *c == '\n')
-                                .take(remaining),
-                        );
+                        app.text_input
+                            .borrow_mut()
+                            .paste("Message", value, &text, 3000);
                     } else if app.controller_controls().get(app.controller.selected)
                         == Some(&Control::ControllerDefaultsInput)
                         && let Some((_, value)) = &mut app.controller.defaults_input
@@ -654,6 +655,15 @@ pub fn run(mut request: Request) -> Result<()> {
                     }
                 } else if matches!(app.screen, Screen::Access) && !app.exit {
                     if app.access_controls().get(app.access.selected)
+                        == Some(&Control::AccessIdentity)
+                    {
+                        if let Some(draft) = &mut app.access.provision {
+                            let remaining = 64usize.saturating_sub(draft.identity.chars().count());
+                            draft
+                                .identity
+                                .extend(text.chars().filter(|c| !c.is_control()).take(remaining));
+                        }
+                    } else if app.access_controls().get(app.access.selected)
                         == Some(&Control::AccessDurationInput)
                     {
                         if let Some(input) = app
@@ -705,14 +715,25 @@ pub fn run(mut request: Request) -> Result<()> {
                         app.nodes_controls().get(app.nodes_selected).copied()
                         && let Some(editor) = &mut app.nodes.editor
                     {
-                        editor.fields[index].append_paste(&text);
+                        if matches!(editor.fields[index].key, "notes" | "awg_parameters") {
+                            let limit = editor.fields[index].input_limit();
+                            app.text_input.borrow_mut().paste(
+                                editor.fields[index].label,
+                                &mut editor.fields[index].value,
+                                &text,
+                                limit,
+                            );
+                        } else {
+                            editor.fields[index].append_paste(&text);
+                        }
                         editor.changed();
                     }
                 } else if matches!(app.screen, Screen::Form) && !app.exit {
                     app.form.append(&text);
                 }
             }
-            TermEvent::Key(key) if key.kind == KeyEventKind::Press => {
+            TermEvent::Key(mut key) if key.kind == KeyEventKind::Press => {
+                app.normalize_backspace(&mut key);
                 if app.discard.is_some() && !app.exit {
                     match key.code {
                         KeyCode::Left | KeyCode::Right | KeyCode::Tab | KeyCode::BackTab => {

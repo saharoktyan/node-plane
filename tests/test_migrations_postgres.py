@@ -30,6 +30,25 @@ class MigrationsPostgresTests(unittest.TestCase):
         with self.base.transaction() as conn:
             conn.execute(f'DROP SCHEMA {self.schema} CASCADE')
 
+    def test_account_profile_upgrade_preserves_runtime_and_backfills_missing_pairs(self):
+        migrate(self.db,revisions=REVISIONS[:-1])
+        with self.db.transaction() as conn:
+            conn.execute("INSERT INTO backend_accounts(id,status) VALUES ('owner','approved'),('pending','pending')")
+            conn.execute("INSERT INTO backend_external_identities VALUES ('telegram','102','owner')")
+            conn.execute("INSERT INTO backend_profiles(id,runtime_name,display_name,owner_account_id) VALUES ('one','legacy_one','One','owner'),('two','legacy_two','Two','owner'),('orphan','legacy_orphan','Orphan',NULL)")
+        migrate(self.db)
+        with self.db.connect() as conn:
+            rows = conn.execute('SELECT id,runtime_name,owner_account_id FROM backend_profiles').fetchall()
+            self.assertEqual(len(rows),4)
+            self.assertEqual(len({r['owner_account_id'] for r in rows}),4)
+            self.assertTrue(all(r['owner_account_id'] for r in rows))
+            legacy = {r['id']:r['runtime_name'] for r in rows if r['id'] in {'one','two','orphan'}}
+            self.assertEqual(legacy,{'one':'legacy_one','two':'legacy_two','orphan':'legacy_orphan'})
+            self.assertEqual(conn.execute("SELECT account_id FROM backend_external_identities WHERE subject='102'").fetchone()['account_id'],'owner')
+        with self.assertRaises(Exception):
+            with self.db.transaction() as conn:
+                conn.execute("INSERT INTO backend_profiles(id,runtime_name,display_name,owner_account_id) VALUES ('duplicate','duplicate','Duplicate','owner')")
+
     def test_recovery_audit_is_additive_and_preserves_existing_jobs(self):
         migrate(self.db,revisions=REVISIONS[:4])
         identity=str(uuid4())

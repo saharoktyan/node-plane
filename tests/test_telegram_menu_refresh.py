@@ -16,6 +16,18 @@ class MenuRefreshTests(IsolatedAsyncioTestCase):
         self.backend = SimpleNamespace(request=AsyncMock(side_effect=[{'delivery': {'account': self.account, 'revision': 3}}, {'ok': True}]))
         self.bot = SimpleNamespace(id=1)
 
+    async def test_deleted_account_refreshes_as_new_identity_and_acks_old_receipt(self):
+        self.account.update(role='member',status='disabled',deleted=True,username='alice')
+        self.backend.resolve = AsyncMock()
+        fresh = {'id':'fresh','role':'member','status':'pending'}
+        self.backend.me = AsyncMock(return_value=fresh)
+        await self.state.update_data(control_message_id=77,draft='old account')
+        with patch('telegram_client.access_guard.leave_admin_panel',new_callable=AsyncMock) as leave:
+            self.assertTrue(await refresh_menu(self.bot,self.backend,self.dispatcher))
+        self.backend.resolve.assert_awaited_once()
+        self.assertEqual(leave.call_args.args[-1],fresh)
+        self.assertIn('/account/ack?',self.backend.request.call_args.args[1])
+
     async def test_open_main_menu_is_refreshed_with_new_role(self):
         await self.state.update_data(control_message_id=77, home_presentation={'account': {'role': 'member'}},
             navigation_screen={'parents': [{'callback': 'u:home'}]})

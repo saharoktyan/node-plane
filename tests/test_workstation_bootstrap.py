@@ -111,12 +111,12 @@ shutil.copyfile(root / name, destination)
             self.assertEqual(result.returncode, 0, result.stderr)
             prefix = Path(self.env['HOME']) / '.local/share/node-plane-workstation' / channel
             self.assertTrue((prefix / 'node-plane').is_file())
-            launcher = Path(self.env['HOME']) / '.local/bin' / ('node-plane-' + channel)
+            launcher = Path(self.env['HOME']) / '.local/bin' / ('node-plane-dev' if channel == 'dev' else 'node-plane')
             self.assertEqual(launcher.resolve(), prefix / 'node-plane')
             self.assertEqual((prefix / 'receipt-path').read_text().strip(),
                 str(Path(self.env['XDG_CONFIG_HOME']) / 'node-plane-workstation' / channel))
         self.assertNotEqual((Path(self.env['HOME']) / '.local/bin/node-plane-dev').resolve(),
-            (Path(self.env['HOME']) / '.local/bin/node-plane-stable').resolve())
+            (Path(self.env['HOME']) / '.local/bin/node-plane').resolve())
         for channel, tag in (('dev', 'v1.0.0'), ('stable', 'v1.0.0-alpha.1')):
             self.assertNotEqual(self.run_installer('--channel', channel, '--tag', tag).returncode, 0)
 

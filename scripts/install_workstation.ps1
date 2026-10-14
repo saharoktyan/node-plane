@@ -62,18 +62,19 @@ function Install-WorkstationShortcut {
     $programs = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
     New-Item -ItemType Directory -Path $programs -Force | Out-Null
     $shell = New-Object -ComObject WScript.Shell
-    $shortcut = $shell.CreateShortcut((Join-Path $programs ("Node Plane Workstation ($Channel).lnk")))
+    $displayName = if ($Channel -eq 'dev') { 'Node Plane (Dev)' } else { 'Node Plane' }
+    $shortcut = $shell.CreateShortcut((Join-Path $programs "$displayName.lnk"))
     $terminal = Get-Command wt.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($terminal) {
         $shortcut.TargetPath = $terminal.Source
-        $shortcut.Arguments = '-w new new-tab --title "Node Plane Workstation" -d "{0}" "{1}"' -f $env:USERPROFILE, $executable
+        $shortcut.Arguments = '-w new new-tab --title "{0}" -d "{1}" "{2}"' -f $displayName, $env:USERPROFILE, $executable
     } else {
         # Console applications open in Windows' configured terminal host.
         $shortcut.TargetPath = $executable
         $shortcut.Arguments = ''
     }
     $shortcut.WorkingDirectory = $env:USERPROFILE
-    $shortcut.Description = 'Node Plane Workstation'
+    $shortcut.Description = $displayName
     $shortcut.IconLocation = "$executable,0"
     $shortcut.Save()
 }
@@ -98,10 +99,12 @@ try {
         $env:CARGO_DIST_FORCE_INSTALL_DIR = $previousForce
         $env:NODE_PLANE_CLI_INSTALL_DIR = $previousSpecific
     }
-    $launcher = Join-Path $channelInstallDir "node-plane-$Channel.cmd"
+    $launcherName = if ($Channel -eq 'dev') { 'node-plane-dev' } else { 'node-plane' }
+    $launcher = Join-Path $channelInstallDir "$launcherName.cmd"
     Set-Content -LiteralPath $launcher -Encoding ASCII -Value '@"%~dp0node-plane.exe" %*'
     Install-WorkstationShortcut
-    Write-Host "Open Node Plane Workstation ($Channel) from the Windows Start menu, or run: node-plane-$Channel"
+    $displayName = if ($Channel -eq 'dev') { 'Node Plane (Dev)' } else { 'Node Plane' }
+    Write-Host "Open $displayName from the Windows Start menu, or run: $launcherName"
 } finally {
     Remove-Item -LiteralPath $installer -ErrorAction SilentlyContinue
 }

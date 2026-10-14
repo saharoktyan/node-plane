@@ -104,6 +104,16 @@ class CredentialAttributionTests(TestCase):
 class APIAuditTests(TestCase):
     setUp = http_fixture.BackendHTTPTests.setUp
 
+    def test_profile_audit_title_prefers_username_then_telegram_id(self):
+        from backend.workstation_audit import WorkstationAudit
+        member = http_fixture.BackendHTTPTests.register(self,102,username='alice').json()
+        profile = self.db.connection.execute('SELECT id FROM backend_profiles WHERE owner_account_id=?',(member['id'],)).fetchone()[0]
+        action = 'PATCH /api/v1/profiles/' + profile
+        self.assertEqual(WorkstationAudit.describe(self.db.connection,action),'Update profile · @alice')
+        self.db.connection.execute("UPDATE backend_telegram_identity_details SET username=NULL WHERE subject='102'")
+        self.assertEqual(WorkstationAudit.describe(self.db.connection,action),'Update profile · 102')
+        self.assertEqual(WorkstationAudit.describe(self.db.connection,'POST /api/v1/system/updates/run'),'Run controller update')
+
     def test_workstation_reads_node_registry_without_telegram_delegation(self):
         with tempfile.TemporaryDirectory() as directory:
             service = WorkstationService(self.db, __import__('pathlib').Path(directory) / 'sessions')

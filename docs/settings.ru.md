@@ -6,7 +6,7 @@
 
 ## Installation defaults
 
-В Workstation откройте **Node Plane Settings → Installation → Installation defaults**, в боте — значения установки в настройках администратора.
+В Workstation откройте **Node Plane Settings → Basic → Installation defaults**, в боте — значения установки в настройках администратора.
 
 Выберите протоколы, транспорты Xray и режимы портов. В **Advanced options** находятся SNI, fingerprint, XHTTP path и параметры AWG. В Telegram нажатие на название параметра открывает его редактирование. Auto AWG показывает предпочтительный порт пресета.
 

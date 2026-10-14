@@ -40,12 +40,22 @@ async def refresh_menu(bot, backend, dispatcher):
     if not delivery:
         return False
     account = delivery['account']
+    original_account_id = account['id']
     recipient = account.get('telegram_user_id')
     if recipient:
         key = StorageKey(bot_id=bot.id, chat_id=recipient, user_id=recipient)
         async with dispatcher.fsm.events_isolation.lock(key=key):
             state = FSMContext(storage=dispatcher.storage, key=key)
             data = await state.get_data()
+            if account.get('deleted') and data.get('control_message_id'):
+                await backend.resolve(recipient, username=account.get('username'),
+                    first_name=account.get('first_name'), last_name=account.get('last_name'),
+                    language_code=account.get('language_code'))
+                account = await backend.me(recipient)
+                await leave_admin_panel(bot, backend, state, recipient, recipient,
+                    data['control_message_id'], account)
+                await backend.request('POST', f"/api/v1/integrations/telegram/menu-refresh/{original_account_id}/ack?revision={delivery['revision']}")
+                return True
             previous = (data.get('home_presentation') or {}).get('account') or {}
             lost_access = (account.get('role') != 'admin' or account.get('status') != 'approved') and (
                 previous.get('role') == 'admin' or admin_panel(data))

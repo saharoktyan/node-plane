@@ -61,15 +61,15 @@ class AnnouncementTests(unittest.TestCase):
         self.assertIsNone(self.service.claim(self.transport, str(uuid4())))
         self.assertEqual(self.service.get(self.actor, job['id'])['counts']['skipped'], 1)
 
-    def test_deleting_one_of_two_profiles_keeps_one_recipient(self):
+    def test_deleting_account_revokes_recipient_even_with_legacy_extra_profile(self):
         ProfileRepository(self.db).create_profile(runtime_name='second_profile',
             display_name='Second profile', owner_account_id=self.member['id'])
         ProfileCommands(self.db).execute(self.actor, str(uuid4()), action='delete',
             profile_id=self.profile_id, revision=1)
-        self.assertEqual(self.service.preview(self.actor, 'Hello')['recipients'], 1)
+        self.assertEqual(self.service.preview(self.actor, 'Hello')['recipients'], 0)
         job = self.service.queue(self.actor, 'Hello', str(uuid4()))
-        self.assertEqual(job['total'], 1)
-        self.assertEqual(self.service.claim(self.transport, str(uuid4()))['telegram_user_id'], 102)
+        self.assertEqual(job['total'], 0)
+        self.assertIsNone(self.service.claim(self.transport, str(uuid4())))
 
     def headers_for(self, user_id):
         return {**self.headers, "X-Node-Plane-Telegram-User-ID": str(user_id)}

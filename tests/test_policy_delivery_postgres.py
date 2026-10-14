@@ -53,8 +53,7 @@ class TrafficPolicyPostgresTests(unittest.TestCase):
     def setUp(self):
         fixture.BackupsPostgresTests.setUp(self)
         self.backups = self.service
-        self.profile = ProfileRepository(self.db).create_profile(runtime_name='traffic_test',
-            display_name='Traffic test', owner_account_id=self.admin.id)
+        self.profile = ProfileRepository(self.db).ensure_account_profile(self.admin.id)
         with self.db.transaction() as conn:
             conn.execute("""INSERT INTO backend_nodes
                 (key,title,region,protocols_json,xray_transports_json,applied_revision)

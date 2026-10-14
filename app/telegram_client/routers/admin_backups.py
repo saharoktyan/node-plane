@@ -4,7 +4,8 @@ from uuid import uuid4
 
 from aiogram import Bot, F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InlineKeyboardButton
+from aiogram.types import CallbackQuery, InlineKeyboardButton, Message
+from .states import BackupNameState
 
 from ..backend import BackendClient, BackendError
 from ..i18n import normalize_locale, tr
@@ -38,6 +39,8 @@ async def draw(query, bot, state, title, lines, rows, sections=()):
 
 
 async def overview(query, bot, backend, state):
+    await state.set_state(None)
+    await state.update_data(backup_draft=None)
     lang = normalize_locale((await state.get_data()).get("locale"))
     value = await backend.backups_overview(query.from_user.id)
     lines = []
@@ -84,7 +87,7 @@ async def catalog(query, bot, backend, state, offset):
     rows = [
         [
             button(
-                f"{item['created_at'][:19]} · {item['app_version']}",
+                f"{tr(lang, 'backups.kind.' + item.get('kind', 'automatic'))} · {item['created_at'][:19]} · {item['app_version']}" + (f" · {item['name']}" if item.get('name') else ""),
                 f"backup_detail:{item['id']}",
             )
         ]
@@ -215,6 +218,8 @@ async def backup_cb(
             metadata = Table((tr(lang, 'maintenance.rich.field'), tr(lang, 'maintenance.rich.value')), (
                 (tr(lang, 'backups.rich.created'), info['created_at'][:19]),
                 (tr(lang, 'backups.rich.version'), info['app_version']),
+                (tr(lang, 'backups.kind'), tr(lang, 'backups.kind.' + info.get('kind', 'automatic'))),
+                *((((tr(lang, 'backups.name'), info['name']),)) if info.get('name') else ()),
                 (tr(lang, 'profiles.title'), str(info['profiles'])),
                 (tr(lang, 'admin.nodes'), str(info['nodes']))))
             await draw(query, bot, state, 'backups.details',
@@ -236,8 +241,13 @@ async def backup_cb(
                 }
             nonce = uuid4().hex[:8]
             await state.update_data(
-                backup_draft={"body": body, "key": str(uuid4()), "nonce": nonce}
+                backup_draft={"body": body, "key": str(uuid4()), "nonce": nonce, "owner": query.from_user.id, "message_id": query.message.message_id}
             )
+            if body['action'] == 'create':
+                await state.set_state(BackupNameState.waiting_for_name)
+                await draw(query, bot, state, 'backups.name', [tr(lang, 'backups.name_prompt')],
+                    [[button(tr(lang, 'backups.skip'), f'backup_name_skip:{nonce}')], [button(tr(lang, 'back'), 'backups')]])
+                return
             back = (
                 f"backup_detail:{body['backup_id']}"
                 if body["action"] == "restore"
@@ -273,7 +283,7 @@ async def backup_cb(
             )
         elif action.startswith("backup_submit:"):
             draft = (await state.get_data()).get("backup_draft")
-            if not draft or draft["nonce"] != action.split(":")[1]:
+            if not draft or draft["nonce"] != action.split(":")[1] or draft.get("owner", query.from_user.id) != query.from_user.id:
                 return await overview(query, bot, backend, state)
             job = await backend.backup_command(
                 query.from_user.id, draft["body"], draft["key"]
@@ -309,3 +319,46 @@ async def backup_cb(
             [failure_note(lang, exc.code if isinstance(exc, BackendError) else None)],
             [[button(tr(lang, "back"), "backups")]],
         )
+
+
+async def confirm_manual(chat_id, user_id, message_id, bot, state):
+    lang = normalize_locale((await state.get_data()).get('locale'))
+    draft = (await state.get_data()).get('backup_draft')
+    if not draft or draft.get('owner') != user_id:
+        return
+    await state.set_state(None)
+    lines = (tr(lang, 'backups.create_note'),)
+    if draft['body'].get('name'):
+        lines += (draft['body']['name'],)
+    await render(bot, chat_id, Screen(tr(lang, 'backups.confirm'), lines, embedded_buttons=True, navigation=True),
+        [[button(tr(lang, 'back'), 'backup_create'), button(tr(lang, 'backups.create'), 'backup_submit:' + draft['nonce'], style='primary')]], state, message_id)
+
+
+@router.callback_query(F.data.startswith('backup_name_skip:'))
+async def skip_backup_name(query: CallbackQuery, bot: Bot, state: FSMContext):
+    await query.answer()
+    draft = (await state.get_data()).get('backup_draft') or {}
+    if draft.get('nonce') != query.data.split(':', 1)[1] or draft.get('owner') != query.from_user.id or draft.get('message_id') != query.message.message_id:
+        return
+    await confirm_manual(query.message.chat.id, query.from_user.id, query.message.message_id, bot, state)
+
+
+@router.message(BackupNameState.waiting_for_name, F.text)
+async def backup_name_message(message: Message, bot: Bot, state: FSMContext):
+    data = await state.get_data()
+    draft = data.get('backup_draft') or {}
+    if message.chat.type != 'private' or not message.from_user or draft.get('owner') != message.from_user.id:
+        return
+    try:
+        await message.delete()
+    except Exception:
+        pass
+    name = message.text.strip()
+    if len(name) > 128:
+        lang = normalize_locale(data.get('locale'))
+        await render(bot, message.chat.id, Screen(tr(lang, 'backups.name'), (tr(lang, 'backups.name_prompt'),), embedded_buttons=True, navigation=True),
+            [[button(tr(lang, 'backups.skip'), 'backup_name_skip:' + draft['nonce'])], [button(tr(lang, 'back'), 'backups')]], state, draft['message_id'])
+        return
+    draft['body']['name'] = name
+    await state.update_data(backup_draft=draft)
+    await confirm_manual(message.chat.id, message.from_user.id, draft['message_id'], bot, state)

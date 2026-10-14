@@ -264,6 +264,26 @@ pub(super) fn draw_button_color(
             ),
         inner,
     );
+    if let Some((prefix, value)) = label
+        .rsplit_once(": ")
+        .filter(|(_, value)| matches!(*value, "On" | "Off"))
+    {
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(format!("{prefix}: "), Style::default().fg(Color::White)),
+                Span::styled(
+                    value,
+                    Style::default().fg(if value == "On" {
+                        Color::Cyan
+                    } else {
+                        Color::White
+                    }),
+                ),
+            ]))
+            .alignment(ratatui::layout::Alignment::Center),
+            inner,
+        );
+    }
 }
 
 pub(super) fn button_pair(

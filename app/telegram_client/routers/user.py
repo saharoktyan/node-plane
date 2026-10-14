@@ -462,7 +462,9 @@ async def show_account_profile(chat_id: int, user_id: int, message_id: int,
 
 
 def profile_traffic_statistics(summary, locale):
-    traffic = summary.get('traffic') or {}
+    if not summary.get('traffic'):
+        return ()
+    traffic = summary['traffic']
     items = traffic.get('items') or []
     available = traffic.get('status') in {'current', 'unknown'}
     totals = {item['protocol']: traffic_item_total(item) for item in items} if available else {}
@@ -1145,6 +1147,13 @@ async def show_admin_menu(chat_id: int, user_id: int, message_id: int,
         except TimeoutError:
             raise BackendError('backend_unavailable', 503) from None
 
+    try:
+        guide = await optional_read(backend.request('GET', '/api/v1/system/onboarding', telegram_user_id=user_id))
+        if not guide.get('completed') and guide.get('next_step') is None:
+            await optional_read(backend.request('POST', '/api/v1/system/onboarding/complete/telegram', telegram_user_id=user_id, body={}))
+    except BackendError as exc:
+        if exc.status not in {503, 504}:
+            raise
     title, overview = await asyncio.gather(optional_read(backend.bot_title(user_id)),
         optional_read(backend.admin_overview(user_id)), return_exceptions=True)
     for result in (title, overview):

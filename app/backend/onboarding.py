@@ -30,7 +30,7 @@ def progress(db, actor):
     steps = [{'key': key, 'complete': bool(complete)} for key, complete in (
         ('defaults', configured), ('node', node is not None), ('protocols', applied),
         ('config', issued))]
-    for client in ('telegram', 'workstation'):
+    for client in ('workstation',):
         required = [step for step in steps if client == 'telegram' or step['key'] != 'config']
         if all(step['complete'] for step in required):
             with db.transaction() as conn:

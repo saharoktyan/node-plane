@@ -260,6 +260,11 @@ impl App {
             | Control::AccessRule(..)
             | Control::AccessGrantAll(..)
             | Control::AccessEdit
+            | Control::AccessIdentity
+            | Control::AccessProvisionNext
+            | Control::AccessProvisionSubmit
+            | Control::AccessProvisionCancel
+            | Control::AccessResultClose
             | Control::AccessNew
             | Control::AccessWizardNext
             | Control::AccessWizardBack
@@ -307,6 +312,7 @@ impl App {
             | Control::TemporaryRevoke
             | Control::TemporaryConfirm => return self.activate_temporary(control),
             Control::ControllerAudit
+            | Control::ControllerAuditFilter(_)
             | Control::ControllerRecoveryHistory
             | Control::ControllerAnnouncement
             | Control::ControllerAnnouncementCompose

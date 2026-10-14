@@ -8,7 +8,7 @@ Usage: bash install_workstation.sh [--channel dev|stable] [--tag vX.Y.Z[-alpha.N
 
 Installs Workstation on Linux x86_64 or macOS (Intel/Apple Silicon) and configures PATH.
 The default stable channel selects stable releases. Use --channel dev for alpha builds.
-Stable and dev installations are separate. Run node-plane-stable or node-plane-dev.
+Stable and dev installations are separate. Run node-plane or node-plane-dev.
 Saved installation profiles and SSH keys are retained.
 EOF
 }
@@ -77,9 +77,13 @@ if download "$base/node-plane-cli-installer.sh" "$tmp_dir/installer.sh"; then
   [[ -x "$install_dir/node-plane" ]] || { echo 'Installed Workstation executable is missing.' >&2; exit 1; }
   install_dir="$(cd "$install_dir" && pwd -P)"
   mkdir -p "$HOME/.local/bin"
-  ln -sfn "$install_dir/node-plane" "$install_dir/node-plane-$channel"
-  ln -sfn "$install_dir/node-plane" "$HOME/.local/bin/node-plane-$channel"
-  echo "[4/4] Workstation installed. Open a new terminal, then run: node-plane-$channel"
+  launcher=node-plane
+  if [[ "$channel" == dev ]]; then
+    launcher=node-plane-dev
+    ln -sfn "$install_dir/node-plane" "$install_dir/$launcher"
+  fi
+  ln -sfn "$install_dir/node-plane" "$HOME/.local/bin/$launcher"
+  echo "[4/4] Workstation installed. Open a new terminal, then run: $launcher"
   exit 0
 fi
 

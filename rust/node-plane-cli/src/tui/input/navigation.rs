@@ -158,6 +158,22 @@ impl App {
         }
     }
     pub(in crate::tui) fn move_spatial(&mut self, direction: KeyCode) -> bool {
+        if matches!(self.screen, Screen::Controller)
+            && self.controller_controls().get(self.controller.selected)
+                == Some(&Control::ControllerAnnouncementInput)
+        {
+            return false;
+        }
+        if matches!(self.screen, Screen::Nodes)
+            && let Some(Control::NodesEditField(index)) =
+                self.nodes_controls().get(self.nodes_selected)
+            && self.nodes.editor.as_ref().is_some_and(|editor| {
+                matches!(editor.fields[*index].key, "notes" | "awg_parameters")
+            })
+        {
+            return false;
+        }
+
         if !matches!(
             direction,
             KeyCode::Up | KeyCode::Down | KeyCode::Left | KeyCode::Right

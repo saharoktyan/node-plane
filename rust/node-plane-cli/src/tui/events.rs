@@ -149,6 +149,7 @@ impl App {
                         }
                     }
                     crate::nodes::Update::EditContext(source, defaults) => {
+                        self.manual_awg_original = None;
                         match crate::node_editor::Editor::new(source, &defaults) {
                             Ok(editor) => {
                                 self.nodes.editor = Some(editor);
@@ -419,7 +420,15 @@ impl App {
                         self.nodes_background = false;
                         self.access_busy = false;
                         if let Err(error) = result {
-                            self.error = error;
+                            if self.controller.telegram_role_pending.take().is_some() {
+                                self.controller.telegram_result =
+                                    Some(crate::access::role_error(&error));
+                                self.controller.selected = 0;
+                                self.error.clear();
+                                self.screen = Screen::Controller;
+                            } else {
+                                self.error = error;
+                            }
                         }
                         return;
                     }
@@ -437,8 +446,36 @@ impl App {
                     };
                     self.wizard_loading = false;
                     let error = result.err().unwrap_or_default();
+                    if self.controller.telegram_role_pending.take().is_some() && !error.is_empty() {
+                        self.controller.telegram_result = Some(crate::access::role_error(&error));
+                        self.screen = Screen::Controller;
+                        self.error.clear();
+                        return;
+                    }
+
+                    if self.access.role_pending.take().is_some() && !error.is_empty() {
+                        self.access.account_action = None;
+                        self.access.result = Some(crate::access::role_error(&error));
+                        self.error.clear();
+                        return;
+                    }
+
                     if !error.is_empty() {
-                        self.error = error;
+                        if let Some(draft) = &mut self.access.provision {
+                            draft.confirm = false;
+                            self.access.selected = 0;
+                            self.error = if error.contains("telegram_id_required") {
+                                "This username is not known to the bot. Enter the user's Telegram ID.".into()
+                            } else if error.contains("invalid_telegram_identity") {
+                                "Enter a positive Telegram ID or @username.".into()
+                            } else if error.contains("account_disabled") {
+                                "This account is blocked. Open its profile to manage it.".into()
+                            } else {
+                                "The account could not be created. Check the connection and retry the same draft.".into()
+                            };
+                        } else {
+                            self.error = error;
+                        }
                     }
                     if failed && let Some(wizard) = &mut self.node_wizard {
                         if self.error.contains("local_node_exists") {

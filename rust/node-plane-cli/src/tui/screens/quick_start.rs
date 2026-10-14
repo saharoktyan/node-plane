@@ -28,11 +28,11 @@ pub(in crate::tui) fn draw_quick_start(
                 });
                 text.push_str(&format!("{} {label}\n", if done { "✓" } else { "○" }));
                 if key == "defaults" {
-                    text.push_str("  Install Node Plane → Basic → Installation defaults\n");
+                    text.push_str("  Node Plane Settings → Basic → Installation defaults\n");
                 }
             }
             text.push_str(match value["next_step"].as_str().unwrap_or("done") {
-                "defaults" => "\nContinue accepts current defaults. To customize them, open Install Node Plane → Basic → Installation defaults first.",
+                "defaults" => "\nContinue accepts current defaults. To customize them, open Node Plane Settings → Basic → Installation defaults first.",
                 "node" => "\nContinue opens the node creation wizard. Choose Local for a node on this controller.",
                 "protocols" => "\nContinue opens the node. Set up its agent, then bootstrap protocols. Wait for a successful operation.",
                 "config" => "\nServer setup is complete.",

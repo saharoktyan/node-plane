@@ -106,7 +106,7 @@ class MaintenanceRichTests(IsolatedAsyncioTestCase):
         with patch.object(backups, 'render', AsyncMock()) as draw:
             await backups.backup_cb(self.query, self.bot, backend, self.state)
         screen, rows = draw.call_args.args[2:4]
-        self.assertEqual(len(screen.sections[0].tables[0].rows), 4)
+        self.assertEqual(len(screen.sections[0].tables[0].rows), 5)
         self.assertEqual(rows[0][0].style, 'danger')
         self.query.data = 'backup_restore:snapshot'
         with patch.object(backups, 'render', AsyncMock()) as draw:

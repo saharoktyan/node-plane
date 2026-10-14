@@ -15,7 +15,7 @@ class AdminNavigationSectionsTests(IsolatedAsyncioTestCase):
         overview = {'pending_requests': 0, 'nodes_enabled': 1, 'nodes_total': 1,
             'profiles_active': 1, 'profiles_total': 1, 'problem_nodes': [], 'updates': {'available': True}}
         backend = SimpleNamespace(bot_title=AsyncMock(return_value={'title': 'Node Plane'}),
-            admin_overview=AsyncMock(return_value=overview))
+            request=AsyncMock(return_value={'completed': True}), admin_overview=AsyncMock(return_value=overview))
         for locale in ('ru', 'en'):
             self.state_data['locale'] = locale
             with patch.object(user, 'render', new_callable=AsyncMock) as draw:

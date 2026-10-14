@@ -43,6 +43,7 @@ pub(super) fn terminal_too_small(area: Rect) -> bool {
 }
 
 pub(super) fn draw(frame: &mut Frame, app: &App) -> Vec<Hit> {
+    app.text_input.borrow_mut().reset_area();
     let area = frame.area();
     if app.restart_required {
         return draw_restart(frame, app);
@@ -271,7 +272,7 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
             button_pair(
                 frame,
                 sections[1],
-                ("Delete profile", "Cancel"),
+                ("Delete account", "Cancel"),
                 app.confirm,
                 (Control::ConfirmDelete(true), Control::ConfirmDelete(false)),
                 &mut hits,
@@ -497,7 +498,13 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
             }
         }
     };
-    let hint = if !app.quick_start_completed() {
+    let hint = if !app.quick_start_completed()
+        && app.error.is_empty()
+        && app.controller.telegram_result.is_none()
+        && app.access.result.is_none()
+        && app.access.account_action.is_none()
+        && app.access.provision.is_none()
+    {
         format!("{hint}   F1: Quick Start")
     } else {
         hint.to_owned()

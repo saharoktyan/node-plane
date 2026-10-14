@@ -9,16 +9,16 @@ Workstation is the administrator's terminal interface. It connects to a Linux co
 Use the [README installation commands](../README.md#install-workstation), then run:
 
 ```sh
-node-plane-dev
+node-plane
 ```
 
 Allow at least **70 columns × 30 rows**. Use a larger terminal for tables and long forms. To select a separate local data directory:
 
 ```sh
-node-plane-dev --state-dir /path/to/workstation-data
+node-plane --state-dir /path/to/workstation-data
 ```
 
-For stable, run `node-plane-stable`. On Windows, the installer adds **Node Plane Workstation (dev)** or **Node Plane Workstation (stable)** to the Start menu. Find it through Windows Search to open Workstation in a terminal. Updating preserves the shortcut; uninstalling Workstation removes it.
+On Windows, the installer adds **Node Plane** or **Node Plane (Dev)** to the Start menu. Find it through Windows Search to open Workstation in a terminal. Updating preserves the shortcut; uninstalling Workstation removes it.
 
 ## Connect to a controller
 
@@ -33,7 +33,7 @@ The header shows connection and loading status. SSH connections are reused acros
 - **↑ / ↓ / ← / →** move between controls; **Enter** activates the selected control.
 - **Tab / Shift+Tab** move focus. Hovering the pointer changes focus; clicking activates.
 - The mouse wheel scrolls long pages. Use the scrollbar to move through a page.
-- **Back** returns to the parent menu. **Esc** backs out of a submenu or closes the current section; from the empty workspace it opens the exit confirmation.
+- **Back** returns to the parent menu. **Esc** or **Backspace** outside a text field backs out of a submenu or closes the current section; from the empty workspace it opens the exit confirmation.
 - In wizards, **Cancel** closes the first step; **Back** returns one step and keeps the draft. Confirmation dialogs use full text buttons.
 - In the sidebar profile selector, **← / →** switches the installation profile while keeping focus on its name.
 - A **×** marks an unavailable action. Controller sections become available after installation is confirmed.
@@ -58,7 +58,7 @@ The **Offer service and operation recovery** option retains its last selection a
 
 Quick Start appears beside the sidebar until setup is complete or you confirm **Dismiss**. Completion is saved automatically, including when you do not select **Done**. Removing nodes does not restore it. In NPW the guide ends after installing the node protocols; create user devices and obtain ordinary configurations in the Telegram bot. If installation detection is unconfirmed, use **Check installation**.
 
-Automatic check, backup and alert preferences appear when the corresponding feature is enabled. Select an interval directly; backups also offer a retention count. **Node Plane Settings → Basic** contains installation defaults and general controller options.
+Automatic check, backup and alert preferences appear when the corresponding feature is enabled. Select an interval directly; automatic backups also offer a retention count. Manual backups have an optional name and remain until an administrator deletes them. **Node Plane Settings → Basic** contains installation defaults and general controller options.
 
 Open **Node Plane Settings → Basic → Telegram** to change the bot token or add/remove administrators by Telegram ID. Known usernames appear in the list. The token is hidden, verified before saving and never included in local operation journals. Changing the token restarts the Telegram service; administrator changes apply immediately. Your own administrator rights cannot be removed here.
 
@@ -91,15 +91,15 @@ Open **Settings → Appearance** to choose a theme or custom accent. Built-in th
 
 The optional `section_border` field sets decorative section borders separately from the accent. Use a short name and `#RRGGBB` colors. Invalid theme files are skipped with a warning.
 
-## Stable and dev channels
+## Channels
 
-Dev NPW installs and manages dev controllers; stable NPW manages stable controllers. The form channel is fixed by the build. Management checks the installed controller version: changing the update preference alone does not unlock access. Installation detection and diagnostics without recovery remain available.
+Node Plane (Dev) installs and manages dev controllers; Node Plane manages main controllers. The form channel is fixed by the build. Management checks the installed controller version: changing the update preference alone does not unlock access. Installation detection and diagnostics without recovery remain available.
 
 Installers use separate `$HOME/.local/share/node-plane-workstation/dev` and `stable` directories, updater receipts and launch commands. Dev uses the local data directory `node-plane-dev`; stable uses `node-plane`. Each NPW only updates within its own channel.
 
 To transition:
 
-1. In the source NPW open **Settings → Profiles**, select the profile and choose **Copy to stable NPW** or **Copy to dev NPW**.
+1. In the source NPW open **Settings → Profiles**, select the profile and choose **Copy to Node Plane** or **Copy to Node Plane (Dev)**.
 2. Open or restart the target NPW. Connection metadata and the selected account are copied; the original profile stays. SSH keys, host fingerprints and operation journals are not copied: verify the server fingerprint and provide SSH access again if needed.
 3. In **Node Plane Updates**, confirm switching the controller to this NPW's channel, select a release and update the installation. Until the runtime is updated, only the transition is available; ordinary management is blocked.
 
@@ -116,3 +116,11 @@ After a successful local update, select **Restart** to open the updated Workstat
 For configurations, use **Copy URI** or **Save files** where offered. Telegram also provides QR delivery. See [Temporary configurations](temporary-configs.md) and [Troubleshooting](troubleshooting.md).
 
 Open **Settings → Documentation** to select a named guide with a short description; Enter or click opens its GitHub page in your browser. For a local node, entering `.` as its public address uses the controller address saved in the selected installation profile.
+
+Notes, announcements and manual AWG parameters support multiline input, automatic wrapping, a visible cursor and a scrollbar. Use arrows to move the cursor, Page Up/Down or the mouse wheel to scroll, and Tab to move to the dialog buttons. Backspace deletes text inside input fields and acts as Back/Cancel elsewhere.
+
+**Access → Profiles → New profile** asks for a Telegram ID or a known @username and creates an account together with its default VPN profile. Open the resulting profile to configure access. An existing account reuses its profile. Only its owner can rename an administrator profile.
+
+Workstation Audit shows readable actions and profile identities, with **All / Errors** filters. Event details retain the API endpoint.
+
+Each account has one VPN profile, even before it receives server access. **Delete account** removes both; a later access request creates a new account and profile. **Freeze** pauses VPN access and **Block** restricts account access without deleting either entity. An administrator can rename only their own administrator profile.
