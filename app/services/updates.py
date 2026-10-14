@@ -87,6 +87,8 @@ def _trim_log_tail(text: str, limit: int = 1200) -> str:
 
 
 def _last_run_status_from_show(payload: Dict[str, str], fallback: str) -> str:
+    if payload.get('LoadState') == 'not-found':
+        return fallback
     active = payload.get("ActiveState", "").strip().lower()
     sub = payload.get("SubState", "").strip().lower()
     result = payload.get("Result", "").strip().lower()
@@ -335,6 +337,7 @@ def refresh_update_run_state(timeout: int = 20) -> Dict[str, str]:
             timeout=timeout,
         )
         show_payload = _parse_show_output((show_proc.stdout or "").strip())
+        unit_missing = show_payload.get('LoadState') == 'not-found'
         if show_proc.returncode == 0:
             status = _last_run_status_from_show(show_payload, str(state.get("last_run_status") or "never"))
         else:
@@ -350,22 +353,33 @@ def refresh_update_run_state(timeout: int = 20) -> Dict[str, str]:
             state = app_settings.get_update_state()
             state["last_run_status"] = status
             state["last_run_log_tail"] = log_tail or str(state.get("last_run_log_tail") or "")
-            return state
+            return {**state, 'last_run_unit_missing': unit_missing}
         if status in {"success", "failed"} and state.get("last_run_status") != status:
             app_settings.record_update_run_finished(status, _utcnow_iso(), log_tail if status == "failed" else "")
             state = app_settings.get_update_state()
             state["last_run_unit"] = unit_name
-            return state
+            return {**state, 'last_run_unit_missing': unit_missing}
         if status == "failed" and log_tail and state.get("last_run_log_tail") != log_tail:
             app_settings.set_update_run_log_tail(log_tail)
             state = app_settings.get_update_state()
             state["last_run_unit"] = unit_name
-        return state
-    except Exception as exc:
-        if str(state.get("last_run_status") or "") == "running":
-            app_settings.record_update_run_finished("failed", _utcnow_iso(), str(exc))
-            state = app_settings.get_update_state()
-        return state
+        return {**state, 'last_run_unit_missing': unit_missing}
+    except Exception:
+        # A failed observation is not evidence that the installation failed.
+        return {**state, 'last_run_observation_error': True}
+
+
+def confirm_collected_update(unit_name: str, status: str) -> bool:
+    """Persist the outcome already verified against an exact stack-job receipt."""
+    if status not in {'success', 'failed'}:
+        return False
+    with _update_run_lock:
+        state = app_settings.get_update_state()
+        if state.get('last_run_unit') != unit_name:
+            return False
+        if state.get('last_run_status') != status:
+            app_settings.record_update_run_finished(status, _utcnow_iso(), state.get('last_run_log_tail', '') if status == 'failed' else '')
+        return True
 
 
 def schedule_update(timeout: int = 30, branch: str | None = None, target_ref: str | None = None, stack_job_id: str | None = None) -> Dict[str, str]:

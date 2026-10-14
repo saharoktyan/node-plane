@@ -41,6 +41,8 @@ async def _locale(state: FSMContext) -> str:
 
 
 def _friendly_error(locale: str, error: BackendError) -> str:
+    if error.code in {'system_cleanup_in_progress', 'update_pending', 'restore_in_progress', 'maintenance_busy'}:
+        return tr(locale, 'settings.error_maintenance')
     if error.status == 503:
         return tr(locale, 'settings.error_unavailable')
     return tr(locale, 'settings.error_generic')

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 1.0.0-alpha.11 - 2026-10-14
+
+- Reconcile collected systemd update units from exact durable terminal receipts, preserve unknown outcomes and persist confirmed completion so the next update can start. Add a guarded one-time repair for older controllers stuck after a confirmed rollback.
+- Show maintenance explanations in Telegram and visible operation status during Workstation recovery, including controller update results.
+- Require explicit installed shared paths in the repair utility, report specific evidence failures, and validate its real CLI path including parsed UUID arguments.
+- Build new release artifacts from the current repository history; keep commit verification enabled for controller installation.
+
 ## 1.0.0-alpha.10 - 2026-10-14
 
 - Replace repeated temporary-lease expiry service launches with a persistent worker, recover the old start-limit failure during runtime synchronization, and require an active expiry worker before retrieving credentials. Preserve expiry deadlines and read-only artifact retrieval.

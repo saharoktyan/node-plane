@@ -52,7 +52,11 @@ pub(in crate::tui) fn draw_running(frame: &mut Frame, app: &App, area: Rect) {
             } else {
                 format!("Step {step}/{total}")
             },
-            app.stage.as_str(),
+            if app.stage.is_empty() {
+                "Waiting for the operation status…"
+            } else {
+                app.stage.as_str()
+            },
         )
     };
     let block = section_block(title);

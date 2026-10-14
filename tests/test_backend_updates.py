@@ -40,6 +40,7 @@ class BackendUpdateTests(TestCase):
                  'action': 'upgrade', 'kind': 'head', 'commit': 'b' * 40}]}),
             is_driver_agents_setup_supported=Mock(return_value=True),
             schedule_update=Mock(return_value={'status': 'running', 'unit_name': 'test-update'}),
+            confirm_collected_update=Mock(return_value=True),
             refresh_update_run_state=Mock(return_value={'last_run_status': 'success', 'last_run_unit': 'test-update'}))
         self.driver = SimpleNamespace(binary_info=Mock(return_value={'commit': 'a' * 40}),
             inspect_node_services=Mock(return_value={'agent_commit': 'a' * 40, 'runtime_commit': 'a' * 40}), **driver)

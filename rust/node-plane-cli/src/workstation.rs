@@ -505,6 +505,11 @@ pub async fn recover_operations(
         let mut offset = 0;
         let mut reviewed = std::collections::HashSet::new();
         loop {
+            if request.workflow.stop.load(Ordering::Relaxed) {
+                lines.push("Stopped observing recovery; confirmed server actions continue independently.".into());
+                break;
+            }
+            stage(tx, "Reading queued and blocked operation status");
             let page = backend::request(session, &credential, Method::GET,
                 &format!("/api/v1/system/recovery?offset={offset}"), None, None).await?;
             let items = page["items"].as_array().context("Invalid recovery inventory")?;
@@ -537,14 +542,22 @@ pub async fn recover_operations(
                         _ => bail!("Unsupported recovery action"),
                     };
                     if !events::confirm(tx, "Recover this operation?", format!("{kind}: {id}\nStatus: {status}\nNode: {node}\n\n{explanation}"))? { continue; }
-                    stage(tx, "Checking the existing operation outcome");
+                    stage(tx, &format!("Checking {kind} operation {id}; no installation is repeated"));
                     match backend::request(session, &credential, Method::POST, &path, None, None).await {
                         Ok(result) => {
+                            if kind == "update" && result["kind"] == "stack" {
+                                let snapshot = UpdateSnapshot::parse(&result, Uuid::parse_str(&id)?)?;
+                                let _ = tx.send(Event::Update(snapshot));
+                            }
+                            stage(tx, &format!("Recovery check completed: {}", text(&result["status"])));
                             lines.push(format!("  {action}: {}", text(&result["status"])));
                             if result["status"] == "blocked" { lines.push("  The outcome is still unconfirmed; the block remains.".into()); }
                             if let Some(id) = result["replacement_id"].as_str() { lines.push(format!("  Recovery queued: {id}")); }
                         },
-                        Err(_) => lines.push(format!("  {action}: result unconfirmed. Check this exact operation again; no automatic retry.")),
+                        Err(_) => {
+                            stage(tx, "Recovery result is unconfirmed; returning to diagnostics");
+                            lines.push(format!("  {action}: result unconfirmed. Check this exact operation again; no automatic retry."));
+                        },
                     }
                 }
             }

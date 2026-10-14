@@ -469,6 +469,22 @@ class UpdateService:
         if state.get('last_run_unit') != plan.get('unit_name'):
             self._finish(job['id'], 'blocked', {**plan, 'error_code': 'update_verification_unavailable'})
             return True
+        if state.get('last_run_unit_missing'):
+            # --collect removes completed transient units. Only the terminal
+            # evidence for this exact job can replace the lost systemd status.
+            progress = self._stack_progress(job['id'])
+            if progress.get('status') == 'failed' and progress.get('rollback_status') in {'succeeded', 'failed'}:
+                state = {**state, 'last_run_status': 'failed'}
+            elif progress.get('status') == 'succeeded':
+                state = {**state, 'last_run_status': 'success'}
+            else:
+                self._finish(job['id'], 'blocked', {**plan, 'error_code': 'update_verification_unavailable'})
+                return True
+            if not self.updater.confirm_collected_update(plan['unit_name'], state['last_run_status']):
+                self._finish(job['id'], 'blocked', {**plan, 'error_code': 'update_verification_unavailable'})
+                return True
+            if progress.get('components'):
+                plan['components'] = progress['components']
         if state.get('last_run_status') == 'failed':
             plan.update(rollback_status=progress.get('rollback_status', 'unknown'),
                 error_code=progress.get('error_code', 'core_update_failed'))

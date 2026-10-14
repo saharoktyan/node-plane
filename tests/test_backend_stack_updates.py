@@ -55,6 +55,30 @@ class StackUpdateTests(TestCase):
             service.run_one()
         self.assertEqual(service.get(self.actor, job['id'])['status'], 'blocked')
 
+    def test_collected_failed_unit_finishes_exact_job_and_releases_update_gate(self):
+        service = self.service()
+        job = self.queue(service)
+        service.run_one()
+        service.updater.refresh_update_run_state.return_value.update(last_run_status='running', last_run_unit_missing=True)
+        with patch.object(service, '_stack_progress', return_value={'status':'failed', 'rollback_status':'succeeded', 'error_code':'core_update_failed'}):
+            service.run_one()
+        self.assertEqual(service.get(self.actor, job['id'])['status'], 'rolled_back')
+        self.assertIsNone(self.db.connection.execute('SELECT job_id FROM backend_controller_update_gate').fetchone())
+        service.updater.schedule_update.assert_called_once()
+        service.updater.confirm_collected_update.assert_called_once_with('test-update','failed')
+
+    def test_collected_unit_without_final_receipt_keeps_gate_and_never_replays(self):
+        service = self.service()
+        job = self.queue(service)
+        service.run_one()
+        service.updater.refresh_update_run_state.return_value.update(last_run_status='running', last_run_unit_missing=True)
+        with patch.object(service, '_stack_progress', return_value={'status':'failed'}):
+            service.run_one()
+        self.assertEqual(service.get(self.actor, job['id'])['status'], 'blocked')
+        self.assertIsNotNone(self.db.connection.execute('SELECT job_id FROM backend_controller_update_gate').fetchone())
+        service.updater.schedule_update.assert_called_once()
+        service.updater.confirm_collected_update.assert_not_called()
+
     def test_agent_failure_is_partial_and_does_not_reinstall_controller(self):
         service = self.service()
         self.node()

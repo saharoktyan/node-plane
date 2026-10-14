@@ -17,6 +17,36 @@ fn header_status_tracks_installation_probe_and_connection() {
 }
 
 #[test]
+fn recovery_wait_never_displays_an_empty_preparation_dialog() {
+    let mut app = test_profile_app();
+    app.form.select_action(Action::Diagnose);
+    app.screen = Screen::Running;
+    app.stage.clear();
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    let text: String = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|c| c.symbol())
+        .collect();
+    assert!(text.contains("Waiting for the operation status"));
+    app.event(Event::Stage(
+        "Checking update operation; no installation is repeated".into(),
+    ));
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    let text: String = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|c| c.symbol())
+        .collect();
+    assert!(text.contains("Checking update operation"));
+}
+
+#[test]
 fn startup_update_offer_waits_for_connection_then_opens_on_idle_with_its_own_title() {
     let mut app = test_profile_app();
     app.screen = Screen::Idle;

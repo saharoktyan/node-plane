@@ -388,6 +388,28 @@ class UpdatesTests(unittest.TestCase):
         self.assertEqual(state["last_run_status"], "success")
         self.assertEqual(state["last_run_log_tail"], "")
 
+    def test_collected_unit_is_not_mistaken_for_running_or_successful_proof(self):
+        self.app_settings.record_update_run_started('2026-04-01T00:00:00Z','node-plane-update-1')
+        missing = SimpleNamespace(returncode=1,stdout='LoadState=not-found\nActiveState=inactive\nResult=success\nExecMainStatus=0\n',stderr='')
+        journal = SimpleNamespace(returncode=0,stdout='failed\n',stderr='')
+        with patch('services.updates.subprocess.run',side_effect=[missing,journal]):
+            state = self.updates.refresh_update_run_state()
+        self.assertTrue(state['last_run_unit_missing'])
+        self.assertEqual(state['last_run_status'],'running')
+        self.assertEqual(self.updates._last_run_status_from_show({'LoadState':'not-found','Result':'success'},'running'),'running')
+        self.assertFalse(self.updates.confirm_collected_update('another-update','failed'))
+        self.assertTrue(self.updates.confirm_collected_update('node-plane-update-1','failed'))
+        self.assertEqual(self.app_settings.get_update_state()['last_run_status'],'failed')
+
+    def test_observation_timeout_does_not_invent_a_failed_update(self):
+        import subprocess
+        self.app_settings.record_update_run_started('2026-04-01T00:00:00Z','node-plane-update-1')
+        with patch('services.updates.subprocess.run',side_effect=subprocess.TimeoutExpired('systemctl',20)):
+            state = self.updates.refresh_update_run_state()
+        self.assertTrue(state['last_run_observation_error'])
+        self.assertEqual(state['last_run_status'],'running')
+        self.assertEqual(self.app_settings.get_update_state()['last_run_status'],'running')
+
 
 
 

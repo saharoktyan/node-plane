@@ -43,6 +43,10 @@ A successful compile is not Windows/macOS interactive acceptance. Check PATH, no
 
 ## Compatibility and rollback
 
+Published tags must keep pointing to the commit used to build their artifacts. Rewriting authors or ancestry changes commit IDs even when files stay the same. Moving a published tag without rebuilding its artifacts causes controller archive verification to refuse the release. Import older history on a separate branch or merge it without rewriting published commits; publish a new version after any necessary rewrite.
+
+On older controllers, a completed transient update unit removed by systemd's `--collect` can leave an unfinished update gate. `scripts/recover_collected_update.py` is a standalone repair for a failed core update with a successful rollback receipt. Copy it to the host and run it from the installed controller directory using `PYTHONPATH=app .venv/bin/python /path/to/recover_collected_update.py OPERATION_UUID --shared-dir /opt/node-plane/shared`. Use the actual shared directory of that installation. The utility selects its runtime paths before loading the installed configuration; an interactive shell does not inherit systemd's environment. It takes the worker lock, checks the exact job/unit/gate, refuses an existing unit or incomplete rollback, records the recovery, and never runs the installer. It does not repair mismatched release artifacts.
+
 Use matching release artifacts unless a combination has explicit acceptance evidence. An application rollback does not downgrade PostgreSQL. Respect migration `minimum_reader` and driver/agent journal format compatibility. Keep journals and the actual previous working release.
 
 Record tested OS, component versions, failure scenarios and limits in release evidence. Changelog entries describe user-visible changes; user guides describe the current behavior without release-history narration.
