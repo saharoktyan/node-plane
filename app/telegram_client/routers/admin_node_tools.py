@@ -7,7 +7,7 @@ from aiogram.fsm.context import FSMContext
 from ..backend import BackendClient, BackendError
 from ..i18n import normalize_locale, tr
 from ..screens import Screen, Section, Table, server_label
-from .common import render, schedule_refresh
+from .common import installation_progress_lines, render, schedule_refresh
 from ..navigation import remember_node, remember_label
 from .callbacks import AdminNodeCallback, NodeSettingsCallback, EditNodeFieldCallback
 
@@ -328,7 +328,7 @@ async def show_bootstrap(chat_id, user_id, message_id, job, bot, backend, state)
         if job.get('error_code'):
             lines += (job['error_code'],)
     if job.get('progress'):
-        lines += (tr(locale, 'installation_progress.' + job['progress']['stage']),)
+        lines += installation_progress_lines(job['progress'],locale)
     rows = [[button(locale, 'node_tools.refresh', 'bootstrap_status:' + job['id'])]]
     if job['status'] == 'blocked' and job.get('child_id'):
         from .callbacks import RolloutStatusCallback
@@ -373,7 +373,7 @@ async def show_job(chat_id, user_id, message_id, job, bot, state, backend=None):
     locale = normalize_locale((await state.get_data()).get('locale'))
     lines = [tr(locale, 'operation.' + job['status'])]
     if job.get('progress'):
-        lines.append(tr(locale, 'installation_progress.' + job['progress']['stage']))
+        lines.extend(installation_progress_lines(job['progress'],locale))
     result = job.get('result') or {}
     if job['status'] == 'succeeded':
         lines = [tr(locale, 'node_tools.done.' + job['action'])]

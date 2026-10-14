@@ -87,6 +87,13 @@ impl App {
                         {
                             return;
                         }
+                        if command.request().is_ok_and(|r| r.0 == hyper::Method::GET)
+                            && self
+                                .controller_request_context
+                                .is_some_and(|context| !context.is_current(self))
+                        {
+                            return;
+                        }
                         if !matches!(&command, crate::controller::Command::Verify(_)) {
                             self.remember_installed();
                         }
@@ -420,6 +427,12 @@ impl App {
                         self.nodes_background = false;
                         self.access_busy = false;
                         if let Err(error) = result {
+                            if self
+                                .controller_request_context
+                                .is_some_and(|context| context.read && !context.is_current(self))
+                            {
+                                return;
+                            }
                             if self.controller.telegram_role_pending.take().is_some() {
                                 self.controller.telegram_result =
                                     Some(crate::access::role_error(&error));
@@ -461,18 +474,10 @@ impl App {
                     }
 
                     if !error.is_empty() {
-                        if let Some(draft) = &mut self.access.provision {
-                            draft.confirm = false;
+                        if self.access.provision.take().is_some() {
+                            self.access.result = Some(crate::access::provision_error(&error));
                             self.access.selected = 0;
-                            self.error = if error.contains("telegram_id_required") {
-                                "This username is not known to the bot. Enter the user's Telegram ID.".into()
-                            } else if error.contains("invalid_telegram_identity") {
-                                "Enter a positive Telegram ID or @username.".into()
-                            } else if error.contains("account_disabled") {
-                                "This account is blocked. Open its profile to manage it.".into()
-                            } else {
-                                "The account could not be created. Check the connection and retry the same draft.".into()
-                            };
+                            self.error.clear();
                         } else {
                             self.error = error;
                         }

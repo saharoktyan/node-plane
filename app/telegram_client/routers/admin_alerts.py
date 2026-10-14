@@ -50,7 +50,7 @@ async def alerts_cb(
         if query.data.startswith("alert_pref:"):
             parts = query.data.split(':')
             field = parts[1]
-            if field == 'interval_minutes' and len(parts) == 3 and parts[2] in {'5', '15'}:
+            if field == 'interval_minutes' and len(parts) == 3 and parts[2] in {'3', '5', '10'}:
                 change = {field: int(parts[2])}
             elif field in {'enabled', 'notify_resolved'} and len(parts) == 3 and parts[2] in {'on', 'off'}:
                 change = {field: parts[2] == 'on'}
@@ -111,7 +111,7 @@ async def alerts_cb(
                 for selected in (True, False))
         intervals = tuple(button(tr(locale, 'alerts.minutes', minutes=minutes),
             f'alert_pref:interval_minutes:{minutes}').model_copy(
-                update={'style': 'primary' if value['interval_minutes'] == minutes else None}) for minutes in (5, 15))
+                update={'style': 'primary' if value['interval_minutes'] == minutes else None}) for minutes in (3, 5, 10))
         sections = [Section(tr(locale, 'alerts.rich.monitoring'),
             (tr(locale, 'alerts.last', at=(last.get('at') or '—')[:19],
                 status=tr(locale, 'alerts.status.' + last.get('status', 'never'))),), rows=(choices('enabled'),)),
@@ -123,7 +123,8 @@ async def alerts_cb(
                 rows=((button(tr(locale, 'alerts.active_title'), 'alerts_active:0'),),)))
         else:
             sections.append(Section(tr(locale, 'alerts.active_title'), (tr(locale, 'alerts.none'),)))
-        sections.append(Section(tr(locale, 'alerts.rich.details'), collapsed=True,
+        opened = any(getattr(block, 'type', None) == 'details' and getattr(block, 'summary', None) == tr(locale,'alerts.rich.details') and getattr(block,'is_open',False) for block in getattr(getattr(query.message,'rich_message',None),'blocks',()))
+        sections.append(Section(tr(locale, 'alerts.rich.details'), collapsed=True, is_open=opened,
             lines=(tr(locale, 'alerts.thresholds'), tr(locale, 'alerts.unknown_note')),
             tables=(Table((tr(locale, 'announce.rich.state'), tr(locale, 'announce.rich.count')),
                 tuple((tr(locale, 'announce.rich.' + kind), str(counts.get(kind, 0)))

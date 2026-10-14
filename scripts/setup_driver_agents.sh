@@ -921,6 +921,8 @@ install_local_agent() {
   if [[ -n "$archive_notice" ]]; then
     JOURNAL_ARCHIVE_NOTICES+=("$archive_notice")
     echo "$archive_notice"
+  else
+    set_step "skip previous controller journals for local node ${server_key}"
   fi
   set_step "prepare mutual TLS certificate for local node ${server_key}"
   prepare_node_tls "$server_key" "127.0.0.1" || return 1
@@ -1140,6 +1142,8 @@ PY
     if [[ -n "$archive_notice" ]]; then
       JOURNAL_ARCHIVE_NOTICES+=("$archive_notice")
       echo "$archive_notice"
+    else
+      set_step "skip previous controller journals for ${server_key}"
     fi
 
     set_step "prepare mutual TLS certificate for ${server_key}"

@@ -232,12 +232,20 @@ class AlertTests(unittest.TestCase):
         self.scan()
         self.driver.inspect_node_services.assert_not_called()
 
+    def test_alert_interval_choices_and_legacy_fifteen_minute_policy(self):
+        for minutes in (3,5,10):
+            result = self.service.preferences(self.actor,{'interval_minutes':minutes})
+            self.assertEqual(result['interval_minutes'],minutes)
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_system_settings SET value=? WHERE key='alert_policy'", (json.dumps({'enabled':True,'notify_resolved':True,'interval_minutes':15}),))
+            self.assertEqual(self.service._policy(conn)['interval_minutes'],10)
+
     def test_preferences_and_interval_are_enforced(self):
         self.assertTrue(self.service.scheduled())
         self.assertFalse(self.service.scheduled())
         for changes in (
             {"interval_minutes": True},
-            {"interval_minutes": 10},
+            {"interval_minutes": 15},
             {"enabled": 1},
             {},
         ):

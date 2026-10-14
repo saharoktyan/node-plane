@@ -359,6 +359,18 @@ pub fn run(mut request: Request) -> Result<()> {
                         command,
                         crate::nodes::Command::Controller(_, crate::controller::Command::Presence)
                     );
+                    app.controller_request_context = match &command {
+                        crate::nodes::Command::Controller(_, command) => {
+                            Some(ControllerRequestContext {
+                                action: app.form.action,
+                                section: app.controller_section,
+                                screen: std::mem::discriminant(&app.screen),
+                                revision: app.controller_navigation_revision,
+                                read: command.request().is_ok_and(|r| r.0 == hyper::Method::GET),
+                            })
+                        }
+                        _ => None,
+                    };
                     nodes_worker.submit(next, command, tx)?;
                     receiver = Some(rx);
                     app.nodes_busy = true;

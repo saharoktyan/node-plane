@@ -527,7 +527,12 @@ class UpdateService:
             tag = ref if ref.startswith('v') else 'v' + str(result.get('remote_version') or '')
             changelog = get_release_changelog(tag) if track == 'tag' or branch == 'main' else ''
         payload = {'branch':branch, 'dev_track':track, 'version':version,
-            'changelog':changelog.strip()[:1800]}
+            'changelog':changelog.strip()[:65536]}
+        import re
+        repo = os.environ.get('NODE_PLANE_GITHUB_REPO','saharoktyan/node-plane')
+        tag = ref if ref.startswith('v') else 'v' + str(result.get('remote_version') or '')
+        if re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+',repo) and re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?',tag):
+            payload['release_url'] = f'https://github.com/{repo}/releases/tag/{tag}'
         timestamp = datetime.now(timezone.utc).isoformat()
         with self.db.transaction() as conn:
             conn.execute('UPDATE backend_account_guard SET revision=revision+1 WHERE id=1')

@@ -55,8 +55,9 @@ pub(in crate::tui) fn alert_controls(state: &crate::controller::Browser) -> Vec<
     let mut controls = vec![Control::ControllerAlertToggle("enabled")];
     if state.alerts.as_ref().is_some_and(|v| v["enabled"] == true) {
         controls.extend([
+            Control::ControllerAlertInterval(3),
             Control::ControllerAlertInterval(5),
-            Control::ControllerAlertInterval(15),
+            Control::ControllerAlertInterval(10),
             Control::ControllerAlertToggle("notify_resolved"),
         ]);
     }
@@ -1559,6 +1560,10 @@ pub(in crate::tui) fn choice_selected(
     control: Control,
 ) -> bool {
     match control {
+        Control::ControllerAuditFilter(errors) => state
+            .workstation_audit
+            .as_ref()
+            .is_some_and(|v| (v["errors_only"] == true) == errors),
         Control::ControllerUpdateInterval(n) => state
             .updates
             .as_ref()

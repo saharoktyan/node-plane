@@ -440,6 +440,16 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         self.assertEqual(rows[0][0].callback_data, 'request_page:0')
         self.assertIn('Search: alex', screen.plain())
 
+    async def test_announcements_embed_close_and_dismiss_and_sender_in_native_message(self):
+        from telegram_client.announcement_delivery import deliver_one
+        backend = SimpleNamespace(announcement_claim=AsyncMock(return_value={'delivery':{'id':'delivery','telegram_user_id':102,'text':'Hello','locale':'en','silent':False,'sender_username':'sender'}}),announcement_ack=AsyncMock())
+        self.bot.send_rich_message = AsyncMock()
+        await deliver_one(self.bot,backend)
+        rich = self.bot.send_rich_message.call_args.kwargs['rich_message']
+        self.assertEqual(rich.blocks[1].text,'by @sender')
+        self.assertEqual([b.callback_data for b in rich.blocks[-1].buttons],['announce_close:delivery','announce_dismiss:delivery'])
+        backend.announcement_ack.assert_awaited()
+
     async def test_add_user_provisions_account_and_automatic_profile_atomically(self):
         message = SimpleNamespace(from_user=SimpleNamespace(id=101), chat=SimpleNamespace(id=1, type='private'),
                                   text='102', delete=AsyncMock())
@@ -640,7 +650,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
     async def test_alert_policy_selected_interval_and_back_navigation(self):
         from telegram_client.routers import admin_alerts
         backend=SimpleNamespace(alerts_overview=AsyncMock(return_value={
-            'enabled':True,'notify_resolved':True,'interval_minutes':15,'active_count':0,'active':[],
+            'enabled':True,'notify_resolved':True,'interval_minutes':10,'active_count':0,'active':[],
             'last_scan':None,'delivery_counts':dict(queued=0,claimed=0,sent=0,failed=0,unknown=0,skipped=0)}))
         self.query.data='alerts'
         self.state_data['locale']='en'
@@ -648,8 +658,8 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             await admin_alerts.alerts_cb(self.query,self.bot,backend,self.state)
         screen, rows=draw.call_args.args[2:4]
         intervals = screen.sections[1].rows[0]
-        self.assertEqual(intervals[1].text,'15 min')
-        self.assertEqual(intervals[1].style, 'primary')
+        self.assertEqual([i.text for i in intervals],['3 min','5 min','10 min'])
+        self.assertEqual(intervals[2].style, 'primary')
         self.assertIsNone(intervals[0].style)
         self.assertTrue(rows[-1][0].callback_data.startswith('admin_settings'))
 

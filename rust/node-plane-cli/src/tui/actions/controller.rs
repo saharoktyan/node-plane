@@ -774,6 +774,8 @@ impl App {
                 None
             }
             Control::ControllerSection(section) => {
+                self.controller_navigation_revision =
+                    self.controller_navigation_revision.wrapping_add(1);
                 self.controller_section = Some(section);
                 self.requests_settings = false;
                 if section == ControllerSection::Policies {
@@ -930,6 +932,8 @@ impl App {
                 None
             }
             Control::ControllerBack => {
+                self.controller_navigation_revision =
+                    self.controller_navigation_revision.wrapping_add(1);
                 if self.controller_return_form
                     && !self.controller_ready()
                     && !self.controller.removal_active()
@@ -1097,6 +1101,7 @@ impl App {
         }
     }
     pub(in crate::tui) fn open_controller(&mut self) {
+        self.controller_navigation_revision = self.controller_navigation_revision.wrapping_add(1);
         self.controller_return_form = false;
         if !self.actions_enabled() {
             return;

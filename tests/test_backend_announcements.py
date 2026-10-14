@@ -83,6 +83,15 @@ class AnnouncementTests(unittest.TestCase):
         self.assertEqual(job["total"], 1)
         self.assertEqual(job["counts"]["queued"], 1)
 
+    def test_delivery_exposes_sender_only_when_telegram_username_is_known(self):
+        self.service.queue(self.actor, "First", str(uuid4()))
+        delivery = self.service.claim(self.transport, str(uuid4()))
+        self.assertIsNone(delivery['sender_username'])
+        fixture.BackendHTTPTests.register(self, 101, username='sender')
+        self.service.queue(self.actor, "Second", str(uuid4()))
+        delivery = self.service.claim(self.transport, str(uuid4()))
+        self.assertEqual(delivery['sender_username'], 'sender')
+
     def test_double_tap_and_changed_payload_reuse(self):
         key = str(uuid4())
         first = self.service.queue(self.actor, "Hello", key)

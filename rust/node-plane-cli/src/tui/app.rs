@@ -22,6 +22,8 @@ impl App {
             nodes_busy: false,
             loading_message: String::new(),
             nodes_background: false,
+            controller_request_context: None,
+            controller_navigation_revision: 0,
             node_wizard: None,
             wizard_loading: false,
             ssh_state: crate::nodes::ConnectionState::Closed,

@@ -143,6 +143,7 @@ impl App {
                         .as_ref()
                         .is_some_and(|d| d.editor.is_some()))
             || control == Control::NodesEditBack
+                && self.manual_awg_original.is_none()
                 && self
                     .nodes
                     .editor

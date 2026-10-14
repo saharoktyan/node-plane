@@ -122,6 +122,7 @@ class Section:
     heading_rows: tuple[tuple[InlineKeyboardButton, ...], ...] = ()
     inline_rows: tuple[tuple[str | InlineKeyboardButton, ...], ...] = ()
     bold_first_line: bool = False
+    formatted_blocks: tuple = ()
 
     def rich(self, depth=2):
         # iOS cannot activate controls inside Details, even in nested sections.
@@ -134,6 +135,8 @@ class Section:
         blocks = [InputRichBlockParagraph(text=RichTextBold(text=line)
             if self.bold_first_line and index == 0 else line)
             for index, line in enumerate(self.lines) if line]
+        if self.formatted_blocks:
+            blocks = list(self.formatted_blocks)
         blocks.extend(table.rich() for table in self.tables)
         for index, row in enumerate(self.inline_rows):
             text = [RichTextButton(button=RichMessageButton(text=item.text, callback_data=item.callback_data,

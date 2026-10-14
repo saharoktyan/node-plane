@@ -133,7 +133,9 @@ class AccountService:
                 user_id = int(identity)
             from .authorization import validate_telegram_id
             validate_telegram_id(user_id)
-            account = identities.find_telegram_account(user_id) or identities._resolve(conn, user_id)
+            account = identities.find_telegram_account(user_id)
+            created = account is None
+            account = account or identities._resolve(conn, user_id)
             if account.status == 'disabled':
                 raise AccessDenied('account_disabled', 409)
             pending = conn.execute("SELECT id FROM backend_access_requests WHERE account_id=? AND status='pending'", (account.id,)).fetchone()
@@ -148,7 +150,7 @@ class AccountService:
             from .profiles import ProfileRepository
             profile_id = ProfileRepository.ensure_account_profile_in_transaction(conn, account.id)
             profile = conn.execute('SELECT * FROM backend_profiles WHERE id=?', (profile_id,)).fetchone()
-            result = {'account': self.public(self._read(conn, account.id)), 'profile': ProfileRepository.public(profile)}
+            result = {'account': self.public(self._read(conn, account.id)), 'profile': ProfileRepository.public(profile), 'created': created}
             conn.execute('INSERT INTO backend_account_commands VALUES (?,?,?,?,?)', (actor.account.id, key, account.id, input_json, json.dumps(result, sort_keys=True)))
             return result
 

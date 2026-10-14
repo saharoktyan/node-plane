@@ -104,14 +104,8 @@ impl App {
                 None
             }
             Control::NodesEditBack if self.manual_awg_original.is_some() => {
+                self.manual_awg_original = None;
                 if let Some(editor) = &mut self.nodes.editor {
-                    if let Some(field) = editor
-                        .fields
-                        .iter_mut()
-                        .find(|field| field.key == "awg_parameters")
-                    {
-                        field.value = self.manual_awg_original.take().unwrap();
-                    }
                     editor.tab = crate::node_editor::Tab::Advanced;
                 }
                 self.nodes_selected = 0;

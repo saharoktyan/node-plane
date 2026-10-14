@@ -530,8 +530,10 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
                 app,
                 rows[1],
                 &[(
-                    if result.starts_with("Account and VPN profile") {
+                    if result.starts_with("Profile ") {
                         "Open profile"
+                    } else if result.starts_with("Could not create profile:") {
+                        "Cancel"
                     } else {
                         "Close"
                     },
@@ -541,7 +543,11 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
             );
         } else if let Some(draft) = &app.access.provision {
             if draft.confirm {
-                frame.render_widget(Paragraph::new(format!("Create an approved account and VPN profile for {}?\nAn existing account will keep its profile and access.",draft.identity)).wrap(Wrap { trim:false }),rows[0]);
+                frame.render_widget(
+                    Paragraph::new(format!("Create profile for {}?", draft.identity))
+                        .wrap(Wrap { trim: false }),
+                    rows[0],
+                );
                 draw_access_buttons(
                     frame,
                     app,

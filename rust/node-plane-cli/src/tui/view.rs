@@ -1,6 +1,14 @@
 //! Screen composition, header, dialogs and focus decoration.
 use super::*;
 
+pub(super) fn disabled_channel(app: &App, control: Control) -> bool {
+    match control {
+        Control::EditField(4) => true,
+        Control::Field(index) => index > 0 && app.form.visible().get(index - 1) == Some(&3),
+        _ => false,
+    }
+}
+
 pub(super) fn draw_qr(frame: &mut Frame, area: Rect, image: &image::DynamicImage) {
     // qr_image uses six pixels per module, including its four-module quiet zone.
     // Preserve every module; averaging or downsampling makes QR codes unreadable.
@@ -567,11 +575,9 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
                         devices.editor.is_some() || devices.delete_key.is_some()
                     })))
             && !(matches!(app.screen, Screen::Nodes)
-                && app
-                    .nodes
-                    .editor
-                    .as_ref()
-                    .is_some_and(|editor| editor.review.is_some()))
+                && app.nodes.editor.as_ref().is_some_and(|editor| {
+                    editor.review.is_some() || editor.tab == crate::node_editor::Tab::AwgParameters
+                }))
             && !(matches!(app.screen, Screen::Temporary)
                 && (app.temporary.wizard() || app.temporary.view == crate::temporary::View::Revoke))
             && !hits
@@ -779,15 +785,17 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
         });
     }
     let hovered_hit = app.pointer_position.and_then(|position| {
-        hits.iter()
-            .rev()
-            .find(|hit| app.hovered == Some(hit.control) && hit.area.contains(position))
+        hits.iter().rev().find(|hit| {
+            app.hovered == Some(hit.control)
+                && hit.area.contains(position)
+                && !disabled_channel(app, hit.control)
+        })
     });
     // A pointer hover replaces the keyboard highlight. Clear the old outline
     // before drawing the current one, including when the pointer leaves controls.
     if app.pointer_active {
         for hit in &hits {
-            if hit.control == Control::WindowClose {
+            if hit.control == Control::WindowClose || disabled_channel(app, hit.control) {
                 continue;
             }
             let rect = hit.area;
@@ -891,7 +899,10 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
         let color = if red { Color::Red } else { Color::Cyan };
         for y in rect.y..rect.bottom() {
             for x in rect.x..rect.right() {
-                if frame.buffer_mut()[(x, y)].fg == SECTION_BORDER {
+                if frame.buffer_mut()[(x, y)].fg == SECTION_BORDER
+                    || matches!(hit.control, Control::TemporaryChoice(_))
+                        && frame.buffer_mut()[(x, y)].symbol() == "→"
+                {
                     continue;
                 }
                 if x == rect.x || x + 1 == rect.right() || y == rect.y || y + 1 == rect.bottom() {

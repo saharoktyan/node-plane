@@ -164,6 +164,14 @@ class AnnouncementService:
             ).fetchone()
         return {"last_job": self.get(actor, row["id"]) if row else None}
 
+    @staticmethod
+    def sender_username(conn, announcement_id):
+        row = conn.execute("""SELECT d.username FROM backend_announcements a
+            JOIN backend_external_identities i ON i.account_id=a.actor_id AND i.provider='telegram'
+            JOIN backend_telegram_identity_details d ON d.subject=i.subject
+            WHERE a.id=? ORDER BY i.subject LIMIT 1""", (announcement_id,)).fetchone()
+        return row['username'] if row and row['username'] else None
+
     def inbox(self, actor, offset=0, limit=10):
         require_permission(actor, "account.self.read")
         limit = max(1, min(int(limit), 50))
@@ -176,7 +184,7 @@ class AnnouncementService:
                 (actor.account.id,)).fetchone()["count"]
             offset = min(max(0, int(offset)), max(0, total - 1))
             offset = offset // limit * limit
-            rows = conn.execute("""SELECT d.id,a.text,a.created_at,s.viewed_at
+            rows = conn.execute("""SELECT d.id,a.id AS announcement_id,a.text,a.created_at,s.viewed_at
                 FROM backend_announcement_deliveries d
                 JOIN backend_announcements a ON a.id=d.announcement_id
                 LEFT JOIN backend_announcement_user_state s ON s.delivery_id=d.id AND s.account_id=d.account_id
@@ -184,14 +192,15 @@ class AnnouncementService:
                 AND (s.dismissed_at IS NULL)
                 ORDER BY a.created_at DESC,a.id DESC LIMIT ? OFFSET ?""",
                 (actor.account.id, limit, offset)).fetchall()
-        return {"items": [dict(row) for row in rows], "total": total,
+            items = [{**dict(row),"sender_username":self.sender_username(conn,row["announcement_id"])} for row in rows]
+        return {"items": items, "total": total,
             "offset": offset, "page_size": limit}
 
     def inbox_item(self, actor, delivery_id):
         require_permission(actor, "account.self.read")
         viewed_at = datetime.now(timezone.utc).isoformat()
         with self.db.transaction() as conn:
-            row = conn.execute("""SELECT d.id,a.text,a.created_at
+            row = conn.execute("""SELECT d.id,a.id AS announcement_id,a.text,a.created_at
                 FROM backend_announcement_deliveries d
                 JOIN backend_announcements a ON a.id=d.announcement_id
                 WHERE d.id=? AND d.account_id=? AND d.status='sent'
@@ -206,6 +215,7 @@ class AnnouncementService:
                 (delivery_id, actor.account.id, viewed_at))
             result = dict(row)
             result["viewed_at"] = viewed_at
+            result["sender_username"] = self.sender_username(conn,row["announcement_id"])
         return result
 
     def dismiss_inbox_item(self, actor, delivery_id):
@@ -327,6 +337,7 @@ class AnnouncementService:
             if details
             else None,
             "silent": bool(json.loads(silent["value"])) if silent else False,
+            "sender_username": AnnouncementService.sender_username(conn,row["announcement_id"]),
         }
 
     def acknowledge(self, principal, delivery_id, key, status, retry_after=None):

@@ -647,8 +647,12 @@ impl Browser {
                 profile["_account"] = value["account"].clone();
                 self.card = Some(profile);
                 self.result = Some(
-                    "Account and VPN profile are ready. Open the profile to configure access."
-                        .into(),
+                    if value["created"] == false {
+                        "Profile already exists. Open it to manage access."
+                    } else {
+                        "Profile is ready. Open it to configure access."
+                    }
+                    .into(),
                 );
             }
             Command::ProfileProgress(_) => unreachable!(),
@@ -815,6 +819,27 @@ pub fn label(tab: Tab, item: &Value) -> String {
             )
         ),
     }
+}
+
+pub fn provision_error(error: &str) -> String {
+    let cause = if error.contains("telegram_id_required") {
+        "this username is not known. Use the user's Telegram ID."
+    } else if error.contains("invalid_telegram_identity") {
+        "enter a positive Telegram ID or a valid @username."
+    } else if error.contains("account_disabled") {
+        "this profile is blocked. Open the existing profile to manage it."
+    } else if error.contains("permission_denied") {
+        "administrator rights are required."
+    } else if error.contains("maintenance_busy") {
+        "the controller is performing maintenance. Try again when it finishes."
+    } else if error.contains("idempotency_conflict") {
+        "the creation request conflicts with an earlier request."
+    } else if error.contains("account_deleting") {
+        "this profile is being deleted. Wait for deletion to finish."
+    } else {
+        "the backend did not confirm the result. Refresh profiles before trying again."
+    };
+    format!("Could not create profile: {cause}")
 }
 
 pub fn role_error(error: &str) -> String {

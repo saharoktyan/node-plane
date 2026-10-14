@@ -541,7 +541,8 @@ fn transport_error() -> ApiError {
 }
 fn ensure_api_path(path: &str) -> std::result::Result<(), ApiError> {
     let resource = path.split('?').next().unwrap_or_default();
-    if (path.starts_with("/api/v1/system/")
+    if (resource == "/api/v1/me"
+        || path.starts_with("/api/v1/system/")
         || resource == "/api/v1/regions"
         || resource == "/api/v1/accounts"
         || resource.starts_with("/api/v1/accounts/")
@@ -750,6 +751,10 @@ mod tests {
         assert!(ensure_api_path("/api/v1/announcements/job").is_ok());
         assert!(ensure_api_path("/api/v1/announcements/../profiles").is_err());
         assert!(ensure_api_path("/api/v1/system/updates").is_ok());
+        assert!(ensure_api_path("/api/v1/me").is_ok());
+        assert!(ensure_api_path("/api/v1/me?view=profile").is_ok());
+        assert!(ensure_api_path("/api/v1/me/other").is_err());
+        assert!(ensure_api_path("/api/v1/me/../profiles").is_err());
         assert!(ensure_api_path("/api/v1/nodes?order=region&cursor=a%2Fb").is_ok());
         assert!(ensure_api_path("/api/v1/nodes/lv1/overview").is_ok());
         assert!(ensure_api_path("/api/v1/system/installation-defaults").is_ok());

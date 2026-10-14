@@ -3038,3 +3038,6 @@ CATALOG['ru']['backups.kind'] = 'Тип'
 
 CATALOG['en'].update({'accounts.open_profile':'Open profile','profile.admin.delete':'Delete account','profile.admin.delete_title':'Delete account','profile.admin.delete_done':'Account and VPN profile deleted.','profile.admin.delete_warning':'The account, VPN profile and all devices will be deleted. Server access will be revoked.','profile.admin.delete_queued':'Account access is closed. Node cleanup: {status}.'})
 CATALOG['ru'].update({'accounts.open_profile':'Открыть профиль','profile.admin.delete':'Удалить аккаунт','profile.admin.delete_title':'Удаление аккаунта','profile.admin.delete_done':'Аккаунт и VPN-профиль удалены.','profile.admin.delete_warning':'Аккаунт, VPN-профиль и все устройства будут удалены. Доступ к серверам будет отозван.','profile.admin.delete_queued':'Доступ аккаунта закрыт. Очистка нод: {status}.'})
+
+CATALOG['en']['updates.notice.full_release'] = 'Full release on GitHub'
+CATALOG['ru']['updates.notice.full_release'] = 'Полный релиз на GitHub'

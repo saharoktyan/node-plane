@@ -102,10 +102,10 @@ async def admin_settings_cb(query: CallbackQuery, bot: Bot,
 
 @router.callback_query(F.data == 'admin_about')
 async def about_cb(query: CallbackQuery, bot: Bot, state: FSMContext) -> None:
-    from config import APP_VERSION
+    from config import APP_SEMVER
     await query.answer()
     locale = await _locale(state)
-    await render(bot, query.message.chat.id, Screen(f'Node Plane · {APP_VERSION}', (tr(locale, 'about.description'),),
+    await render(bot, query.message.chat.id, Screen(f'Node Plane · {APP_SEMVER}', (tr(locale, 'about.description'),),
         sections=(Section('', inline_rows=((InlineKeyboardButton(text=tr(locale, 'about.repository'), url='https://github.com/saharoktyan/node-plane', style='link'),),)),),
         embedded_buttons=True, navigation=True), [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data=AdminSettingsCallback().pack())]], state, query.message.message_id)
 

@@ -360,7 +360,7 @@ async def show_notification(chat_id: int, user_id: int, message_id: int,
              button(user_id, tr(locale, 'announce.dismiss'), 'notification_dismiss',
                     delivery_id, str(offset))]]
     await render(bot, chat_id, Screen(tr(locale, 'announce.notification'),
-        (item['text'],), embedded_buttons=True, navigation=True), rows, state, message_id)
+        (("by @" + item['sender_username'].lstrip('@'),) if item.get('sender_username') else ()) + (item['text'],), embedded_buttons=True, navigation=True), rows, state, message_id)
 
 
 async def show_profiles(chat_id: int, user_id: int, message_id: int, bot: Bot,

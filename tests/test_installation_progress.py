@@ -29,6 +29,19 @@ class InstallationProgressTests(TestCase):
             path.write_text(json.dumps({'operation_id': identity, 'stage': 'secret output'}))
             self.assertIsNone(read_progress(row))
 
+    def test_skipped_archive_is_retained_after_following_installation_steps(self):
+        with TemporaryDirectory() as shared, patch.dict(os.environ,NODE_PLANE_SHARED_DIR=shared):
+            identity = str(uuid4())
+            path = progress_path(identity)
+            row = {'id':identity,'status':'running'}
+            write_progress(path,identity,'skip previous controller journals for hidden-host')
+            self.assertEqual(read_progress(row)['state'],'skipped')
+            write_progress(path,identity,'prepare mutual TLS certificate for hidden-host')
+            progress = read_progress(row)
+            self.assertEqual(progress['skipped_stages'],['archive_journals'])
+            self.assertIn('Skipped',progress['label'])
+            self.assertNotIn('hidden-host',path.read_text())
+
     def test_actual_shell_step_publishes_observation_without_leaking_target(self):
         root = Path(__file__).resolve().parents[1]
         source = (root / 'scripts/setup_driver_agents.sh').read_text()

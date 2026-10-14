@@ -60,12 +60,15 @@ LEASE_UNITS = {
     'node-plane-lease-expiry.service': '''[Unit]
 Description=Node Plane temporary access expiry
 After=docker.service
+StartLimitIntervalSec=0
 
 [Service]
-Type=oneshot
+Type=simple
 User=root
 UMask=0077
-ExecStart=/usr/bin/python3 /opt/node-plane-runtime/apply-profile-intent.py expire-leases
+ExecStart=/usr/bin/python3 /opt/node-plane-runtime/apply-profile-intent.py monitor-leases
+Restart=on-failure
+RestartSec=5s
 TimeoutStartSec=60
 KillMode=control-group
 ''',
@@ -74,7 +77,7 @@ Description=Node Plane temporary access expiry timer
 
 [Timer]
 OnBootSec=1s
-OnUnitInactiveSec=1s
+OnUnitInactiveSec=5s
 AccuracySec=1s
 Unit=node-plane-lease-expiry.service
 
@@ -138,10 +141,15 @@ def ensure_lease_scheduler(directory='/etc/systemd/system', execute=subprocess.r
             finally:
                 os.close(fd)
             execute(['systemctl', 'daemon-reload'], check=True, capture_output=True, timeout=30)
+        if changed:
+            execute(['systemctl', 'reset-failed', 'node-plane-lease-expiry.service', 'node-plane-lease-expiry.timer'],
+                    check=True, capture_output=True, timeout=15)
         execute(['systemctl', 'enable', '--now', 'node-plane-lease-expiry.timer'],
                 check=True, capture_output=True, timeout=30)
         execute(['systemctl', 'is-active', '--quiet', 'node-plane-lease-expiry.timer'],
                 check=True, capture_output=True, timeout=15)
+        execute(['systemctl', 'start', 'node-plane-lease-expiry.service'],
+                check=True, capture_output=True, timeout=30)
         if protocol is not None:
             config, container, server_key = leased_runtime_settings(protocol, execute)
             record = leased_container(protocol, config, container, execute)
@@ -193,6 +201,7 @@ def lease_enforcement_ready(protocol, execute=subprocess.run):
     try:
         for action, unit in (('is-enabled', 'node-plane-lease-expiry.timer'),
                              ('is-active', 'node-plane-lease-expiry.timer'),
+                             ('is-active', 'node-plane-lease-expiry.service'),
                              ('is-enabled', 'node-plane-leased-' + protocol + '.service'),
                              ('is-active', 'node-plane-leased-' + protocol + '.service')):
             execute(['systemctl', action, '--quiet', unit], check=True, capture_output=True, timeout=15)
@@ -227,6 +236,7 @@ def refresh_leased_runtime(protocol, execute=subprocess.run, directory='/etc/sys
         return False
     if path.is_symlink() or path.read_text() != LEASE_UNITS[name]:
         raise ValueError('leased runtime unit ownership is unconfirmed')
+    ensure_lease_scheduler(directory, execute)
     config, container, _ = leased_runtime_settings(protocol, execute)
     record = leased_container(protocol, config, container, execute)
     execute(['docker', 'update', '--restart', 'no', record['Id']], check=True, capture_output=True, timeout=30)
@@ -488,6 +498,20 @@ def lookup(intent, path):
         return json.loads(row[2])
     finally:
         connection.close()
+
+
+def monitor_leases(path, runner, stop=None, interval=1):
+    """Keep local expiry checks alive without spawning a service for every scan."""
+    import threading
+    stop = stop or threading.Event()
+    while not stop.is_set():
+        result = expire_leases(path, runner)
+        if result['expired']:
+            print(json.dumps(result), flush=True)
+        if result['pending']:
+            # Fail visibly and let systemd retry. Never report an unhealthy scan as success.
+            raise ValueError('temporary lease revocation is pending')
+        stop.wait(interval)
 
 
 def expire_leases(path, runner, now=None):
@@ -1242,6 +1266,9 @@ if __name__ == '__main__':
             sys.exit(0)
         if len(sys.argv) == 3 and sys.argv[1] == 'start-leased-runtime':
             start_leased_runtime(sys.argv[2])
+            sys.exit(0)
+        if len(sys.argv) == 2 and sys.argv[1] == 'monitor-leases':
+            monitor_leases('/etc/node-plane/profile-intents.sqlite3', run)
             sys.exit(0)
         if len(sys.argv) == 2 and sys.argv[1] == 'expire-leases':
             result = expire_leases('/etc/node-plane/profile-intents.sqlite3', run)

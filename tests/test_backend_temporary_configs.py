@@ -42,6 +42,28 @@ class TemporaryConfigTests(unittest.TestCase):
     def create(self, protocol='xray', duration=86400, key=None):
         return self.service.create(self.actor,'n1',protocol,'tcp' if protocol=='xray' else 'vpn',duration,key or str(uuid4()))
 
+    def test_get_after_previous_revocation_repeatedly_checks_enforcement_without_reissuing(self):
+        self.prepare()
+        old = self.create()
+        self.service.run_one()
+        self.service.revoke(self.actor,old['id'])
+        self.service.run_one()
+        current = self.create()
+        self.service.run_one()
+        deadline = self.service.get(self.actor,current['id'])['expires_at']
+        for ready in (True,False,True,False,True):
+            self.driver.states[current['id']]['enforcement_ready'] = ready
+            if ready:
+                self.assertTrue(self.service.artifact(self.actor,current['id'])['content'].startswith('vless://'))
+            else:
+                with self.assertRaises(AccessDenied) as failed:
+                    self.service.artifact(self.actor,current['id'])
+                self.assertEqual(failed.exception.code,'config_unavailable')
+        self.assertEqual(self.service.get(self.actor,current['id'])['expires_at'],deadline)
+        self.assertEqual(sum(identity==current['id'] and action=='temporary_ensure' and not recover for identity,action,recover in self.driver.calls),1)
+        with self.assertRaises(AccessDenied):
+            self.service.artifact(self.actor,old['id'])
+
     def test_durations_idempotency_and_independent_identities(self):
         self.prepare()
         key = str(uuid4())

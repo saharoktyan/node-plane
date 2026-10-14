@@ -16,8 +16,11 @@ async def deliver_one(bot, backend):
     delivery = value.get("delivery")
     if not delivery:
         return False
+    sender = delivery.get("sender_username")
     screen = Screen(
-        tr(delivery.get("locale"), "announce.notification"), (delivery["text"],)
+        tr(delivery.get("locale"), "announce.notification"),
+        (("by @" + sender.lstrip("@"),) if sender else ()) + (delivery["text"],),
+        embedded_buttons=True
     )
     rows = [[InlineKeyboardButton(text=tr(delivery.get("locale"), "announce.close"),
         callback_data="announce_close:" + delivery["id"]),

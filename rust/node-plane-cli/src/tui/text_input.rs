@@ -254,9 +254,10 @@ pub(super) fn draw_multiline(
         .collect::<Vec<_>>();
     frame.render_widget(Paragraph::new(lines), input.area);
     if input.rows.len() > visible {
-        let mut state = ratatui::widgets::ScrollbarState::new(input.rows.len())
-            .position(input.top)
-            .viewport_content_length(visible);
+        let mut state =
+            ratatui::widgets::ScrollbarState::new(input.rows.len().saturating_sub(visible) + 1)
+                .position(input.top)
+                .viewport_content_length(visible);
         frame.render_stateful_widget(
             ratatui::widgets::Scrollbar::new(ratatui::widgets::ScrollbarOrientation::VerticalRight),
             inner,
@@ -271,6 +272,37 @@ pub(super) fn draw_multiline(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn every_multiline_field_uses_the_full_scroll_track_and_proportional_thumb() {
+        let app = App::new(&super::super::tests::test_request());
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(30, 12)).unwrap();
+        for label in ["Notes", "Manual AWG parameters", "Message"] {
+            let mut thumb_sizes = Vec::new();
+            for count in [12, 100] {
+                let value = (0..count)
+                    .map(|i| format!("line {i}"))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                terminal
+                    .draw(|frame| {
+                        draw_multiline(frame, Rect::new(0, 0, 30, 12), label, &value, true, &app)
+                    })
+                    .unwrap();
+                let buffer = terminal.backend().buffer();
+                let thumb: Vec<_> = (2..10)
+                    .filter(|y| buffer[(28, *y)].symbol() == "█")
+                    .collect();
+                assert!(!thumb.is_empty(), "{label} {count}");
+                assert_eq!(
+                    thumb.last(),
+                    Some(&9),
+                    "bottom position must reach the bottom of the track"
+                );
+                thumb_sizes.push(thumb.len());
+            }
+            assert!(thumb_sizes[0] > thumb_sizes[1]);
+        }
+    }
     #[test]
     fn cursor_inserts_and_pastes_inside_unicode_text_and_deletes_at_cursor() {
         let mut input = TextInput {

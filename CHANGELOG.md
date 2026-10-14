@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 1.0.0-alpha.10 - 2026-10-14
+
+- Replace repeated temporary-lease expiry service launches with a persistent worker, recover the old start-limit failure during runtime synchronization, and require an active expiry worker before retrieving credentials. Preserve expiry deadlines and read-only artifact retrieval.
+- Fix multiline scrollbar proportions and bottom positions in notes, announcements and manual AWG parameters. Keep a full Back button in the AWG dialog without discarding the draft.
+- Preserve temporary-configuration focus marker colors and Audit filter highlighting; keep the fixed controller channel grey on hover. Prevent late controller responses from replacing a different screen and use the full documentation list area.
+- Simplify profile provisioning text, show creation failures in a separate result dialog, distinguish existing profiles, and allow the authenticated profile context endpoint used by editing.
+- Restore Close and Dismiss controls on announcement notifications and show a known Telegram sender username. Format release notes into native headings, code and links with a full-release link, and omit the build hash from About.
+- Offer alert intervals of 3, 5 and 10 minutes and preserve expanded policy details during Refresh. Mark journal archival as Skipped when no previous journals exist.
+- Add regression coverage for intermittent artifact availability, expiry worker health, notification delivery, provisioning and terminal rendering. Validate with Python, PostgreSQL, Docker and Rust 1.90 suites and strict Workstation Clippy.
+
 ## 1.0.0-alpha.9 - 2026-10-14
 
 - Pair accounts with one VPN profile, add a Telegram ID/known username provisioning wizard, and delete the account and profile together after confirmed node revocations. Freeze and Block preserve both entities. Preserve legacy runtime identities while normalizing profile ownership, retain inaccessible deletion receipts, and refresh the deleted user's bot screen with a new pending identity.

@@ -39,7 +39,10 @@ class AlertService:
         row = conn.execute(
             "SELECT value FROM backend_system_settings WHERE key='alert_policy'"
         ).fetchone()
-        return json.loads(row["value"]) if row else dict(DEFAULT_POLICY)
+        policy = json.loads(row["value"]) if row else dict(DEFAULT_POLICY)
+        if policy.get("interval_minutes") == 15:
+            policy["interval_minutes"] = 10
+        return policy
 
     @staticmethod
     def retire_node(conn, node_key):
@@ -56,7 +59,7 @@ class AlertService:
             raise AccessDenied("invalid_input", 422)
         for key, value in changes.items():
             if key == "interval_minutes":
-                valid = type(value) is int and value in {5, 15}
+                valid = type(value) is int and value in {3, 5, 10}
             else:
                 valid = type(value) is bool
             if not valid:

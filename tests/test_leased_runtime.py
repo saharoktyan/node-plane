@@ -149,6 +149,15 @@ class LeasedRuntimeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'ownership'):
             MODULE.stop_leased_runtime_units(('xray',),self.execute,units)
 
+    def test_restarting_or_stopped_expiry_worker_cannot_report_ready(self):
+        self.running = True
+        for state in ('activating', 'inactive'):
+            def execute(args, **kwargs):
+                if args == ['systemctl','is-active','--quiet','node-plane-lease-expiry.service']:
+                    raise subprocess.CalledProcessError(3,args,output=state)
+                return self.execute(args,**kwargs)
+            self.assertFalse(MODULE.lease_enforcement_ready('xray',execute))
+
     def test_inherited_lock_stays_held_and_rejects_another_file(self):
         with open(str(self.path)+'.lock','a') as parent:
             fcntl.flock(parent,fcntl.LOCK_EX)

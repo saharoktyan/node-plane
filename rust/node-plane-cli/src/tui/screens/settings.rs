@@ -52,7 +52,10 @@ pub(in crate::tui) fn draw_documentation(
     hits: &mut Vec<Hit>,
 ) {
     let right = draw_navigation(frame, app, area, hits);
-    let sections = dialog(frame, right, " Documentation ");
+    let block = section_block(" Documentation ");
+    let content = block.inner(right);
+    frame.render_widget(block, right);
+    let sections = [content, pinned_back_area(frame.area())];
     let capacity = usize::from(sections[0].height / 3).max(1);
     let selected = app.settings_selected.saturating_sub(1);
     let offset = app.viewport(

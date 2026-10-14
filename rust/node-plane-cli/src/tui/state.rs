@@ -526,6 +526,23 @@ impl Drop for Form {
     }
 }
 
+#[derive(Clone, Copy)]
+pub(super) struct ControllerRequestContext {
+    pub(super) action: Action,
+    pub(super) section: Option<ControllerSection>,
+    pub(super) screen: std::mem::Discriminant<Screen>,
+    pub(super) revision: u64,
+    pub(super) read: bool,
+}
+impl ControllerRequestContext {
+    pub(super) fn is_current(self, app: &App) -> bool {
+        self.action == app.form.action
+            && self.section == app.controller_section
+            && self.screen == std::mem::discriminant(&app.screen)
+            && self.revision == app.controller_navigation_revision
+    }
+}
+
 pub(super) struct App {
     pub(super) manual_awg_original: Option<String>,
     pub(super) text_input: std::cell::RefCell<super::text_input::TextInput>,
@@ -545,6 +562,8 @@ pub(super) struct App {
     pub(super) nodes_busy: bool,
     pub(super) loading_message: String,
     pub(super) nodes_background: bool,
+    pub(super) controller_navigation_revision: u64,
+    pub(super) controller_request_context: Option<ControllerRequestContext>,
     pub(super) node_wizard: Option<crate::node_wizard::Wizard>,
     pub(super) wizard_loading: bool,
     pub(super) ssh_state: crate::nodes::ConnectionState,

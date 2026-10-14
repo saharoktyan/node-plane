@@ -58,7 +58,7 @@ The **Offer service and operation recovery** option retains its last selection a
 
 Quick Start appears beside the sidebar until setup is complete or you confirm **Dismiss**. Completion is saved automatically, including when you do not select **Done**. Removing nodes does not restore it. In NPW the guide ends after installing the node protocols; create user devices and obtain ordinary configurations in the Telegram bot. If installation detection is unconfirmed, use **Check installation**.
 
-Automatic check, backup and alert preferences appear when the corresponding feature is enabled. Select an interval directly; automatic backups also offer a retention count. Manual backups have an optional name and remain until an administrator deletes them. **Node Plane Settings → Basic** contains installation defaults and general controller options.
+Automatic check, backup and alert preferences appear when the corresponding feature is enabled. Alerts offer intervals of 3, 5 or 10 minutes. Select an interval directly; automatic backups also offer a retention count. Manual backups have an optional name and remain until an administrator deletes them. **Node Plane Settings → Basic** contains installation defaults and general controller options.
 
 Open **Node Plane Settings → Basic → Telegram** to change the bot token or add/remove administrators by Telegram ID. Known usernames appear in the list. The token is hidden, verified before saving and never included in local operation journals. Changing the token restarts the Telegram service; administrator changes apply immediately. Your own administrator rights cannot be removed here.
 

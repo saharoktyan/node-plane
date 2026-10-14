@@ -336,6 +336,7 @@ pub(super) fn draw_channel(
 ) {
     let block = Block::bordered()
         .title("Controller channel")
+        .title_style(Style::default().fg(Color::DarkGray))
         .border_style(Style::default().fg(Color::DarkGray));
     let inner = block.inner(area);
     frame.render_widget(block, area);

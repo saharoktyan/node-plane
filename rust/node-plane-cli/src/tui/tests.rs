@@ -2761,7 +2761,7 @@ fn form_navigation_and_prompt_cancel() {
     app.prompt_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     assert!(matches!(rx.recv().unwrap(), Answer::Confirm(false)));
 }
-fn test_request() -> Request {
+pub(super) fn test_request() -> Request {
     Request {
         action: Action::Update,
         host: "controller.example".into(),
@@ -5300,6 +5300,182 @@ fn new_profile_provisions_account_in_a_dialog_and_preserves_identity_on_back() {
     app.activate(Control::AccessProvisionCancel);
     app.activate(Control::AccessProvisionCancel);
     assert!(app.access.provision.is_none());
+}
+
+#[test]
+fn provision_failure_replaces_wizard_with_a_reason_and_cancel() {
+    let mut app = test_profile_app();
+    app.open_access();
+    app.activate(Control::AccessNew);
+    app.nodes_busy = true;
+    app.access_busy = true;
+    app.event(Event::Finished(Err(
+        "telegram_id_required (HTTP 422)".into()
+    )));
+    assert!(app.access.provision.is_none());
+    assert!(app.error.is_empty());
+    assert!(app.access.result.as_ref().unwrap().contains("Telegram ID"));
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    let text: String = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|c| c.symbol())
+        .collect();
+    assert!(text.contains("Cancel"));
+    assert!(!text.contains("HTTP 422"));
+}
+
+#[test]
+fn delayed_controller_read_cannot_replace_a_new_section_or_its_error() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Controller;
+    app.form.select_action(Action::Update);
+    app.controller_request_context = Some(ControllerRequestContext {
+        action: app.form.action,
+        section: app.controller_section,
+        screen: std::mem::discriminant(&app.screen),
+        revision: app.controller_navigation_revision,
+        read: true,
+    });
+    app.nodes_busy = true;
+    app.nodes_background = true;
+    app.form.select_action(Action::Install);
+    app.open_controller();
+    let current_error = app.error.clone();
+    app.event(Event::Nodes(crate::nodes::Update::Controller(
+        app.controller.profile,
+        crate::controller::Command::Updates,
+        serde_json::json!({"version":"late"}),
+    )));
+    assert!(app.controller.updates.is_none());
+    app.event(Event::Finished(Err("stale network failure".into())));
+    assert_eq!(app.error, current_error);
+    assert!(!app.nodes_busy);
+    assert!(matches!(app.screen, Screen::Controller));
+}
+
+#[test]
+fn manual_awg_back_is_a_full_button_and_preserves_the_draft() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Nodes;
+    app.nodes.editor = Some(node_settings_editor());
+    app.activate(Control::NodesEditTab(
+        crate::node_editor::Tab::AwgParameters,
+    ));
+    let field = app
+        .nodes
+        .editor
+        .as_mut()
+        .unwrap()
+        .fields
+        .iter_mut()
+        .find(|field| field.key == "awg_parameters")
+        .unwrap();
+    field.value = "Jc=5\nJmin=50\nJmax=100".into();
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    let hit = app
+        .hits
+        .iter()
+        .find(|h| h.control == Control::NodesEditBack)
+        .unwrap();
+    assert!(hit.area.width > 5);
+    let text: String = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|c| c.symbol())
+        .collect();
+    assert!(text.contains("Back"));
+    app.activate(Control::NodesEditBack);
+    let editor = app.nodes.editor.as_ref().unwrap();
+    assert!(editor.tab == crate::node_editor::Tab::Advanced);
+    assert_eq!(
+        editor
+            .fields
+            .iter()
+            .find(|f| f.key == "awg_parameters")
+            .unwrap()
+            .value,
+        "Jc=5\nJmin=50\nJmax=100"
+    );
+}
+
+#[test]
+fn temporary_choice_marker_stays_white_when_hovered() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Temporary;
+    app.temporary_sidebar = false;
+    app.temporary.view = crate::temporary::View::Duration;
+    let control = Control::TemporaryChoice(0);
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    let area = app.hits.iter().find(|h| h.control == control).unwrap().area;
+    app.pointer_active = true;
+    app.hovered = Some(control);
+    app.pointer_position = Some((area.x, area.y).into());
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let markers: Vec<_> = (area.x..area.right())
+        .map(|x| &buffer[(x, area.y)])
+        .filter(|cell| cell.symbol() == "→")
+        .collect();
+    assert!(!markers.is_empty());
+    assert!(markers.iter().all(|cell| cell.fg == Color::White));
+}
+
+#[test]
+fn fixed_controller_channel_remains_grey_when_hovered() {
+    let mut app = test_profile_app();
+    app.begin_edit(false);
+    let control = Control::EditField(4);
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 40)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    let area = app.hits.iter().find(|h| h.control == control).unwrap().area;
+    app.pointer_active = true;
+    app.hovered = Some(control);
+    app.pointer_position = Some((area.x + 1, area.y + 1).into());
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    for y in area.y..area.bottom() {
+        for x in area.x..area.right() {
+            let cell = &terminal.backend().buffer()[(x, y)];
+            if cell.symbol().trim().is_empty() {
+                continue;
+            }
+            assert_eq!(cell.fg, Color::DarkGray, "channel cell {x},{y}");
+        }
+    }
+}
+
+#[test]
+fn audit_filter_keeps_its_accent_when_pointer_focus_moves() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Controller;
+    app.form.select_action(Action::Install);
+    app.pointer_active = true;
+    app.pointer_position = Some((0, 0).into());
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 40)).unwrap();
+    for errors in [false, true] {
+        app.controller.workstation_audit =
+            Some(serde_json::json!({"items":[],"total":0,"offset":0,"errors_only":errors}));
+        terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+        let area = app
+            .hits
+            .iter()
+            .find(|h| h.control == Control::ControllerAuditFilter(errors))
+            .unwrap()
+            .area;
+        let buffer = terminal.backend().buffer();
+        assert!((area.x + 1..area.right() - 1).any(|x| {
+            let cell = &buffer[(x, area.y + 1)];
+            !cell.symbol().trim().is_empty() && cell.fg == Color::Cyan
+        }));
+        assert_eq!(buffer[(area.x, area.y)].fg, Color::White);
+    }
 }
 
 #[test]

@@ -44,7 +44,7 @@ pub(in crate::tui) fn draw_node_editor(
             .spacing(1)
             .split(rows[1]);
         for (index, (label, control)) in [
-            ("Cancel", Control::NodesEditBack),
+            ("Back", Control::NodesEditBack),
             ("Continue", Control::NodesEditTab(Tab::Advanced)),
         ]
         .into_iter()

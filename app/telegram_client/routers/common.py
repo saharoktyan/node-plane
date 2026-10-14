@@ -350,3 +350,14 @@ class NotificationStateMiddleware(BaseMiddleware):
         if data.get('state') is not None:
             cancel_refresh(data['state'])
         return await handler(event, data)
+
+
+def installation_progress_lines(progress, locale):
+    if not progress:
+        return ()
+    from ..i18n import tr
+    skipped = progress.get('skipped_stages',())
+    stage = progress['stage']
+    lines = [] if stage in skipped else [tr(locale,'installation_progress.' + stage)]
+    lines.extend(tr(locale,'installation_progress.' + code) + ' · ' + tr(locale,'update_tools.status.skipped') for code in skipped)
+    return tuple(lines)

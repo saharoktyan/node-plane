@@ -247,6 +247,8 @@ def run(action, intent, lock_fd):
             raise ValueError('Docker is unavailable')
         return {'docker': True}
     if action == 'sync_runtime':
+        if Path('/etc/systemd/system/node-plane-lease-expiry.service').is_file():
+            intents.ensure_lease_scheduler()
         return {'synced': True}
     if action == 'regenerate_entropy':
         command([str(ROOT / 'regenerate-awg-entropy.sh')], lock_fd)

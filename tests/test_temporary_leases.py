@@ -252,9 +252,30 @@ class TemporaryLeaseTests(unittest.TestCase):
         self.assertEqual(calls.count(['systemctl', 'daemon-reload']), 1)
         unit = (directory / 'node-plane-lease-expiry.service').read_text()
         self.assertNotIn('node-plane-agent.service', unit)
-        self.assertIn('expire-leases', unit)
+        self.assertIn('monitor-leases', unit)
+        self.assertIn('Type=simple', unit)
+        self.assertIn('StartLimitIntervalSec=0', unit)
+        self.assertIn(['systemctl','reset-failed','node-plane-lease-expiry.service','node-plane-lease-expiry.timer'], calls)
         self.assertIn('KillMode=control-group', unit)
         self.assertIn('WantedBy=timers.target', (directory / 'node-plane-lease-expiry.timer').read_text())
+
+    def test_monitor_reuses_process_and_stays_quiet_without_due_leases(self):
+        from unittest.mock import Mock
+        stop = Mock()
+        stop.is_set.side_effect = [False,False,False,True]
+        with patch.object(MODULE,'expire_leases',return_value={'expired':0,'pending':0}) as scan, patch('builtins.print') as output:
+            MODULE.monitor_leases(self.path,self.mutate,stop=stop)
+        self.assertEqual(scan.call_count,3)
+        self.assertEqual(stop.wait.call_count,3)
+        output.assert_not_called()
+
+    def test_monitor_pending_revocation_fails_for_supervised_retry(self):
+        from unittest.mock import Mock
+        stop = Mock()
+        stop.is_set.return_value = False
+        with patch.object(MODULE,'expire_leases',return_value={'expired':0,'pending':1}), self.assertRaises(ValueError):
+            MODULE.monitor_leases(self.path,self.mutate,stop=stop)
+        stop.wait.assert_not_called()
 
     def test_scheduler_failure_never_provisions_a_peer(self):
         intent = self.intent()

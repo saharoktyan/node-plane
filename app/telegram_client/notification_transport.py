@@ -19,7 +19,8 @@ async def send_notification(bot, chat_id, screen, silent=False, *, rows=None):
     try:
         try:
             await bot.send_rich_message(
-                chat_id=chat_id, rich_message=screen.rich(rows), disable_notification=silent
+                chat_id=chat_id, rich_message=screen.rich(rows), disable_notification=silent,
+                **({'reply_markup': InlineKeyboardMarkup(inline_keyboard=rows)} if rows and not screen.embedded_buttons else {})
             )
         except TelegramBadRequest:
             options = {'reply_markup': InlineKeyboardMarkup(inline_keyboard=rows)} if rows else {}

@@ -14,7 +14,7 @@ from ..backend import BackendClient, BackendError
 from ..screens import Screen, Section, Table, server_label, format_size
 from ..i18n import normalize_locale, tr
 from ..node_templates import NODE_TEMPLATES
-from .common import schedule_refresh, render
+from .common import installation_progress_lines, schedule_refresh, render
 from ..navigation import remember_node, parent_path
 from .states import NodeDraftState, NodeEditState, MaintenanceState, AgentDraftState
 from .callbacks import (
@@ -1578,14 +1578,14 @@ async def show_node_apply_status(chat_id, user_id, message_id, operation_id, nod
     if s['status'] in {'blocked', 'superseded'}:
         await render(bot, chat_id, Screen(tr(locale, 'nodes.apply.blocked_title'),
             (tr(locale, 'nodes.apply.blocked'),
-             *((tr(locale, 'installation_progress.' + s['progress']['stage']),) if s.get('progress') else ()),
+             *installation_progress_lines(s.get('progress'),locale),
              *((s['error_code'],) if s.get('error_code') else ())), embedded_buttons=True, navigation=True), rows, state, message_id)
         return
     rows.insert(0, [InlineKeyboardButton(text=tr(locale, 'nodes.apply.refresh'),
         callback_data=apply_progress_callback(operation_id, node_key))])
     await render(bot, chat_id, Screen(tr(locale, 'nodes.apply.running_title'),
         (tr(locale, 'nodes.apply.state.' + s['status']),
-         *((tr(locale, 'installation_progress.' + s['progress']['stage']),) if s.get('progress') else ())),
+         *installation_progress_lines(s.get('progress'),locale)),
         embedded_buttons=True, navigation=True), rows, state, message_id)
     schedule_refresh(state, lambda: show_node_apply_status(chat_id, user_id, message_id, operation_id, node_key, bot, backend, state))
 
@@ -1891,7 +1891,7 @@ async def show_rollout_status(chat_id, user_id, message_id, task_id, bot, backen
         rows.append([button(user_id, tr(locale, 'nodes.rollout.main_menu'), 'admin_menu')])
     lines = [tr(locale, 'nodes.rollout.' + status)]
     if task.get('progress'):
-        lines.append(tr(locale, 'installation_progress.' + task['progress']['stage']))
+        lines.extend(installation_progress_lines(task['progress'],locale))
     for path in task.get('journal_archives', []):
         lines.append(tr(locale, 'nodes.rollout.journal_archived', path=path))
     if task.get('failure_code') == 'build_resources':
