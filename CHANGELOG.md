@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.0-alpha.13 - 2026-10-15
+
+- Add a custom theme wizard with named JSON files, primary/secondary color previews, an optional darker secondary color, and confirmed deletion of custom themes.
+- Split Diagnostic into Installation diagnostics and Operations; show the Operations loading screen immediately. Preserve the latest navigation read while another request is running, bind settings actions to the current installation, and retain safeguards against stale responses and replayed mutations.
+- Validate SSH user/host targets and public DNS/IPv4 addresses before advancing the node wizard, retaining the local controller-address shortcut. Use contextual Skip/Continue labels for optional flags and backup names.
+- Keep dialog Back/Cancel on the left and primary actions on the right, filling the available row with only visible buttons. Keep Refresh before Create in temporary configurations and remove verbose CPU sampling policy text from Workstation alerts.
+- Shorten the workstation theme documentation and point installer bootstrap links to the existing repository branch.
+
 ## 1.0.0-alpha.12 - 2026-10-14
 
 - Sample CPU every 5 seconds, report a rolling minute average throughout node/controller diagnostics and check CPU alerts every 30 seconds independently of service checks and provisioning. Notify severity transitions and recovery with current measurements, explicit units and Close-only alert/recovery messages; preserve the separate alert Inbox.

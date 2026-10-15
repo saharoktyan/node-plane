@@ -81,6 +81,8 @@ impl ControllerSection {
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Control {
+    DiagnosticOverview,
+    DiagnosticMenu,
     WindowClose,
     Restart,
     ControllerSection(ControllerSection),
@@ -266,8 +268,11 @@ pub(super) enum Control {
     SettingsPage(SettingsPage),
     Documentation(usize),
     Accent(usize),
-    AccentInput,
-    SaveAccent,
+    CreateTheme,
+    ThemeDelete(usize),
+    ThemeField,
+    ThemeNext,
+    ThemeBack,
     DeleteInstallation,
     ConfirmDelete(bool),
     CheckWorkstationUpdates,
@@ -357,6 +362,7 @@ pub(super) struct Hit {
 }
 pub(super) struct Form {
     pub(super) action: Action,
+    pub(super) diagnostic_menu: bool,
     pub(super) fields: Vec<String>,
     pub(super) selected: usize,
     pub(super) saved: Option<Installation>,
@@ -365,6 +371,7 @@ impl Form {
     pub(super) fn new(r: &Request) -> Self {
         Self {
             action: r.action,
+            diagnostic_menu: false,
             fields: vec![
                 r.host.clone(),
                 r.port.to_string(),
@@ -384,9 +391,16 @@ impl Form {
         }
     }
     pub(super) fn count(&self) -> usize {
-        self.visible().len() + 2 + usize::from(self.action == Action::Diagnose)
+        if self.action == Action::Diagnose && self.diagnostic_menu {
+            3
+        } else {
+            self.visible().len() + 2
+        }
     }
     pub(super) fn visible(&self) -> Vec<usize> {
+        if self.action == Action::Diagnose && self.diagnostic_menu {
+            return Vec::new();
+        }
         let all: &[usize] = match self.action {
             Action::Install => &[0, 1, 2, 3, 6, 5, 4],
             Action::Diagnose => &[0, 1, 2, 11],
@@ -631,7 +645,7 @@ pub(super) struct App {
     pub(super) settings_selected: usize,
     pub(super) settings_profile: usize,
     pub(super) appearance_viewport: std::cell::Cell<usize>,
-    pub(super) accent_input: String,
+    pub(super) theme_wizard: Option<theme_wizard::ThemeWizard>,
     pub(super) themes: Vec<theme::Theme>,
     pub(super) editor: Option<(Option<uuid::Uuid>, Vec<String>, usize)>,
     pub(super) profile_copy: Option<(Installation, std::path::PathBuf, mpsc::Receiver<Answer>)>,

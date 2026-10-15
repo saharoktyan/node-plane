@@ -13,13 +13,13 @@ Workstation — терминальный интерфейс администра
 **Linux (x64) и macOS (Intel или Apple Silicon)**
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/saharoktyan/node-plane/main/scripts/install_workstation.sh | bash
+curl -fsSL https://raw.githubusercontent.com/saharoktyan/node-plane/dev/scripts/install_workstation.sh | bash
 ```
 
 **Windows (x64), PowerShell**
 
 ```powershell
-irm https://raw.githubusercontent.com/saharoktyan/node-plane/main/scripts/install_workstation.ps1 | iex
+irm https://raw.githubusercontent.com/saharoktyan/node-plane/dev/scripts/install_workstation.ps1 | iex
 ```
 
 Для Workstation нужны поддерживаемая ОС, терминал размером не меньше 70 столбцов × 30 строк и SSH-доступ к контроллеру. Если команда ещё не появилась в PATH, откройте новый терминал. Для первоначальной установки контроллера нужен root-доступ к серверу.

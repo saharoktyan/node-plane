@@ -12,6 +12,7 @@ mod screens;
 mod tests;
 mod text_input;
 mod theme;
+mod theme_wizard;
 mod widgets;
 use text_input::draw_multiline;
 
@@ -366,7 +367,7 @@ pub fn run(mut request: Request) -> Result<()> {
                                 section: app.controller_section,
                                 screen: std::mem::discriminant(&app.screen),
                                 revision: app.controller_navigation_revision,
-                                read: command.request().is_ok_and(|r| r.0 == hyper::Method::GET),
+                                read: command.read_only(),
                             })
                         }
                         _ => None,
@@ -611,15 +612,8 @@ pub fn run(mut request: Request) -> Result<()> {
                         app.password
                             .extend(text.chars().filter(|c| !c.is_control()));
                     }
-                } else if matches!(app.screen, Screen::SettingsPage(SettingsPage::Appearance))
-                    && !app.exit
-                    && app.settings_selected == app.themes.len() + 1
-                {
-                    app.accent_input.extend(
-                        text.chars()
-                            .filter(|c| *c == '#' || c.is_ascii_hexdigit())
-                            .take(7usize.saturating_sub(app.accent_input.len())),
-                    );
+                } else if let Some(wizard) = &mut app.theme_wizard {
+                    wizard.input(&text);
                 } else if matches!(app.screen, Screen::EditInstallation) && !app.exit {
                     if let Some((_, fields, selected)) = &mut app.editor
                         && *selected < fields.len()
@@ -778,6 +772,10 @@ pub fn run(mut request: Request) -> Result<()> {
                         }
                         _ => {}
                     }
+                    continue;
+                }
+                if app.theme_wizard.is_some() {
+                    app.theme_wizard_key(key);
                     continue;
                 }
                 if app.qr_visible {
@@ -964,9 +962,14 @@ pub fn run(mut request: Request) -> Result<()> {
                             }
                             KeyCode::Enter
                                 if app.form.action == Action::Diagnose
-                                    && app.form.selected == app.form.count() - 2 =>
+                                    && app.form.diagnostic_menu
+                                    && app.form.selected > 0 =>
                             {
-                                app.activate(Control::ControllerRecoveryInventory(0));
+                                app.activate(if app.form.selected == 1 {
+                                    Control::DiagnosticOverview
+                                } else {
+                                    Control::ControllerRecoveryInventory(0)
+                                });
                             }
                             KeyCode::Enter => {
                                 if app.form.selected + 1 < app.form.count() {

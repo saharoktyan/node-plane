@@ -156,83 +156,89 @@ pub(in crate::tui) fn draw_appearance(
     let right = draw_navigation(frame, app, area, hits);
     frame.render_widget(Block::bordered().title(" Appearance · Themes "), right);
     let content = Block::bordered().inner(right);
-    let capacity = usize::from(content.height / 3).max(1);
-    let selected = app.settings_selected.saturating_sub(1);
-    let offset = if selected < app.themes.len() + 2 {
-        viewport_start(app.appearance_viewport.get(), selected, capacity)
-    } else {
-        app.appearance_viewport.get()
+    let controls = app.appearance_controls();
+    let selected_control = controls.get(app.settings_selected.saturating_sub(1));
+    let selected_row = match selected_control {
+        Some(Control::Accent(i) | Control::ThemeDelete(i)) => *i,
+        _ => app.themes.len(),
     };
-    let offset = app.viewport(offset, app.themes.len() + 2, capacity);
+    let capacity = usize::from(content.height / 3).max(1);
+    let offset = if selected_control == Some(&Control::Settings) {
+        app.appearance_viewport.get()
+    } else {
+        viewport_start(app.appearance_viewport.get(), selected_row, capacity)
+    };
+    let offset = app.viewport(offset, app.themes.len() + 1, capacity);
     app.appearance_viewport.set(offset);
-    let mut entries: Vec<(String, String, Control)> = app
-        .themes
-        .iter()
-        .enumerate()
-        .map(|(i, selected)| {
-            let name = &selected.name;
-            let value = &selected.accent;
-            (
-                format!(
+    for row in offset..(offset + capacity).min(app.themes.len() + 1) {
+        let rect = Rect::new(
+            content.x,
+            content.y + (row - offset) as u16 * 3,
+            content.width,
+            3,
+        );
+        if let Some(theme) = app.themes.get(row) {
+            let has_delete = !theme.packaged();
+            let width = if has_delete {
+                rect.width.saturating_sub(11)
+            } else {
+                rect.width
+            };
+            let choose = Rect::new(rect.x, rect.y, width, 3);
+            draw_field(
+                frame,
+                choose,
+                &format!(
                     "{}{}",
-                    name,
-                    if selected.selected(&app.connections) {
+                    theme.name,
+                    if theme.selected(&app.connections) {
                         " · Selected"
                     } else {
                         ""
                     }
                 ),
-                if value == "terminal" {
-                    "Use the terminal's Cyan palette color".into()
-                } else {
-                    value.to_string()
-                },
-                Control::Accent(i),
-            )
-        })
-        .collect();
-    entries.extend([
-        (
-            "Custom color · #RRGGBB".into(),
-            app.accent_input.clone(),
-            Control::AccentInput,
-        ),
-        (
-            "Apply custom color".into(),
-            "Saved for all installation profiles".into(),
-            Control::SaveAccent,
-        ),
-    ]);
-    for (index, (label, value, control)) in
-        entries.into_iter().enumerate().skip(offset).take(capacity)
-    {
-        let rect = Rect::new(
-            content.x,
-            content.y + (index - offset) as u16 * 3,
-            content.width,
-            3,
-        );
-        if matches!(control, Control::Settings | Control::SaveAccent) {
-            draw_button(frame, rect, &label, app.settings_selected == index + 1);
+                &theme.accent,
+                selected_control == Some(&Control::Accent(row)),
+            );
+            hits.push(Hit {
+                area: choose,
+                control: Control::Accent(row),
+            });
+            if has_delete {
+                let delete = Rect::new(choose.right() + 1, rect.y, 10, 3);
+                draw_button(
+                    frame,
+                    delete,
+                    "Delete",
+                    selected_control == Some(&Control::ThemeDelete(row)),
+                );
+                hits.push(Hit {
+                    area: delete,
+                    control: Control::ThemeDelete(row),
+                });
+            }
         } else {
-            draw_field(
+            draw_button(
                 frame,
                 rect,
-                &label,
-                &value,
-                app.settings_selected == index + 1,
+                "Create custom theme",
+                selected_control == Some(&Control::CreateTheme),
             );
+            hits.push(Hit {
+                area: rect,
+                control: Control::CreateTheme,
+            });
         }
-        hits.push(Hit {
-            area: rect,
-            control,
-        });
     }
     hits.push(Hit {
         area: pinned_back_area(frame.area()),
         control: Control::Settings,
     });
+    if app.theme_wizard.is_some() {
+        theme_wizard::draw(frame, app, hits);
+    }
 }
+
 pub(in crate::tui) fn draw_profiles(frame: &mut Frame, app: &App, area: Rect, hits: &mut Vec<Hit>) {
     let right = draw_navigation(frame, app, area, hits);
     let mut sections = dialog(frame, right, " Installation profiles ");
@@ -454,7 +460,7 @@ pub(in crate::tui) fn draw_editor(frame: &mut Frame, app: &App, area: Rect, hits
             draw_field(frame, rect, labels[i], value, *selected == i);
         }
     }
-    let buttons = button_areas(sections[1], 2, 2);
+    let buttons = dialog_button_areas(sections[1], &["Save", "Cancel"], 1);
     for (index, (label, control)) in [
         ("Save", Control::SaveInstallation),
         ("Cancel", Control::CancelEdit),

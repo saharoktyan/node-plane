@@ -70,8 +70,8 @@ pub(in crate::tui) fn draw_temporary(
                 lines.push(Line::from("No active configurations."));
             }
             actions.extend([
-                ("Create", Control::TemporaryNew),
                 ("Refresh", Control::TemporaryRefresh),
+                ("Create", Control::TemporaryNew),
             ]);
             if browser.page > 0 {
                 actions.push(("←", Control::TemporaryPage(true)));
@@ -292,7 +292,11 @@ pub(in crate::tui) fn draw_temporary(
         );
     }
     let areas = if browser.wizard() || browser.view == View::Revoke {
-        button_areas(rows[2], actions.len(), 2)
+        dialog_button_areas(
+            rows[2],
+            &actions.iter().map(|(label, _)| *label).collect::<Vec<_>>(),
+            1,
+        )
     } else {
         action_areas(
             frame.area(),

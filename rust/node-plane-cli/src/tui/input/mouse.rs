@@ -8,7 +8,11 @@ impl App {
         // Releasing a mouse button must not restore an unrelated keyboard focus.
         self.pointer_active = true;
         self.pointer_position = Some((event.column, event.row).into());
-        let modal = self.prompt.is_some() || self.exit || self.discard.is_some() || self.qr_visible;
+        let modal = self.prompt.is_some()
+            || self.exit
+            || self.discard.is_some()
+            || self.qr_visible
+            || self.theme_wizard.is_some();
         if !modal && let Some(bar) = self.scrollbar.get() {
             match event.kind {
                 MouseEventKind::Down(MouseButton::Left)

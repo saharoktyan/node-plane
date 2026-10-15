@@ -33,6 +33,7 @@ impl App {
                                 if value["installed"] == true {
                                     self.remember_installed();
                                     if matches!(self.screen, Screen::Controller)
+                                        && self.nodes_requested.is_none()
                                         && !self.controller.verifying
                                     {
                                         self.nodes_requested =
@@ -87,7 +88,7 @@ impl App {
                         {
                             return;
                         }
-                        if command.request().is_ok_and(|r| r.0 == hyper::Method::GET)
+                        if command.read_only()
                             && self
                                 .controller_request_context
                                 .is_some_and(|context| !context.is_current(self))

@@ -21,7 +21,7 @@ Build channel follows the package version: prereleases are dev, stable versions 
 - Domain modules: controller, nodes, access, temporary configurations and operation models.
 - `workflow.rs` and related modules: command execution and progress.
 
-Themes are JSON files copied from `tui/themes/` to the local state directory without overwriting existing files. Keep keyboard and pointer focus separate from activation. Restore parent focus by control identity after dynamic lists redraw.
+Custom themes are supported in the local state directory’s `themes/` subdirectory.
 
 ## Checks
 

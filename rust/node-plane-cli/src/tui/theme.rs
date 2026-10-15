@@ -2,7 +2,7 @@
 use crate::connections::{Connections, validate_accent};
 use anyhow::{Context, Result, ensure};
 use ratatui::{Frame, style::Color};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{fs, io::Write, path::Path};
 
 pub(super) const SECTION_BORDER: Color = Color::Indexed(253);
@@ -15,7 +15,7 @@ const PACKAGED: [(&str, &str); 6] = [
     ("glacer.json", include_str!("themes/glacer.json")),
 ];
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Theme {
     #[serde(skip)]
@@ -41,6 +41,10 @@ impl Theme {
         }
         theme.id = id.into();
         Ok(theme)
+    }
+
+    pub fn packaged(&self) -> bool {
+        PACKAGED.iter().any(|(id, _)| *id == self.id)
     }
 
     pub fn selected(&self, preferences: &Connections) -> bool {
@@ -118,6 +122,39 @@ pub(super) fn load(state: &Path) -> Result<Catalog> {
             .then_with(|| a.id.cmp(&b.id))
     });
     Ok(Catalog { themes, warnings })
+}
+
+pub(super) fn create(state: &Path, name: &str, accent: &str, border: &str) -> Result<Theme> {
+    let id = format!("custom-{}.json", uuid::Uuid::new_v4());
+    let text = serde_json::to_string_pretty(&serde_json::json!({
+        "name": name.trim(), "accent": accent, "section_border": border
+    }))?;
+    let theme = Theme::parse(&id, &text)?;
+    crate::ssh::secure_state_directory(state)?;
+    let directory = state.join("themes");
+    fs::create_dir_all(&directory)?;
+    let path = directory.join(&id);
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)?;
+    if let Err(error) = file
+        .write_all(format!("{text}\n").as_bytes())
+        .and_then(|()| file.sync_all())
+    {
+        let _ = fs::remove_file(&path);
+        return Err(error.into());
+    }
+    Ok(theme)
+}
+
+pub(super) fn remove(state: &Path, selected: &Theme) -> Result<()> {
+    ensure!(!selected.packaged(), "Packaged themes cannot be deleted.");
+    ensure!(
+        Path::new(&selected.id).file_name().and_then(|s| s.to_str()) == Some(selected.id.as_str()),
+        "Invalid theme file name."
+    );
+    fs::remove_file(state.join("themes").join(&selected.id)).context("Delete theme file")
 }
 
 pub(super) fn accent_color(value: &str) -> Color {

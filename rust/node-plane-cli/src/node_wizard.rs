@@ -289,20 +289,23 @@ impl Wizard {
                 });
             }
             Step::Target => {
-                self.target = self.target.trim().trim_end_matches(":22").into();
+                let target = self
+                    .target
+                    .trim()
+                    .strip_suffix(":22")
+                    .unwrap_or(self.target.trim());
                 ensure!(
-                    valid_target(&self.target),
+                    valid_target(target),
                     "Enter user@hostname or user@IP (SSH port 22)"
                 );
+                self.target = target.into();
                 self.set_step(Step::Host);
             }
             Step::Host => {
                 self.host = self.host.trim().into();
                 ensure!(
-                    !self.host.is_empty()
-                        && self.host.len() <= 255
-                        && !self.host.chars().any(char::is_whitespace),
-                    "Enter a public hostname or IP, without spaces"
+                    valid_public_host(&self.host) || self.transport == "local" && self.host == ".",
+                    "Enter a valid public DNS name or IPv4 address, without a user, URL scheme or port"
                 );
                 self.set_step(Step::Protocols);
             }
@@ -391,15 +394,14 @@ fn valid_target(target: &str) -> bool {
     if target.is_empty() || target.len() > 255 {
         return false;
     }
-    let (user, host) = target
-        .split_once('@')
-        .map_or((None, target), |(u, h)| (Some(u), h));
-    if let Some(user) = user
-        && (user.is_empty()
-            || !(user.as_bytes()[0].is_ascii_alphabetic() || user.starts_with('_'))
-            || !user
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b)))
+    let Some((user, host)) = target.split_once('@') else {
+        return false;
+    };
+    if user.is_empty()
+        || !(user.as_bytes()[0].is_ascii_alphabetic() || user.starts_with('_'))
+        || !user
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
     {
         return false;
     }
@@ -408,11 +410,34 @@ fn valid_target(target: &str) -> bool {
             .parse::<std::net::Ipv6Addr>()
             .is_ok()
     } else {
-        !host.is_empty()
-            && host
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b".-".contains(&b))
+        valid_public_host(host)
     }
+}
+
+fn valid_public_host(host: &str) -> bool {
+    if host.parse::<std::net::Ipv4Addr>().is_ok() {
+        return true;
+    }
+    if host.is_empty() || host.len() > 253 || !host.is_ascii() {
+        return false;
+    }
+    // A numeric target is not a DNS name; malformed IPv4 must not fall back to DNS.
+    if !host
+        .rsplit('.')
+        .next()
+        .is_some_and(|label| label.bytes().any(|b| b.is_ascii_alphabetic()))
+    {
+        return false;
+    }
+    host.split('.').all(|label| {
+        !label.is_empty()
+            && label.len() <= 63
+            && label.as_bytes()[0].is_ascii_alphanumeric()
+            && label.as_bytes()[label.len() - 1].is_ascii_alphanumeric()
+            && label
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+    })
 }
 
 #[cfg(test)]
@@ -529,5 +554,74 @@ mod tests {
         );
         assert!(wizard.back());
         assert_eq!(wizard.step, Step::Protocols);
+    }
+    #[test]
+    fn addresses_are_validated_before_advancing() {
+        for target in [
+            "123",
+            "vpn.example",
+            "root@123",
+            "root@999.1.2.3",
+            "root@-vpn.example",
+            "root@vpn..example",
+            "root@vpn.example:2222",
+            "root@vpn.example:22:22",
+            "root@@vpn.example",
+            "root@https://vpn.example",
+        ] {
+            let mut wizard = Wizard::new(options(false)).unwrap();
+            wizard.step = Step::Target;
+            wizard.target = target.into();
+            assert!(wizard.next().is_err(), "accepted {target}");
+            assert_eq!(wizard.step, Step::Target);
+            assert_eq!(wizard.target, target);
+            assert!(wizard.next().is_err());
+        }
+        for target in [
+            "root@vpn.example",
+            "ubuntu@203.0.113.10",
+            "root@[2001:db8::1]",
+            "root@vpn.example:22",
+        ] {
+            let mut wizard = Wizard::new(options(false)).unwrap();
+            wizard.step = Step::Target;
+            wizard.target = target.into();
+            wizard.next().unwrap();
+            assert_eq!(wizard.step, Step::Host);
+        }
+        for host in [
+            "123",
+            "999.1.2.3",
+            "1.2.3",
+            "vpn..example",
+            "-vpn.example",
+            "vpn-.example",
+            "root@vpn.example",
+            "https://vpn.example",
+            "vpn.example:443",
+            "vpn.example/path",
+            ".",
+        ] {
+            let mut wizard = Wizard::new(options(false)).unwrap();
+            wizard.step = Step::Host;
+            wizard.host = host.into();
+            assert!(wizard.next().is_err(), "accepted {host}");
+            assert_eq!(wizard.step, Step::Host);
+        }
+        for host in [
+            "vpn.example",
+            "vpn-1.example.com",
+            "203.0.113.10",
+            "localhost",
+        ] {
+            assert!(valid_public_host(host), "rejected {host}");
+        }
+        assert!(!valid_public_host(&format!("{}.example", "a".repeat(64))));
+        let mut local = Wizard::new(options(true)).unwrap();
+        local.transport = "local".into();
+        local.step = Step::Host;
+        local.host = ".".into();
+        local.next().unwrap();
+        assert_eq!(local.step, Step::Protocols);
     }
 }

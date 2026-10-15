@@ -34,10 +34,23 @@ impl App {
                 && self.nodes.editor.as_ref().is_some_and(|e| e.dirty()))
     }
     pub(in crate::tui) fn activate(&mut self, control: Control) -> Option<KeyEvent> {
+        if self.theme_wizard.is_some() && !self.exit && self.prompt.is_none() {
+            self.theme_wizard_action(control);
+            return None;
+        }
         let previous_key = self.navigation_key();
         let previous_viewport = self.manual_viewport.get();
         self.remember_navigation_focus(Some(control));
         let result = self.activate_inner(control);
+        if control == Control::ControllerBack
+            && matches!(self.screen, Screen::Controller)
+            && self.form.action == Action::Install
+            && self.controller.overview.is_none()
+            && self.nodes_requested.is_none()
+            && self.controller_ready()
+        {
+            self.controller_command(crate::controller::Command::Overview);
+        }
         self.restore_navigation_context();
         if previous_key.is_some()
             && previous_key == self.navigation_key()
@@ -64,8 +77,11 @@ impl App {
             Control::ControllerDefaultsReset
                 | Control::NodesEditReset
                 | Control::Accent(_)
-                | Control::AccentInput
-                | Control::SaveAccent
+                | Control::CreateTheme
+                | Control::ThemeDelete(_)
+                | Control::ThemeField
+                | Control::ThemeNext
+                | Control::ThemeBack
                 | Control::Documentation(_)
         ) {
             self.manual_viewport.set(None);
@@ -108,7 +124,6 @@ impl App {
                 | Control::ControllerRecoveryPage(_)
                 | Control::ControllerHistoryPage(_)
                 | Control::ControllerAlertPage(_)
-                | Control::SaveAccent
                 | Control::Accent(_)
                 | Control::TemporaryRefresh
                 | Control::TemporaryPage(_)
@@ -157,6 +172,7 @@ impl App {
         }
         self.discard_bypass = false;
         if global_leave {
+            self.cancel_queued_controller_read();
             self.controller.defaults = None;
             self.controller.defaults_input = None;
             self.access.editor = None;
@@ -394,6 +410,17 @@ impl App {
             | Control::ControllerShutdown
             | Control::ControllerAbort
             | Control::ControllerBack => return self.activate_controller(control),
+            Control::DiagnosticOverview => {
+                self.form.diagnostic_menu = false;
+                self.form.selected = 1;
+                return None;
+            }
+            Control::DiagnosticMenu => {
+                self.form.diagnostic_menu = true;
+                self.form.selected = 1;
+                self.screen = Screen::Form;
+                return None;
+            }
             Control::Action(action) => {
                 if !self.actions_enabled() || action != Action::Install && !self.controller_ready()
                 {
@@ -403,6 +430,7 @@ impl App {
                 self.temporary.artifact = None;
                 self.fresh_installation = false;
                 self.form.select_action(action);
+                self.form.diagnostic_menu = action == Action::Diagnose;
                 self.screen = Screen::Form;
                 self.editor = None;
                 self.error.clear();
@@ -456,8 +484,11 @@ impl App {
             | Control::SettingsPage(..)
             | Control::Documentation(..)
             | Control::Accent(..)
-            | Control::AccentInput
-            | Control::SaveAccent
+            | Control::CreateTheme
+            | Control::ThemeDelete(_)
+            | Control::ThemeField
+            | Control::ThemeNext
+            | Control::ThemeBack
             | Control::DeleteInstallation
             | Control::ConfirmDelete(..)
             | Control::SelfUpdate

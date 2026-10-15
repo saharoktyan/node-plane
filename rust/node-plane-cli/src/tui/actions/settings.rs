@@ -53,13 +53,6 @@ impl App {
                 None
             }
             Control::SettingsPage(page) => {
-                if page == SettingsPage::Appearance {
-                    self.accent_input = if self.connections.accent == "terminal" {
-                        String::new()
-                    } else {
-                        self.connections.accent.clone()
-                    };
-                }
                 self.screen = Screen::SettingsPage(page);
                 self.settings_selected = 1;
                 self.error.clear();
@@ -93,7 +86,12 @@ impl App {
                 None
             }
             Control::Accent(index) => {
-                self.settings_selected = index + 1;
+                self.settings_selected = self
+                    .appearance_controls()
+                    .iter()
+                    .position(|c| *c == Control::Accent(index))
+                    .unwrap_or(0)
+                    + 1;
                 let mut next = self.connections.clone();
                 let selected = self.themes.get(index)?;
                 next.accent = selected.accent.clone();
@@ -107,24 +105,23 @@ impl App {
                 }
                 None
             }
-            Control::AccentInput => {
-                self.settings_selected = self.themes.len() + 1;
+            Control::CreateTheme => {
+                self.screen = Screen::SettingsPage(SettingsPage::Appearance);
+                self.theme_wizard = Some(theme_wizard::ThemeWizard::default());
                 None
             }
-            Control::SaveAccent => {
-                self.settings_selected = self.themes.len() + 2;
-                let mut next = self.connections.clone();
-                next.accent = self.accent_input.trim().to_ascii_lowercase();
-                next.theme = None;
-                match next.save(&self.state_dir) {
-                    Ok(()) => {
-                        self.connections = next;
-                        self.error.clear();
-                    }
-                    Err(error) => self.error = error.to_string(),
+            Control::ThemeDelete(index) => {
+                if let Some(theme) = self.themes.get(index).filter(|t| !t.packaged()) {
+                    self.theme_wizard = Some(theme_wizard::ThemeWizard {
+                        name: theme.name.clone(),
+                        step: 4,
+                        delete: Some(theme.id.clone()),
+                        ..Default::default()
+                    });
                 }
                 None
             }
+            Control::ThemeField | Control::ThemeNext | Control::ThemeBack => None,
             Control::DeleteInstallation => {
                 if let Some(profile) = self.connections.installations.get(self.settings_profile) {
                     self.screen = Screen::DeleteInstallation(profile.id);

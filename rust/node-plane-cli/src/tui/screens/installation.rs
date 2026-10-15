@@ -29,6 +29,28 @@ pub(in crate::tui) fn draw_form(frame: &mut Frame, app: &App, area: Rect, hits: 
         frame.render_widget(Paragraph::new("Create or select an installation profile to enable actions.\n\nUse ← / → in the profile switcher above Settings.\nSelect New profile again, or press Enter, to create a profile.").wrap(Wrap { trim: false }), sections[0]);
         return;
     }
+    if app.form.action == Action::Diagnose && app.form.diagnostic_menu {
+        let content = dialog(frame, right, " Diagnostic ")[0];
+        for (index, label, control) in [
+            (1, "Installation diagnostics", Control::DiagnosticOverview),
+            (2, "Operations", Control::ControllerRecoveryInventory(0)),
+        ] {
+            let button = Rect::new(content.x, content.y + (index - 1) * 3, content.width, 3);
+            if button.bottom() <= content.bottom() {
+                draw_button(
+                    frame,
+                    button,
+                    label,
+                    app.form.selected == usize::from(index),
+                );
+                hits.push(Hit {
+                    area: button,
+                    control,
+                });
+            }
+        }
+        return;
+    }
     let title = app.form.saved.as_ref().map_or_else(
         || " Connection settings ".to_string(),
         |profile| {
@@ -47,14 +69,10 @@ pub(in crate::tui) fn draw_form(frame: &mut Frame, app: &App, area: Rect, hits: 
     if app.form.action == Action::Install
         && sections[0].height >= (app.form.visible().len() as u16 + 1) * 3
     {
-        let manage = centered(
-            Rect::new(
-                sections[0].x,
-                sections[0].bottom() - 3,
-                sections[0].width,
-                3,
-            ),
-            18,
+        let manage = Rect::new(
+            sections[0].x,
+            sections[0].bottom() - 3,
+            sections[0].width,
             3,
         );
         draw_button(frame, manage, "Manage installed", false);
@@ -122,26 +140,8 @@ pub(in crate::tui) fn draw_form(frame: &mut Frame, app: &App, area: Rect, hits: 
             draw_field(frame, rect, label, &value, selected);
         }
     }
-    let button_area = if app.form.action == Action::Diagnose {
-        let buttons = Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
-            .spacing(1)
-            .split(sections[1]);
-        let operations = centered(buttons[0], 24, 3);
-        draw_button(
-            frame,
-            operations,
-            "Operations",
-            app.form.selected == app.form.count() - 2,
-        );
-        hits.push(Hit {
-            area: operations,
-            control: Control::ControllerRecoveryInventory(0),
-        });
-        buttons[1]
-    } else {
-        sections[1]
-    };
-    let button = centered(button_area, 18, 3);
+    let button_area = sections[1];
+    let button = button_area;
     draw_button(
         frame,
         button,

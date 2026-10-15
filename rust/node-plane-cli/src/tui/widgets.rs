@@ -182,6 +182,22 @@ pub(super) fn button_areas(area: Rect, count: usize, max_rows: usize) -> Vec<Rec
         .collect()
 }
 
+// Preserve control indexes while placing navigation first and the primary action last.
+pub(super) fn dialog_button_areas(area: Rect, labels: &[&str], max_rows: usize) -> Vec<Rect> {
+    let mut order: Vec<_> = (0..labels.len()).collect();
+    order.sort_by_key(|&index| match labels[index] {
+        "Back" | "Cancel" | "Dismiss" => 0,
+        "Continue" | "Confirm" | "Save" | "Apply" | "Create" | "Delete" | "Revoke" => 2,
+        _ => 1,
+    });
+    let cells = button_areas(area, labels.len(), max_rows);
+    let mut result = vec![Rect::default(); labels.len()];
+    for (index, cell) in order.into_iter().zip(cells) {
+        result[index] = cell;
+    }
+    result
+}
+
 pub(super) fn dialog(frame: &mut Frame, area: Rect, title: &str) -> [Rect; 2] {
     let block = section_block(title);
     let inner = block.inner(area);
@@ -295,36 +311,33 @@ pub(super) fn button_pair(
     controls: (Control, Control),
     hits: &mut Vec<Hit>,
 ) {
-    let strip = centered(area, 36, 3);
-    let buttons = Layout::horizontal([
-        Constraint::Fill(1),
-        Constraint::Length(2),
-        Constraint::Fill(1),
-    ])
-    .split(strip);
-    draw_button_color(
-        frame,
-        buttons[0],
-        labels.0,
-        first,
-        if matches!(
-            controls.0,
-            Control::ConfirmDelete(true) | Control::Discard(true)
-        ) {
-            Color::Red
-        } else {
-            Color::Cyan
-        },
-    );
-    draw_button(frame, buttons[2], labels.1, !first);
-    hits.push(Hit {
-        area: buttons[0],
-        control: controls.0,
-    });
-    hits.push(Hit {
-        area: buttons[2],
-        control: controls.1,
-    });
+    let cells = dialog_button_areas(area, &[labels.0, labels.1], 1);
+    for (index, (label, control, selected)) in [
+        (labels.0, controls.0, first),
+        (labels.1, controls.1, !first),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        draw_button_color(
+            frame,
+            cells[index],
+            label,
+            selected,
+            if matches!(
+                control,
+                Control::ConfirmDelete(true) | Control::Discard(true)
+            ) {
+                Color::Red
+            } else {
+                Color::Cyan
+            },
+        );
+        hits.push(Hit {
+            area: cells[index],
+            control,
+        });
+    }
 }
 
 pub(super) fn draw_channel(

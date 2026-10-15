@@ -524,12 +524,15 @@ pub(in crate::tui) fn draw_node_diagnostics(
         actions.push(("Refresh", Control::NodesDiagnostics));
     }
     actions.push(("Back", Control::NodesBack));
-    let buttons = action_areas(
-        frame.area(),
-        rows[1],
-        actions.iter().map(|(_, control)| *control),
-        2,
-    );
+    let buttons = if app.nodes.recovery_confirm.is_some() {
+        dialog_button_areas(
+            rows[1],
+            &actions.iter().map(|(label, _)| *label).collect::<Vec<_>>(),
+            1,
+        )
+    } else {
+        action_areas(frame.area(), rows[1], actions.iter().map(|(_, c)| *c), 2)
+    };
     for ((label, control), rect) in actions.into_iter().zip(buttons) {
         draw_button(frame, rect, label, selected(index));
         hits.push(Hit {
@@ -717,12 +720,23 @@ pub(in crate::tui) fn draw_node_maintenance(
         paragraph.scroll((view.scroll.min(maximum).min(u16::MAX as usize) as u16, 0)),
         rows[0],
     );
-    let buttons = action_areas(
-        frame.area(),
-        rows[1],
-        actions.iter().map(|(_, control, _)| *control),
-        button_rows,
-    );
+    let buttons = if view.confirmation.is_some() {
+        dialog_button_areas(
+            rows[1],
+            &actions
+                .iter()
+                .map(|(label, _, _)| *label)
+                .collect::<Vec<_>>(),
+            1,
+        )
+    } else {
+        action_areas(
+            frame.area(),
+            rows[1],
+            actions.iter().map(|(_, c, _)| *c),
+            button_rows,
+        )
+    };
     for (index, ((label, control, danger), rect)) in actions.into_iter().zip(buttons).enumerate() {
         draw_button_color(
             frame,
@@ -1285,8 +1299,8 @@ pub(in crate::tui) fn wizard_buttons(
         buttons.push((
             if wizard.step == Step::Review {
                 "Create node"
-            } else if wizard.step == Step::Flag {
-                "Next / Skip"
+            } else if wizard.step == Step::Flag && wizard.flag.trim().is_empty() {
+                "Skip"
             } else {
                 "Continue"
             },

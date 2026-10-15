@@ -695,12 +695,12 @@ fn section_boundaries_do_not_switch_sidebar_or_wrap_on_arrows() {
     assert!(app.move_spatial(KeyCode::Down));
     assert_eq!(app.settings_selected, SettingsPage::ALL.len());
     app.screen = Screen::SettingsPage(SettingsPage::Appearance);
-    app.settings_selected = app.themes.len() + 3;
+    app.settings_selected = app.appearance_controls().len();
     terminal
         .draw(|frame| app.hits = draw_content(frame, &app))
         .unwrap();
     app.appearance_key(KeyCode::Down);
-    assert_eq!(app.settings_selected, app.themes.len() + 3);
+    assert_eq!(app.settings_selected, app.appearance_controls().len());
     app.screen = Screen::Controller;
     app.controller_sidebar = false;
     app.controller_section = Some(ControllerSection::Removal);
@@ -1042,7 +1042,7 @@ fn appearance_back_can_receive_hover_focus() {
     let mut app = test_profile_app();
     app.screen = Screen::SettingsPage(SettingsPage::Appearance);
     app.focus(Control::Settings);
-    assert_eq!(app.settings_selected, app.themes.len() + 3);
+    assert_eq!(app.settings_selected, app.appearance_controls().len());
 }
 #[test]
 fn removal_section_shows_cleanup_without_waiting_for_overview() {
@@ -1913,8 +1913,8 @@ fn repeated_custom_accents_persist_and_render_each_selected_color() {
     for color in [
         "#123abc", "#ffbb74", "#55b1c2", "#123abc", "#000000", "#ffffff",
     ] {
-        app.accent_input = color.into();
-        app.activate(Control::SaveAccent);
+        create_test_theme(&mut app, "Custom", color);
+        app.activate(Control::Accent(app.themes.len() - 1));
         assert!(app.error.is_empty());
         terminal.clear().unwrap();
         terminal
@@ -2226,12 +2226,8 @@ fn appearance_mouse_keyboard_and_custom_color_persist_across_restart() {
             .any(|c| c.fg == Color::Rgb(255, 187, 116))
     );
     assert_eq!(Connections::load(dir.path()).unwrap().accent, "#ffbb74");
-    app.activate(Control::AccentInput);
-    app.accent_input.clear();
-    for c in "#123abc".chars() {
-        app.appearance_key(KeyCode::Char(c));
-    }
-    app.appearance_key(KeyCode::Enter);
+    create_test_theme(&mut app, "Custom", "#123abc");
+    app.activate(Control::Accent(app.themes.len() - 1));
     assert_eq!(Connections::load(dir.path()).unwrap().accent, "#123abc");
     app.activate(Control::Accent(0));
     assert_eq!(Connections::load(dir.path()).unwrap().accent, "terminal");
@@ -2382,7 +2378,7 @@ fn settings_directory_opens_sections_without_profile_actions_on_home() {
         click(&mut app, (target.x + 1, target.y + 1));
         assert!(matches!(app.screen, Screen::SettingsPage(p) if p == page));
         if page == SettingsPage::Appearance {
-            app.settings_selected = app.themes.len() + 3;
+            app.settings_selected = app.appearance_controls().len();
         }
         terminal
             .draw(|frame| app.hits = draw_content(frame, &app))
@@ -2474,38 +2470,21 @@ fn profile_deletion_requires_confirmation_and_cancel_preserves_save() {
     assert_eq!(app.profile_controls().len(), 2);
 }
 #[test]
-fn compact_appearance_keeps_apply_between_input_and_back() {
+fn compact_appearance_keeps_create_button_and_back_accessible() {
     let mut app = test_profile_app();
     app.screen = Screen::SettingsPage(SettingsPage::Appearance);
-    app.settings_selected = app.themes.len() + 1;
+    app.settings_selected = app.appearance_controls().len() - 1;
     let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(60, 13)).unwrap();
-    terminal
-        .draw(|frame| app.hits = draw_content(frame, &app))
-        .unwrap();
-    app.appearance_key(KeyCode::Down);
-    assert_eq!(app.settings_selected, app.themes.len() + 2);
     terminal
         .draw(|frame| app.hits = draw_content(frame, &app))
         .unwrap();
     assert!(
         app.hits
             .iter()
-            .any(|hit| hit.control == Control::SaveAccent)
+            .any(|hit| hit.control == Control::CreateTheme)
     );
-    app.mouse(MouseEvent {
-        kind: MouseEventKind::ScrollDown,
-        column: 50,
-        row: 5,
-        modifiers: KeyModifiers::NONE,
-    });
-    assert_eq!(app.settings_selected, app.themes.len() + 2);
-    app.mouse(MouseEvent {
-        kind: MouseEventKind::ScrollUp,
-        column: 50,
-        row: 5,
-        modifiers: KeyModifiers::NONE,
-    });
-    assert_eq!(app.settings_selected, app.themes.len() + 2);
+    app.appearance_key(KeyCode::Down);
+    assert_eq!(app.settings_selected, app.appearance_controls().len());
     assert!(app.nodes_requested.is_none());
 }
 
@@ -2669,6 +2648,7 @@ fn running_panel_centers_the_stage_and_prints_it_only_once() {
 fn action_specific_fields_do_not_edit_hidden_credentials() {
     let mut form = Form {
         action: Action::Update,
+        diagnostic_menu: false,
         fields: vec![String::new(); 11],
         selected: 6,
         saved: None,
@@ -2905,7 +2885,7 @@ fn pinned_back_remains_visible_in_small_scrolled_settings() {
     let mut app = test_profile_app();
     app.screen = Screen::SettingsPage(SettingsPage::Appearance);
     let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(80, 20)).unwrap();
-    for selected in [1, app.themes.len() + 3] {
+    for selected in [1, app.appearance_controls().len()] {
         app.settings_selected = selected;
         terminal
             .draw(|frame| app.hits = draw_content(frame, &app))
@@ -4470,10 +4450,17 @@ fn custom_theme_selection_survives_restart_and_custom_color_clears_it() {
             .iter()
             .any(|cell| cell.fg == Color::Rgb(0x12, 0x34, 0x56))
     );
-    restarted.accent_input = "#ffbb74".into();
-    restarted.activate(Control::SaveAccent);
-    assert!(restarted.connections.theme.is_none());
-    assert!(Connections::load(state.path()).unwrap().theme.is_none());
+    create_test_theme(&mut restarted, "Custom peach", "#ffbb74");
+    restarted.activate(Control::Accent(restarted.themes.len() - 1));
+    assert!(
+        restarted
+            .connections
+            .theme
+            .as_ref()
+            .unwrap()
+            .starts_with("custom-")
+    );
+    assert_eq!(Connections::load(state.path()).unwrap().accent, "#ffbb74");
 }
 
 #[test]
@@ -6214,10 +6201,9 @@ fn audit_titles_survive_new_api_and_older_controller_responses() {
 }
 
 #[test]
-fn operations_open_from_diagnostic_and_back_returns_to_its_form() {
+fn operations_open_from_diagnostic_and_back_returns_to_its_menu() {
     let mut app = test_profile_app();
-    app.form.select_action(Action::Diagnose);
-    app.screen = Screen::Form;
+    app.activate(Control::Action(Action::Diagnose));
     let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
     terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
     assert!(
@@ -6239,7 +6225,8 @@ fn operations_open_from_diagnostic_and_back_returns_to_its_form() {
     app.activate(Control::ControllerBack);
     assert!(matches!(app.screen, Screen::Form));
     assert!(app.form.action == Action::Diagnose);
-    assert_eq!(app.form.selected, app.form.count() - 2);
+    assert_eq!(app.form.selected, 2);
+    assert!(app.form.diagnostic_menu);
     assert!(app.controller.recovery_inventory.is_none());
 }
 
@@ -6260,4 +6247,500 @@ fn alert_descriptions_use_clear_units_for_cpu_memory_disk_and_load() {
                 .contains(expected)
         );
     }
+}
+
+#[test]
+fn diagnostic_menu_has_full_width_entries_and_nested_back_returns_to_menu() {
+    let mut app = test_profile_app();
+    app.activate(Control::Action(Action::Diagnose));
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    let diagnostics = app
+        .hits
+        .iter()
+        .find(|h| h.control == Control::DiagnosticOverview)
+        .unwrap()
+        .area;
+    let operations = app
+        .hits
+        .iter()
+        .find(|h| h.control == Control::ControllerRecoveryInventory(0))
+        .unwrap()
+        .area;
+    assert_eq!(diagnostics.width, operations.width);
+    assert!(diagnostics.width > 60);
+    assert_eq!(operations.y, diagnostics.bottom());
+    assert!(
+        !app.hits
+            .iter()
+            .any(|h| matches!(h.control, Control::RepairMode | Control::Continue))
+    );
+    app.activate(Control::DiagnosticOverview);
+    assert!(!app.form.diagnostic_menu);
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    assert!(app.hits.iter().any(|h| h.control == Control::RepairMode));
+    assert!(
+        app.hits
+            .iter()
+            .any(|h| h.control == Control::DiagnosticMenu)
+    );
+    assert!(app.section_navigation(KeyCode::Esc));
+    assert!(app.form.diagnostic_menu);
+    assert_eq!(app.form.selected, 1);
+    app.activate(Control::DiagnosticOverview);
+    app.form.selected = app.form.count() - 1;
+    let mut backspace =
+        crossterm::event::KeyEvent::new(KeyCode::Backspace, crossterm::event::KeyModifiers::NONE);
+    app.normalize_backspace(&mut backspace);
+    assert_eq!(backspace.code, KeyCode::Esc);
+    assert!(app.section_navigation(backspace.code));
+    assert!(app.form.diagnostic_menu);
+    app.activate(Control::DiagnosticOverview);
+    app.activate(Control::DiagnosticMenu);
+    assert!(app.form.diagnostic_menu);
+    assert!(app.section_navigation(KeyCode::Esc));
+    assert!(matches!(app.screen, Screen::Idle));
+}
+
+#[test]
+fn custom_theme_hex_prefix_survives_backspace_and_repeated_hashes() {
+    let mut app = test_profile_app();
+    app.activate(Control::CreateTheme);
+    app.theme_wizard.as_mut().unwrap().name = "Test".into();
+    app.activate(Control::ThemeNext);
+    for _ in 0..10 {
+        app.theme_wizard_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
+    }
+    assert_eq!(app.theme_wizard.as_ref().unwrap().primary, "#");
+    app.theme_wizard.as_mut().unwrap().input("#12#3abc");
+    assert_eq!(app.theme_wizard.as_ref().unwrap().primary, "#123abc");
+}
+
+fn create_test_theme(app: &mut App, name: &str, primary: &str) {
+    app.activate(Control::CreateTheme);
+    app.theme_wizard.as_mut().unwrap().input(name);
+    app.activate(Control::ThemeNext);
+    app.theme_wizard.as_mut().unwrap().input(primary);
+    app.activate(Control::ThemeNext);
+    app.activate(Control::ThemeNext);
+    app.activate(Control::ThemeNext);
+    assert!(app.theme_wizard.is_none());
+    assert!(
+        app.appearance_controls()[app.settings_selected - 1]
+            == Control::Accent(app.themes.len() - 1)
+    );
+}
+
+#[test]
+fn theme_wizard_saves_previewed_colors_and_requires_deletion_confirmation() {
+    let state = tempfile::tempdir().unwrap();
+    let mut app = test_profile_app();
+    app.state_dir = state.path().into();
+    app.activate(Control::SettingsPage(SettingsPage::Appearance));
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 35)).unwrap();
+    create_test_theme(&mut app, "../../Midnight", "#804020");
+    let index = app.themes.len() - 1;
+    let file = state.path().join("themes").join(&app.themes[index].id);
+    assert!(file.is_file());
+    assert_eq!(app.themes[index].section_border.as_deref(), Some("#603018"));
+    let reloaded = theme::load(state.path()).unwrap();
+    assert!(reloaded.themes.iter().any(|t| t.id == app.themes[index].id));
+    app.activate(Control::Accent(index));
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    assert!(
+        app.hits
+            .iter()
+            .any(|h| h.control == Control::ThemeDelete(index) && h.area.width == 10)
+    );
+    app.activate(Control::ThemeDelete(index));
+    assert!(file.is_file());
+    app.activate(Control::ThemeBack);
+    assert!(file.is_file());
+    app.activate(Control::ThemeDelete(index));
+    app.activate(Control::ThemeNext);
+    assert!(!file.exists());
+    assert_eq!(Connections::load(state.path()).unwrap().accent, "terminal");
+}
+
+#[test]
+fn theme_wizard_validates_colors_keeps_drafts_on_back_and_previews_secondary() {
+    let mut app = test_profile_app();
+    app.activate(Control::CreateTheme);
+    app.activate(Control::ThemeNext);
+    assert_eq!(app.theme_wizard.as_ref().unwrap().step, 0);
+    app.theme_wizard.as_mut().unwrap().input("Ocean custom");
+    app.activate(Control::ThemeNext);
+    app.theme_wizard.as_mut().unwrap().input("12");
+    app.activate(Control::ThemeNext);
+    assert_eq!(app.theme_wizard.as_ref().unwrap().step, 1);
+    app.theme_wizard.as_mut().unwrap().input("3456");
+    app.activate(Control::ThemeNext);
+    app.theme_wizard.as_mut().unwrap().input("abcdef");
+    app.activate(Control::ThemeNext);
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 35)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    let cells = &terminal.backend().buffer().content;
+    assert!(cells.iter().any(|c| c.fg == Color::Rgb(0x12, 0x34, 0x56)));
+    assert!(cells.iter().any(|c| c.fg == Color::Rgb(0xab, 0xcd, 0xef)));
+    app.activate(Control::ThemeBack);
+    assert_eq!(app.theme_wizard.as_ref().unwrap().secondary, "#abcdef");
+    assert!(
+        app.hits
+            .iter()
+            .all(|h| !matches!(h.control, Control::Settings | Control::Action(_)))
+    );
+}
+
+#[test]
+fn secondary_color_has_one_contextual_action_and_theme_delete_stays_red() {
+    let mut app = test_profile_app();
+    let state = tempfile::tempdir().unwrap();
+    app.state_dir = state.path().into();
+    app.activate(Control::CreateTheme);
+    app.theme_wizard.as_mut().unwrap().name = "Custom".into();
+    app.activate(Control::ThemeNext);
+    app.theme_wizard.as_mut().unwrap().input("123456");
+    app.activate(Control::ThemeNext);
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 35)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    let text = |terminal: &Terminal<ratatui::backend::TestBackend>| {
+        terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<String>()
+    };
+    assert!(text(&terminal).contains("Skip"));
+    assert!(!text(&terminal).contains("Continue"));
+    assert_eq!(
+        app.hits
+            .iter()
+            .filter(|h| h.control == Control::ThemeNext)
+            .count(),
+        1
+    );
+    app.theme_wizard.as_mut().unwrap().input("abcdef");
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    assert!(text(&terminal).contains("Continue"));
+    app.activate(Control::ThemeNext);
+    app.activate(Control::ThemeNext);
+    app.activate(Control::ThemeDelete(app.themes.len() - 1));
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    let rect = app
+        .hits
+        .iter()
+        .find(|h| h.control == Control::ThemeNext)
+        .unwrap()
+        .area;
+    let red_text = |terminal: &Terminal<ratatui::backend::TestBackend>| {
+        (rect.x + 1..rect.right() - 1)
+            .any(|x| terminal.backend().buffer()[(x, rect.y + 1)].fg == Color::Red)
+    };
+    assert!(red_text(&terminal));
+    assert_eq!(
+        terminal.backend().buffer()[(rect.x, rect.y)].fg,
+        Color::White
+    );
+    app.mouse(MouseEvent {
+        kind: MouseEventKind::Moved,
+        column: rect.x + 2,
+        row: rect.y + 1,
+        modifiers: KeyModifiers::NONE,
+    });
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    assert!(red_text(&terminal));
+    assert_eq!(terminal.backend().buffer()[(rect.x, rect.y)].fg, Color::Red);
+    app.activate(Control::ThemeBack);
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    assert!(!text(&terminal).contains("Custom color: #RRGGBB"));
+}
+
+#[test]
+fn backup_name_and_node_flag_buttons_follow_optional_input() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Controller;
+    app.controller.defaults_input = Some(("backup_name", String::new()));
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    let text = |terminal: &Terminal<ratatui::backend::TestBackend>| {
+        terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<String>()
+    };
+    assert!(text(&terminal).contains("Skip"));
+    assert!(!text(&terminal).contains("Continue"));
+    app.controller.defaults_input.as_mut().unwrap().1 = "Before maintenance".into();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    assert!(text(&terminal).contains("Continue"));
+    app.controller.defaults_input = None;
+    let options = serde_json::from_value(serde_json::json!({"local_available":true,"defaults":{"protocols":[],"xray_transports":[],"settings":{}},"templates":[{"code":"de","title":"Frankfurt","region":"Europe","flag":"","draft":{}}]})).unwrap();
+    app.node_wizard = Some(crate::node_wizard::Wizard::new(options).unwrap());
+    app.node_wizard.as_mut().unwrap().step = crate::node_wizard::Step::Flag;
+    app.screen = Screen::NodeWizard;
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    assert!(text(&terminal).contains("Skip"));
+    assert!(!text(&terminal).contains("Next / Skip"));
+    app.node_wizard.as_mut().unwrap().flag = "🇩🇪".into();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    assert!(text(&terminal).contains("Continue"));
+}
+
+#[test]
+fn dialog_navigation_is_left_and_visible_buttons_fill_the_row() {
+    let area = Rect::new(3, 4, 80, 3);
+    for labels in [
+        vec!["Confirm", "Cancel"],
+        vec!["Continue", "Back"],
+        vec!["Save", "Cancel", "Access"],
+        vec!["Cancel"],
+    ] {
+        let cells = dialog_button_areas(area, &labels, 1);
+        let navigation = labels
+            .iter()
+            .position(|label| matches!(*label, "Back" | "Cancel"))
+            .unwrap();
+        assert_eq!(cells[navigation].x, area.x);
+        let mut ordered = cells.clone();
+        ordered.sort_by_key(|rect| rect.x);
+        assert_eq!(ordered.last().unwrap().right(), area.right());
+        for pair in ordered.windows(2) {
+            assert_eq!(pair[0].right() + 1, pair[1].x);
+        }
+    }
+    let mut app = test_profile_app();
+    app.screen = Screen::Controller;
+    app.controller.defaults = Some(serde_json::json!({"settings":{"awg_port":"443"}}));
+    app.controller.defaults_input = Some(("awg_port", "443".into()));
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    let before = app
+        .hits
+        .iter()
+        .find(|h| h.control == Control::ControllerBack)
+        .unwrap()
+        .area;
+    assert!(
+        !app.hits
+            .iter()
+            .any(|h| h.control == Control::ControllerDefaultsInputApply)
+    );
+    app.controller.defaults_input.as_mut().unwrap().1 = "444".into();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    let cancel = app
+        .hits
+        .iter()
+        .find(|h| h.control == Control::ControllerBack)
+        .unwrap()
+        .area;
+    let next = app
+        .hits
+        .iter()
+        .find(|h| h.control == Control::ControllerDefaultsInputApply)
+        .unwrap()
+        .area;
+    assert_eq!(cancel.x, before.x);
+    assert_eq!(cancel.y, next.y);
+    assert_eq!(cancel.right() + 1, next.x);
+    assert_eq!(next.right(), before.right());
+    assert!(cancel.width < before.width);
+}
+
+#[test]
+fn confirmation_dialogs_keep_cancel_left_and_primary_action_right() {
+    let mut app = test_profile_app();
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+    for screen in [Screen::Confirm, Screen::NewInstallation] {
+        app.screen = screen;
+        terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+        let (cancel, confirm) = if matches!(app.screen, Screen::Confirm) {
+            (Control::Confirm(false), Control::Confirm(true))
+        } else {
+            (
+                Control::NewInstallationConfirm(false),
+                Control::NewInstallationConfirm(true),
+            )
+        };
+        let left = app.hits.iter().find(|h| h.control == cancel).unwrap().area;
+        let right = app.hits.iter().find(|h| h.control == confirm).unwrap().area;
+        assert!(left.x < right.x);
+        assert_eq!(left.y, right.y);
+    }
+    app.exit = true;
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    let cancel = app
+        .hits
+        .iter()
+        .find(|h| h.control == Control::Exit(false))
+        .unwrap()
+        .area;
+    let close = app
+        .hits
+        .iter()
+        .find(|h| h.control == Control::Exit(true))
+        .unwrap()
+        .area;
+    assert!(cancel.x < close.x);
+    assert_eq!(cancel.width + close.width + 1, 76);
+}
+
+#[test]
+fn operations_show_their_loading_view_immediately_and_cancel_pending_reads_on_back() {
+    let mut app = test_profile_app();
+    app.activate(Control::Action(Action::Diagnose));
+    app.nodes_busy = true;
+    app.activate(Control::ControllerRecoveryInventory(0));
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    let text: String = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(|c| c.symbol())
+        .collect();
+    assert!(text.contains("Loading operations…"));
+    assert!(
+        !app.hits
+            .iter()
+            .any(|h| matches!(h.control, Control::ControllerSection(_)))
+    );
+    assert!(matches!(
+        app.nodes_requested,
+        Some(crate::nodes::Command::Controller(
+            _,
+            crate::controller::Command::RecoveryInventory(0)
+        ))
+    ));
+    app.activate(Control::ControllerBack);
+    assert!(matches!(app.screen, Screen::Form));
+    assert!(app.form.diagnostic_menu);
+    assert!(app.nodes_requested.is_none());
+}
+
+#[test]
+fn changing_settings_sections_during_a_read_queues_the_latest_read_without_replaying_actions() {
+    use crate::controller::Command;
+    let mut app = test_profile_app();
+    app.screen = Screen::Controller;
+    app.controller.profile = app.form.saved.as_ref().map(|p| p.id);
+    app.controller_request_context = Some(ControllerRequestContext {
+        action: app.form.action,
+        section: app.controller_section,
+        screen: std::mem::discriminant(&app.screen),
+        revision: app.controller_navigation_revision,
+        read: true,
+    });
+    app.nodes_busy = true;
+    app.nodes_background = true;
+    app.activate(Control::ControllerSection(ControllerSection::Installation));
+    assert!(matches!(
+        app.nodes_requested,
+        Some(crate::nodes::Command::Controller(_, Command::Overview))
+    ));
+    app.activate(Control::ControllerSection(ControllerSection::Policies));
+    assert!(matches!(
+        app.nodes_requested,
+        Some(crate::nodes::Command::Controller(_, Command::Policies))
+    ));
+    app.event(Event::Nodes(crate::nodes::Update::Controller(
+        app.controller.profile,
+        Command::Overview,
+        serde_json::json!({"counts":{}}),
+    )));
+    assert!(app.controller.overview.is_none());
+    app.event(Event::Finished(Ok("done".into())));
+    assert!(matches!(
+        app.take_browser_request(false),
+        Some(crate::nodes::Command::Controller(_, Command::Policies))
+    ));
+    app.controller_request_context = None;
+    app.event(Event::Nodes(crate::nodes::Update::Controller(
+        app.controller.profile,
+        Command::Policies,
+        serde_json::json!({"traffic":{"enabled":true}}),
+    )));
+    assert!(app.controller.policies.is_some());
+    app.activate(Control::ControllerBack);
+    assert!(matches!(
+        app.nodes_requested,
+        Some(crate::nodes::Command::Controller(_, Command::Overview))
+    ));
+    app.nodes_requested = None;
+    app.nodes_busy = true;
+    app.controller_command(Command::UpdateCheck);
+    assert!(app.nodes_requested.is_none());
+    app.nodes_requested = Some(crate::nodes::Command::Controller(
+        app.controller.profile,
+        Command::UpdateCheck,
+    ));
+    app.controller_command(Command::Overview);
+    assert!(matches!(
+        app.nodes_requested,
+        Some(crate::nodes::Command::Controller(_, Command::UpdateCheck))
+    ));
+}
+
+#[test]
+fn temporary_lists_keep_refresh_left_and_create_right() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Temporary;
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+    for filtered in [false, true] {
+        app.temporary.filter = filtered.then(|| browser_node("lv1", "Europe"));
+        terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+        let refresh = app
+            .hits
+            .iter()
+            .find(|h| h.control == Control::TemporaryRefresh)
+            .unwrap()
+            .area;
+        let create = app
+            .hits
+            .iter()
+            .find(|h| h.control == Control::TemporaryNew)
+            .unwrap()
+            .area;
+        assert!(refresh.x < create.x);
+        assert_eq!(refresh.y, create.y);
+    }
+}
+
+#[test]
+fn settings_actions_from_the_form_bind_the_current_installation_and_load_the_section() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Form;
+    app.controller = crate::controller::Browser::default();
+    app.activate(Control::ControllerSection(ControllerSection::Installation));
+    assert!(matches!(app.screen, Screen::Controller));
+    let profile = app.form.saved.as_ref().map(|p| p.id);
+    assert_eq!(app.controller.profile, profile);
+    assert!(matches!(
+        app.nodes_requested.take(),
+        Some(crate::nodes::Command::Controller(
+            _,
+            crate::controller::Command::Overview
+        ))
+    ));
+    app.event(Event::Nodes(crate::nodes::Update::Controller(
+        profile,
+        crate::controller::Command::Overview,
+        serde_json::json!({"counts":{"accounts":1,"profiles":1,"nodes":1},"latest_job":null}),
+    )));
+    assert!(app.controller.overview.is_some());
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    let text: String = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(|c| c.symbol())
+        .collect();
+    assert!(!text.contains("Loading installation…"));
 }

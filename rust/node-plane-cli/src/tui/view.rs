@@ -435,7 +435,7 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
                 usize::from(sections[1].height),
                 ScrollTarget::Result,
             );
-            let rect = centered(sections[2], 16, 3);
+            let rect = sections[2];
             draw_button(frame, rect, "Close", true);
             hits.push(Hit {
                 area: rect,
@@ -469,6 +469,12 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
             Screen::Nodes => {
                 "Tab / ↑ / ↓: select   Enter / click: open   Ctrl+F: search   ← / →: pages   Esc: list / sidebar"
             }
+            Screen::Form if app.form.action == Action::Diagnose && app.form.diagnostic_menu => {
+                "Tab / arrows: select   Enter / click: open   Esc: sidebar"
+            }
+            Screen::Form if app.form.action == Action::Diagnose => {
+                "Click: select   Tab: move   Enter: continue   Esc: back"
+            }
             Screen::Form => {
                 "Click: select   Tab: move   Arrows: actions / fields   Enter: continue   Esc: sidebar / exit"
             }
@@ -477,7 +483,7 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
                 "Enter / click: open document in browser   Esc: settings"
             }
             Screen::SettingsPage(SettingsPage::Appearance) => {
-                "Tab / arrows: select   Enter / click: apply   Custom color: #RRGGBB   Esc: settings"
+                "Tab / arrows: select   Enter / click: apply   Esc: settings"
             }
             Screen::SettingsPage(SettingsPage::Updates) => {
                 "Tab / arrows: select   Enter / click: activate   C: check   U: update   Esc: settings"
@@ -552,6 +558,11 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
                 && app.controller_controls().contains(&Control::ControllerBack)
             {
                 Some(Control::ControllerBack)
+            } else if matches!(app.screen, Screen::Form)
+                && app.form.action == Action::Diagnose
+                && !app.form.diagnostic_menu
+            {
+                Some(Control::DiagnosticMenu)
             } else if matches!(app.screen, Screen::SettingsPage(_)) {
                 Some(Control::Settings)
             } else if matches!(app.screen, Screen::Nodes) && app.nodes.editor.is_some() {
@@ -561,7 +572,18 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
             }
         });
     if let Some(control) = back.filter(|control| {
-        (app.controller.defaults_input.is_none() || !matches!(app.screen, Screen::Controller))
+        app.theme_wizard.is_none()
+            && (app.controller.defaults_input.is_none()
+                || !matches!(app.screen, Screen::Controller))
+            && !(matches!(app.screen, Screen::Controller)
+                && (app.controller.plan.is_some() || app.controller.branch_confirmation))
+            && !(matches!(app.screen, Screen::Nodes)
+                && (app.nodes.recovery_confirm.is_some()
+                    || app
+                        .nodes
+                        .maintenance
+                        .as_ref()
+                        .is_some_and(|m| m.confirmation.is_some())))
             && !(matches!(app.screen, Screen::Controller)
                 && app.controller.announcement_draft.is_some()
                 && app.controller.announcement_job.is_none())
@@ -603,7 +625,7 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
                     == Some(&control)
             }
             Screen::SettingsPage(SettingsPage::Appearance) => {
-                app.settings_selected == app.themes.len() + 3
+                app.settings_selected == app.appearance_controls().len()
             }
             Screen::SettingsPage(SettingsPage::Updates) => {
                 app.settings_selected == 2 + usize::from(app.self_release.is_some())
@@ -987,10 +1009,7 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
             .map(Control::Documentation)
             .chain([Control::Settings])
             .collect(),
-        Screen::SettingsPage(SettingsPage::Appearance) => (0..app.themes.len())
-            .map(Control::Accent)
-            .chain([Control::AccentInput, Control::SaveAccent, Control::Settings])
-            .collect(),
+        Screen::SettingsPage(SettingsPage::Appearance) => app.appearance_controls(),
         _ => Vec::new(),
     };
     let selected = match app.screen {

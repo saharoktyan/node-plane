@@ -13,13 +13,13 @@ Workstation is the administrator's terminal interface. Install it on your own co
 **Linux (x64) and macOS (Intel or Apple Silicon)**
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/saharoktyan/node-plane/main/scripts/install_workstation.sh | bash
+curl -fsSL https://raw.githubusercontent.com/saharoktyan/node-plane/dev/scripts/install_workstation.sh | bash
 ```
 
 **Windows (x64), PowerShell**
 
 ```powershell
-irm https://raw.githubusercontent.com/saharoktyan/node-plane/main/scripts/install_workstation.ps1 | iex
+irm https://raw.githubusercontent.com/saharoktyan/node-plane/dev/scripts/install_workstation.ps1 | iex
 ```
 
 Workstation requires a supported OS, a terminal of at least 70 columns × 30 rows and SSH access to the controller. Open a new terminal if the command is not yet on PATH. Initial controller installation requires root access on the target server.

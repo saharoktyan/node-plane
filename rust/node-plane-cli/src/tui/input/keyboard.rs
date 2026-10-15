@@ -50,9 +50,10 @@ impl App {
                         *selected < fields.len() && *selected != 4
                     })
                 }
-                Screen::SettingsPage(SettingsPage::Appearance) => {
-                    self.settings_selected == self.themes.len() + 1
-                }
+                Screen::SettingsPage(SettingsPage::Appearance) => self
+                    .theme_wizard
+                    .as_ref()
+                    .is_some_and(|w| w.step < 3 && w.selected == 0),
                 _ => false,
             }
         };
@@ -71,34 +72,22 @@ impl App {
         if self.move_spatial(key) {
             return;
         }
-        let count = self.themes.len() + 3;
+        let controls = self.appearance_controls();
         match key {
             KeyCode::Esc => self.open_settings(),
             KeyCode::Down | KeyCode::Tab => {
-                self.settings_selected = (self.settings_selected + 1).min(count)
+                self.settings_selected = (self.settings_selected + 1).min(controls.len())
             }
             KeyCode::Up | KeyCode::BackTab => {
                 self.settings_selected = self.settings_selected.saturating_sub(1).max(1)
             }
-            KeyCode::Char(c)
-                if self.settings_selected == self.themes.len() + 1
-                    && self.accent_input.len() < 7
-                    && (c == '#' || c.is_ascii_hexdigit()) =>
-            {
-                self.accent_input.push(c)
-            }
-            KeyCode::Backspace if self.settings_selected == self.themes.len() + 1 => {
-                self.accent_input.pop();
-            }
             KeyCode::Enter => {
-                let control = match self.settings_selected {
-                    i if i > 0 && i <= self.themes.len() => Control::Accent(i - 1),
-                    i if i == self.themes.len() + 1 || i == self.themes.len() + 2 => {
-                        Control::SaveAccent
-                    }
-                    _ => Control::Settings,
-                };
-                self.activate(control);
+                self.activate(
+                    controls[self
+                        .settings_selected
+                        .saturating_sub(1)
+                        .min(controls.len() - 1)],
+                );
             }
             _ => {}
         }

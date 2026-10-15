@@ -88,7 +88,7 @@ impl App {
             settings_selected: 0,
             settings_profile: 0,
             appearance_viewport: std::cell::Cell::new(0),
-            accent_input: String::new(),
+            theme_wizard: None,
             themes: theme::defaults(),
             editor: None,
             profile_copy: None,

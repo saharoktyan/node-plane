@@ -14,7 +14,7 @@ pub(in crate::tui) fn draw_access_grants(
                 .wrap(Wrap { trim: false }),
             sections[1],
         );
-        let area = centered(sections[2], 18, 3);
+        let area = sections[2];
         draw_button(frame, area, "Back", true);
         hits.push(Hit {
             area,
@@ -194,9 +194,14 @@ pub(in crate::tui) fn draw_access_buttons(
         cells
     } else if pages.len() == 2 && buttons.len() > 2 && area.height >= 6 {
         let page_cells = button_areas(Rect::new(area.x, area.y, area.width, 3), 2, 1);
-        let mut others = button_areas(
+        let other_labels: Vec<_> = buttons
+            .iter()
+            .filter(|(_, control)| !is_page_control(*control))
+            .map(|(label, _)| *label)
+            .collect();
+        let mut others = dialog_button_areas(
             Rect::new(area.x, area.y + 3, area.width, area.height - 3),
-            buttons.len() - 2,
+            &other_labels,
             usize::from((area.height - 3) / 3).max(1),
         )
         .into_iter();
@@ -210,7 +215,11 @@ pub(in crate::tui) fn draw_access_buttons(
             })
             .collect()
     } else {
-        button_areas(area, buttons.len(), usize::from(area.height / 3).max(1))
+        dialog_button_areas(
+            area,
+            &buttons.iter().map(|(label, _)| *label).collect::<Vec<_>>(),
+            usize::from(area.height / 3).max(1),
+        )
     };
     for (index, (label, control)) in buttons.iter().enumerate() {
         let rect = cells[index];
@@ -918,7 +927,11 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
         if !editor.permanent_access {
             buttons.insert(0, ("Duration", Control::AccessExpiryMenu));
         }
-        let columns = button_areas(sections[2], buttons.len(), 2);
+        let columns = dialog_button_areas(
+            sections[2],
+            &buttons.iter().map(|(label, _)| *label).collect::<Vec<_>>(),
+            1,
+        );
         for (index, (label, control)) in buttons.into_iter().enumerate() {
             draw_button(
                 frame,

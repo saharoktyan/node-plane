@@ -2,6 +2,28 @@ use super::super::*;
 
 impl App {
     pub(in crate::tui) fn activate_controller(&mut self, control: Control) -> Option<KeyEvent> {
+        let profile = self.form.saved.as_ref().map(|p| p.id);
+        if self.controller.profile != profile {
+            if self.controller.profile.is_some() {
+                self.controller = crate::controller::Browser {
+                    profile,
+                    ..Default::default()
+                };
+            } else {
+                self.controller.profile = profile;
+            }
+        }
+        if matches!(self.screen, Screen::Form)
+            && !matches!(
+                control,
+                Control::Controller
+                    | Control::ControllerRecoveryInventory(_)
+                    | Control::ControllerRecoveryPage(_)
+            )
+        {
+            self.screen = Screen::Controller;
+            self.controller_sidebar = false;
+        }
         match control {
             Control::ControllerAuditFilter(errors) => {
                 self.controller_command(if errors {
@@ -18,11 +40,26 @@ impl App {
             Control::ControllerRecoveryInventory(offset)
             | Control::ControllerRecoveryPage(offset) => {
                 if matches!(self.screen, Screen::Form) && self.form.action == Action::Diagnose {
-                    self.controller.profile = self.form.saved.as_ref().map(|p| p.id);
-                    self.controller.recovery_inventory = None;
+                    let profile = self.form.saved.as_ref().map(|p| p.id);
+                    if self.controller.profile != profile {
+                        self.controller = crate::controller::Browser {
+                            profile,
+                            ..Default::default()
+                        };
+                    }
+                    self.controller_navigation_revision =
+                        self.controller_navigation_revision.wrapping_add(1);
+                    self.controller_section = None;
+                    self.controller.recovery_inventory =
+                        Some(serde_json::json!({"loading":true,"items":[],"offset":offset}));
+                    self.controller.telegram_result = None;
+                    self.controller.defaults_input = None;
+                    self.controller.announcement_draft = None;
+                    self.controller.announcement_preview = None;
                     self.controller.workstation_audit = None;
                     self.controller.recovery_history = None;
                     self.controller.history_detail = None;
+                    self.controller.selected = 0;
                     self.screen = Screen::Controller;
                     self.controller_sidebar = false;
                 }
@@ -812,6 +849,8 @@ impl App {
                 self.requests_settings = false;
                 if section == ControllerSection::Policies {
                     self.controller_command(crate::controller::Command::Policies);
+                } else if self.controller.overview.is_none() {
+                    self.controller_command(crate::controller::Command::Overview);
                 }
                 self.controller.selected = 0;
                 self.controller_viewport.set(0);
@@ -964,13 +1003,15 @@ impl App {
                 None
             }
             Control::ControllerBack => {
+                self.cancel_queued_controller_read();
                 self.controller_navigation_revision =
                     self.controller_navigation_revision.wrapping_add(1);
                 if self.form.action == Action::Diagnose && matches!(self.screen, Screen::Controller)
                 {
                     self.controller.recovery_inventory = None;
                     self.screen = Screen::Form;
-                    self.form.selected = self.form.count() - 2;
+                    self.form.diagnostic_menu = true;
+                    self.form.selected = 2;
                     self.controller.selected = 0;
                     return None;
                 }
@@ -1083,8 +1124,7 @@ impl App {
         }
     }
     pub(in crate::tui) fn controller_command(&mut self, command: crate::controller::Command) {
-        if self.nodes_busy
-            || self.controller.removed && !matches!(command, crate::controller::Command::Probe)
+        if self.controller.removed && !matches!(command, crate::controller::Command::Probe)
             || self.controller.verifying
                 && !matches!(
                     command,
@@ -1092,6 +1132,19 @@ impl App {
                         | crate::controller::Command::Shutdown(..)
                 )
         {
+            return;
+        }
+        if self.nodes_busy {
+            let read = command.read_only();
+            let pending_read = self.nodes_requested.as_ref().is_none_or(|pending| {
+                matches!(pending, crate::nodes::Command::Controller(_, c) if c.read_only())
+            });
+            if read && pending_read {
+                self.nodes_requested = Some(crate::nodes::Command::Controller(
+                    self.form.saved.as_ref().map(|p| p.id),
+                    command,
+                ));
+            }
             return;
         }
         if let crate::controller::Command::TelegramAdmin(add, _, _) = &command {
@@ -1103,6 +1156,12 @@ impl App {
             command,
         ));
         self.error.clear();
+    }
+    pub(in crate::tui) fn cancel_queued_controller_read(&mut self) {
+        if matches!(&self.nodes_requested, Some(crate::nodes::Command::Controller(_, command)) if command.read_only())
+        {
+            self.nodes_requested = None;
+        }
     }
     pub(in crate::tui) fn controller_ready(&self) -> bool {
         self.form
@@ -1213,6 +1272,16 @@ impl App {
                 Control::ControllerCheck,
                 Control::ControllerBack,
             ];
+        }
+        if let Some(page) = state
+            .recovery_inventory
+            .as_ref()
+            .filter(|p| p["loading"] == true)
+        {
+            return recovery_controls(page)
+                .into_iter()
+                .map(|(_, c)| c)
+                .collect();
         }
         if state.plan_pending {
             return Vec::new();

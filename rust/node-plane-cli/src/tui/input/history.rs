@@ -169,7 +169,11 @@ impl App {
                     .as_ref()
                     .map(|w| std::mem::discriminant(&w.step))
             ),
-            Screen::Form => format!("form:{:?}", std::mem::discriminant(&self.form.action)),
+            Screen::Form => format!(
+                "form:{:?}:{}",
+                std::mem::discriminant(&self.form.action),
+                self.form.diagnostic_menu
+            ),
             Screen::NewInstallation => "new-installation".into(),
             Screen::Idle
             | Screen::QuickStart
@@ -191,56 +195,58 @@ impl App {
         let Some(key) = self.navigation_key() else {
             return;
         };
-        let (index, controls) =
-            match self.screen {
-                Screen::Controller => (self.controller.selected, self.controller_controls()),
-                Screen::Access => (self.access.selected, self.access_controls()),
-                Screen::Nodes => (self.nodes_selected, self.nodes_controls()),
-                Screen::Temporary => (self.temporary.selected, self.temporary_controls()),
-                Screen::Settings => (
-                    self.settings_selected.saturating_sub(1),
-                    SettingsPage::ALL
-                        .iter()
-                        .copied()
-                        .map(Control::SettingsPage)
-                        .collect(),
-                ),
-                Screen::SettingsPage(SettingsPage::Profiles) => (
-                    self.settings_selected.saturating_sub(1),
-                    self.profile_controls(),
-                ),
-                Screen::SettingsPage(SettingsPage::Appearance) => (
-                    self.settings_selected.saturating_sub(1),
-                    (0..self.themes.len())
-                        .map(Control::Accent)
-                        .chain([Control::AccentInput, Control::SaveAccent, Control::Settings])
-                        .collect(),
-                ),
-                Screen::SettingsPage(SettingsPage::Updates) => (
-                    self.settings_selected.saturating_sub(1),
-                    std::iter::once(Control::CheckWorkstationUpdates)
-                        .chain(self.self_release.as_ref().map(|_| Control::SelfUpdate))
-                        .chain([Control::Settings])
-                        .collect(),
-                ),
-                Screen::SettingsPage(SettingsPage::Documentation) => (
-                    self.settings_selected.saturating_sub(1),
-                    (0..DOCUMENTS.len())
-                        .map(Control::Documentation)
-                        .chain([Control::Settings])
-                        .collect(),
-                ),
-                Screen::SettingsPage(_) => (
-                    self.settings_selected.saturating_sub(1),
-                    vec![Control::Settings],
-                ),
-                Screen::EditInstallation => (self.editor.as_ref().map_or(0, |e| e.2), Vec::new()),
-                Screen::NodeWizard => (
-                    self.node_wizard.as_ref().map_or(0, |w| w.selected),
-                    Vec::new(),
-                ),
-                Screen::Form if self.form.action == Action::Diagnose => {
-                    let mut controls = vec![Control::Action(Action::Diagnose)];
+        let (index, controls) = match self.screen {
+            Screen::Controller => (self.controller.selected, self.controller_controls()),
+            Screen::Access => (self.access.selected, self.access_controls()),
+            Screen::Nodes => (self.nodes_selected, self.nodes_controls()),
+            Screen::Temporary => (self.temporary.selected, self.temporary_controls()),
+            Screen::Settings => (
+                self.settings_selected.saturating_sub(1),
+                SettingsPage::ALL
+                    .iter()
+                    .copied()
+                    .map(Control::SettingsPage)
+                    .collect(),
+            ),
+            Screen::SettingsPage(SettingsPage::Profiles) => (
+                self.settings_selected.saturating_sub(1),
+                self.profile_controls(),
+            ),
+            Screen::SettingsPage(SettingsPage::Appearance) => (
+                self.settings_selected.saturating_sub(1),
+                self.appearance_controls(),
+            ),
+            Screen::SettingsPage(SettingsPage::Updates) => (
+                self.settings_selected.saturating_sub(1),
+                std::iter::once(Control::CheckWorkstationUpdates)
+                    .chain(self.self_release.as_ref().map(|_| Control::SelfUpdate))
+                    .chain([Control::Settings])
+                    .collect(),
+            ),
+            Screen::SettingsPage(SettingsPage::Documentation) => (
+                self.settings_selected.saturating_sub(1),
+                (0..DOCUMENTS.len())
+                    .map(Control::Documentation)
+                    .chain([Control::Settings])
+                    .collect(),
+            ),
+            Screen::SettingsPage(_) => (
+                self.settings_selected.saturating_sub(1),
+                vec![Control::Settings],
+            ),
+            Screen::EditInstallation => (self.editor.as_ref().map_or(0, |e| e.2), Vec::new()),
+            Screen::NodeWizard => (
+                self.node_wizard.as_ref().map_or(0, |w| w.selected),
+                Vec::new(),
+            ),
+            Screen::Form if self.form.action == Action::Diagnose => {
+                let mut controls = vec![Control::Action(Action::Diagnose)];
+                if self.form.diagnostic_menu {
+                    controls.extend([
+                        Control::DiagnosticOverview,
+                        Control::ControllerRecoveryInventory(0),
+                    ]);
+                } else {
                     controls.extend(self.form.visible().iter().enumerate().map(
                         |(position, index)| {
                             if *index == 11 {
@@ -250,12 +256,13 @@ impl App {
                             }
                         },
                     ));
-                    controls.extend([Control::ControllerRecoveryInventory(0), Control::Continue]);
-                    (self.form.selected, controls)
+                    controls.push(Control::Continue);
                 }
-                Screen::Form => (self.form.selected, Vec::new()),
-                _ => (0, Vec::new()),
-            };
+                (self.form.selected, controls)
+            }
+            Screen::Form => (self.form.selected, Vec::new()),
+            _ => (0, Vec::new()),
+        };
         let index = activated
             .and_then(|c| controls.iter().position(|v| *v == c))
             .unwrap_or(index);

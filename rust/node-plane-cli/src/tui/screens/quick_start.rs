@@ -65,7 +65,7 @@ pub(in crate::tui) fn draw_quick_start(
     };
     let complete = next_label == "Done";
     if complete {
-        let area = centered(sections[1], 18, 3);
+        let area = sections[1];
         draw_button(
             frame,
             area,
@@ -78,7 +78,7 @@ pub(in crate::tui) fn draw_quick_start(
             control: Control::QuickStartAction,
         });
     } else {
-        let strip = centered(sections[1], 36, 3);
+        let strip = sections[1];
         let buttons = Layout::horizontal([
             Constraint::Fill(1),
             Constraint::Length(2),

@@ -18,7 +18,7 @@
 Выполните на сервере от root:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/saharoktyan/node-plane/main/scripts/controller_release.py -o /tmp/node-plane-controller-release.py
+curl -fsSL https://raw.githubusercontent.com/saharoktyan/node-plane/dev/scripts/controller_release.py -o /tmp/node-plane-controller-release.py
 python3 /tmp/node-plane-controller-release.py download --branch main --destination /opt/node-plane-install
 cd /opt/node-plane-install
 ./scripts/install.sh --mode simple

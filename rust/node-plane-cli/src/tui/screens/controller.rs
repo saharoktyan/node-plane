@@ -420,7 +420,14 @@ pub(in crate::tui) fn draw_controller(
     let state = &app.controller;
     let mut text = String::new();
     let mut controls: Vec<(String, Control)> = Vec::new();
-    if state.removed {
+    if state
+        .recovery_inventory
+        .as_ref()
+        .is_some_and(|page| page["loading"] == true)
+    {
+        text = "Loading operations…".into();
+        controls = recovery_controls(state.recovery_inventory.as_ref().unwrap());
+    } else if state.removed {
         text = "Bye-bye! Node Plane has been removed.".into();
         controls.extend([
             ("New installation".into(), Control::ControllerNew),
@@ -711,9 +718,6 @@ pub(in crate::tui) fn draw_controller(
             value["last_scan"]["at"].as_str().unwrap_or("Never"),
             value["last_cpu_scan"]["at"].as_str().unwrap_or("Never")
         );
-        if value["cpu_check_seconds"] == 30 {
-            text.push_str("\nCPU: sample every 5 seconds · average over 1 minute · check every 30 seconds\nWarning ≥85% · critical ≥95% · recovery <80%");
-        }
         if let Some(items) = value["active"].as_array() {
             for item in items.iter().skip(state.alerts_page * 5).take(5) {
                 text.push_str(&format!(
@@ -783,7 +787,7 @@ pub(in crate::tui) fn draw_controller(
                     if state.defaults_input.as_ref().unwrap().1.trim().is_empty() {
                         "Skip"
                     } else {
-                        "Create backup"
+                        "Continue"
                     }
                 } else if key.starts_with("backup_") {
                     "Transfer file"
@@ -1337,8 +1341,92 @@ pub(in crate::tui) fn draw_controller(
     controls.retain(|(_, control)| {
         *control != Control::ControllerBack
             || state.defaults_input.is_some()
+            || state.plan.is_some()
             || state.announcement_preview.is_some()
     });
+    if state.branch_confirmation
+        || (state.plan.is_some()
+            && controls
+                .iter()
+                .any(|(_, c)| *c == Control::ControllerPhrase))
+    {
+        let footer = Rect::new(
+            parts[0].x,
+            parts[0].bottom().saturating_sub(3),
+            parts[0].width,
+            3,
+        );
+        let field_height = if state.branch_confirmation { 0 } else { 3 };
+        let body = Rect::new(
+            parts[0].x,
+            parts[0].y,
+            parts[0].width,
+            parts[0].height.saturating_sub(3 + field_height),
+        );
+        let lines: Vec<_> = text
+            .lines()
+            .enumerate()
+            .map(|(index, line)| {
+                if state.plan.is_some() && index == 1 {
+                    Line::styled(
+                        line.to_owned(),
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
+                    )
+                } else {
+                    Line::from(line.to_owned())
+                }
+            })
+            .collect();
+        frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), body);
+        if field_height > 0 {
+            let rect = Rect::new(body.x, body.bottom(), body.width, 3);
+            let index = controls
+                .iter()
+                .position(|(_, c)| *c == Control::ControllerPhrase)
+                .unwrap();
+            draw_field(
+                frame,
+                rect,
+                "Confirmation phrase",
+                &state.phrase,
+                state.selected == index,
+            );
+            hits.push(Hit {
+                area: rect,
+                control: Control::ControllerPhrase,
+            });
+        }
+        let buttons: Vec<_> = controls
+            .iter()
+            .filter(|(_, c)| *c != Control::ControllerPhrase)
+            .collect();
+        let labels: Vec<_> = buttons.iter().map(|(label, _)| label.as_str()).collect();
+        let cells = dialog_button_areas(footer, &labels, 1);
+        for ((label, control), rect) in buttons.into_iter().zip(cells) {
+            let index = controls.iter().position(|(_, c)| c == control).unwrap();
+            draw_button_color(
+                frame,
+                rect,
+                label,
+                state.selected == index,
+                if matches!(
+                    control,
+                    Control::ControllerConfirm | Control::ControllerUpdateBranchConfirm(true)
+                ) {
+                    Color::Red
+                } else {
+                    Color::Cyan
+                },
+            );
+            hits.push(Hit {
+                area: rect,
+                control: *control,
+            });
+        }
+        return;
+    }
     if state.announcement_preview.is_some() && state.announcement_job.is_none() {
         let rows = Layout::vertical([Constraint::Min(0), Constraint::Length(3)]).split(parts[0]);
         frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: false }), rows[0]);
@@ -1447,40 +1535,40 @@ pub(in crate::tui) fn draw_controller(
             parts[0].width,
             3,
         );
-        let cells = Layout::horizontal([Constraint::Fill(1), Constraint::Fill(1)])
-            .spacing(1)
-            .split(footer);
-        for (slot, control, label) in [
-            (
-                0,
-                Control::ControllerBack,
-                if state.text_confirmation {
-                    "Back"
-                } else {
-                    "Cancel"
-                },
-            ),
-            (
-                1,
-                if state.text_confirmation {
-                    Control::ControllerTextConfirm
-                } else {
-                    Control::ControllerDefaultsInputApply
-                },
+        let mut buttons = vec![(
+            if state.text_confirmation {
+                "Back"
+            } else {
+                "Cancel"
+            },
+            Control::ControllerBack,
+        )];
+        let apply = if state.text_confirmation {
+            Control::ControllerTextConfirm
+        } else {
+            Control::ControllerDefaultsInputApply
+        };
+        if controls.iter().any(|(_, c)| *c == apply) {
+            buttons.push((
                 if state.text_confirmation {
                     "Confirm"
+                } else if *key == "backup_name" && input.trim().is_empty() {
+                    "Skip"
                 } else {
                     "Continue"
                 },
-            ),
-        ] {
-            if let Some(index) = controls.iter().position(|(_, value)| *value == control) {
-                draw_button(frame, cells[slot], label, state.selected == index);
-                hits.push(Hit {
-                    area: cells[slot],
-                    control,
-                });
-            }
+                apply,
+            ));
+        }
+        let labels: Vec<_> = buttons.iter().map(|(label, _)| *label).collect();
+        let cells = dialog_button_areas(footer, &labels, 1);
+        for ((label, control), rect) in buttons.into_iter().zip(cells) {
+            let index = controls.iter().position(|(_, c)| *c == control).unwrap();
+            draw_button(frame, rect, label, state.selected == index);
+            hits.push(Hit {
+                area: rect,
+                control,
+            });
         }
         return;
     }

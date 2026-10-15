@@ -65,6 +65,10 @@ pub enum Command {
     Verify(Value),
 }
 impl Command {
+    pub fn read_only(&self) -> bool {
+        matches!(self, Self::Probe | Self::Presence | Self::TelegramSettings)
+            || self.request().is_ok_and(|r| r.0 == Method::GET)
+    }
     pub fn request(&self) -> Result<(Method, String, Option<Value>, Option<Uuid>)> {
         let root = "/api/v1/system/cleanup";
         Ok(match self {

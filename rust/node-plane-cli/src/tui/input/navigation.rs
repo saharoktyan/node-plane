@@ -42,6 +42,7 @@ impl App {
             self.temporary_sidebar = true;
         } else {
             self.form.select_action(Action::ALL[next]);
+            self.form.diagnostic_menu = self.form.action == Action::Diagnose;
             if self.form.action == Action::Install && self.has_installation() {
                 self.open_controller();
                 return;
@@ -211,8 +212,7 @@ impl App {
                 (self.profile_controls(), self.settings_selected - 1, 1)
             }
             Screen::SettingsPage(SettingsPage::Appearance) if self.settings_selected > 0 => {
-                let mut controls: Vec<_> = (0..self.themes.len()).map(Control::Accent).collect();
-                controls.extend([Control::AccentInput, Control::SaveAccent, Control::Settings]);
+                let controls = self.appearance_controls();
                 (controls, self.settings_selected - 1, 1)
             }
             Screen::SettingsPage(SettingsPage::Updates) if self.settings_selected > 0 => {
@@ -321,6 +321,14 @@ impl App {
     }
 
     fn section_navigation_inner(&mut self, key: KeyCode) -> bool {
+        if key == KeyCode::Esc
+            && matches!(self.screen, Screen::Form)
+            && self.form.action == Action::Diagnose
+            && !self.form.diagnostic_menu
+        {
+            self.activate(Control::DiagnosticMenu);
+            return true;
+        }
         if key == KeyCode::Esc && self.section_root() {
             let control = match self.screen {
                 Screen::Settings => Control::Settings,
@@ -550,6 +558,12 @@ impl App {
         ))
     }
     pub(in crate::tui) fn focus(&mut self, control: Control) {
+        if let Some(wizard) = &mut self.theme_wizard {
+            if let Some(index) = wizard.controls().iter().position(|c| *c == control) {
+                wizard.selected = index;
+            }
+            return;
+        }
         if control == Control::WindowClose {
             return;
         }
@@ -609,23 +623,45 @@ impl App {
                     self.form.selected = index + 1;
                 }
             }
+            Control::DiagnosticOverview => {
+                self.quick_focus = false;
+                self.form.selected = 1;
+            }
             Control::ControllerRecoveryInventory(_)
                 if matches!(self.screen, Screen::Form) && self.form.action == Action::Diagnose =>
             {
                 self.quick_focus = false;
-                self.form.selected = self.form.count() - 2;
+                self.form.selected = 2;
             }
             Control::Continue => {
                 self.quick_focus = false;
                 self.form.selected = self.form.count() - 1;
             }
             Control::Documentation(index) => self.settings_selected = index + 1,
-            Control::Accent(index) => self.settings_selected = index + 1,
-            Control::AccentInput => self.settings_selected = self.themes.len() + 1,
+            Control::Accent(_) => {
+                if let Some(index) = self
+                    .appearance_controls()
+                    .iter()
+                    .position(|c| *c == control)
+                {
+                    self.settings_selected = index + 1;
+                }
+            }
+            Control::CreateTheme | Control::ThemeDelete(_) => {
+                if let Some(index) = self
+                    .appearance_controls()
+                    .iter()
+                    .position(|c| *c == control)
+                {
+                    self.settings_selected = index + 1;
+                }
+            }
             Control::Settings if matches!(self.screen, Screen::SettingsPage(_)) => {
                 self.settings_selected =
                     match self.screen {
-                        Screen::SettingsPage(SettingsPage::Appearance) => self.themes.len() + 3,
+                        Screen::SettingsPage(SettingsPage::Appearance) => {
+                            self.appearance_controls().len()
+                        }
                         Screen::SettingsPage(SettingsPage::Documentation) => DOCUMENTS.len() + 1,
                         Screen::SettingsPage(SettingsPage::Profiles) => {
                             self.profile_controls().len()
@@ -636,7 +672,6 @@ impl App {
                         _ => 1,
                     };
             }
-            Control::SaveAccent => self.settings_selected = self.themes.len() + 2,
             Control::Installation(index) => self.settings_selected = index + 1,
             Control::SettingsPage(page) => {
                 if matches!(self.screen, Screen::Settings) {
