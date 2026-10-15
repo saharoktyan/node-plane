@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.0-alpha.14 - 2026-10-15
+
+- Simplify Get config to a region-grouped server list followed by full protocol buttons. Skip the VLESS transport choice when only one transport is available and return AWG/device and transport screens to the selected server without reissuing configurations.
+- Compact the Telegram Server access editor into one button per server with selected protocol labels. Put global and regional All/None actions and Persistent rules in text links, and edit individual protocols on a separate screen while retaining the draft and list page.
+- Hide Profile details and traffic statistics after access expires; keep traffic totals only in their dedicated section and remove the incomplete-totals notice.
+- Deliver access-expiry notifications from System through the existing announcement Inbox, using the configured service name and the same Close/Dismiss controls. Deduplicate each expiry and suppress queued notices after renewal.
+- Use From for notification senders and show the sender and DD/MM/YY date in Inbox buttons. Mark only unread items as New, and show a labeled page counter only when there are multiple pages.
+
 ## 1.0.0-alpha.13 - 2026-10-15
 
 - Add a custom theme wizard with named JSON files, primary/secondary color previews, an optional darker secondary color, and confirmed deletion of custom themes.

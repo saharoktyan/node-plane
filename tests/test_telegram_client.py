@@ -446,9 +446,90 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         self.bot.send_rich_message = AsyncMock()
         await deliver_one(self.bot,backend)
         rich = self.bot.send_rich_message.call_args.kwargs['rich_message']
-        self.assertEqual(rich.blocks[1].text,'by @sender')
+        self.assertEqual(rich.blocks[1].text,'From @sender')
         self.assertEqual([b.callback_data for b in rich.blocks[-1].buttons],['announce_close:delivery','announce_dismiss:delivery'])
         backend.announcement_ack.assert_awaited()
+
+    async def test_notification_inbox_only_marks_unread_items_and_labels_multiple_pages(self):
+        for locale in ('en', 'ru'):
+            self.state_data['locale'] = locale
+            items = [{'id':'new', 'text':'Unread message', 'viewed_at':None,
+                      'sender_username':'alice', 'created_at':'2026-10-15T13:40:00+00:00'},
+                     {'id':'seen', 'text':'Viewed message', 'viewed_at':'2026-10-15T00:00:00Z',
+                      'notification_kind':'access_expired', 'created_at':'2026-10-14T00:00:00Z'},
+                     {'id':'unknown', 'text':'Message without sender username', 'viewed_at':None,
+                      'created_at':'2026-01-02T00:00:00Z'}]
+            for total, offset in ((3, 0), (13, 0), (13, 10)):
+                backend = SimpleNamespace(notifications=AsyncMock(return_value={
+                    'items':items, 'total':total, 'offset':offset, 'page_size':10}))
+                with patch.object(user, 'render', new_callable=AsyncMock) as draw:
+                    await user.show_notification_inbox(123,123,77,self.bot,backend,self.state,offset=offset)
+                screen, rows = draw.call_args.args[2:4]
+                self.assertEqual(rows[0][0].text, user.tr(locale,'announce.new') + ' · ' +
+                                 user.tr(locale,'notification.from',sender='@alice') + ' · 15/10/26')
+                self.assertEqual(rows[1][0].text, user.tr(locale,'notification.from',sender='System') + ' · 14/10/26')
+                self.assertEqual(rows[2][0].text, user.tr(locale,'announce.new') + ' · ' +
+                    user.tr(locale,'notification.from',sender=user.tr(locale,'notification.administrator')) + ' · 02/01/26')
+                self.assertNotIn('message', ' '.join(row[0].text.lower() for row in rows))
+                self.assertEqual(screen.lines, () if total == 3 else (
+                    user.tr(locale,'notification.page',page=offset // 10 + 1,pages=2),))
+
+    async def test_system_expiry_notifications_share_announcement_controls_and_inbox_presentation(self):
+        from telegram_client.announcement_delivery import deliver_one
+        for locale in ('en','ru'):
+            self.state_data['locale'] = locale
+            item = {'id':'delivery','telegram_user_id':123,'text':'stored receipt',
+                    'locale':locale,'silent':False,'notification_kind':'access_expired',
+                    'service_title':'Private VPN','sender_name':'System','sender_username':None}
+            backend = SimpleNamespace(announcement_claim=AsyncMock(return_value={'delivery':item}),
+                announcement_ack=AsyncMock(), notification=AsyncMock(return_value=item))
+            self.bot.send_rich_message = AsyncMock()
+            await deliver_one(self.bot,backend)
+            rich = self.bot.send_rich_message.call_args.kwargs['rich_message']
+            self.assertEqual([b.callback_data for b in rich.blocks[-1].buttons],['announce_close:delivery','announce_dismiss:delivery'])
+            self.assertIn('System',rich.blocks[1].text)
+            self.assertIn('Private VPN',rich.blocks[2].text)
+            self.assertNotIn('Node Plane',rich.blocks[2].text)
+            self.assertEqual(rich.blocks[0].text,user.tr(locale,'notification.access_expired.title'))
+            with patch.object(user,'render',new_callable=AsyncMock) as draw:
+                await user.show_notification(123,123,77,'delivery',self.bot,backend,self.state)
+            screen = draw.call_args.args[2]
+            self.assertEqual(screen.title, user.tr(locale,'notification.access_expired.title'))
+            self.assertIn(user.tr(locale,'notification.from',sender='System'),screen.lines)
+
+    async def test_expired_account_profile_hides_details_and_traffic_even_for_cached_callbacks(self):
+        summary = {'display_name':'Alice','frozen':False,'expired':True,'nodes':[],
+            'traffic':{'status':'current','month':'2026-10','items':[{'protocol':'awg','uplink_bytes':1024,'downlink_bytes':2048}]}}
+        backend = SimpleNamespace(member_profile_summary=AsyncMock(return_value=summary))
+        for locale in ('ru','en'):
+            self.state_data['locale'] = locale
+            for details in (False,True):
+                with patch.object(user,'render',new_callable=AsyncMock) as draw:
+                    await user.show_account_profile(123,123,77,'p1',self.bot,backend,self.state,details=details)
+                screen, rows = draw.call_args.args[2:4]
+                self.assertFalse(any(s.title == user.tr(locale,'traffic.title') for s in screen.sections))
+                self.assertFalse(any(b.text == user.tr(locale,'account.details') for row in rows for b in row))
+                self.assertIn(user.tr(locale,'profile.expired'),screen.plain())
+            with patch.object(user,'render',new_callable=AsyncMock) as draw:
+                await user.show_account_stats(123,123,77,'p1',self.bot,backend,self.state)
+            self.assertFalse(any(s.title == user.tr(locale,'traffic.title') for s in draw.call_args.args[2].sections))
+
+    async def test_profile_statistics_do_not_duplicate_dedicated_traffic_section(self):
+        summary = {'display_name':'Alice','frozen':False,'expired':False,'nodes':[],
+            'traffic':{'status':'unknown','month':'2026-10','items':[{'protocol':'awg','uplink_bytes':1024,'downlink_bytes':2048}]}}
+        backend = SimpleNamespace(member_profile_summary=AsyncMock(return_value=summary))
+        for locale in ('en','ru'):
+            self.state_data['locale'] = locale
+            with patch.object(user,'render',new_callable=AsyncMock) as draw:
+                await user.show_account_profile(123,123,77,'p1',self.bot,backend,self.state,details=True)
+            screen = draw.call_args.args[2]
+            stats = next(s for s in screen.sections if s.title == user.tr(locale,'account.statistics'))
+            labels = {row[0] for row in stats.tables[0].rows}
+            for key in ('account.traffic_total','account.traffic_awg','account.traffic_vless'):
+                self.assertNotIn(user.tr(locale,key),labels)
+            traffic = next(s for s in screen.sections if s.title == user.tr(locale,'traffic.title'))
+            self.assertNotIn(user.tr(locale,'traffic.status.unknown'),traffic.lines)
+            self.assertIn('3.0 KiB',traffic.tables[0].rows[0][1])
 
     async def test_add_user_provisions_account_and_automatic_profile_atomically(self):
         message = SimpleNamespace(from_user=SimpleNamespace(id=101), chat=SimpleNamespace(id=1, type='private'),
@@ -909,15 +990,15 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         screen = draw.call_args.args[2]
         self.assertTrue(screen.embedded_buttons)
         self.assertEqual([section.title for section in screen.sections], ['EU', 'RU'])
-        self.assertEqual([section.sections[0].title for section in screen.sections], ['🇱🇻 Latvia', '🇷🇺 Moscow'])
-        self.assertEqual(screen.lines, ())
+        self.assertEqual([section.rows[0][0].text for section in screen.sections], ['🇱🇻 Latvia · AWG, VLESS', '🇷🇺 Moscow · VLESS'])
+        self.assertEqual(screen.lines, ('Choose a server.',))
         self.assertEqual([block.type for block in screen.rich(draw.call_args.args[3]).blocks],
-            ['heading', 'heading', 'heading', 'buttons', 'divider', 'heading', 'heading', 'buttons', 'divider', 'buttons'])
+            ['heading', 'paragraph', 'heading', 'buttons', 'heading', 'buttons', 'divider', 'buttons'])
         backend.member_profile_summary.assert_not_awaited()
         for section, node_key in zip(screen.sections, ('lv1', 'msk1')):
-            for button in section.sections[0].rows[0]:
+            for button in section.rows[0]:
                 action = user.actions[button.callback_data[2:]]
-                self.assertEqual(action.name, 'protocol')
+                self.assertEqual(action.name, 'node')
                 self.assertEqual(action.args[:2], ('p1', node_key))
         back = user.actions[draw.call_args.args[3][-1][0].callback_data[2:]]
         self.assertEqual(back.name, 'home')
@@ -933,14 +1014,14 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
                 await user.show_profile(123, 123, 77, 'p1', self.bot, backend, self.state,
                                         page_index=page)
                 screen, rows = draw.call_args.args[2:4]
-                titles = [node.title for region in screen.sections for node in region.sections]
+                titles = [row[0].text.removesuffix(' · VLESS') for region in screen.sections for row in region.rows]
                 self.assertEqual(len(titles), 10 if page < 2 else 3)
                 seen.extend(titles)
                 self.assertIn(f'{page + 1} / 3', [b.text for b in rows[0]])
                 self.assertEqual([b.text for b in rows[0]],
                     (['←'] if page else []) + [f'{page + 1} / 3'] + (['→'] if page < 2 else []))
                 for region in screen.sections:
-                    self.assertTrue(all(region.title not in node.title for node in region.sections))
+                    self.assertTrue(all(region.title not in row[0].text for row in region.rows))
             await user.show_profile(123, 123, 77, 'p1', self.bot, backend, self.state)
         self.assertEqual(len(set(seen)), 23)
         self.assertEqual(seen, [f'Server {i:02}' for i in [*range(12, 23), *range(12)]])
@@ -980,7 +1061,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             self.assertEqual(user.server_pagination(123, 'en', index, pages, 'profile'), ())
             self.assertEqual(len(nodes), count)
 
-    async def test_transport_selection_goes_back_to_server_list(self):
+    async def test_transport_selection_goes_back_to_protocol_selection(self):
         backend = SimpleNamespace(profile_nodes=AsyncMock(return_value={'items': [
             {'key': 'lv1', 'title': 'Latvia', 'protocols': [
                 {'kind': 'xray', 'transports': ['tcp', 'xhttp']}]}]}))
@@ -996,7 +1077,33 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             action = user.actions[button.callback_data[2:]]
             self.assertEqual(action.args, ('p1', 'lv1', 'xray', transport))
         back = user.actions[draw.call_args.args[3][-1][0].callback_data[2:]]
-        self.assertEqual((back.name, back.args), ('profile', ('p1',)))
+        self.assertEqual((back.name, back.args), ('node', ('p1', 'lv1')))
+
+    async def test_config_node_uses_full_protocol_buttons_and_single_transport_skips_choice(self):
+        nodes = [{'key':'lv1','title':'Latvia #1','region':'Europe','flag':'🇱🇻',
+                  'protocols':[{'kind':'awg'}, {'kind':'xray','transports':['tcp']}]}]
+        backend = SimpleNamespace(profile_nodes=AsyncMock(return_value={'items':nodes}))
+        for locale in ('en','ru'):
+            self.state_data['locale'] = locale
+            with patch.object(user,'render',new_callable=AsyncMock) as draw:
+                await user.show_node(123,123,77,'p1','lv1',self.bot,backend,self.state)
+                screen, rows = draw.call_args.args[2:4]
+                self.assertEqual(screen.lines, (user.tr(locale,'node.choose_protocol'),))
+                self.assertEqual([row[0].text for row in rows[:2]], ['AmneziaWG','VLESS'])
+                awg = user.actions[rows[0][0].callback_data[2:]]
+                vless = user.actions[rows[1][0].callback_data[2:]]
+                self.assertEqual((awg.name,awg.args), ('protocol',('p1','lv1','awg')))
+                self.assertEqual((vless.name,vless.args), ('issue',('p1','lv1','xray','tcp')))
+                self.assertEqual(user.actions[rows[-1][0].callback_data[2:]].name,'profile')
+                self.query.data = rows[1][0].callback_data
+                with patch.object(user,'issue',new_callable=AsyncMock) as issue:
+                    await user.user_action_cb(self.query,self.bot,backend,self.state)
+                    self.assertEqual(issue.call_args.args[3:7], ('p1','lv1','xray','tcp'))
+                    issue.reset_mock()
+                    # Back opens protocol buttons without sending a configuration again.
+                    await user.show_protocol(123,123,77,'p1','lv1','xray',self.bot,backend,self.state)
+                    issue.assert_not_awaited()
+                self.assertEqual(draw.call_args.args[2].title,'🇱🇻 Latvia #1')
 
     async def test_member_settings_actions_describe_the_change_and_preserve_backend_values(self):
         backend = SimpleNamespace(me=AsyncMock(return_value={
@@ -1044,7 +1151,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             await admin_profiles.show_create_nodes(123, 123, 77, self.bot, backend, self.state)
             self.assertEqual(next(s for s in draw.call_args.args[2].sections if s.sections).sections[0].title, '🇱🇻 Latvia')
             await admin_profiles.show_grant_nodes(123, 123, 77, 'p1', self.bot, backend, self.state)
-            self.assertEqual(next(s for s in draw.call_args.args[2].sections if s.sections).sections[0].title, '🇱🇻 Latvia')
+            self.assertEqual(draw.call_args.args[2].sections[1].rows[0][0].text, '🇱🇻 Latvia')
 
     async def test_plain_config_fallback_preserves_downloads(self):
         backend = SimpleNamespace(

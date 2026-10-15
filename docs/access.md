@@ -22,6 +22,8 @@ Open or create a profile, then edit its access:
 
 The expiry display shows the resulting deadline. Current grants and future-server rules are separate: check both when changing a region or removing access.
 
+In Telegram, **Server access** lists one button per server, with selected protocols beside its name. Open a server to change its protocols; Back returns to the same list page. The text actions **All / None** apply to all current servers, or only the region beside them, across all pages. **Persistent rules** opens future-server rules. Changes remain a draft until saved.
+
 ## Devices and configurations
 
 AWG devices have distinct identities and peer configurations. Create a separate device for each simultaneous client. Two clients sharing one AWG identity can interfere with each other's connection.

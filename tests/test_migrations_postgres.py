@@ -31,7 +31,7 @@ class MigrationsPostgresTests(unittest.TestCase):
             conn.execute(f'DROP SCHEMA {self.schema} CASCADE')
 
     def test_account_profile_upgrade_preserves_runtime_and_backfills_missing_pairs(self):
-        migrate(self.db,revisions=REVISIONS[:-1])
+        migrate(self.db,revisions=REVISIONS[:10])
         with self.db.transaction() as conn:
             conn.execute("INSERT INTO backend_accounts(id,status) VALUES ('owner','approved'),('pending','pending')")
             conn.execute("INSERT INTO backend_external_identities VALUES ('telegram','102','owner')")
@@ -62,6 +62,55 @@ class MigrationsPostgresTests(unittest.TestCase):
         self.assertEqual(migrate(self.db)['applied'],[])
         with self.db.connect() as conn:
             self.assertEqual(conn.execute('SELECT COUNT(*) AS n FROM backend_recovery_audit').fetchone()['n'],1)
+
+    def test_system_notification_upgrade_preserves_announcements_and_previous_reader(self):
+        migrate(self.db,revisions=REVISIONS[:11])
+        with self.db.transaction() as conn:
+            conn.execute("INSERT INTO backend_announcements VALUES ('existing','actor','key','Hello','2026-10-15')")
+        self.assertEqual(migrate(self.db)['applied'],[12])
+        self.assertTrue(check_schema(self.db,revisions=REVISIONS[:11])['ready'])
+        with self.db.transaction() as conn:
+            self.assertEqual(conn.execute("SELECT text FROM backend_announcements WHERE id='existing'").fetchone()['text'],'Hello')
+            conn.execute("INSERT INTO backend_system_notifications VALUES ('existing','access_expired','profile','2026-10-15','Private VPN')")
+            # The previous application can still clear transport records during restore.
+            conn.execute("DELETE FROM backend_announcements WHERE id='existing'")
+            self.assertEqual(conn.execute('SELECT COUNT(*) AS n FROM backend_system_notifications').fetchone()['n'],0)
+
+    def test_concurrent_expiry_admits_one_notification_and_rechecks_renewal(self):
+        from datetime import timedelta
+        from backend.announcements import AnnouncementService
+        from backend.authorization import Principal, PrincipalKind
+        from backend.credentials import ADAPTER_SCOPES
+        from backend.executor import IntentExecutor
+        from backend.identity_repository import SQLIdentityRepository
+        from backend.profiles import ProfileRepository
+        migrate(self.db)
+        identities = SQLIdentityRepository(self.db)
+        account = identities.create_account()
+        identities.link_telegram(account.id,102)
+        profile = ProfileRepository(self.db).ensure_account_profile(account.id)
+        deadline = (datetime.now(timezone.utc)-timedelta(seconds=5)).isoformat()
+        with self.db.transaction() as conn:
+            conn.execute('UPDATE backend_profiles SET expires_at=? WHERE id=?',(deadline,profile))
+            conn.execute("INSERT INTO backend_system_settings(key,value) VALUES ('bot_menu_title','Private VPN')")
+        start = threading.Barrier(2)
+        def expire():
+            start.wait(timeout=5)
+            return IntentExecutor(self.db,None).queue_expired_profiles()
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            list(pool.map(lambda _:expire(),range(2)))
+        with self.db.connect() as conn:
+            self.assertEqual(conn.execute('SELECT COUNT(*) AS n FROM backend_system_notifications').fetchone()['n'],1)
+            self.assertEqual(conn.execute('SELECT COUNT(*) AS n FROM backend_announcement_deliveries').fetchone()['n'],1)
+        # A renewal after admission must suppress the outdated queued message.
+        with self.db.transaction() as conn:
+            conn.execute('UPDATE backend_profiles SET expires_at=? WHERE id=?',
+                ((datetime.now(timezone.utc)+timedelta(days=1)).isoformat(),profile))
+        service = AnnouncementService(self.db)
+        transport = Principal('telegram-test',PrincipalKind.ADAPTER,ADAPTER_SCOPES)
+        self.assertIsNone(service.claim(transport,str(uuid4())))
+        with self.db.connect() as conn:
+            self.assertEqual(conn.execute('SELECT status FROM backend_announcement_deliveries').fetchone()['status'],'skipped')
 
     def test_targeted_recovery_and_audit_use_real_postgres_rows(self):
         migrate(self.db)

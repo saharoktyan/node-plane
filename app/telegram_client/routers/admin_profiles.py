@@ -202,10 +202,12 @@ def _task_status(status, locale):
     return tr(locale, 'operation.' + key) if key else tr(locale, 'profile.rich.unknown')
 
 
-def _bulk_buttons(profile_id, scope, locale, *, region=False, prefix='grant_bulk'):
-    return (InlineKeyboardButton(text=tr(locale, 'profile.rich.grant_region' if region else 'profile.rich.grant_all'),
+def _bulk_buttons(profile_id, scope, locale, *, region=False, prefix='grant_bulk', compact=False):
+    return (InlineKeyboardButton(text=tr(locale, 'profile.access.all' if compact else
+                'profile.rich.grant_region' if region else 'profile.rich.grant_all'),
                 callback_data=f'{prefix}:{profile_id}:add:{scope}', style='primary'),
-            InlineKeyboardButton(text=tr(locale, 'profile.rich.revoke_region' if region else 'profile.rich.revoke_all'),
+            InlineKeyboardButton(text=tr(locale, 'profile.access.none' if compact else
+                'profile.rich.revoke_region' if region else 'profile.rich.revoke_all'),
                 callback_data=f'{prefix}:{profile_id}:del:{scope}', style='danger'))
 
 
@@ -1388,25 +1390,15 @@ async def show_grant_nodes(chat_id: int, user_id: int, message_id: int,
     await state.update_data(grant_nodes_page=page, grant_inline=True, future_rules_context=None,
         grant_node_labels={node['key']: server_label(node) for node in nodes})
     granted = policy_ui.effective(data, nodes)
-    inherited = policy_ui.inherited(policy_ui.values(data), nodes)
     await state.update_data(grant_draft_nodes=nodes, policy_region_labels={
         **(data.get('policy_region_labels') or {}),
         **{node['region_id']: node['region'] for node in nodes if node.get('region_id')}})
-    def node_section(node):
-        buttons = []
-        for protocol in node['protocols']:
-            selected = (node['key'], protocol) in granted
-            if not selected and not node.get('enabled', True):
-                continue
-            callback = (RemoveGrantCallback if selected else AddGrantCallback)(
-                profile_id=profile_id, node_key=node['key'], protocol=protocol)
-            buttons.append(InlineKeyboardButton(text=tr(locale, 'protocol.' + protocol),
-                callback_data=callback.pack(), style='primary' if selected else None))
-        derived_protocols = [tr(locale, 'protocol.' + p) for n, p in sorted(inherited) if n == node['key']]
-        return Section(server_label(node), rows=(tuple(buttons),) if buttons else (),
-            lines=(tr(locale, 'policy.inherited', protocols=' · '.join(derived_protocols)),) if derived_protocols else
-                  () if buttons else (tr(locale, 'profile.rich.no_protocols'),),
-            divider_after=node['key'] != visible[-1]['key'], heading_size=3)
+    def node_button(node):
+        protocols = [label for protocol, label in (('awg', 'AWG'), ('xray', 'VLESS'))
+                     if (node['key'], protocol) in granted]
+        label = server_label(node) + (' · ' + ', '.join(protocols) if protocols else '')
+        return InlineKeyboardButton(text=label, callback_data=GrantProtocolsCallback(
+            profile_id=profile_id, node_key=node['key']).pack())
     scopes, groups, with_controls = {}, {}, []
     for node in visible:
         groups.setdefault(node.get('region') or '', []).append(node)
@@ -1415,16 +1407,15 @@ async def show_grant_nodes(chat_id: int, user_id: int, message_id: int,
         # and must not exceed Telegram's callback length or shift by list index.
         token = secrets.token_urlsafe(6)
         scopes[token] = raw_region
-        with_controls.append(Section(raw_region or tr(locale, 'nodes.region_unknown'),
-            sections=tuple(node_section(node) for node in items),
-            heading_rows=(_bulk_buttons(profile_id, token, locale, region=True),)))
+        all_button, none_button = _bulk_buttons(profile_id, token, locale, compact=True)
+        with_controls.append(Section('', inline_rows=((raw_region or tr(locale, 'nodes.region_unknown'),
+            ' · ', all_button, ' · ', none_button),),
+            rows=tuple((node_button(node),) for node in items)))
     await state.update_data(grant_bulk_regions=scopes)
-    sections = (Section(tr(locale, 'profile.rich.bulk'),
-        heading_rows=(_bulk_buttons(profile_id, 'all', locale),)),
-        Section(tr(locale, 'policy.title'),
-            (tr(locale, 'policy.count', count=len(data.get('draft_rules') or [])),),
-            rows=((InlineKeyboardButton(text=tr(locale, 'policy.configure'),
-                callback_data=f'future_open:edit:{profile_id}'),),)), *with_controls)
+    all_button, none_button = _bulk_buttons(profile_id, 'all', locale, compact=True)
+    sections = (Section('', inline_rows=((all_button, ' · ', none_button, ' · ',
+        InlineKeyboardButton(text=tr(locale, 'profile.access.rules'),
+            callback_data=f'future_open:edit:{profile_id}')),)), *with_controls)
     changed = policy_ui.changed(data)
     lines = [tr(locale, 'profile.rich.unsaved')] if changed else []
     if pages > 1:
@@ -1500,22 +1491,30 @@ async def show_grant_protocols(chat_id: int, user_id: int, message_id: int,
     await state.update_data(grant_inline=False)
     nodes = await _all_nodes(backend, user_id)
     enabled = {p for n, p in policy_ui.effective(data, nodes) if n == node_key}
+    inherited = {p for n, p in policy_ui.inherited(policy_ui.values(data), nodes) if n == node_key}
     locale = await _locale(state)
     node = await backend.request('GET', f'/api/v1/nodes/{node_key}',
                                  telegram_user_id=user_id)
     buttons = []
     for protocol in node['protocols']:
+        if protocol not in enabled and not node.get('enabled', True):
+            continue
         callback = (RemoveGrantCallback if protocol in enabled else AddGrantCallback)(
             profile_id=profile_id, node_key=node_key, protocol=protocol)
         buttons.append(InlineKeyboardButton(
             text=tr(locale, 'protocol.' + protocol),
             callback_data=callback.pack(), style='primary' if protocol in enabled else None))
-    rows = [buttons]
+    rows = [buttons] if buttons else []
     rows.append([InlineKeyboardButton(text=tr(locale, 'back'),
         callback_data=GrantNodesCallback(profile_id=profile_id).pack())])
+    lines = [server_label(node)]
+    if inherited:
+        lines.append(tr(locale, 'policy.inherited', protocols=' · '.join(
+            tr(locale, 'protocol.' + p) for p in sorted(inherited))))
+    if not buttons:
+        lines.append(tr(locale, 'profile.rich.no_protocols'))
     await render(bot, chat_id, Screen(tr(locale, 'profile.admin.protocols_title'),
-        (tr(locale, 'profile.admin.server', name=server_label(node)),
-         tr(locale, 'profile.admin.protocols_prompt')), embedded_buttons=True, navigation=True),
+        tuple(lines), embedded_buttons=True, navigation=True),
         rows, state, message_id)
 
 

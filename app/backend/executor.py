@@ -42,6 +42,8 @@ class IntentExecutor:
                 return 0
             from .profile_commands import ProfileCommands
             ProfileCommands.restore_admin_expiries(conn)
+            from .announcements import AnnouncementService
+            AnnouncementService.queue_expired_access(conn, timestamp)
             rows = conn.execute("""SELECT p.id, p.desired_revision, p.expires_at,
                 o.actor_id FROM backend_profiles p JOIN backend_operations o
                 ON o.profile_id = p.id AND o.desired_revision = p.desired_revision

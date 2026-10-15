@@ -56,7 +56,7 @@ class TelegramTrafficTests(IsolatedAsyncioTestCase):
                 screen.sections[1].lines,
             )
 
-    async def test_member_stats_keep_last_totals_and_mark_unknown_in_both_locales(self):
+    async def test_member_stats_keep_last_totals_without_incomplete_notice_in_both_locales(self):
         summary = {
             "display_name": "Profile",
             "created_at": None,
@@ -89,7 +89,7 @@ class TelegramTrafficTests(IsolatedAsyncioTestCase):
                 await user.show_account_stats(
                     123, 123, 77, "p1", self.bot, backend, self.state
                 )
-            self.assertIn(
+            self.assertNotIn(
                 tr(locale, "traffic.status.unknown"), draw.call_args.args[2].lines
             )
             self.assertIn(

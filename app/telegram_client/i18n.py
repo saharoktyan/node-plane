@@ -1823,7 +1823,7 @@ CATALOG["en"].update({
     "announce.send": "Send", "announce.result": "Announcement delivery",
     "announce.notification": "Announcement", "announce.empty": "No eligible recipients.",
     "announce.close": "Close", "announce.inbox": "Notifications", "announce.inbox_empty": "No notifications.",
-    "announce.dismiss": "Dismiss", "announce.open": "Open", "announce.read": "Read", "announce.new": "New",
+    "announce.dismiss": "Dismiss", "announce.open": "Open", "announce.new": "New",
     "announce.counts": "Sent: {sent} · Failed: {failed} · Unknown: {unknown} · Skipped: {skipped} · Queued: {queued} · Sending: {claimed}",
     "announce.delivery_note": 'Sending continues after leaving this screen.',
     "announce.error": "Could not confirm the announcement. Check your access and backend availability.",
@@ -1837,7 +1837,7 @@ CATALOG["ru"].update({
     "announce.send": "Отправить", "announce.result": "Доставка объявления",
     "announce.notification": "Объявление", "announce.empty": "Нет подходящих получателей.",
     "announce.close": "Закрыть", "announce.inbox": "Уведомления", "announce.inbox_empty": "Уведомлений нет.",
-    "announce.dismiss": "Удалить", "announce.open": "Открыть", "announce.read": "Прочитано", "announce.new": "Новое",
+    "announce.dismiss": "Удалить", "announce.open": "Открыть", "announce.new": "Новое",
     "announce.counts": "Отправлено: {sent} · Ошибки: {failed} · Неизвестно: {unknown} · Пропущено: {skipped} · В очереди: {queued} · Отправляются: {claimed}",
     "announce.delivery_note": 'Отправка продолжится после выхода с экрана.',
     "announce.error": "Не удалось подтвердить объявление. Проверьте права и доступность backend.",
@@ -3113,4 +3113,27 @@ CATALOG['ru'].update({
     'alerts.condition.resolved.ram_high': 'Использование RAM вернулось в норму',
     'alerts.condition.resolved.load_high': 'Load average вернулся в норму',
     'alerts.condition.resolved.cpu_high': 'Загрузка CPU вернулась в норму',
+})
+
+CATALOG['en'].update({
+    'notification.from': 'From {sender}',
+    'profile.access.all': 'All',
+    'profile.access.none': 'None',
+    'profile.access.rules': 'Persistent rules',
+    'config.choose_server': 'Choose a server.',
+    'notification.administrator': 'Administrator',
+    'notification.page': 'Page {page} / {pages}',
+    'notification.access_expired.title': 'Access expired',
+    'notification.access_expired.body': 'Your access to {service} has expired.',
+})
+CATALOG['ru'].update({
+    'notification.from': 'От {sender}',
+    'profile.access.all': 'Все',
+    'profile.access.none': 'Ни одного',
+    'profile.access.rules': 'Постоянные правила',
+    'config.choose_server': 'Выберите сервер.',
+    'notification.administrator': 'Администратор',
+    'notification.page': 'Страница {page} / {pages}',
+    'notification.access_expired.title': 'Срок доступа истёк',
+    'notification.access_expired.body': 'Срок вашего доступа к {service} истёк.',
 })

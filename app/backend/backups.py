@@ -52,6 +52,7 @@ CLEAR = (
     "backend_alert_deliveries",
     "backend_alert_events",
     "backend_alert_state",
+    "backend_system_notifications",
     "backend_announcement_user_state",
     "backend_announcement_deliveries",
     "backend_announcements",

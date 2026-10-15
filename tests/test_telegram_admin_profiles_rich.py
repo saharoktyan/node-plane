@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 from telegram_client.backend import BackendError
 from telegram_client.routers import admin_profiles as profiles
-from telegram_client.routers.callbacks import AdminProfilesCallback, AddGrantCallback
+from telegram_client.routers.callbacks import AdminProfilesCallback, AddGrantCallback, GrantProtocolsCallback, GrantNodesCallback
 
 
 class ProfileRichTests(IsolatedAsyncioTestCase):
@@ -111,8 +111,8 @@ class ProfileRichTests(IsolatedAsyncioTestCase):
             await profiles.profile_access_page_cb(self.query, self.bot, self.backend, self.state)
         screen = draw.call_args.args[2]
         groups = screen.sections[1:]
-        self.assertEqual(sum(len(g.sections) for g in groups), 3)
-        self.assertTrue(any('Node 09' in node.title for g in groups for node in g.sections))
+        self.assertEqual(sum(len(g.rows) for g in groups), 3)
+        self.assertTrue(any('Node 09' in row[0].text for g in groups for row in g.rows))
         self.assertEqual(self.data['grant_nodes_page'], 2)
         self.assertEqual(self.backend.admin_nodes.await_count, 2)
 
@@ -153,6 +153,55 @@ class ProfileRichTests(IsolatedAsyncioTestCase):
         with patch.object(profiles, 'show_admin_profile', new_callable=AsyncMock):
             await profiles.save_grants_cb(self.query, self.bot, self.backend, self.state)
         self.assertEqual(self.backend.replace_access_policy.call_args.args[2], 7)
+
+    async def test_compact_access_has_inline_actions_and_one_button_per_server(self):
+        self.nodes[:] = [dict(self.nodes[0], title='Latvia #1', region='Europe'),
+                         dict(self.nodes[1], title='Latvia #2', region='Europe')]
+        self.grants[:] = [{'node_key':'n00','protocol':p} for p in ('awg','xray')]
+        for locale in ('en', 'ru'):
+            self.data.update(locale=locale, edit_profile_id=None)
+            with patch.object(profiles, 'render', new_callable=AsyncMock) as draw:
+                await profiles.show_grant_nodes(123,123,77,'p1',self.bot,self.backend,self.state)
+            screen, rows = draw.call_args.args[2:4]
+            self.assertEqual(len(screen.sections), 2)
+            top, region = screen.sections
+            self.assertEqual([item.text for item in top.inline_rows[0] if hasattr(item,'callback_data')],
+                [profiles.tr(locale,'profile.access.all'), profiles.tr(locale,'profile.access.none'),
+                 profiles.tr(locale,'profile.access.rules')])
+            self.assertEqual(top.rows, ())
+            self.assertEqual(region.inline_rows[0][0], 'Europe')
+            self.assertEqual([row[0].text for row in region.rows],
+                ['🇱🇻 Latvia #1 · AWG, VLESS','🇱🇻 Latvia #2'])
+            self.assertFalse(region.sections)
+            self.assertEqual([row[0].callback_data for row in region.rows],
+                [GrantProtocolsCallback(profile_id='p1',node_key=n['key']).pack() for n in self.nodes])
+            inline = region.rich()[0]
+            self.assertEqual(inline.type, 'paragraph')
+            self.assertEqual([inline.text[index].button.style for index in (2,4)], ['link','link'])
+            self.assertEqual(rows[-1][0].callback_data, 'admin_profile:p1')
+            self.assertIn('future_open:edit:p1', [b.callback_data for row in screen.fallback_rows(rows) for b in row])
+
+    async def test_server_protocol_editor_returns_to_same_page_with_updated_draft(self):
+        async def request(method, path, **kwargs):
+            return next(n for n in self.nodes if n['key'] == path.rsplit('/',1)[1]) if path.startswith('/api/v1/nodes/') else self.profile
+        self.backend.request.side_effect = request
+        await profiles._ensure_grant_draft(self.backend,123,'p1',self.state)
+        self.data['grant_nodes_page'] = 1
+        with patch.object(profiles,'render',new_callable=AsyncMock) as draw:
+            await profiles.show_grant_nodes(123,123,77,'p1',self.bot,self.backend,self.state)
+            group = draw.call_args.args[2].sections[1]
+            target = GrantProtocolsCallback.unpack(group.rows[0][0].callback_data)
+            await profiles.grant_protocols_cb(self.query,target,self.bot,self.backend,self.state)
+            self.assertEqual([b.style for b in draw.call_args.args[3][0]], ['primary',None])
+            self.assertEqual(draw.call_args.args[3][-1][0].callback_data,'grant_nodes:p1')
+            await profiles.change_grant(self.query,'p1',target.node_key,'xray',True,self.bot,self.backend,self.state)
+            self.assertEqual([b.style for b in draw.call_args.args[3][0]], ['primary','primary'])
+            await profiles.grant_nodes_cb(self.query,GrantNodesCallback(profile_id='p1'),self.bot,self.backend,self.state)
+            self.assertEqual(self.data['grant_nodes_page'],1)
+            screen, rows = draw.call_args.args[2:4]
+            self.assertTrue(any(b.text.endswith(' · AWG, VLESS') for s in screen.sections for row in s.rows for b in row))
+            self.assertIn('admin_profile_grants_save:p1',[b.callback_data for row in rows for b in row])
+        self.backend.replace_access_policy.assert_not_awaited()
 
     async def test_revision_conflict_preserves_unsaved_grants_for_review(self):
         await profiles._ensure_grant_draft(self.backend, 123, 'p1', self.state)
@@ -207,8 +256,8 @@ class ProfileRichTests(IsolatedAsyncioTestCase):
     async def test_region_bulk_includes_other_pages_and_new_nodes_on_next_explicit_press(self):
         with patch.object(profiles, 'render', new_callable=AsyncMock) as draw:
             await profiles.show_grant_nodes(123, 123, 77, 'p1', self.bot, self.backend, self.state)
-            region = next(s for s in draw.call_args.args[2].sections if s.title == 'Germany')
-            self.query.data = region.heading_rows[0][0].callback_data
+            region = next(s for s in draw.call_args.args[2].sections if s.inline_rows[0][0] == 'Germany')
+            self.query.data = region.inline_rows[0][2].callback_data
             # A server appeared after the initial screen was drawn.
             self.nodes.append({'key': 'new', 'title': 'New', 'region': 'Germany',
                                'flag': '🇩🇪', 'enabled': True, 'protocols': ['awg', 'xray']})
@@ -217,8 +266,8 @@ class ProfileRichTests(IsolatedAsyncioTestCase):
             self.assertIn(('n22', 'xray'), granted)  # Not on the displayed page.
             self.assertIn(('new', 'awg'), granted)
             self.assertNotIn(('n00', 'xray'), granted)  # Other region unchanged.
-            region = next(s for s in draw.call_args.args[2].sections if s.title == 'Germany')
-            self.query.data = region.heading_rows[0][1].callback_data
+            region = next(s for s in draw.call_args.args[2].sections if s.inline_rows[0][0] == 'Germany')
+            self.query.data = region.inline_rows[0][4].callback_data
             await profiles.grant_bulk_cb(self.query, self.bot, self.backend, self.state)
         self.assertEqual({g['node_key'] for g in self.data['draft_grants']},
                          {f'n{i:02}' for i in range(10)})

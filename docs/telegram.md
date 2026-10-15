@@ -12,10 +12,10 @@ The navigation line at the top shows your location. Click a parent item to retur
 
 ## User actions
 
-- **Get config:** choose a server, protocol and Xray transport when choices are available. On your first AWG request, enter a name for your device. Access approval alone does not create a device. When you have several devices, choose one. The preparation screen refreshes automatically while the device and configuration are being prepared; Back returns to the server list. Download the file, use the URI or scan the QR with a compatible VPN client.
-- **Profile:** view access status, expiry, server count and total traffic. **Details** opens account information, configuration statistics and the server/protocol breakdown.
+- **Get config:** choose a server from the region-grouped list, then choose AmneziaWG or VLESS. Server buttons show the available protocols. VLESS offers a transport choice only when several are available. On your first AWG request, enter a name for your device. Access approval alone does not create a device. When you have several devices, choose one. The preparation screen refreshes automatically while the device and configuration are being prepared; Back returns to the previous choice without issuing another configuration. Download the file, use the URI or scan the QR with a compatible VPN client.
+- **Profile:** view access status, expiry, server count and traffic statistics. **Details** opens account information, configuration statistics and the server/protocol breakdown. Details and traffic statistics are hidden after access expires.
 - **Settings:** change available personal preferences.
-- **Notifications:** read administrator announcements. This section is hidden when empty. **Close** closes the message; **Dismiss** also removes it from your notification list.
+- **Notifications:** read administrator announcements and access-expiry notices from System. Expiry notices use the service name configured by the administrator. Inbox buttons show the sender and date in DD/MM/YY format; only unread items have a **New** label. This section is hidden when empty. **Close** closes the message; **Dismiss** also removes it from your notification list.
 
 Use the separate-message action when an iOS client cannot copy a link or public key from the formatted screen. Treat delivered configurations as private credentials.
 

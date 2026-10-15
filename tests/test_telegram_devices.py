@@ -35,7 +35,7 @@ class TelegramDeviceTests(IsolatedAsyncioTestCase):
             first_key = backend.issue.call_args.kwargs['command_key']
             self.assertIn(user.tr('en', 'config.awg_preparing'), draw.call_args.args[2].lines)
             back = user.actions[draw.call_args.args[3][-1][0].callback_data[2:]]
-            self.assertEqual((back.name, back.args), ('profile', ('profile',)))
+            self.assertEqual((back.name, back.args), ('node', ('profile', 'node')))
             await refresh.call_args.args[1]()
             self.assertEqual(backend.issue.call_args.kwargs['command_key'], first_key)
 
@@ -62,7 +62,7 @@ class TelegramDeviceTests(IsolatedAsyncioTestCase):
     async def test_single_device_skips_picker_forward_and_backward_without_reissuing(self):
         backend = self.backend([{'id': 'phone', 'display_name': 'My phone', 'status': 'active'}])
         with patch.object(user, 'issue', new_callable=AsyncMock) as issue, \
-             patch.object(user, 'show_profile', new_callable=AsyncMock) as profile, \
+             patch.object(user, 'show_node', new_callable=AsyncMock) as profile, \
              patch.object(user_devices, 'render', new_callable=AsyncMock) as draw:
             await user_devices.show_picker(123, 123, 77, 'profile', 'node', self.bot, backend, self.state)
             issue.assert_awaited_once()
@@ -117,7 +117,7 @@ class TelegramDeviceTests(IsolatedAsyncioTestCase):
             actions = [user.actions[b.callback_data[2:]] for row in draw.call_args.args[3] for b in row]
             self.assertEqual(self.state_data['device_name_draft']['node_key'], 'node')
             self.assertTrue(self.state_data['device_name_draft']['first_device'])
-            self.assertEqual([a.name for a in actions], ['profile'])
+            self.assertEqual([a.name for a in actions], ['node'])
 
     async def test_pending_server_changes_offer_retry_instead_of_generic_error(self):
         with patch.object(user, 'issue', new_callable=AsyncMock,

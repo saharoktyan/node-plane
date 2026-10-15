@@ -19,6 +19,7 @@ import qrcode
 from qrcode.exceptions import DataOverflowError
 
 from ..backend import BackendClient, BackendError
+from ..notifications import notification_content, notification_label
 from ..screens import Screen, Section, Table, server_label
 from ..i18n import normalize_locale, tr
 from .callbacks import HomeCallback
@@ -329,10 +330,10 @@ async def show_notification_inbox(chat_id: int, user_id: int, message_id: int,
         await show_home(chat_id, user_id, bot, backend, state, message_id,
                         cached_navigation=False)
         return
-    rows = [[button(user_id, f"{tr(locale, 'announce.read' if item.get('viewed_at') else 'announce.new')} · " +
-                    (item['text'].replace('\n', ' ').strip()[:35] or tr(locale, 'announce.notification')),
-                    'notification_detail', item['id'], str(page['offset']))]
-            for item in page['items']]
+    rows = []
+    for item in page['items']:
+        rows.append([button(user_id, notification_label(item, locale), 'notification_detail',
+                            item['id'], str(page['offset']))])
     current = page['offset']
     size = page['page_size']
     pagination = []
@@ -345,9 +346,9 @@ async def show_notification_inbox(chat_id: int, user_id: int, message_id: int,
     if pagination:
         rows.append(pagination)
     rows.append([button(user_id, tr(locale, 'back'), 'home')])
+    pages = max(1, (page['total'] + size - 1) // size)
     await render(bot, chat_id, Screen(tr(locale, 'announce.inbox'),
-        (tr(locale, 'pagination.page', page=current // size + 1,
-            pages=max(1, (page['total'] + size - 1) // size)),),
+        (tr(locale, 'notification.page', page=current // size + 1, pages=pages),) if pages > 1 else (),
         embedded_buttons=True, navigation=True), rows, state, message_id)
 
 
@@ -359,8 +360,8 @@ async def show_notification(chat_id: int, user_id: int, message_id: int,
     rows = [[button(user_id, tr(locale, 'announce.close'), 'notification_close', str(offset)),
              button(user_id, tr(locale, 'announce.dismiss'), 'notification_dismiss',
                     delivery_id, str(offset))]]
-    await render(bot, chat_id, Screen(tr(locale, 'announce.notification'),
-        (("by @" + item['sender_username'].lstrip('@'),) if item.get('sender_username') else ()) + (item['text'],), embedded_buttons=True, navigation=True), rows, state, message_id)
+    title, lines = notification_content(item, locale)
+    await render(bot, chat_id, Screen(title, lines, embedded_buttons=True, navigation=True), rows, state, message_id)
 
 
 async def show_profiles(chat_id: int, user_id: int, message_id: int, bot: Bot,
@@ -413,6 +414,9 @@ async def show_account_profile(chat_id: int, user_id: int, message_id: int,
         Breadcrumb(profile_label, button(user_id, profile_label, 'account_profile', profile_id, back_to).callback_data),
     )
     summary = await backend.member_profile_summary(user_id, profile_id)
+    expired = bool(summary.get('expired'))
+    if expired:
+        details = False
     nodes, page_index, pages = server_page(summary['nodes'], page_index)
     status_key = ('profile.frozen' if summary['frozen'] else
                   'profile.expired' if summary['expired'] else 'profile.active')
@@ -427,11 +431,12 @@ async def show_account_profile(chat_id: int, user_id: int, message_id: int,
             *access.tables[0].rows,
             (tr(locale, 'admin.nodes'), str(summary.get('node_count', len(summary['nodes'])))))),))
         compact_traffic = Section(traffic.title, traffic.lines) if traffic else None
+        rows = [] if expired else [[button(user_id, tr(locale, 'account.details'), 'account_details', profile_id, back_to)]]
+        rows.append([button(user_id, tr(locale, 'back'), back_to)])
         await render(bot, chat_id, Screen(tr(locale, 'account.profile_title'),
             (summary['display_name'],), sections=(compact_access, *((compact_traffic,) if compact_traffic else ())),
             embedded_buttons=True, navigation=True, breadcrumbs=profile_path),
-            [[button(user_id, tr(locale, 'account.details'), 'account_details', profile_id, back_to)],
-             [button(user_id, tr(locale, 'back'), back_to)]], state, message_id)
+            rows, state, message_id)
         return
     identity = Section(tr(locale, 'account.rich.identity'), tables=(Table(facts, (
         (tr(locale, 'account.rich.username'), '@' + username if username else '—'),
@@ -444,7 +449,6 @@ async def show_account_profile(chat_id: int, user_id: int, message_id: int,
         (tr(locale, 'protocol.xray'), str(summary.get('xray_count', 0))),
         (tr(locale, 'protocol.awg'), str(summary.get('awg_count', 0))),
         (tr(locale, 'account.rich.issued'), str(summary.get('issued_count', 0))),
-        *profile_traffic_statistics(summary, locale),
         (tr(locale, 'account.rich.last'), (summary.get('last_issued_at') or '')[:16].replace('T', ' ') or '—'))),))
     traffic = profile_traffic_section(summary, locale)
     servers = Section(tr(locale, 'account.access_title'),
@@ -461,25 +465,13 @@ async def show_account_profile(chat_id: int, user_id: int, message_id: int,
         [[button(user_id, tr(locale, 'back'), 'account_profile', profile_id, back_to)]], state, message_id)
 
 
-def profile_traffic_statistics(summary, locale):
-    if not summary.get('traffic'):
-        return ()
-    traffic = summary['traffic']
-    items = traffic.get('items') or []
-    available = traffic.get('status') in {'current', 'unknown'}
-    totals = {item['protocol']: traffic_item_total(item) for item in items} if available else {}
-    total = (sum(totals.values()) if totals and all(value is not None for value in totals.values()) else None)
-    labels = (('account.traffic_total', total), ('account.traffic_awg', totals.get('awg')),
-              ('account.traffic_vless', totals.get('xray')))
-    return tuple((tr(locale, label), _traffic_bytes(value) if value is not None else
-                  tr(locale, 'account.rich.waiting')) for label, value in labels)
-
-
 def profile_traffic_section(summary, locale):
+    if summary.get('expired'):
+        return None
     traffic = summary.get('traffic')
     if not traffic:
         return None
-    lines = [tr(locale, 'traffic.status.' + traffic['status'])]
+    lines = [] if traffic['status'] == 'unknown' else [tr(locale, 'traffic.status.' + traffic['status'])]
     tables = ()
     if traffic['status'] in {'current', 'unknown'} and traffic.get('items'):
         items = traffic['items']
@@ -516,6 +508,9 @@ async def show_account_stats(chat_id: int, user_id: int, message_id: int,
                              state: FSMContext, *, back_to: str = 'home') -> None:
     locale = normalize_locale((await state.get_data()).get('locale'))
     summary = await backend.member_profile_summary(user_id, profile_id)
+    if summary.get('expired'):
+        await show_account_profile(chat_id, user_id, message_id, profile_id, bot, backend, state, back_to=back_to)
+        return
     lines = profile_statistics(summary, locale)
     await render(bot, chat_id, Screen(tr(locale, 'account.stats_title'), lines, embedded_buttons=True, navigation=True),
         [[button(user_id, tr(locale, 'back'), 'account_profile', profile_id, back_to)]],
@@ -534,7 +529,8 @@ def profile_statistics(summary: dict, locale: str) -> tuple[str, ...]:
                 value=(summary.get('last_issued_at') or '')[:16].replace('T', ' ') or '—'))
     traffic = summary.get('traffic')
     if traffic:
-        lines += (tr(locale, 'traffic.status.' + traffic['status']),)
+        if traffic['status'] != 'unknown':
+            lines += (tr(locale, 'traffic.status.' + traffic['status']),)
         if traffic['items'] and all(traffic_item_total(item) is not None for item in traffic['items']):
             lines += (tr(locale, 'traffic.month_total', month=traffic.get('month') or '—',
                 total=_traffic_bytes(sum(item['uplink_bytes'] + item['downlink_bytes']
@@ -591,13 +587,17 @@ async def show_profile(chat_id: int, user_id: int, message_id: int,
         page_index = saved.get('page', 0) if saved.get('profile_id') == profile_id else 0
     nodes, page_index, pages = server_page(page['items'], page_index)
     await state.update_data(member_nodes_page={'profile_id': profile_id, 'page': page_index})
-    sections = region_sections(nodes, locale, lambda node: Section(server_label(node),
-        rows=(tuple(button(user_id, tr(locale, f"protocol.{protocol['kind']}"), 'protocol',
-            profile_id, node['key'], protocol['kind']) for protocol in node['protocols']),),
-        divider_after=True, heading_size=3))
+    groups = {}
+    for node in nodes:
+        labels = ['AWG' if protocol['kind'] == 'awg' else tr(locale, 'protocol.' + protocol['kind'])
+                  for protocol in node['protocols']]
+        label = server_label(node) + (' · ' + ', '.join(labels) if labels else '')
+        groups.setdefault(node.get('region') or tr(locale, 'nodes.region_unknown'), []).append(
+            (button(user_id, label, 'node', profile_id, node['key']),))
+    sections = tuple(Section(region, rows=tuple(rows)) for region, rows in groups.items())
     back = (await state.get_data()).get('member_profile_back', 'profiles')
     await render(bot, chat_id, Screen(tr(locale, 'home.get_config'),
-        () if page['items'] else (tr(locale, 'nodes.empty'),),
+        (tr(locale, 'config.choose_server'),) if page['items'] else (tr(locale, 'nodes.empty'),),
         sections=sections, embedded_buttons=True, navigation=True),
         [*server_pagination(user_id, locale, page_index, pages, 'config_nodes_page', profile_id),
          [button(user_id, tr(locale, 'back'), back)]], state, message_id)
@@ -614,12 +614,16 @@ async def show_node(chat_id: int, user_id: int, message_id: int,
         return
     await remember_node(state, node)
     locale = normalize_locale((await state.get_data()).get('locale'))
-    rows = [[button(user_id, tr(locale, f"protocol.{protocol['kind']}"),
-                    'protocol', profile_id, node_key, protocol['kind'])]
-            for protocol in node['protocols']]
+    rows = []
+    for protocol in node['protocols']:
+        transports = [kind for kind in ('xhttp', 'tcp') if kind in protocol.get('transports', [])]
+        action, args = ('issue', (profile_id, node_key, 'xray', transports[0])) if (
+            protocol['kind'] == 'xray' and len(transports) == 1) else (
+                'protocol', (profile_id, node_key, protocol['kind']))
+        rows.append([button(user_id, tr(locale, 'protocol.' + protocol['kind']), action, *args)])
     rows.append([button(user_id, tr(locale, 'back'), 'profile', profile_id)])
     await render(bot, chat_id, Screen(server_label(node),
-        (node['region'], tr(locale, 'node.choose_protocol')), embedded_buttons=True, navigation=True),
+        (tr(locale, 'node.choose_protocol'),), embedded_buttons=True, navigation=True),
         rows, state, message_id)
 
 
@@ -640,9 +644,13 @@ async def show_protocol(chat_id: int, user_id: int, message_id: int, profile_id:
                           bot, backend, state)
         return
     transports = [kind for kind in ('xhttp', 'tcp') if kind in selected['transports']]
+    if len(transports) == 1:
+        # Returning from a configuration must never issue it again.
+        await show_node(chat_id, user_id, message_id, profile_id, node_key, bot, backend, state)
+        return
     rows = [[button(user_id, tr(locale, f'transport.{kind}'), 'issue',
                     profile_id, node_key, 'xray', kind) for kind in transports],
-            [button(user_id, tr(locale, 'back'), 'profile', profile_id)]]
+            [button(user_id, tr(locale, 'back'), 'node', profile_id, node_key)]]
     destination = button(user_id, tr(locale, 'transport.title'), 'protocol', profile_id, node_key, 'xray')
     breadcrumbs = parent_path(destination.callback_data, locale, await state.get_data())[:-1]
     await render(bot, chat_id, Screen(tr(locale, 'transport.title'),
@@ -666,7 +674,7 @@ async def show_issuance(chat_id: int, user_id: int, message_id: int,
             if pending and pending.get('issuance_id') == issuance_id:
                 await show_awg_waiting(chat_id, user_id, message_id, pending['profile_id'], bot, state,
                     lambda: show_issuance(chat_id, user_id, message_id, issuance_id, bot, backend, state),
-                    transient=exc.status >= 500 or exc.status == 429)
+                    transient=exc.status >= 500 or exc.status == 429, node_key=pending['identity'][1])
                 if exc.status < 500 and exc.status != 429:
                     await state.update_data(awg_issuance_request=None)
                 return
@@ -683,8 +691,8 @@ async def _render_issuance(chat_id: int, user_id: int, message_id: int,
     locale = normalize_locale((await state.get_data()).get('locale'))
     device_back = result['protocol'] == 'awg' and result.get('device_id')
     rows = [[button(user_id, tr(locale, 'back'),
-                    'device_picker_back' if device_back else ('profile' if result['protocol'] == 'awg' else 'protocol'),
-                    profile_id, *((node_key,) if device_back else (() if result['protocol'] == 'awg' else (node_key, 'xray'))) )]]
+                    'device_picker_back' if device_back else ('node' if result['protocol'] == 'awg' else 'protocol'),
+                    profile_id, node_key, *((('xray',) if result['protocol'] != 'awg' else ())) )]]
     if result['status'] == 'succeeded':
         artifact = await backend.artifact(user_id, issuance_id)
         if (await state.get_data()).get('issuance_poll_token') != view_token:
@@ -765,12 +773,13 @@ async def _render_issuance(chat_id: int, user_id: int, message_id: int,
             await state.update_data(awg_issuance_request=None)
 
 
-async def show_awg_waiting(chat_id, user_id, message_id, profile_id, bot, state, refresh, *, transient=True):
+async def show_awg_waiting(chat_id, user_id, message_id, profile_id, bot, state, refresh, *, transient=True, node_key=None):
     locale = normalize_locale((await state.get_data()).get('locale'))
     await render(bot, chat_id, Screen(tr(locale, 'config.preparing_title' if transient else 'config.not_ready'),
         (tr(locale, 'config.awg_preparing' if transient else 'config.unavailable'),),
         embedded_buttons=True, navigation=True),
-        [[button(user_id, tr(locale, 'back'), 'profile', profile_id)]], state, message_id)
+        [[button(user_id, tr(locale, 'back'), 'node' if node_key else 'profile', profile_id,
+                 *((node_key,) if node_key else ()))]], state, message_id)
     if transient:
         schedule_refresh(state, refresh)
 
@@ -799,8 +808,8 @@ async def issue(chat_id: int, user_id: int, message_id: int, profile_id: str,
         await render(bot, chat_id, Screen(tr(locale, 'config.preparing_title'),
             (tr(locale, 'config.awg_preparing' if protocol == 'awg' else 'config.preparing'),), embedded_buttons=True, navigation=True),
             [[button(user_id, tr(locale, 'back'),
-                     'profile' if protocol == 'awg' else 'protocol', profile_id,
-                     *(() if protocol == 'awg' else (node_key, protocol)))]], state, message_id)
+                     'node' if protocol == 'awg' else 'protocol', profile_id,
+                     *((node_key,) if protocol == 'awg' else (node_key, protocol)))]], state, message_id)
         queued = await backend.issue(user_id, profile_id, node_key, protocol, transport,
             **({'device_id': device_id} if device_id else {}),
             **({'command_key': awg_request['command_key']} if awg_request else {}))
@@ -830,7 +839,7 @@ async def issue(chat_id: int, user_id: int, message_id: int, profile_id: str,
                 pending = exc.code in {'profile_not_synced', 'node_settings_pending'} or exc.status >= 500 or exc.status == 429
                 await show_awg_waiting(chat_id, user_id, message_id, profile_id, bot, state,
                     lambda: issue(chat_id, user_id, message_id, profile_id, node_key, protocol, transport,
-                        bot, backend, state, device_id=device_id), transient=pending)
+                        bot, backend, state, device_id=device_id), transient=pending, node_key=node_key)
                 if not pending:
                     await state.update_data(awg_issuance_request=None)
                 return

@@ -71,6 +71,59 @@ class AnnouncementTests(unittest.TestCase):
         self.assertEqual(job['total'], 0)
         self.assertIsNone(self.service.claim(self.transport, str(uuid4())))
 
+    def expire_profile(self, deadline=None):
+        from datetime import datetime, timedelta, timezone
+        from backend.executor import IntentExecutor
+        deadline = deadline or (datetime.now(timezone.utc)-timedelta(seconds=1)).isoformat()
+        self.db.connection.execute('UPDATE backend_profiles SET expires_at=? WHERE id=?', (deadline,self.profile_id))
+        self.db.connection.commit()
+        IntentExecutor(self.db, None).queue_expired_profiles()
+        return deadline
+
+    def test_expiry_uses_shared_delivery_and_inbox_once_with_configured_service_name(self):
+        self.db.connection.execute("INSERT INTO backend_system_settings(key,value) VALUES ('bot_menu_title','My private VPN')")
+        self.db.connection.commit()
+        self.expire_profile()
+        self.expire_profile(self.db.connection.execute('SELECT expires_at FROM backend_profiles WHERE id=?',(self.profile_id,)).fetchone()[0])
+        self.assertEqual(self.db.connection.execute('SELECT COUNT(*) FROM backend_system_notifications').fetchone()[0],1)
+        key = str(uuid4())
+        delivery = self.service.claim(self.transport,key)
+        self.assertEqual(delivery['notification_kind'],'access_expired')
+        self.assertEqual(delivery['sender_name'],'System')
+        self.assertEqual(delivery['service_title'],'My private VPN')
+        self.assertEqual(delivery['telegram_user_id'],102)
+        self.assertIsNone(delivery['sender_username'])
+        self.service.acknowledge(self.transport,delivery['id'],key,'sent')
+        from backend.authorization import resolve_actor
+        actor = resolve_actor(self.transport, self.identities, telegram_user_id=102)
+        self.assertEqual(self.service.inbox(actor)['total'],1)
+        item = self.service.inbox_item(actor,delivery['id'])
+        self.assertEqual(item['notification_kind'],'access_expired')
+        self.assertTrue(item['viewed_at'])
+        self.service.dismiss_inbox_item(actor,delivery['id'])
+        self.assertEqual(self.service.inbox(actor)['total'],0)
+        self.assertIsNone(self.service.latest(self.actor)['last_job'])
+
+    def test_renewed_or_deleted_account_does_not_receive_stale_expiry_notice(self):
+        from datetime import datetime, timedelta, timezone
+        self.expire_profile()
+        self.db.connection.execute('UPDATE backend_profiles SET expires_at=? WHERE id=?', ((datetime.now(timezone.utc)+timedelta(days=1)).isoformat(),self.profile_id))
+        self.db.connection.commit()
+        self.assertIsNone(self.service.claim(self.transport,str(uuid4())))
+        # A new deadline is a new expiry event; blocking the account suppresses delivery.
+        self.expire_profile((datetime.now(timezone.utc)-timedelta(seconds=2)).isoformat())
+        self.db.connection.execute("UPDATE backend_accounts SET status='disabled' WHERE id=?", (self.member['id'],))
+        self.db.connection.commit()
+        self.assertIsNone(self.service.claim(self.transport,str(uuid4())))
+
+    def test_expiry_without_servers_is_notified_and_new_deadline_creates_new_event(self):
+        from datetime import datetime, timedelta, timezone
+        deadline = self.expire_profile()
+        self.assertEqual(self.db.connection.execute('SELECT COUNT(*) FROM backend_system_notifications').fetchone()[0],1)
+        other = (datetime.fromisoformat(deadline)-timedelta(seconds=5)).isoformat()
+        self.expire_profile(other)
+        self.assertEqual(self.db.connection.execute('SELECT COUNT(*) FROM backend_system_notifications').fetchone()[0],2)
+
     def headers_for(self, user_id):
         return {**self.headers, "X-Node-Plane-Telegram-User-ID": str(user_id)}
 

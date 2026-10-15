@@ -91,7 +91,7 @@ async def show_picker(chat_id, user_id, message_id, profile_id, node_key, bot, b
     for item in items:
         await remember_label(state, 'devices', item['id'], item['display_name'])
     if len(items) <= 1 and returning:
-        await user.show_profile(chat_id, user_id, message_id, profile_id, bot, backend, state)
+        await user.show_node(chat_id, user_id, message_id, profile_id, node_key, bot, backend, state)
         return
     if not items:
         await prompt_name(chat_id, user_id, message_id, profile_id, None, bot, backend, state,
@@ -108,7 +108,7 @@ async def show_picker(chat_id, user_id, message_id, profile_id, node_key, bot, b
     rows.extend(user.server_pagination(user_id, locale, page, pages, 'device_picker_page', profile_id, node_key))
     rows.append([user.button(user_id, tr(locale, 'devices.add'), 'device_create', profile_id, node_key)
         .model_copy(update={'style': 'primary'})])
-    rows.append([user.button(user_id, tr(locale, 'back'), 'profile', profile_id)])
+    rows.append([user.button(user_id, tr(locale, 'back'), 'node', profile_id, node_key)])
     picker = user.button(user_id, tr(locale, 'devices.title'), 'device_picker', profile_id, node_key)
     path = parent_path(picker.callback_data, locale, await state.get_data())
     await render(bot, chat_id, Screen(tr(locale, 'devices.title'), breadcrumbs=path[:-1],
@@ -144,7 +144,7 @@ async def prompt_name(chat_id, user_id, message_id, profile_id, device_id, bot, 
         'first_device': first_device})
     await state.set_state(DeviceName.waiting)
     locale = await locale_for(state)
-    back = user.button(user_id, tr(locale, 'back'), 'profile', profile_id) if first_device else user.button(
+    back = user.button(user_id, tr(locale, 'back'), 'node', profile_id, node_key) if first_device else user.button(
         user_id, tr(locale, 'back'), 'device_card' if device_id else ('device_picker' if node_key else 'device_list'),
         profile_id, *((device_id,) if device_id else ((node_key,) if node_key else ())))
     await render(bot, chat_id, Screen(tr(locale, 'devices.first' if first_device else 'devices.rename' if device_id else 'devices.add'),
@@ -178,7 +178,8 @@ async def name_message(message, bot, backend, state):
             'revision_conflict': 'devices.changed'}.get(error.code, 'action.error.retry')
         await render(bot, message.chat.id, Screen(tr(locale, 'devices.add' if not device_id else 'devices.rename'),
             (tr(locale, key), tr(locale, 'devices.name_prompt')), embedded_buttons=True, navigation=True),
-            [[user.button(message.from_user.id, tr(locale, 'back'), 'profile' if draft.get('node_key') else 'device_list', profile_id)]],
+            [[user.button(message.from_user.id, tr(locale, 'back'), 'node' if draft.get('node_key') else 'device_list',
+                profile_id, *((draft['node_key'],) if draft.get('node_key') else ()))]],
             state, draft['message_id'])
         if error.code == 'revision_conflict' or error.status in {401, 403, 404}:
             await state.set_state(None)
