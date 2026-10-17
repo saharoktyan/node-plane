@@ -39,7 +39,8 @@ class InstallationProgressTests(TestCase):
             write_progress(path,identity,'prepare mutual TLS certificate for hidden-host')
             progress = read_progress(row)
             self.assertEqual(progress['skipped_stages'],['archive_journals'])
-            self.assertIn('Skipped',progress['label'])
+            self.assertNotIn('Skipped',progress['label'])
+            self.assertEqual(progress['label'], 'Preparing connection certificates')
             self.assertNotIn('hidden-host',path.read_text())
 
     def test_actual_shell_step_publishes_observation_without_leaking_target(self):

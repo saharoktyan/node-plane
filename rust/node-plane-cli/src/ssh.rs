@@ -31,7 +31,19 @@ pub struct SshOptions {
     pub state_dir: PathBuf,
 }
 
+pub enum Authentication {
+    Password,
+    Key(PathBuf),
+}
+
 pub trait Interaction: Send + Sync {
+    fn authentication(&self, _user: &str, _host: &str) -> Result<Authentication> {
+        Ok(Authentication::Password)
+    }
+    fn input(&self, _title: &str, _description: &str, _secret: bool) -> Result<Zeroizing<String>> {
+        bail!("This SSH authentication challenge requires interactive input")
+    }
+
     fn confirm_host_key(&self, host: &str, fingerprint: &str) -> Result<bool>;
     fn password(&self, user: &str, host: &str) -> Result<Zeroizing<String>>;
 }
@@ -107,7 +119,7 @@ pub async fn connect(
     let workstation_fingerprint = key.public_key().fingerprint(HashAlg::Sha256).to_string();
     let (mut session, server_key) = open_connection(options, interaction.clone()).await?;
     if authenticate_key(&mut session, &options.user, key.clone()).await? {
-        return Ok(SshSession {
+        let mut connected = SshSession {
             session,
             server_key,
             ssh_user: options.user.clone(),
@@ -116,31 +128,93 @@ pub async fn connect(
             peers: BTreeMap::new(),
             persistent: false,
             authorization: std::sync::Mutex::new(None),
-        });
+        };
+        connected.verify_privileges().await?;
+        return Ok(connected);
     }
 
-    let user = options.user.clone();
-    let endpoint = endpoint(options);
     let prompt = interaction.clone();
-    let password = tokio::task::spawn_blocking(move || prompt.password(&user, &endpoint))
-        .await
-        .context("Password prompt task failed")??;
-    ensure!(!password.is_empty(), "SSH password was not provided");
-    // russh owns a transient String for its authentication packet. The UI/input
-    // buffer is zeroized, and neither buffer is written to disk or application logs.
-    let accepted = timeout(
-        AUTH_TIMEOUT,
-        session.authenticate_password(options.user.clone(), password.as_str()),
-    )
-    .await
-    .context("SSH password authentication timed out")?
-    .context("SSH password authentication failed")?
-    .success();
-    drop(password);
-    ensure!(
-        accepted,
-        "SSH password was rejected. Check the user, password and server login policy"
-    );
+    let user = options.user.clone();
+    let host = endpoint(options);
+    let method = tokio::task::spawn_blocking(move || prompt.authentication(&user, &host)).await??;
+    match method {
+        Authentication::Key(path) => {
+            let path = if let Ok(rest) = path.strip_prefix("~") {
+                std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
+                    .map(PathBuf::from)
+                    .context("Cannot locate your home directory")?
+                    .join(rest)
+            } else {
+                path
+            };
+            let data = Zeroizing::new(
+                fs::read(&path).context("Could not read the selected SSH private key")?,
+            );
+            let mut existing = PrivateKey::from_openssh(data.as_slice())
+                .context("The selected SSH private key is invalid or unsupported")?;
+            if existing.is_encrypted() {
+                let prompt = interaction.clone();
+                let passphrase = tokio::task::spawn_blocking(move || {
+                    prompt.input(
+                        "SSH key passphrase",
+                        "Unlock the selected private key. The passphrase is not saved.",
+                        true,
+                    )
+                })
+                .await??;
+                existing = existing
+                    .decrypt(passphrase.as_bytes())
+                    .context("Could not unlock the SSH private key; check its passphrase")?;
+            }
+            ensure!(
+                authenticate_key(&mut session, &options.user, Arc::new(existing)).await?,
+                "The server rejected the selected SSH key. Check the SSH user and authorized_keys."
+            );
+        }
+        Authentication::Password => {
+            let result = timeout(
+                AUTH_TIMEOUT,
+                session.authenticate_none(options.user.clone()),
+            )
+            .await??;
+            let mut methods = match result {
+                client::AuthResult::Success => None,
+                client::AuthResult::Failure {
+                    remaining_methods, ..
+                } => Some(remaining_methods),
+            };
+            if methods
+                .as_ref()
+                .is_some_and(|m| m.contains(&russh::MethodKind::Password))
+            {
+                let user = options.user.clone();
+                let host = endpoint(options);
+                let prompt = interaction.clone();
+                let password =
+                    tokio::task::spawn_blocking(move || prompt.password(&user, &host)).await??;
+                ensure!(!password.is_empty(), "SSH password was not provided");
+                let result = timeout(
+                    AUTH_TIMEOUT,
+                    session.authenticate_password(options.user.clone(), password.as_str()),
+                )
+                .await
+                .context("SSH password authentication timed out")??;
+                methods = match result {
+                    client::AuthResult::Success => None,
+                    client::AuthResult::Failure {
+                        remaining_methods, ..
+                    } => Some(remaining_methods),
+                };
+            }
+            if let Some(methods) = methods {
+                ensure!(
+                    methods.contains(&russh::MethodKind::KeyboardInteractive),
+                    "SSH authentication was not accepted. The server requires a different credential or additional authentication."
+                );
+                authenticate_interactive(&mut session, &options.user, interaction.clone()).await?;
+            }
+        }
+    }
 
     let public_key = key.public_key().to_openssh()?;
     let mut initial = SshSession {
@@ -153,6 +227,7 @@ pub async fn connect(
         persistent: false,
         authorization: std::sync::Mutex::new(None),
     };
+    initial.verify_privileges().await?;
     let command = initial.audited_enrollment_command(
         &public_key,
         "workstation-key-enrollment",
@@ -273,7 +348,63 @@ async fn authenticate_key(
     .success())
 }
 
+async fn authenticate_interactive(
+    session: &mut client::Handle<HostVerifier>,
+    user: &str,
+    interaction: Arc<dyn Interaction>,
+) -> Result<()> {
+    use client::KeyboardInteractiveAuthResponse as Response;
+    let mut response = timeout(
+        AUTH_TIMEOUT,
+        session.authenticate_keyboard_interactive_start(user, None),
+    )
+    .await??;
+    for _ in 0..8 {
+        response = match response {
+            Response::Success => return Ok(()),
+            Response::Failure { .. } => bail!(
+                "SSH keyboard-interactive authentication was rejected or requires another method"
+            ),
+            Response::InfoRequest {
+                name,
+                instructions,
+                prompts,
+            } => {
+                ensure!(prompts.len() <= 8, "Too many SSH authentication challenges");
+                let mut answers = Vec::new();
+                for challenge in prompts {
+                    let ui = interaction.clone();
+                    let description = format!("{name}\n{instructions}\n{}", challenge.prompt);
+                    let answer = tokio::task::spawn_blocking(move || {
+                        ui.input("SSH authentication", &description, !challenge.echo)
+                    })
+                    .await??;
+                    answers.push(answer.to_string());
+                }
+                timeout(
+                    AUTH_TIMEOUT,
+                    session.authenticate_keyboard_interactive_respond(answers),
+                )
+                .await??
+            }
+        };
+    }
+    bail!("SSH authentication exceeded the challenge limit")
+}
+
 impl SshSession {
+    async fn verify_privileges(&mut self) -> Result<()> {
+        let code = self.run(
+            "# node-plane-ssh-preflight\nif [ \"$(id -u)\" = 0 ]; then exit 0; fi; sudo -n /bin/bash -c 'test \"$(id -u)\" = 0' >/dev/null 2>&1",
+            None, |_, _| {},
+        ).await.context("Could not check SSH account privileges")?;
+        ensure!(
+            code == 0,
+            "The SSH account needs root access or passwordless sudo for /bin/bash. No installation or workstation key enrollment was started."
+        );
+        Ok(())
+    }
+
     /// Exact OpenSSH host public key accepted by the workstation's trust store.
     /// This can pin a controller-side verification without trusting ssh-keyscan.
     pub fn server_key(&self) -> String {
@@ -1012,10 +1143,44 @@ mod tests {
             type Error = anyhow::Error;
 
             async fn auth_password(&mut self, user: &str, password: &str) -> Result<server::Auth> {
-                Ok(if user == "test" && password == "test-password" {
-                    server::Auth::Accept
-                } else {
-                    server::Auth::reject()
+                Ok(
+                    if user == "test"
+                        && password == "test-password"
+                        && !self.home.join("interactive-only").exists()
+                    {
+                        server::Auth::Accept
+                    } else {
+                        server::Auth::reject()
+                    },
+                )
+            }
+
+            async fn auth_keyboard_interactive<'a>(
+                &'a mut self,
+                user: &str,
+                _submethods: &str,
+                response: Option<server::Response<'a>>,
+            ) -> Result<server::Auth> {
+                use std::borrow::Cow;
+                if user != "test" || !self.home.join("interactive-only").exists() {
+                    return Ok(server::Auth::reject());
+                }
+                if let Some(mut response) = response {
+                    return Ok(
+                        if response
+                            .next()
+                            .is_some_and(|v| v.as_ref() == b"test-password")
+                        {
+                            server::Auth::Accept
+                        } else {
+                            server::Auth::reject()
+                        },
+                    );
+                }
+                Ok(server::Auth::Partial {
+                    name: Cow::Borrowed("PAM"),
+                    instructions: Cow::Borrowed("Server challenge"),
+                    prompts: Cow::Owned(vec![(Cow::Borrowed("Password:"), false)]),
                 })
             }
 
@@ -1286,6 +1451,18 @@ mod tests {
                 }
                 let home = self.home.clone();
                 let input = self.inputs.remove(&channel).unwrap_or_default();
+                if command.contains("# node-plane-ssh-preflight") {
+                    session.exit_status_request(
+                        channel,
+                        if home.join("deny-privileges").exists() {
+                            1
+                        } else {
+                            0
+                        },
+                    )?;
+                    session.close(channel)?;
+                    return Ok(());
+                }
                 if home.join("nodes-fixture").exists()
                     && (command.contains("NODE_PLANE_DIAGNOSTICS_SOURCE")
                         || command.contains("A running systemd host is required"))
@@ -2133,6 +2310,98 @@ mod tests {
                 1
             );
             worker.shutdown().unwrap();
+        }
+
+        struct ExistingCredential {
+            path: Option<PathBuf>,
+        }
+        impl Interaction for ExistingCredential {
+            fn confirm_host_key(&self, _: &str, _: &str) -> Result<bool> {
+                Ok(true)
+            }
+            fn authentication(&self, _: &str, _: &str) -> Result<Authentication> {
+                Ok(self
+                    .path
+                    .clone()
+                    .map_or(Authentication::Password, Authentication::Key))
+            }
+            fn password(&self, _: &str, _: &str) -> Result<Zeroizing<String>> {
+                Ok(Zeroizing::new("test-password".into()))
+            }
+            fn input(&self, _: &str, _: &str, secret: bool) -> Result<Zeroizing<String>> {
+                assert!(secret);
+                Ok(Zeroizing::new(
+                    if self.path.is_some() {
+                        "key-passphrase"
+                    } else {
+                        "test-password"
+                    }
+                    .into(),
+                ))
+            }
+        }
+
+        #[tokio::test]
+        async fn existing_encrypted_key_enrolls_only_workstation_public_key() {
+            let server = MockServer::start().await;
+            let state = tempfile::tempdir().unwrap();
+            let source = tempfile::tempdir().unwrap();
+            let key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
+            let encrypted = key.encrypt(&mut rand::rng(), b"key-passphrase").unwrap();
+            let encoded = encrypted
+                .to_openssh(russh::keys::ssh_key::LineEnding::LF)
+                .unwrap();
+            let path = source.path().join("existing-key");
+            fs::write(&path, encoded.as_bytes()).unwrap();
+            fs::create_dir(server.home.join(".ssh")).unwrap();
+            let authorized = format!("{}\n", key.public_key().to_openssh().unwrap());
+            fs::write(server.home.join(".ssh/authorized_keys"), &authorized).unwrap();
+            let session = connect(
+                &server.options(state.path()),
+                Arc::new(ExistingCredential {
+                    path: Some(path.clone()),
+                }),
+            )
+            .await
+            .unwrap();
+            session.close().await.unwrap();
+            assert_eq!(fs::read(path).unwrap(), encoded.as_bytes());
+            let installed = fs::read_to_string(server.home.join(".ssh/authorized_keys")).unwrap();
+            assert!(installed.starts_with(&authorized));
+            assert!(installed.lines().count() > 1);
+            assert_ne!(
+                fs::read(state.path().join("id_ed25519")).unwrap(),
+                encoded.as_bytes()
+            );
+        }
+
+        #[tokio::test]
+        async fn keyboard_interactive_password_login_and_privilege_refusal() {
+            let server = MockServer::start().await;
+            fs::write(server.home.join("interactive-only"), "").unwrap();
+            let state = tempfile::tempdir().unwrap();
+            let session = connect(
+                &server.options(state.path()),
+                Arc::new(ExistingCredential { path: None }),
+            )
+            .await
+            .unwrap();
+            session.close().await.unwrap();
+            let previous = fs::read(server.home.join(".ssh/authorized_keys")).unwrap();
+            fs::write(server.home.join("deny-privileges"), "").unwrap();
+            let other = tempfile::tempdir().unwrap();
+            let error = connect(
+                &server.options(other.path()),
+                Arc::new(ExistingCredential { path: None }),
+            )
+            .await
+            .err()
+            .unwrap();
+            assert!(format!("{error:#}").contains("passwordless sudo"));
+            assert_eq!(
+                fs::read(server.home.join(".ssh/authorized_keys")).unwrap(),
+                previous
+            );
         }
 
         #[tokio::test]

@@ -72,9 +72,9 @@ def read_progress(row):
         skipped = [code for code in data.get('skipped_stages',[]) if code in STAGES]
         if skipped:
             result['skipped_stages'] = skipped
-            result['label'] += ' · ' + '; '.join(STAGES[code] + ': Skipped' for code in skipped)
         if data.get('state') == 'skipped':
             result['state'] = 'skipped'
+            result['label'] += ' · Skipped'
         return result
     except (OSError, ValueError, TypeError, AttributeError):
         return None

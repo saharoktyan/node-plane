@@ -102,12 +102,11 @@ class AgentNodeOperationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 self.execute('reinstall_keep')
 
-    def test_interrupted_command_requires_agent_restart_before_retirement(self):
+    def test_finished_executor_can_be_retired_under_lock_without_agent_restart(self):
         with patch.dict(os.environ, {'NODE_PLANE_AGENT_INSTANCE_ID': 'old'}), patch.object(MODULE, 'run', side_effect=TimeoutError):
             with self.assertRaises(TimeoutError):
                 self.execute()
-            with self.assertRaises(ValueError):
-                self.execute('resolve_reinstall_clean', True)
+            self.assertTrue(self.execute('resolve_reinstall_clean', True)['retired'])
         with patch.dict(os.environ, {'NODE_PLANE_AGENT_INSTANCE_ID': 'new'}):
             self.assertTrue(self.execute('resolve_reinstall_clean', True)['retired'])
             with self.assertRaises(ValueError):

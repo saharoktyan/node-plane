@@ -134,6 +134,9 @@ class NodeBootstrapService:
                     return True
                 return False
             if child['status'] in {'awaiting_executor', 'running'}:
+                if row['status'] == 'blocked':
+                    self._change(row, status='running', child=row['child_id'], kind=row['child_kind'])
+                    return True
                 return False
             if child['status'] == 'blocked':
                 if row['status'] != 'blocked':
@@ -208,6 +211,47 @@ class NodeBootstrapService:
             kind = 'node-jobs'
         self._change(row, status='running', child=child['id'], kind=kind)
         return True
+
+    def resume_child(self, actor, identity):
+        """Recover the exact child before continuing; never replay unknown work."""
+        require_permission(actor, 'maintenance.manage')
+        require_permission(actor, 'nodes.manage')
+        with self.db.connect() as conn:
+            row = conn.execute('SELECT * FROM backend_node_bootstraps WHERE id=?', (identity,)).fetchone()
+        if row is None:
+            raise AccessDenied('resource_not_found', 404)
+        if row['status'] != 'blocked':
+            raise AccessDenied('task_not_blocked', 409)
+        if not row['child_id']:
+            return self.resume(actor, identity)
+        if row['child_kind'] == 'agent-rollouts':
+            from .agent_rollout import AgentRolloutService
+            service = AgentRolloutService(self.db)
+            with self.db.connect() as conn:
+                child = conn.execute('SELECT * FROM backend_agent_rollouts WHERE id=?', (row['child_id'],)).fetchone()
+            if child and service.preflight_failed(child):
+                service.resume_preflight(actor, child['id'])
+                self._change(row, status='running', child=child['id'], kind=row['child_kind'])
+            else:
+                from .recovery import act
+                act(self.db, actor, self.driver, 'agent', row['child_id'], 'recheck')
+                self._advance(row)
+        elif row['child_kind'] == 'node-jobs':
+            from .node_operations import NodeOperations
+            service = NodeOperations(self.db, self.driver)
+            child = service.resolve(actor, row['child_id'])
+            if child['status'] == 'succeeded':
+                self._advance(row)
+            elif child['status'] == 'superseded':
+                with self.db.connect() as conn:
+                    node = conn.execute('SELECT desired_revision FROM backend_nodes WHERE key=?', (row['node_key'],)).fetchone()
+                # A retired fingerprint cannot execute again. The replacement is
+                # explicit, has its own durable identity, and retains the parent.
+                next_key = str(uuid5(UUID(identity), row['phase'] + ':' + row['child_id']))
+                replacement = service.queue(actor, row['node_key'], child['action'],
+                    revision=node['desired_revision'], command_key=next_key, bootstrap_id=identity)
+                self._change(row, status='running', child=replacement['id'], kind='node-jobs')
+        return self.get(actor, identity)
 
     def resume(self, actor, identity):
         """Resume a blocked coordinator before dispatch; never reset a child."""

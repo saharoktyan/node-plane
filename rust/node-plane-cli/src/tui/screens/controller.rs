@@ -8,6 +8,7 @@ pub(in crate::tui) fn recovery_controls(page: &serde_json::Value) -> Vec<(String
                 "recheck" => "Check result",
                 "resolve" => "Recover journal",
                 "resume" => "Continue",
+                "cancel" if item["kind"] == "bootstrap" => "Cancel setup",
                 "cancel" => "Cancel before execution",
                 _ => continue,
             };
@@ -1577,6 +1578,48 @@ pub(in crate::tui) fn draw_controller(
             hits.push(Hit {
                 area: rect,
                 control,
+            });
+        }
+        return;
+    }
+    if state.recovery_inventory.is_some() {
+        // Operations is one document: the text and action buttons share one
+        // viewport, so a long report cannot pin all but one button off screen.
+        let body = parts[0];
+        let paragraph = Paragraph::new(text).wrap(Wrap { trim: false });
+        let text_lines = paragraph.line_count(body.width) + 1;
+        let total = text_lines + controls.len() * 3;
+        let capacity = usize::from(body.height).max(1);
+        let selected_line = text_lines + state.selected * 3;
+        let previous = app.controller_viewport.get();
+        let automatic = if previous == 0 && state.selected == 0 {
+            0
+        } else if selected_line + 3 > previous + capacity {
+            (selected_line + 3).saturating_sub(capacity)
+        } else if selected_line < previous {
+            selected_line
+        } else {
+            previous
+        };
+        let offset = app.viewport(automatic, total, capacity);
+        app.controller_viewport.set(offset);
+        let remaining_text = text_lines.saturating_sub(offset).min(capacity);
+        if remaining_text > 0 {
+            frame.render_widget(
+                paragraph.scroll((offset.min(u16::MAX as usize) as u16, 0)),
+                Rect::new(body.x, body.y, body.width, remaining_text as u16),
+            );
+        }
+        for (index, (label, control)) in controls.iter().enumerate() {
+            let y = text_lines + index * 3;
+            if y < offset || y + 3 > offset + capacity {
+                continue;
+            }
+            let rect = Rect::new(body.x, body.y + (y - offset) as u16, body.width, 3);
+            draw_button(frame, rect, label, state.selected == index);
+            hits.push(Hit {
+                area: rect,
+                control: *control,
             });
         }
         return;

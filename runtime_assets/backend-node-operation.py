@@ -440,9 +440,9 @@ def execute(action, command_id, intent, recover=False, path='/etc/node-plane/pro
                 if prior[0] != fingerprint:
                     raise ValueError('command identity conflict')
                 if resolving and prior[1] in {'running', 'retired'}:
-                    instance = conn.execute('SELECT instance_id FROM commands WHERE id = ?', (command_id,)).fetchone()[0]
-                    if prior[1] == 'running' and instance == os.environ.get('NODE_PLANE_AGENT_INSTANCE_ID', 'standalone'):
-                        raise ValueError('restart the agent before retiring an interrupted operation')
+                    # The exclusive operation flock is inherited by every mutation
+                    # subprocess. Acquiring it proves the old executor is finished;
+                    # retiring this fingerprint fences any delayed duplicate.
                     conn.execute("UPDATE commands SET status = 'retired' WHERE id = ?", (command_id,))
                     conn.commit()
                     return {'node_key': intent['node_key'], 'action': action, 'revision': intent['revision'], 'retired': True}

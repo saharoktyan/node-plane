@@ -789,7 +789,7 @@ def verify_node_settings_config(intent, xray_path, awg_path):
                 raise ValueError('Xray settings verification failed')
         if inbounds['reality-xhttp']['streamSettings']['xhttpSettings']['path'] != settings['xray_xhttp_path']:
             raise ValueError('Xray path verification failed')
-    if 'ipv6_outbound' in settings:
+        if 'ipv6_outbound' in settings:
             direct = next(item for item in data['outbounds'] if item.get('tag') == 'direct')
             enabled = settings['ipv6_outbound'] == 'on'
             if direct.get('settings', {}).get('domainStrategy') != ('AsIs' if enabled else 'ForceIPv4'):

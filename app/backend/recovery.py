@@ -41,6 +41,15 @@ def _maintenance(conn, exclude_backup=None):
     return gate, other
 
 
+class _ConnectionDB:
+    def __init__(self, conn):
+        self.conn = conn
+
+    @contextmanager
+    def connect(self):
+        yield self.conn
+
+
 def _item(conn, row, actor, gate, other):
     kind, identity, status = row['kind'], row['id'], row['status']
     result = _json(row['result_json'])
@@ -100,8 +109,20 @@ def _item(conn, row, actor, gate, other):
             actions = ['recheck', 'resolve']
         elif kind in {'agent', 'bootstrap'} and 'nodes.manage' in actor.principal.scopes:
             actions = ['recheck']
-            if kind == 'bootstrap' and not related_id:
+            if kind == 'agent':
+                from .agent_rollout import AgentRolloutService
+                task = conn.execute('SELECT * FROM backend_agent_rollouts WHERE id=?', (identity,)).fetchone()
+                if AgentRolloutService(_ConnectionDB(conn)).preflight_failed(task):
+                    actions.append('resume')
+            if kind == 'bootstrap':
                 actions.append('resolve')
+                if related_kind == 'node-jobs':
+                    actions.append('cancel')
+                if related_kind == 'agent-rollouts':
+                    from .agent_rollout import AgentRolloutService
+                    task = conn.execute('SELECT * FROM backend_agent_rollouts WHERE id=?', (related_id,)).fetchone()
+                    if task and AgentRolloutService(_ConnectionDB(conn)).preflight_failed(task):
+                        actions.append('cancel')
     hint = ('maintenance' if (gate or other) and kind != 'update' else
             'child' if related_id else
             'agent' if kind == 'agent' else
@@ -117,6 +138,8 @@ def _sql():
         f"SELECT '{kind}' AS kind,{'node_key' if kind == 'removal' else 'id'} AS id,status,{node} AS node_key,{result} AS result_json,"
         f"{('error_code' if kind in {'removal', 'bootstrap', 'temporary'} else 'NULL')} AS stored_error FROM {table} "
         "WHERE status IN ('queued','awaiting_executor','running','blocked','awaiting_shutdown','issuing','revoking','revoke_blocked')"
+        + (" AND EXISTS (SELECT 1 FROM backend_nodes n WHERE n.key=backend_agent_rollouts.node_key)"
+           " AND NOT EXISTS (SELECT 1 FROM backend_node_bootstraps b WHERE b.child_id=backend_agent_rollouts.id AND b.status='superseded')" if kind == 'agent' else '')
         for kind, table, node, result in SOURCES)
 
 
@@ -219,6 +242,9 @@ def act(db, actor, driver, kind, identity, action):
                         changed = conn.execute("UPDATE backend_operation_tasks SET status='succeeded',driver_operation_id=?,result_json=? WHERE id=? AND status='blocked' RETURNING id", (result['driver_operation_id'], result.get('result_json'), identity)).fetchone()
                         if changed:
                             service.refresh_operation(conn, row['operation_id'])
+        elif kind == 'agent' and action == 'resume':
+            from .agent_rollout import AgentRolloutService
+            AgentRolloutService(db).resume_preflight(actor, identity)
         elif kind == 'agent':
             # Confirm the bound, authenticated agent and installed build independently.
             facts = driver.inspect_node(row['node_key'])
@@ -236,9 +262,18 @@ def act(db, actor, driver, kind, identity, action):
                 if current and bound:
                     conn.execute("UPDATE backend_agent_rollouts SET status='succeeded' WHERE id=? AND status='blocked'", (identity,))
         elif kind == 'bootstrap':
-            if action == 'resolve':
+            if action == 'cancel':
+                # Protocol cancellation first fences/recovers the old command;
+                # it never queues a replacement or claims remote cleanup.
+                if row['child_kind'] == 'node-jobs':
+                    from .node_operations import NodeOperations
+                    NodeOperations(db, driver).resolve(actor, row['child_id'])
+                with db.transaction() as conn:
+                    conn.execute("UPDATE backend_agent_rollouts SET status='cancelled' WHERE id=? AND status='blocked'", (row['child_id'],))
+                    conn.execute("UPDATE backend_node_bootstraps SET status='superseded',error_code='setup_cancelled' WHERE id=? AND status='blocked'", (identity,))
+            elif action == 'resolve':
                 from .node_bootstrap import NodeBootstrapService
-                NodeBootstrapService(db, driver).resume(actor, identity)
+                NodeBootstrapService(db, driver).resume_child(actor, identity)
             elif row['child_id']:
                 child_table = {'agent-rollouts': 'backend_agent_rollouts', 'node-jobs': 'backend_node_jobs'}.get(row['child_kind'])
                 with db.connect() as conn:

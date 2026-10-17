@@ -535,7 +535,10 @@ impl App {
                 if matches!(
                     &self.prompt,
                     Some((
-                        Prompt::Password { .. } | Prompt::SelectAdministrator { .. },
+                        Prompt::Password { .. }
+                            | Prompt::Text { .. }
+                            | Prompt::Select { .. }
+                            | Prompt::SelectAdministrator { .. },
                         _
                     ))
                 ) && !value

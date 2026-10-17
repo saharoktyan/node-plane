@@ -4,10 +4,31 @@ use std::sync::{Arc, mpsc};
 use zeroize::Zeroizing;
 
 pub enum Prompt {
-    HostKey { host: String, fingerprint: String },
-    Password { user: String, host: String },
-    ConfirmAction { title: String, description: String },
-    SelectAdministrator { choices: Vec<(String, String)> },
+    HostKey {
+        host: String,
+        fingerprint: String,
+    },
+    Select {
+        title: String,
+        description: String,
+        choices: Vec<(String, String)>,
+    },
+    Text {
+        title: String,
+        description: String,
+        secret: bool,
+    },
+    Password {
+        user: String,
+        host: String,
+    },
+    ConfirmAction {
+        title: String,
+        description: String,
+    },
+    SelectAdministrator {
+        choices: Vec<(String, String)>,
+    },
 }
 pub enum Answer {
     Confirm(bool),
@@ -54,6 +75,36 @@ pub fn select_administrator(
     }
 }
 impl Interaction for UiInteraction {
+    fn authentication(&self, user: &str, host: &str) -> Result<crate::ssh::Authentication> {
+        match self.ask(Prompt::Select {
+            title: "SSH authentication".into(),
+            description: format!("First login: {user}@{host}. Choose an existing credential."),
+            choices: vec![
+                ("password".into(), "Password / keyboard-interactive".into()),
+                ("key".into(), "Existing SSH private key".into()),
+            ],
+        })? {
+            Answer::Selection(0) => Ok(crate::ssh::Authentication::Password),
+            Answer::Selection(1) => {
+                let path = self.input("SSH private key", "Path to your existing private key (for example ~/.ssh/id_ed25519). The file stays on this computer.", false)?;
+                Ok(crate::ssh::Authentication::Key(std::path::PathBuf::from(
+                    path.as_str(),
+                )))
+            }
+            _ => bail!("SSH authentication cancelled."),
+        }
+    }
+    fn input(&self, title: &str, description: &str, secret: bool) -> Result<Zeroizing<String>> {
+        match self.ask(Prompt::Text {
+            title: title.into(),
+            description: description.into(),
+            secret,
+        })? {
+            Answer::Password(value) => Ok(value),
+            _ => bail!("SSH authentication cancelled."),
+        }
+    }
+
     fn confirm_host_key(&self, host: &str, fingerprint: &str) -> Result<bool> {
         match self.ask(Prompt::HostKey {
             host: host.into(),

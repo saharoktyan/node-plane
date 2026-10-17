@@ -24,7 +24,7 @@ class AgentRolloutService:
                 id TEXT PRIMARY KEY, node_key TEXT NOT NULL,
                 actor_account_id TEXT NOT NULL REFERENCES backend_accounts(id),
                 command_key TEXT NOT NULL, intent_json TEXT NOT NULL,
-                status TEXT NOT NULL CHECK(status IN ('awaiting_executor', 'running', 'blocked', 'succeeded')),
+                status TEXT NOT NULL CHECK(status IN ('awaiting_executor', 'running', 'blocked', 'succeeded', 'cancelled')),
                 UNIQUE(actor_account_id, command_key)
             )''')
             conn.execute('CREATE INDEX IF NOT EXISTS idx_backend_agent_rollouts_work ON backend_agent_rollouts(status, id)')
@@ -113,6 +113,41 @@ class AgentRolloutService:
     def recover(self):
         with self.db.transaction() as conn:
             conn.execute("UPDATE backend_agent_rollouts SET status = 'blocked' WHERE status = 'running'")
+
+    def preflight_failed(self, row):
+        """Only a known SSH probe failure permits another installer dispatch."""
+        from .installation_progress import read_progress
+        progress = read_progress(row)
+        with self.db.connect() as conn:
+            failure = conn.execute('SELECT code FROM backend_agent_rollout_failures WHERE task_id=?', (row['id'],)).fetchone()
+            node = conn.execute('SELECT key FROM backend_nodes WHERE key=?', (row['node_key'],)).fetchone()
+            abandoned = conn.execute("SELECT 1 FROM backend_node_bootstraps WHERE child_id=? AND status='superseded'", (row['id'],)).fetchone()
+        return bool(row['status'] == 'blocked' and node and not abandoned
+                    and progress and progress['stage'] == 'check_ssh'
+                    and failure and failure['code'] in {'ssh_authentication', 'ssh_host_key', 'ssh_prerequisites'})
+
+    def resume_preflight(self, actor, task_id):
+        require_permission(actor, 'maintenance.manage')
+        require_permission(actor, 'nodes.manage')
+        with self.db.connect() as conn:
+            row = conn.execute('SELECT * FROM backend_agent_rollouts WHERE id=?', (task_id,)).fetchone()
+        if row is None or not self.preflight_failed(row):
+            raise AccessDenied('recovery_unconfirmed', 409)
+        with self.db.transaction() as conn:
+            from .maintenance_gate import admit
+            admit(conn)
+            account = conn.execute('SELECT role,status FROM backend_accounts WHERE id=?', (actor.account.id,)).fetchone()
+            if not account or account['role'] != 'admin' or account['status'] != 'approved':
+                raise AccessDenied('permission_denied')
+            connection = conn.execute('SELECT transport,ssh_target FROM backend_node_connections WHERE node_key=?', (row['node_key'],)).fetchone()
+            intent = json.loads(row['intent_json'])
+            if (not connection or (connection['transport'], connection['ssh_target']) !=
+                    (intent['transport'], intent['ssh_target']) or
+                    conn.execute('SELECT 1 FROM backend_node_drains WHERE node_key=?', (row['node_key'],)).fetchone()):
+                raise AccessDenied('repair_conflict', 409)
+            conn.execute("UPDATE backend_agent_rollouts SET status='awaiting_executor' WHERE id=? AND status='blocked'", (task_id,))
+            conn.execute('DELETE FROM backend_agent_rollout_failures WHERE task_id=?', (task_id,))
+        return self.get(actor, task_id)
 
     def _execute(self, row):
         intent = json.loads(row['intent_json'])

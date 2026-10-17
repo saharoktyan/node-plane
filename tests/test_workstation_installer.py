@@ -48,7 +48,7 @@ class WorkstationInstallerShellTests(unittest.TestCase):
         ast.parse(body.group(1))
         return body.group(1)
 
-    def run_token_check(self, should_fail=False):
+    def run_token_check(self, should_fail=False, failure_kind="ValueError"):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             app, shared, stubs = root / 'current', root / 'shared', root / 'stub-modules'
@@ -75,13 +75,15 @@ class Bot:
         assert request_timeout == 10
         Path(os.environ['CALLS_FILE']).write_text('get_me\\n')
         if os.environ.get('SIMULATE_FAILURE') == '1':
-            raise ValueError(os.environ['EXPECTED_TOKEN'])
+            kind = os.environ.get('FAILURE_KIND', 'ValueError')
+            error = type(kind, (TimeoutError if kind == 'TimeoutError' else Exception,), {})
+            raise error(os.environ['EXPECTED_TOKEN'])
 ''')
             env = {**os.environ,
                    'NODE_PLANE_APP_DIR': str(app), 'NODE_PLANE_SHARED_DIR': str(shared),
                    'PYTHONPATH': f'{stubs}:{ROOT / "app"}',
                    'EXPECTED_TOKEN': private_token, 'CALLS_FILE': str(log),
-                   'SIMULATE_FAILURE': '1' if should_fail else '0'}
+                   'SIMULATE_FAILURE': '1' if should_fail else '0', 'FAILURE_KIND': failure_kind}
             for key in ('BOT_TOKEN', 'ADMIN_IDS', 'DB_BACKEND'):
                 env.pop(key, None)
             result = subprocess.run([sys.executable, '-'], input=self.verification_python(),
@@ -98,8 +100,19 @@ class Bot:
     def test_failed_token_validation_does_not_disclose_token(self):
         result = self.run_token_check(should_fail=True)
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn('Telegram token or network validation failed', result.stderr)
+        self.assertIn('NODE_PLANE_INSTALL_ERROR telegram_validation_failed', result.stderr)
         self.assertNotIn('Traceback', result.stderr)
+
+    def test_telegram_network_and_token_failures_have_distinct_secret_free_results(self):
+        for kind, code in [('TelegramUnauthorizedError','telegram_token_rejected'),
+                           ('TokenValidationError','telegram_token_rejected'),
+                           ('TelegramNetworkError','telegram_api_unreachable'),
+                           ('TimeoutError','telegram_api_unreachable')]:
+            with self.subTest(kind=kind):
+                result = self.run_token_check(True, kind)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('NODE_PLANE_INSTALL_ERROR ' + code, result.stderr)
+                self.assertNotIn('Traceback', result.stderr)
 
     def run_prepare(self, variant):
         with tempfile.TemporaryDirectory() as directory:

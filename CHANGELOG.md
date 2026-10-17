@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 1.0.0-alpha.16 - 2026-10-17
+
+- Recover node setup after a confirmed SSH preflight failure, allow explicit cancellation before remote installation, and recover blocked protocol children without replaying an unfenced command.
+- Verify Xray IPv6 settings only when Xray is selected, allowing AWG-only setup to finish normally.
+- Offer an existing local SSH private key for the first Workstation connection, support encrypted keys and keyboard-interactive challenges, and check root/passwordless sudo before enrolling the Workstation key.
+- Distinguish Telegram Bot API connectivity failures from rejected bot tokens during installation, bound the API check, and explain how to continue after an installed controller fails final verification.
+- Scroll Operations text and actions together and clear completed skipped-stage text from the current installation progress.
+
 ## 1.0.0-alpha.15 - 2026-10-17
 
 - Capture IPv6 in full-tunnel AWG configurations and preserve peer keys during dual-stack migration; add a shared IPv6 outbound switch for AWG/Xray and installation defaults.

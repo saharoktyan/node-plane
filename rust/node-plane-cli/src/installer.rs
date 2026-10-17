@@ -4,7 +4,7 @@ use crate::{
     progress::{Lines, Progress, Tracker, redact},
     ssh::{self, Interaction, OutputStream, SshOptions, SshSession},
 };
-use anyhow::{Context, Result, ensure};
+use anyhow::{Context, Result, bail, ensure};
 use std::{
     fs::{File, OpenOptions},
     io::Write,
@@ -320,7 +320,8 @@ NODE_PLANE_CHANNEL
     stage("Starting installation");
     checked(session, &command, None, journal, true, tx).await?;
     stage("Verifying services, Telegram startup and backend readiness");
-    checked(session, VERIFY, None, journal, false, tx).await?;
+    checked(session, VERIFY, None, journal, false, tx).await.with_context(||
+        "Controller installation has completed, but final verification failed. Correct the reported problem and run Check installation; do not install the controller again.")?;
     stage("Registering this workstation key with the controller administrator");
     let session_id = uuid::Uuid::new_v4();
     *session.authorization.lock().unwrap() = None;
@@ -402,6 +403,23 @@ async fn checked(
     stderr.finish(&mut emit);
     if let Some(error) = failure {
         return Err(error);
+    }
+    if status != 0 {
+        for line in &output {
+            if let Some(code) = line.strip_prefix("NODE_PLANE_INSTALL_ERROR ") {
+                bail!(
+                    "{}",
+                    match code {
+                        "telegram_api_unreachable" =>
+                            "The server cannot reach Telegram Bot API (api.telegram.org:443). Check the server DNS, outbound firewall and provider routing. The bot token could not be verified.",
+                        "telegram_token_rejected" =>
+                            "Telegram rejected the configured bot token. Check the token supplied by BotFather.",
+                        _ =>
+                            "Telegram startup verification failed for a reason other than a confirmed token rejection or connection failure. Check the Telegram service diagnostics.",
+                    }
+                );
+            }
+        }
     }
     ensure!(
         status == 0,
@@ -563,6 +581,29 @@ check_polling_conflict() {
         exit 21
     fi
 }
+check_polling_conflict
+# Validate getMe through the installed runtime without putting the token in argv.
+NODE_PLANE_APP_DIR=/opt/node-plane/current NODE_PLANE_SHARED_DIR=/opt/node-plane/shared PYTHONPATH=/opt/node-plane/current/app /opt/node-plane/current/.venv/bin/python - <<'PY'
+import asyncio
+from config import BOT_TOKEN
+from aiogram import Bot
+async def check():
+    async with Bot(BOT_TOKEN) as bot:
+        await asyncio.wait_for(bot.get_me(request_timeout=10), timeout=15)
+try:
+    asyncio.run(check())
+except Exception as error:
+    names = {cls.__name__ for cls in type(error).__mro__}
+    if names & {'TelegramUnauthorizedError', 'TokenValidationError'}:
+        code = 'telegram_token_rejected'
+    elif isinstance(error, (TimeoutError, OSError)) or names & {'TelegramNetworkError', 'ClientError'}:
+        code = 'telegram_api_unreachable'
+    else:
+        code = 'telegram_validation_failed'
+    # Never print the exception: its URL or payload may contain the bot token.
+    raise SystemExit('NODE_PLANE_INSTALL_ERROR ' + code)
+
+PY
 for attempt in $(seq 1 20); do
     healthy=1
     check_polling_conflict
@@ -580,19 +621,7 @@ sleep 8
 check_polling_conflict
 test "$pid" != 0 && test "$(systemctl show -p MainPID --value node-plane-telegram.service)" = "$pid"
 systemctl is-active --quiet node-plane-telegram.service
-# Validate getMe through the installed runtime without putting the token in argv.
-NODE_PLANE_APP_DIR=/opt/node-plane/current NODE_PLANE_SHARED_DIR=/opt/node-plane/shared PYTHONPATH=/opt/node-plane/current/app /opt/node-plane/current/.venv/bin/python - <<'PY'
-import asyncio
-from config import BOT_TOKEN
-from aiogram import Bot
-async def check():
-    async with Bot(BOT_TOKEN) as bot:
-        await bot.get_me(request_timeout=10)
-try:
-    asyncio.run(check())
-except Exception:
-    raise SystemExit('Telegram token or network validation failed. Check the bot credentials and connectivity.')
-PY
+
 echo 'Backend, Telegram, driver and worker are ready'
 "#;
 const DIAGNOSE: &str = r#"

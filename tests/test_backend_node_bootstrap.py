@@ -21,6 +21,99 @@ class BootstrapTests(unittest.TestCase):
     def queue(self):
         return self.service.queue(self.actor, 'n1', 1, str(uuid4()))
 
+    def test_explicit_protocol_recovery_fences_old_child_and_keeps_parent(self):
+        from backend.recovery import act
+        from unittest.mock import Mock
+        import json
+        parent = self.queue()
+        for _ in range(3):
+            self.service.run_one()
+        child = self.service.get(self.actor, parent['id'])['child_id']
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_node_jobs SET status='blocked' WHERE id=?", (child,))
+        self.service.run_one()
+        driver = SimpleNamespace(node_action=Mock(return_value={
+            'node_key': 'n1', 'action': 'bootstrap', 'revision': 2, 'retired': True}))
+        result = act(self.db, self.actor, driver, 'bootstrap', parent['id'], 'resolve')
+        self.assertEqual(result['status'], 'running')
+        current = self.service.get(self.actor, parent['id'])
+        self.assertNotEqual(current['child_id'], child)
+        with self.db.connect() as conn:
+            old = conn.execute('SELECT status FROM backend_node_jobs WHERE id=?', (child,)).fetchone()
+            new = conn.execute('SELECT * FROM backend_node_jobs WHERE id=?', (current['child_id'],)).fetchone()
+        self.assertEqual(old['status'], 'superseded')
+        self.assertEqual(new['status'], 'awaiting_executor')
+        self.assertEqual(json.loads(new['intent_json'])['command_id'], new['id'])
+        driver.node_action.assert_called_once()
+        self.assertEqual(driver.node_action.call_args.args[1], 'resolve_bootstrap')
+
+    def test_protocol_setup_cancellation_fences_child_without_reinstalling(self):
+        from backend.recovery import act
+        from backend.node_lifecycle import NodeLifecycle
+        from unittest.mock import Mock
+        parent=self.queue()
+        for _ in range(3): self.service.run_one()
+        child=self.service.get(self.actor,parent['id'])['child_id']
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_node_jobs SET status='blocked' WHERE id=?",(child,))
+        self.service.run_one()
+        driver=SimpleNamespace(node_action=Mock(return_value={'node_key':'n1','action':'bootstrap','revision':2,'retired':True}))
+        result=act(self.db,self.actor,driver,'bootstrap',parent['id'],'cancel')
+        self.assertEqual(result['status'],'superseded')
+        with self.db.connect() as conn:
+            self.assertEqual(conn.execute('SELECT COUNT(*) AS n FROM backend_node_jobs').fetchone()['n'],1)
+        # Setup no longer pins the node; normal drain/removal can proceed.
+        self.assertEqual(NodeLifecycle(self.db).start_drain(self.actor,'n1')['status'],'draining')
+
+    def test_protocol_recovery_without_retirement_evidence_does_not_dispatch(self):
+        from backend.recovery import act
+        from unittest.mock import Mock
+        parent = self.queue()
+        for _ in range(3): self.service.run_one()
+        child = self.service.get(self.actor,parent['id'])['child_id']
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_node_jobs SET status='blocked' WHERE id=?", (child,))
+        self.service.run_one()
+        driver=SimpleNamespace(node_action=Mock(side_effect=TimeoutError('uncertain')))
+        with self.assertRaises(AccessDenied):
+            act(self.db,self.actor,driver,'bootstrap',parent['id'],'resolve')
+        with self.db.connect() as conn:
+            self.assertEqual(conn.execute('SELECT COUNT(*) AS n FROM backend_node_jobs').fetchone()['n'],1)
+        self.assertEqual(self.service.get(self.actor,parent['id'])['status'],'blocked')
+
+    def test_ssh_preflight_failure_can_resume_or_cancel_without_fake_success(self):
+        from backend.agent_rollout import AgentRolloutService
+        from backend.installation_progress import progress_path, write_progress
+        from backend.recovery import act, overview
+        from tempfile import TemporaryDirectory
+        from unittest.mock import patch
+        import os
+        parent = self.queue()
+        # A child exists but failed before any remote installation command.
+        with self.db.transaction() as conn:
+            conn.execute("INSERT INTO backend_node_connections(node_key,transport,ssh_target) VALUES ('n1','ssh','root@n1.example') ON CONFLICT(node_key) DO UPDATE SET transport='ssh',ssh_target='root@n1.example'")
+        child = AgentRolloutService(self.db).request(self.actor, 'n1', str(uuid4()),
+            transport='ssh', ssh_target='root@n1.example', bootstrap_id=parent['id'])
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_agent_rollouts SET status='blocked' WHERE id=?", (child['id'],))
+            conn.execute('INSERT INTO backend_agent_rollout_failures VALUES (?,?)', (child['id'], 'ssh_authentication'))
+            conn.execute("UPDATE backend_node_bootstraps SET status='blocked',child_id=?,child_kind='agent-rollouts',error_code='child_operation_blocked' WHERE id=?", (child['id'], parent['id']))
+        with TemporaryDirectory() as shared, patch.dict(os.environ, NODE_PLANE_SHARED_DIR=shared):
+            write_progress(progress_path(child['id']), child['id'], 'check SSH prerequisites for n1')
+            self.assertIn('resume', next(x for x in overview(self.db,self.actor)['items'] if x['kind']=='agent')['actions'])
+            result = act(self.db,self.actor,None,'bootstrap',parent['id'],'resolve')
+            self.assertEqual(result['status'], 'running')
+            self.assertEqual(AgentRolloutService(self.db).get(self.actor,child['id'])['status'], 'awaiting_executor')
+            with self.db.transaction() as conn:
+                conn.execute("UPDATE backend_agent_rollouts SET status='blocked' WHERE id=?", (child['id'],))
+                conn.execute('INSERT INTO backend_agent_rollout_failures VALUES (?,?)', (child['id'], 'ssh_authentication'))
+                conn.execute("UPDATE backend_node_bootstraps SET status='blocked' WHERE id=?", (parent['id'],))
+            result = act(self.db,self.actor,None,'bootstrap',parent['id'],'cancel')
+            self.assertEqual(result['status'], 'superseded')
+            self.assertEqual(overview(self.db,self.actor)['items'], [])
+            # Cancellation stays terminal in history, never succeeded.
+            self.assertEqual(AgentRolloutService(self.db).get(self.actor,child['id'])['status'], 'cancelled')
+
     def test_overview_can_read_active_bootstrap_and_recoverable_agent_wait(self):
         from backend.node_overview import NodeOverviewService
         parent = self.queue()

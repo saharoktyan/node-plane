@@ -342,6 +342,43 @@ fn read_line(prompt: &str) -> Result<String> {
 }
 fn console_prompt(prompt: Prompt) -> Result<Answer> {
     match prompt {
+        Prompt::Text {
+            title,
+            description,
+            secret,
+        } => {
+            ensure!(
+                io::stdin().is_terminal(),
+                "{title} requires interactive input."
+            );
+            println!("{description}");
+            Ok(Answer::Password(Zeroizing::new(if secret {
+                rpassword::prompt_password(format!("{title} (hidden): "))?
+            } else {
+                read_line(&format!("{title}: "))?
+            })))
+        }
+        Prompt::Select {
+            title,
+            description,
+            choices,
+        } => {
+            ensure!(
+                io::stdin().is_terminal(),
+                "{title} requires an interactive terminal."
+            );
+            println!("{title}\n{description}");
+            for (index, (_, label)) in choices.iter().enumerate() {
+                println!("{}. {label}", index + 1);
+            }
+            let value = read_line("Choice (blank cancels): ")?;
+            if value.is_empty() {
+                return Ok(Answer::Cancel);
+            }
+            let index: usize = value.parse().context("Invalid choice")?;
+            ensure!(index > 0 && index <= choices.len(), "Invalid choice");
+            Ok(Answer::Selection(index - 1))
+        }
         Prompt::SelectAdministrator { choices } => {
             println!("Choose administrator");
             for (index, (_, label)) in choices.iter().enumerate() {

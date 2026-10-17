@@ -4,6 +4,8 @@
 
 Workstation is the administrator's terminal interface. It connects to a Linux controller over SSH and uses the controller's backend for node, profile and settings operations.
 
+First SSH login accepts a password or an existing local private key, including an encrypted key with a passphrase. Keyboard-interactive server challenges are supported. Workstation verifies the host fingerprint and root or passwordless sudo access before enrolling its own public key; the selected private key and passphrase stay on your computer and are not saved by Workstation.
+
 ## Install and start
 
 Use the [README installation commands](../README.md#install-workstation), then run:

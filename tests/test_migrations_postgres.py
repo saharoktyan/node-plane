@@ -30,6 +30,18 @@ class MigrationsPostgresTests(unittest.TestCase):
         with self.base.transaction() as conn:
             conn.execute(f'DROP SCHEMA {self.schema} CASCADE')
 
+    def test_cancelled_agent_rollout_upgrade_preserves_history_and_previous_reader(self):
+        migrate(self.db,revisions=REVISIONS[:12])
+        with self.db.transaction() as conn:
+            conn.execute("INSERT INTO backend_accounts(id,status) VALUES ('admin','approved')")
+            conn.execute("INSERT INTO backend_agent_rollouts VALUES ('task','n1','admin','key','{}','blocked')")
+        self.assertEqual(migrate(self.db)['applied'], [13])
+        self.assertTrue(check_schema(self.db,revisions=REVISIONS[:12])['ready'])
+        with self.db.transaction() as conn:
+            self.assertEqual(conn.execute("SELECT status FROM backend_agent_rollouts WHERE id='task'").fetchone()['status'],'blocked')
+            conn.execute("UPDATE backend_agent_rollouts SET status='cancelled' WHERE id='task'")
+        self.assertEqual(migrate(self.db)['applied'], [])
+
     def test_account_profile_upgrade_preserves_runtime_and_backfills_missing_pairs(self):
         migrate(self.db,revisions=REVISIONS[:10])
         with self.db.transaction() as conn:
@@ -67,7 +79,7 @@ class MigrationsPostgresTests(unittest.TestCase):
         migrate(self.db,revisions=REVISIONS[:11])
         with self.db.transaction() as conn:
             conn.execute("INSERT INTO backend_announcements VALUES ('existing','actor','key','Hello','2026-10-15')")
-        self.assertEqual(migrate(self.db)['applied'],[12])
+        self.assertEqual(migrate(self.db)['applied'],[revision.number for revision in REVISIONS[11:]])
         self.assertTrue(check_schema(self.db,revisions=REVISIONS[:11])['ready'])
         with self.db.transaction() as conn:
             self.assertEqual(conn.execute("SELECT text FROM backend_announcements WHERE id='existing'").fetchone()['text'],'Hello')

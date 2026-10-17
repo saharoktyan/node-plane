@@ -8,7 +8,7 @@ impl App {
         let input = if self.exit || self.discard.is_some() {
             false
         } else if let Some((prompt, _)) = &self.prompt {
-            matches!(prompt, Prompt::Password { .. })
+            matches!(prompt, Prompt::Password { .. } | Prompt::Text { .. })
         } else {
             match self.screen {
                 Screen::Controller => matches!(
@@ -834,22 +834,24 @@ impl App {
             return;
         };
         let answer = match prompt {
-            Prompt::SelectAdministrator { choices } => match key.code {
-                KeyCode::Up => {
-                    self.administrator_selected = self.administrator_selected.saturating_sub(1);
-                    None
+            Prompt::SelectAdministrator { choices } | Prompt::Select { choices, .. } => {
+                match key.code {
+                    KeyCode::Up => {
+                        self.administrator_selected = self.administrator_selected.saturating_sub(1);
+                        None
+                    }
+                    KeyCode::Down | KeyCode::Tab => {
+                        self.administrator_selected =
+                            (self.administrator_selected + 1).min(choices.len().saturating_sub(1));
+                        None
+                    }
+                    KeyCode::Enter if !choices.is_empty() => {
+                        Some(Answer::Selection(self.administrator_selected))
+                    }
+                    KeyCode::Esc => Some(Answer::Cancel),
+                    _ => None,
                 }
-                KeyCode::Down | KeyCode::Tab => {
-                    self.administrator_selected =
-                        (self.administrator_selected + 1).min(choices.len().saturating_sub(1));
-                    None
-                }
-                KeyCode::Enter if !choices.is_empty() => {
-                    Some(Answer::Selection(self.administrator_selected))
-                }
-                KeyCode::Esc => Some(Answer::Cancel),
-                _ => None,
-            },
+            }
             Prompt::HostKey { .. } | Prompt::ConfirmAction { .. } => match key.code {
                 KeyCode::Char('y' | 'Y') => Some(Answer::Confirm(true)),
                 KeyCode::Char('n' | 'N') | KeyCode::Esc => Some(Answer::Confirm(false)),
@@ -860,7 +862,7 @@ impl App {
                 KeyCode::Enter => Some(Answer::Confirm(self.trust)),
                 _ => None,
             },
-            Prompt::Password { .. } => match key.code {
+            Prompt::Password { .. } | Prompt::Text { .. } => match key.code {
                 KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                     if self.password.len() < 4096 {
                         self.password.push(c);
@@ -872,7 +874,7 @@ impl App {
                     None
                 }
                 KeyCode::Enter if self.password.is_empty() => {
-                    self.error = "Enter the SSH password before connecting.".into();
+                    self.error = "Enter a value before continuing.".into();
                     None
                 }
                 KeyCode::Enter => Some(Answer::Password(std::mem::replace(

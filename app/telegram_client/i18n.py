@@ -3154,3 +3154,16 @@ CATALOG['ru'].update({
     'recovery.explain.temporary.recheck': 'Проверить сохранённый результат без повторной выдачи конфигурации.',
     'recovery.explain.temporary.resolve': 'Отменить только после подтверждения агентом отсутствия lease и peer и блокировки исходной команды. Для прерванной команды нужен перезапуск агента.',
 })
+
+CATALOG['en'].update({
+    'recovery.action.cancel': 'Cancel operation',
+    'recovery.explain.agent.resume': 'Retry setup after a confirmed SSH preflight failure. Add the controller public key or correct SSH permissions first.',
+    'recovery.explain.bootstrap.resolve': 'Recover the saved setup step. An uncertain command is fenced before a replacement can run; existing protocol identities are preserved.',
+    'recovery.explain.bootstrap.cancel': 'Stop setup after confirming or fencing the current command. Installed components remain; remove the node separately if needed.',
+})
+CATALOG['ru'].update({
+    'recovery.action.cancel': 'Отменить операцию',
+    'recovery.explain.agent.resume': 'Повторить установку после подтверждённого отказа проверки SSH. Сначала добавьте публичный ключ контроллера или исправьте права SSH.',
+    'recovery.explain.bootstrap.resolve': 'Восстановить сохранённый шаг установки. Неопределённая команда блокируется от повторного запуска до создания новой; существующие ключи протоколов сохраняются.',
+    'recovery.explain.bootstrap.cancel': 'Остановить установку после проверки или блокировки текущей команды. Установленные компоненты сохранятся; при необходимости удалите ноду отдельно.',
+})

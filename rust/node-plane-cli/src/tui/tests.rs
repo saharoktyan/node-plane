@@ -6781,3 +6781,103 @@ fn settings_actions_from_the_form_bind_the_current_installation_and_load_the_sec
         .collect();
     assert!(!text.contains("Loading installation…"));
 }
+
+#[test]
+fn operations_scroll_text_and_buttons_as_one_document() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Controller;
+    app.form.action = Action::Diagnose;
+    let items: Vec<_> = (0..5)
+        .map(|i| {
+            serde_json::json!({
+                "kind":"node","node_key":format!("node-{i}"),"id":format!("operation-{i}"),
+                "status":"blocked","error_code":"journal_unconfirmed","next_step":"journal",
+                "actions":["recheck","resolve"]
+            })
+        })
+        .collect();
+    app.controller.recovery_inventory =
+        Some(serde_json::json!({"total":5,"items":items,"offset":0,"page_size":10}));
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 24)).unwrap();
+    terminal
+        .draw(|frame| app.hits = draw_content(frame, &app))
+        .unwrap();
+    let before: String = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(|c| c.symbol())
+        .collect();
+    assert!(before.contains("Operations · 5 active tasks"));
+    let maximum = app.list_max_viewport.get();
+    assert!(maximum > 20);
+    app.manual_viewport.set(Some(maximum));
+    terminal
+        .draw(|frame| app.hits = draw_content(frame, &app))
+        .unwrap();
+    let after: String = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(|c| c.symbol())
+        .collect();
+    assert!(!after.contains("Operations · 5 active tasks"));
+    assert!(
+        app.hits
+            .iter()
+            .filter(|h| matches!(h.control, Control::ControllerRecoveryAction(..)))
+            .count()
+            > 1
+    );
+}
+
+#[test]
+fn ssh_credential_choice_path_and_passphrase_support_submit_and_cancel() {
+    let mut app = App::new(&test_request());
+    let (tx, rx) = mpsc::channel();
+    app.event(Event::Prompt(
+        Prompt::Select {
+            title: "SSH authentication".into(),
+            description: "Choose a credential".into(),
+            choices: vec![
+                ("password".into(), "Password".into()),
+                ("key".into(), "Existing key".into()),
+            ],
+        },
+        tx,
+    ));
+    app.prompt_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    app.prompt_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(matches!(rx.recv().unwrap(), Answer::Selection(1)));
+    for secret in [false, true] {
+        let (tx, rx) = mpsc::channel();
+        app.event(Event::Prompt(
+            Prompt::Text {
+                title: "Key credential".into(),
+                description: "Local SSH key".into(),
+                secret,
+            },
+            tx,
+        ));
+        for c in "key-value".chars() {
+            app.prompt_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+        }
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(80, 24)).unwrap();
+        terminal
+            .draw(|frame| app.hits = draw_content(frame, &app))
+            .unwrap();
+        let text: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|c| c.symbol())
+            .collect();
+        assert_eq!(text.contains("key-value"), !secret);
+        let key = app.activate(Control::Prompt(false)).unwrap();
+        app.prompt_key(key);
+        assert!(matches!(rx.recv().unwrap(), Answer::Cancel));
+    }
+}

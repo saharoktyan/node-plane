@@ -664,13 +664,15 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
         );
         let title = match prompt {
             Prompt::SelectAdministrator { .. } => "Choose administrator",
-            Prompt::ConfirmAction { title, .. } => title,
+            Prompt::ConfirmAction { title, .. }
+            | Prompt::Select { title, .. }
+            | Prompt::Text { title, .. } => title,
             _ => "Connection confirmation",
         };
         let sections = dialog(frame, popup, &format!(" {title} "));
         let text = match prompt {
             Prompt::SelectAdministrator { .. } => "Select the account to bind to this workstation key.\n↑ / ↓ · Enter to select · Esc to cancel".into(),
-            Prompt::ConfirmAction { description, .. } => description.clone(),
+            Prompt::ConfirmAction { description, .. } | Prompt::Select { description, .. } | Prompt::Text { description, .. } => description.clone(),
             Prompt::HostKey { host, fingerprint } => format!(
                 "First connection to {host}\n\nSSH fingerprint:\n{fingerprint}\n\nCompare it with a trusted provider/source before accepting."
             ),
@@ -678,7 +680,7 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
                 "SSH login: {user}@{host}\nThe workstation key is not authorized yet. Enter the server password below; only the public key will be enrolled after login."
             ),
         };
-        if let Prompt::SelectAdministrator { choices } = prompt {
+        if let Prompt::SelectAdministrator { choices } | Prompt::Select { choices, .. } = prompt {
             let body =
                 Layout::vertical([Constraint::Length(3), Constraint::Min(0)]).split(sections[0]);
             frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: false }), body[0]);
@@ -715,12 +717,18 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
                     control: Control::Administrator(index),
                 });
             }
-        } else if matches!(prompt, Prompt::Password { .. }) {
+        } else if matches!(prompt, Prompt::Password { .. } | Prompt::Text { .. }) {
             let body =
                 Layout::vertical([Constraint::Min(0), Constraint::Length(3)]).split(sections[0]);
             frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: false }), body[0]);
             let value = if app.password.is_empty() {
-                "Type or paste the SSH password".into()
+                if matches!(prompt, Prompt::Text { .. }) {
+                    "Type or paste a value".into()
+                } else {
+                    "Type or paste the SSH password".into()
+                }
+            } else if matches!(prompt, Prompt::Text { secret: false, .. }) {
+                app.password.to_string()
             } else {
                 "*".repeat(
                     app.password
@@ -738,7 +746,11 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
                     }))
                     .block(
                         Block::bordered()
-                            .title(" SSH password (hidden) ")
+                            .title(if let Prompt::Text { title, .. } = prompt {
+                                title.as_str()
+                            } else {
+                                " SSH password (hidden) "
+                            })
                             .border_style(Style::default().fg(Color::Cyan)),
                     ),
                 body[1],
@@ -764,7 +776,10 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
             app.trust
                 || matches!(
                     prompt,
-                    Prompt::Password { .. } | Prompt::SelectAdministrator { .. }
+                    Prompt::Password { .. }
+                        | Prompt::Text { .. }
+                        | Prompt::Select { .. }
+                        | Prompt::SelectAdministrator { .. }
                 ),
             (Control::Prompt(true), Control::Prompt(false)),
             &mut hits,

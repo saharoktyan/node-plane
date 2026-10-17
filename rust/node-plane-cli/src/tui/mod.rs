@@ -607,7 +607,10 @@ pub fn run(mut request: Request) -> Result<()> {
                 qr_needs_redraw = true;
             }
             TermEvent::Paste(text) => {
-                if matches!(&app.prompt, Some((Prompt::Password { .. }, _))) {
+                if matches!(
+                    &app.prompt,
+                    Some((Prompt::Password { .. } | Prompt::Text { .. }, _))
+                ) {
                     if app.password.len() + text.len() <= 4096 {
                         app.password
                             .extend(text.chars().filter(|c| !c.is_control()));

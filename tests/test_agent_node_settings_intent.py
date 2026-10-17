@@ -60,7 +60,7 @@ class AgentNodeSettingsIntentTests(unittest.TestCase):
             (root / name).chmod(0o755)
         intent = self.intent()
         intent['protocols'] = ['awg']
-        intent['settings'].update(awg_port=443, awg_port_mode='auto', awg_i1_preset='quic')
+        intent['settings'].update(awg_port=443, awg_port_mode='auto', awg_i1_preset='quic', ipv6_outbound='on')
         real_run = subprocess.run
 
         def run(args, **kwargs):
