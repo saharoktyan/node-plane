@@ -334,6 +334,7 @@ impl App {
             | Control::ControllerRecoveryPage(_)
             | Control::ControllerRecoveryInventory(_)
             | Control::ControllerRecoveryAction(..)
+            | Control::ControllerRecoveryNode(_)
             | Control::ControllerRecoveryHistory
             | Control::ControllerAnnouncement
             | Control::ControllerAnnouncementCompose

@@ -19,6 +19,7 @@ impl App {
                 Control::Controller
                     | Control::ControllerRecoveryInventory(_)
                     | Control::ControllerRecoveryPage(_)
+                    | Control::ControllerRecoveryNode(_)
             )
         {
             self.screen = Screen::Controller;
@@ -50,6 +51,8 @@ impl App {
                     self.controller_navigation_revision =
                         self.controller_navigation_revision.wrapping_add(1);
                     self.controller_section = None;
+                    self.controller_viewport.set(0);
+                    self.manual_viewport.set(None);
                     self.controller.recovery_inventory =
                         Some(serde_json::json!({"loading":true,"items":[],"offset":offset}));
                     self.controller.telegram_result = None;
@@ -63,7 +66,35 @@ impl App {
                     self.screen = Screen::Controller;
                     self.controller_sidebar = false;
                 }
-                self.controller_command(crate::controller::Command::RecoveryInventory(offset));
+                let command = if matches!(
+                    control,
+                    Control::ControllerRecoveryPage(_) | Control::ControllerRecoveryInventory(_)
+                ) {
+                    self.controller
+                        .recovery_inventory
+                        .as_ref()
+                        .and_then(|p| p["node_key"].as_str())
+                        .map(|key| crate::controller::Command::RecoveryNode(key.into(), offset))
+                        .unwrap_or(crate::controller::Command::RecoveryInventory(offset))
+                } else {
+                    crate::controller::Command::RecoveryInventory(offset)
+                };
+                self.controller_command(command);
+                None
+            }
+            Control::ControllerRecoveryNode(index) => {
+                if let Some(key) = self
+                    .controller
+                    .recovery_inventory
+                    .as_ref()
+                    .and_then(|p| p["groups"][index]["node_key"].as_str())
+                    .map(str::to_owned)
+                {
+                    self.controller_viewport.set(0);
+                    self.manual_viewport.set(None);
+                    self.controller.selected = 0;
+                    self.controller_command(crate::controller::Command::RecoveryNode(key, 0));
+                }
                 None
             }
             Control::ControllerRecoveryAction(index, action) => {
@@ -79,6 +110,7 @@ impl App {
                             id.into(),
                             action.into(),
                             page["offset"].as_u64().unwrap_or(0) as usize,
+                            page["node_key"].as_str().map(str::to_owned),
                         ));
                     }
                 }
@@ -1049,6 +1081,22 @@ impl App {
                 }
                 if self.controller.history_detail.take().is_some() {
                     self.controller.selected = 0;
+                    return None;
+                }
+                if self
+                    .controller
+                    .recovery_inventory
+                    .as_ref()
+                    .is_some_and(|p| p["node_key"].is_string())
+                {
+                    self.controller_viewport.set(0);
+                    self.manual_viewport.set(None);
+                    self.controller.selected = 0;
+                    let offset = self.controller.recovery_group_offset;
+                    self.controller.recovery_inventory = Some(
+                        serde_json::json!({"loading":true,"grouped":true,"groups":[],"offset":offset}),
+                    );
+                    self.controller_command(crate::controller::Command::RecoveryInventory(offset));
                     return None;
                 }
                 if self.controller.recovery_inventory.take().is_some()

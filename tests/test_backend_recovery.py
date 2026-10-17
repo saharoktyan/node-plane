@@ -9,6 +9,37 @@ class RecoveryTests(TestCase):
     setUp = fixture.BackendUpdateTests.setUp
     service = fixture.BackendUpdateTests.service
 
+    def test_grouped_inventory_counts_before_paging_and_keeps_controller_separate(self):
+        self.service()
+        self.db.connection.execute("INSERT INTO backend_nodes(key,title,region,flag,protocols_json,xray_transports_json) VALUES ('test-node','Demo node','EU','🏳️','[]','[]')")
+        for _ in range(12):
+            self.db.connection.execute("INSERT INTO backend_node_jobs VALUES (?,'test-node',?,?,'sync_runtime',1,'{}','blocked',NULL)", (str(uuid4()),self.admin.id,str(uuid4())))
+        self.db.connection.execute("INSERT INTO backend_update_jobs(id,actor_id,command_key,kind,intent_json,status,created_at) VALUES (?,?,?,'agents','{}','blocked','now')", (str(uuid4()),self.admin.id,str(uuid4())))
+        page=overview(self.db,self.actor,group_by_node=True)
+        self.assertEqual((page['total'],page['total_tasks'],page['items']),(2,13,[]))
+        self.assertEqual([g['node_key'] for g in page['groups']],['','test-node'])
+        self.assertEqual(page['groups'][1],{'node_key':'test-node','title':'Demo node','flag':'🏳️','total':12,'blocked':12})
+        detail=overview(self.db,self.actor,10,node_key='test-node')
+        self.assertEqual((detail['node_title'],detail['total'],len(detail['items'])),('Demo node',12,2))
+        controller=overview(self.db,self.actor,node_key='')
+        self.assertEqual((controller['total'],controller['items'][0]['kind']),(1,'update'))
+        headers={**self.headers,'X-Node-Plane-Telegram-User-ID':'101'}
+        root=self.client.get('/api/v1/system/recovery?group_by_node=true',headers=headers)
+        self.assertEqual(root.status_code,200,root.text)
+        self.assertEqual(root.json()['total_tasks'],13)
+        controller=self.client.get('/api/v1/system/recovery?node_key=',headers=headers)
+        self.assertEqual(controller.status_code,200,controller.text)
+        self.assertEqual(controller.json()['total'],1)
+
+    def test_group_pagination_does_not_split_one_node_into_multiple_entries(self):
+        self.service()
+        for index in range(12):
+            self.db.connection.execute("INSERT INTO backend_node_removals VALUES (?,?,'blocked','node_cleanup_unavailable')", (f'group-{index}',self.admin.id))
+        first=overview(self.db,self.actor,group_by_node=True)
+        second=overview(self.db,self.actor,10,group_by_node=True)
+        self.assertEqual((first['total'],len(first['groups']),len(second['groups'])),(12,10,2))
+        self.assertFalse({g['node_key'] for g in first['groups']} & {g['node_key'] for g in second['groups']})
+
     def test_queued_update_is_cancellable_but_uncertain_core_requires_evidence(self):
         service = self.service()
         job = service.queue(self.actor, str(uuid4()), 'stack', target_ref='v0.4.3-alpha.19', branch='dev')

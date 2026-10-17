@@ -160,6 +160,28 @@ class BackendNodeSettingsTests(unittest.TestCase):
         self.assertEqual(result['status'], 'superseded')
         self.assertEqual(result['error_code'], 'node_installation_required')
 
+    def test_adding_second_protocol_on_managed_node_does_not_prepare_it_as_fresh(self):
+        self.assertEqual(self.create().status_code,201)
+        for existing in ('awg','xray'):
+            with self.subTest(existing=existing):
+                with self.db.transaction() as conn:
+                    conn.execute("DELETE FROM backend_node_settings_tasks WHERE node_key='n1'")
+                    conn.execute("UPDATE backend_nodes SET applied_revision=1,desired_revision=2 WHERE key='n1'")
+                task_id=self.queue(2).json()['id']
+                calls=[]
+                class Driver:
+                    def inspect_node(inner,node_key):
+                        return {'health_state':'running','awg_config_present':existing=='awg','xray_config_present':existing=='xray'}
+                    def prepare_node(inner,node_key):
+                        raise AssertionError('managed runtime cannot be prepared as fresh')
+                    def apply_node_settings(inner,command_id,intent):
+                        calls.append(command_id)
+                        return json.dumps({'node_key':'n1','revision':2,'settings_sha256':_digest(intent)})
+                self.assertTrue(NodeSettingsExecutor(self.db,Driver()).run_one())
+                self.assertEqual(calls,[task_id])
+                result=self.client.get(f'/api/v1/node-settings-operations/{task_id}',headers=self.admin_headers()).json()
+                self.assertEqual(result['status'],'succeeded')
+
     def test_clean_agent_is_prepared_before_settings_command(self):
         self.assertEqual(self.create().status_code, 201)
         self.db.connection.execute("UPDATE backend_nodes SET applied_revision=1, desired_revision=2 WHERE key='n1'")

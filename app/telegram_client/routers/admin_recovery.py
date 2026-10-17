@@ -50,6 +50,10 @@ def action_path(kind, identity, action):
             raise ValueError('invalid node identity')
         return f'/api/v1/system/recovery/removal/{identity}/resume'
     identity = str(UUID(identity))
+    if kind == 'agent' and action in {'recheck', 'resume'}:
+        return f'/api/v1/system/recovery/agent/{identity}/{action}'
+    if kind == 'bootstrap' and action in {'recheck', 'resolve', 'cancel'}:
+        return f'/api/v1/system/recovery/bootstrap/{identity}/{action}'
     if kind == 'backup' and action in {'resume', 'cancel'}:
         return f'/api/v1/system/recovery/backup/{identity}/{action}'
     if kind == 'update' and action in {'cancel', 'recheck'}:
@@ -59,6 +63,12 @@ def action_path(kind, identity, action):
             raise ValueError('unsupported recovery action')
         return f'/api/v1/system/recovery/{kind}/{identity}/{action}'
     raise ValueError('unsupported recovery action')
+
+
+def action_label(locale, kind, action):
+    key = 'recovery.action.' + kind + '.' + action
+    label = tr(locale, key)
+    return tr(locale, 'recovery.action.' + action) if label == key else label
 
 
 async def show(query, bot, backend, state, offset=0, note=''):
@@ -83,7 +93,7 @@ async def show(query, bot, backend, state, offset=0, note=''):
             token = next((token for token, node in previous_tokens.items() if node == identity), None) or uuid4().hex[:12]
             action_tokens[token] = identity
             identity = token
-        rows = [tuple(InlineKeyboardButton(text=tr(locale, 'recovery.action.' + action),
+        rows = [tuple(InlineKeyboardButton(text=action_label(locale, item['kind'], action),
                     callback_data=RecoveryAction(kind=item['kind'], id=identity, action=action).pack(),
                     style='danger' if action == 'cancel' else 'primary')
                 for action in item['actions'])] if item['actions'] else []
@@ -147,7 +157,7 @@ async def recovery_action(query: CallbackQuery, callback_data: RecoveryAction, b
         await show(query, bot, backend, state)
         return
     if not callback_data.confirm:
-        rows = [[InlineKeyboardButton(text=tr(locale, 'recovery.action.' + callback_data.action),
+        rows = [[InlineKeyboardButton(text=action_label(locale, callback_data.kind, callback_data.action),
                     callback_data=RecoveryAction(kind=callback_data.kind, id=callback_data.id,
                         action=callback_data.action, confirm=1).pack(),
                     style='danger' if callback_data.action == 'cancel' else 'primary')],

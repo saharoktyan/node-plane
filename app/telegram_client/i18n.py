@@ -1672,7 +1672,7 @@ CATALOG['en'].update({'node_tools.general': 'General settings',
 CATALOG['ru'].update({
     'account.details': 'Подробности',
     'nodes.apply.progress': 'Прогресс применения',
-    'nodes.apply.state.awaiting_executor': 'В очереди · ожидаем сервер.',
+    'nodes.apply.state.awaiting_executor': 'В очереди · ожидаем применения настроек.',
     'nodes.apply.state.running': 'Применяем настройки…',
     'nodes.apply.complete': 'Настройки применены',
     'nodes.apply.success': 'Изменения применены и проверены на сервере.',
@@ -1687,7 +1687,7 @@ CATALOG['ru'].update({
 CATALOG['en'].update({
     'account.details': 'Details',
     'nodes.apply.progress': 'Apply progress',
-    'nodes.apply.state.awaiting_executor': 'Queued · waiting for the server.',
+    'nodes.apply.state.awaiting_executor': 'Queued · waiting to apply settings.',
     'nodes.apply.state.running': 'Applying settings…',
     'nodes.apply.complete': 'Settings applied',
     'nodes.apply.success': 'Changes applied and verified on the server.',
@@ -3167,3 +3167,21 @@ CATALOG['ru'].update({
     'recovery.explain.bootstrap.resolve': 'Восстановить сохранённый шаг установки. Неопределённая команда блокируется от повторного запуска до создания новой; существующие ключи протоколов сохраняются.',
     'recovery.explain.bootstrap.cancel': 'Остановить установку после проверки или блокировки текущей команды. Установленные компоненты сохранятся; при необходимости удалите ноду отдельно.',
 })
+
+CATALOG['en'].update({
+    'recovery.action.bootstrap.resolve': 'Resume setup',
+    'recovery.action.settings.resolve': 'Reapply settings',
+    'recovery.action.profile.resolve': 'Restore profile access',
+    'recovery.action.node.resolve': 'Resolve blocked step',
+    'recovery.action.temporary.resolve': 'Cancel unused configuration',
+})
+CATALOG['ru'].update({
+    'recovery.action.bootstrap.resolve': 'Продолжить установку',
+    'recovery.action.settings.resolve': 'Применить настройки заново',
+    'recovery.action.profile.resolve': 'Восстановить доступ профиля',
+    'recovery.action.node.resolve': 'Завершить восстановление шага',
+    'recovery.action.temporary.resolve': 'Отменить невыданную конфигурацию',
+})
+
+CATALOG['en']['recovery.hint.bootstrap_child'] = 'Use Resume setup to recover this installation step and continue. Cancel operation stops setup without removing installed components.'
+CATALOG['ru']['recovery.hint.bootstrap_child'] = 'Нажмите «Продолжить установку», чтобы восстановить текущий шаг. Отмена операции остановит установку, сохранив уже установленные компоненты.'

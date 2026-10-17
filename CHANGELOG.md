@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 1.0.0-alpha.17 - 2026-10-17
+
+- Apply a newly selected second protocol through the existing managed settings command instead of repeatedly attempting fresh-node preparation.
+
+- Group Workstation Operations by node or controller, with scoped task pages, refresh and Back navigation. Keep a single scrollable document within each page.
+- Use contextual recovery labels such as Resume setup and Reapply settings; allow the agent preflight retry and setup cancellation routes in both clients.
+
 ## 1.0.0-alpha.16 - 2026-10-17
 
 - Recover node setup after a confirmed SSH preflight failure, allow explicit cancellation before remote installation, and recover blocked protocol children without replaying an unfenced command.

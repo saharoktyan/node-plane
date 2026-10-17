@@ -1,12 +1,46 @@
 use super::super::*;
 
+fn operation_kind_label(kind: &str) -> &str {
+    match kind {
+        "bootstrap" => "Node setup",
+        "agent" => "Agent setup",
+        "node" => "Node maintenance",
+        "settings" => "Node settings",
+        "profile" => "Profile access",
+        "update" => "Controller update",
+        "backup" => "Backup",
+        "removal" => "Node removal",
+        "temporary" => "Temporary configuration",
+        _ => "Operation",
+    }
+}
+
 pub(in crate::tui) fn recovery_controls(page: &serde_json::Value) -> Vec<(String, Control)> {
     let mut controls = Vec::new();
+    if page["grouped"] == true {
+        for (index, group) in page["groups"].as_array().into_iter().flatten().enumerate() {
+            let flag = group["flag"].as_str().unwrap_or("");
+            let title = group["title"].as_str().unwrap_or("Controller");
+            controls.push((
+                format!(
+                    "{flag} {title} · {} tasks · {} blocked",
+                    group["total"], group["blocked"]
+                )
+                .trim()
+                .to_owned(),
+                Control::ControllerRecoveryNode(index),
+            ));
+        }
+    }
     for (index, item) in page["items"].as_array().into_iter().flatten().enumerate() {
         for (action, value) in item["actions"].as_array().into_iter().flatten().enumerate() {
             let label = match value.as_str().unwrap_or("") {
                 "recheck" => "Check result",
-                "resolve" => "Recover journal",
+                "resolve" if item["kind"] == "bootstrap" => "Resume setup",
+                "resolve" if item["kind"] == "settings" => "Reapply settings",
+                "resolve" if item["kind"] == "profile" => "Restore profile access",
+                "resolve" if item["kind"] == "temporary" => "Cancel unused configuration",
+                "resolve" => "Resolve blocked step",
                 "resume" => "Continue",
                 "cancel" if item["kind"] == "bootstrap" => "Cancel setup",
                 "cancel" => "Cancel before execution",
@@ -15,7 +49,7 @@ pub(in crate::tui) fn recovery_controls(page: &serde_json::Value) -> Vec<(String
             controls.push((
                 format!(
                     "{} · {}: {label}",
-                    item["kind"].as_str().unwrap_or("Operation"),
+                    operation_kind_label(item["kind"].as_str().unwrap_or("")),
                     item["node_key"]
                         .as_str()
                         .filter(|v| !v.is_empty())
@@ -39,10 +73,7 @@ pub(in crate::tui) fn recovery_controls(page: &serde_json::Value) -> Vec<(String
             Control::ControllerRecoveryPage(offset + size),
         ));
     }
-    controls.push((
-        "Refresh".into(),
-        Control::ControllerRecoveryInventory(offset),
-    ));
+    controls.push(("Refresh".into(), Control::ControllerRecoveryPage(offset)));
     controls.push(("Back".into(), Control::ControllerBack));
     controls
 }
@@ -475,7 +506,20 @@ pub(in crate::tui) fn draw_controller(
         );
         controls = app.controller_removal_controls();
     } else if let Some(page) = &state.recovery_inventory {
-        text = format!("Operations · {} active tasks\n", page["total"]);
+        text = if page["grouped"] == true {
+            format!(
+                "Operations · {} active tasks\nChoose a node or the controller to view its tasks and actions.\n",
+                page["total_tasks"]
+            )
+        } else if let Some(key) = page["node_key"].as_str() {
+            let title = page["node_title"]
+                .as_str()
+                .filter(|v| !v.is_empty())
+                .unwrap_or(if key.is_empty() { "Controller" } else { key });
+            format!("Operations › {title}\n{} active tasks\n", page["total"])
+        } else {
+            format!("Operations · {} active tasks\n", page["total"])
+        };
         if let Some(result) = page["recovery_result"].as_str() {
             text.push_str(&format!("\n{result}\n"));
         }
@@ -485,7 +529,7 @@ pub(in crate::tui) fn draw_controller(
         for item in page["items"].as_array().into_iter().flatten() {
             text.push_str(&format!(
                 "\n{} · {} · {}\nOperation: {}\n{}\n{}\n",
-                item["kind"].as_str().unwrap_or("Operation"),
+                operation_kind_label(item["kind"].as_str().unwrap_or("")),
                 item["node_key"]
                     .as_str()
                     .filter(|s| !s.is_empty())
@@ -1588,9 +1632,27 @@ pub(in crate::tui) fn draw_controller(
         let body = parts[0];
         let paragraph = Paragraph::new(text).wrap(Wrap { trim: false });
         let text_lines = paragraph.line_count(body.width) + 1;
-        let total = text_lines + controls.len() * 3;
+        let mut rows: Vec<Vec<usize>> = Vec::new();
+        for (index, (_, control)) in controls.iter().enumerate() {
+            if *control == Control::ControllerBack {
+                continue;
+            }
+            if matches!(control, Control::ControllerRecoveryPage(_))
+                && rows.last().is_some_and(|row| {
+                    row.len() == 1
+                        && matches!(controls[row[0]].1, Control::ControllerRecoveryPage(_))
+                })
+            {
+                rows.last_mut().unwrap().push(index);
+            } else {
+                rows.push(vec![index]);
+            }
+        }
+        let total = text_lines + rows.len() * 3;
         let capacity = usize::from(body.height).max(1);
-        let selected_line = text_lines + state.selected * 3;
+        let selected_row = rows.iter().position(|row| row.contains(&state.selected));
+        let selected_line =
+            selected_row.map_or(app.controller_viewport.get(), |row| text_lines + row * 3);
         let previous = app.controller_viewport.get();
         let automatic = if previous == 0 && state.selected == 0 {
             0
@@ -1610,17 +1672,27 @@ pub(in crate::tui) fn draw_controller(
                 Rect::new(body.x, body.y, body.width, remaining_text as u16),
             );
         }
-        for (index, (label, control)) in controls.iter().enumerate() {
-            let y = text_lines + index * 3;
+        for (row, indices) in rows.iter().enumerate() {
+            let y = text_lines + row * 3;
             if y < offset || y + 3 > offset + capacity {
                 continue;
             }
-            let rect = Rect::new(body.x, body.y + (y - offset) as u16, body.width, 3);
-            draw_button(frame, rect, label, state.selected == index);
-            hits.push(Hit {
-                area: rect,
-                control: *control,
-            });
+            let cells = Layout::horizontal(vec![Constraint::Fill(1); indices.len()])
+                .spacing(1)
+                .split(Rect::new(
+                    body.x,
+                    body.y + (y - offset) as u16,
+                    body.width,
+                    3,
+                ));
+            for (column, &index) in indices.iter().enumerate() {
+                let (label, control) = &controls[index];
+                draw_button(frame, cells[column], label, state.selected == index);
+                hits.push(Hit {
+                    area: cells[column],
+                    control: *control,
+                });
+            }
         }
         return;
     }

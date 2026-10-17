@@ -599,7 +599,8 @@ pub(crate) fn recovery_path(kind: &str, id: &str, action: &str) -> Result<String
             Ok(format!("/api/v1/system/recovery/backup/{id}/{action}"))
         }
         ("node" | "settings" | "profile" | "bootstrap" | "temporary", "resolve" | "recheck")
-        | ("agent", "recheck") => Ok(format!("/api/v1/system/recovery/{kind}/{id}/{action}")),
+        | ("agent", "recheck" | "resume")
+        | ("bootstrap", "cancel") => Ok(format!("/api/v1/system/recovery/{kind}/{id}/{action}")),
         _ => bail!("Unsupported recovery action"),
     }
 }
@@ -630,7 +631,10 @@ pub(crate) fn recovery_reason(code: &str) -> &str {
 pub(crate) fn recovery_hint(hint: &str) -> &str {
     match hint {
         "maintenance" => "Finish controller maintenance before recovering this operation.",
-        "child" => "Recover the installation step, then check the parent operation again.",
+        "child" => "Recover the dependent operation, then check the parent operation again.",
+        "bootstrap_child" => {
+            "Use Resume setup to recover this installation step and continue. Cancel setup stops it without removing installed components."
+        }
         "agent" => {
             "Check SSH access and the agent service; recheck verifies the bound agent and current build."
         }
@@ -1029,6 +1033,14 @@ mod tests {
         assert_eq!(
             super::recovery_path("temporary", &id, "resolve").unwrap(),
             format!("/api/v1/system/recovery/temporary/{id}/resolve")
+        );
+        assert_eq!(
+            super::recovery_path("agent", &id, "resume").unwrap(),
+            format!("/api/v1/system/recovery/agent/{id}/resume")
+        );
+        assert_eq!(
+            super::recovery_path("bootstrap", &id, "cancel").unwrap(),
+            format!("/api/v1/system/recovery/bootstrap/{id}/cancel")
         );
         assert!(super::recovery_path("temporary", &id, "resume").is_err());
         assert!(super::recovery_path("profile", &id, "unlock").is_err());

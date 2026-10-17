@@ -108,6 +108,7 @@ pub(super) enum Control {
     ControllerRecoveryInventory(usize),
     ControllerRecoveryPage(usize),
     ControllerRecoveryAction(usize, usize),
+    ControllerRecoveryNode(usize),
     ControllerAnnouncement,
     ControllerAnnouncementCompose,
     ControllerAnnouncementInput,

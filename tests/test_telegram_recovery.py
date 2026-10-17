@@ -10,6 +10,14 @@ from tests import test_telegram_client as fixture
 class RecoveryScreenTests(IsolatedAsyncioTestCase):
     setUp = fixture.TelegramFlowTests.setUp
 
+    def test_new_recovery_actions_have_valid_routes_and_clear_labels(self):
+        identity=str(uuid4())
+        for kind,action in [('agent','resume'),('bootstrap','cancel'),('bootstrap','resolve')]:
+            self.assertEqual(recovery.action_path(kind,identity,action),f'/api/v1/system/recovery/{kind}/{identity}/{action}')
+        self.assertEqual(recovery.action_label('en','bootstrap','resolve'),'Resume setup')
+        self.assertEqual(recovery.action_label('ru','bootstrap','resolve'),'Продолжить установку')
+        with self.assertRaises(ValueError): recovery.action_path('agent',identity,'cancel')
+
     async def test_fleet_diagnostics_show_coverage_details_and_server_navigation(self):
         backend = SimpleNamespace(request=AsyncMock(return_value={
             'errors': 1, 'warnings': 0, 'total': 8, 'offset': 0, 'page_size': 5, 'next_offset': 5,

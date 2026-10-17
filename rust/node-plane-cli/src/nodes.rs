@@ -1107,7 +1107,7 @@ async fn execute_inner(
                             format!("This will send the message to {recipients} eligible users."))?,
                             "Announcement cancelled");
                     }
-                    if let crate::controller::Command::RecoveryAction(kind, id, action, offset) = &command {
+                    if let crate::controller::Command::RecoveryAction(kind, id, action, offset, node_key) = &command {
                         let explanation = match (kind.as_str(), action.as_str()) { ("bootstrap", "cancel") => "Stop setup after confirming or fencing the current step. Already installed components remain; remove the node separately if needed.", ("bootstrap", "resolve") => "Recover the saved step. An interrupted command is fenced before a replacement step can run. Existing protocol identities are preserved.", ("agent", "resume") => "Retry the installer only after a confirmed read-only SSH preflight failure. Fix the SSH key or account permissions first.", (_, "recheck") => "Check the recorded result of this exact command. Missing evidence keeps it blocked.", (_, "resolve") => "Recover the exact driver journal before reconciling current settings. Unconfirmed outcomes stay blocked.", (_, "resume") => "Continue the saved operation checkpoint, preserving existing child commands.", (_, "cancel") => "Cancel only before execution. The backend checks this boundary again.", _ => anyhow::bail!("Unsupported recovery action") };
                         if !events::confirm(tx, "Recover this operation?", format!("{kind}: {id}\n\n{explanation}"))? { return Ok("Recovery cancelled".into()); }
                         let (method, path, body, key) = command.request()?;
@@ -1115,7 +1115,7 @@ async fn execute_inner(
                             Ok(result) => format!("Operation {id}: {}", result["status"].as_str().unwrap_or("result unconfirmed")),
                             Err(error) => format!("Recovery was not confirmed: {error}. Refresh this operation before trying again."),
                         };
-                        let mut page = backend::request(session, &credential, Method::GET, &format!("/api/v1/system/recovery?offset={offset}"), None, None).await?;
+                        let mut page = backend::request(session, &credential, Method::GET, &crate::controller::recovery_inventory_path(*offset, node_key.as_deref()), None, None).await?;
                         page["recovery_result"] = json!(note);
                         let _ = tx.send(Event::Nodes(Update::Controller(profile, command, page)));
                         return Ok("Recovery state loaded".into());

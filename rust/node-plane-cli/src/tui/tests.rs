@@ -6192,7 +6192,7 @@ fn recovery_panel_refresh_keeps_focus_and_uses_current_backend_actions() {
     );
     app.activate_controller(Control::ControllerRecoveryAction(0, 1));
     assert!(
-        matches!(&app.nodes_requested,Some(crate::nodes::Command::Controller(_,crate::controller::Command::RecoveryAction(kind,identity,action,0))) if kind=="settings" && identity==&id.to_string() && action=="resolve")
+        matches!(&app.nodes_requested,Some(crate::nodes::Command::Controller(_,crate::controller::Command::RecoveryAction(kind,identity,action,0,_))) if kind=="settings" && identity==&id.to_string() && action=="resolve")
     );
     app.activate_controller(Control::ControllerBack);
     assert!(app.controller.recovery_inventory.is_none());
@@ -6880,4 +6880,48 @@ fn ssh_credential_choice_path_and_passphrase_support_submit_and_cancel() {
         app.prompt_key(key);
         assert!(matches!(rx.recv().unwrap(), Answer::Cancel));
     }
+}
+
+#[test]
+fn operations_groups_open_node_keep_actions_scoped_and_back_returns_to_groups() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Controller;
+    let groups = serde_json::json!({"grouped":true,"total":2,"total_tasks":3,"offset":0,"page_size":10,"items":[],
+        "groups":[{"node_key":"sg1","title":"Singapore","flag":"","total":2,"blocked":2},
+                  {"node_key":"","title":"Controller","total":1,"blocked":0}]});
+    app.controller
+        .apply(crate::controller::Command::RecoveryInventory(0), groups);
+    app.activate_controller(Control::ControllerRecoveryNode(0));
+    assert!(
+        matches!(&app.nodes_requested,Some(crate::nodes::Command::Controller(_,crate::controller::Command::RecoveryNode(key,0))) if key=="sg1")
+    );
+    app.nodes_requested = None;
+    let id = uuid::Uuid::new_v4();
+    let detail = serde_json::json!({"node_key":"sg1","node_title":"Singapore","offset":0,"total":1,"page_size":10,
+        "items":[{"kind":"bootstrap","id":id,"node_key":"sg1","actions":["resolve"],"status":"blocked"}]});
+    app.controller.apply(
+        crate::controller::Command::RecoveryNode("sg1".into(), 0),
+        detail,
+    );
+    let controls = recovery_controls(app.controller.recovery_inventory.as_ref().unwrap());
+    assert!(controls[0].0.contains("Resume setup"));
+    assert!(!controls[0].0.contains("journal"));
+    app.activate_controller(Control::ControllerRecoveryInventory(0));
+    assert!(
+        matches!(&app.nodes_requested,Some(crate::nodes::Command::Controller(_,crate::controller::Command::RecoveryNode(key,0))) if key=="sg1")
+    );
+    app.nodes_requested = None;
+    app.activate_controller(Control::ControllerRecoveryAction(0, 0));
+    assert!(
+        matches!(&app.nodes_requested,Some(crate::nodes::Command::Controller(_,crate::controller::Command::RecoveryAction(_,_,_,0,Some(key)))) if key=="sg1")
+    );
+    app.nodes_requested = None;
+    app.activate_controller(Control::ControllerBack);
+    assert!(matches!(
+        &app.nodes_requested,
+        Some(crate::nodes::Command::Controller(
+            _,
+            crate::controller::Command::RecoveryInventory(0)
+        ))
+    ));
 }

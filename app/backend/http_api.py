@@ -282,7 +282,21 @@ class RecoveryItemOutput(BaseModel):
     next_step: str = ''
 
 
+class RecoveryGroupOutput(BaseModel):
+    node_key: str
+    title: str
+    flag: str = ''
+    total: int
+    blocked: int
+
+
 class RecoveryOverviewOutput(BaseModel):
+    grouped: bool = False
+    groups: list[RecoveryGroupOutput] = Field(default_factory=list)
+    total_tasks: int = 0
+    node_key: str | None = None
+    node_title: str = ''
+
     items: list[RecoveryItemOutput]
     offset: int
     page_size: int
@@ -2020,9 +2034,10 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
 
     @app.get('/api/v1/system/recovery', response_model=RecoveryOverviewOutput)
     def recovery_overview(offset: int = Query(default=0, ge=0, le=1000000),
-                          node_key: str | None = Query(default=None, min_length=1, max_length=100), current=Depends(actor)):
+                          node_key: str | None = Query(default=None, min_length=0, max_length=100),
+                          group_by_node: bool = False, current=Depends(actor)):
         from .recovery import overview
-        return overview(db, current, offset, node_key=node_key)
+        return overview(db, current, offset, node_key=node_key, group_by_node=group_by_node)
 
     @app.get('/api/v1/system/workstation-audit', response_model=WorkstationAuditPageOutput)
     def workstation_audit(offset: int = Query(default=0, ge=0, le=1000000),

@@ -3,6 +3,25 @@ use hyper::Method;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
+pub fn recovery_inventory_path(offset: usize, node_key: Option<&str>) -> String {
+    match node_key {
+        None => format!("/api/v1/system/recovery?group_by_node=true&offset={offset}"),
+        Some(key) => {
+            let key: String = key
+                .bytes()
+                .map(|b| {
+                    if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) {
+                        char::from(b).to_string()
+                    } else {
+                        format!("%{b:02X}")
+                    }
+                })
+                .collect();
+            format!("/api/v1/system/recovery?offset={offset}&node_key={key}")
+        }
+    }
+}
+
 #[derive(Clone)]
 pub enum Command {
     Probe,
@@ -20,7 +39,8 @@ pub enum Command {
     WorkstationAuditErrors(usize),
     RecoveryHistory(usize),
     RecoveryInventory(usize),
-    RecoveryAction(String, String, String, usize),
+    RecoveryNode(String, usize),
+    RecoveryAction(String, String, String, usize, Option<String>),
     AnnouncementOverview,
     AnnouncementPreview(String),
     AnnouncementCreate(String, Uuid, u64),
@@ -187,11 +207,17 @@ impl Command {
             ),
             Self::RecoveryInventory(offset) => (
                 Method::GET,
-                format!("/api/v1/system/recovery?offset={offset}"),
+                recovery_inventory_path(*offset, None),
                 None,
                 None,
             ),
-            Self::RecoveryAction(kind, id, action, _) => (
+            Self::RecoveryNode(key, offset) => (
+                Method::GET,
+                recovery_inventory_path(*offset, Some(key)),
+                None,
+                None,
+            ),
+            Self::RecoveryAction(kind, id, action, _, _) => (
                 Method::POST,
                 crate::workstation::recovery_path(kind, id, action)?,
                 None,
@@ -334,6 +360,7 @@ pub struct Browser {
     pub workstation_audit: Option<Value>,
     pub recovery_history: Option<Value>,
     pub recovery_inventory: Option<Value>,
+    pub recovery_group_offset: usize,
     pub history_detail: Option<(&'static str, usize)>,
     pub announcement_overview: Option<Value>,
     pub announcement_draft: Option<String>,
@@ -441,17 +468,27 @@ impl Browser {
                 self.history_detail = None;
                 self.selected = 0;
             }
-            Command::RecoveryInventory(_) | Command::RecoveryAction(..) => {
+            Command::RecoveryInventory(_)
+            | Command::RecoveryNode(..)
+            | Command::RecoveryAction(..) => {
                 let mut value = value;
                 if value.get("recovery_result").is_none()
                     && let Some(result) = self
                         .recovery_inventory
                         .as_ref()
+                        .filter(|p| {
+                            p["node_key"] == value["node_key"] && p["grouped"] == value["grouped"]
+                        })
                         .and_then(|p| p.get("recovery_result"))
                 {
                     value["recovery_result"] = result.clone();
                 }
-                let first_page = self.recovery_inventory.is_none();
+                if value["grouped"] == true {
+                    self.recovery_group_offset = value["offset"].as_u64().unwrap_or(0) as usize;
+                }
+                let first_page = self.recovery_inventory.as_ref().is_none_or(|old| {
+                    old["node_key"] != value["node_key"] || old["grouped"] != value["grouped"]
+                });
                 self.recovery_inventory = Some(value);
                 self.workstation_audit = None;
                 self.recovery_history = None;
@@ -695,9 +732,12 @@ impl Browser {
                 .map(Command::Job);
         }
         if let Some(page) = &self.recovery_inventory {
-            return Some(Command::RecoveryInventory(
-                page["offset"].as_u64().unwrap_or(0) as usize,
-            ));
+            let offset = page["offset"].as_u64().unwrap_or(0) as usize;
+            return Some(if let Some(key) = page["node_key"].as_str() {
+                Command::RecoveryNode(key.into(), offset)
+            } else {
+                Command::RecoveryInventory(offset)
+            });
         }
         if let Some(job) = &self.backup_job {
             return if matches!(

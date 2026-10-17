@@ -286,9 +286,12 @@ class NodeSettingsExecutor:
                     if not node['applied_revision']:
                         self._retire_uninstalled(candidate)
                         return True
-                    # Preparation is repeatable and occurs before the durable
-                    # settings mutation. No command is claimed on failure.
-                    self.driver.prepare_node(candidate['node_key'])
+                    # Existing protocol state means this is a managed node.
+                    # Adding its second protocol must initialize the missing
+                    # config inside the durable settings command; PrepareNode
+                    # deliberately rejects a node with an existing journal.
+                    if not (observation.get('xray_config_present') or observation.get('awg_config_present')):
+                        self.driver.prepare_node(candidate['node_key'])
             except Exception:
                 if not node['applied_revision']:
                     self._retire_uninstalled(candidate)

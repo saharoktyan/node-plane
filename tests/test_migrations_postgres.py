@@ -30,6 +30,21 @@ class MigrationsPostgresTests(unittest.TestCase):
         with self.base.transaction() as conn:
             conn.execute(f'DROP SCHEMA {self.schema} CASCADE')
 
+    def test_grouped_recovery_inventory_runs_on_postgres_and_filters_controller(self):
+        from backend.recovery import overview
+        from backend.authorization import Actor,Account,Principal,PrincipalKind,ADMIN_PERMISSIONS
+        migrate(self.db)
+        with self.db.transaction() as conn:
+            conn.execute("INSERT INTO backend_accounts(id,status,role) VALUES ('reader','approved','admin')")
+            conn.execute("INSERT INTO backend_nodes(key,title,region,protocols_json,xray_transports_json) VALUES ('n1','Readable node','EU','[]','[]')")
+            conn.execute("INSERT INTO backend_node_jobs VALUES (?,'n1','reader',?,'bootstrap',1,'{}','blocked',NULL)",(str(uuid4()),str(uuid4())))
+            conn.execute("INSERT INTO backend_update_jobs(id,actor_id,command_key,kind,intent_json,status,created_at) VALUES (?,'reader',?,'agents','{}','blocked','now')",(str(uuid4()),str(uuid4())))
+        actor=Actor(Principal('reader',PrincipalKind.ACCOUNT,ADMIN_PERMISSIONS),Account('reader','admin','approved'))
+        page=overview(self.db,actor,group_by_node=True)
+        self.assertEqual((page['total'],page['total_tasks']),(2,2))
+        self.assertEqual([g['title'] for g in page['groups']],['Controller','Readable node'])
+        self.assertEqual(overview(self.db,actor,node_key='')['total'],1)
+
     def test_cancelled_agent_rollout_upgrade_preserves_history_and_previous_reader(self):
         migrate(self.db,revisions=REVISIONS[:12])
         with self.db.transaction() as conn:

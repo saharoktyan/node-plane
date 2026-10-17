@@ -124,6 +124,7 @@ def _item(conn, row, actor, gate, other):
                     if task and AgentRolloutService(_ConnectionDB(conn)).preflight_failed(task):
                         actions.append('cancel')
     hint = ('maintenance' if (gate or other) and kind != 'update' else
+            'bootstrap_child' if related_id and kind == 'bootstrap' else
             'child' if related_id else
             'agent' if kind == 'agent' else
             'bootstrap' if kind == 'bootstrap' else
@@ -143,22 +144,39 @@ def _sql():
         for kind, table, node, result in SOURCES)
 
 
-def overview(db, actor, offset=0, node_key=None):
+def overview(db, actor, offset=0, node_key=None, *, group_by_node=False):
     require_permission(actor, 'maintenance.manage')
     page_size, sql = 10, _sql()
     inventory = f'({sql}) inventory'
     parameters = ()
     if node_key is not None:
-        inventory += ' WHERE node_key=?'
+        inventory += " WHERE COALESCE(node_key,'')=?"
         parameters = (node_key,)
     with db.connect() as conn:
         gate, other = _maintenance(conn)
+        if group_by_node and node_key is None:
+            grouped = f"""SELECT COALESCE(node_key,'') AS node_key,COUNT(*) AS total,
+                SUM(CASE WHEN status IN ('blocked','revoke_blocked') THEN 1 ELSE 0 END) AS blocked
+                FROM ({sql}) tasks GROUP BY COALESCE(node_key,'')"""
+            total = conn.execute(f'SELECT COUNT(*) AS count FROM ({grouped}) grouped_tasks', ()).fetchone()['count']
+            total_tasks = conn.execute(f'SELECT COUNT(*) AS count FROM ({sql}) tasks', ()).fetchone()['count']
+            offset = min(offset, max(0, (total - 1) // page_size * page_size))
+            rows = conn.execute(f"""SELECT grouped_tasks.*,n.title,n.flag FROM ({grouped}) grouped_tasks
+                LEFT JOIN backend_nodes n ON n.key=grouped_tasks.node_key
+                ORDER BY CASE WHEN grouped_tasks.node_key='' THEN 0 ELSE 1 END,COALESCE(n.title,grouped_tasks.node_key),grouped_tasks.node_key
+                LIMIT ? OFFSET ?""", (page_size,offset)).fetchall()
+            groups = [{'node_key':r['node_key'],'title':r['title'] or r['node_key'] or 'Controller',
+                       'flag':r['flag'] or '', 'total':r['total'],'blocked':r['blocked']} for r in rows]
+            return {'items':[], 'groups':groups, 'grouped':True, 'total_tasks':total_tasks,
+                    'offset':offset,'page_size':page_size,'total':total,'maintenance_active':bool(gate) or other}
         total = conn.execute(f'SELECT COUNT(*) AS count FROM {inventory}', parameters).fetchone()['count']
         offset = min(offset, max(0, (total - 1) // page_size * page_size))
         rows = conn.execute(f'SELECT * FROM {inventory} ORDER BY kind,id LIMIT ? OFFSET ?', (*parameters, page_size, offset)).fetchall()
         items = [_item(conn, row, actor, gate, other) for row in rows]
+        node = conn.execute('SELECT title FROM backend_nodes WHERE key=?', (node_key,)).fetchone() if node_key else None
     return {'items': items, 'offset': offset, 'page_size': page_size, 'total': total,
-            'maintenance_active': bool(gate) or other}
+            'maintenance_active': bool(gate) or other, 'node_key':node_key,
+            'node_title':node['title'] if node else node_key or 'Controller'}
 
 
 def act(db, actor, driver, kind, identity, action):
