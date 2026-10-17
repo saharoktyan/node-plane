@@ -19,6 +19,7 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).parent
+RA_POLICY = Path("/etc/sysctl.d/70-node-plane-ipv6.conf")
 spec = importlib.util.spec_from_file_location('profile_intents', ROOT / 'apply-profile-intent.py')
 intents = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(intents)
@@ -169,6 +170,17 @@ def remove_protocol_runtime(lock_fd):
     intents.stop_leased_runtime_units()
     for identity in containers:
         command(['docker', 'rm', '-f', identity], lock_fd)
+    network = subprocess.run(['docker', 'network', 'inspect', 'node-plane-awg'],
+        capture_output=True, text=True, timeout=30)
+    if network.returncode == 0:
+        records = json.loads(network.stdout)
+        if (len(records) == 1 and records[0].get('Driver') == 'bridge'
+                and records[0].get('Labels', {}).get('org.node-plane.network') == 'awg'):
+            # Docker refuses removal if another container still uses the network.
+            command(['docker', 'network', 'rm', 'node-plane-awg'], lock_fd)
+    ra_policy = RA_POLICY
+    if ra_policy.is_file() and ra_policy.read_text().startswith('# Managed by Node Plane:'):
+        ra_policy.unlink()
     # Only protocol-owned directories; never agent identity, journal or scripts.
     for directory in directories:
         if directory.exists():
@@ -267,6 +279,52 @@ def run(action, intent, lock_fd):
     return json.loads(result['payload_json'])
 
 
+
+def resolve_unused_temporary(intent, path):
+    """Fence an unused lease command before acknowledging cancellation.
+
+    A scheduler preflight may fail before any command row exists. Inserting a
+    superseded receipt also fences a delayed original request in that case.
+    Existing leases or any live/disk peer require reconciliation, not cancellation.
+    """
+    if (intent['action'] != 'ensure' or intent.get('lease_seconds') not in intents.LEASE_DURATIONS
+            or not intent['runtime_name'].startswith('tmp_')):
+        raise ValueError('invalid temporary cancellation')
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fingerprint = hashlib.sha256(json.dumps(intent, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+    with open(str(path) + '.lock', 'a') as lock:
+        os.chmod(lock.name, 0o600)
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if Path(str(path) + '.disabled').exists():
+            raise ValueError('agent removal is in progress')
+        with closing(sqlite3.connect(path)) as conn:
+            os.chmod(path, 0o600)
+            conn.execute('PRAGMA synchronous=FULL')
+            conn.execute('CREATE TABLE IF NOT EXISTS commands (id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, status TEXT NOT NULL, response TEXT, instance_id TEXT NOT NULL)')
+            prior = conn.execute('SELECT fingerprint,status,response,instance_id FROM commands WHERE id=?', (intent['command_id'],)).fetchone()
+            if prior:
+                if prior[0] != fingerprint:
+                    raise ValueError('command identity mismatch')
+                if prior[1] == 'superseded':
+                    return json.loads(prior[2])
+                if prior[1] != 'running' or prior[3] == os.environ.get('NODE_PLANE_AGENT_INSTANCE_ID', 'standalone'):
+                    raise ValueError('agent service restart or confirmed journal is required')
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='temporary_leases'").fetchone():
+                if conn.execute('SELECT 1 FROM temporary_leases WHERE protocol=? AND profile=?',
+                                (intent['protocol'], intent['runtime_name'])).fetchone():
+                    raise ValueError('existing temporary lease requires reconciliation')
+            observation = intents.inspect_for_repair(intent, allow_unused=True)
+            expected = {'disk_present', 'live_present', 'identity_matches', 'config_available'}
+            if set(observation) != expected or any(value is not False for value in observation.values()):
+                raise ValueError('temporary absence is unconfirmed')
+            record = {'unused_confirmed': True, 'observation': observation}
+            conn.execute("INSERT INTO commands VALUES (?,?,'superseded',?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,response=excluded.response",
+                         (intent['command_id'], fingerprint, json.dumps(record), os.environ.get('NODE_PLANE_AGENT_INSTANCE_ID', 'standalone')))
+            conn.commit()
+            return record
+
+
 def temporary_profile(action, command_id, intent, recover, path):
     """Explicit leased-peer commands over the existing authenticated node RPC.
 
@@ -279,6 +337,10 @@ def temporary_profile(action, command_id, intent, recover, path):
     intents.validate(intent)
     if intent['command_id'] != command_id:
         raise ValueError('temporary operation is not supported')
+    if action == 'temporary_resolve':
+        if not recover:
+            raise ValueError('temporary cancellation requires recovery')
+        return resolve_unused_temporary(intent, path)
     if action == 'temporary_status':
         if not recover:
             raise ValueError('temporary status is read-only')
@@ -334,7 +396,7 @@ def temporary_profile(action, command_id, intent, recover, path):
 
 
 def execute(action, command_id, intent, recover=False, path='/etc/node-plane/profile-intents.sqlite3'):
-    if action in {'temporary_ensure', 'temporary_revoke', 'temporary_status'}:
+    if action in {'temporary_ensure', 'temporary_revoke', 'temporary_status', 'temporary_resolve'}:
         return temporary_profile(action, command_id, intent, recover, path)
     resolving = action.startswith('resolve_')
     if resolving:

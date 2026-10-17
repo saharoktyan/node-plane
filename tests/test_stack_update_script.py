@@ -111,6 +111,97 @@ rollback_simple {shlex.quote(str(previous))} {shlex.quote(str(link))} {shlex.quo
                 self.assertEqual(value['rollback_status'], 'succeeded' if healthy else 'failed')
                 self.assertEqual(value['components'][component], 'failed')
 
+    def test_failed_snapshot_never_restores_an_unvisited_file_as_absent(self):
+        update = (ROOT / 'scripts/update.sh').read_text()
+        handler = update[update.index('on_error() {'):update.index("trap 'on_error $?' ERR")]
+        for failure in ('driver', 'unit', '.env'):
+            with self.subTest(copy_failure=failure), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                files = [root / name for name in ('driver', 'unit', '.env')]
+                for path in files:
+                    path.write_text('original ' + path.name)
+                    path.chmod(0o600 if path.name == '.env' else 0o755)
+                progress = root / 'progress.json'
+                source = f'''set -Eeuo pipefail
+source {shlex.quote(str(ROOT / 'scripts/lib/stack_update.sh'))}
+sudo() {{ "$@"; }}
+cp() {{
+  if [[ "$3" == {shlex.quote(str(root / failure))} ]]; then
+    # Model a failed copy which already wrote partial destination bytes.
+    printf partial > "${{@: -1}}"
+    return 1
+  fi
+  command cp "$@"
+}}
+stack_files() {{ printf '%s\n' {' '.join(shlex.quote(str(p)) for p in files)}; }}
+STACK_JOB=test
+STACK_COMPONENT=backend
+CORE_ARMED=0
+CURRENT_STEP=snapshot
+STACK_PROGRESS_FILE={shlex.quote(str(progress))}
+{handler}
+trap 'on_error $?' ERR
+stack_snapshot {shlex.quote(str(files[-1]))}
+'''
+                result = subprocess.run(['bash', '-c', source], capture_output=True, text=True)
+                self.assertNotEqual(result.returncode, 0)
+                for path in files:
+                    self.assertEqual(path.read_text(), 'original ' + path.name)
+                self.assertEqual(files[-1].stat().st_mode & 0o777, 0o600)
+                self.assertEqual(json.loads(progress.read_text())['rollback_status'], 'succeeded')
+
+    def test_restore_distinguishes_original_absence_and_preserves_symlinks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            original, absent, link = [root / name for name in ('env', 'new.service', 'old.service')]
+            original.write_text('private original')
+            original.chmod(0o600)
+            link.symlink_to(original.name)
+            source = f'''set -euo pipefail
+source {shlex.quote(str(ROOT / 'scripts/lib/stack_update.sh'))}
+sudo() {{ "$@"; }}
+stack_files() {{ printf '%s\n' {shlex.quote(str(original))} {shlex.quote(str(absent))} {shlex.quote(str(link))}; }}
+stack_snapshot {shlex.quote(str(original))}
+printf changed > {shlex.quote(str(original))}
+printf new > {shlex.quote(str(absent))}
+rm {shlex.quote(str(link))}
+printf replacement > {shlex.quote(str(link))}
+stack_restore
+rm -rf -- "$STACK_SNAPSHOT"
+'''
+            result = subprocess.run(['bash', '-c', source], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(original.read_text(), 'private original')
+            self.assertEqual(original.stat().st_mode & 0o777, 0o600)
+            self.assertFalse(absent.exists())
+            self.assertTrue(link.is_symlink())
+            self.assertEqual(os.readlink(link), original.name)
+
+    def test_incomplete_snapshot_is_rejected_before_any_restore_or_delete(self):
+        for damage in ('source', 'completion'):
+            with self.subTest(damage=damage), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                first, second, absent = [root / name for name in ('first', 'second', 'new.service')]
+                first.write_text('old first')
+                second.write_text('old second')
+                source = f'''set -euo pipefail
+source {shlex.quote(str(ROOT / 'scripts/lib/stack_update.sh'))}
+sudo() {{ "$@"; }}
+stack_files() {{ printf '%s\n' {shlex.quote(str(first))} {shlex.quote(str(second))} {shlex.quote(str(absent))}; }}
+stack_snapshot {shlex.quote(str(first))}
+printf changed > {shlex.quote(str(first))}
+printf changed > {shlex.quote(str(second))}
+printf new > {shlex.quote(str(absent))}
+rm -- "$STACK_SNAPSHOT/{'files' + str(second) if damage == 'source' else '.complete'}"
+if stack_restore; then exit 99; fi
+rm -rf -- "$STACK_SNAPSHOT"
+'''
+                result = subprocess.run(['bash', '-c', source], capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(first.read_text(), 'changed')
+                self.assertEqual(second.read_text(), 'changed')
+                self.assertEqual(absent.read_text(), 'new')
+
     def test_driver_update_and_health_checks_precede_agent_rollout(self):
         source = (ROOT / 'scripts/update.sh').read_text()
         self.assertIn('setup_driver_agents.sh" --skip-agents --strict --bin-source release', source)

@@ -24,6 +24,8 @@ SERVER_PORT="${AWG_SERVER_PORT:-51820}"
 CLIENT_DNS="${AWG_DNS:-1.1.1.1}"
 CLIENT_MTU="${AWG_MTU:-1280}"
 ALLOWED_IPS="${AWG_ALLOWED_IPS:-0.0.0.0/0}"
+IPV6_TOOL="$(dirname "${BASH_SOURCE[0]}")/awg_ipv6.py"
+ALLOWED_IPS="$(python3 "$IPV6_TOOL" routes "$ALLOWED_IPS")"
 KEEPALIVE="${AWG_KEEPALIVE:-25}"
 I1_PRESET="${AWG_I1_PRESET:-quic}"
 CONF2VPN="${AWG_CONF2VPN:-/opt/node-plane-runtime/conf2vpn.py}"
@@ -193,7 +195,7 @@ PY
 
 USED_IPS="$(
   docker_cmd exec -i "$CONTAINER" sh -lc \
-  "wg show $IFACE allowed-ips | awk '{print \$NF}' | cut -d/ -f1" | tr -d '\r'
+  "wg show $IFACE allowed-ips | cut -f2- | tr ', ' '\n' | cut -d/ -f1" | tr -d '\r'
 )"
 
 USED_IPS+=$'\n'"$(python3 "$PEER_STATE" reserved "$CFG" "$CLIENTS_DIR")"
@@ -210,6 +212,8 @@ if [[ -z "$FREE_IP" ]]; then
   exit 1
 fi
 
+PEER_ADDRESSES="$(python3 "$IPV6_TOOL" addresses "$FREE_IP/32")"
+
 read -r CLIENT_PRIV CLIENT_PUB CLIENT_PSK < <(
   docker_cmd exec -i "$CONTAINER" sh -lc '
     umask 077
@@ -225,12 +229,12 @@ SERVER_PUB="$(docker_cmd exec -i "$CONTAINER" sh -lc "wg show $IFACE public-key"
 docker_cmd exec -i "$CONTAINER" sh -lc "
   tmp=\$(mktemp)
   echo '$CLIENT_PSK' > \$tmp
-  wg set $IFACE peer '$CLIENT_PUB' preshared-key \$tmp allowed-ips '$FREE_IP/32'
+  wg set $IFACE peer '$CLIENT_PUB' preshared-key \$tmp allowed-ips '${PEER_ADDRESSES// /}'
   rm -f \$tmp
 "
 
-printf '\n# %s\n[Peer]\nPublicKey = %s\nPresharedKey = %s\nAllowedIPs = %s/32\n' \
-  "$DISPLAY_NAME" "$CLIENT_PUB" "$CLIENT_PSK" "$FREE_IP" >> "$CFG"
+printf '\n# %s\n[Peer]\nPublicKey = %s\nPresharedKey = %s\nAllowedIPs = %s\n' \
+  "$DISPLAY_NAME" "$CLIENT_PUB" "$CLIENT_PSK" "$PEER_ADDRESSES" >> "$CFG"
 
 TMP_CONF="$(mktemp /tmp/awg-client-XXXX.conf)"
 TMP_JSON="$(mktemp /tmp/awg-amnezia-XXXX.json)"
@@ -241,7 +245,7 @@ cat > "$TMP_CONF" <<EOF
 [Interface]
 PrivateKey = $CLIENT_PRIV
 PublicKey = $CLIENT_PUB
-Address = $FREE_IP/32
+Address = $PEER_ADDRESSES
 DNS = $CLIENT_DNS
 MTU = $CLIENT_MTU
 

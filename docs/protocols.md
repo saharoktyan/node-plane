@@ -46,3 +46,11 @@ Formats include WireGuard-style `.conf` and Amnezia configuration delivery where
 4. Obtain a fresh configuration and test from the client network.
 
 The exact container pins are defined by the release's runtime assets. A preset or successful health check does not guarantee connectivity through every network.
+
+## IPv6
+
+`IPv6 outbound` is a node-wide setting for both AmneziaWG and VLESS. It defaults to On and is also available in Installation defaults for future nodes. On permits native IPv6 egress when the host has IPv6 connectivity. Off rejects IPv6 through AWG and limits Xray destinations to IPv4. IPv4 remains available when the server has no IPv6 connectivity.
+
+Full-tunnel AWG configurations include both `0.0.0.0/0` and `::/0`, independently of this switch. The tunnel captures the client's IPv6 even when server IPv6 egress is disabled. Existing peer keys are preserved when adding tunnel IPv6 addresses. After upgrading the node runtime and applying its settings, obtain and import the configuration again on existing devices; downloaded files cannot update themselves.
+
+A VLESS link configures the proxy connection, not the device's system routes. Use a VPN client with TUN/VPN mode that captures both IPv4 and IPv6 (and its DNS traffic). A browser/system proxy or an IPv4-only TUN can leave other device traffic outside Xray; the server cannot change those device routes through a VLESS link.

@@ -6,6 +6,9 @@ CFG="${AWG_CONFIG_FILE:-/opt/amnezia/awg/wg0.conf}"
 NETWORK="${AWG_NETWORK:-10.8.1.0/24}"
 GO_IMPL="${WG_QUICK_USERSPACE_IMPLEMENTATION:-amneziawg-go}"
 GO_PID=""
+IPV6_OUTBOUND="${IPV6_OUTBOUND:-off}"
+IPV6_NETWORK="fd42:6e70:6177:2::/64"
+PUB6_IFACE="$(ip -6 route show default 2>/dev/null | awk '/dev/ {for (i=1;i<=NF;i++) if ($i=="dev") {print $(i+1); exit}}' || true)"
 PUB_IFACE="$(ip route get 1.1.1.1 2>/dev/null | awk '/dev/ {for (i=1;i<=NF;i++) if ($i=="dev") {print $(i+1); exit}}' || true)"
 
 echo "AWG runtime starting: iface=$IFACE cfg=$CFG network=$NETWORK"
@@ -59,6 +62,16 @@ strip_conf() {
 }
 
 setup_nat() {
+  # Capture is client policy; disabled/unavailable server egress rejects promptly.
+  if [ -e /proc/sys/net/ipv6/conf/all/disable_ipv6 ]; then
+  if [ "$IPV6_OUTBOUND" = on ] && [ -n "$PUB6_IFACE" ]; then
+    ip6tables -A FORWARD -i "$IFACE" -j ACCEPT
+    ip6tables -A FORWARD -o "$IFACE" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+    ip6tables -t nat -A POSTROUTING -s "$IPV6_NETWORK" -o "$PUB6_IFACE" -j MASQUERADE
+  else
+    ip6tables -A FORWARD -i "$IFACE" -j REJECT --reject-with icmp6-adm-prohibited
+  fi
+  fi
   if [ -n "$PUB_IFACE" ]; then
     iptables -C FORWARD -i "$IFACE" -j ACCEPT >/dev/null 2>&1 || iptables -A FORWARD -i "$IFACE" -j ACCEPT
     iptables -C FORWARD -o "$IFACE" -j ACCEPT >/dev/null 2>&1 || iptables -A FORWARD -o "$IFACE" -j ACCEPT
@@ -68,6 +81,12 @@ setup_nat() {
 }
 
 cleanup_nat() {
+  ip6tables -D FORWARD -i "$IFACE" -j ACCEPT >/dev/null 2>&1 || true
+  ip6tables -D FORWARD -o "$IFACE" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT >/dev/null 2>&1 || true
+  ip6tables -D FORWARD -i "$IFACE" -j REJECT --reject-with icmp6-adm-prohibited >/dev/null 2>&1 || true
+  if [ -n "$PUB6_IFACE" ]; then
+    ip6tables -t nat -D POSTROUTING -s "$IPV6_NETWORK" -o "$PUB6_IFACE" -j MASQUERADE >/dev/null 2>&1 || true
+  fi
   if [ -n "$PUB_IFACE" ]; then
     iptables -D FORWARD -i "$IFACE" -j ACCEPT >/dev/null 2>&1 || true
     iptables -D FORWARD -o "$IFACE" -j ACCEPT >/dev/null 2>&1 || true
@@ -97,12 +116,16 @@ require_cmd "$GO_IMPL"
 require_cmd wg
 require_cmd ip
 require_cmd awk
+if [ -e /proc/sys/net/ipv6/conf/all/disable_ipv6 ]; then
+  require_cmd ip6tables
+fi
 
 ADDR="$(conf_value "Address")"
 MTU="$(conf_value "MTU")"
 [ -n "$MTU" ] || MTU="1280"
 
 sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1 || true
+sysctl -w net.ipv6.conf.all.forwarding=1 >/dev/null 2>&1 || true
 ip link del "$IFACE" >/dev/null 2>&1 || true
 
 "$GO_IMPL" "$IFACE" &
@@ -123,7 +146,16 @@ fi
 strip_conf | wg setconf "$IFACE" /dev/stdin
 
 if [ -n "$ADDR" ]; then
-  ip address add "$ADDR" dev "$IFACE"
+  OLD_IFS="$IFS"
+  IFS=,
+  for address in $ADDR; do
+    address="$(printf '%s' "$address" | tr -d ' ')"
+    case "$address" in
+      *:*) [ -e /proc/sys/net/ipv6/conf/all/disable_ipv6 ] || continue ;;
+    esac
+    ip address add "$address" dev "$IFACE"
+  done
+  IFS="$OLD_IFS"
 fi
 ip link set mtu "$MTU" up dev "$IFACE"
 

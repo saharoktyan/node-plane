@@ -36,6 +36,39 @@ CONTAINER="${AWG_CONTAINER_NAME:-amnezia-awg}"
 CFG="${AWG_CONFIG:-/opt/node-plane-runtime/amnezia-awg/data/wg0.conf}"
 IFACE="${AWG_IFACE:-wg0}"
 PORT="${AWG_SERVER_PORT:-51820}"
+IPV6_EFFECTIVE=off
+NETWORK_ARGS=()
+IPV6_SYSCTL_ARGS=()
+if [[ -e /proc/sys/net/ipv6/conf/all/disable_ipv6 ]]; then
+  IPV6_SYSCTL_ARGS=(--sysctl net.ipv6.conf.all.disable_ipv6=0 --sysctl net.ipv6.conf.all.forwarding=1)
+fi
+if [[ "${IPV6_OUTBOUND:-on}" == on ]] && ip -6 route show default | grep -q . && ip -6 address show scope global | grep -q 'inet6 '; then
+  # Docker enables forwarding. Keep kernel-managed RA on the uplink working
+  # when forwarding changes, including after a reboot.
+  RA_UPLINK="$(ip -6 route show default proto ra | awk '/dev/ {for (i=1;i<=NF;i++) if ($i=="dev") {print $(i+1); exit}}')"
+  if [[ "$RA_UPLINK" =~ ^[A-Za-z0-9_.:-]+$ ]] && [[ "$(sysctl -n "net/ipv6/conf/$RA_UPLINK/accept_ra" 2>/dev/null || true)" == 1 ]]; then
+    install -d -m 0755 /etc/sysctl.d
+    printf '%s\n' '# Managed by Node Plane: IPv6 router advertisements' "-net/ipv6/conf/$RA_UPLINK/accept_ra = 2" > /etc/sysctl.d/70-node-plane-ipv6.conf
+    sysctl -w "net/ipv6/conf/$RA_UPLINK/accept_ra=2" >/dev/null
+  fi
+  NETWORK_NAME=node-plane-awg
+  NETWORK_PREFIX=fd42:6e70:6177:1::/64
+  if ! docker_cmd network inspect "$NETWORK_NAME" >/dev/null 2>&1; then
+    docker_cmd network create --driver bridge --ipv6 --subnet "$NETWORK_PREFIX" \
+      --label org.node-plane.network=awg "$NETWORK_NAME" >/dev/null
+  fi
+  NETWORK_INFO="$(docker_cmd network inspect "$NETWORK_NAME")"
+  NETWORK_INFO_ENV="$NETWORK_INFO" python3 - <<'PYNET'
+import json, os
+network = json.loads(os.environ['NETWORK_INFO_ENV'])[0]
+if (network.get('Driver') != 'bridge' or not network.get('EnableIPv6')
+        or network.get('Labels', {}).get('org.node-plane.network') != 'awg'
+        or not any(item.get('Subnet') == 'fd42:6e70:6177:1::/64' for item in network['IPAM']['Config'])):
+    raise SystemExit('Existing node-plane-awg network does not match Node Plane ownership or IPv6 configuration')
+PYNET
+  NETWORK_ARGS=(--network "$NETWORK_NAME")
+  IPV6_EFFECTIVE=on
+fi
 
 if [[ ! -c /dev/net/tun ]]; then
   echo "/dev/net/tun is not available on this host. AWG userspace runtime cannot start." >&2
@@ -103,6 +136,7 @@ trap restore_previous EXIT
 
 python3 /opt/node-plane-runtime/awg_profile.py migrate "$CFG" "${AWG_I1_PRESET:-quic}"
 python3 /opt/node-plane-runtime/awg_profile.py validate "$CFG"
+python3 /opt/node-plane-runtime/awg_ipv6.py migrate "$CFG"
 
 if docker_cmd ps -a --format '{{.Names}}' | grep -q "^${CONTAINER}$"; then
   OLD_CONTAINER="${CONTAINER}-previous-$$"
@@ -121,6 +155,9 @@ docker_cmd run -d \
   --cap-add NET_ADMIN \
   --device /dev/net/tun:/dev/net/tun \
   --sysctl net.ipv4.ip_forward=1 \
+  "${IPV6_SYSCTL_ARGS[@]}" \
+  "${NETWORK_ARGS[@]}" \
+  -e IPV6_OUTBOUND="$IPV6_EFFECTIVE" \
   -e AWG_IFACE="$IFACE" \
   -e AWG_CONFIG_FILE="/opt/amnezia/awg/$(basename "$CFG")" \
   -e AWG_NETWORK="${AWG_NETWORK:-10.8.1.0/24}" \
@@ -144,6 +181,9 @@ if [[ "$STATE" != "running" ]]; then
     --cap-add NET_ADMIN \
     --device /dev/net/tun:/dev/net/tun \
     --sysctl net.ipv4.ip_forward=1 \
+    "${IPV6_SYSCTL_ARGS[@]}" \
+    "${NETWORK_ARGS[@]}" \
+    -e IPV6_OUTBOUND="$IPV6_EFFECTIVE" \
     -e AWG_IFACE="$IFACE" \
     -e AWG_CONFIG_FILE="/opt/amnezia/awg/$(basename "$CFG")" \
     -e AWG_NETWORK="${AWG_NETWORK:-10.8.1.0/24}" \

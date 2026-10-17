@@ -20,7 +20,8 @@ class AwgDeployRollbackTests(unittest.TestCase):
             node_env.write_text(
                 f"AWG_DOCKER_DIR={shlex.quote(str(image_dir))}\n"
                 f"AWG_CONFIG={shlex.quote(str(config))}\n"
-                "AWG_CONTAINER_NAME=amnezia-awg\n",
+                "AWG_CONTAINER_NAME=amnezia-awg\n"
+                "IPV6_OUTBOUND=off\n",
                 encoding="utf-8",
             )
             profile = subprocess.check_output(
@@ -56,7 +57,8 @@ class AwgDeployRollbackTests(unittest.TestCase):
                 .replace("if [[ ! -c /dev/net/tun ]]; then", "if false; then")
                 # A host unit must not make this fake deployment invoke real runtime files.
                 .replace("if [[ -f /etc/systemd/system/node-plane-leased-awg.service ]]; then", "if false; then")
-                .replace("/opt/node-plane-runtime/awg_profile.py", str(ASSETS / "awg_profile.py")),
+                .replace("/opt/node-plane-runtime/awg_profile.py", str(ASSETS / "awg_profile.py"))
+                .replace("/opt/node-plane-runtime/awg_ipv6.py", str(ASSETS / "awg_ipv6.py")),
                 encoding="utf-8",
             )
             env = os.environ.copy()

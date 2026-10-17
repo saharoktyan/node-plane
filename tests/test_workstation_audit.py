@@ -104,6 +104,22 @@ class CredentialAttributionTests(TestCase):
 class APIAuditTests(TestCase):
     setUp = http_fixture.BackendHTTPTests.setUp
 
+    def test_provisioning_audit_describes_account_creation_and_keeps_endpoint(self):
+        from backend.workstation_audit import WorkstationAudit
+        with tempfile.TemporaryDirectory() as directory:
+            service = WorkstationService(self.db, __import__('pathlib').Path(directory) / 'sessions')
+            credential = service.handle({'version': 1, 'action': 'authenticate',
+                'session_id': str(uuid4()), 'attribution': ATTRIBUTION, 'account_id': self.admin.id})
+            headers = {'Authorization': 'Bearer ' + credential['token'], 'Idempotency-Key': str(uuid4())}
+            created = self.client.post('/api/v1/accounts', headers=headers, json={'identity': '102'})
+            self.assertEqual(created.status_code, 201, created.text)
+            page = self.client.get('/api/v1/system/workstation-audit', headers=headers).json()
+            events = [row for row in page['items'] if row['action'] == 'POST /api/v1/accounts']
+            self.assertEqual({row['phase'] for row in events}, {'admitted', 'completed'})
+            self.assertTrue(all(row['title'] == 'Create account' for row in events))
+            self.assertEqual(WorkstationAudit.describe(self.db.connection, 'POST /api/v1/profiles'),
+                             'Create profile')
+
     def test_profile_audit_title_prefers_username_then_telegram_id(self):
         from backend.workstation_audit import WorkstationAudit
         member = http_fixture.BackendHTTPTests.register(self,102,username='alice').json()

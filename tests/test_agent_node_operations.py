@@ -65,6 +65,9 @@ class AgentNodeOperationTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
+        policy = patch.object(MODULE, "RA_POLICY", Path(self.temp.name) / "ipv6-ra.conf")
+        policy.start()
+        self.addCleanup(policy.stop)
         self.path = Path(self.temp.name) / 'journal.sqlite3'
         self.intent = {'node_key': 'n1', 'command_id': 'job1', 'revision': 2,
             'protocols': ['awg'], 'settings': {'public_host': 'node.example', 'awg_port': 51820}}
@@ -144,11 +147,16 @@ class AgentNodeOperationTests(unittest.TestCase):
             (root / folder / 'config').write_text('private config')
         (root / 'helper.py').write_text('runtime helper')
         self.path.write_text('journal')
+        MODULE.RA_POLICY.write_text('administrator-owned settings\n')
         with patch.object(MODULE, 'ROOT', root), patch.object(MODULE, 'environment',
                 return_value=[str(root/'xray/config.json'), str(root/'amnezia-awg/data/wg0.conf'), 'xray', 'amnezia-awg']), \
              patch.object(MODULE.subprocess, 'run') as inspect, patch.object(MODULE, 'command', return_value=''):
             inspect.return_value.returncode = 1
             MODULE.remove_protocol_runtime(0)
+            self.assertEqual(MODULE.RA_POLICY.read_text(), 'administrator-owned settings\n')
+            MODULE.RA_POLICY.write_text('# Managed by Node Plane: IPv6 router advertisements\n')
+            MODULE.remove_protocol_runtime(0)
+            self.assertFalse(MODULE.RA_POLICY.exists())
         self.assertFalse((root / 'awg-clients').exists())
         self.assertFalse((root / 'xray').exists())
         self.assertFalse((root / 'amnezia-awg').exists())

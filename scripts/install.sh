@@ -586,7 +586,7 @@ configure_env() {
     exit 1
   fi
 
-  if [[ -z "$admin_ids" || "$admin_ids" == "123456789" ]]; then
+  if [[ -z "$admin_ids" || ( "$admin_ids" == "123456789" && $EXPLICIT_CONFIG_FILE -eq 0 ) ]]; then
     admin_ids="$(prompt_value "Enter ADMIN_IDS (comma-separated Telegram numeric user ids)" "")"
   elif [[ $NON_INTERACTIVE -eq 0 ]]; then
     admin_ids="$(prompt_value "Enter ADMIN_IDS (comma-separated Telegram numeric user ids)" "$admin_ids")"

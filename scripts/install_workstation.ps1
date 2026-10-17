@@ -9,6 +9,7 @@ $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $headers = @{ 'User-Agent' = 'node-plane-workstation-installer' }
 $repo = 'https://api.github.com/repos/saharoktyan/node-plane'
+$sourceGuide = 'https://github.com/saharoktyan/node-plane/blob/dev/docs/workstation.md#build-from-source'
 
 if ($Tag -and $Tag -notmatch '^v\d+\.\d+\.\d+(-alpha\.\d+)?$') {
     throw 'Invalid release tag.'
@@ -37,7 +38,7 @@ if (-not $Tag) {
             break
         }
     }
-    if (-not $release) { throw 'No Windows Workstation release found for this channel.' }
+    if (-not $release) { throw "No Windows Workstation release found for this channel. For source-only tags or the current dev branch: $sourceGuide" }
     $Tag = $release.tag_name
 }
 
@@ -83,7 +84,11 @@ $installer = Join-Path ([IO.Path]::GetTempPath()) "node-plane-installer-$([guid]
 try {
     Write-Host "[2/3] Downloading the release installer for $Tag..."
     $uri = "https://github.com/saharoktyan/node-plane/releases/download/$Tag/node-plane-cli-installer.ps1"
-    Invoke-WebRequest -UseBasicParsing -Uri $uri -Headers $headers -OutFile $installer
+    try {
+        Invoke-WebRequest -UseBasicParsing -Uri $uri -Headers $headers -OutFile $installer
+    } catch {
+        throw "Could not download the published Workstation installer for $Tag. Check the tag and connection. For source-only tags or the current dev branch: $sourceGuide"
+    }
     Write-Host '[3/3] Installing Workstation...'
     $previousConfig = $env:XDG_CONFIG_HOME
     $previousForce = $env:CARGO_DIST_FORCE_INSTALL_DIR

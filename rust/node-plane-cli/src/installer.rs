@@ -324,7 +324,22 @@ NODE_PLANE_CHANNEL
     stage("Registering this workstation key with the controller administrator");
     let session_id = uuid::Uuid::new_v4();
     *session.authorization.lock().unwrap() = None;
-    crate::backend::authenticate(session, session_id, &request.workflow.account, tx).await?;
+    crate::backend::authenticate(session, session_id, &request.workflow.account, tx)
+        .await
+        .with_context(|| {
+            let launcher = if crate::config::workstation_channel() == "dev" {
+                "node-plane-dev"
+            } else {
+                "node-plane"
+            };
+            format!(
+                "Node Plane is installed and verified. Workstation access registration is incomplete.\nOpen an interactive terminal and run:\n{launcher} --no-tui --state-dir {} diagnose {} --user {} --port {}\nRegistration requires administrator confirmation; the controller does not need to be installed again.",
+                shell_quote(&request.state_dir.to_string_lossy()),
+                shell_quote(&request.host),
+                shell_quote(&request.user),
+                request.port
+            )
+        })?;
     crate::backend::revoke(session, session_id).await?;
     Ok("Node Plane is installed. Open your Telegram bot and send /start.\nThe workstation public key is saved on the server; future connections do not need a password.".into())
 }

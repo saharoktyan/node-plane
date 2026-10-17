@@ -1410,7 +1410,7 @@ async def show_grant_nodes(chat_id: int, user_id: int, message_id: int,
         all_button, none_button = _bulk_buttons(profile_id, token, locale, compact=True)
         with_controls.append(Section('', inline_rows=((raw_region or tr(locale, 'nodes.region_unknown'),
             ' · ', all_button, ' · ', none_button),),
-            rows=tuple((node_button(node),) for node in items)))
+            rows=tuple((node_button(node),) for node in items), space_before=not with_controls))
     await state.update_data(grant_bulk_regions=scopes)
     all_button, none_button = _bulk_buttons(profile_id, 'all', locale, compact=True)
     sections = (Section('', inline_rows=((all_button, ' · ', none_button, ' · ',

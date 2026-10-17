@@ -4,6 +4,9 @@ source /etc/node-plane/node.env
 
 CFG="${AWG_CONFIG:-/opt/node-plane-runtime/amnezia-awg/data/wg0.conf}"
 SERVER_ADDR="${AWG_SERVER_ADDRESS:-10.8.1.0/24}"
+if [[ "$SERVER_ADDR" != *:* ]]; then
+  SERVER_ADDR+=", fd42:6e70:6177:2::1/64"
+fi
 PORT="${AWG_SERVER_PORT:-51820}"
 PRESET="${AWG_I1_PRESET:-quic}"
 PROFILE_TOOL="${AWG_PROFILE_TOOL:-/opt/node-plane-runtime/awg_profile.py}"

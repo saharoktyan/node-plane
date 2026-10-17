@@ -100,8 +100,9 @@ class NavigationPathTests(TestCase):
         name = 'Очень длинное название сервера 🇱🇻 ' * 3
         screen = Screen(name, breadcrumbs=(Breadcrumb('Admin', 'admin_menu'),), breadcrumb_more='nav_more:n')
         blocks = screen.rich().blocks
-        self.assertEqual(blocks[1].text, name)
-        self.assertEqual(blocks[1].size, 1)
+        self.assertEqual(blocks[1].type, 'divider')
+        self.assertEqual(blocks[2].text, name)
+        self.assertEqual(blocks[2].size, 1)
         self.assertGreater(text_width('日本'), len('日本'))
         self.assertIn(name, screen.plain())
 

@@ -259,6 +259,57 @@ class TemporaryLeaseTests(unittest.TestCase):
         self.assertIn('KillMode=control-group', unit)
         self.assertIn('WantedBy=timers.target', (directory / 'node-plane-lease-expiry.timer').read_text())
 
+    def test_first_scheduler_ignores_unloaded_reset_but_requires_start(self):
+        with tempfile.TemporaryDirectory() as directory:
+            calls = []
+            def execute(args, **kwargs):
+                calls.append((args, kwargs))
+                if args[1] == 'reset-failed':
+                    if kwargs.get('check'):
+                        raise subprocess.CalledProcessError(1, args)
+                    return subprocess.CompletedProcess(args, 1)
+                return subprocess.CompletedProcess(args, 0)
+            MODULE.ensure_lease_scheduler(directory, execute)
+            self.assertTrue(any(args[1] == 'start' for args, _ in calls))
+            self.assertFalse(next(kw['check'] for args, kw in calls if args[1] == 'reset-failed'))
+            def failing_start(args, **kwargs):
+                if args[1] == 'start':
+                    raise subprocess.CalledProcessError(1, args)
+                return execute(args, **kwargs)
+            with self.assertRaises(subprocess.CalledProcessError):
+                MODULE.ensure_lease_scheduler(directory, failing_start)
+
+    def test_unused_temporary_resolution_fences_a_delayed_original_request(self):
+        intent = self.intent()
+        empty = dict.fromkeys(('disk_present','live_present','identity_matches','config_available'), False)
+        with patch.object(OPERATIONS.intents, 'inspect_for_repair', return_value=empty):
+            result = OPERATIONS.execute('temporary_resolve', intent['command_id'], intent, recover=True, path=self.path)
+            self.assertTrue(result['unused_confirmed'])
+            self.assertEqual(OPERATIONS.execute('temporary_resolve', intent['command_id'], intent, recover=True, path=self.path), result)
+        with self.assertRaises(ValueError):
+            MODULE.apply(intent, self.path, self.mutate)
+        self.assertEqual(self.calls, [])
+        with self.assertRaises(ValueError):
+            OPERATIONS.execute('temporary_resolve', intent['command_id'], {**intent, 'lease_seconds':43200}, recover=True, path=self.path)
+
+    def test_unused_resolution_requires_absence_and_old_agent_instance(self):
+        intent = self.intent()
+        empty = dict.fromkeys(('disk_present','live_present','identity_matches','config_available'), False)
+        def crash(*args):
+            raise RuntimeError('interrupted')
+        with patch.dict('os.environ', {'NODE_PLANE_AGENT_INSTANCE_ID':'old'}):
+            with self.assertRaises(RuntimeError):
+                MODULE.apply(intent, self.path, crash)
+            with patch.object(OPERATIONS.intents, 'inspect_for_repair', return_value=empty), self.assertRaises(ValueError):
+                OPERATIONS.execute('temporary_resolve', intent['command_id'], intent, recover=True, path=self.path)
+        # apply records a lease before invoking the mutator: never cancel that lease.
+        with patch.dict('os.environ', {'NODE_PLANE_AGENT_INSTANCE_ID':'new'}), patch.object(OPERATIONS.intents, 'inspect_for_repair', return_value=empty), self.assertRaises(ValueError):
+            OPERATIONS.execute('temporary_resolve', intent['command_id'], intent, recover=True, path=self.path)
+        other = self.intent()
+        for observation in ({**empty, 'live_present':True}, {**empty, 'disk_present':True}, {}, {**empty, 'live_present':0}):
+            with patch.object(OPERATIONS.intents, 'inspect_for_repair', return_value=observation), self.assertRaises(ValueError):
+                OPERATIONS.execute('temporary_resolve', other['command_id'], other, recover=True, path=self.path)
+
     def test_monitor_reuses_process_and_stays_quiet_without_due_leases(self):
         from unittest.mock import Mock
         stop = Mock()

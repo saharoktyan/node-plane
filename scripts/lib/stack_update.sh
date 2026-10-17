@@ -34,28 +34,58 @@ stack_files() {
 }
 
 stack_snapshot() {
-  STACK_SNAPSHOT="$(mktemp -d)"
-  chmod 700 "$STACK_SNAPSHOT"
+  # Publish only a complete inventory. A failed copy must never turn files
+  # that have not been visited yet into "originally absent" rollback targets.
+  STACK_SNAPSHOT=""
+  local candidate item target
+  candidate="$(mktemp -d)" || return 1
+  chmod 700 "$candidate" || { rm -rf -- "$candidate"; return 1; }
   STACK_ENV_FILE="$1"
-  local item
   while IFS= read -r item; do
-    if sudo test -f "$item"; then
-      sudo cp -a --parents "$item" "$STACK_SNAPSHOT"
+    if sudo test -e "$item" || sudo test -L "$item"; then
+      target="${candidate}/files${item}"
+      if ! sudo test -d "$item" || sudo test -L "$item"; then
+        if sudo mkdir -p -- "$(dirname "$target")" && sudo cp -a -- "$item" "$target"; then
+          continue
+        fi
+      fi
+    else
+      target="${candidate}/absent${item}"
+      if sudo mkdir -p -- "$(dirname "$target")" && sudo touch -- "$target"; then
+        continue
+      fi
     fi
+    sudo rm -rf -- "$candidate"
+    return 1
   done < <(stack_files)
+  if ! sudo touch -- "${candidate}/.complete"; then
+    sudo rm -rf -- "$candidate"
+    return 1
+  fi
+  STACK_SNAPSHOT="$candidate"
 }
 
 stack_restore() {
   local item failed=0
+  [[ -n "${STACK_SNAPSHOT:-}" ]] && sudo test -f "${STACK_SNAPSHOT}/.complete" || return 1
+  # Validate the entire inventory before changing any live file. Missing
+  # snapshot data is an error, never permission to delete the original.
   while IFS= read -r item; do
-    if sudo test -f "${STACK_SNAPSHOT}${item}"; then
-      if sudo cp -a "${STACK_SNAPSHOT}${item}" "${item}.rollback.$$"; then
-        sudo mv -f "${item}.rollback.$$" "$item" || failed=1
+    if sudo test -e "${STACK_SNAPSHOT}/files${item}" || sudo test -L "${STACK_SNAPSHOT}/files${item}"; then
+      sudo test ! -e "${STACK_SNAPSHOT}/absent${item}" || return 1
+    else
+      sudo test -f "${STACK_SNAPSHOT}/absent${item}" || return 1
+    fi
+  done < <(stack_files)
+  while IFS= read -r item; do
+    if sudo test -e "${STACK_SNAPSHOT}/files${item}" || sudo test -L "${STACK_SNAPSHOT}/files${item}"; then
+      if sudo cp -a -- "${STACK_SNAPSHOT}/files${item}" "${item}.rollback.$$"; then
+        sudo mv -fT -- "${item}.rollback.$$" "$item" || failed=1
       else
         failed=1
       fi
     else
-      sudo rm -f "$item" || failed=1
+      sudo rm -f -- "$item" || failed=1
     fi
   done < <(stack_files)
   return "$failed"

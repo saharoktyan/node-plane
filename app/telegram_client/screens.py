@@ -123,6 +123,7 @@ class Section:
     inline_rows: tuple[tuple[str | InlineKeyboardButton, ...], ...] = ()
     bold_first_line: bool = False
     formatted_blocks: tuple = ()
+    space_before: bool = False
 
     def rich(self, depth=2):
         # iOS cannot activate controls inside Details, even in nested sections.
@@ -152,7 +153,8 @@ class Section:
                 return []
             return [InputRichBlockDetails(summary=self.title,
                 blocks=content, is_open=self.is_open)]
-        return [*([InputRichBlockSectionHeading(text=self.title, size=size)] if self.title else []),
+        return [*([InputRichBlockParagraph(text='\u00a0')] if self.space_before else []),
+                *([InputRichBlockSectionHeading(text=self.title, size=size)] if self.title else []),
                 *rich_buttons(self.heading_rows), *blocks,
                 *([InputRichBlockDivider()] if self.divider_after else [])]
 
@@ -183,6 +185,8 @@ class Screen:
         blocks = ([InputRichBlockParagraph(text=breadcrumb_text(self.breadcrumbs,
             self.title, self.breadcrumb_more))] if self.breadcrumbs else
             [InputRichBlockSectionHeading(text=self.title, size=1)])
+        if self.breadcrumbs:
+            blocks.append(InputRichBlockDivider())
         if self.breadcrumbs and self.breadcrumb_more and text_width(self.title) > 24 and text_width(
                 ' › '.join([p.label for p in self.breadcrumbs] + [self.title])) > 48:
             blocks.append(InputRichBlockSectionHeading(text=self.title, size=1))
@@ -233,7 +237,8 @@ class Screen:
         return InputRichMessage(blocks=blocks, skip_entity_detection=True)
 
     def plain(self) -> str:
-        lines = [' › '.join([p.label for p in self.breadcrumbs] + [self.title]), *self.lines]
+        lines = [' › '.join([p.label for p in self.breadcrumbs] + [self.title]),
+                 *(('──────────',) if self.breadcrumbs else ()), *self.lines]
         def append_sections(sections):
             for section in sections:
                 lines.extend((section.title, *section.lines))

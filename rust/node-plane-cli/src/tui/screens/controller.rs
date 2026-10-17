@@ -236,6 +236,7 @@ pub(in crate::tui) fn defaults_controls(state: &crate::controller::Browser) -> V
             .into_iter()
             .map(Control::ControllerDefaultsField),
         );
+        controls.push(Control::ControllerDefaultsToggle("ipv6_outbound"));
     }
     if state.defaults != state.defaults_baseline {
         controls.extend([
@@ -883,6 +884,14 @@ pub(in crate::tui) fn draw_controller(
         );
         for control in defaults_controls(state) {
             let label = match control {
+                Control::ControllerDefaultsToggle("ipv6_outbound") => format!(
+                    "IPv6 outbound: {}",
+                    if value["settings"]["ipv6_outbound"] == "off" {
+                        "Off"
+                    } else {
+                        "On"
+                    }
+                ),
                 Control::ControllerDefaultsToggle(choice) => {
                     let field = if matches!(choice, "tcp" | "xhttp") {
                         "xray_transports"

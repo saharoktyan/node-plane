@@ -175,7 +175,9 @@ class ProfileRichTests(IsolatedAsyncioTestCase):
             self.assertFalse(region.sections)
             self.assertEqual([row[0].callback_data for row in region.rows],
                 [GrantProtocolsCallback(profile_id='p1',node_key=n['key']).pack() for n in self.nodes])
-            inline = region.rich()[0]
+            self.assertTrue(region.space_before)
+            self.assertEqual(region.rich()[0].text, '\u00a0')
+            inline = region.rich()[1]
             self.assertEqual(inline.type, 'paragraph')
             self.assertEqual([inline.text[index].button.style for index in (2,4)], ['link','link'])
             self.assertEqual(rows[-1][0].callback_data, 'admin_profile:p1')
@@ -189,6 +191,8 @@ class ProfileRichTests(IsolatedAsyncioTestCase):
         self.data['grant_nodes_page'] = 1
         with patch.object(profiles,'render',new_callable=AsyncMock) as draw:
             await profiles.show_grant_nodes(123,123,77,'p1',self.bot,self.backend,self.state)
+            groups = draw.call_args.args[2].sections[1:]
+            self.assertEqual([group.space_before for group in groups], [True] + [False] * (len(groups) - 1))
             group = draw.call_args.args[2].sections[1]
             target = GrantProtocolsCallback.unpack(group.rows[0][0].callback_data)
             await profiles.grant_protocols_cb(self.query,target,self.bot,self.backend,self.state)

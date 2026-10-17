@@ -158,5 +158,10 @@
     "target_path": "/opt/node-plane-runtime/traffic-snapshot.py",
     "asset_path": "traffic-snapshot.py",
     "mode": "0644"
+  },
+  {
+    "target_path": "/opt/node-plane-runtime/awg_ipv6.py",
+    "asset_path": "awg_ipv6.py",
+    "mode": "0644"
   }
 ]

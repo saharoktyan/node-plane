@@ -55,6 +55,8 @@ TMP_*.md
 /CORE_PRO_PLAN.md
 CODE_REVIEW.md
 /TESTER_FEEDBACK_2026-10-09.md
+/TEST_CHECKLIST_LOCAL.md
+/TEST_CHECKLIST_VPS.md
 
 # Local staging for release dependency caches
 .release-rust-cache/

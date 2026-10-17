@@ -8,12 +8,28 @@ from aiogram.methods import EditMessageText, SendRichMessage
 from aiogram import Bot
 import json
 from telegram_client.routers.common import render, send_notice
-from telegram_client.screens import Screen, Section, Table
+from telegram_client.screens import Screen, Section, Table, Breadcrumb
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram_client.routers import user
 
 
 class RenderRecoveryTests(IsolatedAsyncioTestCase):
+    async def test_path_divider_is_separate_from_back_divider_and_absent_without_path(self):
+        back = InlineKeyboardButton(text='← Back', callback_data='back')
+        screen = Screen('Settings', ('Content',), breadcrumbs=(Breadcrumb('Menu','home'),),
+                        embedded_buttons=True, navigation=True)
+        self.assertEqual([block.type for block in screen.rich([[back]]).blocks],
+                         ['paragraph','divider','paragraph','divider','buttons'])
+        self.assertEqual(screen.plain().split('\n\n')[:3],
+                         ['Menu › Settings','──────────','Content'])
+        no_content = Screen('Settings', breadcrumbs=screen.breadcrumbs,
+                            embedded_buttons=True, navigation=True)
+        self.assertEqual([block.type for block in no_content.rich([[back]]).blocks],
+                         ['paragraph','divider','buttons'])
+        standalone = Screen('Request access', ('Content',), standalone=True)
+        self.assertFalse(any(block.type == 'divider' for block in standalone.rich().blocks))
+        self.assertNotIn('──────────',standalone.plain())
+
     async def test_start_sends_new_panel_even_if_hidden_old_message_accepts_edits(self):
         message = SimpleNamespace(chat=SimpleNamespace(id=1, type='private'), delete=AsyncMock(),
             from_user=SimpleNamespace(id=101, username='admin', first_name='Admin',

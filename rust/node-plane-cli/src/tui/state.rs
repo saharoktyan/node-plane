@@ -619,6 +619,7 @@ pub(super) struct App {
     pub(super) controller_section: Option<ControllerSection>,
     pub(super) requests_settings: bool,
     pub(super) confirmed_installation: Option<uuid::Uuid>,
+    pub(super) controller_version: Option<(uuid::Uuid, String)>,
     pub(super) probe_requested: bool,
     pub(super) ignore_nodes_updates: bool,
     pub(super) access: crate::access::Browser,

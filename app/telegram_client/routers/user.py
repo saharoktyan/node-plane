@@ -1183,10 +1183,7 @@ async def show_admin_menu(chat_id: int, user_id: int, message_id: int,
     requests = isinstance(overview, dict) and overview.get('requests_enabled', True) and overview['pending_requests']
     alerts = isinstance(overview, dict) and overview.get('alerts_enabled', False) and overview.get('unacknowledged_alerts', 0)
     if isinstance(overview, dict):
-        values = [(tr(locale, 'admin.nodes'), f"{overview['nodes_enabled']}/{overview['nodes_total']}"),
-                  (tr(locale, 'admin.profiles'), f"{overview['profiles_active']}/{overview['profiles_total']}")]
-        if overview.get('profiles_frozen'):
-            values.append((tr(locale, 'admin.rich.frozen'), str(overview['profiles_frozen'])))
+        values = [(tr(locale, 'admin.nodes'), str(overview['nodes_total']))]
         if requests:
             values.append((tr(locale, 'admin.requests'), str(requests)))
         if overview['problem_nodes']:

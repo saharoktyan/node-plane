@@ -112,6 +112,32 @@ class TemporaryScreensTests(IsolatedAsyncioTestCase):
         self.assertEqual(draw.call_args.args[3][0][0].style,'danger')
         backend.request.assert_not_awaited()
 
+    async def test_stale_show_explains_terminal_state_without_fetching_artifact(self):
+        for status in ('revoked', 'expired', 'cancelled'):
+            with self.subTest(status=status):
+                identity = str(uuid4())
+                item = dict(id=identity, node_key='lv1', protocol='awg',
+                            transport='vpn', status=status)
+                backend = SimpleNamespace(request=AsyncMock(return_value=item))
+                draw = await self.click('show:' + identity, backend)
+                screen = draw.call_args.args[2]
+                self.assertIn(screens.tr('en', 'temporary.artifact_unavailable',
+                    status=screens.tr('en', 'temporary.status.' + status)), screen.lines)
+                backend.request.assert_awaited_once()
+                self.assertFalse(screen.files)
+
+    async def test_revoke_between_card_and_artifact_refreshes_card_instead_of_generic_error(self):
+        identity = str(uuid4())
+        item = dict(id=identity, node_key='lv1', protocol='awg', transport='vpn', status='active')
+        backend = SimpleNamespace(request=AsyncMock(side_effect=[item,
+            BackendError('config_not_ready', 409), {**item, 'status':'revoked'}]))
+        draw = await self.click('show:' + identity, backend)
+        screen = draw.call_args.args[2]
+        self.assertIn(screens.tr('en', 'temporary.status.revoked'), screen.lines)
+        self.assertNotIn(screens.tr('en', 'temporary.error'), screen.lines)
+        self.assertEqual(backend.request.await_count, 3)
+        self.assertFalse(screen.files)
+
     async def test_unknown_issue_keeps_key_and_does_not_repeat_request(self):
         backend=SimpleNamespace(request=AsyncMock(side_effect=BackendError('backend_unavailable',503)))
         key=str(uuid4())

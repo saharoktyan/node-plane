@@ -68,6 +68,45 @@ class InstallationDiagnosticsTests(unittest.TestCase):
         with patch.object(diagnostics.subprocess, 'run', side_effect=subprocess.TimeoutExpired('secret', 5)):
             self.assertEqual(diagnostics.command(['systemctl', 'show']), (-1, ''))
 
+    def test_backend_readiness_wait_tolerates_startup_but_is_bounded(self):
+        for probes, expected in (([False, False, True], True), ([False] * 3, False)):
+            clock = [0.0]
+            def sleep(seconds):
+                clock[0] += seconds
+            with self.subTest(expected=expected), \
+                 patch.object(diagnostics.time, 'monotonic', side_effect=lambda: clock[0]), \
+                 patch.object(diagnostics.time, 'sleep', side_effect=sleep), \
+                 patch.object(diagnostics, 'backend_ready', side_effect=probes) as ready, \
+                 patch.object(diagnostics, 'unit_state', return_value={'ActiveState':'active'}), \
+                 patch.object(diagnostics, 'command') as mutation:
+                self.assertEqual(diagnostics.wait_backend_ready(timeout=3), expected)
+            self.assertEqual(ready.call_count, 3)
+            self.assertLessEqual(clock[0], 3)
+            mutation.assert_not_called()
+
+    def test_failed_backend_process_does_not_wait_or_restart(self):
+        with patch.object(diagnostics, 'backend_ready', return_value=False), \
+             patch.object(diagnostics, 'unit_state', return_value={'ActiveState':'failed'}), \
+             patch.object(diagnostics.time, 'sleep') as sleep, \
+             patch.object(diagnostics, 'command') as mutation:
+            self.assertFalse(diagnostics.wait_backend_ready())
+        sleep.assert_not_called()
+        mutation.assert_not_called()
+
+    def test_readiness_wait_is_after_confirmed_backend_start_only(self):
+        for action, status, expected in (
+            ('node-plane-backend.service', 'dispatched', True),
+            ('node-plane-backend.service', 'refused', False),
+            ('node-plane-driver.service', 'dispatched', False),
+        ):
+            result = SimpleNamespace(returncode=0, stdout='{"status":"' + status + '"}')
+            with self.subTest(action=action, status=status), \
+                 patch.object(diagnostics.subprocess, 'run', return_value=result), \
+                 patch.object(diagnostics, 'wait_backend_ready', return_value=True) as wait:
+                value = diagnostics.installed_database(action)
+            self.assertEqual(wait.called, expected)
+            self.assertEqual(value.get('ready'), True if expected else None)
+
     def test_observations_do_not_propose_repair_when_database_is_unavailable(self):
         with patch.object(diagnostics, 'installed_database', return_value={'status': 'unavailable'}), \
              patch.object(diagnostics, 'unit_state', return_value={'LoadState': 'loaded', 'ActiveState': 'failed'}), \

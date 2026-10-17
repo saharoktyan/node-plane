@@ -19,7 +19,7 @@ from .profiles import _cursor, _page
 _KEY = re.compile(r'[A-Za-z0-9][A-Za-z0-9_-]{0,63}\Z')
 _SETTINGS = frozenset({'public_host', 'xray_host', 'xray_sni', 'xray_tcp_port',
                        'xray_xhttp_port', 'xray_xhttp_path', 'awg_public_host', 'awg_port',
-                       'xray_fingerprint', 'awg_interface', 'awg_i1_preset', 'awg_port_mode', 'awg_parameters'})
+                       'xray_fingerprint', 'awg_interface', 'awg_i1_preset', 'awg_port_mode', 'awg_parameters', 'ipv6_outbound'})
 _PORTS = frozenset({'xray_tcp_port', 'xray_xhttp_port', 'awg_port'})
 _SSH_TARGET = re.compile(r'(?:[A-Za-z_][A-Za-z0-9._-]*@)?(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:]+\])\Z')
 
@@ -28,7 +28,7 @@ def protocol_defaults(settings, protocols):
     """Fill omitted public settings; secret protocol material is generated on-node."""
     result = dict(settings)
     host = result.get('public_host')
-    defaults = {}
+    defaults = {'ipv6_outbound': 'on'}
     if 'xray' in protocols:
         defaults.update(xray_sni='www.cloudflare.com', xray_fingerprint='chrome',
                         xray_tcp_port=443, xray_xhttp_port=8443,
@@ -118,6 +118,8 @@ def _validate(values, *, create):
             if field == 'awg_interface' and not re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]{0,14}', value):
                 raise AccessDenied('invalid_input', 422)
             if field == 'awg_i1_preset' and value not in {'quic', 'dns', 'chaos'}:
+                raise AccessDenied('invalid_input', 422)
+            if field == 'ipv6_outbound' and value not in {'on', 'off'}:
                 raise AccessDenied('invalid_input', 422)
             if field == 'awg_port_mode' and value not in {'auto', 'manual'}:
                 raise AccessDenied('invalid_input', 422)

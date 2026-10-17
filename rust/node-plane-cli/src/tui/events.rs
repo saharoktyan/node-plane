@@ -88,6 +88,16 @@ impl App {
                         {
                             return;
                         }
+                        if matches!(command, crate::controller::Command::Presence) {
+                            self.controller_version = profile.and_then(|profile| {
+                                let raw = value["current_version"].as_str()?;
+                                let version =
+                                    raw.split_whitespace().next()?.trim_start_matches('v');
+                                semver::Version::parse(version).ok()?;
+                                Some((profile, version.to_owned()))
+                            });
+                            return;
+                        }
                         if command.read_only()
                             && self
                                 .controller_request_context

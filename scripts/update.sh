@@ -520,6 +520,7 @@ update_simple() {
     STACK_PROGRESS_FILE="${shared_dir}/data/updates/${STACK_JOB}.json"
     stack_progress status running
     stack_progress backend running
+    set_step "snapshot controller stack"
     stack_snapshot "$runtime_env_file"
   fi
 

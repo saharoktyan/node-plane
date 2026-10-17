@@ -285,7 +285,8 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             with patch.object(user, 'render', new_callable=AsyncMock) as draw:
                 await user.show_admin_status(123, 123, 77, self.bot, backend, self.state)
             screen, rows = draw.call_args.args[2:4]
-            self.assertEqual(screen.sections[0].tables[0].rows[0][1], '2/3')
+            self.assertEqual(screen.sections[0].tables[0].rows[0][1], '3')
+            self.assertNotIn(user.tr(locale, 'admin.profiles'), [label for label, _ in screen.sections[0].tables[0].rows])
             callbacks = [b.callback_data for row in screen.fallback_rows(rows) for b in row]
             self.assertIn('admin_problem_nodes', callbacks)
             self.assertIn('admin_alerts', callbacks)
@@ -311,7 +312,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         callbacks = [b.callback_data for row in screen.fallback_rows(rows) for b in row]
         self.assertNotIn('requests', callbacks)
         self.assertNotIn('admin_alerts', callbacks)
-        self.assertEqual(len(screen.sections[0].tables[0].rows), 2)
+        self.assertEqual(len(screen.sections[0].tables[0].rows), 1)
         self.assertIn('2026-10-12 12:34:56 UTC', screen.plain())
         self.assertFalse(any(b.callback_data == 'admin_menu' for row in rows for b in row))
 
@@ -352,8 +353,8 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             self.assertEqual(screen.sections[0].lines, ())
             blocks = screen.rich(rows).blocks
             table = next(block for block in blocks if block.type == 'table')
-            self.assertEqual(table.cells[1][1].text, '2/3')
-            self.assertEqual(table.cells[3][1].text, '2')
+            self.assertEqual(table.cells[1][1].text, '3')
+            self.assertEqual(table.cells[2][1].text, '2')
             self.assertEqual(table.cells[0][0].text, user.tr(locale, 'admin.rich.item'))
             attention = next(section for section in screen.sections
                 if section.title == user.tr(locale, 'admin.rich.attention'))
@@ -373,7 +374,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         self.assertFalse(any(section.title.startswith(user.tr('en', 'admin.rich.access_management')) for section in screen.sections))
         self.assertFalse(any(b.callback_data == admin_requests.RequestsCallback().pack() for row in screen.fallback_rows(rows) for b in row))
         self.assertEqual([label for label, _ in screen.sections[0].tables[0].rows],
-                         [user.tr('en', 'admin.nodes'), user.tr('en', 'admin.profiles')])
+                         [user.tr('en', 'admin.nodes')])
         for requests, problems in ((2, []), (0, [{'key': 'lv1'}])):
             overview.update(pending_requests=requests, problem_nodes=problems)
             with patch.object(user, 'render', new_callable=AsyncMock) as draw:
@@ -614,6 +615,10 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             await admin_backups.backup_cb(self.query, self.bot, backend, self.state)
         callbacks = [b.callback_data for row in draw.call_args.args[3] for b in row]
         self.assertEqual(callbacks, ['backup_list:8'])
+        screen = draw.call_args.args[2]
+        metadata = dict(screen.sections[0].tables[0].rows)
+        self.assertEqual(metadata[user.tr('en', 'admin.profiles')], '2')
+        self.assertEqual(metadata[user.tr('en', 'backups.rich.version')], '—')
 
     def setUp(self):
         self.bot = SimpleNamespace(send_document=AsyncMock(), send_photo=AsyncMock())
@@ -1676,7 +1681,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         self.assertEqual(user.actions[callbacks[-1].split(':', 1)[1]].name, 'admin_menu')
         self.assertEqual(render.call_args.args[3][-1][0].text, 'Main menu')
         blocks = render.call_args.args[2].rich(render.call_args.args[3]).blocks
-        self.assertEqual(sum(block.type == 'divider' for block in blocks), 1)
+        self.assertEqual(sum(block.type == 'divider' for block in blocks), 2)
         self.assertEqual([block.type for block in blocks[-3:]], ['buttons', 'divider', 'buttons'])
         self.assertFalse(any(value.startswith('refresh_runtime:') for value in callbacks))
 

@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+## 1.0.0-alpha.15 - 2026-10-17
+
+- Capture IPv6 in full-tunnel AWG configurations and preserve peer keys during dual-stack migration; add a shared IPv6 outbound switch for AWG/Xray and installation defaults.
+
+- Document dev-channel installation on Linux/macOS and PowerShell, exact alpha tags, and source builds for the current dev branch or tags without published binaries; link source instructions from installer errors.
+- Publish channel-aware workstation bootstrap assets and use tag-pinned dev/stable commands in release installation instructions.
+- Wait for backend API readiness after confirmed service recovery, and distinguish a completed controller installation from incomplete workstation registration with a concrete continuation command.
+- Accept an explicitly supplied Telegram administrator ID even when it matches the example value, and handle unsuffixed Agent/Driver archives without moving binaries onto themselves.
+- Keep backup details concise with a Profiles label and short commit hash; show the server count without profile ratios in the admin Overview.
+- Explain expired or revoked temporary configurations without fetching their artifacts again; refresh the card when revocation races artifact loading.
+
+- Allow the first temporary configuration to start its expiry scheduler when new inactive systemd units cannot be reset; keep activation and readiness checks mandatory.
+- Include temporary issuance and revocation failures in Operations, with targeted journal checks and cancellation only after the agent confirms absence and fences the original command.
+
+- Preserve the installed controller when a stack snapshot fails, validate complete snapshots before restoring, and restore only explicitly recorded files and absences.
+- Label account creation correctly in the Workstation audit while retaining the API endpoint in its details.
+- Separate Telegram menu breadcrumbs from their content with a divider, and add a blank line before the first region in the profile access editor.
+- Show a version mismatch in the Workstation Status line when the connected controller and NPW report different versions, without comparing commit hashes or using another installation's version.
+
 ## 1.0.0-alpha.14 - 2026-10-15
 
 - Simplify Get config to a region-grouped server list followed by full protocol buttons. Skip the VLESS transport choice when only one transport is available and return AWG/device and transport screens to the selected server without reissuing configurations.

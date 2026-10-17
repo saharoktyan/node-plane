@@ -17,6 +17,43 @@ fn header_status_tracks_installation_probe_and_connection() {
 }
 
 #[test]
+fn header_status_reports_only_known_version_mismatch_for_selected_installation() {
+    let mut app = test_profile_app();
+    let profile = app.form.saved.as_ref().unwrap().id;
+    app.installed_profile = Some(profile);
+    app.controller.profile = Some(profile);
+    app.ssh_state = crate::nodes::ConnectionState::Connected;
+    for (version, mismatch) in [
+        (format!("v{} · abcdef", env!("CARGO_PKG_VERSION")), false),
+        ("0.3.9".into(), true),
+        ("99.0.0".into(), true),
+        ("unknown".into(), false),
+        (String::new(), false),
+    ] {
+        app.event(Event::Nodes(crate::nodes::Update::Controller(
+            Some(profile),
+            crate::controller::Command::Presence,
+            serde_json::json!({"current_version": version}),
+        )));
+        let status = app.header_status();
+        assert_eq!(status.contains("Version mismatch"), mismatch, "{status}");
+        if mismatch {
+            assert!(status.contains(&format!(
+                "NPW {} / controller {version}",
+                env!("CARGO_PKG_VERSION")
+            )));
+        } else {
+            assert_eq!(status, "Status: SSH connected");
+        }
+    }
+    app.controller_version = Some((uuid::Uuid::new_v4(), "0.3.9".into()));
+    assert_eq!(app.header_status(), "Status: SSH connected");
+    app.controller_version = Some((profile, "0.3.9".into()));
+    app.ssh_state = crate::nodes::ConnectionState::Closed;
+    assert_eq!(app.header_status(), "Status: SSH closed");
+}
+
+#[test]
 fn recovery_wait_never_displays_an_empty_preparation_dialog() {
     let mut app = test_profile_app();
     app.form.select_action(Action::Diagnose);

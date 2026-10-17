@@ -45,7 +45,9 @@ class WorkstationAudit:
         resource = parts[0]
         verbs = {'POST': 'Create', 'PATCH': 'Update', 'PUT': 'Update', 'DELETE': 'Delete'}
         target = None
-        if resource in {'profiles', 'accounts'} and len(parts) > 1:
+        if resource in {'profiles', 'accounts'} and len(parts) == 1:
+            title = verbs.get(method, 'Manage') + (' profile' if resource == 'profiles' else ' account')
+        elif resource in {'profiles', 'accounts'} and len(parts) > 1:
             account_id = parts[1]
             if resource == 'profiles':
                 row = conn.execute('SELECT owner_account_id FROM backend_profiles WHERE id=?', (parts[1],)).fetchone()

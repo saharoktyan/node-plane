@@ -175,7 +175,7 @@ class AgentNodeSettingsIntentTests(unittest.TestCase):
         intent = self.intent()
         xray = Path(self.temp.name) / 'xray.json'
         awg = Path(self.temp.name) / 'wg0.conf'
-        data = {'inbounds': [
+        data = {'outbounds': [{'protocol': 'freedom', 'tag': 'direct'}], 'inbounds': [
             {'tag': 'reality-tcp', 'port': 443, 'streamSettings': {
                 'realitySettings': {'serverNames': ['www.cloudflare.com'], 'dest': 'www.cloudflare.com:443'}}},
             {'tag': 'reality-xhttp', 'port': 8443, 'streamSettings': {
@@ -285,7 +285,7 @@ printf '[Interface]\\nListenPort = 51820\\n' > '{awg}'
         xray = root / 'xray.json'
         awg = root / 'wg0.conf'
         env.write_text(f'XRAY_CONFIG={xray}\nAWG_CONFIG={awg}\nXRAY_CONTAINER_NAME=xray\nAWG_CONTAINER_NAME=awg\n')
-        data = {'inbounds': [
+        data = {'outbounds': [{'protocol': 'freedom', 'tag': 'direct'}], 'inbounds': [
             {'tag': tag, 'port': port, 'settings': {'clients': [{'id': 'existing-user'}]},
              'streamSettings': {'realitySettings': {'privateKey': 'existing-server-key',
                  'shortIds': ['existing-short-id'], 'serverNames': ['old.example'], 'dest': 'old.example:443'},
@@ -308,7 +308,7 @@ printf '[Interface]\\nListenPort = 51820\\n' > '{awg}'
         intent['settings'].update(public_host='new.example', xray_host='vless.example',
             xray_sni='www.example.com', xray_fingerprint='firefox', xray_tcp_port=1443,
             xray_xhttp_port=2443, xray_xhttp_path='/new', awg_public_host='awg.example',
-            awg_interface='vpn0', awg_port=5300, awg_i1_preset='dns', awg_port_mode='manual')
+            awg_interface='vpn0', awg_port=5300, awg_i1_preset='dns', awg_port_mode='manual', ipv6_outbound='off')
         real_run = subprocess.run
         def run(args, **kwargs):
             if args[0] in {'ufw', 'docker'}:
@@ -327,6 +327,17 @@ printf '[Interface]\\nListenPort = 51820\\n' > '{awg}'
         self.assertIn(peers, new_awg.read_text())
         MODULE.verify_node_settings_environment(intent, env)
         MODULE.verify_node_settings_config(intent, xray, new_awg)
+        direct = next(item for item in updated['outbounds'] if item['tag'] == 'direct')
+        self.assertEqual(direct['settings']['domainStrategy'], 'ForceIPv4')
+        self.assertEqual(updated['routing']['rules'][0]['ip'], ['::/0'])
+        intent['settings']['ipv6_outbound'] = 'on'
+        with patch.object(MODULE.subprocess, 'run', side_effect=run):
+            MODULE.run_node_settings(intent, 0, env_path=env, root=root)
+        enabled = json.loads(xray.read_text())
+        direct = next(item for item in enabled['outbounds'] if item['tag'] == 'direct')
+        self.assertEqual(direct['settings']['domainStrategy'], 'AsIs')
+        self.assertFalse(any(item.get('outboundTag') == 'node-plane-ipv6-disabled'
+            for item in enabled['routing']['rules']))
         # Explicit profiles may use custom CPS patterns unrelated to the preset.
         manual = MODULE.awg_profile_module().new_profile('quic')
         manual['I1'] = '<r 80>'

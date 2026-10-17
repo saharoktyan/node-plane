@@ -182,6 +182,7 @@ class LeasedRuntimeTests(unittest.TestCase):
         source = Path(MODULE.__file__).read_text().replace('/etc/node-plane/profile-intents.sqlite3',str(self.path))
         script.write_text(source)
         shutil.copy(Path(MODULE.__file__).with_name('awg-peer-state.py'),self.root)
+        shutil.copy(Path(MODULE.__file__).with_name('awg_ipv6.py'),self.root)
         fake_bin = self.root/'bin'
         fake_bin.mkdir()
         record = {'Id':'a'*64,'Name':'/test','State':{'Running':False},

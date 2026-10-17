@@ -72,6 +72,7 @@ impl Editor {
             ("awg_port_mode", "AWG port mode", true),
             ("awg_i1_preset", "AWG I-parameters", true),
             ("awg_parameters", "AWG parameters", true),
+            ("ipv6_outbound", "IPv6 outbound", true),
         ] {
             let value = if setting {
                 &source["settings"][key]
@@ -102,6 +103,7 @@ impl Editor {
                     "xray_fingerprint" => "chrome",
                     "awg_i1_preset" => "quic",
                     "awg_port_mode" => "auto",
+                    "ipv6_outbound" => "on",
                     "awg_port" => "443",
                     "awg_interface" => "wg0",
                     "awg_parameters" => "auto",
@@ -165,7 +167,9 @@ impl Editor {
                     field.setting
                         && field.key != "public_host"
                         && field.key != "awg_parameters"
-                        && (if field.key.starts_with("xray") {
+                        && (if field.key == "ipv6_outbound" {
+                            true
+                        } else if field.key.starts_with("xray") {
                             self.protocols.iter().any(|p| p == "xray")
                         } else {
                             self.protocols.iter().any(|p| p == "awg")
@@ -179,6 +183,7 @@ impl Editor {
         match key {
             "awg_i1_preset" => Some(&["quic", "dns", "chaos"]),
             "awg_port_mode" => Some(&["auto", "manual"]),
+            "ipv6_outbound" => Some(&["on", "off"]),
             "xray_fingerprint" => Some(&[
                 "chrome",
                 "firefox",
@@ -474,7 +479,8 @@ mod tests {
             editor
                 .field_indices()
                 .iter()
-                .all(|i| editor.fields[*i].key.starts_with("awg"))
+                .all(|i| editor.fields[*i].key.starts_with("awg")
+                    || editor.fields[*i].key == "ipv6_outbound")
         );
     }
 

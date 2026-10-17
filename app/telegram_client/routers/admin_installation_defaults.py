@@ -37,6 +37,9 @@ async def show(query, bot, state, *, error=None):
     transport_rows = (tuple(button(tr(locale, 'transport.' + kind), 'transport:' + kind,
         selected=kind in draft['xray_transports']) for kind in ('tcp', 'xhttp')),)
     sections = [] if advanced else [Section(tr(locale, 'defaults.protocols'), rows=protocol_rows)]
+    sections.append(Section(tr(locale, 'nodes.settings.field.ipv6_outbound'), rows=(tuple(
+        button(mode.title(), 'ipv6:' + mode, selected=settings.get('ipv6_outbound', 'on') == mode)
+        for mode in ('on', 'off')),)))
     if not advanced and 'xray' in draft['protocols']:
         sections.append(Section(tr(locale, 'defaults.transports'), rows=transport_rows))
     if not advanced and 'awg' in draft['protocols']:
@@ -113,6 +116,11 @@ async def defaults_cb(query, bot, backend, state):
                 return
             draft['settings'].update(awg_i1_preset=preset, awg_port_mode='auto')
             draft['settings'].pop('awg_port', None)
+        elif action.startswith('ipv6:'):
+            mode = action.split(':')[1]
+            if mode not in {'on', 'off'}:
+                return
+            draft['settings']['ipv6_outbound'] = mode
         elif action == 'auto':
             draft['settings']['awg_port_mode'] = 'auto'
             draft['settings'].pop('awg_port', None)

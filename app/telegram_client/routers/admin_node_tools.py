@@ -136,7 +136,7 @@ async def section_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, sta
 async def show_section(chat_id, user_id, message_id, section, node_key, bot, backend, state):
     from .admin_nodes import editable_node, draft_controls
     fields = {'general': ('title', 'flag', 'region', 'notes'),
-              'connection': ('public_host',),
+              'connection': ('public_host', 'ipv6_outbound'),
               'xray': ('xray_host', 'xray_sni', 'xray_fingerprint', 'xray_tcp_port', 'xray_xhttp_port', 'xray_xhttp_path'),
               'awg': ('awg_public_host', 'awg_interface', 'awg_port', 'awg_port_mode', 'awg_i1_preset')}
     if section not in fields:
@@ -150,7 +150,7 @@ async def show_section(chat_id, user_id, message_id, section, node_key, bot, bac
     def field_button(field):
         return button(locale, 'nodes.settings.field.' + field,
                       EditNodeFieldCallback(node_key=node_key, field=field).pack())
-    defaults = {'xray_fingerprint': 'chrome', 'awg_interface': 'wg0', 'awg_i1_preset': 'quic'}
+    defaults = {'ipv6_outbound': 'on', 'xray_fingerprint': 'chrome', 'awg_interface': 'wg0', 'awg_i1_preset': 'quic'}
     if node['settings'].get('awg_port_mode') == 'auto':
         defaults['awg_port'] = tr(locale, 'nodes.awg.port_automatic')
     def group(title, selected, *, extra=(), collapsed=False):
@@ -162,7 +162,7 @@ async def show_section(chat_id, user_id, message_id, section, node_key, bot, bac
     if section == 'general':
         sections = (group('nodes.rich.name_region', ('title', 'region', 'flag')), group('nodes.settings.field.notes', ('notes',), collapsed=True))
     elif section == 'connection':
-        sections = (group('nodes.rich.connection', ('public_host',)),)
+        sections = (group('nodes.rich.connection', fields['connection']),)
     elif section == 'xray':
         sections = (group('', fields['xray']),)
     else:

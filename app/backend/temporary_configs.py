@@ -204,19 +204,39 @@ class TemporaryConfigService:
             rows = conn.execute("SELECT * FROM backend_temporary_configs WHERE status IN ('blocked','revoke_blocked') ORDER BY created_at,id LIMIT 100").fetchall()
         for row in rows:
             try:
-                intent = json.loads(row['intent_json'])
-                state = self.driver.node_action(row['id'],'temporary_status',intent,recover=True)
-                if state['status'] in {'expired','revoked'}:
-                    with self.db.transaction() as conn:
-                        conn.execute('UPDATE backend_account_guard SET revision=revision+1 WHERE id=1')
-                        changed = conn.execute("UPDATE backend_temporary_configs SET status=?,error_code=NULL WHERE id=? AND status IN ('blocked','revoke_blocked') RETURNING id",
-                                               (state['status'],row['id'])).fetchone()
-                        if changed:
-                            self.event(conn,row,'reconcile',state['status'])
-                elif row['status']=='blocked':
-                    self._finish_issue(row,self.driver.node_action(row['id'],'temporary_ensure',intent,recover=True))
+                self.reconcile_one(row)
             except Exception:
                 continue
+
+    def reconcile_one(self, row):
+        """Read evidence for exactly one saved command; never reissue it."""
+        intent = json.loads(row['intent_json'])
+        state = self.driver.node_action(row['id'], 'temporary_status', intent, recover=True)
+        if state['status'] in {'expired', 'revoked'}:
+            with self.db.transaction() as conn:
+                conn.execute('UPDATE backend_account_guard SET revision=revision+1 WHERE id=1')
+                changed = conn.execute("UPDATE backend_temporary_configs SET status=?,error_code=NULL WHERE id=? AND status IN ('blocked','revoke_blocked') RETURNING id",
+                                       (state['status'], row['id'])).fetchone()
+                if changed:
+                    self.event(conn, row, 'reconcile', state['status'])
+        elif row['status'] == 'blocked':
+            self._finish_issue(row, self.driver.node_action(row['id'], 'temporary_ensure', intent, recover=True))
+
+    def resolve_unused(self, row):
+        """Cancel only after the agent fences the old command and proves absence."""
+        result = self.driver.node_action(row['id'], 'temporary_resolve',
+                                         json.loads(row['intent_json']), recover=True)
+        expected = {'disk_present', 'live_present', 'identity_matches', 'config_available'}
+        observation = result.get('observation', {})
+        if (result.get('unused_confirmed') is not True or set(observation) != expected
+                or any(value is not False for value in observation.values())):
+            raise ValueError('temporary absence is unconfirmed')
+        with self.db.transaction() as conn:
+            changed = conn.execute("UPDATE backend_temporary_configs SET status='cancelled',error_code=NULL WHERE id=? AND status='blocked' RETURNING id",
+                                   (row['id'],)).fetchone()
+            if changed:
+                self.event(conn, row, 'resolve', 'cancelled')
+        return observation
 
     def run_one(self):
         with self.db.transaction() as conn:

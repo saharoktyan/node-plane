@@ -1038,6 +1038,10 @@ async fn execute_inner(
         };
         let result = async {
             let updates = backend::request(session, &credential, Method::GET, "/api/v1/system/updates", None, None).await?;
+            if let Command::Controller(profile, _) = &command {
+                let _ = tx.send(Event::Nodes(Update::Controller(*profile,
+                    crate::controller::Command::Presence, json!({"current_version":updates["current_version"]}))));
+            }
             let installed_branch = controller_branch(&updates)?;
             if let Err(error) = validate_controller_channel(&command, installed_branch, crate::config::default_branch()) {
                 if let Command::Controller(profile, _) = &command {
@@ -1439,7 +1443,7 @@ async fn execute_inner(
                     ensure!(item["node_key"] == key, "Recovery belongs to another server");
                     ensure!(["recheck", "resolve"].contains(&action.as_str()), "Unsupported recovery action");
                     let kind = item["kind"].as_str().context("Missing recovery kind")?;
-                    ensure!(["node", "settings", "agent", "bootstrap", "profile"].contains(&kind), "Unsupported recovery kind");
+                    ensure!(["node", "settings", "agent", "bootstrap", "profile", "temporary"].contains(&kind), "Unsupported recovery kind");
                     let identity = Uuid::parse_str(item["id"].as_str().context("Missing recovery identity")?)?;
                     // The backend validates currently allowed actions under the worker lock.
                     ensure!(item["actions"].as_array().is_some_and(|actions| actions.iter().any(|v| v == &action)), "Recovery action unavailable");

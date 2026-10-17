@@ -270,7 +270,7 @@ class UpdatePreferencesInput(BaseModel):
 
 class RecoveryItemOutput(BaseModel):
     id: str
-    kind: Literal['update', 'node', 'settings', 'bootstrap', 'agent', 'profile', 'removal', 'backup']
+    kind: Literal['update', 'node', 'settings', 'bootstrap', 'agent', 'profile', 'removal', 'backup', 'temporary']
     status: str
     node_key: str
     error_code: str
@@ -376,6 +376,7 @@ class NodeSettingsInput(BaseModel):
     awg_public_host: StrictStr | None = None
     awg_port: StrictInt | None = None
     awg_port_mode: Literal['auto', 'manual'] | None = None
+    ipv6_outbound: Literal['on', 'off'] | None = None
     xray_fingerprint: Literal['chrome', 'firefox', 'safari', 'ios', 'android', 'edge', 'random', 'randomized'] | None = None
     awg_interface: StrictStr | None = None
     awg_i1_preset: Literal['quic', 'dns', 'chaos'] | None = None
@@ -912,7 +913,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
             if request.method not in {'GET','HEAD','OPTIONS'}:
                 import re
                 update_recovery = bool(re.fullmatch(r'/api/v1/system/updates/jobs/[0-9a-fA-F-]{36}/(cancel|recheck)', request.url.path))
-                operation_recovery = bool(re.fullmatch(r'/api/v1/system/recovery/(node|settings|profile|agent|bootstrap|removal|backup)/[A-Za-z0-9_-]{1,100}/(cancel|resume|resolve|recheck)', request.url.path))
+                operation_recovery = bool(re.fullmatch(r'/api/v1/system/recovery/(node|settings|profile|agent|bootstrap|removal|backup|temporary)/[A-Za-z0-9_-]{1,100}/(cancel|resume|resolve|recheck)', request.url.path))
                 allowed = operation_recovery or request.url.path.startswith('/api/v1/system/cleanup/') or request.url.path.endswith('/ack') or update_recovery
                 if not allowed:
                     from .maintenance_gate import active

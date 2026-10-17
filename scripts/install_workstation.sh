@@ -8,8 +8,10 @@ Usage: bash install_workstation.sh [--channel dev|stable] [--tag vX.Y.Z[-alpha.N
 
 Installs Workstation on Linux x86_64 or macOS (Intel/Apple Silicon) and configures PATH.
 The default stable channel selects stable releases. Use --channel dev for alpha builds.
+An explicit --tag skips discovery and requires that tag's published binaries.
 Stable and dev installations are separate. Run node-plane or node-plane-dev.
 Saved installation profiles and SSH keys are retained.
+Source-only tags/current dev: https://github.com/saharoktyan/node-plane/blob/dev/docs/workstation.md#build-from-source
 EOF
 }
 
@@ -57,7 +59,11 @@ if [[ -z "$tag" ]]; then
       break
     fi
   done <<< "$tags"
-  [[ -n "$tag" ]] || { echo 'No published release found for this channel. Try --channel dev or --tag.' >&2; exit 1; }
+  [[ -n "$tag" ]] || {
+    echo 'No published Workstation release found for this channel. Use --channel dev for published alphas, or --tag for an exact published version.' >&2
+    echo 'For source-only tags or the current dev branch: https://github.com/saharoktyan/node-plane/blob/dev/docs/workstation.md#build-from-source' >&2
+    exit 1
+  }
 else
   echo "[1/4] Using release $tag"
 fi
@@ -87,5 +93,6 @@ if download "$base/node-plane-cli-installer.sh" "$tmp_dir/installer.sh"; then
   exit 0
 fi
 
-echo 'This release has no cargo-dist Workstation installer. Choose a newer release.' >&2
+echo "No published Workstation installer is available for $tag." >&2
+echo 'For source-only tags or the current dev branch: https://github.com/saharoktyan/node-plane/blob/dev/docs/workstation.md#build-from-source' >&2
 exit 1

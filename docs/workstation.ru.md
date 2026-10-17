@@ -106,6 +106,53 @@ Node Plane (Dev) устанавливает и управляет dev-контр
 
 Копирование использует стандартный каталог целевого NPW и не перезаписывает конфликтующий профиль. Переход требует опубликованного релиза целевого канала. Перенос профиля не переустанавливает контроллер и не переносит его БД.
 
+## Установка dev-сборки
+
+Параметр `--channel dev` у bootstrap-скрипта из репозитория выбирает последнюю опубликованную alpha, включая GitHub prereleases. Для конкретного опубликованного тега без запроса списка релизов замените тег в примере:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/saharoktyan/node-plane/dev/scripts/install_workstation.sh | bash -s -- --channel dev --tag vX.Y.Z-alpha.N
+node-plane-dev
+```
+
+```powershell
+& ([scriptblock]::Create((irm 'https://raw.githubusercontent.com/saharoktyan/node-plane/dev/scripts/install_workstation.ps1'))) -Channel dev -Tag 'vX.Y.Z-alpha.N'
+node-plane-dev
+```
+
+Без параметра тега выбирается последняя опубликованная alpha. Git-тег сам по себе содержит исходники; для установки готовой сборки нужны installer и архив платформы из релиза. Bootstrap не компилирует отсутствующие бинарники автоматически.
+
+### Сборка из исходников
+
+Чтобы установить текущую ветку `dev` без GitHub Releases, подготовьте Rust 1.90 или новее, Git и инструменты сборки C/C++ для своей ОС, затем получите исходники:
+
+```sh
+git clone --branch dev --single-branch https://github.com/saharoktyan/node-plane.git node-plane-dev-src
+cd node-plane-dev-src
+```
+
+Для alpha-тега без опубликованных бинарников укажите этот тег вместо `dev` в `git clone --branch`.
+
+На Linux/macOS установите сборку в отдельный каталог и создайте команду запуска:
+
+```sh
+cargo install --locked --path rust/node-plane-cli --root "$HOME/.local/share/node-plane-workstation/source-dev"
+mkdir -p "$HOME/.local/bin"
+ln -sfn "$HOME/.local/share/node-plane-workstation/source-dev/bin/node-plane" "$HOME/.local/bin/node-plane-dev"
+node-plane-dev
+```
+
+Каталог `$HOME/.local/bin` должен быть в PATH. Исходная сборка хранится отдельно от готовой установки; обе dev-сборки используют существующий каталог данных `node-plane-dev`.
+
+На Windows соберите и запустите NPW из каталога репозитория:
+
+```powershell
+cargo build --release --locked --manifest-path rust/node-plane-cli/Cargo.toml
+.\rust\node-plane-cli\target\release\node-plane.exe
+```
+
+Для обновления исходной сборки получите нужные изменения и повторите сборку/установку (`cargo install --force`, если версия пакета осталась прежней). Самообновление Workstation использует опубликованные бинарники и cargo-dist receipts; оно не обновляет исходники.
+
 ## Обновление Workstation
 
 Откройте **Settings → Workstation updates** для обновления приложения на компьютере. **Node Plane Updates** обновляет серверную установку.

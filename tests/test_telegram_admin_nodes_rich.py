@@ -282,8 +282,22 @@ class AdminNodeRichTests(IsolatedAsyncioTestCase):
         labels = [b.text for row in draw.call_args.args[2].fallback_rows(draw.call_args.args[3]) for b in row]
         self.assertIn('🇷🇺 Moscow #1', labels)
 
+    async def test_ipv6_toggle_is_a_draft_change_shared_by_both_protocols(self):
+        self.node['settings']['ipv6_outbound'] = 'on'
+        with patch.object(nodes, 'render', new_callable=AsyncMock) as draw:
+            await nodes.edit_node_field_cb(self.query,
+                nodes.EditNodeFieldCallback(node_key='msk1', field='ipv6_outbound'),
+                self.bot, self.backend, self.state)
+            self.assertIn('node_ipv6:off:msk1', self.callbacks(draw))
+        self.query.data = 'node_ipv6:off:msk1'
+        with patch.object(tools, 'render', new_callable=AsyncMock):
+            await nodes.node_ipv6_cb(self.query, self.bot, self.backend, self.state)
+        data = await self.state.get_data()
+        self.assertEqual(data['node_settings_draft']['values']['settings']['ipv6_outbound'], 'off')
+        self.assertEqual(self.node['settings']['ipv6_outbound'], 'on')
+
     async def test_protocol_settings_have_tables_and_all_existing_edit_actions(self):
-        expected = {'general': {'title', 'flag', 'region', 'notes'}, 'connection': {'public_host'},
+        expected = {'general': {'title', 'flag', 'region', 'notes'}, 'connection': {'public_host', 'ipv6_outbound'},
             'awg': {'awg_public_host', 'awg_port', 'awg_port_mode', 'awg_interface', 'awg_i1_preset', 'awg_parameters'},
             'xray': {'xray_host', 'xray_sni', 'xray_tcp_port', 'xray_xhttp_port', 'xray_fingerprint', 'xray_xhttp_path'}}
         for locale in ('ru', 'en'):

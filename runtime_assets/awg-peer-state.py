@@ -9,6 +9,8 @@ import subprocess
 import sys
 import tempfile
 
+from awg_ipv6 import migrate
+
 
 def atomic_write(path, text):
     path = Path(path)
@@ -85,17 +87,18 @@ def mutate(action, config, clients, name, container, interface):
         if record['server'] != fingerprint(text):
             archive.unlink()
             return 2
+        record['peer'] = migrate(record['peer'])
         data = fields(record['peer'])
         # Protect against an older runtime having reused this revoked peer IP.
         addresses = [fields(block).get('AllowedIPs', '') for block in current.split('[Peer]')[1:]]
-        if data['AllowedIPs'] in addresses and not peer:
+        reserved_addresses = {part.strip() for value in addresses for part in value.split(',')}
+        if reserved_addresses.intersection(part.strip() for part in data['AllowedIPs'].split(',')) and not peer:
             archive.unlink()
             return 2
-        if not peer:
-            atomic_write(config, current.rstrip() + '\n\n' + record['peer'].rstrip() + '\n')
+        atomic_write(config, current.rstrip() + '\n\n' + record['peer'].rstrip() + '\n')
         docker('exec', '-i', container, 'sh', '-c',
                'umask 077; p=$(mktemp); trap \'rm -f "$p"\' EXIT; cat > "$p"; wg set "$1" peer "$2" preshared-key "$p" allowed-ips "$3"',
-               'awg-peer', interface, data['PublicKey'], data['AllowedIPs'], input=data['PresharedKey'] + '\n', text=True)
+               'awg-peer', interface, data['PublicKey'], data['AllowedIPs'].replace(' ', ''), input=data['PresharedKey'] + '\n', text=True)
         # Keep the archive until the next revoke: retries after a failed live update are safe.
         return 0
     raise ValueError('Unknown action')

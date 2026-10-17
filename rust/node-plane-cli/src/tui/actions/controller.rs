@@ -553,6 +553,17 @@ impl App {
                 self.controller_command(crate::controller::Command::Defaults);
                 None
             }
+            Control::ControllerDefaultsToggle("ipv6_outbound") => {
+                if let Some(value) = &mut self.controller.defaults {
+                    value["settings"]["ipv6_outbound"] =
+                        serde_json::json!(if value["settings"]["ipv6_outbound"] == "off" {
+                            "on"
+                        } else {
+                            "off"
+                        });
+                }
+                None
+            }
             Control::ControllerDefaultsToggle(choice) => {
                 if let Some(value) = &mut self.controller.defaults {
                     let field = if matches!(choice, "tcp" | "xhttp") {

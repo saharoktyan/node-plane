@@ -4,6 +4,8 @@ Rust terminal/command-line administrator client with embedded SSH. User instruct
 
 ## Build and run
 
+For a published alpha, use the [dev installation commands](../../README.md#development-builds). To install the current `dev` branch without a GitHub Release, follow [Build from source](../../docs/workstation.md#build-from-source).
+
 ```sh
 cargo build --manifest-path rust/node-plane-cli/Cargo.toml --bin node-plane
 rust/node-plane-cli/target/debug/node-plane

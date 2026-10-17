@@ -30,6 +30,8 @@ class CargoDistReleaseTests(unittest.TestCase):
             (root / 'runtime_assets/entry.sh').write_text('#!/bin/sh\nexit 0\n')
             shutil.copyfile(ROOT / 'scripts/controller_release.py', root / 'scripts/controller_release.py')
             shutil.copyfile(ROOT / 'scripts/build_release_stack.sh', root / 'scripts/build_release_stack.sh')
+            for name in ('install_workstation.sh', 'install_workstation.ps1'):
+                shutil.copyfile(ROOT / 'scripts' / name, root / 'scripts' / name)
             (root / '.env').write_text('must not be packaged\n')
             subprocess.run(['git', 'init', '-q', str(root)], check=True, capture_output=True)
             subprocess.run(['git', '-C', str(root), 'add', '.'], check=True, capture_output=True)
@@ -63,6 +65,10 @@ class CargoDistReleaseTests(unittest.TestCase):
                 digest, name = line.split()
                 self.assertEqual(hashlib.sha256((out / name).read_bytes()).hexdigest(), digest)
             self.assertFalse((out / 'node-plane-cli-linux-amd64.tar.gz').exists())
+            self.assertEqual((out / 'node-plane-workstation-installer.sh').read_bytes(),
+                             (ROOT / 'scripts/install_workstation.sh').read_bytes())
+            self.assertEqual((out / 'node-plane-workstation-installer.ps1').read_bytes(),
+                             (ROOT / 'scripts/install_workstation.ps1').read_bytes())
             _, payload = controller.verify(out / 'node-plane-controller.tar.gz', 'v0.4.3-alpha.59', 'a' * 40)
             self.assertNotIn('.env', payload)
             self.assertNotIn('scripts/build_release_stack.sh', payload)

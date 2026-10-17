@@ -14,6 +14,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import time
 import urllib.request
 
 BASE = Path('/opt/node-plane')
@@ -94,9 +95,33 @@ def installed_database(action=None):
             args += ['--repair', action]
         result = subprocess.run(args, input=source, capture_output=True, text=True,
                                 timeout=45, check=False, env=env)
-        return json.loads(result.stdout) if result.returncode == 0 else {'status': 'unavailable'}
+        value = json.loads(result.stdout) if result.returncode == 0 else {'status': 'unavailable'}
+        if action == 'node-plane-backend.service' and value.get('status') == 'dispatched':
+            # The child's database transaction/guard has ended. Wait for the
+            # started process; never repeat start or hold the guard while waiting.
+            value['ready'] = wait_backend_ready()
+        return value
     except (OSError, ValueError, subprocess.TimeoutExpired):
         return {'status': 'unavailable'}
+
+
+def backend_ready(timeout=5):
+    try:
+        with urllib.request.urlopen('http://127.0.0.1:8080/health/ready', timeout=timeout) as response:
+            return response.status == 200
+    except Exception:
+        return False
+
+
+def wait_backend_ready(timeout=30):
+    deadline = time.monotonic() + timeout
+    while (remaining := deadline - time.monotonic()) > 0:
+        if backend_ready(timeout=min(2, remaining)):
+            return True
+        if unit_state('node-plane-backend.service').get('ActiveState') in {'failed', 'inactive'}:
+            return False
+        time.sleep(min(1, max(0, deadline - time.monotonic())))
+    return False
 
 
 def controller_cpu(sample):
@@ -178,11 +203,7 @@ def observe():
             'Another process is polling this bot token. Stop the bot on the other installation, then restart node-plane-telegram.service.')
     add('worker', 'ok' if worker.get('ActiveState') == 'active' else 'warning',
         'Worker: ' + worker.get('ActiveState', 'unknown'))
-    try:
-        with urllib.request.urlopen('http://127.0.0.1:8080/health/ready', timeout=5) as response:
-            ready = response.status == 200
-    except Exception:
-        ready = False
+    ready = backend_ready()
     add('api', 'ok' if ready else 'error', 'Backend readiness: ' + ('ready' if ready else 'unavailable'))
     for table, count in db.get('blocked', {}).items():
         add('blocked:' + table, 'warning', f'{table}: {count} blocked operations; preserve identity and use operation-specific recovery')

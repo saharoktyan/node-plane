@@ -62,13 +62,17 @@ shutil.copyfile(root / name, destination)
         result = self.run_installer('--channel', 'dev', '--tag', 'v0.4.3-alpha.50')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn('api.github.com', self.requests.read_text())
+        self.assertIn('/v0.4.3-alpha.50/node-plane-cli-installer.sh', self.requests.read_text())
+        launcher = Path(self.env['HOME']) / '.local/bin/node-plane-dev'
+        self.assertTrue(launcher.is_file())
 
     def test_missing_generated_installer_never_falls_back_to_legacy(self):
         (self.root / 'node-plane-cli-installer.sh').unlink()
         (self.root / ASSET).write_bytes(b'legacy archive')
         result = self.run_installer('--channel', 'dev', '--tag', 'v0.4.3-alpha.50')
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn('no cargo-dist', result.stderr)
+        self.assertIn('No published Workstation installer', result.stderr)
+        self.assertIn('#build-from-source', result.stderr)
         self.assertFalse(self.marker.exists())
         self.assertNotIn(ASSET, self.requests.read_text())
 

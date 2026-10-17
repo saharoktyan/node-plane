@@ -8,6 +8,7 @@ import tempfile
 from pathlib import Path
 
 from conf2vpn import parse_conf
+from awg_ipv6 import dual_addresses, capture_routes
 from awg_profile import ALL_FIELDS, interface_values, validate
 
 
@@ -33,6 +34,8 @@ def refresh(old_conf: str, server_conf: str, endpoint: str, port: str, server_pu
         else:
             iface.pop(key, None)
     validate(iface)
+    iface['Address'] = dual_addresses(iface['Address'])
+    peer['AllowedIPs'] = capture_routes(peer.get('AllowedIPs', '0.0.0.0/0'))
     peer['PublicKey'] = server_pub
     peer['Endpoint'] = f'{endpoint}:{port}'
     lines = ['[Interface]'] + [f'{key} = {value}' for key, value in iface.items()]

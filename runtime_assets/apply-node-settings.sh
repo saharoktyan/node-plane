@@ -15,7 +15,7 @@ if [[ "$APPLY_XRAY" == true ]]; then
   [[ -f "$XRAY_CONFIG_PATH" ]] || { echo "Xray config missing: $XRAY_CONFIG_PATH" >&2; exit 1; }
   XRAY_BACKUP="$(mktemp "$(dirname "$XRAY_CONFIG_PATH")/.xray-config-backup-XXXXXX")"
   cp -p "$XRAY_CONFIG_PATH" "$XRAY_BACKUP"
-  XRAY_CONFIG_ENV="$XRAY_CONFIG_PATH" XRAY_SNI_ENV="$XRAY_SNI_VALUE" XRAY_TCP_ENV="$XRAY_TCP_VALUE" XRAY_XHTTP_ENV="$XRAY_XHTTP_VALUE" XRAY_PATH_ENV="$XRAY_PATH_VALUE" python3 - <<'PY'
+  XRAY_CONFIG_ENV="$XRAY_CONFIG_PATH" XRAY_SNI_ENV="$XRAY_SNI_VALUE" XRAY_TCP_ENV="$XRAY_TCP_VALUE" XRAY_XHTTP_ENV="$XRAY_XHTTP_VALUE" XRAY_PATH_ENV="$XRAY_PATH_VALUE" IPV6_OUTBOUND_ENV="${IPV6_OUTBOUND:-on}" python3 - <<'PY'
 import json
 import os
 import tempfile
@@ -33,6 +33,17 @@ for tag, port in [('reality-tcp', 'XRAY_TCP_ENV'), ('reality-xhttp', 'XRAY_XHTTP
     reality['serverNames'] = [os.environ['XRAY_SNI_ENV']]
     reality['dest'] = os.environ['XRAY_SNI_ENV'] + ':443'
 inbounds['reality-xhttp']['streamSettings'].setdefault('xhttpSettings', {})['path'] = os.environ['XRAY_PATH_ENV']
+enabled = os.environ['IPV6_OUTBOUND_ENV'] == 'on'
+outbounds = data.setdefault('outbounds', [])
+direct = next(item for item in outbounds if item.get('tag') == 'direct')
+direct.setdefault('settings', {})['domainStrategy'] = 'AsIs' if enabled else 'ForceIPv4'
+block_tag = 'node-plane-ipv6-disabled'
+outbounds[:] = [item for item in outbounds if item.get('tag') != block_tag]
+rules = data.setdefault('routing', {}).setdefault('rules', [])
+rules[:] = [item for item in rules if item.get('outboundTag') != block_tag]
+if not enabled:
+    outbounds.append({'protocol': 'blackhole', 'tag': block_tag})
+    rules.insert(0, {'type': 'field', 'ip': ['::/0'], 'outboundTag': block_tag})
 with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=path.parent, delete=False) as tmp:
     json.dump(data, tmp, ensure_ascii=False, indent=2)
     tmp.write('\n')

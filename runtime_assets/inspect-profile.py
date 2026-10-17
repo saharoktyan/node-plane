@@ -47,7 +47,7 @@ def xray(path, container, tags, name, expected_uuid):
                 'config_available': bool(matches and all(disk) and all(live))}
 
 
-def awg(path, clients, container, interface, name):
+def awg(path, clients, container, interface, name, allow_unused=False):
     peers = load('awg-peer-state')
     with open(str(path) + '.lock', 'a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -63,8 +63,8 @@ def awg(path, clients, container, interface, name):
                 if record['server'] != peers.fingerprint(text):
                     raise ValueError('archived identity belongs to another server')
                 data = peers.fields(record['peer'])
-        if not data.get('PublicKey'):
-            # Absence cannot be verified by name: live peers have public keys only.
+        if not data.get('PublicKey') and not allow_unused:
+            # Ordinary inspection needs a recorded identity, never name alone.
             raise ValueError('peer identity unavailable')
         result = subprocess.run(['docker', 'exec', container, 'wg', 'show', interface, 'dump'],
                                 check=True, capture_output=True, text=True, timeout=15)
@@ -72,12 +72,25 @@ def awg(path, clients, container, interface, name):
         if not lines or len(lines[0].split('\t')) < 4:
             raise ValueError('invalid live interface response')
         rows = [line.split('\t') for line in lines[1:]]
+        if not data.get('PublicKey'):
+            # First issuance can fail before allocating a key. Prove that every
+            # live peer is accounted for by a different disk peer; any orphan,
+            # malformed peer, or client residue makes absence unconfirmed.
+            blocks = text.split('[Peer]')[1:]
+            keys = [peers.fields(part).get('PublicKey') for part in blocks]
+            live_keys = [row[0] for row in rows]
+            if (block or not Path(clients).is_dir() or any(Path(clients).glob(name + '.*'))
+                    or any(not key for key in keys) or len(set(keys)) != len(keys)
+                    or any(len(row) < 8 for row in rows)
+                    or len(set(live_keys)) != len(live_keys) or set(live_keys) != set(keys)):
+                raise ValueError('unused peer absence is unconfirmed')
+            return dict.fromkeys(('disk_present','live_present','identity_matches','config_available'), False)
         found = [row for row in rows if row[0] == data['PublicKey']]
         if len(found) > 1 or any(len(row) < 8 for row in rows):
             raise ValueError('invalid live peer response')
         actual = found[0] if found else None
         matches = bool(block and actual and actual[1] == data.get('PresharedKey')
-                       and set(actual[3].split(',')) == set(data.get('AllowedIPs', '').split(',')))
+                       and {part.strip() for part in actual[3].split(',')} == {part.strip() for part in data.get('AllowedIPs', '').split(',')})
         return {'disk_present': bool(block), 'live_present': actual is not None,
                 'identity_matches': matches,
                 'config_available': matches and (Path(clients) / (name + '.txt')).is_file()}
@@ -91,12 +104,12 @@ def main():
         value = xray(os.environ.get('XRAY_CONFIG', '/opt/node-plane-runtime/xray/config.json'),
             os.environ.get('XRAY_CONTAINER_NAME', 'xray'),
             (os.environ.get('XRAY_INBOUND_TCP_TAG', 'reality-tcp'), os.environ.get('XRAY_INBOUND_XHTTP_TAG', 'reality-xhttp')), name, extra[0])
-    elif protocol == 'awg' and not extra:
+    elif protocol == 'awg' and extra in ([], ['--allow-unused']):
         prefix = os.environ.get('SERVER_KEY', '')
         display = prefix + '-' + name if prefix else name
         value = awg(os.environ.get('AWG_CONFIG', '/opt/node-plane-runtime/amnezia-awg/data/wg0.conf'),
             os.environ.get('AWG_CLIENTS_DIR', '/opt/node-plane-runtime/awg-clients'),
-            os.environ.get('AWG_CONTAINER_NAME', 'amnezia-awg'), os.environ.get('AWG_IFACE', 'wg0'), display)
+            os.environ.get('AWG_CONTAINER_NAME', 'amnezia-awg'), os.environ.get('AWG_IFACE', 'wg0'), display, allow_unused=bool(extra))
     else:
         raise ValueError('invalid inspection arguments')
     print(json.dumps(value))

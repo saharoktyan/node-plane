@@ -62,6 +62,7 @@ impl App {
             controller_section: None,
             requests_settings: false,
             confirmed_installation: None,
+            controller_version: None,
             probe_requested: false,
             ignore_nodes_updates: false,
             access: crate::access::Browser::default(),
@@ -348,7 +349,23 @@ impl App {
         } else {
             self.ssh_state.label()
         };
-        format!("Status: {status}")
+        let mut label = format!("Status: {status}");
+        if self.ssh_state == ConnectionState::Connected
+            && self.has_installation()
+            && let Some((profile, version)) = &self.controller_version
+            && self
+                .form
+                .saved
+                .as_ref()
+                .is_some_and(|saved| saved.id == *profile)
+            && version != env!("CARGO_PKG_VERSION")
+        {
+            label.push_str(&format!(
+                " · Version mismatch: NPW {} / controller {version}",
+                env!("CARGO_PKG_VERSION")
+            ));
+        }
+        label
     }
 
     pub(super) fn cancel_exit(&mut self) {

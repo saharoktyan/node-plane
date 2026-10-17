@@ -115,6 +115,12 @@ def get_db():
             self.assertIn('lv1=127.0.0.1:50061', local.stdout)
 
     def test_github_api_downloads_assets_when_direct_links_return_404(self):
+        self.release_download_case('-linux-amd64')
+
+    def test_release_archives_accept_unsuffixed_binaries_without_self_move(self):
+        self.release_download_case('')
+
+    def release_download_case(self, binary_suffix):
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
             app_root = root / "current"
@@ -125,7 +131,7 @@ def get_db():
             (shared_root / ".env").write_text("BOT_TOKEN=test\n", encoding="utf-8")
             for name, asset_id in (("driver", 101), ("agent", 102)):
                 archive = root / f"{name}.tar.gz"
-                binary_name = f"node-plane-{name}-linux-amd64"
+                binary_name = f"node-plane-{name}{binary_suffix}"
                 with tarfile.open(archive, "w:gz") as output:
                     payload = b"#!/bin/sh\nexit 0\n"
                     info = tarfile.TarInfo(binary_name)

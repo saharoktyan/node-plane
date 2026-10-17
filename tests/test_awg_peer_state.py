@@ -2,10 +2,12 @@ import importlib.util
 import json
 from pathlib import Path
 import tempfile
+import sys
 import unittest
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'runtime_assets'))
 spec = importlib.util.spec_from_file_location('awg_peer_state', ROOT / 'runtime_assets/awg-peer-state.py')
 peer_state = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(peer_state)
@@ -37,7 +39,8 @@ class AwgPeerStateTests(unittest.TestCase):
         self.assertTrue((self.clients / 'node-alice.txt').exists())
         with patch.object(peer_state, 'docker') as docker:
             self.assertEqual(self.mutate('restore'), 0)
-        self.assertIn(PEER, self.config.read_text())
+        self.assertIn('PublicKey = public-one', self.config.read_text())
+        self.assertIn('AllowedIPs = 10.8.1.2/32, fd42:6e70:6177:2::a08:102/128', self.config.read_text())
         self.assertEqual(docker.call_args.kwargs['input'], 'shared-one\n')
         self.assertIn('public-one', docker.call_args.args)
 

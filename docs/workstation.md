@@ -107,6 +107,53 @@ To transition:
 
 Copying uses the target NPW's standard local data directory and refuses conflicting profiles. Transition requires a published target-channel release. Copying a profile does not reinstall the controller or move its database.
 
+## Install a development build
+
+Use `--channel dev` with the repository bootstrap to install the latest published alpha; GitHub prereleases are included. To select a particular published tag without querying the release list, replace the example tag below:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/saharoktyan/node-plane/dev/scripts/install_workstation.sh | bash -s -- --channel dev --tag vX.Y.Z-alpha.N
+node-plane-dev
+```
+
+```powershell
+& ([scriptblock]::Create((irm 'https://raw.githubusercontent.com/saharoktyan/node-plane/dev/scripts/install_workstation.ps1'))) -Channel dev -Tag 'vX.Y.Z-alpha.N'
+node-plane-dev
+```
+
+Omit the tag option to select the latest published alpha. A Git tag by itself contains source; a prebuilt installation also requires the release's installer and platform archive. The bootstrap does not compile missing binaries automatically.
+
+### Build from source
+
+To use the current `dev` branch without GitHub Releases, install Rust 1.90 or newer, Git and the platform C/C++ build tools, then clone the source:
+
+```sh
+git clone --branch dev --single-branch https://github.com/saharoktyan/node-plane.git node-plane-dev-src
+cd node-plane-dev-src
+```
+
+For a source-only alpha tag, use that tag instead of `dev` in `git clone --branch`.
+
+On Linux/macOS, install in a separate source-build prefix and expose the dev command:
+
+```sh
+cargo install --locked --path rust/node-plane-cli --root "$HOME/.local/share/node-plane-workstation/source-dev"
+mkdir -p "$HOME/.local/bin"
+ln -sfn "$HOME/.local/share/node-plane-workstation/source-dev/bin/node-plane" "$HOME/.local/bin/node-plane-dev"
+node-plane-dev
+```
+
+Ensure `$HOME/.local/bin` is on PATH. The source prefix is separate from the prebuilt installation; both dev builds use the existing `node-plane-dev` data directory.
+
+On Windows, build and run from the checkout:
+
+```powershell
+cargo build --release --locked --manifest-path rust/node-plane-cli/Cargo.toml
+.\rust\node-plane-cli\target\release\node-plane.exe
+```
+
+For source-build updates, pull the desired changes and repeat the build/install command (`cargo install --force` when reinstalling the same package version). Workstation self-update uses published release binaries and cargo-dist receipts; it does not update a source checkout.
+
 ## Update Workstation
 
 Open **Settings → Workstation updates**. This updates the local application. **Node Plane Updates** updates the server installation.

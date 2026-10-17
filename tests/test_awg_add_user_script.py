@@ -1,4 +1,7 @@
 import os
+import base64
+import json
+import zlib
 import pathlib
 import shlex
 import subprocess
@@ -22,6 +25,7 @@ class AwgAddUserScriptTests(unittest.TestCase):
             fake_bin = root / "bin"
             fake_bin.mkdir()
             (root / "awg-peer-state.py").write_text((SCRIPT.parent / "awg-peer-state.py").read_text())
+            (root / "awg_ipv6.py").write_text((SCRIPT.parent / "awg_ipv6.py").read_text())
             profile = subprocess.check_output([sys.executable, str(PROFILE_TOOL), "init", str(config)], text=True)
             config.write_text("[Interface]\nPrivateKey = serverprivate\nAddress = 10.8.1.1/24\nListenPort = 51820\n" + profile, encoding="utf-8")
             node_env.write_text(
@@ -72,6 +76,8 @@ class AwgAddUserScriptTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("Address = 10.8.1.2/32", result.stdout)
+            self.assertIn("Address = 10.8.1.2/32, fd42:6e70:6177:2::a08:102/128", result.stdout)
+            self.assertIn("AllowedIPs = 0.0.0.0/0, ::/0", result.stdout)
             self.assertIn("AllowedIPs = 10.8.1.2/32", config.read_text(encoding="utf-8"))
             self.assertIn("tmp=$(mktemp)", docker_log.read_text(encoding="utf-8"))
             self.assertIn("HeaderProtectionKey = ", result.stdout)
@@ -83,6 +89,14 @@ class AwgAddUserScriptTests(unittest.TestCase):
                 value = next(line for line in profile.splitlines() if line.startswith(field + ' = '))
                 self.assertIn(value, result.stdout)
             self.assertIn("\nvpn://", result.stdout)
+            vpn = next(line[6:] for line in result.stdout.splitlines() if line.startswith('vpn://'))
+            encoded = base64.urlsafe_b64decode(vpn + '=' * (-len(vpn) % 4))
+            decoded = json.loads(zlib.decompress(encoded[4:]))
+            last = json.loads(decoded['containers'][0]['awg']['last_config'])
+            self.assertEqual(last['allowed_ips'], ['0.0.0.0/0', '::/0'])
+            self.assertIn('fd42:6e70:6177:2::a08:102/128', last['config'])
+            self.assertEqual(last['client_ip'], '10.8.1.2')
+
             self.assertEqual(config.read_text(encoding="utf-8").count("# msk1-alice"), 1)
 
             cached = root / "clients" / "msk1-alice.txt"

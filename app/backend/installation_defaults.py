@@ -6,7 +6,7 @@ from .authorization import AccessDenied, require_permission
 DEFAULTS = {'protocols': ['awg', 'xray'], 'xray_transports': ['tcp', 'xhttp'],
     'settings': {'awg_i1_preset': 'quic', 'awg_port_mode': 'auto'}}
 FIELDS = {'awg_i1_preset', 'awg_port_mode', 'awg_port', 'awg_interface',
-    'xray_sni', 'xray_fingerprint', 'xray_tcp_port', 'xray_xhttp_port', 'xray_xhttp_path'}
+    'ipv6_outbound', 'xray_sni', 'xray_fingerprint', 'xray_tcp_port', 'xray_xhttp_port', 'xray_xhttp_path'}
 
 
 def portable_settings(settings):

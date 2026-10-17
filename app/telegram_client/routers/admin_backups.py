@@ -1,5 +1,6 @@
 """Backup screens backed exclusively by backend commands and read models."""
 
+import re
 from uuid import uuid4
 
 from aiogram import Bot, F, Router
@@ -13,6 +14,11 @@ from ..screens import Screen, Section, Table, format_size
 from .common import render, schedule_refresh
 
 router = Router()
+
+
+def backup_commit(version):
+    commit = str(version or '').rsplit(' · ', 1)[-1].strip()
+    return commit[:12] if re.fullmatch(r'[0-9a-fA-F]{7,40}', commit) else '—'
 
 
 def button(text, data, *, style=None):
@@ -217,10 +223,10 @@ async def backup_cb(
             rows.append([button(tr(lang, "back"), f"backup_list:{offset}")])
             metadata = Table((tr(lang, 'maintenance.rich.field'), tr(lang, 'maintenance.rich.value')), (
                 (tr(lang, 'backups.rich.created'), info['created_at'][:19]),
-                (tr(lang, 'backups.rich.version'), info['app_version']),
+                (tr(lang, 'backups.rich.version'), backup_commit(info['app_version'])),
                 (tr(lang, 'backups.kind'), tr(lang, 'backups.kind.' + info.get('kind', 'automatic'))),
                 *((((tr(lang, 'backups.name'), info['name']),)) if info.get('name') else ()),
-                (tr(lang, 'profiles.title'), str(info['profiles'])),
+                (tr(lang, 'admin.profiles'), str(info['profiles'])),
                 (tr(lang, 'admin.nodes'), str(info['nodes']))))
             await draw(query, bot, state, 'backups.details',
                 [] if info['compatible'] else [tr(lang, 'backups.incompatible')], rows,

@@ -40,7 +40,7 @@ def main(conf_path, template_path, out_json_path, decoder_py, container_name="am
     if version == "3.1":
         validate(interface_values(conf_text))
 
-    client_ip = iface.get("Address", "").split("/", 1)[0]
+    client_ip = iface.get("Address", "").split(",", 1)[0].strip().split("/", 1)[0]
     endpoint = peer.get("Endpoint", "")
     endpoint_host, endpoint_port = endpoint.rsplit(":", 1)
     allowed = _split_csv(peer.get("AllowedIPs", "")) or ["0.0.0.0/0", "::/0"]

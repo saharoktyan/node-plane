@@ -639,9 +639,7 @@ download_release_binaries() {
     tar -xzf "$driver_archive" -C "$WORK_DIR" || return 1
     if [[ -x "${WORK_DIR}/node-plane-driver-linux-amd64" ]]; then
       mv "${WORK_DIR}/node-plane-driver-linux-amd64" "$driver_out"
-    elif [[ -x "${WORK_DIR}/node-plane-driver" ]]; then
-      mv "${WORK_DIR}/node-plane-driver" "$driver_out"
-    else
+    elif [[ ! -x "$driver_out" ]]; then
       return 1
     fi
   else
@@ -658,9 +656,7 @@ download_release_binaries() {
     tar -xzf "$agent_archive" -C "$WORK_DIR" || return 1
     if [[ -x "${WORK_DIR}/node-plane-agent-linux-amd64" ]]; then
       mv "${WORK_DIR}/node-plane-agent-linux-amd64" "$agent_out"
-    elif [[ -x "${WORK_DIR}/node-plane-agent" ]]; then
-      mv "${WORK_DIR}/node-plane-agent" "$agent_out"
-    else
+    elif [[ ! -x "$agent_out" ]]; then
       return 1
     fi
   else

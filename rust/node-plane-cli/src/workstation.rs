@@ -536,8 +536,10 @@ pub async fn recover_operations(
                         "recheck" if kind == "agent" => "Verify the configured agent identity and current build. The installer will not run again.",
                         "recheck" if kind == "bootstrap" => "Check the recorded installation step. A confirmed result lets setup continue.",
                         "recheck" if kind != "update" => "Read the saved result of this exact command. Missing evidence keeps the block.",
+                        "recheck" if kind == "temporary" => "Read the saved lease result without issuing another configuration.",
                         "recheck" => "Inspect existing update/rollback evidence. No installation is repeated; missing evidence keeps the block.",
                         "resolve" if kind == "bootstrap" => "Resume setup before dispatch, or adopt an already recorded child. No uncertain child is replayed.",
+                        "resolve" if kind == "temporary" => "Cancel only after the agent confirms no lease or peer exists and fences the original command. Interrupted commands require an agent restart.",
                         "resolve" if kind == "profile" => "Inspect and retire the uncertain journal entry after agent restart, then queue the current profile access again.",
                         "resolve" if kind == "settings" => "Inspect and retire the uncertain settings command after agent restart, then apply a new revision of current settings.",
                         "resolve" => "Resolve this exact node operation through the driver journal. Unconfirmed outcomes stay blocked.",
@@ -596,7 +598,7 @@ pub(crate) fn recovery_path(kind: &str, id: &str, action: &str) -> Result<String
         ("backup", "resume" | "cancel") => {
             Ok(format!("/api/v1/system/recovery/backup/{id}/{action}"))
         }
-        ("node" | "settings" | "profile" | "bootstrap", "resolve" | "recheck")
+        ("node" | "settings" | "profile" | "bootstrap" | "temporary", "resolve" | "recheck")
         | ("agent", "recheck") => Ok(format!("/api/v1/system/recovery/{kind}/{id}/{action}")),
         _ => bail!("Unsupported recovery action"),
     }
@@ -1024,6 +1026,11 @@ mod tests {
             super::recovery_path("update", &id, "recheck").unwrap(),
             format!("/api/v1/system/updates/jobs/{id}/recheck")
         );
+        assert_eq!(
+            super::recovery_path("temporary", &id, "resolve").unwrap(),
+            format!("/api/v1/system/recovery/temporary/{id}/resolve")
+        );
+        assert!(super::recovery_path("temporary", &id, "resume").is_err());
         assert!(super::recovery_path("profile", &id, "unlock").is_err());
         assert!(super::recovery_path("update", "../updates/run", "cancel").is_err());
         assert!(super::recovery_path("node", &id, "install").is_err());

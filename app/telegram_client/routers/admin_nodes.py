@@ -1072,7 +1072,7 @@ async def edit_node_field_cb(query: CallbackQuery, callback_data: EditNodeFieldC
     user_id = query.from_user.id
     node_key, field = callback_data.node_key, callback_data.field
     allowed = {'title', 'region', 'flag', 'notes', 'public_host', 'awg_port', 'awg_public_host', 'awg_interface', 'awg_i1_preset', 'xray_host', 'xray_fingerprint', 'xray_sni', 'xray_tcp_port', 'xray_xhttp_port', 'xray_xhttp_path', 'ssh_target'}
-    allowed.update({'awg_parameters', 'awg_port_mode'})
+    allowed.update({'awg_parameters', 'awg_port_mode', 'ipv6_outbound'})
     if field not in allowed:
         await show_node_settings(query.message.chat.id, user_id, query.message.message_id, node_key, bot, backend, state)
         return
@@ -1090,6 +1090,14 @@ async def edit_node_field_cb(query: CallbackQuery, callback_data: EditNodeFieldC
     
     current = node.get(field) if field in {'title', 'region', 'flag', 'notes'} else node['settings'].get(field)
     locale = normalize_locale((await state.get_data()).get('locale'))
+    if field == 'ipv6_outbound':
+        await state.set_state(None)
+        rows = [[InlineKeyboardButton(text=mode.title(), callback_data=f'node_ipv6:{mode}:{node_key}',
+            style='primary' if mode == (current or 'on') else None) for mode in ('on', 'off')],
+            [InlineKeyboardButton(text=tr(locale, 'back'), callback_data=f'node_section:connection:{node_key}')]]
+        await render(bot, query.message.chat.id, Screen(tr(locale, 'nodes.settings.field.ipv6_outbound'),
+            embedded_buttons=True, navigation=True), rows, state, query.message.message_id)
+        return
     if field == 'awg_port_mode':
         await state.set_state(None)
         rows = [[InlineKeyboardButton(text=tr(locale, 'nodes.awg.mode.' + mode), callback_data=f'node_awg_mode:{mode}:{node_key}',
@@ -2014,3 +2022,19 @@ async def wizard_region_cb(query: CallbackQuery, bot: Bot, state: FSMContext):
         return
     await state.update_data(wizard_data={**data['wizard_data'], 'region': preset[2]})
     await render_wizard_step(query.message.chat.id, bot, state, 'flag', query.message.message_id)
+
+
+@router.callback_query(F.data.startswith('node_ipv6:'))
+async def node_ipv6_cb(query, bot, backend, state):
+    await query.answer()
+    _, mode, node_key = query.data.split(':', 2)
+    data = await state.get_data()
+    if (mode not in {'on', 'off'} or data.get('edit_node_key') != node_key
+            or data.get('edit_field') != 'ipv6_outbound'):
+        return
+    node = await editable_node(query.from_user.id, node_key, backend, state)
+    await change_node_draft(query.from_user.id, node_key,
+        {'settings': dict(node['settings'], ipv6_outbound=mode)}, backend, state, baseline_node=node)
+    from .admin_node_tools import show_section
+    await show_section(query.message.chat.id, query.from_user.id, query.message.message_id,
+        'connection', node_key, bot, backend, state)

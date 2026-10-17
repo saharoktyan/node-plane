@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -20,6 +21,7 @@ from backend.removal_verifier import RemovalVerifier
 from backend.installation_maintenance import InstallationMaintenance, UNITS
 
 ASSETS = Path(__file__).resolve().parents[1] / 'runtime_assets'
+sys.path.insert(0, str(ASSETS))
 XRAY_IMAGE = 'ghcr.io/xtls/xray-core:26.3.27'
 AWG_IMAGE = 'amneziavpn/amneziawg-go:3.1.20260828@sha256:cbafc02b8373a83f428272db6d8001b37bc02e6211cbd8c0cb4e2e3759b12b72'
 

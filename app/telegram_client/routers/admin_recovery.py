@@ -54,7 +54,7 @@ def action_path(kind, identity, action):
         return f'/api/v1/system/recovery/backup/{identity}/{action}'
     if kind == 'update' and action in {'cancel', 'recheck'}:
         return f'/api/v1/system/updates/jobs/{identity}/{action}'
-    if kind in {'node', 'settings', 'profile', 'agent', 'bootstrap'} and action in {'recheck', 'resolve'}:
+    if kind in {'node', 'settings', 'profile', 'agent', 'bootstrap', 'temporary'} and action in {'recheck', 'resolve'}:
         if kind == 'agent' and action != 'recheck':
             raise ValueError('unsupported recovery action')
         return f'/api/v1/system/recovery/{kind}/{identity}/{action}'
@@ -153,7 +153,7 @@ async def recovery_action(query: CallbackQuery, callback_data: RecoveryAction, b
                     style='danger' if callback_data.action == 'cancel' else 'primary')],
                 [InlineKeyboardButton(text=tr(locale, 'back'), callback_data=RecoveryPage().pack())]]
         await render(bot, query.message.chat.id, Screen(tr(locale, 'recovery.confirm'),
-            (tr(locale, 'recovery.explain.' + callback_data.kind + '.' + callback_data.action) if callback_data.kind in {'settings', 'profile', 'agent', 'bootstrap', 'backup', 'removal'} else tr(locale, 'recovery.explain.' + callback_data.action), identity),
+            (tr(locale, 'recovery.explain.' + callback_data.kind + '.' + callback_data.action) if callback_data.kind in {'settings', 'profile', 'agent', 'bootstrap', 'backup', 'removal', 'temporary'} else tr(locale, 'recovery.explain.' + callback_data.action), identity),
             embedded_buttons=True, navigation=True), rows, state, query.message.message_id)
         return
     try:

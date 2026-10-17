@@ -45,9 +45,9 @@ class ProfileInspectionTests(unittest.TestCase):
                 MODULE.xray(self.path, 'container', ('tcp', 'xhttp'), 'p_test', self.uuid)
 
     def test_awg_checks_live_key_psk_and_allowed_ips(self):
-        self.path.write_text('[Interface]\nPrivateKey = server\n\n# node-p_test\n[Peer]\nPublicKey = public\nPresharedKey = secret\nAllowedIPs = 10.0.0.2/32\n')
+        self.path.write_text('[Interface]\nPrivateKey = server\n\n# node-p_test\n[Peer]\nPublicKey = public\nPresharedKey = secret\nAllowedIPs = 10.0.0.2/32, fd42:6e70:6177:2::2/128\n')
         (Path(self.tmp.name) / 'node-p_test.txt').write_text('private client config')
-        dump = 'server\tpublic\t51820\t0\npublic\tsecret\t(none)\t10.0.0.2/32\t0\t0\t0\t25\n'
+        dump = 'server\tpublic\t51820\t0\npublic\tsecret\t(none)\t10.0.0.2/32,fd42:6e70:6177:2::2/128\t0\t0\t0\t25\n'
         with patch.object(MODULE.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, dump)) as run:
             value = MODULE.awg(self.path, self.tmp.name, 'container', 'wg0', 'node-p_test')
             self.assertTrue(value['identity_matches'])
@@ -71,3 +71,23 @@ class ProfileInspectionTests(unittest.TestCase):
             value = MODULE.awg(self.path, self.tmp.name, 'container', 'wg0', 'node-p_test')
             self.assertFalse(value['disk_present'])
             self.assertFalse(value['live_present'])
+
+    def test_unused_awg_requires_all_live_keys_accounted_for_and_no_client_residue(self):
+        self.path.write_text('[Interface]\nPrivateKey = server\n\n# sibling\n[Peer]\nPublicKey = sibling-key\nAllowedIPs = 10.0.0.2/32\n')
+        dump='server\tpublic\t51820\t0\nsibling-key\tsecret\t(none)\t10.0.0.2/32\t0\t0\t0\t25\n'
+        with patch.object(MODULE.subprocess,'run',return_value=subprocess.CompletedProcess([],0,dump)) as run:
+            result=MODULE.awg(self.path,self.tmp.name,'container','wg0','missing',allow_unused=True)
+            self.assertTrue(all(v is False for v in result.values()))
+            run.return_value.stdout=dump+'orphan\tsecret\t(none)\t10.0.0.3/32\t0\t0\t0\t25\n'
+            with self.assertRaises(ValueError):
+                MODULE.awg(self.path,self.tmp.name,'container','wg0','missing',allow_unused=True)
+            run.return_value.stdout=dump
+            (Path(self.tmp.name)/'missing.txt').write_text('private residue')
+            with self.assertRaises(ValueError):
+                MODULE.awg(self.path,self.tmp.name,'container','wg0','missing',allow_unused=True)
+
+    def test_unused_awg_does_not_turn_live_rpc_failure_into_absence(self):
+        self.path.write_text('[Interface]\nPrivateKey = server\n')
+        with patch.object(MODULE.subprocess,'run',side_effect=subprocess.CalledProcessError(1,['docker'])):
+            with self.assertRaises(subprocess.CalledProcessError):
+                MODULE.awg(self.path,self.tmp.name,'container','wg0','missing',allow_unused=True)

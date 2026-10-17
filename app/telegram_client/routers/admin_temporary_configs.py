@@ -101,6 +101,10 @@ async def card(query, bot, backend, state, identity, show=False):
     rows, lines = [], [f"{item.get('node_title',item['node_key'])} · {'VLESS' if item['protocol']=='xray' else 'AmneziaWG'} · {item['transport'].upper()}", tr(locale,'temporary.status.'+item['status'])]
     if item.get('expires_at'):
         lines.append(tr(locale,'temporary.expires',value=item['expires_at'][:19].replace('T',' ')+' UTC'))
+    if show and (item['status'] != 'active' or not item.get('artifact_available', True)):
+        lines.append(tr(locale, 'temporary.artifact_unavailable',
+            status=tr(locale, 'temporary.status.' + item['status'])))
+        show = False
     if item['protocol']=='xray':
         lines.append(tr(locale,'temporary.vless_notice'))
     if item.get('unavailable_reason') == 'node_changed':
@@ -112,7 +116,12 @@ async def card(query, bot, backend, state, identity, show=False):
     rows.extend([[button(locale,'devices.refresh','card:'+identity)], [button(locale,'back','list:0')]])
     kwargs = {}
     if show:
-        artifact = await request(backend,query.from_user.id,'GET','/'+identity+'/artifact')
+        try:
+            artifact = await request(backend,query.from_user.id,'GET','/'+identity+'/artifact')
+        except BackendError as error:
+            if error.code == 'config_not_ready':
+                return await card(query, bot, backend, state, identity)
+            raise
         from .user import config_qr, qr_payload
         uri = artifact['content']
         image = await asyncio.to_thread(config_qr, qr_payload(item['protocol'],item['transport'],uri))

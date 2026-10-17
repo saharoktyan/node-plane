@@ -142,8 +142,10 @@ def ensure_lease_scheduler(directory='/etc/systemd/system', execute=subprocess.r
                 os.close(fd)
             execute(['systemctl', 'daemon-reload'], check=True, capture_output=True, timeout=30)
         if changed:
+            # Newly written inactive units may not be loaded yet. Reset is advisory;
+            # enable/start and readiness below remain mandatory.
             execute(['systemctl', 'reset-failed', 'node-plane-lease-expiry.service', 'node-plane-lease-expiry.timer'],
-                    check=True, capture_output=True, timeout=15)
+                    check=False, capture_output=True, timeout=15)
         execute(['systemctl', 'enable', '--now', 'node-plane-lease-expiry.timer'],
                 check=True, capture_output=True, timeout=30)
         execute(['systemctl', 'is-active', '--quiet', 'node-plane-lease-expiry.timer'],
@@ -598,7 +600,7 @@ def validate_node_settings(intent):
     settings = intent['settings']
     fields = {'public_host', 'xray_host', 'xray_sni', 'xray_tcp_port', 'xray_xhttp_port',
               'xray_xhttp_path', 'awg_public_host', 'awg_port',
-              'xray_fingerprint', 'awg_interface', 'awg_i1_preset', 'awg_port_mode', 'awg_parameters'}
+              'xray_fingerprint', 'awg_interface', 'awg_i1_preset', 'awg_port_mode', 'awg_parameters', 'ipv6_outbound'}
     if not isinstance(settings, dict) or set(settings) - fields:
         raise ValueError('invalid settings')
     required = {'public_host'}
@@ -635,6 +637,8 @@ def validate_node_settings(intent):
             raise ValueError('invalid AWG interface')
         if field == 'awg_i1_preset' and value not in {'quic', 'dns', 'chaos'}:
             raise ValueError('invalid AWG preset')
+        if field == 'ipv6_outbound' and value not in {'on', 'off'}:
+            raise ValueError('invalid IPv6 outbound policy')
         if field == 'awg_port_mode' and value not in {'auto', 'manual'}:
             raise ValueError('invalid AWG port mode')
         if field == 'xray_fingerprint' and value not in {'chrome', 'firefox', 'safari', 'ios', 'android', 'edge', 'random', 'randomized'}:
@@ -785,6 +789,15 @@ def verify_node_settings_config(intent, xray_path, awg_path):
                 raise ValueError('Xray settings verification failed')
         if inbounds['reality-xhttp']['streamSettings']['xhttpSettings']['path'] != settings['xray_xhttp_path']:
             raise ValueError('Xray path verification failed')
+    if 'ipv6_outbound' in settings:
+            direct = next(item for item in data['outbounds'] if item.get('tag') == 'direct')
+            enabled = settings['ipv6_outbound'] == 'on'
+            if direct.get('settings', {}).get('domainStrategy') != ('AsIs' if enabled else 'ForceIPv4'):
+                raise ValueError('Xray IPv6 outbound verification failed')
+            blocks = [rule for rule in data.get('routing', {}).get('rules', [])
+                if rule.get('outboundTag') == 'node-plane-ipv6-disabled']
+            if (enabled and blocks) or (not enabled and (len(blocks) != 1 or blocks[0].get('ip') != ['::/0'])):
+                raise ValueError('Xray IPv6 block verification failed')
     if 'awg' in intent['protocols']:
         awg_config = Path(awg_path).read_text()
         if not re.search(r'(?m)^ListenPort\s*=\s*' + str(settings['awg_port']) + r'\s*$', awg_config):
@@ -812,6 +825,8 @@ def verify_node_settings_environment(intent, env_path):
     """The endpoint and client options live in node.env, outside protocol configs."""
     settings = intent['settings']
     expected = {'SERVER_KEY': intent['node_key']}
+    if 'ipv6_outbound' in settings:
+        expected['IPV6_OUTBOUND'] = settings['ipv6_outbound']
     if 'awg' in intent['protocols']:
         expected.update(AWG_SERVER_IP=settings.get('awg_public_host', settings['public_host']),
             AWG_SERVER_PORT=str(settings['awg_port']), AWG_IFACE=settings.get('awg_interface', 'wg0'),
@@ -929,6 +944,7 @@ def run_node_settings(intent, lock_fd, *, env_path=Path('/etc/node-plane/node.en
         'AWG_IFACE': settings.get('awg_interface', 'wg0'),
         'AWG_I1_PRESET': settings.get('awg_i1_preset', 'quic'),
         'XRAY_FP': settings.get('xray_fingerprint', 'chrome'),
+        'IPV6_OUTBOUND': settings.get('ipv6_outbound', 'on'),
     }
     parameters_path = env_path.with_name('awg-parameters.json')
     with tempfile.NamedTemporaryFile(mode='w', dir=env_path.parent, delete=False) as staged:
@@ -1184,12 +1200,14 @@ def resolve_interrupted(intent, path, inspector):
             connection.close()
 
 
-def inspect_for_repair(intent):
+def inspect_for_repair(intent, allow_unused=False):
     arguments = [intent['protocol'], intent['runtime_name']]
     if intent['protocol'] == 'xray':
         # Deletion intents omit XraySpec. For repair, compare presence without
         # claiming an identity match; the new revision will enforce desired state.
         arguments.append(intent['uuid'])
+    if allow_unused and intent['protocol'] == 'awg':
+        arguments.append('--allow-unused')
     result = subprocess.run([str(Path(__file__).with_name('inspect-profile.sh')), *arguments],
                             check=True, capture_output=True, text=True, timeout=30)
     return json.loads(result.stdout)

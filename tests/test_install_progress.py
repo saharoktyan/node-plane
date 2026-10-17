@@ -156,6 +156,12 @@ esac
         self.assertFalse((active / 'rust').exists())
         self.assertIn(f'NODE_PLANE_SOURCE_DIR={active}', (self.base / 'shared/.env').read_text())
 
+    def test_explicit_admin_id_matching_example_is_not_discarded(self):
+        self.config.write_text(self.config.read_text().replace('ADMIN_IDS=789', 'ADMIN_IDS=123456789'))
+        result = self.run_install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('ADMIN_IDS=123456789', (self.base / 'shared/.env').read_text())
+
     def test_complete_install_has_fixed_phases_and_no_secrets_in_events(self):
         result = self.run_install()
         self.assertEqual(result.returncode, 0, result.stderr)

@@ -245,6 +245,15 @@ fn entry() -> Result<()> {
     let (tx, rx) = mpsc::channel();
     let interaction: Arc<dyn ssh::Interaction> = UiInteraction::shared(tx.clone());
     let worker = spawn(request, interaction, tx);
+    run_console_events(rx, worker, console_prompt)
+}
+
+fn run_console_events(
+    rx: mpsc::Receiver<Event>,
+    worker: std::thread::JoinHandle<()>,
+    mut prompt: impl FnMut(Prompt) -> Result<Answer>,
+) -> Result<()> {
+    let mut prompt_failure = None;
     let mut result = None;
     let mut last_stage = String::new();
     for event in rx {
@@ -286,10 +295,17 @@ fn entry() -> Result<()> {
                     );
                 }
             }
-            Event::Prompt(prompt, reply) => {
-                let answer = console_prompt(prompt);
-                let _ = reply.send(answer?);
-            }
+            Event::Prompt(request, reply) => match prompt(request) {
+                Ok(answer) => {
+                    let _ = reply.send(answer);
+                }
+                Err(error) => {
+                    // Closing the reply lets the worker publish its final,
+                    // contextual result before the console returns an error.
+                    drop(reply);
+                    prompt_failure = Some(error);
+                }
+            },
             Event::Finished(outcome) => {
                 result = Some(outcome);
                 break;
@@ -304,7 +320,10 @@ fn entry() -> Result<()> {
             println!("{message}");
             Ok(())
         }
-        Some(Err(error)) => Err(anyhow::anyhow!(error)),
+        Some(Err(error)) => Err(match prompt_failure {
+            Some(cause) => cause.context(error),
+            None => anyhow::anyhow!(error),
+        }),
         None => Err(anyhow::anyhow!(
             "Operation ended without a result. Diagnose the server before retrying."
         )),
@@ -392,4 +411,39 @@ pub fn spawn(
             });
         let _ = tx.send(Event::Finished(result.map_err(|e| format!("{e:#}"))));
     })
+}
+
+#[cfg(test)]
+mod console_tests {
+    use super::*;
+
+    #[test]
+    fn unavailable_prompt_preserves_the_workers_verified_install_result() {
+        let (tx, rx) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let (reply, answer) = mpsc::channel();
+            tx.send(Event::Prompt(
+                Prompt::ConfirmAction {
+                    title: "Register workstation access".into(),
+                    description: "Bind the workstation key?".into(),
+                },
+                reply,
+            ))
+            .unwrap();
+            assert!(answer.recv().is_err());
+            tx.send(Event::Finished(Err(
+                "Node Plane is installed and verified. Workstation access registration is incomplete."
+                    .into(),
+            )))
+            .unwrap();
+        });
+        let error = run_console_events(rx, worker, |_| {
+            anyhow::bail!("Interactive input is required")
+        })
+        .unwrap_err();
+        let message = format!("{error:#}");
+        assert!(message.contains("installed and verified"));
+        assert!(message.contains("registration is incomplete"));
+        assert!(message.contains("Interactive input is required"));
+    }
 }
