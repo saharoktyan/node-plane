@@ -393,10 +393,33 @@ impl App {
                 }
             }
             KeyCode::Tab => {
-                self.access.selected =
-                    (self.access.selected + 1).min(controls.len().saturating_sub(1))
+                self.access.selected = (self.access.selected + 1) % controls.len().max(1);
             }
-            KeyCode::BackTab => self.access.selected = self.access.selected.saturating_sub(1),
+            KeyCode::BackTab => {
+                let count = controls.len().max(1);
+                self.access.selected = (self.access.selected + count - 1) % count;
+            }
+            KeyCode::Up | KeyCode::Down | KeyCode::Left | KeyCode::Right => {
+                let visible: Vec<_> = controls
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, control)| {
+                        self.hits
+                            .iter()
+                            .rfind(|hit| hit.control == *control)
+                            .map(|hit| (index, hit.area))
+                    })
+                    .collect();
+                if let Some(current) = visible
+                    .iter()
+                    .position(|(index, _)| *index == self.access.selected)
+                {
+                    let areas: Vec<_> = visible.iter().map(|(_, area)| *area).collect();
+                    if let Some(next) = directional_index(&areas, current, key.code) {
+                        self.access.selected = visible[next].0;
+                    }
+                }
+            }
             KeyCode::Enter => {
                 if let Some(control) = controls.get(self.access.selected) {
                     self.activate(*control);
@@ -420,15 +443,6 @@ impl App {
                 self.access.search.pop();
                 self.access.page = 0;
             }
-            KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down => {
-                let areas: Vec<_> = controls
-                    .iter()
-                    .filter_map(|c| self.hits.iter().find(|h| h.control == *c).map(|h| h.area))
-                    .collect();
-                if let Some(next) = directional_index(&areas, self.access.selected, key.code) {
-                    self.access.selected = next;
-                }
-            }
             _ => {}
         }
     }
@@ -442,12 +456,6 @@ impl App {
         if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
             self.exit = true;
             self.exit_confirm = false;
-            return;
-        }
-        if self.qr_visible {
-            if matches!(key.code, KeyCode::Esc | KeyCode::Enter) {
-                self.qr_visible = false;
-            }
             return;
         }
         if self.temporary_sidebar {
@@ -470,7 +478,6 @@ impl App {
             KeyCode::Esc if self.temporary.view == crate::temporary::View::List => {
                 self.temporary_sidebar = true
             }
-            KeyCode::Esc if self.qr_visible => self.qr_visible = false,
             KeyCode::Esc => {
                 self.activate(Control::TemporaryBack);
             }
@@ -855,7 +862,7 @@ impl App {
             Prompt::HostKey { .. } | Prompt::ConfirmAction { .. } => match key.code {
                 KeyCode::Char('y' | 'Y') => Some(Answer::Confirm(true)),
                 KeyCode::Char('n' | 'N') | KeyCode::Esc => Some(Answer::Confirm(false)),
-                KeyCode::Left | KeyCode::Right | KeyCode::Tab => {
+                KeyCode::Left | KeyCode::Right | KeyCode::Tab | KeyCode::BackTab => {
                     self.trust = !self.trust;
                     None
                 }
@@ -863,6 +870,19 @@ impl App {
                 _ => None,
             },
             Prompt::Password { .. } | Prompt::Text { .. } => match key.code {
+                KeyCode::Tab | KeyCode::BackTab | KeyCode::Left | KeyCode::Right => {
+                    self.trust = !self.trust;
+                    None
+                }
+                KeyCode::Up => {
+                    self.trust = false;
+                    None
+                }
+                KeyCode::Down => {
+                    self.trust = true;
+                    None
+                }
+                KeyCode::Enter if !self.trust => Some(Answer::Cancel),
                 KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                     if self.password.len() < 4096 {
                         self.password.push(c);

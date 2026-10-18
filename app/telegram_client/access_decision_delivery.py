@@ -1,7 +1,7 @@
 """Update every known administrator notice after a committed access decision."""
 import asyncio
 
-from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramNotFound, TelegramRetryAfter
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from .i18n import normalize_locale, tr
@@ -50,7 +50,7 @@ async def edit_notice(bot, delivery):
     locale = normalize_locale(delivery['locale'])
     screen = Screen(tr(locale, 'requests.title'), (decision_text(locale, delivery),), embedded_buttons=True)
     rows = [[InlineKeyboardButton(text=tr(locale, 'setup.close'), callback_data='notification_close')]]
-    options = {'chat_id': delivery['chat_id'], 'message_id': delivery['message_id']}
+    options = {'chat_id': delivery['chat_id'], 'message_id': delivery['message_id'], 'request_timeout': 15}
     try:
         try:
             await bot.edit_message_rich_message(**options, rich_message=screen.rich(rows),
@@ -62,7 +62,7 @@ async def edit_notice(bot, delivery):
     except TelegramRetryAfter as error:
         await asyncio.sleep(max(1, min(error.retry_after, 86400)))
         return False
-    except (TelegramBadRequest, TelegramForbiddenError) as error:
+    except (TelegramBadRequest, TelegramForbiddenError, TelegramNotFound) as error:
         if not any(text in str(error).lower() for text in ('not found', 'not modified', 'blocked', 'chat not found', 'deactivated')):
             raise
     return True

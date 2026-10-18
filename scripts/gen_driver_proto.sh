@@ -16,7 +16,7 @@ if [[ -z "$PYTHON_BIN" ]]; then
 fi
 
 if ! "$PYTHON_BIN" -c 'import grpc_tools.protoc' >/dev/null 2>&1; then
-  echo "grpcio-tools is not installed. Install requirements-dev.txt first." >&2
+  echo "grpcio-tools is not installed. Run uv sync --locked first." >&2
   exit 1
 fi
 

@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## 1.0.0-alpha.18 - 2026-10-18
+
+- Manage Python dependencies with pyproject.toml and uv.lock; deploy exact runtime groups with locked sync, use the same lock in CI, and retain generated hashed requirements exports for published updaters.
+- Treat confirmed access expiry, freeze/revocation and administratively disabled VPN as expected states in node summaries and diagnostics; preserve warnings for blocked or unconfirmed changes and real host faults.
+- Keep pending requests and deleted accounts out of Workstation Profiles; show Blocked/Unblock correctly, refresh cached profile revisions after account changes, and remove duplicate approval summaries.
+- Count successful AWG/VLESS issuance on any eligible server toward Telegram Quick Start; preserve explicit Done acknowledgement.
+- Shorten ordinary and temporary configuration names to server · AWG/VLESS · device (when present).
+- Retire missing Telegram decision notices so a deleted message cannot block updates for other administrators.
+- Remove terminal QR rendering and its unused Rust dependencies; place Cancel before Close in the Workstation exit dialog.
+- Return to Quick Start after guided server, protocol, access and configuration flows, while clearing that context when leaving for the main or admin menu.
+- Allow keyboard selection of Cancel/Continue in Workstation password and text prompts, with matching button highlighting.
+- Return guided installation-defaults editing to Telegram Quick Start, retain its breadcrumb context, and offer Continue/Edit installation defaults after returning.
+- Remove Telegram breadcrumb dividers while preserving the divider before Back.
+- Restore visible corner Back navigation in Workstation profile editing, access and duration menus; remove unused editor footer space and make Access keyboard navigation cycle and retain control indices.
+
 ## 1.0.0-alpha.17 - 2026-10-17
 
 - Apply a newly selected second protocol through the existing managed settings command instead of repeatedly attempting fresh-node preparation.

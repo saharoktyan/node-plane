@@ -89,20 +89,24 @@ class NodeOverviewService:
             expires_at = grant['expires_at']
             active = not grant['frozen'] and not grant['deleting'] and (
                 expires_at is None or datetime.fromisoformat(expires_at) > now)
-            if not active:
-                counts['attention'] += 1
-            elif not peer_tasks or any(task is None or task['desired_revision'] != grant['desired_revision'] for task in peer_tasks):
-                counts['attention'] += 1
-            elif any(task['action'] != 'ensure' for task in peer_tasks):
+            expected_action = 'ensure' if active and node['enabled'] else 'delete'
+            if not peer_tasks or any(task is None or task['desired_revision'] != grant['desired_revision'] for task in peer_tasks):
                 counts['attention'] += 1
             elif any(task['status'] == 'blocked' for task in peer_tasks):
                 counts['failed'] += 1
             elif any(task['status'] in {'awaiting_executor', 'running'} for task in peer_tasks):
                 counts['pending'] += 1
-            elif all(task['status'] == 'succeeded' for task in peer_tasks) and state == 'applied_unverified':
-                counts['ready'] += 1
-            else:
+            elif any(task['action'] != expected_action or task['status'] != 'succeeded' for task in peer_tasks):
                 counts['attention'] += 1
+            elif expected_action == 'ensure' and state == 'applied_unverified':
+                counts['ready'] += 1
+            # Confirmed deletion for frozen/expired access or a disabled node is
+            # a healthy desired state, not failed or missing provisioning.
+
+        # Revocations may concern retired devices or removed grants, which are
+        # no longer in the loop above. A blocked task still requires recovery.
+        blocked = {(task['profile_id'], task['protocol']) for task in tasks if task['status'] == 'blocked'}
+        counts['failed'] = max(counts['failed'], len(blocked))
 
         if bootstrap:
             from .node_bootstrap import NodeBootstrapService

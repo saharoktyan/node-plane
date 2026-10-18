@@ -94,3 +94,61 @@ class UvRuntimeTests(unittest.TestCase):
             # Removing one complete release does not damage the other environment.
             shutil.rmtree(base / 'one')
             subprocess.run([str(base / 'two/.venv/bin/python'), '-c', 'import fixture_pkg'], check=True)
+
+    def test_locked_release_sync_excludes_dev_cleans_extras_and_rejects_stale_lock(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            def wheel(name):
+                path = base / f'{name}-1.0-py3-none-any.whl'
+                files = {f'{name}/__init__.py':'VALUE = 42\n',
+                    f'{name}-1.0.dist-info/METADATA':f'Metadata-Version: 2.1\nName: {name}\nVersion: 1.0\n',
+                    f'{name}-1.0.dist-info/WHEEL':'Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n'}
+                record = f'{name}-1.0.dist-info/RECORD'
+                files[record] = ''.join(f'{entry},,\n' for entry in [*files,record])
+                with zipfile.ZipFile(path,'w') as archive:
+                    for entry,content in files.items():
+                        archive.writestr(entry,content)
+                return path
+            runtime, dev, retired = wheel('fixture_pkg'),wheel('fixture_dev'),wheel('retired_pkg')
+            release = base / 'release'
+            release.mkdir()
+            manifest = ('[project]\nname="fixture-controller"\nversion="1.0"\n'
+                'requires-python=">=3.11,<3.13"\n'
+                f'dependencies=["fixture-pkg @ {runtime.as_uri()}"]\n'
+                '[dependency-groups]\nbackend=[]\ntelegram=[]\n'
+                f'dev=["fixture-dev @ {dev.as_uri()}"]\n'
+                '[tool.uv]\npackage=false\n')
+            (release/'pyproject.toml').write_text(manifest)
+            (release/'requirements.txt').write_text(str(runtime)+'\n')
+            env = {**os.environ,'NODE_PLANE_UV_BIN':shutil.which('uv'),
+                'PYTHON_BIN':sys.executable,'UV_OFFLINE':'true','UV_CACHE_DIR':str(base/'shared/cache/uv')}
+            subprocess.run([shutil.which('uv'),'lock','--project',str(release),'--python',sys.executable],
+                env=env,check=True,capture_output=True,text=True)
+            locked = (release/'uv.lock').read_bytes()
+            def sync():
+                return subprocess.run(['bash','-c','source "$1"; install_release_dependencies "$2" "$3"',
+                    'bash',str(ROOT/'scripts/uv_runtime.sh'),str(release),str(base/'shared')],
+                    env=env,capture_output=True,text=True,timeout=30)
+            result = sync()
+            self.assertEqual(result.returncode,0,result.stderr)
+            python = release/'.venv/bin/python'
+            subprocess.run([str(python),'-c','import fixture_pkg,importlib.util; '
+                'assert importlib.util.find_spec("fixture_dev") is None; '
+                'assert importlib.util.find_spec("pip") is None'],check=True)
+            subprocess.run([shutil.which('uv'),'pip','install','--python',str(python),str(retired)],
+                env=env,check=True,capture_output=True)
+            result = sync()
+            self.assertEqual(result.returncode,0,result.stderr)
+            subprocess.run([str(python),'-c','import importlib.util; '
+                'assert importlib.util.find_spec("retired_pkg") is None'],check=True)
+            self.assertEqual((release/'uv.lock').read_bytes(),locked)
+            (release/'pyproject.toml').write_text(manifest.replace('version="1.0"','version="2.0"'))
+            result = sync()
+            self.assertNotEqual(result.returncode,0)
+            self.assertIn('lockfile',result.stderr.lower())
+            self.assertEqual((release/'uv.lock').read_bytes(),locked)
+            (release/'uv.lock').unlink()
+            result = sync()
+            self.assertNotEqual(result.returncode,0)
+            self.assertIn('both required',result.stderr)
+            subprocess.run([str(python),'-c','import fixture_pkg'],check=True)

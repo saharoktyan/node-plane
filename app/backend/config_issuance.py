@@ -215,7 +215,7 @@ class ConfigIssuanceService:
         if protocol == 'awg':
             stored = json.loads(latest['result_json'])['wg_conf']
             refreshed = driver.refresh_awg_config(node_key, stored,
-                f'{node["title"]} AmneziaWG · {profile["display_name"]} · {identity["device_name"]}')
+                f'{node["title"]} · AWG' + (f' · {identity["device_name"]}' if identity.get("device_name") else ""))
             settings = json.loads(node['settings_json'])
             expected_endpoint = settings.get('awg_public_host', settings['public_host'])
             expected_port = settings.get('awg_port', 51820)
@@ -303,14 +303,12 @@ class ConfigIssuanceService:
             extension = row['transport']
             safe_title = (re.sub(r'[^\w .()#-]+', '', node['title']).strip(' .')[:64]
                           or row['node_key'])
-            safe_profile = (re.sub(r'[^\w .()#-]+', '', profile['display_name']).strip(' .')[:64]
-                            or 'Profile')
             safe_device = re.sub(r'[^\w .()#-]+','',identity['device_name']).strip(' .')[:64] or 'Device'
-            return {'filename': f'AmneziaWG - {safe_title} - {safe_profile} - {safe_device}.{extension}',
-                    'display_name': f'{node["title"]} AmneziaWG · {profile["display_name"]} · {identity["device_name"]}',
+            return {'filename': f'{safe_title} · AWG · {safe_device}.{extension}',
+                    'display_name': f'{node["title"]} · AWG' + (f' · {identity["device_name"]}' if identity.get("device_name") else ""),
                     'media_type': 'text/plain',
                     'content': refreshed['vpn_key'] if extension == 'vpn' else refreshed['wg_conf'],
-                    'files': [{'filename': f'AmneziaWG - {safe_title} - {safe_profile} - {safe_device}.{ext}',
+                    'files': [{'filename': f'{safe_title} · AWG · {safe_device}.{ext}',
                                'content': refreshed[key]} for ext, key in
                               (('vpn', 'vpn_key'), ('conf', 'wg_conf'))]}
         settings = json.loads(node['settings_json'])
@@ -323,12 +321,10 @@ class ConfigIssuanceService:
         else:
             params += (f'&type=xhttp&path={quote(metadata["xhttp_path"], safe="")}&mode=auto'
                        '&extra=%7B%22xmux%22%3A%7B%22maxConcurrency%22%3A%2216-32%22%7D%7D')
-        display_name = f'{node["title"]} VLESS {row["transport"].upper()} · {profile["display_name"]}'
+        display_name = f'{node["title"]} · VLESS'
         label = quote(display_name, safe='')
         uri = f'vless://{identity["xray_uuid"]}@{host}:{port}?{params}#{label}'
         safe_title = (re.sub(r'[^\w .()#-]+', '', node['title']).strip(' .')[:64]
                       or row['node_key'])
-        safe_profile = (re.sub(r'[^\w .()#-]+', '', profile['display_name']).strip(' .')[:64]
-                        or 'Profile')
-        return {'filename': f'VLESS - {safe_title} - {safe_profile} - {row["transport"].upper()}.txt',
+        return {'filename': f'{safe_title} · VLESS.txt',
                 'media_type': 'text/uri-list', 'content': uri, 'display_name': display_name}

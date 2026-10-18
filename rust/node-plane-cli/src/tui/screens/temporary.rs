@@ -183,9 +183,6 @@ pub(in crate::tui) fn draw_temporary(
                     View::Artifact => {
                         if browser.artifact.is_some() {
                             actions.push(("Copy URI", Control::TemporaryCopy));
-                            if app.image_picker.is_some() {
-                                actions.push(("QR code", Control::TemporaryQr));
-                            }
                             actions.push(("Save files", Control::TemporarySave));
                         }
                     }
@@ -267,13 +264,6 @@ pub(in crate::tui) fn draw_temporary(
                 area: rect,
                 control: *control,
             });
-        }
-    } else if app.qr_visible && browser.view == View::Artifact {
-        let layout = Layout::vertical([Constraint::Length(lines.len() as u16), Constraint::Min(0)])
-            .split(rows[1]);
-        frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), layout[0]);
-        if let Some(qr) = app.qr.borrow_mut().as_mut() {
-            draw_qr(frame, layout[1], qr);
         }
     } else {
         let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });

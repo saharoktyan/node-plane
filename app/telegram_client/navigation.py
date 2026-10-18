@@ -8,6 +8,16 @@ def parent_path(callback, locale, data):
     settings = (*admin, Breadcrumb(tr(locale, 'settings.admin.title'), 'admin_settings'))
     servers = (*admin, Breadcrumb(tr(locale, 'nodes.admin.title'), 'admin_nodes'))
     profiles = (*admin, Breadcrumb(tr(locale, 'profiles.admin.title'), 'admin_profiles'))
+    step = (data.get('quick_start_context') or {}).get('step')
+    guide = ()
+    if step:
+        home = data.get('quick_start_home')
+        guide = parent_path(home, locale, {}) if home else admin
+        guide = (*guide, Breadcrumb(tr(locale, 'quick_start.title'), 'quick_start'))
+        if step in {'node', 'protocols'}:
+            servers = (*guide, Breadcrumb(tr(locale, 'nodes.admin.title'), 'admin_nodes'))
+        elif step == 'access':
+            profiles = (*guide, Breadcrumb(tr(locale, 'profiles.admin.title'), 'admin_profiles'))
     if callback.startswith('u:'):
         # Member callbacks are opaque and owner-bound. Reuse that same router.
         from .routers.user import actions, button
@@ -25,7 +35,7 @@ def parent_path(callback, locale, data):
         if name == 'quick_start':
             return (*menu, Breadcrumb(tr(locale, 'quick_start.title'), callback))
         if name in {'profiles', 'profile'}:
-            return (*menu, Breadcrumb(tr(locale, 'home.get_config'), callback))
+            return (*(guide if step == 'config' else menu), Breadcrumb(tr(locale, 'home.get_config'), callback))
         if name in {'account_info', 'account_profile'}:
             return (*menu, Breadcrumb(tr(locale, 'home.account'), callback))
         if name in {'account_details', 'account_nodes_page'} and len(args) >= 2:
@@ -35,7 +45,7 @@ def parent_path(callback, locale, data):
             return (*menu, Breadcrumb(tr(locale, 'home.settings'), callback))
         if name in {'node', 'protocol', 'device_picker', 'device_picker_back'} and len(args) >= 2:
             profile, key = args[:2]
-            path = (*menu, member(tr(locale, 'home.get_config'), 'profile', profile),
+            path = (*(guide if step == 'config' else menu), member(tr(locale, 'home.get_config'), 'profile', profile),
                     member(data.get('_navigation_nodes', {}).get(key, key), 'node', profile, key))
             if name == 'node':
                 return (*path[:-1], Breadcrumb(path[-1].label, callback))
@@ -71,11 +81,14 @@ def parent_path(callback, locale, data):
         'admin_documentation': 'documentation.title', 'admin_about': 'about.title',
         'alerts': 'alerts.title', 'traffic': 'traffic.title',
         'bot_title_settings': 'bot_title.title', 'request_policy': 'request_policy.title',
-        'idefault:open': 'defaults.title', 'idefault:main': 'defaults.title',
+        'idefault:open': 'defaults.title', 'idefault:guide': 'defaults.title', 'idefault:main': 'defaults.title',
         'recpage:0': 'recovery.title',
         'system_cleanup': 'system_cleanup.title', 'ssh_key': 'settings.admin.ssh_key',
     }
     if callback in settings_pages:
+        if callback.startswith('idefault:') and data.get('installation_defaults_return') == 'quick_start':
+            return (*parent_path('quick_start', locale, data),
+                    Breadcrumb(tr(locale, 'defaults.title'), 'idefault:main'))
         return (*settings, Breadcrumb(tr(locale, settings_pages[callback]), callback))
     if callback.startswith('temporary:'):
         root = (*settings, Breadcrumb(tr(locale, 'temporary.title'), 'temporary:list:0'))
@@ -156,7 +169,7 @@ def parent_path(callback, locale, data):
         key = pieces[1]
         label = data.get('_navigation_nodes', {}).get(key, key)
         origin = data.get('node_return') or {}
-        roots = parent_path(origin['callback'], locale, {}) if origin.get('node_key') == key else servers
+        roots = parent_path(origin['callback'], locale, {**data, 'node_return': None, 'quick_start_context': None}) if origin.get('node_key') == key else servers
         path = (*(roots or servers), Breadcrumb(label, 'admin_node:' + key))
         if prefix == 'admin_node':
             return path

@@ -325,7 +325,6 @@ impl App {
             | Control::TemporaryPage(..)
             | Control::TemporaryShow
             | Control::TemporaryCopy
-            | Control::TemporaryQr
             | Control::TemporarySave
             | Control::TemporaryRevoke
             | Control::TemporaryConfirm => return self.activate_temporary(control),

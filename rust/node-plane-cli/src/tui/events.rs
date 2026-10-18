@@ -241,8 +241,6 @@ impl App {
                                 self.temporary.id = None;
                             }
                             Command::Artifact(_) => {
-                                self.qr_visible = false;
-                                *self.qr.borrow_mut() = None;
                                 self.temporary.artifact = Some(value);
                                 self.temporary.scroll = 0;
                                 self.temporary.view = View::Artifact;
@@ -415,9 +413,9 @@ impl App {
             }
             Event::Prompt(prompt, reply) => {
                 self.administrator_selected = 0;
+                self.trust = matches!(prompt, Prompt::Password { .. } | Prompt::Text { .. });
                 self.prompt = Some((prompt, reply));
                 self.password.zeroize();
-                self.trust = false;
             }
             Event::Finished(result) => {
                 if self.restart_required {

@@ -25,9 +25,10 @@ SCRIPTS = {
     'lib/agent_ssh.sh', 'lib/install_progress.sh', 'lib/stack_update.sh', 'lib/controller_archive.sh',
     'lib/archive_agent_journals.py', 'lib/install_credentials.sh',
 }
+PYTHON_PROJECT_FILES = {'pyproject.toml', 'uv.lock'}
 ROOT_FILES = {'VERSION', 'LICENSE', '.env.example', 'requirements.txt',
-              'requirements-backend.txt', 'requirements-telegram.txt'}
-REQUIRED = ROOT_FILES | {'app/backend/http_api.py', 'app/backend/executor.py',
+              'requirements-backend.txt', 'requirements-telegram.txt'} | PYTHON_PROJECT_FILES
+REQUIRED = (ROOT_FILES - PYTHON_PROJECT_FILES) | {'app/backend/http_api.py', 'app/backend/executor.py',
                         'app/telegram_client/main.py', 'runtime_assets/manifest.json'} | {'scripts/' + s for s in SCRIPTS}
 TAG = re.compile(r'^v?(\d+)\.(\d+)\.(\d+)(?:-alpha\.(\d+))?$')
 COMMIT = re.compile(r'^[0-9a-f]{40}$')
@@ -72,8 +73,9 @@ def build(root, output, ref, commit):
     # Only tracked files: no local credentials, test outputs or build caches.
     tracked = subprocess.check_output(['git', '-C', str(root), 'ls-files', '-z']).decode().split('\0')
     files = sorted(name for name in tracked if name and allowed(name))
-    if not REQUIRED.issubset(files):
-        raise ValueError('Missing controller runtime files: ' + ', '.join(sorted(REQUIRED - set(files))))
+    required = REQUIRED | PYTHON_PROJECT_FILES
+    if not required.issubset(files):
+        raise ValueError('Missing controller runtime files: ' + ', '.join(sorted(required - set(files))))
     version = (root / 'VERSION').read_text().strip()
     if version != ref.removeprefix('v'):
         raise ValueError('Controller VERSION does not match release tag')
@@ -86,6 +88,7 @@ def build(root, output, ref, commit):
     payload['BUILD_COMMIT'] = (commit + '\n').encode()
     verify_runtime_assets(payload)
     manifest = {'format': 1, 'ref': ref, 'version': version, 'commit': commit,
+                'python_dependencies': 'uv',
                 'files': {name: hashlib.sha256(value).hexdigest() for name, value in payload.items()}}
     payload[MANIFEST] = (json.dumps(manifest, sort_keys=True) + '\n').encode()
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -125,6 +128,8 @@ def verify(archive_path, ref=None, commit=None):
     # Readers must accept previously published runtime layouts too. The helper
     # became mandatory in alpha.52; its absence in older packages is intentional.
     required = set(REQUIRED)
+    if manifest.get('python_dependencies') == 'uv':
+        required |= PYTHON_PROJECT_FILES
     version = tuple(int(value or 0) for value in TAG.fullmatch(manifest['ref']).groups())
     # Credential validation is included starting with alpha.80. Keep older
     # packages readable for rollback and existing release selection.

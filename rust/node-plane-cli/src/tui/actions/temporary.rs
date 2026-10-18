@@ -16,10 +16,6 @@ impl App {
                 None
             }
             Control::TemporaryBack => {
-                if self.qr_visible {
-                    self.qr_visible = false;
-                    return None;
-                }
                 if self.temporary.view == crate::temporary::View::List
                     && self.temporary.filter.is_some()
                 {
@@ -102,31 +98,6 @@ impl App {
                 }
                 None
             }
-            Control::TemporaryQr => {
-                if let (Some(picker), Some(uri)) = (
-                    &self.image_picker,
-                    self.temporary
-                        .artifact
-                        .as_ref()
-                        .and_then(|v| v["content"].as_str()),
-                ) {
-                    match crate::temporary::qr_image(uri) {
-                        Ok(image) => {
-                            *self.qr_graphic.borrow_mut() =
-                                Some(picker.new_resize_protocol(image.clone()));
-                            *self.qr.borrow_mut() = Some(image);
-                            self.qr_visible = true;
-                            self.error.clear();
-                        }
-                        Err(_) => {
-                            self.error =
-                                "The link is too large for a QR code. Copy it or save the files."
-                                    .into()
-                        }
-                    }
-                }
-                None
-            }
             Control::TemporarySave => {
                 if let (Some(card), Some(artifact)) =
                     (&self.temporary.card, &self.temporary.artifact)
@@ -192,8 +163,6 @@ impl App {
         self.temporary.selected = 0;
         self.temporary.artifact = None;
         self.temporary.notice.clear();
-        self.qr_visible = false;
-        *self.qr.borrow_mut() = None;
         self.screen = Screen::Temporary;
         self.temporary_sidebar = false;
         self.quick_focus = false;
@@ -230,7 +199,6 @@ impl App {
             | Control::TemporaryRefresh
             | Control::TemporaryPage(_)
             | Control::TemporaryCopy
-            | Control::TemporaryQr
             | Control::TemporaryShow
             | Control::TemporarySave
             | Control::TemporaryRevoke

@@ -96,3 +96,23 @@ class BackendOnboardingTests(unittest.TestCase):
 
     def test_awg_issuance_with_device_completes_telegram_guide(self):
         self.check_protocol_completion('awg', 'conf')
+
+    def test_awg_on_other_node_counts_even_when_local_node_has_no_issuance(self):
+        profile = issuance_fixture.BackendConfigIssuanceTests.setup_ready_profile(self, 'awg')
+        with self.db.transaction() as conn:
+            conn.execute("INSERT INTO backend_nodes(key,title,region,enabled,protocols_json,xray_transports_json,desired_revision,applied_revision,settings_json) SELECT 'a-local','Local',region,enabled,protocols_json,xray_transports_json,desired_revision,applied_revision,settings_json FROM backend_nodes WHERE key='n1'")
+            conn.execute("INSERT INTO backend_grants(profile_id,node_key,protocol) VALUES (?,'a-local','awg')", (profile,))
+        driver = issuance_fixture.BackendConfigIssuanceTests.driver(self)
+        headers = self.headers_for_admin()
+        with TestClient(create_app(self.db, node_driver=driver)) as client:
+            client.post('/api/v1/system/onboarding/defaults', headers=headers)
+            response = client.post(f'/api/v1/profiles/{profile}/config-issuances?wait=true',
+                headers={**headers, 'Idempotency-Key': str(uuid4())},
+                json={'node_key':'n1', 'protocol':'awg', 'transport':'vpn'})
+            self.assertEqual(response.json()['status'], 'succeeded', response.text)
+            artifact = client.get(f'/api/v1/config-issuances/{response.json()["id"]}/artifact', headers=headers)
+            self.assertEqual(artifact.status_code, 200, artifact.text)
+            progress = client.get('/api/v1/system/onboarding', headers=headers).json()
+            self.assertEqual(progress['node_key'], 'n1')
+            self.assertIsNone(progress['next_step'])
+            self.assertFalse(progress['completed'])

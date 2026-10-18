@@ -50,3 +50,12 @@ class AccessDecisionDeliveryTests(IsolatedAsyncioTestCase):
         await state.update_data(notification_closed=True)
         self.assertTrue(await deliver_one(self.bot, self.backend, self.dispatcher))
         self.bot.edit_message_rich_message.assert_not_awaited()
+
+    async def test_deleted_notice_is_acknowledged_instead_of_blocking_other_admins(self):
+        from aiogram.exceptions import TelegramNotFound
+        from aiogram.methods import EditMessageText
+        self.bot.edit_message_rich_message.side_effect = TelegramNotFound(
+            method=EditMessageText(chat_id=123, message_id=99, text='receipt'),
+            message='Not Found')
+        self.assertTrue(await deliver_one(self.bot, self.backend, self.dispatcher))
+        self.assertIn('/ack?', self.backend.request.call_args.args[1])

@@ -11,7 +11,6 @@ impl App {
         let modal = self.prompt.is_some()
             || self.exit
             || self.discard.is_some()
-            || self.qr_visible
             || self.theme_wizard.is_some();
         if !modal && let Some(bar) = self.scrollbar.get() {
             match event.kind {

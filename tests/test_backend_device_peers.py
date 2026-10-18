@@ -112,7 +112,7 @@ class BackendDevicePeerTests(unittest.TestCase):
             artifacts.append(self.issuances.artifact(self.actor,queued['id']))
         self.assertNotEqual(artifacts[0]['content'],artifacts[1]['content'])
         self.assertTrue(artifacts[1]['display_name'].endswith(' · Phone'))
-        self.assertIn(' - Phone.vpn',artifacts[1]['filename'])
+        self.assertIn(' · AWG · Phone.vpn',artifacts[1]['filename'])
         self.revise()
         self.finish()
         self.assertEqual(self.driver.peers,{'alice':alice,'phone_peer':phone})
@@ -306,3 +306,51 @@ class BackendDevicePeerTests(unittest.TestCase):
                     self.assertEqual(self.executor.queue_expired_profiles(),1)
                 self.finish()
                 self.assertEqual(self.driver.peers,{})
+                self.assert_healthy_expected_access()
+
+    def diagnostic(self, *, running=True, disk_free=70):
+        from backend.installation_diagnostics import FleetDiagnostics
+        self.driver.inspect_node_services = lambda key: {
+            'docker':True, 'awg_installed':True, 'awg_running':running,
+            'awg_config_valid':True, 'runtime_drift':False,
+            'host_metrics':{'cpu_used_percent':10,'cpu_sample_window_seconds':60,
+                'cpu_sample_age_seconds':0,'ram_used_percent':30,
+                'disk_free_percent':disk_free,'load1':0.1,'cpus':2}}
+        return FleetDiagnostics(self.db,self.driver).observe(self.actor,node_key='n1')
+
+    def assert_healthy_expected_access(self):
+        from backend.admin_overview import AdminOverviewService
+        summary = NodeOverviewService(self.db).get(self.actor,'n1')
+        self.assertEqual((summary['attention'],summary['failed'],summary['pending']),(0,0,0))
+        diagnostic = self.diagnostic()
+        self.assertEqual((diagnostic['warnings'],diagnostic['errors']),(0,0),diagnostic)
+        self.assertEqual(AdminOverviewService(self.db).get(self.actor)['problem_nodes'],[])
+
+    def test_revocation_is_pending_until_confirmed_and_blocked_revoke_still_warns(self):
+        self.prepare()
+        self.finish()
+        self.db.connection.execute('UPDATE backend_profiles SET frozen=1 WHERE id=?',(self.profile_id,))
+        self.revise()
+        summary = NodeOverviewService(self.db).get(self.actor,'n1')
+        self.assertEqual((summary['pending'],summary['attention'],summary['failed']),(1,0,0))
+        self.assertEqual(self.diagnostic()['warnings'],0)
+        self.db.connection.execute("UPDATE backend_operation_tasks SET status='blocked' WHERE status='awaiting_executor'")
+        summary = NodeOverviewService(self.db).get(self.actor,'n1')
+        self.assertEqual(summary['failed'],1)
+        report = self.diagnostic()
+        self.assertTrue(any(c['id']=='operations' and c['status']=='warning'
+            for c in report['items'][0]['checks']))
+
+    def test_disabled_node_is_neutral_but_host_faults_are_not_suppressed(self):
+        self.prepare()
+        self.finish()
+        self.db.connection.execute("UPDATE backend_nodes SET enabled=0 WHERE key='n1'")
+        self.revise()
+        self.finish()
+        summary = NodeOverviewService(self.db).get(self.actor,'n1')
+        self.assertEqual((summary['attention'],summary['failed']),(0,0))
+        report = self.diagnostic(running=False)
+        self.assertEqual((report['warnings'],report['errors']),(0,0),report)
+        broken = self.diagnostic(running=False,disk_free=3)
+        self.assertTrue(any(c['id']=='disk_free_percent' and c['status']=='error'
+            for c in broken['items'][0]['checks']))

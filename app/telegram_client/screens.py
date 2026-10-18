@@ -185,8 +185,6 @@ class Screen:
         blocks = ([InputRichBlockParagraph(text=breadcrumb_text(self.breadcrumbs,
             self.title, self.breadcrumb_more))] if self.breadcrumbs else
             [InputRichBlockSectionHeading(text=self.title, size=1)])
-        if self.breadcrumbs:
-            blocks.append(InputRichBlockDivider())
         if self.breadcrumbs and self.breadcrumb_more and text_width(self.title) > 24 and text_width(
                 ' › '.join([p.label for p in self.breadcrumbs] + [self.title])) > 48:
             blocks.append(InputRichBlockSectionHeading(text=self.title, size=1))
@@ -237,8 +235,7 @@ class Screen:
         return InputRichMessage(blocks=blocks, skip_entity_detection=True)
 
     def plain(self) -> str:
-        lines = [' › '.join([p.label for p in self.breadcrumbs] + [self.title]),
-                 *(('──────────',) if self.breadcrumbs else ()), *self.lines]
+        lines = [' › '.join([p.label for p in self.breadcrumbs] + [self.title]), *self.lines]
         def append_sections(sections):
             for section in sections:
                 lines.extend((section.title, *section.lines))

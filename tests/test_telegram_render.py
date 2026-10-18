@@ -14,14 +14,14 @@ from telegram_client.routers import user
 
 
 class RenderRecoveryTests(IsolatedAsyncioTestCase):
-    async def test_path_divider_is_separate_from_back_divider_and_absent_without_path(self):
+    async def test_path_has_no_divider_and_back_keeps_its_divider(self):
         back = InlineKeyboardButton(text='← Back', callback_data='back')
         screen = Screen('Settings', ('Content',), breadcrumbs=(Breadcrumb('Menu','home'),),
                         embedded_buttons=True, navigation=True)
         self.assertEqual([block.type for block in screen.rich([[back]]).blocks],
-                         ['paragraph','divider','paragraph','divider','buttons'])
-        self.assertEqual(screen.plain().split('\n\n')[:3],
-                         ['Menu › Settings','──────────','Content'])
+                         ['paragraph','paragraph','divider','buttons'])
+        self.assertEqual(screen.plain().split('\n\n')[:2],
+                         ['Menu › Settings','Content'])
         no_content = Screen('Settings', breadcrumbs=screen.breadcrumbs,
                             embedded_buttons=True, navigation=True)
         self.assertEqual([block.type for block in no_content.rich([[back]]).blocks],

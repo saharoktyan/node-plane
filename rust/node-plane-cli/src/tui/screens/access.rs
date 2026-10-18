@@ -147,7 +147,9 @@ pub(in crate::tui) fn draw_access_buttons(
     let back = buttons.iter().find(|(label, control)| {
         *label == "Back"
             && *control != Control::AccessWizardBack
-            && app.access.editor.is_none()
+            && app.access.editor.as_ref().is_none_or(|editor| {
+                editor.creation_step.is_none() && editor.duration_input.is_none()
+            })
             && !app.access.creating_profile
             && app.access.decision.is_none()
     });
@@ -680,6 +682,7 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
                     (_, Some("disabled")) => {
                         "Block this account? Bot and API access will be disabled.\nVPN access is retained; use Freeze to suspend it."
                     }
+                    (_, Some("approved")) => "Unblock this account?",
                     _ => "Approve this account?",
                 },
                 Control::AccessAccountConfirm,
@@ -738,8 +741,10 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
             } else {
                 3
             }
-        } else {
+        } else if editor.creation_step.is_some() {
             6
+        } else {
+            3
         }
     } else if let Some(card) = &app.access.card {
         let count = if app.access.decision.is_some()
@@ -861,6 +866,10 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
             draw_access_buttons(frame, app, sections[2], &buttons, hits);
             return;
         }
+        hits.push(Hit {
+            area: pinned_back_area(frame.area()),
+            control: Control::AccessBack,
+        });
         let labels = ["Profile name", "Expires at (UTC)"];
         frame.render_widget(
             Paragraph::new(if editor.source.is_some() {
@@ -922,7 +931,6 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
         let mut buttons = vec![
             ("Access", Control::AccessGrants),
             ("Save", Control::AccessSave),
-            ("Cancel", Control::AccessBack),
         ];
         if !editor.permanent_access {
             buttons.insert(0, ("Duration", Control::AccessExpiryMenu));
@@ -967,7 +975,9 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
             buttons.clear();
         }
         let mut lines = vec![Line::from(label(app.access.tab, card))];
-        if let Some(account) = card.get("_account") {
+        if app.access.tab != Tab::Requests
+            && let Some(account) = card.get("_account")
+        {
             lines.push(Line::from(format!(
                 "{} · {}",
                 label(Tab::Accounts, account),
@@ -1029,6 +1039,7 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
                     (Some("admin"), _) => "Grant administrator access to this account?",
                     (Some(_), _) => "Remove administrator access from this account?",
                     (_, Some("disabled")) => "Block this account? Bot and API access will be disabled. VPN access is retained; use Freeze to suspend it.",
+                    (_, Some("approved")) => "Unblock this account?",
                     _ => "Approve this account?",
                 },
             ));
@@ -1063,6 +1074,8 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
                     buttons.push((
                         if account["status"] == "approved" {
                             "Block"
+                        } else if account["status"] == "disabled" {
+                            "Unblock"
                         } else {
                             "Approve"
                         },

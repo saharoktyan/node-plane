@@ -3185,3 +3185,6 @@ CATALOG['ru'].update({
 
 CATALOG['en']['recovery.hint.bootstrap_child'] = 'Use Resume setup to recover this installation step and continue. Cancel operation stops setup without removing installed components.'
 CATALOG['ru']['recovery.hint.bootstrap_child'] = 'Нажмите «Продолжить установку», чтобы восстановить текущий шаг. Отмена операции остановит установку, сохранив уже установленные компоненты.'
+
+CATALOG['en']['quick_start.edit_defaults'] = 'Edit installation defaults'
+CATALOG['ru']['quick_start.edit_defaults'] = 'Изменить настройки установки'

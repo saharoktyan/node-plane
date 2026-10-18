@@ -368,14 +368,17 @@ async def show_profiles(chat_id: int, user_id: int, message_id: int, bot: Bot,
                         backend: BackendClient, state: FSMContext) -> None:
     locale = normalize_locale((await state.get_data()).get('locale'))
     page = await backend.profiles(user_id)
-    await state.update_data(member_profile_back='home' if len(page['items']) == 1 else 'profiles')
+    data = await state.get_data()
+    guided = (data.get('quick_start_context') or {}).get('step') == 'config'
+    profile_back = 'quick_start' if guided else ('home' if len(page['items']) == 1 else 'profiles')
+    await state.update_data(member_profile_back=profile_back)
     if len(page['items']) == 1:
         await show_profile(chat_id, user_id, message_id, page['items'][0]['id'],
                            bot, backend, state)
         return
     rows = [[button(user_id, item['display_name'], 'profile', item['id'])]
             for item in page['items']]
-    rows.append([button(user_id, tr(locale, 'back'), 'home')])
+    rows.append([button(user_id, tr(locale, 'back'), 'quick_start' if guided else 'home')])
     await render(bot, chat_id, Screen(tr(locale, 'profiles.title'),
         (tr(locale, 'profiles.choose'),) if page['items'] else (tr(locale, 'profiles.empty'),), embedded_buttons=True),
         rows, state, message_id)
@@ -1025,6 +1028,7 @@ async def user_action_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
             from .user_devices import handle_action
             await handle_action(action, query, bot, backend, state)
         elif action.name == 'home':
+            await state.update_data(quick_start_context=None, node_return=None, member_profile_back='profiles')
             await show_home(chat_id, user_id, bot, backend, state, message_id,
                             cached_navigation=True)
         elif action.name == 'first_locale':
@@ -1122,6 +1126,7 @@ async def user_action_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
             from .admin_requests import notify_admins
             await notify_admins(bot, backend, request['id'])
         elif action.name == 'admin_menu':
+            await state.update_data(quick_start_context=None, node_return=None, member_profile_back='profiles')
             await show_admin_menu(chat_id, user_id, message_id, bot, backend, state)
     except BackendError as exc:
         locale = normalize_locale((await state.get_data()).get('locale'))
@@ -1321,5 +1326,6 @@ async def admin_menu_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
             query.message.chat.id, query.message.message_id, account)
         return
     await state.set_state(None)
+    await state.update_data(quick_start_context=None, node_return=None, member_profile_back='profiles')
     await show_admin_menu(query.message.chat.id, query.from_user.id,
                           query.message.message_id, bot, backend, state)

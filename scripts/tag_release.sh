@@ -155,17 +155,22 @@ fi
 # never be tagged or published merely because runtime dependencies are absent.
 set_step "compile Telegram client"
 python3 - "$VERSION" <<'PY'
-import pathlib, re, sys
+import pathlib, re, sys, tomllib
 manifest = pathlib.Path('rust/node-plane-cli/Cargo.toml').read_text()
 match = re.search(r'^version\s*=\s*"([^"]+)"', manifest, re.M)
 if not match or match.group(1) != sys.argv[1]:
     raise SystemExit('Workstation Cargo package version must match VERSION before release.')
+project = tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']
+if project['version'] != sys.argv[1]:
+    raise SystemExit('Python project version must match VERSION before release.')
 PY
 python3 -m compileall -q app/telegram_client
 
 run_preflight_checks() {
   set_step "python tests"
-  python3 scripts/run_ci_tests.py unit
+  need_cmd uv
+  uv run --locked python scripts/export_python_requirements.py --check
+  uv run --locked python scripts/run_ci_tests.py unit
   set_step "cargo test node-driver"
   (cd rust/node-driver && cargo test --locked)
   set_step "cargo test node-agent"

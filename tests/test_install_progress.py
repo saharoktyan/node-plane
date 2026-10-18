@@ -49,6 +49,8 @@ auto_provision_simple_postgres() {
             path = self.release / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             path.touch()
+        for name in ('pyproject.toml', 'uv.lock'):
+            shutil.copyfile(ROOT / name, self.release / name)
         (self.release / 'VERSION').write_text('0.4.3-alpha.99\n')
         for name, label in (
             ('install_backend_systemd.sh', 'backend-services'),
@@ -76,6 +78,7 @@ fi
 printf 'uv %s\\n' "$*" >> "$COMMAND_LOG"
 if [[ "$1" == --version ]]; then printf 'uv fixture\\n'; fi
 if [[ "$1" == venv ]]; then "$FAKE_PYTHON" -m venv "${@: -1}"; fi
+if [[ "$1" == sync ]]; then "$FAKE_PYTHON" -m venv "$UV_PROJECT_ENVIRONMENT"; fi
 ''')
         self.executable(self.binaries / 'git', '''#!/bin/bash
 case "$1" in
@@ -127,7 +130,7 @@ esac
 
     def test_archive_install_has_all_seven_steps_without_source_checkout(self):
         from tests.test_controller_release import release
-        for name in release.REQUIRED:
+        for name in release.REQUIRED | release.PYTHON_PROJECT_FILES:
             path = self.source / name
             if not path.exists():
                 path.parent.mkdir(parents=True, exist_ok=True)

@@ -21,7 +21,7 @@ class CargoDistReleaseTests(unittest.TestCase):
     def test_global_build_packages_server_stack_without_legacy_workstation(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            for name in controller.REQUIRED:
+            for name in controller.REQUIRED | controller.PYTHON_PROJECT_FILES:
                 path = root / name
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text('fixture\n')

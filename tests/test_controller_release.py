@@ -28,7 +28,7 @@ class ControllerReleaseTests(unittest.TestCase):
         self.source.mkdir()
         self.tag = 'v' + (ROOT / 'VERSION').read_text().strip()
         self.commit = 'a' * 40
-        for name in release.REQUIRED:
+        for name in release.REQUIRED | release.PYTHON_PROJECT_FILES:
             target = self.source / name
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / name, target)
@@ -62,6 +62,29 @@ class ControllerReleaseTests(unittest.TestCase):
         result = subprocess.run(['python3', '-m', 'compileall', '-q', str(destination / 'app')],
                                 capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_dependency_layout_keeps_legacy_archives_readable_and_checks_new_pair(self):
+        manifest, contents = release.verify(self.archive)
+        self.assertEqual(manifest['python_dependencies'], 'uv')
+        self.assertTrue(release.PYTHON_PROJECT_FILES.issubset(contents))
+        for name in release.PYTHON_PROJECT_FILES:
+            contents.pop(name)
+            manifest['files'].pop(name)
+        def archive(name):
+            target = self.root / name
+            contents[release.MANIFEST] = json.dumps(manifest).encode()
+            with tarfile.open(target, 'w:gz') as output:
+                for key, value in contents.items():
+                    info = tarfile.TarInfo(key)
+                    info.size = len(value)
+                    output.addfile(info, io.BytesIO(value))
+            return target
+        with self.assertRaisesRegex(ValueError, 'incomplete'):
+            release.verify(archive('incomplete-project.tar.gz'))
+        manifest.pop('python_dependencies')
+        legacy, files = release.verify(archive('legacy.tar.gz'))
+        self.assertNotIn('python_dependencies', legacy)
+        self.assertTrue({'requirements.txt','requirements-backend.txt','requirements-telegram.txt'}.issubset(files))
 
     def test_packaged_installer_can_source_its_libraries(self):
         destination = self.root / 'installer'

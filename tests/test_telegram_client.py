@@ -1681,7 +1681,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         self.assertEqual(user.actions[callbacks[-1].split(':', 1)[1]].name, 'admin_menu')
         self.assertEqual(render.call_args.args[3][-1][0].text, 'Main menu')
         blocks = render.call_args.args[2].rich(render.call_args.args[3]).blocks
-        self.assertEqual(sum(block.type == 'divider' for block in blocks), 2)
+        self.assertEqual(sum(block.type == 'divider' for block in blocks), 1)
         self.assertEqual([block.type for block in blocks[-3:]], ['buttons', 'divider', 'buttons'])
         self.assertFalse(any(value.startswith('refresh_runtime:') for value in callbacks))
 

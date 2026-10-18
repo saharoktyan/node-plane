@@ -24,7 +24,7 @@ def has_node_changes(data):
 
 def leaving_node_settings(callback, data):
     draft = data.get('node_settings_draft') or {}
-    return callback in {'admin_menu', 'admin_nodes'} or (
+    return callback in {'admin_menu', 'admin_nodes', 'quick_start'} or (
         (callback or '').startswith(('admin_node:', 'node_settings:'))
         and callback.split(':', 1)[1] != draft.get('node_key'))
 
@@ -33,8 +33,8 @@ def safe_discard_destination(callback, kind, data):
     if kind == 'node_settings':
         return leaving_node_settings(callback, data)
     if kind == 'access':
-        return callback in {'admin_menu', 'admin_profiles'} or (callback or '').startswith(('admin_profile:', 'admin_profile_edit:', 'prof_manage:'))
-    return callback in {'admin_menu', 'admin_nodes'}
+        return callback in {'admin_menu', 'admin_profiles', 'quick_start'} or (callback or '').startswith(('admin_profile:', 'admin_profile_edit:', 'prof_manage:'))
+    return callback in {'admin_menu', 'admin_nodes', 'quick_start'}
 
 
 async def edit_navigation(query, bot, screen, rows):
@@ -63,7 +63,7 @@ class NavigationGuardMiddleware(BaseMiddleware):
         leaving_access = has_profile_changes(values) and (
             safe_discard_destination(query.data, 'access', values))
         leaving_creation = bool(values.get('wizard_data') and not values.get('wizard_saved')) and (
-            query.data in {'admin_menu', 'admin_nodes'})
+            query.data in {'admin_menu', 'admin_nodes', 'quick_start'})
         leaving_settings = has_node_changes(values) and leaving_node_settings(query.data, values)
         if not (leaving_access or leaving_creation or leaving_settings):
             return await handler(event, data)

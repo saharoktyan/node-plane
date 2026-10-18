@@ -32,6 +32,7 @@ async def show(query, bot, state, *, error=None):
     locale = normalize_locale(data.get('locale'))
     settings = draft['settings']
     advanced = data.get('installation_defaults_view') == 'advanced'
+    back = data.get('installation_defaults_return') or AdminSettingsCallback().pack()
     protocol_rows = (tuple(button(tr(locale, 'protocol.' + kind), 'protocol:' + kind,
         selected=kind in draft['protocols']) for kind in ('xray', 'awg')),)
     transport_rows = (tuple(button(tr(locale, 'transport.' + kind), 'transport:' + kind,
@@ -74,7 +75,7 @@ async def show(query, bot, state, *, error=None):
         for key in ('protocols', 'xray_transports', 'settings'))
     rows = ([[button(tr(locale, 'defaults.save'), 'save', selected=True), button(tr(locale, 'defaults.reset'), 'reset')]] if changed else []) + [
         [button(tr(locale, 'back'), 'main') if advanced else
-         InlineKeyboardButton(text=tr(locale, 'back'), callback_data=AdminSettingsCallback().pack())]]
+         InlineKeyboardButton(text=tr(locale, 'back'), callback_data=back)]]
     await render(bot, query.message.chat.id, Screen(tr(locale, 'defaults.edit_advanced' if advanced else 'defaults.title'),
         ((error,) if error else ()) + (tr(locale, 'defaults.future_only'),),
         sections=tuple(sections), embedded_buttons=True, navigation=True), rows, state, query.message.message_id)
@@ -88,10 +89,11 @@ async def defaults_cb(query, bot, backend, state):
     locale = normalize_locale((await state.get_data()).get('locale'))
     try:
         data = await state.get_data()
-        if action == 'open' or not data.get('installation_defaults_draft'):
+        if action in {'open', 'guide'} or not data.get('installation_defaults_draft'):
             current = await backend.request('GET', PATH, telegram_user_id=query.from_user.id)
             await state.update_data(installation_defaults_draft=current,
-                installation_defaults_original=current, installation_defaults_view='main')
+                installation_defaults_original=current, installation_defaults_view='main',
+                installation_defaults_return='quick_start' if action == 'guide' else None)
             await show(query, bot, state)
             return
         draft = dict(data['installation_defaults_draft'])
@@ -151,7 +153,9 @@ async def defaults_cb(query, bot, backend, state):
         else:
             await render(bot, query.message.chat.id, Screen(tr(locale, 'defaults.title'),
                 (tr(locale, 'action.error.retry'),), embedded_buttons=True, navigation=True),
-                [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data=AdminSettingsCallback().pack())]], state, query.message.message_id)
+                [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data=
+                    'quick_start' if action == 'guide' or data.get('installation_defaults_return') == 'quick_start'
+                    else AdminSettingsCallback().pack())]], state, query.message.message_id)
 
 
 @router.message(DefaultField.waiting, F.text, ~F.text.startswith('/'))

@@ -4,9 +4,10 @@ The backend owns identity, authorization, desired access, node inventory, settin
 
 ## Run from a checkout
 
-Install the root Python requirements, load a private PostgreSQL environment and initialize schema:
+Sync the locked backend dependencies with uv, load a private PostgreSQL environment and initialize schema:
 
 ```sh
+uv sync --locked --python 3.12 --no-default-groups --group backend
 PYTHONPATH=app .venv/bin/python -m backend.admin_cli init-schema
 PYTHONPATH=app .venv/bin/python -m uvicorn backend.http_api:application --factory --host 127.0.0.1 --port 8080 --no-access-log
 ```

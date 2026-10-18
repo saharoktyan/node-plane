@@ -687,6 +687,15 @@ impl Browser {
                 {
                     profile["_account"] = account.clone();
                 }
+                if delete {
+                    self.items.retain(|item| item["id"] != profile["id"]);
+                } else if let Some(item) = self
+                    .items
+                    .iter_mut()
+                    .find(|item| item["id"] == profile["id"])
+                {
+                    *item = profile.clone();
+                }
                 self.card = Some(profile);
                 self.editor = None;
                 self.profile_action = None;
@@ -736,7 +745,18 @@ impl Browser {
                 if self.tab == Tab::Profiles
                     && let Some(card) = &mut self.card
                 {
-                    card["_account"] = value;
+                    let mut account = value;
+                    if let Some(profile) = account
+                        .as_object_mut()
+                        .and_then(|account| account.remove("_profile"))
+                    {
+                        *card = profile;
+                    }
+                    card["_account"] = account;
+                    if let Some(item) = self.items.iter_mut().find(|item| item["id"] == card["id"])
+                    {
+                        *item = card.clone();
+                    }
                 } else {
                     self.tab = Tab::Accounts;
                     self.card = Some(value);
@@ -764,6 +784,30 @@ impl Browser {
         }
     }
 }
+/// Profiles are shown only for approved or blocked accounts; pending requests
+/// and deletion receipts belong to their own screens.
+pub fn merge_profiles(profiles: &mut Value, accounts: &Value) {
+    if let Some(items) = profiles["items"].as_array_mut() {
+        items.retain_mut(|profile| {
+            let account = accounts["items"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find(|account| {
+                    account["id"] == profile["owner_account_id"]
+                        && matches!(account["status"].as_str(), Some("approved" | "disabled"))
+                        && account["deleted"] != true
+                });
+            if let Some(account) = account {
+                profile["_account"] = account.clone();
+                true
+            } else {
+                false
+            }
+        });
+    }
+}
+
 pub fn text(value: &Value) -> String {
     value.as_str().map(str::to_owned).unwrap_or_else(|| {
         if value.is_null() {
@@ -797,6 +841,12 @@ pub fn label(tab: Tab, item: &Value) -> String {
                 } else {
                     "Deleting"
                 }
+            } else if item["_account"]["status"] == "disabled" {
+                "Blocked"
+            } else if item["_account"]["status"] == "pending" {
+                "Pending"
+            } else if item["_account"]["status"] == "rejected" {
+                "Rejected"
             } else if item["frozen"] == true {
                 "Frozen"
             } else {
@@ -854,6 +904,46 @@ pub fn role_error(error: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn profiles_exclude_pending_and_deleted_accounts_and_keep_blocked() {
+        let mut profiles = json!({"items":[
+            {"id":"p1","owner_account_id":"approved","display_name":"Member"},
+            {"id":"p2","owner_account_id":"pending"},
+            {"id":"p3","owner_account_id":"blocked","display_name":"Blocked member"},
+            {"id":"p4","owner_account_id":"deleted"}]});
+        let accounts = json!({"items":[
+            {"id":"approved","status":"approved"},
+            {"id":"pending","status":"pending"},
+            {"id":"blocked","status":"disabled"}]});
+        merge_profiles(&mut profiles, &accounts);
+        assert_eq!(profiles["items"].as_array().unwrap().len(), 2);
+        assert_eq!(profiles["items"][0]["id"], "p1");
+        assert_eq!(
+            label(Tab::Profiles, &profiles["items"][1]),
+            "Blocked member · Blocked"
+        );
+    }
+
+    #[test]
+    fn role_change_updates_profile_revision_before_next_action() {
+        let mut browser = Browser::default();
+        browser.card = Some(json!({"id":"profile","desired_revision":1}));
+        browser.items = vec![browser.card.clone().unwrap()];
+        browser.apply(
+            Command::AccountMutate {
+                id: "account".into(),
+                revision: 1,
+                body: json!({"role":"member"}),
+                key: Uuid::new_v4(),
+            },
+            json!({"id":"account","role":"member","revision":2,
+                "_profile":{"id":"profile","desired_revision":3}}),
+        );
+        assert_eq!(browser.card.as_ref().unwrap()["desired_revision"], 3);
+        assert_eq!(browser.items[0]["desired_revision"], 3);
+        assert_eq!(browser.card.as_ref().unwrap()["_account"]["role"], "member");
+    }
+
     #[test]
     fn applied_access_summary_counts_unique_servers_not_protocol_grants() {
         let mut editor = Editor::new(None, None);

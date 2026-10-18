@@ -109,9 +109,6 @@ pub fn run(mut request: Request) -> Result<()> {
     let guard = TerminalGuard::enter()?;
     let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
     let mut app = App::new(&request);
-    // Terminal graphics can truncate the image or erase surrounding cells in
-    // Kitty and Windows Terminal. Keep QR disabled until rendering is reliable.
-    // Do not probe image capabilities: copy/save work in every terminal.
     app.load_connections(&request)?;
     app.screen = Screen::Idle;
     let mut receiver: Option<mpsc::Receiver<Event>> = None;
@@ -133,8 +130,6 @@ pub fn run(mut request: Request) -> Result<()> {
     let mut last_temporary_poll = std::time::Instant::now();
     let mut last_access_poll = std::time::Instant::now();
     let mut last_node_observation = std::time::Instant::now();
-    let mut qr_was_visible = false;
-    let mut qr_needs_redraw = false;
     let mut previous_accent = app.connections.accent.clone();
     let mut pending_input = None;
     let mut input_timing = None;
@@ -459,7 +454,6 @@ pub fn run(mut request: Request) -> Result<()> {
                                 app.prompt = None;
                                 app.exit = false;
                                 app.discard = None;
-                                app.qr_visible = false;
                                 app.self_release = None;
                                 app.self_status =
                                     "Updated; restart TUI to use the new version.".into();
@@ -488,15 +482,11 @@ pub fn run(mut request: Request) -> Result<()> {
         if app.restart_required {
             continue;
         }
-        if qr_was_visible != app.qr_visible || previous_accent != app.connections.accent {
+        if previous_accent != app.connections.accent {
             terminal.clear()?;
-            qr_needs_redraw = true;
-            qr_was_visible = app.qr_visible;
             previous_accent = app.connections.accent.clone();
         }
-        // Graphics persist outside the cell buffer. Sending the same image on
-        // every idle tick clears and uploads it again, causing visible flicker.
-        if !app.qr_visible || qr_needs_redraw {
+        {
             let draw_timing = crate::timings::Stage::new("tui_draw");
             app.restore_navigation_context();
             terminal.draw(|frame| app.hits = draw(frame, &app))?;
@@ -506,7 +496,6 @@ pub fn run(mut request: Request) -> Result<()> {
             {
                 terminal.draw(|frame| app.hits = draw(frame, &app))?;
             }
-            qr_needs_redraw = false;
             drop(draw_timing);
             drop(input_timing.take());
         }
@@ -558,7 +547,6 @@ pub fn run(mut request: Request) -> Result<()> {
                 }
                 TermEvent::Resize(_, _) => {
                     terminal.clear()?;
-                    qr_needs_redraw = true;
                 }
                 _ => {}
             }
@@ -601,10 +589,7 @@ pub fn run(mut request: Request) -> Result<()> {
         };
         match input {
             TermEvent::Resize(_, _) => {
-                // Image protocols draw outside ratatui's cell diff. Invalidate
-                // both buffers so resizing repaints every cell around the QR.
                 terminal.clear()?;
-                qr_needs_redraw = true;
             }
             TermEvent::Paste(text) => {
                 if matches!(
@@ -779,10 +764,6 @@ pub fn run(mut request: Request) -> Result<()> {
                 }
                 if app.theme_wizard.is_some() {
                     app.theme_wizard_key(key);
-                    continue;
-                }
-                if app.qr_visible {
-                    app.temporary_key(key);
                     continue;
                 }
                 if key.code == KeyCode::F(1) {

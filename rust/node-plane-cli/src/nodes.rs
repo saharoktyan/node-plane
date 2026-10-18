@@ -1224,6 +1224,12 @@ async fn execute_inner(
                         && let Some(account) = value["account_id"].as_str() {
                             value["_account"] = backend::request(session, &credential, Method::GET, &format!("/api/v1/accounts/{account}"), None, None).await?;
                     }
+                    if matches!(&command, crate::access::Command::AccountMutate { .. })
+                        && let Some(id) = value["profile_id"].as_str() {
+                        let profile = backend::request(session, &credential, Method::GET,
+                            &format!("/api/v1/profiles/{id}"), None, None).await?;
+                        value["_profile"] = profile;
+                    }
                     if let crate::access::Command::List(tab) = &command {
                         let mut cursors = BTreeSet::new();
                         while let Some(cursor) = value["next_cursor"].as_str().map(str::to_owned) {
@@ -1246,18 +1252,7 @@ async fn execute_inner(
                                 ensure!(items.len() + extra.len() <= 20_000, "Too many accounts");
                                 items.extend(extra.iter().cloned()); accounts["next_cursor"] = next["next_cursor"].clone();
                             }
-                            let items = value["items"].as_array_mut().context("Missing profiles")?;
-                            for account in accounts["items"].as_array().into_iter().flatten() {
-                                let owned: Vec<_> = items.iter_mut().filter(|item| item["owner_account_id"] == account["id"]).collect();
-                                if owned.is_empty() {
-                                    let mut item = account.clone();
-                                    item["_account_only"] = json!(true);
-                                    item["display_name"] = json!(crate::access::label(crate::access::Tab::Accounts, account));
-                                    items.push(item);
-                                } else {
-                                    for item in owned { item["_account"] = account.clone(); }
-                                }
-                            }
+                            crate::access::merge_profiles(&mut value, &accounts);
                         }
                     }
                     let _ = tx.send(Event::Nodes(Update::Access(command, value)));

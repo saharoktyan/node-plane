@@ -129,3 +129,45 @@ class TelegramInstallationDefaultsTests(IsolatedAsyncioTestCase):
         self.backend.request.assert_not_awaited()
         draft = (await self.state.get_data())['installation_defaults_draft']
         self.assertEqual((draft['settings']['awg_port_mode'], draft['settings']['awg_port']), ('manual', 51111))
+
+    async def test_guide_defaults_keep_context_and_return_with_continue_and_edit(self):
+        from telegram_client.routers import quick_start
+        from telegram_client.navigation import screen_parents, parent_path
+        current = {'revision': 1, 'protocols': ['awg'], 'xray_transports': [],
+            'settings': {'awg_i1_preset': 'quic', 'awg_port_mode': 'auto'}}
+        self.backend.request.return_value = copy.deepcopy(current)
+        self.query.data = 'idefault:guide'
+        with patch.object(defaults, 'render', new_callable=AsyncMock) as draw:
+            await defaults.defaults_cb(self.query, self.bot, self.backend, self.state)
+            screen, rows = draw.call_args.args[2:4]
+            self.assertEqual(rows[-1][0].callback_data, 'quick_start')
+            data = await self.state.get_data()
+            self.assertEqual(screen_parents(screen, rows, 'en', data)[-1].callback, 'quick_start')
+            self.query.data = 'idefault:advanced'
+            await defaults.defaults_cb(self.query, self.bot, self.backend, self.state)
+            screen, rows = draw.call_args.args[2:4]
+            parents = screen_parents(screen, rows, 'en', await self.state.get_data())
+            self.assertIn('quick_start', [p.callback for p in parents])
+            self.assertNotIn('admin_settings', [p.callback for p in parents])
+            self.query.data = 'idefault:field:awg_port'
+            await defaults.defaults_cb(self.query, self.bot, self.backend, self.state)
+            self.assertIn('quick_start', [p.callback for p in parent_path('idefault:back', 'en', await self.state.get_data())])
+        self.backend.request.return_value = {'steps': [{'key': 'defaults', 'complete': False}],
+            'next_step': 'defaults', 'node_key': None, 'profile_id': None}
+        with patch.object(quick_start, 'render', new_callable=AsyncMock) as draw:
+            await quick_start.show(123, 123, 77, self.bot, self.backend, self.state)
+            rows = draw.call_args.args[3]
+            self.assertEqual(rows[0][0].callback_data, 'quick_start_defaults')
+            self.assertEqual(rows[1][0].callback_data, 'idefault:guide')
+            self.assertEqual(rows[1][0].text, 'Edit installation defaults')
+            self.assertIsNone(await self.state.get_state())
+            self.backend.request.reset_mock()
+            await quick_start.use_defaults(self.query, self.bot, self.backend, self.state)
+            self.assertEqual(self.backend.request.await_args_list[0].args,
+                ('POST', '/api/v1/system/onboarding/defaults'))
+        self.backend.request.return_value = copy.deepcopy(current)
+        self.query.data = 'idefault:open'
+        with patch.object(defaults, 'render', new_callable=AsyncMock) as draw:
+            await defaults.defaults_cb(self.query, self.bot, self.backend, self.state)
+            self.assertEqual(draw.call_args.args[3][-1][0].callback_data, 'admin_settings')
+            self.assertIsNone((await self.state.get_data())['installation_defaults_return'])

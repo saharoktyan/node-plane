@@ -7,10 +7,21 @@ Use a source checkout and isolated data. Do not point tests at production databa
 Use Python 3.11 or 3.12:
 
 ```sh
-python3.12 -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt -r requirements-dev.txt
-PYTHONPATH=app .venv/bin/python -m unittest discover -s tests
+uv sync --locked --python 3.12
+uv run --locked python scripts/run_ci_tests.py unit
 ```
+
+Use uv 0.12.23, the same version as CI and the controller installer. `pyproject.toml` declares the common dependencies and the `backend`, `telegram` and `dev` groups; `uv.lock` pins the full dependency graph for Python 3.11/3.12. A normal `uv sync` includes all three groups. Deployment explicitly selects only `backend` and `telegram`, and creates a separate `.venv` for each release.
+
+To change dependencies, edit `pyproject.toml`, then run:
+
+```sh
+uv lock --python 3.12
+uv run --locked python scripts/export_python_requirements.py
+uv run --locked python scripts/export_python_requirements.py --check
+```
+
+Commit the manifest, lockfile and generated exports together. The `requirements*.txt` files are compatibility exports for already published installers; do not edit them by hand. Install/update and CI use `uv sync --locked`, which rejects a stale lockfile instead of selecting new versions during deployment. Source files still run through `PYTHONPATH=app`; this project is not installed as a Python package.
 
 Select narrower test modules while developing. PostgreSQL integration requires a disposable DSN and a separate process; see [Database](database.md).
 

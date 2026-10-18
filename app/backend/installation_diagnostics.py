@@ -9,7 +9,7 @@ from .nodes import NodeService
 from .node_overview import NodeOverviewService
 
 
-def server_checks(observation):
+def server_checks(observation, *, vpn_enabled=True):
     checks = []
     def add(key, status, detail):
         checks.append({'id': key, 'status': status, 'detail': detail})
@@ -25,6 +25,9 @@ def server_checks(observation):
         flag('docker', observation['docker'])
     for protocol in observation['protocols']:
         for key in ('installed', 'running', 'config_valid'):
+            if key == 'running' and not vpn_enabled:
+                add(protocol['protocol'] + ':running', 'ok', 'VPN is administratively disabled; running service is not required')
+                continue
             flag(protocol['protocol'] + ':' + key, protocol[key])
     if observation['protocols']:
         if observation['settings_pending']:
@@ -99,16 +102,19 @@ class FleetDiagnostics:
             else:
                 try:
                     observation = probe(dict(node, protocols=[]) if not node['applied_revision'] else node, self.driver)
-                    checks = server_checks(observation)
+                    checks = server_checks(observation, vpn_enabled=node['enabled'])
                     if not node['enabled']:
-                        checks.append({'id': 'disabled', 'status': 'warning', 'detail':
+                        checks.append({'id': 'disabled', 'status': 'ok', 'detail':
                             'VPN protocols are not installed; agent inspected separately' if not node['applied_revision']
                             else 'VPN access is disabled; agent inspected separately'})
                 except Exception:
                     checks = [{'id': 'agent', 'status': 'warning' if not node['applied_revision'] else 'error',
                                'detail': 'Live inspection unavailable; inspect agent setup and controller driver connectivity'}]
-            if state and (state['state'] in {'needs_attention', 'deletion_blocked'} or state['failed'] or state['attention']):
+            if state and (state['state'] in {'needs_attention', 'deletion_blocked'} or state['failed']):
                 checks.append({'id': 'operations', 'status': 'warning', 'detail': 'Saved operations need attention; inspect server recovery'})
+            if state and state['attention']:
+                checks.append({'id': 'access', 'status': 'warning', 'detail':
+                    'Desired access is not confirmed; inspect profile access synchronization'})
             return {'node_key': node['key'], 'title': node['title'], 'region': node['region'],
                     'checks': checks, 'errors': sum(c['status'] == 'error' for c in checks),
                     'warnings': sum(c['status'] == 'warning' for c in checks)}

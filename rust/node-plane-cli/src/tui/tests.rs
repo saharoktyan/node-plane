@@ -1920,27 +1920,6 @@ fn account_changes_require_confirmation_and_cancel_keeps_card() {
 }
 
 #[test]
-fn qr_preserves_black_and_white_modules_and_requires_enough_space() {
-    let image = crate::temporary::qr_image("vpn://SECRET").unwrap();
-    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(50, 20)).unwrap();
-    terminal
-        .draw(|frame| draw_qr(frame, frame.area(), &image))
-        .unwrap();
-    for cell in terminal.backend().buffer().content() {
-        if cell.symbol() == "▀" {
-            assert!(matches!(cell.fg, Color::Black | Color::White));
-            assert!(matches!(cell.bg, Color::Black | Color::White));
-        }
-    }
-    terminal.backend_mut().resize(20, 10);
-    terminal.clear().unwrap();
-    terminal
-        .draw(|frame| draw_qr(frame, frame.area(), &image))
-        .unwrap();
-    assert!(format!("{:?}", terminal.backend().buffer()).contains("Enlarge"));
-}
-
-#[test]
 fn repeated_custom_accents_persist_and_render_each_selected_color() {
     let directory = tempfile::tempdir().unwrap();
     let mut app = App::new(&test_request());
@@ -1993,56 +1972,7 @@ fn quick_start_keyboard_opens_profile_and_escape_closes_guide() {
 }
 
 #[test]
-fn qr_modal_has_only_close_and_escape_or_enter_restores_artifact() {
-    for key in [KeyCode::Esc, KeyCode::Enter] {
-        let mut app = test_profile_app();
-        app.screen = Screen::Temporary;
-        app.temporary.view = crate::temporary::View::Artifact;
-        app.qr_visible = true;
-        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 40)).unwrap();
-        terminal
-            .draw(|frame| app.hits = draw_content(frame, &app))
-            .unwrap();
-        assert_eq!(app.hits.len(), 1);
-        assert!(matches!(app.hits[0].control, Control::TemporaryBack));
-        app.temporary_key(KeyEvent::new(key, KeyModifiers::NONE));
-        assert!(!app.qr_visible);
-        assert!(app.temporary.view == crate::temporary::View::Artifact);
-    }
-}
-
-#[test]
-fn temporary_qr_survives_small_and_large_layouts_without_showing_uri() {
-    let mut app = test_profile_app();
-    app.screen = Screen::Temporary;
-    app.temporary.view = crate::temporary::View::Artifact;
-    app.temporary.card = Some(serde_json::json!({
-        "node_key":"lv1", "protocol":"awg", "status":"active"
-    }));
-    app.temporary.artifact = Some(serde_json::json!({"content":"vpn://SECRET"}));
-    let mut picker = ratatui_image::picker::Picker::halfblocks();
-    picker.set_protocol_type(ratatui_image::picker::ProtocolType::Sixel);
-    *app.qr.borrow_mut() = Some(crate::temporary::qr_image("vpn://SECRET").unwrap());
-    app.image_picker = Some(picker);
-    app.qr_visible = true;
-    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
-    for (width, height) in [(100, 30), (60, 18), (140, 45), (50, 12)] {
-        terminal.backend_mut().resize(width, height);
-        terminal.clear().unwrap();
-        terminal
-            .draw(|frame| app.hits = draw_content(frame, &app))
-            .unwrap();
-        assert!(!format!("{:?}", terminal.backend().buffer()).contains("vpn://SECRET"));
-        assert!(
-            app.hits
-                .iter()
-                .any(|hit| matches!(hit.control, Control::TemporaryBack))
-        );
-    }
-}
-
-#[test]
-fn temporary_artifact_offers_copy_and_hides_qr_without_graphics() {
+fn temporary_artifact_offers_copy_save_and_back() {
     let mut app = test_profile_app();
     app.screen = Screen::Temporary;
     app.temporary.view = crate::temporary::View::Artifact;
@@ -2065,15 +1995,6 @@ fn temporary_artifact_offers_copy_and_hides_qr_without_graphics() {
             .iter()
             .any(|c| matches!(c, Control::TemporarySave))
     );
-    assert!(
-        !app.temporary_controls()
-            .iter()
-            .any(|c| matches!(c, Control::TemporaryQr))
-    );
-    app.qr_visible = true;
-    app.temporary_key(KeyCode::Esc.into());
-    assert!(!app.qr_visible);
-    assert!(app.temporary.view == crate::temporary::View::Artifact);
     app.temporary_key(KeyCode::Esc.into());
     assert!(app.temporary.view == crate::temporary::View::Card);
     app.temporary_key(KeyCode::Esc.into());
@@ -6924,4 +6845,94 @@ fn operations_groups_open_node_keep_actions_scoped_and_back_returns_to_groups() 
             crate::controller::Command::RecoveryInventory(0)
         ))
     ));
+}
+
+#[test]
+fn access_editor_back_is_visible_in_each_section_and_tab_cycles() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Access;
+    app.access.editor = Some(crate::access::Editor::new(
+        Some(serde_json::json!({"display_name":"Member"})),
+        None,
+    ));
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+    for section in 0..3 {
+        let editor = app.access.editor.as_mut().unwrap();
+        editor.expiry_view = section == 1;
+        editor.grants_view = section == 2;
+        terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+        let expected = match section {
+            1 => Control::AccessExpiryBack,
+            2 => Control::AccessGrantBack,
+            _ => Control::AccessBack,
+        };
+        let hit = app.hits.iter().find(|hit| hit.control == expected).unwrap();
+        assert_eq!(hit.area, pinned_back_area(Rect::new(0, 0, 120, 40)));
+        app.access.selected = app.access_controls().len() - 1;
+        app.access_key(KeyCode::Tab.into());
+        assert_eq!(app.access.selected, 0);
+        app.access_key(KeyCode::BackTab.into());
+        assert_eq!(app.access.selected, app.access_controls().len() - 1);
+    }
+}
+
+#[test]
+fn access_input_dialog_can_reach_cancel_with_arrow_keys() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Access;
+    app.access.provision = Some(crate::access::ProvisionDraft {
+        identity: String::new(),
+        key: uuid::Uuid::new_v4(),
+        confirm: false,
+    });
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    app.access.selected = 0;
+    app.access_key(KeyCode::Down.into());
+    assert!(app.access_controls()[app.access.selected] == Control::AccessProvisionCancel);
+}
+
+#[test]
+fn input_prompts_offer_keyboard_cancel_and_continue() {
+    let mut app = test_profile_app();
+    for kind in 0..3 {
+        let prompt = || match kind {
+            0 => Prompt::Password {
+                user: "root".into(),
+                host: "node.example".into(),
+            },
+            1 => Prompt::Text {
+                title: "SSH key".into(),
+                description: "Key path".into(),
+                secret: false,
+            },
+            _ => Prompt::Text {
+                title: "Passphrase".into(),
+                description: "Encrypted key".into(),
+                secret: true,
+            },
+        };
+        for key in [
+            KeyCode::Tab,
+            KeyCode::BackTab,
+            KeyCode::Left,
+            KeyCode::Right,
+            KeyCode::Up,
+        ] {
+            let (tx, rx) = mpsc::channel();
+            app.event(Event::Prompt(prompt(), tx));
+            app.prompt_key(KeyCode::Char('x').into());
+            app.prompt_key(key.into());
+            assert!(!app.trust);
+            app.prompt_key(KeyCode::Enter.into());
+            assert!(matches!(rx.recv().unwrap(), Answer::Cancel));
+        }
+        let (tx, rx) = mpsc::channel();
+        app.event(Event::Prompt(prompt(), tx));
+        app.prompt_key(KeyCode::Char('x').into());
+        app.prompt_key(KeyCode::Tab.into());
+        app.prompt_key(KeyCode::Down.into());
+        app.prompt_key(KeyCode::Enter.into());
+        assert!(matches!(rx.recv().unwrap(), Answer::Password(value) if value.as_str() == "x"));
+    }
 }

@@ -222,8 +222,11 @@ async def _clear_flow(state: FSMContext) -> None:
         await state.update_data(notification_session=True,
             notification_result=data.get('notification_result'),
             control_message_id=data.get('control_message_id'))
+    retained = {key: data[key] for key in ('quick_start_context', 'quick_start_home', 'quick_start_defaults_reviewed', 'member_profile_back') if key in data}
     if data.get('locale'):
-        await state.update_data(locale=data['locale'])
+        retained['locale'] = data['locale']
+    if retained:
+        await state.update_data(**retained)
 
 
 def _profile_error(locale: str, error: BackendError) -> str:
@@ -664,7 +667,8 @@ async def show_admin_profiles(chat_id: int, user_id: int, message_id: int,
             callback_data=f'admin_profiles_page:{page_index + 1}'))
     if arrows:
         rows.append(arrows)
-    rows.append([InlineKeyboardButton(text=tr(locale, 'back'), callback_data='admin_menu')])
+    back_callback = 'quick_start' if (data.get('quick_start_context') or {}).get('step') == 'access' else 'admin_menu'
+    rows.append([InlineKeyboardButton(text=tr(locale, 'back'), callback_data=back_callback)])
     lines = [] if page['items'] else [tr(locale, 'profiles.search.empty' if search else 'profiles.admin.empty')]
     if page_index or page.get('next_cursor'):
         lines.append(tr(locale, 'profiles.admin.page', page=page_index + 1))

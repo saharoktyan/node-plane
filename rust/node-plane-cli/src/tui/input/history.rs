@@ -154,10 +154,9 @@ impl App {
                 )
             }
             Screen::Temporary => format!(
-                "temporary:{:?}:{}:{}",
+                "temporary:{:?}:{}",
                 std::mem::discriminant(&self.temporary.view),
-                value_id(&self.temporary.card),
-                self.qr_visible
+                value_id(&self.temporary.card)
             ),
             Screen::Settings => "settings".into(),
             Screen::SettingsPage(page) => format!("settings:{:?}", std::mem::discriminant(page)),

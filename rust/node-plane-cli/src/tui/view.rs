@@ -9,43 +9,6 @@ pub(super) fn disabled_channel(app: &App, control: Control) -> bool {
     }
 }
 
-pub(super) fn draw_qr(frame: &mut Frame, area: Rect, image: &image::DynamicImage) {
-    // qr_image uses six pixels per module, including its four-module quiet zone.
-    // Preserve every module; averaging or downsampling makes QR codes unreadable.
-    let pixels = image.to_luma8();
-    let side = (pixels.width() / 6) as u16;
-    let height = side.div_ceil(2);
-    if area.width < side || area.height < height {
-        frame.render_widget(Paragraph::new(format!(
-            "Enlarge the terminal to show the QR code ({side} columns × {height} rows required)."
-        )).wrap(Wrap { trim: false }), area);
-        return;
-    }
-    for row in 0..height {
-        let spans: Vec<Span> = (0..side)
-            .map(|column| {
-                let color = |module_row: u16| {
-                    if module_row < side
-                        && pixels.get_pixel(u32::from(column) * 6, u32::from(module_row) * 6)[0]
-                            == 0
-                    {
-                        Color::Black
-                    } else {
-                        Color::White
-                    }
-                };
-                Span::styled(
-                    "▀",
-                    Style::default().fg(color(row * 2)).bg(color(row * 2 + 1)),
-                )
-            })
-            .collect();
-        frame.render_widget(
-            Paragraph::new(Line::from(spans)),
-            Rect::new(area.x, area.y + row, side, 1),
-        );
-    }
-}
 pub(super) fn terminal_too_small(area: Rect) -> bool {
     area.width < 70 || area.height < 30
 }
@@ -109,9 +72,9 @@ pub(super) fn draw_exit_dialog(frame: &mut Frame, app: &App, hits: &mut Vec<Hit>
     button_pair(
         frame,
         sections[1],
-        ("Close", "Cancel"),
-        app.exit_confirm,
-        (Control::Exit(true), Control::Exit(false)),
+        ("Cancel", "Close"),
+        !app.exit_confirm,
+        (Control::Exit(false), Control::Exit(true)),
         hits,
     );
 }
@@ -135,54 +98,6 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
     app.scrollbar.set(None);
     let mut hits = Vec::new();
     let area = frame.area();
-    if app.qr_visible {
-        frame.render_widget(ratatui::widgets::Clear, area);
-        // Keep all controls above the image: some graphics protocols erase cells
-        // below their output. Closing restores the entire underlying screen.
-        let modal = Rect::new(
-            area.x + 1,
-            area.y + 1,
-            area.width.saturating_sub(2),
-            area.height.saturating_sub(2),
-        );
-        frame.render_widget(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("QR code")
-                .title_style(Style::default().fg(Color::Cyan))
-                .border_style(Style::default().fg(SECTION_BORDER)),
-            modal,
-        );
-        let close = Rect::new(
-            modal.x + 2,
-            modal.y + 1,
-            modal.width.saturating_sub(4).min(22),
-            3,
-        );
-        draw_button(frame, close, "Close", true);
-        hits.push(Hit {
-            area: close,
-            control: Control::TemporaryBack,
-        });
-        let image_area = Rect::new(
-            modal.x + 2,
-            modal.y + 5,
-            modal.width.saturating_sub(4),
-            modal.height.saturating_sub(6),
-        );
-        if let Some(qr) = app.qr_graphic.borrow_mut().as_mut() {
-            frame.render_stateful_widget(
-                ratatui_image::StatefulImage::default().resize(ratatui_image::Resize::Scale(Some(
-                    image::imageops::FilterType::Nearest,
-                ))),
-                image_area,
-                qr,
-            );
-        } else if let Some(qr) = app.qr.borrow().as_ref() {
-            draw_qr(frame, image_area, qr);
-        }
-        return hits;
-    }
     let rows = Layout::vertical([
         Constraint::Length(3),
         Constraint::Min(4),
@@ -588,8 +503,9 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
                 && app.controller.announcement_draft.is_some()
                 && app.controller.announcement_job.is_none())
             && !(matches!(app.screen, Screen::Access)
-                && (app.access.editor.is_some()
-                    || app.access.creating_profile
+                && (app.access.editor.as_ref().is_some_and(|editor| {
+                    editor.creation_step.is_some() || editor.duration_input.is_some()
+                }) || app.access.creating_profile
                     || app.access.decision.is_some()
                     || app.access.account_action.is_some()
                     || app.access.profile_action.is_some()
@@ -776,10 +692,7 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
             app.trust
                 || matches!(
                     prompt,
-                    Prompt::Password { .. }
-                        | Prompt::Text { .. }
-                        | Prompt::Select { .. }
-                        | Prompt::SelectAdministrator { .. }
+                    Prompt::Select { .. } | Prompt::SelectAdministrator { .. }
                 ),
             (Control::Prompt(true), Control::Prompt(false)),
             &mut hits,

@@ -1,10 +1,10 @@
 # Releases
 
-`dev` publishes development releases (`X.Y.Z-alpha.N`); `main` publishes stable releases (`X.Y.Z`). Tags use the `v` prefix. `VERSION`, Rust package versions and the changelog must describe the same release.
+`dev` publishes development releases (`X.Y.Z-alpha.N`); `main` publishes stable releases (`X.Y.Z`). Tags use the `v` prefix. `VERSION`, the Python project version, Rust package versions and the changelog must describe the same release.
 
 ## Artifacts and CI
 
-Publication requires the reusable server/Python checks and the native Workstation matrix to pass for the tagged commit. Unit, real PostgreSQL and Docker suites run separately; unexpected Python test skips fail CI. See [Testing](testing.md#continuous-integration). All three Rust binaries have committed Cargo lockfiles; build and test with `--locked`.
+Publication requires the reusable server/Python checks and the native Workstation matrix to pass for the tagged commit. Unit, real PostgreSQL and Docker suites run separately; unexpected Python test skips fail CI. See [Testing](testing.md#continuous-integration). All three Rust binaries have committed Cargo lockfiles; build and test with `--locked`. Python installation and CI use the committed `uv.lock` through `uv sync --locked`; generated requirements exports keep older updaters compatible.
 
 `dist-workspace.toml` configures cargo-dist for Workstation. The release workflow builds Linux x64, macOS Intel/Apple Silicon and Windows x64 archives, shell/PowerShell installers and checksums.
 
@@ -17,7 +17,7 @@ For the first stable release, use the [1.0.0 acceptance checklist](release-1.0.0
 ## Prepare a release
 
 1. Finish and commit the intended changes on the correct branch.
-2. Update `VERSION`, affected Cargo manifests/lockfiles and `CHANGELOG.md`.
+2. Update `VERSION`, `project.version` in `pyproject.toml`, affected Cargo manifests/lockfiles and `CHANGELOG.md`. Run `uv lock --python 3.12` and `uv run --locked python scripts/export_python_requirements.py`; commit the updated lockfile and exports.
 3. Run relevant Python/Rust tests and platform checks. Include migration/rollback validation for schema changes.
 4. Review install/update scripts and ensure required runtime resources are packaged.
 5. Commit the version changes with a clean working tree.

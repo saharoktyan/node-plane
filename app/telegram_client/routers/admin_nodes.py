@@ -40,7 +40,7 @@ async def _clear_node_flow(state: FSMContext) -> None:
     data = await state.get_data()
     await state.clear()
     await state.update_data(**{key: value for key, value in data.items()
-        if key in {'locale', 'admin_node_search', 'admin_node_cursors', 'admin_node_page', 'node_settings_draft', 'node_settings_view', '_navigation_nodes', '_navigation_node_jobs', 'node_return'}})
+        if key in {'locale', 'admin_node_search', 'admin_node_cursors', 'admin_node_page', 'node_settings_draft', 'node_settings_view', '_navigation_nodes', '_navigation_node_jobs', 'node_return', 'quick_start_context', 'quick_start_home', 'quick_start_defaults_reviewed'}})
 
 
 _DRAFT_FIELDS = ('title', 'region', 'flag', 'notes', 'transport', 'ssh_target',
@@ -260,7 +260,8 @@ async def show_admin_nodes(chat_id, user_id, message_id, bot, backend, state, pa
     if page.get('next_cursor'):
         arrows.append(InlineKeyboardButton(text='→', callback_data=f'admin_node_page:{page_index + 1}'))
     rows = [arrows] if arrows else []
-    rows.append([InlineKeyboardButton(text=tr(locale, 'back'), callback_data='admin_menu')])
+    back_callback = 'quick_start' if (data.get('quick_start_context') or {}).get('step') in {'node', 'protocols'} else 'admin_menu'
+    rows.append([InlineKeyboardButton(text=tr(locale, 'back'), callback_data=back_callback)])
     lines = [tr(locale, 'nodes.admin.no_results' if search else 'nodes.admin.empty')] if not page['items'] else []
     if search:
         lines.append(tr(locale, 'profiles.search.active', query=search))

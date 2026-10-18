@@ -156,7 +156,12 @@ detect_mode() {
 check_repo_basics() {
   section "Repository"
   check_file_exists "app/telegram_client/main.py" "Telegram client entrypoint"
-  check_file_exists "requirements.txt" "Requirements file"
+  if [[ -f pyproject.toml || -f uv.lock ]]; then
+    check_file_exists "pyproject.toml" "Python project manifest"
+    check_file_exists "uv.lock" "Python dependency lock"
+  else
+    check_file_exists "requirements.txt" "Legacy Python requirements"
+  fi
   check_file_exists ".env.example" "Environment template"
 
   if [[ -f "$ENV_FILE" ]]; then
