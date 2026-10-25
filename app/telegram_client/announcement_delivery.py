@@ -48,9 +48,6 @@ async def refresh_menu(bot, backend, dispatcher):
             state = FSMContext(storage=dispatcher.storage, key=key)
             data = await state.get_data()
             if account.get('deleted') and data.get('control_message_id'):
-                await backend.resolve(recipient, username=account.get('username'),
-                    first_name=account.get('first_name'), last_name=account.get('last_name'),
-                    language_code=account.get('language_code'))
                 account = await backend.me(recipient)
                 await leave_admin_panel(bot, backend, state, recipient, recipient,
                     data['control_message_id'], account)
@@ -74,7 +71,11 @@ async def refresh_menu(bot, backend, dispatcher):
                     # Keep this queued home refresh retryable if delivery fails.
                     await state.update_data(home_panel_active=True)
                     raise
-    await backend.request('POST', f"/api/v1/integrations/telegram/menu-refresh/{account['id']}/ack?revision={delivery['revision']}")
+    if delivery.get('visitor_subject'):
+        acknowledgement = f"/api/v1/integrations/telegram/visitor-menu-refresh/{delivery['visitor_subject']}/ack?revision={delivery['revision']}"
+    else:
+        acknowledgement = f"/api/v1/integrations/telegram/menu-refresh/{account['id']}/ack?revision={delivery['revision']}"
+    await backend.request('POST', acknowledgement)
     return True
 
 

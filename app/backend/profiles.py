@@ -191,8 +191,9 @@ class ProfileRepository:
     def all_profiles(self, *, after, limit):
         with self.db.connect() as conn:
             rows = conn.execute('''SELECT p.*, CASE WHEN d.profile_id IS NULL THEN 0 ELSE 1 END AS deleting
-                FROM backend_profiles p LEFT JOIN backend_profile_deletions d ON d.profile_id = p.id
-                WHERE p.id > ? AND (d.profile_id IS NULL OR EXISTS (
+                FROM backend_profiles p LEFT JOIN backend_accounts a ON a.id = p.owner_account_id
+                LEFT JOIN backend_profile_deletions d ON d.profile_id = p.id
+                WHERE (a.id IS NULL OR a.status IN ('approved', 'disabled')) AND p.id > ? AND (d.profile_id IS NULL OR EXISTS (
                     SELECT 1 FROM backend_operations o WHERE o.id = d.operation_id
                     AND o.status NOT IN ('no_targets', 'succeeded')))
                 ORDER BY p.id LIMIT ?''',
@@ -206,8 +207,9 @@ class ProfileRepository:
         with self.db.connect() as conn:
             while len(matches) < limit:
                 rows = conn.execute('''SELECT p.*, CASE WHEN d.profile_id IS NULL THEN 0 ELSE 1 END AS deleting
-                    FROM backend_profiles p LEFT JOIN backend_profile_deletions d ON d.profile_id = p.id
-                    WHERE p.id > ? AND (d.profile_id IS NULL OR EXISTS (
+                    FROM backend_profiles p LEFT JOIN backend_accounts a ON a.id = p.owner_account_id
+                    LEFT JOIN backend_profile_deletions d ON d.profile_id = p.id
+                    WHERE (a.id IS NULL OR a.status IN ('approved', 'disabled')) AND p.id > ? AND (d.profile_id IS NULL OR EXISTS (
                         SELECT 1 FROM backend_operations o WHERE o.id = d.operation_id
                         AND o.status NOT IN ('no_targets', 'succeeded')))
                     ORDER BY p.id LIMIT 200''', (current,)).fetchall()

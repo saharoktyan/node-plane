@@ -424,6 +424,69 @@ class UpdatesTests(unittest.TestCase):
         self.app_settings = importlib.reload(app_settings)
         self.assertEqual(self.app_settings.get_updates_branch(), "dev")
 
+    def test_stack_systemd_unit_naming_and_refuse_unrelated_running_unit(self) -> None:
+        from uuid import UUID, uuid4
+        job_id = str(uuid4())
+        proc = SimpleNamespace(returncode=0, stdout="Started", stderr="")
+        with patch("services.updates.subprocess.run", return_value=proc), \
+             patch("services.updates.maybe_create_pre_action_backup", return_value={"status": "success"}), \
+             patch("services.updates.is_manual_update_supported", return_value=True):
+            result = self.updates.schedule_update(branch="dev", stack_job_id=job_id)
+
+        self.assertEqual(result["status"], "running")
+        self.assertEqual(result["unit_name"], f"node-plane-update-{UUID(job_id)}")
+
+        # Refuse binding to unrelated running unit
+        with patch("services.updates.is_manual_update_supported", return_value=True):
+            another_job = str(uuid4())
+            rejected = self.updates.schedule_update(branch="dev", stack_job_id=another_job)
+            self.assertEqual(rejected["status"], "failed")
+            self.assertIn("already running", rejected["message"])
+
+    def test_schedule_update_version_launch_job_id_and_dispatch_uncertainty(self) -> None:
+        from uuid import UUID, uuid4
+        import subprocess
+        job_id = str(uuid4())
+        expected_unit = f"node-plane-update-{UUID(job_id)}"
+
+        # 1. Proven predispatch failure: manual updates not supported -> launch_state="not_started"
+        with patch("services.updates.is_manual_update_supported", return_value=False):
+            res = self.updates.schedule_update(branch="dev", launch_job_id=job_id)
+            self.assertEqual(res["status"], "failed")
+            self.assertEqual(res["launch_state"], "not_started")
+            self.assertEqual(res["unit_name"], expected_unit)
+
+        # 2. Proven predispatch failure: another unit already running -> launch_state="not_started"
+        with patch.object(self.updates, "refresh_update_run_state", return_value={"last_run_status": "running", "last_run_unit": "other-unit"}), \
+             patch("services.updates.is_manual_update_supported", return_value=True):
+            res = self.updates.schedule_update(branch="dev", launch_job_id=job_id)
+            self.assertEqual(res["status"], "failed")
+            self.assertEqual(res["launch_state"], "not_started")
+            self.assertEqual(res["unit_name"], expected_unit)
+
+        # 3. Dispatched but nonzero returncode: remains uncertain (launch_state not "not_started")
+        proc_failed = SimpleNamespace(returncode=1, stdout="", stderr="systemd error")
+        with patch("services.updates.is_manual_update_supported", return_value=True), \
+             patch.object(self.updates, "refresh_update_run_state", return_value={"last_run_status": "idle"}), \
+             patch("services.updates.maybe_create_pre_action_backup", return_value={"status": "success"}), \
+             patch("services.updates.subprocess.run", return_value=proc_failed) as run:
+            res = self.updates.schedule_update(branch="dev", launch_job_id=job_id)
+            command = run.call_args.args[0]
+            self.assertEqual(command[command.index("--stack-job") + 1], job_id)
+            self.assertEqual(res["status"], "failed")
+            self.assertNotEqual(res.get("launch_state"), "not_started")
+            self.assertEqual(res["unit_name"], expected_unit)
+
+        # 4. Dispatched but timed out: launch_state="dispatching" (uncertain, never not_started)
+        with patch("services.updates.is_manual_update_supported", return_value=True), \
+             patch.object(self.updates, "refresh_update_run_state", return_value={"last_run_status": "idle"}), \
+             patch("services.updates.maybe_create_pre_action_backup", return_value={"status": "success"}), \
+             patch("services.updates.subprocess.run", side_effect=subprocess.TimeoutExpired("systemd-run", 30)):
+            res = self.updates.schedule_update(branch="dev", launch_job_id=job_id)
+            self.assertEqual(res["status"], "failed")
+            self.assertEqual(res.get("launch_state"), "dispatching")
+            self.assertEqual(res["unit_name"], expected_unit)
+
 
 if __name__ == "__main__":
     unittest.main()

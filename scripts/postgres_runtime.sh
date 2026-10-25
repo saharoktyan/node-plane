@@ -264,26 +264,6 @@ dsn_uses_managed_local_postgres() {
   [[ "$dsn" == *"@127.0.0.1:${POSTGRES_RUNTIME_PORT}/${POSTGRES_RUNTIME_DB_NAME}"* ]]
 }
 
-
-ensure_portable_postgres_env() {
-  local runtime_env_file="$1"
-  load_postgres_runtime_config "$runtime_env_file" "$PWD"
-
-  if [[ -z "$POSTGRES_RUNTIME_DB_PASSWORD" ]]; then
-    POSTGRES_RUNTIME_DB_PASSWORD="$(random_alnum)"
-    env_set "$runtime_env_file" "NODE_PLANE_POSTGRES_PASSWORD" "$POSTGRES_RUNTIME_DB_PASSWORD"
-  fi
-  if [[ -z "$POSTGRES_RUNTIME_DSN" ]]; then
-    POSTGRES_RUNTIME_DSN="postgresql://${POSTGRES_RUNTIME_DB_USER}:${POSTGRES_RUNTIME_DB_PASSWORD}@postgres:5432/${POSTGRES_RUNTIME_DB_NAME}"
-    env_set "$runtime_env_file" "POSTGRES_DSN" "$POSTGRES_RUNTIME_DSN"
-  fi
-  env_set "$runtime_env_file" "DB_BACKEND" "postgres"
-  env_set "$runtime_env_file" "NODE_PLANE_POSTGRES_DB" "$POSTGRES_RUNTIME_DB_NAME"
-  env_set "$runtime_env_file" "NODE_PLANE_POSTGRES_USER" "$POSTGRES_RUNTIME_DB_USER"
-  env_set "$runtime_env_file" "NODE_PLANE_POSTGRES_PORT" "5432"
-  env_set "$runtime_env_file" "NODE_PLANE_POSTGRES_IMAGE" "$POSTGRES_RUNTIME_IMAGE"
-}
-
 auto_provision_simple_postgres() {
   local runtime_env_file="$1"
   local shared_dir="$2"

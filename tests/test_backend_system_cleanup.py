@@ -315,10 +315,17 @@ class SystemCleanupTests(unittest.TestCase):
         from backend.http_api import create_app
         from fastapi.testclient import TestClient
 
-        fixture.BackendHTTPTests.register(self, 102)
         with TestClient(create_app(self.db, cleanup_host=self.host)) as client:
             headers = {**self.headers, "X-Node-Plane-Telegram-User-ID": "101"}
             path = "/api/v1/system/cleanup/plans"
+            denied_guest = client.post(
+                path,
+                headers={**headers, "X-Node-Plane-Telegram-User-ID": "102"},
+                json={"action": "reset", "cleanup_nodes": False},
+            )
+            self.assertEqual(denied_guest.status_code, 401)
+            resp = fixture.BackendHTTPTests.provision(self, 102)
+            self.assertIn(resp.status_code, (200, 201))
             self.assertEqual(
                 client.post(
                     path,
@@ -370,3 +377,47 @@ class SystemCleanupTests(unittest.TestCase):
                 ).status_code,
                 409,
             )
+
+    def test_cleanup_visible_and_initiating_account_retry_abort_with_rotated_principal_works_while_other_account_denied(self):
+        from backend.recovery import overview
+        from backend.authorization import PrincipalKind, ADMIN_PERMISSIONS
+        job = self.queue(action="reset", nodes=False)
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_system_cleanup_jobs SET status='blocked', phase='backup' WHERE id=?", (job["id"],))
+
+        # Initiating account sees actions
+        items = overview(self.db, self.actor)["items"]
+        cleanup_items = [i for i in items if i["kind"] == "cleanup"]
+        self.assertEqual(len(cleanup_items), 1)
+        self.assertEqual(cleanup_items[0]["id"], job["id"])
+        self.assertIn("retry", cleanup_items[0]["actions"])
+        self.assertIn("abort", cleanup_items[0]["actions"])
+
+        # Another account is denied
+        with self.db.transaction() as conn:
+            conn.execute("INSERT INTO backend_accounts(id,role,status) VALUES ('admin-other','admin','approved')")
+        _, other_token = self.credentials.issue(PrincipalKind.ACCOUNT, ADMIN_PERMISSIONS, account_id="admin-other")
+        other_account = type(self.admin)("admin-other", "admin", "approved")
+        other_actor = Actor(self.credentials.authenticate("Bearer " + other_token), other_account)
+
+        items_other = overview(self.db, other_actor)["items"]
+        cleanup_other = [i for i in items_other if i["kind"] == "cleanup"][0]
+        self.assertEqual(cleanup_other["actions"], [])
+
+        with self.assertRaises(AccessDenied):
+            self.service.retry(other_actor, job["id"])
+        with self.assertRaises(AccessDenied):
+            self.service.abort(other_actor, job["id"])
+
+        # Same account with rotated principal (new credential) works
+        _, new_token = self.credentials.issue(PrincipalKind.ACCOUNT, ADMIN_PERMISSIONS, account_id=self.admin.id)
+        rotated_actor = Actor(self.credentials.authenticate("Bearer " + new_token), self.admin)
+
+        retried = self.service.retry(rotated_actor, job["id"])
+        self.assertEqual(retried["status"], "running")
+
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_system_cleanup_jobs SET status='blocked' WHERE id=?", (job["id"],))
+
+        aborted = self.service.abort(rotated_actor, job["id"])
+        self.assertEqual(aborted["status"], "aborted")

@@ -42,11 +42,14 @@ class RequestSetupTests(IsolatedAsyncioTestCase):
         self.owner = {'id': 'member', 'role': 'member', 'status': 'approved', 'telegram_user_id': 456}
         async def request(method, path, **kwargs):
             if path.endswith('/decision'):
-                return {'account_id': 'member'}
+                body = kwargs.get('body') or kwargs.get('json') or {}
+                decision = body.get('decision')
+                return {'account_id': None if decision == 'reject' else 'member'}
             if '/accounts/' in path:
                 return self.owner
             return self.profile
         self.backend = SimpleNamespace(request=AsyncMock(side_effect=request),
+            resolve=AsyncMock(side_effect=AssertionError("resolve must never be called")),
             pending_access_request=AsyncMock(return_value={'locale': 'en'}),
             profiles=AsyncMock(return_value={'items': [self.profile]}),
             profile_grants=AsyncMock(return_value={'items': [{'node_key': 'n1', 'protocol': 'awg'}]}),
@@ -107,7 +110,69 @@ class RequestSetupTests(IsolatedAsyncioTestCase):
             await self.dispatch(lambda state: requests.apply_decision(self.query, 'request', 'reject', self.bot, self.backend, state, notification=True))
         rows = draw.call_args_list[0].args[3]
         self.assertEqual([b.callback_data for row in rows for b in row], ['notification_close'])
+        data = await self.notice.get_data()
+        self.assertIsNone(data['notification_result']['account_id'])
+        self.assertEqual(data['notification_result']['decision'], 'reject')
+        self.backend.resolve.assert_not_called()
         await self.assert_main_unchanged()
+
+    async def test_deleted_user_background_refresh_never_calls_resolve(self):
+        from telegram_client.announcement_delivery import refresh_menu
+        from aiogram.fsm.storage.memory import SimpleEventIsolation
+        delivery = {
+            'account': {'id': 'deleted-acc', 'telegram_user_id': 123, 'deleted': True},
+            'revision': 5,
+        }
+        backend = SimpleNamespace(
+            request=AsyncMock(side_effect=[
+                {'delivery': delivery},
+                {'ok': True},
+            ]),
+            me=AsyncMock(return_value={'id': 'telegram:123', 'status': 'pending', 'account_created': False}),
+            resolve=AsyncMock(side_effect=AssertionError("resolve must never be called")),
+        )
+        await self.main.update_data(control_message_id=77, home_presentation={'account': {'role': 'admin'}})
+        dispatcher = SimpleNamespace(
+            storage=self.main.storage,
+            fsm=SimpleNamespace(events_isolation=SimpleEventIsolation()),
+        )
+        bot = SimpleNamespace(id=1, delete_message=AsyncMock())
+        with patch('telegram_client.access_guard.leave_admin_panel', new_callable=AsyncMock) as leave:
+            worked = await refresh_menu(bot, backend, dispatcher)
+            self.assertTrue(worked)
+            leave.assert_awaited_once()
+            backend.resolve.assert_not_called()
+            backend.me.assert_awaited_once_with(123)
+
+    async def test_notify_admins_guest_request_without_account_id(self):
+        backend = SimpleNamespace(
+            request=AsyncMock(side_effect=[
+                {'items': [123]},
+                {'message_id': 556},
+            ]),
+            me=AsyncMock(return_value={'role': 'admin', 'status': 'approved', 'locale': 'en'}),
+            access_request_policy=AsyncMock(return_value={'notify_requests': True}),
+            pending_access_request=AsyncMock(return_value={
+                'id': 'req-100',
+                'account_id': None,
+                'first_name': 'Charlie',
+                'last_name': None,
+                'username': None,
+                'telegram_user_id': 999888,
+                'created_at': '2026-10-25T11:00:00Z',
+            }),
+        )
+        bot = SimpleNamespace()
+        with patch('telegram_client.routers.admin_requests.send_notice', new_callable=AsyncMock) as mock_send:
+            mock_send.return_value = SimpleNamespace(message_id=556)
+            await requests.notify_admins(bot, backend, 'req-100')
+            mock_send.assert_awaited_once()
+            _, admin_id, notice, markup = mock_send.call_args.args
+            self.assertEqual(admin_id, 123)
+            text = '\n'.join(notice.lines)
+            self.assertIn('999888', text)
+            self.assertIn('req-100', text)
+            self.assertNotIn('Account ID', text)
 
     async def test_reply_input_routes_only_to_its_notification(self):
         await self.notice.update_data(notification_session=True)
@@ -167,3 +232,54 @@ class RequestSetupTests(IsolatedAsyncioTestCase):
         self.assertEqual(await replacement.get_state(), await self.notice.get_state())
         self.assertTrue((await self.notice.get_data())['notification_closed'])
         await self.assert_main_unchanged()
+
+    async def test_request_button_label_formatting(self):
+        # username present
+        label1 = requests._request_button_label({'username': '@alice', 'created_at': '2026-10-25T14:30:00Z'})
+        self.assertEqual(label1, '@alice · 25/10/26')
+        # telegram_user_id when no username
+        label2 = requests._request_button_label({'telegram_user_id': 987654321, 'account_id': 'acc12345678', 'created_at': '2026-10-25T14:30:00Z'})
+        self.assertEqual(label2, '987654321 · 25/10/26')
+        # fallback to account_id
+        label3 = requests._request_button_label({'account_id': 'acc12345678', 'created_at': '2026-10-25T14:30:00Z'})
+        self.assertEqual(label3, 'acc12345 · 25/10/26')
+        # invalid date fallback
+        label4 = requests._request_button_label({'username': 'bob', 'created_at': 'not-a-date'})
+        self.assertEqual(label4, '@bob · —')
+
+    async def test_notify_admins_includes_full_review_details_without_review_button(self):
+        backend = SimpleNamespace(
+            request=AsyncMock(side_effect=[
+                {'items': [123]},
+                {'message_id': 555},
+            ]),
+            me=AsyncMock(return_value={'role': 'admin', 'status': 'approved', 'locale': 'en'}),
+            access_request_policy=AsyncMock(return_value={'notify_requests': True}),
+            pending_access_request=AsyncMock(return_value={
+                'id': 'req-99',
+                'account_id': 'acc-12345678',
+                'first_name': 'Bob',
+                'last_name': 'Smith',
+                'username': 'bobsmith',
+                'telegram_user_id': 789012,
+                'created_at': '2026-10-25T10:00:00Z',
+            }),
+        )
+        bot = SimpleNamespace()
+        with patch('telegram_client.routers.admin_requests.send_notice', new_callable=AsyncMock) as mock_send:
+            mock_send.return_value = SimpleNamespace(message_id=555)
+            await requests.notify_admins(bot, backend, 'req-99')
+            mock_send.assert_awaited_once()
+            call_bot, admin_id, notice, markup = mock_send.call_args.args
+            self.assertEqual(admin_id, 123)
+            text = '\n'.join(notice.lines)
+            self.assertIn('Bob Smith · @bobsmith', text)
+            self.assertIn('789012', text)
+            self.assertIn('req-99', text)
+            self.assertIn('acc-12345678', text)
+            flat_buttons = [b for row in markup.inline_keyboard for b in row]
+            callbacks = [b.callback_data for b in flat_buttons]
+            self.assertIn(requests.NotificationDecisionCallback(request_id='req-99', decision='approve').pack(), callbacks)
+            self.assertIn(requests.NotificationDecisionCallback(request_id='req-99', decision='reject').pack(), callbacks)
+            self.assertIn('notification_close', callbacks)
+            self.assertFalse(any('review' in c for c in callbacks))

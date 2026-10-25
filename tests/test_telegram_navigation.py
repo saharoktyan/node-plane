@@ -52,6 +52,12 @@ class NavigationPathTests(TestCase):
                 ['admin_menu', 'admin_nodes', 'admin_node:lv1', 'node_settings:lv1', 'node_section:awg:lv1'])
             self.assertEqual(path[2].label, '🇱🇻 Latvia #1')
             self.assertFalse(any('.' in p.label for p in path))
+            tools_path = parent_path('node_tools:lv1', locale, data)
+            self.assertEqual([p.callback for p in tools_path],
+                ['admin_menu', 'admin_nodes', 'admin_node:lv1', 'node_manage:lv1', 'node_technical:lv1', 'node_tools:lv1'])
+            from telegram_client.i18n import tr
+            self.assertEqual(tools_path[-2].label, tr(locale, 'nodes.rich.technical'))
+            self.assertEqual(tools_path[-1].label, tr(locale, 'node_tools.diagnostics'))
 
     def test_node_opened_from_updates_keeps_components_path_in_submenus(self):
         for origin in ('fleet_nodes:2', 'updates_nodes:1', 'update_nodes:job-id:3'):
@@ -111,6 +117,37 @@ class NavigationPathTests(TestCase):
         text = breadcrumb_text(path, 'SSH key')
         self.assertEqual([p.button.callback_data for p in text if isinstance(p, RichTextButton)],
                          [p.callback for p in path])
+
+    def test_screen_rich_includes_heading_for_noncollapsed_uri_and_collapses_normal_uri(self):
+        from aiogram.types import RichTextCode
+        # 1. Non-collapsed screen (e.g. Bot public key in SSH settings) with uri_rows
+        key_screen = Screen('SSH Key',
+            uri='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI...',
+            uri_title='Bot public key',
+            uri_collapsed=False,
+            uri_rows=((InlineKeyboardButton(text='Send plain text link', callback_data='ssh_key_plain'),),))
+        key_blocks = key_screen.rich().blocks
+        heading_idx = next(i for i, b in enumerate(key_blocks) if b.type == 'heading' and b.text == 'Bot public key')
+        self.assertEqual(key_blocks[heading_idx].size, 2)
+        code_block = key_blocks[heading_idx + 1]
+        self.assertEqual(code_block.type, 'paragraph')
+        self.assertIsInstance(code_block.text, RichTextCode)
+        self.assertEqual(code_block.text.text, 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI...')
+        self.assertEqual(key_blocks[heading_idx + 2].type, 'paragraph')
+
+        # 2. Normal URI screen (uri_collapsed=True) stays collapsed inside details
+        normal_screen = Screen('Client Config',
+            uri='vless://secret@example.com:443',
+            uri_title='Config link',
+            uri_collapsed=True,
+            uri_rows=((InlineKeyboardButton(text='Send link', callback_data='config_plain'),),))
+        normal_blocks = normal_screen.rich().blocks
+        details = next(b for b in normal_blocks if b.type == 'details')
+        self.assertEqual(details.summary, 'Config link')
+        self.assertFalse(details.is_open)
+        self.assertIsInstance(details.blocks[0].text, RichTextCode)
+        self.assertEqual(details.blocks[0].text.text, 'vless://secret@example.com:443')
+        self.assertFalse(any(b.type == 'heading' and b.text == 'Config link' for b in normal_blocks))
 
 
 class NavigationRenderTests(IsolatedAsyncioTestCase):

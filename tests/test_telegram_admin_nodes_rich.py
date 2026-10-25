@@ -138,7 +138,9 @@ class AdminNodeRichTests(IsolatedAsyncioTestCase):
             self.assertIsNone(nodes.node_traffic_section(None, locale))
 
     async def test_full_cleanup_confirmation_lists_affected_profiles_and_resources(self):
-        backend = SimpleNamespace(node_maintenance=AsyncMock(return_value={'affected_profiles': 3}))
+        backend = SimpleNamespace(
+            request=AsyncMock(return_value={'applied_revision': 1}),
+            node_maintenance=AsyncMock(return_value={'affected_profiles': 3}))
         for locale in ('ru', 'en'):
             self.data['locale'] = locale
             with patch.object(nodes, 'render', new_callable=AsyncMock) as draw:
@@ -429,9 +431,11 @@ class AdminNodeRichTests(IsolatedAsyncioTestCase):
         for locale in ('ru', 'en'):
             self.data['locale'] = locale
             for status in ('active', 'draining'):
-                backend = SimpleNamespace(node_maintenance=AsyncMock(return_value={
-                    'status': status, 'verification_target': None, 'pending_tasks': 1,
-                    'blocked_tasks': 1, 'cleanup_phase': 'preparing'}))
+                backend = SimpleNamespace(
+                    request=AsyncMock(return_value=self.node),
+                    node_maintenance=AsyncMock(return_value={
+                        'status': status, 'verification_target': None, 'pending_tasks': 1,
+                        'blocked_tasks': 1, 'cleanup_phase': 'preparing'}))
                 with patch.object(nodes, 'render', new_callable=AsyncMock) as draw:
                     await nodes.show_node_maintenance(123, 123, 77, 'msk1', self.bot, backend, self.state)
                 screen, rows = draw.call_args.args[2:4]
@@ -671,7 +675,7 @@ class AdminNodeRichTests(IsolatedAsyncioTestCase):
         self.assertIn('bootstrap_menu:msk1', self.callbacks(draw))
         self.assertFalse(any(c.startswith('apply_node:') for c in self.callbacks(draw)))
         controls = await nodes.draft_controls(self.node, self.state, 'en')
-        self.assertEqual(controls[0][0].callback_data, 'bootstrap_menu:msk1')
+        self.assertEqual(controls, [])
         self.backend.apply_node_settings = AsyncMock()
         with patch.object(tools, 'show_install', new_callable=AsyncMock) as install:
             await nodes.apply_node(123, 123, 77, 'msk1', self.bot, self.backend, self.state)
@@ -770,3 +774,167 @@ class AdminNodeRichTests(IsolatedAsyncioTestCase):
             await nodes.show_node_apply_status(123, 123, 77, 'task', 'msk1', self.bot, self.backend, self.state)
         self.assertIn('bootstrap_menu:msk1', self.callbacks(draw))
         self.assertIn(tr('en', 'nodes.apply.installation_required'), draw.call_args.args[2].lines)
+
+    async def test_uninstalled_node_ui_invariants_and_runtime_tools_rejection(self):
+        from telegram_client.backend import BackendError
+        self.node['applied_revision'] = 0
+        self.overview['state'] = 'not_installed'
+        with patch.object(nodes, 'render', new_callable=AsyncMock) as draw:
+            await nodes.show_admin_node(123, 123, 77, 'msk1', self.bot, self.backend, self.state)
+        callbacks = self.callbacks(draw)
+        self.assertIn('bootstrap_menu:msk1', callbacks)
+        self.assertIn(nodes.NodeSettingsCallback(node_key='msk1').pack(), callbacks)
+        self.assertIn(nodes.ConfirmRegistryRemovalCallback(node_key='msk1').pack(), callbacks)
+        self.assertIn(nodes.AdminNodesCallback().pack(), callbacks)
+        self.assertNotIn(nodes.ProbeNodeCallback(node_key='msk1').pack(), callbacks)
+        self.assertNotIn('node_manage:msk1', callbacks)
+        self.assertNotIn('node_technical:msk1', callbacks)
+        self.assertNotIn('node_tools:msk1', callbacks)
+        self.assertNotIn(nodes.NodeMaintenanceCallback(node_key='msk1').pack(), callbacks)
+        screen, rows = draw.call_args.args[2:4]
+        registry_btn = [b for row in screen.fallback_rows(rows) for b in row if 'confirm_registry_removal' in b.callback_data]
+        self.assertEqual(len(registry_btn), 1)
+        self.assertEqual(registry_btn[0].style, 'danger')
+
+        with patch.object(nodes, 'show_admin_node', new_callable=AsyncMock) as show:
+            self.query.data = 'node_manage:msk1'
+            await nodes.node_manage_cb(self.query, self.bot, self.backend, self.state)
+            show.assert_awaited_once_with(123, 123, 77, 'msk1', self.bot, self.backend, self.state)
+
+        with patch.object(nodes, 'show_admin_node', new_callable=AsyncMock) as show:
+            self.query.data = 'node_technical:msk1'
+            await nodes.node_technical_cb(self.query, self.bot, self.backend, self.state)
+            show.assert_awaited_once_with(123, 123, 77, 'msk1', self.bot, self.backend, self.state)
+
+        with patch.object(nodes, 'show_admin_node', new_callable=AsyncMock) as show:
+            await nodes.probe_node_cb(self.query, nodes.ProbeNodeCallback(node_key='msk1'), self.bot, self.backend, self.state)
+            show.assert_awaited_once_with(123, 123, 77, 'msk1', self.bot, self.backend, self.state)
+
+        with patch.object(nodes, 'show_admin_node', new_callable=AsyncMock) as show:
+            self.query.data = 'node_diagnostics:msk1'
+            await nodes.node_diagnostics_cb(self.query, self.bot, self.backend, self.state)
+            show.assert_awaited_once_with(123, 123, 77, 'msk1', self.bot, self.backend, self.state)
+
+        with patch.object(nodes, 'show_admin_node', new_callable=AsyncMock) as show:
+            await nodes.confirm_node_drain_cb(self.query, nodes.ConfirmNodeDrainCallback(node_key='msk1'), self.bot, self.backend, self.state)
+            show.assert_awaited_once_with(123, 123, 77, 'msk1', self.bot, self.backend, self.state)
+
+        with patch.object(nodes, 'show_admin_node', new_callable=AsyncMock) as show:
+            await nodes.drain_node_cb(self.query, nodes.DrainNodeCallback(node_key='msk1'), self.bot, self.backend, self.state)
+            show.assert_awaited_once_with(123, 123, 77, 'msk1', self.bot, self.backend, self.state)
+
+        with patch.object(nodes, 'show_admin_node', new_callable=AsyncMock) as show:
+            await nodes.bind_local_cb(self.query, nodes.BindLocalCallback(node_key='msk1'), self.bot, self.backend, self.state)
+            show.assert_awaited_once_with(123, 123, 77, 'msk1', self.bot, self.backend, self.state)
+
+        with patch.object(nodes, 'show_admin_node', new_callable=AsyncMock) as show:
+            await nodes.bind_ssh_cb(self.query, nodes.BindSshCallback(node_key='msk1'), self.bot, self.backend, self.state)
+            show.assert_awaited_once_with(123, 123, 77, 'msk1', self.bot, self.backend, self.state)
+
+        self.backend.node_maintenance = AsyncMock()
+        with patch.object(nodes, 'render', new_callable=AsyncMock) as draw:
+            await nodes.show_node_maintenance(123, 123, 77, 'msk1', self.bot, self.backend, self.state)
+        self.backend.node_maintenance.assert_not_awaited()
+        screen, rows = draw.call_args.args[2:4]
+        self.assertIn(tr('en', 'nodes.apply.installation_required'), screen.lines)
+        choices = [b.callback_data for row in screen.fallback_rows(rows) for b in row]
+        self.assertIn(nodes.ConfirmRegistryRemovalCallback(node_key='msk1').pack(), choices)
+        self.assertIn(nodes.AdminNodeCallback(node_key='msk1').pack(), choices)
+        self.assertNotIn(nodes.ConfirmNodeDrainCallback(node_key='msk1').pack(), choices)
+
+    async def test_installed_node_retains_management_probe_and_tools(self):
+        self.node['applied_revision'] = 2
+        self.overview['state'] = 'active'
+        with patch.object(nodes, 'render', new_callable=AsyncMock) as draw:
+            await nodes.show_admin_node(123, 123, 77, 'msk1', self.bot, self.backend, self.state)
+        callbacks = self.callbacks(draw)
+        self.assertIn(nodes.ProbeNodeCallback(node_key='msk1').pack(), callbacks)
+        self.assertIn('node_manage:msk1', callbacks)
+        self.assertNotIn(nodes.ConfirmRegistryRemovalCallback(node_key='msk1').pack(), callbacks)
+
+        self.query.data = 'node_manage:msk1'
+        with patch.object(nodes, 'render', new_callable=AsyncMock) as draw:
+            await nodes.node_manage_cb(self.query, self.bot, self.backend, self.state)
+        callbacks = self.callbacks(draw)
+        self.assertIn('bootstrap_menu:msk1', callbacks)
+        self.assertIn(nodes.NodeMaintenanceCallback(node_key='msk1').pack(), callbacks)
+        self.assertIn('node_technical:msk1', callbacks)
+
+        self.query.data = 'node_technical:msk1'
+        with patch.object(nodes, 'render', new_callable=AsyncMock) as draw:
+            await nodes.node_technical_cb(self.query, self.bot, self.backend, self.state)
+        callbacks = self.callbacks(draw)
+        self.assertIn('node_tools:msk1', callbacks)
+
+    async def test_backend_node_probe_and_diagnostics_node_installation_required_error_returns_to_card(self):
+        from telegram_client.backend import BackendError
+        self.backend.node_probe = AsyncMock(side_effect=BackendError('node_installation_required', 409))
+        self.backend.node_diagnostics = AsyncMock(side_effect=BackendError('node_installation_required', 409))
+        self.backend.node_maintenance = AsyncMock(side_effect=BackendError('node_installation_required', 409))
+        installed_node = {'key': 'msk1', 'applied_revision': 1, 'desired_revision': 1}
+        dummy_backend = SimpleNamespace(
+            request=AsyncMock(return_value=installed_node),
+            node_probe=self.backend.node_probe,
+            node_diagnostics=self.backend.node_diagnostics,
+            node_maintenance=self.backend.node_maintenance,
+        )
+        with patch.object(nodes, 'show_admin_node', new_callable=AsyncMock) as show:
+            await nodes.probe_node_cb(self.query, nodes.ProbeNodeCallback(node_key='msk1'), self.bot, dummy_backend, self.state)
+            show.assert_awaited_once_with(123, 123, 77, 'msk1', self.bot, dummy_backend, self.state)
+
+        with patch.object(nodes, 'show_admin_node', new_callable=AsyncMock) as show:
+            self.query.data = 'node_diagnostics:msk1'
+            await nodes.node_diagnostics_cb(self.query, self.bot, dummy_backend, self.state)
+            show.assert_awaited_once_with(123, 123, 77, 'msk1', self.bot, dummy_backend, self.state)
+
+        with patch.object(nodes, 'show_admin_node', new_callable=AsyncMock) as show:
+            await nodes.confirm_node_drain_cb(self.query, nodes.ConfirmNodeDrainCallback(node_key='msk1'), self.bot, dummy_backend, self.state)
+            show.assert_awaited_once_with(123, 123, 77, 'msk1', self.bot, dummy_backend, self.state)
+
+        # Race fallback vs pre-check: uninstalled node returned by backend.request returns to card before calling tools
+        uninstalled_node = {'key': 'msk1', 'applied_revision': 0, 'desired_revision': 1}
+        dummy_uninstalled = SimpleNamespace(
+            request=AsyncMock(return_value=uninstalled_node),
+            node_probe=AsyncMock(),
+        )
+        with patch.object(nodes, 'show_admin_node', new_callable=AsyncMock) as show:
+            await nodes.probe_node_cb(self.query, nodes.ProbeNodeCallback(node_key='msk1'), self.bot, dummy_uninstalled, self.state)
+            show.assert_awaited_once_with(123, 123, 77, 'msk1', self.bot, dummy_uninstalled, self.state)
+            dummy_uninstalled.node_probe.assert_not_awaited()
+
+    async def test_admin_node_tools_uninstalled_node_guards_and_bootstrap_success_close_only(self):
+        uninstalled = {'key': 'msk1', 'applied_revision': 0, 'desired_revision': 1, 'protocols': []}
+        backend = SimpleNamespace(
+            request=AsyncMock(return_value=uninstalled),
+            node_action=AsyncMock(),
+        )
+        # 1. tools_cb returns root for uninstalled node
+        self.query.data = 'node_tools:msk1'
+        with patch.object(nodes, 'show_admin_node', new_callable=AsyncMock) as show:
+            await tools.tools_cb(self.query, self.bot, backend, self.state)
+            show.assert_awaited_once_with(123, 123, 77, 'msk1', self.bot, backend, self.state)
+
+        # 2. view_cb returns root for uninstalled node
+        self.query.data = 'node_view:diagnostics:msk1'
+        with patch.object(nodes, 'show_admin_node', new_callable=AsyncMock) as show:
+            await tools.view_cb(self.query, self.bot, backend, self.state)
+            show.assert_awaited_once_with(123, 123, 77, 'msk1', self.bot, backend, self.state)
+
+        # 3. non-bootstrap action_cb returns root for uninstalled node
+        self.query.data = 'node_action:cleanup_runtime:msk1'
+        with patch.object(nodes, 'show_admin_node', new_callable=AsyncMock) as show:
+            await tools.action_cb(self.query, self.bot, backend, self.state)
+            show.assert_awaited_once_with(123, 123, 77, 'msk1', self.bot, backend, self.state)
+
+        # 4. show_bootstrap succeeded renders ONLY Close button
+        succeeded_job = {
+            'id': 'job1', 'node_key': 'msk1', 'status': 'succeeded',
+            'phase': 'done', 'child_id': None, 'child_kind': None
+        }
+        with patch.object(tools, 'render', new_callable=AsyncMock) as draw:
+            await tools.show_bootstrap(123, 123, 77, succeeded_job, self.bot, backend, self.state)
+        rows = draw.call_args.args[3]
+        flat_buttons = [b for row in rows for b in row]
+        self.assertEqual(len(flat_buttons), 1)
+        self.assertEqual(flat_buttons[0].callback_data, nodes.AdminNodeCallback(node_key='msk1').pack())
+        self.assertEqual(flat_buttons[0].text, tr('en', 'setup.close'))

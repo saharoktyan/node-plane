@@ -610,24 +610,18 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
                 .enumerate()
             {
                 let area = Rect::new(body[1].x, body[1].y + row as u16, body[1].width, 1);
-                frame.render_widget(
-                    Paragraph::new(format!(
-                        "{} {label}",
-                        if index == app.administrator_selected {
-                            "→"
-                        } else {
-                            " "
-                        }
-                    ))
-                    .style(Style::default().fg(
-                        if index == app.administrator_selected {
-                            Color::Cyan
-                        } else {
-                            Color::Gray
-                        },
-                    )),
-                    area,
-                );
+                let selected = index == app.administrator_selected;
+                let line = Line::from(vec![
+                    Span::styled(
+                        if selected { "→ " } else { "  " },
+                        Style::default().fg(Color::White),
+                    ),
+                    Span::styled(
+                        label.as_str(),
+                        Style::default().fg(if selected { Color::Cyan } else { Color::Gray }),
+                    ),
+                ]);
+                frame.render_widget(Paragraph::new(line), area);
                 hits.push(Hit {
                     area,
                     control: Control::Administrator(index),
@@ -680,23 +674,21 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
         } else {
             frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: false }), sections[0]);
         }
-        let label = match prompt {
-            Prompt::HostKey { .. } => "Trust host",
-            Prompt::Password { .. } => "Connect",
-            _ => "Continue",
-        };
-        button_pair(
-            frame,
-            sections[1],
-            (label, "Cancel"),
-            app.trust
-                || matches!(
-                    prompt,
-                    Prompt::Select { .. } | Prompt::SelectAdministrator { .. }
-                ),
-            (Control::Prompt(true), Control::Prompt(false)),
-            &mut hits,
-        );
+        if !matches!(prompt, Prompt::Select { .. }) {
+            let label = match prompt {
+                Prompt::HostKey { .. } => "Trust host",
+                Prompt::Password { .. } => "Connect",
+                _ => "Continue",
+            };
+            button_pair(
+                frame,
+                sections[1],
+                (label, "Cancel"),
+                app.trust || matches!(prompt, Prompt::SelectAdministrator { .. }),
+                (Control::Prompt(true), Control::Prompt(false)),
+                &mut hits,
+            );
+        }
     }
     if app.exit && app.prompt.is_none() {
         draw_exit_dialog(frame, app, &mut hits);

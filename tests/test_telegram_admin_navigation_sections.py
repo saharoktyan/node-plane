@@ -54,3 +54,65 @@ class AdminNavigationSectionsTests(IsolatedAsyncioTestCase):
                 values = [p.callback for p in parent_path(callback, locale, self.state_data)]
                 self.assertEqual(values[0], 'admin_menu')
                 self.assertNotIn('admin_settings', values)
+
+    async def test_uninstalled_node_draft_controls_empty_in_submenus_and_setup_on_root_only(self):
+        from telegram_client.routers import admin_nodes
+        self.state_data['locale'] = 'en'
+        uninstalled_node = {
+            'key': 'n1', 'title': 'Node 1', 'region': 'Europe', 'transport': 'ssh',
+            'ssh_target': 'root@n1.example', 'protocols': ['awg'], 'settings': {'public_host': 'n1.example'},
+            'applied_revision': 0, 'desired_revision': 1, 'enabled': False
+        }
+        # In settings submenus (no unapplied draft), draft_controls returns []
+        controls = await admin_nodes.draft_controls(uninstalled_node, self.state, 'en')
+        self.assertEqual(controls, [])
+
+        # On root (show_admin_node), bootstrap/setup button is offered in installation section
+        backend = SimpleNamespace(
+            node=AsyncMock(return_value=uninstalled_node),
+            node_overview=AsyncMock(return_value={'ready': 0, 'pending': 0, 'failed': 0, 'attention': 0}),
+            admin_overview=AsyncMock(return_value={}),
+            request=AsyncMock(return_value=uninstalled_node)
+        )
+        with patch.object(admin_nodes, 'render', new_callable=AsyncMock) as draw:
+            await admin_nodes.show_admin_node(123, 123, 77, 'n1', self.bot, backend, self.state)
+        screen = draw.call_args.args[2]
+        install_section = next(s for s in screen.sections if s.title == 'Installation and checks')
+        callbacks = [b.callback_data for row in install_section.rows for b in row]
+        self.assertTrue(any(c == 'bootstrap_menu:n1' for c in callbacks))
+
+    async def test_probe_shows_disk_usage_percentage_and_used_over_total_bytes(self):
+        from telegram_client.routers import admin_nodes
+        self.state_data['locale'] = 'en'
+        node_data = {
+            'key': 'n1', 'title': 'Node 1', 'region': 'Europe', 'transport': 'ssh',
+            'ssh_target': 'root@n1.example', 'protocols': ['awg'], 'settings': {'public_host': 'n1.example'},
+            'applied_revision': 1, 'desired_revision': 1, 'enabled': True
+        }
+        observation = {
+            'applied_revision': 1, 'desired_revision': 1,
+            'protocols': [{'protocol': 'awg', 'installed': True, 'running': True, 'config_valid': True,
+                'ports': [{'transport': 'udp', 'network': 'udp', 'port': 51820}]}],
+            'docker': True,
+            'checked_at': '2026-10-25T12:00:00+00:00',
+            'response_ms': 42,
+            'host_metrics': {
+                'cpu_used_percent': 12.5,
+                'disk_free_percent': 25.0,  # 25% free -> 75% used
+                'disk_total_bytes': 100 * 1024 * 1024 * 1024,
+                'disk_free_bytes': 25 * 1024 * 1024 * 1024,  # used = 75 GB
+            }
+        }
+        backend = SimpleNamespace(
+            request=AsyncMock(return_value=node_data),
+            node_probe=AsyncMock(return_value=observation)
+        )
+        self.query.data = 'probe_node:n1'
+        with patch.object(admin_nodes, 'render', new_callable=AsyncMock) as draw:
+            await admin_nodes.probe_node_cb(self.query, admin_nodes.ProbeNodeCallback(node_key='n1'), self.bot, backend, self.state)
+        screen = draw.call_args.args[2]
+        res_section = next(s for s in screen.sections if s.title == 'Host resources')
+        table = res_section.tables[0]
+        row_dict = dict(table.rows)
+        self.assertIn('Disk usage', row_dict)
+        self.assertEqual(row_dict['Disk usage'], '75% · 75.0 GiB / 100.0 GiB')

@@ -34,9 +34,22 @@ async def show(chat_id, user_id, message_id, bot, backend, state):
     if callback and len(callback.encode()) > 64:
         callback = 'admin_nodes'
     if callback:
-        rows.append([InlineKeyboardButton(text=tr(locale, 'quick_start.continue'), callback_data=callback, style='primary')])
+        if step == 'defaults':
+            label = tr(locale, 'quick_start.action.use_defaults' if reviewed else 'quick_start.action.configure_defaults')
+        elif step == 'node':
+            label = tr(locale, 'quick_start.action.add_server')
+        elif step == 'protocols':
+            label = tr(locale, 'quick_start.action.setup_server')
+        elif step == 'access':
+            label = tr(locale, 'quick_start.action.configure_access')
+        elif step == 'config':
+            label = tr(locale, 'quick_start.action.get_config')
+        else:
+            label = tr(locale, 'quick_start.continue')
+        rows.append([InlineKeyboardButton(text=label, callback_data=callback, style='primary')])
     if step == 'defaults':
-        rows.append([InlineKeyboardButton(text=tr(locale, 'quick_start.edit_defaults' if reviewed else 'quick_start.use_defaults'),
+        rows.append([InlineKeyboardButton(
+            text=tr(locale, 'quick_start.action.configure_defaults' if reviewed else 'quick_start.action.use_defaults'),
             callback_data='idefault:guide' if reviewed else 'quick_start_defaults')])
     if step is None:
         rows.append([InlineKeyboardButton(text=tr(locale, 'quick_start.done'), callback_data='quick_start_done', style='primary')])

@@ -40,10 +40,18 @@ class GrantPolicyTests(unittest.TestCase):
                     'settings': {'public_host': key + '.example'}})
 
     def bootstrap(self, key):
-        NodeOperations(self.db).queue(self.actor, key, 'bootstrap', revision=1, command_key=str(uuid4()))
-        driver = SimpleNamespace(node_action=lambda task, action, intent: {
-            'node_key': key, 'action': action, 'revision': intent['revision'], 'result': {'verified': True}})
+        from backend.node_bootstrap import NodeBootstrapService
+        driver = SimpleNamespace(
+            inspect_node_services=lambda node: {'docker': True, 'awg_config_valid': True,
+                'awg_running': True, 'xray_config_valid': True, 'xray_running': True},
+            node_action=lambda task, action, intent: {
+                'node_key': key, 'action': action, 'revision': intent['revision'], 'result': {'verified': True}})
+        parent = NodeBootstrapService(self.db, driver)
+        parent.queue(self.actor, key, 1, str(uuid4()))
+        for _ in range(3):  # healthy agent, Docker, then the parent's protocol child
+            self.assertTrue(parent.run_one())
         self.assertTrue(NodeOperations(self.db, driver).run_one())
+        self.assertTrue(parent.run_one())
 
     def test_future_node_grants_start_after_confirmed_bootstrap_and_are_idempotent(self):
         profile = self.profile()

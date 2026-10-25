@@ -401,9 +401,11 @@ class BackendClient:
     async def rollout_agent(self, telegram_user_id: int, node_key: str,
                             transport: str, *, ssh_target: str | None = None,
                             command_key: str, install_rust: bool = False) -> dict:
+        if install_rust:
+            raise BackendError('install_rust_unsupported', 422)
         return await self.request('POST', f'/api/v1/nodes/{node_key}/agent-rollouts',
             telegram_user_id=telegram_user_id, command=True, command_key=command_key,
-            body={'transport': transport, 'ssh_target': ssh_target, 'install_rust': install_rust})
+            body={'transport': transport, 'ssh_target': ssh_target, 'install_rust': False})
 
     async def agent_rollout(self, telegram_user_id: int, task_id: str) -> dict:
         return await self.request('GET', f'/api/v1/agent-rollouts/{task_id}',

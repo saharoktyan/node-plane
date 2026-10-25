@@ -1264,11 +1264,8 @@ async def profile_expiry_message(message: Message, bot: Bot, backend: BackendCli
     locale = await _locale(state)
     error = None
     try:
-        value = message.text.strip()
-        date = datetime.strptime(value, '%Y-%m-%d').date()
-        if date.isoformat() != value or date < datetime.now(timezone.utc).date():
-            raise ValueError()
-        expires = datetime(date.year, date.month, date.day, 23, 59, 59, tzinfo=timezone.utc).isoformat()
+        from services.access_expiry import parse_expiry
+        expires = parse_expiry(message.text.strip())
     except ValueError:
         error = tr(locale, 'profile.layout.date_invalid')
     if not error:

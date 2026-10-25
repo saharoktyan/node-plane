@@ -99,6 +99,9 @@ class FleetDiagnostics:
             if state is None:
                 checks.append({'id': 'registry', 'status': 'error',
                                'detail': 'Saved server metadata unavailable or changed during diagnostics; refresh the registry'})
+            elif not node['applied_revision']:
+                checks.append({'id': 'installation', 'status': 'ok',
+                               'detail': 'Server is not installed; configure it and run server setup'})
             else:
                 try:
                     observation = probe(dict(node, protocols=[]) if not node['applied_revision'] else node, self.driver)

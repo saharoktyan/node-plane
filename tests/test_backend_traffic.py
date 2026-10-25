@@ -87,9 +87,10 @@ class TrafficTests(unittest.TestCase):
         self.assertEqual(traffic['status'], 'current')
         self.assertEqual(traffic['items'][0]['uplink_bytes'], 100)
         self.assertEqual(traffic['items'][1]['uplink_bytes'], 0)
-        member = fixture.BackendHTTPTests.register(self, 102).json()
-        self.db.connection.execute("UPDATE backend_accounts SET status='approved' WHERE id=?", (member['id'],))
-        self.db.connection.commit()
+        self.assertEqual(self.client.get(endpoint, headers={**self.headers,
+            'X-Node-Plane-Telegram-User-ID':'102'}).status_code, 401)
+        resp = fixture.BackendHTTPTests.provision(self, 102)
+        self.assertIn(resp.status_code, (200, 201))
         self.assertEqual(self.client.get(endpoint, headers={**self.headers,
             'X-Node-Plane-Telegram-User-ID':'102'}).status_code, 403)
         self.settings.update_traffic_policy(self.actor, False)
@@ -156,10 +157,11 @@ class TrafficTests(unittest.TestCase):
         self.collect()
         self.driver.up = 1100
         self.collect()
-        member = fixture.BackendHTTPTests.register(self, 102).json()
-        self.db.connection.execute("UPDATE backend_accounts SET status='approved' WHERE id=?", (member['id'],))
-        self.db.connection.commit()
         endpoint = f'/api/v1/profiles/{self.profile_id}/summary'
+        self.assertEqual(self.client.get(endpoint, headers={**self.headers,
+            'X-Node-Plane-Telegram-User-ID': '102'}).status_code, 401)
+        resp = fixture.BackendHTTPTests.provision(self, 102)
+        self.assertIn(resp.status_code, (200, 201))
         self.assertEqual(self.client.get(endpoint, headers={**self.headers,
             'X-Node-Plane-Telegram-User-ID': '102'}).status_code, 403)
         response = self.client.get(endpoint, headers={**self.headers,
@@ -381,12 +383,11 @@ class TrafficTests(unittest.TestCase):
 
     def test_ownership_change_purges_history_and_other_account_cannot_read_it(self):
         self.collect()
-        member = fixture.BackendHTTPTests.register(self, 102).json()
+        resp = fixture.BackendHTTPTests.provision(self, 102)
+        self.assertIn(resp.status_code, (200, 201))
+        member = resp.json()["account"]
         self.db.connection.execute(
-            "UPDATE backend_accounts SET status='approved' WHERE id=?", (member["id"],)
-        )
-        self.db.connection.execute(
-            "UPDATE backend_profiles SET owner_account_id=?", (member["id"],)
+            "UPDATE backend_profiles SET owner_account_id=? WHERE id=?", (member["id"], self.profile_id)
         )
         self.db.connection.commit()
         self.collect()

@@ -337,6 +337,9 @@ class SystemCleanupService:
         return self.get(actor, job_id)
 
     def retry(self, actor, job_id):
+        # Recovery is bound to the initiating account, not an ephemeral NPW
+        # credential. A fresh login must be able to continue its saved job.
+        # Destructive shutdown acknowledgement keeps its principal binding.
         require_permission(actor, "maintenance.manage")
         with self.db.transaction() as conn:
             conn.execute(
@@ -349,7 +352,6 @@ class SystemCleanupService:
             if (
                 not row
                 or row["actor_id"] != actor.account.id
-                or row["principal_id"] != actor.principal.id
             ):
                 raise AccessDenied("resource_not_found", 404)
             if row["status"] != "blocked" or row["phase"] == "uninstall_launch":
@@ -374,6 +376,8 @@ class SystemCleanupService:
         return self.get(actor, job_id)
 
     def abort(self, actor, job_id, *, _finish=False):
+        # Like retry, allow the same administrator after credential rotation;
+        # fresh permissions and the irreversible-phase boundary still apply.
         require_permission(actor, "maintenance.manage")
         with self.db.transaction() as conn:
             conn.execute(
@@ -386,7 +390,6 @@ class SystemCleanupService:
             if (
                 not row
                 or row["actor_id"] != actor.account.id
-                or row["principal_id"] != actor.principal.id
             ):
                 raise AccessDenied("resource_not_found", 404)
             intent = json.loads(row["intent_json"])

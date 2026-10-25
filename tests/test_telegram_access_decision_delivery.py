@@ -59,3 +59,16 @@ class AccessDecisionDeliveryTests(IsolatedAsyncioTestCase):
             message='Not Found')
         self.assertTrue(await deliver_one(self.bot, self.backend, self.dispatcher))
         self.assertIn('/ack?', self.backend.request.call_args.args[1])
+
+    async def test_rejection_receipt_has_close_and_attribution(self):
+        self.delivery['decision'] = 'rejected'
+        self.delivery['surface'] = 'telegram'
+        self.delivery['decider'] = {'id': 'admin-1', 'username': 'reviewer'}
+        self.assertTrue(await deliver_one(self.bot, self.backend, self.dispatcher))
+        options = self.bot.edit_message_rich_message.call_args.kwargs
+        self.assertEqual(options['message_id'], 99)
+        content = options['rich_message'].model_dump_json()
+        self.assertIn('notification_close', content)
+        self.assertIn('@reviewer', content)
+        self.assertNotIn('Workstation', content)
+        self.assertIn('/ack?', self.backend.request.call_args.args[1])

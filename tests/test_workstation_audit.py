@@ -122,7 +122,10 @@ class APIAuditTests(TestCase):
 
     def test_profile_audit_title_prefers_username_then_telegram_id(self):
         from backend.workstation_audit import WorkstationAudit
-        member = http_fixture.BackendHTTPTests.register(self,102,username='alice').json()
+        http_fixture.BackendHTTPTests.register(self, 102, username='alice')
+        resp = http_fixture.BackendHTTPTests.provision(self, 102)
+        self.assertIn(resp.status_code, (200, 201))
+        member = resp.json()['account']
         profile = self.db.connection.execute('SELECT id FROM backend_profiles WHERE owner_account_id=?',(member['id'],)).fetchone()[0]
         action = 'PATCH /api/v1/profiles/' + profile
         self.assertEqual(WorkstationAudit.describe(self.db.connection,action),'Update profile · @alice')

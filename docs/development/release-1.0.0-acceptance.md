@@ -1,6 +1,6 @@
 # 1.0.0 acceptance
 
-This checklist accompanies preparation of the first stable release. The current manual acceptance build is `1.0.0-alpha.3` in the dev channel; the target stable version remains `1.0.0`. This document does not record publication or approval of the manual checks below.
+This checklist accompanies preparation of the first stable release. The current development candidate is `1.0.0-alpha.19` in the dev channel; the target stable version remains `1.0.0`. Automated evidence and owner verification are recorded separately.
 
 ## Automated evidence
 
@@ -18,7 +18,15 @@ Build the server stack in `scripts/Dockerfile.release` (Debian 12). Verify the c
 - Previously built Debian 12 server artifacts passed checksum and controller-manifest verification; the new runtime modules are present. These working-tree archives must be rebuilt from the final candidate commit before publication.
 - GitHub CI and manual checks below remain pending. This local run covers Python 3.12 and Linux; it does not certify Python 3.11 or actual Windows/macOS behavior.
 
-## Manual checks still required
+### Owner verification update on 2026-10-25
+
+The owner reports a full screen walkthrough, almost all bot functionality checked, working real traffic through all protocols, automatic temporary-configuration revocation, and working server settings and edits. Repeat only the changed approval/deletion, recovery and UI paths on the new candidate; these results do not require another full UI walkthrough.
+
+A real-client IPv6 leak check remains unverified: the owner's mobile connection reports that IPv6 leak testing is unavailable. This does not establish the reason or prove the absence of leaks. Native Windows/macOS interaction and the final disposable-host reboot/reset/removal checks are not certified by the bot walkthrough.
+
+## Manual acceptance inventory
+
+The list below is the original inventory, not a request to repeat checks covered by the owner update. Stable-channel installation and final candidate CI/artifact verification still require the actual release candidate.
 
 - [ ] Install a fresh controller from the stable channel on the supported clean host; complete Quick Start through both Telegram and NPW, close/reopen it midway and verify progress resumes.
 - [ ] Create local and SSH nodes; issue VLESS TCP, VLESS XHTTP and AWG 3.1 configurations, import them into real clients and confirm traffic.

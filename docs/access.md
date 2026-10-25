@@ -6,6 +6,8 @@ An account identifies a person and their role. A VPN profile holds that person's
 
 ## Requests
 
+Sending `/start` and language selection record visitor metadata only; an access request exists without allocating an account. Pending is a request and presentation status, not a new VPN profile. Approval or explicit administrator provisioning creates the account and default VPN profile atomically. Rejecting a request or background menu refresh does not allocate an account.
+
 Open **Access → Requests** in Workstation or the administrator's requests screen in Telegram. Review the Telegram ID, username when available and request details. Approve or reject the request. Approval and protocol grants are separate choices: check which servers the profile can use.
 
 Request policy controls whether users can request access and which requests are handled automatically; see [Settings](settings.md).
@@ -40,7 +42,7 @@ Expiry and revocation remove runtime authorization. New VLESS connections are bl
 
 ## Delete an account
 
-**Delete account** removes the account, its VPN profile and devices. A later request creates a new account and profile with new IDs. **Freeze** and **Block** preserve the existing account and profile. Review the affected access and confirm deletion. Progress refreshes while the operation runs. A blocked revocation requires recovery; closing the screen does not complete or cancel it.
+**Delete account** removes the account, its VPN profile and devices. After deletion, submitting a new request alone does not recreate an account; a subsequent approval or explicit administrator provisioning creates a fresh account and profile with new IDs. **Freeze** and **Block** preserve the existing account and profile. Review the affected access and confirm deletion. Progress refreshes while the operation runs. A blocked revocation requires recovery; closing the screen does not complete or cancel it.
 
 Deletion of a saved Workstation installation profile is a local preference action. It does not delete a user, VPN profile or controller.
 

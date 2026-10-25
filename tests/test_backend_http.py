@@ -58,7 +58,7 @@ class BackendHTTPTests(unittest.TestCase):
     def test_workstation_can_read_own_and_other_profile_cards(self):
         from backend.workstation_cli import SCOPES
         self.register(101, username='administrator')
-        member = self.register(102, username='member').json()
+        member = self.provision(102).json()['account']
         _, token = self.credentials.issue(PrincipalKind.ACCOUNT, SCOPES, account_id=self.admin.id)
         headers = {'Authorization': 'Bearer ' + token}
         for account_id in (self.admin.id, member['id']):
@@ -76,19 +76,26 @@ class BackendHTTPTests(unittest.TestCase):
         self.assertNotIn(('POST', '/api/v1/system/cleanup/run'), pairs)
         self.assertIn(('GET', '/api/v1/system/cleanup'), pairs)
 
-    def test_registration_creates_one_default_profile_and_updates_only_automatic_names(self):
+    def test_approval_creates_one_default_profile_and_updates_only_automatic_names(self):
         first = self.register(102, username='alice').json()
         repo = ProfileRepository(self.db)
-        profiles = repo.owned(first['id'], after='', limit=10)
+        self.assertEqual(len(repo.owned(first['id'], after='', limit=10)), 0)
+        self.assertFalse(first['account_created'])
+        self.assertEqual(first['status'], 'pending')
+        provisioned = self.provision(102).json()
+        self.assertEqual(provisioned['account']['status'], 'approved')
+        profiles = repo.owned(provisioned['account']['id'], after='', limit=10)
         self.assertEqual(len(profiles), 1)
         self.assertEqual(profiles[0]['display_name'], 'alice')
         self.register(102, username='new_alice')
-        self.assertEqual(len(repo.owned(first['id'], after='', limit=10)), 1)
-        self.assertEqual(repo.owned(first['id'], after='', limit=10)[0]['display_name'], 'alice')
+        self.assertEqual(len(repo.owned(provisioned['account']['id'], after='', limit=10)), 1)
+        self.assertEqual(repo.owned(provisioned['account']['id'], after='', limit=10)[0]['display_name'], 'alice')
         fallback = self.register(103).json()
-        self.assertEqual(repo.owned(fallback['id'], after='', limit=10)[0]['display_name'], 'User 103')
+        self.assertEqual(len(repo.owned(fallback['id'], after='', limit=10)), 0)
+        provisioned_fallback = self.provision(103).json()
+        self.assertEqual(repo.owned(provisioned_fallback['account']['id'], after='', limit=10)[0]['display_name'], 'User 103')
         self.register(103, username='bob')
-        self.assertEqual(repo.owned(fallback['id'], after='', limit=10)[0]['display_name'], 'bob')
+        self.assertEqual(repo.owned(provisioned_fallback['account']['id'], after='', limit=10)[0]['display_name'], 'bob')
         bootstrap_admin(self.identities, 101, self.db)
         self.register(101, username='administrator')
         self.assertEqual(repo.owned(self.admin.id, after='', limit=10)[0]['display_name'], 'administrator')
@@ -111,9 +118,13 @@ class BackendHTTPTests(unittest.TestCase):
                 self.assertTrue(Path(str(private) + '.pub').read_text().endswith('\n'))
                 self.assertNotIn('\\n', recovered.json()['public_key'])
                 self.register(102)
-                denied = self.client.get('/api/v1/system/ssh-key', headers={**self.headers,
+                denied_guest = self.client.get('/api/v1/system/ssh-key', headers={**self.headers,
                     'X-Node-Plane-Telegram-User-ID': '102'})
-                self.assertEqual(denied.status_code, 403)
+                self.assertEqual(denied_guest.status_code, 401)
+                self.provision(103)
+                denied_member = self.client.get('/api/v1/system/ssh-key', headers={**self.headers,
+                    'X-Node-Plane-Telegram-User-ID': '103'})
+                self.assertEqual(denied_member.status_code, 403)
 
     def test_settings_and_config_reads_use_production_result_adapter(self):
         from contextlib import contextmanager
@@ -172,6 +183,13 @@ class BackendHTTPTests(unittest.TestCase):
             headers={**self.headers, 'Idempotency-Key': key or str(uuid4())},
             json={'telegram_user_id': user_id, **fields})
 
+    def provision(self, identity, key=None):
+        from backend.workstation_cli import SCOPES
+        _, token = self.credentials.issue(PrincipalKind.ACCOUNT, SCOPES, account_id=self.admin.id)
+        return self.client.post('/api/v1/accounts',
+            headers={'Authorization': 'Bearer ' + token, 'Idempotency-Key': key or str(uuid4())},
+            json={'identity': str(identity)})
+
     def test_authenticated_me_and_no_auth_rejected(self):
         self.assertEqual(self.client.get('/api/v1/me').status_code, 401)
         response = self.client.get('/api/v1/me', headers={**self.headers, 'X-Node-Plane-Telegram-User-ID': '101'})
@@ -186,6 +204,8 @@ class BackendHTTPTests(unittest.TestCase):
         self.assertEqual(first.status_code, 200, first.text)
         self.assertEqual(first.json()['status'], 'pending')
         self.assertEqual(first.json()['role'], 'member')
+        self.assertFalse(first.json()['account_created'])
+        self.assertEqual(first.json()['id'], 'telegram:102')
         self.assertEqual(self.register(102, key).json()['id'], first.json()['id'])
         conflict = self.register(103, key)
         self.assertEqual(conflict.status_code, 409)

@@ -148,6 +148,17 @@ impl App {
                 None
             }
             Control::NodesRemove(mode) => {
+                if mode == crate::node_maintenance::Mode::RegistryOnly
+                    && self.nodes.maintenance.is_none()
+                    && let Some(node) = &self.nodes.card
+                    && node.applied_revision == 0
+                {
+                    self.nodes_requested = Some(crate::nodes::Command::Maintenance(
+                        node.key.clone(),
+                        Some(mode),
+                    ));
+                    return None;
+                }
                 if let Some(view) = &self.nodes.maintenance
                     && !view.removed()
                     && (mode == crate::node_maintenance::Mode::RegistryOnly || !view.active())
@@ -213,20 +224,17 @@ impl App {
                 }
                 None
             }
-            Control::NodesRecovery(index, resolve) => {
+            Control::NodesRecovery(index, action) => {
                 if let Some((_, inventory)) = &self.nodes.diagnostics
                     && let Some(item) = inventory["items"]
                         .as_array()
                         .and_then(|items| items.get(index))
-                {
-                    let action = if resolve { "resolve" } else { "recheck" };
-                    if item["actions"]
+                    && item["actions"]
                         .as_array()
                         .is_some_and(|actions| actions.iter().any(|v| v == action))
-                    {
-                        self.nodes.recovery_confirm = Some((item.clone(), action.into()));
-                        self.nodes_selected = 0;
-                    }
+                {
+                    self.nodes.recovery_confirm = Some((item.clone(), action.into()));
+                    self.nodes_selected = 0;
                 }
                 None
             }
@@ -286,6 +294,14 @@ impl App {
                 {
                     self.nodes_selected = 0;
                     if view.confirmation.take().is_some() {
+                        if self
+                            .nodes
+                            .card
+                            .as_ref()
+                            .is_some_and(|node| node.applied_revision == 0)
+                        {
+                            self.nodes.maintenance = None;
+                        }
                         return None;
                     }
                     if view.section != crate::node_maintenance::Section::Root && !view.removed() {

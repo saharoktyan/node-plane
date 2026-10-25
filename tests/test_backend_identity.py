@@ -8,6 +8,7 @@ import sys
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'app'))
+from backend.telegram_visitors import TelegramVisitor
 from backend.authorization import (
     AccessDenied, Principal, PrincipalKind, ProfileResource, require_permission,
     require_profile, resolve_actor,
@@ -44,8 +45,8 @@ class BackendIdentityTests(unittest.TestCase):
                                 'profiles.self.read', 'configs.self.issue', 'configs.self.read',
                                 'profiles.manage', 'configs.manage.issue', 'nodes.execute'})
         self.adapter = Principal('telegram', PrincipalKind.ADAPTER, self.scopes)
-        self.alice = self.service.resolve_telegram(self.adapter, 101)
-        self.bob = self.service.resolve_telegram(self.adapter, 102)
+        self.alice = self.repository.resolve_telegram(101)
+        self.bob = self.repository.resolve_telegram(102)
 
     def approve(self, account, role='member'):
         with self.db.transaction() as conn:
@@ -58,9 +59,20 @@ class BackendIdentityTests(unittest.TestCase):
         self.assertEqual(error.exception.code, code)
 
     def test_registration_is_pending_member_and_repeat_has_same_id(self):
-        self.assertEqual((self.alice.role, self.alice.status), ('member', 'pending'))
+        accounts_before = self.db.connection.execute('SELECT COUNT(*) FROM backend_accounts').fetchone()[0]
+        visitor = self.service.resolve_telegram(self.adapter, 201, username='charlie')
+        self.assertIsInstance(visitor, TelegramVisitor)
+        public = visitor.public()
+        self.assertEqual(public['id'], 'telegram:201')
+        self.assertEqual(public['role'], 'member')
+        self.assertEqual(public['status'], 'pending')
+        self.assertFalse(public['account_created'])
+        accounts_after = self.db.connection.execute('SELECT COUNT(*) FROM backend_accounts').fetchone()[0]
+        self.assertEqual(accounts_after, accounts_before)
+        self.assertIsNone(self.repository.find_telegram_account(201))
+        repeat = self.service.resolve_telegram(self.adapter, 201, username='charlie')
+        self.assertEqual(repeat.public(), public)
         self.assertEqual(self.service.resolve_telegram(self.adapter, 101), self.alice)
-        self.assertEqual(self.db.connection.execute('SELECT COUNT(*) FROM backend_accounts').fetchone()[0], 2)
 
     def test_profile_owner_exists_without_telegram_and_can_link_later(self):
         account = self.repository.create_account()

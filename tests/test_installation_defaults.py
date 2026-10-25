@@ -133,3 +133,22 @@ class InstallationDefaultsTests(unittest.TestCase):
         self.assertEqual(response.json()['key'], 'lv10')
         malformed = self.create({**template['draft'], 'template': 'unknown', 'protocols': ['awg']})
         self.assertEqual(malformed.status_code, 422, malformed.text)
+
+    def test_ssh_preparation_required_until_any_ssh_node_exists(self):
+        # 1. Initially with no nodes, ssh_preparation_required is True
+        options = self.client.get('/api/v1/nodes/creation-options', headers=self.admin_headers()).json()
+        self.assertTrue(options['ssh_preparation_required'])
+
+        # 2. Local node alone does not suppress ssh_preparation_required
+        local = self.create()
+        self.assertEqual(local.status_code, 201, local.text)
+        options = self.client.get('/api/v1/nodes/creation-options', headers=self.admin_headers()).json()
+        self.assertFalse(options['local_available'])
+        self.assertTrue(options['ssh_preparation_required'])
+
+        # 3. Once ANY SSH node exists, ssh_preparation_required is suppressed (False)
+        ssh_node = self.create({'key': 'rem1', 'title': 'Remote', 'region': 'EU', 'transport': 'ssh',
+            'ssh_target': 'root@rem1.example', 'protocols': ['awg'], 'settings': {'public_host': 'rem1.example'}})
+        self.assertEqual(ssh_node.status_code, 201, ssh_node.text)
+        options = self.client.get('/api/v1/nodes/creation-options', headers=self.admin_headers()).json()
+        self.assertFalse(options['ssh_preparation_required'])

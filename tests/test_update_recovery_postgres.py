@@ -26,6 +26,11 @@ class UpdateRecoveryPostgresTests(unittest.TestCase):
             schedule_update=Mock(return_value={'status': 'running', 'unit_name': 'test-update'}),
             refresh_update_run_state=Mock(return_value={'last_run_status': 'success', 'last_run_unit': 'test-update'}))
         self.driver = SimpleNamespace(inspect_node_services=Mock(return_value={'agent_commit': 'a' * 40}))
+        def schedule(**kwargs):
+            unit = f"node-plane-update-{kwargs['stack_job_id']}" if kwargs.get('stack_job_id') else 'test-update'
+            self.updater.refresh_update_run_state.return_value['last_run_unit'] = unit
+            return {'status': 'running', 'unit_name': unit}
+        self.updater.schedule_update.side_effect = schedule
         self.service = UpdateService(self.db, self.driver, self.updater)
         self.service.initialize_schema()
 
@@ -177,3 +182,73 @@ class UpdateRecoveryPostgresTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 200, response.text)
                 self.assertEqual(response.json()['status'], 'cancelled')
                 self.assertIsNone(self.gate())
+
+    def test_unknown_blocked_stack_core_without_result_json_cannot_cancel_or_resume_and_keeps_gate(self):
+        job = self.queue()
+        self.service.run_one()
+        # Stack update core blocked with result_json NULL
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_update_jobs SET status='blocked', result_json=NULL WHERE id=?", (job['id'],))
+        with self.assertRaises(AccessDenied) as denied:
+            self.service.cancel(self.actor, job['id'])
+        self.assertEqual(denied.exception.code, 'update_cancel_unsafe')
+        self.assertIsNotNone(self.gate())
+        with self.assertRaises(AccessDenied) as denied:
+            self.service.resume(self.actor, job['id'])
+        self.assertIn(denied.exception.code, {'update_recovery_unavailable', 'recovery_unconfirmed'})
+        self.assertIsNotNone(self.gate())
+
+        # Test with result_json = '{}' and zero items
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_update_jobs SET status='blocked', result_json='{}' WHERE id=?", (job['id'],))
+            conn.execute("DELETE FROM backend_update_items WHERE job_id=?", (job['id'],))
+        with self.assertRaises(AccessDenied) as denied:
+            self.service.cancel(self.actor, job['id'])
+        self.assertEqual(denied.exception.code, 'update_cancel_unsafe')
+        self.assertIsNotNone(self.gate())
+        with self.assertRaises(AccessDenied) as denied:
+            self.service.resume(self.actor, job['id'])
+        self.assertIn(denied.exception.code, {'update_recovery_unavailable', 'recovery_unconfirmed'})
+        self.assertIsNotNone(self.gate())
+
+    def test_update_cancel_and_resume_never_perform_rpcs_inside_outer_db_transaction(self):
+        self.node('one')
+        job = self.queue()
+        self.service.run_one()
+        with patch.object(self.service, '_stack_progress', return_value={'status': 'succeeded'}):
+            self.service.run_one()
+
+        self.service.run_one()
+        item = self.service.get(self.actor, job['id'])['items'][0]
+        child_id = item['child_id']
+        self.assertIsNotNone(child_id)
+
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_agent_rollouts SET status='blocked' WHERE id=?", (child_id,))
+            conn.execute("UPDATE backend_update_jobs SET status='blocked' WHERE id=?", (job['id'],))
+            conn.execute("UPDATE backend_update_items SET status='blocked' WHERE job_id=?", (job['id'],))
+
+        orig_inspect = self.driver.inspect_node_services
+        def inspect_spy(*args, **kwargs):
+            with self.db.connect() as conn:
+                in_tx = conn.execute("SELECT (txid_current_if_assigned() IS NOT NULL) AS in_tx").fetchone()['in_tx']
+                if in_tx:
+                    raise AssertionError("driver RPC invoked while outer DB transaction is held")
+            return orig_inspect(*args, **kwargs)
+        self.driver.inspect_node_services = inspect_spy
+
+        with self.assertRaises(AccessDenied) as denied:
+            self.service.cancel(self.actor, job['id'])
+        self.assertIn(denied.exception.code, {'update_cancel_unsafe', 'recovery_unconfirmed'})
+
+        with patch('config.APP_COMMIT', 'a' * 40), self.assertRaises(AccessDenied) as denied:
+            self.service.resume(self.actor, job['id'])
+        self.assertEqual(denied.exception.code, 'update_child_recovery_required')
+
+        # A confirmed pre-install failure may be resumed, but the helper must
+        # acquire its own guard after the parent transaction has been released.
+        with self.db.transaction() as conn:
+            conn.execute("INSERT INTO backend_agent_rollout_failures VALUES (?,'release_binary_unavailable')", (child_id,))
+        with patch('config.APP_COMMIT', 'a' * 40):
+            self.assertEqual(self.service.resume(self.actor, job['id'])['status'], 'running')
+        self.assertEqual(AgentRolloutService(self.db).get(self.actor, child_id)['status'], 'awaiting_executor')

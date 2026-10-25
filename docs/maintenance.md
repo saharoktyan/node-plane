@@ -12,7 +12,7 @@ The screen shows the branch, installed version, component state, latest known re
 
 Review an update and start it. Progress shows component steps. **Update results** appears when a completed result is available; Dismiss removes its shortcut from Updates. Failed node updates are shown separately, with links to their server cards for diagnostics and setup recovery. Changing branch or rolling back requires a separate confirmation because it can break installation compatibility.
 
-A controller update can restart the bot. Reopen Updates if progress is interrupted. Do not start another update while the existing outcome is uncertain.
+A controller update can restart the bot. Reopen Updates if progress is interrupted. A confirmed rollback ends with `rolled_back` and releases the update lock; fix the cause and start a new update. If the outcome is uncertain, use Operations before attempting another update.
 
 For a direct server check:
 
@@ -20,6 +20,8 @@ For a direct server check:
 cd /opt/node-plane/current
 ./scripts/healthcheck.sh --mode simple
 ```
+
+The healthcheck detects the installation root when run through `current` or from `releases/<release>`, reads `shared/.env`, and checks the installed `.venv`. A uv-managed environment does not need pip installed inside it. Docker and TUN availability are also reported as prerequisites for running a VPN node on this host; missing local VPN prerequisites alone do not make a controller with remote nodes unhealthy.
 
 ## Backups
 
@@ -40,7 +42,12 @@ Restore reconnects the enabled nodes recorded in the backup, reuses reachable ag
 - **Recovery history:** recovery outcomes and details.
 - **Workstation audit:** administrator actions with account attribution and workstation key identity.
 
-If an operation is blocked, use its diagnostics and explicit recovery choices. A timeout can leave an unknown result. Do not delete journals or force a new mutation to clear the label.
+Open recovery from either interface:
+
+- Workstation (NPW): **Diagnostic → Operations**.
+- Telegram administrator menu: **System settings → Maintenance → Diagnostics & recovery**.
+
+Select the affected operation, read its reason and choose an offered action: check its result, continue saved work or cancel safely. Available actions depend on the operation and its execution state; cancellation preserves changes already completed. Checking a result observes the saved operation without repeating installation. If rollback is confirmed, the update lock is released and a new update can be started. Missing or conflicting evidence keeps the operation blocked: do not delete journals or resend an uncertain mutation to clear its status.
 
 ## Reset and removal
 

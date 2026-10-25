@@ -12,6 +12,7 @@ from tests.test_backend_http import BackendHTTPTests
 
 class BackendNodeSettingsTests(unittest.TestCase):
     setUp = BackendHTTPTests.setUp
+    provision = BackendHTTPTests.provision
 
     def test_overview_exposes_pending_operation_and_reads_its_verified_progress(self):
         import os
@@ -269,7 +270,12 @@ class BackendNodeSettingsTests(unittest.TestCase):
         member = self.client.post('/api/v1/integrations/telegram/identities/resolve',
             headers={**self.headers, 'Idempotency-Key': str(uuid4())},
             json={'telegram_user_id': 102}).json()
-        self.db.connection.execute("UPDATE backend_accounts SET status = 'approved' WHERE id = ?", (member['id'],))
+        self.assertEqual(member['id'], 'telegram:102')
+        self.assertFalse(member['account_created'])
+        guest_headers = {**self.headers, 'X-Node-Plane-Telegram-User-ID': '102',
+                         'Idempotency-Key': str(uuid4()), 'If-Match': '"1"'}
+        self.assertEqual(self.client.post('/api/v1/nodes/n1/apply-settings', headers=guest_headers).status_code, 401)
+        self.provision(102)
         denied = self.client.post('/api/v1/nodes/n1/apply-settings', headers={**self.headers,
             'X-Node-Plane-Telegram-User-ID': '102', 'Idempotency-Key': str(uuid4()), 'If-Match': '"1"'})
         self.assertEqual(denied.status_code, 403)

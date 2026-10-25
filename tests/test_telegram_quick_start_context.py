@@ -57,3 +57,29 @@ class QuickStartContextTests(IsolatedAsyncioTestCase):
                 path = parent_path(user.button(123,'Config','node','p1','lv1').callback_data,
                     'en', await self.state.get_data())
                 self.assertIn('quick_start', [p.callback for p in path])
+
+    async def test_quick_start_action_labels_match_callbacks(self):
+        cases = [
+            # (step, reviewed, expected_primary_text, expected_primary_cb, expected_secondary_text, expected_secondary_cb)
+            ('defaults', False, 'Configure installation defaults', 'idefault:guide', 'Use installation defaults', 'quick_start_defaults'),
+            ('defaults', True, 'Use installation defaults', 'quick_start_defaults', 'Configure installation defaults', 'idefault:guide'),
+            ('node', False, 'Add server', 'quick_start_open:node', None, None),
+            ('protocols', False, 'Set up server', 'quick_start_open:protocols', None, None),
+            ('access', False, 'Configure access', 'quick_start_open:access', None, None),
+            ('config', False, 'Get config', 'quick_start_open:config', None, None),
+        ]
+        for step, reviewed, p_text, p_cb, s_text, s_cb in cases:
+            await self.state.update_data(quick_start_defaults_reviewed=reviewed)
+            steps_info = [{'key': s, 'complete': False} for s in ('defaults', 'node', 'protocols', 'access', 'config')]
+            backend = SimpleNamespace(request=AsyncMock(return_value={
+                'completed': False, 'steps': steps_info, 'next_step': step
+            }))
+            with patch.object(quick_start, 'render', new_callable=AsyncMock) as draw:
+                await quick_start.show(123, 123, 77, self.bot, backend, self.state)
+            rows = draw.call_args.args[3]
+            # Primary button is the first row
+            self.assertEqual(rows[0][0].text, p_text)
+            self.assertEqual(rows[0][0].callback_data, p_cb)
+            if s_cb:
+                self.assertEqual(rows[1][0].text, s_text)
+                self.assertEqual(rows[1][0].callback_data, s_cb)

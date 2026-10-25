@@ -50,13 +50,17 @@ def action_path(kind, identity, action):
             raise ValueError('invalid node identity')
         return f'/api/v1/system/recovery/removal/{identity}/resume'
     identity = str(UUID(identity))
+    if kind == 'cleanup' and action in {'retry', 'abort'}:
+        return f'/api/v1/system/cleanup/jobs/{identity}/{action}'
+    if kind == 'issuance' and action == 'cancel':
+        return f'/api/v1/system/recovery/issuance/{identity}/cancel'
     if kind == 'agent' and action in {'recheck', 'resume'}:
         return f'/api/v1/system/recovery/agent/{identity}/{action}'
     if kind == 'bootstrap' and action in {'recheck', 'resolve', 'cancel'}:
         return f'/api/v1/system/recovery/bootstrap/{identity}/{action}'
     if kind == 'backup' and action in {'resume', 'cancel'}:
         return f'/api/v1/system/recovery/backup/{identity}/{action}'
-    if kind == 'update' and action in {'cancel', 'recheck'}:
+    if kind == 'update' and action in {'cancel', 'recheck', 'resume'}:
         return f'/api/v1/system/updates/jobs/{identity}/{action}'
     if kind in {'node', 'settings', 'profile', 'agent', 'bootstrap', 'temporary'} and action in {'recheck', 'resolve'}:
         if kind == 'agent' and action != 'recheck':
@@ -95,7 +99,7 @@ async def show(query, bot, backend, state, offset=0, note=''):
             identity = token
         rows = [tuple(InlineKeyboardButton(text=action_label(locale, item['kind'], action),
                     callback_data=RecoveryAction(kind=item['kind'], id=identity, action=action).pack(),
-                    style='danger' if action == 'cancel' else 'primary')
+                    style='danger' if action in {'cancel', 'abort'} else 'primary')
                 for action in item['actions'])] if item['actions'] else []
         code = item.get('error_code', '')
         reason = tr(locale, 'recovery.cause.' + code)
@@ -157,13 +161,13 @@ async def recovery_action(query: CallbackQuery, callback_data: RecoveryAction, b
         await show(query, bot, backend, state)
         return
     if not callback_data.confirm:
-        rows = [[InlineKeyboardButton(text=action_label(locale, callback_data.kind, callback_data.action),
+        rows = [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data=RecoveryPage().pack()),
+                 InlineKeyboardButton(text=action_label(locale, callback_data.kind, callback_data.action),
                     callback_data=RecoveryAction(kind=callback_data.kind, id=callback_data.id,
                         action=callback_data.action, confirm=1).pack(),
-                    style='danger' if callback_data.action == 'cancel' else 'primary')],
-                [InlineKeyboardButton(text=tr(locale, 'back'), callback_data=RecoveryPage().pack())]]
+                    style='danger' if callback_data.action in {'cancel', 'abort'} else 'primary')]]
         await render(bot, query.message.chat.id, Screen(tr(locale, 'recovery.confirm'),
-            (tr(locale, 'recovery.explain.' + callback_data.kind + '.' + callback_data.action) if callback_data.kind in {'settings', 'profile', 'agent', 'bootstrap', 'backup', 'removal', 'temporary'} else tr(locale, 'recovery.explain.' + callback_data.action), identity),
+            (tr(locale, 'recovery.explain.' + callback_data.kind + '.' + callback_data.action) if callback_data.kind in {'settings', 'profile', 'agent', 'bootstrap', 'backup', 'removal', 'temporary', 'issuance', 'cleanup'} else tr(locale, 'recovery.explain.' + callback_data.action), identity),
             embedded_buttons=True, navigation=True), rows, state, query.message.message_id)
         return
     try:
@@ -173,8 +177,10 @@ async def recovery_action(query: CallbackQuery, callback_data: RecoveryAction, b
             note = tr(locale, 'recovery.still_blocked')
         if result.get('replacement_id'):
             note += '\n' + tr(locale, 'recovery.replacement', id=result['replacement_id'])
-    except BackendError:
-        note = tr(locale, 'recovery.unconfirmed')
+    except BackendError as exc:
+        key = 'recovery.cause.' + exc.code
+        reason = tr(locale, key)
+        note = tr(locale, 'recovery.unconfirmed') if reason == key else reason
     await show(query, bot, backend, state, note=note)
 
 

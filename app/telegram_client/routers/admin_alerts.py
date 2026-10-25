@@ -114,21 +114,24 @@ async def alerts_cb(
                 update={'style': 'primary' if value['interval_minutes'] == minutes else None}) for minutes in (3, 5, 10))
         sections = [Section(tr(locale, 'alerts.rich.monitoring'),
             (tr(locale, 'alerts.last', at=(last.get('at') or '—')[:19],
-                status=tr(locale, 'alerts.status.' + last.get('status', 'never'))),), rows=(choices('enabled'),)),
-            Section(tr(locale, 'alerts.rich.interval'), (tr(locale, 'alerts.cpu_schedule'),), rows=(intervals,)),
-            Section(tr(locale, 'alerts.rich.recovery'), rows=(choices('notify_resolved'),))]
-        if value['active_count']:
-            sections.append(Section(tr(locale, 'admin.rich.attention'),
-                (tr(locale, 'alerts.active_count', count=value['active_count']),),
-                rows=((button(tr(locale, 'alerts.active_title'), 'alerts_active:0'),),)))
-        else:
-            sections.append(Section(tr(locale, 'alerts.active_title'), (tr(locale, 'alerts.none'),)))
-        opened = any(getattr(block, 'type', None) == 'details' and getattr(block, 'summary', None) == tr(locale,'alerts.rich.details') and getattr(block,'is_open',False) for block in getattr(getattr(query.message,'rich_message',None),'blocks',()))
-        sections.append(Section(tr(locale, 'alerts.rich.details'), collapsed=True, is_open=opened,
-            lines=(tr(locale, 'alerts.thresholds'), tr(locale, 'alerts.unknown_note')),
-            tables=(Table((tr(locale, 'announce.rich.state'), tr(locale, 'announce.rich.count')),
-                tuple((tr(locale, 'announce.rich.' + kind), str(counts.get(kind, 0)))
-                    for kind in ('queued', 'claimed', 'failed', 'unknown'))),)))
+                status=tr(locale, 'alerts.status.' + last.get('status', 'never'))),) if value['enabled'] else (), rows=(choices('enabled'),))]
+        if value['enabled']:
+            sections.extend([
+                Section(tr(locale, 'alerts.rich.interval'), rows=(intervals,)),
+                Section(tr(locale, 'alerts.rich.recovery'), rows=(choices('notify_resolved'),))
+            ])
+            if value['active_count']:
+                sections.append(Section(tr(locale, 'admin.rich.attention'),
+                    (tr(locale, 'alerts.active_count', count=value['active_count']),),
+                    rows=((button(tr(locale, 'alerts.active_title'), 'alerts_active:0'),),)))
+            else:
+                sections.append(Section(tr(locale, 'alerts.active_title'), (tr(locale, 'alerts.none'),)))
+            opened = any(getattr(block, 'type', None) == 'details' and getattr(block, 'summary', None) == tr(locale,'alerts.rich.details') and getattr(block,'is_open',False) for block in getattr(getattr(query.message,'rich_message',None),'blocks',()))
+            sections.append(Section(tr(locale, 'alerts.rich.details'), collapsed=True, is_open=opened,
+                lines=(tr(locale, 'alerts.thresholds'), tr(locale, 'alerts.unknown_note')),
+                tables=(Table((tr(locale, 'announce.rich.state'), tr(locale, 'announce.rich.count')),
+                    tuple((tr(locale, 'announce.rich.' + kind), str(counts.get(kind, 0)))
+                        for kind in ('queued', 'claimed', 'failed', 'unknown'))),)))
         rows = [[button(tr(locale, 'updates.refresh'), 'alerts')],
                 [button(tr(locale, 'back'), AdminSettingsCallback().pack())]]
         await render(bot, query.message.chat.id,

@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, patch
 
+from telegram_client.i18n import tr
 from telegram_client.routers import admin_installation_defaults as defaults
 from telegram_client.routers import admin_nodes as nodes
 from telegram_client.routers.states import NodeDraftState
@@ -72,7 +73,7 @@ class TelegramInstallationDefaultsTests(IsolatedAsyncioTestCase):
         callbacks = [b.callback_data for row in self.draw.call_args.args[3] for b in row]
         self.assertNotIn('wizard_transport:local', callbacks)
         self.query.data = 'wizard_transport:local'
-        await nodes.wizard_transport_cb(self.query, self.bot, self.state)
+        await nodes.wizard_transport_cb(self.query, self.bot, self.state, self.backend)
         self.assertEqual(await self.state.get_state(), NodeDraftState.waiting_for_transport.state)
         self.assertNotIn('transport', (await self.state.get_data())['wizard_data'])
 
@@ -159,7 +160,7 @@ class TelegramInstallationDefaultsTests(IsolatedAsyncioTestCase):
             rows = draw.call_args.args[3]
             self.assertEqual(rows[0][0].callback_data, 'quick_start_defaults')
             self.assertEqual(rows[1][0].callback_data, 'idefault:guide')
-            self.assertEqual(rows[1][0].text, 'Edit installation defaults')
+            self.assertEqual(rows[1][0].text, tr('en', 'quick_start.action.configure_defaults'))
             self.assertIsNone(await self.state.get_state())
             self.backend.request.reset_mock()
             await quick_start.use_defaults(self.query, self.bot, self.backend, self.state)

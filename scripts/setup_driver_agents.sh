@@ -50,7 +50,8 @@ BACKEND_SSH_TARGET=""
 BACKEND_SSH_PORT="22"
 BACKEND_SSH_IDENTITY=""
 BACKEND_AGENT_HOST=""
-BIN_SOURCE="${NODE_PLANE_BIN_SOURCE:-auto}" # auto|release|build
+BIN_SOURCE="${NODE_PLANE_BIN_SOURCE:-auto}" # auto|release
+BIN_SOURCE_EXPLICIT=0
 GITHUB_REPO="${NODE_PLANE_GITHUB_REPO:-saharoktyan/node-plane}"
 TLS_ROOT="${SHARED_ROOT}/driver-agent-tls"
 TLS_CA_CERT="${TLS_ROOT}/ca.crt"
@@ -299,35 +300,6 @@ download_to_file() {
   return 1
 }
 
-ensure_cargo_for_auto_build() {
-  if has_cmd cargo && has_cmd protoc; then
-    return 0
-  fi
-  local answer="${NODE_PLANE_INSTALL_RUST:-ask}"
-  if [[ "$answer" == "ask" && -t 0 && -r /dev/tty ]]; then
-    read -r -p "Release binaries are unavailable. Install Rust build tools (cargo, rustc, protoc) locally? [y/N] " answer </dev/tty
-  fi
-  case "${answer,,}" in
-    y|yes|1|true) ;;
-    *)
-      echo "RUST_INSTALL_REQUIRED: release binaries and local Rust build tools are unavailable. Run again with NODE_PLANE_INSTALL_RUST=yes to install build tools, or publish release binaries." >&2
-      return 1
-      ;;
-  esac
-  echo "Installing Rust build tools for a local build."
-  if has_cmd apt-get; then
-    sudo env DEBIAN_FRONTEND=noninteractive apt-get update
-    sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y cargo rustc protobuf-compiler build-essential
-  elif has_cmd dnf; then
-    sudo dnf install -y cargo rustc protobuf-compiler gcc make
-  else
-    echo "No supported package manager found. Install cargo, rustc and protoc, then rerun with NODE_PLANE_BIN_SOURCE=build." >&2
-    return 1
-  fi
-  need_cmd cargo
-  need_cmd protoc
-}
-
 check_url_access() {
   local url="$1"
   if has_cmd curl; then
@@ -418,7 +390,11 @@ asset_url() {
 
 ensure_bin_source_mode() {
   case "$BIN_SOURCE" in
-    auto|release|build) ;;
+    auto|release) ;;
+    build)
+      echo "Build mode is disabled: on-server source builds are no longer supported. Use release binaries." >&2
+      exit 1
+      ;;
     *)
       echo "Unsupported NODE_PLANE_BIN_SOURCE value: $BIN_SOURCE" >&2
       exit 1
@@ -489,16 +465,18 @@ while [[ $# -gt 0 ]]; do
       ;;
     --bin-source)
       BIN_SOURCE="${2:-}"
+      BIN_SOURCE_EXPLICIT=1
       shift 2
       ;;
     --bin-source=*)
       BIN_SOURCE="${1#*=}"
+      BIN_SOURCE_EXPLICIT=1
       shift
       ;;
     -h|--help)
       cat <<'EOF'
 Usage:
-  scripts/setup_driver_agents.sh [--skip-driver] [--skip-agents] [--node-key KEY] [--agent-port 50061] [--strict] [--dry-run] [--bin-source auto|release|build]
+  scripts/setup_driver_agents.sh [--skip-driver] [--skip-agents] [--node-key KEY] [--agent-port 50061] [--strict] [--dry-run] [--bin-source auto|release]
   scripts/setup_driver_agents.sh --backend-node-key KEY (--backend-local | --backend-ssh-target user@host) [--backend-ssh-port 22] [--backend-ssh-identity PATH] [--backend-agent-host HOST] [--bin-source release]
 
 Purpose:
@@ -508,16 +486,15 @@ Purpose:
   - Write NODE_AGENT_TARGETS and driver mTLS settings in the shared .env.
 
 Binary source modes:
-  auto     Use GitHub release binaries first; if unavailable, build locally when resources and Rust tools are available.
+  auto     Use GitHub release binaries (source builds are disabled).
   release  Use GitHub release binaries only.
-  build    Use local cargo build only.
 
 Dry run:
   --dry-run validates binary source resolution, local registration and SSH reachability.
   It does not install binaries, write systemd units, or restart services.
 
 Key env overrides:
-  NODE_PLANE_BIN_SOURCE             auto|release|build (default: auto)
+  NODE_PLANE_BIN_SOURCE             auto|release (default: auto)
   NODE_PLANE_GITHUB_REPO            owner/repo (default: saharoktyan/node-plane)
   NODE_PLANE_BINARY_RELEASE         release tag (default: v<VERSION> from app root)
   NODE_PLANE_DRIVER_ASSET_NAME      driver asset filename
@@ -589,6 +566,10 @@ if [[ -f "$ENV_FILE" ]]; then
   # shellcheck disable=SC1090
   source "$ENV_FILE"
   set +a
+  if [[ ${BIN_SOURCE_EXPLICIT:-0} -eq 0 && -n "${NODE_PLANE_BIN_SOURCE:-}" ]]; then
+    BIN_SOURCE="$NODE_PLANE_BIN_SOURCE"
+  fi
+  ensure_bin_source_mode
 fi
 
 # Use the same controller identity as config.SSH_KEY and the backend key endpoint.
@@ -632,7 +613,7 @@ download_release_binaries() {
 
   set_step "download driver binary"
   if ! download_release_asset "$DRIVER_ASSET_NAME" "$driver_url" "$driver_archive" "$DRIVER_BIN_URL"; then
-    echo "Driver release asset ${DRIVER_ASSET_NAME} for $(detect_release_ref) is missing or inaccessible. Publish both release assets or configure authenticated binary URLs." >&2
+    echo "RELEASE_BINARY_UNAVAILABLE: Driver release asset ${DRIVER_ASSET_NAME} for $(detect_release_ref) is missing or inaccessible. Publish both release assets or configure authenticated binary URLs." >&2
     return 1
   fi
   if tar -tzf "$driver_archive" >/dev/null 2>&1; then
@@ -649,7 +630,7 @@ download_release_binaries() {
 
   set_step "download agent binary"
   if ! download_release_asset "$AGENT_ASSET_NAME" "$agent_url" "$agent_archive" "$AGENT_BIN_URL"; then
-    echo "Agent release asset ${AGENT_ASSET_NAME} for $(detect_release_ref) is missing or inaccessible. Publish both release assets or configure authenticated binary URLs." >&2
+    echo "RELEASE_BINARY_UNAVAILABLE: Agent release asset ${AGENT_ASSET_NAME} for $(detect_release_ref) is missing or inaccessible. Publish both release assets or configure authenticated binary URLs." >&2
     return 1
   fi
   if tar -tzf "$agent_archive" >/dev/null 2>&1; then
@@ -668,89 +649,18 @@ download_release_binaries() {
   agent_bin_path="$agent_out"
 }
 
-build_local_binaries() {
-  if [[ ! -d "${APP_ROOT}/rust/node-driver" || ! -d "${APP_ROOT}/rust/node-agent" ]]; then
-    echo "This controller archive contains no Rust sources. Use published release binaries." >&2
-    return 1
-  fi
-  need_cmd cargo
-  need_cmd protoc
-  check_local_build_resources
-  export CARGO_BUILD_JOBS="${NODE_PLANE_BUILD_JOBS:-1}"
-  set_step "build node-driver binary"
-  (cd "${APP_ROOT}/rust/node-driver" && cargo build --release --locked)
-  set_step "build node-agent binary"
-  (cd "${APP_ROOT}/rust/node-agent" && cargo build --release --locked)
-  driver_bin_path="${APP_ROOT}/rust/node-driver/target/release/node-plane-driver"
-  agent_bin_path="${APP_ROOT}/rust/node-agent/target/release/node-plane-agent"
-}
-
-check_local_build_resources() {
-  local min_mem_mb max_cpu_percent mem_available_kb cpu_before idle_before cpu_after idle_after cpu_busy_percent
-  min_mem_mb="${NODE_PLANE_BUILD_MIN_MEM_MB:-2048}"
-  max_cpu_percent="${NODE_PLANE_BUILD_MAX_CPU_PERCENT:-65}"
-  if [[ ! "$min_mem_mb" =~ ^[0-9]+$ || ! "$max_cpu_percent" =~ ^[0-9]+$ ]] \
-    || (( max_cpu_percent > 100 )); then
-    echo "Invalid build resource thresholds: NODE_PLANE_BUILD_MIN_MEM_MB must be an integer and NODE_PLANE_BUILD_MAX_CPU_PERCENT must be 0..100." >&2
-    return 1
-  fi
-  if [[ ! -r /proc/meminfo || ! -r /proc/stat ]]; then
-    echo "Cannot inspect available memory and CPU load; refusing local Rust build." >&2
-    return 1
-  fi
-  mem_available_kb="$(awk '/^MemAvailable:/ {print $2; exit}' /proc/meminfo)"
-  if [[ ! "$mem_available_kb" =~ ^[0-9]+$ ]]; then
-    echo "Cannot determine available memory; refusing local Rust build." >&2
-    return 1
-  fi
-  local mem_available_mb=$((mem_available_kb / 1024))
-  if (( mem_available_mb < min_mem_mb )); then
-    echo "Not enough free memory for local Rust build: ${mem_available_mb} MiB available; need at least ${min_mem_mb} MiB. Build release binaries on another machine and rerun with NODE_PLANE_BIN_SOURCE=release." >&2
-    return 1
-  fi
-
-  read -r cpu_before idle_before < <(awk '$1 == "cpu" { idle=$5+$6; for (i=2; i<=NF; i++) total+=$i; print total, idle; exit }' /proc/stat)
-  if [[ ! "$cpu_before" =~ ^[0-9]+$ || ! "$idle_before" =~ ^[0-9]+$ ]]; then
-    echo "Cannot determine CPU load; refusing local Rust build." >&2
-    return 1
-  fi
-  sleep 2
-  read -r cpu_after idle_after < <(awk '$1 == "cpu" { idle=$5+$6; for (i=2; i<=NF; i++) total+=$i; print total, idle; exit }' /proc/stat)
-  if [[ ! "$cpu_after" =~ ^[0-9]+$ || ! "$idle_after" =~ ^[0-9]+$ ]] \
-    || (( cpu_after <= cpu_before || idle_after < idle_before )); then
-    echo "Cannot measure CPU load; refusing local Rust build." >&2
-    return 1
-  fi
-  cpu_busy_percent="$(awk -v total="$((cpu_after - cpu_before))" -v idle="$((idle_after - idle_before))" 'BEGIN { printf "%d", 100 * (total-idle) / total }')"
-  if (( cpu_busy_percent > max_cpu_percent )); then
-    echo "CPU is too busy for local Rust build: ${cpu_busy_percent}% busy; maximum is ${max_cpu_percent}%. Wait for the host to quiet down or build release binaries on another machine." >&2
-    return 1
-  fi
-  echo "Build resource check passed: ${mem_available_mb} MiB available, CPU ${cpu_busy_percent}% busy."
-}
-
 resolve_binaries() {
   case "$BIN_SOURCE" in
-    release)
+    auto|release)
       download_release_binaries
       ;;
     build)
-      build_local_binaries
+      echo "Build mode is disabled: on-server source builds are no longer supported. Use release binaries." >&2
+      exit 1
       ;;
-    auto)
-      if [[ -f "${APP_ROOT}/CONTROLLER_PACKAGE.json" ]]; then
-        download_release_binaries
-        return
-      fi
-      if download_release_binaries; then
-        echo "Using release binaries from GitHub."
-      elif has_cmd cargo && has_cmd protoc; then
-        echo "Release binaries are unavailable; building driver/agent from APP_ROOT=${APP_ROOT}."
-        build_local_binaries
-      else
-        ensure_cargo_for_auto_build
-        build_local_binaries
-      fi
+    *)
+      echo "Unsupported binary source mode: ${BIN_SOURCE}" >&2
+      exit 1
       ;;
   esac
   [[ -x "$driver_bin_path" ]] || { echo "Driver binary is not executable: $driver_bin_path" >&2; exit 1; }
@@ -761,29 +671,25 @@ resolve_binaries_dry_run() {
   local driver_url="${DRIVER_BIN_URL:-$(asset_url "$DRIVER_ASSET_NAME")}"
   local agent_url="${AGENT_BIN_URL:-$(asset_url "$AGENT_ASSET_NAME")}"
   case "$BIN_SOURCE" in
-    release)
+    auto|release)
       set_step "dry-run check release binary urls"
-      check_release_asset_access "$DRIVER_ASSET_NAME" "$driver_url" "$DRIVER_BIN_URL"
-      check_release_asset_access "$AGENT_ASSET_NAME" "$agent_url" "$AGENT_BIN_URL"
+      if ! check_release_asset_access "$DRIVER_ASSET_NAME" "$driver_url" "$DRIVER_BIN_URL"; then
+        echo "RELEASE_BINARY_UNAVAILABLE: Driver release asset ${DRIVER_ASSET_NAME} for $(detect_release_ref) is missing or inaccessible." >&2
+        return 1
+      fi
+      if ! check_release_asset_access "$AGENT_ASSET_NAME" "$agent_url" "$AGENT_BIN_URL"; then
+        echo "RELEASE_BINARY_UNAVAILABLE: Agent release asset ${AGENT_ASSET_NAME} for $(detect_release_ref) is missing or inaccessible." >&2
+        return 1
+      fi
       echo "Dry-run: release binary URLs are reachable."
       ;;
     build)
-      need_cmd cargo
-      echo "Dry-run: local cargo build mode is available."
+      echo "Build mode is disabled: on-server source builds are no longer supported. Use release binaries." >&2
+      return 1
       ;;
-    auto)
-      set_step "dry-run check release binary urls"
-      if check_release_asset_access "$DRIVER_ASSET_NAME" "$driver_url" "$DRIVER_BIN_URL" \
-        && check_release_asset_access "$AGENT_ASSET_NAME" "$agent_url" "$AGENT_BIN_URL"; then
-        echo "Dry-run: release binary URLs are reachable (auto mode)."
-      elif has_cmd cargo && has_cmd protoc; then
-        echo "Dry-run: release binaries are unavailable; local cargo build is available (auto mode)."
-      elif has_cmd apt-get || has_cmd dnf; then
-        echo "Dry-run: release binaries are unavailable; Rust build tools require confirmation."
-      else
-        echo "Release binaries are unavailable and no supported Rust package manager was found." >&2
-        return 1
-      fi
+    *)
+      echo "Unsupported binary source mode: ${BIN_SOURCE}" >&2
+      return 1
       ;;
   esac
 }

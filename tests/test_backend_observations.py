@@ -7,13 +7,18 @@ from uuid import uuid4
 
 from fastapi.testclient import TestClient
 from backend.http_api import create_app
-from tests.test_backend_nodes import BackendNodeTests
+from tests import test_backend_nodes as fixture
 
 
 class ObservationTests(TestCase):
-    setUp = BackendNodeTests.setUp
-    create = BackendNodeTests.create
-    admin_headers = BackendNodeTests.admin_headers
+    setUp = fixture.BackendNodeTests.setUp
+    def create(self, *args, **kwargs):
+        response = fixture.BackendNodeTests.create(self, *args, **kwargs)
+        if response.status_code == 201:
+            self.db.connection.execute("UPDATE backend_nodes SET applied_revision=1, desired_revision=2 WHERE key='lv1'")
+            self.db.connection.commit()
+        return response
+    admin_headers = fixture.BackendNodeTests.admin_headers
 
     def test_overview_publishes_actual_alert_and_request_policy_switches(self):
         with self.db.transaction() as conn:
@@ -54,7 +59,7 @@ class ObservationTests(TestCase):
     def test_cpu_mean_and_thresholds_are_shared_by_probe_and_fleet_diagnostics(self):
         from backend.installation_diagnostics import server_checks
         self.create()
-        driver = SimpleNamespace(inspect_node_services=Mock())
+        driver = SimpleNamespace(inspect_node_services=Mock(return_value={}))
         with TestClient(create_app(self.db,node_driver=driver)) as client:
             for percent,expected in [(20,'ok'),(85,'warning'),(95,'error')]:
                 driver.inspect_node_services.return_value = {'host_metrics':{'cpu_used_percent':percent,'cpu_sample_window_seconds':60,'cpu_sample_age_seconds':1}}
@@ -104,13 +109,13 @@ class ObservationTests(TestCase):
         self.assertEqual(page['total'], 2)
         self.assertEqual(len(page['items']), 2)
         self.assertEqual(page['errors'], 1)
-        self.assertEqual({call.args[0] for call in driver.inspect_node_services.call_args_list}, {'disabled','lv1'})
+        self.assertEqual({call.args[0] for call in driver.inspect_node_services.call_args_list}, {'lv1'})
         self.assertNotIn('PRIVATE', response.text)
 
     def test_fleet_pages_do_not_probe_servers_outside_the_requested_page(self):
         self.create()
         for index in range(6):
-            self.db.connection.execute("INSERT INTO backend_nodes(key,title,region,protocols_json,enabled) VALUES (?,?,'EU','[]',0)",
+            self.db.connection.execute("INSERT INTO backend_nodes(key,title,region,protocols_json,enabled,applied_revision) VALUES (?,?,'EU','[]',0,1)",
                 (f'other{index}', f'Other {index}'))
         self.db.connection.execute("UPDATE backend_nodes SET enabled=1 WHERE key='other0'")
         self.db.connection.commit()
@@ -126,9 +131,9 @@ class ObservationTests(TestCase):
     def test_invalid_server_metadata_does_not_hide_other_diagnostic_results(self):
         self.create()
         self.db.connection.execute("UPDATE backend_nodes SET protocols_json='invalid-json' WHERE key='lv1'")
-        self.db.connection.execute("INSERT INTO backend_nodes(key,title,region,protocols_json,enabled) VALUES ('other','Other','EU','[]',0)")
+        self.db.connection.execute("INSERT INTO backend_nodes(key,title,region,protocols_json,enabled,applied_revision) VALUES ('other','Other','EU','[]',0,1)")
         self.db.connection.commit()
-        driver = SimpleNamespace(inspect_node_services=Mock())
+        driver = SimpleNamespace(inspect_node_services=Mock(return_value={}))
         with TestClient(create_app(self.db, node_driver=driver)) as client:
             response = client.get('/api/v1/system/recovery/fleet', headers=self.admin_headers())
         self.assertEqual(response.status_code, 200, response.text)

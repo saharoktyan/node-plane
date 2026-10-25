@@ -337,7 +337,7 @@ class TemporaryConfigService:
             # datetime equality permits equivalent UTC encodings, but never a renewed lease.
             if datetime.fromisoformat(receipt['expires_at']) != datetime.fromisoformat(row['expires_at']):
                 raise AccessDenied('config_stale',409)
-        label = node['title'] + (' · AWG' if row['protocol'] == 'awg' else ' · VLESS')
+        label = ('AWG' if row['protocol'] == 'awg' else 'VLESS · ' + row['transport'].upper()) + ' · ' + node['title'] + ' · Temp'
         safe_title = re.sub(r'[^\w .()#-]+', '', node['title']).strip(' .')[:64] or row['node_key']
         if row['protocol']=='awg':
             config = driver.refresh_awg_config(row['node_key'],receipt['wg_conf'],label)
@@ -345,7 +345,7 @@ class TemporaryConfigService:
             host = settings.get('awg_public_host', settings['public_host'])
             if f'Endpoint = {host}:{settings.get("awg_port", 51820)}' not in config['wg_conf'].splitlines():
                 raise AccessDenied('config_stale',409)
-            files = [{'filename':safe_title+' · AWG.'+ext,'content':config[key]} for ext,key in (('vpn','vpn_key'),('conf','wg_conf'))]
+            files = [{'filename':safe_title+' · AWG · Temp.'+ext,'content':config[key]} for ext,key in (('vpn','vpn_key'),('conf','wg_conf'))]
             content = config['wg_conf'] if row['transport']=='conf' else config['vpn_key']
         else:
             metadata = driver.read_xray_public(row['node_key'])
@@ -366,7 +366,7 @@ class TemporaryConfigService:
             else:
                 params.update(path=metadata['xhttp_path'],mode='auto',extra='{"xmux":{"maxConcurrency":"16-32"}}')
             content = 'vless://'+intent['uuid']+'@'+host+':'+str(port)+'?'+ '&'.join(k+'='+quote(v,safe='') for k,v in params.items())+'#'+quote(label,safe='')
-            files = [{'filename':safe_title+' · VLESS.txt','content':content}]
+            files = [{'filename':safe_title+' · VLESS · '+row['transport'].upper()+' · Temp.txt','content':content}]
         with self.db.transaction() as conn:
             conn.execute('UPDATE backend_account_guard SET revision=revision+1 WHERE id=1')
             self._readable(conn,actor,config_id)

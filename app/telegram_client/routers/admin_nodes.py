@@ -105,7 +105,7 @@ async def draft_controls(node, state, locale):
         return [[InlineKeyboardButton(text=tr(locale, 'nodes.draft.save_only' if not node['applied_revision'] else 'nodes.draft.save'), callback_data=f'node_draft_save:{node["key"]}', style='primary'),
                  InlineKeyboardButton(text=tr(locale, 'nodes.draft.reset'), callback_data=f'node_draft_reset:{node["key"]}')]]
     if not node['applied_revision']:
-        return [[InlineKeyboardButton(text=tr(locale, 'nodes.card.bootstrap'), callback_data=f'bootstrap_menu:{node["key"]}', style='primary')]]
+        return []
     if node['desired_revision'] > node['applied_revision']:
         return [[InlineKeyboardButton(text=tr(locale, 'nodes.card.apply'), callback_data=ApplyNodeCallback(node_key=node['key']).pack(), style='primary')]]
     return []
@@ -349,7 +349,9 @@ async def new_node_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, st
     await state.update_data(wizard_data={'protocols': list(defaults['protocols']),
         'xray_transports': list(defaults['xray_transports']), 'settings': dict(defaults['settings'])},
         wizard_templates=options.get('templates', []),
-        wizard_local_available=options['local_available'], create_node_command_key=str(uuid4()),
+        wizard_local_available=options['local_available'],
+        wizard_ssh_preparation_required=options.get('ssh_preparation_required', False), wizard_ssh_public_key=None,
+        create_node_command_key=str(uuid4()),
                             rollout_command_key=str(uuid4()), wizard_saved=False)
     await render_wizard_transport(query.message.chat.id, bot, state,
                                   query.message.message_id)
@@ -418,6 +420,8 @@ async def wizard_back_cb(query: CallbackQuery, bot: Bot, state: FSMContext):
     elif step == 'transport':
         await render_wizard_transport(query.message.chat.id, bot, state,
                                       query.message.message_id)
+    elif step == 'ssh_preparation':
+        await render_wizard_ssh_preparation(query.message.chat.id, bot, state, query.message.message_id)
     elif step == 'template':
         await render_wizard_templates(query.message.chat.id, bot, state,
                                       query.message.message_id)
@@ -531,7 +535,7 @@ async def render_wizard_transport(chat_id: int, bot: Bot, state: FSMContext, mes
         embedded_buttons=True, navigation=True), rows, state, message_id)
 
 @router.callback_query(F.data.startswith("wizard_transport:"))
-async def wizard_transport_cb(query: CallbackQuery, bot: Bot, state: FSMContext):
+async def wizard_transport_cb(query: CallbackQuery, bot: Bot, state: FSMContext, backend: BackendClient):
     await query.answer()
     if await state.get_state() != NodeDraftState.waiting_for_transport.state:
         return
@@ -551,6 +555,41 @@ async def wizard_transport_cb(query: CallbackQuery, bot: Bot, state: FSMContext)
     if transport == 'local':
         w['ssh_target'] = None
         await state.update_data(wizard_data=w)
+    elif data.get('wizard_ssh_preparation_required'):
+        try:
+            key = await backend.request('GET', '/api/v1/system/ssh-key', telegram_user_id=query.from_user.id)
+            await state.update_data(wizard_ssh_public_key=key['public_key'])
+        except BackendError:
+            await state.update_data(wizard_ssh_public_key=None)
+        await render_wizard_ssh_preparation(query.message.chat.id, bot, state, query.message.message_id)
+        return
+    await render_wizard_templates(query.message.chat.id, bot, state, query.message.message_id)
+
+
+async def render_wizard_ssh_preparation(chat_id, bot, state, message_id=None):
+    await state.set_state(NodeDraftState.waiting_for_ssh_preparation)
+    data = await state.get_data()
+    locale = normalize_locale(data.get('locale'))
+    key = data.get('wizard_ssh_public_key')
+    await render(bot, chat_id, Screen(tr(locale, 'node.wizard.ssh_prepare.title'),
+        (tr(locale, 'node.wizard.ssh_prepare.note'),) + (() if key else (tr(locale, 'settings.ssh.unavailable'),)),
+        sections=(Section(tr(locale, 'node.wizard.ssh_prepare.guide_title'),
+            (tr(locale, 'node.wizard.ssh_prepare.guide'),), collapsed=True),),
+        uri=key, uri_title=tr(locale, 'settings.ssh.public_key'), uri_collapsed=True,
+        uri_rows=((InlineKeyboardButton(text=tr(locale, 'ssh_key.send'), callback_data='ssh_key_plain'),),) if key else (),
+        embedded_buttons=True, navigation=True),
+        [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data='wizard_back:transport'),
+          InlineKeyboardButton(text=tr(locale, 'quick_start.continue'), callback_data='wizard_ssh_continue', style='primary')]],
+        state, message_id)
+
+
+@router.callback_query(F.data == 'wizard_ssh_continue')
+async def wizard_ssh_continue_cb(query: CallbackQuery, bot: Bot, state: FSMContext):
+    await query.answer()
+    data = await state.get_data()
+    if (await state.get_state() != NodeDraftState.waiting_for_ssh_preparation.state
+            or data.get('wizard_saved') or data.get('wizard_data', {}).get('transport') != 'ssh'):
+        return
     await render_wizard_templates(query.message.chat.id, bot, state, query.message.message_id)
 
 
@@ -571,7 +610,9 @@ async def render_wizard_templates(chat_id, bot, state, message_id=None):
                 tuple(buttons[index:index + 2]) for index in range(0, len(buttons), 2))))
     rows = [[InlineKeyboardButton(text=tr(locale, 'node.wizard.template.custom'),
                 callback_data='wizard_template:custom')],
-            [InlineKeyboardButton(text=tr(locale, 'back'), callback_data='wizard_back:transport')]]
+            [InlineKeyboardButton(text=tr(locale, 'back'), callback_data=
+                'wizard_back:ssh_preparation' if data.get('wizard_ssh_preparation_required') and
+                data.get('wizard_data', {}).get('transport') == 'ssh' else 'wizard_back:transport')]]
     await render(bot, chat_id, Screen(tr(locale, 'node.wizard.template.title'),
         (tr(locale, 'node.wizard.template.prompt'),), sections=tuple(sections),
         embedded_buttons=True, navigation=True), rows, state, message_id)
@@ -689,7 +730,8 @@ async def render_wizard_protocols(chat_id: int, bot: Bot, state: FSMContext, mes
          InlineKeyboardButton(text=tr(locale, 'node.wizard.review'), callback_data='wizard_proto:done', style='primary')]]
     await render(bot, chat_id, Screen(tr(locale, 'node.wizard.protocols.title'),
         (tr(locale, 'node.wizard.protocols.prompt'),
-         tr(locale, 'node.wizard.protocols.xray_default')), embedded_buttons=True, navigation=True), rows, state, message_id)
+         'VLESS — ' + ' · '.join(value.upper() for value in (w.get('xray_transports') or ['tcp', 'xhttp']))
+         if 'xray' in protocols else ''), embedded_buttons=True, navigation=True), rows, state, message_id)
 
 
 async def render_wizard_summary(chat_id: int, bot: Bot, state: FSMContext,
@@ -921,7 +963,8 @@ async def show_admin_node(chat_id, user_id, message_id, node_key, bot, backend, 
              (tr(locale, 'nodes.rich.failed'), str(overview['failed'] + overview['attention'])))),)))
     else:
         lines.append(tr(locale, 'nodes.card.summary_unavailable'))
-    install_rows.append((InlineKeyboardButton(text=tr(locale, 'nodes.card.probe'), callback_data=ProbeNodeCallback(node_key=node_key).pack()),))
+    if node['applied_revision']:
+        install_rows.append((InlineKeyboardButton(text=tr(locale, 'nodes.card.probe'), callback_data=ProbeNodeCallback(node_key=node_key).pack()),))
     sections.insert(0, Section(tr(locale, 'nodes.rich.installation'), rows=tuple(install_rows)))
     operation = (overview or {}).get('settings_operation')
     progress_rows = ((InlineKeyboardButton(text=tr(locale, 'nodes.apply.progress'),
@@ -937,7 +980,9 @@ async def show_admin_node(chat_id, user_id, message_id, node_key, bot, backend, 
         sections.append(traffic)
     title = f"{node.get('region') or tr(locale, 'nodes.region_unknown')} · {server_label(node)}"
     await render(bot, chat_id, Screen(title, tuple(lines), sections=tuple(sections), embedded_buttons=True, navigation=True),
-        [[InlineKeyboardButton(text=tr(locale, 'nodes.rich.manage'), callback_data=f'node_manage:{node_key}', style='link')],
+        [[InlineKeyboardButton(text=tr(locale, 'nodes.rich.manage') if node['applied_revision'] else tr(locale, 'nodes.maintenance.registry_only'),
+            callback_data=f'node_manage:{node_key}' if node['applied_revision'] else ConfirmRegistryRemovalCallback(node_key=node_key).pack(),
+            style='link' if node['applied_revision'] else 'danger')],
          [InlineKeyboardButton(text=back_label, callback_data=back)]], state, message_id)
     if overview and (overview.get('state') == 'applying' or
             (overview.get('last_job') or {}).get('status') in {'awaiting_executor', 'running'}):
@@ -952,6 +997,9 @@ async def node_manage_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
     locale = normalize_locale((await state.get_data()).get('locale'))
     node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=query.from_user.id)
     await remember_node(state, node)
+    if not node['applied_revision']:
+        return await show_admin_node(query.message.chat.id, query.from_user.id,
+            query.message.message_id, node_key, bot, backend, state)
     await render(bot, query.message.chat.id, Screen(tr(locale, 'nodes.rich.manage'), embedded_buttons=True, navigation=True),
         [[InlineKeyboardButton(text=tr(locale, 'nodes.draft.reinstall' if node['applied_revision'] else 'nodes.card.bootstrap'), callback_data=f'bootstrap_menu:{node_key}', style='primary')],
          [InlineKeyboardButton(text=tr(locale, 'nodes.maintenance.title'), callback_data=NodeMaintenanceCallback(node_key=node_key).pack())],
@@ -965,6 +1013,9 @@ async def node_technical_cb(query: CallbackQuery, bot: Bot, backend: BackendClie
     node_key = query.data.split(':', 1)[1]
     node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=query.from_user.id)
     await remember_node(state, node)
+    if not node['applied_revision']:
+        return await show_admin_node(query.message.chat.id, query.from_user.id,
+            query.message.message_id, node_key, bot, backend, state)
     overview = await backend.node_overview(query.from_user.id, node_key)
     locale = normalize_locale((await state.get_data()).get('locale'))
     lines = (tr(locale, 'nodes.card.agent_transport', value=node.get('transport') or '—'),
@@ -1369,6 +1420,10 @@ async def probe_node_cb(query: CallbackQuery, callback_data: ProbeNodeCallback, 
     user_id = query.from_user.id
     node_key = callback_data.node_key
     locale = normalize_locale((await state.get_data()).get('locale'))
+    node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=user_id)
+    if not node.get('applied_revision'):
+        return await show_admin_node(query.message.chat.id, query.from_user.id,
+            query.message.message_id, node_key, bot, backend, state)
     back = [[InlineKeyboardButton(text=tr(locale, 'back'),
         callback_data=AdminNodeCallback(node_key=node_key).pack())]]
     try:
@@ -1401,14 +1456,14 @@ async def probe_node_cb(query: CallbackQuery, callback_data: ProbeNodeCallback, 
             f"{metrics['cpu_used_percent']:g}%" if 'cpu_used_percent' in metrics else tr(locale, 'nodes.probe.cpu_unavailable'))]
         for key in ('ram_used_percent', 'disk_free_percent'):
             if key in metrics:
-                value = f"{metrics[key]:g}%"
+                value = f"{(100 - metrics[key] if key == 'disk_free_percent' else metrics[key]):g}%"
                 total_key = 'ram_total_bytes' if key == 'ram_used_percent' else 'disk_total_bytes'
                 free_key = 'ram_available_bytes' if key == 'ram_used_percent' else 'disk_free_bytes'
                 total, free = metrics.get(total_key), metrics.get(free_key)
                 if total and free is not None and free <= total:
-                    amount = total - free if key == 'ram_used_percent' else free
+                    amount = total - free
                     value += f" · {format_size(int(amount))} / {format_size(int(total))}"
-                resources.append((tr(locale, 'nodes.probe.' + key), value))
+                resources.append((tr(locale, 'nodes.probe.disk_usage' if key == 'disk_free_percent' else 'nodes.probe.' + key), value))
         if 'load1' in metrics:
             load = ' / '.join(str(metrics.get(key, '—')) for key in ('load1', 'load5', 'load15'))
             cpus = f"{metrics['cpus']:g}" if 'cpus' in metrics else '—'
@@ -1433,6 +1488,9 @@ async def probe_node_cb(query: CallbackQuery, callback_data: ProbeNodeCallback, 
               InlineKeyboardButton(text=tr(locale, 'nodes.diagnostics.open'), callback_data=f'node_diagnostics:{node_key}')],
              *back], state, query.message.message_id)
     except BackendError as exc:
+        if exc.code == 'node_installation_required':
+            return await show_admin_node(query.message.chat.id, query.from_user.id,
+                query.message.message_id, node_key, bot, backend, state)
         cause = exc.code if exc.code in {'node_agent_unconfigured',
             'node_agent_unavailable', 'driver_unavailable'} else 'unknown'
         await render(bot, query.message.chat.id,
@@ -1448,11 +1506,18 @@ async def node_diagnostics_cb(query: CallbackQuery, bot: Bot,
     await query.answer()
     node_key = query.data.split(':', 1)[1]
     locale = normalize_locale((await state.get_data()).get('locale'))
+    node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=query.from_user.id)
+    if not node.get('applied_revision'):
+        return await show_admin_node(query.message.chat.id, query.from_user.id,
+            query.message.message_id, node_key, bot, backend, state)
     back = [InlineKeyboardButton(text=tr(locale, 'back'),
         callback_data=ProbeNodeCallback(node_key=node_key).pack())]
     try:
         result = await backend.node_diagnostics(query.from_user.id, node_key)
     except BackendError as exc:
+        if exc.code == 'node_installation_required':
+            return await show_admin_node(query.message.chat.id, query.from_user.id,
+                query.message.message_id, node_key, bot, backend, state)
         cause = exc.code if exc.code in {'node_agent_unconfigured',
             'node_agent_unavailable', 'driver_unavailable'} else 'unknown'
         await render(bot, query.message.chat.id,
@@ -1607,6 +1672,14 @@ async def node_maintenance_cb(query: CallbackQuery, callback_data: NodeMaintenan
 async def show_node_maintenance(chat_id, user_id, message_id, node_key, bot, backend, state):
     await state.update_data(registry_removal_confirmation=None)
     locale = normalize_locale((await state.get_data()).get('locale'))
+    node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=user_id)
+    if not node['applied_revision']:
+        await render(bot, chat_id, Screen(tr(locale, 'nodes.maintenance.registry_only'),
+            (tr(locale, 'nodes.apply.installation_required'),), embedded_buttons=True, navigation=True),
+            [[InlineKeyboardButton(text=tr(locale, 'nodes.maintenance.registry_only'),
+                callback_data=ConfirmRegistryRemovalCallback(node_key=node_key).pack(), style='danger')],
+             [InlineKeyboardButton(text=tr(locale, 'back'), callback_data=AdminNodeCallback(node_key=node_key).pack())]], state, message_id)
+        return
     st = await backend.node_maintenance(user_id, node_key)
     lines = [tr(locale, 'nodes.maintenance.state',
         value=tr(locale, 'nodes.maintenance.status.' + st['status']))]
@@ -1629,6 +1702,10 @@ async def show_node_maintenance(chat_id, user_id, message_id, node_key, bot, bac
 @router.callback_query(BindLocalCallback.filter())
 async def bind_local_cb(query: CallbackQuery, callback_data: BindLocalCallback, bot: Bot, backend: BackendClient, state: FSMContext):
     await query.answer()
+    node = await backend.request('GET', f'/api/v1/nodes/{callback_data.node_key}', telegram_user_id=query.from_user.id)
+    if not node.get('applied_revision'):
+        return await show_admin_node(query.message.chat.id, query.from_user.id,
+            query.message.message_id, callback_data.node_key, bot, backend, state)
     try:
         await backend.bind_verification_target(query.from_user.id, callback_data.node_key, 'local')
     except BackendError:
@@ -1648,6 +1725,10 @@ async def show_node_maintenance_error(chat_id, message_id, node_key, bot, state)
 @router.callback_query(BindSshCallback.filter())
 async def bind_ssh_cb(query: CallbackQuery, callback_data: BindSshCallback, bot: Bot, backend: BackendClient, state: FSMContext):
     await query.answer()
+    node = await backend.request('GET', f'/api/v1/nodes/{callback_data.node_key}', telegram_user_id=query.from_user.id)
+    if not node.get('applied_revision'):
+        return await show_admin_node(query.message.chat.id, query.from_user.id,
+            query.message.message_id, callback_data.node_key, bot, backend, state)
     await state.set_state(MaintenanceState.waiting_for_ssh_target)
     await state.update_data(maintenance_node_key=callback_data.node_key)
     locale = normalize_locale((await state.get_data()).get('locale'))
@@ -1689,9 +1770,16 @@ async def confirm_node_drain_cb(query: CallbackQuery, callback_data: ConfirmNode
     await query.answer()
     node_key = callback_data.node_key
     locale = normalize_locale((await state.get_data()).get('locale'))
+    node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=query.from_user.id)
+    if not node.get('applied_revision'):
+        return await show_admin_node(query.message.chat.id, query.from_user.id,
+            query.message.message_id, node_key, bot, backend, state)
     try:
         maintenance = await backend.node_maintenance(query.from_user.id, node_key)
-    except BackendError:
+    except BackendError as exc:
+        if exc.code == 'node_installation_required':
+            return await show_admin_node(query.message.chat.id, query.from_user.id,
+                query.message.message_id, node_key, bot, backend, state)
         await show_node_maintenance_error(query.message.chat.id, query.message.message_id,
             node_key, bot, state)
         return
@@ -1711,6 +1799,11 @@ async def confirm_node_drain_cb(query: CallbackQuery, callback_data: ConfirmNode
 @router.callback_query(DrainNodeCallback.filter())
 async def drain_node_cb(query: CallbackQuery, callback_data: DrainNodeCallback, bot: Bot, backend: BackendClient, state: FSMContext):
     await query.answer()
+    node_key = callback_data.node_key
+    node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=query.from_user.id)
+    if not node.get('applied_revision'):
+        return await show_admin_node(query.message.chat.id, query.from_user.id,
+            query.message.message_id, node_key, bot, backend, state)
     from .admin_node_tools import advance_removal
     await advance_removal(query.message.chat.id, query.from_user.id, query.message.message_id,
                           callback_data.node_key, bot, backend, state)
@@ -1718,6 +1811,10 @@ async def drain_node_cb(query: CallbackQuery, callback_data: DrainNodeCallback, 
 @router.callback_query(CleanupStepCallback.filter())
 async def cleanup_step_cb(query: CallbackQuery, callback_data: CleanupStepCallback, bot: Bot, backend: BackendClient, state: FSMContext):
     await query.answer()
+    node = await backend.request('GET', f'/api/v1/nodes/{callback_data.node_key}', telegram_user_id=query.from_user.id)
+    if not node.get('applied_revision'):
+        return await show_admin_node(query.message.chat.id, query.from_user.id,
+            query.message.message_id, callback_data.node_key, bot, backend, state)
     try:
         await backend.cleanup_node_step(query.from_user.id, callback_data.node_key,
                                         callback_data.expected_phase)
@@ -1730,6 +1827,10 @@ async def cleanup_step_cb(query: CallbackQuery, callback_data: CleanupStepCallba
 @router.callback_query(VerifyRetirementCallback.filter())
 async def verify_retirement_cb(query: CallbackQuery, callback_data: VerifyRetirementCallback, bot: Bot, backend: BackendClient, state: FSMContext):
     await query.answer()
+    node = await backend.request('GET', f'/api/v1/nodes/{callback_data.node_key}', telegram_user_id=query.from_user.id)
+    if not node.get('applied_revision'):
+        return await show_admin_node(query.message.chat.id, query.from_user.id,
+            query.message.message_id, callback_data.node_key, bot, backend, state)
     try:
         await backend.verify_and_retire_node(query.from_user.id, callback_data.node_key)
     except BackendError:
@@ -1775,7 +1876,7 @@ async def show_registry_confirmation(chat_id, user_id, message_id, node_key, bot
         [[InlineKeyboardButton(text=tr(locale, 'nodes.maintenance.registry_confirm'),
             callback_data=RetireRegistryCallback(node_key=node_key).pack(), style='danger')],
          [InlineKeyboardButton(text=tr(locale, 'back'),
-            callback_data=NodeMaintenanceCallback(node_key=node_key).pack())]],
+            callback_data=NodeMaintenanceCallback(node_key=node_key).pack() if node['applied_revision'] else AdminNodeCallback(node_key=node_key).pack())]],
         state, message_id)
     await state.update_data(registry_removal_confirmation={
         'node_key': node_key,
@@ -1891,9 +1992,6 @@ async def show_rollout_status(chat_id, user_id, message_id, task_id, bot, backen
     rows = [] if status in {'succeeded', 'blocked'} else [
         [InlineKeyboardButton(text=tr(locale, 'nodes.rollout.refresh'),
             callback_data=RolloutStatusCallback(task_id=task_id).pack())]]
-    if status == 'blocked' and task.get('failure_code') == 'rust_required':
-        rows.append([InlineKeyboardButton(text=tr(locale, 'nodes.rollout.install_rust'),
-            callback_data=f"rust_offer:{task_id}", style='primary')])
     rows.append([InlineKeyboardButton(text=tr(locale, 'nodes.rollout.card'),
         callback_data=AdminNodeCallback(node_key=task['node_key']).pack())])
     if status == 'succeeded':
@@ -1904,6 +2002,10 @@ async def show_rollout_status(chat_id, user_id, message_id, task_id, bot, backen
         lines.extend(installation_progress_lines(task['progress'],locale))
     for path in task.get('journal_archives', []):
         lines.append(tr(locale, 'nodes.rollout.journal_archived', path=path))
+    if task.get('failure_code') == 'release_binary_unavailable':
+        lines.append(tr(locale, 'nodes.rollout.release_binary_unavailable'))
+    if task.get('failure_code') == 'rust_required':
+        lines.append(tr(locale, 'nodes.rollout.rust_required'))
     if task.get('failure_code') == 'build_resources':
         lines.append(tr(locale, 'nodes.rollout.build_resources'))
     if task.get('failure_code') == 'ssh_prerequisites':
@@ -1921,38 +2023,6 @@ async def show_rollout_status(chat_id, user_id, message_id, task_id, bot, backen
     if status in {'awaiting_executor', 'running'}:
         schedule_refresh(state, lambda: show_rollout_status(chat_id, user_id,
             message_id, task_id, bot, backend, state))
-
-
-@router.callback_query(F.data.startswith('rust_offer:'))
-async def rust_offer_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
-    await query.answer()
-    task_id = query.data.split(':', 1)[1]
-    task = await backend.agent_rollout(query.from_user.id, task_id)
-    if task.get('status') != 'blocked' or task.get('failure_code') != 'rust_required':
-        return await show_rollout_status(query.message.chat.id, query.from_user.id,
-            query.message.message_id, task_id, bot, backend, state)
-    locale = normalize_locale((await state.get_data()).get('locale'))
-    await state.update_data(rust_rollout_task=task_id, rust_rollout_key=str(uuid4()))
-    await render(bot, query.message.chat.id, Screen(tr(locale, 'nodes.rollout.install_rust'),
-        (tr(locale, 'nodes.rollout.rust_note'),), embedded_buttons=True, navigation=True), [[
-        InlineKeyboardButton(text=tr(locale, 'back'), callback_data=RolloutStatusCallback(task_id=task_id).pack()),
-        InlineKeyboardButton(text=tr(locale, 'nodes.rollout.install_rust'), callback_data=f'rust_confirm:{task_id}', style='primary')]], state, query.message.message_id)
-
-
-@router.callback_query(F.data.startswith('rust_confirm:'))
-async def rust_confirm_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
-    await query.answer()
-    task_id = query.data.split(':', 1)[1]
-    data = await state.get_data()
-    if data.get('rust_rollout_task') != task_id:
-        return
-    task = await backend.agent_rollout(query.from_user.id, task_id)
-    node = await backend.request('GET', f"/api/v1/nodes/{task['node_key']}", telegram_user_id=query.from_user.id)
-    await remember_node(state, node)
-    queued = await backend.rollout_agent(query.from_user.id, task['node_key'], node['transport'],
-        ssh_target=node.get('ssh_target'), command_key=data['rust_rollout_key'], install_rust=True)
-    await show_rollout_status(query.message.chat.id, query.from_user.id,
-        query.message.message_id, queued['id'], bot, backend, state)
 
 
 

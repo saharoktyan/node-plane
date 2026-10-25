@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 1.0.0-alpha.19 - 2026-10-25
+
+- Enforce controller update gate invariants to reject overlapping updates; support safe predispatch cancellation, blocked operation recovery (resume/recheck/cancel) across updates, backups, issuances, and cleanup jobs without unfenced mutation retries.
+- Require Driver and Agent release binaries for setup and rollout; remove unsupported on-server Rust compilation paths.
+- Align healthcheck inspections with installed releases and uv-managed runtimes, read environment files as structured data, and remove legacy portable deployment mode.
+- Refine Telegram and Workstation interfaces: add an SSH preparation screen with collapsed guides and copyable iOS links, streamline Quick Start prompts and breadcrumbs, isolate temporary configuration artifact views from action controls, and accept ISO dates and composite custom durations (`3d5m1y`).
+- Restrict account creation to administrator approval or manual provisioning, avoiding pre-allocation for visitor requests and preventing phantom recreation of deleted accounts.
+- Schema migration 14 introduces visitor request tracking (minimum reader 14); rolling back to an older controller release requires restoring a prior database snapshot.
+
 ## 1.0.0-alpha.18 - 2026-10-18
 
 - Manage Python dependencies with pyproject.toml and uv.lock; deploy exact runtime groups with locked sync, use the same lock in CI, and retain generated hashed requirements exports for published updaters.

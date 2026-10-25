@@ -169,7 +169,9 @@ class RecoveryScreenTests(IsolatedAsyncioTestCase):
             backend.request.assert_not_called()
             screen, rows = render.call_args.args[2:4]
             self.assertTrue(screen.rich(rows).blocks)
-            self.assertEqual(rows[0][0].style, 'danger')
+            self.assertEqual(len(rows[0]), 2)
+            self.assertEqual(rows[0][0].callback_data, recovery.RecoveryPage().pack())
+            self.assertEqual(rows[0][1].style, 'danger')
             with patch.object(recovery, 'show', new_callable=AsyncMock):
                 await recovery.recovery_action(self.query, action.model_copy(update={'confirm': 1}), self.bot, backend, self.state)
             backend.request.assert_awaited_once_with('POST',
@@ -218,3 +220,56 @@ class RecoveryScreenTests(IsolatedAsyncioTestCase):
             self.assertTrue(screen.sections[0].sections[0].collapsed)
             self.assertNotIn('recovery.',str(screen.sections[0].lines))
             self.assertTrue(any(button.callback_data == recovery.RecoveryDiagnostics().pack() for row in rows for button in row))
+
+    def test_issuance_and_cleanup_path_builders_and_rejections(self):
+        identity = str(uuid4())
+        self.assertEqual(recovery.action_path('cleanup', identity, 'retry'), f'/api/v1/system/cleanup/jobs/{identity}/retry')
+        self.assertEqual(recovery.action_path('cleanup', identity, 'abort'), f'/api/v1/system/cleanup/jobs/{identity}/abort')
+        self.assertEqual(recovery.action_path('issuance', identity, 'cancel'), f'/api/v1/system/recovery/issuance/{identity}/cancel')
+        self.assertEqual(recovery.action_path('update', identity, 'resume'), f'/api/v1/system/updates/jobs/{identity}/resume')
+
+        for kind, action in [
+            ('cleanup', 'cancel'),
+            ('cleanup', 'recheck'),
+            ('cleanup', 'resume'),
+            ('issuance', 'retry'),
+            ('issuance', 'abort'),
+            ('issuance', 'recheck'),
+            ('issuance', 'resolve'),
+            ('issuance', 'resume'),
+            ('unknown', 'cancel'),
+        ]:
+            with self.assertRaises(ValueError):
+                recovery.action_path(kind, identity, action)
+
+        for bad_id in ('../escape', 'not-a-uuid', 'abc;rm -rf /', ''):
+            with self.assertRaises(ValueError):
+                recovery.action_path('cleanup', bad_id, 'retry')
+            with self.assertRaises(ValueError):
+                recovery.action_path('issuance', bad_id, 'cancel')
+
+    async def test_issuance_cancel_and_cleanup_actions_require_confirmation_and_dispatch_valid_routes(self):
+        issuance_id = str(uuid4())
+        cleanup_id = str(uuid4())
+        backend = SimpleNamespace(request=AsyncMock(return_value={'status': 'superseded'}))
+
+        action = recovery.RecoveryAction(kind='issuance', id=issuance_id, action='cancel')
+        with patch.object(recovery, 'render', new_callable=AsyncMock) as render:
+            await recovery.recovery_action(self.query, action, self.bot, backend, self.state)
+        backend.request.assert_not_called()
+        screen, rows = render.call_args.args[2:4]
+        self.assertTrue(screen.rich(rows).blocks)
+        self.assertEqual(rows[0][1].style, 'danger')
+        with patch.object(recovery, 'show', new_callable=AsyncMock):
+            await recovery.recovery_action(self.query, action.model_copy(update={'confirm': 1}), self.bot, backend, self.state)
+        backend.request.assert_awaited_once_with('POST', f'/api/v1/system/recovery/issuance/{issuance_id}/cancel', telegram_user_id=self.query.from_user.id)
+
+        backend.request.reset_mock()
+        backend.request.return_value = {'status': 'running'}
+        action_cleanup = recovery.RecoveryAction(kind='cleanup', id=cleanup_id, action='retry')
+        with patch.object(recovery, 'render', new_callable=AsyncMock):
+            await recovery.recovery_action(self.query, action_cleanup, self.bot, backend, self.state)
+        backend.request.assert_not_called()
+        with patch.object(recovery, 'show', new_callable=AsyncMock):
+            await recovery.recovery_action(self.query, action_cleanup.model_copy(update={'confirm': 1}), self.bot, backend, self.state)
+        backend.request.assert_awaited_once_with('POST', f'/api/v1/system/cleanup/jobs/{cleanup_id}/retry', telegram_user_id=self.query.from_user.id)

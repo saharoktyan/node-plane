@@ -130,12 +130,11 @@ while [[ $# -gt 0 ]]; do
     -h|--help)
       cat <<'EOF'
 Usage:
-  scripts/update.sh [--mode auto|simple|portable] [--branch main|dev] [--to <ref>] [--skip-pull] [--skip-deps] [--skip-restart] [--health-timeout 30]
+  scripts/update.sh [--mode auto|simple] [--branch main|dev] [--to <ref>] [--skip-pull] [--skip-deps] [--skip-restart] [--health-timeout 30]
 
 Modes:
   auto      Detect update mode from local environment
   simple    Update the host/systemd deployment with rollback support
-  portable  Unsupported; use systemd/simple mode
 
 Flags:
   --branch           Branch to use as the update source
@@ -143,7 +142,7 @@ Flags:
   --from-source      Development only: export a Git checkout instead of downloading an archive
   --skip-pull        Skip fetching Git refs in --from-source mode
   --skip-deps        Unsupported in release-based systemd updates.
-  --skip-restart     Do not restart the service/container after applying changes
+  --skip-restart     Do not restart services after applying changes
   --health-timeout   Seconds to wait for node-plane-telegram.service to become active after restart
 EOF
       exit 0
@@ -196,28 +195,10 @@ set_env_value_in_file() {
 }
 
 detect_mode() {
-  if [[ "$MODE" != "auto" ]]; then
-    return 0
-  fi
-
-  if has_cmd systemctl && systemctl list-unit-files node-plane-telegram.service >/dev/null 2>&1; then
+  if [[ "$MODE" == "auto" ]]; then
     MODE="simple"
     return 0
   fi
-
-  if has_cmd docker; then
-    if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx 'node-plane'; then
-      MODE="portable"
-      return 0
-    fi
-  fi
-
-  if [[ -d .venv ]]; then
-    MODE="simple"
-    return 0
-  fi
-
-  MODE="portable"
 }
 
 read_version() {
@@ -605,7 +586,7 @@ update_simple() {
     STACK_COMPONENT=driver
     stack_progress driver running
     NODE_PLANE_BASE_DIR="$base_dir" NODE_PLANE_APP_DIR="$current_link" \
-      NODE_PLANE_SHARED_DIR="$shared_dir" NODE_PLANE_INSTALL_RUST=no \
+      NODE_PLANE_SHARED_DIR="$shared_dir" \
       bash "${current_link}/scripts/setup_driver_agents.sh" --skip-agents --strict --bin-source release
     NODE_PLANE_APP_DIR="$current_link" NODE_PLANE_SHARED_DIR="$shared_dir" \
       PYTHONPATH="${current_link}/app" "${current_link}/.venv/bin/python" - <<'PYDRIVER'
@@ -695,25 +676,22 @@ main() {
     stack_progress status running
     stack_progress backend running
   fi
-  echo "Detected update mode: ${MODE}"
-  echo "Current checkout version: $(print_version)"
-  fetch_code
-  echo "Source checkout version: $(print_version)"
-
   case "$MODE" in
-    simple)
-      update_simple
-      echo "Backend nodes use their own agent rollout; refresh changed nodes from the Telegram Updates screen."
-      ;;
-    portable)
-      echo "Portable Docker updates are temporarily unsupported; use a systemd installation." >&2
-      return 1
+    simple|systemd)
+      MODE="simple"
       ;;
     *)
       echo "Unsupported mode: ${MODE}" >&2
       exit 1
       ;;
   esac
+  echo "Detected update mode: ${MODE}"
+  echo "Current checkout version: $(print_version)"
+  fetch_code
+  echo "Source checkout version: $(print_version)"
+
+  update_simple
+  echo "Backend nodes use their own agent rollout; refresh changed nodes from the Telegram Updates screen."
 
   echo
   echo "Update complete."

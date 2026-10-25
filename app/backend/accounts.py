@@ -138,7 +138,8 @@ class AccountService:
             account = account or identities._resolve(conn, user_id)
             if account.status == 'disabled':
                 raise AccessDenied('account_disabled', 409)
-            pending = conn.execute("SELECT id FROM backend_access_requests WHERE account_id=? AND status='pending'", (account.id,)).fetchone()
+            pending = conn.execute("""SELECT id FROM backend_access_requests WHERE status='pending'
+                AND (account_id=? OR (account_id IS NULL AND telegram_subject=?))""", (account.id, str(user_id))).fetchone()
             if pending:
                 from .access_requests import AccessRequestService
                 AccessRequestService(local).decide(actor, pending['id'], 'approve', key)
@@ -147,6 +148,7 @@ class AccountService:
                 revision = conn.execute('SELECT revision FROM backend_accounts WHERE id=?', (account.id,)).fetchone()['revision']
                 conn.execute("""INSERT INTO backend_account_menu_refresh(account_id,revision) VALUES (?,?)
                     ON CONFLICT(account_id) DO UPDATE SET revision=excluded.revision""", (account.id, revision))
+            conn.execute('DELETE FROM backend_telegram_menu_refresh WHERE subject=?', (str(user_id),))
             from .profiles import ProfileRepository
             profile_id = ProfileRepository.ensure_account_profile_in_transaction(conn, account.id)
             profile = conn.execute('SELECT * FROM backend_profiles WHERE id=?', (profile_id,)).fetchone()

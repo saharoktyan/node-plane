@@ -272,7 +272,11 @@ async def show_home(chat_id: int, user_id: int, bot: Bot, backend: BackendClient
         if pending:
             lines = (tr(locale, 'home.waiting'),)
         elif policy['enabled']:
-            lines = (tr(locale, 'home.request_prompt'),)
+            welcome = policy.get('welcome_message')
+            if welcome and welcome != 'Request access to use this bot.':
+                lines = (welcome,)
+            else:
+                lines = (tr(locale, 'home.request_prompt'),)
         else:
             lines = (policy['gate_message'],)
     else:
@@ -314,8 +318,8 @@ async def show_language_picker(chat_id: int, user_id: int, bot: Bot,
                                state: FSMContext, message_id: int | None = None) -> None:
     data = await state.get_data()
     locale = normalize_locale(data.get('locale'))
-    rows = [[button(user_id, tr(locale, 'settings.russian'), 'first_locale', 'ru'),
-             button(user_id, tr(locale, 'settings.english'), 'first_locale', 'en')]]
+    rows = [[button(user_id, tr(locale, 'settings.english'), 'first_locale', 'en'),
+             button(user_id, tr(locale, 'settings.russian'), 'first_locale', 'ru')]]
     title = (await backend.bot_title(user_id))['title']
     await render(bot, chat_id, Screen(title,
         (tr(locale, 'language.prompt'),), embedded_buttons=True), rows, state, message_id)
@@ -1094,7 +1098,9 @@ async def user_action_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
             # Older panels can still contain a cached documentation callback.
             await show_member_settings(chat_id, user_id, message_id, bot, backend, state)
         elif action.name == 'announcement_silent':
-            await backend.set_announcement_silent(user_id, action.args[0] == 'true')
+            current = await backend.me(user_id)
+            if current.get('status') == 'approved':
+                await backend.set_announcement_silent(user_id, action.args[0] == 'true')
             await show_member_settings(chat_id, user_id, message_id, bot, backend, state)
         elif action.name == 'notification_inbox':
             await show_notification_inbox(chat_id, user_id, message_id, bot, backend, state)
@@ -1304,12 +1310,13 @@ async def show_member_settings(chat_id: int, user_id: int, message_id: int,
     sections = [Section(tr(locale, 'settings.locale'), rows=(tuple(
         button(user_id, tr(locale, 'settings.russian' if kind == 'ru' else 'settings.english'),
                'set_locale', kind).model_copy(update={'style': 'primary' if selected_locale == kind else None})
-        for kind in ('ru', 'en')),)),
-        Section(tr(locale, 'ui.notifications'), rows=((
+        for kind in ('en', 'ru')),))]
+    if current.get('status') == 'approved':
+        sections.append(Section(tr(locale, 'ui.notifications'), rows=((
             button(user_id, tr(locale, 'ui.enable_sound'), 'announcement_silent', 'false')
                 .model_copy(update={'style': 'primary' if not silent else None}),
             button(user_id, tr(locale, 'ui.disable_sound'), 'announcement_silent', 'true')
-                .model_copy(update={'style': 'primary' if silent else None}),),))]
+                .model_copy(update={'style': 'primary' if silent else None}),),)))
     await render(bot, chat_id, Screen(tr(locale, 'settings.title'),
         sections=tuple(sections), embedded_buttons=True, navigation=True),
         [[button(user_id, tr(locale, 'back'), 'home')]], state, message_id)

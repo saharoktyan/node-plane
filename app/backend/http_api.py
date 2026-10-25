@@ -56,6 +56,7 @@ class ResolveInput(BaseModel):
 
 
 class AccountOutput(BaseModel):
+    account_created: bool = True
     id: str
     role: str
     status: str
@@ -270,11 +271,11 @@ class UpdatePreferencesInput(BaseModel):
 
 class RecoveryItemOutput(BaseModel):
     id: str
-    kind: Literal['update', 'node', 'settings', 'bootstrap', 'agent', 'profile', 'removal', 'backup', 'temporary']
+    kind: Literal['update', 'node', 'settings', 'bootstrap', 'agent', 'profile', 'removal', 'backup', 'temporary', 'issuance', 'cleanup']
     status: str
     node_key: str
     error_code: str
-    actions: list[Literal['cancel', 'recheck', 'resolve', 'resume']]
+    actions: list[Literal['cancel', 'recheck', 'resolve', 'resume', 'retry', 'abort']]
     phase: str = ''
     subject_id: str = ''
     related_id: str = ''
@@ -732,7 +733,7 @@ class ProfileCommandOutput(BaseModel):
 
 class AccessRequestOutput(BaseModel):
     id: UUID
-    account_id: UUID
+    account_id: UUID | None
     status: str
     created_at: str
     decided_at: str | None
@@ -760,12 +761,14 @@ class AccessRequestPolicyInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
     enabled: StrictBool | None = None
     gate_message: StrictStr | None = Field(default=None, max_length=500)
+    welcome_message: StrictStr | None = Field(default=None, max_length=500)
     notify_requests: StrictBool | None = None
 
 
 class AccessRequestPolicyOutput(BaseModel):
     enabled: bool
     gate_message: str
+    welcome_message: str
     notify_requests: bool | None = None
 
 
@@ -926,8 +929,8 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
             operation_recovery = False
             if request.method not in {'GET','HEAD','OPTIONS'}:
                 import re
-                update_recovery = bool(re.fullmatch(r'/api/v1/system/updates/jobs/[0-9a-fA-F-]{36}/(cancel|recheck)', request.url.path))
-                operation_recovery = bool(re.fullmatch(r'/api/v1/system/recovery/(node|settings|profile|agent|bootstrap|removal|backup|temporary)/[A-Za-z0-9_-]{1,100}/(cancel|resume|resolve|recheck)', request.url.path))
+                update_recovery = bool(re.fullmatch(r'/api/v1/system/updates/jobs/[0-9a-fA-F-]{36}/(cancel|recheck|resume)', request.url.path))
+                operation_recovery = bool(re.fullmatch(r'/api/v1/system/recovery/(node|settings|profile|agent|bootstrap|removal|backup|temporary|issuance)/[A-Za-z0-9_-]{1,100}/(cancel|resume|resolve|recheck)', request.url.path))
                 allowed = operation_recovery or request.url.path.startswith('/api/v1/system/cleanup/') or request.url.path.endswith('/ack') or update_recovery
                 if not allowed:
                     from .maintenance_gate import active
@@ -1016,6 +1019,17 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
             user_id = int(raw)
         return resolve_actor(principal, identities, telegram_user_id=user_id)
 
+    def session(request: Request, principal: Annotated[Principal, Depends(authenticate)]):
+        # Visitors are accepted only by the explicitly listed presentation/request routes.
+        # They never become an Actor and cannot enter account/VPN/admin routes.
+        try:
+            return actor(request, principal)
+        except AccessDenied as exc:
+            if exc.code != 'identity_not_registered' or principal.kind != PrincipalKind.ADAPTER:
+                raise
+            from .telegram_visitors import visitor
+            return visitor(db, principal, int(header(request, 'X-Node-Plane-Telegram-User-ID')))
+
     @app.get('/health/live')
     def live():
         return {'status': 'alive'}
@@ -1045,7 +1059,8 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
                 conn.execute('SELECT node_key FROM backend_node_retirements LIMIT 1').fetchone()
                 conn.execute('SELECT node_key FROM backend_node_verification_targets LIMIT 1').fetchone()
                 conn.execute('SELECT fingerprint FROM backend_node_host_identities LIMIT 1').fetchone()
-                conn.execute('SELECT id FROM backend_access_requests LIMIT 1').fetchone()
+                conn.execute('SELECT id,telegram_subject FROM backend_access_requests LIMIT 1').fetchone()
+                conn.execute('SELECT subject,revision FROM backend_telegram_menu_refresh LIMIT 1').fetchone()
                 conn.execute('SELECT key FROM backend_system_settings LIMIT 1').fetchone()
                 conn.execute('SELECT profile_id FROM backend_traffic_usage LIMIT 1').fetchone()
                 conn.execute('SELECT device_id FROM backend_traffic_peers LIMIT 1').fetchone()
@@ -1078,14 +1093,18 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
             key = str(UUID(raw_key))
         except (TypeError, ValueError, AttributeError):
             raise AccessDenied('invalid_idempotency_key', 422) from None
+        from .telegram_visitors import TelegramVisitor
         account = service.resolve_telegram(principal, body.telegram_user_id, command_key=key,
             username=body.username, first_name=body.first_name, last_name=body.last_name,
             language_code=body.language_code)
-        ProfileRepository(db).ensure_account_profile(account.id)
-        return account
+        return ({'id': 'telegram:' + account.subject, 'role': 'member', 'status': 'pending',
+                 'account_created': False} if isinstance(account, TelegramVisitor) else account)
 
     @app.get('/api/v1/me', response_model=MeOutput)
-    def me(current=Depends(actor)):
+    def me(current=Depends(session)):
+        from .telegram_visitors import TelegramVisitor
+        if isinstance(current, TelegramVisitor):
+            return current.public()
         require_permission(current, 'account.self.read')
         permissions = []
         for permission in sorted(SELF_PERMISSIONS | APPROVED_PERMISSIONS | ADMIN_PERMISSIONS):
@@ -1104,10 +1123,18 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
                         **identities.telegram_details_for_account(current.account.id))
 
     @app.patch('/api/v1/me/preferences', response_model=MeOutput)
-    def update_my_preferences(body: AccountPreferencesInput, current=Depends(actor)):
-        require_permission(current, 'account.self.preferences.write')
+    def update_my_preferences(body: AccountPreferencesInput, request: Request, current=Depends(session)):
+        from .telegram_visitors import TelegramVisitor, set_locale
         if not body.model_fields_set or any(value is None for value in body.model_dump(exclude_unset=True).values()):
             raise AccessDenied('invalid_input', 422)
+        if isinstance(current, TelegramVisitor):
+            if body.announcement_silent is not None:
+                raise AccessDenied("permission_denied")
+            if body.locale is None:
+                raise AccessDenied("invalid_input", 422)
+            set_locale(db, current, body.locale)
+            return me(session(request, current.principal))
+        require_permission(current, 'account.self.preferences.write')
         if body.locale is not None:
             identities.set_telegram_locale_for_account(current.account.id, body.locale)
         if body.announcement_silent is not None:
@@ -1135,7 +1162,11 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
 
     @app.get('/api/v1/me/notifications')
     def my_notifications(offset: int = Query(default=0, ge=0, le=1000000),
-                         limit: int = Query(default=10, ge=1, le=50), current=Depends(actor)):
+                         limit: int = Query(default=10, ge=1, le=50), current=Depends(session)):
+        from .telegram_visitors import TelegramVisitor
+        if isinstance(current, TelegramVisitor):
+            current.require("account.self.read")
+            return {"items": [], "total": 0, "offset": offset, "page_size": limit}
         return announcements.inbox(current, offset=offset, limit=limit)
 
     @app.get('/api/v1/me/notifications/{delivery_id}')
@@ -1224,6 +1255,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
                 or not restoring and (bool(conn.execute(
                     "SELECT 1 FROM backend_announcement_deliveries WHERE status='queued' LIMIT 1").fetchone())
                     or bool(conn.execute("SELECT 1 FROM backend_account_menu_refresh LIMIT 1").fetchone())
+                    or bool(conn.execute("SELECT 1 FROM backend_telegram_menu_refresh LIMIT 1").fetchone())
                     or bool(conn.execute("SELECT 1 FROM backend_access_request_messages WHERE status='queued' LIMIT 1").fetchone())))
         if ready:
             return {'ready': True}
@@ -1266,7 +1298,17 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
                 return {'delivery': None}
             row = conn.execute("SELECT account_id,revision FROM backend_account_menu_refresh ORDER BY account_id LIMIT 1").fetchone()
             if not row:
-                return {'delivery': None}
+                guest = conn.execute('''SELECT q.subject,q.revision,d.language_code,d.locale,d.locale_selected
+                    FROM backend_telegram_menu_refresh q JOIN backend_telegram_identity_details d ON d.subject=q.subject
+                    ORDER BY q.subject LIMIT 1''').fetchone()
+                if not guest:
+                    return {'delivery': None}
+                linked = conn.execute("SELECT account_id FROM backend_external_identities WHERE provider='telegram' AND subject=?", (guest['subject'],)).fetchone()
+                account = (AccountService.public(AccountService._read(conn, linked['account_id'])) if linked else
+                    {'id': 'telegram:' + guest['subject'], 'role': 'member', 'status': 'pending',
+                     'account_created': False, 'telegram_user_id': int(guest['subject']),
+                     'locale': guest['locale'], 'language_code': guest['language_code']})
+                return {'delivery': {'account': account, 'revision': guest['revision'], 'visitor_subject': guest['subject']}}
             account = AccountService.public(AccountService._read(conn, row['account_id']))
         return {'delivery': {'account': account, 'revision': row['revision']}}
 
@@ -1277,6 +1319,17 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
         AnnouncementService._transport(principal)
         with db.transaction() as conn:
             conn.execute("DELETE FROM backend_account_menu_refresh WHERE account_id=? AND revision=?", (str(account_id), revision))
+        return {'ok': True}
+
+    @app.post('/api/v1/integrations/telegram/visitor-menu-refresh/{user_id}/ack')
+    def ack_visitor_menu_refresh(user_id: int, request: Request, revision: int = Query(ge=1), principal=Depends(authenticate)):
+        if header(request, 'X-Node-Plane-Telegram-User-ID') is not None:
+            raise AccessDenied('invalid_input', 422)
+        AnnouncementService._transport(principal)
+        from .authorization import validate_telegram_id
+        validate_telegram_id(user_id)
+        with db.transaction() as conn:
+            conn.execute('DELETE FROM backend_telegram_menu_refresh WHERE subject=? AND revision=?', (str(user_id), revision))
         return {'ok': True}
 
     @app.post('/api/v1/integrations/telegram/alerts/claim')
@@ -1313,11 +1366,11 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
 
     @app.post('/api/v1/me/access-requests', response_model=AccessRequestOutput, status_code=201)
     def create_access_request(request: Request,
-                              command_key: Annotated[str, Header(alias='Idempotency-Key')], current=Depends(actor)):
+                              command_key: Annotated[str, Header(alias='Idempotency-Key')], current=Depends(session)):
         return access_requests.create(current, header(request, 'Idempotency-Key'))
 
     @app.get('/api/v1/system/access-requests', response_model=AccessRequestPolicyOutput)
-    def get_access_request_policy(current=Depends(actor)):
+    def get_access_request_policy(current=Depends(session)):
         return access_requests.policy(current)
 
     @app.patch('/api/v1/system/access-requests', response_model=AccessRequestPolicyOutput)
@@ -1325,7 +1378,13 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
         return access_requests.update_policy(current, **body.model_dump(exclude_unset=True))
 
     @app.get('/api/v1/system/bot-title', response_model=BotTitleOutput)
-    def get_bot_title(current=Depends(actor)):
+    def get_bot_title(current=Depends(session)):
+        from .telegram_visitors import TelegramVisitor
+        if isinstance(current, TelegramVisitor):
+            current.require('account.self.read')
+            with db.connect() as conn:
+                row = conn.execute("SELECT value FROM backend_system_settings WHERE key='bot_menu_title'").fetchone()
+            return {'title': row['value'] if row and row['value'].strip() else 'Node Plane'}
         return system_settings.bot_title(current)
 
     @app.patch('/api/v1/system/bot-title', response_model=BotTitleOutput)
@@ -1333,12 +1392,16 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
         return system_settings.update_bot_title(current, body.title)
 
     @app.get('/api/v1/system/version', response_model=VersionOutput)
-    def get_system_version(current=Depends(actor)):
-        require_permission(current, 'account.self.read')
+    def get_system_version(current=Depends(session)):
+        from .telegram_visitors import TelegramVisitor
+        if isinstance(current, TelegramVisitor):
+            current.require('account.self.read')
+        else:
+            require_permission(current, 'account.self.read')
         return {'version': APP_VERSION}
 
     @app.get('/api/v1/me/access-requests', response_model=AccessRequestPage)
-    def own_access_requests(current=Depends(actor), limit: Annotated[int, Query(ge=1, le=100)] = 25,
+    def own_access_requests(current=Depends(session), limit: Annotated[int, Query(ge=1, le=100)] = 25,
                             cursor: Annotated[str | None, Query(max_length=512)] = None):
         return access_requests.list_own(current, limit=limit, cursor=cursor)
 
@@ -1512,6 +1575,8 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     @app.get('/api/v1/nodes/{node_key}/probe', response_model=NodeProbeOutput)
     def probe_node(node_key: str, current=Depends(actor)):
         node = nodes.get(current, node_key)
+        from .nodes import require_runtime
+        require_runtime(node)
         from .node_probe import probe
         try:
             if node_driver is not None:
@@ -1562,6 +1627,8 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     @app.get('/api/v1/nodes/{node_key}/runtime', response_model=NodeRuntimeObservation)
     def inspect_node_runtime(node_key: str, current=Depends(actor)):
         node = nodes.get(current, node_key)
+        from .nodes import require_runtime
+        require_runtime(node)
         try:
             if node_driver is None:
                 from .driver_transport import GrpcIntentDriver, local_channel
@@ -1585,6 +1652,8 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     @app.get('/api/v1/nodes/{node_key}/diagnostics', response_model=NodeDiagnosticsOutput)
     def get_node_diagnostics(node_key: str, current=Depends(actor)):
         node = nodes.get(current, node_key)
+        from .nodes import require_runtime
+        require_runtime(node)
         def inspect(driver):
             result = driver.diagnose_node(node_key)
             from .installation_diagnostics import server_checks
@@ -2064,6 +2133,12 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
         from .recovery import track
         with maintenance_lock(current), track(db,current,'update',str(job_id),'recheck'), live_updates() as service:
             return service.recheck(current, str(job_id))
+
+    @app.post('/api/v1/system/updates/jobs/{job_id}/resume')
+    def resume_update(job_id: UUID, current=Depends(actor)):
+        from .recovery import track
+        with maintenance_lock(current), track(db,current,'update',str(job_id),'resume'), live_updates() as service:
+            return service.resume(current, str(job_id))
 
     @app.get('/api/v1/system/onboarding')
     def onboarding_progress(current=Depends(actor)):

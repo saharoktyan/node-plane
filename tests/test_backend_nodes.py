@@ -13,6 +13,7 @@ from tests.test_backend_http import BackendHTTPTests
 class BackendNodeTests(unittest.TestCase):
     setUp = BackendHTTPTests.setUp
     register = BackendHTTPTests.register
+    provision = BackendHTTPTests.provision
 
     def admin_headers(self, **extra):
         return {**self.headers, 'X-Node-Plane-Telegram-User-ID': '101', **extra}
@@ -146,9 +147,11 @@ class BackendNodeTests(unittest.TestCase):
         self.assertEqual(automatic.json()['settings']['awg_parameters'], {})
 
     def test_access_validation_and_active_grant_guard(self):
-        member = self.register(102).json()
-        self.db.connection.execute("UPDATE backend_accounts SET status = 'approved' WHERE id = ?", (member['id'],))
+        visitor = self.register(102).json()
+        self.assertFalse(visitor['account_created'])
         member_headers = {**self.headers, 'X-Node-Plane-Telegram-User-ID': '102'}
+        self.assertEqual(self.client.get('/api/v1/nodes', headers=member_headers).status_code, 401)
+        self.provision(102)
         self.assertEqual(self.client.get('/api/v1/nodes', headers=member_headers).status_code, 403)
         self.assertEqual(self.client.post('/api/v1/nodes', headers={**member_headers,
             'Idempotency-Key': str(uuid4())}, json={'key': 'foo', 'title': 'Foo', 'region': 'EU', 'protocols': []}).status_code, 403)
@@ -173,6 +176,8 @@ class BackendNodeTests(unittest.TestCase):
 
     def test_runtime_inspection_is_read_only_and_never_acknowledges_settings(self):
         self.assertEqual(self.create().status_code, 201)
+        self.db.connection.execute("UPDATE backend_nodes SET applied_revision=1, desired_revision=2 WHERE key='lv1'")
+        self.db.connection.commit()
 
         class Driver:
             calls = []
@@ -189,17 +194,21 @@ class BackendNodeTests(unittest.TestCase):
             self.assertEqual(response.status_code, 200, response.text)
             self.assertEqual(driver.calls, ['lv1'])
             self.assertFalse(response.json()['settings_verified'])
-            self.assertEqual((response.json()['desired_revision'], response.json()['applied_revision']), (1, 0))
+            self.assertEqual((response.json()['desired_revision'], response.json()['applied_revision']), (2, 1))
             self.assertEqual(client.get('/api/v1/nodes/other/runtime', headers=self.admin_headers()).status_code, 404)
-            member = self.register(102).json()
-            self.db.connection.execute("UPDATE backend_accounts SET status = 'approved' WHERE id = ?", (member['id'],))
-            denied = client.get('/api/v1/nodes/lv1/runtime', headers={**self.headers,
-                'X-Node-Plane-Telegram-User-ID': '102'})
+            visitor = self.register(102).json()
+            self.assertFalse(visitor['account_created'])
+            member_headers = {**self.headers, 'X-Node-Plane-Telegram-User-ID': '102'}
+            self.assertEqual(client.get('/api/v1/nodes/lv1/runtime', headers=member_headers).status_code, 401)
+            self.provision(102)
+            denied = client.get('/api/v1/nodes/lv1/runtime', headers=member_headers)
             self.assertEqual(denied.status_code, 403)
             self.assertEqual(driver.calls, ['lv1'])
 
     def test_runtime_inspection_redacts_agent_failure(self):
         self.assertEqual(self.create().status_code, 201)
+        self.db.connection.execute("UPDATE backend_nodes SET applied_revision=1, desired_revision=2 WHERE key='lv1'")
+        self.db.connection.commit()
 
         class Unavailable(grpc.RpcError):
             def code(self):
@@ -217,6 +226,21 @@ class BackendNodeTests(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.json()['error']['code'], 'node_agent_unavailable')
         self.assertNotIn('secret agent address', response.text)
+
+    def test_uninstalled_node_runtime_and_probe_reject_before_driver_interaction(self):
+        created = self.create()
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(created.json()['applied_revision'], 0)
+
+        # With default app (node_driver=None), neither runtime nor probe should attempt driver connection
+        with TestClient(create_app(self.db, node_driver=None)) as client:
+            runtime_resp = client.get('/api/v1/nodes/lv1/runtime', headers=self.admin_headers())
+            self.assertEqual(runtime_resp.status_code, 409)
+            self.assertEqual(runtime_resp.json()['error']['code'], 'node_installation_required')
+
+            probe_resp = client.get('/api/v1/nodes/lv1/probe', headers=self.admin_headers())
+            self.assertEqual(probe_resp.status_code, 409)
+            self.assertEqual(probe_resp.json()['error']['code'], 'node_installation_required')
 
     def test_minimal_creation_is_installable_and_preserves_explicit_parameters(self):
         from backend.node_overview import NodeOverviewService

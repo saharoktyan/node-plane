@@ -44,11 +44,17 @@ class BackendUpdateTests(TestCase):
             refresh_update_run_state=Mock(return_value={'last_run_status': 'success', 'last_run_unit': 'test-update'}))
         self.driver = SimpleNamespace(binary_info=Mock(return_value={'commit': 'a' * 40}),
             inspect_node_services=Mock(return_value={'agent_commit': 'a' * 40, 'runtime_commit': 'a' * 40}), **driver)
+        def schedule(**kwargs):
+            identity = kwargs.get('stack_job_id') or kwargs.get('launch_job_id')
+            unit = f"node-plane-update-{identity}" if identity else 'test-update'
+            self.updater.refresh_update_run_state.return_value['last_run_unit'] = unit
+            return {'status': 'running', 'unit_name': unit}
+        self.updater.schedule_update.side_effect = schedule
         return UpdateService(self.db, self.driver, self.updater)
 
     def node(self):
         with self.db.transaction() as conn:
-            conn.execute("INSERT INTO backend_nodes(key,title,region,enabled,protocols_json,xray_transports_json) VALUES ('lv1','Latvia','EU',0,'[]','[]')")
+            conn.execute("INSERT INTO backend_nodes(key,title,region,enabled,protocols_json,xray_transports_json,applied_revision) VALUES ('lv1','Latvia','EU',0,'[]','[]',1)")
             conn.execute("INSERT INTO backend_node_connections(node_key,transport,ssh_target) VALUES ('lv1','ssh','root@lv1.example')")
 
     def test_dismiss_is_persistent_per_administrator_and_never_cancels_an_active_job(self):
@@ -76,12 +82,15 @@ class BackendUpdateTests(TestCase):
         admin_headers = {**self.headers, 'X-Node-Plane-Telegram-User-ID': '101'}
         active = self.client.post(path, headers=admin_headers)
         self.assertEqual(active.status_code, 409, active.text)
-        self.db.connection.execute("UPDATE backend_update_jobs SET status='succeeded' WHERE id=?", (job['id'],))
+        service._finish(job['id'], 'succeeded')
         dismissed = self.client.post(path, headers=admin_headers)
         self.assertEqual(dismissed.status_code, 200, dismissed.text)
         self.assertEqual(dismissed.json(), {'dismissed_job_id': job['id']})
         self.assertEqual(service.dismissed_results(self.actor), [job['id']])
-        BackendHTTPTests.register(self, 102)
+        denied_guest = self.client.post(path, headers={**self.headers, 'X-Node-Plane-Telegram-User-ID': '102'})
+        self.assertEqual(denied_guest.status_code, 401, denied_guest.text)
+        resp = BackendHTTPTests.provision(self, 102)
+        self.assertIn(resp.status_code, (200, 201))
         denied = self.client.post(path, headers={**self.headers, 'X-Node-Plane-Telegram-User-ID': '102'})
         self.assertEqual(denied.status_code, 403, denied.text)
 
@@ -94,16 +103,17 @@ class BackendUpdateTests(TestCase):
         first = service.queue(self.actor, key, 'version', target_ref='v0.4.3-alpha.19', branch='dev')
         self.assertEqual(service.queue(self.actor, key, 'version', target_ref='v0.4.3-alpha.19', branch='dev')['id'], first['id'])
         self.assertTrue(service.run_one())
-        service.updater.schedule_update.assert_called_once_with(branch='dev', target_ref='v0.4.3-alpha.19')
-        self.assertTrue(service.run_one())
-        self.assertEqual(service.get(self.actor, first['id'])['status'], 'succeeded')
+        service.updater.schedule_update.assert_called_once_with(branch='dev', target_ref='v0.4.3-alpha.19', launch_job_id=first['id'])
+        with patch.object(service, '_stack_progress', return_value={'status': 'succeeded'}):
+            self.assertTrue(service.run_one())
+            self.assertEqual(service.get(self.actor, first['id'])['status'], 'succeeded')
         service.updater.schedule_update.assert_called_once()
 
     def test_dev_head_is_pinned_to_confirmed_commit(self):
         service = self.service()
-        service.queue(self.actor, str(uuid4()), 'version', target_ref='origin/dev', branch='dev')
+        job = service.queue(self.actor, str(uuid4()), 'version', target_ref='origin/dev', branch='dev')
         service.run_one()
-        service.updater.schedule_update.assert_called_once_with(branch='dev', target_ref='b' * 40)
+        service.updater.schedule_update.assert_called_once_with(branch='dev', target_ref='b' * 40, launch_job_id=job['id'])
 
     def test_interrupted_systemd_launch_never_replays(self):
         service = self.service()
@@ -250,6 +260,9 @@ class BackendUpdateTests(TestCase):
         with patch('backend.updates.UpdateService.updater', new=property(lambda _: self.updater)):
             with TestClient(create_app(self.db, node_driver=self.driver)) as client:
                 headers = {**self.headers, 'X-Node-Plane-Telegram-User-ID': '101'}
+                member = self.identities.resolve_telegram(102)
+                self.db.connection.execute("UPDATE backend_accounts SET status='approved' WHERE id=?", (member.id,))
+                self.assertEqual(client.get('/api/v1/system/updates/versions', headers={**headers, 'X-Node-Plane-Telegram-User-ID': '102'}).status_code, 403)
                 value = client.get('/api/v1/system/updates/versions?offset=2', headers=headers)
                 self.assertEqual(value.status_code, 200, value.text)
                 self.assertEqual(value.json()['items'][0]['ref'], 'origin/dev')
@@ -257,6 +270,10 @@ class BackendUpdateTests(TestCase):
                 self.assertEqual(client.post('/api/v1/system/updates/run', headers=headers, json=body).status_code, 422)
                 response = client.post('/api/v1/system/updates/run', headers={**headers, 'Idempotency-Key': str(uuid4())}, json=body)
                 self.assertEqual(response.status_code, 202, response.text)
-                member = self.identities.resolve_telegram(102)
-                self.db.connection.execute("UPDATE backend_accounts SET status='approved' WHERE id=?", (member.id,))
-                self.assertEqual(client.get('/api/v1/system/updates/versions', headers={**headers, 'X-Node-Plane-Telegram-User-ID': '102'}).status_code, 403)
+                # Gate fence blocks subsequent update queue and non-restore admission
+                blocked = client.post('/api/v1/system/updates/run', headers={**headers, 'Idempotency-Key': str(uuid4())}, json=body)
+                self.assertEqual(blocked.status_code, 409)
+                self.assertIn(blocked.json()['error']['code'], {'update_pending', 'system_cleanup_in_progress'})
+                with self.assertRaises(AccessDenied) as ctx:
+                    service.queue(self.actor, str(uuid4()), 'version', target_ref='v0.4.3-alpha.19', branch='dev')
+                self.assertEqual(ctx.exception.code, 'update_pending')

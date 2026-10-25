@@ -65,7 +65,7 @@ class StackUpdateTests(TestCase):
         self.assertEqual(service.get(self.actor, job['id'])['status'], 'rolled_back')
         self.assertIsNone(self.db.connection.execute('SELECT job_id FROM backend_controller_update_gate').fetchone())
         service.updater.schedule_update.assert_called_once()
-        service.updater.confirm_collected_update.assert_called_once_with('test-update','failed')
+        service.updater.confirm_collected_update.assert_called_once_with(f"node-plane-update-{job['id']}",'failed')
 
     def test_collected_unit_without_final_receipt_keeps_gate_and_never_replays(self):
         service = self.service()

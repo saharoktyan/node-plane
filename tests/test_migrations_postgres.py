@@ -50,12 +50,12 @@ class MigrationsPostgresTests(unittest.TestCase):
         with self.db.transaction() as conn:
             conn.execute("INSERT INTO backend_accounts(id,status) VALUES ('admin','approved')")
             conn.execute("INSERT INTO backend_agent_rollouts VALUES ('task','n1','admin','key','{}','blocked')")
-        self.assertEqual(migrate(self.db)['applied'], [13])
+        self.assertEqual(migrate(self.db,revisions=REVISIONS[:13])['applied'], [13])
         self.assertTrue(check_schema(self.db,revisions=REVISIONS[:12])['ready'])
         with self.db.transaction() as conn:
             self.assertEqual(conn.execute("SELECT status FROM backend_agent_rollouts WHERE id='task'").fetchone()['status'],'blocked')
             conn.execute("UPDATE backend_agent_rollouts SET status='cancelled' WHERE id='task'")
-        self.assertEqual(migrate(self.db)['applied'], [])
+        self.assertEqual(migrate(self.db,revisions=REVISIONS[:13])['applied'], [])
 
     def test_account_profile_upgrade_preserves_runtime_and_backfills_missing_pairs(self):
         migrate(self.db,revisions=REVISIONS[:10])
@@ -94,7 +94,7 @@ class MigrationsPostgresTests(unittest.TestCase):
         migrate(self.db,revisions=REVISIONS[:11])
         with self.db.transaction() as conn:
             conn.execute("INSERT INTO backend_announcements VALUES ('existing','actor','key','Hello','2026-10-15')")
-        self.assertEqual(migrate(self.db)['applied'],[revision.number for revision in REVISIONS[11:]])
+        self.assertEqual(migrate(self.db,revisions=REVISIONS[:12])['applied'],[12])
         self.assertTrue(check_schema(self.db,revisions=REVISIONS[:11])['ready'])
         with self.db.transaction() as conn:
             self.assertEqual(conn.execute("SELECT text FROM backend_announcements WHERE id='existing'").fetchone()['text'],'Hello')
@@ -102,6 +102,16 @@ class MigrationsPostgresTests(unittest.TestCase):
             # The previous application can still clear transport records during restore.
             conn.execute("DELETE FROM backend_announcements WHERE id='existing'")
             self.assertEqual(conn.execute('SELECT COUNT(*) AS n FROM backend_system_notifications').fetchone()['n'],0)
+
+    def test_preapproval_visitors_upgrade_requires_incompatible_reader_and_rejects_older_readers(self):
+        migrate(self.db, revisions=REVISIONS[:13])
+        self.assertTrue(check_schema(self.db, revisions=REVISIONS[:13])['ready'])
+        self.assertEqual(migrate(self.db, revisions=REVISIONS[:14])['applied'], [14])
+        self.assertTrue(check_schema(self.db, revisions=REVISIONS[:14])['ready'])
+        with self.assertRaisesRegex(MigrationError, 'database_reader_incompatible'):
+            check_schema(self.db, revisions=REVISIONS[:13])
+        with self.assertRaisesRegex(MigrationError, 'database_reader_incompatible'):
+            check_schema(self.db, revisions=REVISIONS[:12])
 
     def test_concurrent_expiry_admits_one_notification_and_rechecks_renewal(self):
         from datetime import timedelta

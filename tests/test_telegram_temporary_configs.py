@@ -41,7 +41,11 @@ class TemporaryScreensTests(IsolatedAsyncioTestCase):
         await self.click('transport:xhttp',backend)
         draw=await self.click('duration:259200',backend)
         screen,rows=draw.call_args.args[2:4]
-        self.assertIn('Existing connections',screen.plain())
+        self.assertEqual(screen.lines[0], 'Latvia #1 · VLESS · XHTTP · 3d')
+        self.assertEqual(screen.lines[1], '\n' + screens.tr('en', 'temporary.vless_notice'))
+        self.assertIn('Existing connections', screen.plain())
+        self.assertEqual(screen.title, f"{screens.tr('en', 'temporary.create_short')} · {screens.tr('en', 'temporary.step.confirm')}")
+        self.assertEqual(rows[0][0].callback_data, 'temporary:issue')
         self.assertEqual(rows[0][0].style,'primary')
         key=self.state_data['temporary_draft']['command_key']
         await self.click('duration',backend)
@@ -50,14 +54,19 @@ class TemporaryScreensTests(IsolatedAsyncioTestCase):
 
     async def test_card_retains_files_and_ios_message_does_not_replace_card(self):
         identity=str(uuid4())
-        card=dict(id=identity,node_key='lv1',protocol='xray',transport='tcp',status='active',expires_at='2026-10-12T12:00:00+00:00')
+        card=dict(id=identity,node_key='lv1',node_title='Latvia #1',protocol='xray',transport='tcp',status='active',expires_at='2026-10-12T12:00:00+00:00')
         artifact=dict(content='vless://secret',files=[dict(filename='Temporary VLESS.txt',content='vless://secret')])
         backend=SimpleNamespace(request=AsyncMock(side_effect=[card,artifact,artifact]))
         draw=await self.click('show:'+identity,backend)
         screen,rows=draw.call_args.args[2:4]
         self.assertTrue(screen.files)
         self.assertEqual(screen.uri_rows[0][0].callback_data,'temporary:plain:'+identity)
-        self.assertIn('Existing connections',screen.plain())
+        self.assertNotIn('Existing connections',screen.plain())
+        self.assertEqual(screen.title, screens.tr('en', 'temporary.config'))
+        self.assertEqual(screen.lines, (screens.tr('en', 'ui.config_intro'),))
+        self.assertEqual(rows, [[screens.button('en', 'back', 'card:' + identity)]])
+        self.assertEqual(screen.breadcrumbs[-1].callback, 'temporary:card:' + identity)
+        self.assertEqual(screen.breadcrumbs[-1].label, 'Latvia #1 · VLESS · TCP')
         screen.rich(rows)
         self.bot.send_message=AsyncMock()
         draw=await self.click('plain:'+identity,backend)
@@ -65,6 +74,32 @@ class TemporaryScreensTests(IsolatedAsyncioTestCase):
         self.bot.send_message.assert_awaited_once()
         self.assertIsNone(self.bot.send_message.call_args.kwargs['parse_mode'])
         self.assertEqual(self.bot.send_message.call_args.args[1],'vless://secret')
+        entities = self.bot.send_message.call_args.kwargs['entities']
+        self.assertEqual(len(entities), 1)
+        self.assertEqual(entities[0].type, 'code')
+        self.assertEqual(entities[0].offset, 0)
+        self.assertEqual(entities[0].length, len('vless://secret'))
+        keyboard = self.bot.send_message.call_args.kwargs['reply_markup'].inline_keyboard
+        self.assertEqual(keyboard[0][0].callback_data, 'config_uri_close')
+        self.assertEqual(keyboard[0][0].text, screens.tr('en', 'setup.close'))
+
+    async def test_card_warning_suppressed_during_creation_and_shown_on_active(self):
+        identity = str(uuid4())
+        for status, has_warning in (('queued', False), ('issuing', False), ('active', True)):
+            with self.subTest(status=status):
+                card = dict(id=identity, node_key='lv1', node_title='Latvia #1', protocol='xray',
+                            transport='tcp', status=status, expires_at='2026-10-12T12:00:00+00:00')
+                backend = SimpleNamespace(request=AsyncMock(return_value=card))
+                draw = await self.click('card:' + identity, backend)
+                screen, rows = draw.call_args.args[2:4]
+                self.assertIn(screens.tr('en', 'temporary.status.' + status), screen.lines)
+                if has_warning:
+                    self.assertTrue(any(line.startswith('\n') and 'Existing connections' in line for line in screen.lines))
+                    self.assertIn('temporary:show:' + identity, [b.callback_data for r in rows for b in r])
+                    self.assertIn('temporary:confirm_revoke:' + identity, [b.callback_data for r in rows for b in r])
+                else:
+                    self.assertFalse(any('Existing connections' in line for line in screen.lines))
+                    self.assertNotIn('temporary:show:' + identity, [b.callback_data for r in rows for b in r])
 
     async def test_temporary_qr_matches_regular_payload_and_media_layout(self):
         from telegram_client.routers.user import config_qr, qr_payload
@@ -109,7 +144,7 @@ class TemporaryScreensTests(IsolatedAsyncioTestCase):
         backend=SimpleNamespace(request=AsyncMock())
         identity=str(uuid4())
         draw=await self.click('confirm_revoke:'+identity,backend)
-        self.assertEqual(draw.call_args.args[3][0][0].style,'danger')
+        self.assertEqual(draw.call_args.args[3][0][1].style,'danger')
         backend.request.assert_not_awaited()
 
     async def test_stale_show_explains_terminal_state_without_fetching_artifact(self):

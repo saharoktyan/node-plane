@@ -38,6 +38,67 @@ def get_db():
     return DB()
 ''', encoding='utf-8')
 
+    @staticmethod
+    def install_fake_release_curl(fake_bin, root=None):
+        driver_archive = None
+        agent_archive = None
+        if root is not None:
+            driver_archive = root / "driver.tar.gz"
+            agent_archive = root / "agent.tar.gz"
+            for name, path in (("driver", driver_archive), ("agent", agent_archive)):
+                if not path.exists():
+                    with tarfile.open(path, "w:gz") as output:
+                        payload = b"#!/bin/sh\nexit 0\n"
+                        info = tarfile.TarInfo(f"node-plane-{name}-linux-amd64")
+                        info.mode = 0o755
+                        info.size = len(payload)
+                        output.addfile(info, io.BytesIO(payload))
+        curl = fake_bin / "curl"
+        curl.write_text(f"""#!/bin/sh
+out=''
+head_only=0
+previous=''
+for arg in "$@"; do
+  if [ "$previous" = '-o' ]; then out="$arg"; fi
+  case "$arg" in -I|-*I*) head_only=1;; esac
+  previous="$arg"
+done
+case "$*" in
+  *github.com*releases*|*node-plane-*)
+    if [ "$head_only" -eq 1 ]; then
+      exit 0
+    fi
+    if [ -n "$out" ]; then
+      case "$*" in
+        *driver*)
+          if [ -f "{driver_archive or ''}" ]; then
+            cp "{driver_archive}" "$out"
+          else
+            printf '#!/bin/sh\\nexit 0\\n' > "$out"
+            chmod +x "$out"
+          fi
+          exit 0
+          ;;
+        *agent*)
+          if [ -f "{agent_archive or ''}" ]; then
+            cp "{agent_archive}" "$out"
+          else
+            printf '#!/bin/sh\\nexit 0\\n' > "$out"
+            chmod +x "$out"
+          fi
+          exit 0
+          ;;
+      esac
+    fi
+    exit 0
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+""", encoding="utf-8")
+        curl.chmod(0o755)
+
     def test_remote_wrapper_preserves_quoting_stdin_and_noninteractive_privileges(self):
         helper = (REPO_ROOT / 'scripts/lib/agent_ssh.sh').read_text()
         with tempfile.TemporaryDirectory() as temporary:
@@ -92,11 +153,12 @@ def get_db():
                 path = fake_bin / command
                 path.write_text(f'#!/bin/sh\nprintf "%s\\n" "$*" >> "{ssh_log}"\n', encoding='utf-8')
                 path.chmod(0o755)
+            self.install_fake_release_curl(fake_bin, root)
             environment = os.environ.copy()
             environment.update(NODE_PLANE_APP_DIR=str(app_root),
                                NODE_PLANE_SHARED_DIR=str(shared_root),
                                PATH=f"{fake_bin}:{environment['PATH']}")
-            result = subprocess.run([str(SETUP_SCRIPT), '--dry-run', '--bin-source', 'build',
+            result = subprocess.run([str(SETUP_SCRIPT), '--dry-run', '--bin-source', 'auto',
                 '--backend-node-key', 'lv1', '--backend-ssh-target', 'root@203.0.113.10',
                 '--backend-agent-host', 'vpn.example.test'], env=environment, text=True,
                 capture_output=True, check=False)
@@ -108,7 +170,7 @@ def get_db():
             self.assertIn('ServerAliveCountMax=3', ssh_log.read_text(encoding='utf-8'))
             self.assertNotIn('vpn.example.test', ssh_log.read_text(encoding='utf-8'))
             self.assertEqual((shared_root / '.env').read_text(encoding='utf-8'), 'BOT_TOKEN=test\n')
-            local = subprocess.run([str(SETUP_SCRIPT), '--dry-run', '--bin-source', 'build',
+            local = subprocess.run([str(SETUP_SCRIPT), '--dry-run', '--bin-source', 'auto',
                 '--backend-node-key', 'lv1', '--backend-local'], env=environment, text=True,
                 capture_output=True, check=False)
             self.assertEqual(local.returncode, 0, local.stderr)
@@ -187,7 +249,7 @@ esac
             self.assertIn("trying GitHub API", result.stdout)
             self.assertIn("Accept: application/octet-stream", curl_log.read_text(encoding="utf-8"))
 
-    def test_auto_requires_consent_before_installing_rust_tools(self):
+    def test_auto_fails_with_release_binary_unavailable_and_never_installs_rust(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
             app_root = root / "current"
@@ -200,7 +262,7 @@ esac
             (shared_root / ".env").write_text("BOT_TOKEN=test\n", encoding="utf-8")
             for command in ("bash", "dirname", "sed", "tail", "mktemp", "rm", "python3"):
                 (fake_bin / command).symlink_to(shutil.which(command))
-            for command in ("ssh", "scp", "sudo", "apt-get"):
+            for command in ("ssh", "scp", "sudo", "apt-get", "cargo", "rustc", "protoc"):
                 path = fake_bin / command
                 path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
                 path.chmod(0o755)
@@ -211,7 +273,6 @@ esac
             environment.update(
                 NODE_PLANE_APP_DIR=str(app_root),
                 NODE_PLANE_SHARED_DIR=str(shared_root),
-                NODE_PLANE_INSTALL_RUST="no",
                 PATH=str(fake_bin),
             )
             result = subprocess.run(
@@ -222,10 +283,12 @@ esac
                 check=False,
             )
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("RUST_INSTALL_REQUIRED", result.stderr)
+            self.assertIn("RELEASE_BINARY_UNAVAILABLE", result.stderr)
+            self.assertIn("missing or inaccessible", result.stderr)
+            self.assertNotIn("RUST_INSTALL_REQUIRED", result.stderr)
             self.assertNotIn("Installing Rust build tools", result.stdout)
 
-    def test_auto_dry_run_reports_build_fallback_when_release_assets_are_missing(self):
+    def test_dry_run_fails_when_release_assets_are_missing_even_if_cargo_exists(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
             app_root = root / "current"
@@ -238,7 +301,7 @@ esac
             (shared_root / ".env").write_text("BOT_TOKEN=test\n", encoding="utf-8")
             for command in ("bash", "dirname", "sed", "tail", "mktemp", "rm", "python3"):
                 (fake_bin / command).symlink_to(shutil.which(command))
-            for command in ("ssh", "scp", "sudo", "apt-get"):
+            for command in ("ssh", "scp", "sudo", "apt-get", "cargo", "rustc", "protoc"):
                 path = fake_bin / command
                 path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
                 path.chmod(0o755)
@@ -258,8 +321,39 @@ esac
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn("Rust build tools require confirmation", result.stdout)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("RELEASE_BINARY_UNAVAILABLE", result.stderr)
+            self.assertIn("missing or inaccessible", result.stderr)
+            self.assertNotIn("Rust build tools require confirmation", result.stdout)
+            self.assertNotIn("local cargo build is available", result.stdout)
+
+    def test_build_mode_is_rejected_clearly_before_side_effects(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            app_root = root / "current"
+            shared_root = root / "shared"
+            fake_bin = root / "bin"
+            shared_root.mkdir()
+            fake_bin.mkdir()
+            env_file = shared_root / ".env"
+            env_file.write_text("BOT_TOKEN=test\n", encoding="utf-8")
+            environment = os.environ.copy()
+            environment.update(
+                NODE_PLANE_APP_DIR=str(app_root),
+                NODE_PLANE_SHARED_DIR=str(shared_root),
+                PATH=f"{fake_bin}:{environment['PATH']}",
+            )
+            result = subprocess.run(
+                [str(SETUP_SCRIPT), "--bin-source", "build", "--skip-driver", "--skip-agents"],
+                env=environment,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Build mode is disabled", result.stderr)
+            self.assertIn("on-server source builds are no longer supported", result.stderr)
+            self.assertEqual(env_file.read_text(encoding="utf-8"), "BOT_TOKEN=test\n")
 
     def test_missing_release_asset_stops_before_archive_move(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -294,6 +388,7 @@ esac
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("fake HTTP 404", result.stderr)
+            self.assertIn("RELEASE_BINARY_UNAVAILABLE", result.stderr)
             self.assertNotIn("mv: cannot stat", result.stderr)
 
     def test_dry_run_uses_installed_backend_registry_and_preserves_empty_ssh_fields(self):
@@ -321,6 +416,7 @@ esac
                     encoding="utf-8",
                 )
                 path.chmod(0o755)
+            self.install_fake_release_curl(fake_bin, root)
 
             environment = os.environ.copy()
             environment.update(
@@ -329,7 +425,7 @@ esac
                 PATH=f"{fake_bin}:{environment['PATH']}",
             )
             result = subprocess.run(
-                [str(SETUP_SCRIPT), "--dry-run", "--bin-source", "build"],
+                [str(SETUP_SCRIPT), "--dry-run", "--bin-source", "auto"],
                 env=environment,
                 text=True,
                 capture_output=True,
@@ -358,6 +454,7 @@ esac
                 path = fake_bin / command
                 path.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
                 path.chmod(0o755)
+            self.install_fake_release_curl(fake_bin, root)
             environment = os.environ.copy()
             environment.update(
                 NODE_PLANE_APP_DIR=str(app_root),
@@ -365,7 +462,7 @@ esac
                 PATH=f"{fake_bin}:{environment['PATH']}",
             )
             result = subprocess.run(
-                [str(SETUP_SCRIPT), "--dry-run", "--bin-source", "build", "--node-key", "home"],
+                [str(SETUP_SCRIPT), "--dry-run", "--bin-source", "auto", "--node-key", "home"],
                 env=environment, text=True, capture_output=True, check=False,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -392,6 +489,7 @@ esac
             ssh = fake_bin / "ssh"
             ssh.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
             ssh.chmod(0o755)
+            self.install_fake_release_curl(fake_bin, root)
             environment = os.environ.copy()
             environment.update(
                 NODE_PLANE_APP_DIR=str(app_root),
@@ -399,7 +497,7 @@ esac
                 PATH=f"{fake_bin}:{environment['PATH']}",
             )
             result = subprocess.run(
-                [str(SETUP_SCRIPT), "--dry-run", "--bin-source", "build", "--node-key", "lv1"],
+                [str(SETUP_SCRIPT), "--dry-run", "--bin-source", "auto", "--node-key", "lv1"],
                 env=environment, text=True, capture_output=True, check=False,
             )
             self.assertEqual(result.returncode, 0, result.stderr)

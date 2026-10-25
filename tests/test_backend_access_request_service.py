@@ -72,6 +72,7 @@ class AccessRequestServiceTests(unittest.TestCase):
             'enabled': True,
             'gate_message': 'Authorization is required to use this bot.',
             'notify_requests': None,
+            'welcome_message': 'Request access to use this bot.',
         })
         updated = self.requests.update_policy(self.admin_actor, enabled=False,
             gate_message='Contact the administrator.', notify_requests=False)
@@ -79,11 +80,13 @@ class AccessRequestServiceTests(unittest.TestCase):
             'enabled': False,
             'gate_message': 'Contact the administrator.',
             'notify_requests': False,
+            'welcome_message': 'Request access to use this bot.',
         })
         self.assertEqual(self.requests.policy(self.member_actor), {
             'enabled': False,
             'gate_message': 'Contact the administrator.',
             'notify_requests': None,
+            'welcome_message': 'Request access to use this bot.',
         })
         self.assertFalse(self.requests.policy(self.admin_actor)['notify_requests'])
         with self.assertRaises(AccessDenied) as error:
@@ -91,6 +94,41 @@ class AccessRequestServiceTests(unittest.TestCase):
         self.assertEqual(error.exception.code, 'access_requests_disabled')
         with self.assertRaises(AccessDenied):
             self.requests.update_policy(self.member_actor, enabled=True)
+
+    def test_welcome_message_persistence_mode_switch_validation_and_permissions(self):
+        # Update welcome_message independently
+        updated = self.requests.update_policy(self.admin_actor, welcome_message='Welcome to our private bot!')
+        self.assertEqual(updated['welcome_message'], 'Welcome to our private bot!')
+        self.assertEqual(updated['gate_message'], 'Authorization is required to use this bot.')
+
+        # Mode switch to disabled retains welcome_message
+        disabled = self.requests.update_policy(self.admin_actor, enabled=False, gate_message='Registration closed.')
+        self.assertFalse(disabled['enabled'])
+        self.assertEqual(disabled['gate_message'], 'Registration closed.')
+        self.assertEqual(disabled['welcome_message'], 'Welcome to our private bot!')
+
+        # Mode switch back to enabled retains gate_message
+        enabled = self.requests.update_policy(self.admin_actor, enabled=True)
+        self.assertTrue(enabled['enabled'])
+        self.assertEqual(enabled['gate_message'], 'Registration closed.')
+        self.assertEqual(enabled['welcome_message'], 'Welcome to our private bot!')
+
+        # Public policy read sees the updated welcome_message
+        self.assertEqual(self.requests.policy(self.member_actor)['welcome_message'], 'Welcome to our private bot!')
+
+        # Validation: empty or whitespace-only
+        with self.assertRaises(AccessDenied) as ctx:
+            self.requests.update_policy(self.admin_actor, welcome_message='   ')
+        self.assertEqual(ctx.exception.code, 'invalid_input')
+
+        # Validation: exceeds 500 characters
+        with self.assertRaises(AccessDenied) as ctx:
+            self.requests.update_policy(self.admin_actor, welcome_message='a' * 501)
+        self.assertEqual(ctx.exception.code, 'invalid_input')
+
+        # Nonadmin permission preservation
+        with self.assertRaises(AccessDenied):
+            self.requests.update_policy(self.member_actor, welcome_message='Hacked')
 
     def test_bot_title_is_backend_owned_and_admin_managed(self):
         self.assertEqual(self.system_settings.bot_title(self.member_actor),

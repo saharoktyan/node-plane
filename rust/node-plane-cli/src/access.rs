@@ -492,32 +492,142 @@ pub fn expiry_after(days: u32, now: std::time::SystemTime) -> anyhow::Result<Str
     expiry_after_seconds(u64::from(days) * 86400, now)
 }
 
+fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
+    let y = year - i64::from(month <= 2);
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let m = if month > 2 { month - 3 } else { month + 9 };
+    let doy = (153 * m + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + i64::from(doy);
+    era * 146097 + doe - 719468
+}
+
 pub fn expiry_from_duration(input: &str, now: std::time::SystemTime) -> anyhow::Result<String> {
     let input = input.trim();
-    anyhow::ensure!(input.is_ascii(), "Use a number followed by H, D, M or Y");
-    let (amount, unit) = input.split_at(
-        input
-            .len()
-            .checked_sub(1)
-            .ok_or_else(|| anyhow::anyhow!("Enter a duration, for example 12H, 7D, 1M or 1Y"))?,
+    anyhow::ensure!(
+        !input.is_empty() && input.is_ascii(),
+        "Use a date as YYYY-MM-DD or duration like 12H, 7D, 1M, 1Y"
     );
-    let amount = amount
-        .parse::<u64>()
-        .map_err(|_| anyhow::anyhow!("Enter a positive whole number followed by H, D, M or Y"))?;
-    anyhow::ensure!(amount > 0, "Duration must be greater than zero");
-    let factor = match unit.to_ascii_uppercase().as_str() {
-        "H" => 3600,
-        "D" => 86400,
-        "M" => 30 * 86400,
-        "Y" => 365 * 86400,
-        _ => anyhow::bail!("Use H (hours), D (days), M (30 days), or Y (365 days)"),
-    };
-    expiry_after_seconds(
-        amount
+
+    // YYYY-MM-DD date format
+    let bytes = input.as_bytes();
+    if bytes.len() == 10 && bytes[4] == b'-' && bytes[7] == b'-' {
+        anyhow::ensure!(
+            bytes[..4]
+                .iter()
+                .chain(&bytes[5..7])
+                .chain(&bytes[8..])
+                .all(u8::is_ascii_digit),
+            "Use a date as YYYY-MM-DD"
+        );
+        let parts: Vec<&str> = input.split('-').collect();
+        if parts.len() == 3 {
+            let year = parts[0]
+                .parse::<i64>()
+                .map_err(|_| anyhow::anyhow!("Invalid year"))?;
+            let month = parts[1]
+                .parse::<u32>()
+                .map_err(|_| anyhow::anyhow!("Invalid month"))?;
+            let day = parts[2]
+                .parse::<u32>()
+                .map_err(|_| anyhow::anyhow!("Invalid day"))?;
+            anyhow::ensure!((1..=9999).contains(&year), "Year is out of range");
+            anyhow::ensure!((1..=12).contains(&month), "Month is out of range");
+            let days_in_month = match month {
+                1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+                4 | 6 | 9 | 11 => 30,
+                2 => {
+                    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+                    if leap { 29 } else { 28 }
+                }
+                _ => anyhow::bail!("Invalid month"),
+            };
+            anyhow::ensure!(
+                day >= 1 && day <= days_in_month,
+                "Day is out of range for month"
+            );
+
+            let now_secs = now
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|_| anyhow::anyhow!("Time went backwards"))?
+                .as_secs();
+            let now_day = (now_secs / 86400) as i64;
+            let target_day = days_from_civil(year, month, day);
+            anyhow::ensure!(target_day >= now_day, "Expiry date cannot be in the past");
+            return Ok(format!("{year:04}-{month:02}-{day:02}T23:59:59Z"));
+        }
+    }
+
+    // Combined duration tokens (e.g. 12H, 7D, 3d5m1y)
+    let mut total_seconds: u64 = 0;
+    let mut seen_h = false;
+    let mut seen_d = false;
+    let mut seen_m = false;
+    let mut seen_y = false;
+
+    let mut chars = input.chars().peekable();
+    let mut parsed_any = false;
+
+    while chars.peek().is_some() {
+        let mut digits = String::new();
+        while let Some(&c) = chars.peek() {
+            if c.is_ascii_digit() {
+                digits.push(c);
+                chars.next();
+            } else {
+                break;
+            }
+        }
+        anyhow::ensure!(
+            !digits.is_empty(),
+            "Enter a number followed by H, D, M or Y"
+        );
+        let amount = digits
+            .parse::<u64>()
+            .map_err(|_| anyhow::anyhow!("Duration is too large"))?;
+        anyhow::ensure!(amount > 0, "Duration must be greater than zero");
+
+        let unit_char = chars
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("Missing duration unit"))?;
+        let factor = match unit_char.to_ascii_uppercase() {
+            'H' => {
+                anyhow::ensure!(!seen_h, "Duplicate duration unit: H");
+                seen_h = true;
+                3600
+            }
+            'D' => {
+                anyhow::ensure!(!seen_d, "Duplicate duration unit: D");
+                seen_d = true;
+                86400
+            }
+            'M' => {
+                anyhow::ensure!(!seen_m, "Duplicate duration unit: M");
+                seen_m = true;
+                30 * 86400
+            }
+            'Y' => {
+                anyhow::ensure!(!seen_y, "Duplicate duration unit: Y");
+                seen_y = true;
+                365 * 86400
+            }
+            _ => anyhow::bail!("Use H (hours), D (days), M (30 days), or Y (365 days)"),
+        };
+
+        let unit_seconds = amount
             .checked_mul(factor)
-            .ok_or_else(|| anyhow::anyhow!("Duration is too large"))?,
-        now,
-    )
+            .ok_or_else(|| anyhow::anyhow!("Duration is too large"))?;
+        total_seconds = total_seconds
+            .checked_add(unit_seconds)
+            .ok_or_else(|| anyhow::anyhow!("Duration overflow"))?;
+        parsed_any = true;
+    }
+
+    anyhow::ensure!(
+        parsed_any && total_seconds > 0,
+        "Duration must be greater than zero"
+    );
+    expiry_after_seconds(total_seconds, now)
 }
 
 fn expiry_after_seconds(duration: u64, now: std::time::SystemTime) -> anyhow::Result<String> {
@@ -821,12 +931,24 @@ pub fn label(tab: Tab, item: &Value) -> String {
     if item["_account_only"] == true {
         return format!("{} · No VPN access", text(&item["display_name"]));
     }
-    if tab == Tab::Requests && item.get("_account").is_some() {
-        return format!(
-            "{} · {}",
-            label(Tab::Accounts, &item["_account"]),
-            text(&item["status"])
-        );
+    if tab == Tab::Requests {
+        let account = item.get("_account").unwrap_or(item);
+        let identity = account["username"]
+            .as_str()
+            .filter(|name| !name.is_empty())
+            .map(|name| format!("@{}", name.trim_start_matches('@')))
+            .unwrap_or_else(|| text(&account["telegram_user_id"]));
+        let date = item["created_at"].as_str().unwrap_or("");
+        let short_date = match (date.get(8..10), date.get(5..7), date.get(2..4)) {
+            (Some(day), Some(month), Some(year))
+                if date.as_bytes().get(4) == Some(&b'-')
+                    && date.as_bytes().get(7) == Some(&b'-') =>
+            {
+                format!("{day}/{month}/{year}")
+            }
+            _ => "—".into(),
+        };
+        return format!("{identity} · {short_date}");
     }
     match tab {
         Tab::Profiles => format!(

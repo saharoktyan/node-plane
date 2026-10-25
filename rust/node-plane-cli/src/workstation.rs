@@ -530,23 +530,9 @@ pub async fn recover_operations(
                 for action in item["actions"].as_array().into_iter().flatten() {
                     let action = action.as_str().context("Invalid recovery action")?;
                     let path = recovery_path(&kind, &id, action)?;
-                    let explanation = match action {
-                        "resume" => "Continue the saved operation checkpoint. Previously dispatched commands retain their identity and require confirmed journal evidence.",
-                        "cancel" => "Cancel only an operation that has not started; the backend rechecks the execution boundary.",
-                        "recheck" if kind == "agent" => "Verify the configured agent identity and current build. The installer will not run again.",
-                        "recheck" if kind == "bootstrap" => "Check the recorded installation step. A confirmed result lets setup continue.",
-                        "recheck" if kind != "update" => "Read the saved result of this exact command. Missing evidence keeps the block.",
-                        "recheck" if kind == "temporary" => "Read the saved lease result without issuing another configuration.",
-                        "recheck" => "Inspect existing update/rollback evidence. No installation is repeated; missing evidence keeps the block.",
-                        "resolve" if kind == "bootstrap" => "Resume setup before dispatch, or adopt an already recorded child. No uncertain child is replayed.",
-                        "resolve" if kind == "temporary" => "Cancel only after the agent confirms no lease or peer exists and fences the original command. Interrupted commands require an agent restart.",
-                        "resolve" if kind == "profile" => "Inspect and retire the uncertain journal entry after agent restart, then queue the current profile access again.",
-                        "resolve" if kind == "settings" => "Inspect and retire the uncertain settings command after agent restart, then apply a new revision of current settings.",
-                        "resolve" => "Resolve this exact node operation through the driver journal. Unconfirmed outcomes stay blocked.",
-                        _ => bail!("Unsupported recovery action"),
-                    };
+                    let explanation = recovery_explanation(&kind, action)?;
                     if !events::confirm(tx, "Recover this operation?", format!("{kind}: {id}\nStatus: {status}\nNode: {node}\n\n{explanation}"))? { continue; }
-                    stage(tx, &format!("Checking {kind} operation {id}; no installation is repeated"));
+                    stage(tx, &format!("Recovering {kind} operation {id} using its saved evidence"));
                     match backend::request(session, &credential, Method::POST, &path, None, None).await {
                         Ok(result) => {
                             if kind == "update" && result["kind"] == "stack" {
@@ -592,17 +578,69 @@ pub(crate) fn recovery_path(kind: &str, id: &str, action: &str) -> Result<String
     }
     let id = Uuid::parse_str(id).context("Invalid recovery operation identity")?;
     match (kind, action) {
-        ("update", "cancel" | "recheck") => {
+        ("update", "cancel" | "recheck" | "resume") => {
             Ok(format!("/api/v1/system/updates/jobs/{id}/{action}"))
         }
         ("backup", "resume" | "cancel") => {
             Ok(format!("/api/v1/system/recovery/backup/{id}/{action}"))
         }
+        ("cleanup", "retry" | "abort") => Ok(format!("/api/v1/system/cleanup/jobs/{id}/{action}")),
+        ("issuance", "cancel") => Ok(format!("/api/v1/system/recovery/issuance/{id}/cancel")),
         ("node" | "settings" | "profile" | "bootstrap" | "temporary", "resolve" | "recheck")
         | ("agent", "recheck" | "resume")
         | ("bootstrap", "cancel") => Ok(format!("/api/v1/system/recovery/{kind}/{id}/{action}")),
         _ => bail!("Unsupported recovery action"),
     }
+}
+
+pub(crate) fn recovery_explanation(kind: &str, action: &str) -> Result<&'static str> {
+    // Validate the pair before showing an explanation or sending a request.
+    recovery_path(kind, "00000000-0000-0000-0000-000000000000", action)?;
+    Ok(match (kind, action) {
+        ("cleanup", "retry") => {
+            "Continue the saved cleanup plan. Unknown shutdown outcomes cannot be replayed."
+        }
+        ("cleanup", "abort") => {
+            "Stop further cleanup. Resources already removed cannot be restored by cancellation."
+        }
+        ("issuance", "cancel") => {
+            "Close the failed configuration read request. Existing VPN access and configurations remain available."
+        }
+        ("backup", "cancel") => {
+            "Cancel this snapshot job before restore starts. Any snapshot already saved remains in the backup catalog."
+        }
+        ("bootstrap", "cancel") => {
+            "Stop setup only after confirming or fencing the current step. Installed components remain; remove the node separately if needed."
+        }
+        ("bootstrap", "resolve") => {
+            "Recover the saved step. An interrupted command is fenced before a replacement can run."
+        }
+        ("agent", "resume") => {
+            "Retry setup only after a confirmed failure before installation. Fix SSH access or release binary availability first."
+        }
+        ("temporary", "resolve") => {
+            "Cancel only after the agent confirms the lease and peer are absent and fences the original command."
+        }
+        ("profile", "resolve") => {
+            "Retire the uncertain journal entry after agent restart, then reconcile current profile access."
+        }
+        ("settings", "resolve") => {
+            "Retire the uncertain settings entry after agent restart, then apply current settings as a new revision."
+        }
+        (_, "resume") => {
+            "Continue the saved checkpoint. Unknown remote commands retain their identity and are not replayed."
+        }
+        (_, "cancel") => {
+            "Cancel only work whose execution boundary is confirmed safe. Unknown outcomes keep their fences."
+        }
+        (_, "recheck") => {
+            "Read the result of this exact saved operation. No installation is launched; missing evidence keeps the block."
+        }
+        (_, "resolve") => {
+            "Resolve this exact operation using the driver journal. Unconfirmed outcomes stay blocked."
+        }
+        _ => bail!("Unsupported recovery action"),
+    })
 }
 
 pub(crate) fn recovery_reason(code: &str) -> &str {
@@ -612,8 +650,9 @@ pub(crate) fn recovery_reason(code: &str) -> &str {
         "ssh_authentication" => "The controller cannot log in over SSH.",
         "ssh_host_key" => "The SSH host key is missing or has changed.",
         "ssh_prerequisites" => "SSH needs root or passwordless sudo, systemd and sha256sum.",
-        "rust_required" => "No suitable binary is available; Rust is needed to build it.",
-        "build_resources" => "Not enough resources to build the agent.",
+        "release_binary_unavailable" => "Release binary is missing or inaccessible.",
+        "rust_required" => "On-server build is obsolete. Use published release binaries.",
+        "build_resources" => "Local build is obsolete. Use published release binaries.",
         "child_operation_blocked" => "An installation step is blocked.",
         "child_operation_missing" => "The installation step record is missing.",
         "revision_conflict" => "Server settings changed during installation.",
@@ -622,6 +661,24 @@ pub(crate) fn recovery_reason(code: &str) -> &str {
         "node_agent_unconfigured" => "No agent connection is configured.",
         "operation_timeout" => "The operation timed out; its result is unconfirmed.",
         "journal_unconfirmed" => "The agent journal has no confirmed result.",
+        "update_child_recovery_required" => {
+            "Recover the dependent server operation first, then continue this update."
+        }
+        "update_target_drifted" => {
+            "This update targets another controller build. Settle its server operations, cancel it, then start a new update."
+        }
+        "update_owner_unavailable" => {
+            "The initiating administrator no longer has access. Settle or cancel this update before starting another one."
+        }
+        "update_child_mismatch" => {
+            "The saved server operation no longer matches this update. Inspect recovery for that server."
+        }
+        "update_cancel_unsafe" => {
+            "The operation may still be running. Check its recorded result before cancelling."
+        }
+        "update_unit_mismatch" => {
+            "The installer does not match the saved update. Its result must be confirmed before continuing."
+        }
         "update_version_mismatch" => "The installed version differs from the requested version.",
         "update_verification_unavailable" => "The controller update outcome could not be verified.",
         _ => "The operation outcome is unconfirmed.",
@@ -1046,6 +1103,56 @@ mod tests {
         assert!(super::recovery_path("profile", &id, "unlock").is_err());
         assert!(super::recovery_path("update", "../updates/run", "cancel").is_err());
         assert!(super::recovery_path("node", &id, "install").is_err());
+    }
+
+    #[test]
+    fn recovery_reason_handles_release_and_legacy_codes() {
+        assert_eq!(
+            super::recovery_reason("release_binary_unavailable"),
+            "Release binary is missing or inaccessible."
+        );
+        assert_eq!(
+            super::recovery_reason("rust_required"),
+            "On-server build is obsolete. Use published release binaries."
+        );
+        assert_eq!(
+            super::recovery_reason("build_resources"),
+            "Local build is obsolete. Use published release binaries."
+        );
+    }
+
+    #[test]
+    fn recovery_routes_support_update_resume_cleanup_and_issuance() {
+        let id = uuid::Uuid::new_v4().to_string();
+        assert_eq!(
+            super::recovery_path("update", &id, "resume").unwrap(),
+            format!("/api/v1/system/updates/jobs/{id}/resume")
+        );
+        assert_eq!(
+            super::recovery_path("cleanup", &id, "retry").unwrap(),
+            format!("/api/v1/system/cleanup/jobs/{id}/retry")
+        );
+        assert_eq!(
+            super::recovery_path("cleanup", &id, "abort").unwrap(),
+            format!("/api/v1/system/cleanup/jobs/{id}/abort")
+        );
+        assert_eq!(
+            super::recovery_path("issuance", &id, "cancel").unwrap(),
+            format!("/api/v1/system/recovery/issuance/{id}/cancel")
+        );
+        assert!(super::recovery_path("cleanup", &id, "cancel").is_err());
+        assert!(super::recovery_path("cleanup", &id, "resume").is_err());
+        assert!(super::recovery_path("issuance", &id, "retry").is_err());
+        assert!(super::recovery_path("issuance", &id, "recheck").is_err());
+        assert!(super::recovery_path("issuance", &id, "resolve").is_err());
+        assert!(super::recovery_path("cleanup", "../jobs/123", "retry").is_err());
+        assert!(super::recovery_path("issuance", "invalid-uuid", "cancel").is_err());
+
+        assert!(super::recovery_explanation("update", "resume").is_ok());
+        assert!(super::recovery_explanation("cleanup", "retry").is_ok());
+        assert!(super::recovery_explanation("cleanup", "abort").is_ok());
+        assert!(super::recovery_explanation("issuance", "cancel").is_ok());
+        assert!(super::recovery_explanation("issuance", "retry").is_err());
     }
 
     use super::*;

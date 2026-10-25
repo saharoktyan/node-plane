@@ -6,18 +6,18 @@ from uuid import uuid4
 from backend.authorization import Actor, Principal, PrincipalKind, ADMIN_PERMISSIONS, AccessDenied
 from backend.backups import BackupService
 from backend.temporary_configs import TemporaryConfigService
-from tests.test_backend_http import BackendHTTPTests
-from tests.test_backend_config_issuance import BackendConfigIssuanceTests
+from tests import test_backend_http as http_fixture
+from tests import test_backend_config_issuance as issuance_fixture
 
 
 class TemporaryConfigTests(unittest.TestCase):
-    setUp = BackendHTTPTests.setUp
-    setup_ready_profile = BackendConfigIssuanceTests.setup_ready_profile
+    setUp = http_fixture.BackendHTTPTests.setUp
+    setup_ready_profile = issuance_fixture.BackendConfigIssuanceTests.setup_ready_profile
 
     def prepare(self, protocol='xray'):
         self.setup_ready_profile(protocol)
         self.actor = Actor(Principal('workstation',PrincipalKind.ACCOUNT,ADMIN_PERMISSIONS,self.admin.id),self.admin)
-        base = BackendConfigIssuanceTests.driver(self)
+        base = issuance_fixture.BackendConfigIssuanceTests.driver(self)
         base.calls, base.receipts, base.states = [], {}, {}
         def action(identity, action, intent, recover=False):
             base.calls.append((identity,action,recover))
@@ -35,7 +35,11 @@ class TemporaryConfigTests(unittest.TestCase):
                 base.states[identity] = {'status':'active','expires_at':expiry,'enforcement_ready':True}
             return base.receipts[identity]
         base.node_action = action
-        base.refresh_awg_config = lambda *args: {'wg_conf':'[Interface]\nPrivateKey = secret\n\n[Peer]\nEndpoint = node.example:51820\n','vpn_key':'vpn://secret'}
+        self.awg_refresh_labels = []
+        def refresh_awg(node_key, wg_conf, profile_name):
+            self.awg_refresh_labels.append(profile_name)
+            return {'wg_conf':'[Interface]\nPrivateKey = secret\n\n[Peer]\nEndpoint = node.example:51820\n','vpn_key':'vpn://secret'}
+        base.refresh_awg_config = refresh_awg
         self.driver = base
         self.service = TemporaryConfigService(self.db,base)
 
@@ -143,6 +147,14 @@ class TemporaryConfigTests(unittest.TestCase):
                 artifact = self.service.artifact(self.actor,config['id'])
                 self.assertTrue(artifact['content'].startswith('vless://' if protocol=='xray' else 'vpn://'))
                 self.assertEqual(len(artifact['files']),1 if protocol=='xray' else 2)
+                from urllib.parse import unquote, urlsplit
+                if protocol == 'xray':
+                    self.assertEqual(artifact['files'][0]['filename'], 'Latvia #1 · VLESS · TCP · Temp.txt')
+                    self.assertEqual(unquote(urlsplit(artifact['content']).fragment), 'VLESS · TCP · Latvia #1 · Temp')
+                else:
+                    self.assertEqual([f['filename'] for f in artifact['files']],
+                                     ['Latvia #1 · AWG · Temp.vpn', 'Latvia #1 · AWG · Temp.conf'])
+                    self.assertIn('AWG · Latvia #1 · Temp', self.awg_refresh_labels)
                 self.assertTrue(BackupService.busy(self.db.connection))
                 self.assertEqual(self.service.get(self.actor,config['id'])['expires_at'],expiry)
                 self.assertEqual(self.service.revoke(self.actor,config['id'])['status'],'revoking')

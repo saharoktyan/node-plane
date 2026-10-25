@@ -321,10 +321,10 @@ class ConfigIssuanceService:
         else:
             params += (f'&type=xhttp&path={quote(metadata["xhttp_path"], safe="")}&mode=auto'
                        '&extra=%7B%22xmux%22%3A%7B%22maxConcurrency%22%3A%2216-32%22%7D%7D')
-        display_name = f'{node["title"]} · VLESS'
+        display_name = f'{node["title"]} · VLESS · {row["transport"].upper()}'
         label = quote(display_name, safe='')
         uri = f'vless://{identity["xray_uuid"]}@{host}:{port}?{params}#{label}'
         safe_title = (re.sub(r'[^\w .()#-]+', '', node['title']).strip(' .')[:64]
                       or row['node_key'])
-        return {'filename': f'{safe_title} · VLESS.txt',
+        return {'filename': f'{safe_title} · VLESS · {row["transport"].upper()}.txt',
                 'media_type': 'text/uri-list', 'content': uri, 'display_name': display_name}

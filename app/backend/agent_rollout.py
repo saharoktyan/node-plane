@@ -40,6 +40,8 @@ class AgentRolloutService:
         require_permission(actor, 'nodes.manage')
         if type(install_rust) is not bool or type(skip_driver) is not bool:
             raise AccessDenied('invalid_input', 422)
+        if install_rust:
+            raise AccessDenied('install_rust_unsupported', 422)
         try:
             key = str(UUID(command_key))
         except (TypeError, ValueError, AttributeError):
@@ -52,8 +54,6 @@ class AgentRolloutService:
         elif not isinstance(ssh_target, str) or not SSH_TARGET.fullmatch(ssh_target):
             raise AccessDenied('invalid_input', 422)
         intent = {'transport': transport, 'ssh_target': ssh_target, 'ssh_port': ssh_port}
-        if install_rust:
-            intent['install_rust'] = True
         if skip_driver:
             intent['skip_driver'] = True
         encoded = json.dumps(intent, sort_keys=True, separators=(',', ':'))
@@ -115,16 +115,22 @@ class AgentRolloutService:
             conn.execute("UPDATE backend_agent_rollouts SET status = 'blocked' WHERE status = 'running'")
 
     def preflight_failed(self, row):
-        """Only a known SSH probe failure permits another installer dispatch."""
+        """Only a confirmed failure before installation permits another dispatch.
+
+        Binary resolution finishes before installing either component. Its
+        typed failure code is recorded only after the subprocess returns;
+        interrupted/unknown executions never acquire this permission.
+        """
         from .installation_progress import read_progress
         progress = read_progress(row)
         with self.db.connect() as conn:
             failure = conn.execute('SELECT code FROM backend_agent_rollout_failures WHERE task_id=?', (row['id'],)).fetchone()
             node = conn.execute('SELECT key FROM backend_nodes WHERE key=?', (row['node_key'],)).fetchone()
             abandoned = conn.execute("SELECT 1 FROM backend_node_bootstraps WHERE child_id=? AND status='superseded'", (row['id'],)).fetchone()
-        return bool(row['status'] == 'blocked' and node and not abandoned
-                    and progress and progress['stage'] == 'check_ssh'
-                    and failure and failure['code'] in {'ssh_authentication', 'ssh_host_key', 'ssh_prerequisites'})
+        return bool(row['status'] == 'blocked' and node and not abandoned and failure
+                    and (failure['code'] in {'release_binary_unavailable', 'rust_required'}
+                         or progress and progress['stage'] == 'check_ssh'
+                         and failure['code'] in {'ssh_authentication', 'ssh_host_key', 'ssh_prerequisites'}))
 
     def resume_preflight(self, actor, task_id):
         require_permission(actor, 'maintenance.manage')
@@ -165,10 +171,11 @@ class AgentRolloutService:
         if self.runner is not None:
             return self.runner(args)
         from .installation_progress import progress_path
-        env = {**os.environ, 'NODE_PLANE_INSTALL_RUST': 'yes' if intent.get('install_rust') else 'no'}
+        env = dict(os.environ)
         # Override inherited observer targets; every job owns its own file.
         env.pop('NODE_PLANE_AGENT_PROGRESS_FILE', None)
         env.pop('NODE_PLANE_AGENT_PROGRESS_ID', None)
+        env.pop('NODE_PLANE_INSTALL_RUST', None)
         path = progress_path(row['id']) if 'id' in row.keys() else None
         if path is not None:
             env.update(NODE_PLANE_AGENT_PROGRESS_FILE=str(path), NODE_PLANE_AGENT_PROGRESS_ID=row['id'])
@@ -185,7 +192,9 @@ class AgentRolloutService:
                 with self.db.transaction() as conn:
                     conn.execute('''INSERT INTO backend_agent_rollout_archives VALUES (?, ?)
                         ON CONFLICT(task_id, path) DO NOTHING''', (row['id'], parts[2]))
-        if 'RUST_INSTALL_REQUIRED:' in output:
+        if re.search(r'(?m)^(?:RELEASE_BINARY_UNAVAILABLE: )?(?:Driver|Agent) release asset [^\r\n]+ is missing or inaccessible\.', output):
+            self._failure_code = 'release_binary_unavailable'
+        elif 'RUST_INSTALL_REQUIRED:' in output:
             self._failure_code = 'rust_required'
         elif 'Not enough free memory' in output or 'too busy' in output:
             self._failure_code = 'build_resources'

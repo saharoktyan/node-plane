@@ -20,11 +20,22 @@ def button(locale, key, callback, *, style=None):
 
 def error(locale, exc):
     key = {'node_agent_unconfigured': 'node_tools.no_agent',
+           'node_installation_required': 'nodes.apply.installation_required',
            'node_agent_unavailable': 'node_tools.unreachable',
            'node_operation_pending': 'node_tools.busy',
            'revision_conflict': 'node_tools.changed',
            'node_settings_incomplete': 'node_tools.incomplete'}.get(exc.code, 'node_tools.error')
     return tr(locale, key)
+
+
+async def return_uninstalled_node(query, node, bot, backend, state):
+    if node.get('applied_revision', 0) > 0:
+        return False
+    from .admin_nodes import show_admin_node
+    await state.update_data(node_job_draft=None)
+    await show_admin_node(query.message.chat.id, query.from_user.id,
+        query.message.message_id, node['key'], bot, backend, state)
+    return True
 
 
 async def show_install(chat_id, user_id, message_id, node_key, bot, backend, state):
@@ -186,12 +197,15 @@ async def show_section(chat_id, user_id, message_id, section, node_key, bot, bac
 async def tools_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
     await query.answer()
     node_key = query.data.split(':', 1)[1]
+    node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=query.from_user.id)
+    if await return_uninstalled_node(query, node, bot, backend, state):
+        return
     locale = normalize_locale((await state.get_data()).get('locale'))
     rows = [[button(locale, 'node_tools.' + name, f'node_view:{name}:{node_key}') for name in names]
             for names in (('diagnostics', 'ports'), ('runtime', 'repair'))]
     rows += [[button(locale, 'node_tools.cleanup_runtime', f'node_action:cleanup_runtime:{node_key}').model_copy(update={'style': 'danger'})],
              [button(locale, 'back', f'node_technical:{node_key}')]]
-    await render(bot, query.message.chat.id, Screen(tr(locale, 'nodes.rich.technical'), (), embedded_buttons=True, navigation=True), rows, state, query.message.message_id)
+    await render(bot, query.message.chat.id, Screen(tr(locale, 'node_tools.diagnostics'), (), embedded_buttons=True, navigation=True), rows, state, query.message.message_id)
 
 
 @router.callback_query(F.data.startswith('node_view:'))
@@ -203,6 +217,8 @@ async def view_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state:
     try:
         node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=query.from_user.id)
         await remember_node(state, node)
+        if await return_uninstalled_node(query, node, bot, backend, state):
+            return
         if view == 'diagnostics':
             from urllib.parse import quote
             from .admin_recovery import detail_link, server_check_name
@@ -286,6 +302,8 @@ async def action_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, stat
         return
     try:
         node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=query.from_user.id)
+        if action != 'bootstrap' and await return_uninstalled_node(query, node, bot, backend, state):
+            return
         await show_action_confirmation(query.message.chat.id, query.message.message_id,
             node, action, bot, state)
     except BackendError as exc:
@@ -329,13 +347,14 @@ async def show_bootstrap(chat_id, user_id, message_id, job, bot, backend, state)
             lines += (job['error_code'],)
     if job.get('progress'):
         lines += installation_progress_lines(job['progress'],locale)
-    rows = [[button(locale, 'node_tools.refresh', 'bootstrap_status:' + job['id'])]]
+    rows = [] if job['status'] == 'succeeded' else [[button(locale, 'node_tools.refresh', 'bootstrap_status:' + job['id'])]]
     if job['status'] == 'blocked' and job.get('child_id'):
         from .callbacks import RolloutStatusCallback
         callback = ('node_job:' + job['child_id'] if job['child_kind'] == 'node-jobs' else
                     RolloutStatusCallback(task_id=job['child_id']).pack())
         rows.append([button(locale, 'node_tools.resolve', callback)])
-    rows.append([button(locale, 'back', AdminNodeCallback(node_key=job['node_key']).pack())])
+    rows.append([button(locale, 'setup.close' if job['status'] == 'succeeded' else 'back',
+        AdminNodeCallback(node_key=job['node_key']).pack())])
     await render(bot, chat_id, Screen(tr(locale, 'node_tools.bootstrap'), lines,
         embedded_buttons=True, navigation=True), rows, state, message_id)
     if job['status'] in {'awaiting_executor', 'running', 'blocked'}:

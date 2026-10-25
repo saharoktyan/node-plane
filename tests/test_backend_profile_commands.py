@@ -113,32 +113,67 @@ class BackendProfileCommandTests(unittest.TestCase):
         repo = ProfileRepository(self.db)
         old_id = repo.ensure_account_profile(member.id)
         old_runtime = self.db.connection.execute('SELECT runtime_name FROM backend_profiles WHERE id = ?', (old_id,)).fetchone()[0]
+
+        admin_headers = self.headers_for()
+        initial_list = self.client.get('/api/v1/profiles', headers=admin_headers).json()['items']
+        self.assertIn(old_id, [p['id'] for p in initial_list])
+
         headers = self.headers_for(1)
         path = f'/api/v1/profiles/{old_id}'
         first = self.client.delete(path, headers=headers)
         self.assertEqual(first.status_code, 200, first.text)
         self.assertEqual(self.client.delete(path, headers=headers).json(), first.json())
+
+        # Deleted old ID absent from admin list and search
+        list_after_del = self.client.get('/api/v1/profiles', headers=admin_headers).json()['items']
+        self.assertNotIn(old_id, [p['id'] for p in list_after_del])
+        search_after_del = self.client.get('/api/v1/profiles', headers=admin_headers, params={'search': old_id[:8]}).json()['items']
+        self.assertNotIn(old_id, [p['id'] for p in search_after_del])
+
         member_headers = {**self.headers, 'X-Node-Plane-Telegram-User-ID': '102'}
         self.assertIsNone(self.identities.find_telegram_account(102))
         self.assertEqual(self.identities.get_account(member.id).status, 'disabled')
         fresh = self.register(102).json()
         self.assertNotEqual(fresh['id'], member.id)
+        self.assertEqual(fresh['id'], 'telegram:102')
+        self.assertFalse(fresh['account_created'])
+        self.assertEqual(fresh['status'], 'pending')
+
+        # No account or profile exists for fresh visitor
+        self.assertIsNone(self.identities.find_telegram_account(102))
+        list_pending = self.client.get('/api/v1/profiles', headers=admin_headers).json()['items']
+        self.assertNotIn(old_id, [p['id'] for p in list_pending])
+
         me = self.client.get('/api/v1/me', headers=member_headers).json()
         self.assertEqual(me['status'], 'pending')
+        self.assertFalse(me['account_created'])
         self.assertNotIn('profiles.self.read', me['permissions'])
-        self.assertEqual(self.client.get('/api/v1/me/profiles', headers=member_headers).status_code, 403)
+        self.assertEqual(self.client.get('/api/v1/me/profiles', headers=member_headers).status_code, 401)
         request = self.client.post('/api/v1/me/access-requests',
             headers={**member_headers, 'Idempotency-Key': str(uuid4())}).json()
         approved = self.client.post(f"/api/v1/access-requests/{request['id']}/decision",
             headers=self.headers_for(), json={'decision': 'approve'})
         self.assertEqual(approved.status_code, 200, approved.text)
-        new_id = repo.ensure_account_profile(fresh['id'])
+        new_account_id = approved.json()['account_id']
+        self.assertNotEqual(new_account_id, member.id)
+        profiles = repo.owned(new_account_id, after='', limit=10)
+        self.assertEqual(len(profiles), 1)
+        new_id = profiles[0]['id']
         self.assertNotEqual(new_id, old_id)
-        self.assertEqual(repo.ensure_account_profile(fresh['id']), new_id)
+        self.assertEqual(repo.ensure_account_profile(new_account_id), new_id)
         new_runtime = self.db.connection.execute('SELECT runtime_name FROM backend_profiles WHERE id = ?', (new_id,)).fetchone()[0]
         self.assertNotEqual(new_runtime, old_runtime)
         self.assertEqual(self.client.get('/api/v1/me', headers=member_headers).json()['status'], 'approved')
         self.assertEqual(self.db.connection.execute('SELECT COUNT(*) FROM backend_grants WHERE profile_id = ?', (new_id,)).fetchone()[0], 0)
+
+        # After approval fresh profile appears once; old receipt remains hidden
+        list_approved = self.client.get('/api/v1/profiles', headers=admin_headers).json()['items']
+        self.assertEqual([p['id'] for p in list_approved].count(new_id), 1)
+        self.assertNotIn(old_id, [p['id'] for p in list_approved])
+
+        search_approved = self.client.get('/api/v1/profiles', headers=admin_headers, params={'search': new_id[:8]}).json()['items']
+        self.assertEqual([p['id'] for p in search_approved].count(new_id), 1)
+        self.assertNotIn(old_id, [p['id'] for p in search_approved])
 
     def test_deletion_protects_admin_and_one_account_cannot_have_two_profiles(self):
         admin_profile = self.create(owner_account_id=self.admin.id).json()['profile']['id']

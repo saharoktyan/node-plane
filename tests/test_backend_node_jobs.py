@@ -124,7 +124,8 @@ class BackendNodeJobTests(unittest.TestCase):
         self.assertEqual(NodeOverviewService(self.db).get(self.actor, 'n1')['state'], 'not_installed')
         self.assertTrue(NodeSettingsExecutor(self.db, Driver()).run_one())
         self.assertEqual(NodeSettingsService(self.db).get(self.actor, task['id'])['error_code'], 'node_installation_required')
-        self.assertEqual(self.queue('bootstrap')['status'], 'awaiting_executor')
+        from backend.node_bootstrap import NodeBootstrapService
+        self.assertEqual(NodeBootstrapService(self.db).queue(self.actor, 'n1', 1, str(uuid4()))['status'], 'awaiting_executor')
 
     def test_reinstall_fences_config_issuance_and_reprovisions_with_new_revision(self):
         profile = ProfileRepository(self.db).create_profile(runtime_name='alice', display_name='Alice', owner_account_id=self.actor.account.id)
@@ -188,3 +189,30 @@ class BackendNodeJobTests(unittest.TestCase):
         self.assertEqual(self.jobs.get(self.actor, job['id'])['status'], 'succeeded')
         self.assertFalse(NodeService(self.db).get(self.actor, 'n1')['enabled'])
         self.assertEqual(NodeService(self.db).get(self.actor, 'n1')['transport'], 'local')
+
+    def test_uninstalled_node_rejects_runtime_jobs_before_task_creation_while_setup_and_settings_functional(self):
+        from backend.node_bootstrap import NodeBootstrapService
+        from backend.node_settings import NodeSettingsService
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_nodes SET applied_revision=0, enabled=0 WHERE key='n1'")
+
+        initial_count = self.db.connection.execute("SELECT COUNT(*) AS count FROM backend_node_jobs WHERE node_key='n1'").fetchone()['count']
+        with self.assertRaises(AccessDenied) as denied:
+            self.jobs.queue(self.actor, 'n1', 'sync_runtime', revision=1, command_key=str(uuid4()))
+        self.assertEqual(denied.exception.code, 'node_installation_required')
+        after_count = self.db.connection.execute("SELECT COUNT(*) AS count FROM backend_node_jobs WHERE node_key='n1'").fetchone()['count']
+        self.assertEqual(after_count, initial_count)
+
+        with self.assertRaises(AccessDenied) as denied:
+            self.jobs.queue(self.actor, 'n1', 'bootstrap', revision=1, command_key=str(uuid4()))
+        self.assertEqual(denied.exception.code, 'node_installation_required')
+
+        # 3. Settings remain functional on uninstalled node
+        settings_task = NodeSettingsService(self.db).queue(self.actor, 'n1', revision=1, command_key=str(uuid4()))
+        self.assertEqual(settings_task['status'], 'awaiting_executor')
+        with self.db.transaction() as conn:
+            conn.execute("DELETE FROM backend_node_settings_tasks WHERE id=?", (settings_task['id'],))
+
+        # 4. Parent-authorized setup via NodeBootstrapService works
+        bootstrap_job = NodeBootstrapService(self.db).queue(self.actor, 'n1', 1, str(uuid4()))
+        self.assertEqual(bootstrap_job['status'], 'awaiting_executor')

@@ -39,6 +39,7 @@ TABLES = (
     "backend_access_requests",
 )
 CLEAR = (
+    "backend_telegram_menu_refresh",
     "backend_account_deletions",
     "backend_account_menu_refresh",
     "backend_node_bootstraps",
@@ -307,9 +308,14 @@ class BackupService:
         compatible = True
         with self.db.connect() as conn:
             for table in TABLES:
-                compatible &= (
-                    self._columns(conn, table) == value["tables"][table]["columns"]
-                )
+                current_columns = self._columns(conn, table)
+                stored_columns = value["tables"][table]["columns"]
+                if table == "backend_access_requests" and "telegram_subject" not in stored_columns:
+                    # Pre-visitor snapshots contain account-bound requests. The
+                    # additive nullable column may be omitted without rewriting
+                    # the checksummed snapshot or inventing guest accounts.
+                    current_columns = [column for column in current_columns if column != "telegram_subject"]
+                compatible &= current_columns == stored_columns
         return {
             "id": str(UUID(backup_id)),
             "created_at": value["created_at"],

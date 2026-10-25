@@ -7,9 +7,9 @@ from tests import test_backend_http as fixture
 class TrafficPreferencesTests(unittest.TestCase):
     def setUp(self):
         fixture.BackendHTTPTests.setUp(self)
-        self.member = fixture.BackendHTTPTests.register(self, 102).json()
-        self.db.connection.execute("UPDATE backend_accounts SET status='approved' WHERE id=?", (self.member['id'],))
-        self.db.connection.commit()
+        resp = fixture.BackendHTTPTests.provision(self, 102)
+        self.assertIn(resp.status_code, (200, 201))
+        self.member = resp.json()['account']
 
     def headers_for(self, uid):
         return {**self.headers, 'X-Node-Plane-Telegram-User-ID': str(uid)}
@@ -42,6 +42,8 @@ class TrafficPreferencesTests(unittest.TestCase):
         self.assertEqual(rows, [])
 
     def test_member_cannot_change_policy_and_payload_is_strict(self):
+        self.assertEqual(self.client.patch('/api/v1/system/traffic/preferences',
+            headers=self.headers_for(104), json={'enabled': True}).status_code, 401)
         self.assertEqual(self.client.patch('/api/v1/system/traffic/preferences',
             headers=self.headers_for(102), json={'enabled': True}).status_code, 403)
         for payload in ({}, {'enabled': 'yes'}, {'enabled': None}, {'enabled': True, 'account_id': self.member['id']}):

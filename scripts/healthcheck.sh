@@ -8,13 +8,13 @@ MODE="${MODE:-auto}"
 FAILURES=0
 WARNINGS=0
 SIMPLE_LOCAL_READY=0
-PORTABLE_REMOTE_READY=0
 declare -a REMEDIATIONS=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --mode)
-      MODE="${2:-}"
+      [[ $# -ge 2 ]] || { echo "--mode requires a value" >&2; exit 1; }
+      MODE="$2"
       shift 2
       ;;
     --mode=*)
@@ -24,12 +24,11 @@ while [[ $# -gt 0 ]]; do
     -h|--help)
       cat <<'EOF'
 Usage:
-  scripts/healthcheck.sh [--mode auto|simple|portable]
+  scripts/healthcheck.sh [--mode auto|simple]
 
 Modes:
-  auto      Detect mode from local environment
+  auto      Use the supported host/systemd setup
   simple    Check host/systemd-oriented setup
-  portable  Unsupported; use systemd/simple mode
 EOF
       exit 0
       ;;
@@ -102,27 +101,55 @@ has_cmd() {
   command -v "$1" >/dev/null 2>&1
 }
 
-python_version() {
-  python3 - <<'EOF'
-import sys
-print(f"{sys.version_info.major}.{sys.version_info.minor}")
-EOF
-}
-
-python_supported() {
-  python3 - <<'EOF'
-import sys
-sys.exit(0 if sys.version_info[:2] in {(3, 11), (3, 12)} else 1)
-EOF
-}
-
+# Read values as data: never execute a private environment file as shell code.
 read_env_value() {
-  local key="$1"
-  local file="${2:-${ENV_FILE:-.env}}"
-  if [[ ! -f "$file" ]]; then
-    return 0
+  local key="$1" file="${2:-${ENV_FILE:-.env}}" value
+  [[ -r "$file" ]] || return 0
+  value="$(sed -n "s/^[[:space:]]*${key}=//p" "$file" | tail -n 1)"
+  value="${value%$'\r'}"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  if [[ "$value" == \"*\" || "$value" == \'*\' ]]; then
+    value="${value:1:${#value}-2}"
   fi
-  sed -n "s/^${key}=//p" "$file" | tail -n 1
+  printf '%s' "$value"
+}
+
+infer_install_base() {
+  local app_root="$1" physical_root
+  physical_root="$(cd "$app_root" 2>/dev/null && pwd -P)" || return 0
+  if [[ "$(basename "$app_root")" == current && -L "$app_root" ]]; then
+    dirname "$app_root"
+  elif [[ "$(basename "$(dirname "$physical_root")")" == releases ]]; then
+    dirname "$(dirname "$physical_root")"
+  fi
+}
+
+resolve_layout() {
+  local bootstrap_env="${REPO_ROOT}/.env" inferred_base configured_shared initial_base
+  inferred_base="$(infer_install_base "$REPO_ROOT")"
+  BASE_DIR="${NODE_PLANE_BASE_DIR:-$(read_env_value NODE_PLANE_BASE_DIR "$bootstrap_env")}"
+  APP_DIR="${NODE_PLANE_APP_DIR:-$(read_env_value NODE_PLANE_APP_DIR "$bootstrap_env")}"
+  if [[ -z "$BASE_DIR" && -n "$APP_DIR" ]]; then
+    BASE_DIR="$(infer_install_base "$APP_DIR")"
+  fi
+  BASE_DIR="${BASE_DIR:-${inferred_base:-$REPO_ROOT}}"
+  initial_base="$BASE_DIR"
+  APP_DIR="${APP_DIR:-${BASE_DIR}/current}"
+  configured_shared="${NODE_PLANE_SHARED_DIR:-$(read_env_value NODE_PLANE_SHARED_DIR "$bootstrap_env")}"
+  SHARED_DIR="${configured_shared:-${BASE_DIR}/shared}"
+  ENV_FILE="${SHARED_DIR}/.env"
+  # A source checkout can contain the installer configuration, pointing to shared.
+  # An installed release must never fall back to an unrelated checkout .env.
+  if [[ ! -f "$ENV_FILE" && -z "$inferred_base" && -z "${NODE_PLANE_SHARED_DIR:-}" && -f "$bootstrap_env" ]]; then
+    ENV_FILE="$bootstrap_env"
+  fi
+  BASE_DIR="${NODE_PLANE_BASE_DIR:-$(read_env_value NODE_PLANE_BASE_DIR "$ENV_FILE")}"
+  BASE_DIR="${BASE_DIR:-$initial_base}"
+  APP_DIR="${NODE_PLANE_APP_DIR:-$(read_env_value NODE_PLANE_APP_DIR "$ENV_FILE")}"
+  APP_DIR="${APP_DIR:-${BASE_DIR}/current}"
+  SHARED_DIR="${NODE_PLANE_SHARED_DIR:-$(read_env_value NODE_PLANE_SHARED_DIR "$ENV_FILE")}"
+  SHARED_DIR="${SHARED_DIR:-${BASE_DIR}/shared}"
 }
 
 check_file_exists() {
@@ -140,62 +167,51 @@ systemd_unit_installed() {
 }
 
 detect_mode() {
-  if [[ "$MODE" != "auto" ]]; then
-    return 0
-  fi
-  # Prefer the explicitly configured host installation over node containers.
-  if systemd_unit_installed || [[ -d .venv ]] || [[ -n "$(read_env_value NODE_PLANE_APP_DIR)" ]]; then
-    MODE="simple"
-  elif has_cmd docker && docker ps --format '{{.Names}}' 2>/dev/null | grep -qx 'node-plane'; then
-    MODE="portable"
-  else
-    MODE="simple"
+  if [[ "$MODE" == auto ]]; then
+    MODE=simple
   fi
 }
 
 check_repo_basics() {
-  section "Repository"
-  check_file_exists "app/telegram_client/main.py" "Telegram client entrypoint"
-  if [[ -f pyproject.toml || -f uv.lock ]]; then
-    check_file_exists "pyproject.toml" "Python project manifest"
-    check_file_exists "uv.lock" "Python dependency lock"
+  section "Installation files"
+  local check_root="$REPO_ROOT"
+  [[ ! -d "$APP_DIR" ]] || check_root="$APP_DIR"
+  check_file_exists "${check_root}/app/telegram_client/main.py" "Telegram client entrypoint"
+  if [[ -f "${check_root}/pyproject.toml" || -f "${check_root}/uv.lock" ]]; then
+    check_file_exists "${check_root}/pyproject.toml" "Python project manifest"
+    check_file_exists "${check_root}/uv.lock" "Python dependency lock"
   else
-    check_file_exists "requirements.txt" "Legacy Python requirements"
+    check_file_exists "${check_root}/requirements.txt" "Legacy Python requirements"
   fi
-  check_file_exists ".env.example" "Environment template"
-
-  if [[ -f "$ENV_FILE" ]]; then
-    ok "Environment file exists: $ENV_FILE"
+  check_file_exists "${check_root}/.env.example" "Environment template"
+  if [[ -r "$ENV_FILE" ]]; then
+    ok "Environment file is readable: $ENV_FILE"
   else
-    fail ".env file is missing"
-    add_remediation "Create the environment file: cp .env.example .env"
+    fail "Environment file is missing or unreadable: $ENV_FILE"
+    add_remediation "Check the installed configuration at $ENV_FILE; do not create a separate .env inside a release"
   fi
 }
 
 check_env() {
   section "Configuration"
 
-  local bot_token admin_ids base_dir app_dir shared_dir ssh_key adapter_token_file
+  local bot_token admin_ids adapter_token_file
   bot_token="$(read_env_value BOT_TOKEN)"
   admin_ids="$(read_env_value ADMIN_IDS)"
-  base_dir="$(read_env_value NODE_PLANE_BASE_DIR)"
-  app_dir="$(read_env_value NODE_PLANE_APP_DIR)"
-  shared_dir="$(read_env_value NODE_PLANE_SHARED_DIR)"
-  ssh_key="$(read_env_value SSH_KEY)"
   adapter_token_file="$(read_env_value NODE_PLANE_BACKEND_ADAPTER_TOKEN_FILE)"
 
   if [[ -n "$bot_token" && "$bot_token" != "replace_me" ]]; then
     ok "BOT_TOKEN is configured"
   else
     fail "BOT_TOKEN is missing or still set to placeholder"
-    add_remediation "Set BOT_TOKEN in .env"
+    add_remediation "Set BOT_TOKEN in $ENV_FILE"
   fi
 
   if [[ -n "$admin_ids" && "$admin_ids" != "123456789" ]]; then
     ok "ADMIN_IDS is configured"
   else
     fail "ADMIN_IDS is missing or still set to placeholder"
-    add_remediation "Set ADMIN_IDS in .env to your Telegram numeric user id"
+    add_remediation "Set ADMIN_IDS in $ENV_FILE to your Telegram numeric user id"
   fi
 
   if [[ -n "$adapter_token_file" && -f "$adapter_token_file" && -r "$adapter_token_file" ]]; then
@@ -205,37 +221,15 @@ check_env() {
     add_remediation "Rerun ./scripts/install.sh --mode simple to create the aiogram adapter credential"
   fi
 
-  if [[ "$MODE" == "simple" ]]; then
-    if [[ -z "$app_dir" ]]; then
-      app_dir="$base_dir"
-    fi
-    if [[ -n "$app_dir" ]]; then
-      ok "NODE_PLANE_APP_DIR is set to ${app_dir}"
-    else
-      warn "NODE_PLANE_APP_DIR is not set"
-      add_remediation "Set NODE_PLANE_APP_DIR in .env for simple mode"
-    fi
-    if [[ -n "$shared_dir" ]]; then
-      ok "NODE_PLANE_SHARED_DIR is set to ${shared_dir}"
-    else
-      warn "NODE_PLANE_SHARED_DIR is not set"
-      add_remediation "Set NODE_PLANE_SHARED_DIR in .env for runtime data and SSH keys"
-    fi
-  else
-    if [[ -n "$ssh_key" ]]; then
-      ok "SSH_KEY is set to ${ssh_key}"
-    else
-      warn "SSH_KEY is not set"
-      add_remediation "Set SSH_KEY in .env if the bot will manage remote nodes over SSH"
-    fi
-  fi
+  ok "Application directory: $APP_DIR"
+  ok "Shared directory: $SHARED_DIR"
 }
 
 check_simple_mode() {
   section "Simple Mode"
 
   local python_ok=0
-  local pip_ok=0
+  local dependencies_ok=0
   local venv_ok=0
   local systemd_ok=0
   local service_active_ok=0
@@ -246,37 +240,26 @@ check_simple_mode() {
   local current_link_ok=0
   local app_dir shared_dir base_dir current_target
 
-  base_dir="$(read_env_value NODE_PLANE_BASE_DIR)"
-  app_dir="$(read_env_value NODE_PLANE_APP_DIR)"
-  shared_dir="$(read_env_value NODE_PLANE_SHARED_DIR)"
-  if [[ -z "$base_dir" ]]; then
-    base_dir="$REPO_ROOT"
-  fi
-  if [[ -z "$app_dir" ]]; then
-    app_dir="${base_dir}/current"
-  fi
-  if [[ -z "$shared_dir" ]]; then
-    shared_dir="${base_dir}/shared"
-  fi
+  base_dir="$BASE_DIR"
+  app_dir="$APP_DIR"
+  shared_dir="$SHARED_DIR"
   current_target="$(readlink -f "$app_dir" 2>/dev/null || true)"
 
   local runtime_python="${app_dir}/.venv/bin/python"
-  if [[ ! -x "$runtime_python" ]]; then
-    runtime_python="$(select_python_runtime 2>/dev/null || true)"
-  fi
-  if [[ -n "$runtime_python" ]] && "$runtime_python" -c 'import sys; sys.exit(0 if sys.version_info[:2] in {(3,11),(3,12)} else 1)' >/dev/null 2>&1; then
+  if [[ -x "$runtime_python" ]] && "$runtime_python" -I -c 'import sys; sys.exit(0 if sys.version_info[:2] in {(3,11),(3,12)} else 1)' >/dev/null 2>&1; then
     ok "Bot Python runtime is supported ($runtime_python)"
     python_ok=1
+    # uv-managed virtualenvs do not need an installed pip module.
+    if "$runtime_python" -I -c 'import aiogram, fastapi, uvicorn, psycopg' >/dev/null 2>&1; then
+      ok "Controller Python dependencies are importable"
+      dependencies_ok=1
+    else
+      fail "Controller Python dependencies are missing or cannot be imported"
+      add_remediation "Repair the installed Python environment through installation diagnostics or rerun the supported install/update workflow"
+    fi
   else
-    fail "No supported bot Python runtime found"
-    add_remediation "Install Python 3.11/3.12 and rerun ./scripts/install.sh --mode simple"
-  fi
-  if [[ -n "$runtime_python" ]] && "$runtime_python" -m pip --version >/dev/null 2>&1; then
-    ok "pip is available in the bot runtime"
-    pip_ok=1
-  else
-    fail "pip is missing in the bot runtime"
-    add_remediation "Recreate the bot virtualenv with ./scripts/install.sh --mode simple"
+    fail "No supported installed bot Python runtime found at $runtime_python"
+    add_remediation "Repair the managed virtualenv through installation diagnostics; no system Python replacement is required"
   fi
 
   if [[ -n "$app_dir" && -x "${app_dir}/.venv/bin/python" ]]; then
@@ -302,7 +285,7 @@ check_simple_mode() {
     ok "shared environment file exists at ${shared_dir}/.env"
   else
     warn "shared environment file is missing"
-    add_remediation "Sync the environment file to shared storage: cp .env ${shared_dir}/.env"
+    add_remediation "Check the installed environment file at ${shared_dir}/.env and its permissions"
   fi
 
   if [[ -n "$shared_dir" && -d "${shared_dir}/data" ]]; then
@@ -322,7 +305,7 @@ check_simple_mode() {
   fi
 
   local runtime_env_file db_backend postgres_dsn
-  runtime_env_file="${shared_dir}/.env"
+  runtime_env_file="$ENV_FILE"
   db_backend="$(read_env_value DB_BACKEND "$runtime_env_file")"
   postgres_dsn="$(read_env_value POSTGRES_DSN "$runtime_env_file")"
   if [[ -z "$db_backend" ]]; then
@@ -332,7 +315,7 @@ check_simple_mode() {
   if [[ "$db_backend" == "postgres" && -n "$postgres_dsn" ]]; then
     ok "PostgreSQL runtime is configured"
   elif [[ "$db_backend" == "postgres" ]]; then
-    warn "POSTGRES_DSN is missing for PostgreSQL runtime"
+    fail "POSTGRES_DSN is missing for PostgreSQL runtime"
     add_remediation "Set POSTGRES_DSN in ${shared_dir}/.env and rerun installation/update"
   else
     warn "No PostgreSQL configuration was detected"
@@ -385,23 +368,23 @@ check_simple_mode() {
       ok "Docker daemon is reachable"
       docker_ok=1
     else
-      warn "docker exists but daemon is not reachable for the current user"
-      add_remediation "Ensure Docker is installed and the current user can access the daemon"
+      info "Local node prerequisite: Docker daemon is not reachable for the current user"
+      info "Docker access is needed for a local VPN node or managed local PostgreSQL"
     fi
   else
-    warn "docker is not installed"
-    add_remediation "Rerun install/update; Node Plane can auto-install Docker when it needs PostgreSQL runtime provisioning"
+    info "Local node prerequisite: Docker is not installed"
+    info "Docker is needed for a local VPN node or managed local PostgreSQL"
   fi
 
   if [[ -c /dev/net/tun ]]; then
     ok "/dev/net/tun is available"
     tun_ok=1
   else
-    warn "/dev/net/tun is missing"
-    add_remediation "Use a VPS/kernel setup that provides /dev/net/tun for TUN-based runtime support"
+    info "Local node prerequisite: /dev/net/tun is missing (not required for a controller-only host)"
+    info "A local VPN node needs kernel TUN support; remote nodes are unaffected"
   fi
 
-  if [[ $python_ok -eq 1 && $pip_ok -eq 1 && $venv_ok -eq 1 && $systemd_ok -eq 1 && $service_active_ok -eq 1 && $docker_ok -eq 1 && $tun_ok -eq 1 && $shared_data_ok -eq 1 && $shared_ssh_ok -eq 1 && $current_link_ok -eq 1 ]]; then
+  if [[ $python_ok -eq 1 && $dependencies_ok -eq 1 && $venv_ok -eq 1 && $systemd_ok -eq 1 && $service_active_ok -eq 1 && $docker_ok -eq 1 && $tun_ok -eq 1 && $shared_data_ok -eq 1 && $shared_ssh_ok -eq 1 && $current_link_ok -eq 1 ]]; then
     SIMPLE_LOCAL_READY=1
   fi
 }
@@ -412,7 +395,7 @@ print_mode_readiness() {
     ok "This host is ready for Simple Mode and local node deployment"
     info "Next: open the bot as admin, add a node, install its agent, then open Bootstrap"
   else
-    warn "This host is not fully ready for local node deployment yet"
+    info "Local node deployment prerequisites are incomplete; a controller can manage remote nodes without local VPN support"
     info "Goal: active systemd services, reachable Docker daemon, and /dev/net/tun on the same host"
   fi
 }
@@ -442,28 +425,15 @@ print_remediations() {
   done
 }
 
-source "${SCRIPT_DIR}/python_runtime.sh"
-ENV_FILE="${NODE_PLANE_SHARED_DIR:+${NODE_PLANE_SHARED_DIR}/.env}"
-if [[ -z "$ENV_FILE" || ! -f "$ENV_FILE" ]]; then
-  ENV_FILE="${REPO_ROOT}/.env"
-  configured_shared="$(read_env_value NODE_PLANE_SHARED_DIR)"
-  if [[ -n "$configured_shared" && -f "${configured_shared}/.env" ]]; then
-    ENV_FILE="${configured_shared}/.env"
-  fi
-fi
-
 detect_mode
 case "$MODE" in
   simple) ;;
-  portable)
-    echo "Portable Docker installation is unsupported; use --mode simple." >&2
-    exit 1
-    ;;
   *)
-    echo "Unsupported mode: ${MODE}. Use auto, simple, or portable." >&2
+    echo "Unsupported mode: ${MODE}. Use auto or simple." >&2
     exit 1
     ;;
 esac
+resolve_layout
 
 check_repo_basics
 check_env

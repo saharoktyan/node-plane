@@ -81,9 +81,8 @@ class AlertTests(unittest.TestCase):
         self.assertIsNotNone(delivery)
         self.service.acknowledge(self.transport, delivery['id'], key, 'retry', 60)
         self.assertIsNone(self.service.claim(self.transport, str(uuid4())))
-        member = fixture.BackendHTTPTests.register(self, 102).json()
-        with self.db.transaction() as conn:
-            conn.execute("UPDATE backend_accounts SET status='approved' WHERE id=?", (member['id'],))
+        resp = fixture.BackendHTTPTests.provision(self, 102)
+        self.assertIn(resp.status_code, (200, 201))
         announcements = AnnouncementService(self.db)
         queued = announcements.queue(self.actor, 'Hello', str(uuid4()))
         self.assertEqual(queued['total'], 1)
@@ -401,8 +400,12 @@ class AlertTests(unittest.TestCase):
         )
 
     def test_events_target_every_approved_admin_and_skip_other_accounts(self):
-        second = fixture.BackendHTTPTests.register(self, 102).json()
-        third = fixture.BackendHTTPTests.register(self, 103).json()
+        resp_second = fixture.BackendHTTPTests.provision(self, 102)
+        self.assertIn(resp_second.status_code, (200, 201))
+        second = resp_second.json()['account']
+        resp_third = fixture.BackendHTTPTests.provision(self, 103)
+        self.assertIn(resp_third.status_code, (200, 201))
+        third = resp_third.json()['account']
         with self.db.transaction() as conn:
             conn.execute("UPDATE backend_accounts SET role='admin',status='approved' WHERE id=?", (second['id'],))
             conn.execute("UPDATE backend_accounts SET role='admin',status='disabled' WHERE id=?", (third['id'],))
@@ -470,7 +473,11 @@ class AlertTests(unittest.TestCase):
             self.assertEqual(len(self.events()), 1)
 
     def test_member_http_access_denied(self):
-        fixture.BackendHTTPTests.register(self, 102)
+        denied_guest = self.client.post('/api/v1/system/alerts/' + str(uuid4()) + '/dismiss',
+            headers={**self.headers, "X-Node-Plane-Telegram-User-ID": "102"})
+        self.assertEqual(denied_guest.status_code, 401)
+        resp = fixture.BackendHTTPTests.provision(self, 102)
+        self.assertIn(resp.status_code, (200, 201))
         headers = {**self.headers, "X-Node-Plane-Telegram-User-ID": "102"}
         self.assertEqual(self.client.post('/api/v1/system/alerts/' + str(uuid4()) + '/dismiss',
             headers=headers).status_code, 403)

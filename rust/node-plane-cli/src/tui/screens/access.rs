@@ -270,14 +270,14 @@ pub(in crate::tui) fn draw_access_expiry(
         .and_then(|e| e.duration_input.as_ref())
     {
         frame.render_widget(
-            Paragraph::new("Enter duration: 12H, 7D, 1M or 1Y. M = 30 days; Y = 365 days."),
+            Paragraph::new("Enter date as YYYY-MM-DD or duration like 12H, 7D, 3D5M1Y. M = 30 days; Y = 365 days."),
             sections[0],
         );
         let field = Rect::new(sections[1].x, sections[1].y, sections[1].width, 3);
         draw_field(
             frame,
             field,
-            "Duration",
+            "Custom",
             input,
             app.access_controls().get(app.access.selected) == Some(&Control::AccessDurationInput),
         );
@@ -313,7 +313,7 @@ pub(in crate::tui) fn draw_access_expiry(
         ("7 days", Control::AccessExpiry(Some(7))),
         ("30 days", Control::AccessExpiry(Some(30))),
         ("90 days", Control::AccessExpiry(Some(90))),
-        ("Custom duration", Control::AccessDurationCustom),
+        ("Custom", Control::AccessDurationCustom),
     ];
     let capacity = (usize::from(sections[1].height / 3).max(1) * 2).min(6);
     app.access_capacity.set(capacity);
@@ -755,14 +755,17 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
         } else {
             let mut count =
                 usize::from(app.access.tab != Tab::Requests || card["status"] == "pending");
-            if app.access.tab == Tab::Accounts || card.get("_account").is_some() {
-                count += 2;
-            }
-            if app.access.tab == Tab::Accounts {
-                count += 1;
+            if card["deleting"] != true
+                && (app.access.tab == Tab::Accounts || card.get("_account").is_some())
+            {
+                let account = card.get("_account").unwrap_or(card);
+                count += 1 + usize::from(account["role"] != "admin");
+                if app.access.tab == Tab::Accounts {
+                    count += 1;
+                }
             }
             if app.access.tab == Tab::Profiles && card["deleting"] != true {
-                count += 3;
+                count += 1 + 2 * usize::from(card["_account"]["role"] != "admin");
             }
             if app.access.tab == Tab::Requests && card["status"] == "pending" {
                 count += 2;
@@ -1060,7 +1063,9 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
                 ("Cancel", Control::AccessBack),
             ];
         } else {
-            if app.access.tab == Tab::Accounts || card.get("_account").is_some() {
+            if card["deleting"] != true
+                && (app.access.tab == Tab::Accounts || card.get("_account").is_some())
+            {
                 let account = card.get("_account").unwrap_or(card);
                 buttons.push((
                     if account["role"] == "admin" {

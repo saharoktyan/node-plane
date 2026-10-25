@@ -26,18 +26,18 @@ class AnnouncementTests(unittest.TestCase):
         )
         self.transport = self.credentials.authenticate("Bearer " + self.token)
         self.service = AnnouncementService(self.db)
-        self.member = fixture.BackendHTTPTests.register(self, 102).json()
-        self.db.connection.execute(
-            "UPDATE backend_accounts SET status='approved' WHERE id=?",
-            (self.member["id"],),
-        )
+        resp = fixture.BackendHTTPTests.provision(self, 102)
+        self.assertIn(resp.status_code, (200, 201))
+        self.member = resp.json()["account"]
+        self.profile_id = resp.json()["profile"]["id"]
+        self.db.connection.execute("DELETE FROM backend_account_menu_refresh")
         self.db.connection.commit()
-        self.profile_id = ProfileRepository(self.db).ensure_account_profile(self.member['id'])
 
     def test_approved_orphan_account_is_not_a_recipient(self):
-        orphan = fixture.BackendHTTPTests.register(self, 103).json()
+        resp = fixture.BackendHTTPTests.provision(self, 103)
+        self.assertIn(resp.status_code, (200, 201))
+        orphan = resp.json()["account"]
         self.db.connection.execute('DELETE FROM backend_profiles WHERE owner_account_id=?', (orphan['id'],))
-        self.db.connection.execute("UPDATE backend_accounts SET status='approved' WHERE id=?", (orphan['id'],))
         self.db.connection.commit()
         self.assertEqual(self.service.preview(self.actor, 'Hello')['recipients'], 1)
         self.assertEqual(self.service.queue(self.actor, 'Hello', str(uuid4()))['total'], 1)
@@ -129,6 +129,7 @@ class AnnouncementTests(unittest.TestCase):
 
     def test_approved_recipients_exclude_sender_pending_and_nontelegram_accounts(self):
         fixture.BackendHTTPTests.register(self, 103)
+        self.identities.resolve_telegram(104)
         self.identities.create_account()
         preview = self.service.preview(self.actor, " Hello ")
         self.assertEqual(preview, {"text": "Hello", "recipients": 1})

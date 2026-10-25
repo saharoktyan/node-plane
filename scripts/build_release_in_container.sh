@@ -38,6 +38,6 @@ fi
   --network host "$IMAGE_NAME" \
   bash scripts/tag_release.sh "$TAG" --skip-tests --no-tag
 
-echo "Portable artifacts are ready in dist/releases/${TAG}."
+echo "Release artifacts are ready in dist/releases/${TAG}."
 echo "Create the tag with: scripts/tag_release.sh ${TAG} --no-build"
 echo "Push the tag; GitHub Actions builds all platforms and publishes the release via cargo-dist."

@@ -42,7 +42,7 @@ class NodeTemplateTests(IsolatedAsyncioTestCase):
         await nodes.new_node_cb(self.query, self.bot, self.backend, self.state)
         self.assertEqual(await self.state.get_state(), NodeDraftState.waiting_for_transport.state)
         self.query.data = 'wizard_transport:' + transport
-        await nodes.wizard_transport_cb(self.query, self.bot, self.state)
+        await nodes.wizard_transport_cb(self.query, self.bot, self.state, self.backend)
         self.assertEqual(await self.state.get_state(), NodeDraftState.waiting_for_template.state)
         self.query.data = 'wizard_template:' + template
         await nodes.wizard_template_cb(self.query, self.bot, self.backend, self.state)
@@ -148,3 +148,63 @@ class NodeTemplateTests(IsolatedAsyncioTestCase):
             for template in NODE_TEMPLATES:
                 self.assertIn(template.flag + ' ' + tr(locale, 'node.template.' + template.code), labels)
             self.assertEqual([b.size for b in screen.rich(rows).blocks if b.type == 'heading'], [1, 2, 2, 2])
+
+    async def test_wizard_ssh_preparation_flow_back_and_subsequent_server_skips_prep(self):
+        # 1. Start wizard where ssh_preparation_required is True
+        self.backend.node_creation_options.return_value['ssh_preparation_required'] = True
+        self.backend.request.return_value = {'public_key': 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBotPublicKey bot@node-plane'}
+        await nodes.new_node_cb(self.query, self.bot, self.backend, self.state)
+        self.assertEqual(await self.state.get_state(), NodeDraftState.waiting_for_transport.state)
+
+        # 2. Choose SSH transport -> renders SSH preparation screen
+        self.query.data = 'wizard_transport:ssh'
+        await nodes.wizard_transport_cb(self.query, self.bot, self.state, self.backend)
+        self.assertEqual(await self.state.get_state(), NodeDraftState.waiting_for_ssh_preparation.state)
+        screen, rows = self.draw.call_args.args[2:4]
+        self.assertTrue(screen.sections[0].collapsed)
+        self.assertEqual(screen.uri, 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBotPublicKey bot@node-plane')
+        self.assertTrue(screen.uri_collapsed)
+        self.assertEqual(screen.uri_rows[0][0].callback_data, 'ssh_key_plain')
+        self.assertEqual([b.callback_data for b in rows[-1]], ['wizard_back:transport', 'wizard_ssh_continue'])
+        self.assertEqual(rows[-1][1].style, 'primary')
+
+        # 3. Click Continue -> renders templates screen with Back pointing to ssh_preparation
+        self.query.data = 'wizard_ssh_continue'
+        await nodes.wizard_ssh_continue_cb(self.query, self.bot, self.state)
+        self.assertEqual(await self.state.get_state(), NodeDraftState.waiting_for_template.state)
+        screen, rows = self.draw.call_args.args[2:4]
+        self.assertEqual(rows[-1][0].callback_data, 'wizard_back:ssh_preparation')
+
+        # 4. Templates Back returns to ssh_preparation
+        self.query.data = 'wizard_back:ssh_preparation'
+        await nodes.wizard_back_cb(self.query, self.bot, self.state)
+        self.assertEqual(await self.state.get_state(), NodeDraftState.waiting_for_ssh_preparation.state)
+
+        # 5. Subsequent SSH server (ssh_preparation_required is False) -> skips preparation directly to templates
+        self.backend.node_creation_options.return_value['ssh_preparation_required'] = False
+        await nodes.new_node_cb(self.query, self.bot, self.backend, self.state)
+        self.assertEqual(await self.state.get_state(), NodeDraftState.waiting_for_transport.state)
+        self.query.data = 'wizard_transport:ssh'
+        await nodes.wizard_transport_cb(self.query, self.bot, self.state, self.backend)
+        self.assertEqual(await self.state.get_state(), NodeDraftState.waiting_for_template.state)
+        screen, rows = self.draw.call_args.args[2:4]
+        self.assertEqual(rows[-1][0].callback_data, 'wizard_back:transport')
+
+    async def test_protocol_picker_shows_inherited_vless_transports_and_awg_only_omits_hint(self):
+        # 1. Defaults with single TCP transport shows 'VLESS — TCP'
+        await self.state.update_data(wizard_data={'protocols': ['xray', 'awg'], 'xray_transports': ['tcp']})
+        await nodes.render_wizard_protocols(123, self.bot, self.state, 77)
+        screen = self.draw.call_args.args[2]
+        self.assertIn('VLESS — TCP', screen.lines)
+
+        # 2. Defaults with both TCP and XHTTP shows 'VLESS — TCP · XHTTP'
+        await self.state.update_data(wizard_data={'protocols': ['xray', 'awg'], 'xray_transports': ['tcp', 'xhttp']})
+        await nodes.render_wizard_protocols(123, self.bot, self.state, 77)
+        screen = self.draw.call_args.args[2]
+        self.assertIn('VLESS — TCP · XHTTP', screen.lines)
+
+        # 3. AWG-only omits VLESS hint entirely
+        await self.state.update_data(wizard_data={'protocols': ['awg'], 'xray_transports': ['tcp', 'xhttp']})
+        await nodes.render_wizard_protocols(123, self.bot, self.state, 77)
+        screen = self.draw.call_args.args[2]
+        self.assertFalse(any('VLESS' in line for line in screen.lines if line))

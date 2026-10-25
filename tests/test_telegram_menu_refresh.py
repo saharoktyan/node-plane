@@ -24,7 +24,8 @@ class MenuRefreshTests(IsolatedAsyncioTestCase):
         await self.state.update_data(control_message_id=77,draft='old account')
         with patch('telegram_client.access_guard.leave_admin_panel',new_callable=AsyncMock) as leave:
             self.assertTrue(await refresh_menu(self.bot,self.backend,self.dispatcher))
-        self.backend.resolve.assert_awaited_once()
+        self.backend.resolve.assert_not_called()
+        self.backend.me.assert_awaited_once_with(102)
         self.assertEqual(leave.call_args.args[-1],fresh)
         self.assertIn('/account/ack?',self.backend.request.call_args.args[1])
 

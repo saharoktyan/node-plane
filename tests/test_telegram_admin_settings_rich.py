@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, patch
 
+from telegram_client.i18n import tr
 from telegram_client.routers import admin_settings as settings
 from telegram_client.backend import BackendError
 from tests import test_telegram_client as fixture
@@ -57,20 +58,40 @@ class AdminSettingsRichTests(IsolatedAsyncioTestCase):
         backend.update_bot_title.assert_not_awaited()
 
     async def test_request_choices_highlight_saved_values_and_set_explicit_values(self):
+        welcome_msg = 'Welcome custom'
+        gate_msg = 'Stub gate'
         for locale in ('en', 'ru'):
             self.state_data['locale'] = locale
             for enabled in (True, False):
-                policy = {'enabled': enabled, 'notify_requests': not enabled, 'gate_message': 'Welcome'}
+                policy = {'enabled': enabled, 'notify_requests': not enabled,
+                          'welcome_message': welcome_msg, 'gate_message': gate_msg}
                 backend = SimpleNamespace(access_request_policy=AsyncMock(return_value=policy),
                     update_access_request_policy=AsyncMock())
                 with patch.object(settings, 'render', new_callable=AsyncMock) as draw:
                     await settings.show_request_policy(123, 123, 77, self.bot, backend, self.state)
                 screen, rows = draw.call_args.args[2:4]
-                self.assertEqual([b.style for b in screen.sections[0].rows[0]],
-                                 ['primary', None] if enabled else [None, 'primary'])
-                self.assertEqual([b.style for b in screen.sections[1].rows[0]],
-                                 [None, 'primary'] if enabled else ['primary', None])
-                self.assertEqual(screen.sections[2].lines, ('Welcome',))
+                self.assertEqual(screen.title, tr(locale, 'request_policy.title'))
+                self.assertEqual(screen.sections[0].title, tr(locale, 'settings.rich.requests'))
+                self.assertEqual([b.text for b in screen.sections[0].rows[0]],
+                                 [tr(locale, 'settings.rich.enable'), tr(locale, 'settings.rich.disable')])
+                if enabled:
+                    self.assertEqual(len(screen.sections), 3)
+                    self.assertEqual([b.style for b in screen.sections[0].rows[0]], ['primary', None])
+                    self.assertEqual(screen.sections[1].title, tr(locale, 'settings.rich.notifications'))
+                    self.assertEqual([b.style for b in screen.sections[1].rows[0]], [None, 'primary'])
+                    self.assertEqual([b.text for b in screen.sections[1].rows[0]],
+                                     [tr(locale, 'settings.rich.enable'), tr(locale, 'settings.rich.disable')])
+                    self.assertEqual(screen.sections[2].title, tr(locale, 'settings.rich.welcome_message'))
+                    self.assertEqual(screen.sections[2].lines, (welcome_msg,))
+                    self.assertEqual(screen.sections[2].rows[0][0].text, tr(locale, 'request_policy.edit_message'))
+                    self.assertEqual(screen.sections[2].rows[0][0].callback_data, 'request_policy_edit:welcome_message')
+                else:
+                    self.assertEqual(len(screen.sections), 2)
+                    self.assertEqual([b.style for b in screen.sections[0].rows[0]], [None, 'primary'])
+                    self.assertEqual(screen.sections[1].title, tr(locale, 'settings.rich.gate_message'))
+                    self.assertEqual(screen.sections[1].lines, (gate_msg,))
+                    self.assertEqual(screen.sections[1].rows[0][0].text, tr(locale, 'request_policy.edit_message'))
+                    self.assertEqual(screen.sections[1].rows[0][0].callback_data, 'request_policy_edit:gate_message')
                 screen.rich(rows)
                 for callback, field, selected in (('request_policy_enabled:on', 'enabled', True),
                     ('request_policy_notify:off', 'notify_requests', False)):

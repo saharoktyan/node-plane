@@ -159,14 +159,14 @@ class BackendConfigIssuanceTests(unittest.TestCase):
             artifact = client.get(f'/api/v1/config-issuances/{task_id}/artifact', headers=headers)
             self.assertEqual(artifact.status_code, 200, artifact.text)
             self.assertEqual(artifact.json()['filename'],
-                             'Latvia #1 · VLESS.txt')
+                             'Latvia #1 · VLESS · XHTTP.txt')
             self.assertIn('pbk=' + 'a' * 43, artifact.json()['content'])
             self.assertIn('type=xhttp', artifact.json()['content'])
             self.assertIn('Latvia%20%231', artifact.json()['content'])
             from urllib.parse import unquote, urlsplit
             self.assertEqual(unquote(urlsplit(artifact.json()['content']).fragment),
-                             'Latvia #1 · VLESS')
-            self.assertEqual(artifact.json()['display_name'], 'Latvia #1 · VLESS')
+                             'Latvia #1 · VLESS · XHTTP')
+            self.assertEqual(artifact.json()['display_name'], 'Latvia #1 · VLESS · XHTTP')
             self.assertEqual(artifact.headers['Cache-Control'], 'no-store')
             self.db.connection.execute('UPDATE backend_nodes SET desired_revision = 2 WHERE key = ?', ('n1',))
             stale = client.get(f'/api/v1/config-issuances/{task_id}/artifact', headers=headers)
@@ -184,6 +184,14 @@ class BackendConfigIssuanceTests(unittest.TestCase):
             self.assertEqual(queued.status_code, 202, queued.text)
             self.assertTrue(service.run_one())
             task_id = queued.json()['id']
+            artifact = client.get(f'/api/v1/config-issuances/{task_id}/artifact', headers=headers)
+            self.assertEqual(artifact.status_code, 200, artifact.text)
+            self.assertEqual(artifact.json()['filename'], 'Latvia #1 · VLESS · TCP.txt')
+            self.assertEqual(artifact.json()['display_name'], 'Latvia #1 · VLESS · TCP')
+            from urllib.parse import unquote, urlsplit
+            self.assertEqual(unquote(urlsplit(artifact.json()['content']).fragment), 'Latvia #1 · VLESS · TCP')
+            self.assertIn('type=tcp', artifact.json()['content'])
+            self.assertIn('flow=xtls-rprx-vision', artifact.json()['content'])
             self.db.connection.execute('DELETE FROM backend_grants WHERE profile_id = ?', (profile_id,))
             response = client.get(f'/api/v1/config-issuances/{task_id}/artifact', headers=headers)
             self.assertEqual(response.status_code, 403)

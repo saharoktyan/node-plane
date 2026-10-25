@@ -10,6 +10,8 @@ The key binding survives local session closure. Revoking a session ends that ses
 
 Authorization is applied in the backend, not inferred from a hidden button. Accounts, VPN profiles, grants and devices are distinct records. Workstation local connection profiles are outside the backend model.
 
+Telegram visitor observation (`POST /api/v1/integrations/telegram/identities/resolve` and `GET /api/v1/me`) returns `account_created: false` and a synthetic ID `telegram:<id>` for unprovisioned visitors. This ID is presentation only and must never be used as an account UUID or stored in account foreign keys. Access requests have a nullable `account_id` until approval; pre-approval visitor requests store `telegram_subject` without allocating an account. Approval or explicit administrator provisioning creates the account UUID and default VPN profile atomically. Rejection or deleted-account menu refresh delivers visitor presentation and never allocates an account.
+
 ## Mutation contracts
 
 Use stable idempotency keys where required. Preserve command identities through retries and recovery; reuse with a different payload is invalid. Revision checks prevent applying a stale draft. Durable operation responses are acceptance, not immediate proof of runtime completion.
@@ -19,6 +21,10 @@ Poll the operation/read model for the result. Recovery endpoints observe or expl
 ## Error handling
 
 Read the structured error code and response body. Authentication failure, insufficient permission, invalid input, revision conflict and uncertain execution require different responses. Preserve an operation ID for support; omit tokens and credential payloads from logs.
+
+## Schema migrations and compatibility
+
+Revision 14 introduces pre-approval visitors and schema invariants (nullable request `account_id`, `telegram_subject` references, visitor menu-refresh queue). Older application readers (revision 13 and earlier) cannot consume schema 14 (`minimum_reader = 14`). Whole-stack rollback requires restoring a prior database snapshot; backward compatibility with older readers is not promised once migrated to revision 14.
 
 ## API groups
 
@@ -63,6 +69,9 @@ Consult the routes below and their Pydantic models for exact request bodies. The
 | `GET` | `/api/v1/announcements/{announcement_id}` | `announcement_status` |
 | `POST` | `/api/v1/integrations/telegram/announcements/claim` | `claim_announcement` |
 | `POST` | `/api/v1/integrations/telegram/announcements/{delivery_id}/ack` | `ack_announcement` |
+| `POST` | `/api/v1/integrations/telegram/menu-refresh/claim` | `claim_menu_refresh` |
+| `POST` | `/api/v1/integrations/telegram/menu-refresh/{account_id}/ack` | `ack_menu_refresh` |
+| `POST` | `/api/v1/integrations/telegram/visitor-menu-refresh/{user_id}/ack` | `ack_visitor_menu_refresh` |
 | `POST` | `/api/v1/me/access-requests` | `create_access_request` |
 | `GET` | `/api/v1/system/access-requests` | `get_access_request_policy` |
 | `PATCH` | `/api/v1/system/access-requests` | `edit_access_request_policy` |
@@ -116,6 +125,7 @@ Consult the routes below and their Pydantic models for exact request bodies. The
 | `POST` | `/api/v1/nodes/{node_key}/remove-step` | `remove_node_step` |
 | `GET` | `/api/v1/nodes/{node_key}/removal` | `get_node_removal` |
 | `GET` | `/api/v1/accounts` | `list_accounts` |
+| `POST` | `/api/v1/accounts` | `provision_account` |
 | `GET` | `/api/v1/accounts/{account_id}` | `get_account` |
 | `PATCH` | `/api/v1/accounts/{account_id}` | `update_account` |
 | `GET` | `/api/v1/regions` | `grant_regions` |

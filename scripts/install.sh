@@ -115,7 +115,6 @@ Usage:
 
 Modes:
   simple    Host install via venv + systemd. Supports same-host runtime deployment.
-  portable  Temporarily unsupported while the separate backend is integrated.
 
 Flags:
   --branch            Default update branch for this installation
@@ -523,7 +522,16 @@ prepare_telegram_identity() {
 
 choose_mode() {
   if [[ -n "$MODE" ]]; then
-    return 0
+    case "$MODE" in
+      simple|systemd)
+        MODE="simple"
+        return 0
+        ;;
+      *)
+        echo "Unsupported mode: ${MODE}. Use --mode simple." >&2
+        exit 1
+        ;;
+    esac
   fi
   if [[ $NON_INTERACTIVE -eq 1 ]]; then
     echo "Mode is required in non-interactive mode. Use --mode simple." >&2
@@ -543,7 +551,7 @@ configure_env() {
   ensure_common_dirs
   set_step "read installer environment"
 
-  local bot_token admin_ids base_dir app_dir shared_dir source_dir install_mode ssh_key image_repo image_tag update_branch install_ref latest_install_ref
+  local bot_token admin_ids base_dir app_dir shared_dir source_dir install_mode update_branch install_ref latest_install_ref
   local db_backend postgres_dsn controller_host
   bot_token="$(read_env_value BOT_TOKEN)"
   admin_ids="$(read_env_value ADMIN_IDS)"
@@ -552,9 +560,6 @@ configure_env() {
   shared_dir="$(read_env_value NODE_PLANE_SHARED_DIR)"
   source_dir="$(read_env_value NODE_PLANE_SOURCE_DIR)"
   install_mode="$(read_env_value NODE_PLANE_INSTALL_MODE)"
-  ssh_key="$(read_env_value SSH_KEY)"
-  image_repo="$(read_env_value NODE_PLANE_IMAGE_REPO)"
-  image_tag="$(read_env_value NODE_PLANE_IMAGE_TAG)"
   # .env records the previous installation's ref; only an explicit CLI/env
   # override should pin a future installation to that same version.
   install_ref="$INSTALL_REF"
@@ -629,117 +634,86 @@ configure_env() {
   fi
   install_ref="$(resolve_install_ref "$update_branch" "$install_ref")"
 
-  if [[ "$MODE" == "simple" ]]; then
-    install_mode="simple"
-    if [[ -z "$base_dir" ]]; then
-      base_dir="${REPO_ROOT}"
-    fi
-    if [[ -z "$app_dir" ]]; then
-      app_dir="${base_dir}/current"
-    fi
-    if [[ -z "$shared_dir" ]]; then
-      shared_dir="${base_dir}/shared"
-    fi
-
-    if [[ "$base_dir" != "$REPO_ROOT" && $NON_INTERACTIVE -eq 0 ]]; then
-      echo
-      echo "Detected NODE_PLANE_BASE_DIR in .env:"
-      echo "  ${base_dir}"
-      echo "Current repository path is:"
-      echo "  ${REPO_ROOT}"
-      echo "This checkout will be exported into releases under the install root."
-    fi
-    if [[ $NON_INTERACTIVE -eq 0 ]]; then
-      base_dir="$(prompt_value "Enter NODE_PLANE_BASE_DIR install root for systemd mode" "$base_dir")"
-      app_dir="$(prompt_value "Enter NODE_PLANE_APP_DIR for the active release symlink" "${base_dir}/current")"
-      shared_dir="$(prompt_value "Enter NODE_PLANE_SHARED_DIR for runtime data and SSH keys" "${base_dir}/shared")"
-    else
-      app_dir="${base_dir}/current"
-      shared_dir="${base_dir}/shared"
-    fi
-    if [[ "$app_dir" != "${base_dir}/current" ]]; then
-      echo "Simple mode expects NODE_PLANE_APP_DIR to be ${base_dir}/current." >&2
-      exit 1
-    fi
-    if [[ "$shared_dir" != "${base_dir}/shared" ]]; then
-      if [[ $NON_INTERACTIVE -eq 1 ]]; then
-        echo "Simple mode expects NODE_PLANE_SHARED_DIR to be ${base_dir}/shared." >&2
-        exit 1
-      fi
-      echo "Simple mode expects NODE_PLANE_SHARED_DIR to be ${base_dir}/shared."
-      shared_dir="${base_dir}/shared"
-    fi
-    if path_is_within "$REPO_ROOT" "$base_dir"; then
-      echo >&2
-      echo "The current checkout is inside NODE_PLANE_BASE_DIR." >&2
-      echo "That mixes source files with release artifacts and is not recommended." >&2
-      echo "Use separate paths, for example:" >&2
-      echo "  source checkout: /opt/node-plane-src" >&2
-      echo "  install root:    ${base_dir}" >&2
-      echo "Then rerun ./scripts/install.sh from the source checkout." >&2
-      exit 1
-    fi
-    if [[ "$base_dir" != /* ]]; then
-      echo "NODE_PLANE_BASE_DIR must be an absolute path." >&2
-      exit 1
-    fi
-    if [[ "${NODE_PLANE_INSTALL_EVENTS:-0}" == "1" \
-      && ( -e "${base_dir}/current" || -L "${base_dir}/current" ) ]] \
-      && ! workstation_target_is_partial "$base_dir" "$install_ref"; then
-      echo "An active installation already exists. Use the update workflow; workstation installs never replace it." >&2
-      exit 1
-    fi
-    if [[ "${NODE_PLANE_INSTALL_EVENTS:-0}" == "1" && -f "${shared_dir}/.env" ]]; then
-      local previous_token previous_admin_ids
-      previous_token="$(read_env_value BOT_TOKEN "${shared_dir}/.env")"
-      previous_admin_ids="$(read_env_value ADMIN_IDS "${shared_dir}/.env")"
-      if [[ ( -n "$previous_token" && "$previous_token" != "$bot_token" ) \
-        || ( -n "$previous_admin_ids" && "$previous_admin_ids" != "$admin_ids" ) ]]; then
-        echo "A previous partial installation has different bot or administrator credentials. Reuse its configuration; shared state was not changed." >&2
-        exit 1
-      fi
-    fi
-    set_env_value NODE_PLANE_BASE_DIR "$base_dir"
-    set_env_value NODE_PLANE_APP_DIR "$app_dir"
-    set_env_value NODE_PLANE_SHARED_DIR "$shared_dir"
-    if [[ "$FROM_SOURCE" == 0 ]]; then
-      set_env_value NODE_PLANE_SOURCE_DIR "$app_dir"
-    else
-      set_env_value NODE_PLANE_SOURCE_DIR "$REPO_ROOT"
-    fi
-    set_env_value NODE_PLANE_INSTALL_MODE "$install_mode"
-    set_env_value NODE_PLANE_UPDATE_BRANCH "$update_branch"
-    set_env_value NODE_PLANE_INSTALL_REF "$install_ref"
-  else
-    install_mode="portable"
-    if [[ -n "$base_dir" && $NON_INTERACTIVE -eq 0 ]]; then
-      base_dir="$(prompt_value "Enter NODE_PLANE_BASE_DIR used inside the container" "$base_dir")"
-      set_env_value NODE_PLANE_BASE_DIR "$base_dir"
-    fi
-    if [[ -z "$ssh_key" ]]; then
-      ssh_key="/root/.ssh/id_ed25519"
-    fi
-    if [[ $NON_INTERACTIVE -eq 0 ]]; then
-      ssh_key="$(prompt_value "Enter SSH_KEY for remote node management" "$ssh_key")"
-    fi
-    if [[ -z "$image_repo" ]]; then
-      image_repo="ghcr.io/saharoktyan/node-plane"
-    fi
-    if [[ -z "$image_tag" ]]; then
-      image_tag="$(current_semver "$install_ref")"
-    fi
-    if [[ $NON_INTERACTIVE -eq 0 ]]; then
-      image_repo="$(prompt_value "Enter NODE_PLANE_IMAGE_REPO (default: ghcr.io/saharoktyan/node-plane, or use node-plane for local builds)" "$image_repo")"
-      image_tag="$(prompt_value "Enter NODE_PLANE_IMAGE_TAG (use local for local builds)" "$image_tag")"
-    fi
-    set_env_value SSH_KEY "$ssh_key"
-    set_env_value NODE_PLANE_SOURCE_DIR "$REPO_ROOT"
-    set_env_value NODE_PLANE_INSTALL_MODE "$install_mode"
-    set_env_value NODE_PLANE_UPDATE_BRANCH "$update_branch"
-    set_env_value NODE_PLANE_INSTALL_REF "$install_ref"
-    set_env_value NODE_PLANE_IMAGE_REPO "$image_repo"
-    set_env_value NODE_PLANE_IMAGE_TAG "$image_tag"
+  install_mode="simple"
+  if [[ -z "$base_dir" ]]; then
+    base_dir="${REPO_ROOT}"
   fi
+  if [[ -z "$app_dir" ]]; then
+    app_dir="${base_dir}/current"
+  fi
+  if [[ -z "$shared_dir" ]]; then
+    shared_dir="${base_dir}/shared"
+  fi
+
+  if [[ "$base_dir" != "$REPO_ROOT" && $NON_INTERACTIVE -eq 0 ]]; then
+    echo
+    echo "Detected NODE_PLANE_BASE_DIR in .env:"
+    echo "  ${base_dir}"
+    echo "Current repository path is:"
+    echo "  ${REPO_ROOT}"
+    echo "This checkout will be exported into releases under the install root."
+  fi
+  if [[ $NON_INTERACTIVE -eq 0 ]]; then
+    base_dir="$(prompt_value "Enter NODE_PLANE_BASE_DIR install root for systemd mode" "$base_dir")"
+    app_dir="$(prompt_value "Enter NODE_PLANE_APP_DIR for the active release symlink" "${base_dir}/current")"
+    shared_dir="$(prompt_value "Enter NODE_PLANE_SHARED_DIR for runtime data and SSH keys" "${base_dir}/shared")"
+  else
+    app_dir="${base_dir}/current"
+    shared_dir="${base_dir}/shared"
+  fi
+  if [[ "$app_dir" != "${base_dir}/current" ]]; then
+    echo "Simple mode expects NODE_PLANE_APP_DIR to be ${base_dir}/current." >&2
+    exit 1
+  fi
+  if [[ "$shared_dir" != "${base_dir}/shared" ]]; then
+    if [[ $NON_INTERACTIVE -eq 1 ]]; then
+      echo "Simple mode expects NODE_PLANE_SHARED_DIR to be ${base_dir}/shared." >&2
+      exit 1
+    fi
+    echo "Simple mode expects NODE_PLANE_SHARED_DIR to be ${base_dir}/shared."
+    shared_dir="${base_dir}/shared"
+  fi
+  if path_is_within "$REPO_ROOT" "$base_dir"; then
+    echo >&2
+    echo "The current checkout is inside NODE_PLANE_BASE_DIR." >&2
+    echo "That mixes source files with release artifacts and is not recommended." >&2
+    echo "Use separate paths, for example:" >&2
+    echo "  source checkout: /opt/node-plane-src" >&2
+    echo "  install root:    ${base_dir}" >&2
+    echo "Then rerun ./scripts/install.sh from the source checkout." >&2
+    exit 1
+  fi
+  if [[ "$base_dir" != /* ]]; then
+    echo "NODE_PLANE_BASE_DIR must be an absolute path." >&2
+    exit 1
+  fi
+  if [[ "${NODE_PLANE_INSTALL_EVENTS:-0}" == "1" \
+    && ( -e "${base_dir}/current" || -L "${base_dir}/current" ) ]] \
+    && ! workstation_target_is_partial "$base_dir" "$install_ref"; then
+    echo "An active installation already exists. Use the update workflow; workstation installs never replace it." >&2
+    exit 1
+  fi
+  if [[ "${NODE_PLANE_INSTALL_EVENTS:-0}" == "1" && -f "${shared_dir}/.env" ]]; then
+    local previous_token previous_admin_ids
+    previous_token="$(read_env_value BOT_TOKEN "${shared_dir}/.env")"
+    previous_admin_ids="$(read_env_value ADMIN_IDS "${shared_dir}/.env")"
+    if [[ ( -n "$previous_token" && "$previous_token" != "$bot_token" ) \
+      || ( -n "$previous_admin_ids" && "$previous_admin_ids" != "$admin_ids" ) ]]; then
+      echo "A previous partial installation has different bot or administrator credentials. Reuse its configuration; shared state was not changed." >&2
+      exit 1
+    fi
+  fi
+  set_env_value NODE_PLANE_BASE_DIR "$base_dir"
+  set_env_value NODE_PLANE_APP_DIR "$app_dir"
+  set_env_value NODE_PLANE_SHARED_DIR "$shared_dir"
+  if [[ "$FROM_SOURCE" == 0 ]]; then
+    set_env_value NODE_PLANE_SOURCE_DIR "$app_dir"
+  else
+    set_env_value NODE_PLANE_SOURCE_DIR "$REPO_ROOT"
+  fi
+  set_env_value NODE_PLANE_INSTALL_MODE "$install_mode"
+  set_env_value NODE_PLANE_UPDATE_BRANCH "$update_branch"
+  set_env_value NODE_PLANE_INSTALL_REF "$install_ref"
 
   controller_host="$(read_env_value NODE_PLANE_CONTROLLER_HOST)"
   if [ -n "$controller_host" ]; then
@@ -748,9 +722,7 @@ configure_env() {
   set_env_value BOT_TOKEN "$bot_token"
   set_env_value ADMIN_IDS "$admin_ids"
   set_env_value DB_BACKEND "$db_backend"
-  if [[ "$MODE" == "portable" ]]; then
-    ensure_portable_postgres_env ".env"
-  elif [[ -n "$postgres_dsn" ]]; then
+  if [[ -n "$postgres_dsn" ]]; then
     set_env_value POSTGRES_DSN "$postgres_dsn"
   fi
 }
@@ -1021,12 +993,8 @@ install_systemd_stack() {
 choose_mode
 case "$MODE" in
   simple) ;;
-  portable)
-    echo "Portable Docker installation is temporarily unsupported; use --mode simple." >&2
-    exit 1
-    ;;
   *)
-    echo "Unsupported mode: ${MODE}. Use simple or portable." >&2
+    echo "Unsupported mode: ${MODE}. Use --mode simple." >&2
     exit 1
     ;;
 esac

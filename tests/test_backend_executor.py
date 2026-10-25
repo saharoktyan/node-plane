@@ -3,7 +3,7 @@ import unittest
 
 from backend.executor import IntentExecutor
 from backend.authorization import Actor, Principal, PrincipalKind
-from tests import test_backend_operations
+from tests import test_backend_http, test_backend_operations
 
 
 class FakeDriver:
@@ -24,6 +24,7 @@ class BackendExecutorTests(unittest.TestCase):
     create = test_backend_operations.BackendOperationTests.create
     prepare = test_backend_operations.BackendOperationTests.prepare
     grants = test_backend_operations.BackendOperationTests.grants
+    provision = test_backend_http.BackendHTTPTests.provision
 
     def actor(self, account=None):
         account = account or self.admin
@@ -59,8 +60,12 @@ class BackendExecutorTests(unittest.TestCase):
         self.assertIsNone(self.identities.find_telegram_account(102))
         self.assertEqual(self.db.connection.execute('SELECT status FROM backend_devices WHERE profile_id=?',(profile,)).fetchone()[0],'retired')
         fresh = self.client.post('/api/v1/integrations/telegram/identities/resolve', headers={**self.headers,'Idempotency-Key':str(uuid4())},json={'telegram_user_id':102}).json()
-        self.assertNotEqual(fresh['id'],member.id)
-        self.assertNotEqual(ProfileRepository(self.db).ensure_account_profile(fresh['id']),profile)
+        self.assertEqual(fresh['id'], 'telegram:102')
+        self.assertFalse(fresh['account_created'])
+        self.assertIsNone(self.identities.find_telegram_account(102))
+        provisioned = self.provision(102).json()['account']
+        self.assertNotEqual(provisioned['id'], member.id)
+        self.assertNotEqual(ProfileRepository(self.db).ensure_account_profile(provisioned['id']), profile)
 
     def test_admin_repair_supersedes_old_revisions_and_queues_current_state(self):
         profile = self.prepare(with_device=True)

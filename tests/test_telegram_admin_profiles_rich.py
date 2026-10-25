@@ -425,11 +425,22 @@ class ProfileRichTests(IsolatedAsyncioTestCase):
         self.backend.edit_profile.assert_awaited_once_with(123, 'p1', 7,
             {'expires_at': '2099-12-31T23:59:59+00:00'}, command_key=draft['command_key'])
 
+        # Test combined duration token as well
+        self.backend.edit_profile.reset_mock()
+        message2 = SimpleNamespace(text='3d5m1y', delete=AsyncMock(),
+            from_user=SimpleNamespace(id=123), chat=SimpleNamespace(id=123, type='private'))
+        with patch.object(profiles, 'show_profile_edit_menu', new_callable=AsyncMock), \
+             patch('services.access_expiry.parse_expiry', return_value='2030-01-01T12:00:00+00:00') as parser:
+            await profiles.profile_expiry_message(message2, self.bot, self.backend, self.state)
+        parser.assert_called_once_with('3d5m1y')
+        self.backend.edit_profile.assert_awaited_once_with(123, 'p1', 7,
+            {'expires_at': '2030-01-01T12:00:00+00:00'}, command_key=draft['command_key'])
+
     async def test_invalid_expiry_dates_do_not_mutate_backend(self):
         self.query.data = 'prof_expiry:p1'
         with patch.object(profiles, 'render', new_callable=AsyncMock):
             await profiles.profile_expiry_cb(self.query, self.bot, self.backend, self.state)
-            for value in ('2000-01-01', '2099-02-30', 'tomorrow', '2099-1-2'):
+            for value in ('2000-01-01', '2099-02-30', 'tomorrow', '2099-1-2', '3d4d', '0d', '-1h', '1.5d'):
                 message = SimpleNamespace(text=value, delete=AsyncMock(),
                     from_user=SimpleNamespace(id=123), chat=SimpleNamespace(id=123, type='private'))
                 await profiles.profile_expiry_message(message, self.bot, self.backend, self.state)

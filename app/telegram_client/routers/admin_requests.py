@@ -1,6 +1,7 @@
 import os
 import logging
 from dataclasses import replace
+from datetime import datetime
 
 from aiogram import F, Router, Bot
 from aiogram.exceptions import TelegramAPIError
@@ -29,17 +30,35 @@ def _request_name(item, locale):
         return name + ' · @' + item['username'].removeprefix('@')
     return name or (tr(locale, 'requests.username', username=item['username'])
         if item.get('username') else
-        tr(locale, 'requests.account', id=item['account_id'][:8]))
+        str(item.get('telegram_user_id') or item.get('account_id') or item['id']))
 
 
 def _request_date(item):
     return (item.get('created_at') or '').replace('T', ' ').split('.')[0] or '—'
 
 
+def _request_button_label(item):
+    identity = ('@' + item['username'].removeprefix('@') if item.get('username') else
+                str(item.get('telegram_user_id') or (item.get('account_id') or item['id'])[:8]))
+    try:
+        date = datetime.fromisoformat(item.get('created_at') or '').strftime('%d/%m/%y')
+    except ValueError:
+        date = '—'
+    return identity + ' · ' + date
+
+
+def _review_lines(item, locale):
+    return (tr(locale, 'requests.detail_name', name=_request_name(item, locale)),
+        tr(locale, 'requests.detail_username',
+           username='@' + item['username'].removeprefix('@') if item.get('username') else '—'),
+        tr(locale, 'requests.detail_date', date=_request_date(item)),
+        tr(locale, 'requests.pending_state'))
+
+
 def _request_details(item, locale):
     return (tr(locale, 'requests.detail_id', id=item.get('telegram_user_id') or '—'),
             tr(locale, 'requests.detail_request_id', id=item['id']),
-            tr(locale, 'requests.detail_account_id', id=item['account_id']))
+            *((tr(locale, 'requests.detail_account_id', id=item['account_id']),) if item.get('account_id') else ()))
 
 
 @router.callback_query(RequestsCallback.filter())
@@ -110,14 +129,6 @@ async def render_request_page(chat_id: int, user_id: int, message_id: int,
     sections = [Section(tr(locale, 'requests.filters'),
         (tr(locale, 'requests.search_active', query=search),) if search else (),
         (tuple(controls),))] if controls else []
-    for index, item in enumerate(page['items']):
-        sections.append(Section(_request_name(item, locale),
-            (tr(locale, 'requests.detail_date', date=_request_date(item)),),
-            ((InlineKeyboardButton(text=tr(locale, 'requests.review_button'),
-                callback_data=ReviewCallback(request_id=item['id']).pack()),),),
-            sections=(Section(tr(locale, 'requests.details'), _request_details(item, locale),
-                              collapsed=True),),
-            divider_after=index < len(page['items']) - 1))
     if not page['items']:
         lines = [tr(locale, 'requests.empty')]
     else:
@@ -131,7 +142,8 @@ async def render_request_page(chat_id: int, user_id: int, message_id: int,
     if page.get('next_cursor'):
         navigation.append(InlineKeyboardButton(text='→',
             callback_data=f'request_page:{page_index + 1}'))
-    rows = []
+    rows = [[InlineKeyboardButton(text=_request_button_label(item),
+        callback_data=ReviewCallback(request_id=item['id']).pack())] for item in page['items']]
     if navigation:
         rows.append(navigation)
     rows.append([InlineKeyboardButton(text=tr(locale, 'back'),
@@ -233,7 +245,6 @@ async def review_cb(query: CallbackQuery, callback_data: ReviewCallback, bot: Bo
             (await state.get_data()).get('request_page_index', 0))
         return
     decision_type = NotificationDecisionCallback if notification else DecideCallback
-    name = _request_name(item, locale)
     rows = [
         [InlineKeyboardButton(text=tr(locale, 'requests.approve'),
             callback_data=decision_type(request_id=item['id'], decision='approve').pack(), style='primary'),
@@ -243,11 +254,7 @@ async def review_cb(query: CallbackQuery, callback_data: ReviewCallback, bot: Bo
             callback_data='notification_close' if notification else
                 f"request_page:{(await state.get_data()).get('request_page_index', 0)}")]
     ]
-    lines = [tr(locale, 'requests.detail_name', name=name),
-        tr(locale, 'requests.detail_username',
-           username='@' + item['username'] if item.get('username') else '—'),
-        tr(locale, 'requests.detail_date', date=_request_date(item)),
-        tr(locale, 'requests.pending_state')]
+    lines = _review_lines(item, locale)
     control_id = (await state.get_data()).get('control_message_id')
     try:
         await render(bot, query.message.chat.id,
@@ -323,9 +330,9 @@ async def apply_decision(query: CallbackQuery, request_id: str, decision: str,
             query.message.message_id, bot, backend, state,
             (await state.get_data()).get('request_page_index', 0), return_home_when_empty=True)
     try:
-        account = await backend.request('GET',
-            f"/api/v1/accounts/{result['account_id']}", telegram_user_id=user_id)
-        recipient = account.get('telegram_user_id')
+        account = (await backend.request('GET',
+            f"/api/v1/accounts/{result['account_id']}", telegram_user_id=user_id)) if result.get('account_id') else {}
+        recipient = account.get('telegram_user_id') or result.get('telegram_user_id') or request_info.get('telegram_user_id')
         if recipient:
             requester_state = FSMContext(storage=state.storage,
                 key=replace(state.key, chat_id=recipient, user_id=recipient,
@@ -392,12 +399,9 @@ async def notify_admins(bot: Bot, backend: BackendClient, request_id: str):
                 continue
             locale = normalize_locale(admin.get('locale') or admin.get('language_code'))
             item = await backend.pending_access_request(admin_id, request_id)
-            identity = ('@' + item['username'].removeprefix('@') if item.get('username')
-                        else str(item.get('telegram_user_id') or item['account_id'][:8]))
-            name = ' '.join(filter(None, (item.get('first_name'), item.get('last_name'))))
             notice = Screen(tr(locale, 'requests.title'),
-                (tr(locale, 'requests.notification'),
-                 ' · '.join(filter(None, (name, identity)))), embedded_buttons=True)
+                (tr(locale, 'requests.notification'), *_review_lines(item, locale), *_request_details(item, locale)),
+                embedded_buttons=True)
             markup = InlineKeyboardMarkup(inline_keyboard=[[
                 InlineKeyboardButton(text=tr(locale, 'requests.approve'),
                     callback_data=NotificationDecisionCallback(request_id=request_id,
@@ -405,9 +409,6 @@ async def notify_admins(bot: Bot, backend: BackendClient, request_id: str):
                 InlineKeyboardButton(text=tr(locale, 'requests.reject'),
                     callback_data=NotificationDecisionCallback(request_id=request_id,
                         decision='reject').pack(), style='danger')], [
-                InlineKeyboardButton(text=tr(locale, 'requests.review_button'),
-                    callback_data=NotificationReviewCallback(
-                        request_id=request_id).pack()),
                 InlineKeyboardButton(text=tr(locale, 'setup.close'), callback_data='notification_close')]])
             sent = await send_notice(bot, admin_id, notice, markup)
             if type(getattr(sent, 'message_id', None)) is int:

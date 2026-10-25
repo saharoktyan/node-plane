@@ -84,7 +84,10 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             backend.admin_nodes.assert_awaited_once_with(123, limit=1)
             self.assertIn(user.tr('en', 'home.admin_quick_start'),
                           draw.call_args.args[2].lines)
-            self.assertIn('Bootstrap', user.tr('en', 'home.admin_quick_start'))
+            self.assertEqual(user.tr('en', 'home.admin_quick_start'), 'Welcome to Node Plane!')
+            self.assertEqual(user.tr('ru', 'home.admin_quick_start'), 'Добро пожаловать в Node Plane!')
+            self.assertNotIn('Bootstrap', user.tr('en', 'home.admin_quick_start'))
+            self.assertNotIn('Quick start guide', user.tr('en', 'home.admin_quick_start'))
 
     async def test_get_config_back_refreshes_title_but_reuses_account_presentation(self):
         backend = SimpleNamespace(notifications=AsyncMock(return_value={'total': 0, 'items': []}),
@@ -437,8 +440,9 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         backend.pending_access_requests.assert_awaited_once_with(123, cursor='cursor', search='alex', limit=10)
         self.assertIsNone(self.current_state)
         screen, rows = draw.call_args.args[2:4]
-        self.assertEqual(rows[0][0].text, '←')
-        self.assertEqual(rows[0][0].callback_data, 'request_page:0')
+        nav_row = next(r for r in rows if any(b.text == '←' for b in r))
+        self.assertEqual(nav_row[0].text, '←')
+        self.assertEqual(nav_row[0].callback_data, 'request_page:0')
         self.assertIn('Search: alex', screen.plain())
 
     async def test_announcements_embed_close_and_dismiss_and_sender_in_native_message(self):
@@ -1112,7 +1116,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
 
     async def test_member_settings_actions_describe_the_change_and_preserve_backend_values(self):
         backend = SimpleNamespace(me=AsyncMock(return_value={
-            'announcement_silent': True, 'traffic_available': True}))
+            'status': 'approved', 'announcement_silent': True, 'traffic_available': True}))
         with patch.object(user, 'render', new_callable=AsyncMock) as draw:
             await user.show_member_settings(123, 123, 77, self.bot, backend, self.state)
         sections = draw.call_args.args[2].sections
@@ -1126,7 +1130,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             for silent in (False, True):
                 self.state_data['locale'] = 'en' if locale == 'ru' else 'ru'
                 backend = SimpleNamespace(me=AsyncMock(return_value={
-                    'locale': locale, 'announcement_silent': silent}))
+                    'status': 'approved', 'locale': locale, 'announcement_silent': silent}))
                 with patch.object(user, 'render', new_callable=AsyncMock) as draw:
                     await user.show_member_settings(123, 123, 77, self.bot, backend, self.state)
                 self.assertEqual(draw.call_args.args[2].lines, ())
@@ -1137,13 +1141,55 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
                 self.assertEqual([b.text for b in sound.rows[0]],
                     ['Включить', 'Выключить'] if locale == 'ru' else ['Enable', 'Disable'])
                 self.assertEqual([b.style for b in language.rows[0]],
-                    ['primary', None] if locale == 'ru' else [None, 'primary'])
+                    ['primary', None] if locale == 'en' else [None, 'primary'])
+                self.assertEqual([user.actions[b.callback_data[2:]].args[0] for b in language.rows[0]],
+                                 ['en', 'ru'])
                 self.assertEqual([b.style for b in sound.rows[0]],
                     [None, 'primary'] if silent else ['primary', None])
                 self.assertEqual([user.actions[b.callback_data[2:]].args for b in sound.rows[0]],
                                  [('false',), ('true',)])
                 self.assertEqual([b.style for b in sound.rich()[-1].buttons],
                                  [b.style for b in sound.rows[0]])
+
+    async def test_first_language_picker_order_is_english_then_russian(self):
+        backend = SimpleNamespace(bot_title=AsyncMock(return_value={'title': 'Node Plane'}))
+        with patch.object(user, 'render', new_callable=AsyncMock) as draw:
+            await user.show_language_picker(123, 123, self.bot, backend, self.state)
+        rows = draw.call_args.args[3]
+        buttons = rows[0]
+        self.assertEqual(len(buttons), 2)
+        self.assertEqual(buttons[0].text, user.tr('en', 'settings.english'))
+        self.assertEqual(buttons[1].text, user.tr('en', 'settings.russian'))
+        self.assertEqual(user.actions[buttons[0].callback_data[2:]].args, ('en',))
+        self.assertEqual(user.actions[buttons[1].callback_data[2:]].args, ('ru',))
+
+    async def test_unapproved_member_settings_has_only_language_section_and_preserves_back(self):
+        for status in ('pending', 'disabled'):
+            backend = SimpleNamespace(me=AsyncMock(return_value={
+                'status': status, 'locale': 'en', 'announcement_silent': True}))
+            with patch.object(user, 'render', new_callable=AsyncMock) as draw:
+                await user.show_member_settings(123, 123, 77, self.bot, backend, self.state)
+            screen = draw.call_args.args[2]
+            self.assertEqual(len(screen.sections), 1)
+            self.assertEqual(screen.sections[0].title, user.tr('en', 'settings.locale'))
+            self.assertNotIn(user.tr('en', 'ui.notifications'), [s.title for s in screen.sections])
+            rows = draw.call_args.args[3]
+            self.assertEqual(len(rows), 1)
+            back_button = rows[0][0]
+            self.assertEqual(back_button.text, user.tr('en', 'back'))
+            self.assertEqual(user.actions[back_button.callback_data[2:]].name, 'home')
+
+    async def test_stale_announcement_silent_callback_for_unapproved_does_not_mutate_backend(self):
+        for status in ('pending', 'disabled'):
+            self.query.data = user.button(123, 'Enable', 'announcement_silent', 'false').callback_data
+            backend = SimpleNamespace(
+                me=AsyncMock(return_value={'status': status, 'locale': 'en'}),
+                set_announcement_silent=AsyncMock(),
+            )
+            with patch.object(user, 'render', new_callable=AsyncMock):
+                await user.user_action_cb(self.query, self.bot, backend, self.state)
+            backend.me.assert_awaited()
+            backend.set_announcement_silent.assert_not_awaited()
 
     async def test_admin_grant_server_lists_include_flags(self):
         backend = SimpleNamespace(admin_nodes=AsyncMock(return_value={'items': [
@@ -1379,8 +1425,9 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         self.assertFalse(result)
 
     async def test_probe_unavailable_shows_recovery_without_raw_rpc_error(self):
-        backend = SimpleNamespace(node_probe=AsyncMock(
-            side_effect=BackendError('node_agent_unavailable', 503)))
+        backend = SimpleNamespace(
+            request=AsyncMock(return_value={'applied_revision': 1}),
+            node_probe=AsyncMock(side_effect=BackendError('node_agent_unavailable', 503)))
         with patch.object(admin_nodes, 'render', new_callable=AsyncMock) as render:
             await admin_nodes.probe_node_cb(self.query, ProbeNodeCallback(node_key='lv1'),
                                             self.bot, backend, self.state)
@@ -1396,7 +1443,9 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
                 'ports': [{'transport': 'awg', 'network': 'udp', 'port': 51820}]}],
             'host_metrics': {'ram_used_percent': 35, 'disk_free_percent': 70, 'load1': 0.1,
                 'load5': 0.2, 'load15': 0.3, 'cpus': 1, 'uptime_seconds': 86400}}
-        backend = SimpleNamespace(node_probe=AsyncMock(return_value=facts))
+        backend = SimpleNamespace(
+            request=AsyncMock(return_value={'applied_revision': 1}),
+            node_probe=AsyncMock(return_value=facts))
         for locale in ('en', 'ru'):
             self.state_data['locale'] = locale
             with patch.object(admin_nodes, 'render', new_callable=AsyncMock) as draw:
@@ -1418,10 +1467,12 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
 
     async def test_node_diagnostics_displays_agent_status_without_paths(self):
         self.query.data = 'node_diagnostics:lv1'
-        backend = SimpleNamespace(node_diagnostics=AsyncMock(return_value={
-            'node_key': 'lv1', 'docker': 'ok', 'runtime_root': 'ok',
-            'xray_config': 'ok', 'awg_config': 'missing',
-            'runtime_version': '0.4.3'}))
+        backend = SimpleNamespace(
+            request=AsyncMock(return_value={'applied_revision': 1}),
+            node_diagnostics=AsyncMock(return_value={
+                'node_key': 'lv1', 'docker': 'ok', 'runtime_root': 'ok',
+                'xray_config': 'ok', 'awg_config': 'missing',
+                'runtime_version': '0.4.3'}))
         with patch.object(admin_nodes, 'render', new_callable=AsyncMock) as render:
             await admin_nodes.node_diagnostics_cb(self.query, self.bot, backend, self.state)
         screen = render.call_args.args[2]
@@ -1432,8 +1483,10 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
 
     async def test_node_diagnostics_unavailable_has_recovery(self):
         self.query.data = 'node_diagnostics:lv1'
-        backend = SimpleNamespace(node_diagnostics=AsyncMock(
-            side_effect=BackendError('node_agent_unavailable', 503)))
+        backend = SimpleNamespace(
+            request=AsyncMock(return_value={'applied_revision': 1}),
+            node_diagnostics=AsyncMock(
+                side_effect=BackendError('node_agent_unavailable', 503)))
         with patch.object(admin_nodes, 'render', new_callable=AsyncMock) as render:
             await admin_nodes.node_diagnostics_cb(self.query, self.bot, backend, self.state)
         screen = render.call_args.args[2]
@@ -1442,10 +1495,12 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
 
     async def test_node_maintenance_translates_state_and_cleanup_phase(self):
         self.state_data['locale'] = 'ru'
-        backend = SimpleNamespace(node_maintenance=AsyncMock(return_value={
-            'status': 'draining', 'verification_target': 'root@lv1.example.com',
-            'pending_tasks': 1, 'blocked_tasks': 0, 'cleanup_phase': 'prepared',
-            'revocations_complete': False}))
+        backend = SimpleNamespace(
+            request=AsyncMock(return_value={'applied_revision': 1}),
+            node_maintenance=AsyncMock(return_value={
+                'status': 'draining', 'verification_target': 'root@lv1.example.com',
+                'pending_tasks': 1, 'blocked_tasks': 0, 'cleanup_phase': 'prepared',
+                'revocations_complete': False}))
         with patch.object(admin_nodes, 'render', new_callable=AsyncMock) as render:
             await admin_nodes.show_node_maintenance(123, 123, 77, 'lv1',
                                                     self.bot, backend, self.state)
@@ -1483,7 +1538,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         markup = send_notice.call_args.args[3]
         callbacks = [button.callback_data for row in markup.inline_keyboard
                      for button in row]
-        self.assertEqual(len(callbacks), 4)
+        self.assertEqual(len(callbacks), 3)
         self.assertIn('notification_close', callbacks)
         self.assertTrue(any(value.startswith('notification_decide:') and 'approve' in value
                             for value in callbacks))
@@ -1496,7 +1551,8 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             pending_access_request=AsyncMock(return_value={'id':'r','account_id':'a','first_name':'Alice','telegram_user_id':456}))
         with patch.dict('os.environ', {'ADMIN_IDS':'123'}), patch.object(admin_requests,'send_notice',new_callable=AsyncMock) as send:
             await admin_requests.notify_admins(self.bot,backend,'r')
-        self.assertIn('Alice · 456',send.call_args.args[2].plain())
+        self.assertIn('Name: Alice', send.call_args.args[2].plain())
+        self.assertIn('Telegram ID: 456', send.call_args.args[2].plain())
 
     async def test_request_notification_respects_admin_preference(self):
         backend = SimpleNamespace(
@@ -1655,8 +1711,10 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
 
     async def test_failed_node_cleanup_has_recoverable_screen(self):
         from telegram_client.routers.callbacks import CleanupStepCallback
-        backend = SimpleNamespace(cleanup_node_step=AsyncMock(
-            side_effect=BackendError('node_agent_unavailable', 503)))
+        backend = SimpleNamespace(
+            request=AsyncMock(return_value={'applied_revision': 1}),
+            cleanup_node_step=AsyncMock(
+                side_effect=BackendError('node_agent_unavailable', 503)))
         with patch.object(admin_nodes, 'render', new_callable=AsyncMock) as render:
             await admin_nodes.cleanup_step_cb(self.query,
                 CleanupStepCallback(node_key='lv1', expected_phase='prepared'),
@@ -1684,6 +1742,43 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         self.assertEqual(sum(block.type == 'divider' for block in blocks), 1)
         self.assertEqual([block.type for block in blocks[-3:]], ['buttons', 'divider', 'buttons'])
         self.assertFalse(any(value.startswith('refresh_runtime:') for value in callbacks))
+
+    async def test_agent_setup_release_binary_unavailable_displays_neutral_message(self):
+        backend = SimpleNamespace(agent_rollout=AsyncMock(return_value={
+            'id': 'task1', 'node_key': 'lv1', 'status': 'blocked',
+            'failure_code': 'release_binary_unavailable'}))
+        with patch.object(admin_nodes, 'render', new_callable=AsyncMock) as render:
+            await admin_nodes.show_rollout_status(123, 123, 77, 'task1',
+                                                  self.bot, backend, self.state)
+        screen = render.call_args.args[2]
+        callbacks = [button.callback_data for row in render.call_args.args[3]
+                     for button in row]
+        self.assertTrue(any('missing or inaccessible' in line for line in screen.lines))
+        self.assertFalse(any('token' in line.lower() for line in screen.lines))
+        self.assertFalse(any(value.startswith('rust_offer:') for value in callbacks))
+
+    async def test_agent_setup_legacy_failures_display_obsolete_guidance_without_rust_offer(self):
+        for code, expected_text in (
+            ('rust_required', 'obsolete'),
+            ('build_resources', 'obsolete'),
+        ):
+            backend = SimpleNamespace(agent_rollout=AsyncMock(return_value={
+                'id': 'task1', 'node_key': 'lv1', 'status': 'blocked',
+                'failure_code': code}))
+            with patch.object(admin_nodes, 'render', new_callable=AsyncMock) as render:
+                await admin_nodes.show_rollout_status(123, 123, 77, 'task1',
+                                                      self.bot, backend, self.state)
+            screen = render.call_args.args[2]
+            callbacks = [button.callback_data for row in render.call_args.args[3]
+                         for button in row]
+            self.assertTrue(any(expected_text in line.lower() for line in screen.lines))
+            self.assertFalse(any(value.startswith('rust_offer:') for value in callbacks))
+
+    async def test_backend_rollout_agent_rejects_install_rust_true(self):
+        client = BackendClient.__new__(BackendClient)
+        with self.assertRaises(BackendError) as ctx:
+            await client.rollout_agent(123, 'lv1', 'local', command_key='key', install_rust=True)
+        self.assertEqual(ctx.exception.code, 'install_rust_unsupported')
 
     async def test_install_menu_checks_docker_and_reusable_configs(self):
         from telegram_client.routers import admin_node_tools
@@ -1829,3 +1924,40 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
                 self.assertEqual(user.tr(locale, 'account.rich.enable_traffic') in screen.plain(), expected)
                 stats = next(s for s in screen.sections if s.title == user.tr(locale, 'account.statistics'))
                 self.assertEqual(bool(stats.lines), expected)
+
+    async def test_uninstalled_node_filters_runtime_tools_in_telegram_client(self):
+        from telegram_client.routers.callbacks import ProbeNodeCallback, ConfirmRegistryRemovalCallback, NodeSettingsCallback
+        node = {'key': 'lv1', 'title': 'Latvia', 'region': 'EU', 'flag': '🇱🇻',
+                'protocols': ['awg'], 'xray_transports': [], 'transport': 'local',
+                'ssh_target': None, 'settings': {}, 'desired_revision': 1,
+                'applied_revision': 0}
+        overview = {'state': 'not_installed', 'ready': 0, 'access_total': 0, 'pending': 0,
+                    'failed': 0, 'attention': 0, 'settings_complete': True, 'last_job': None}
+        backend = SimpleNamespace(
+            request=AsyncMock(return_value=node),
+            node_overview=AsyncMock(return_value=overview),
+            node_probe=AsyncMock(side_effect=BackendError('node_installation_required', 409)),
+            node_maintenance=AsyncMock(),
+        )
+        with patch.object(admin_nodes, 'render', new_callable=AsyncMock) as draw:
+            await admin_nodes.show_admin_node(123, 123, 77, 'lv1', self.bot, backend, self.state)
+        screen, rows = draw.call_args.args[2:4]
+        callbacks = [b.callback_data for r in screen.fallback_rows(rows) for b in r]
+        self.assertIn('bootstrap_menu:lv1', callbacks)
+        self.assertIn(NodeSettingsCallback(node_key='lv1').pack(), callbacks)
+        self.assertIn(ConfirmRegistryRemovalCallback(node_key='lv1').pack(), callbacks)
+        self.assertFalse(any(c.startswith('probe_node:') or c.startswith('node_manage:') for c in callbacks))
+
+        # Stale probe rejects and returns to node card
+        with patch.object(admin_nodes, 'show_admin_node', new_callable=AsyncMock) as show:
+            await admin_nodes.probe_node_cb(self.query, ProbeNodeCallback(node_key='lv1'), self.bot, backend, self.state)
+            show.assert_awaited_once_with(123, 123, 77, 'lv1', self.bot, backend, self.state)
+
+        # Maintenance screen only exposes registry deletion
+        with patch.object(admin_nodes, 'render', new_callable=AsyncMock) as draw:
+            await admin_nodes.show_node_maintenance(123, 123, 77, 'lv1', self.bot, backend, self.state)
+        backend.node_maintenance.assert_not_awaited()
+        screen, rows = draw.call_args.args[2:4]
+        m_callbacks = [b.callback_data for r in screen.fallback_rows(rows) for b in r]
+        self.assertIn(ConfirmRegistryRemovalCallback(node_key='lv1').pack(), m_callbacks)
+        self.assertFalse(any('confirm_node_drain' in c for c in m_callbacks))

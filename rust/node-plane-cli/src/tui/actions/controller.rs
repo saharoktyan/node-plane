@@ -348,15 +348,32 @@ impl App {
             }
             Control::ControllerGateMessage | Control::ControllerBotTitleEdit => {
                 let (key, value) = if control == Control::ControllerGateMessage {
-                    (
-                        "gate_message",
-                        self.controller
-                            .policies
-                            .as_ref()?
-                            .pointer("/requests/gate_message")
-                            .and_then(serde_json::Value::as_str)
-                            .unwrap_or(""),
-                    )
+                    let requests_enabled = self
+                        .controller
+                        .policies
+                        .as_ref()
+                        .is_some_and(|p| p["requests"]["enabled"] == true);
+                    if requests_enabled {
+                        (
+                            "welcome_message",
+                            self.controller
+                                .policies
+                                .as_ref()?
+                                .pointer("/requests/welcome_message")
+                                .and_then(serde_json::Value::as_str)
+                                .unwrap_or("Request access to use this bot."),
+                        )
+                    } else {
+                        (
+                            "gate_message",
+                            self.controller
+                                .policies
+                                .as_ref()?
+                                .pointer("/requests/gate_message")
+                                .and_then(serde_json::Value::as_str)
+                                .unwrap_or(""),
+                        )
+                    }
                 } else {
                     (
                         "bot_title",
@@ -432,10 +449,10 @@ impl App {
                 if self.controller.text_confirmation {
                     self.controller.text_confirmation = false;
                     if let Some((key, input)) = self.controller.defaults_input.clone() {
-                        if key == "gate_message" {
+                        if key == "gate_message" || key == "welcome_message" {
                             self.controller_command(crate::controller::Command::PolicySave(
                                 "access-requests",
-                                serde_json::json!({"gate_message":input}),
+                                serde_json::json!({key: input}),
                             ));
                         } else if key == "bot_title" {
                             self.controller_command(crate::controller::Command::BotTitleSave(
@@ -506,7 +523,7 @@ impl App {
                         ));
                         return None;
                     }
-                    if key == "gate_message" {
+                    if key == "gate_message" || key == "welcome_message" {
                         if input.trim().is_empty() || input.chars().count() > 500 {
                             self.error = "Enter a message from 1 to 500 characters".into();
                             return None;

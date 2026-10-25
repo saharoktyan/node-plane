@@ -21,6 +21,8 @@ class BackendProfileTests(unittest.TestCase):
         self.profile = self.repo.create_profile(runtime_name='alice', display_name='Alice', owner_account_id=self.member.id)
         self.foreign = self.repo.create_profile(runtime_name='bob', display_name='Bob', owner_account_id=self.other.id)
         self.unowned = self.repo.create_profile(runtime_name='unowned', display_name='Unowned')
+        # Historical trusted profiles can have no owner; pending filtering must preserve them.
+        self.db.connection.execute('UPDATE backend_profiles SET owner_account_id = NULL WHERE id = ?', (self.unowned,))
 
     def node(self, key, *, enabled=1, protocols=('awg', 'xray')):
         self.db.connection.execute('''INSERT INTO backend_nodes(key, title, region, flag, enabled, protocols_json, xray_transports_json, desired_revision, applied_revision)
@@ -72,7 +74,71 @@ class BackendProfileTests(unittest.TestCase):
         self.headers['X-Node-Plane-Telegram-User-ID'] = '101'
         page = self.get('/api/v1/profiles').json()
         self.assertEqual({item['id'] for item in page['items']},
+                         {self.profile, self.unowned})
+        self.assertNotIn(self.foreign, {item['id'] for item in page['items']})
+        self.db.connection.execute("UPDATE backend_accounts SET status = 'approved' WHERE id = ?", (self.other.id,))
+        approved_page = self.get('/api/v1/profiles').json()
+        self.assertEqual({item['id'] for item in approved_page['items']},
                          {self.profile, self.foreign, self.unowned})
+
+    def test_admin_profile_pagination_and_search_filters_pending_before_limit(self):
+        self.prepare()
+        self.headers['X-Node-Plane-Telegram-User-ID'] = '101'
+        user_app = self.identities.resolve_telegram(201)
+        self.db.connection.execute("UPDATE backend_accounts SET status = 'approved' WHERE id = ?", (user_app.id,))
+        p_approved = self.repo.create_profile(runtime_name='p_approved', display_name='SearchMatch Approved', owner_account_id=user_app.id)
+
+        user_dis = self.identities.resolve_telegram(202)
+        self.db.connection.execute("UPDATE backend_accounts SET status = 'disabled' WHERE id = ?", (user_dis.id,))
+        p_disabled = self.repo.create_profile(runtime_name='p_disabled', display_name='SearchMatch Disabled', owner_account_id=user_dis.id)
+
+        user_pen1 = self.identities.resolve_telegram(203)
+        p_pending1 = self.repo.create_profile(runtime_name='p_pending1', display_name='SearchMatch Pending1', owner_account_id=user_pen1.id)
+
+        user_pen2 = self.identities.resolve_telegram(204)
+        p_pending2 = self.repo.create_profile(runtime_name='p_pending2', display_name='SearchMatch Pending2', owner_account_id=user_pen2.id)
+
+        seen = []
+        cursor = None
+        while True:
+            params = {'limit': 1}
+            if cursor:
+                params['cursor'] = cursor
+            page = self.get('/api/v1/profiles', **params).json()
+            self.assertGreater(len(page['items']), 0, 'Pagination returned an empty page!')
+            self.assertNotIn(page['items'][0]['id'], seen, 'Pagination repeated an item')
+            seen.extend(item['id'] for item in page['items'])
+            cursor = page.get('next_cursor')
+            if not cursor:
+                break
+
+        self.assertNotIn(self.foreign, seen)
+        self.assertNotIn(p_pending1, seen)
+        self.assertNotIn(p_pending2, seen)
+
+        expected = {self.profile, self.unowned, p_approved, p_disabled}
+        self.assertEqual(set(seen), expected)
+
+        search_seen = []
+        search_cursor = None
+        while True:
+            params = {'limit': 1, 'search': 'SearchMatch'}
+            if search_cursor:
+                params['cursor'] = search_cursor
+            page = self.get('/api/v1/profiles', **params).json()
+            self.assertGreater(len(page['items']), 0, 'Search pagination returned an empty page!')
+            self.assertNotIn(page['items'][0]['id'], search_seen, 'Search pagination repeated an item')
+            search_seen.extend(item['id'] for item in page['items'])
+            search_cursor = page.get('next_cursor')
+            if not search_cursor:
+                break
+
+        self.assertEqual(set(search_seen), {p_approved, p_disabled})
+        self.assertNotIn(p_pending1, search_seen)
+        self.assertNotIn(p_pending2, search_seen)
+
+        pending_only = self.get('/api/v1/profiles', search='Pending1').json()
+        self.assertEqual(pending_only['items'], [])
 
     def test_pagination_filters_before_limit(self):
         self.prepare()

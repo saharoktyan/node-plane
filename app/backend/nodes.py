@@ -141,6 +141,17 @@ def _validate(values, *, create):
     return values
 
 
+def require_runtime(node):
+    """Reject runtime tools on a registry-only entry before creating any job.
+
+    A temporarily unreachable installed node still has an applied revision;
+    connectivity is deliberately not used as an installation-state predicate.
+    Setup and registry removal have their own independent admission paths.
+    """
+    if node['applied_revision'] <= 0:
+        raise AccessDenied('node_installation_required', 409)
+
+
 class NodeService:
     def __init__(self, db):
         self.db = db

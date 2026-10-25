@@ -382,19 +382,30 @@ def confirm_collected_update(unit_name: str, status: str) -> bool:
         return True
 
 
-def schedule_update(timeout: int = 30, branch: str | None = None, target_ref: str | None = None, stack_job_id: str | None = None) -> Dict[str, str]:
+def schedule_update(timeout: int = 30, branch: str | None = None, target_ref: str | None = None, stack_job_id: str | None = None, launch_job_id: str | None = None) -> Dict[str, str]:
     with _update_run_lock:
+        started_at = _utcnow_iso()
+        bound_job_id = stack_job_id or launch_job_id
+        if bound_job_id:
+            from uuid import UUID
+            unit_name = f"{UPDATE_UNIT_PREFIX}-{UUID(bound_job_id)}"
+        else:
+            unit_name = f"{UPDATE_UNIT_PREFIX}-{started_at.replace(':', '').replace('-', '').replace('T', '-').replace('Z', '').lower()}"
         state = refresh_update_run_state()
         if str(state.get("last_run_status") or "") == "running":
-            return {"status": "running", "unit_name": str(state.get("last_run_unit") or "")}
+            running_unit = str(state.get("last_run_unit") or "")
+            if running_unit == unit_name:
+                return {"status": "running", "unit_name": unit_name}
+            return {"status": "failed", "launch_state": "not_started", "unit_name": unit_name,
+                    "message": f"another update unit is already running: {running_unit}"}
         if not is_manual_update_supported():
             app_settings.record_update_run_finished("failed", _utcnow_iso(), "manual updates are only available in simple mode")
             state = app_settings.get_update_state()
-            return {"status": "failed", "message": str(state.get("last_run_log_tail") or "")}
+            return {"status": "failed", "launch_state": "not_started", "unit_name": unit_name,
+                    "message": str(state.get("last_run_log_tail") or "")}
         source_root = _effective_source_root()
         selected_branch = str(branch or app_settings.get_updates_branch()).strip().lower() or "main"
-        started_at = _utcnow_iso()
-        unit_name = f"{UPDATE_UNIT_PREFIX}-{started_at.replace(':', '').replace('-', '').replace('T', '-').replace('Z', '').lower()}"
+        dispatched = False
         try:
             backup_result = maybe_create_pre_action_backup("pre_update")
             cmd = _system_cmd(
@@ -425,9 +436,13 @@ def schedule_update(timeout: int = 30, branch: str | None = None, target_ref: st
                 # Unpublished dev heads are available only from development checkouts.
                 if len(target_ref) == 40 and os.path.isdir(f"{source_root}/.git"):
                     cmd.append("--from-source")
-            if stack_job_id:
+            if bound_job_id:
                 from uuid import UUID
-                cmd.extend(["--stack-job", str(UUID(stack_job_id))])
+                # Both core-only and fleet updates need a durable terminal receipt.
+                cmd.extend(["--stack-job", str(UUID(bound_job_id))])
+            # Scheduler records bound launch before crossing systemd boundary
+            app_settings.record_update_run_started(started_at, unit_name)
+            dispatched = True
             proc = _run_cmd(cmd, cwd=source_root, timeout=timeout)
             output = ((proc.stdout or "").strip() + "\n" + (proc.stderr or "").strip()).strip()
             if backup_result.get("status") == "failed":
@@ -435,12 +450,12 @@ def schedule_update(timeout: int = 30, branch: str | None = None, target_ref: st
             if proc.returncode != 0:
                 message = output or f"failed to start update job (exit {proc.returncode})"
                 app_settings.record_update_run_finished("failed", _utcnow_iso(), message)
-                return {"status": "failed", "message": message}
-            app_settings.record_update_run_started(started_at, unit_name)
+                return {"status": "failed", "unit_name": unit_name, "message": message}
             return {"status": "running", "unit_name": unit_name}
         except Exception as exc:
             app_settings.record_update_run_finished("failed", _utcnow_iso(), str(exc))
-            return {"status": "failed", "message": str(exc)}
+            return {"status": "failed", "unit_name": unit_name,
+                    "launch_state": "dispatching" if dispatched else "not_started", "message": str(exc)}
 
 
 def is_driver_agents_setup_supported() -> bool:

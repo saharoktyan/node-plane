@@ -203,7 +203,7 @@ class Screen:
                 blocks=[InputRichBlockParagraph(text=RichTextCode(text=self.uri))]))
         if self.uri and not self.uri_collapsed:
             uri = InputRichBlockParagraph(text=RichTextCode(text=self.uri))
-            if self.uri_title and not self.uri_rows:
+            if self.uri_title:
                 blocks.append(InputRichBlockSectionHeading(text=self.uri_title, size=2))
             blocks.append(uri)
         for row in self.uri_rows:

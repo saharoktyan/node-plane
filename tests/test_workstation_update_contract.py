@@ -65,7 +65,7 @@ class WorkstationUpdateContractTests(TestCase):
         self.assertEqual(job['target_ref'], 'v0.4.3-alpha.19')
         self.assertEqual(job['branch'], 'dev')
         self.assertEqual(job['result'], {'resolved_ref': 'v0.4.3-alpha.19',
-            'expected_commit': 'a' * 40, 'phase': 'core'})
+            'expected_commit': 'a' * 40, 'launch_state': 'not_started', 'phase': 'core'})
         self.assertEqual(job['items'], [])
         self.assertNotIn(headers['Authorization'][7:], response.text)
         self.assertNotIn('actor_id', job)

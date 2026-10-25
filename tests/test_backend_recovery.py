@@ -2,12 +2,14 @@ from unittest import TestCase
 from uuid import uuid4
 
 from tests import test_backend_updates as fixture
+from tests.test_backend_http import BackendHTTPTests
 from backend.recovery import overview
 
 
 class RecoveryTests(TestCase):
     setUp = fixture.BackendUpdateTests.setUp
     service = fixture.BackendUpdateTests.service
+    provision = BackendHTTPTests.provision
 
     def test_grouped_inventory_counts_before_paging_and_keeps_controller_separate(self):
         self.service()
@@ -101,6 +103,9 @@ class RecoveryTests(TestCase):
         self.register = lambda: self.client.post('/api/v1/integrations/telegram/identities/resolve',
             headers={**self.headers, 'Idempotency-Key': str(uuid4())}, json={'telegram_user_id': 202})
         self.register()
+        self.assertEqual(self.client.get('/api/v1/system/recovery', headers={**self.headers,
+            'X-Node-Plane-Telegram-User-ID': '202'}).status_code, 401)
+        self.provision(202)
         self.assertEqual(self.client.get('/api/v1/system/recovery', headers={**self.headers,
             'X-Node-Plane-Telegram-User-ID': '202'}).status_code, 403)
         self.db.connection.execute("INSERT INTO backend_node_removals VALUES ('old-node',?,'blocked','node_cleanup_unavailable')", (self.admin.id,))
@@ -321,3 +326,82 @@ class ParentRecoveryTests(TestCase):
         self.assertEqual(self.db.connection.execute('SELECT result_json FROM backend_backup_jobs WHERE id=?',(identity,)).fetchone()['result_json'],checkpoint)
         self.db.connection.execute("UPDATE backend_backup_jobs SET status='blocked',result_json='{}'")
         self.assertEqual(overview(self.db,self.actor)['items'][0]['actions'], [])
+
+    def test_blocked_config_issuance_is_visible_and_cancel_clears_busy_keeping_access_intact(self):
+        from backend.recovery import act
+        from backend.backups import BackupService
+        from backend.profiles import ProfileRepository
+        from backend.devices import DeviceRepository
+        self.service()
+        profile_id = ProfileRepository(self.db).create_profile(runtime_name='user1', display_name='User 1', owner_account_id=self.admin.id)
+        with self.db.transaction() as conn:
+            conn.execute("INSERT INTO backend_nodes(key,title,region,protocols_json,xray_transports_json) VALUES ('n1','Node 1','EU','[]','[]')")
+            conn.execute("INSERT INTO backend_grants(profile_id,node_key,protocol) VALUES (?,'n1','awg')", (profile_id,))
+            DeviceRepository.ensure_default(conn, conn.execute("SELECT * FROM backend_profiles WHERE id=?", (profile_id,)).fetchone())
+            issuance_id = str(uuid4())
+            conn.execute("INSERT INTO backend_config_issuances(id,actor_account_id,command_key,profile_id,node_key,protocol,transport,profile_revision,node_revision,status,created_at,expires_at) VALUES (?,?,?,?,'n1','awg','udp',1,1,'blocked','now','never')",
+                         (issuance_id, self.admin.id, str(uuid4()), profile_id))
+
+        items = overview(self.db, self.actor)['items']
+        issuance_items = [i for i in items if i['kind'] == 'issuance']
+        self.assertEqual(len(issuance_items), 1)
+        self.assertEqual(issuance_items[0]['actions'], ['cancel'])
+        self.assertEqual(issuance_items[0]['error_code'], 'config_read_failed')
+
+        with self.db.connect() as conn:
+            self.assertTrue(BackupService.busy(conn))
+
+        act(self.db, self.actor, None, 'issuance', issuance_id, 'cancel')
+
+        with self.db.connect() as conn:
+            self.assertFalse(BackupService.busy(conn))
+            row = conn.execute("SELECT status FROM backend_config_issuances WHERE id=?", (issuance_id,)).fetchone()
+            self.assertEqual(row['status'], 'superseded')
+            # Profile and access remain intact
+            self.assertIsNotNone(conn.execute("SELECT 1 FROM backend_profiles WHERE id=?", (profile_id,)).fetchone())
+            self.assertIsNotNone(conn.execute("SELECT 1 FROM backend_grants WHERE profile_id=?", (profile_id,)).fetchone())
+
+    def test_failed_create_backup_cancel(self):
+        from backend.recovery import act
+        self.service()
+        identity = str(uuid4())
+        with self.db.transaction() as conn:
+            conn.execute("INSERT INTO backend_backup_jobs(id,actor_id,command_key,action,status,created_at) VALUES (?,?,?,'create','blocked','now')",
+                         (identity, self.admin.id, str(uuid4())))
+
+        items = overview(self.db, self.actor)['items']
+        backup_item = next(i for i in items if i['id'] == identity)
+        self.assertIn('cancel', backup_item['actions'])
+        self.assertIn('resume', backup_item['actions'])
+
+        act(self.db, self.actor, None, 'backup', identity, 'cancel')
+        with self.db.connect() as conn:
+            row = conn.execute("SELECT status FROM backend_backup_jobs WHERE id=?", (identity,)).fetchone()
+            self.assertEqual(row['status'], 'cancelled')
+
+    def test_update_recovery_choices_for_blocked_version_agents_runtimes_and_stack(self):
+        import json
+        self.service()
+        # Version update
+        v_id = str(uuid4())
+        # Agents update
+        a_id = str(uuid4())
+        # Runtimes update
+        r_id = str(uuid4())
+        # Stack update in agents phase
+        s_id = str(uuid4())
+        with self.db.transaction() as conn:
+            conn.execute("INSERT INTO backend_update_jobs(id,actor_id,command_key,kind,intent_json,status,result_json,created_at) VALUES (?,?,?,'version','{}','blocked',?,'now')",
+                         (v_id, self.admin.id, str(uuid4()), json.dumps({'unit_name': 'test-unit'})))
+            conn.execute("INSERT INTO backend_update_jobs(id,actor_id,command_key,kind,intent_json,status,created_at) VALUES (?,?,?,'agents','{}','blocked','now')",
+                         (a_id, self.admin.id, str(uuid4())))
+            conn.execute("INSERT INTO backend_update_jobs(id,actor_id,command_key,kind,intent_json,status,created_at) VALUES (?,?,?,'runtimes','{}','blocked','now')",
+                         (r_id, self.admin.id, str(uuid4())))
+            conn.execute("INSERT INTO backend_update_jobs(id,actor_id,command_key,kind,intent_json,status,result_json,created_at) VALUES (?,?,?,'stack','{}','blocked',?,'now')",
+                         (s_id, self.admin.id, str(uuid4()), json.dumps({'phase': 'agents', 'unit_name': 'test-stack'})))
+
+        items = {i['id']: i for i in overview(self.db, self.actor)['items']}
+        self.assertEqual(items[v_id]['actions'], ['recheck'])
+        self.assertEqual(items[a_id]['actions'], ['recheck', 'resume', 'cancel'])
+        self.assertEqual(items[r_id]['actions'], ['recheck', 'resume', 'cancel'])
+        self.assertEqual(items[s_id]['actions'], ['recheck', 'resume', 'cancel'])

@@ -5,11 +5,12 @@ from urllib.parse import quote
 
 from aiogram import Bot, F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, BufferedInputFile
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, BufferedInputFile, MessageEntity, LinkPreviewOptions
 
 from ..backend import BackendClient, BackendError
 from ..i18n import normalize_locale, tr
-from ..screens import Screen
+from ..screens import Screen, Breadcrumb
+from ..navigation import parent_path, remember_label
 from .callbacks import AdminSettingsCallback
 from .common import render, schedule_refresh
 
@@ -28,7 +29,7 @@ async def request(backend, user, method, suffix='', **kwargs):
 async def draw(query, bot, state, title, lines, rows, **kwargs):
     locale = normalize_locale((await state.get_data()).get('locale'))
     return await render(bot,query.message.chat.id,
-        Screen(tr(locale,title),tuple(lines),embedded_buttons=True,navigation=True,**kwargs),
+        Screen(kwargs.pop('title_text', None) or tr(locale,title),tuple(lines),embedded_buttons=True,navigation=True,**kwargs),
         rows,state,query.message.message_id)
 
 
@@ -85,28 +86,36 @@ async def wizard(query, bot, state, step):
         rows = [[InlineKeyboardButton(text=label,callback_data=f'temporary:duration:{seconds}',style='primary')] for seconds,label in ((43200,'12h'),(86400,'1d'),(259200,'3d'))]
         back = 'transport' if draft['protocol']=='xray' and len(node['xray_transports'])>1 else ('protocol' if len(node['protocols'])>1 else 'server')
     else:
-        lines = [f"{node['title']} · {'VLESS '+draft['transport'].upper() if draft['protocol']=='xray' else 'AmneziaWG'}", {43200:'12h',86400:'1d',259200:'3d'}[draft['duration_seconds']]]
+        lines = [f"{node['title']} · " + ('VLESS · '+draft['transport'].upper() if draft['protocol']=='xray' else 'AWG') +
+            ' · ' + {43200:'12h',86400:'1d',259200:'3d'}[draft['duration_seconds']]]
         if draft['protocol']=='xray':
-            lines.append(tr(locale,'temporary.vless_notice'))
+            lines.append('\n' + tr(locale,'temporary.vless_notice'))
         rows = [[button(locale,'temporary.create','issue','primary')]]
         back = 'duration'
     rows.append([button(locale,'back',back)])
     await state.update_data(temporary_step=step)
-    await draw(query,bot,state,'temporary.'+step,lines,rows)
+    parents = parent_path('temporary:list:0',locale,data)
+    if parents:
+        parents = (*parents[:-1], Breadcrumb(tr(locale,'temporary.short_title'), parents[-1].callback))
+    await draw(query,bot,state,'temporary.'+step,lines,rows, breadcrumbs=parents,
+        title_text=tr(locale,'temporary.create_short') + ' · ' + tr(locale,'temporary.step.'+step))
 
 
 async def card(query, bot, backend, state, identity, show=False):
     locale = normalize_locale((await state.get_data()).get('locale'))
     item = await request(backend,query.from_user.id,'GET','/'+identity)
-    rows, lines = [], [f"{item.get('node_title',item['node_key'])} · {'VLESS' if item['protocol']=='xray' else 'AmneziaWG'} · {item['transport'].upper()}", tr(locale,'temporary.status.'+item['status'])]
+    label = item.get('node_title',item['node_key']) + ' · ' + (
+        'VLESS · ' + item['transport'].upper() if item['protocol']=='xray' else 'AWG')
+    await remember_label(state, 'temporary_configs', identity, label)
+    rows, lines = [], [tr(locale,'temporary.status.'+item['status'])]
     if item.get('expires_at'):
         lines.append(tr(locale,'temporary.expires',value=item['expires_at'][:19].replace('T',' ')+' UTC'))
     if show and (item['status'] != 'active' or not item.get('artifact_available', True)):
         lines.append(tr(locale, 'temporary.artifact_unavailable',
             status=tr(locale, 'temporary.status.' + item['status'])))
         show = False
-    if item['protocol']=='xray':
-        lines.append(tr(locale,'temporary.vless_notice'))
+    if item['protocol']=='xray' and item['status'] not in {'queued', 'issuing'}:
+        lines.append('\n' + tr(locale,'temporary.vless_notice'))
     if item.get('unavailable_reason') == 'node_changed':
         lines.append(tr(locale, 'temporary.node_changed_notice'))
     if item['status']=='active' and item.get('artifact_available', True) and not show:
@@ -114,7 +123,7 @@ async def card(query, bot, backend, state, identity, show=False):
     if item['status'] not in {'expired','revoked','cancelled','revoking'}:
         rows.append([button(locale,'temporary.revoke','confirm_revoke:'+identity,'danger')])
     rows.extend([[button(locale,'devices.refresh','card:'+identity)], [button(locale,'back','list:0')]])
-    kwargs = {}
+    kwargs = dict(title_text=label, breadcrumbs=parent_path('temporary:list:0', locale, await state.get_data()))
     if show:
         try:
             artifact = await request(backend,query.from_user.id,'GET','/'+identity+'/artifact')
@@ -123,14 +132,18 @@ async def card(query, bot, backend, state, identity, show=False):
                 return await card(query, bot, backend, state, identity)
             raise
         from .user import config_qr, qr_payload
-        uri = artifact['content']
-        image = await asyncio.to_thread(config_qr, qr_payload(item['protocol'],item['transport'],uri))
-        lines.append(tr(locale,'ui.config_intro'))
-        kwargs = dict(uri=uri,uri_collapsed=True,uri_title=tr(locale,'ui.config_link'),
+        uri = artifact['content'] if item['protocol']=='xray' or item['transport']=='vpn' else None
+        image = await asyncio.to_thread(config_qr, qr_payload(item['protocol'],item['transport'],uri)) if uri else None
+        lines = [tr(locale,'ui.config_intro')]
+        rows = [[button(locale,'back','card:'+identity)]]
+        kwargs = dict(title_text=tr(locale, 'temporary.config'),
+            breadcrumbs=parent_path('temporary:card:'+identity, locale, await state.get_data()),
+            uri=uri,uri_collapsed=True,uri_title=tr(locale,'ui.config_link'),
             qr=image,qr_title=tr(locale,'ui.config_qr'),
             details_title=tr(locale,'ui.config_help'),
-            details_lines=(tr(locale,'config.import_xray' if item['protocol']=='xray' else 'config.import_awg_vpn'),),
-            uri_rows=((button(locale,'config.link.send','plain:'+identity),),),
+            details_lines=(tr(locale,'config.import_xray' if item['protocol']=='xray' else
+                'config.import_awg_vpn' if uri else 'config.import_awg_conf'),),
+            uri_rows=((button(locale,'config.link.send','plain:'+identity),),) if uri else (),
             files=tuple((f['filename'],f['content'].encode()) for f in artifact['files']),files_title=tr(locale,'ui.config_files'))
     rich = await draw(query,bot,state,'temporary.title',lines,rows,**kwargs)
     if not show and item['status'] in {'queued', 'issuing', 'revoking', 'expiry_pending'}:
@@ -169,12 +182,15 @@ async def temporary_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, s
             await card(query,bot,backend,state,action.split(':')[1],action.startswith('show:'))
         elif action.startswith('plain:'):
             artifact = await request(backend,query.from_user.id,'GET','/'+action.split(':')[1]+'/artifact')
-            await bot.send_message(query.message.chat.id,artifact['content'],parse_mode=None,
+            content = artifact['content']
+            await bot.send_message(query.message.chat.id,content,parse_mode=None,
+                entities=[MessageEntity(type='code',offset=0,length=len(content.encode('utf-16-le'))//2)],
+                link_preview_options=LinkPreviewOptions(is_disabled=True),
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=tr(locale,'setup.close'),callback_data='config_uri_close')]]))
         elif action.startswith('confirm_revoke:'):
             identity = action.split(':')[1]
             await draw(query,bot,state,'temporary.revoke',[tr(locale,'temporary.revoke_confirm')],
-                [[button(locale,'temporary.revoke','revoke:'+identity,'danger')],[button(locale,'back','card:'+identity)]])
+                [[button(locale,'back','card:'+identity),button(locale,'temporary.revoke','revoke:'+identity,'danger')]])
         elif action.startswith('revoke:'):
             identity = action.split(':')[1]
             await request(backend,query.from_user.id,'POST','/'+identity+'/revoke')

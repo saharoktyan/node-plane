@@ -96,10 +96,13 @@ def change(db, actor, identities, path, request, *, verify=verify_token, restart
                         raise AccessDenied('resource_not_found', 404)
                     target = identities.create_account(status='approved')
                     identities.link_telegram(target.id, request['telegram_id'])
-                pending = conn.execute("SELECT id FROM backend_access_requests WHERE account_id=? AND status='pending'", (target.id,)).fetchone()
+                pending = conn.execute("""SELECT id FROM backend_access_requests WHERE status='pending'
+                    AND (account_id=? OR (account_id IS NULL AND telegram_subject=?))""", (target.id, str(request['telegram_id']))).fetchone()
                 if pending and action == 'telegram-admin-add':
                     from .access_requests import AccessRequestService
                     AccessRequestService(local).decide(actor, pending['id'], 'approve', request['command_id'])
+                if action == 'telegram-admin-add':
+                    conn.execute('DELETE FROM backend_telegram_menu_refresh WHERE subject=?', (str(request['telegram_id']),))
                 service = AccountService(local)
                 previous = conn.execute('SELECT result_json FROM backend_account_commands WHERE actor_account_id=? AND command_key=?',
                     (actor.account.id, request['command_id'])).fetchone()

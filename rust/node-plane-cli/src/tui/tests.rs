@@ -621,7 +621,7 @@ fn access_arrows_traverse_search_and_profiles_between_tabs_and_actions() {
     use crate::access::Tab;
     let mut app = test_profile_app();
     app.screen = Screen::Access;
-    app.access.tab = Tab::Profiles;
+    app.access.tab = crate::access::Tab::Profiles;
     app.access.items = vec![serde_json::json!({"id":"one", "display_name":"Member"})];
     let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
     for tab in Tab::ALL {
@@ -659,7 +659,7 @@ fn active_access_tab_retains_colored_label_without_focus_outline() {
     use crate::access::Tab;
     let mut app = test_profile_app();
     app.screen = Screen::Access;
-    app.access.tab = Tab::Profiles;
+    app.access.tab = crate::access::Tab::Profiles;
     let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
     terminal
         .draw(|frame| app.hits = draw_content(frame, &app))
@@ -1342,7 +1342,9 @@ fn server_removal_requires_live_preview_and_explicit_confirmation() {
     let mut app = test_profile_app();
     app.screen = Screen::Nodes;
     app.nodes_sidebar = false;
-    app.nodes.card = Some(browser_node("lv1", "Europe"));
+    let mut node = browser_node("lv1", "Europe");
+    node.applied_revision = 1;
+    app.nodes.card = Some(node);
     let state = serde_json::json!({"node_key":"lv1","status":"active","affected_profiles":4});
     app.event(Event::Nodes(crate::nodes::Update::Maintenance(
         Browser::new("lv1".into(), state.clone(), None).unwrap(),
@@ -1475,15 +1477,15 @@ fn node_recovery_requires_confirmation_and_back_preserves_server() {
             serde_json::json!({"items":[{"id":identity,"node_key":"lv1","kind":"bootstrap","status":"blocked","actions":["recheck"]}],"total":1,"offset":0,"page_size":10}))));
     app.nodes_requested = None;
     app.activate(Control::NodesDiagnosticItem(0));
-    app.activate(Control::NodesRecovery(0, true));
+    app.activate(Control::NodesRecovery(0, "resolve"));
     assert!(app.nodes.recovery_confirm.is_none());
-    app.activate(Control::NodesRecovery(0, false));
+    app.activate(Control::NodesRecovery(0, "recheck"));
     assert!(app.nodes.recovery_confirm.is_some());
     assert!(app.nodes_requested.is_none());
     app.nodes_key(KeyCode::Esc.into());
     assert!(app.nodes.recovery_confirm.is_none());
     assert!(app.nodes.diagnostic_item.is_some());
-    app.activate(Control::NodesRecovery(0, false));
+    app.activate(Control::NodesRecovery(0, "recheck"));
     app.activate(Control::NodesRecoveryConfirm);
     assert!(
         matches!(app.nodes_requested.take(), Some(crate::nodes::Command::Recover(key, item, action)) if key == "lv1" && item["id"] == identity && action == "recheck")
@@ -1493,6 +1495,89 @@ fn node_recovery_requires_confirmation_and_back_preserves_server() {
     app.nodes_key(KeyCode::Esc.into());
     assert!(app.nodes.diagnostics.is_none());
     assert!(app.nodes.card.is_some());
+}
+
+#[test]
+fn node_recovery_card_can_select_resume_and_cancel_with_confirmation() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Nodes;
+    app.nodes.card = Some(browser_node("lv1", "Europe"));
+    let identity = uuid::Uuid::new_v4().to_string();
+    app.event(Event::Nodes(crate::nodes::Update::Diagnostics(
+        "lv1".into(),
+        serde_json::json!({"error_code": "node_agent_unavailable"}),
+        serde_json::json!({
+            "items": [{
+                "id": identity,
+                "node_key": "lv1",
+                "kind": "agent",
+                "status": "blocked",
+                "actions": ["resume", "cancel"]
+            }],
+            "total": 1,
+            "offset": 0,
+            "page_size": 10
+        }),
+    )));
+    app.nodes_requested = None;
+    app.activate(Control::NodesDiagnosticItem(0));
+
+    // Selecting resume requires confirmation before command dispatch
+    app.activate(Control::NodesRecovery(0, "resume"));
+    assert!(app.nodes.recovery_confirm.is_some());
+    assert!(app.nodes_requested.is_none());
+    app.activate(Control::NodesRecoveryConfirm);
+    assert!(
+        matches!(app.nodes_requested.take(), Some(crate::nodes::Command::Recover(key, item, action)) if key == "lv1" && item["id"] == identity && action == "resume")
+    );
+
+    // Bootstrap cancellation is an actual backend-supported pair (agent/cancel is not).
+    app.nodes.diagnostics.as_mut().unwrap().1["items"][0]["kind"] = serde_json::json!("bootstrap");
+    app.nodes.diagnostics.as_mut().unwrap().1["items"][0]["actions"] =
+        serde_json::json!(["cancel"]);
+    // Selecting cancel requires confirmation before command dispatch
+    app.activate(Control::NodesRecovery(0, "cancel"));
+    assert!(app.nodes.recovery_confirm.is_some());
+    assert!(app.nodes_requested.is_none());
+    app.activate(Control::NodesRecoveryConfirm);
+    assert!(
+        matches!(app.nodes_requested.take(), Some(crate::nodes::Command::Recover(key, item, action)) if key == "lv1" && item["id"] == identity && action == "cancel")
+    );
+}
+
+#[test]
+fn uninstalled_node_card_exposes_only_settings_setup_and_registry_removal() {
+    let mut node = browser_node("lv1", "Europe");
+    node.applied_revision = 0;
+    node.protocols = vec!["awg".into()];
+    let actions = crate::tui::node_card_actions(&node, None);
+    let controls: Vec<_> = actions.iter().map(|(_, c)| *c).collect();
+
+    assert!(controls.contains(&Control::NodesEdit));
+    assert!(controls.contains(&Control::NodesBootstrap));
+    assert!(controls.contains(&Control::NodesRemove(
+        crate::node_maintenance::Mode::RegistryOnly
+    )));
+    assert!(controls.contains(&Control::NodesRefresh));
+    assert!(controls.contains(&Control::NodesBack));
+
+    assert!(!controls.contains(&Control::NodeTemporary));
+    assert!(!controls.contains(&Control::NodesMaintenance));
+    assert!(!controls.contains(&Control::NodesApply));
+    for (_, c) in &actions {
+        assert!(!matches!(c, Control::NodesProtocolAction(_)));
+    }
+
+    node.protocols = vec![];
+    let actions_empty = crate::tui::node_card_actions(&node, None);
+    let controls_empty: Vec<_> = actions_empty.iter().map(|(_, c)| *c).collect();
+    assert!(controls_empty.contains(&Control::NodesSetup));
+    assert!(controls_empty.contains(&Control::NodesEdit));
+    assert!(controls_empty.contains(&Control::NodesRemove(
+        crate::node_maintenance::Mode::RegistryOnly
+    )));
+    assert!(!controls_empty.contains(&Control::NodeTemporary));
+    assert!(!controls_empty.contains(&Control::NodesMaintenance));
 }
 #[test]
 fn diagnostics_ignore_other_servers_and_paginate_short_terminals() {
@@ -3972,6 +4057,7 @@ fn node_card_arrows_follow_button_geometry_after_resize() {
     let mut node = browser_node("lv1", "Europe");
     node.transport = Some("ssh".into());
     node.overview.as_mut().unwrap()["state"] = serde_json::json!("installed");
+    node.applied_revision = 1;
     node.agent = crate::nodes::AgentState::Missing;
     node.services =
         Some(serde_json::json!({"docker":true,"awg_running":false,"xray_running":false}));
@@ -4935,7 +5021,43 @@ fn custom_duration_accepts_units_and_rejects_invalid_or_overflowing_values() {
         crate::access::expiry_from_duration("1Y", now).unwrap(),
         crate::access::expiry_after(365, now).unwrap()
     );
-    for input in ["", "0D", "-1H", "1.5D", "1Q", "é", "18446744073709551615Y"] {
+    // Combined duration tokens: 3d5m1y
+    // 3 + 5*30 + 365 = 518 days after 1970-01-01 -> 1971-06-03
+    assert_eq!(
+        crate::access::expiry_from_duration("3d5m1y", now).unwrap(),
+        crate::access::expiry_after(518, now).unwrap()
+    );
+    assert_eq!(
+        crate::access::expiry_from_duration("1Y5M3D", now).unwrap(),
+        crate::access::expiry_after(518, now).unwrap()
+    );
+    // Exact date format (23:59:59 UTC)
+    assert_eq!(
+        crate::access::expiry_from_duration("1970-01-01", now).unwrap(),
+        "1970-01-01T23:59:59Z"
+    );
+    assert_eq!(
+        crate::access::expiry_from_duration("2030-05-10", now).unwrap(),
+        "2030-05-10T23:59:59Z"
+    );
+    for input in [
+        "",
+        "0D",
+        "-1H",
+        "1.5D",
+        "1Q",
+        "é",
+        "18446744073709551615Y",
+        "3d4d",
+        "1h2h",
+        "1969-12-31",
+        "2025-02-29",
+        "2026-13-01",
+        "2026-00-10",
+        "2099-+1-01",
+        "2099-01-+1",
+        "1d 2h",
+    ] {
         assert!(crate::access::expiry_from_duration(input, now).is_err());
     }
     let mut app = test_profile_app();
@@ -6935,4 +7057,296 @@ fn input_prompts_offer_keyboard_cancel_and_continue() {
         app.prompt_key(KeyCode::Enter.into());
         assert!(matches!(rx.recv().unwrap(), Answer::Password(value) if value.as_str() == "x"));
     }
+}
+
+#[test]
+fn ssh_select_prompt_styling_direct_selection_and_no_footer_buttons() {
+    let mut app = App::new(&test_request());
+    let (tx, rx) = mpsc::channel();
+    app.event(Event::Prompt(
+        Prompt::Select {
+            title: "SSH authentication".into(),
+            description: "Choose authentication method".into(),
+            choices: vec![
+                ("password".into(), "Password".into()),
+                ("key".into(), "Existing key".into()),
+            ],
+        },
+        tx,
+    ));
+
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(80, 24)).unwrap();
+    terminal
+        .draw(|frame| app.hits = draw_content(frame, &app))
+        .unwrap();
+
+    // 1. Verify no Cancel or Continue footer buttons exist in hits
+    assert!(
+        !app.hits
+            .iter()
+            .any(|h| matches!(h.control, Control::Prompt(_)))
+    );
+
+    // 2. Verify choices have administrator hit targets
+    assert!(
+        app.hits
+            .iter()
+            .any(|h| h.control == Control::Administrator(0))
+    );
+    assert!(
+        app.hits
+            .iter()
+            .any(|h| h.control == Control::Administrator(1))
+    );
+
+    // 3. Verify arrow color is always white and selected label is cyan, unselected label is gray
+    let buffer = terminal.backend().buffer();
+    let choice0_hit = app
+        .hits
+        .iter()
+        .find(|h| h.control == Control::Administrator(0))
+        .unwrap();
+    let choice1_hit = app
+        .hits
+        .iter()
+        .find(|h| h.control == Control::Administrator(1))
+        .unwrap();
+
+    // Row 0 is selected by default:
+    // Arrow is at choice0_hit.area.x
+    let arrow_cell = &buffer[(choice0_hit.area.x, choice0_hit.area.y)];
+    assert_eq!(arrow_cell.symbol(), "→");
+    assert_eq!(arrow_cell.fg, Color::White);
+
+    // Label on row 0 has Cyan text
+    let p_cell = &buffer[(choice0_hit.area.x + 2, choice0_hit.area.y)];
+    assert_eq!(p_cell.symbol(), "P");
+    assert_eq!(p_cell.fg, Color::Cyan);
+
+    // Row 1 is not selected:
+    // Space at choice1_hit.area.x
+    let space_cell = &buffer[(choice1_hit.area.x, choice1_hit.area.y)];
+    assert_eq!(space_cell.symbol(), " ");
+    // Label on row 1 has Gray text
+    let e_cell = &buffer[(choice1_hit.area.x + 2, choice1_hit.area.y)];
+    assert_eq!(e_cell.symbol(), "E");
+    assert_eq!(e_cell.fg, Color::Gray);
+
+    // 4. Test direct click selection
+    let key = app.activate(Control::Administrator(1)).unwrap();
+    app.prompt_key(key);
+    assert!(matches!(rx.recv().unwrap(), Answer::Selection(1)));
+
+    // 5. Test Esc cancels
+    let (tx2, rx2) = mpsc::channel();
+    app.event(Event::Prompt(
+        Prompt::Select {
+            title: "SSH authentication".into(),
+            description: "Choose authentication method".into(),
+            choices: vec![
+                ("password".into(), "Password".into()),
+                ("key".into(), "Existing key".into()),
+            ],
+        },
+        tx2,
+    ));
+    app.prompt_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(matches!(rx2.recv().unwrap(), Answer::Cancel));
+
+    // 6. Test SelectAdministrator retains footer buttons
+    let (tx3, _rx3) = mpsc::channel();
+    app.event(Event::Prompt(
+        Prompt::SelectAdministrator {
+            choices: vec![("adm1".into(), "Administrator 1".into())],
+        },
+        tx3,
+    ));
+    terminal
+        .draw(|frame| app.hits = draw_content(frame, &app))
+        .unwrap();
+    assert!(
+        app.hits
+            .iter()
+            .any(|h| matches!(h.control, Control::Prompt(_)))
+    );
+}
+
+#[test]
+fn access_screen_admin_profile_footer_gap_and_deleting_profile_actions() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Access;
+    app.access.tab = crate::access::Tab::Profiles;
+
+    // 1. Admin profile card
+    app.access.card = Some(serde_json::json!({
+        "id": "admin-prof",
+        "display_name": "Admin Profile",
+        "owner_account_id": "acc-admin",
+        "frozen": false,
+        "_account": {
+            "id": "acc-admin",
+            "revision": 2,
+            "role": "admin",
+            "status": "approved"
+        }
+    }));
+
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+    terminal
+        .draw(|frame| app.hits = draw_content(frame, &app))
+        .unwrap();
+
+    // For admin profile, visible actions are:
+    // Back, Refresh, Make member (AccessAccountAction(true)), Edit
+    // Total 4 buttons: exactly 2 rows (height 6). No extra gap (no 3rd or 4th row).
+    assert!(app.hits.iter().any(|h| h.control == Control::AccessBack));
+    let back_hit = app
+        .hits
+        .iter()
+        .find(|h| h.control == Control::AccessBack)
+        .unwrap();
+    assert_eq!(back_hit.area, pinned_back_area(Rect::new(0, 0, 120, 40)));
+    let refresh_hit = app
+        .hits
+        .iter()
+        .find(|h| h.control == Control::AccessRefresh)
+        .unwrap();
+    // Footer button bounds touch the bottom border of the card panel (no empty row gap)
+    assert_eq!(refresh_hit.area.bottom(), 36);
+    assert!(
+        app.hits
+            .iter()
+            .any(|h| h.control == Control::AccessAccountAction(true))
+    );
+    assert!(app.hits.iter().any(|h| h.control == Control::AccessEdit));
+    // No member-only actions for admin:
+    assert!(
+        !app.hits
+            .iter()
+            .any(|h| h.control == Control::AccessAccountAction(false))
+    );
+    assert!(
+        !app.hits
+            .iter()
+            .any(|h| matches!(h.control, Control::AccessProfileAction(_)))
+    );
+
+    // 2. Member profile card (verify off-by-one reserved row does not regress)
+    app.access.card = Some(serde_json::json!({
+        "id": "member-prof",
+        "display_name": "Member Profile",
+        "owner_account_id": "acc-member",
+        "frozen": false,
+        "_account": {
+            "id": "acc-member",
+            "revision": 2,
+            "role": "member",
+            "status": "approved"
+        }
+    }));
+    terminal
+        .draw(|frame| app.hits = draw_content(frame, &app))
+        .unwrap();
+    let member_refresh = app
+        .hits
+        .iter()
+        .find(|h| h.control == Control::AccessRefresh)
+        .unwrap();
+    assert_eq!(member_refresh.area.bottom(), 36);
+    let member_back = app
+        .hits
+        .iter()
+        .find(|h| h.control == Control::AccessBack)
+        .unwrap();
+    assert_eq!(member_back.area, pinned_back_area(Rect::new(0, 0, 120, 40)));
+    assert!(
+        app.hits
+            .iter()
+            .any(|h| h.control == Control::AccessAccountAction(true))
+    );
+    assert!(
+        app.hits
+            .iter()
+            .any(|h| h.control == Control::AccessAccountAction(false))
+    );
+    assert!(app.hits.iter().any(|h| h.control == Control::AccessEdit));
+    assert!(
+        app.hits
+            .iter()
+            .any(|h| h.control == Control::AccessProfileAction(false))
+    );
+    assert!(
+        app.hits
+            .iter()
+            .any(|h| h.control == Control::AccessProfileAction(true))
+    );
+
+    // 3. Deleting profile card
+    app.access.card = Some(serde_json::json!({
+        "id": "deleting-prof",
+        "display_name": "Deleting Profile",
+        "owner_account_id": "acc-mem",
+        "deleting": true,
+        "frozen": false,
+        "_account": {
+            "id": "acc-mem",
+            "revision": 3,
+            "role": "member",
+            "status": "approved"
+        }
+    }));
+
+    terminal
+        .draw(|frame| app.hits = draw_content(frame, &app))
+        .unwrap();
+
+    // Deleting profile removes all account/profile mutating actions while preserving Refresh and Back
+    assert!(app.hits.iter().any(|h| h.control == Control::AccessBack));
+    assert!(app.hits.iter().any(|h| h.control == Control::AccessRefresh));
+    assert!(
+        !app.hits
+            .iter()
+            .any(|h| matches!(h.control, Control::AccessAccountAction(_)))
+    );
+    assert!(
+        !app.hits
+            .iter()
+            .any(|h| matches!(h.control, Control::AccessProfileAction(_)))
+    );
+    assert!(!app.hits.iter().any(|h| h.control == Control::AccessEdit));
+}
+
+#[test]
+fn access_request_tab_labels_use_compact_identity_and_date_with_account_fallback() {
+    use crate::access::{Tab, label};
+    // Username present on item
+    let item_user = serde_json::json!({
+        "username": "@alice",
+        "created_at": "2026-10-24T15:30:00Z"
+    });
+    assert_eq!(label(Tab::Requests, &item_user), "@alice · 24/10/26");
+
+    // No username, telegram_user_id present
+    let item_tg_id = serde_json::json!({
+        "telegram_user_id": 98765432,
+        "created_at": "2026-10-24T15:30:00Z"
+    });
+    assert_eq!(label(Tab::Requests, &item_tg_id), "98765432 · 24/10/26");
+
+    // Nested _account fallback
+    let item_nested = serde_json::json!({
+        "created_at": "2026-10-25T08:00:00Z",
+        "_account": {
+            "username": "bob",
+            "telegram_user_id": 11223344
+        }
+    });
+    assert_eq!(label(Tab::Requests, &item_nested), "@bob · 25/10/26");
+
+    // Invalid date fallback
+    let item_bad_date = serde_json::json!({
+        "username": "charlie",
+        "created_at": "not-a-date"
+    });
+    assert_eq!(label(Tab::Requests, &item_bad_date), "@charlie · —");
 }

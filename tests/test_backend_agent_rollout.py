@@ -8,11 +8,11 @@ from tempfile import TemporaryDirectory
 from pathlib import Path
 
 from backend.agent_rollout import AgentRolloutService
-from tests.test_backend_http import BackendHTTPTests
+from tests import test_backend_http as fixture_http
 
 
 class BackendAgentRolloutTests(TestCase):
-    setUp = BackendHTTPTests.setUp
+    setUp = fixture_http.BackendHTTPTests.setUp
 
     def test_agent_only_node_can_be_created_and_later_receive_protocols(self):
         headers = {**self.headers, 'X-Node-Plane-Telegram-User-ID': '101',
@@ -99,6 +99,128 @@ class BackendAgentRolloutTests(TestCase):
             self.assertFalse(service._execute({'node_key': 'lv1', 'intent_json': json.dumps({
                 'transport': 'ssh', 'ssh_target': 'root@lv1.example', 'ssh_port': 22})}))
         self.assertEqual(service._failure_code, 'ssh_prerequisites')
+
+    def test_release_binary_unavailable_failure_is_exposed_from_script_output(self):
+        service = AgentRolloutService(self.db)
+        for stderr in (
+            'RELEASE_BINARY_UNAVAILABLE: Driver release asset node-plane-driver-linux-amd64.tar.gz for v0.4.1 is missing or inaccessible.',
+            'Agent release asset node-plane-agent-linux-amd64.tar.gz for v0.4.1 is missing or inaccessible. Publish both release assets or configure authenticated binary URLs.',
+        ):
+            with patch.dict(os.environ, {'NODE_PLANE_APP_DIR': '/opt/node-plane/current'}), \
+                    patch('backend.agent_rollout.subprocess.run', return_value=SimpleNamespace(
+                        returncode=1, stdout='', stderr=stderr)):
+                self.assertFalse(service._execute({'node_key': 'lv1', 'intent_json': json.dumps({
+                    'transport': 'ssh', 'ssh_target': 'root@lv1.example', 'ssh_port': 22})}))
+            self.assertEqual(service._failure_code, 'release_binary_unavailable')
+
+    def test_legacy_rust_required_and_build_resources_failures_are_preserved(self):
+        for stderr, expected in (
+            ('RUST_INSTALL_REQUIRED: release binaries and local Rust build tools are unavailable.', 'rust_required'),
+            ('Not enough free memory for local Rust build: 512 MiB available', 'build_resources'),
+            ('CPU is too busy for local Rust build: 95% busy', 'build_resources'),
+        ):
+            service = AgentRolloutService(self.db)
+            with patch.dict(os.environ, {'NODE_PLANE_APP_DIR': '/opt/node-plane/current'}), \
+                    patch('backend.agent_rollout.subprocess.run', return_value=SimpleNamespace(
+                        returncode=1, stdout='', stderr=stderr)):
+                self.assertFalse(service._execute({'node_key': 'lv1', 'intent_json': json.dumps({
+                    'transport': 'ssh', 'ssh_target': 'root@lv1.example', 'ssh_port': 22})}))
+            self.assertEqual(service._failure_code, expected)
+
+    def test_install_rust_parameter_is_rejected_without_execution(self):
+        self.node()
+        headers = {**self.headers, 'X-Node-Plane-Telegram-User-ID': '101',
+                   'Idempotency-Key': str(uuid4())}
+        path = '/api/v1/nodes/lv1/agent-rollouts'
+        response = self.client.post(path, headers=headers,
+            json={'transport': 'local', 'install_rust': True})
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()['error']['code'], 'install_rust_unsupported')
+        service = AgentRolloutService(self.db)
+        from backend.authorization import AccessDenied, Actor, Principal, PrincipalKind
+        actor = Actor(Principal('admin', PrincipalKind.ACCOUNT, frozenset({'nodes.manage'})), self.admin)
+        with self.assertRaises(AccessDenied) as ctx:
+            service.request(actor, 'lv1', str(uuid4()), transport='local', install_rust=True)
+        self.assertEqual(ctx.exception.code, 'install_rust_unsupported')
+
+    def test_known_preinstall_failure_allows_recovery_retry_but_timeout_and_forged_output_do_not(self):
+        from backend.authorization import AccessDenied, Actor, Principal, PrincipalKind
+        from backend.recovery import overview
+        actor = Actor(Principal('admin', PrincipalKind.ACCOUNT, frozenset({'nodes.manage', 'maintenance.manage'})), self.admin)
+        self.node()
+        with self.db.transaction() as conn:
+            conn.execute("INSERT INTO backend_node_connections(node_key, transport, ssh_target) VALUES ('lv1', 'ssh', 'root@lv1.example')")
+        service = AgentRolloutService(self.db)
+
+        # 1. Known pre-install failure: release_binary_unavailable
+        req1 = service.request(actor, 'lv1', str(uuid4()), transport='ssh', ssh_target='root@lv1.example')
+        with patch.dict(os.environ, {'NODE_PLANE_APP_DIR': '/opt/node-plane/current'}), \
+                patch('backend.agent_rollout.subprocess.run', return_value=SimpleNamespace(
+                    returncode=1, stdout='', stderr='RELEASE_BINARY_UNAVAILABLE: Driver release asset node-plane-driver-linux-amd64.tar.gz for v0.4.1 is missing or inaccessible.')):
+            service.run_one()
+        row1 = service.get(actor, req1['id'])
+        self.assertEqual(row1['status'], 'blocked')
+        self.assertTrue(service.preflight_failed(row1))
+        items1 = overview(self.db, actor)['items']
+        item1 = next(i for i in items1 if i['id'] == req1['id'])
+        self.assertIn('resume', item1['actions'])
+        resumed1 = service.resume_preflight(actor, req1['id'])
+        self.assertEqual(resumed1['status'], 'awaiting_executor')
+
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_agent_rollouts SET status='cancelled' WHERE id=?", (req1['id'],))
+
+        # 2. Known pre-install failure: legacy rust_required
+        req2 = service.request(actor, 'lv1', str(uuid4()), transport='ssh', ssh_target='root@lv1.example')
+        with patch.dict(os.environ, {'NODE_PLANE_APP_DIR': '/opt/node-plane/current'}), \
+                patch('backend.agent_rollout.subprocess.run', return_value=SimpleNamespace(
+                    returncode=1, stdout='', stderr='RUST_INSTALL_REQUIRED: release binaries and local Rust build tools are unavailable.')):
+            service.run_one()
+        row2 = service.get(actor, req2['id'])
+        self.assertEqual(row2['status'], 'blocked')
+        self.assertTrue(service.preflight_failed(row2))
+        items2 = overview(self.db, actor)['items']
+        item2 = next(i for i in items2 if i['id'] == req2['id'])
+        self.assertIn('resume', item2['actions'])
+        resumed2 = service.resume_preflight(actor, req2['id'])
+        self.assertEqual(resumed2['status'], 'awaiting_executor')
+
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_agent_rollouts SET status='cancelled' WHERE id=?", (req2['id'],))
+
+        # 3. TimeoutError / no receipt: does NOT authorize retry
+        req3 = service.request(actor, 'lv1', str(uuid4()), transport='ssh', ssh_target='root@lv1.example')
+        with patch.dict(os.environ, {'NODE_PLANE_APP_DIR': '/opt/node-plane/current'}), \
+                patch('backend.agent_rollout.subprocess.run', side_effect=TimeoutError("installer timeout")):
+            service.run_one()
+        row3 = service.get(actor, req3['id'])
+        self.assertEqual(row3['status'], 'blocked')
+        self.assertFalse(service.preflight_failed(row3))
+        items3 = overview(self.db, actor)['items']
+        item3 = next(i for i in items3 if i['id'] == req3['id'])
+        self.assertNotIn('resume', item3['actions'])
+        with self.assertRaises(AccessDenied) as ctx:
+            service.resume_preflight(actor, req3['id'])
+        self.assertEqual(ctx.exception.code, 'recovery_unconfirmed')
+
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_agent_rollouts SET status='cancelled' WHERE id=?", (req3['id'],))
+
+        # 4. Forged generic output: does NOT authorize retry
+        req4 = service.request(actor, 'lv1', str(uuid4()), transport='ssh', ssh_target='root@lv1.example')
+        with patch.dict(os.environ, {'NODE_PLANE_APP_DIR': '/opt/node-plane/current'}), \
+                patch('backend.agent_rollout.subprocess.run', return_value=SimpleNamespace(
+                    returncode=1, stdout='Something unexpected occurred', stderr='ERROR: unrelated file is missing or inaccessible.')):
+            service.run_one()
+        row4 = service.get(actor, req4['id'])
+        self.assertEqual(row4['status'], 'blocked')
+        self.assertFalse(service.preflight_failed(row4))
+        items4 = overview(self.db, actor)['items']
+        item4 = next(i for i in items4 if i['id'] == req4['id'])
+        self.assertNotIn('resume', item4['actions'])
+        with self.assertRaises(AccessDenied) as ctx:
+            service.resume_preflight(actor, req4['id'])
+        self.assertEqual(ctx.exception.code, 'recovery_unconfirmed')
 
     def test_ssh_access_failures_are_not_mislabeled_as_host_prerequisites(self):
         for detail, expected in (

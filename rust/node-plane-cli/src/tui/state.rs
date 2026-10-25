@@ -196,7 +196,7 @@ pub(super) enum Control {
     NodesApply,
     NodesDiagnostics,
     NodesDiagnosticPage(bool),
-    NodesRecovery(usize, bool),
+    NodesRecovery(usize, &'static str),
     NodesDiagnosticItem(usize),
     NodesRecoveryConfirm,
     NodesMaintenance,

@@ -188,9 +188,10 @@ class UpdateService:
                 import re
                 if not re.fullmatch(r'[0-9a-fA-F]{40}', resolved or ''):
                     raise AccessDenied('update_target_blocked', 409)
-            plan = {'resolved_ref': resolved}
+            plan = {'resolved_ref': resolved, 'expected_commit': selected.get('commit'),
+                    'launch_state': 'not_started', 'phase': 'core'}
             if kind == 'stack':
-                plan.update(expected_commit=selected.get('commit'), phase='core')
+                plan.update(phase='core')
                 if not selected.get('commit') or len(selected['commit']) != 40:
                     raise AccessDenied('update_target_blocked', 409)
                 with self.db.connect() as conn:
@@ -237,7 +238,7 @@ class UpdateService:
             conn.execute('INSERT INTO backend_update_jobs VALUES (?,?,?,?,?,?,?,?)',
                 (job_id, actor.account.id, key, kind, encoded, 'awaiting_executor',
                  json.dumps(plan) if plan else None, datetime.now(timezone.utc).isoformat()))
-            if kind == 'stack':
+            if kind in {'version', 'stack'}:
                 conn.execute('INSERT INTO backend_controller_update_gate VALUES (1,?)', (job_id,))
             for item in items:
                 conn.execute('INSERT INTO backend_update_items VALUES (?,?,?,?,?,?)',
@@ -252,7 +253,7 @@ class UpdateService:
                 raise AccessDenied('resource_not_found', 404)
             items = conn.execute('SELECT node_key,status,child_id,error_code,intent_json FROM backend_update_items WHERE job_id=? ORDER BY node_key', (job_id,)).fetchall()
         result = json.loads(row['result_json']) if row['result_json'] else None
-        if row['kind'] == 'stack' and row['status'] == 'running':
+        if row['kind'] in {'stack', 'version'} and row['status'] == 'running':
             progress = self._stack_progress(job_id)
             if progress.get('components'):
                 result = {**(result or {}), 'components': progress['components']}
@@ -266,30 +267,118 @@ class UpdateService:
         # An interrupted systemd launch is uncertain; never launch it again.
         with self.db.transaction() as conn:
             conn.execute("UPDATE backend_update_jobs SET status='blocked' WHERE kind IN ('version','stack') AND status='running' AND result_json IS NULL")
-            conn.execute("UPDATE backend_update_items SET status='blocked',error_code='execution_interrupted' WHERE node_key='@driver' AND status='running'")
+            for row in conn.execute("SELECT id,result_json FROM backend_update_jobs WHERE kind IN ('version','stack') AND status='running'").fetchall():
+                if json.loads(row['result_json'] or '{}').get('launch_state') == 'dispatching':
+                    conn.execute("UPDATE backend_update_jobs SET status='blocked' WHERE id=?", (row['id'],))
+            conn.execute("UPDATE backend_update_items SET status='blocked',error_code='driver_install_unconfirmed' WHERE node_key='@driver' AND status='running'")
+
+    @staticmethod
+    def _child_key(job, item):
+        intent = json.loads(item['intent_json'])
+        phase = intent.get('phase', job['kind'])
+        suffix = phase + ':' + intent['retired_child_id'] if intent.get('retired_child_id') else item['node_key'] + ':' + phase
+        return str(uuid5(UUID(job['id']), suffix))
+
+    def _recovery_job(self, conn, actor, job_id):
+        conn.execute('UPDATE backend_account_guard SET revision=revision+1 WHERE id=1')
+        self._fresh_admin(conn, actor)
+        job = conn.execute('SELECT * FROM backend_update_jobs WHERE id=?', (job_id,)).fetchone()
+        if not job:
+            raise AccessDenied('resource_not_found', 404)
+        gate = conn.execute('SELECT job_id FROM backend_controller_update_gate WHERE id=1').fetchone()
+        if gate and gate['job_id'] != job_id:
+            raise AccessDenied('update_pending', 409)
+        if conn.execute("SELECT 1 FROM backend_system_cleanup_jobs WHERE status IN ('queued','running','awaiting_shutdown','blocked') LIMIT 1").fetchone():
+            raise AccessDenied('system_cleanup_in_progress', 409)
+        if conn.execute("SELECT 1 FROM backend_backup_jobs WHERE action='restore' AND status IN ('awaiting_executor','running') LIMIT 1").fetchone():
+            raise AccessDenied('restore_in_progress', 409)
+        return dict(job)
+
+    def _bound_child(self, conn, job, item):
+        intent = json.loads(item['intent_json'])
+        agent = job['kind'] == 'agents' or job['kind'] == 'stack' and intent.get('phase') == 'agent'
+        table = 'backend_agent_rollouts' if agent else 'backend_node_jobs'
+        owner = 'actor_account_id' if agent else 'actor_id'
+        key = self._child_key(job, item)
+        if item['child_id']:
+            child = conn.execute(f'SELECT * FROM {table} WHERE id=?', (item['child_id'],)).fetchone()
+            if child is None:
+                raise AccessDenied('update_child_missing', 409)
+        else:
+            child = conn.execute(f'SELECT * FROM {table} WHERE {owner}=? AND command_key=?', (job['actor_id'], key)).fetchone()
+        if child is None:
+            return None
+        if (child['node_key'], child[owner], child['command_key']) != (item['node_key'], job['actor_id'], key):
+            raise AccessDenied('update_child_mismatch', 409)
+        if agent:
+            saved = json.loads(child['intent_json'])
+            connection = conn.execute('SELECT transport,ssh_target FROM backend_node_connections WHERE node_key=?', (item['node_key'],)).fetchone()
+            expected = (intent.get('transport'), intent.get('ssh_target'))
+            if ((saved.get('transport'), saved.get('ssh_target')) != expected
+                    or saved.get('ssh_port', 22) != intent.get('ssh_port', 22)
+                    or bool(saved.get('skip_driver')) != (job['kind'] == 'stack')
+                    or saved.get('install_rust', False)
+                    or not connection or (connection['transport'], connection['ssh_target']) != expected):
+                raise AccessDenied('update_child_mismatch', 409)
+        elif child['action'] != 'sync_runtime' or child['revision'] != intent.get('desired_revision'):
+            raise AccessDenied('update_child_mismatch', 409)
+        return dict(child)
 
     def cancel(self, actor, job_id):
-        """Cancel only work that has not crossed any execution boundary.
-
-        The caller holds the worker lock. Never clear an uncertain launch or
-        installation merely because the operator requests cancellation.
-        """
+        """Stop only proven unstarted or terminal work; never call RPC in a transaction."""
         require_permission(actor, 'maintenance.manage')
         with self.db.transaction() as conn:
-            conn.execute('UPDATE backend_account_guard SET revision=revision+1 WHERE id=1')
-            self._fresh_admin(conn, actor)
-            job = conn.execute('SELECT * FROM backend_update_jobs WHERE id=?', (job_id,)).fetchone()
-            if not job:
-                raise AccessDenied('resource_not_found', 404)
-            if job['status'] == 'cancelled':
-                return self.get(actor, job_id)
-            if job['status'] != 'awaiting_executor' or conn.execute("""SELECT 1 FROM backend_update_items
-                    WHERE job_id=? AND (status!='awaiting_executor' OR child_id IS NOT NULL)""", (job_id,)).fetchone():
+            job = self._recovery_job(conn, actor, job_id)
+        if job['status'] == 'cancelled':
+            return self.get(actor, job_id)
+        plan = json.loads(job['result_json'] or '{}')
+        terminal_version = False
+        if (job['status'] == 'blocked' and job['kind'] == 'version' and plan.get('phase') != 'core'
+                and plan.get('launch_state') != 'not_started'):
+            state = self.updater.refresh_update_run_state()
+            terminal_version = bool(plan.get('unit_name') and state.get('last_run_unit') == plan['unit_name']
+                and not state.get('last_run_unit_missing') and not state.get('last_run_observation_error')
+                and state.get('last_run_status') in {'success', 'failed'})
+            if not terminal_version:
                 raise AccessDenied('update_cancel_unsafe', 409)
-            result = json.loads(job['result_json'] or '{}')
-            result.update(cancelled_by=actor.account.id, cancelled_at=datetime.now(timezone.utc).isoformat())
-            conn.execute("UPDATE backend_update_jobs SET status='cancelled',result_json=? WHERE id=?", (json.dumps(result), job_id))
-            conn.execute("UPDATE backend_update_items SET status='skipped' WHERE job_id=?", (job_id,))
+        with self.db.transaction() as conn:
+            current = self._recovery_job(conn, actor, job_id)
+            if current['status'] != job['status'] or current['result_json'] != job['result_json']:
+                raise AccessDenied('update_selection_changed', 409)
+            if job['status'] not in {'awaiting_executor', 'blocked'}:
+                raise AccessDenied('update_cancel_unsafe', 409)
+            items = conn.execute('SELECT * FROM backend_update_items WHERE job_id=? ORDER BY node_key', (job_id,)).fetchall()
+            if job['status'] == 'awaiting_executor':
+                if any(i['status'] != 'awaiting_executor' or i['child_id'] for i in items):
+                    raise AccessDenied('update_cancel_unsafe', 409)
+            elif (job['kind'] == 'stack' and plan.get('phase') != 'agents'
+                    or job['kind'] == 'version' and plan.get('phase') == 'core'):
+                if plan.get('launch_state') != 'not_started' or any(i['status'] != 'awaiting_executor' or i['child_id'] for i in items):
+                    raise AccessDenied('update_cancel_unsafe', 409)
+            elif job['kind'] == 'version' and not terminal_version and plan.get('launch_state') != 'not_started':
+                raise AccessDenied('update_cancel_unsafe', 409)
+            for item in items:
+                if item['node_key'] == '@driver':
+                    if item['status'] not in {'awaiting_executor', 'succeeded', 'skipped', 'cancelled'} and not (item['status'] == 'blocked' and item['error_code'] == 'driver_install_failed'):
+                        raise AccessDenied('update_cancel_unsafe', 409)
+                    continue
+                require_permission(actor, 'nodes.manage')
+                child = self._bound_child(conn, job, item)
+                if child is None:
+                    continue  # No durable child exists, so its executor cannot have run.
+                intent = json.loads(item['intent_json'])
+                agent = job['kind'] == 'agents' or job['kind'] == 'stack' and intent.get('phase') == 'agent'
+                if child['status'] in {'succeeded', 'superseded', 'cancelled'}:
+                    continue
+                safe = child['status'] == 'awaiting_executor' or agent and AgentRolloutService(self.db).preflight_failed(child)
+                if not safe:
+                    raise AccessDenied('update_cancel_unsafe', 409)
+                table = 'backend_agent_rollouts' if agent else 'backend_node_jobs'
+                conn.execute(f'UPDATE {table} SET status=? WHERE id=? AND status=?',
+                    ('cancelled' if agent else 'superseded', child['id'], child['status']))
+            plan.update(cancelled_by=actor.account.id, cancelled_at=datetime.now(timezone.utc).isoformat())
+            conn.execute("UPDATE backend_update_jobs SET status='cancelled',result_json=? WHERE id=?", (json.dumps(plan), job_id))
+            conn.execute("UPDATE backend_update_items SET status='skipped' WHERE job_id=? AND status!='succeeded'", (job_id,))
             conn.execute('DELETE FROM backend_controller_update_gate WHERE job_id=?', (job_id,))
         return self.get(actor, job_id)
 
@@ -300,24 +389,185 @@ class UpdateService:
             raise AccessDenied('permission_denied')
 
     def recheck(self, actor, job_id):
-        """Re-read an uncertain core outcome without repeating the installation.
-
-        Failed rollback or missing evidence keeps the gate. Restored durable
-        health/rollback evidence can release it after manual host recovery.
-        """
+        """Re-read an uncertain core outcome or children without repeating installation."""
         require_permission(actor, 'maintenance.manage')
         with self.db.transaction() as conn:
-            conn.execute('UPDATE backend_account_guard SET revision=revision+1 WHERE id=1')
-            self._fresh_admin(conn, actor)
-            row = conn.execute('SELECT * FROM backend_update_jobs WHERE id=?', (job_id,)).fetchone()
-            if not row:
-                raise AccessDenied('resource_not_found', 404)
-            if row['status'] != 'blocked' or row['kind'] != 'stack':
-                raise AccessDenied('update_recovery_unavailable', 409)
-            plan = json.loads(row['result_json'] or '{}')
-            if not plan.get('unit_name') or plan.get('phase') != 'core':
+            job = self._recovery_job(conn, actor, job_id)
+            if job['status'] != 'blocked':
+                raise AccessDenied('task_not_blocked', 409)
+        plan = json.loads(job['result_json'] or '{}')
+        intent = json.loads(job['intent_json'] or '{}')
+
+        if job['kind'] in {'stack', 'version'} and plan.get('phase') == 'core':
+            if not plan.get('unit_name'):
                 raise AccessDenied('update_recovery_unconfirmed', 409)
-        self._run_stack_core(dict(row), actor)
+            progress = self._stack_progress(job['id'])
+            state = self.updater.refresh_update_run_state()
+            if not progress and state.get('last_run_unit') != plan.get('unit_name'):
+                raise AccessDenied('update_recovery_unconfirmed', 409)
+            self._run_stack_core(job, actor)
+            return self.get(actor, job_id)
+
+        if job['kind'] == 'version':
+            unit_name = plan.get('unit_name')
+            if not unit_name:
+                raise AccessDenied('update_recovery_unconfirmed', 409)
+            state = self.updater.refresh_update_run_state()
+            if (state.get('last_run_unit') != unit_name or state.get('last_run_unit_missing')
+                    or state.get('last_run_observation_error')):
+                raise AccessDenied('update_recovery_unconfirmed', 409)
+            if state.get('last_run_status') == 'success':
+                target_commit = plan.get('expected_commit') or plan.get('resolved_ref') or intent.get('target_ref')
+                verified = False
+                plan['observed_unit_terminal'] = 'success'
+                if target_commit and len(target_commit) == 40 and hasattr(self.driver, 'binary_info'):
+                    verified, _ = self._verify_commit(self.driver.binary_info, 'commit', target_commit)
+                if verified:
+                    self._finish(job_id, 'succeeded', plan)
+                else:
+                    self._finish(job_id, 'blocked', {**plan, 'error_code': 'build_verification_failed'})
+            elif state.get('last_run_status') == 'failed':
+                self._finish(job_id, 'blocked', {**plan, 'observed_unit_terminal': 'failed', 'error_code': 'update_failed'})
+            return self.get(actor, job_id)
+
+        # Kind is 'agents', 'runtimes', or 'stack' in agents phase
+        with self.db.connect() as conn:
+            items = conn.execute('SELECT * FROM backend_update_items WHERE job_id=? ORDER BY node_key', (job_id,)).fetchall()
+
+        for item in items:
+            item_intent = json.loads(item['intent_json'])
+            agent_phase = (job['kind'] == 'agents' or (job['kind'] == 'stack' and item_intent.get('phase') == 'agent'))
+
+            if item['node_key'] == '@driver':
+                if item['status'] == 'blocked':
+                    verified, _ = self._verify_commit(self.driver.binary_info, 'commit', item_intent['expected_commit'])
+                    if verified:
+                        with self.db.transaction() as conn:
+                            conn.execute("UPDATE backend_update_items SET status='succeeded',error_code=NULL WHERE job_id=? AND node_key='@driver'", (job_id,))
+                continue
+
+            require_permission(actor, 'nodes.manage')
+            with self.db.transaction() as conn:
+                self._recovery_job(conn, actor, job_id)
+                child = self._bound_child(conn, job, item)
+                if child and not item['child_id']:
+                    conn.execute('UPDATE backend_update_items SET child_id=? WHERE job_id=? AND node_key=?', (child['id'], job_id, item['node_key']))
+            if child:
+                child_status = child['status']
+                if child_status == 'succeeded':
+                    field = 'agent_commit' if agent_phase else 'runtime_commit'
+                    verified, error_code = self._verify_commit(
+                        lambda: self.driver.inspect_node_services(item['node_key']), field,
+                        item_intent['expected_commit'])
+                    if verified:
+                        if job['kind'] == 'stack' and agent_phase and item_intent.get('applied_revision', 0):
+                            item_intent['phase'] = 'runtime'
+                            with self.db.transaction() as conn:
+                                conn.execute("UPDATE backend_update_items SET status='awaiting_executor',child_id=NULL,intent_json=?,error_code=NULL WHERE job_id=? AND node_key=?",
+                                    (json.dumps(item_intent), job_id, item['node_key']))
+                        else:
+                            with self.db.transaction() as conn:
+                                conn.execute("UPDATE backend_update_items SET status='succeeded',error_code=NULL WHERE job_id=? AND node_key=?",
+                                    (job_id, item['node_key']))
+                    else:
+                        with self.db.transaction() as conn:
+                            conn.execute("UPDATE backend_update_items SET status='blocked',error_code=? WHERE job_id=? AND node_key=?",
+                                (error_code or 'build_verification_failed', job_id, item['node_key']))
+                elif child_status in {'cancelled', 'superseded'}:
+                    with self.db.transaction() as conn:
+                        conn.execute("UPDATE backend_update_items SET status='cancelled',error_code=? WHERE job_id=? AND node_key=?",
+                            (child.get('error_code') or 'child_cancelled', job_id, item['node_key']))
+                elif child_status == 'blocked':
+                    error_code = child.get('failure_code') or child.get('error_code') or 'node_update_failed'
+                    with self.db.transaction() as conn:
+                        conn.execute("UPDATE backend_update_items SET status='blocked',error_code=? WHERE job_id=? AND node_key=?",
+                            (error_code, job_id, item['node_key']))
+
+        with self.db.connect() as conn:
+            updated_items = conn.execute("SELECT * FROM backend_update_items WHERE job_id=?", (job_id,)).fetchall()
+        states = {i['status'] for i in updated_items}
+        if not states & {'running', 'awaiting_executor'}:
+            if not states or states == {'succeeded'}:
+                self._finish(job_id, 'succeeded')
+            elif states <= {'cancelled', 'skipped'}:
+                self._finish(job_id, 'cancelled')
+            elif job['kind'] == 'stack' and 'blocked' not in states:
+                self._finish(job_id, 'partial')
+            else:
+                if 'blocked' in states:
+                    self._finish(job_id, 'blocked')
+                else:
+                    self._finish(job_id, 'partial' if 'succeeded' in states else 'cancelled')
+        return self.get(actor, job_id)
+
+    def resume(self, actor, job_id):
+        """Continue saved work only after its original execution boundary is settled.
+
+        Caller holds the worker lock. Remote journal resolution is a separate
+        child action; no network request or nested writer runs under this guard.
+        """
+        require_permission(actor, 'maintenance.manage')
+        preparation_retries = []
+        changes = []
+        with self.db.transaction() as conn:
+            job = self._recovery_job(conn, actor, job_id)
+            plan = json.loads(job['result_json'] or '{}')
+            if job['status'] != 'blocked':
+                raise AccessDenied('task_not_blocked', 409)
+            if job['kind'] not in {'agents', 'runtimes'} and not (job['kind'] == 'stack' and plan.get('phase') == 'agents'):
+                raise AccessDenied('update_recovery_unavailable', 409)
+            owner = conn.execute('SELECT role,status FROM backend_accounts WHERE id=?', (job['actor_id'],)).fetchone()
+            if not owner or owner['role'] != 'admin' or owner['status'] != 'approved':
+                raise AccessDenied('update_owner_unavailable', 409)
+            from config import APP_COMMIT
+            items = conn.execute('SELECT * FROM backend_update_items WHERE job_id=? ORDER BY node_key', (job_id,)).fetchall()
+            for item in items:
+                intent = json.loads(item['intent_json'])
+                if not same_commit(intent.get('expected_commit'), APP_COMMIT):
+                    raise AccessDenied('update_target_drifted', 409)
+                if item['status'] in {'succeeded', 'cancelled', 'skipped'}:
+                    continue
+                if item['node_key'] == '@driver':
+                    if item['status'] != 'awaiting_executor' and item['error_code'] != 'driver_install_failed':
+                        raise AccessDenied('update_recovery_unconfirmed', 409)
+                    changes.append((item['node_key'], 'awaiting_executor', None, intent))
+                    continue
+                require_permission(actor, 'nodes.manage')
+                child = self._bound_child(conn, job, item)
+                if child is None:
+                    changes.append((item['node_key'], 'awaiting_executor', None, intent))
+                    continue
+                agent = job['kind'] == 'agents' or job['kind'] == 'stack' and intent.get('phase') == 'agent'
+                if child['status'] in {'superseded', 'cancelled'}:
+                    intent['retired_child_id'] = child['id']
+                    node = conn.execute('SELECT desired_revision FROM backend_nodes WHERE key=?', (item['node_key'],)).fetchone()
+                    if not node:
+                        raise AccessDenied('resource_not_found', 404)
+                    intent['desired_revision'] = node['desired_revision']
+                    changes.append((item['node_key'], 'awaiting_executor', None, intent))
+                elif agent and AgentRolloutService(self.db).preflight_failed(child):
+                    preparation_retries.append(child['id'])
+                    changes.append((item['node_key'], 'running', child['id'], intent))
+                elif child['status'] in {'succeeded', 'awaiting_executor', 'running'}:
+                    changes.append((item['node_key'], 'running', child['id'], intent))
+                else:
+                    raise AccessDenied('update_child_recovery_required', 409)
+            if not changes:
+                raise AccessDenied('update_recovery_unavailable', 409)
+        # This helper performs its own admission transaction. Calling it while
+        # holding backend_account_guard would deadlock PostgreSQL connections.
+        for identity in preparation_retries:
+            AgentRolloutService(self.db).resume_preflight(actor, identity)
+        with self.db.transaction() as conn:
+            current = self._recovery_job(conn, actor, job_id)
+            if current['status'] != 'blocked' or current['result_json'] != job['result_json']:
+                raise AccessDenied('update_selection_changed', 409)
+            for node_key, status, child_id, intent in changes:
+                conn.execute('UPDATE backend_update_items SET status=?,child_id=?,intent_json=?,error_code=NULL WHERE job_id=? AND node_key=?',
+                    (status, child_id, json.dumps(intent), job_id, node_key))
+            plan.pop('error_code', None)
+            plan.update(resumed_by=actor.account.id, resumed_at=datetime.now(timezone.utc).isoformat())
+            conn.execute("UPDATE backend_update_jobs SET status='running',result_json=? WHERE id=?", (json.dumps(plan), job_id))
         return self.get(actor, job_id)
 
     def run_one(self):
@@ -331,27 +581,24 @@ class UpdateService:
             if actor is None or actor.account.role != 'admin' or actor.account.status != 'approved':
                 self._finish(job['id'], 'blocked')
                 return True
-            if job['kind'] == 'stack':
+            plan = json.loads(job['result_json'] or '{}')
+            if job['kind'] == 'version' and job['status'] == 'awaiting_executor' and not plan.get('phase'):
+                # Upgrade only work that has never crossed the installer boundary.
+                plan['phase'] = 'core'
+                with self.db.transaction() as conn:
+                    conn.execute('UPDATE backend_update_jobs SET result_json=? WHERE id=?', (json.dumps(plan), job['id']))
+                job = dict(job, result_json=json.dumps(plan))
+            if job['kind'] == 'stack' or job['kind'] == 'version' and plan.get('phase') == 'core':
                 if self._run_stack_core(job, actor):
                     return True
-                if json.loads(job['result_json'] or '{}').get('phase') != 'agents':
+                if plan.get('phase') != 'agents':
                     continue
             if job['kind'] == 'version':
-                if job['status'] == 'awaiting_executor':
-                    intent = json.loads(job['intent_json'])
-                    plan = json.loads(job['result_json'])
-                    with self.db.transaction() as conn:
-                        conn.execute("UPDATE backend_update_jobs SET status='running', result_json=NULL WHERE id=?", (job['id'],))
-                    try:
-                        result = self.updater.schedule_update(branch=intent['branch'], target_ref=plan['resolved_ref'])
-                    except Exception:
-                        result = {'status': 'failed'}
-                    self._finish(job['id'], 'running' if result.get('status') == 'running' else 'blocked',
-                                 {'status': result.get('status'), 'unit_name': result.get('unit_name'), 'target_ref': plan['resolved_ref']})
-                    return True
+                # Legacy launches without receipts are observed, never replayed.
                 state = self.updater.refresh_update_run_state()
                 launch = json.loads(job['result_json'] or '{}')
-                if state.get('last_run_unit') != launch.get('unit_name'):
+                if (state.get('last_run_unit') != launch.get('unit_name')
+                        or state.get('last_run_unit_missing') or state.get('last_run_observation_error')):
                     self._finish(job['id'], 'blocked')
                     return True
                 if state.get('last_run_status') in {'success', 'failed'}:
@@ -363,7 +610,7 @@ class UpdateService:
             for item in items:
                 if item['status'] == 'awaiting_executor':
                     intent = json.loads(item['intent_json'])
-                    child_key = str(uuid5(UUID(job['id']), item['node_key'] + ':' + intent.get('phase', job['kind'])))
+                    child_key = self._child_key(job, item)
                     if item['node_key'] == '@driver':
                         with self.db.transaction() as conn:
                             conn.execute("UPDATE backend_update_items SET status='running' WHERE job_id=? AND node_key='@driver'", (job['id'],))
@@ -371,16 +618,21 @@ class UpdateService:
                         try:
                             root = Path(os.environ['NODE_PLANE_APP_DIR'])
                             args = ['bash', str(root / 'scripts/setup_driver_agents.sh'), '--skip-agents', '--bin-source', 'auto']
-                            succeeded = (self.runner(args) if self.runner else subprocess.run(args, cwd=root,
-                                env={**os.environ, 'NODE_PLANE_INSTALL_RUST': 'no'}, capture_output=True,
-                                timeout=1200, check=False).returncode == 0)
+                            res = (self.runner(args) if self.runner else subprocess.run(args, cwd=root,
+                                env=dict(os.environ), capture_output=True,
+                                timeout=1200, check=False))
+                            succeeded = res if isinstance(res, bool) else (res.returncode == 0)
                             if succeeded:
                                 succeeded, _ = self._verify_commit(self.driver.binary_info, 'commit', intent['expected_commit'])
+                                error_code = None if succeeded else 'driver_verification_failed'
+                            else:
+                                error_code = 'driver_install_failed'
                         except Exception:
                             succeeded = False
+                            error_code = 'driver_install_unconfirmed'
                         with self.db.transaction() as conn:
-                            conn.execute("UPDATE backend_update_items SET status=? WHERE job_id=? AND node_key='@driver'",
-                                ('succeeded' if succeeded else 'blocked', job['id']))
+                            conn.execute("UPDATE backend_update_items SET status=?,error_code=? WHERE job_id=? AND node_key='@driver'",
+                                ('succeeded' if succeeded else 'blocked', error_code, job['id']))
                         return True
                     try:
                         if job['kind'] == 'agents' or job['kind'] == 'stack' and intent.get('phase') == 'agent':
@@ -442,17 +694,24 @@ class UpdateService:
         if plan.get('phase') == 'agents':
             return False
         if job['status'] == 'awaiting_executor':
-            # Record launch intent before crossing the systemd boundary. Recovery
-            # never replays a launch whose outcome is uncertain.
+            expected_unit_name = f"node-plane-update-{UUID(job['id'])}"
+            plan.update(unit_name=expected_unit_name, launch_state='dispatching')
             with self.db.transaction() as conn:
-                conn.execute("UPDATE backend_update_jobs SET status='running',result_json=NULL WHERE id=?", (job['id'],))
+                conn.execute("UPDATE backend_update_jobs SET status='running',result_json=? WHERE id=?", (json.dumps(plan), job['id']))
             intent = json.loads(job['intent_json'])
             try:
+                binding = {'launch_job_id' if job['kind'] == 'version' else 'stack_job_id': job['id']}
                 launched = self.updater.schedule_update(branch=intent['branch'],
-                    target_ref=plan['resolved_ref'], stack_job_id=job['id'])
+                    target_ref=plan['resolved_ref'], **binding)
             except Exception:
                 launched = {'status': 'failed'}
-            plan.update(unit_name=launched.get('unit_name'))
+            if launched.get('unit_name') and launched['unit_name'] != expected_unit_name:
+                launched = {'status': 'failed'}
+                plan['error_code'] = 'update_unit_mismatch'
+            if launched.get('launch_state') == 'not_started':
+                plan['launch_state'] = 'not_started'
+            if launched.get('status') == 'running':
+                plan['launch_state'] = 'launched'
             self._finish(job['id'], 'running' if launched.get('status') == 'running' else 'blocked', plan)
             return True
         progress = self._stack_progress(job['id'])
@@ -496,10 +755,10 @@ class UpdateService:
             if progress.get('status') != 'succeeded':
                 self._finish(job['id'], 'blocked', {**plan, 'error_code': 'update_verification_unavailable'})
             else:
-                plan['phase'] = 'agents'
+                plan['phase'] = 'done' if job['kind'] == 'version' else 'agents'
                 plan.pop('error_code', None)
                 plan.pop('rollback_status', None)
-                self._finish(job['id'], 'running', plan)
+                self._finish(job['id'], 'succeeded' if job['kind'] == 'version' else 'running', plan)
             return True
         return False
 

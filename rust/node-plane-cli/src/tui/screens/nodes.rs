@@ -306,10 +306,15 @@ pub(in crate::tui) fn draw_node_diagnostics(
     let mut index = 0;
     let mut actions = Vec::new();
     if let Some((item, action)) = &app.nodes.recovery_confirm {
-        let explanation = if action == "resolve" {
-            "Recover this operation using the current server state?"
-        } else {
-            "Check the recorded result of this operation?"
+        let explanation = match action.as_str() {
+            "resolve" => "Recover this operation using confirmed server evidence?",
+            "resume" => {
+                "Continue the saved installation step without replaying an unknown command?"
+            }
+            "cancel" => {
+                "Stop setup only after confirming or fencing the current step? Installed components remain."
+            }
+            _ => "Check the recorded result of this operation?",
         };
         frame.render_widget(
             Paragraph::new(format!(
@@ -356,13 +361,29 @@ pub(in crate::tui) fn draw_node_diagnostics(
                 .as_array()
                 .is_some_and(|a| a.iter().any(|v| v == "recheck"))
             {
-                actions.push(("Recheck", Control::NodesRecovery(position, false)));
+                actions.push(("Recheck", Control::NodesRecovery(position, "recheck")));
             }
             if item["actions"]
                 .as_array()
                 .is_some_and(|a| a.iter().any(|v| v == "resolve"))
             {
-                actions.push(("Resolve block", Control::NodesRecovery(position, true)));
+                actions.push(("Resolve block", Control::NodesRecovery(position, "resolve")));
+            }
+            for (action, label) in [
+                ("resume", "Continue saved step"),
+                ("cancel", "Cancel setup"),
+            ] {
+                if item["actions"]
+                    .as_array()
+                    .is_some_and(|a| a.iter().any(|v| v == action))
+                {
+                    let label = if action == "cancel" && item["kind"] == "issuance" {
+                        "Close failed configuration request"
+                    } else {
+                        label
+                    };
+                    actions.push((label, Control::NodesRecovery(position, action)));
+                }
             }
         }
         actions.push(("Refresh", Control::NodesDiagnostics));
@@ -581,7 +602,13 @@ pub(in crate::tui) fn draw_node_maintenance(
             true,
         ));
     } else if !view.removed() {
-        if !view.active() {
+        if !view.active()
+            && app
+                .nodes
+                .card
+                .as_ref()
+                .is_some_and(|node| node.applied_revision > 0)
+        {
             actions.push((
                 if view.blocked() {
                     "Retry removal"
@@ -600,7 +627,8 @@ pub(in crate::tui) fn draw_node_maintenance(
         if !view.active()
             && !view.blocked()
             && app.nodes.card.as_ref().is_some_and(|node| {
-                node.agent == crate::nodes::AgentState::Ready
+                node.applied_revision > 0
+                    && node.agent == crate::nodes::AgentState::Ready
                     && !node.protocols.is_empty()
                     && !node.needs_observation(app.nodes.operation.as_ref())
                     && app.nodes.operation.as_ref().is_none_or(|op| {
@@ -803,8 +831,15 @@ pub(in crate::tui) fn node_card_actions(
             actions.push(("Apply changes", Control::NodesApply));
         }
     }
-    actions.push(("Temporary configs", Control::NodeTemporary));
-    actions.push(("Maintenance", Control::NodesMaintenance));
+    if node.applied_revision > 0 {
+        actions.push(("Temporary configs", Control::NodeTemporary));
+        actions.push(("Maintenance", Control::NodesMaintenance));
+    } else {
+        actions.push((
+            "Remove from registry",
+            Control::NodesRemove(crate::node_maintenance::Mode::RegistryOnly),
+        ));
+    }
     actions.extend([
         ("Refresh", Control::NodesRefresh),
         ("Back", Control::NodesBack),
@@ -1084,7 +1119,17 @@ pub(in crate::tui) fn draw_nodes(frame: &mut Frame, app: &App, area: Rect, hits:
         button_rows,
     );
     for (position, (label, control)) in actions.into_iter().enumerate() {
-        draw_button(frame, areas[position], label, selected(index));
+        draw_button_color(
+            frame,
+            areas[position],
+            label,
+            selected(index),
+            if matches!(control, Control::NodesRemove(_)) {
+                Color::Red
+            } else {
+                Color::Cyan
+            },
+        );
         hits.push(Hit {
             area: areas[position],
             control,

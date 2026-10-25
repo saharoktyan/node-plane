@@ -47,6 +47,8 @@ class InstallationDefaults:
             keys = [r['key'] for r in conn.execute('SELECT key FROM backend_nodes').fetchall()]
             keys += [r['node_key'] for r in conn.execute('SELECT node_key FROM backend_node_retirements').fetchall()]
             return {'local_available': local_available(conn), 'defaults': read_defaults(conn),
+                'ssh_preparation_required': not bool(conn.execute(
+                    "SELECT 1 FROM backend_node_connections WHERE transport='ssh' LIMIT 1").fetchone()),
                 'templates': [{**asdict(t), 'draft': t.draft(keys)} for t in NODE_TEMPLATES]}
 
     def update(self, actor, values, revision):

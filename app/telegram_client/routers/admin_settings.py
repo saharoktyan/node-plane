@@ -198,11 +198,22 @@ async def show_request_policy(chat_id: int, user_id: int, message_id: int,
     locale = await _locale(state)
     await state.update_data(settings_text_confirmation=None)
     policy = await backend.access_request_policy(user_id)
-    sections = (
-        Section(tr(locale, 'settings.rich.requests'), rows=(policy_choices(locale, 'request_policy_enabled', policy['enabled']),)),
-        Section(tr(locale, 'settings.rich.notifications'), rows=(policy_choices(locale, 'request_policy_notify', policy.get('notify_requests', True)),)),
-        Section(tr(locale, 'settings.rich.gate_message'), (policy['gate_message'],),
-            rows=((InlineKeyboardButton(text=tr(locale, 'request_policy.edit_message'), callback_data='request_policy_edit'),),)))
+    if policy['enabled']:
+        welcome = policy.get('welcome_message')
+        if not welcome or welcome == 'Request access to use this bot.':
+            welcome = tr(locale, 'home.request_prompt')
+        sections = (
+            Section(tr(locale, 'settings.rich.requests'), rows=(policy_choices(locale, 'request_policy_enabled', True),)),
+            Section(tr(locale, 'settings.rich.notifications'), rows=(policy_choices(locale, 'request_policy_notify', policy.get('notify_requests', True)),)),
+            Section(tr(locale, 'settings.rich.welcome_message'), (welcome,),
+                rows=((InlineKeyboardButton(text=tr(locale, 'request_policy.edit_message'), callback_data='request_policy_edit:welcome_message'),),)),
+        )
+    else:
+        sections = (
+            Section(tr(locale, 'settings.rich.requests'), rows=(policy_choices(locale, 'request_policy_enabled', False),)),
+            Section(tr(locale, 'settings.rich.gate_message'), (policy['gate_message'],),
+                rows=((InlineKeyboardButton(text=tr(locale, 'request_policy.edit_message'), callback_data='request_policy_edit:gate_message'),),)),
+        )
     await render(bot, chat_id, Screen(tr(locale, 'request_policy.title'),
         sections=sections, embedded_buttons=True, navigation=True),
         [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data=AdminSettingsCallback().pack())]], state, message_id)
@@ -285,11 +296,18 @@ async def request_policy_notify_cb(query: CallbackQuery, bot: Bot,
             state, query.message.message_id)
 
 
-@router.callback_query(F.data == 'request_policy_edit')
-async def request_policy_edit_cb(query: CallbackQuery, bot: Bot, state: FSMContext) -> None:
+@router.callback_query(F.data.startswith('request_policy_edit'))
+async def request_policy_edit_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext) -> None:
     await query.answer()
     locale = await _locale(state)
+    parts = query.data.split(':', 1)
+    if len(parts) > 1 and parts[1] in {'gate_message', 'welcome_message'}:
+        field = parts[1]
+    else:
+        policy = await backend.access_request_policy(query.from_user.id)
+        field = 'welcome_message' if policy['enabled'] else 'gate_message'
     await state.set_state(RequestPolicyState.waiting_for_gate_message)
+    await state.update_data(request_policy_field=field)
     await render(bot, query.message.chat.id,
         Screen(tr(locale, 'request_policy.edit_title'), (tr(locale, 'request_policy.edit_prompt'),), embedded_buttons=True, navigation=True),
         [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data=RequestPolicyCallback().pack())]],
@@ -307,7 +325,9 @@ async def request_policy_text(message: Message, bot: Bot, backend: BackendClient
         pass
     locale = await _locale(state)
     value = (message.text or '').strip()
-    message_id = (await state.get_data()).get('control_message_id')
+    data = await state.get_data()
+    message_id = data.get('control_message_id')
+    field = data.get('request_policy_field', 'welcome_message')
     if not value or len(value) > 500:
         await render(bot, message.chat.id,
             Screen(tr(locale, 'request_policy.edit_title'), (tr(locale, 'request_policy.invalid'),), embedded_buttons=True, navigation=True),
@@ -316,12 +336,12 @@ async def request_policy_text(message: Message, bot: Bot, backend: BackendClient
         return
     await state.set_state(None)
     nonce = uuid4().hex[:12]
-    await state.update_data(settings_text_confirmation={'kind': 'request', 'value': value,
+    await state.update_data(settings_text_confirmation={'kind': 'request', 'field': field, 'value': value,
         'nonce': nonce, 'message_id': message_id})
     await render(bot, message.chat.id,
         Screen(tr(locale, 'request_policy.title'), (tr(locale, 'settings.confirm_text'), value), embedded_buttons=True, navigation=True),
-        [[InlineKeyboardButton(text=tr(locale, 'policy.confirm'), callback_data='settings_text_confirm:' + nonce),
-          InlineKeyboardButton(text=tr(locale, 'cancel'), callback_data=RequestPolicyCallback().pack())]], state, message_id)
+        [[InlineKeyboardButton(text=tr(locale, 'cancel'), callback_data=RequestPolicyCallback().pack()),
+          InlineKeyboardButton(text=tr(locale, 'policy.confirm'), callback_data='settings_text_confirm:' + nonce)]], state, message_id)
 
 
 @router.callback_query(SshKeyCallback.filter())
@@ -534,15 +554,18 @@ async def traffic_settings_cb(query: CallbackQuery, bot: Bot,
             policy = await backend.traffic_policy(query.from_user.id)
         enabled = policy['enabled']
         choices = policy_choices(locale, 'traffic', enabled)
-        lines = (tr(locale, 'traffic.interval', minutes=policy['interval_minutes']),)
-        scan = policy.get('last_scan')
-        if scan:
-            lines += (tr(locale, 'traffic.scan', at=scan['at'][:16].replace('T', ' '),
-                         checked=scan['profiles_checked'], unknown=scan['unknown']),)
+        if enabled:
+            lines = (tr(locale, 'traffic.interval', minutes=policy['interval_minutes']),)
+            scan = policy.get('last_scan')
+            if scan:
+                lines += (tr(locale, 'traffic.scan', at=scan['at'][:16].replace('T', ' '),
+                             checked=scan['profiles_checked'], unknown=scan['unknown']),)
+            else:
+                lines += (tr(locale, 'traffic.not_checked'),)
+            sections = (Section(tr(locale, 'settings.rich.collection'), rows=(choices,)),
+                Section(tr(locale, 'settings.rich.scan'), lines))
         else:
-            lines += (tr(locale, 'traffic.not_checked'),)
-        sections = (Section(tr(locale, 'settings.rich.collection'), rows=(choices,)),
-            Section(tr(locale, 'settings.rich.scan'), lines))
+            sections = (Section(tr(locale, 'settings.rich.collection'), rows=(choices,)),)
     except BackendError as exc:
         lines = (_friendly_error(locale, exc),)
     await render(bot, query.message.chat.id, Screen(tr(locale, 'traffic.title'),
@@ -561,7 +584,8 @@ async def settings_text_confirm(query: CallbackQuery, bot: Bot, backend: Backend
         if pending['kind'] == 'title':
             await backend.update_bot_title(query.from_user.id, pending['value'])
         else:
-            await backend.update_access_request_policy(query.from_user.id, {'gate_message': pending['value']})
+            field = pending.get('field', 'gate_message')
+            await backend.update_access_request_policy(query.from_user.id, {field: pending['value']})
     except BackendError as exc:
         await query.answer(_friendly_error(locale, exc), show_alert=True)
         return

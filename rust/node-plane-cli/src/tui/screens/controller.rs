@@ -11,6 +11,8 @@ fn operation_kind_label(kind: &str) -> &str {
         "backup" => "Backup",
         "removal" => "Node removal",
         "temporary" => "Temporary configuration",
+        "issuance" => "Configuration request",
+        "cleanup" => "Controller cleanup",
         _ => "Operation",
     }
 }
@@ -35,6 +37,8 @@ pub(in crate::tui) fn recovery_controls(page: &serde_json::Value) -> Vec<(String
     for (index, item) in page["items"].as_array().into_iter().flatten().enumerate() {
         for (action, value) in item["actions"].as_array().into_iter().flatten().enumerate() {
             let label = match value.as_str().unwrap_or("") {
+                "retry" if item["kind"] == "cleanup" => "Continue cleanup",
+                "abort" if item["kind"] == "cleanup" => "Cancel cleanup",
                 "recheck" => "Check result",
                 "resolve" if item["kind"] == "bootstrap" => "Resume setup",
                 "resolve" if item["kind"] == "settings" => "Reapply settings",
@@ -43,7 +47,11 @@ pub(in crate::tui) fn recovery_controls(page: &serde_json::Value) -> Vec<(String
                 "resolve" => "Resolve blocked step",
                 "resume" => "Continue",
                 "cancel" if item["kind"] == "bootstrap" => "Cancel setup",
-                "cancel" => "Cancel before execution",
+                "cancel" if item["kind"] == "issuance" => "Close failed configuration request",
+                "cancel" if item["kind"] == "backup" && item["status"] == "blocked" => {
+                    "Cancel failed backup"
+                }
+                "cancel" => "Cancel operation",
                 _ => continue,
             };
             controls.push((
@@ -813,11 +821,12 @@ pub(in crate::tui) fn draw_controller(
                 .map(|(_, value)| value.as_str())
                 .unwrap_or("")
         );
-        controls.push(("Confirm".into(), Control::ControllerTextConfirm));
         controls.push(("Cancel".into(), Control::ControllerBack));
+        controls.push(("Confirm".into(), Control::ControllerTextConfirm));
     } else if let Some((key, _)) = &state.defaults_input {
         text = match *key {
-            "gate_message" => "Message for users requesting access".into(),
+            "gate_message" => "Stub message for users when access requests are disabled".into(),
+            "welcome_message" => "Welcome message for users requesting access".into(),
             "bot_title" => "Bot name".into(),
             "telegram_token" => "New bot token from BotFather. The token is hidden; saving restarts the bot.".into(),
             "telegram_admin" => "Telegram user ID of the administrator to add".into(),
@@ -846,26 +855,30 @@ pub(in crate::tui) fn draw_controller(
         }
         controls.push(("Cancel".into(), Control::ControllerBack));
     } else if let Some(value) = state.policies.as_ref().filter(|_| app.requests_settings) {
-        text = "Requests settings".into();
+        let requests_enabled = value["requests"]["enabled"] == true;
         let status = |enabled: bool| if enabled { "On" } else { "Off" };
-        controls.extend([
-            (
-                format!(
-                    "Access requests: {}",
-                    status(value["requests"]["enabled"] == true)
-                ),
-                Control::ControllerPolicyToggle("requests"),
-            ),
-            (
+        controls.push((
+            format!("Access requests: {}", status(requests_enabled)),
+            Control::ControllerPolicyToggle("requests"),
+        ));
+        if requests_enabled {
+            controls.push((
                 format!(
                     "Request notifications: {}",
                     status(value["requests"]["notify_requests"] == true)
                 ),
                 Control::ControllerPolicyToggle("notifications"),
-            ),
-        ]);
-
-        controls.push(("Request message".into(), Control::ControllerGateMessage));
+            ));
+            let welcome = value["requests"]["welcome_message"]
+                .as_str()
+                .unwrap_or("Request access to use this bot.");
+            text = format!("Requests settings\n\nWelcome message:\n{welcome}");
+            controls.push(("Welcome message".into(), Control::ControllerGateMessage));
+        } else {
+            let stub = value["requests"]["gate_message"].as_str().unwrap_or("");
+            text = format!("Requests settings\n\nStub message:\n{stub}");
+            controls.push(("Stub message".into(), Control::ControllerGateMessage));
+        }
     } else if let Some(value) = &state.telegram_settings {
         text = format!(
             "Bot token: {}",
@@ -1987,6 +2000,10 @@ pub(in crate::tui) fn defaults_input_changed(state: &crate::controller::Browser)
             .policies
             .as_ref()
             .map(|v| &v["requests"]["gate_message"]),
+        "welcome_message" => state
+            .policies
+            .as_ref()
+            .map(|v| &v["requests"]["welcome_message"]),
         _ => state.defaults.as_ref().map(|v| &v["settings"][key]),
     };
     value.is_some_and(|v| {

@@ -97,7 +97,9 @@ def parent_path(callback, locale, data):
             return (*settings, Breadcrumb(tr(locale, 'temporary.title'), callback))
         if action.startswith(('card:', 'show:')):
             identity = action.split(':')[1]
-            return (*root, Breadcrumb(tr(locale, 'temporary.show'), 'temporary:card:'+identity))
+            label = data.get('_navigation_temporary_configs', {}).get(identity, tr(locale, 'temporary.show'))
+            path = (*root, Breadcrumb(label, 'temporary:card:'+identity))
+            return (*path, Breadcrumb(tr(locale, 'temporary.config'), callback)) if action.startswith('show:') else path
         if action.startswith('confirm_revoke:'):
             return (*root, Breadcrumb(tr(locale, 'temporary.revoke'), callback))
         return root
@@ -176,8 +178,8 @@ def parent_path(callback, locale, data):
         if prefix in {'node_technical', 'node_maintenance', 'node_tools'}:
             path += (Breadcrumb(tr(locale, 'nodes.rich.manage'), 'node_manage:' + key),)
         if prefix == 'node_tools':
-            # Both screens currently use the same Technical title.
-            return (*path, Breadcrumb(tr(locale, 'nodes.rich.technical'), callback))
+            return (*path, Breadcrumb(tr(locale, 'nodes.rich.technical'), 'node_technical:' + key),
+                Breadcrumb(tr(locale, 'node_tools.diagnostics'), callback))
         return (*path, Breadcrumb(tr(locale, node_pages[prefix]), callback))
     if prefix == 'node_section' and len(pieces) == 3 and pieces[1] in {'general', 'connection', 'awg', 'xray'}:
         section, key = pieces[1:]

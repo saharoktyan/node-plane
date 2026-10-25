@@ -62,7 +62,7 @@ Estimated minimum resources for a small installation using published binaries:
 | Agent with VLESS and AmneziaWG | 1 vCPU | 1 GiB | 5 GiB |
 | Controller, local PostgreSQL, agent and both protocols | 1 vCPU | 1 GiB | 10 GiB |
 
-Disk figures are available space after installing the OS. Allow additional space for database growth, logs and backups. CPU and bandwidth needs grow with concurrent VPN traffic. The combined installation has been observed to run on a 1 GiB server, using about 350 MiB at idle. Plan additional RAM for active traffic; the other figures are sizing estimates. Local Rust compilation requires at least 2 GiB of available RAM.
+Disk figures are available space after installing the OS. Allow additional space for database growth, logs and backups. CPU and bandwidth needs grow with concurrent VPN traffic. The combined installation has been observed to run on a 1 GiB server, using about 350 MiB at idle. Plan additional RAM for active traffic; the other figures are sizing estimates.
 
 ## Guides
 

@@ -1108,7 +1108,7 @@ async fn execute_inner(
                             "Announcement cancelled");
                     }
                     if let crate::controller::Command::RecoveryAction(kind, id, action, offset, node_key) = &command {
-                        let explanation = match (kind.as_str(), action.as_str()) { ("bootstrap", "cancel") => "Stop setup after confirming or fencing the current step. Already installed components remain; remove the node separately if needed.", ("bootstrap", "resolve") => "Recover the saved step. An interrupted command is fenced before a replacement step can run. Existing protocol identities are preserved.", ("agent", "resume") => "Retry the installer only after a confirmed read-only SSH preflight failure. Fix the SSH key or account permissions first.", (_, "recheck") => "Check the recorded result of this exact command. Missing evidence keeps it blocked.", (_, "resolve") => "Recover the exact driver journal before reconciling current settings. Unconfirmed outcomes stay blocked.", (_, "resume") => "Continue the saved operation checkpoint, preserving existing child commands.", (_, "cancel") => "Cancel only before execution. The backend checks this boundary again.", _ => anyhow::bail!("Unsupported recovery action") };
+                        let explanation = crate::workstation::recovery_explanation(kind, action)?;
                         if !events::confirm(tx, "Recover this operation?", format!("{kind}: {id}\n\n{explanation}"))? { return Ok("Recovery cancelled".into()); }
                         let (method, path, body, key) = command.request()?;
                         let note = match backend::request(session, &credential, method, &path, body, key).await {
@@ -1436,14 +1436,13 @@ async fn execute_inner(
                 }
                 Command::Recover(key, item, action) => {
                     ensure!(item["node_key"] == key, "Recovery belongs to another server");
-                    ensure!(["recheck", "resolve"].contains(&action.as_str()), "Unsupported recovery action");
                     let kind = item["kind"].as_str().context("Missing recovery kind")?;
-                    ensure!(["node", "settings", "agent", "bootstrap", "profile", "temporary"].contains(&kind), "Unsupported recovery kind");
+                    ensure!(["node", "settings", "agent", "bootstrap", "profile", "temporary", "issuance"].contains(&kind), "Unsupported recovery kind");
                     let identity = Uuid::parse_str(item["id"].as_str().context("Missing recovery identity")?)?;
                     // The backend validates currently allowed actions under the worker lock.
                     ensure!(item["actions"].as_array().is_some_and(|actions| actions.iter().any(|v| v == &action)), "Recovery action unavailable");
-                    backend::request(session, &credential, Method::POST,
-                        &format!("/api/v1/system/recovery/{kind}/{identity}/{action}"), None, None).await?;
+                    let path = crate::workstation::recovery_path(kind, &identity.to_string(), &action)?;
+                    backend::request(session, &credential, Method::POST, &path, None, None).await?;
                     let (facts, inventory) = diagnostic_snapshot(session, &credential, &key, 0).await?;
                     let _ = tx.send(Event::Nodes(Update::Diagnostics(key, facts, inventory)));
                 }
@@ -1525,7 +1524,7 @@ async fn execute_inner(
                     } else if setup {
                         let transport = item.transport.as_deref().context("Node transport is not configured")?;
                         (format!("/api/v1/nodes/{}/agent-rollouts", item.key), json!({"transport":transport,
-                            "ssh_target":item.ssh_target,"ssh_port":22,"install_rust":false}), "agent-rollouts")
+                            "ssh_target":item.ssh_target,"ssh_port":22}), "agent-rollouts")
                     } else {
                         ensure!(item.needs_setup(), "Refresh the node card before server setup");
                         (format!("/api/v1/nodes/{}/bootstrap", item.key),
