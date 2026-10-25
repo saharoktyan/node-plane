@@ -1,6 +1,6 @@
 # 1.0.0 acceptance
 
-This checklist accompanies preparation of the first stable release. The current development candidate is `1.0.0-alpha.19` in the dev channel; the target stable version remains `1.0.0`. Automated evidence and owner verification are recorded separately.
+This checklist accompanies preparation of the first stable release. The current development candidate is `1.0.0-alpha.20` in the dev channel; the target stable version remains `1.0.0`. Automated evidence and owner verification are recorded separately.
 
 ## Automated evidence
 
@@ -23,6 +23,8 @@ Build the server stack in `scripts/Dockerfile.release` (Debian 12). Verify the c
 The owner reports a full screen walkthrough, almost all bot functionality checked, working real traffic through all protocols, automatic temporary-configuration revocation, and working server settings and edits. Repeat only the changed approval/deletion, recovery and UI paths on the new candidate; these results do not require another full UI walkthrough.
 
 A real-client IPv6 leak check remains unverified: the owner's mobile connection reports that IPv6 leak testing is unavailable. This does not establish the reason or prove the absence of leaks. Native Windows/macOS interaction and the final disposable-host reboot/reset/removal checks are not certified by the bot walkthrough.
+
+An isolated IPv6 lab subsequently passed six scenarios using the alpha.19 runtime assets and real AWG/Xray processes. A deliberately IPv4-only AWG configuration leaked six native IPv6 packets while its IPv4 VPN worked; the generated full-tunnel configuration carried HTTP and UDP/TCP DNS through the VPN with zero bypass packets. Disabling IPv6 outbound blocked IPv6 without breaking IPv4; re-enabling it restored IPv6. VLESS TCP/XHTTP proxy paths also passed outbound on/off checks. These results cover the tested Linux configuration and runtime paths, not mobile TUN routing, application resolver integration or client kill switches.
 
 ## Manual acceptance inventory
 

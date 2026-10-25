@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 1.0.0-alpha.20 - 2026-10-25
+
+- Restore release CI by exercising the PostgreSQL grant-policy race through the supported server setup coordinator; keep the prohibition on runtime actions for uninstalled nodes.
+- Includes the recovery, account lifecycle and interface fixes prepared for alpha.19. The schema 14 rollback requirement still applies.
+
 ## 1.0.0-alpha.19 - 2026-10-25
 
 - Enforce controller update gate invariants to reject overlapping updates; support safe predispatch cancellation, blocked operation recovery (resume/recheck/cancel) across updates, backups, issuances, and cleanup jobs without unfenced mutation retries.

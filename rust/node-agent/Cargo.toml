@@ -1,6 +1,6 @@
 [package]
 name = "node-plane-agent"
-version = "1.0.0-alpha.19"
+version = "1.0.0-alpha.20"
 edition = "2024"
 
 [build-dependencies]
