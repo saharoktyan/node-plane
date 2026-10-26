@@ -223,7 +223,7 @@ def get_release_changelog(ref: str) -> str:
     """Optional public release notes; an unavailable note never blocks checking."""
     repo = os.environ.get('NODE_PLANE_GITHUB_REPO', 'saharoktyan/node-plane')
     if not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', repo) or not re.fullmatch(
-        r'v\d+\.\d+\.\d+(?:-alpha\.\d+)?', ref):
+        r'v\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.\d+)?', ref):
         return ''
     request = urllib.request.Request(f'https://api.github.com/repos/{repo}/releases/tags/{ref}',
         headers={'User-Agent':'node-plane-controller', 'Accept':'application/vnd.github+json'})
@@ -308,7 +308,7 @@ def _list_available_versions(selected_branch: str, timeout: int) -> Dict[str, ob
     versions.sort(
         key=lambda item: (
             1 if str(item.get("kind") or "") == "head" else 0,
-            _parse_semver(str(item["version"])) or (0, 0, 0, (0, 0), ""),
+            _parse_semver(str(item["version"])) or (0, 0, 0, (), ""),
         ),
         reverse=True,
     )

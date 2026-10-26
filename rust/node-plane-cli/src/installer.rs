@@ -411,7 +411,7 @@ async fn checked(
                     "{}",
                     match code {
                         "telegram_api_unreachable" =>
-                            "The server cannot reach Telegram Bot API (api.telegram.org:443). Check the server DNS, outbound firewall and provider routing. The bot token could not be verified.",
+                            "The server could not reach Telegram Bot API (api.telegram.org:443) during the final installation check. This may be temporary: the installation may already be working and the bot may still respond. Open Diagnostics -> Installation diagnostics before reinstalling. If the issue persists, check the server DNS, outbound firewall and provider routing. The bot token could not be verified by this check.",
                         "telegram_token_rejected" =>
                             "Telegram rejected the configured bot token. Check the token supplied by BotFather.",
                         _ =>

@@ -123,7 +123,7 @@ node-plane-dev
 node-plane-dev
 ```
 
-Omit the tag option to select the latest published alpha. A Git tag by itself contains source; a prebuilt installation also requires the release's installer and platform archive. The bootstrap does not compile missing binaries automatically.
+Omit the tag option to select the latest published development release (`alpha.N`, `beta.N` or `rc.N`). A Git tag by itself contains source; a prebuilt installation also requires the release's installer and platform archive. The bootstrap does not compile missing binaries automatically.
 
 ### Build from source
 

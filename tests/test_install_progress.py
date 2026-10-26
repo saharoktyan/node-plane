@@ -130,7 +130,7 @@ esac
 
     def test_archive_install_has_all_seven_steps_without_source_checkout(self):
         from tests.test_controller_release import release
-        for name in release.REQUIRED | release.PYTHON_PROJECT_FILES:
+        for name in release.BUILD_REQUIRED:
             path = self.source / name
             if not path.exists():
                 path.parent.mkdir(parents=True, exist_ok=True)
@@ -155,6 +155,8 @@ esac
         self.assertNotIn('fetch', self.log.read_text())
         active = self.base / 'current'
         self.assertTrue((active / 'CONTROLLER_PACKAGE.json').is_file())
+        self.assertTrue((active / 'LICENSE').is_file())
+        self.assertTrue((active / 'THIRD_PARTY_LICENSES').is_file())
         self.assertFalse((active / '.git').exists())
         self.assertFalse((active / 'rust').exists())
         self.assertIn(f'NODE_PLANE_SOURCE_DIR={active}', (self.base / 'shared/.env').read_text())

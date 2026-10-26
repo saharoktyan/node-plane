@@ -40,16 +40,6 @@
     "mode": "0755"
   },
   {
-    "target_path": "/opt/node-plane-runtime/xray-enable-stats.sh",
-    "asset_path": "xray-enable-stats.sh",
-    "mode": "0755"
-  },
-  {
-    "target_path": "/opt/node-plane-runtime/xray-add-user.sh",
-    "asset_path": "xray-add-user.sh",
-    "mode": "0755"
-  },
-  {
     "target_path": "/opt/node-plane-runtime/xray-add-user-existing.sh",
     "asset_path": "xray-add-user-existing.sh",
     "mode": "0755"
@@ -57,16 +47,6 @@
   {
     "target_path": "/opt/node-plane-runtime/xray-user-api.py",
     "asset_path": "xray-user-api.py",
-    "mode": "0755"
-  },
-  {
-    "target_path": "/opt/node-plane-runtime/xray-list-users.sh",
-    "asset_path": "xray-list-users.sh",
-    "mode": "0755"
-  },
-  {
-    "target_path": "/opt/node-plane-runtime/xray-list-traffic.sh",
-    "asset_path": "xray-list-traffic.sh",
     "mode": "0755"
   },
   {

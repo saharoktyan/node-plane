@@ -61,3 +61,6 @@ CODE_REVIEW.md
 
 # Local staging for release dependency caches
 .release-rust-cache/
+
+# Local test output
+/test_output.txt

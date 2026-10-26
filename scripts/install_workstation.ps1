@@ -11,7 +11,7 @@ $headers = @{ 'User-Agent' = 'node-plane-workstation-installer' }
 $repo = 'https://api.github.com/repos/saharoktyan/node-plane'
 $sourceGuide = 'https://github.com/saharoktyan/node-plane/blob/dev/docs/workstation.md#build-from-source'
 
-if ($Tag -and $Tag -notmatch '^v\d+\.\d+\.\d+(-alpha\.\d+)?$') {
+if ($Tag -and $Tag -notmatch '^v\d+\.\d+\.\d+(-(alpha|beta|rc)\.\d+)?$') {
     throw 'Invalid release tag.'
 }
 if (-not $Tag) {
@@ -24,6 +24,8 @@ if (-not $Tag) {
     foreach ($r in $releases) {
         if ($r.draft) { continue }
         if (($Channel -eq 'dev') -ne [bool]$r.prerelease) { continue }
+        if ($Channel -eq 'dev' -and $r.tag_name -notmatch '^v\d+\.\d+\.\d+-(alpha|beta|rc)\.\d+$') { continue }
+        if ($Channel -eq 'stable' -and $r.tag_name -notmatch '^v\d+\.\d+\.\d+$') { continue }
         $hasInstaller = $false
         if ($null -ne $r.assets) {
             foreach ($a in $r.assets) {
@@ -42,7 +44,7 @@ if (-not $Tag) {
     $Tag = $release.tag_name
 }
 
-if (($Channel -eq 'dev') -ne ($Tag -match '-alpha\.')) {
+if (($Channel -eq 'dev') -ne ($Tag -match '-(alpha|beta|rc)\.')) {
     throw 'The release tag must match the requested Workstation channel.'
 }
 $channelInstallDir = Join-Path $env:USERPROFILE ".local\share\node-plane-workstation\$Channel"

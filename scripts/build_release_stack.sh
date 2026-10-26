@@ -44,6 +44,15 @@ SHORT_COMMIT="${COMMIT:0:12}"
   exit 1
 }
 
+for legal in LICENSE THIRD_PARTY_LICENSES; do
+  if [[ ! -s "$ROOT_DIR/$legal" ]]; then
+    echo "Missing or empty required legal file: $legal" >&2
+    exit 1
+  fi
+  cp "$ROOT_DIR/$legal" "$TMP_DIR/$legal"
+  chmod 0644 "$TMP_DIR/$legal"
+done
+
 mkdir -p "$OUT_DIR"
 cargo build --locked --release --manifest-path rust/node-driver/Cargo.toml
 cargo build --locked --release --manifest-path rust/node-agent/Cargo.toml
@@ -64,8 +73,8 @@ for binary in "$TMP_DIR/$DRIVER_NAME" "$TMP_DIR/$AGENT_NAME"; do
   fi
 done
 
-tar -C "$TMP_DIR" -czf "$OUT_DIR/$DRIVER_NAME.tar.gz" "$DRIVER_NAME"
-tar -C "$TMP_DIR" -czf "$OUT_DIR/$AGENT_NAME.tar.gz" "$AGENT_NAME"
+tar -C "$TMP_DIR" -czf "$OUT_DIR/$DRIVER_NAME.tar.gz" "$DRIVER_NAME" LICENSE THIRD_PARTY_LICENSES
+tar -C "$TMP_DIR" -czf "$OUT_DIR/$AGENT_NAME.tar.gz" "$AGENT_NAME" LICENSE THIRD_PARTY_LICENSES
 python3 scripts/controller_release.py build --root "$ROOT_DIR" \
   --archive "$OUT_DIR/$CONTROLLER_NAME" --ref "$TAG" --commit "$COMMIT"
 cp scripts/install_workstation.sh "$OUT_DIR/node-plane-workstation-installer.sh"

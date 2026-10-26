@@ -1,2 +1,7 @@
 # Linux host scripts are also embedded in the native Windows assistant.
 *.sh text eol=lf
+
+# Keep vendored legal texts and their checksums identical on every platform.
+/THIRD_PARTY_LICENSES -text
+/licenses/** -text
+/LICENSE text eol=lf

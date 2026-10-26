@@ -34,7 +34,7 @@ curl -fsSL https://raw.githubusercontent.com/saharoktyan/node-plane/dev/scripts/
 & ([scriptblock]::Create((irm 'https://raw.githubusercontent.com/saharoktyan/node-plane/dev/scripts/install_workstation.ps1'))) -Channel dev
 ```
 
-To select an exact alpha, add `--tag vX.Y.Z-alpha.N` or `-Tag 'vX.Y.Z-alpha.N'`. These commands install published binaries, including GitHub prereleases. For the current `dev` branch or a tag without published binaries, [build from source](docs/workstation.md#build-from-source).
+To select an exact prerelease, add `--tag vX.Y.Z-beta.N` or `-Tag 'vX.Y.Z-beta.N'`. The dev channel supports `alpha.N`, `beta.N` and `rc.N`. These commands install published binaries, including GitHub prereleases. For the current `dev` branch or a tag without published binaries, [build from source](docs/workstation.md#build-from-source).
 
 Workstation requires a supported OS, a terminal of at least 70 columns × 30 rows and SSH access to the controller. Open a new terminal if the command is not yet on PATH. Initial controller installation requires root access on the target server.
 

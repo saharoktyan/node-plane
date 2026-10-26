@@ -1,6 +1,6 @@
 # Releases
 
-`dev` publishes development releases (`X.Y.Z-alpha.N`); `main` publishes stable releases (`X.Y.Z`). Tags use the `v` prefix. `VERSION`, the Python project version, Rust package versions and the changelog must describe the same release.
+`dev` publishes development releases (`X.Y.Z-alpha.N`, `X.Y.Z-beta.N`, `X.Y.Z-rc.N`); `main` publishes stable releases (`X.Y.Z`). Tags use the `v` prefix. `VERSION`, the Python project version, Rust package versions and the changelog must describe the same release.
 
 ## Artifacts and CI
 
@@ -11,6 +11,18 @@ Publication requires the reusable server/Python checks and the native Workstatio
 The server job builds the controller archive plus Linux amd64 driver/agent archives. Server artifacts run alongside Workstation builds and join the same GitHub release. Rust dependency caches are shared across tag builds. Pull requests run release planning; pushing a version tag triggers publication.
 
 The controller archive contains the Python application, operational scripts and runtime assets. Its extraction policy validates paths/types and required resources without rejecting additional safe files merely because the installer does not know their names. Do not use a developer source archive as an installed controller runtime.
+
+Release archives package legal notices alongside the binaries and controller runtime. The root `LICENSE` covers Node Plane itself, while `THIRD_PARTY_LICENSES` contains third-party notices generated from locked Rust crate graphs using `cargo-about` (primary tool version 0.9.2). All pre-releases and stable releases carry these notices. These notices apply to the compiled Rust binaries and repository distribution; they do not cover Python packages or host system libraries downloaded and installed separately by the runtime environment.
+
+Refresh notices whenever Rust dependencies or supported targets change:
+
+```sh
+cargo install cargo-about --version 0.9.2 --locked
+python3 scripts/generate_third_party_licenses.py
+python3 scripts/generate_third_party_licenses.py --check
+```
+
+Commit the generated root file with the dependency changes. `--offline` skips Cargo downloads when dependencies are cached. Generation preserves bundled notices and verified upstream supplements in `licenses/upstream/`; a missing license requires a reviewed supplement rather than a placeholder. Standard-library notices in `licenses/` must follow the pinned Rust version. Release CI checks freshness before publication.
 
 For the first stable release, use the [1.0.0 acceptance checklist](release-1.0.0-acceptance.md). Automated results and manual acceptance are recorded separately.
 

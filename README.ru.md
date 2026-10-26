@@ -34,7 +34,7 @@ curl -fsSL https://raw.githubusercontent.com/saharoktyan/node-plane/dev/scripts/
 & ([scriptblock]::Create((irm 'https://raw.githubusercontent.com/saharoktyan/node-plane/dev/scripts/install_workstation.ps1'))) -Channel dev
 ```
 
-Для конкретной alpha добавьте `--tag vX.Y.Z-alpha.N` или `-Tag 'vX.Y.Z-alpha.N'`. Эти команды устанавливают опубликованные бинарники, в том числе из GitHub prereleases. Текущую ветку `dev` или тег без готовых бинарников можно [собрать из исходников](docs/workstation.ru.md#сборка-из-исходников).
+Для конкретной предварительной версии добавьте `--tag vX.Y.Z-beta.N` или `-Tag 'vX.Y.Z-beta.N'`. Канал dev поддерживает `alpha.N`, `beta.N` и `rc.N`. Эти команды устанавливают опубликованные бинарники, в том числе из GitHub prereleases. Текущую ветку `dev` или тег без готовых бинарников можно [собрать из исходников](docs/workstation.ru.md#сборка-из-исходников).
 
 Для Workstation нужны поддерживаемая ОС, терминал размером не меньше 70 столбцов × 30 строк и SSH-доступ к контроллеру. Если команда ещё не появилась в PATH, откройте новый терминал. Для первоначальной установки контроллера нужен root-доступ к серверу.
 

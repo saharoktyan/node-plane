@@ -1,6 +1,6 @@
 # 1.0.0 acceptance
 
-This checklist accompanies preparation of the first stable release. The current development candidate is `1.0.0-alpha.20` in the dev channel; the target stable version remains `1.0.0`. Automated evidence and owner verification are recorded separately.
+This checklist accompanies preparation of the first stable release. The current development candidate is `1.0.0-beta.1` in the dev channel; the target stable version remains `1.0.0`. Automated evidence and owner verification are recorded separately.
 
 ## Automated evidence
 

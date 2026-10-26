@@ -25,12 +25,14 @@ SCRIPTS = {
     'lib/agent_ssh.sh', 'lib/install_progress.sh', 'lib/stack_update.sh', 'lib/controller_archive.sh',
     'lib/archive_agent_journals.py', 'lib/install_credentials.sh',
 }
+LEGAL_FILES = {'LICENSE', 'THIRD_PARTY_LICENSES'}
 PYTHON_PROJECT_FILES = {'pyproject.toml', 'uv.lock'}
-ROOT_FILES = {'VERSION', 'LICENSE', '.env.example', 'requirements.txt',
-              'requirements-backend.txt', 'requirements-telegram.txt'} | PYTHON_PROJECT_FILES
-REQUIRED = (ROOT_FILES - PYTHON_PROJECT_FILES) | {'app/backend/http_api.py', 'app/backend/executor.py',
+ROOT_FILES = {'VERSION', '.env.example', 'requirements.txt',
+              'requirements-backend.txt', 'requirements-telegram.txt'} | PYTHON_PROJECT_FILES | LEGAL_FILES
+REQUIRED = (ROOT_FILES - PYTHON_PROJECT_FILES - {'THIRD_PARTY_LICENSES'}) | {'app/backend/http_api.py', 'app/backend/executor.py',
                         'app/telegram_client/main.py', 'runtime_assets/manifest.json'} | {'scripts/' + s for s in SCRIPTS}
-TAG = re.compile(r'^v?(\d+)\.(\d+)\.(\d+)(?:-alpha\.(\d+))?$')
+BUILD_REQUIRED = REQUIRED | PYTHON_PROJECT_FILES | LEGAL_FILES
+TAG = re.compile(r'^v?(\d+)\.(\d+)\.(\d+)(?:-(alpha|beta|rc)\.(\d+))?$')
 COMMIT = re.compile(r'^[0-9a-f]{40}$')
 LIMIT = 64 * 1024 * 1024
 
@@ -73,7 +75,7 @@ def build(root, output, ref, commit):
     # Only tracked files: no local credentials, test outputs or build caches.
     tracked = subprocess.check_output(['git', '-C', str(root), 'ls-files', '-z']).decode().split('\0')
     files = sorted(name for name in tracked if name and allowed(name))
-    required = REQUIRED | PYTHON_PROJECT_FILES
+    required = BUILD_REQUIRED
     if not required.issubset(files):
         raise ValueError('Missing controller runtime files: ' + ', '.join(sorted(required - set(files))))
     version = (root / 'VERSION').read_text().strip()
@@ -84,6 +86,8 @@ def build(root, output, ref, commit):
         path = root / name
         if path.is_symlink() or not path.is_file():
             raise ValueError('Controller package files must be regular files')
+        if name in LEGAL_FILES and path.stat().st_size == 0:
+            raise ValueError(f'Legal file must not be empty: {name}')
         payload[name] = path.read_bytes()
     payload['BUILD_COMMIT'] = (commit + '\n').encode()
     verify_runtime_assets(payload)
@@ -130,16 +134,18 @@ def verify(archive_path, ref=None, commit=None):
     required = set(REQUIRED)
     if manifest.get('python_dependencies') == 'uv':
         required |= PYTHON_PROJECT_FILES
-    version = tuple(int(value or 0) for value in TAG.fullmatch(manifest['ref']).groups())
+    parsed = TAG.fullmatch(manifest['ref'])
+    version = tuple(int(parsed[index]) for index in (1, 2, 3)) + (int(parsed[5] or 0),)
+    legacy_alpha = parsed[4] == 'alpha'
     # Credential validation is included starting with alpha.80. Keep older
     # packages readable for rollback and existing release selection.
-    if version < (0, 4, 3, 0) or (version[:3] == (0, 4, 3) and version[3] in range(1, 80)):
+    if version < (0, 4, 3, 0) or (version[:3] == (0, 4, 3) and legacy_alpha and version[3] in range(1, 80)):
         required.discard('scripts/lib/install_credentials.sh')
-    if version < (0, 4, 3, 0) or (version[:3] == (0, 4, 3) and version[3] in range(1, 52)):
+    if version < (0, 4, 3, 0) or (version[:3] == (0, 4, 3) and legacy_alpha and version[3] in range(1, 52)):
         required.discard('scripts/lib/archive_agent_journals.py')
     # Runtime assets were accidentally omitted through alpha.53. Old archives
     # remain readable; new builds always require a complete deployment bundle.
-    if version < (0, 4, 3, 0) or (version[:3] == (0, 4, 3) and version[3] in range(1, 54)):
+    if version < (0, 4, 3, 0) or (version[:3] == (0, 4, 3) and legacy_alpha and version[3] in range(1, 54)):
         required.discard('runtime_assets/manifest.json')
     if not isinstance(files, dict) or set(files) != set(contents) - {MANIFEST} or not required.issubset(files):
         raise ValueError('Controller package manifest is incomplete')
@@ -215,8 +221,9 @@ def fetch(url, limit=LIMIT):
 
 
 def sort_key(ref):
-    major, minor, patch, alpha = TAG.fullmatch(ref).groups()
-    return (int(major), int(minor), int(patch), alpha is None, int(alpha or 0))
+    major, minor, patch, stage, number = TAG.fullmatch(ref).groups()
+    rank = {'alpha': 0, 'beta': 1, 'rc': 2, None: 3}[stage]
+    return (int(major), int(minor), int(patch), rank, int(number or 0))
 
 
 def catalog(branch):
@@ -301,7 +308,7 @@ def check(branch, installed, listing):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='command', required=True)
-    for name in ('build', 'verify', 'extract', 'download', 'check', 'copy'):
+    for name in ('build', 'verify', 'extract', 'download', 'check', 'copy', 'sort-refs'):
         cmd = sub.add_parser(name)
         if name in {'build', 'verify', 'extract'}:
             cmd.add_argument('--archive', type=Path, required=True)
@@ -319,7 +326,11 @@ def main():
             cmd.add_argument('--list', action='store_true')
     args = parser.parse_args()
     try:
-        if args.command == 'build':
+        if args.command == 'sort-refs':
+            refs = {line.strip() for line in sys.stdin if TAG.fullmatch(line.strip())}
+            for ref in sorted(refs, key=sort_key, reverse=True):
+                print(ref)
+        elif args.command == 'build':
             build(args.root, args.archive, args.ref, args.commit or '')
         elif args.command == 'copy':
             copy_package(args.root, args.destination)

@@ -14,7 +14,7 @@ CURRENT_STEP="startup"
 usage() {
   cat <<'EOF' >&2
 Usage:
-  scripts/tag_release.sh vX.Y.Z[-alpha.N] [options]
+  scripts/tag_release.sh vX.Y.Z[-alpha.N|-beta.N|-rc.N] [options]
 
 Options:
   --skip-tests         Do not run preflight checks (Python and all Rust tests)
@@ -104,7 +104,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-alpha\.[0-9]+)?$ ]]; then
+if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.[0-9]+)?$ ]]; then
   echo "Invalid tag format: $TAG" >&2
   usage
   exit 1
@@ -219,14 +219,23 @@ build_release_artifacts() {
   local checksums_file="SHA256SUMS.txt"
   local controller_name="node-plane-controller.tar.gz"
 
+  for legal in LICENSE THIRD_PARTY_LICENSES; do
+    if [[ ! -s "$ROOT_DIR/$legal" ]]; then
+      echo "Missing or empty required legal file: $legal" >&2
+      exit 1
+    fi
+    cp "$ROOT_DIR/$legal" "${tmp_dir}/${legal}"
+    chmod 0644 "${tmp_dir}/${legal}"
+  done
+
   cp "$driver_bin" "${tmp_dir}/${driver_name}"
   cp "$agent_bin" "${tmp_dir}/${agent_name}"
   chmod +x "${tmp_dir}/${driver_name}" "${tmp_dir}/${agent_name}"
 
   set_step "package driver artifact"
-  tar -C "$tmp_dir" -czf "${release_dir}/${driver_name}.tar.gz" "$driver_name"
+  tar -C "$tmp_dir" -czf "${release_dir}/${driver_name}.tar.gz" "$driver_name" LICENSE THIRD_PARTY_LICENSES
   set_step "package agent artifact"
-  tar -C "$tmp_dir" -czf "${release_dir}/${agent_name}.tar.gz" "$agent_name"
+  tar -C "$tmp_dir" -czf "${release_dir}/${agent_name}.tar.gz" "$agent_name" LICENSE THIRD_PARTY_LICENSES
 
   set_step "package controller runtime"
   python3 scripts/controller_release.py build --root "$ROOT_DIR" \
@@ -286,6 +295,13 @@ publish_github_release() {
       echo "Invalid release archive: ${name}.tar.gz" >&2
       return 1
     fi
+    for legal in LICENSE THIRD_PARTY_LICENSES; do
+      if ! tar -tzf "${release_dir}/${name}.tar.gz" "$legal" >/dev/null 2>&1; then
+        rm -rf "$verify_dir"
+        echo "Missing legal file in ${name}.tar.gz: $legal" >&2
+        return 1
+      fi
+    done
     if ! check_glibc_compatibility "${verify_dir}/${name}"; then
       rm -rf "$verify_dir"
       return 1

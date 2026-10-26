@@ -4,23 +4,20 @@ import re
 _SEMVER_RE = re.compile(r"^(?P<major>0|[1-9]\d*)\.(?P<minor>0|[1-9]\d*)\.(?P<patch>0|[1-9]\d*)(?:-(?P<pre>[0-9A-Za-z.-]+))?$")
 
 
-def _parse_semver(value: str) -> tuple[int, int, int, tuple[int, ...], str] | None:
+def _parse_semver(value: str) -> tuple[int, int, int, tuple[tuple[int, int | str], ...], str] | None:
     raw = str(value or "").strip()
     match = _SEMVER_RE.fullmatch(raw)
     if not match:
         return None
     pre = str(match.group("pre") or "")
-    pre_parts: tuple[int, ...] = ()
-    if pre.startswith("alpha."):
-        suffix = pre.split(".", 1)[1]
-        if suffix.isdigit():
-            pre_parts = (0, int(suffix))
-        else:
-            pre_parts = (0, 0)
-    elif pre:
-        pre_parts = (1, 0)
-    else:
-        pre_parts = (2, 0)
+    # Numeric identifiers compare numerically, textual identifiers lexically;
+    # a stable release sorts after every prerelease of the same base version.
+    pre_parts = ((2, 0),)
+    if pre:
+        parts = pre.split(".")
+        if any(not part or (part.isdigit() and len(part) > 1 and part[0] == "0") for part in parts):
+            return None
+        pre_parts = tuple((0, int(part)) if part.isdigit() else (1, part) for part in parts)
     return (int(match.group("major")), int(match.group("minor")), int(match.group("patch")), pre_parts, raw)
 
 

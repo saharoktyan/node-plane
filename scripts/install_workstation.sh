@@ -4,10 +4,10 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: bash install_workstation.sh [--channel dev|stable] [--tag vX.Y.Z[-alpha.N]]
+Usage: bash install_workstation.sh [--channel dev|stable] [--tag vX.Y.Z[-alpha.N|-beta.N|-rc.N]]
 
 Installs Workstation on Linux x86_64 or macOS (Intel/Apple Silicon) and configures PATH.
-The default stable channel selects stable releases. Use --channel dev for alpha builds.
+The default stable channel selects stable releases. Use --channel dev for prerelease builds (alpha, beta, rc).
 An explicit --tag skips discovery and requires that tag's published binaries.
 Stable and dev installations are separate. Run node-plane or node-plane-dev.
 Saved installation profiles and SSH keys are retained.
@@ -26,7 +26,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 [[ "$channel" == dev || "$channel" == stable ]] || { echo 'Channel must be dev or stable.' >&2; exit 1; }
-if [[ -n "$tag" && ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-alpha\.[0-9]+)?$ ]]; then
+if [[ -n "$tag" && ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.[0-9]+)?$ ]]; then
   echo 'Invalid release tag.' >&2
   exit 1
 fi
@@ -51,16 +51,16 @@ if [[ -z "$tag" ]]; then
   [[ "$channel" == stable ]] && api='https://api.github.com/repos/saharoktyan/node-plane/releases/latest'
   download "$api" "$tmp_dir/releases.json"
   # Public release discovery needs no interpreter or jq. Tags are strictly bounded.
-  tags="$(grep -oE '"tag_name"[[:space:]]*:[[:space:]]*"v[0-9]+\.[0-9]+\.[0-9]+(-alpha\.[0-9]+)?"' "$tmp_dir/releases.json" \
+  tags="$(grep -oE '"tag_name"[[:space:]]*:[[:space:]]*"v[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.[0-9]+)?"' "$tmp_dir/releases.json" \
     | sed -E 's/^.*:[[:space:]]*"([^"]+)"$/\1/' || true)"
   while IFS= read -r candidate; do
-    if [[ -n "$candidate" && (( "$channel" == dev && "$candidate" == *-alpha.* ) || ( "$channel" == stable && "$candidate" != *-alpha.* )) ]]; then
+    if [[ -n "$candidate" && (( "$channel" == dev && "$candidate" =~ -(alpha|beta|rc)\.[0-9]+$ ) || ( "$channel" == stable && ! "$candidate" =~ -(alpha|beta|rc)\.[0-9]+$ )) ]]; then
       tag="$candidate"
       break
     fi
   done <<< "$tags"
   [[ -n "$tag" ]] || {
-    echo 'No published Workstation release found for this channel. Use --channel dev for published alphas, or --tag for an exact published version.' >&2
+    echo 'No published Workstation release found for this channel. Use --channel dev for published prereleases, or --tag for an exact published version.' >&2
     echo 'For source-only tags or the current dev branch: https://github.com/saharoktyan/node-plane/blob/dev/docs/workstation.md#build-from-source' >&2
     exit 1
   }
@@ -68,7 +68,7 @@ else
   echo "[1/4] Using release $tag"
 fi
 
-if [[ ( "$channel" == dev && "$tag" != *-alpha.* ) || ( "$channel" == stable && "$tag" == *-alpha.* ) ]]; then
+if [[ ( "$channel" == dev && ! "$tag" =~ -(alpha|beta|rc)\.[0-9]+$ ) || ( "$channel" == stable && "$tag" =~ -(alpha|beta|rc)\.[0-9]+$ ) ]]; then
   echo 'The release tag must match the requested Workstation channel.' >&2
   exit 1
 fi

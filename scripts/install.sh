@@ -321,7 +321,7 @@ latest_release_tag_for_branch() {
   local regex
   case "$branch" in
     main) regex='^v?[0-9]+\.[0-9]+\.[0-9]+$' ;;
-    dev) regex='^v?[0-9]+\.[0-9]+\.[0-9]+(-alpha\.[0-9]+)?$' ;;
+    dev) regex='^v?[0-9]+\.[0-9]+\.[0-9]+-(alpha|beta|rc)\.[0-9]+$' ;;
     *) echo "Unsupported update branch: $branch" >&2; exit 1 ;;
   esac
   while IFS= read -r tag; do
@@ -330,7 +330,7 @@ latest_release_tag_for_branch() {
       echo "$tag"
       return 0
     fi
-  done < <(git tag --merged "origin/${branch}" --sort=-version:refname)
+  done < <(git tag --merged "origin/${branch}" | python3 "${SCRIPT_DIR}/controller_release.py" sort-refs)
   echo "No release tag found for branch '${branch}'." >&2
   exit 1
 }

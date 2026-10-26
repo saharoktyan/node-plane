@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 1.0.0-beta.1 - 2026-10-26
+
+- Support numbered alpha, beta and rc releases in controller installation, update catalogs, Workstation bootstrap installers and release tooling; compare prerelease numbers correctly and keep development and stable channels separate.
+- This beta requires a fresh installation when coming from alpha.20: that controller's release selector only recognizes alpha tags. Later beta/rc updates use the normal development-channel workflow.
+- Ship LICENSE and generated third-party Rust dependency notices in Workstation, Driver, Agent and controller archives; check notice freshness before publication.
+- Remove obsolete Xray runtime helpers, unused Python namespaces and validation helpers, unused Rust dependencies and the unused pytest development stack; retain locked dependency versions and compatibility exports.
+- Label removal of an uninstalled node simply Remove; clarify that a failed final Telegram Bot API check can be temporary and point to Diagnostics → Installation diagnostics before reinstalling.
+
 ## 1.0.0-alpha.20 - 2026-10-25
 
 - Restore release CI by exercising the PostgreSQL grant-policy race through the supported server setup coordinator; keep the prohibition on runtime actions for uninstalled nodes.

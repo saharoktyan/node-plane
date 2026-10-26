@@ -8,7 +8,7 @@ function Invoke-WebRequest {
         Set-Content -LiteralPath $OutFile -Value '# mock installer'
         return
     }
-    return [pscustomobject]@{ Content = '[{"tag_name":"v0.4.3-alpha.67","draft":false,"prerelease":true,"assets":[]},{"tag_name":"v0.4.3-alpha.66","draft":false,"prerelease":true,"assets":[{"name":"node-plane-cli-installer.ps1"}]},{"tag_name":"v0.4.3","draft":false,"prerelease":false,"assets":[{"name":"node-plane-cli-installer.ps1"}]}]' }
+    return [pscustomobject]@{ Content = '[{"tag_name":"v0.4.3-rc.1","draft":false,"prerelease":true,"assets":[{"name":"node-plane-cli-installer.ps1"}]},{"tag_name":"v0.4.3-alpha.67","draft":false,"prerelease":true,"assets":[]},{"tag_name":"v0.4.3-alpha.66","draft":false,"prerelease":true,"assets":[{"name":"node-plane-cli-installer.ps1"}]},{"tag_name":"v0.4.3","draft":false,"prerelease":false,"assets":[{"name":"node-plane-cli-installer.ps1"}]}]' }
 }
 function powershell.exe {
     New-Item -ItemType Directory -Path $env:NODE_PLANE_CLI_INSTALL_DIR -Force | Out-Null
@@ -48,7 +48,7 @@ try {
     & $installer -Channel dev
     $devDir = Join-Path $env:USERPROFILE '.local\share\node-plane-workstation\dev'
     $executable = Join-Path $devDir 'node-plane.exe'
-    if ($downloads[$downloads.Count - 1] -notlike '*/v0.4.3-alpha.66/node-plane-cli-installer.ps1') {
+    if ($downloads[$downloads.Count - 1] -notlike '*/v0.4.3-rc.1/node-plane-cli-installer.ps1') {
         throw "Wrong development release: $($downloads[$downloads.Count - 1])"
     }
     $linkPath = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Node Plane (Dev).lnk'
@@ -58,6 +58,16 @@ try {
         throw 'Shortcut does not launch Workstation through Windows Terminal.'
     }
     $testTerminal = $null
+    & $installer -Channel dev -Tag 'v0.4.3-beta.1'
+    if ($downloads[$downloads.Count - 1] -notlike '*/v0.4.3-beta.1/node-plane-cli-installer.ps1') {
+        throw "Wrong explicit prerelease: $($downloads[$downloads.Count - 1])"
+    }
+    $mismatchFailed = $false
+    try { & $installer -Channel stable -Tag 'v0.4.3-rc.1' } catch { $mismatchFailed = $true }
+    if (-not $mismatchFailed) { throw 'Stable channel accepted a prerelease tag.' }
+    $mismatchFailed = $false
+    try { & $installer -Channel dev -Tag 'v0.4.3' } catch { $mismatchFailed = $true }
+    if (-not $mismatchFailed) { throw 'Dev channel accepted a stable tag.' }
     & $installer -Channel stable
     $stableDir = Join-Path $env:USERPROFILE '.local\share\node-plane-workstation\stable'
     $executable = Join-Path $stableDir 'node-plane.exe'

@@ -980,7 +980,7 @@ async def show_admin_node(chat_id, user_id, message_id, node_key, bot, backend, 
         sections.append(traffic)
     title = f"{node.get('region') or tr(locale, 'nodes.region_unknown')} · {server_label(node)}"
     await render(bot, chat_id, Screen(title, tuple(lines), sections=tuple(sections), embedded_buttons=True, navigation=True),
-        [[InlineKeyboardButton(text=tr(locale, 'nodes.rich.manage') if node['applied_revision'] else tr(locale, 'nodes.maintenance.registry_only'),
+        [[InlineKeyboardButton(text=tr(locale, 'nodes.rich.manage') if node['applied_revision'] else tr(locale, 'nodes.maintenance.remove'),
             callback_data=f'node_manage:{node_key}' if node['applied_revision'] else ConfirmRegistryRemovalCallback(node_key=node_key).pack(),
             style='link' if node['applied_revision'] else 'danger')],
          [InlineKeyboardButton(text=back_label, callback_data=back)]], state, message_id)
@@ -1674,9 +1674,9 @@ async def show_node_maintenance(chat_id, user_id, message_id, node_key, bot, bac
     locale = normalize_locale((await state.get_data()).get('locale'))
     node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=user_id)
     if not node['applied_revision']:
-        await render(bot, chat_id, Screen(tr(locale, 'nodes.maintenance.registry_only'),
+        await render(bot, chat_id, Screen(tr(locale, 'nodes.maintenance.remove'),
             (tr(locale, 'nodes.apply.installation_required'),), embedded_buttons=True, navigation=True),
-            [[InlineKeyboardButton(text=tr(locale, 'nodes.maintenance.registry_only'),
+            [[InlineKeyboardButton(text=tr(locale, 'nodes.maintenance.remove'),
                 callback_data=ConfirmRegistryRemovalCallback(node_key=node_key).pack(), style='danger')],
              [InlineKeyboardButton(text=tr(locale, 'back'), callback_data=AdminNodeCallback(node_key=node_key).pack())]], state, message_id)
         return
@@ -1867,7 +1867,7 @@ async def show_registry_confirmation(chat_id, user_id, message_id, node_key, bot
             await show_node_maintenance_error(chat_id, message_id, node_key, bot, state)
         return
     await render(bot, chat_id,
-        Screen(tr(locale, 'nodes.maintenance.registry_only'),
+        Screen(tr(locale, 'nodes.maintenance.registry_only' if node['applied_revision'] else 'nodes.maintenance.remove'),
             (server_label(node),
              tr(locale, 'nodes.maintenance.registry_grants'),
              tr(locale, 'nodes.maintenance.registry_runtime'),

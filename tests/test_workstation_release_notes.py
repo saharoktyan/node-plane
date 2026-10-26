@@ -18,6 +18,8 @@ class WorkstationReleaseNotesTests(unittest.TestCase):
                 'curl https://example.test/node-plane-cli-installer.sh | sh\n'
                 '## Download node-plane-cli 1.0.0-alpha.1\nKeep download links.\n')
         for tag, channel, launcher in [('v1.0.0-alpha.1', 'dev', 'Node Plane (Dev)'),
+                                       ('v1.0.0-beta.2', 'dev', 'Node Plane (Dev)'),
+                                       ('v1.0.0-rc.10', 'dev', 'Node Plane (Dev)'),
                                        ('v1.0.0', 'stable', 'Node Plane')]:
             with self.subTest(channel=channel):
                 result = notes.render_notes(body, tag)
@@ -30,6 +32,6 @@ class WorkstationReleaseNotesTests(unittest.TestCase):
                 self.assertNotIn('node-plane-cli-installer.sh', result)
 
     def test_invalid_tag_cannot_change_notes_or_inject_commands(self):
-        for tag in ('', '../dev', 'v1.0.0; sh', 'v1.0.0\n', 'v1.0.0-beta.1'):
+        for tag in ('', '../dev', 'v1.0.0; sh', 'v1.0.0\n', 'v1.0.0-beta', 'v1.0.0-rc', 'v1.0.0-preview.1'):
             with self.subTest(tag=tag), self.assertRaises(ValueError):
                 notes.render_notes('Changelog', tag)

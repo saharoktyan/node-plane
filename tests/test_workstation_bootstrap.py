@@ -110,7 +110,7 @@ shutil.copyfile(root / name, destination)
         self.assertNotIn(ASSET, self.requests.read_text())
 
     def test_channels_use_distinct_prefixes_launchers_and_receipt_paths(self):
-        for channel, tag in (('dev', 'v1.0.0-alpha.1'), ('stable', 'v1.0.0')):
+        for channel, tag in (('dev', 'v1.0.0-alpha.1'), ('dev', 'v1.0.0-beta.2'), ('dev', 'v1.0.0-rc.3'), ('stable', 'v1.0.0')):
             result = self.run_installer('--channel', channel, '--tag', tag)
             self.assertEqual(result.returncode, 0, result.stderr)
             prefix = Path(self.env['HOME']) / '.local/share/node-plane-workstation' / channel
@@ -121,8 +121,31 @@ shutil.copyfile(root / name, destination)
                 str(Path(self.env['XDG_CONFIG_HOME']) / 'node-plane-workstation' / channel))
         self.assertNotEqual((Path(self.env['HOME']) / '.local/bin/node-plane-dev').resolve(),
             (Path(self.env['HOME']) / '.local/bin/node-plane').resolve())
-        for channel, tag in (('dev', 'v1.0.0'), ('stable', 'v1.0.0-alpha.1')):
+        for channel, tag in (('dev', 'v1.0.0'), ('stable', 'v1.0.0-alpha.1'),
+                             ('stable', 'v1.0.0-beta.2'), ('stable', 'v1.0.0-rc.3')):
             self.assertNotEqual(self.run_installer('--channel', channel, '--tag', tag).returncode, 0)
+
+    def test_discovered_beta_and_rc_accepted_only_dev(self):
+        for tag in ('v0.4.3-beta.2', 'v0.4.3-rc.1'):
+            with self.subTest(tag=tag):
+                (self.root / 'releases.json').write_text(json.dumps([{'tag_name': tag}]))
+                dev_result = self.run_installer('--channel', 'dev')
+                self.assertEqual(dev_result.returncode, 0, dev_result.stderr)
+                self.assertIn(f'/{tag}/', self.requests.read_text())
+
+                stable_result = self.run_installer('--channel', 'stable')
+                self.assertNotEqual(stable_result.returncode, 0)
+
+    def test_explicit_beta_and_rc_accepted_only_dev(self):
+        for tag in ('v0.4.3-beta.1', 'v0.4.3-rc.2'):
+            with self.subTest(tag=tag):
+                result = self.run_installer('--channel', 'dev', '--tag', tag)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(f'/{tag}/node-plane-cli-installer.sh', self.requests.read_text())
+
+                mismatch_result = self.run_installer('--channel', 'stable', '--tag', tag)
+                self.assertNotEqual(mismatch_result.returncode, 0)
+                self.assertIn('The release tag must match the requested Workstation channel', mismatch_result.stderr)
 
     def test_generated_installer_failure_is_not_replayed_as_legacy_install(self):
         (self.root / 'node-plane-cli-installer.sh').write_text('#!/bin/sh\nexit 7\n')

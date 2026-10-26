@@ -3,8 +3,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TAG="${1:-}"
-if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-alpha\.[0-9]+)?$ ]]; then
-  echo "Usage: scripts/build_release_in_container.sh vX.Y.Z[-alpha.N]" >&2
+if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.[0-9]+)?$ ]]; then
+  echo "Usage: scripts/build_release_in_container.sh vX.Y.Z[-alpha.N|-beta.N|-rc.N]" >&2
   exit 1
 fi
 

@@ -15,7 +15,7 @@ const DIST_APP: &str = "node-plane-cli";
 pub enum Command {
     /// Remove the managed binary; retain profiles and SSH keys.
     Uninstall,
-    /// Check the matching stable/alpha channel and update the managed binary.
+    /// Check the matching stable/development channel and update the managed binary.
     Update {
         /// Update without the interactive confirmation.
         #[arg(long)]
@@ -91,13 +91,13 @@ pub fn discover() -> Result<Option<Release>> {
 }
 
 fn select_release(releases: Vec<Release>, current: &str) -> Option<Release> {
-    let alpha = current.contains('-');
+    let development = current.contains('-');
     releases
         .into_iter()
         .filter_map(|mut release| {
             if release.draft
-                || release.prerelease != alpha
-                || release.tag_name.contains('-') != alpha
+                || release.prerelease != development
+                || release.tag_name.contains('-') != development
                 || !newer(&release.tag_name, current)
                 || !has_platform_artifacts(&release)
             {
@@ -390,11 +390,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn versions_respect_alpha_numbers_and_stable_order() {
+    fn versions_respect_prerelease_numbers_and_stable_order() {
         assert!(newer("v0.4.3-alpha.50", "0.4.3-alpha.49"));
         assert!(!newer("v0.4.3-alpha.9", "0.4.3-alpha.49"));
         assert!(newer("v0.4.3", "0.4.3-alpha.49"));
         assert!(!newer("garbage", "0.4.3"));
+        assert!(newer("v1.0.0-beta.1", "1.0.0-alpha.99"));
+        assert!(newer("v1.0.0-beta.11", "1.0.0-beta.2"));
+        assert!(newer("v1.0.0-rc.1", "1.0.0-beta.99"));
+        assert!(newer("v1.0.0-rc.10", "1.0.0-rc.2"));
+        assert!(newer("v1.0.0", "1.0.0-rc.10"));
     }
 
     #[test]
@@ -438,6 +443,18 @@ mod tests {
             .collect();
             release
         }
+        let candidates = vec![
+            complete("v1.0.0-beta.12", true),
+            complete("v1.0.0-rc.2", true),
+            complete("v1.0.0-rc.10", true),
+            complete("v1.0.0", false),
+        ];
+        assert_eq!(
+            select_release(candidates, "1.0.0-alpha.20")
+                .unwrap()
+                .tag_name,
+            "v1.0.0-rc.10"
+        );
         let releases = vec![complete("v1.0.0-alpha.4", true), complete("v1.0.0", false)];
         assert_eq!(
             select_release(releases.clone(), "1.0.0-alpha.3")

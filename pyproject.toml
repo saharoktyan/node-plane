@@ -1,6 +1,6 @@
 [project]
 name = "node-plane-controller"
-version = "1.0.0-alpha.20"
+version = "1.0.0-beta.1"
 description = "Node Plane controller and Telegram adapter"
 requires-python = ">=3.11,<3.13"
 dependencies = [
@@ -14,7 +14,7 @@ dependencies = [
 [dependency-groups]
 backend = ["fastapi==0.141.1", "uvicorn==0.54.0"]
 telegram = ["aiogram==3.31.0"]
-dev = ["pytest==8.4.2", "grpcio-tools==1.74.0", "httpx==0.28.1", "uv==0.12.23"]
+dev = ["grpcio-tools==1.74.0", "httpx==0.28.1", "uv==0.12.23"]
 
 [tool.uv]
 package = false

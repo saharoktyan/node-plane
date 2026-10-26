@@ -11,7 +11,7 @@ prepare_controller_archive() {
   if [[ -f "${REPO_ROOT}/VERSION" ]]; then packaged_version="$(tr -d '\r\n' < "${REPO_ROOT}/VERSION")"; fi
   if [[ "$reuse" == 1 && -f "${REPO_ROOT}/CONTROLLER_PACKAGE.json" ]] && \
       [[ -z "$ref" || "${ref#v}" == "$packaged_version" ]] && \
-      [[ ( "$branch" == dev && "$packaged_version" == *-alpha.* ) || ( "$branch" == main && "$packaged_version" != *-alpha.* ) ]]; then
+      [[ ( "$branch" == dev && "$packaged_version" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+-(alpha|beta|rc)\.[0-9]+$ ) || ( "$branch" == main && "$packaged_version" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ) ]]; then
     # The workstation has already downloaded and verified this package.
     if ! python3 "${SCRIPT_DIR}/controller_release.py" copy --root "$REPO_ROOT" --destination "${temporary}/release"; then
       rm -rf "$temporary"

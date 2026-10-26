@@ -62,6 +62,11 @@ mod channel_tests {
         assert!(validate_install_channel("1.0.0", "main", "v1.0.0-alpha.1").is_err());
         assert!(validate_install_channel("1.0.0-alpha.1", "dev", "v1.0.0-alpha.1").is_ok());
         assert!(validate_install_channel("1.0.0-alpha.1", "main", "v1.0.0").is_err());
+        for stage in ["alpha", "beta", "rc"] {
+            let version = format!("1.0.0-{stage}.2");
+            assert!(validate_install_channel(&version, "dev", &format!("v{version}")).is_ok());
+            assert!(validate_install_channel("1.0.0", "main", &format!("v{version}")).is_err());
+        }
     }
 }
 
@@ -155,7 +160,7 @@ impl Request {
         if !self.tag.is_empty() {
             ensure!(
                 valid_tag(&self.tag),
-                "Release must be a version tag, for example v0.4.3-alpha.48; leave blank for latest."
+                "Release must be a version tag, for example v1.0.0-beta.1; leave blank for latest."
             );
         }
         if self.action == Action::Install {
@@ -255,8 +260,10 @@ fn valid_tag(tag: &str) -> bool {
             .iter()
             .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
         && suffix.is_none_or(|s| {
-            s.strip_prefix("alpha.")
-                .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+            ["alpha.", "beta.", "rc."].iter().any(|prefix| {
+                s.strip_prefix(prefix)
+                    .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+            })
         })
 }
 
@@ -269,7 +276,13 @@ mod tests {
     use super::*;
     #[test]
     fn only_version_refs() {
-        for tag in ["v0.4.3-alpha.48", "0.4.2", "v1.0.0"] {
+        for tag in [
+            "v0.4.3-alpha.48",
+            "v1.0.0-beta.2",
+            "v1.0.0-rc.10",
+            "0.4.2",
+            "v1.0.0",
+        ] {
             assert!(valid_tag(tag));
         }
         for tag in [
@@ -278,6 +291,9 @@ mod tests {
             "v1.2.3;touch /tmp/pwn",
             "v1.2.3$(id)",
             "v1.2.3-alpha.",
+            "v1.2.3-beta.x",
+            "v1.2.3-rc.",
+            "v1.2.3-beta.1;id",
             "--help",
         ] {
             assert!(!valid_tag(tag));

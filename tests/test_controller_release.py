@@ -28,7 +28,7 @@ class ControllerReleaseTests(unittest.TestCase):
         self.source.mkdir()
         self.tag = 'v' + (ROOT / 'VERSION').read_text().strip()
         self.commit = 'a' * 40
-        for name in release.REQUIRED | release.PYTHON_PROJECT_FILES:
+        for name in release.BUILD_REQUIRED:
             target = self.source / name
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / name, target)
@@ -48,6 +48,9 @@ class ControllerReleaseTests(unittest.TestCase):
     def test_package_has_only_runtime_files_and_full_build_identity(self):
         manifest, contents = release.verify(self.archive, self.tag, self.commit)
         self.assertTrue(release.REQUIRED.issubset(contents))
+        self.assertTrue(release.LEGAL_FILES.issubset(contents))
+        self.assertEqual(contents['LICENSE'], (ROOT / 'LICENSE').read_bytes())
+        self.assertEqual(contents['THIRD_PARTY_LICENSES'], (self.source / 'THIRD_PARTY_LICENSES').read_bytes())
         self.assertEqual(manifest['commit'], self.commit)
         self.assertEqual(contents['BUILD_COMMIT'], (self.commit + '\n').encode())
         self.assertTrue(all(release.allowed(name) or name in {release.MANIFEST, 'BUILD_COMMIT'}
@@ -58,6 +61,8 @@ class ControllerReleaseTests(unittest.TestCase):
         destination = self.root / 'release'
         release.extract(self.archive, destination, self.tag, self.commit)
         self.assertTrue((destination / 'app/telegram_client/main.py').is_file())
+        self.assertTrue((destination / 'LICENSE').is_file())
+        self.assertTrue((destination / 'THIRD_PARTY_LICENSES').is_file())
         self.assertEqual((destination / 'scripts/update.sh').stat().st_mode & 0o777, 0o755)
         result = subprocess.run(['python3', '-m', 'compileall', '-q', str(destination / 'app')],
                                 capture_output=True, text=True)
@@ -242,6 +247,8 @@ trap 'on_error $?' ERR
         manifest['files'].pop('scripts/lib/archive_agent_journals.py')
         contents.pop('scripts/lib/install_credentials.sh')
         manifest['files'].pop('scripts/lib/install_credentials.sh')
+        contents.pop('THIRD_PARTY_LICENSES')
+        manifest['files'].pop('THIRD_PARTY_LICENSES')
         manifest.update(ref='v0.4.3-alpha.51', version='0.4.3-alpha.51')
         contents['VERSION'] = b'0.4.3-alpha.51\n'
         manifest['files']['VERSION'] = hashlib.sha256(contents['VERSION']).hexdigest()
@@ -302,7 +309,7 @@ trap 'on_error $?' ERR
         self.assertFalse((self.root / 'wrong-commit').exists())
 
     def test_release_catalog_ignores_missing_assets_and_peels_annotated_tags(self):
-        branch = 'dev' if '-alpha.' in self.tag else 'main'
+        branch = 'dev' if '-' in self.tag else 'main'
         entries = [{'tag_name': self.tag, 'assets': [{'name': release.ASSET}, {'name': 'SHA256SUMS.txt'}]},
                    {'tag_name': 'v0.0.1-alpha.1', 'assets': []},
                    {'tag_name': 'v9.9.9', 'assets': [{'name': release.ASSET}, {'name': 'SHA256SUMS.txt'}]}]
@@ -335,3 +342,71 @@ trap 'on_error $?' ERR
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual((destination / 'BUILD_COMMIT').read_text().strip(), self.commit)
             self.assertEqual(active.resolve(), installed)
+
+    def test_build_refuses_missing_or_empty_legal_file(self):
+        subprocess.run(['git', '-C', str(self.source), 'rm', '-f', '-q', 'THIRD_PARTY_LICENSES'], check=True, capture_output=True)
+        with self.assertRaisesRegex(ValueError, 'Missing controller runtime files.*THIRD_PARTY_LICENSES'):
+            release.build(self.source, self.root / 'missing.tar.gz', self.tag, self.commit)
+        (self.source / 'THIRD_PARTY_LICENSES').write_text('')
+        subprocess.run(['git', '-C', str(self.source), 'add', 'THIRD_PARTY_LICENSES'], check=True, capture_output=True)
+        with self.assertRaisesRegex(ValueError, 'Legal file must not be empty: THIRD_PARTY_LICENSES'):
+            release.build(self.source, self.root / 'empty.tar.gz', self.tag, self.commit)
+        (self.source / 'THIRD_PARTY_LICENSES').write_text('fixture\n')
+        (self.source / 'LICENSE').write_text('')
+        subprocess.run(['git', '-C', str(self.source), 'add', 'LICENSE', 'THIRD_PARTY_LICENSES'], check=True, capture_output=True)
+        with self.assertRaisesRegex(ValueError, 'Legal file must not be empty: LICENSE'):
+            release.build(self.source, self.root / 'empty-license.tar.gz', self.tag, self.commit)
+        shutil.copyfile(ROOT / 'LICENSE', self.source / 'LICENSE')
+        subprocess.run(['git', '-C', str(self.source), 'add', 'LICENSE'], check=True, capture_output=True)
+
+    def test_legacy_archives_without_third_party_licenses_remain_verifiable_without_illegal_weaken(self):
+        manifest, contents = release.verify(self.archive)
+        self.assertIn('THIRD_PARTY_LICENSES', contents)
+        contents.pop('THIRD_PARTY_LICENSES')
+        manifest['files'].pop('THIRD_PARTY_LICENSES')
+        contents[release.MANIFEST] = json.dumps(manifest).encode()
+        legacy_archive = self.root / 'legacy-without-third-party.tar.gz'
+        with tarfile.open(legacy_archive, 'w:gz') as output:
+            for name, value in contents.items():
+                info = tarfile.TarInfo(name)
+                info.size = len(value)
+                output.addfile(info, io.BytesIO(value))
+        verified_manifest, verified_contents = release.verify(legacy_archive, self.tag, self.commit)
+        self.assertNotIn('THIRD_PARTY_LICENSES', verified_contents)
+        self.assertIn('LICENSE', verified_contents)
+        self.assertEqual(verified_contents['LICENSE'], (ROOT / 'LICENSE').read_bytes())
+
+        bad_manifest = manifest | {'files': manifest['files'] | {'THIRD_PARTY_LICENSES': 'a' * 64}}
+        contents[release.MANIFEST] = json.dumps(bad_manifest).encode()
+        tampered_archive = self.root / 'tampered-missing.tar.gz'
+        with tarfile.open(tampered_archive, 'w:gz') as output:
+            for name, value in contents.items():
+                info = tarfile.TarInfo(name)
+                info.size = len(value)
+                output.addfile(info, io.BytesIO(value))
+        with self.assertRaisesRegex(ValueError, 'incomplete'):
+            release.verify(tampered_archive)
+
+        contents.pop(release.MANIFEST)
+        contents['unlisted.txt'] = b'unlisted'
+        contents[release.MANIFEST] = json.dumps(manifest).encode()
+        tampered_archive2 = self.root / 'tampered-unlisted.tar.gz'
+        with tarfile.open(tampered_archive2, 'w:gz') as output:
+            for name, value in contents.items():
+                info = tarfile.TarInfo(name)
+                info.size = len(value)
+                output.addfile(info, io.BytesIO(value))
+        with self.assertRaisesRegex(ValueError, 'incomplete'):
+            release.verify(tampered_archive2)
+
+    def test_catalog_orders_all_prerelease_stages_numerically_and_separates_stable(self):
+        tags = ['v1.0.0-beta.2', 'v1.0.0-alpha.90', 'v1.0.0-rc.2',
+                'v1.0.0-beta.12', 'v1.0.0-rc.10', 'v1.0.0']
+        entries = [{'tag_name': tag, 'assets': [{'name': release.ASSET}, {'name': 'SHA256SUMS.txt'}]}
+                   for tag in tags]
+        refs = ''.join(f"{self.commit}\trefs/tags/{tag}\n" for tag in tags)
+        with patch.object(release.subprocess, 'check_output', return_value=refs.encode()), \
+             patch.object(release, 'fetch', return_value=json.dumps(entries).encode()):
+            self.assertEqual([item['ref'] for item in release.catalog('dev')],
+                ['v1.0.0-rc.10', 'v1.0.0-rc.2', 'v1.0.0-beta.12', 'v1.0.0-beta.2', 'v1.0.0-alpha.90'])
+            self.assertEqual([item['ref'] for item in release.catalog('main')], ['v1.0.0'])

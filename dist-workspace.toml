@@ -17,6 +17,7 @@ windows-archive = ".zip"
 checksum = "sha256"
 source-tarball = false
 auto-includes = false
+include = ["LICENSE", "THIRD_PARTY_LICENSES"]
 install-path = "~/.local/bin"
 install-updater = true
 install-success-msg = "Open a new terminal and run: node-plane"

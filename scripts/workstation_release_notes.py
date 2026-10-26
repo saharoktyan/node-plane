@@ -5,9 +5,9 @@ import re
 
 
 def render_notes(body, tag):
-    if not re.fullmatch(r'v\d+\.\d+\.\d+(?:-alpha\.\d+)?', tag):
+    if not re.fullmatch(r'v\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.\d+)?', tag):
         raise ValueError('Invalid release tag')
-    channel = 'dev' if '-alpha.' in tag else 'stable'
+    channel = 'dev' if re.search(r'-(?:alpha|beta|rc)\.\d+$', tag) else 'stable'
     name = 'Node Plane (Dev)' if channel == 'dev' else 'Node Plane'
     base = f'https://github.com/saharoktyan/node-plane/releases/download/{tag}'
     install = f'''## Install {name}

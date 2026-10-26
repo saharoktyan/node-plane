@@ -1280,14 +1280,6 @@ impl AgentState {
         let _ = Command::new("docker").args(args).output();
     }
 
-    fn docker_inspect_exists(&self, args: &[&str]) -> bool {
-        Command::new("docker")
-            .args(args)
-            .output()
-            .map(|output| output.status.success())
-            .unwrap_or(false)
-    }
-
     fn container_cleanup_plan(
         records: &serde_json::Value,
         protocols: &[(&str, &str, &str, bool)],

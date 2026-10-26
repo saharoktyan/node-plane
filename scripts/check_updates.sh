@@ -71,7 +71,7 @@ emit_error() {
 }
 
 stable_tag_regex='^v?[0-9]+\.[0-9]+\.[0-9]+$'
-alpha_tag_regex='^v?[0-9]+\.[0-9]+\.[0-9]+-alpha\.[0-9]+$'
+prerelease_tag_regex='^v?[0-9]+\.[0-9]+\.[0-9]+-(alpha|beta|rc)\.[0-9]+$'
 
 latest_tag_for_branch() {
   local branch="$1"
@@ -79,7 +79,7 @@ latest_tag_for_branch() {
   if [[ "$branch" == "main" ]]; then
     regex="$stable_tag_regex"
   else
-    regex="$alpha_tag_regex"
+    regex="$prerelease_tag_regex"
   fi
   while IFS= read -r tag; do
     [[ -z "$tag" ]] && continue
@@ -87,7 +87,7 @@ latest_tag_for_branch() {
       echo "$tag"
       return 0
     fi
-  done < <(git tag --merged "origin/${branch}" --sort=-version:refname)
+  done < <(git tag --merged "origin/${branch}" | python3 "${SCRIPT_DIR}/controller_release.py" sort-refs)
   return 1
 }
 
@@ -166,14 +166,14 @@ if [[ $LIST_MODE -eq 1 ]]; then
   if [[ "$BRANCH" == "main" ]]; then
     tag_regex="$stable_tag_regex"
   else
-    tag_regex="$alpha_tag_regex"
+    tag_regex="$prerelease_tag_regex"
   fi
   while IFS= read -r tag; do
     [[ -z "$tag" ]] && continue
     if [[ "$tag" =~ $tag_regex ]]; then
       echo "version_item: ${tag#v}|${tag}|tag|$(git rev-parse "${tag}^{commit}")"
     fi
-  done < <(git tag --merged "${BRANCH_REF}" --sort=-version:refname)
+  done < <(git tag --merged "${BRANCH_REF}" | python3 "${SCRIPT_DIR}/controller_release.py" sort-refs)
   exit 0
 fi
 
