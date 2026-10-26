@@ -7,6 +7,7 @@
 - Preserve the configured Telegram adapter credential across controller reset, including resets started from Workstation; continue invalidating unrelated credentials.
 - Fix HTTP 500 responses when installation progress includes skipped stages, and validate node keys and edited fields before advancing through forms. Explain reserved keys and suggest a free numeric suffix.
 - Reject duplicate Workstation installation names, support Ctrl+W/Ctrl+Backspace in TUI inputs, correct post-creation navigation, simplify uninstalled-node removal and regroup Quick Start and IPv6 defaults.
+- Release the local installation catalog lock after rejected edits as well as successful saves, including when a concurrently spawned child inherited the descriptor.
 
 ## 1.0.0-beta.1 - 2026-10-26
 

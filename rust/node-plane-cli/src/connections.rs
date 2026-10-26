@@ -11,6 +11,15 @@ use std::{
 use tempfile::NamedTempFile;
 use uuid::Uuid;
 
+// Closing our descriptor alone does not release flock while a child spawned
+// on another thread still holds an inherited copy before exec.
+struct PreferencesLock(fs::File);
+impl Drop for PreferencesLock {
+    fn drop(&mut self) {
+        let _ = FileExt::unlock(&self.0);
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Installation {
@@ -227,6 +236,8 @@ impl Connections {
         ssh::secure_file(&lock_path)?;
         lock.try_lock_exclusive()
             .context("Installation preferences are being edited in another window. Try again.")?;
+        // Release on validation and I/O errors too, not just the success path.
+        let lock = PreferencesLock(lock);
         let current = Self::load(state)?;
         ensure!(
             current.revision == self.revision,
@@ -263,7 +274,7 @@ impl Connections {
         self.revision = next_revision;
         // Explicitly release the lock even if a concurrently spawned child briefly
         // inherited its file descriptor before exec closed it.
-        FileExt::unlock(&lock)?;
+        FileExt::unlock(&lock.0)?;
         Ok(())
     }
     /// Copy only connection metadata. Keys and operation journals stay in their own installation.
@@ -359,6 +370,27 @@ impl Connections {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    #[test]
+    fn preference_lock_is_released_even_while_an_inherited_descriptor_survives() {
+        let path = tempfile::NamedTempFile::new().unwrap();
+        // Use a named inode so a second independent open can test the lock.
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(path.path())
+            .unwrap();
+        file.try_lock_exclusive().unwrap();
+        let inherited_named = file.try_clone().unwrap();
+        drop(PreferencesLock(file));
+        let contender = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(path.path())
+            .unwrap();
+        contender.try_lock_exclusive().unwrap();
+        drop(inherited_named);
+    }
     #[test]
     fn accent_defaults_for_old_saves_and_invalid_colors_do_not_replace_preferences() {
         let dir = tempfile::tempdir().unwrap();
