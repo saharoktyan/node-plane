@@ -107,7 +107,8 @@ class NodeTemplateTests(IsolatedAsyncioTestCase):
     async def test_manual_location_still_flows_from_type_to_addresses(self):
         await self.choose('ssh', 'custom')
         self.assertEqual(await self.state.get_state(), NodeDraftState.waiting_for_key.state)
-        await nodes.process_wizard_key(self.message('custom1'), self.bot, self.state)
+        self.backend.request.return_value = {'available': True, 'reason': None, 'suggestion': None}
+        await nodes.process_wizard_key(self.message('custom1'), self.bot, self.state, self.backend)
         await nodes.process_wizard_title(self.message('Private node'), self.bot, self.state)
         self.query.data = 'wizard_region:asia'
         await nodes.wizard_region_cb(self.query, self.bot, self.state)
@@ -116,6 +117,19 @@ class NodeTemplateTests(IsolatedAsyncioTestCase):
         self.assertEqual(await self.state.get_state(), NodeDraftState.waiting_for_target.state)
         self.assertEqual(self.draw.call_args.args[3][0][0].callback_data, 'wizard_back:flag')
         self.assertEqual((await self.state.get_data())['wizard_data']['region'], 'Asia')
+
+    async def test_key_conflict_is_shown_before_advancing_with_input_preserved(self):
+        await self.choose('ssh', 'custom')
+        for reason in ('node_key_retired', 'node_key_conflict'):
+            self.backend.request.return_value = {'available': False, 'reason': reason, 'suggestion': 'lv10'}
+            await nodes.process_wizard_key(self.message('lv9'), self.bot, self.state, self.backend)
+            self.assertEqual(await self.state.get_state(), NodeDraftState.waiting_for_key.state)
+            self.assertEqual((await self.state.get_data())['wizard_data']['key'], 'lv9')
+            self.assertIn(tr('en', 'node.wizard.key.' + reason, suggestion='lv10'),
+                self.draw.call_args.args[2].plain())
+        self.backend.request.side_effect = BackendError('backend_unavailable', 503)
+        await nodes.process_wizard_key(self.message('lv9'), self.bot, self.state, self.backend)
+        self.assertEqual(await self.state.get_state(), NodeDraftState.waiting_for_key.state)
 
     async def test_existing_numbers_include_later_pages_and_drafts_preview_same_next_number(self):
         self.backend.request.side_effect = [

@@ -243,13 +243,13 @@ impl Request {
     }
 }
 
-fn valid_telegram_id(value: &str) -> bool {
+pub(crate) fn valid_telegram_id(value: &str) -> bool {
     !value.is_empty()
         && value.bytes().all(|b| b.is_ascii_digit())
         && value.parse::<i64>().is_ok_and(|id| id > 0)
 }
 
-fn valid_tag(tag: &str) -> bool {
+pub(crate) fn valid_tag(tag: &str) -> bool {
     let value = tag.strip_prefix('v').unwrap_or(tag);
     let (version, suffix) = value
         .split_once('-')

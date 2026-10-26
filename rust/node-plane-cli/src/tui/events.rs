@@ -247,6 +247,27 @@ impl App {
                             }
                         }
                     }
+                    crate::nodes::Update::KeyAvailability(key, value) => {
+                        if let Some(wizard) = &mut self.node_wizard
+                            && wizard.step == crate::node_wizard::Step::Key
+                            && wizard.key == key
+                        {
+                            if value["available"] == true {
+                                wizard.step = crate::node_wizard::Step::Title;
+                                wizard.selected = 0;
+                            } else {
+                                let reason = if value["reason"] == "node_key_retired" {
+                                    "This key belonged to a deleted node and remains reserved for safety."
+                                } else {
+                                    "A node with this key already exists."
+                                };
+                                self.error = format!(
+                                    "{reason} Try: {}",
+                                    value["suggestion"].as_str().unwrap_or("another key")
+                                );
+                            }
+                        }
+                    }
                     crate::nodes::Update::CreationOptions(options) => {
                         match crate::node_wizard::Wizard::new(options) {
                             Ok(wizard) => self.node_wizard = Some(wizard),

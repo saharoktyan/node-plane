@@ -451,6 +451,46 @@ impl Form {
     pub(super) fn next(&mut self) {
         self.selected = (self.selected + 1).min(self.count().saturating_sub(1));
     }
+    pub(super) fn validate_selected(&self) -> Result<()> {
+        if self.selected == 0 || self.diagnostic_menu {
+            return Ok(());
+        }
+        let Some(index) = self.visible().get(self.selected - 1).copied() else {
+            return Ok(());
+        };
+        let value = self.fields[index].trim();
+        match index {
+            0 | 8 => Installation::validate_field(1, value)?,
+            1 | 9 => Installation::validate_field(2, value)?,
+            2 | 10 => Installation::validate_field(3, value)?,
+            3 => Installation::validate_field(4, value)?,
+            4 => anyhow::ensure!(
+                value.is_empty() || crate::config::valid_tag(value),
+                "Enter a release tag such as v1.0.0-beta.1, or leave blank for latest."
+            ),
+            5 => anyhow::ensure!(
+                !value.is_empty()
+                    && value
+                        .split(',')
+                        .all(|id| crate::config::valid_telegram_id(id.trim())),
+                "Enter positive numeric Telegram administrator IDs separated by commas."
+            ),
+            6 => {
+                let (id, secret) = value.split_once(':').unwrap_or_default();
+                anyhow::ensure!(
+                    crate::config::valid_telegram_id(id)
+                        && secret.len() >= 20
+                        && secret
+                            .bytes()
+                            .all(|b| b.is_ascii_alphanumeric() || b"_-".contains(&b)),
+                    "Paste the Telegram bot token from BotFather."
+                );
+            }
+            7 => Installation::validate_field(6, value)?,
+            _ => {}
+        }
+        Ok(())
+    }
     pub(super) fn previous(&mut self) {
         self.selected = if self.selected == 0 {
             0
@@ -460,7 +500,7 @@ impl Form {
     }
     pub(super) fn apply(&self, r: &mut Request) -> Result<()> {
         if !r.host.eq_ignore_ascii_case(self.fields[0].trim())
-            || r.port.to_string() != self.fields[1]
+            || r.port.to_string() != self.fields[1].trim()
             || r.user != self.fields[2]
         {
             r.workflow.operation = None;
@@ -468,15 +508,15 @@ impl Form {
         r.action = self.action;
         r.workflow.repair = self.fields.get(11).is_some_and(|v| v == "true");
         r.host = self.fields[0].trim().into();
-        r.port = self.fields[1].parse()?;
+        r.port = self.fields[1].trim().parse()?;
         r.user = self.fields[2].trim().into();
         r.branch = self.fields[3].trim().into();
         r.tag = self.fields[4].trim().into();
         r.admin_ids = self.fields[5].trim().into();
-        r.bot_token = Zeroizing::new(self.fields[6].clone());
+        r.bot_token = Zeroizing::new(self.fields[6].trim().to_owned());
         r.workflow.account = self.fields[7].trim().into();
         r.workflow.target_host = self.fields[8].trim().into();
-        r.workflow.target_port = self.fields[9].parse()?;
+        r.workflow.target_port = self.fields[9].trim().parse()?;
         r.workflow.target_user = self.fields[10].trim().into();
         r.validate()
     }
@@ -492,7 +532,7 @@ impl Form {
                 .as_ref()
                 .map_or_else(|| self.fields[0].clone(), |p| p.name.clone()),
             host: self.fields[0].trim().into(),
-            port: self.fields[1].parse().unwrap_or(22),
+            port: self.fields[1].trim().parse().unwrap_or(22),
             user: self.fields[2].trim().into(),
             branch: self.fields[3].trim().into(),
             admin_ids: self.fields[5].trim().into(),
@@ -502,7 +542,7 @@ impl Form {
     pub(super) fn use_installation(&mut self, profile: &Installation) {
         if !profile.matches(
             &self.fields[0],
-            self.fields[1].parse().unwrap_or(22),
+            self.fields[1].trim().parse().unwrap_or(22),
             &self.fields[2],
         ) {
             self.fields[8].clear();

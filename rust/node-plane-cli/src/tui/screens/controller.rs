@@ -254,6 +254,7 @@ pub(in crate::tui) fn defaults_controls(state: &crate::controller::Browser) -> V
             Control::ControllerDefaultsToggle("xhttp"),
         ]);
     }
+    controls.push(Control::ControllerDefaultsToggle("ipv6_outbound"));
     controls.push(Control::ControllerDefaultsAdvanced);
     if state.defaults_advanced {
         controls.push(Control::ControllerDefaultsPreset);
@@ -276,7 +277,6 @@ pub(in crate::tui) fn defaults_controls(state: &crate::controller::Browser) -> V
             .into_iter()
             .map(Control::ControllerDefaultsField),
         );
-        controls.push(Control::ControllerDefaultsToggle("ipv6_outbound"));
     }
     if state.defaults != state.defaults_baseline {
         controls.extend([

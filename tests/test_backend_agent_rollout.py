@@ -78,12 +78,88 @@ class BackendAgentRolloutTests(TestCase):
             write_progress(progress_path(queued['id']), queued['id'], 'verify backend agent route for lv1')
             result = self.client.get(f'/api/v1/agent-rollouts/{queued["id"]}', headers=headers).json()
             self.assertEqual(result['progress']['stage'], 'verify_agent')
+            self.assertNotIn('skipped_stages', result['progress'])
+            self.assertNotIn('state', result['progress'])
             summary = self.client.get('/api/v1/nodes/lv1/overview', headers=headers).json()
             self.assertEqual(summary['agent_rollout']['progress']['stage'], 'verify_agent')
             with self.db.transaction() as conn:
                 conn.execute("UPDATE backend_agent_rollouts SET status='succeeded' WHERE id=?", (queued['id'],))
             result = self.client.get(f'/api/v1/agent-rollouts/{queued["id"]}', headers=headers).json()
             self.assertIsNone(result['progress'])
+
+    def test_rollout_progress_regression_running_and_blocked_with_skipped_stages_and_success(self):
+        from backend.installation_progress import progress_path, write_progress
+        self.node()
+        headers = {**self.headers, 'X-Node-Plane-Telegram-User-ID': '101',
+                   'Idempotency-Key': str(uuid4())}
+        queued = self.client.post('/api/v1/nodes/lv1/agent-rollouts', headers=headers,
+                                 json={'transport': 'local'}).json()
+        with TemporaryDirectory() as shared, patch.dict(os.environ, NODE_PLANE_SHARED_DIR=shared):
+            path = progress_path(queued['id'])
+
+            # 1. Running state with currently skipped stage
+            with self.db.transaction() as conn:
+                conn.execute("UPDATE backend_agent_rollouts SET status='running' WHERE id=?", (queued['id'],))
+            write_progress(path, queued['id'], 'skip previous controller journals for lv1')
+            self.assertTrue(path.is_file())
+
+            response = self.client.get(f'/api/v1/agent-rollouts/{queued["id"]}', headers=headers)
+            self.assertEqual(response.status_code, 200)
+            result = response.json()
+            self.assertEqual(result['status'], 'running')
+            self.assertEqual(result['progress']['stage'], 'archive_journals')
+            self.assertEqual(result['progress']['label'], 'Archiving previous installation journals · Skipped')
+            self.assertEqual(result['progress']['state'], 'skipped')
+            self.assertEqual(result['progress']['skipped_stages'], ['archive_journals'])
+
+            # Node overview also reflects rollout progress with skipped stages
+            overview = self.client.get('/api/v1/nodes/lv1/overview', headers=headers).json()
+            self.assertEqual(overview['agent_rollout']['progress']['stage'], 'archive_journals')
+            self.assertEqual(overview['agent_rollout']['progress']['skipped_stages'], ['archive_journals'])
+
+            # 2. Running state after previous skipped stage (state field absent, skipped_stages preserved)
+            write_progress(path, queued['id'], 'prepare mutual TLS certificate for lv1')
+            response = self.client.get(f'/api/v1/agent-rollouts/{queued["id"]}', headers=headers)
+            self.assertEqual(response.status_code, 200)
+            result = response.json()
+            self.assertEqual(result['status'], 'running')
+            self.assertEqual(result['progress']['stage'], 'certificates')
+            self.assertEqual(result['progress']['label'], 'Preparing connection certificates')
+            self.assertEqual(result['progress']['skipped_stages'], ['archive_journals'])
+            self.assertNotIn('state', result['progress'])
+
+            # 3. Blocked state retains progress observation and skipped stages
+            with self.db.transaction() as conn:
+                conn.execute("UPDATE backend_agent_rollouts SET status='blocked' WHERE id=?", (queued['id'],))
+
+            response = self.client.get(f'/api/v1/agent-rollouts/{queued["id"]}', headers=headers)
+            self.assertEqual(response.status_code, 200)
+            result = response.json()
+            self.assertEqual(result['status'], 'blocked')
+            self.assertEqual(result['progress']['stage'], 'certificates')
+            self.assertEqual(result['progress']['skipped_stages'], ['archive_journals'])
+            self.assertNotIn('state', result['progress'])
+
+            # Blocked state with stage that is itself skipped
+            write_progress(path, queued['id'], 'skip previous controller journals for lv1')
+            response = self.client.get(f'/api/v1/agent-rollouts/{queued["id"]}', headers=headers)
+            self.assertEqual(response.status_code, 200)
+            result = response.json()
+            self.assertEqual(result['status'], 'blocked')
+            self.assertEqual(result['progress']['stage'], 'archive_journals')
+            self.assertEqual(result['progress']['state'], 'skipped')
+            self.assertEqual(result['progress']['skipped_stages'], ['archive_journals'])
+
+            # 4. Successful final state hides progress observation (default absence semantics)
+            with self.db.transaction() as conn:
+                conn.execute("UPDATE backend_agent_rollouts SET status='succeeded' WHERE id=?", (queued['id'],))
+
+            response = self.client.get(f'/api/v1/agent-rollouts/{queued["id"]}', headers=headers)
+            self.assertEqual(response.status_code, 200)
+            result = response.json()
+            self.assertEqual(result['status'], 'succeeded')
+            self.assertIsNone(result['progress'])
+            self.assertTrue(path.is_file())
 
     def node(self):
         with self.db.transaction() as conn:

@@ -249,6 +249,7 @@ impl Wizard {
                 self.choose(self.selected)?;
             }
             Step::Key => {
+                self.key = self.key.trim().into();
                 ensure!(
                     !self.key.is_empty()
                         && self.key.len() <= 64
@@ -390,7 +391,7 @@ impl Wizard {
         )
     }
 }
-fn valid_target(target: &str) -> bool {
+pub(crate) fn valid_target(target: &str) -> bool {
     if target.is_empty() || target.len() > 255 {
         return false;
     }
@@ -414,7 +415,7 @@ fn valid_target(target: &str) -> bool {
     }
 }
 
-fn valid_public_host(host: &str) -> bool {
+pub(crate) fn valid_public_host(host: &str) -> bool {
     if host.parse::<std::net::Ipv4Addr>().is_ok() {
         return true;
     }

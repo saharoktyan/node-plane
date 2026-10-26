@@ -2,7 +2,8 @@
 
 import tempfile
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
+from pathlib import Path
 from uuid import uuid4
 
 from backend.authorization import AccessDenied, Actor
@@ -133,6 +134,45 @@ class SystemCleanupTests(unittest.TestCase):
         self.assertIsNotNone(ProfileRepository(self.db).get(profile))
         self.assertEqual(self.service.abort(self.actor, job["id"])["status"], "aborted")
         self.host.clear_local.assert_not_called()
+
+    def test_reset_preserves_only_configured_adapter_for_either_initiator(self):
+        from backend.authorization import PrincipalKind
+        from backend.credentials import ADAPTER_SCOPES, PERMISSIONS
+
+        for via_adapter in (False, True):
+            with self.subTest(via_adapter=via_adapter):
+                adapter_id, token = self.credentials.issue(PrincipalKind.ADAPTER, ADAPTER_SCOPES)
+                _, other = self.credentials.issue(PrincipalKind.ADAPTER, ADAPTER_SCOPES)
+                _, user_key = self.credentials.issue(PrincipalKind.ACCOUNT,
+                    PERMISSIONS, account_id=self.admin.id)
+                _, operator_key = self.credentials.issue(PrincipalKind.ACCOUNT,
+                    PERMISSIONS, account_id=self.admin.id)
+                self.actor = Actor(self.credentials.authenticate('Bearer ' +
+                    (token if via_adapter else operator_key)), self.admin)
+                path = Path(self.temp.name) / 'adapter.token'
+                path.write_text(token)
+                with patch.dict('os.environ', {'NODE_PLANE_BACKEND_ADAPTER_TOKEN_FILE': str(path)}):
+                    job = self.queue()
+                    self.advance(job, 'succeeded')
+                self.assertEqual(self.credentials.authenticate('Bearer ' + token).id, adapter_id)
+                self.assertEqual(self.client.get('/api/v1/me', headers={
+                    'Authorization': 'Bearer ' + token, 'X-Node-Plane-Telegram-User-ID': '101'}).status_code, 200)
+                for removed in (other, user_key):
+                    with self.assertRaises(AccessDenied):
+                        self.credentials.authenticate('Bearer ' + removed)
+
+    def test_reset_does_not_restore_revoked_configured_adapter(self):
+        from backend.authorization import PrincipalKind
+        from backend.credentials import ADAPTER_SCOPES
+
+        identity, token = self.credentials.issue(PrincipalKind.ADAPTER, ADAPTER_SCOPES)
+        self.credentials.revoke(identity)
+        path = Path(self.temp.name) / 'adapter.token'
+        path.write_text(token)
+        with patch.dict('os.environ', {'NODE_PLANE_BACKEND_ADAPTER_TOKEN_FILE': str(path)}):
+            self.advance(self.queue(), 'succeeded')
+        with self.assertRaises(AccessDenied):
+            self.credentials.authenticate('Bearer ' + token)
 
     def test_remove_waits_for_ack_and_then_launches_once(self):
         job = self.queue("remove")

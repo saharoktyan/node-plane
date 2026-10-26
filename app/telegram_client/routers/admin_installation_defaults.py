@@ -6,7 +6,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import InlineKeyboardButton
 
 from ..backend import BackendError
-from ..i18n import normalize_locale, tr
+from ..i18n import field_hint, normalize_locale, tr
 from ..screens import Screen, Section, Table
 from .callbacks import AdminSettingsCallback
 from .common import render
@@ -38,11 +38,12 @@ async def show(query, bot, state, *, error=None):
     transport_rows = (tuple(button(tr(locale, 'transport.' + kind), 'transport:' + kind,
         selected=kind in draft['xray_transports']) for kind in ('tcp', 'xhttp')),)
     sections = [] if advanced else [Section(tr(locale, 'defaults.protocols'), rows=protocol_rows)]
-    sections.append(Section(tr(locale, 'nodes.settings.field.ipv6_outbound'), rows=(tuple(
-        button(mode.title(), 'ipv6:' + mode, selected=settings.get('ipv6_outbound', 'on') == mode)
-        for mode in ('on', 'off')),)))
     if not advanced and 'xray' in draft['protocols']:
         sections.append(Section(tr(locale, 'defaults.transports'), rows=transport_rows))
+    if not advanced:
+        sections.append(Section(tr(locale, 'nodes.settings.field.ipv6_outbound'), rows=(tuple(
+            button(mode.title(), 'ipv6:' + mode, selected=settings.get('ipv6_outbound', 'on') == mode)
+            for mode in ('on', 'off')),)))
     if not advanced and 'awg' in draft['protocols']:
         sections.append(Section(tr(locale, 'defaults.awg'),
             lines=(tr(locale, 'defaults.port_policy'),),
@@ -136,7 +137,7 @@ async def defaults_cb(query, bot, backend, state):
             await state.update_data(installation_defaults_field=field)
             await state.set_state(DefaultField.waiting)
             await render(bot, query.message.chat.id, Screen(tr(locale, 'nodes.settings.field.' + field),
-                (tr(locale, 'nodes.settings.send_value'),), embedded_buttons=True, navigation=True),
+                (field_hint(locale, field),), embedded_buttons=True, navigation=True),
                 [[button(tr(locale, 'back'), 'back')]], state, query.message.message_id)
             return
         elif action == 'save':
@@ -159,7 +160,7 @@ async def defaults_cb(query, bot, backend, state):
 
 
 @router.message(DefaultField.waiting, F.text, ~F.text.startswith('/'))
-async def field_text(message, bot, state):
+async def field_text(message, bot, state, backend):
     if not message.from_user or message.chat.type != 'private':
         return
     data = await state.get_data()
@@ -174,18 +175,26 @@ async def field_text(message, bot, state):
     value = message.text.strip()
     query = SimpleNamespace(message=SimpleNamespace(chat=message.chat,
         message_id=data.get('control_message_id')))
+    async def invalid(error):
+        await render(bot, message.chat.id, Screen(tr(locale, 'nodes.settings.field.' + field),
+            (error, str(value), field_hint(locale, field)), embedded_buttons=True, navigation=True),
+            [[button(tr(locale, 'back'), 'back')]], state, data.get('control_message_id'))
     if field.endswith('_port'):
         if not value.isascii() or not value.isdecimal() or not 1 <= int(value) <= 65535:
-            await show(query, bot, state, error=tr(locale, 'defaults.invalid'))
-            await state.set_state(None)
+            await invalid(tr(locale, 'nodes.settings.invalid_port'))
             return
         value = int(value)
     if field == 'xray_sni':
         from domain_names import valid_sni
         if not valid_sni(value):
-            await show(query, bot, state, error=tr(locale, 'nodes.settings.sni_hint'))
-            await state.set_state(None)
+            await invalid(tr(locale, 'nodes.settings.invalid_sni'))
             return
+    try:
+        await backend.request('POST', '/api/v1/nodes/validate-fields',
+            telegram_user_id=message.from_user.id, body={'settings': {field: value}})
+    except BackendError as exc:
+        await invalid(tr(locale, 'defaults.invalid' if exc.status == 422 else 'action.error.retry'))
+        return
     draft = dict(data['installation_defaults_draft'])
     draft['settings'] = dict(draft['settings'], **{field: value})
     if field == 'awg_port':

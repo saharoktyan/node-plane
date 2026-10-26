@@ -73,6 +73,52 @@ class BackendNodeTests(unittest.TestCase):
         response = self.create(body={'key': 'old', 'title': 'Old', 'region': 'EU', 'protocols': []})
         self.assertEqual(response.json()['error']['code'], 'node_key_retired')
 
+    def test_key_availability_distinguishes_retired_and_active_numeric_suffixes(self):
+        self.assertEqual(self.create().status_code, 201)
+        with self.db.transaction() as conn:
+            for key in ('lv2', 'lv9', 'lv10', 'plain', 'pad009', '9' * 64):
+                conn.execute('''INSERT INTO backend_node_retirements
+                    (node_key, actor_id, mode, reason, unfinished_tasks, retired_at)
+                    VALUES (?, ?, 'registry_only', 'test', 0, '2026-10-26')''', (key, self.admin.id))
+        for key, reason, suggestion in (
+                ('lv1', 'node_key_conflict', 'lv3'),
+                ('lv9', 'node_key_retired', 'lv11'),
+                ('plain', 'node_key_retired', 'plain1'),
+                ('pad009', 'node_key_retired', 'pad10')):
+            result = self.client.get('/api/v1/nodes/key-availability',
+                params={'key': key}, headers=self.admin_headers())
+            self.assertEqual(result.status_code, 200, result.text)
+            self.assertEqual(result.json(), {'available': False, 'reason': reason, 'suggestion': suggestion})
+        result = self.client.get('/api/v1/nodes/key-availability',
+            params={'key': '9' * 64}, headers=self.admin_headers()).json()
+        self.assertLessEqual(len(result['suggestion']), 64)
+        self.assertEqual(self.client.get('/api/v1/nodes/key-availability?key=free',
+            headers=self.admin_headers()).json(), {'available': True, 'reason': None, 'suggestion': None})
+        self.assertEqual(self.client.get('/api/v1/nodes/key-availability?key=bad.key',
+            headers=self.admin_headers()).status_code, 422)
+        self.assertEqual(self.client.get('/api/v1/nodes/key-availability?key=lv1').status_code, 401)
+        # Read-only availability must not reserve the suggested key.
+        self.assertEqual(self.create({'key': 'lv3', 'title': 'New', 'region': 'EU',
+            'protocols': [], 'transport': 'ssh', 'ssh_target': 'root@node.example'}).status_code, 201)
+
+    def test_field_validation_is_read_only_and_reuses_persistence_constraints(self):
+        original = self.create().json()
+        self.assertFalse(original['setup_attempted'])
+        for value, expected in (({'title': ''}, 422),
+                ({'settings': {'xray_tcp_port': 0}}, 422),
+                ({'settings': {'xray_xhttp_path': 'no-slash'}}, 422),
+                ({'settings': {'xray_fingerprint': 'invalid'}}, 422),
+                ({'settings': {'awg_interface': '123'}}, 422),
+                ({'settings': {'xray_xhttp_path': '/assets', 'xray_tcp_port': 1443}}, 200)):
+            response = self.client.post('/api/v1/nodes/validate-fields',
+                json=value, headers=self.admin_headers())
+            self.assertEqual(response.status_code, expected, response.text)
+        self.assertEqual(self.client.get('/api/v1/nodes/lv1', headers=self.admin_headers()).json(), original)
+        self.assertEqual(self.client.post('/api/v1/nodes/validate-fields', json={'title': 'x'}).status_code, 401)
+        self.client.post('/api/v1/nodes/lv1/agent-rollouts',
+            headers=self.admin_headers(**{'Idempotency-Key': str(uuid4())}), json={'transport': 'local'})
+        self.assertTrue(self.client.get('/api/v1/nodes/lv1', headers=self.admin_headers()).json()['setup_attempted'])
+
     def test_partial_settings_preserve_custom_fields_and_update_inherited_hosts(self):
         body = {'key': 'lv1', 'title': 'Custom', 'region': 'EU', 'protocols': ['awg', 'xray'],
             'settings': {'public_host': 'old.example', 'xray_sni': 'example.com',

@@ -373,7 +373,7 @@ _WIZARD_PREVIOUS = {
 
 async def render_wizard_step(chat_id: int, bot: Bot, state: FSMContext,
                              step: str, message_id: int | None = None,
-                             error: bool = False):
+                             error: bool | str = False):
     if step == 'region' and not error:
         await render_wizard_regions(chat_id, bot, state, message_id)
         return
@@ -387,7 +387,7 @@ async def render_wizard_step(chat_id: int, bot: Bot, state: FSMContext,
     if current:
         lines.append(tr(locale, 'node.wizard.current', value=current))
     if error:
-        lines.insert(0, tr(locale, f'node.wizard.{step}.invalid'))
+        lines.insert(0, error if isinstance(error, str) else tr(locale, f'node.wizard.{step}.invalid'))
     navigation = []
     previous = _WIZARD_PREVIOUS.get(step)
     if step in {'target', 'public_host'} and data.get('wizard_data', {}).get('template') == 'custom':
@@ -430,7 +430,7 @@ async def wizard_back_cb(query: CallbackQuery, bot: Bot, state: FSMContext):
                                       query.message.message_id)
 
 @router.message(NodeDraftState.waiting_for_key, F.text)
-async def process_wizard_key(message: Message, bot: Bot, state: FSMContext):
+async def process_wizard_key(message: Message, bot: Bot, state: FSMContext, backend: BackendClient):
     if message.from_user is None or message.chat.type != 'private':
         return
     try:
@@ -445,6 +445,18 @@ async def process_wizard_key(message: Message, bot: Bot, state: FSMContext):
     w = dict(data.get('wizard_data', {}))
     w['key'] = message.text.strip()
     await state.update_data(wizard_data=w)
+    locale = normalize_locale(data.get('locale'))
+    try:
+        availability = await backend.request('GET', f"/api/v1/nodes/key-availability?key={w['key']}",
+            telegram_user_id=message.from_user.id)
+    except BackendError:
+        await render_wizard_step(message.chat.id, bot, state, 'key',
+            data.get('control_message_id'), error=tr(locale, 'action.error.retry'))
+        return
+    if not availability['available']:
+        await render_wizard_step(message.chat.id, bot, state, 'key', data.get('control_message_id'),
+            error=tr(locale, 'node.wizard.key.' + availability['reason'], suggestion=availability['suggestion']))
+        return
     await render_wizard_step(message.chat.id, bot, state, 'title',
                              data.get('control_message_id'))
 
@@ -838,6 +850,17 @@ async def wizard_save_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
             'transport': w['transport'], 'ssh_target': w.get('ssh_target'),
         }, command_key=data['create_node_command_key'])
     except BackendError as exc:
+        if exc.code in {'node_key_retired', 'node_key_conflict'}:
+            try:
+                availability = await backend.request('GET',
+                    f"/api/v1/nodes/key-availability?key={w['key']}", telegram_user_id=query.from_user.id)
+                error = tr(locale, 'node.wizard.key.' + exc.code,
+                    suggestion=availability.get('suggestion') or w['key'] + '1')
+            except BackendError:
+                error = tr(locale, 'node.wizard.duplicate')
+            await render_wizard_step(query.message.chat.id, bot, state, 'key',
+                query.message.message_id, error=error)
+            return
         if exc.code == 'local_node_exists':
             await state.update_data(wizard_local_available=False)
             await render_wizard_transport(query.message.chat.id, bot, state, query.message.message_id)
@@ -1324,6 +1347,9 @@ async def process_node_edit(message: Message, bot: Bot, backend: BackendClient, 
         if field == 'awg_port':
             body['settings']['awg_port_mode'] = 'manual'
     try:
+        await backend.request('POST', '/api/v1/nodes/validate-fields',
+            telegram_user_id=user_id, body=({field: parsed} if field in {'title', 'region', 'flag', 'notes', 'ssh_target'}
+                else {'settings': {field: parsed}}))
         await change_node_draft(user_id, node_key, body, backend, state)
         await _clear_node_flow(state)
         if field == 'ssh_target':
@@ -1334,10 +1360,12 @@ async def process_node_edit(message: Message, bot: Bot, backend: BackendClient, 
             await show_section(message.chat.id, user_id, message_id, data.get('edit_section', 'general'), node_key, bot, backend, state)
     except BackendError as exc:
         locale = normalize_locale(data.get('locale'))
+        from ..i18n import field_hint
         callback = (f'node_connection:{node_key}' if field == 'ssh_target' else
                     NodeSettingsCallback(node_key=node_key).pack())
         await render(bot, message.chat.id, Screen(tr(locale, 'nodes.settings.save_failed_title'),
-            (tr(locale, 'nodes.settings.save_failed'),), embedded_buttons=True, navigation=True),
+            ((field_hint(locale, field) if exc.status == 422 else tr(locale, 'nodes.settings.save_failed')),
+             value, tr(locale, 'nodes.settings.send_value')), embedded_buttons=True, navigation=True),
             [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data=callback)]],
             state, message_id)
 
@@ -1872,8 +1900,9 @@ async def show_registry_confirmation(chat_id, user_id, message_id, node_key, bot
              tr(locale, 'nodes.maintenance.registry_grants'),
              tr(locale, 'nodes.maintenance.registry_runtime'),
              tr(locale, 'nodes.maintenance.registry_tunnels'),
-             tr(locale, 'nodes.maintenance.registry_use')), embedded_buttons=True, navigation=True),
-        [[InlineKeyboardButton(text=tr(locale, 'nodes.maintenance.registry_confirm'),
+             tr(locale, 'nodes.maintenance.registry_use')) if node['applied_revision'] or node.get('setup_attempted', True) else
+            (server_label(node), tr(locale, 'nodes.maintenance.registry_grants')), embedded_buttons=True, navigation=True),
+        [[InlineKeyboardButton(text=tr(locale, 'nodes.maintenance.registry_confirm' if node['applied_revision'] else 'nodes.maintenance.remove'),
             callback_data=RetireRegistryCallback(node_key=node_key).pack(), style='danger')],
          [InlineKeyboardButton(text=tr(locale, 'back'),
             callback_data=NodeMaintenanceCallback(node_key=node_key).pack() if node['applied_revision'] else AdminNodeCallback(node_key=node_key).pack())]],

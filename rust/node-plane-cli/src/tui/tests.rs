@@ -2285,6 +2285,7 @@ fn deleting_one_of_two_profiles_on_same_endpoint_preserves_trust() {
     let mut other = profile.clone();
     other.id = uuid::Uuid::new_v4();
     other.user = "admin".into();
+    other.name = "Other administrator".into();
     app.connections.installations.push(other);
     app.connections.save(dir.path()).unwrap();
     let path = dir.path().join("known_hosts.json");
@@ -2443,7 +2444,8 @@ fn deleting_saved_profiles_preserves_host_trust_and_operation_history() {
         let mut app = test_profile_app();
         app.state_dir = dir.path().into();
         let active = app.connections.selected.unwrap();
-        let other = saved_installation("other.example");
+        let mut other = saved_installation("other.example");
+        other.name = "Other installation".into();
         app.connections.installations.push(other.clone());
         app.connections.save(&app.state_dir).unwrap();
         for name in ["id_ed25519", "update-operation.json"] {
@@ -3873,11 +3875,18 @@ fn new_node_wizard_keyboard_and_mouse_offer_card_without_installing() {
             .iter()
             .any(|h| matches!(h.control, Control::NodesSetup))
     );
+    app.wizard_key(KeyCode::Right.into());
     app.wizard_key(KeyCode::Enter.into());
     assert!(
         matches!(app.nodes_requested.take(),Some(crate::nodes::Command::Card(key)) if key == "lv1")
     );
     assert!(matches!(app.screen, Screen::Nodes));
+    app.activate(Control::WizardCancel);
+    assert!(app.nodes.card.is_none());
+    assert!(matches!(
+        app.nodes_requested.take(),
+        Some(crate::nodes::Command::List)
+    ));
 }
 fn browser_node(key: &str, region: &str) -> crate::nodes::Node {
     serde_json::from_value(serde_json::json!({"key":key, "title":key, "region":region,
@@ -7349,4 +7358,556 @@ fn access_request_tab_labels_use_compact_identity_and_date_with_account_fallback
         "created_at": "not-a-date"
     });
     assert_eq!(label(Tab::Requests, &item_bad_date), "@charlie · —");
+}
+
+#[test]
+fn normalize_backspace_ctrl_w_and_ctrl_backspace_routing() {
+    let mut app = test_profile_app();
+    let dir = tempfile::tempdir().unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700));
+    }
+    app.state_dir = dir.path().into();
+
+    // 1. Outside input: Ctrl+W and Ctrl+Backspace are ignored (KeyCode::Null),
+    // whereas plain Backspace maps to KeyCode::Esc.
+    for screen in [
+        Screen::Finished,
+        Screen::SettingsPage(SettingsPage::Profiles),
+    ] {
+        app.screen = screen;
+        for code in [KeyCode::Char('w'), KeyCode::Backspace] {
+            let mut key = KeyEvent::new(code, KeyModifiers::CONTROL);
+            app.normalize_backspace(&mut key);
+            assert_eq!(key.code, KeyCode::Null);
+        }
+        let mut esc = KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE);
+        app.normalize_backspace(&mut esc);
+        assert_eq!(esc.code, KeyCode::Esc);
+    }
+
+    // Modal exit and discard cancel input even if in an input screen
+    app.screen = Screen::Controller;
+    app.controller.defaults_input = Some(("bot_title", "My Node Plane".into()));
+    app.controller.selected = app
+        .controller_controls()
+        .iter()
+        .position(|c| *c == Control::ControllerDefaultsInput)
+        .unwrap();
+    app.exit = true;
+    let mut exit_key = KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL);
+    app.normalize_backspace(&mut exit_key);
+    assert_eq!(exit_key.code, KeyCode::Null);
+    app.exit = false;
+
+    app.discard = Some(Control::Discard(true));
+    let mut discard_key = KeyEvent::new(KeyCode::Backspace, KeyModifiers::CONTROL);
+    app.normalize_backspace(&mut discard_key);
+    assert_eq!(discard_key.code, KeyCode::Null);
+    app.discard = None;
+
+    // Profile editor: non-editable branch field (4) or buttons (7, 8) ignore word deletion
+    app.begin_edit(true);
+    assert!(app.editor.is_some(), "begin_edit failed: {}", app.error);
+    for non_input_index in [4, 7, 8] {
+        app.editor.as_mut().unwrap().2 = non_input_index;
+        let mut key = KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL);
+        app.normalize_backspace(&mut key);
+        assert_eq!(key.code, KeyCode::Null);
+    }
+
+    // 2. Inside input: Ctrl+W normalizes to KeyCode::Backspace with CONTROL modifier preserved;
+    // Ctrl+Backspace keeps KeyCode::Backspace with CONTROL.
+    app.editor.as_mut().unwrap().2 = 0;
+    for code in [KeyCode::Char('w'), KeyCode::Backspace] {
+        let mut key = KeyEvent::new(code, KeyModifiers::CONTROL);
+        app.normalize_backspace(&mut key);
+        assert_eq!(key.code, KeyCode::Backspace);
+        assert!(key.modifiers.contains(KeyModifiers::CONTROL));
+    }
+}
+
+#[test]
+fn inputs_handle_ctrl_w_and_ctrl_backspace_word_deletion() {
+    let mut app = test_profile_app();
+    let dir = tempfile::tempdir().unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700));
+    }
+    app.state_dir = dir.path().into();
+
+    // 1. Controller inputs: phrase, defaults input, announcement draft
+    app.screen = Screen::Controller;
+    app.installed_profile = app.confirmed_installation;
+    app.controller.plan =
+        Some(serde_json::json!({"action": "reset", "confirmation_phrase": "reset"}));
+    app.controller.phrase = "alpha beta gamma".into();
+    app.controller.selected = app
+        .controller_controls()
+        .iter()
+        .position(|c| *c == Control::ControllerPhrase)
+        .unwrap();
+    for (expected, code) in [
+        ("alpha beta ", KeyCode::Char('w')),
+        ("alpha ", KeyCode::Backspace),
+    ] {
+        let mut key = KeyEvent::new(code, KeyModifiers::CONTROL);
+        app.normalize_backspace(&mut key);
+        app.controller_key(key);
+        assert_eq!(app.controller.phrase, expected);
+    }
+
+    app.controller.defaults_input = Some(("awg_port", "first second third".into()));
+    app.controller.selected = app
+        .controller_controls()
+        .iter()
+        .position(|c| *c == Control::ControllerDefaultsInput)
+        .unwrap();
+    let mut def_key = KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL);
+    app.normalize_backspace(&mut def_key);
+    app.controller_key(def_key);
+    assert_eq!(
+        app.controller.defaults_input.as_ref().unwrap().1,
+        "first second "
+    );
+
+    app.controller.announcement_draft = Some("service maintenance alert".into());
+    app.controller.selected = app
+        .controller_controls()
+        .iter()
+        .position(|c| *c == Control::ControllerAnnouncementInput)
+        .unwrap();
+    let mut ann_key = KeyEvent::new(KeyCode::Backspace, KeyModifiers::CONTROL);
+    app.normalize_backspace(&mut ann_key);
+    app.controller_key(ann_key);
+    assert_eq!(
+        app.controller.announcement_draft.as_ref().unwrap(),
+        "service maintenance "
+    );
+
+    // 2. Access inputs: search, grant draft identity, device name
+    app.screen = Screen::Access;
+    app.access.search = "admin operators query".into();
+    app.hits = vec![Hit {
+        control: Control::AccessSearch,
+        area: ratatui::layout::Rect::default(),
+    }];
+    app.access.selected = 0;
+    let mut search_key = KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL);
+    app.normalize_backspace(&mut search_key);
+    app.access_key(search_key);
+    assert_eq!(app.access.search, "admin operators ");
+
+    app.access.provision = Some(crate::access::ProvisionDraft {
+        identity: "user one two".into(),
+        key: uuid::Uuid::new_v4(),
+        confirm: false,
+    });
+    app.access.selected = 0;
+    let mut grant_key = KeyEvent::new(KeyCode::Backspace, KeyModifiers::CONTROL);
+    app.normalize_backspace(&mut grant_key);
+    app.access_key(grant_key);
+    assert_eq!(app.access.provision.as_ref().unwrap().identity, "user one ");
+    app.access.provision = None;
+
+    app.access.devices = Some(crate::access::Devices {
+        profile: serde_json::Value::Null,
+        items: Vec::new(),
+        operation: serde_json::Value::Null,
+        card: None,
+        editor: Some(crate::access::DeviceEditor {
+            source: None,
+            name: "My Work Laptop".into(),
+            key: uuid::Uuid::new_v4(),
+        }),
+        delete_key: None,
+        page: 0,
+    });
+    app.hits = vec![Hit {
+        control: Control::AccessDeviceName,
+        area: ratatui::layout::Rect::default(),
+    }];
+    app.access.selected = 0;
+    let mut dev_key = KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL);
+    app.normalize_backspace(&mut dev_key);
+    app.access_key(dev_key);
+    assert_eq!(
+        app.access
+            .devices
+            .as_ref()
+            .unwrap()
+            .editor
+            .as_ref()
+            .unwrap()
+            .name,
+        "My Work "
+    );
+
+    // 3. Node wizard inputs: host, title, key
+    let options = serde_json::from_value(serde_json::json!({
+        "local_available": false,
+        "defaults": {"protocols": ["awg"], "xray_transports": [], "settings": {"awg_i1_preset": "quic", "awg_port_mode": "auto"}},
+        "templates": [{"code": "custom", "title": "Custom", "region": "Europe", "flag": "🌐", "draft": {"key": "", "title": ""}}]
+    })).unwrap();
+    let mut wizard = crate::node_wizard::Wizard::new(options).unwrap();
+    wizard.step = crate::node_wizard::Step::Host;
+    wizard.host = "node one two".into();
+    app.node_wizard = Some(wizard);
+    app.screen = Screen::NodeWizard;
+
+    let mut wiz_host_key = KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL);
+    app.normalize_backspace(&mut wiz_host_key);
+    app.wizard_key(wiz_host_key);
+    assert_eq!(app.node_wizard.as_ref().unwrap().host, "node one ");
+
+    app.node_wizard.as_mut().unwrap().step = crate::node_wizard::Step::Title;
+    app.node_wizard.as_mut().unwrap().title = "node title words".into();
+    let mut wiz_title_key = KeyEvent::new(KeyCode::Backspace, KeyModifiers::CONTROL);
+    app.normalize_backspace(&mut wiz_title_key);
+    app.wizard_key(wiz_title_key);
+    assert_eq!(app.node_wizard.as_ref().unwrap().title, "node title ");
+
+    app.node_wizard.as_mut().unwrap().step = crate::node_wizard::Step::Key;
+    app.node_wizard.as_mut().unwrap().key = "part1 part2".into();
+    let mut wiz_key = KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL);
+    app.normalize_backspace(&mut wiz_key);
+    app.wizard_key(wiz_key);
+    assert_eq!(app.node_wizard.as_ref().unwrap().key, "part1 ");
+
+    // 4. Form inputs (text_input::delete_backwards)
+    let mut form_val = "first second third".to_string();
+    let mut form_key = KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL);
+    form_key.code = KeyCode::Backspace;
+    text_input::delete_backwards(&mut form_val, form_key);
+    assert_eq!(form_val, "first second ");
+
+    // 5. Profile editor inputs
+    app.begin_edit(true);
+    app.editor.as_mut().unwrap().1[0] = "Profile Name Three".into();
+    for (expected, code) in [
+        ("Profile Name ", KeyCode::Char('w')),
+        ("Profile ", KeyCode::Backspace),
+    ] {
+        let mut key = KeyEvent::new(code, KeyModifiers::CONTROL);
+        app.normalize_backspace(&mut key);
+        app.installation_editor_key(key);
+        assert_eq!(app.editor.as_ref().unwrap().1[0], expected);
+    }
+
+    // 6. Password prompt input
+    let (tx, _rx) = std::sync::mpsc::channel();
+    app.event(Event::Prompt(
+        Prompt::Password {
+            user: "root".into(),
+            host: "server.example".into(),
+        },
+        tx,
+    ));
+    app.password = zeroize::Zeroizing::new("secret word password".to_string());
+    for (expected, code) in [
+        ("secret word ", KeyCode::Char('w')),
+        ("secret ", KeyCode::Backspace),
+    ] {
+        let mut key = KeyEvent::new(code, KeyModifiers::CONTROL);
+        app.normalize_backspace(&mut key);
+        app.prompt_key(key);
+        assert_eq!(app.password.as_str(), expected);
+    }
+    app.prompt = None;
+
+    // 7. Theme wizard inputs: name deletes word; hex fields delete word and preserve # prefix
+    app.activate(Control::CreateTheme);
+    app.theme_wizard.as_mut().unwrap().name = "Ocean Blue Dark".into();
+    let mut theme_name_key = KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL);
+    app.normalize_backspace(&mut theme_name_key);
+    app.theme_wizard_key(theme_name_key);
+    assert_eq!(app.theme_wizard.as_ref().unwrap().name, "Ocean Blue ");
+
+    // Primary color: preserves '#' hex prefix
+    app.activate(Control::ThemeNext);
+    app.theme_wizard.as_mut().unwrap().primary = "#abcdef".into();
+    let mut theme_hex_key = KeyEvent::new(KeyCode::Backspace, KeyModifiers::CONTROL);
+    app.normalize_backspace(&mut theme_hex_key);
+    app.theme_wizard_key(theme_hex_key);
+    assert_eq!(app.theme_wizard.as_ref().unwrap().primary, "#");
+
+    // Secondary color: restore valid primary, advance, then test secondary preserves '#'
+    app.theme_wizard.as_mut().unwrap().primary = "#abcdef".into();
+    app.activate(Control::ThemeNext);
+    assert_eq!(app.theme_wizard.as_ref().unwrap().step, 2);
+    app.theme_wizard.as_mut().unwrap().secondary = "#123456".into();
+    let mut theme_hex2_key = KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL);
+    app.normalize_backspace(&mut theme_hex2_key);
+    app.theme_wizard_key(theme_hex2_key);
+    assert_eq!(app.theme_wizard.as_ref().unwrap().secondary, "#");
+}
+
+#[test]
+fn profile_editor_duplicate_installation_name_rejected_on_leave_input_intact() {
+    let mut app = test_profile_app();
+    let dir = tempfile::tempdir().unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700));
+    }
+    app.state_dir = dir.path().into();
+    let mut existing = saved_installation("alpha.example");
+    existing.name = "Production VPS".into();
+    app.connections.installations.push(existing);
+
+    app.begin_edit(true);
+    assert_eq!(app.editor.as_ref().unwrap().2, 0);
+    app.editor.as_mut().unwrap().1[0] = "  production vps  ".into();
+
+    for key in [KeyCode::Down, KeyCode::Tab, KeyCode::Enter] {
+        app.error.clear();
+        app.installation_editor_key(key.into());
+        assert_eq!(
+            app.error,
+            "An installation profile with this name already exists. Choose another name."
+        );
+        assert_eq!(app.editor.as_ref().unwrap().2, 0);
+        assert_eq!(app.editor.as_ref().unwrap().1[0], "  production vps  ");
+    }
+
+    assert_eq!(app.connections.installations.len(), 2);
+
+    app.editor.as_mut().unwrap().1[0] = "Staging VPS".into();
+    app.error.clear();
+    app.installation_editor_key(KeyCode::Down.into());
+    assert!(app.error.is_empty());
+    assert_eq!(app.editor.as_ref().unwrap().2, 1);
+    assert_eq!(app.editor.as_ref().unwrap().1[0], "Staging VPS");
+}
+
+#[test]
+fn key_availability_response_routing_and_wizard_loading_behavior() {
+    let mut app = test_profile_app();
+    let options = serde_json::from_value(serde_json::json!({
+        "local_available": false,
+        "defaults": {"protocols": ["awg"], "xray_transports": [], "settings": {"awg_i1_preset": "quic", "awg_port_mode": "auto"}},
+        "templates": [{"code": "custom", "title": "Custom", "region": "Europe", "flag": "🌐", "draft": {"key": "", "title": ""}}]
+    })).unwrap();
+    let mut wizard = crate::node_wizard::Wizard::new(options).unwrap();
+    wizard.step = crate::node_wizard::Step::Key;
+    wizard.key = "lv1".into();
+    app.node_wizard = Some(wizard);
+    app.screen = Screen::NodeWizard;
+
+    app.activate(Control::WizardNext);
+    assert!(app.wizard_loading);
+    assert!(matches!(
+        app.nodes_requested.take(),
+        Some(crate::nodes::Command::CheckKey(key)) if key == "lv1"
+    ));
+    assert_eq!(
+        app.node_wizard.as_ref().unwrap().step,
+        crate::node_wizard::Step::Key
+    );
+
+    // Retired key keeps wizard at Key step and surfaces retired safety error
+    app.event(Event::Nodes(crate::nodes::Update::KeyAvailability(
+        "lv1".into(),
+        serde_json::json!({
+            "available": false,
+            "reason": "node_key_retired",
+            "suggestion": "lv2"
+        }),
+    )));
+    assert_eq!(
+        app.node_wizard.as_ref().unwrap().step,
+        crate::node_wizard::Step::Key
+    );
+    assert_eq!(
+        app.error,
+        "This key belonged to a deleted node and remains reserved for safety. Try: lv2"
+    );
+
+    // Conflict key keeps wizard at Key step and surfaces conflict error
+    app.error.clear();
+    app.event(Event::Nodes(crate::nodes::Update::KeyAvailability(
+        "lv1".into(),
+        serde_json::json!({
+            "available": false,
+            "reason": "node_key_conflict",
+            "suggestion": "lv3"
+        }),
+    )));
+    assert_eq!(
+        app.node_wizard.as_ref().unwrap().step,
+        crate::node_wizard::Step::Key
+    );
+    assert_eq!(app.error, "A node with this key already exists. Try: lv3");
+
+    // Change key to lv9: stale response for lv1 does not advance wizard
+    app.error.clear();
+    app.node_wizard.as_mut().unwrap().key = "lv9".into();
+    app.event(Event::Nodes(crate::nodes::Update::KeyAvailability(
+        "lv1".into(),
+        serde_json::json!({
+            "available": true,
+            "reason": null,
+            "suggestion": null
+        }),
+    )));
+    assert_eq!(
+        app.node_wizard.as_ref().unwrap().step,
+        crate::node_wizard::Step::Key
+    );
+
+    // Available response for current key advances wizard to Title
+    app.event(Event::Nodes(crate::nodes::Update::KeyAvailability(
+        "lv9".into(),
+        serde_json::json!({
+            "available": true,
+            "reason": null,
+            "suggestion": null
+        }),
+    )));
+    assert_eq!(
+        app.node_wizard.as_ref().unwrap().step,
+        crate::node_wizard::Step::Title
+    );
+    assert_eq!(app.node_wizard.as_ref().unwrap().selected, 0);
+
+    // Wizard loading cleared by Event::Finished while remaining on Screen::NodeWizard
+    app.wizard_loading = true;
+    app.nodes_busy = true;
+    app.event(Event::Finished(Ok("Check complete".into())));
+    assert!(!app.wizard_loading);
+    assert!(!app.nodes_busy);
+    assert!(matches!(app.screen, Screen::NodeWizard));
+
+    // Event::Finished with error also clears wizard_loading and retains NodeWizard screen
+    app.wizard_loading = true;
+    app.nodes_busy = true;
+    app.event(Event::Finished(Err("network failure".into())));
+    assert!(!app.wizard_loading);
+    assert!(!app.nodes_busy);
+    assert!(matches!(app.screen, Screen::NodeWizard));
+    assert_eq!(app.error, "network failure");
+}
+
+#[test]
+fn node_wizard_created_step_nodes_vs_open_card_transitions() {
+    let mut app = test_profile_app();
+    let make_options = || {
+        serde_json::from_value(serde_json::json!({
+        "local_available": false,
+        "defaults": {"protocols": ["awg"], "xray_transports": [], "settings": {"awg_i1_preset": "quic", "awg_port_mode": "auto"}},
+        "templates": [{"code": "lv", "title": "Latvia", "region": "Europe", "flag": "🇱🇻", "draft": {"key": "lv1", "title": "Latvia #1"}}]
+    })).unwrap()
+    };
+
+    // 1. Transition to Nodes via default selection (index 0: "Nodes" / Control::WizardCancel)
+    let mut wizard = crate::node_wizard::Wizard::new(make_options()).unwrap();
+    wizard.step = crate::node_wizard::Step::Created;
+    wizard.created_key = Some("lv1".into());
+    wizard.selected = 0;
+    app.node_wizard = Some(wizard);
+    app.screen = Screen::NodeWizard;
+    app.nodes.card = Some(browser_node("lv1", "Europe"));
+    app.nodes.operation = Some(crate::nodes::Operation {
+        kind: "node-bootstraps".into(),
+        id: uuid::Uuid::new_v4(),
+        node_key: "lv1".into(),
+        status: "running".into(),
+        error: String::new(),
+        command_id: None,
+        action: "setup".into(),
+    });
+
+    let buttons = screens::wizard_buttons(app.node_wizard.as_ref().unwrap());
+    assert_eq!(buttons.len(), 2);
+    assert_eq!(buttons[0].0, "Nodes");
+    assert!(matches!(buttons[0].1, Control::WizardCancel));
+    assert_eq!(buttons[1].0, "Open node card");
+    assert!(matches!(buttons[1].1, Control::WizardOpen));
+
+    let controls = screens::wizard_controls(app.node_wizard.as_ref().unwrap());
+    assert_eq!(controls.len(), 2);
+    assert!(matches!(controls[0], Control::WizardCancel));
+    assert!(matches!(controls[1], Control::WizardOpen));
+
+    // Pressing Enter directly at index 0 activates "Nodes" (WizardCancel)
+    app.wizard_key(KeyCode::Enter.into());
+    assert!(matches!(app.screen, Screen::Nodes));
+    assert!(app.node_wizard.is_none());
+    assert!(app.nodes.card.is_none());
+    assert!(app.nodes.operation.is_none());
+    assert!(matches!(
+        app.nodes_requested.take(),
+        Some(crate::nodes::Command::List)
+    ));
+
+    // 2. Transition to Open node card via index 1 (Control::WizardOpen)
+    let mut wizard2 = crate::node_wizard::Wizard::new(make_options()).unwrap();
+    wizard2.step = crate::node_wizard::Step::Created;
+    wizard2.created_key = Some("lv1".into());
+    wizard2.selected = 0;
+    app.node_wizard = Some(wizard2);
+    app.screen = Screen::NodeWizard;
+    app.nodes.card = Some(browser_node("lv1", "Europe"));
+
+    // Navigate to index 1: "Open node card"
+    app.wizard_key(KeyCode::Right.into());
+    assert_eq!(app.node_wizard.as_ref().unwrap().selected, 1);
+    app.wizard_key(KeyCode::Enter.into());
+    assert!(matches!(app.screen, Screen::Nodes));
+    assert!(app.node_wizard.is_none());
+    assert!(
+        matches!(app.nodes_requested.take(), Some(crate::nodes::Command::Card(key)) if key == "lv1")
+    );
+}
+
+#[test]
+fn form_constraints_are_checked_before_advancing_without_mutating_input() {
+    let mut form = Form::new(&test_request());
+    form.action = Action::Install;
+    for (field, invalid) in [
+        (1, "0"),
+        (6, "invalid token"),
+        (5, "@username"),
+        (4, "not-a-tag"),
+    ] {
+        form.selected = form.visible().iter().position(|i| *i == field).unwrap() + 1;
+        form.fields[field] = invalid.into();
+        assert!(form.validate_selected().is_err());
+        assert_eq!(form.fields[field], invalid);
+    }
+    form.fields[1] = " 2222 ".into();
+    form.selected = form.visible().iter().position(|i| *i == 1).unwrap() + 1;
+    assert!(form.validate_selected().is_ok());
+}
+
+#[test]
+fn custom_expiry_accepts_typed_iso_date_with_hyphens() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Access;
+    let mut editor =
+        crate::access::Editor::new(Some(serde_json::json!({"display_name": "User"})), None);
+    editor.duration_input = Some(String::new());
+    app.access.editor = Some(editor);
+    app.hits = vec![Hit {
+        control: Control::AccessDurationInput,
+        area: Rect::default(),
+    }];
+    app.access.selected = 0;
+    for c in "2030-12-31".chars() {
+        app.access_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+    }
+    assert_eq!(
+        app.access
+            .editor
+            .as_ref()
+            .unwrap()
+            .duration_input
+            .as_deref(),
+        Some("2030-12-31")
+    );
 }

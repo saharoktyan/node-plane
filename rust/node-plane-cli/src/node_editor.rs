@@ -47,6 +47,12 @@ pub struct Editor {
     pub review: Option<(Draft, Value)>,
 }
 impl Editor {
+    pub fn validate_field(&self, index: usize) -> Result<()> {
+        if self.fields[index].value == self.fields[index].baseline {
+            return Ok(());
+        }
+        self.fields[index].validate()
+    }
     pub fn new(source: Value, defaults: &Value) -> Result<Self> {
         ensure!(
             source["key"].is_string() && source["desired_revision"].as_u64().is_some(),
@@ -233,6 +239,9 @@ impl Editor {
         self.changed();
     }
     pub fn draft(&self) -> Result<Draft> {
+        for index in 0..self.fields.len() {
+            self.validate_field(index)?;
+        }
         let mut body = json!({});
         let mut settings = self.source["settings"]
             .as_object()
@@ -379,6 +388,80 @@ pub fn parse_awg_parameters(text: &str) -> Result<Value> {
 }
 
 impl Field {
+    pub fn validate(&self) -> Result<()> {
+        let field = self;
+        let value = field.value.trim();
+        let limit = match field.key {
+            "title" | "region" => 128,
+            "flag" => 16,
+            "notes" => 2000,
+            "awg_parameters" => 16384,
+            _ => 255,
+        };
+        ensure!(
+            value.chars().count() <= limit,
+            "{} is too long (maximum {limit} characters)",
+            field.label
+        );
+        if matches!(field.key, "flag" | "notes") {
+            return Ok(());
+        }
+        ensure!(!value.is_empty(), "{} is required", field.label);
+        if field.key == "awg_parameters" {
+            parse_awg_parameters(value)?;
+        } else if field.key.ends_with("_port") {
+            ensure!(
+                value.parse::<u16>().is_ok_and(|v| v > 0),
+                "{} must be between 1 and 65535",
+                field.label
+            );
+        } else if matches!(
+            field.key,
+            "public_host" | "xray_host" | "awg_public_host" | "xray_sni"
+        ) {
+            ensure!(
+                crate::node_wizard::valid_public_host(value),
+                "{} must be a valid hostname or IPv4 address",
+                field.label
+            );
+            if field.key == "xray_sni" {
+                ensure!(
+                    value.contains('.') && value.parse::<std::net::IpAddr>().is_err(),
+                    "SNI must be a DNS name with at least two labels"
+                );
+            }
+        } else if field.key == "ssh_target" {
+            ensure!(
+                crate::node_wizard::valid_target(value),
+                "Enter user@hostname or user@IP"
+            );
+        } else if field.key == "xray_xhttp_path" {
+            ensure!(
+                value.starts_with('/')
+                    && value
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b"/_~.%+-".contains(&b)),
+                "XHTTP path must start with / and contain URL path characters"
+            );
+        } else if field.key == "awg_interface" {
+            ensure!(
+                value.len() <= 15
+                    && value.as_bytes()[0].is_ascii_alphabetic()
+                    && value
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b"_-".contains(&b)),
+                "AWG interface must start with a letter and contain up to 15 letters, numbers, _ or -"
+            );
+        }
+        if let Some(choices) = Editor::choices(field.key) {
+            ensure!(
+                choices.contains(&value),
+                "Choose a supported value for {}",
+                field.label
+            );
+        }
+        Ok(())
+    }
     pub fn input_limit(&self) -> usize {
         if self.key == "notes" {
             2000
@@ -423,6 +506,26 @@ mod tests {
     fn defaults() -> Value {
         json!({"settings":{"xray_sni":"www.cloudflare.com","xray_tcp_port":443,"xray_xhttp_port":8443,"xray_xhttp_path":"/assets","xray_fingerprint":"chrome"}})
     }
+    #[test]
+    fn invalid_fields_are_rejected_before_review_and_keep_the_entered_value() {
+        let mut editor = Editor::new(source(), &defaults()).unwrap();
+        for (key, invalid) in [
+            ("public_host", "https://vpn.test"),
+            ("awg_interface", "123"),
+            ("xray_xhttp_path", "missing-slash"),
+            ("xray_sni", "localhost"),
+            ("xray_fingerprint", "unknown"),
+        ] {
+            let index = editor.fields.iter().position(|f| f.key == key).unwrap();
+            let original = editor.fields[index].value.clone();
+            editor.fields[index].value = invalid.into();
+            assert!(editor.validate_field(index).is_err(), "{key}");
+            assert_eq!(editor.fields[index].value, invalid);
+            assert!(editor.review.is_none());
+            editor.fields[index].value = original;
+        }
+    }
+
     #[test]
     fn metadata_draft_contains_only_changes_and_keeps_revision_and_retry_key() {
         let mut editor = Editor::new(source(), &defaults()).unwrap();

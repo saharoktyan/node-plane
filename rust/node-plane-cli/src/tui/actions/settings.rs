@@ -215,6 +215,23 @@ impl App {
                 None
             }
             Control::EditField(index) => {
+                if let Some((id, fields, selected)) = &self.editor
+                    && *selected < fields.len()
+                    && *selected != index
+                {
+                    let result = Installation::validate_field(*selected, &fields[*selected])
+                        .and_then(|()| {
+                            if *selected == 0 {
+                                self.connections.validate_name(&fields[0], *id)
+                            } else {
+                                Ok(())
+                            }
+                        });
+                    if let Err(error) = result {
+                        self.error = error.to_string();
+                        return None;
+                    }
+                }
                 if let Some(editor) = &mut self.editor {
                     editor.2 = index;
                 }
@@ -483,20 +500,22 @@ impl App {
                     p.installed
                         && p.matches(
                             fields[1].trim(),
-                            fields[2].parse().unwrap_or(0),
+                            fields[2].trim().parse().unwrap_or(0),
                             fields[3].trim(),
                         )
                 }),
             id: id.unwrap_or_else(uuid::Uuid::new_v4),
             name: fields[0].trim().into(),
             host: fields[1].trim().into(),
-            port: fields[2].parse()?,
+            port: fields[2].trim().parse()?,
             user: fields[3].trim().into(),
             branch: fields[4].trim().into(),
             admin_ids: fields[5].trim().into(),
             account: fields[6].trim().into(),
         };
         profile.validate()?;
+        self.connections
+            .validate_name(&profile.name, Some(profile.id))?;
         let mut next = self.connections.clone();
         if let Some(existing) = next.installations.iter_mut().find(|p| p.id == profile.id) {
             *existing = profile.clone();

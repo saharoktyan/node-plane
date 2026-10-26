@@ -2,7 +2,9 @@ use super::super::*;
 
 impl App {
     pub(in crate::tui) fn normalize_backspace(&self, key: &mut KeyEvent) {
-        if key.code != KeyCode::Backspace {
+        let word = key.modifiers.contains(KeyModifiers::CONTROL)
+            && matches!(key.code, KeyCode::Char('w') | KeyCode::Backspace);
+        if key.code != KeyCode::Backspace && !word {
             return;
         }
         let input = if self.exit || self.discard.is_some() {
@@ -33,10 +35,9 @@ impl App {
                     self.nodes_controls().get(self.nodes_selected),
                     Some(Control::NodesSearch | Control::NodesEditField(_))
                 ),
-                Screen::NodeWizard => self
-                    .node_wizard
-                    .as_ref()
-                    .is_some_and(|wizard| wizard.field().is_some()),
+                Screen::NodeWizard => self.node_wizard.as_ref().is_some_and(|wizard| {
+                    wizard.field().is_some() && (!word || wizard.selected == 0)
+                }),
                 Screen::Form => {
                     self.form.selected > 0
                         && self
@@ -53,12 +54,14 @@ impl App {
                 Screen::SettingsPage(SettingsPage::Appearance) => self
                     .theme_wizard
                     .as_ref()
-                    .is_some_and(|w| w.step < 3 && w.selected == 0),
+                    .is_some_and(|w| w.delete.is_none() && w.step < 3 && w.selected == 0),
                 _ => false,
             }
         };
-        if !input {
-            key.code = KeyCode::Esc;
+        if input && word {
+            key.code = KeyCode::Backspace;
+        } else if !input {
+            key.code = if word { KeyCode::Null } else { KeyCode::Esc };
         }
     }
 
@@ -204,7 +207,7 @@ impl App {
             }
             KeyCode::Backspace if controls[current] == Control::ControllerDefaultsInput => {
                 if let Some((_, value)) = &mut self.controller.defaults_input {
-                    value.pop();
+                    super::super::text_input::delete_backwards(value, key);
                 }
             }
             KeyCode::Char(c)
@@ -218,7 +221,7 @@ impl App {
             }
             KeyCode::Backspace if controls[current] == Control::ControllerAnnouncementInput => {
                 if let Some(value) = &mut self.controller.announcement_draft {
-                    value.pop();
+                    super::super::text_input::delete_backwards(value, key);
                 }
             }
             KeyCode::Char(c)
@@ -229,7 +232,7 @@ impl App {
                 }
             }
             KeyCode::Backspace if controls[current] == Control::ControllerPhrase => {
-                self.controller.phrase.pop();
+                super::super::text_input::delete_backwards(&mut self.controller.phrase, key);
             }
             _ => {}
         }
@@ -261,7 +264,7 @@ impl App {
                         return;
                     }
                     KeyCode::Backspace => {
-                        draft.identity.pop();
+                        super::super::text_input::delete_backwards(&mut draft.identity, key);
                         return;
                     }
                     KeyCode::Enter => {
@@ -288,7 +291,7 @@ impl App {
                     return;
                 }
                 KeyCode::Backspace => {
-                    editor.name.pop();
+                    super::super::text_input::delete_backwards(&mut editor.name, key);
                     editor.key = uuid::Uuid::new_v4();
                     return;
                 }
@@ -305,7 +308,7 @@ impl App {
             match key.code {
                 KeyCode::Char(c)
                     if !key.modifiers.contains(KeyModifiers::CONTROL)
-                        && c.is_ascii_alphanumeric() =>
+                        && (c.is_ascii_alphanumeric() || c == '-') =>
                 {
                     if input.len() < 32 {
                         input.push(c);
@@ -313,7 +316,7 @@ impl App {
                     return;
                 }
                 KeyCode::Backspace => {
-                    input.pop();
+                    super::super::text_input::delete_backwards(input, key);
                     return;
                 }
                 KeyCode::Enter => {
@@ -337,7 +340,7 @@ impl App {
                     return;
                 }
                 KeyCode::Backspace => {
-                    editor.fields[index].pop();
+                    super::super::text_input::delete_backwards(&mut editor.fields[index], key);
                     editor.key = uuid::Uuid::new_v4();
                     return;
                 }
@@ -440,7 +443,7 @@ impl App {
             KeyCode::Backspace
                 if controls.get(self.access.selected) == Some(&Control::AccessSearch) =>
             {
-                self.access.search.pop();
+                super::super::text_input::delete_backwards(&mut self.access.search, key);
                 self.access.page = 0;
             }
             _ => {}
@@ -534,7 +537,7 @@ impl App {
             KeyCode::BackTab => wizard.selected = (wizard.selected + count - 1) % count,
             KeyCode::Backspace => {
                 if let Some(field) = wizard.field_mut() {
-                    field.pop();
+                    super::super::text_input::delete_backwards(field, key);
                 }
             }
             KeyCode::Char(c)
@@ -576,6 +579,20 @@ impl App {
         let controls = self.nodes_controls();
         let selected = self.nodes_selected.min(controls.len().saturating_sub(1));
         let search = matches!(controls.get(selected), Some(Control::NodesSearch));
+        if matches!(
+            key.code,
+            KeyCode::Tab | KeyCode::BackTab | KeyCode::Up | KeyCode::Down | KeyCode::Enter
+        ) && let Some(Control::NodesEditField(index)) = controls.get(selected)
+            && let Some(editor) = &self.nodes.editor
+            && !(matches!(editor.fields[*index].key, "notes" | "awg_parameters")
+                && matches!(key.code, KeyCode::Up | KeyCode::Down | KeyCode::Enter))
+        {
+            if let Err(error) = editor.validate_field(*index) {
+                self.error = error.to_string();
+                return;
+            }
+            self.error.clear();
+        }
         if let Some(Control::NodesEditField(index)) = controls.get(selected)
             && let Some(editor) = &mut self.nodes.editor
         {
@@ -615,7 +632,10 @@ impl App {
                     return;
                 }
                 KeyCode::Backspace => {
-                    editor.fields[*index].value.pop();
+                    super::super::text_input::delete_backwards(
+                        &mut editor.fields[*index].value,
+                        key,
+                    );
                     editor.changed();
                     return;
                 }
@@ -737,7 +757,7 @@ impl App {
                 }
             }
             KeyCode::Backspace if search => {
-                self.nodes.search.pop();
+                super::super::text_input::delete_backwards(&mut self.nodes.search, key);
                 self.nodes.page = 0;
             }
             _ => {}
@@ -797,6 +817,24 @@ impl App {
             self.exit_confirm = false;
             return;
         }
+        if matches!(key.code, KeyCode::Down | KeyCode::Tab | KeyCode::Enter)
+            && let Some((id, fields, selected)) = &self.editor
+            && *selected < fields.len()
+        {
+            let result =
+                Installation::validate_field(*selected, &fields[*selected]).and_then(|()| {
+                    if *selected == 0 {
+                        self.connections.validate_name(&fields[0], *id)
+                    } else {
+                        Ok(())
+                    }
+                });
+            if let Err(error) = result {
+                self.error = error.to_string();
+                return;
+            }
+            self.error.clear();
+        }
         let Some((_, fields, selected)) = &mut self.editor else {
             return;
         };
@@ -816,7 +854,7 @@ impl App {
                 }
             }
             KeyCode::Backspace if *selected < 7 && *selected != 4 => {
-                fields[*selected].pop();
+                super::super::text_input::delete_backwards(&mut fields[*selected], key);
             }
             KeyCode::Enter if *selected < 7 => *selected += 1,
             KeyCode::Enter if *selected == 7 => {
@@ -890,7 +928,7 @@ impl App {
                     None
                 }
                 KeyCode::Backspace => {
-                    self.password.pop();
+                    super::super::text_input::delete_backwards(&mut self.password, key);
                     None
                 }
                 KeyCode::Enter if self.password.is_empty() => {

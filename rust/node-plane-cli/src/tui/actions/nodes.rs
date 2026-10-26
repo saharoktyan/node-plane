@@ -2,6 +2,18 @@ use super::super::*;
 
 impl App {
     pub(in crate::tui) fn activate_nodes(&mut self, control: Control) -> Option<KeyEvent> {
+        if matches!(
+            control,
+            Control::NodesEditField(_) | Control::NodesEditTab(_) | Control::NodesEditChoice(_)
+        ) && let Some(Control::NodesEditField(index)) =
+            self.nodes_controls().get(self.nodes_selected)
+            && control != Control::NodesEditField(*index)
+            && let Some(editor) = &self.nodes.editor
+            && let Err(error) = editor.validate_field(*index)
+        {
+            self.error = error.to_string();
+            return None;
+        }
         match control {
             Control::NodesEdit => {
                 if let Some(node) = &self.nodes.card {
@@ -363,12 +375,21 @@ impl App {
             }
             Control::WizardNext => {
                 if let Some(wizard) = &mut self.node_wizard {
+                    let checking_key = wizard.step == crate::node_wizard::Step::Key;
                     match wizard.next() {
                         Ok(Some(draft)) => {
                             self.wizard_loading = true;
                             self.nodes_requested = Some(crate::nodes::Command::Create(draft));
                         }
-                        Ok(None) => self.error.clear(),
+                        Ok(None) => {
+                            self.error.clear();
+                            if checking_key {
+                                wizard.step = crate::node_wizard::Step::Key;
+                                self.wizard_loading = true;
+                                self.nodes_requested =
+                                    Some(crate::nodes::Command::CheckKey(wizard.key.clone()));
+                            }
+                        }
                         Err(error) => self.error = error.to_string(),
                     }
                 }
@@ -384,6 +405,9 @@ impl App {
             }
             Control::WizardCancel => {
                 self.node_wizard = None;
+                self.nodes.card = None;
+                self.nodes.operation = None;
+                self.nodes_requested = Some(crate::nodes::Command::List);
                 self.screen = Screen::Nodes;
                 self.error.clear();
                 None

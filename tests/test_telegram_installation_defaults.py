@@ -41,6 +41,9 @@ class TelegramInstallationDefaultsTests(IsolatedAsyncioTestCase):
             with patch.object(defaults, 'render', new_callable=AsyncMock) as draw:
                 await defaults.show(self.query, self.bot, self.state)
                 screen, rows = draw.call_args.args[2:4]
+                titles = [s.title for s in screen.sections]
+                self.assertEqual(titles.index(tr(locale, 'nodes.settings.field.ipv6_outbound')),
+                    titles.index(tr(locale, 'defaults.transports')) + 1)
                 details = next(b for b in screen.rich(rows).blocks if b.type == 'details')
                 self.assertEqual([b.type for b in details.blocks], ['table'])
                 advanced = next(s for s in screen.sections if s.collapsed)
@@ -56,6 +59,8 @@ class TelegramInstallationDefaultsTests(IsolatedAsyncioTestCase):
                 screen, rows = draw.call_args.args[2:4]
                 callbacks = [b.callback_data for row in screen.fallback_rows(rows) for b in row]
                 self.assertIn('idefault:field:xray_sni', callbacks)
+                self.assertNotIn('idefault:ipv6:on', callbacks)
+                self.assertNotIn('idefault:ipv6:off', callbacks)
                 self.assertNotIn('idefault:field:awg_interface', callbacks)
                 self.assertEqual(rows[-1][0].callback_data, 'idefault:main')
                 blocks = screen.rich(rows).blocks
@@ -126,10 +131,25 @@ class TelegramInstallationDefaultsTests(IsolatedAsyncioTestCase):
             installation_defaults_field='awg_port')
         await self.state.set_state(defaults.DefaultField.waiting)
         with patch.object(defaults, 'render', new_callable=AsyncMock):
-            await defaults.field_text(self.message('51111'), self.bot, self.state)
-        self.backend.request.assert_not_awaited()
+            await defaults.field_text(self.message('51111'), self.bot, self.state, self.backend)
+        self.backend.request.assert_awaited_once_with('POST', '/api/v1/nodes/validate-fields',
+            telegram_user_id=123, body={'settings': {'awg_port': 51111}})
         draft = (await self.state.get_data())['installation_defaults_draft']
         self.assertEqual((draft['settings']['awg_port_mode'], draft['settings']['awg_port']), ('manual', 51111))
+
+    async def test_invalid_field_stays_at_input_without_changing_draft(self):
+        from telegram_client.backend import BackendError
+        current = {'revision': 1, 'protocols': ['xray'], 'xray_transports': ['tcp'],
+            'settings': {'xray_xhttp_path': '/assets'}}
+        await self.state.update_data(installation_defaults_draft=copy.deepcopy(current),
+            installation_defaults_field='xray_xhttp_path')
+        await self.state.set_state(defaults.DefaultField.waiting)
+        self.backend.request.side_effect = BackendError('invalid_input', 422)
+        with patch.object(defaults, 'render', new_callable=AsyncMock) as draw:
+            await defaults.field_text(self.message('invalid-path'), self.bot, self.state, self.backend)
+        self.assertEqual(await self.state.get_state(), defaults.DefaultField.waiting.state)
+        self.assertEqual((await self.state.get_data())['installation_defaults_draft'], current)
+        self.assertIn('invalid-path', draw.call_args.args[2].plain())
 
     async def test_guide_defaults_keep_context_and_return_with_continue_and_edit(self):
         from telegram_client.routers import quick_start

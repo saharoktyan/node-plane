@@ -1,6 +1,24 @@
 //! Cursor-aware multiline editing shared by notes, announcements and AWG parameters.
 use super::*;
 
+pub(super) fn word_start(value: &str, cursor: usize) -> usize {
+    let prefix = &value[..cursor];
+    let end = prefix.trim_end_matches(char::is_whitespace).len();
+    prefix[..end]
+        .char_indices()
+        .rev()
+        .find(|(_, c)| c.is_whitespace())
+        .map_or(0, |(index, c)| index + c.len_utf8())
+}
+
+pub(super) fn delete_backwards(value: &mut String, key: KeyEvent) {
+    if key.modifiers.contains(KeyModifiers::CONTROL) {
+        value.truncate(word_start(value, value.len()));
+    } else {
+        value.pop();
+    }
+}
+
 #[derive(Default)]
 pub(super) struct TextInput {
     key: String,
@@ -94,6 +112,13 @@ impl TextInput {
                 .map_or(self.cursor, |c| self.cursor + c.len_utf8())
         };
         match event.code {
+            KeyCode::Char('w') | KeyCode::Backspace
+                if event.modifiers.contains(KeyModifiers::CONTROL) =>
+            {
+                let start = word_start(value, self.cursor);
+                value.replace_range(start..self.cursor, "");
+                self.cursor = start;
+            }
             KeyCode::Char(c)
                 if !event.modifiers.contains(KeyModifiers::CONTROL) && !c.is_control() =>
             {
@@ -272,6 +297,37 @@ pub(super) fn draw_multiline(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn word_deletion_preserves_suffix_and_unicode_at_cursor() {
+        for code in [KeyCode::Char('w'), KeyCode::Backspace] {
+            let mut input = TextInput::default();
+            let mut value = "Привет мир   хвост".to_string();
+            input.sync("Notes", &value);
+            input.cursor = "Привет мир   ".len();
+            assert!(input.edit(
+                "Notes",
+                &mut value,
+                KeyEvent::new(code, KeyModifiers::CONTROL),
+                100
+            ));
+            assert_eq!(value, "Привет хвост");
+            assert_eq!(input.cursor, "Привет ".len());
+            input.cursor = 0;
+            input.edit(
+                "Notes",
+                &mut value,
+                KeyEvent::new(code, KeyModifiers::CONTROL),
+                100,
+            );
+            assert_eq!(value, "Привет хвост");
+        }
+        let mut tail = "hello мир   ".to_string();
+        delete_backwards(
+            &mut tail,
+            KeyEvent::new(KeyCode::Backspace, KeyModifiers::CONTROL),
+        );
+        assert_eq!(tail, "hello ");
+    }
     #[test]
     fn every_multiline_field_uses_the_full_scroll_track_and_proportional_thumb() {
         let app = App::new(&super::super::tests::test_request());

@@ -1332,8 +1332,8 @@ pub(in crate::tui) fn wizard_buttons(
     use crate::node_wizard::Step;
     if wizard.step == Step::Created {
         return vec![
-            ("Open node card", Control::WizardOpen),
             ("Nodes", Control::WizardCancel),
+            ("Open node card", Control::WizardOpen),
         ];
     }
     let mut buttons = Vec::new();

@@ -58,8 +58,9 @@ async def show(chat_id, user_id, message_id, bot, backend, state):
     if step is not None:
         rows.append([member_button(user_id, tr(locale, 'back'), 'home')])
     await render(bot, chat_id, Screen(tr(locale, 'quick_start.title'),
-        (tr(locale, 'quick_start.note.' + (step or 'done')),), sections=(
-            Section(tr(locale, 'quick_start.progress'), lines=lines),), embedded_buttons=True, navigation=True, breadcrumbs=(
+        (), sections=(
+            Section(tr(locale, 'quick_start.progress'), lines=lines),
+            Section('', lines=(tr(locale, 'quick_start.note.' + (step or 'done')),))), embedded_buttons=True, navigation=True, breadcrumbs=(
                 Breadcrumb(tr(locale, 'navigation.menu'), member_button(user_id, tr(locale, 'navigation.menu'), 'home').callback_data),
                 Breadcrumb(tr(locale, 'quick_start.title'), 'quick_start'))),
         rows, state, message_id)

@@ -187,6 +187,7 @@ class NodeService:
         return {'key': row['key'], 'title': row['title'], 'region': row['region'], 'region_id': row['region_id'],
                 'flag': row['flag'], 'enabled': bool(row['enabled']),
                 'policy_eligible': bool(row['policy_eligible']),
+                'setup_attempted': bool(row['setup_attempted']),
                 'protocols': json.loads(row['protocols_json']),
                 'xray_transports': json.loads(row['xray_transports_json']),
                 'desired_revision': row['desired_revision'], 'applied_revision': row['applied_revision'],
@@ -196,6 +197,11 @@ class NodeService:
     @staticmethod
     def _select():
         return '''SELECT n.*, c.transport, c.ssh_target, m.notes, r.region_id,
+            CASE WHEN n.applied_revision>0
+                OR EXISTS (SELECT 1 FROM backend_agent_rollouts a WHERE a.node_key=n.key)
+                OR EXISTS (SELECT 1 FROM backend_node_jobs j WHERE j.node_key=n.key)
+                OR EXISTS (SELECT 1 FROM backend_node_settings_tasks s WHERE s.node_key=n.key)
+                THEN 1 ELSE 0 END AS setup_attempted,
             CASE WHEN (n.enabled=1 OR n.applied_revision>0)
                 AND NOT EXISTS (SELECT 1 FROM backend_node_drains d WHERE d.node_key=n.key)
                 AND NOT EXISTS (SELECT 1 FROM backend_node_retirements t WHERE t.node_key=n.key)
@@ -258,6 +264,33 @@ class NodeService:
                 item.pop('_position')
             return page
         return _page(items, limit, kind, 'key')
+
+    def key_availability(self, actor, node_key):
+        """Read-only early validation; command() remains the concurrency guard."""
+        require_permission(actor, 'nodes.manage')
+        if not isinstance(node_key, str) or not _KEY.fullmatch(node_key):
+            raise AccessDenied('invalid_input', 422)
+        with self.db.connect() as conn:
+            existing = {r['key'] for r in conn.execute('SELECT key FROM backend_nodes').fetchall()}
+            retired = {r['node_key'] for r in conn.execute('SELECT node_key FROM backend_node_retirements').fetchall()}
+        reason = 'node_key_retired' if node_key in retired else 'node_key_conflict' if node_key in existing else None
+        suggestion = None
+        if reason:
+            suffix = re.search(r'([0-9]+)$', node_key)
+            prefix = node_key[:suffix.start()] if suffix else node_key
+            number = int(suffix.group()) + 1 if suffix else 1
+            occupied = existing | retired
+            while True:
+                digits = str(number)
+                if len(digits) > 64:
+                    prefix, number = node_key[:48] + '_', 1
+                    continue
+                candidate = prefix[:64 - len(digits)] + digits
+                if candidate not in occupied:
+                    suggestion = candidate
+                    break
+                number += 1
+        return {'available': reason is None, 'reason': reason, 'suggestion': suggestion}
 
     def get(self, actor, node_key):
         require_permission(actor, 'nodes.manage')

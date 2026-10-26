@@ -198,7 +198,10 @@ impl App {
                     _ => &mut wizard.secondary,
                 };
                 if wizard.step == 0 || field.len() > 1 {
-                    field.pop();
+                    super::text_input::delete_backwards(field, key);
+                    if wizard.step != 0 && !field.starts_with('#') {
+                        field.insert(0, '#');
+                    }
                 }
             }
             KeyCode::Backspace => self.theme_wizard_action(Control::ThemeBack),

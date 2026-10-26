@@ -728,6 +728,16 @@ pub fn run(mut request: Request) -> Result<()> {
             }
             TermEvent::Key(mut key) if key.kind == KeyEventKind::Press => {
                 app.normalize_backspace(&mut key);
+                if matches!(app.screen, Screen::Form)
+                    && app.prompt.is_none()
+                    && app.discard.is_none()
+                    && !app.exit
+                    && matches!(key.code, KeyCode::Tab | KeyCode::Down | KeyCode::Enter)
+                    && let Err(error) = app.form.validate_selected()
+                {
+                    app.error = error.to_string();
+                    continue;
+                }
                 if app.discard.is_some() && !app.exit {
                     match key.code {
                         KeyCode::Left | KeyCode::Right | KeyCode::Tab | KeyCode::BackTab => {
@@ -941,7 +951,7 @@ pub fn run(mut request: Request) -> Result<()> {
                             {
                                 let index = app.form.visible()[app.form.selected - 1];
                                 if !matches!(index, 3 | 11) {
-                                    app.form.fields[index].pop();
+                                    text_input::delete_backwards(&mut app.form.fields[index], key);
                                 }
                             }
                             KeyCode::Enter

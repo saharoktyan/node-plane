@@ -10,7 +10,7 @@ from typing import Annotated, Literal
 from fastapi import Depends, FastAPI, Header, Query, Request, Response, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.exceptions import RequestValidationError
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, model_serializer
 from starlette.exceptions import HTTPException
 from starlette.responses import JSONResponse
 
@@ -456,6 +456,7 @@ class AdminNodeOutput(BaseModel):
     flag: str
     enabled: bool
     policy_eligible: bool = False
+    setup_attempted: bool = True
     protocols: list[str]
     xray_transports: list[str]
     desired_revision: int
@@ -565,13 +566,29 @@ class NodeDiagnosticsOutput(BaseModel):
     observation: NodeProbeOutput | None = None
 
 
+class InstallationProgressOutput(BaseModel):
+    stage: str
+    label: str
+    state: str | None = None
+    skipped_stages: list[str] | None = None
+
+    @model_serializer(mode='wrap')
+    def _serialize(self, nxt):
+        data = nxt(self)
+        if not data.get('skipped_stages'):
+            data.pop('skipped_stages', None)
+        if data.get('state') is None:
+            data.pop('state', None)
+        return data
+
+
 class NodeSettingsTaskOutput(BaseModel):
     id: UUID
     node_key: str
     revision: int
     status: str
     error_code: str | None = None
-    progress: dict[str, str] | None = None
+    progress: InstallationProgressOutput | None = None
 
 
 class NodeActionInput(BaseModel):
@@ -601,7 +618,7 @@ class AgentRolloutOutput(BaseModel):
     status: str
     failure_code: str | None = None
     journal_archives: list[str] = Field(default_factory=list)
-    progress: dict[str, str] | None = None
+    progress: InstallationProgressOutput | None = None
 
 
 class NodeMaintenanceOutput(BaseModel):
@@ -1531,6 +1548,18 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     @app.get('/api/v1/nodes/creation-options')
     def node_creation_options(current=Depends(actor)):
         return installation_defaults.creation_options(current)
+
+    @app.get('/api/v1/nodes/key-availability')
+    def node_key_availability(key: str, current=Depends(actor)):
+        return nodes.key_availability(current, key)
+
+    @app.post('/api/v1/nodes/validate-fields')
+    def validate_node_fields(body: dict, current=Depends(actor)):
+        from .authorization import require_permission
+        from .nodes import _validate
+        require_permission(current, 'nodes.manage')
+        _validate(body, create=False)
+        return {'valid': True}
 
     @app.get('/api/v1/system/installation-defaults')
     def get_installation_defaults(response: Response, current=Depends(actor)):

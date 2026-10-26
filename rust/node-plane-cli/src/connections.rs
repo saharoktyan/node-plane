@@ -26,6 +26,35 @@ pub struct Installation {
     pub installed: bool,
 }
 impl Installation {
+    pub fn validate_field(index: usize, value: &str) -> Result<()> {
+        let mut sample = Self {
+            id: Uuid::nil(),
+            name: "Installation".into(),
+            host: "example.com".into(),
+            port: 22,
+            user: "root".into(),
+            branch: String::new(),
+            admin_ids: String::new(),
+            account: String::new(),
+            installed: false,
+        };
+        match index {
+            0 => sample.name = value.trim().into(),
+            1 => sample.host = value.trim().into(),
+            2 => {
+                sample.port = value
+                    .trim()
+                    .parse()
+                    .context("SSH port must be between 1 and 65535.")?
+            }
+            3 => sample.user = value.trim().into(),
+            4 => sample.branch = value.trim().into(),
+            5 => sample.admin_ids = value.trim().into(),
+            6 => sample.account = value.trim().into(),
+            _ => return Ok(()),
+        }
+        sample.validate()
+    }
     pub fn validate(&self) -> Result<()> {
         ensure!(
             !self.name.trim().is_empty()
@@ -34,7 +63,8 @@ impl Installation {
             "Enter a short installation name."
         );
         ensure!(
-            self.host.len() <= 253
+            !self.host.is_empty()
+                && self.host.len() <= 253
                 && self
                     .host
                     .chars()
@@ -43,7 +73,8 @@ impl Installation {
         );
         ensure!(self.port > 0, "SSH port must be between 1 and 65535.");
         ensure!(
-            self.user.len() <= 64
+            !self.user.is_empty()
+                && self.user.len() <= 64
                 && self
                     .user
                     .chars()
@@ -59,7 +90,7 @@ impl Installation {
                 || self
                     .admin_ids
                     .split(',')
-                    .all(|id| id.trim().parse::<u64>().is_ok_and(|id| id > 0)),
+                    .all(|id| crate::config::valid_telegram_id(id.trim())),
             "Administrator IDs must be positive numbers separated by commas."
         );
         ensure!(
@@ -165,6 +196,19 @@ impl Connections {
             .iter()
             .find(|p| Some(p.id) == self.selected)
     }
+    pub fn validate_name(&self, name: &str, except: Option<Uuid>) -> Result<()> {
+        let normalized = name.trim().to_lowercase();
+        ensure!(!normalized.is_empty(), "Enter an installation name.");
+        ensure!(
+            !self
+                .installations
+                .iter()
+                .any(|profile| Some(profile.id) != except
+                    && profile.name.trim().to_lowercase() == normalized),
+            "An installation profile with this name already exists. Choose another name."
+        );
+        Ok(())
+    }
     pub fn save(&mut self, state: &Path) -> Result<()> {
         validate_accent(&self.accent)?;
         ssh::secure_state_directory(state)?;
@@ -194,6 +238,13 @@ impl Connections {
         );
         for profile in &self.installations {
             profile.validate()?;
+            if !current
+                .installations
+                .iter()
+                .any(|old| old.id == profile.id && old.name == profile.name)
+            {
+                self.validate_name(&profile.name, Some(profile.id))?;
+            }
         }
         let next_revision = self
             .revision
@@ -346,6 +397,32 @@ mod tests {
             account: String::new(),
         }
     }
+    #[test]
+    fn installation_names_are_unique_before_save_and_on_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Connections::default();
+        let mut first = installation("one.example");
+        first.name = "My VPS".into();
+        store.installations.push(first.clone());
+        store.save(dir.path()).unwrap();
+        assert!(store.validate_name(" my vps ", None).is_err());
+        assert!(store.validate_name("My VPS", Some(first.id)).is_ok());
+        let mut duplicate = installation("two.example");
+        duplicate.name = " MY VPS ".into();
+        store.installations.push(duplicate);
+        assert!(store.save(dir.path()).is_err());
+        assert_eq!(
+            Connections::load(dir.path()).unwrap().installations.len(),
+            1
+        );
+        store.installations[1].name = "Another VPS".into();
+        store.save(dir.path()).unwrap();
+        assert_eq!(
+            Connections::load(dir.path()).unwrap().installations.len(),
+            2
+        );
+    }
+
     #[test]
     fn preferences_roundtrip_and_conflicting_windows_do_not_overwrite_each_other() {
         let dir = tempfile::tempdir().unwrap();

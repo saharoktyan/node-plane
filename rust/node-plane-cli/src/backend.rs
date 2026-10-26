@@ -108,6 +108,12 @@ pub struct ApiError {
 }
 impl fmt::Display for ApiError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.code == "node_key_retired" {
+            return f.write_str("This node key belonged to a deleted node and remains reserved for safety. Choose another key.");
+        }
+        if self.code == "node_key_conflict" {
+            return f.write_str("A node with this key already exists. Choose another key.");
+        }
         match self.status {
             Some(status) => write!(
                 f,

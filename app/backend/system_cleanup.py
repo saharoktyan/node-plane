@@ -2,6 +2,8 @@
 
 import hashlib
 import json
+import os
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
@@ -429,6 +431,27 @@ class SystemCleanupService:
             )
 
     def _wipe_state(self, job, preserve_operator):
+        # Retain only the adapter actually configured for this installation.
+        # Do not keep arbitrary adapter credentials issued to other clients.
+        adapter = None
+        if preserve_operator:
+            from .credentials import CredentialService
+
+            filename = os.environ.get('NODE_PLANE_BACKEND_ADAPTER_TOKEN_FILE')
+            if filename:
+                try:
+                    with Path(filename).open() as stream:
+                        token = stream.read(512).strip()
+                    principal = CredentialService(self.db).authenticate('Bearer ' + token)
+                    if principal.kind == PrincipalKind.ADAPTER:
+                        with self.db.connect() as conn:
+                            row = conn.execute('SELECT * FROM backend_credentials WHERE id=?',
+                                               (principal.id,)).fetchone()
+                            if (row and row['kind'] == 'adapter' and row['account_id'] is None
+                                    and row['secret_hash'] == hashlib.sha256(token.encode()).hexdigest()):
+                                adapter = dict(row)
+                except (OSError, UnicodeError, AccessDenied):
+                    pass
         with self.db.transaction() as conn:
             conn.execute(
                 "UPDATE backend_account_guard SET revision=revision+1 WHERE id=1"
@@ -486,6 +509,16 @@ class SystemCleanupService:
                         (job["principal_id"],),
                     ).fetchall()
                 ]
+                if adapter is not None:
+                    current = conn.execute('SELECT * FROM backend_credentials WHERE id=?',
+                                           (adapter['id'],)).fetchone()
+                    # Recheck under the cleanup lock: a concurrent revocation
+                    # must never be undone by restoring an earlier snapshot.
+                    if (current is not None and dict(current) == adapter
+                            and adapter['revoked_at'] is None
+                            and datetime.fromisoformat(adapter['expires_at']) > datetime.now(timezone.utc)
+                            and adapter['id'] != job['principal_id']):
+                        kept['backend_credentials'].append(adapter)
             # Retained reference tables may exist on upgraded installations.
             # Clear only the explicit Node Plane inventory, never arbitrary tables.
             if getattr(self.db, "backend_name", "") == "postgres":

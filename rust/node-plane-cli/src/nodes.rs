@@ -344,6 +344,7 @@ pub enum Command {
     MaintenancePoll(String),
     Remove(String, crate::node_maintenance::Mode, bool),
     CreationOptions,
+    CheckKey(String),
     Create(crate::node_wizard::Draft),
     List,
     Card(String),
@@ -362,6 +363,7 @@ pub enum Update {
     Diagnostics(String, Value, Value),
     Maintenance(crate::node_maintenance::Browser, bool),
     CreationOptions(crate::node_wizard::Options),
+    KeyAvailability(String, Value),
     Created(Node),
     List(Vec<Node>),
     Card(Node),
@@ -1284,6 +1286,11 @@ async fn execute_inner(
                         }
                     }
                     let _ = tx.send(Event::Nodes(Update::Temporary(command,value)));
+                }
+                Command::CheckKey(key) => {
+                    let path = format!("/api/v1/nodes/key-availability?key={key}");
+                    let value = backend::request(session, &credential, Method::GET, &path, None, None).await?;
+                    let _ = tx.send(Event::Nodes(Update::KeyAvailability(key, value)));
                 }
                 Command::CreationOptions => {
                     let _ = tx.send(Event::Stage("Loading node templates and installation defaults".into()));

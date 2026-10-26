@@ -512,6 +512,12 @@ impl App {
                 KeyCode::Enter
             }
             Control::Field(index) => {
+                if index != self.form.selected
+                    && let Err(error) = self.form.validate_selected()
+                {
+                    self.error = error.to_string();
+                    return None;
+                }
                 self.quick_focus = false;
                 self.form.selected = index;
                 return None;

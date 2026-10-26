@@ -551,7 +551,9 @@ CATALOG = {
         'node.wizard.current': 'Сейчас: {value}',
         'node.wizard.skip': 'Пропустить',
         'node.wizard.key.title': 'Создание сервера · ключ',
-        'node.wizard.key.prompt': 'Отправьте уникальный ключ сервера: латинские буквы, цифры, _ или -.',
+        'node.wizard.key.prompt': 'Отправьте уникальный ключ сервера: латинские буквы, цифры, _ или -. Например: lv1.',
+        'node.wizard.key.node_key_retired': 'Этот ключ использовался удалённой нодой и зарезервирован ради безопасности. Попробуйте: {suggestion}.',
+        'node.wizard.key.node_key_conflict': 'Нода с таким ключом уже существует. Попробуйте: {suggestion}.',
         'node.wizard.key.invalid': 'Ключ должен начинаться с буквы или цифры и содержать не больше 64 символов.',
         'node.wizard.title.title': 'Создание сервера · название',
         'node.wizard.title.prompt': 'Отправьте понятное название сервера.',
@@ -1293,7 +1295,9 @@ CATALOG = {
         'node.wizard.current': 'Current: {value}',
         'node.wizard.skip': 'Skip',
         'node.wizard.key.title': 'Create node · key',
-        'node.wizard.key.prompt': 'Send a unique node key using ASCII letters, numbers, _ or -.',
+        'node.wizard.key.prompt': 'Send a unique node key using ASCII letters, numbers, _ or -. Example: lv1.',
+        'node.wizard.key.node_key_retired': 'This key belonged to a deleted node and remains reserved for safety. Try: {suggestion}.',
+        'node.wizard.key.node_key_conflict': 'A node with this key already exists. Try: {suggestion}.',
         'node.wizard.key.invalid': 'The key must start with a letter or number and be at most 64 characters.',
         'node.wizard.title.title': 'Create node · name',
         'node.wizard.title.prompt': 'Send a clear name for the node.',
@@ -3299,3 +3303,35 @@ CATALOG['ru'].update({
     'recovery.cause.update_cancel_unsafe': 'Операция ещё может выполняться. Сначала проверьте её сохранённый результат.',
     'recovery.cause.update_unit_mismatch': 'Установщик не соответствует сохранённому обновлению. Перед продолжением нужно подтвердить его результат.',
 })
+
+
+# Field constraints are shown before accepting a draft value.
+CATALOG['en'].update({
+    'field.hint.text': 'Enter between 1 and 128 characters.',
+    'field.hint.flag': 'Use up to 16 characters.',
+    'field.hint.notes': 'Use up to 2000 characters.',
+    'field.hint.host': 'Enter a hostname or IPv4 address, without a scheme, username, port or path.',
+    'field.hint.xray_xhttp_path': 'Start with /. Use letters, numbers and / _ ~ . % + - only.',
+    'field.hint.awg_interface': 'Start with a letter. Use up to 15 letters, numbers, _ or -.',
+    'field.hint.xray_fingerprint': 'Choose chrome, firefox, safari, ios, android, edge, random or randomized.',
+})
+CATALOG['ru'].update({
+    'field.hint.text': 'Введите от 1 до 128 символов.',
+    'field.hint.flag': 'Не больше 16 символов.',
+    'field.hint.notes': 'Не больше 2000 символов.',
+    'field.hint.host': 'Введите имя хоста или IPv4-адрес без схемы, имени пользователя, порта и пути.',
+    'field.hint.xray_xhttp_path': 'Начните с /. Допустимы латинские буквы, цифры и / _ ~ . % + -.',
+    'field.hint.awg_interface': 'Начните с буквы. Не больше 15 латинских букв, цифр, _ или -.',
+    'field.hint.xray_fingerprint': 'Выберите chrome, firefox, safari, ios, android, edge, random или randomized.',
+})
+
+
+def field_hint(locale, field):
+    if field.endswith('_port'):
+        return tr(locale, 'nodes.settings.port_range')
+    if field == 'xray_sni':
+        return tr(locale, 'nodes.settings.sni_hint')
+    kind = ('text' if field in {'title', 'region'} else
+        'host' if field in {'public_host', 'xray_host', 'awg_public_host'} else field)
+    key = 'field.hint.' + kind
+    return tr(locale, key if key in CATALOG['en'] else 'nodes.settings.send_value')

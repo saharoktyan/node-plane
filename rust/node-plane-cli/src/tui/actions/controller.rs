@@ -541,6 +541,17 @@ impl App {
                     }
                 }
                 if let Some((key, input)) = &self.controller.defaults_input {
+                    let field = crate::node_editor::Field {
+                        key,
+                        label: key,
+                        value: input.clone(),
+                        baseline: String::new(),
+                        setting: true,
+                    };
+                    if let Err(error) = field.validate() {
+                        self.error = error.to_string();
+                        return None;
+                    }
                     let value = if key.ends_with("port") {
                         match input.parse::<u16>() {
                             Ok(port) if port > 0 => serde_json::json!(port),
