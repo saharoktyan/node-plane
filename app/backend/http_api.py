@@ -1597,7 +1597,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
             with local_channel('127.0.0.1:50051') as channel:
                 return GrpcIntentDriver(channel).inspect_node_services(node_key)
         except Exception as failure:
-            raise inspection_error(node_key, failure) from None
+            raise inspection_error(node_key, failure, fallback='node_agent_unavailable') from None
 
     @app.get('/api/v1/nodes/{node_key}/probe', response_model=NodeProbeOutput)
     def probe_node(node_key: str, current=Depends(actor)):
@@ -1612,7 +1612,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
             with local_channel('127.0.0.1:50051') as channel:
                 return probe(node, GrpcIntentDriver(channel, timeout=15))
         except Exception as failure:
-            raise inspection_error(node_key, failure) from None
+            raise inspection_error(node_key, failure, fallback='node_agent_unavailable') from None
 
     @app.post('/api/v1/nodes/{node_key}/bootstrap', status_code=202)
     def bootstrap_node(node_key: str, body: NodeActionInput,

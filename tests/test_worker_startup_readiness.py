@@ -1,4 +1,5 @@
 import unittest
+import sys
 from unittest.mock import Mock, patch
 
 import psycopg
@@ -7,6 +8,13 @@ from backend.executor import wait_for_schema
 
 
 class WorkerStartupReadinessTests(unittest.TestCase):
+    def setUp(self):
+        # Other suites install a process-wide SQLite-backed psycopg double.
+        # These exception-specific tests need the real driver, then restore it.
+        driver = patch.dict(sys.modules, {'psycopg': psycopg})
+        driver.start()
+        self.addCleanup(driver.stop)
+
     def event(self):
         return Mock(is_set=Mock(return_value=False), wait=Mock(return_value=False))
 

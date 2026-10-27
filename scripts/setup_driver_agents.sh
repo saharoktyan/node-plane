@@ -589,7 +589,7 @@ fi
 # that default so the driver's EnvironmentFile cannot blank its unit fallback.
 if [[ -z "${SSH_KEY:-}" ]]; then
   SSH_KEY="${SHARED_ROOT}/ssh/id_ed25519"
-  if [[ $DRY_RUN -eq 0 && $CHECK_AGENT_OWNER -eq 0 ]]; then
+  if [[ $DRY_RUN -eq 0 && ${CHECK_AGENT_OWNER:-0} -eq 0 ]]; then
     if set_env_value_if_changed "$ENV_FILE" "SSH_KEY" "$SSH_KEY"; then ENV_CHANGED=1; fi
   fi
 fi

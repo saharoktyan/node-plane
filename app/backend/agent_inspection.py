@@ -7,8 +7,8 @@ from .authorization import AccessDenied
 from .driver_transport import AgentNotConfigured
 
 
-def inspection_error(node_key, failure):
-    code, status, hint = 'driver_unavailable', 503, 'driver_error'
+def inspection_error(node_key, failure, *, fallback='driver_unavailable'):
+    code, status, hint = fallback, 503, 'timeout' if isinstance(failure, TimeoutError) else 'driver_error'
     rpc_status = 'non_rpc_error'
     if isinstance(failure, AgentNotConfigured):
         code, status, hint = 'node_agent_unconfigured', 409, 'missing_route'
