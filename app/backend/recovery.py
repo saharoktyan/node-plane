@@ -309,21 +309,24 @@ def act(db, actor, driver, kind, identity, action):
             from .agent_rollout import AgentRolloutService
             AgentRolloutService(db).resume_preflight(actor, identity)
         elif kind == 'agent':
-            # Confirm the bound, authenticated agent and installed build independently.
-            facts = driver.inspect_node(row['node_key'])
-            if facts.get('node_key') != row['node_key']:
-                raise ValueError('agent identity mismatch')
-            from config import APP_COMMIT
-            from .updates import same_commit
-            services = driver.inspect_node_services(row['node_key'])
-            current = bool(APP_COMMIT and same_commit(services.get('agent_commit'), APP_COMMIT))
-            observation = {'agent_reachable': True, 'agent_current': current}
-            with db.transaction() as conn:
-                connection = conn.execute('SELECT transport,ssh_target FROM backend_node_connections WHERE node_key=?', (row['node_key'],)).fetchone()
-                intent = _json(row['intent_json'])
-                bound = connection is not None and (connection['transport'], connection['ssh_target']) == (intent.get('transport'), intent.get('ssh_target'))
-                if current and bound:
-                    conn.execute("UPDATE backend_agent_rollouts SET status='succeeded' WHERE id=? AND status='blocked'", (identity,))
+            from .agent_rollout import AgentRolloutService
+            observation = AgentRolloutService(db).confirm_retired_owner(row)
+            if observation is None:
+                # Confirm the bound, authenticated agent and installed build independently.
+                facts = driver.inspect_node(row['node_key'])
+                if facts.get('node_key') != row['node_key']:
+                    raise ValueError('agent identity mismatch')
+                from config import APP_COMMIT
+                from .updates import same_commit
+                services = driver.inspect_node_services(row['node_key'])
+                current = bool(APP_COMMIT and same_commit(services.get('agent_commit'), APP_COMMIT))
+                observation = {'agent_reachable': True, 'agent_current': current}
+                with db.transaction() as conn:
+                    connection = conn.execute('SELECT transport,ssh_target FROM backend_node_connections WHERE node_key=?', (row['node_key'],)).fetchone()
+                    intent = _json(row['intent_json'])
+                    bound = connection is not None and (connection['transport'], connection['ssh_target']) == (intent.get('transport'), intent.get('ssh_target'))
+                    if current and bound:
+                        conn.execute("UPDATE backend_agent_rollouts SET status='succeeded' WHERE id=? AND status='blocked'", (identity,))
         elif kind == 'bootstrap':
             if action == 'cancel':
                 # Protocol cancellation first fences/recovers the old command;

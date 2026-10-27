@@ -35,6 +35,7 @@ from .node_settings import NodeSettingsService
 from .node_operations import NodeOperations
 from .config_issuance import ConfigIssuanceService
 from .agent_rollout import AgentRolloutService
+from .agent_inspection import inspection_error
 from .node_lifecycle import NodeLifecycle
 from .admin_overview import AdminOverviewService
 from .onboarding import completed as onboarding_completed
@@ -1596,10 +1597,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
             with local_channel('127.0.0.1:50051') as channel:
                 return GrpcIntentDriver(channel).inspect_node_services(node_key)
         except Exception as failure:
-            import grpc
-            if isinstance(failure, grpc.RpcError) and failure.code() == grpc.StatusCode.FAILED_PRECONDITION:
-                raise AccessDenied('node_agent_unconfigured', 409) from None
-            raise AccessDenied('node_agent_unavailable', 503) from None
+            raise inspection_error(node_key, failure) from None
 
     @app.get('/api/v1/nodes/{node_key}/probe', response_model=NodeProbeOutput)
     def probe_node(node_key: str, current=Depends(actor)):
@@ -1614,10 +1612,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
             with local_channel('127.0.0.1:50051') as channel:
                 return probe(node, GrpcIntentDriver(channel, timeout=15))
         except Exception as failure:
-            import grpc
-            if isinstance(failure, grpc.RpcError) and failure.code() == grpc.StatusCode.FAILED_PRECONDITION:
-                raise AccessDenied('node_agent_unconfigured', 409) from None
-            raise AccessDenied('node_agent_unavailable', 503) from None
+            raise inspection_error(node_key, failure) from None
 
     @app.post('/api/v1/nodes/{node_key}/bootstrap', status_code=202)
     def bootstrap_node(node_key: str, body: NodeActionInput,
@@ -1666,13 +1661,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
             else:
                 observation = node_driver.inspect_node(node_key)
         except Exception as failure:
-            import grpc
-            if isinstance(failure, grpc.RpcError):
-                if failure.code() == grpc.StatusCode.FAILED_PRECONDITION:
-                    raise AccessDenied('node_agent_unconfigured', 409) from None
-                if failure.code() in {grpc.StatusCode.UNAVAILABLE, grpc.StatusCode.DEADLINE_EXCEEDED}:
-                    raise AccessDenied('node_agent_unavailable', 503) from None
-            raise AccessDenied('driver_unavailable', 503) from None
+            raise inspection_error(node_key, failure) from None
         # Runtime facts prove only agent connectivity/config-file presence.
         # They cannot acknowledge the desired settings or enable the node.
         return {**observation, 'desired_revision': node['desired_revision'],
@@ -1701,16 +1690,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
                     return inspect(GrpcIntentDriver(channel, timeout=10))
             return inspect(node_driver)
         except Exception as failure:
-            import grpc
-            from .driver_transport import AgentNotConfigured
-            if isinstance(failure, AgentNotConfigured):
-                raise AccessDenied('node_agent_unconfigured', 409) from None
-            if isinstance(failure, grpc.RpcError):
-                if failure.code() == grpc.StatusCode.FAILED_PRECONDITION:
-                    raise AccessDenied('node_agent_unconfigured', 409) from None
-                if failure.code() in {grpc.StatusCode.UNAVAILABLE, grpc.StatusCode.DEADLINE_EXCEEDED}:
-                    raise AccessDenied('node_agent_unavailable', 503) from None
-            raise AccessDenied('driver_unavailable', 503) from None
+            raise inspection_error(node_key, failure) from None
 
     @app.post('/api/v1/nodes', response_model=AdminNodeOutput, status_code=201)
     def create_node(body: NodeCreateInput, request: Request, response: Response,

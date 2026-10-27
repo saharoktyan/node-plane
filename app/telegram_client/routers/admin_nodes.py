@@ -1519,8 +1519,8 @@ async def probe_node_cb(query: CallbackQuery, callback_data: ProbeNodeCallback, 
         if exc.code == 'node_installation_required':
             return await show_admin_node(query.message.chat.id, query.from_user.id,
                 query.message.message_id, node_key, bot, backend, state)
-        cause = exc.code if exc.code in {'node_agent_unconfigured',
-            'node_agent_unavailable', 'driver_unavailable'} else 'unknown'
+        cause = exc.code if exc.code in {'node_agent_unconfigured', 'node_agent_identity_mismatch',
+            'node_agent_inspection_failed', 'node_agent_unavailable', 'driver_unavailable'} else 'unknown'
         await render(bot, query.message.chat.id,
             Screen(tr(locale, 'nodes.probe.failed_title'),
                 (tr(locale, 'nodes.probe.error.' + cause),), embedded_buttons=True, navigation=True),
@@ -1546,8 +1546,8 @@ async def node_diagnostics_cb(query: CallbackQuery, bot: Bot,
         if exc.code == 'node_installation_required':
             return await show_admin_node(query.message.chat.id, query.from_user.id,
                 query.message.message_id, node_key, bot, backend, state)
-        cause = exc.code if exc.code in {'node_agent_unconfigured',
-            'node_agent_unavailable', 'driver_unavailable'} else 'unknown'
+        cause = exc.code if exc.code in {'node_agent_unconfigured', 'node_agent_identity_mismatch',
+            'node_agent_inspection_failed', 'node_agent_unavailable', 'driver_unavailable'} else 'unknown'
         await render(bot, query.message.chat.id,
             Screen(tr(locale, 'nodes.diagnostics.failed_title'),
                 (tr(locale, 'nodes.probe.error.' + cause),), embedded_buttons=True, navigation=True),
@@ -2039,6 +2039,10 @@ async def show_rollout_status(chat_id, user_id, message_id, task_id, bot, backen
         lines.append(tr(locale, 'nodes.rollout.build_resources'))
     if task.get('failure_code') == 'ssh_prerequisites':
         lines.append(tr(locale, 'nodes.rollout.ssh_prerequisites'))
+    if task.get('failure_code') == 'agent_firewall_failed':
+        lines.append(tr(locale, 'nodes.rollout.agent_firewall_failed'))
+    if task.get('failure_code') in {'agent_journal_owner_conflict', 'agent_previous_node_retired'}:
+        lines.append(tr(locale, 'recovery.cause.' + task['failure_code']))
     if task.get('failure_code') in {'ssh_authentication', 'ssh_host_key'}:
         lines.append(tr(locale, 'nodes.rollout.' + task['failure_code']))
     if status in {'awaiting_executor', 'running'}:

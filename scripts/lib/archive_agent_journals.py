@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Quiesce and archive a previous controller's agent journals on onboarding."""
 import fcntl
+from contextlib import nullcontext
 import hashlib
 import json
 import os
@@ -11,6 +12,10 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
+
+
+class JournalOwnerConflict(ValueError):
+    pass
 
 
 def safe_path(path):
@@ -24,11 +29,15 @@ def safe_path(path):
 
 def archive(controller, ca_digest, node_key, *, config=Path('/etc/node-plane/agent.toml'),
             journal=Path('/etc/node-plane/profile-intents.sqlite3'),
-            state=Path('/var/lib/node-plane-agent'), stop=None):
+            state=Path('/var/lib/node-plane-agent'), stop=None,
+            retired_node_keys=(), check_only=False):
     if str(UUID(controller)) != controller or not re.fullmatch('[0-9a-f]{64}', ca_digest):
         raise ValueError('invalid controller identity')
     if not re.fullmatch('[A-Za-z0-9_-]{1,64}', node_key):
         raise ValueError('invalid node key')
+    if isinstance(retired_node_keys, (str, bytes)) or any(not isinstance(key, str) or not re.fullmatch('[A-Za-z0-9_-]{1,64}', key)
+           for key in retired_node_keys):
+        raise ValueError('invalid retired node key')
     config, journal = safe_path(config), safe_path(journal)
     old_node = None
     if config.exists():
@@ -37,12 +46,16 @@ def archive(controller, ca_digest, node_key, *, config=Path('/etc/node-plane/age
         if found:
             old_node = json.loads(found[1])
     state = safe_path(state)
-    state.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if not check_only:
+        state.mkdir(parents=True, exist_ok=True, mode=0o700)
     marker = safe_path(state / 'controller-installation-id')
     lock_path = safe_path(state / 'journal-archive.lock')
-    with open(lock_path, 'a') as lock:
-        os.chmod(lock_path, 0o600)
-        fcntl.flock(lock, fcntl.LOCK_EX)
+    lock_context = (open(lock_path, 'r') if lock_path.exists() else nullcontext()) if check_only else open(lock_path, 'a')
+    with lock_context as lock:
+        if lock is not None:
+            if not check_only:
+                os.chmod(lock_path, 0o600)
+            fcntl.flock(lock, fcntl.LOCK_EX)
         previous = marker.read_text().strip() if marker.exists() else None
         if previous is not None and str(UUID(previous)) != previous:
             raise ValueError('invalid previous controller identity')
@@ -54,10 +67,19 @@ def archive(controller, ca_digest, node_key, *, config=Path('/etc/node-plane/age
         if any(not path.is_file() for path in files):
             raise ValueError('agent journal artifact is not a regular file')
         same = previous == controller or same_legacy_controller
+        reassigning = False
         if same and old_node is not None and old_node != node_key:
-            raise ValueError('a different node of this controller already owns the agent')
+            if old_node not in retired_node_keys:
+                raise JournalOwnerConflict('a different node of this controller already owns the agent')
+            # The controller supplies only permanent tombstones from its own
+            # database. An active key can never authorize a journal handover.
+            reassigning = True
+            same = False
         if previous is None and files and not ca.exists():
             raise ValueError('cannot identify legacy journal owner; refusing to discard its fences')
+        if check_only:
+            return {'reassignable': reassigning, 'previous_node': old_node,
+                    'controller': controller if same_legacy_controller else previous}
         destination = None
         if not same and files:
             if stop is None:
@@ -71,6 +93,7 @@ def archive(controller, ca_digest, node_key, *, config=Path('/etc/node-plane/age
             destination.mkdir(mode=0o700)
             manifest = {'previous_controller': previous, 'new_controller': controller,
                         'previous_node': old_node, 'new_node': node_key,
+                        'previous_node_retired': reassigning,
                         'archived_at': stamp, 'files': [str(path) for path in files]}
             (destination / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
             os.chmod(destination / 'manifest.json', 0o600)
@@ -106,6 +129,18 @@ def quiesce_agent():
 
 if __name__ == '__main__':
     os.umask(0o077)
-    destination = archive(*sys.argv[1:4])
-    if destination is not None:
-        print(f'AGENT_JOURNAL_ARCHIVE|{sys.argv[3]}|{destination}')
+    args = sys.argv[1:]
+    check_only = bool(args and args[0] == '--check')
+    if check_only:
+        args = args[1:]
+    if len(args) not in {3, 4}:
+        raise SystemExit('Expected controller identity, CA digest, node key and optional retired keys')
+    retired = args[3].split(',') if len(args) == 4 and args[3] else []
+    try:
+        result = archive(*args[:3], retired_node_keys=retired, check_only=check_only)
+    except JournalOwnerConflict:
+        raise SystemExit('AGENT_JOURNAL_OWNER_CONFLICT: The agent belongs to another active node of this controller.')
+    if check_only:
+        print(f'AGENT_OWNER_CHECK|{args[2]}|{json.dumps(result, sort_keys=True)}')
+    elif result is not None:
+        print(f'AGENT_JOURNAL_ARCHIVE|{args[2]}|{result}')

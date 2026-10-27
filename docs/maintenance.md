@@ -49,6 +49,10 @@ Open recovery from either interface:
 
 Select the affected operation, read its reason and choose an offered action: check its result, continue saved work or cancel safely. Available actions depend on the operation and its execution state; cancellation preserves changes already completed. Checking a result observes the saved operation without repeating installation. If rollback is confirmed, the update lock is released and a new update can be started. Missing or conflicting evidence keeps the operation blocked: do not delete journals or resend an uncertain mutation to clear its status.
 
+If an agent setup stops at **Archiving previous installation journals** after removing a node and adding the same VPS under a new key, check that operation's result in Operations. The controller checks the agent's old identity over SSH and verifies that its old key was permanently removed from this controller. When confirmed, Continue/Resume becomes available for the same operation. Its old journals are archived before rebinding; an agent belonging to another active node remains protected.
+
+SSH agent setup permits its TCP port in active UFW only from the controller's observed SSH source IP. It does not enable UFW or change its default policy. VPN installation, reinstallation and settings application also allow the selected protocol ports, including the effective automatic AWG port. Provider firewalls and other firewall managers must be configured separately.
+
 ## Reset and removal
 
 Open **Reset & removal** in Node Plane Settings or the bot's cleanup settings. Review the plan and type the displayed confirmation phrase.

@@ -7,6 +7,7 @@ import subprocess
 import tarfile
 import tempfile
 import unittest
+import sys
 
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -14,6 +15,56 @@ SETUP_SCRIPT = REPO_ROOT / "scripts" / "setup_driver_agents.sh"
 
 
 class DriverAgentSetupTests(unittest.TestCase):
+    def test_ownership_check_skips_downloads_firewall_and_installation(self):
+        from uuid import uuid4
+        controller = str(uuid4())
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            app, shared, binaries = root / 'current', root / 'shared', root / 'bin'
+            for path in (app, shared / 'driver-agent-tls', binaries):
+                path.mkdir(parents=True, exist_ok=True)
+            environment_file = shared / '.env'
+            environment_file.write_text('BOT_TOKEN=test\n')
+            (shared / 'driver-agent-tls/ca.crt').write_text('public CA fixture')
+            # Only the two controller DB reads are replaced. Any attempt to
+            # download, change firewall/services or copy a binary fails loudly.
+            python = binaries / 'python3'
+            python.write_text(f'''#!{sys.executable}
+import sys
+source = sys.stdin.read()
+if 'SELECT key FROM backend_nodes' in source:
+    pass
+elif 'SELECT id FROM backend_installation_identity' in source:
+    print({controller!r})
+    print('old1')
+else:
+    raise SystemExit('unexpected Python command')
+''')
+            python.chmod(0o755)
+            for name in ('sudo', 'scp', 'curl', 'openssl', 'systemctl', 'ufw'):
+                path = binaries / name
+                path.write_text('#!/bin/sh\necho "unexpected mutation: $0" >&2\nexit 91\n')
+                path.chmod(0o755)
+            ssh = binaries / 'ssh'
+            ssh.write_text(f'''#!{sys.executable}
+import sys
+source = sys.stdin.read()
+assert 'def archive(' in source
+assert '--check' in sys.argv[-1]
+assert "'old1'" in sys.argv[-1]
+print('AGENT_OWNER_CHECK|new1|' + '{{"reassignable":true,"previous_node":"old1","controller":"{controller}"}}')
+''')
+            ssh.chmod(0o755)
+            before = {p.relative_to(shared): p.read_bytes() for p in shared.rglob('*') if p.is_file()}
+            result = subprocess.run(['bash', str(SETUP_SCRIPT), '--backend-node-key', 'new1',
+                '--backend-ssh-target', 'root@192.0.2.7', '--check-agent-owner'],
+                env={**os.environ, 'PATH': f'{binaries}:{os.environ["PATH"]}',
+                     'NODE_PLANE_APP_DIR': str(app), 'NODE_PLANE_SHARED_DIR': str(shared)},
+                capture_output=True, text=True, timeout=15)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('AGENT_OWNER_CHECK|new1|', result.stdout)
+            self.assertEqual(before, {p.relative_to(shared): p.read_bytes() for p in shared.rglob('*') if p.is_file()})
+
     @staticmethod
     def write_backend_registry(app_root, rows):
         package = app_root / 'app/db'

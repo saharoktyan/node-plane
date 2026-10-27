@@ -10,6 +10,17 @@ from tests import test_telegram_client as fixture
 class RecoveryScreenTests(IsolatedAsyncioTestCase):
     setUp = fixture.TelegramFlowTests.setUp
 
+    async def test_retired_owner_check_explains_that_setup_can_resume(self):
+        action = recovery.RecoveryAction(kind='agent', id=str(uuid4()), action='recheck', confirm=1)
+        backend = SimpleNamespace(request=AsyncMock(return_value={
+            'status': 'blocked', 'observation': {'agent_setup_retryable': True}}))
+        for locale, hint in (('en', 'Resume setup'), ('ru', 'продолжение установки')):
+            self.state_data['locale'] = locale
+            with patch.object(recovery, 'show', new_callable=AsyncMock) as show:
+                await recovery.recovery_action(self.query, action, self.bot, backend, self.state)
+            self.assertIn(hint, show.call_args.kwargs['note'])
+            self.assertNotIn(recovery.tr(locale, 'recovery.still_blocked'), show.call_args.kwargs['note'])
+
     def test_new_recovery_actions_have_valid_routes_and_clear_labels(self):
         identity=str(uuid4())
         for kind,action in [('agent','resume'),('bootstrap','cancel'),('bootstrap','resolve')]:

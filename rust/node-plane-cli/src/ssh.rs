@@ -2244,6 +2244,14 @@ mod tests {
             for (code, expected) in [
                 (None, AgentState::Ready),
                 (Some("node_agent_unconfigured"), AgentState::Missing),
+                (
+                    Some("node_agent_identity_mismatch"),
+                    AgentState::IdentityMismatch,
+                ),
+                (
+                    Some("node_agent_inspection_failed"),
+                    AgentState::InspectionFailed,
+                ),
                 (Some("node_agent_unavailable"), AgentState::Unavailable),
             ] {
                 let path = server.home.join("service-error");

@@ -1425,15 +1425,20 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         self.assertFalse(result)
 
     async def test_probe_unavailable_shows_recovery_without_raw_rpc_error(self):
-        backend = SimpleNamespace(
-            request=AsyncMock(return_value={'applied_revision': 1}),
-            node_probe=AsyncMock(side_effect=BackendError('node_agent_unavailable', 503)))
-        with patch.object(admin_nodes, 'render', new_callable=AsyncMock) as render:
-            await admin_nodes.probe_node_cb(self.query, ProbeNodeCallback(node_key='lv1'),
-                                            self.bot, backend, self.state)
-        screen = render.call_args.args[2]
-        self.assertIn('unreachable', ' '.join(screen.lines))
-        self.assertNotIn('node_agent_unavailable', ' '.join(screen.lines))
+        for code, status, hint in (
+                ('node_agent_unavailable', 503, 'unreachable'),
+                ('node_agent_identity_mismatch', 409, 'another node key'),
+                ('node_agent_inspection_failed', 502, 'runtime inspection failed')):
+            with self.subTest(code=code):
+                backend = SimpleNamespace(
+                    request=AsyncMock(return_value={'applied_revision': 1}),
+                    node_probe=AsyncMock(side_effect=BackendError(code, status)))
+                with patch.object(admin_nodes, 'render', new_callable=AsyncMock) as render:
+                    await admin_nodes.probe_node_cb(self.query, ProbeNodeCallback(node_key='lv1'),
+                                                    self.bot, backend, self.state)
+                screen = render.call_args.args[2]
+                self.assertIn(hint, ' '.join(screen.lines))
+                self.assertNotIn(code, ' '.join(screen.lines))
 
     async def test_probe_shows_selected_protocols_resources_and_versions(self):
         facts = {'node_key': 'lv1', 'checked_at': '2026-10-12T10:00:00+00:00',

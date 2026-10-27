@@ -62,14 +62,19 @@ class AgentNodeSettingsIntentTests(unittest.TestCase):
         intent['protocols'] = ['awg']
         intent['settings'].update(awg_port=443, awg_port_mode='auto', awg_i1_preset='quic', ipv6_outbound='on')
         real_run = subprocess.run
+        firewall_calls = []
 
         def run(args, **kwargs):
             if args[0] in {'ufw', 'docker'}:
+                if args[0] == 'ufw':
+                    firewall_calls.append(args)
                 return subprocess.CompletedProcess(args, 0, 'true\n' if args[0] == 'docker' else '')
             return real_run(args, **kwargs)
 
-        with patch.object(MODULE.subprocess, 'run', side_effect=run):
+        with patch.object(MODULE.subprocess, 'run', side_effect=run), \
+                patch.object(MODULE.shutil, 'which', return_value='/fake/ufw'):
             result = MODULE.run_node_settings(intent, 0, env_path=env, root=root)
+        self.assertEqual(firewall_calls, [['ufw', 'allow', '8443/udp'], ['ufw', 'reload']])
         self.assertIn("AWG_SERVER_PORT=8443", env.read_text())
         self.assertIn('ListenPort = 8443', awg.read_text())
         payload = json.loads(result['payload_json'])
@@ -215,20 +220,63 @@ printf '[Interface]\\nListenPort = 51820\\n' > '{awg}'
             script.chmod(0o755)
         real_run = subprocess.run
         launched = []
+        firewall_calls = []
 
         def run(args, **kwargs):
             if args[0] in {'ufw', 'docker'}:
+                if args[0] == 'ufw':
+                    firewall_calls.append(args)
                 return subprocess.CompletedProcess(args, 0, 'true\n' if args[0] == 'docker' else '')
             launched.append(Path(args[0]).name)
             return real_run(args, **kwargs)
 
-        with patch.object(MODULE.subprocess, 'run', side_effect=run):
+        with patch.object(MODULE.subprocess, 'run', side_effect=run), \
+                patch.object(MODULE.shutil, 'which', return_value='/fake/ufw'):
             first = MODULE.run_node_settings(self.intent(), 0, env_path=env, root=scripts)
             second = MODULE.run_node_settings(self.intent(), 0, env_path=env, root=scripts)
         self.assertEqual(first, second)
         self.assertEqual(launched.count('init-xray.sh'), 1)
         self.assertEqual(launched.count('init-awg.sh'), 1)
         self.assertEqual(launched.count('apply-node-settings.sh'), 2)
+        expected = [['ufw', 'allow', '443/tcp'], ['ufw', 'allow', '8443/tcp'],
+                    ['ufw', 'allow', '51820/udp'], ['ufw', 'reload']]
+        self.assertEqual(firewall_calls, expected + expected)
+
+    def test_applying_settings_opens_current_ports_for_only_enabled_protocols(self):
+        root = Path(self.temp.name)
+        env = root / 'node.env'
+        xray, awg = root / 'xray.json', root / 'wg0.conf'
+        (root / 'apply-node-settings.sh').write_text('#!/bin/sh\nexit 0\n')
+        (root / 'apply-node-settings.sh').chmod(0o755)
+        real_run = subprocess.run
+        for protocols, expected in (
+                (['awg'], ['51999/udp']),
+                (['xray'], ['4443/tcp', '9443/tcp']),
+                (['awg', 'xray'], ['4443/tcp', '9443/tcp', '51999/udp'])):
+            with self.subTest(protocols=protocols):
+                env.write_text(f'XRAY_CONFIG={xray}\nAWG_CONFIG={awg}\nXRAY_CONTAINER_NAME=xray\nAWG_CONTAINER_NAME=awg\n')
+                awg.write_text('[Interface]\nListenPort = 51999\n')
+                xray.write_text(json.dumps({'inbounds': [
+                    {'tag': 'reality-tcp', 'port': 4443, 'streamSettings': {
+                        'realitySettings': {'serverNames': ['www.cloudflare.com'], 'dest': 'www.cloudflare.com:443'}}},
+                    {'tag': 'reality-xhttp', 'port': 9443, 'streamSettings': {
+                        'realitySettings': {'serverNames': ['www.cloudflare.com'], 'dest': 'www.cloudflare.com:443'},
+                        'xhttpSettings': {'path': '/assets'}}}]}))
+                intent = self.intent()
+                intent['protocols'] = protocols
+                intent['settings'].update(awg_port=51999, xray_tcp_port=4443, xray_xhttp_port=9443)
+                firewall = []
+                def run(args, **kwargs):
+                    if args[0] == 'ufw':
+                        firewall.append(args)
+                        return subprocess.CompletedProcess(args, 0, '')
+                    if args[0] == 'docker':
+                        return subprocess.CompletedProcess(args, 0, 'true\n')
+                    return real_run(args, **kwargs)
+                with patch.object(MODULE.subprocess, 'run', side_effect=run), \
+                        patch.object(MODULE.shutil, 'which', return_value='/fake/ufw'):
+                    MODULE.run_node_settings(intent, 0, env_path=env, root=root)
+                self.assertEqual(firewall, [['ufw', 'allow', port] for port in expected] + [['ufw', 'reload']])
 
     def test_environment_verification_covers_endpoint_port_interface_preset_and_fingerprint(self):
         intent = self.intent()

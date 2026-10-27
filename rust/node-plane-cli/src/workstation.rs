@@ -541,7 +541,11 @@ pub async fn recover_operations(
                             }
                             stage(tx, &format!("Recovery check completed: {}", text(&result["status"])));
                             lines.push(format!("  {action}: {}", text(&result["status"])));
-                            if result["status"] == "blocked" { lines.push("  The outcome is still unconfirmed; the block remains.".into()); }
+                            if result.pointer("/observation/agent_setup_retryable").and_then(Value::as_bool) == Some(true) {
+                                lines.push("  Previous node is retired. Resume setup for this operation.".into());
+                            } else if result["status"] == "blocked" {
+                                lines.push("  The outcome is still unconfirmed; the block remains.".into());
+                            }
                             if let Some(id) = result["replacement_id"].as_str() { lines.push(format!("  Recovery queued: {id}")); }
                         },
                         Err(_) => {
@@ -616,7 +620,10 @@ pub(crate) fn recovery_explanation(kind: &str, action: &str) -> Result<&'static 
             "Recover the saved step. An interrupted command is fenced before a replacement can run."
         }
         ("agent", "resume") => {
-            "Retry setup only after a confirmed failure before installation. Fix SSH access or release binary availability first."
+            "Continue setup after confirming a safe installation boundary or a removed previous owner. The saved operation identity is retained."
+        }
+        ("agent", "recheck") => {
+            "Check the agent identity and build, or verify a retired previous owner over SSH. This check does not change the agent or its journals."
         }
         ("temporary", "resolve") => {
             "Cancel only after the agent confirms the lease and peer are absent and fences the original command."
@@ -650,6 +657,21 @@ pub(crate) fn recovery_reason(code: &str) -> &str {
         "ssh_authentication" => "The controller cannot log in over SSH.",
         "ssh_host_key" => "The SSH host key is missing or has changed.",
         "ssh_prerequisites" => "SSH needs root or passwordless sudo, systemd and sha256sum.",
+        "agent_firewall_failed" => {
+            "Could not allow the controller through the agent server firewall. Check UFW and retry setup."
+        }
+        "agent_journal_owner_conflict" => {
+            "The agent belongs to another active node. Check the server address and its registry entry."
+        }
+        "agent_previous_node_retired" => {
+            "The previous node was removed. Resume setup to archive its journals and bind this node."
+        }
+        "node_agent_identity_mismatch" => {
+            "The agent reports another node key. Check the server address and operation recovery."
+        }
+        "node_agent_inspection_failed" => {
+            "The agent answered, but runtime inspection failed. Check its service logs and runtime."
+        }
         "release_binary_unavailable" => "Release binary is missing or inaccessible.",
         "rust_required" => "On-server build is obsolete. Use published release binaries.",
         "build_resources" => "Local build is obsolete. Use published release binaries.",

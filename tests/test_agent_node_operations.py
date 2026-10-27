@@ -75,6 +75,17 @@ class AgentNodeOperationTests(unittest.TestCase):
     def execute(self, action='reinstall_clean', recover=False):
         return MODULE.execute(action, 'job1', self.intent, recover, self.path)
 
+    def test_first_protocol_install_and_both_reinstalls_use_firewall_settings_path(self):
+        for action in ('bootstrap', 'reinstall_keep', 'reinstall_clean'):
+            with self.subTest(action=action), \
+                    patch.object(MODULE, 'inspect', return_value={'awg_config_valid': True}), \
+                    patch.object(MODULE, 'remove_protocol_runtime') as cleanup, \
+                    patch.object(MODULE.intents, 'run_node_settings',
+                        return_value={'payload_json': '{"applied":true}'}) as settings:
+                self.assertEqual(MODULE.run(action, self.intent, 17), {'applied': True})
+                settings.assert_called_once_with({'kind': 'node_settings', **self.intent}, 17)
+                self.assertEqual(cleanup.call_count, int(action == 'reinstall_clean'))
+
     def test_protocol_progress_survives_failure_without_replaying_command(self):
         from uuid import uuid4
         identity = str(uuid4())

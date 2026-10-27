@@ -175,6 +175,8 @@ async def recovery_action(query: CallbackQuery, callback_data: RecoveryAction, b
         note = tr(locale, 'recovery.result_status', status=tr(locale, 'recovery.status.' + result.get('status', 'unknown')))
         if result.get('status') == 'blocked':
             note = tr(locale, 'recovery.still_blocked')
+        if (result.get('observation') or {}).get('agent_setup_retryable') is True:
+            note = tr(locale, 'recovery.agent_setup_retryable')
         if result.get('replacement_id'):
             note += '\n' + tr(locale, 'recovery.replacement', id=result['replacement_id'])
     except BackendError as exc:

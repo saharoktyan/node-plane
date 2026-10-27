@@ -42,6 +42,7 @@ SKIP_DRIVER=0
 SKIP_AGENTS=0
 STRICT_MODE=0
 DRY_RUN=0
+CHECK_AGENT_OWNER=0
 AGENT_PORT="${NODE_AGENT_PORT:-50061}"
 ONLY_NODE_KEY=""
 BACKEND_NODE_KEY=""
@@ -68,6 +69,7 @@ DRIVER_BIN_CHANGED=0
 DRIVER_UNIT_CHANGED=0
 ENV_CHANGED=0
 CONTROLLER_ID=""
+RETIRED_NODE_KEYS=""
 JOURNAL_ARCHIVE_NOTICES=()
 
 set_step() {
@@ -420,6 +422,11 @@ while [[ $# -gt 0 ]]; do
       DRY_RUN=1
       shift
       ;;
+    --check-agent-owner)
+      CHECK_AGENT_OWNER=1
+      SKIP_DRIVER=1
+      shift
+      ;;
     --agent-port)
       AGENT_PORT="${2:-}"
       shift 2
@@ -553,6 +560,11 @@ fi
 
 ensure_bin_source_mode
 
+if [[ $CHECK_AGENT_OWNER -eq 1 && ( -z "$BACKEND_NODE_KEY" || $DRY_RUN -eq 1 || $SKIP_AGENTS -eq 1 ) ]]; then
+  echo "--check-agent-owner requires a single backend node and no dry-run/skip-agents." >&2
+  exit 1
+fi
+
 if [[ ! "$AGENT_PORT" =~ ^[0-9]+$ ]]; then
   echo "Invalid --agent-port: $AGENT_PORT" >&2
   exit 1
@@ -577,7 +589,7 @@ fi
 # that default so the driver's EnvironmentFile cannot blank its unit fallback.
 if [[ -z "${SSH_KEY:-}" ]]; then
   SSH_KEY="${SHARED_ROOT}/ssh/id_ed25519"
-  if [[ $DRY_RUN -eq 0 ]]; then
+  if [[ $DRY_RUN -eq 0 && $CHECK_AGENT_OWNER -eq 0 ]]; then
     if set_env_value_if_changed "$ENV_FILE" "SSH_KEY" "$SSH_KEY"; then ENV_CHANGED=1; fi
   fi
 fi
@@ -819,7 +831,7 @@ install_local_agent() {
   local archive_notice
   set_step "check previous controller journals for local node ${server_key}"
   archive_notice="$(sudo python3 "${SCRIPT_DIR}/lib/archive_agent_journals.py" \
-    "$CONTROLLER_ID" "$(sha256_of_file "$TLS_CA_CERT")" "$server_key")" || return 1
+    "$CONTROLLER_ID" "$(sha256_of_file "$TLS_CA_CERT")" "$server_key" "$RETIRED_NODE_KEYS")" || return 1
   if [[ -n "$archive_notice" ]]; then
     JOURNAL_ARCHIVE_NOTICES+=("$archive_notice")
     echo "$archive_notice"
@@ -919,22 +931,47 @@ deploy_agents() {
   fi
 
   if [[ $DRY_RUN -eq 0 ]]; then
-    set_step "prepare driver-agent mutual TLS certificates"
-    prepare_driver_agent_tls
-    CONTROLLER_ID="$(PYTHONPATH="${APP_ROOT}/app" NODE_PLANE_APP_DIR="${APP_ROOT}" \
-      NODE_PLANE_SHARED_DIR="${SHARED_ROOT}" "$PYTHON_BIN" - <<'PY'
+    if [[ $CHECK_AGENT_OWNER -eq 0 ]]; then
+      set_step "prepare driver-agent mutual TLS certificates"
+      prepare_driver_agent_tls
+    fi
+    local identity_snapshot
+    identity_snapshot="$(PYTHONPATH="${APP_ROOT}/app" NODE_PLANE_APP_DIR="${APP_ROOT}" \
+      NODE_PLANE_SHARED_DIR="${SHARED_ROOT}" "$PYTHON_BIN" - "$CHECK_AGENT_OWNER" <<'PY'
+import re
+import sys
 from db import get_db
 from backend.installation_identity import controller_identity
-print(controller_identity(get_db()))
+from uuid import UUID
+db = get_db()
+if sys.argv[1] == '1':
+    with db.connect() as conn:
+        identity = conn.execute('SELECT id FROM backend_installation_identity WHERE singleton=1').fetchone()['id']
+else:
+    identity = controller_identity(db)
+if str(UUID(identity)) != identity:
+    raise SystemExit('Invalid controller identity')
+with db.connect() as conn:
+    retired = [row['node_key'] for row in conn.execute('''SELECT r.node_key FROM backend_node_retirements r
+        WHERE NOT EXISTS (SELECT 1 FROM backend_nodes n WHERE n.key=r.node_key) ORDER BY r.node_key''').fetchall()]
+if any(not re.fullmatch(r'[A-Za-z0-9_-]{1,64}', key) for key in retired):
+    raise SystemExit('Invalid retired node key')
+print(identity)
+print(','.join(retired))
 PY
     )" || return 1
+    CONTROLLER_ID="${identity_snapshot%%$'\n'*}"
+    RETIRED_NODE_KEYS=""
+    if [[ "$identity_snapshot" == *$'\n'* ]]; then
+      RETIRED_NODE_KEYS="${identity_snapshot#*$'\n'}"
+    fi
   fi
 
   local failed=0
   local matched=0
   local mappings=()
   local local_agent_sum=""
-  if [[ $DRY_RUN -eq 0 ]]; then
+  if [[ $DRY_RUN -eq 0 && $CHECK_AGENT_OWNER -eq 0 ]]; then
     local_agent_sum="$(sha256_of_file "$agent_bin_path")"
   fi
   while IFS=$'\x1f' read -r server_key transport ssh_host ssh_port ssh_user ssh_key public_host; do
@@ -947,6 +984,11 @@ PY
       matched=$((matched + 1))
       echo
       echo "Deploying node-agent to local node ${server_key}..."
+      if [[ $CHECK_AGENT_OWNER -eq 1 ]]; then
+        sudo python3 "${SCRIPT_DIR}/lib/archive_agent_journals.py" --check \
+          "$CONTROLLER_ID" "$(sha256_of_file "$TLS_CA_CERT")" "$server_key" "$RETIRED_NODE_KEYS" || return 1
+        continue
+      fi
       if [[ $DRY_RUN -eq 1 ]]; then
         echo "Dry-run local agent check passed for ${server_key}"
       elif ! install_local_agent "$server_key" "$local_agent_sum"; then
@@ -1000,9 +1042,13 @@ PY
     echo
     echo "Deploying node-agent to ${server_key} (${target}:${ssh_port})..."
 
+    local host_key_policy="${SSH_STRICT_HOST_KEY_CHECKING:-accept-new}"
+    if [[ $CHECK_AGENT_OWNER -eq 1 ]]; then
+      host_key_policy=yes
+    fi
     local -a common_ssh_opts=("-o" "BatchMode=yes" "-o" "ConnectTimeout=15"
       "-o" "ServerAliveInterval=15" "-o" "ServerAliveCountMax=3"
-      "-o" "StrictHostKeyChecking=${SSH_STRICT_HOST_KEY_CHECKING:-accept-new}")
+      "-o" "StrictHostKeyChecking=${host_key_policy}")
     if [[ -n "${SSH_KNOWN_HOSTS_PATH:-}" ]]; then
       common_ssh_opts+=("-o" "UserKnownHostsFile=${SSH_KNOWN_HOSTS_PATH}")
     fi
@@ -1015,6 +1061,13 @@ PY
     # Note: ssh uses -p for port, scp uses -P.
     local -a ssh_opts=("-p" "$ssh_port" "${common_ssh_opts[@]}")
     local -a scp_opts=("-P" "$ssh_port" "${common_ssh_opts[@]}")
+
+    if [[ $CHECK_AGENT_OWNER -eq 1 ]]; then
+      agent_ssh "${ssh_opts[@]}" "$target" \
+        "sudo python3 - --check '${CONTROLLER_ID}' '$(sha256_of_file "$TLS_CA_CERT")' '${server_key}' '${RETIRED_NODE_KEYS}'" \
+        < "${SCRIPT_DIR}/lib/archive_agent_journals.py" || return 1
+      continue
+    fi
 
     if [[ $DRY_RUN -eq 1 ]]; then
       if ! agent_ssh "${ssh_opts[@]}" "$target" 'echo "node-plane-agent dry-run ok" >/dev/null'; then
@@ -1033,10 +1086,17 @@ PY
       continue
     fi
 
+    set_step "configure agent firewall for ${server_key}"
+    if ! agent_ssh "${ssh_opts[@]}" "$target" "bash -s -- '${AGENT_PORT}'" < <(agent_firewall_script); then
+      echo "AGENT_FIREWALL_FAILED: Could not prepare the agent port on ${server_key}." >&2
+      failed=$((failed + 1))
+      continue
+    fi
+
     set_step "check previous controller journals for ${server_key}"
     local archive_notice
     if ! archive_notice="$(agent_ssh "${ssh_opts[@]}" "$target" \
-      "sudo python3 - '${CONTROLLER_ID}' '$(sha256_of_file "$TLS_CA_CERT")' '${server_key}'" \
+      "sudo python3 - '${CONTROLLER_ID}' '$(sha256_of_file "$TLS_CA_CERT")' '${server_key}' '${RETIRED_NODE_KEYS}'" \
       < "${SCRIPT_DIR}/lib/archive_agent_journals.py")"; then
       failed=$((failed + 1))
       continue
@@ -1209,6 +1269,10 @@ EOF
     return 1
   fi
 
+  if [[ $CHECK_AGENT_OWNER -eq 1 ]]; then
+    return 0
+  fi
+
   if [[ $STRICT_MODE -eq 1 && $failed -gt 0 ]]; then
     echo "node-agent deploy failures: ${failed}" >&2
     return 1
@@ -1258,6 +1322,11 @@ EOF
     echo "node-agent deploy completed with ${failed} failures (best-effort mode)."
   fi
 }
+
+if [[ $CHECK_AGENT_OWNER -eq 1 ]]; then
+  deploy_agents
+  exit 0
+fi
 
 if [[ $DRY_RUN -eq 1 ]]; then
   resolve_binaries_dry_run

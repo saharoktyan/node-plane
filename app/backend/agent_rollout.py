@@ -115,11 +115,15 @@ class AgentRolloutService:
             conn.execute("UPDATE backend_agent_rollouts SET status = 'blocked' WHERE status = 'running'")
 
     def preflight_failed(self, row):
-        """Only a confirmed failure before installation permits another dispatch.
+        """Only a confirmed safe boundary permits another installer dispatch.
 
-        Binary resolution finishes before installing either component. Its
-        typed failure code is recorded only after the subprocess returns;
-        interrupted/unknown executions never acquire this permission.
+        Binary resolution, SSH checks and additive UFW configuration finish
+        before agent identity or journals are modified. A typed failure code
+        is recorded only after the subprocess returns; interrupted/unknown
+        executions never acquire this permission.
+
+        A retired-owner receipt is written only after independent SSH and DB
+        checks; it can authorize continuation of a legacy archival failure.
         """
         from .installation_progress import read_progress
         progress = read_progress(row)
@@ -130,7 +134,11 @@ class AgentRolloutService:
         return bool(row['status'] == 'blocked' and node and not abandoned and failure
                     and (failure['code'] in {'release_binary_unavailable', 'rust_required'}
                          or progress and progress['stage'] == 'check_ssh'
-                         and failure['code'] in {'ssh_authentication', 'ssh_host_key', 'ssh_prerequisites'}))
+                         and failure['code'] in {'ssh_authentication', 'ssh_host_key', 'ssh_prerequisites'}
+                         or progress and progress['stage'] == 'agent_firewall'
+                         and failure['code'] == 'agent_firewall_failed'
+                         or progress and progress['stage'] == 'archive_journals'
+                         and failure['code'] == 'agent_previous_node_retired'))
 
     def resume_preflight(self, actor, task_id):
         require_permission(actor, 'maintenance.manage')
@@ -155,7 +163,8 @@ class AgentRolloutService:
             conn.execute('DELETE FROM backend_agent_rollout_failures WHERE task_id=?', (task_id,))
         return self.get(actor, task_id)
 
-    def _execute(self, row):
+    @staticmethod
+    def _installer_args(row):
         intent = json.loads(row['intent_json'])
         root = Path(os.environ['NODE_PLANE_APP_DIR'])
         script = root / 'scripts' / 'setup_driver_agents.sh'
@@ -168,6 +177,53 @@ class AgentRolloutService:
         else:
             args += ['--backend-ssh-target', intent['ssh_target'],
                      '--backend-ssh-port', str(intent['ssh_port'])]
+        return root, args
+
+    def confirm_retired_owner(self, row):
+        """Recheck a blocked archival boundary without replaying installation.
+
+        This also handles pre-fix operations that have no saved failure code.
+        Progress alone never authorizes a retry: independently inspect remote
+        ownership and require the same controller's permanent retirement.
+        """
+        progress = self.progress(row)
+        if row['status'] != 'blocked' or not progress or progress['stage'] != 'archive_journals':
+            return None
+        root, args = self._installer_args(row)
+        env = dict(os.environ)
+        env.pop('NODE_PLANE_AGENT_PROGRESS_FILE', None)
+        env.pop('NODE_PLANE_AGENT_PROGRESS_ID', None)
+        result = subprocess.run([*args, '--check-agent-owner'], cwd=root,
+            capture_output=True, text=True, timeout=60, check=False, env=env)
+        prefix = f"AGENT_OWNER_CHECK|{row['node_key']}|"
+        receipts = [line[len(prefix):] for line in result.stdout.splitlines() if line.startswith(prefix)]
+        if result.returncode != 0 or len(receipts) != 1:
+            return None
+        try:
+            evidence = json.loads(receipts[0])
+        except ValueError:
+            return None
+        old_key = evidence.get('previous_node') if isinstance(evidence, dict) else None
+        if (not isinstance(old_key, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,64}', old_key)
+                or old_key == row['node_key'] or evidence.get('reassignable') is not True):
+            return None
+        with self.db.transaction() as conn:
+            identity = conn.execute('SELECT id FROM backend_installation_identity WHERE singleton=1').fetchone()
+            retired = conn.execute('SELECT node_key FROM backend_node_retirements WHERE node_key=?', (old_key,)).fetchone()
+            active = conn.execute('SELECT key FROM backend_nodes WHERE key=?', (old_key,)).fetchone()
+            connection = conn.execute('SELECT transport,ssh_target FROM backend_node_connections WHERE node_key=?', (row['node_key'],)).fetchone()
+            intent = json.loads(row['intent_json'])
+            if (not identity or evidence.get('controller') != identity['id'] or not retired or active
+                    or not connection or (connection['transport'], connection['ssh_target']) !=
+                    (intent['transport'], intent['ssh_target'])):
+                return None
+            conn.execute('''INSERT INTO backend_agent_rollout_failures VALUES (?, ?)
+                ON CONFLICT(task_id) DO UPDATE SET code=excluded.code''',
+                (row['id'], 'agent_previous_node_retired'))
+        return {'previous_node': old_key, 'previous_node_retired': True, 'agent_setup_retryable': True}
+
+    def _execute(self, row):
+        root, args = self._installer_args(row)
         if self.runner is not None:
             return self.runner(args)
         from .installation_progress import progress_path
@@ -204,6 +260,10 @@ class AgentRolloutService:
             self._failure_code = 'ssh_host_key'
         elif 'SSH_PREREQUISITES_FAILED:' in output:
             self._failure_code = 'ssh_prerequisites'
+        elif 'AGENT_FIREWALL_FAILED:' in output:
+            self._failure_code = 'agent_firewall_failed'
+        elif 'AGENT_JOURNAL_OWNER_CONFLICT:' in output:
+            self._failure_code = 'agent_journal_owner_conflict'
         return result.returncode == 0
 
     def run_one(self):

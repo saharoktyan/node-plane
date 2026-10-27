@@ -9,6 +9,8 @@ import argparse
 import fcntl
 import json
 import os
+import logging
+import time
 from .authorization import AccessDenied, require_permission
 from .operations import OperationRepository
 from .node_settings import NodeSettingsExecutor
@@ -355,6 +357,36 @@ def run_daemon(worker, lock_fd, stop, wait, clock=None):
         wait(max(0, next_scan - clock()))
 
 
+def wait_for_schema(db, stop, *, check=None, clock=time.monotonic, timeout=60):
+    """Wait for database startup, but never retry authentication/schema errors."""
+    from psycopg import OperationalError
+    if check is None:
+        from db.migrations import check_schema
+        check = check_schema
+    deadline = clock() + timeout
+    waiting = False
+    while not stop.is_set():
+        try:
+            check(db)
+        except OperationalError as error:
+            code = error.sqlstate
+            if code is not None and not (code.startswith('08') or code == '57P03'):
+                raise
+            remaining = deadline - clock()
+            if remaining <= 0:
+                raise
+            if not waiting:
+                logging.getLogger(__name__).warning('Waiting for PostgreSQL readiness before starting the worker')
+                waiting = True
+            if stop.wait(min(1, remaining)):
+                return False
+        else:
+            if waiting:
+                logging.getLogger(__name__).info('PostgreSQL is ready; starting the worker')
+            return not stop.is_set()
+    return False
+
+
 def main():
     import signal
     import threading
@@ -386,7 +418,11 @@ def main():
         stack.enter_context(worker_connections())
         db = get_db()
         stack.callback(db.close)
-        check_schema(db)
+        if args.daemon:
+            if not wait_for_schema(db, stop):
+                return
+        else:
+            check_schema(db)
         channel = stack.enter_context(local_channel(args.driver))
         worker = Worker(db, channel)
         if args.daemon:

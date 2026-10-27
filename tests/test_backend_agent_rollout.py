@@ -167,6 +167,84 @@ class BackendAgentRolloutTests(TestCase):
                 protocols_json, xray_transports_json)
                 VALUES ('lv1', 'Latvia', 'EU', 0, '[]', '[]')''')
 
+    def test_legacy_blocked_archive_is_rechecked_then_resumed_with_same_identity(self):
+        from unittest.mock import Mock
+        from backend.authorization import Actor, Principal, PrincipalKind
+        from backend.installation_identity import controller_identity
+        from backend.installation_progress import progress_path, write_stage
+        from backend.recovery import act, overview
+        actor = Actor(Principal('admin', PrincipalKind.ACCOUNT,
+            frozenset({'nodes.manage', 'maintenance.manage'})), self.admin)
+        self.node()
+        controller = controller_identity(self.db)
+        with self.db.transaction() as conn:
+            conn.execute("INSERT INTO backend_node_connections(node_key,transport,ssh_target) VALUES ('lv1','ssh','root@lv1.example')")
+            conn.execute('''INSERT INTO backend_node_retirements(node_key,actor_id,mode,reason,unfinished_tasks,retired_at)
+                VALUES ('old1',?,'registry_only','Owner retired old node',0,'2026-10-27T00:00:00+00:00')''', (self.admin.id,))
+        service = AgentRolloutService(self.db)
+        task = service.request(actor, 'lv1', str(uuid4()), transport='ssh', ssh_target='root@lv1.example')
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_agent_rollouts SET status='blocked' WHERE id=?", (task['id'],))
+        driver = Mock()
+        receipt = 'AGENT_OWNER_CHECK|lv1|' + json.dumps({
+            'reassignable': True, 'previous_node': 'old1', 'controller': controller})
+        with TemporaryDirectory() as shared, patch.dict(os.environ,
+                {'NODE_PLANE_SHARED_DIR': shared, 'NODE_PLANE_APP_DIR': '/opt/node-plane/current'}):
+            write_stage(progress_path(task['id']), task['id'], 'archive_journals')
+            before = next(item for item in overview(self.db, actor)['items'] if item['id'] == task['id'])
+            self.assertEqual(before['actions'], ['recheck'])
+            with patch('backend.agent_rollout.subprocess.run', return_value=SimpleNamespace(
+                    returncode=0, stdout=receipt, stderr='')) as command:
+                observed = act(self.db, actor, driver, 'agent', task['id'], 'recheck')
+            self.assertIn('--check-agent-owner', command.call_args.args[0])
+            self.assertEqual(observed['status'], 'blocked')
+            self.assertTrue(observed['observation']['agent_setup_retryable'])
+            driver.inspect_node.assert_not_called()
+            after = next(item for item in overview(self.db, actor)['items'] if item['id'] == task['id'])
+            self.assertIn('resume', after['actions'])
+            self.assertEqual(after['error_code'], 'agent_previous_node_retired')
+            resumed = act(self.db, actor, driver, 'agent', task['id'], 'resume')
+            self.assertEqual(resumed['id'], task['id'])
+            self.assertEqual(resumed['status'], 'awaiting_executor')
+            with self.db.connect() as conn:
+                self.assertEqual(conn.execute('SELECT COUNT(*) AS n FROM backend_agent_rollouts').fetchone()['n'], 1)
+
+    def test_retired_owner_probe_rejects_missing_retirement_wrong_controller_and_wrong_node(self):
+        from backend.installation_identity import controller_identity
+        from backend.installation_progress import progress_path, write_stage
+        self.node()
+        controller = controller_identity(self.db)
+        identity = str(uuid4())
+        row = {'id': identity, 'node_key': 'lv1', 'status': 'blocked',
+               'intent_json': json.dumps({'transport': 'ssh', 'ssh_target': 'root@lv1.example', 'ssh_port': 22})}
+        service = AgentRolloutService(self.db)
+        with self.db.transaction() as conn:
+            conn.execute("INSERT INTO backend_node_connections(node_key,transport,ssh_target) VALUES ('lv1','ssh','root@lv1.example')")
+        cases = [
+            {'reassignable': True, 'previous_node': 'old1', 'controller': controller},
+            {'reassignable': True, 'previous_node': 'lv1', 'controller': controller},
+            {'reassignable': True, 'previous_node': 'old1', 'controller': str(uuid4())},
+            {'reassignable': False, 'previous_node': 'old1', 'controller': controller},
+        ]
+        with TemporaryDirectory() as shared, patch.dict(os.environ,
+                {'NODE_PLANE_SHARED_DIR': shared, 'NODE_PLANE_APP_DIR': '/opt/node-plane/current'}):
+            write_stage(progress_path(identity), identity, 'archive_journals')
+            for index, proof in enumerate(cases):
+                if index == 1:
+                    with self.db.transaction() as conn:
+                        conn.execute('''INSERT INTO backend_node_retirements(node_key,actor_id,mode,reason,unfinished_tasks,retired_at)
+                            VALUES ('old1',?,'registry_only','Owner retired old node',0,'2026-10-27T00:00:00+00:00')''', (self.admin.id,))
+                with self.subTest(proof=proof), patch('backend.agent_rollout.subprocess.run',
+                        return_value=SimpleNamespace(returncode=0, stdout='AGENT_OWNER_CHECK|lv1|' + json.dumps(proof), stderr='')):
+                    self.assertIsNone(service.confirm_retired_owner(row))
+            with self.db.transaction() as conn:
+                conn.execute("INSERT INTO backend_nodes(key,title,region,enabled,protocols_json,xray_transports_json) VALUES ('old1','Old node','EU',0,'[]','[]')")
+            with patch('backend.agent_rollout.subprocess.run', return_value=SimpleNamespace(
+                    returncode=0, stdout='AGENT_OWNER_CHECK|lv1|' + json.dumps(cases[0]), stderr='')):
+                self.assertIsNone(service.confirm_retired_owner(row))
+            with self.db.connect() as conn:
+                self.assertIsNone(conn.execute('SELECT 1 FROM backend_agent_rollout_failures').fetchone())
+
     def test_ssh_prerequisite_failure_is_exposed_without_console_output(self):
         service = AgentRolloutService(self.db)
         with patch.dict(os.environ, {'NODE_PLANE_APP_DIR': '/opt/node-plane/current'}), \
@@ -175,6 +253,34 @@ class BackendAgentRolloutTests(TestCase):
             self.assertFalse(service._execute({'node_key': 'lv1', 'intent_json': json.dumps({
                 'transport': 'ssh', 'ssh_target': 'root@lv1.example', 'ssh_port': 22})}))
         self.assertEqual(service._failure_code, 'ssh_prerequisites')
+
+    def test_firewall_failure_can_resume_only_before_agent_mutations(self):
+        from backend.authorization import AccessDenied, Actor, Principal, PrincipalKind
+        from backend.installation_progress import progress_path, write_stage
+        from backend.recovery import overview
+        actor = Actor(Principal('admin', PrincipalKind.ACCOUNT,
+            frozenset({'nodes.manage', 'maintenance.manage'})), self.admin)
+        self.node()
+        with self.db.transaction() as conn:
+            conn.execute("INSERT INTO backend_node_connections(node_key,transport,ssh_target) VALUES ('lv1','ssh','root@lv1.example')")
+        service = AgentRolloutService(self.db)
+        task = service.request(actor, 'lv1', str(uuid4()), transport='ssh', ssh_target='root@lv1.example')
+        with TemporaryDirectory() as shared, patch.dict(os.environ,
+                {'NODE_PLANE_SHARED_DIR': shared, 'NODE_PLANE_APP_DIR': '/opt/node-plane/current'}):
+            write_stage(progress_path(task['id']), task['id'], 'agent_firewall')
+            with patch('backend.agent_rollout.subprocess.run', return_value=SimpleNamespace(
+                    returncode=1, stdout='', stderr='AGENT_FIREWALL_FAILED: Could not allow the controller through UFW.')):
+                service.run_one()
+            row = service.get(actor, task['id'])
+            self.assertEqual(row['failure_code'], 'agent_firewall_failed')
+            self.assertEqual(row['progress']['stage'], 'agent_firewall')
+            item = next(item for item in overview(self.db, actor)['items'] if item['id'] == task['id'])
+            self.assertIn('resume', item['actions'])
+            write_stage(progress_path(task['id']), task['id'], 'install_agent')
+            with self.assertRaises(AccessDenied):
+                service.resume_preflight(actor, task['id'])
+            write_stage(progress_path(task['id']), task['id'], 'agent_firewall')
+            self.assertEqual(service.resume_preflight(actor, task['id'])['status'], 'awaiting_executor')
 
     def test_release_binary_unavailable_failure_is_exposed_from_script_output(self):
         service = AgentRolloutService(self.db)

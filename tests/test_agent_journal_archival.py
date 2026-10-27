@@ -33,10 +33,13 @@ class AgentJournalArchivalTests(unittest.TestCase):
         self.config.write_text('node_key = "n1"\n')
         self.stops = []
 
-    def archive(self, **kwargs):
-        return module.archive(self.controller, hashlib.sha256(b'new-ca').hexdigest(), 'n1',
-            config=self.config, state=self.state, journal=self.journal,
-            stop=lambda: self.stops.append(True), **kwargs)
+    def archive(self, node_key='n1', *, controller=None, ca_digest=None, **kwargs):
+        controller = self.controller if controller is None else controller
+        ca_digest = hashlib.sha256(b'new-ca').hexdigest() if ca_digest is None else ca_digest
+        options = {'config': self.config, 'state': self.state, 'journal': self.journal,
+                   'stop': lambda: self.stops.append(True)}
+        options.update(kwargs)
+        return module.archive(controller, ca_digest, node_key, **options)
 
     def test_new_controller_archives_sqlite_and_all_sidecars_then_is_idempotent(self):
         contents = {}
@@ -58,6 +61,70 @@ class AgentJournalArchivalTests(unittest.TestCase):
         self.assertIsNone(self.archive())
         self.assertEqual(self.journal.read_bytes(), b'new active journal')
         self.assertEqual(self.stops, [True])
+
+    def test_same_controller_different_node_refuses_without_modifications(self):
+        self.marker.write_text(self.controller)
+        marker_bytes = self.marker.read_bytes()
+        config_bytes = self.config.read_bytes()
+        sidecars = {}
+        for suffix in ('', '-wal', '-shm', '-journal', '.lock', '.disabled'):
+            path = Path(str(self.journal) + suffix)
+            sidecars[path] = ('active' + suffix).encode()
+            path.write_bytes(sidecars[path])
+
+        with self.assertRaisesRegex(ValueError, 'different node'):
+            self.archive('n2')
+
+        self.assertEqual(self.stops, [])
+        for path, body in sidecars.items():
+            self.assertTrue(path.exists())
+            self.assertEqual(path.read_bytes(), body)
+        self.assertEqual(self.marker.read_bytes(), marker_bytes)
+        self.assertEqual(self.config.read_bytes(), config_bytes)
+        self.assertFalse((self.state / 'journal-archives').exists())
+
+    def test_same_controller_same_key_preserves_journal_and_sidecars_without_stopping(self):
+        self.marker.write_text(self.controller)
+        contents = {}
+        for suffix in ('', '-wal', '-shm', '-journal', '.lock', '.disabled'):
+            path = Path(str(self.journal) + suffix)
+            contents[path] = ('preserve' + suffix).encode()
+            path.write_bytes(contents[path])
+
+        result = self.archive('n1')
+
+        self.assertIsNone(result)
+        self.assertEqual(self.stops, [])
+        for path, body in contents.items():
+            self.assertTrue(path.exists())
+            self.assertEqual(path.read_bytes(), body)
+        self.assertEqual(self.marker.read_text().strip(), self.controller)
+        self.assertFalse((self.state / 'journal-archives').exists())
+
+    def test_legacy_same_ca_different_node_refuses_without_modifications(self):
+        self.marker.unlink()
+        ca = self.config.parent / 'tls/ca.crt'
+        ca.parent.mkdir(parents=True, exist_ok=True)
+        ca.write_bytes(b'new-ca')
+        ca_bytes = ca.read_bytes()
+        config_bytes = self.config.read_bytes()
+        sidecars = {}
+        for suffix in ('', '-wal', '-shm', '-journal', '.lock', '.disabled'):
+            path = Path(str(self.journal) + suffix)
+            sidecars[path] = ('legacy' + suffix).encode()
+            path.write_bytes(sidecars[path])
+
+        with self.assertRaisesRegex(ValueError, 'different node'):
+            self.archive('n2')
+
+        self.assertEqual(self.stops, [])
+        self.assertFalse(self.marker.exists())
+        self.assertEqual(ca.read_bytes(), ca_bytes)
+        self.assertEqual(self.config.read_bytes(), config_bytes)
+        for path, body in sidecars.items():
+            self.assertTrue(path.exists())
+            self.assertEqual(path.read_bytes(), body)
+        self.assertFalse((self.state / 'journal-archives').exists())
 
     def test_legacy_same_ca_adopts_identity_without_clearing_journal(self):
         self.marker.unlink()
@@ -114,3 +181,52 @@ class AgentJournalArchivalTests(unittest.TestCase):
         identity = controller_identity(first)
         self.assertEqual(controller_identity(first), identity)
         self.assertNotEqual(controller_identity(second), identity)
+
+    def test_retired_node_handover_archives_fences_before_rebinding(self):
+        self.marker.write_text(self.controller)
+        self.journal.write_bytes(b'old fences')
+        disabled = Path(str(self.journal) + '.disabled')
+        disabled.write_bytes(b'old disabled marker')
+        result = self.archive('n2', retired_node_keys=['n1'])
+        self.assertEqual(self.stops, [True])
+        self.assertEqual((result / self.journal.name).read_bytes(), b'old fences')
+        self.assertEqual((result / disabled.name).read_bytes(), b'old disabled marker')
+        manifest = json.loads((result / 'manifest.json').read_text())
+        self.assertEqual((manifest['previous_node'], manifest['new_node']), ('n1', 'n2'))
+        self.assertTrue(manifest['previous_node_retired'])
+        # The installer later installs the new agent config. Repeating its
+        # archive boundary must preserve the new node's command journal.
+        self.config.write_text('node_key = "n2"\n')
+        self.journal.write_bytes(b'new fences')
+        self.assertIsNone(self.archive('n2', retired_node_keys=['n1']))
+        self.assertEqual(self.journal.read_bytes(), b'new fences')
+        self.assertEqual(self.stops, [True])
+
+    def test_ownership_probe_is_read_only_and_requires_exact_retirement(self):
+        self.marker.write_text(self.controller)
+        self.journal.write_bytes(b'active fences')
+        before = {path: path.read_bytes() for path in (self.config, self.marker, self.journal)}
+        result = self.archive('n2', retired_node_keys=['n1'], check_only=True)
+        self.assertEqual(result, {'reassignable': True, 'previous_node': 'n1', 'controller': self.controller})
+        self.assertEqual(self.stops, [])
+        self.assertFalse((self.state / 'journal-archive.lock').exists())
+        for path, contents in before.items():
+            self.assertEqual(path.read_bytes(), contents)
+        with self.assertRaises(module.JournalOwnerConflict):
+            self.archive('n2', retired_node_keys=['other'], check_only=True)
+
+    def test_probe_does_not_adopt_missing_or_foreign_installation(self):
+        self.marker.write_text(self.old)
+        self.assertFalse(self.archive('n2', retired_node_keys=['n1'], check_only=True)['reassignable'])
+        self.marker.unlink()
+        self.state.rmdir()
+        self.assertFalse(self.archive('n2', retired_node_keys=['n1'], check_only=True)['reassignable'])
+        self.assertFalse(self.state.exists())
+
+    def test_invalid_retirement_proof_never_stops_or_archives(self):
+        self.marker.write_text(self.controller)
+        self.journal.write_bytes(b'active fences')
+        with self.assertRaisesRegex(ValueError, 'invalid retired'):
+            self.archive('n2', retired_node_keys=['n1;echo invalid'])
+        self.assertEqual(self.stops, [])
+        self.assertEqual(self.journal.read_bytes(), b'active fences')

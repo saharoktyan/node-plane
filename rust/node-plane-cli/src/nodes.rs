@@ -46,6 +46,8 @@ pub enum AgentState {
     Ready,
     Missing,
     Unavailable,
+    IdentityMismatch,
+    InspectionFailed,
 }
 impl AgentState {
     pub fn label(self) -> &'static str {
@@ -54,6 +56,8 @@ impl AgentState {
             Self::Ready => "Ready",
             Self::Missing => "Not installed",
             Self::Unavailable => "Unreachable",
+            Self::IdentityMismatch => "Node key mismatch",
+            Self::InspectionFailed => "Inspection failed",
         }
     }
 }
@@ -1114,6 +1118,7 @@ async fn execute_inner(
                         if !events::confirm(tx, "Recover this operation?", format!("{kind}: {id}\n\n{explanation}"))? { return Ok("Recovery cancelled".into()); }
                         let (method, path, body, key) = command.request()?;
                         let note = match backend::request(session, &credential, method, &path, body, key).await {
+                            Ok(result) if result.pointer("/observation/agent_setup_retryable").and_then(Value::as_bool) == Some(true) => format!("Previous node is retired. Resume setup for operation {id}."),
                             Ok(result) => format!("Operation {id}: {}", result["status"].as_str().unwrap_or("result unconfirmed")),
                             Err(error) => format!("Recovery was not confirmed: {error}. Refresh this operation before trying again."),
                         };
@@ -1466,6 +1471,8 @@ async fn execute_inner(
                         Ok(facts) => { item.services = Some(facts); item.agent = AgentState::Ready; }
                         Err(error) if error.code == "node_agent_unconfigured" => item.agent = AgentState::Missing,
                         Err(error) if error.code == "node_agent_unavailable" => item.agent = AgentState::Unavailable,
+                        Err(error) if error.code == "node_agent_identity_mismatch" => item.agent = AgentState::IdentityMismatch,
+                        Err(error) if error.code == "node_agent_inspection_failed" => item.agent = AgentState::InspectionFailed,
                         Err(error) => return Err(error.into()),
                     }
                     let mut saved = SavedOperation::latest(&request, &credential.account_id, &key)?;
