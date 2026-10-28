@@ -5,6 +5,7 @@ the interruption boundary; it does not claim to exercise a live VPN tunnel.
 Requires a current debug agent binary and the cached release-builder image.
 """
 import os
+import math
 from pathlib import Path
 import re
 import shutil
@@ -240,12 +241,28 @@ tls_client_ca_path = "/test/ca.crt"
         return docker('exec',self.name,'sh','-c',
                       'if [ -f /test/counter ]; then wc -l < /test/counter; else echo 0; fi').stdout.strip()
 
-    def test_cpu_rpc_warms_up_then_reports_a_fresh_minute_average_without_runtime_mutation(self):
+    def test_host_metrics_reports_ram_and_load_before_cpu_warmup_without_runtime_mutation(self):
         import json
+        def assert_resources(metrics):
+            self.assertIs(type(metrics['cpus']), int)
+            self.assertGreater(metrics['cpus'], 0)
+            for key in ('load1', 'load5', 'load15', 'ram_used_percent'):
+                self.assertTrue(math.isfinite(metrics[key]), key)
+                self.assertGreaterEqual(metrics[key], 0, key)
+            self.assertLessEqual(metrics['ram_used_percent'], 100)
+            total, available = metrics['ram_total_bytes'], metrics['ram_available_bytes']
+            self.assertGreater(total, 0)
+            self.assertGreaterEqual(available, 0)
+            self.assertLessEqual(available, total)
+            self.assertAlmostEqual(metrics['ram_used_percent'], 100 * (total - available) / total, delta=0.1)
+
         request = self.pb.BackendNodeActionRequest(node_key='fault-node',action='host_metrics',intent_json='{}')
         first = json.loads(self.stub.BackendNodeAction(request,timeout=2).payload_json)
         self.assertEqual(first['node_key'],'fault-node')
-        self.assertEqual(first['host_metrics'],{})
+        assert_resources(first['host_metrics'])
+        for key in ('cpu_used_percent', 'cpu_sample_window_seconds', 'cpu_sample_age_seconds'):
+            self.assertNotIn(key, first['host_metrics'], 'CPU needs a complete sampling window')
+        self.assertEqual(self.count(), '0')
         deadline = time.monotonic()+70
         while True:
             result = json.loads(self.stub.BackendNodeAction(request,timeout=2).payload_json)
@@ -255,6 +272,7 @@ tls_client_ca_path = "/test/ca.crt"
             if time.monotonic() >= deadline:
                 self.fail('Agent did not publish a complete CPU sample window')
             time.sleep(.5)
+        assert_resources(metrics)
         self.assertGreaterEqual(metrics['cpu_sample_window_seconds'],60)
         self.assertLessEqual(metrics['cpu_sample_window_seconds'],75)
         self.assertGreaterEqual(metrics['cpu_used_percent'],0)

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 1.0.0-beta.6 - 2026-10-28
+
+- Correct Docker integration validation for RAM and load-average metrics available before CPU sampling warms up. Verify resource values immediately, retain the complete CPU-window freshness checks and confirm read-only requests do not mutate runtime state.
+
 ## 1.0.0-beta.5 - 2026-10-28
 
 - Separate base-node and SSH edits from VPN settings application. Keep installed-agent evidence independent of VPN revisions, hide spurious Apply actions on agent-only nodes and skip absent VPN runtimes during updates.
