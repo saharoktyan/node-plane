@@ -944,12 +944,9 @@ impl AgentState {
 
     fn prepare_decommission(&self, command_id: &str) -> Result<(), Status> {
         let helper = self.resolve_runtime_path("/opt/node-plane-runtime/apply-profile-intent.py");
-        if !Path::new(&helper).exists() {
-            if Path::new("/etc/node-plane/profile-intents.sqlite3").exists() {
-                return Err(Status::failed_precondition(
-                    "profile journal exists without its helper; decommission refused",
-                ));
-            }
+        if !Path::new(&helper).exists()
+            && !Path::new("/etc/node-plane/profile-intents.sqlite3").exists()
+        {
             let valid_id = command_id.len() == 36
                 && command_id.bytes().enumerate().all(|(index, byte)| {
                     if matches!(index, 8 | 13 | 18 | 23) {
@@ -1002,8 +999,15 @@ impl AgentState {
             "import sys\n__file__ = sys.argv[1]\nsys.argv = sys.argv[1:]\n{}",
             include_str!("../../../runtime_assets/apply-profile-intent.py")
         );
+        // An agent-only recovery may have created a control-only journal.
+        // Without runtime helpers, inspect fences only; never attempt revocation.
+        let action = if Path::new(&helper).exists() {
+            "prepare-decommission"
+        } else {
+            "prepare-decommission-readonly"
+        };
         let output = Command::new("python3")
-            .args(["-c", &code, &helper, "prepare-decommission", command_id])
+            .args(["-c", &code, &helper, action, command_id])
             .env("NODE_PLANE_AGENT_INSTANCE_ID", &self.instance_id)
             .output()
             .map_err(|_| Status::failed_precondition("decommission helper unavailable"))?;
@@ -2179,18 +2183,34 @@ impl NodeAgentService for NodeAgentApi {
             ));
         }
         let intent = backend_settings_intent(&req)?;
-        let output = self
+        // Recovery must use the current agent's journal implementation even
+        // when an agent-only node has no deployed VPN runtime/helper at all.
+        let helper = self
             .state
-            .run_runtime_command(
-                "apply-profile-intent.py",
-                &["resolve-node-settings".to_string(), intent.to_string()],
-            )
+            .resolve_runtime_path("/opt/node-plane-runtime/apply-profile-intent.py");
+        let code = format!(
+            "import sys\n__file__ = sys.argv[1]\nsys.argv = sys.argv[1:]\n{}",
+            include_str!("../../../runtime_assets/apply-profile-intent.py")
+        );
+        let output = Command::new("python3")
+            .args([
+                "-c",
+                &code,
+                &helper,
+                "resolve-node-settings",
+                &intent.to_string(),
+            ])
+            .env("NODE_PLANE_AGENT_INSTANCE_ID", &self.state.instance_id)
+            .output()
             .map_err(|_| {
-                Status::failed_precondition(
-                    "node settings repair requires a restarted agent and live inspection",
-                )
+                Status::failed_precondition("node settings recovery helper unavailable")
             })?;
-        let value: Value = serde_json::from_str(&output)
+        if !output.status.success() {
+            return Err(Status::failed_precondition(
+                "node settings journal retirement was not confirmed",
+            ));
+        }
+        let value: Value = serde_json::from_slice(&output.stdout)
             .map_err(|_| Status::internal("invalid node settings repair response"))?;
         let observation = value
             .get("observation")

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 1.0.0-beta.7 - 2026-10-28
+
+- Recover obsolete empty settings operations on agent-only nodes even when no VPN runtime helper or journal was ever deployed. Use the agent's embedded recovery helper and durably fence the exact retired command before clearing its blocked backend task; do not inspect or modify unrelated VPN runtime.
+- Keep missing journals unconfirmed for VPN installation/removal commands, preserve command fingerprints and restart requirements for interrupted executions, and allow verification of control-only journals during decommission without invoking absent runtime helpers.
+
 ## 1.0.0-beta.6 - 2026-10-28
 
 - Correct Docker integration validation for RAM and load-average metrics available before CPU sampling warms up. Verify resource values immediately, retain the complete CPU-window freshness checks and confirm read-only requests do not mutate runtime state.

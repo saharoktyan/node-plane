@@ -230,6 +230,58 @@ class AgentNodeSettingsIntentTests(unittest.TestCase):
             MODULE.apply(profile, self.journal, lambda intent, fd: {'summary': '', 'payload_json': ''})
         self.assertEqual(self.calls, [])
 
+    def test_absent_empty_command_is_fenced_without_helper_or_runtime_inspection(self):
+        from unittest.mock import Mock
+        import sqlite3
+        intent = dict(self.intent(), protocols=[], settings={'ipv6_outbound': 'on', 'awg_parameters': {}})
+        inspector = Mock(side_effect=AssertionError('empty recovery must not inspect foreign runtime'))
+        runner = Mock(side_effect=AssertionError('retired command must never execute'))
+        with patch.object(MODULE, 'awg_profile_module', side_effect=AssertionError('runtime helper is absent')):
+            result = MODULE.resolve_node_settings(intent, self.journal, inspector)
+            self.assertEqual(result['observation'], {'config_matches': False, 'containers_running': False})
+            self.assertEqual(MODULE.resolve_node_settings(intent, self.journal, inspector), result)
+            with self.assertRaises(ValueError):
+                MODULE.apply_node_settings(intent, self.journal, runner)
+            with self.assertRaisesRegex(ValueError, 'identity mismatch'):
+                MODULE.resolve_node_settings(dict(intent, settings={'ipv6_outbound': 'off'}), self.journal, inspector)
+        inspector.assert_not_called()
+        runner.assert_not_called()
+        with sqlite3.connect(self.journal) as conn:
+            self.assertEqual(conn.execute('SELECT status FROM commands').fetchone(), ('superseded',))
+            self.assertEqual(conn.execute('SELECT revision FROM node_settings_fence').fetchone(), (1,))
+        MODULE.apply_node_settings(self.intent(revision=2, command_id='fresh'), self.journal, self.runner)
+        self.assertEqual(len(self.calls), 1)
+
+    def test_absent_nonempty_or_removal_command_cannot_be_retired(self):
+        from unittest.mock import Mock
+        for intent in (self.intent(), dict(self.intent(), protocols=[], settings={}, protocol_plan={'remove_protocols': ['awg']})):
+            with self.assertRaisesRegex(ValueError, 'journal is missing'):
+                MODULE.resolve_node_settings(intent, self.journal, Mock())
+            self.assertFalse(self.journal.exists())
+
+    def test_empty_tombstone_preserves_newer_fence_and_other_command(self):
+        import sqlite3
+        from unittest.mock import Mock
+        MODULE.apply_node_settings(self.intent(revision=5, command_id='newer'), self.journal, self.runner)
+        intent = dict(self.intent(), protocols=[], settings={})
+        MODULE.resolve_node_settings(intent, self.journal, Mock(side_effect=AssertionError('no inspection')))
+        with sqlite3.connect(self.journal) as conn:
+            self.assertEqual(conn.execute('SELECT revision,command_id FROM node_settings_fence').fetchone(), (5, 'newer'))
+            self.assertEqual(conn.execute("SELECT status FROM commands WHERE id='newer'").fetchone(), ('succeeded',))
+        self.assertEqual(len(self.calls), 1)
+
+    def test_running_empty_command_still_requires_agent_restart(self):
+        from unittest.mock import Mock
+        intent = dict(self.intent(), protocols=[], settings={})
+        with patch.dict(os.environ, {'NODE_PLANE_AGENT_INSTANCE_ID': 'same-agent'}):
+            with self.assertRaises(RuntimeError):
+                MODULE.apply_node_settings(intent, self.journal, Mock(side_effect=RuntimeError('interrupted')))
+            with self.assertRaisesRegex(ValueError, 'restart'):
+                MODULE.resolve_node_settings(intent, self.journal, Mock())
+        with patch.dict(os.environ, {'NODE_PLANE_AGENT_INSTANCE_ID': 'new-agent'}):
+            result = MODULE.resolve_node_settings(intent, self.journal, Mock(side_effect=AssertionError('no inspection')))
+        self.assertEqual(result['observation'], {'config_matches': False, 'containers_running': False})
+
     def test_interrupted_settings_require_restart_then_fresh_revision(self):
         intent = self.intent()
         before = os.environ.get('NODE_PLANE_AGENT_INSTANCE_ID')

@@ -622,10 +622,12 @@ def validate_node_settings(intent):
         raise ValueError('node settings are incomplete')
     for field, value in settings.items():
         if field == 'awg_parameters':
-            profile = awg_profile_module()
-            if not isinstance(value, dict) or set(value) - set(profile.ALL_FIELDS):
+            if not isinstance(value, dict):
                 raise ValueError('unknown AWG parameters')
             if value:
+                profile = awg_profile_module()
+                if set(value) - set(profile.ALL_FIELDS):
+                    raise ValueError('unknown AWG parameters')
                 if any(not isinstance(v, str) or not v or len(v) > 4096
                        or any(ord(c) < 32 or ord(c) > 126 for c in v) for v in value.values()):
                     raise ValueError('invalid AWG parameter value')
@@ -663,6 +665,12 @@ def node_settings_digest(intent):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
 
+def node_settings_schema(connection):
+    connection.execute('CREATE TABLE IF NOT EXISTS commands (id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, status TEXT NOT NULL, response TEXT, instance_id TEXT NOT NULL)')
+    connection.execute('CREATE TABLE IF NOT EXISTS fences (protocol TEXT, profile TEXT, revision INTEGER NOT NULL, command_id TEXT NOT NULL, action TEXT, PRIMARY KEY(protocol, profile))')
+    connection.execute('CREATE TABLE IF NOT EXISTS node_settings_fence (node_key TEXT PRIMARY KEY, revision INTEGER NOT NULL, command_id TEXT NOT NULL)')
+
+
 def apply_node_settings(intent, path, runner):
     """Journal one node-wide settings mutation under the profile command lock."""
     validate_node_settings(intent)
@@ -678,9 +686,7 @@ def apply_node_settings(intent, path, runner):
         try:
             os.chmod(path, 0o600)
             connection.execute('PRAGMA synchronous=FULL')
-            connection.execute('CREATE TABLE IF NOT EXISTS commands (id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, status TEXT NOT NULL, response TEXT, instance_id TEXT NOT NULL)')
-            connection.execute('CREATE TABLE IF NOT EXISTS fences (protocol TEXT, profile TEXT, revision INTEGER NOT NULL, command_id TEXT NOT NULL, action TEXT, PRIMARY KEY(protocol, profile))')
-            connection.execute('CREATE TABLE IF NOT EXISTS node_settings_fence (node_key TEXT PRIMARY KEY, revision INTEGER NOT NULL, command_id TEXT NOT NULL)')
+            node_settings_schema(connection)
             prior = connection.execute('SELECT fingerprint, status, response FROM commands WHERE id = ?', (intent['command_id'],)).fetchone()
             if prior:
                 if prior[0] != fingerprint:
@@ -745,41 +751,63 @@ def lookup_node_settings(intent, path):
 
 
 def resolve_node_settings(intent, path, inspector):
-    """Retire an interrupted settings command after the old agent has stopped.
+    """Fence the exact interrupted command; never launch a replacement here.
 
-    This never reports application as successful. A new revision must verify
-    the complete runtime state before the backend enables the node again.
+    Empty legacy commands have no authorized runtime target. Persist an exact
+    tombstone even without a journal so a delayed apply cannot execute after
+    the backend clears its blocked task. Missing VPN outcomes stay unconfirmed.
     """
     validate_node_settings(intent)
+    empty = not intent['protocols'] and not intent.get('protocol_plan', {}).get('remove_protocols')
     path = Path(path)
+    if not empty and not path.is_file():
+        raise ValueError('command journal is missing; outcome is unconfirmed')
     fingerprint = hashlib.sha256(json.dumps(intent, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+    path.parent.mkdir(parents=True, exist_ok=True)
     with open(str(path) + '.lock', 'a') as lock:
+        os.chmod(lock.name, 0o600)
         fcntl.flock(lock, fcntl.LOCK_EX)
         if Path(str(path) + '.disabled').exists():
             raise ValueError('agent removal is in progress')
         connection = sqlite3.connect(path)
         try:
+            if empty:
+                os.chmod(path, 0o600)
+                connection.execute('PRAGMA synchronous=FULL')
+                node_settings_schema(connection)
             row = connection.execute('SELECT fingerprint, status, response, instance_id FROM commands WHERE id = ?',
                                      (intent['command_id'],)).fetchone()
-            if not row or row[0] != fingerprint:
+            if row is not None and row[0] != fingerprint:
                 raise ValueError('command identity mismatch')
-            if row[1] == 'superseded':
+            if row is not None and row[1] == 'superseded':
                 return json.loads(row[2])
-            if row[1] != 'running':
-                raise ValueError('command is not interrupted')
-            current_instance = os.environ.get('NODE_PLANE_AGENT_INSTANCE_ID', 'standalone')
-            if not current_instance or row[3] == current_instance:
-                raise ValueError('agent service restart is required before repair')
-            observation = inspector(intent)
+            if row is None and not empty:
+                raise ValueError('command identity mismatch')
+            if row is not None:
+                if row[1] != 'running':
+                    raise ValueError('command is not interrupted')
+                current_instance = os.environ.get('NODE_PLANE_AGENT_INSTANCE_ID', 'standalone')
+                if not current_instance or row[3] == current_instance:
+                    raise ValueError('agent service restart is required before repair')
+            observation = {'config_matches': False, 'containers_running': False} if empty else inspector(intent)
             if set(observation) != {'config_matches', 'containers_running'} or any(
                     type(value) is not bool for value in observation.values()):
                 raise ValueError('live inspection unavailable')
             record = {'observation': observation, 'resolved_at': datetime.now(timezone.utc).isoformat()}
             with connection:
-                changed = connection.execute("UPDATE commands SET status = 'superseded', response = ? WHERE id = ? AND status = 'running'",
-                                             (json.dumps(record, sort_keys=True), intent['command_id']))
-                if changed.rowcount != 1:
-                    raise ValueError('command changed during repair')
+                if row is None:
+                    connection.execute("INSERT INTO commands(id,fingerprint,status,response,instance_id) VALUES (?,?,'superseded',?,?)",
+                        (intent['command_id'], fingerprint, json.dumps(record, sort_keys=True),
+                         os.environ.get('NODE_PLANE_AGENT_INSTANCE_ID', 'standalone')))
+                    connection.execute('''INSERT INTO node_settings_fence(node_key,revision,command_id) VALUES (?,?,?)
+                        ON CONFLICT(node_key) DO UPDATE SET revision=excluded.revision,command_id=excluded.command_id
+                        WHERE excluded.revision > node_settings_fence.revision''',
+                        (intent['node_key'], intent['revision'], intent['command_id']))
+                else:
+                    changed = connection.execute("UPDATE commands SET status = 'superseded', response = ? WHERE id = ? AND status = 'running'",
+                                                 (json.dumps(record, sort_keys=True), intent['command_id']))
+                    if changed.rowcount != 1:
+                        raise ValueError('command changed during repair')
             return record
         finally:
             connection.close()
@@ -1366,8 +1394,9 @@ if __name__ == '__main__':
             result = resolve_interrupted(json.loads(sys.argv[2]), '/etc/node-plane/profile-intents.sqlite3', inspect_for_repair)
             print(json.dumps(result))
             sys.exit(0)
-        if len(sys.argv) == 3 and sys.argv[1] == 'prepare-decommission':
-            result = prepare_decommission('/etc/node-plane/profile-intents.sqlite3', sys.argv[2], run)
+        if len(sys.argv) == 3 and sys.argv[1] in {'prepare-decommission', 'prepare-decommission-readonly'}:
+            result = prepare_decommission('/etc/node-plane/profile-intents.sqlite3', sys.argv[2],
+                                         run if sys.argv[1] == 'prepare-decommission' else None)
             print(json.dumps(result))
             sys.exit(0)
         if len(sys.argv) == 3 and sys.argv[1] == 'verify-decommission':

@@ -280,6 +280,33 @@ tls_client_ca_path = "/test/ca.crt"
         self.assertLessEqual(metrics['cpu_sample_age_seconds'],15)
         self.assertEqual(self.count(),'0')
 
+    def test_agent_only_recovers_missing_helper_and_journal_and_fences_late_apply(self):
+        import json
+        docker('exec', self.name, 'sh', '-c',
+            'rm /test/apply-profile-intent.py; printf foreign > /test/config.json; printf SERVER_KEY=other > /etc/node-plane/node.env')
+        request = self.pb.ApplyBackendNodeSettingsRequest(node_key='fault-node', command_id=str(uuid4()),
+            desired_revision=1, protocols_json='[]', settings_json=json.dumps({'ipv6_outbound': 'on', 'awg_parameters': {}}))
+        with self.assertRaises(grpc.RpcError):
+            self.stub.ApplyBackendNodeSettings(request, timeout=5)
+        self.assertNotEqual(docker('exec', self.name, 'test', '-e', '/etc/node-plane/profile-intents.sqlite3', check=False).returncode, 0)
+        first = self.stub.ResolveBackendNodeSettings(request, timeout=5)
+        self.assertEqual(json.loads(first.payload_json), {'config_matches': False, 'containers_running': False})
+        self.assertEqual(self.stub.ResolveBackendNodeSettings(request, timeout=5).payload_json, first.payload_json)
+        self.assertEqual(self.journal_status(), 'superseded')
+        # A later deployment of runtime files must still honor the tombstone.
+        docker('cp', str(self.root/'apply-profile-intent.py'), self.name+':/test/apply-profile-intent.py')
+        with self.assertRaises(grpc.RpcError):
+            self.stub.ApplyBackendNodeSettings(request, timeout=5)
+        self.assertEqual(self.count(), '0')
+        self.assertEqual(docker('exec', self.name, 'cat', '/test/config.json').stdout, 'foreign')
+        self.assertEqual(docker('exec', self.name, 'cat', '/etc/node-plane/node.env').stdout, 'SERVER_KEY=other')
+        # Control-only journals remain verifiable without invoking runtime cleanup.
+        docker('exec', self.name, 'rm', '/test/apply-profile-intent.py')
+        self.stub.PrepareDecommission(self.pb.DecommissionRequest(command_id=str(uuid4())), timeout=5)
+        self.assertEqual(docker('exec', self.name, 'test', '-e', '/etc/node-plane/profile-intents.sqlite3.disabled').returncode, 0)
+        self.assertEqual(self.count(), '0')
+        self.assertEqual(docker('exec', self.name, 'cat', '/test/config.json').stdout, 'foreign')
+
     def test_agent_sigkill_before_mutation_orphan_completes_once_and_recovers(self):
         self.mode('before_mutation')
         call = self.stub.ApplyProfileIntent.future(self.request, timeout=15)
