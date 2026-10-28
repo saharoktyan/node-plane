@@ -458,6 +458,7 @@ class AdminNodeOutput(BaseModel):
     enabled: bool
     policy_eligible: bool = False
     setup_attempted: bool = True
+    agent_installed: bool = False
     protocols: list[str]
     xray_transports: list[str]
     desired_revision: int

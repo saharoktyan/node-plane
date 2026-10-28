@@ -163,7 +163,7 @@ impl App {
                 if mode == crate::node_maintenance::Mode::RegistryOnly
                     && self.nodes.maintenance.is_none()
                     && let Some(node) = &self.nodes.card
-                    && node.applied_revision == 0
+                    && !node.installed_agent()
                 {
                     self.nodes_requested = Some(crate::nodes::Command::Maintenance(
                         node.key.clone(),
@@ -310,7 +310,7 @@ impl App {
                             .nodes
                             .card
                             .as_ref()
-                            .is_some_and(|node| node.applied_revision == 0)
+                            .is_some_and(|node| !node.installed_agent())
                         {
                             self.nodes.maintenance = None;
                         }

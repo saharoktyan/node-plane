@@ -24,6 +24,7 @@ STAGES = {
     'docker_install': 'Installing Docker',
     'docker_verify': 'Verifying Docker',
     'protocol_settings': 'Preparing protocol settings',
+    'protocol_cleanup': 'Removing unselected VPN protocols',
     'awg_port': 'Selecting AWG port',
     'xray_init': 'Preparing Xray',
     'awg_init': 'Preparing AmneziaWG',

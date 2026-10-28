@@ -62,7 +62,7 @@ def persist_selected_port(conn, node_key, revision, intent, result):
 def _snapshot(node):
     protocols = json.loads(node['protocols_json'])
     settings = protocol_defaults(json.loads(node['settings_json']), protocols)
-    if not protocols or 'public_host' not in settings or ('xray' in protocols and not {
+    if (protocols and 'public_host' not in settings) or ('xray' in protocols and not {
         'xray_sni', 'xray_tcp_port', 'xray_xhttp_port', 'xray_xhttp_path'} <= set(settings)) or (
         'awg' in protocols and 'awg_port' not in settings):
         raise AccessDenied('node_settings_incomplete', 422)
@@ -151,6 +151,9 @@ class NodeSettingsService:
             if node['applied_revision'] >= revision:
                 raise AccessDenied('settings_already_applied', 409)
             intent = _snapshot(node)
+            if not intent['protocols']:
+                from .nodes import NodeService, require_runtime
+                require_runtime(conn.execute(NodeService._select() + ' WHERE n.key=?', (node_key,)).fetchone())
             if conn.execute('''SELECT 1 FROM backend_node_settings_tasks WHERE node_key = ?
                 AND status IN ('awaiting_executor', 'running', 'blocked')''', (node_key,)).fetchone():
                 raise AccessDenied('node_settings_operation_pending', 409)
@@ -272,7 +275,9 @@ class NodeSettingsExecutor:
         row = None
         for candidate in rows:
             with self.db.connect() as conn:
-                node = conn.execute('SELECT desired_revision,applied_revision FROM backend_nodes WHERE key = ?', (candidate['node_key'],)).fetchone()
+                from .nodes import NodeService
+                node = conn.execute(NodeService._select() + ' WHERE n.key = ?', (candidate['node_key'],)).fetchone()
+                initialized = conn.execute("SELECT 1 FROM backend_node_settings_tasks WHERE node_key=? AND status='succeeded' LIMIT 1", (candidate['node_key'],)).fetchone() is not None
             if node is None or node['desired_revision'] != candidate['revision']:
                 with self.db.transaction() as conn:
                     conn.execute("UPDATE backend_node_settings_tasks SET status = 'superseded' WHERE id = ? AND status = 'awaiting_executor'", (candidate['id'],))
@@ -280,20 +285,21 @@ class NodeSettingsExecutor:
             try:
                 observation = self.driver.inspect_node(candidate['node_key'])
                 protocols = json.loads(candidate['intent_json'])['protocols']
-                if (observation['health_state'] != 'running' or
+                if protocols and (observation['health_state'] != 'running' or
                     ('xray' in protocols and not observation['xray_config_present']) or
                     ('awg' in protocols and not observation['awg_config_present'])):
-                    if not node['applied_revision']:
+                    if not node['agent_installed']:
                         self._retire_uninstalled(candidate)
                         return True
                     # Existing protocol state means this is a managed node.
                     # Adding its second protocol must initialize the missing
                     # config inside the durable settings command; PrepareNode
                     # deliberately rejects a node with an existing journal.
-                    if not (observation.get('xray_config_present') or observation.get('awg_config_present')):
+                    if not initialized and not (
+                            observation.get('xray_config_present') or observation.get('awg_config_present')):
                         self.driver.prepare_node(candidate['node_key'])
             except Exception:
-                if not node['applied_revision']:
+                if not node['agent_installed']:
                     self._retire_uninstalled(candidate)
                     return True
                 # An absent agent or incomplete preparation leaves the task

@@ -594,7 +594,7 @@ def validate_node_settings(intent):
     if type(intent['revision']) is not int or intent['revision'] <= 0:
         raise ValueError('invalid revision')
     protocols = intent['protocols']
-    if (not isinstance(protocols, list) or not protocols or len(protocols) > 2
+    if (not isinstance(protocols, list) or len(protocols) > 2
             or len(set(protocols)) != len(protocols) or set(protocols) - {'awg', 'xray'}):
         raise ValueError('invalid protocols')
     settings = intent['settings']
@@ -603,7 +603,7 @@ def validate_node_settings(intent):
               'xray_fingerprint', 'awg_interface', 'awg_i1_preset', 'awg_port_mode', 'awg_parameters', 'ipv6_outbound'}
     if not isinstance(settings, dict) or set(settings) - fields:
         raise ValueError('invalid settings')
-    required = {'public_host'}
+    required = {'public_host'} if protocols else set()
     if 'xray' in protocols:
         required |= {'xray_sni', 'xray_tcp_port', 'xray_xhttp_port', 'xray_xhttp_path'}
     if 'awg' in protocols:
@@ -777,6 +777,9 @@ def resolve_node_settings(intent, path, inspector):
 
 def verify_node_settings_config(intent, xray_path, awg_path):
     settings = intent['settings']
+    for protocol, path in (('xray', xray_path), ('awg', awg_path)):
+        if protocol not in intent['protocols'] and path and Path(path).exists():
+            raise ValueError('removed protocol config is still present')
     if 'xray' in intent['protocols']:
         data = json.loads(Path(xray_path).read_text())
         inbounds = {item.get('tag'): item for item in data.get('inbounds', [])}
@@ -853,14 +856,21 @@ def inspect_node_settings_for_repair(intent, *, env_path=Path('/etc/node-plane/n
                            text=True, timeout=30).stdout.splitlines()
     if len(paths) != 4:
         raise ValueError('invalid node environment')
+    removed_absent = True
     try:
         verify_node_settings_environment(intent, env_path)
         verify_node_settings_config(intent, paths[0], paths[1])
+        removed = sorted({'xray', 'awg'} - set(intent['protocols']))
+        if removed and shutil.which('docker'):
+            cleanup = settings_cleanup_module(Path(__file__).parent)
+            removed_absent = not cleanup.owned_protocol_containers(*paths, protocols=removed)
+            if not removed_absent:
+                raise ValueError('removed protocol containers are still present')
         matches = True
     except (OSError, ValueError, KeyError, TypeError):
         matches = False
     containers = ([paths[2]] if 'xray' in intent['protocols'] else []) + ([paths[3]] if 'awg' in intent['protocols'] else [])
-    running = all(subprocess.run(['docker', 'inspect', '-f', '{{.State.Running}}', name],
+    running = removed_absent and all(subprocess.run(['docker', 'inspect', '-f', '{{.State.Running}}', name],
                                  capture_output=True, text=True, timeout=30).stdout.strip() == 'true'
                   for name in containers)
     return {'config_matches': matches, 'containers_running': running}
@@ -912,6 +922,25 @@ def installation_step(stage):
                 pass
 
 
+def settings_cleanup_module(root):
+    spec = importlib.util.spec_from_file_location('settings_cleanup', root / 'backend-node-operation.py')
+    cleanup = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cleanup)
+    return cleanup
+
+
+def remove_unselected_protocols(intent, lock_fd, root):
+    removed = sorted({'xray', 'awg'} - set(intent['protocols']))
+    if not removed or not shutil.which('docker'):
+        return
+    cleanup = settings_cleanup_module(root)
+    installation_step('protocol_cleanup')
+    cleanup.remove_protocol_runtime(lock_fd, removed)
+    xray, awg, xc, ac = cleanup.environment()
+    if cleanup.owned_protocol_containers(xray, awg, xc, ac, removed):
+        raise ValueError('removed protocol containers are still present')
+
+
 def run_node_settings(intent, lock_fd, *, env_path=Path('/etc/node-plane/node.env'), root=Path(__file__).parent):
     """Apply to an already bootstrapped node; no implicit install or key reset."""
     installation_step('protocol_settings')
@@ -925,6 +954,8 @@ def run_node_settings(intent, lock_fd, *, env_path=Path('/etc/node-plane/node.en
     if len(paths) != 4:
         raise ValueError('invalid node environment')
     xray_path, awg_path = map(Path, paths[:2])
+    # Cleanup shares this durable settings command and lock; no implicit replay.
+    remove_unselected_protocols(intent, lock_fd, root)
     selected_port = None
     if 'awg' in intent['protocols'] and settings.get('awg_port_mode') == 'auto':
         spec = importlib.util.spec_from_file_location('awg_ports', root / 'awg_ports.py')
@@ -939,7 +970,7 @@ def run_node_settings(intent, lock_fd, *, env_path=Path('/etc/node-plane/node.en
     # settings, using the same shell quoting as the legacy env renderer.
     replacements = {
         'SERVER_KEY': intent['node_key'],
-        'AWG_SERVER_IP': settings.get('awg_public_host', settings['public_host']),
+        'AWG_SERVER_IP': settings.get('awg_public_host', settings.get('public_host', 'localhost')),
         'AWG_SERVER_PORT': str(settings.get('awg_port', 51820)),
         'AWG_IFACE': settings.get('awg_interface', 'wg0'),
         'AWG_I1_PRESET': settings.get('awg_i1_preset', 'quic'),

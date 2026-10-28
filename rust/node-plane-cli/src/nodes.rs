@@ -31,6 +31,8 @@ pub struct Node {
     pub xray_transports: Vec<String>,
     pub desired_revision: u64,
     pub applied_revision: u64,
+    #[serde(default)]
+    pub agent_installed: Option<bool>,
     pub transport: Option<String>,
     pub ssh_target: Option<String>,
     pub overview: Option<Value>,
@@ -62,6 +64,9 @@ impl AgentState {
     }
 }
 impl Node {
+    pub fn installed_agent(&self) -> bool {
+        self.agent_installed.unwrap_or(self.applied_revision > 0)
+    }
     pub fn state(&self) -> &str {
         self.overview
             .as_ref()
@@ -1398,7 +1403,7 @@ async fn execute_inner(
                     let mut item = node(saved)?;
                     ensure!(item.key == draft.node, "Backend returned another server");
                     item.overview = backend::request(session, &credential, Method::GET, &format!("/api/v1/nodes/{}/overview", item.key), None, None).await.ok();
-                    let apply = item.applied_revision > 0 && item.applied_revision < item.desired_revision && !item.protocols.is_empty();
+                    let apply = item.installed_agent() && item.applied_revision < item.desired_revision;
                     let _ = tx.send(Event::Nodes(Update::Edited(item.clone())));
                     if apply { apply_settings(session, &credential, &request, &item, draft.apply_key, tx).await?; }
                 }

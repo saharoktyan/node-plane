@@ -103,6 +103,24 @@ pub(in crate::tui) fn draw_node_editor(
                 lines.push(Line::from(format!("{key}: {}", crate::access::text(value))));
             }
         }
+        if let Some(protocols) = draft.body["protocols"].as_array() {
+            let removed = editor.source["protocols"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|protocol| !protocols.contains(protocol))
+                .filter_map(|protocol| protocol.as_str())
+                .collect::<Vec<_>>();
+            if !removed.is_empty() {
+                lines.push(Line::styled(
+                    format!(
+                        "Remove {} and their server configurations. The agent stays installed.",
+                        removed.join(", ")
+                    ),
+                    Style::default().fg(Color::Red),
+                ));
+            }
+        }
         let affected = preview["affected_profiles"].as_u64().unwrap_or(0);
         if affected > 0 {
             lines.push(Line::styled(
@@ -111,7 +129,10 @@ pub(in crate::tui) fn draw_node_editor(
             ));
         }
         lines.push(Line::from(
-            if editor.source["applied_revision"].as_u64().unwrap_or(0) > 0 {
+            if editor.source["agent_installed"]
+                .as_bool()
+                .unwrap_or(editor.source["applied_revision"].as_u64().unwrap_or(0) > 0)
+            {
                 "Save and apply these changes?"
             } else {
                 "Save these settings?"
@@ -163,7 +184,13 @@ pub(in crate::tui) fn draw_node_editor(
                 content[1],
             );
         }
-        let groups = node_editor_rows(editor, content[0].width);
+        let mut groups = node_editor_rows(editor, content[0].width);
+        // Multiline fields must still fit when draft actions shrink the viewport.
+        for (_, height) in &mut groups {
+            if *height > 3 {
+                *height = (*height).min(content[0].height);
+            }
+        }
         let capacity = usize::from(content[0].height / 3).max(1);
         app.nodes_capacity.set(capacity);
         app.nodes_editor_width.set(content[0].width);
@@ -607,7 +634,7 @@ pub(in crate::tui) fn draw_node_maintenance(
                 .nodes
                 .card
                 .as_ref()
-                .is_some_and(|node| node.applied_revision > 0)
+                .is_some_and(|node| node.installed_agent())
         {
             actions.push((
                 if view.blocked() {
@@ -807,10 +834,12 @@ pub(in crate::tui) fn node_card_actions(
     });
     if !busy {
         if node.protocols.is_empty() {
-            if matches!(
-                node.agent,
-                crate::nodes::AgentState::Missing | crate::nodes::AgentState::Unknown
-            ) {
+            if !node.installed_agent()
+                && matches!(
+                    node.agent,
+                    crate::nodes::AgentState::Missing | crate::nodes::AgentState::Unknown
+                )
+            {
                 actions.push(("Setup agent", Control::NodesSetup));
             }
         } else if node.needs_setup() {
@@ -824,15 +853,14 @@ pub(in crate::tui) fn node_card_actions(
     }
     if !busy {
         actions.push(("Settings", Control::NodesEdit));
-        if node.applied_revision > 0
-            && node.desired_revision > node.applied_revision
-            && !node.protocols.is_empty()
-        {
+        if node.installed_agent() && node.desired_revision > node.applied_revision {
             actions.push(("Apply changes", Control::NodesApply));
         }
     }
-    if node.applied_revision > 0 {
-        actions.push(("Temporary configs", Control::NodeTemporary));
+    if node.installed_agent() {
+        if node.applied_revision > 0 && !node.protocols.is_empty() {
+            actions.push(("Temporary configs", Control::NodeTemporary));
+        }
         actions.push(("Maintenance", Control::NodesMaintenance));
     } else {
         actions.push((

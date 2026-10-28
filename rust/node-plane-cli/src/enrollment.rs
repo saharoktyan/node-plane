@@ -222,6 +222,7 @@ def hosts_match(patterns, endpoints):
 
 def confirm_existing(contents, endpoints, key):
     already_pinned = False
+    algorithm = key.split()[0]
     for line in contents.splitlines():
         fields = line.split()
         if not fields or fields[0].startswith('#'):
@@ -230,7 +231,15 @@ def confirm_existing(contents, endpoints, key):
         offset = 1 if marked else 0
         if len(fields) < offset + 3 or not hosts_match(fields[offset], endpoints):
             continue
-        if marked or ' '.join(fields[offset + 1:offset + 3]) != key:
+        if marked:
+            fail('host_key_conflict')
+        # OpenSSH may store several host-key algorithms for the same server.
+        # A separately workstation-verified Ed25519 key does not conflict with
+        # an existing RSA/ECDSA key. Only compare pins of the same algorithm;
+        # the exact new pin must still pass the strict controller login probe.
+        if fields[offset + 1] != algorithm:
+            continue
+        if ' '.join(fields[offset + 1:offset + 3]) != key:
             fail('host_key_conflict')
         already_pinned = True
     return already_pinned

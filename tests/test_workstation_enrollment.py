@@ -29,6 +29,13 @@ def public_key(fill: int = 1) -> str:
     return 'ssh-ed25519 ' + base64.b64encode(wire).decode('ascii')
 
 
+def rsa_public_key() -> str:
+    def field(value):
+        return len(value).to_bytes(4, 'big') + value
+    wire = field(b'ssh-rsa') + field(b'\x01\x00\x01') + field(b'\x00\x80' + b'\x01' * 127)
+    return 'ssh-rsa ' + base64.b64encode(wire).decode('ascii')
+
+
 class ControllerEnrollmentTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory(prefix='node-plane-enrollment-test-')
@@ -101,6 +108,30 @@ class ControllerEnrollmentTests(unittest.TestCase):
             self.verify()
         self.assertEqual(self.calls, [])
         self.assertEqual(self.hosts.read_text(), original)
+
+    def test_other_host_key_algorithm_is_preserved_and_new_pin_requires_login(self):
+        original = 'node.example ' + rsa_public_key() + '\n'
+        self.hosts.write_text(original)
+        with self.assertRaisesRegex(HELPER['EnrollmentError'], 'login_failed'):
+            self.verify(runner=lambda arguments: (255, b''))
+        self.assertEqual(self.hosts.read_text(), original)
+        self.verify()
+        self.assertTrue(self.hosts.read_text().startswith(original))
+        self.assertIn(public_key(), self.hosts.read_text())
+        self.assertEqual(len(self.calls), 1)
+
+    def test_mixed_algorithms_keep_exact_pin_without_duplicate_or_masked_conflict(self):
+        original = ('node.example ' + public_key() + '\n'
+                    + 'node.example ' + rsa_public_key() + '\n')
+        self.hosts.write_text(original)
+        self.verify()
+        self.assertEqual(self.hosts.read_text(), original)
+        conflicting = original + 'node.example ' + public_key(2) + '\n'
+        self.hosts.write_text(conflicting)
+        with self.assertRaisesRegex(HELPER['EnrollmentError'], 'host_key_conflict'):
+            self.verify()
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(self.hosts.read_text(), conflicting)
 
     def test_hashed_and_wildcard_pins_detect_conflict_without_replacing_other_hosts(self):
         salt = b'fixture-hash-salt'

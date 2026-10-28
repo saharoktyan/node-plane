@@ -77,8 +77,10 @@ class NodeOperations:
             if node['desired_revision'] != revision:
                 raise AccessDenied('revision_conflict', 412)
             if not (bootstrap_id and action in {'bootstrap', 'install_docker'}):
-                from .nodes import require_runtime
-                require_runtime(node)
+                from .nodes import NodeService, require_runtime
+                require_runtime(conn.execute(NodeService._select() + ' WHERE n.key=?', (node_key,)).fetchone())
+                if action in {'reinstall_keep', 'reinstall_clean', 'regenerate_entropy', 'sync_xray'} and not json.loads(node['protocols_json']):
+                    raise AccessDenied('config_not_supported', 422)
             if conn.execute('SELECT 1 FROM backend_node_drains WHERE node_key = ?', (node_key,)).fetchone():
                 raise AccessDenied('node_already_draining', 409)
             for table in ('backend_node_jobs', 'backend_node_settings_tasks', 'backend_operation_tasks'):

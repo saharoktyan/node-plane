@@ -47,14 +47,17 @@ class NodeOverviewService:
             settings_complete = True
         except AccessDenied:
             settings_complete = False
-        if not json.loads(node['protocols_json']):
-            state = 'agent_only'
-        elif node['applied_revision'] == 0 and current_settings not in {'running', 'blocked'}:
+        if (json.loads(node['protocols_json']) and node['applied_revision'] == 0
+                and current_settings not in {'running', 'blocked'}):
             state = 'not_installed'
         elif current_settings in {'awaiting_executor', 'running'}:
             state = 'applying'
         elif current_settings == 'blocked':
             state = 'needs_attention'
+        elif not json.loads(node['protocols_json']):
+            state = 'changes_pending' if 0 < node['applied_revision'] < node['desired_revision'] else 'agent_only'
+        elif node['applied_revision'] == 0:
+            state = 'not_installed'
         elif node['applied_revision'] < node['desired_revision']:
             state = 'changes_pending'
         elif not node['enabled']:

@@ -2402,7 +2402,7 @@ CATALOG['en'].update({
     'nodes.draft.reset': 'Reset changes', 'nodes.draft.reinstall': 'Reinstall protocols',
     'nodes.draft.protocol_note': 'Select protocols and VLESS transports.',
     'nodes.draft.transport_required': 'Keep at least one VLESS transport selected.',
-    'nodes.draft.in_use': 'Revoke profile access before disabling this protocol.',
+    'nodes.draft.in_use': 'Revoke profile access and temporary configurations before removing this protocol.',
     'nodes.draft.conflict': 'Settings changed elsewhere. Reset the draft to load the latest values.',
     'nodes.rich.settings_note': 'Save and apply your changes.',
     'nodes.settings.apply_note': 'Edits stay in a draft until Save and apply.',
@@ -2450,7 +2450,7 @@ CATALOG['ru'].update({
     'nodes.draft.reset': 'Сбросить изменения', 'nodes.draft.reinstall': 'Переустановить протоколы',
     'nodes.draft.protocol_note': 'Выберите протоколы и транспорты VLESS.',
     'nodes.draft.transport_required': 'Оставьте выбранным хотя бы один транспорт VLESS.',
-    'nodes.draft.in_use': 'Отзовите доступ профилей перед отключением протокола.',
+    'nodes.draft.in_use': 'Отзовите доступ профилей и временные конфигурации перед удалением протокола.',
     'nodes.draft.conflict': 'Настройки изменились. Сбросьте черновик, чтобы загрузить актуальные значения.',
     'nodes.rich.settings_note': 'Сохраните и примените изменения.',
     'nodes.settings.apply_note': 'Изменения остаются в черновике до сохранения и применения.',
@@ -3355,3 +3355,14 @@ def field_hint(locale, field):
         'host' if field in {'public_host', 'xray_host', 'awg_public_host'} else field)
     key = 'field.hint.' + kind
     return tr(locale, key if key in CATALOG['en'] else 'nodes.settings.send_value')
+
+CATALOG['en'].update({
+    'nodes.protocols.remove_confirm': 'Remove {protocols} and their server configurations? The agent will remain installed. Revoke existing profile access before applying.',
+    'nodes.protocols.remove_title': 'Remove VPN protocols?',
+    'installation_progress.protocol_cleanup': 'Removing unselected VPN protocols',
+})
+CATALOG['ru'].update({
+    'nodes.protocols.remove_confirm': 'Удалить {protocols} и их серверные конфигурации? Агент останется установленным. Перед применением отзовите выданный доступ к этим протоколам.',
+    'nodes.protocols.remove_title': 'Удалить VPN-протоколы?',
+    'installation_progress.protocol_cleanup': 'Удаление отключённых VPN-протоколов',
+})

@@ -20,6 +20,22 @@ RESOURCES = {'paths': ['/opt/node-plane-runtime'], 'containers': ['xray', 'amnez
 class BackendNodeRemovalTests(unittest.TestCase):
     setUp = test_backend_node_jobs.BackendNodeJobTests.setUp
 
+    def test_installed_agent_only_uses_verified_full_removal_without_vpn_revision(self):
+        from uuid import uuid4
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_nodes SET applied_revision=0,protocols_json='[]',xray_transports_json='[]' WHERE key='n1'")
+            conn.execute("INSERT INTO backend_agent_rollouts (id,node_key,actor_account_id,command_key,intent_json,status) VALUES (?,'n1',?,?,'{}','succeeded')",
+                         (str(uuid4()), self.actor.account.id, str(uuid4())))
+        phases = []
+        driver = SimpleNamespace(decommission=lambda key, command, phase: phases.append(phase))
+        worker = NodeRemovalService(self.db, driver, self.verifier)
+        self.assertFalse(worker.retire_unprovisioned(self.actor, 'n1'))
+        worker.request(self.actor, 'n1')
+        for _ in range(5):
+            worker.run_one()
+        self.assertEqual(phases, ['prepare', 'delete_runtime', 'uninstall'])
+        self.assertEqual(worker.get(self.actor, 'n1')['status'], 'removed')
+
     def test_registry_only_outcome_can_be_read_without_a_worker_job(self):
         from backend.node_lifecycle import NodeLifecycle
         NodeLifecycle(self.db).retire_registry_only(self.actor, 'n1',

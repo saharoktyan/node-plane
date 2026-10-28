@@ -88,6 +88,66 @@ class AgentNodeSettingsIntentTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.journal = Path(self.temp.name) / 'commands.sqlite3'
         self.calls = []
+        # These runner tests fake protocol deployment and Docker. Exercise the
+        # cleanup boundary separately with ownership/path checks in operation tests.
+        def cleanup(intent, lock_fd, root):
+            env = root / 'node.env'
+            if env.exists():
+                for line in env.read_text().splitlines():
+                    key, _, value = line.partition('=')
+                    protocol = {'XRAY_CONFIG': 'xray', 'AWG_CONFIG': 'awg'}.get(key)
+                    if protocol and protocol not in intent['protocols']:
+                        Path(shlex.split(value)[0]).unlink(missing_ok=True)
+        mocked = patch.object(MODULE, 'remove_unselected_protocols', side_effect=cleanup)
+        self.cleanup = mocked.start()
+        self.addCleanup(mocked.stop)
+
+    def test_empty_protocol_intent_is_durable_and_retains_the_agent_journal(self):
+        intent = dict(self.intent(), protocols=[], settings={})
+        first = MODULE.apply_node_settings(intent, self.journal, self.runner)
+        self.assertEqual(first, MODULE.lookup_node_settings(intent, self.journal))
+        self.assertEqual(first, MODULE.apply_node_settings(intent, self.journal, self.runner))
+        self.assertEqual(len(self.calls), 1)
+        self.assertTrue(self.journal.exists())
+
+    def test_agent_only_repair_requires_absence_of_removed_containers(self):
+        from unittest.mock import Mock
+        intent = dict(self.intent(), protocols=[], settings={})
+        cleanup = Mock()
+        for leftovers in ([], ['a' * 64]):
+            cleanup.owned_protocol_containers.return_value = leftovers
+            with self.subTest(leftovers=bool(leftovers)), \
+                 patch.object(MODULE, 'settings_cleanup_module', return_value=cleanup), \
+                 patch.object(MODULE, 'verify_node_settings_config'), \
+                 patch.object(MODULE, 'verify_node_settings_environment'), \
+                 patch.object(MODULE.shutil, 'which', return_value='/usr/bin/docker'), \
+                 patch.object(MODULE.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, '/tmp/xray.json\n/tmp/wg0.conf\nxray\nawg\n')):
+                result = MODULE.inspect_node_settings_for_repair(intent)
+            self.assertEqual(result, {'config_matches': not leftovers, 'containers_running': not leftovers})
+
+    def test_agent_only_apply_cleans_both_protocols_and_opens_no_ports(self):
+        root = Path(self.temp.name)
+        env = root / 'node.env'
+        env.write_text(f'XRAY_CONFIG={root / "xray.json"}\nAWG_CONFIG={root / "wg0.conf"}\n')
+        (root / 'xray.json').write_text('{}')
+        (root / 'wg0.conf').write_text('[Interface]')
+        (root / 'apply-node-settings.sh').write_text('#!/bin/sh\nexit 0\n')
+        (root / 'apply-node-settings.sh').chmod(0o755)
+        intent = dict(self.intent(), protocols=[], settings={})
+        real_run = subprocess.run
+        firewall = []
+        def run(args, **kwargs):
+            if args[0] == 'ufw':
+                firewall.append(args)
+                return subprocess.CompletedProcess(args, 0, '')
+            return real_run(args, **kwargs)
+        with patch.object(MODULE.subprocess, 'run', side_effect=run), patch.object(MODULE.shutil, 'which', return_value='/fake/ufw'):
+            result = MODULE.run_node_settings(intent, 0, env_path=env, root=root)
+        self.cleanup.assert_called_once_with(intent, 0, root)
+        self.assertEqual(firewall, [['ufw', 'reload']])
+        self.assertEqual(json.loads(result['payload_json'])['settings_sha256'], MODULE.node_settings_digest(intent))
+        self.assertTrue(env.exists())
+        self.assertTrue((root / 'apply-node-settings.sh').exists())
 
     def intent(self, revision=1, command_id='node-task-1'):
         return {'kind': 'node_settings', 'node_key': 'n1', 'command_id': command_id,

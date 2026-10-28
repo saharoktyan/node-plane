@@ -1,5 +1,6 @@
 """Durable installation coordinator; each mutation belongs to an existing journal."""
 from uuid import UUID, uuid4, uuid5
+import json
 
 from .authorization import (AccessDenied, Account, Actor, Principal, PrincipalKind,
                             ADMIN_PERMISSIONS, require_permission)
@@ -71,6 +72,8 @@ class NodeBootstrapService:
                 raise AccessDenied('resource_not_found', 404)
             if node['desired_revision'] != revision:
                 raise AccessDenied('revision_conflict', 412)
+            if not json.loads(node['protocols_json']):
+                raise AccessDenied('node_settings_incomplete', 422)
             _snapshot(node)
             if conn.execute('SELECT 1 FROM backend_node_drains WHERE node_key=?', (node_key,)).fetchone():
                 raise AccessDenied('node_already_draining', 409)

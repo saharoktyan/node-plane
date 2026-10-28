@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from .authorization import AccessDenied, require_permission
 from .node_probe import probe
 from .host_resources import cpu_metrics, CPU_WARNING, CPU_CRITICAL
-from .nodes import NodeService
+from .nodes import NodeService, agent_installed
 from .node_overview import NodeOverviewService
 
 
@@ -99,19 +99,19 @@ class FleetDiagnostics:
             if state is None:
                 checks.append({'id': 'registry', 'status': 'error',
                                'detail': 'Saved server metadata unavailable or changed during diagnostics; refresh the registry'})
-            elif not node['applied_revision']:
+            elif not agent_installed(node):
                 checks.append({'id': 'installation', 'status': 'ok',
                                'detail': 'Server is not installed; configure it and run server setup'})
             else:
                 try:
-                    observation = probe(dict(node, protocols=[]) if not node['applied_revision'] else node, self.driver)
+                    observation = probe(node, self.driver)
                     checks = server_checks(observation, vpn_enabled=node['enabled'])
                     if not node['enabled']:
                         checks.append({'id': 'disabled', 'status': 'ok', 'detail':
-                            'VPN protocols are not installed; agent inspected separately' if not node['applied_revision']
+                            'VPN protocols are not installed; agent inspected separately' if not node['protocols']
                             else 'VPN access is disabled; agent inspected separately'})
                 except Exception:
-                    checks = [{'id': 'agent', 'status': 'warning' if not node['applied_revision'] else 'error',
+                    checks = [{'id': 'agent', 'status': 'error',
                                'detail': 'Live inspection unavailable; inspect agent setup and controller driver connectivity'}]
             if state and (state['state'] in {'needs_attention', 'deletion_blocked'} or state['failed']):
                 checks.append({'id': 'operations', 'status': 'warning', 'detail': 'Saved operations need attention; inspect server recovery'})

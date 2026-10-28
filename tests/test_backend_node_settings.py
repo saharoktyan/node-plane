@@ -14,6 +14,79 @@ class BackendNodeSettingsTests(unittest.TestCase):
     setUp = BackendHTTPTests.setUp
     provision = BackendHTTPTests.provision
 
+    def test_empty_settings_cannot_start_runtime_work_on_an_uninstalled_node(self):
+        self.client.post('/api/v1/nodes',
+            headers=self.admin_headers(**{'Idempotency-Key': str(uuid4())}),
+            json={'key': 'n1', 'title': 'Empty', 'region': 'EU', 'protocols': []})
+        response = self.queue()
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(response.json()['error']['code'], 'node_installation_required')
+        with self.db.connect() as conn:
+            self.assertIsNone(conn.execute("SELECT 1 FROM backend_node_settings_tasks WHERE node_key='n1'").fetchone())
+
+    def test_first_protocol_can_be_applied_to_an_installed_agent_only_node(self):
+        response = self.client.post('/api/v1/nodes',
+            headers=self.admin_headers(**{'Idempotency-Key': str(uuid4())}),
+            json={'key': 'n1', 'title': 'Agent only', 'region': 'EU', 'protocols': [],
+                  'settings': {'public_host': 'node.example'}})
+        self.assertEqual(response.status_code, 201, response.text)
+        with self.db.transaction() as conn:
+            conn.execute("INSERT INTO backend_agent_rollouts (id,node_key,actor_account_id,command_key,intent_json,status) VALUES (?,'n1',?,?,'{}','succeeded')",
+                         (str(uuid4()), self.admin.id, str(uuid4())))
+        response = self.client.patch('/api/v1/nodes/n1',
+            headers=self.admin_headers(**{'Idempotency-Key': str(uuid4()), 'If-Match': '"1"'}),
+            json={'protocols': ['awg']})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.queue(revision=2).status_code, 202)
+        from unittest.mock import Mock
+        driver = Mock()
+        driver.inspect_node.return_value = {'health_state': 'degraded', 'xray_config_present': False, 'awg_config_present': False}
+        def applied(command, intent):
+            self.assertEqual(intent['protocols'], ['awg'])
+            return json.dumps({'node_key': 'n1', 'revision': 2, 'settings_sha256': _digest(intent)})
+        driver.apply_node_settings.side_effect = applied
+        self.assertTrue(NodeSettingsExecutor(self.db, driver).run_one())
+        driver.prepare_node.assert_called_once_with('n1')
+        driver.apply_node_settings.assert_called_once()
+
+    def test_removing_all_protocols_applies_an_empty_intent_and_retains_installed_agent(self):
+        self.create()
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_nodes SET applied_revision=1 WHERE key='n1'")
+        response = self.client.patch('/api/v1/nodes/n1',
+            headers=self.admin_headers(**{'Idempotency-Key': str(uuid4()), 'If-Match': '"1"'}),
+            json={'protocols': [], 'xray_transports': []})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.json()['agent_installed'])
+        self.assertEqual(self.queue(revision=2).status_code, 202)
+        from unittest.mock import Mock
+        driver = Mock()
+        driver.inspect_node.return_value = {'health_state': 'missing', 'xray_config_present': False, 'awg_config_present': False}
+        def applied(command, intent):
+            self.assertEqual(intent['protocols'], [])
+            return json.dumps({'node_key': 'n1', 'revision': 2, 'settings_sha256': _digest(intent)})
+        driver.apply_node_settings.side_effect = applied
+        self.assertTrue(NodeSettingsExecutor(self.db, driver).run_one())
+        driver.prepare_node.assert_not_called()
+        node = self.client.get('/api/v1/nodes/n1', headers=self.admin_headers()).json()
+        self.assertEqual(node['applied_revision'], 2)
+        self.assertEqual(node['protocols'], [])
+        self.assertTrue(node['agent_installed'])
+
+        # Re-enable a protocol on the same managed runtime and journal, without
+        # attempting PrepareNode (which intentionally rejects managed journals).
+        response = self.client.patch('/api/v1/nodes/n1',
+            headers=self.admin_headers(**{'Idempotency-Key': str(uuid4()), 'If-Match': '"2"'}),
+            json={'protocols': ['awg']})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.queue(revision=3).status_code, 202)
+        def reapplied(command, intent):
+            self.assertEqual(intent['protocols'], ['awg'])
+            return json.dumps({'node_key': 'n1', 'revision': 3, 'settings_sha256': _digest(intent)})
+        driver.apply_node_settings.side_effect = reapplied
+        self.assertTrue(NodeSettingsExecutor(self.db, driver).run_one())
+        driver.prepare_node.assert_not_called()
+
     def test_overview_exposes_pending_operation_and_reads_its_verified_progress(self):
         import os
         import tempfile

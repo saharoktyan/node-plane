@@ -13,6 +13,41 @@ SPEC.loader.exec_module(MODULE)
 
 
 class AgentNodeOperationTests(unittest.TestCase):
+    def test_selective_protocol_cleanup_preserves_the_other_protocol_and_agent(self):
+        for removed in ('awg', 'xray'):
+            with self.subTest(removed=removed), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                for folder in ('xray', 'amnezia-awg/data', 'awg-clients'):
+                    (root / folder).mkdir(parents=True)
+                    (root / folder / 'config').write_text('owned config')
+                (root / 'agent-journal').write_text('keep')
+                (root / 'helper.py').write_text('keep')
+                records = [
+                    {'Name':'/xray', 'Id':'a'*64, 'Mounts':[{'Type':'bind','Source':str(root/'xray'),'Destination':'/etc/xray'}]},
+                    {'Name':'/amnezia-awg','Id':'b'*64,'Mounts':[{'Type':'bind','Source':str(root/'amnezia-awg/data'),'Destination':'/opt/amnezia/awg'}]},
+                    {'Name':'/unrelated','Id':'c'*64,'Mounts':[]},
+                ]
+                def command(args, lock_fd=None):
+                    if args[:3] == ['docker', 'ps', '-aq']:
+                        return '\n'.join(record['Id'] for record in records)
+                    if args[:3] == ['docker', 'container', 'inspect']:
+                        return json.dumps(records)
+                    return ''
+                with patch.object(MODULE, 'ROOT', root), patch.object(MODULE, 'environment',
+                        return_value=[str(root/'xray/config.json'),str(root/'amnezia-awg/data/wg0.conf'),'xray','amnezia-awg']), \
+                     patch.object(MODULE, 'command', side_effect=command) as commands, \
+                     patch.object(MODULE.intents, 'stop_leased_runtime_units') as stop, \
+                     patch.object(MODULE.subprocess, 'run', return_value=SimpleNamespace(returncode=1)):
+                    MODULE.remove_protocol_runtime(17, [removed])
+                stop.assert_called_once_with([removed])
+                deleted = [call.args[0][-1] for call in commands.call_args_list if call.args[0][:3] == ['docker','rm','-f']]
+                self.assertEqual(deleted, [('b' if removed == 'awg' else 'a') * 64])
+                self.assertEqual((root/'xray').exists(), removed != 'xray')
+                self.assertEqual((root/'amnezia-awg').exists(), removed != 'awg')
+                self.assertEqual((root/'awg-clients').exists(), removed != 'awg')
+                self.assertTrue((root/'agent-journal').exists())
+                self.assertTrue((root/'helper.py').exists())
+
     def test_managed_ports_verify_mounts_running_state_and_actual_publications(self):
         xray = Path('/owned/xray/config.json')
         awg = Path('/owned/awg/wg0.conf')

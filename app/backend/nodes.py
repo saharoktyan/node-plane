@@ -141,6 +141,11 @@ def _validate(values, *, create):
     return values
 
 
+def agent_installed(node):
+    """Persisted installation evidence, independent of a live connection."""
+    return bool(node['agent_installed'] if 'agent_installed' in node.keys() else node['applied_revision'] > 0)
+
+
 def require_runtime(node):
     """Reject runtime tools on a registry-only entry before creating any job.
 
@@ -148,7 +153,7 @@ def require_runtime(node):
     connectivity is deliberately not used as an installation-state predicate.
     Setup and registry removal have their own independent admission paths.
     """
-    if node['applied_revision'] <= 0:
+    if not agent_installed(node):
         raise AccessDenied('node_installation_required', 409)
 
 
@@ -188,6 +193,7 @@ class NodeService:
                 'flag': row['flag'], 'enabled': bool(row['enabled']),
                 'policy_eligible': bool(row['policy_eligible']),
                 'setup_attempted': bool(row['setup_attempted']),
+                'agent_installed': bool(row['agent_installed']),
                 'protocols': json.loads(row['protocols_json']),
                 'xray_transports': json.loads(row['xray_transports_json']),
                 'desired_revision': row['desired_revision'], 'applied_revision': row['applied_revision'],
@@ -197,6 +203,9 @@ class NodeService:
     @staticmethod
     def _select():
         return '''SELECT n.*, c.transport, c.ssh_target, m.notes, r.region_id,
+            CASE WHEN n.applied_revision>0 OR EXISTS (
+                SELECT 1 FROM backend_agent_rollouts a WHERE a.node_key=n.key AND a.status='succeeded'
+            ) THEN 1 ELSE 0 END AS agent_installed,
             CASE WHEN n.applied_revision>0
                 OR EXISTS (SELECT 1 FROM backend_agent_rollouts a WHERE a.node_key=n.key)
                 OR EXISTS (SELECT 1 FROM backend_node_jobs j WHERE j.node_key=n.key)
@@ -424,6 +433,9 @@ class NodeService:
                     active_grants = conn.execute('''SELECT DISTINCT protocol FROM backend_grants
                         WHERE node_key = ?''', (node_key,)).fetchall()
                     if any(grant['protocol'] not in next_values['protocols'] for grant in active_grants):
+                        raise AccessDenied('node_protocol_in_use', 409)
+                    temporary = conn.execute("SELECT protocol FROM backend_temporary_configs WHERE node_key=? AND status NOT IN ('expired','revoked','cancelled')", (node_key,)).fetchall()
+                    if any(item['protocol'] not in next_values['protocols'] for item in temporary):
                         raise AccessDenied('node_protocol_in_use', 409)
                 runtime_changed = any(next_values[field] != previous_values[field]
                     for field in ('protocols', 'xray_transports', 'settings', 'transport', 'ssh_target'))

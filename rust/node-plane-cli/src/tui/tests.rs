@@ -6131,6 +6131,98 @@ fn token_editor_masks_secret_and_cancel_discards_it() {
 }
 
 #[test]
+fn notes_remain_editable_when_draft_actions_shrink_the_viewport() {
+    for height in [18, 20, 24, 30] {
+        let mut app = test_profile_app();
+        app.screen = Screen::Nodes;
+        app.nodes.editor = Some(
+            crate::node_editor::Editor::new(
+                serde_json::json!({"key":"de1","title":"Germany","region":"Europe","flag":"DE",
+                "notes":"original note","transport":"local","desired_revision":1,
+                "applied_revision":0,"protocols":["awg"],"xray_transports":[],"settings":{}}),
+                &serde_json::json!({}),
+            )
+            .unwrap(),
+        );
+        let index = app
+            .nodes
+            .editor
+            .as_ref()
+            .unwrap()
+            .fields
+            .iter()
+            .position(|field| field.key == "notes")
+            .unwrap();
+        let control = Control::NodesEditField(index);
+        app.nodes_selected = app
+            .nodes_controls()
+            .iter()
+            .position(|item| *item == control)
+            .unwrap();
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, height)).unwrap();
+        for dirty in [false, true] {
+            if dirty {
+                app.nodes_key(KeyCode::Char('x').into());
+                assert!(app.nodes.editor.as_ref().unwrap().dirty());
+            }
+            terminal
+                .draw(|frame| app.hits = draw_content(frame, &app))
+                .unwrap();
+            let field = app
+                .hits
+                .iter()
+                .find(|hit| hit.control == control)
+                .unwrap_or_else(|| panic!("Notes missing at height {height}, dirty={dirty}"));
+            assert!(field.area.height >= 3);
+            let text = terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>();
+            assert!(text.contains("Notes"));
+            assert!(text.contains("original note"));
+            if dirty {
+                for action in [Control::NodesEditSave, Control::NodesEditReset] {
+                    assert!(
+                        app.hits
+                            .iter()
+                            .any(|hit| hit.control == action && hit.area.height >= 3)
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn installed_agent_only_keeps_maintenance_when_unreachable_and_can_drop_all_protocols() {
+    let mut node = browser_node("de1", "Europe");
+    node.protocols.clear();
+    node.applied_revision = 0;
+    node.agent_installed = Some(true);
+    node.agent = crate::nodes::AgentState::Unavailable;
+    let actions = node_card_actions(&node, None);
+    assert!(
+        actions
+            .iter()
+            .any(|(_, control)| *control == Control::NodesMaintenance)
+    );
+    assert!(!actions.iter().any(|(_, control)| matches!(
+        control,
+        Control::NodesSetup | Control::NodeTemporary | Control::NodesRemove(_)
+    )));
+    let mut editor = node_settings_editor();
+    editor.source["xray_transports"] = serde_json::json!(["tcp"]);
+    editor.protocols.clear();
+    editor.transports.clear();
+    let draft = editor.draft().unwrap();
+    assert_eq!(draft.body["protocols"], serde_json::json!([]));
+    assert_eq!(draft.body["xray_transports"], serde_json::json!([]));
+}
+
+#[test]
 fn notes_accept_newlines_and_manual_awg_has_its_own_tab() {
     let source = serde_json::json!({"key":"de1","title":"Germany","region":"Europe","flag":"DE","notes":"line one",
         "transport":"local","desired_revision":1,"applied_revision":0,"protocols":["awg"],"xray_transports":[],"settings":{"public_host":"vpn.example"}});

@@ -95,6 +95,10 @@ async def change_node_draft(user_id, node_key, values, backend, state, *, baseli
     await state.update_data(node_settings_draft=draft, node_region_confirmation=None)
 
 
+def installed_agent(node):
+    return bool(node.get('agent_installed', node.get('applied_revision', 0) > 0))
+
+
 async def draft_controls(node, state, locale):
     operation = node.get('_settings_operation')
     if operation and operation.get('status') in {'awaiting_executor', 'running', 'blocked'}:
@@ -102,9 +106,9 @@ async def draft_controls(node, state, locale):
             callback_data=apply_progress_callback(operation['id'], node['key']), style='primary')]]
     draft = (await state.get_data()).get('node_settings_draft')
     if draft and draft['node_key'] == node['key'] and draft['values'] != draft['baseline']:
-        return [[InlineKeyboardButton(text=tr(locale, 'nodes.draft.save_only' if not node['applied_revision'] else 'nodes.draft.save'), callback_data=f'node_draft_save:{node["key"]}', style='primary'),
+        return [[InlineKeyboardButton(text=tr(locale, 'nodes.draft.save_only' if not installed_agent(node) else 'nodes.draft.save'), callback_data=f'node_draft_save:{node["key"]}', style='primary'),
                  InlineKeyboardButton(text=tr(locale, 'nodes.draft.reset'), callback_data=f'node_draft_reset:{node["key"]}')]]
-    if not node['applied_revision']:
+    if not installed_agent(node):
         return []
     if node['desired_revision'] > node['applied_revision']:
         return [[InlineKeyboardButton(text=tr(locale, 'nodes.card.apply'), callback_data=ApplyNodeCallback(node_key=node['key']).pack(), style='primary')]]
@@ -151,21 +155,31 @@ async def _save_node_draft(query, bot, backend, state, node_key, *, confirmed=Fa
         return
     try:
         values = {key: value for key, value in draft['values'].items() if value != draft['baseline'][key]}
-        if 'region' in values and not confirmed:
-            preview = await backend.request('GET', f'/api/v1/nodes/{node_key}/region-access-preview?' +
-                urlencode({'region': values['region']}), telegram_user_id=query.from_user.id)
-            if preview['affected_profiles']:
+        removed = set(draft['baseline']['protocols']) - set(draft['values']['protocols'])
+        if not confirmed:
+            preview = {'affected_profiles': 0}
+            if 'region' in values:
+                preview = await backend.request('GET', f'/api/v1/nodes/{node_key}/region-access-preview?' +
+                    urlencode({'region': values['region']}), telegram_user_id=query.from_user.id)
+            if removed or preview['affected_profiles']:
                 locale = normalize_locale(data.get('locale'))
                 nonce = secrets.token_urlsafe(6)
                 await state.update_data(node_region_confirmation={'nonce': nonce, 'node_key': node_key,
                     'values': deepcopy(values), 'revision': draft['revision'], 'command_key': draft['command_key'],
                     'user_id': query.from_user.id, 'message_id': query.message.message_id})
-                await render(bot, query.message.chat.id, Screen(tr(locale, 'policy.region_confirm'),
-                    (tr(locale, 'policy.region_move', old=draft['baseline']['region'], new=values['region']),
-                     tr(locale, 'policy.region_affected', count=preview['affected_profiles']),
-                     tr(locale, 'policy.region_warning')), embedded_buttons=True, navigation=True),
+                lines = []
+                if removed:
+                    lines.append(tr(locale, 'nodes.protocols.remove_confirm',
+                        protocols=', '.join(tr(locale, 'protocol.' + code) for code in sorted(removed))))
+                if preview['affected_profiles']:
+                    lines.extend((tr(locale, 'policy.region_move', old=draft['baseline']['region'], new=values['region']),
+                        tr(locale, 'policy.region_affected', count=preview['affected_profiles']),
+                        tr(locale, 'policy.region_warning')))
+                await render(bot, query.message.chat.id, Screen(tr(locale,
+                    'nodes.protocols.remove_title' if removed else 'policy.region_confirm'),
+                    tuple(lines), embedded_buttons=True, navigation=True),
                     [[InlineKeyboardButton(text=tr(locale, 'policy.confirm'),
-                        callback_data=f'node_region_yes:{nonce}', style='primary')],
+                        callback_data=f'node_region_yes:{nonce}', style='danger' if removed else 'primary')],
                      [InlineKeyboardButton(text=tr(locale, 'back'),
                         callback_data=NodeSettingsCallback(node_key=node_key).pack())]], state, query.message.message_id)
                 return
@@ -181,7 +195,7 @@ async def _save_node_draft(query, bot, backend, state, node_key, *, confirmed=Fa
             [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data=NodeSettingsCallback(node_key=node_key).pack())]], state, query.message.message_id)
         return
     await state.update_data(node_settings_draft=None, node_region_confirmation=None)
-    if not node['applied_revision']:
+    if not installed_agent(node):
         await show_admin_node(query.message.chat.id, query.from_user.id, query.message.message_id,
             node_key, bot, backend, state)
         return
@@ -832,7 +846,7 @@ async def wizard_save_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
     w = data.get('wizard_data', {})
     locale = normalize_locale(data.get('locale'))
     required = {'key', 'title', 'region', 'flag', 'transport', 'public_host', 'protocols'}
-    if not required.issubset(w) or not w['protocols'] or (
+    if not required.issubset(w) or (
             w['transport'] == 'ssh' and not w.get('ssh_target')):
         await render(bot, query.message.chat.id,
             Screen(tr(locale, 'node.wizard.summary.title'),
@@ -957,7 +971,7 @@ async def show_admin_node(chat_id, user_id, message_id, node_key, bot, backend, 
         return
 
     draft = (await state.get_data()).get('node_settings_draft')
-    pending = bool(node['applied_revision'] and node['desired_revision'] > node['applied_revision'] or
+    pending = bool(installed_agent(node) and node['desired_revision'] > node['applied_revision'] or
         draft and draft['node_key'] == node_key and draft['values'] != draft['baseline'])
     lines = []
     sections = []
@@ -977,7 +991,7 @@ async def show_admin_node(chat_id, user_id, message_id, node_key, bot, backend, 
         job = overview.get('last_job')
         if not bootstrap and job and job['status'] in {'awaiting_executor', 'running', 'blocked'}:
             install_rows.append((InlineKeyboardButton(text=tr(locale, 'node_tools.last_operation'), callback_data='node_job:' + job['id'], style='primary'),))
-        if not bootstrap and not node['applied_revision']:
+        if not bootstrap and not installed_agent(node):
             install_rows.append((InlineKeyboardButton(text=tr(locale, 'nodes.card.bootstrap' if node['protocols'] else 'node_tools.setup_agent'), callback_data=f'bootstrap_menu:{node_key}', style='primary'),))
         sections.append(Section(tr(locale, 'nodes.rich.access'), tables=(Table(
             (tr(locale, 'admin.rich.item'), tr(locale, 'admin.rich.value')),
@@ -986,7 +1000,7 @@ async def show_admin_node(chat_id, user_id, message_id, node_key, bot, backend, 
              (tr(locale, 'nodes.rich.failed'), str(overview['failed'] + overview['attention'])))),)))
     else:
         lines.append(tr(locale, 'nodes.card.summary_unavailable'))
-    if node['applied_revision']:
+    if installed_agent(node):
         install_rows.append((InlineKeyboardButton(text=tr(locale, 'nodes.card.probe'), callback_data=ProbeNodeCallback(node_key=node_key).pack()),))
     sections.insert(0, Section(tr(locale, 'nodes.rich.installation'), rows=tuple(install_rows)))
     operation = (overview or {}).get('settings_operation')
@@ -1003,9 +1017,9 @@ async def show_admin_node(chat_id, user_id, message_id, node_key, bot, backend, 
         sections.append(traffic)
     title = f"{node.get('region') or tr(locale, 'nodes.region_unknown')} · {server_label(node)}"
     await render(bot, chat_id, Screen(title, tuple(lines), sections=tuple(sections), embedded_buttons=True, navigation=True),
-        [[InlineKeyboardButton(text=tr(locale, 'nodes.rich.manage') if node['applied_revision'] else tr(locale, 'nodes.maintenance.remove'),
-            callback_data=f'node_manage:{node_key}' if node['applied_revision'] else ConfirmRegistryRemovalCallback(node_key=node_key).pack(),
-            style='link' if node['applied_revision'] else 'danger')],
+        [[InlineKeyboardButton(text=tr(locale, 'nodes.rich.manage') if installed_agent(node) else tr(locale, 'nodes.maintenance.remove'),
+            callback_data=f'node_manage:{node_key}' if installed_agent(node) else ConfirmRegistryRemovalCallback(node_key=node_key).pack(),
+            style='link' if installed_agent(node) else 'danger')],
          [InlineKeyboardButton(text=back_label, callback_data=back)]], state, message_id)
     if overview and (overview.get('state') == 'applying' or
             (overview.get('last_job') or {}).get('status') in {'awaiting_executor', 'running'}):
@@ -1020,14 +1034,20 @@ async def node_manage_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
     locale = normalize_locale((await state.get_data()).get('locale'))
     node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=query.from_user.id)
     await remember_node(state, node)
-    if not node['applied_revision']:
+    if not installed_agent(node):
         return await show_admin_node(query.message.chat.id, query.from_user.id,
             query.message.message_id, node_key, bot, backend, state)
+    rows = []
+    if node['protocols']:
+        rows.append([InlineKeyboardButton(text=tr(locale,
+            'nodes.draft.reinstall' if node['applied_revision'] else 'nodes.card.bootstrap'),
+            callback_data=f'bootstrap_menu:{node_key}', style='primary')])
+    rows.extend([
+        [InlineKeyboardButton(text=tr(locale, 'nodes.maintenance.title'), callback_data=NodeMaintenanceCallback(node_key=node_key).pack())],
+        [InlineKeyboardButton(text=tr(locale, 'nodes.rich.technical'), callback_data=f'node_technical:{node_key}')],
+        [InlineKeyboardButton(text=tr(locale, 'back'), callback_data=AdminNodeCallback(node_key=node_key).pack())]])
     await render(bot, query.message.chat.id, Screen(tr(locale, 'nodes.rich.manage'), embedded_buttons=True, navigation=True),
-        [[InlineKeyboardButton(text=tr(locale, 'nodes.draft.reinstall' if node['applied_revision'] else 'nodes.card.bootstrap'), callback_data=f'bootstrap_menu:{node_key}', style='primary')],
-         [InlineKeyboardButton(text=tr(locale, 'nodes.maintenance.title'), callback_data=NodeMaintenanceCallback(node_key=node_key).pack())],
-         [InlineKeyboardButton(text=tr(locale, 'nodes.rich.technical'), callback_data=f'node_technical:{node_key}')],
-         [InlineKeyboardButton(text=tr(locale, 'back'), callback_data=AdminNodeCallback(node_key=node_key).pack())]], state, query.message.message_id)
+        rows, state, query.message.message_id)
 
 
 @router.callback_query(F.data.startswith('node_technical:'))
@@ -1036,7 +1056,7 @@ async def node_technical_cb(query: CallbackQuery, bot: Bot, backend: BackendClie
     node_key = query.data.split(':', 1)[1]
     node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=query.from_user.id)
     await remember_node(state, node)
-    if not node['applied_revision']:
+    if not installed_agent(node):
         return await show_admin_node(query.message.chat.id, query.from_user.id,
             query.message.message_id, node_key, bot, backend, state)
     overview = await backend.node_overview(query.from_user.id, node_key)
@@ -1408,14 +1428,6 @@ async def toggle_node_feature(chat_id, user_id, message_id, node_key, kind, tran
     protocols, transports = set(node['protocols']), set(node['xray_transports'])
     selected = transports if transport else protocols
     selected.symmetric_difference_update({kind})
-    if not protocols:
-        locale = normalize_locale((await state.get_data()).get('locale'))
-        await render(bot, chat_id, Screen(tr(locale, 'nodes.protocols.required_title'),
-            (tr(locale, 'nodes.protocols.required'),), embedded_buttons=True, navigation=True),
-            [[InlineKeyboardButton(text=tr(locale, 'back'),
-                callback_data=NodeProtocolsCallback(node_key=node_key).pack())]],
-            state, message_id)
-        return
     if 'xray' not in protocols: transports.clear()
     elif not transports:
         if transport:
@@ -1449,7 +1461,7 @@ async def probe_node_cb(query: CallbackQuery, callback_data: ProbeNodeCallback, 
     node_key = callback_data.node_key
     locale = normalize_locale((await state.get_data()).get('locale'))
     node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=user_id)
-    if not node.get('applied_revision'):
+    if not installed_agent(node):
         return await show_admin_node(query.message.chat.id, query.from_user.id,
             query.message.message_id, node_key, bot, backend, state)
     back = [[InlineKeyboardButton(text=tr(locale, 'back'),
@@ -1535,7 +1547,7 @@ async def node_diagnostics_cb(query: CallbackQuery, bot: Bot,
     node_key = query.data.split(':', 1)[1]
     locale = normalize_locale((await state.get_data()).get('locale'))
     node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=query.from_user.id)
-    if not node.get('applied_revision'):
+    if not installed_agent(node):
         return await show_admin_node(query.message.chat.id, query.from_user.id,
             query.message.message_id, node_key, bot, backend, state)
     back = [InlineKeyboardButton(text=tr(locale, 'back'),
@@ -1608,7 +1620,7 @@ async def apply_node(chat_id, user_id, message_id, node_key, bot, backend, state
     if active:
         await show_node_apply_status(chat_id, user_id, message_id, active['id'], node_key, bot, backend, state)
         return False
-    if not node['applied_revision']:
+    if not installed_agent(node):
         from .admin_node_tools import show_install
         await show_install(chat_id, user_id, message_id, node_key, bot, backend, state)
         return False
@@ -1701,7 +1713,7 @@ async def show_node_maintenance(chat_id, user_id, message_id, node_key, bot, bac
     await state.update_data(registry_removal_confirmation=None)
     locale = normalize_locale((await state.get_data()).get('locale'))
     node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=user_id)
-    if not node['applied_revision']:
+    if not installed_agent(node):
         await render(bot, chat_id, Screen(tr(locale, 'nodes.maintenance.remove'),
             (tr(locale, 'nodes.apply.installation_required'),), embedded_buttons=True, navigation=True),
             [[InlineKeyboardButton(text=tr(locale, 'nodes.maintenance.remove'),
@@ -1731,7 +1743,7 @@ async def show_node_maintenance(chat_id, user_id, message_id, node_key, bot, bac
 async def bind_local_cb(query: CallbackQuery, callback_data: BindLocalCallback, bot: Bot, backend: BackendClient, state: FSMContext):
     await query.answer()
     node = await backend.request('GET', f'/api/v1/nodes/{callback_data.node_key}', telegram_user_id=query.from_user.id)
-    if not node.get('applied_revision'):
+    if not installed_agent(node):
         return await show_admin_node(query.message.chat.id, query.from_user.id,
             query.message.message_id, callback_data.node_key, bot, backend, state)
     try:
@@ -1754,7 +1766,7 @@ async def show_node_maintenance_error(chat_id, message_id, node_key, bot, state)
 async def bind_ssh_cb(query: CallbackQuery, callback_data: BindSshCallback, bot: Bot, backend: BackendClient, state: FSMContext):
     await query.answer()
     node = await backend.request('GET', f'/api/v1/nodes/{callback_data.node_key}', telegram_user_id=query.from_user.id)
-    if not node.get('applied_revision'):
+    if not installed_agent(node):
         return await show_admin_node(query.message.chat.id, query.from_user.id,
             query.message.message_id, callback_data.node_key, bot, backend, state)
     await state.set_state(MaintenanceState.waiting_for_ssh_target)
@@ -1799,7 +1811,7 @@ async def confirm_node_drain_cb(query: CallbackQuery, callback_data: ConfirmNode
     node_key = callback_data.node_key
     locale = normalize_locale((await state.get_data()).get('locale'))
     node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=query.from_user.id)
-    if not node.get('applied_revision'):
+    if not installed_agent(node):
         return await show_admin_node(query.message.chat.id, query.from_user.id,
             query.message.message_id, node_key, bot, backend, state)
     try:
@@ -1829,7 +1841,7 @@ async def drain_node_cb(query: CallbackQuery, callback_data: DrainNodeCallback, 
     await query.answer()
     node_key = callback_data.node_key
     node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=query.from_user.id)
-    if not node.get('applied_revision'):
+    if not installed_agent(node):
         return await show_admin_node(query.message.chat.id, query.from_user.id,
             query.message.message_id, node_key, bot, backend, state)
     from .admin_node_tools import advance_removal
@@ -1840,7 +1852,7 @@ async def drain_node_cb(query: CallbackQuery, callback_data: DrainNodeCallback, 
 async def cleanup_step_cb(query: CallbackQuery, callback_data: CleanupStepCallback, bot: Bot, backend: BackendClient, state: FSMContext):
     await query.answer()
     node = await backend.request('GET', f'/api/v1/nodes/{callback_data.node_key}', telegram_user_id=query.from_user.id)
-    if not node.get('applied_revision'):
+    if not installed_agent(node):
         return await show_admin_node(query.message.chat.id, query.from_user.id,
             query.message.message_id, callback_data.node_key, bot, backend, state)
     try:
@@ -1856,7 +1868,7 @@ async def cleanup_step_cb(query: CallbackQuery, callback_data: CleanupStepCallba
 async def verify_retirement_cb(query: CallbackQuery, callback_data: VerifyRetirementCallback, bot: Bot, backend: BackendClient, state: FSMContext):
     await query.answer()
     node = await backend.request('GET', f'/api/v1/nodes/{callback_data.node_key}', telegram_user_id=query.from_user.id)
-    if not node.get('applied_revision'):
+    if not installed_agent(node):
         return await show_admin_node(query.message.chat.id, query.from_user.id,
             query.message.message_id, callback_data.node_key, bot, backend, state)
     try:
@@ -1895,17 +1907,17 @@ async def show_registry_confirmation(chat_id, user_id, message_id, node_key, bot
             await show_node_maintenance_error(chat_id, message_id, node_key, bot, state)
         return
     await render(bot, chat_id,
-        Screen(tr(locale, 'nodes.maintenance.registry_only' if node['applied_revision'] else 'nodes.maintenance.remove'),
+        Screen(tr(locale, 'nodes.maintenance.registry_only' if installed_agent(node) else 'nodes.maintenance.remove'),
             (server_label(node),
              tr(locale, 'nodes.maintenance.registry_grants'),
              tr(locale, 'nodes.maintenance.registry_runtime'),
              tr(locale, 'nodes.maintenance.registry_tunnels'),
-             tr(locale, 'nodes.maintenance.registry_use')) if node['applied_revision'] or node.get('setup_attempted', True) else
+             tr(locale, 'nodes.maintenance.registry_use')) if installed_agent(node) or node.get('setup_attempted', True) else
             (server_label(node), tr(locale, 'nodes.maintenance.registry_grants')), embedded_buttons=True, navigation=True),
-        [[InlineKeyboardButton(text=tr(locale, 'nodes.maintenance.registry_confirm' if node['applied_revision'] else 'nodes.maintenance.remove'),
+        [[InlineKeyboardButton(text=tr(locale, 'nodes.maintenance.registry_confirm' if installed_agent(node) else 'nodes.maintenance.remove'),
             callback_data=RetireRegistryCallback(node_key=node_key).pack(), style='danger')],
          [InlineKeyboardButton(text=tr(locale, 'back'),
-            callback_data=NodeMaintenanceCallback(node_key=node_key).pack() if node['applied_revision'] else AdminNodeCallback(node_key=node_key).pack())]],
+            callback_data=NodeMaintenanceCallback(node_key=node_key).pack() if installed_agent(node) else AdminNodeCallback(node_key=node_key).pack())]],
         state, message_id)
     await state.update_data(registry_removal_confirmation={
         'node_key': node_key,

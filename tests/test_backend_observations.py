@@ -20,6 +20,37 @@ class ObservationTests(TestCase):
         return response
     admin_headers = fixture.BackendNodeTests.admin_headers
 
+    def test_agent_only_with_successful_rollout_is_probed_even_without_applied_vpn_revision(self):
+        self.create()
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_nodes SET applied_revision=0,protocols_json='[]',xray_transports_json='[]' WHERE key='lv1'")
+            conn.execute("INSERT INTO backend_agent_rollouts (id,node_key,actor_account_id,command_key,intent_json,status) VALUES (?,'lv1',?,?,'{}','succeeded')",
+                         (str(uuid4()), self.admin.id, str(uuid4())))
+        driver = SimpleNamespace(inspect_node_services=Mock(return_value={'agent_version': 'test'}))
+        with TestClient(create_app(self.db, node_driver=driver)) as client:
+            node = client.get('/api/v1/nodes/lv1', headers=self.admin_headers()).json()
+            self.assertTrue(node['agent_installed'])
+            self.assertEqual(node['applied_revision'], 0)
+            self.assertEqual(client.get('/api/v1/nodes/lv1/probe', headers=self.admin_headers()).status_code, 200)
+            for fails in (False, True, False):
+                driver.inspect_node_services.side_effect = TimeoutError('PRIVATE') if fails else None
+                response = client.get('/api/v1/system/recovery/fleet', headers=self.admin_headers())
+                self.assertEqual(response.status_code, 200, response.text)
+                checks = response.json()['items'][0]['checks']
+                self.assertEqual(next(c['status'] for c in checks if c['id'] == 'agent'), 'error' if fails else 'ok')
+                self.assertFalse(any(c['id'] == 'installation' for c in checks))
+                self.assertNotIn('PRIVATE', response.text)
+            self.assertTrue(client.get('/api/v1/nodes/lv1', headers=self.admin_headers()).json()['agent_installed'])
+
+    def test_unsuccessful_rollout_does_not_claim_agent_installed(self):
+        self.create()
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_nodes SET applied_revision=0 WHERE key='lv1'")
+            conn.execute("INSERT INTO backend_agent_rollouts (id,node_key,actor_account_id,command_key,intent_json,status) VALUES (?,'lv1',?,?,'{}','blocked')",
+                         (str(uuid4()), self.admin.id, str(uuid4())))
+        response = self.client.get('/api/v1/nodes/lv1', headers=self.admin_headers())
+        self.assertFalse(response.json()['agent_installed'])
+
     def test_overview_publishes_actual_alert_and_request_policy_switches(self):
         with self.db.transaction() as conn:
             conn.execute("INSERT INTO backend_system_settings VALUES ('alert_policy',?)", (json.dumps({'enabled':False}),))

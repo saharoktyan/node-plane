@@ -128,7 +128,7 @@ def ports(intent):
             [('udp', settings['awg_port'])] if 'awg' in intent['protocols'] else [])
 
 
-def owned_protocol_containers(xray, awg, xc, ac):
+def owned_protocol_containers(xray, awg, xc, ac, protocols=('xray', 'awg')):
     """Plan deletion by mount ownership and immutable ID, including crash leftovers."""
     ids = command(['docker', 'ps', '-aq']).splitlines()
     if not ids:
@@ -137,9 +137,11 @@ def owned_protocol_containers(xray, awg, xc, ac):
     owned = []
     for record in records:
         name = record['Name'].lstrip('/')
-        for configured, source, destination in (
-                (xc, Path(xray).parent, '/etc/xray'),
-                (ac, Path(awg).parent, '/opt/amnezia/awg')):
+        for protocol, configured, source, destination in (
+                ('xray', xc, Path(xray).parent, '/etc/xray'),
+                ('awg', ac, Path(awg).parent, '/opt/amnezia/awg')):
+            if protocol not in protocols:
+                continue
             if name != configured and not re.fullmatch(re.escape(configured) + r'-previous-\d+', name):
                 continue
             mounts = record.get('Mounts', [])
@@ -154,32 +156,39 @@ def owned_protocol_containers(xray, awg, xc, ac):
     return list(dict.fromkeys(owned))
 
 
-def remove_protocol_runtime(lock_fd):
+def remove_protocol_runtime(lock_fd, protocols=('xray', 'awg')):
+    if not set(protocols) <= {'xray', 'awg'}:
+        raise ValueError('invalid cleanup protocols')
     xray, awg, xc, ac = environment()
     if any(path.is_symlink() for path in (ROOT, *ROOT.parents)):
         raise ValueError('runtime cleanup root must not contain symlinks')
-    directories = (Path(xray).parent, Path(awg).parent.parent, ROOT / 'awg-clients')
+    directories = []
+    expected = []
+    if 'xray' in protocols:
+        directories.append(Path(xray).parent)
+        expected.append(ROOT.resolve() / 'xray')
+    if 'awg' in protocols:
+        directories.extend((Path(awg).parent.parent, ROOT / 'awg-clients'))
+        expected.extend((ROOT.resolve() / 'amnezia-awg', ROOT.resolve() / 'awg-clients'))
     # Validate the whole deletion plan before stopping containers or removing
     # the first directory. A later invalid path must not leave partial cleanup.
-    expected = (ROOT.resolve() / 'xray', ROOT.resolve() / 'amnezia-awg',
-                ROOT.resolve() / 'awg-clients')
     for directory, owned in zip(directories, expected):
         if directory.is_symlink() or directory.resolve() != owned:
             raise ValueError('runtime cleanup path is outside managed directories')
-    containers = owned_protocol_containers(xray, awg, xc, ac)
-    intents.stop_leased_runtime_units()
+    containers = owned_protocol_containers(xray, awg, xc, ac, protocols)
+    intents.stop_leased_runtime_units(protocols)
     for identity in containers:
         command(['docker', 'rm', '-f', identity], lock_fd)
     network = subprocess.run(['docker', 'network', 'inspect', 'node-plane-awg'],
-        capture_output=True, text=True, timeout=30)
-    if network.returncode == 0:
+        capture_output=True, text=True, timeout=30) if 'awg' in protocols else None
+    if network is not None and network.returncode == 0:
         records = json.loads(network.stdout)
         if (len(records) == 1 and records[0].get('Driver') == 'bridge'
                 and records[0].get('Labels', {}).get('org.node-plane.network') == 'awg'):
             # Docker refuses removal if another container still uses the network.
             command(['docker', 'network', 'rm', 'node-plane-awg'], lock_fd)
     ra_policy = RA_POLICY
-    if ra_policy.is_file() and ra_policy.read_text().startswith('# Managed by Node Plane:'):
+    if 'awg' in protocols and ra_policy.is_file() and ra_policy.read_text().startswith('# Managed by Node Plane:'):
         ra_policy.unlink()
     # Only protocol-owned directories; never agent identity, journal or scripts.
     for directory in directories:

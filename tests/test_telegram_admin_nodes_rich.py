@@ -9,6 +9,42 @@ from telegram_client.i18n import tr
 
 
 class AdminNodeRichTests(IsolatedAsyncioTestCase):
+    async def test_installed_agent_only_card_keeps_probe_and_management_without_setup(self):
+        self.node.update(protocols=[], xray_transports=[], applied_revision=0, agent_installed=True)
+        with patch.object(nodes, 'render', new_callable=AsyncMock) as draw:
+            await nodes.show_admin_node(123, 123, 77, 'msk1', self.bot, self.backend, self.state)
+            callbacks = self.callbacks(draw)
+            self.assertIn('node_manage:msk1', callbacks)
+            self.assertTrue(any(c.startswith('probe_node:') for c in callbacks), callbacks)
+            self.assertNotIn('bootstrap_menu:msk1', callbacks)
+            self.query.data = 'node_manage:msk1'
+            await nodes.node_manage_cb(self.query, self.bot, self.backend, self.state)
+            self.assertNotIn('bootstrap_menu:msk1', self.callbacks(draw))
+        self.assertFalse(await tools.return_uninstalled_node(self.query, self.node, self.bot, self.backend, self.state))
+
+    async def test_last_protocol_can_be_deselected_and_requires_removal_confirmation(self):
+        self.node.update(protocols=['awg'], xray_transports=[])
+        with patch.object(nodes, 'render', new_callable=AsyncMock) as draw:
+            await nodes.toggle_node_feature(123, 123, 77, 'msk1', 'awg', False, self.bot, self.backend, self.state)
+            self.assertEqual(self.data['node_settings_draft']['values']['protocols'], [])
+            self.backend.edit_node = AsyncMock()
+            await nodes._save_node_draft(self.query, self.bot, self.backend, self.state, 'msk1')
+            self.backend.edit_node.assert_not_awaited()
+            self.assertTrue(any(c.startswith('node_region_yes:') for c in self.callbacks(draw)))
+            self.assertIn('agent will remain installed', ' '.join(draw.call_args.args[2].lines))
+
+    async def test_bot_wizard_saves_agent_only_without_requiring_a_protocol(self):
+        from uuid import uuid4
+        self.state.get_state = AsyncMock(return_value=NodeDraftState.waiting_for_summary.state)
+        self.data.update(wizard_data={**self.node, 'protocols': [], 'public_host': 'node.example'},
+                         create_node_command_key=str(uuid4()))
+        self.backend.create_node = AsyncMock(return_value=self.node)
+        with patch.object(nodes, 'render', new_callable=AsyncMock):
+            await nodes.wizard_save_cb(self.query, self.bot, self.backend, self.state)
+        self.backend.create_node.assert_awaited_once()
+        self.assertEqual(self.backend.create_node.call_args.args[1]['protocols'], [])
+        self.assertEqual(self.backend.create_node.call_args.args[1]['xray_transports'], [])
+
     async def test_status_lookup_retries_transient_errors_but_stops_on_denial(self):
         from telegram_client.backend import BackendError
         for status in (503, 403):
@@ -622,6 +658,10 @@ class AdminNodeRichTests(IsolatedAsyncioTestCase):
         self.query.data = 'node_draft_save:msk1'
         with patch.object(nodes, 'render', new_callable=AsyncMock) as draw, patch.object(nodes, 'apply_node', new_callable=AsyncMock) as apply:
             await nodes.save_node_draft_cb(self.query, self.bot, self.backend, self.state)
+            self.backend.edit_node.assert_not_awaited()
+            confirmation = self.data['node_region_confirmation']
+            self.query.data = 'node_region_yes:' + confirmation['nonce']
+            await nodes.confirm_node_region_cb(self.query, self.bot, self.backend, self.state)
         self.assertIn(tr('en', 'nodes.draft.in_use'), draw.call_args.args[2].lines)
         self.assertEqual(self.data['node_settings_draft']['values']['protocols'], ['awg'])
         apply.assert_not_awaited()

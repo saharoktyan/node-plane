@@ -29,7 +29,8 @@ def error(locale, exc):
 
 
 async def return_uninstalled_node(query, node, bot, backend, state):
-    if node.get('applied_revision', 0) > 0:
+    from .admin_nodes import installed_agent
+    if installed_agent(node):
         return False
     from .admin_nodes import show_admin_node
     await state.update_data(node_job_draft=None)
@@ -42,7 +43,8 @@ async def show_install(chat_id, user_id, message_id, node_key, bot, backend, sta
     locale = normalize_locale((await state.get_data()).get('locale'))
     node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=user_id)
     await remember_node(state, node)
-    back = (f'node_manage:{node_key}' if node.get('applied_revision') else
+    from .admin_nodes import installed_agent
+    back = (f'node_manage:{node_key}' if installed_agent(node) else
             AdminNodeCallback(node_key=node_key).pack())
     overview = await backend.node_overview(user_id, node_key)
     if overview.get('bootstrap'):

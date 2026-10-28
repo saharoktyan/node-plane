@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 1.0.0-beta.4 - 2026-10-28
+
+- Track agent installation separately from VPN settings revisions. Keep Probe, Telegram Management and Workstation Maintenance available on installed agent-only nodes, including verified full removal; report connection failures during live diagnostics.
+- Allow agent-only creation from Telegram and confirmed removal of the last VPN protocol. Remove only owned protocol containers/configurations, preserve the agent and its recovery journal, and support adding protocols again. Existing profile access and temporary configurations must be revoked first.
+- Accept matching SSH host keys when known_hosts also contains keys for other algorithms; retain rejection of changed keys and marked entries.
+- Keep the Notes editor visible in short terminal windows when Save/Reset actions appear.
+
+## 1.0.0-beta.3 - 2026-10-27
+
+- Recover agent setup after a previous node key was retired, preserving archived journals and verifying controller ownership before resuming blocked operations.
+- Open the agent port in active UFW only for the controller address; preserve unrelated firewall rules and cover protocol port application paths.
+- Explain agent inspection failures and tolerate PostgreSQL readiness delays when starting the backend worker.
+
 ## 1.0.0-beta.2 - 2026-10-26
 
 - Preserve the configured Telegram adapter credential across controller reset, including resets started from Workstation; continue invalidating unrelated credentials.
