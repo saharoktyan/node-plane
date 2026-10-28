@@ -17,6 +17,16 @@ from backend.node_operations import NodeOperations
 
 
 class BackendNodeJobTests(unittest.TestCase):
+    def test_cleanup_does_not_use_an_unapplied_service_selection(self):
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_nodes SET desired_revision=2 WHERE key='n1'")
+        for action in ('cleanup_runtime', 'reinstall_clean'):
+            with self.subTest(action=action), self.assertRaises(AccessDenied) as rejected:
+                self.jobs.queue(self.actor, 'n1', action, revision=2, command_key=str(uuid4()))
+            self.assertEqual(rejected.exception.code, 'node_settings_uncertain')
+        with self.db.connect() as conn:
+            self.assertIsNone(conn.execute("SELECT 1 FROM backend_node_jobs WHERE node_key='n1'").fetchone())
+
     def test_bootstrap_records_selected_auto_port_before_reconciling_profiles(self):
         from backend.node_settings import _digest
         with self.db.transaction() as conn:
@@ -40,7 +50,7 @@ class BackendNodeJobTests(unittest.TestCase):
             self.assertEqual(json.loads(node['settings_json'])['awg_port'], 8443)
             self.assertEqual(node['desired_revision'], node['applied_revision'])
 
-    def test_protocol_cleanup_resets_installation_and_apply_cannot_wait_forever(self):
+    def test_protocol_cleanup_preserves_agent_and_can_apply_services_again(self):
         from backend.node_overview import NodeOverviewService
         from backend.node_settings import NodeSettingsExecutor
         job = self.queue('cleanup_runtime')
@@ -49,16 +59,21 @@ class BackendNodeJobTests(unittest.TestCase):
                 return {'node_key': 'n1', 'action': action, 'revision': intent['revision'], 'result': {'cleaned': True}}
             def inspect_node(self, node_key):
                 return {'health_state': 'running', 'xray_config_present': False, 'awg_config_present': False}
+            def prepare_node(self, node_key):
+                raise AssertionError('Managed journals must not be prepared as a fresh node')
+            def apply_node_settings(self, command_id, intent):
+                from backend.node_settings import _digest
+                return json.dumps({'node_key': 'n1', 'revision': intent['revision'], 'settings_sha256': _digest(intent)})
         driver = Driver()
         self.assertTrue(NodeOperations(self.db, driver).run_one())
         self.assertEqual(NodeOverviewService(self.db).get(self.actor, 'n1')['state'], 'not_installed')
         node = NodeService(self.db).get(self.actor, 'n1')
         self.assertEqual(node['applied_revision'], 0)
+        self.assertTrue(node['agent_installed'])
         task = NodeSettingsService(self.db).queue(self.actor, 'n1', revision=node['desired_revision'], command_key=str(uuid4()))
         self.assertTrue(NodeSettingsExecutor(self.db, driver).run_one())
         result = NodeSettingsService(self.db).get(self.actor, task['id'])
-        self.assertEqual(result['status'], 'superseded')
-        self.assertEqual(result['error_code'], 'node_installation_required')
+        self.assertEqual(result['status'], 'succeeded')
 
     def test_old_cleanup_receipt_repairs_only_runtime_not_reinstalled_since(self):
         job = self.queue('cleanup_runtime')

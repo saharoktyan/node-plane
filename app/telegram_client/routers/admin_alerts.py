@@ -50,7 +50,9 @@ async def alerts_cb(
         if query.data.startswith("alert_pref:"):
             parts = query.data.split(':')
             field = parts[1]
-            if field == 'interval_minutes' and len(parts) == 3 and parts[2] in {'3', '5', '10'}:
+            if field == 'repeat_minutes' and len(parts) == 3 and parts[2] in {'0', '30', '60', '180'}:
+                change = {field: int(parts[2])}
+            elif field == 'interval_minutes' and len(parts) == 3 and parts[2] in {'3', '5', '10'}:
                 change = {field: int(parts[2])}
             elif field in {'enabled', 'notify_resolved'} and len(parts) == 3 and parts[2] in {'on', 'off'}:
                 change = {field: parts[2] == 'on'}
@@ -109,15 +111,15 @@ async def alerts_cb(
                 f'alert_pref:{field}:{"on" if selected else "off"}').model_copy(
                     update={'style': 'primary' if value[field] == selected else None})
                 for selected in (True, False))
-        intervals = tuple(button(tr(locale, 'alerts.minutes', minutes=minutes),
-            f'alert_pref:interval_minutes:{minutes}').model_copy(
-                update={'style': 'primary' if value['interval_minutes'] == minutes else None}) for minutes in (3, 5, 10))
+        repeats = tuple(button(tr(locale, f'alerts.repeat.{minutes}'),
+            f'alert_pref:repeat_minutes:{minutes}').model_copy(
+                update={'style': 'primary' if value.get('repeat_minutes', 60) == minutes else None}) for minutes in (0, 30, 60, 180))
         sections = [Section(tr(locale, 'alerts.rich.monitoring'),
             (tr(locale, 'alerts.last', at=(last.get('at') or '—')[:19],
                 status=tr(locale, 'alerts.status.' + last.get('status', 'never'))),) if value['enabled'] else (), rows=(choices('enabled'),))]
         if value['enabled']:
             sections.extend([
-                Section(tr(locale, 'alerts.rich.interval'), rows=(intervals,)),
+                Section(tr(locale, 'alerts.rich.repeat'), rows=(repeats,)),
                 Section(tr(locale, 'alerts.rich.recovery'), rows=(choices('notify_resolved'),))
             ])
             if value['active_count']:

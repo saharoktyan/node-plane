@@ -13,6 +13,8 @@ ACTIONS = {'bootstrap', 'reinstall_keep', 'reinstall_clean', 'cleanup_runtime',
            'sync_env', 'sync_xray', 'regenerate_entropy', 'reconcile_access'}
 REBUILD = {'bootstrap', 'reinstall_keep', 'reinstall_clean', 'sync_env', 'sync_xray'}
 INVALIDATE = REBUILD | {'cleanup_runtime', 'regenerate_entropy'}
+VPN_ACTIONS = {'bootstrap', 'reinstall_keep', 'reinstall_clean', 'cleanup_runtime',
+               'sync_env', 'sync_xray', 'sync_runtime', 'regenerate_entropy', 'check_ports', 'open_ports', 'reconcile_access'}
 
 
 class NodeOperations:
@@ -79,8 +81,10 @@ class NodeOperations:
             if not (bootstrap_id and action in {'bootstrap', 'install_docker'}):
                 from .nodes import NodeService, require_runtime
                 require_runtime(conn.execute(NodeService._select() + ' WHERE n.key=?', (node_key,)).fetchone())
-                if action in {'reinstall_keep', 'reinstall_clean', 'regenerate_entropy', 'sync_xray'} and not json.loads(node['protocols_json']):
+                if action in VPN_ACTIONS and (not node['applied_revision'] or not json.loads(node['protocols_json'])):
                     raise AccessDenied('config_not_supported', 422)
+                if action in {'cleanup_runtime', 'reinstall_clean'} and node['applied_revision'] != node['desired_revision']:
+                    raise AccessDenied('node_settings_uncertain', 409)
             if conn.execute('SELECT 1 FROM backend_node_drains WHERE node_key = ?', (node_key,)).fetchone():
                 raise AccessDenied('node_already_draining', 409)
             for table in ('backend_node_jobs', 'backend_node_settings_tasks', 'backend_operation_tasks'):

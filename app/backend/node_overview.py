@@ -14,8 +14,9 @@ class NodeOverviewService:
 
     def get(self, actor, node_key):
         require_permission(actor, 'nodes.manage')
+        from .nodes import NodeService, settings_apply_pending
         with self.db.connect() as conn:
-            node = conn.execute('SELECT * FROM backend_nodes WHERE key = ?', (node_key,)).fetchone()
+            node = conn.execute(NodeService._select() + ' WHERE n.key = ?', (node_key,)).fetchone()
             if node is None:
                 raise AccessDenied('resource_not_found', 404)
             settings_tasks = conn.execute('''SELECT * FROM backend_node_settings_tasks
@@ -55,7 +56,7 @@ class NodeOverviewService:
         elif current_settings == 'blocked':
             state = 'needs_attention'
         elif not json.loads(node['protocols_json']):
-            state = 'changes_pending' if 0 < node['applied_revision'] < node['desired_revision'] else 'agent_only'
+            state = 'changes_pending' if settings_apply_pending(node) else 'agent_only'
         elif node['applied_revision'] == 0:
             state = 'not_installed'
         elif node['applied_revision'] < node['desired_revision']:

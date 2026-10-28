@@ -13,6 +13,7 @@ SPEC = importlib.util.spec_from_file_location('agent_node_settings',
     Path(__file__).resolve().parents[1] / 'runtime_assets/apply-profile-intent.py')
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
+REMOVE_UNSELECTED = MODULE.remove_unselected_protocols
 
 
 class AgentNodeSettingsIntentTests(unittest.TestCase):
@@ -52,7 +53,7 @@ class AgentNodeSettingsIntentTests(unittest.TestCase):
         root = Path(self.temp.name)
         env = root / 'node.env'
         awg = root / 'wg0.conf'
-        env.write_text(f'XRAY_CONFIG={root / "xray.json"}\nAWG_CONFIG={awg}\nXRAY_CONTAINER_NAME=xray\nAWG_CONTAINER_NAME=awg\n')
+        env.write_text(f'SERVER_KEY=n1\nXRAY_CONFIG={root / "xray.json"}\nAWG_CONFIG={awg}\nXRAY_CONTAINER_NAME=xray\nAWG_CONTAINER_NAME=awg\n')
         (root / 'awg_ports.py').write_text('def select_port(*args):\n    return 8443\n')
         (root / 'init-awg.sh').write_text(f'#!/bin/bash\nsource "{env}"\nprintf "[Interface]\\nListenPort = %s\\nI1 = <b 0xc000000001><rc 8><r 900>\\n" "$AWG_SERVER_PORT" > "{awg}"\n')
         (root / 'apply-node-settings.sh').write_text('#!/bin/sh\nexit 0\n')
@@ -96,23 +97,57 @@ class AgentNodeSettingsIntentTests(unittest.TestCase):
                 for line in env.read_text().splitlines():
                     key, _, value = line.partition('=')
                     protocol = {'XRAY_CONFIG': 'xray', 'AWG_CONFIG': 'awg'}.get(key)
-                    if protocol and protocol not in intent['protocols']:
+                    if protocol and protocol in intent.get('protocol_plan', {}).get('remove_protocols', []):
                         Path(shlex.split(value)[0]).unlink(missing_ok=True)
         mocked = patch.object(MODULE, 'remove_unselected_protocols', side_effect=cleanup)
         self.cleanup = mocked.start()
         self.addCleanup(mocked.stop)
 
     def test_empty_protocol_intent_is_durable_and_retains_the_agent_journal(self):
-        intent = dict(self.intent(), protocols=[], settings={})
+        intent = dict(self.intent(), protocols=[], settings={}, protocol_plan={'remove_protocols': ['awg', 'xray']})
         first = MODULE.apply_node_settings(intent, self.journal, self.runner)
         self.assertEqual(first, MODULE.lookup_node_settings(intent, self.journal))
         self.assertEqual(first, MODULE.apply_node_settings(intent, self.journal, self.runner))
         self.assertEqual(len(self.calls), 1)
         self.assertTrue(self.journal.exists())
 
+    def test_empty_command_without_explicit_plan_never_touches_runtime(self):
+        intent = dict(self.intent(), protocols=[], settings={})
+        with patch.object(MODULE.subprocess, 'run') as run:
+            with self.assertRaisesRegex(ValueError, 'no VPN settings'):
+                MODULE.run_node_settings(intent, 0, env_path=Path(self.temp.name)/'foreign.env')
+            self.assertEqual(MODULE.inspect_node_settings_for_repair(intent),
+                {'config_matches': False, 'containers_running': False})
+        run.assert_not_called()
+        self.cleanup.assert_not_called()
+
+    def test_nonselected_foreign_protocol_is_not_a_cleanup_instruction(self):
+        for protocol_plan in (None, {'remove_protocols': []}):
+            intent = dict(self.intent(), protocols=['awg'])
+            if protocol_plan is not None:
+                intent['protocol_plan'] = protocol_plan
+            with patch.object(MODULE, 'settings_cleanup_module') as load:
+                REMOVE_UNSELECTED(intent, 0, Path(self.temp.name))
+            load.assert_not_called()
+
+    def test_removal_plan_refuses_a_runtime_owned_by_another_node(self):
+        root = Path(self.temp.name)
+        env = root / 'node.env'
+        config = root / 'xray.json'
+        config.write_text('foreign configuration')
+        env.write_text(f'SERVER_KEY=other-node\nXRAY_CONFIG={config}\n')
+        (root / 'apply-node-settings.sh').write_text('#!/bin/sh\nexit 0\n')
+        original = env.read_text()
+        intent = dict(self.intent(), protocols=[], protocol_plan={'remove_protocols': ['xray']})
+        with self.assertRaisesRegex(ValueError, 'ownership is not confirmed'):
+            MODULE.run_node_settings(intent, 0, env_path=env, root=root)
+        self.cleanup.assert_not_called()
+        self.assertEqual(config.read_text(), 'foreign configuration')
+        self.assertEqual(env.read_text(), original)
+
     def test_agent_only_repair_requires_absence_of_removed_containers(self):
         from unittest.mock import Mock
-        intent = dict(self.intent(), protocols=[], settings={})
+        intent = dict(self.intent(), protocols=[], settings={}, protocol_plan={'remove_protocols': ['awg', 'xray']})
         cleanup = Mock()
         for leftovers in ([], ['a' * 64]):
             cleanup.owned_protocol_containers.return_value = leftovers
@@ -128,12 +163,12 @@ class AgentNodeSettingsIntentTests(unittest.TestCase):
     def test_agent_only_apply_cleans_both_protocols_and_opens_no_ports(self):
         root = Path(self.temp.name)
         env = root / 'node.env'
-        env.write_text(f'XRAY_CONFIG={root / "xray.json"}\nAWG_CONFIG={root / "wg0.conf"}\n')
+        env.write_text(f'SERVER_KEY=n1\nXRAY_CONFIG={root / "xray.json"}\nAWG_CONFIG={root / "wg0.conf"}\n')
         (root / 'xray.json').write_text('{}')
         (root / 'wg0.conf').write_text('[Interface]')
         (root / 'apply-node-settings.sh').write_text('#!/bin/sh\nexit 0\n')
         (root / 'apply-node-settings.sh').chmod(0o755)
-        intent = dict(self.intent(), protocols=[], settings={})
+        intent = dict(self.intent(), protocols=[], settings={}, protocol_plan={'remove_protocols': ['awg', 'xray']})
         real_run = subprocess.run
         firewall = []
         def run(args, **kwargs):
@@ -266,7 +301,7 @@ class AgentNodeSettingsIntentTests(unittest.TestCase):
         xray = root / 'xray.json'
         awg = root / 'wg0.conf'
         env = root / 'node.env'
-        env.write_text(f'XRAY_CONFIG={xray}\nAWG_CONFIG={awg}\nXRAY_CONTAINER_NAME=xray\nAWG_CONTAINER_NAME=awg\n')
+        env.write_text(f'SERVER_KEY=n1\nXRAY_CONFIG={xray}\nAWG_CONFIG={awg}\nXRAY_CONTAINER_NAME=xray\nAWG_CONTAINER_NAME=awg\n')
         (scripts / 'init-xray.sh').write_text('''#!/bin/sh
 cat > "$1" <<'EOF'
 {"inbounds":[{"tag":"reality-tcp","port":443,"streamSettings":{"realitySettings":{"serverNames":["www.cloudflare.com"],"dest":"www.cloudflare.com:443"}}},{"tag":"reality-xhttp","port":8443,"streamSettings":{"realitySettings":{"serverNames":["www.cloudflare.com"],"dest":"www.cloudflare.com:443"},"xhttpSettings":{"path":"/assets"}}}]}
@@ -314,7 +349,7 @@ printf '[Interface]\\nListenPort = 51820\\n' > '{awg}'
                 (['xray'], ['4443/tcp', '9443/tcp']),
                 (['awg', 'xray'], ['4443/tcp', '9443/tcp', '51999/udp'])):
             with self.subTest(protocols=protocols):
-                env.write_text(f'XRAY_CONFIG={xray}\nAWG_CONFIG={awg}\nXRAY_CONTAINER_NAME=xray\nAWG_CONTAINER_NAME=awg\n')
+                env.write_text(f'SERVER_KEY=n1\nXRAY_CONFIG={xray}\nAWG_CONFIG={awg}\nXRAY_CONTAINER_NAME=xray\nAWG_CONTAINER_NAME=awg\n')
                 awg.write_text('[Interface]\nListenPort = 51999\n')
                 xray.write_text(json.dumps({'inbounds': [
                     {'tag': 'reality-tcp', 'port': 4443, 'streamSettings': {
@@ -392,7 +427,7 @@ printf '[Interface]\\nListenPort = 51820\\n' > '{awg}'
         env = root / 'node.env'
         xray = root / 'xray.json'
         awg = root / 'wg0.conf'
-        env.write_text(f'XRAY_CONFIG={xray}\nAWG_CONFIG={awg}\nXRAY_CONTAINER_NAME=xray\nAWG_CONTAINER_NAME=awg\n')
+        env.write_text(f'SERVER_KEY=n1\nXRAY_CONFIG={xray}\nAWG_CONFIG={awg}\nXRAY_CONTAINER_NAME=xray\nAWG_CONTAINER_NAME=awg\n')
         data = {'outbounds': [{'protocol': 'freedom', 'tag': 'direct'}], 'inbounds': [
             {'tag': tag, 'port': port, 'settings': {'clients': [{'id': 'existing-user'}]},
              'streamSettings': {'realitySettings': {'privateKey': 'existing-server-key',

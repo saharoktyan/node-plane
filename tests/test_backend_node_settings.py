@@ -14,6 +14,71 @@ class BackendNodeSettingsTests(unittest.TestCase):
     setUp = BackendHTTPTests.setUp
     provision = BackendHTTPTests.provision
 
+    def test_unchanged_installed_agent_only_has_no_apply_and_rejects_empty_work(self):
+        self.client.post('/api/v1/nodes', headers=self.admin_headers(**{'Idempotency-Key': str(uuid4())}),
+            json={'key': 'n1', 'title': 'Agent only', 'region': 'EU', 'protocols': []})
+        with self.db.transaction() as conn:
+            conn.execute("INSERT INTO backend_agent_rollouts (id,node_key,actor_account_id,command_key,intent_json,status) VALUES (?,'n1',?,?,'{}','succeeded')",
+                         (str(uuid4()), self.admin.id, str(uuid4())))
+        for _ in range(2):
+            node = self.client.get('/api/v1/nodes/n1', headers=self.admin_headers()).json()
+            self.assertTrue(node['agent_installed'])
+            self.assertFalse(node['settings_apply_pending'])
+            self.assertEqual((node['desired_revision'], node['applied_revision']), (1, 0))
+        self.assertEqual(self.queue().status_code, 409)
+        with self.db.connect() as conn:
+            self.assertIsNone(conn.execute("SELECT 1 FROM backend_node_settings_tasks WHERE node_key='n1'").fetchone())
+
+    def test_explicit_plan_survives_transport_without_granting_implicit_removal(self):
+        from backend.driver_transport import GrpcIntentDriver
+        intent = {'node_key': 'n1', 'revision': 2, 'protocols': ['awg'], 'settings': {},
+                  'protocol_plan': {'remove_protocols': []}}
+        request = GrpcIntentDriver.node_settings_request(intent)
+        self.assertEqual(json.loads(request.protocols_json), {'protocols': ['awg'], 'protocol_plan': {'remove_protocols': []}})
+        legacy = dict(intent)
+        legacy.pop('protocol_plan')
+        self.assertEqual(json.loads(GrpcIntentDriver.node_settings_request(legacy).protocols_json), ['awg'])
+
+    def test_old_queued_empty_request_is_retired_before_any_agent_rpc(self):
+        self.client.post('/api/v1/nodes', headers=self.admin_headers(**{'Idempotency-Key': str(uuid4())}),
+            json={'key': 'n1', 'title': 'Agent only', 'region': 'EU', 'protocols': []})
+        with self.db.transaction() as conn:
+            from backend.node_settings import _snapshot
+            intent = _snapshot(conn.execute("SELECT * FROM backend_nodes WHERE key='n1'").fetchone())
+            task = str(uuid4())
+            conn.execute("INSERT INTO backend_node_settings_tasks(id,node_key,actor_account_id,command_key,revision,intent_json,status) VALUES (?,'n1',?,?,1,?,'awaiting_executor')",
+                         (task, self.admin.id, str(uuid4()), json.dumps(intent)))
+        from unittest.mock import Mock
+        driver = Mock()
+        self.assertTrue(NodeSettingsExecutor(self.db, driver).run_one())
+        self.assertEqual(driver.mock_calls, [])
+        with self.db.connect() as conn:
+            self.assertEqual(conn.execute('SELECT status FROM backend_node_settings_tasks WHERE id=?', (task,)).fetchone()['status'], 'superseded')
+
+    def test_resolving_old_empty_agent_only_command_fences_without_reapplying(self):
+        self.client.post('/api/v1/nodes', headers=self.admin_headers(**{'Idempotency-Key': str(uuid4())}),
+            json={'key': 'n1', 'title': 'Agent only', 'region': 'EU', 'protocols': []})
+        with self.db.transaction() as conn:
+            node = conn.execute("SELECT * FROM backend_nodes WHERE key='n1'").fetchone()
+            from backend.node_settings import _snapshot
+            intent = _snapshot(node)
+            task = str(uuid4())
+            conn.execute("INSERT INTO backend_node_settings_tasks(id,node_key,actor_account_id,command_key,revision,intent_json,status) VALUES (?,'n1',?,?,1,?,'blocked')",
+                         (task, self.admin.id, str(uuid4()), json.dumps(intent)))
+        from unittest.mock import Mock
+        from backend.authorization import Actor, Principal, PrincipalKind, ADMIN_PERMISSIONS, Account
+        actor = Actor(Principal('test', PrincipalKind.SERVICE, ADMIN_PERMISSIONS), Account(self.admin.id, 'admin', 'approved'))
+        driver = Mock()
+        driver.resolve_node_settings.return_value = {'config_matches': False, 'containers_running': False}
+        result = NodeSettingsExecutor(self.db, driver).resolve_blocked(actor, task)
+        self.assertTrue(result['settings_not_required'])
+        self.assertEqual(result['task_id'], task)
+        driver.resolve_node_settings.assert_called_once_with(task, intent)
+        driver.apply_node_settings.assert_not_called()
+        with self.db.connect() as conn:
+            rows = conn.execute("SELECT id,status FROM backend_node_settings_tasks WHERE node_key='n1'").fetchall()
+            self.assertEqual([(r['id'], r['status']) for r in rows], [(task, 'superseded')])
+
     def test_empty_settings_cannot_start_runtime_work_on_an_uninstalled_node(self):
         self.client.post('/api/v1/nodes',
             headers=self.admin_headers(**{'Idempotency-Key': str(uuid4())}),
@@ -51,8 +116,12 @@ class BackendNodeSettingsTests(unittest.TestCase):
 
     def test_removing_all_protocols_applies_an_empty_intent_and_retains_installed_agent(self):
         self.create()
-        with self.db.transaction() as conn:
-            conn.execute("UPDATE backend_nodes SET applied_revision=1 WHERE key='n1'")
+        from types import SimpleNamespace
+        initial = SimpleNamespace(
+            inspect_node=lambda key: {'health_state': 'running', 'xray_config_present': True, 'awg_config_present': True},
+            apply_node_settings=lambda command, intent: json.dumps({'node_key': 'n1', 'revision': 1, 'settings_sha256': _digest(intent)}))
+        self.assertEqual(self.queue().status_code, 202)
+        self.assertTrue(NodeSettingsExecutor(self.db, initial).run_one())
         response = self.client.patch('/api/v1/nodes/n1',
             headers=self.admin_headers(**{'Idempotency-Key': str(uuid4()), 'If-Match': '"1"'}),
             json={'protocols': [], 'xray_transports': []})

@@ -99,6 +99,11 @@ def installed_agent(node):
     return bool(node.get('agent_installed', node.get('applied_revision', 0) > 0))
 
 
+def pending_settings(node):
+    return bool(node.get('settings_apply_pending', node.get('applied_revision', 0) > 0
+        and bool(node.get('protocols')) and node['desired_revision'] > node['applied_revision']))
+
+
 async def draft_controls(node, state, locale):
     operation = node.get('_settings_operation')
     if operation and operation.get('status') in {'awaiting_executor', 'running', 'blocked'}:
@@ -106,11 +111,12 @@ async def draft_controls(node, state, locale):
             callback_data=apply_progress_callback(operation['id'], node['key']), style='primary')]]
     draft = (await state.get_data()).get('node_settings_draft')
     if draft and draft['node_key'] == node['key'] and draft['values'] != draft['baseline']:
-        return [[InlineKeyboardButton(text=tr(locale, 'nodes.draft.save_only' if not installed_agent(node) else 'nodes.draft.save'), callback_data=f'node_draft_save:{node["key"]}', style='primary'),
+        apply = installed_agent(node) and bool(draft['values']['protocols'] or node['protocols'] or pending_settings(node))
+        return [[InlineKeyboardButton(text=tr(locale, 'nodes.draft.save' if apply else 'nodes.draft.save_only'), callback_data=f'node_draft_save:{node["key"]}', style='primary'),
                  InlineKeyboardButton(text=tr(locale, 'nodes.draft.reset'), callback_data=f'node_draft_reset:{node["key"]}')]]
     if not installed_agent(node):
         return []
-    if node['desired_revision'] > node['applied_revision']:
+    if pending_settings(node):
         return [[InlineKeyboardButton(text=tr(locale, 'nodes.card.apply'), callback_data=ApplyNodeCallback(node_key=node['key']).pack(), style='primary')]]
     return []
 
@@ -199,7 +205,7 @@ async def _save_node_draft(query, bot, backend, state, node_key, *, confirmed=Fa
         await show_admin_node(query.message.chat.id, query.from_user.id, query.message.message_id,
             node_key, bot, backend, state)
         return
-    if node['applied_revision'] >= node['desired_revision']:
+    if not pending_settings(node):
         await show_node_settings(query.message.chat.id, query.from_user.id,
             query.message.message_id, node_key, bot, backend, state)
         return
@@ -971,7 +977,7 @@ async def show_admin_node(chat_id, user_id, message_id, node_key, bot, backend, 
         return
 
     draft = (await state.get_data()).get('node_settings_draft')
-    pending = bool(installed_agent(node) and node['desired_revision'] > node['applied_revision'] or
+    pending = bool(pending_settings(node) or
         draft and draft['node_key'] == node_key and draft['values'] != draft['baseline'])
     lines = []
     sections = []
@@ -1062,8 +1068,9 @@ async def node_technical_cb(query: CallbackQuery, bot: Bot, backend: BackendClie
     overview = await backend.node_overview(query.from_user.id, node_key)
     locale = normalize_locale((await state.get_data()).get('locale'))
     lines = (tr(locale, 'nodes.card.agent_transport', value=node.get('transport') or '—'),
-        tr(locale, 'nodes.card.ssh_target', value=node.get('ssh_target') or '—'),
-        tr(locale, 'nodes.card.revisions', applied=node['applied_revision'], desired=node['desired_revision']))
+        tr(locale, 'nodes.card.ssh_target', value=node.get('ssh_target') or '—'))
+    if node['protocols'] or pending_settings(node):
+        lines += (tr(locale, 'nodes.card.revisions', applied=node['applied_revision'], desired=node['desired_revision']),)
     rows = [[InlineKeyboardButton(text=tr(locale, 'node_tools.diagnostics'), callback_data=f'node_tools:{node_key}')]]
     if overview.get('last_job'):
         rows.append([InlineKeyboardButton(text=tr(locale, 'node_tools.last_operation'), callback_data='node_job:' + overview['last_job']['id'])])
@@ -1582,16 +1589,19 @@ async def node_diagnostics_cb(query: CallbackQuery, bot: Bot,
             [[InlineKeyboardButton(text=tr(locale, 'nodes.diagnostics.refresh'), callback_data=f'node_diagnostics:{node_key}')], back],
             state, query.message.message_id)
         return
+    fields = (['docker', 'runtime_root'] if node['protocols'] else [])
+    fields += [p + '_config' for p in ('xray', 'awg') if p in node['protocols']]
     lines = [tr(locale, 'nodes.diagnostics.field.' + field,
         value=tr(locale, 'nodes.diagnostics.status.' + result[field]))
-        for field in ('docker', 'runtime_root', 'xray_config', 'awg_config')]
-    lines.append(tr(locale, 'nodes.diagnostics.version',
-        value=result.get('runtime_version') or '—'))
+        for field in fields]
+    if fields:
+        sections = (Section(tr(locale, 'nodes.rich.services'), lines=tuple(lines)),
+            Section(tr(locale, 'nodes.rich.technical'), collapsed=True,
+                lines=(tr(locale, 'nodes.diagnostics.version', value=result.get('runtime_version') or '—'),)))
+    else:
+        sections = (Section('', lines=(tr(locale, 'nodes.diagnostics.agent_only'),)),)
     await render(bot, query.message.chat.id,
-        Screen(tr(locale, 'nodes.diagnostics.title'), sections=(
-            Section(tr(locale, 'nodes.rich.services'), lines=tuple(lines[:4])),
-            Section(tr(locale, 'nodes.rich.technical'), collapsed=True, lines=tuple(lines[4:])),
-        ), embedded_buttons=True, navigation=True),
+        Screen(tr(locale, 'nodes.diagnostics.title'), sections=sections, embedded_buttons=True, navigation=True),
         [[InlineKeyboardButton(text=tr(locale, 'nodes.diagnostics.refresh'),
             callback_data=f'node_diagnostics:{node_key}')], back],
         state, query.message.message_id)

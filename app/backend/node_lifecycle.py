@@ -249,6 +249,18 @@ class NodeLifecycle:
                             'command_id': command_id}
         if phase in {'uninstall_uncertain', 'uninstall_scheduled'}:
             return {'node_key': node_key, 'phase': phase, 'command_id': command_id}
+        if phase in {'preparing', 'prepared'}:
+            from .nodes import NodeService, applied_protocols
+            with self.db.connect() as conn:
+                inventory = conn.execute(NodeService._select() + ' WHERE n.key=?', (node_key,)).fetchone()
+            if inventory is not None and applied_protocols(inventory) == []:
+                # An agent-only registration does not own a pre-existing VPN
+                # installation merely because the configured paths match.
+                runtime = driver.inspect_node(node_key)
+                services = driver.inspect_node_services(node_key)
+                if any(runtime.get(key) is not False for key in ('xray_config_present', 'awg_config_present')) or any(
+                        services.get(key) is not False for key in ('xray_installed', 'awg_installed')):
+                    raise AccessDenied('node_cleanup_scope_unconfirmed', 409)
         if phase == 'preparing':
             driver.decommission(node_key, command_id, 'prepare')
             next_phase = 'prepared'

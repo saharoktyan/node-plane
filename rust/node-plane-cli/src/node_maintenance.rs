@@ -133,6 +133,9 @@ impl Browser {
                 "host_verification_failed" => {
                     "Cleanup could not be verified. Some server resources may remain."
                 }
+                "node_cleanup_scope_unconfirmed" => {
+                    "VPN runtime is present or could not be checked, but this node has no confirmed VPN installation. Full removal stopped."
+                }
                 "node_revocations_blocked" => "Profile access revocation needs recovery.",
                 "verification_key_unavailable" | "independent_verification_key_required" => {
                     "SSH access is required to verify cleanup."

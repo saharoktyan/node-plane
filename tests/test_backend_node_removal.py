@@ -27,7 +27,9 @@ class BackendNodeRemovalTests(unittest.TestCase):
             conn.execute("INSERT INTO backend_agent_rollouts (id,node_key,actor_account_id,command_key,intent_json,status) VALUES (?,'n1',?,?,'{}','succeeded')",
                          (str(uuid4()), self.actor.account.id, str(uuid4())))
         phases = []
-        driver = SimpleNamespace(decommission=lambda key, command, phase: phases.append(phase))
+        driver = SimpleNamespace(decommission=lambda key, command, phase: phases.append(phase),
+            inspect_node=lambda key: {'xray_config_present': False, 'awg_config_present': False},
+            inspect_node_services=lambda key: {'xray_installed': False, 'awg_installed': False})
         worker = NodeRemovalService(self.db, driver, self.verifier)
         self.assertFalse(worker.retire_unprovisioned(self.actor, 'n1'))
         worker.request(self.actor, 'n1')
@@ -35,6 +37,23 @@ class BackendNodeRemovalTests(unittest.TestCase):
             worker.run_one()
         self.assertEqual(phases, ['prepare', 'delete_runtime', 'uninstall'])
         self.assertEqual(worker.get(self.actor, 'n1')['status'], 'removed')
+
+    def test_agent_only_full_removal_refuses_existing_foreign_vpn_before_remote_cleanup(self):
+        from uuid import uuid4
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_nodes SET applied_revision=0,protocols_json='[]' WHERE key='n1'")
+            conn.execute("INSERT INTO backend_agent_rollouts(id,node_key,actor_account_id,command_key,intent_json,status) VALUES (?,'n1',?,?,'{}','succeeded')",
+                         (str(uuid4()), self.actor.account.id, str(uuid4())))
+        phases = []
+        driver = SimpleNamespace(decommission=lambda key, command, phase: phases.append(phase),
+            inspect_node=lambda key: {'xray_config_present': True, 'awg_config_present': False},
+            inspect_node_services=lambda key: {'xray_installed': True, 'awg_installed': False})
+        worker = NodeRemovalService(self.db, driver, self.verifier)
+        worker.request(self.actor, 'n1')
+        self.assertTrue(worker.run_one())  # Establish verified target and drain.
+        self.assertFalse(worker.run_one())
+        self.assertEqual(phases, [])
+        self.assertEqual(worker.get(self.actor, 'n1')['error_code'], 'node_cleanup_scope_unconfirmed')
 
     def test_registry_only_outcome_can_be_read_without_a_worker_job(self):
         from backend.node_lifecycle import NodeLifecycle

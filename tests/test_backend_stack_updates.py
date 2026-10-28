@@ -138,7 +138,7 @@ class StackUpdateTests(TestCase):
     def test_agent_then_runtime_are_separate_durable_steps(self):
         service = self.service()
         self.node()
-        self.db.connection.execute("UPDATE backend_nodes SET applied_revision=1 WHERE key='lv1'")
+        self.db.connection.execute("UPDATE backend_nodes SET applied_revision=1,protocols_json=? WHERE key='lv1'", ('["awg"]',))
         self.db.connection.commit()
         job = self.queue(service)
         service.run_one()

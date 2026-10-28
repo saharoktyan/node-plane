@@ -25,6 +25,8 @@ def error(locale, exc):
            'node_operation_pending': 'node_tools.busy',
            'revision_conflict': 'node_tools.changed',
            'node_settings_incomplete': 'node_tools.incomplete'}.get(exc.code, 'node_tools.error')
+    if exc.code == 'node_settings_uncertain':
+        key = 'node_tools.settings_pending'
     return tr(locale, key)
 
 
@@ -203,10 +205,13 @@ async def tools_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state
     if await return_uninstalled_node(query, node, bot, backend, state):
         return
     locale = normalize_locale((await state.get_data()).get('locale'))
+    vpn_installed = bool(node['protocols'] and node['applied_revision'])
+    groups = (('diagnostics', 'ports'), ('runtime', 'repair')) if vpn_installed else (('diagnostics',),)
     rows = [[button(locale, 'node_tools.' + name, f'node_view:{name}:{node_key}') for name in names]
-            for names in (('diagnostics', 'ports'), ('runtime', 'repair'))]
-    rows += [[button(locale, 'node_tools.cleanup_runtime', f'node_action:cleanup_runtime:{node_key}').model_copy(update={'style': 'danger'})],
-             [button(locale, 'back', f'node_technical:{node_key}')]]
+            for names in groups]
+    if vpn_installed:
+        rows.append([button(locale, 'node_tools.cleanup_runtime', f'node_action:cleanup_runtime:{node_key}', style='danger')])
+    rows.append([button(locale, 'back', f'node_technical:{node_key}')])
     await render(bot, query.message.chat.id, Screen(tr(locale, 'node_tools.diagnostics'), (), embedded_buttons=True, navigation=True), rows, state, query.message.message_id)
 
 
@@ -220,6 +225,11 @@ async def view_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state:
         node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=query.from_user.id)
         await remember_node(state, node)
         if await return_uninstalled_node(query, node, bot, backend, state):
+            return
+        if view in {'ports', 'repair', 'entropy', 'runtime'} and not (node['protocols'] and node['applied_revision']):
+            from .admin_nodes import show_admin_node
+            await show_admin_node(query.message.chat.id, query.from_user.id,
+                query.message.message_id, node_key, bot, backend, state)
             return
         if view == 'diagnostics':
             from urllib.parse import quote
@@ -517,6 +527,8 @@ async def advance_removal(chat_id, user_id, message_id, node_key, bot, backend, 
             lines = [tr(locale, 'node_tools.revocations_blocked')]
         elif exc.code in {'node_cleanup_failed', 'node_cleanup_unavailable'}:
             lines = [tr(locale, 'node_tools.cleanup_failed')]
+        elif exc.code == 'node_cleanup_scope_unconfirmed':
+            lines = [tr(locale, 'node_tools.cleanup_scope_unconfirmed')]
         elif exc.code in {'independent_verification_key_required', 'verification_key_unavailable'}:
             lines = [tr(locale, 'node_tools.verification_key')]
         else:

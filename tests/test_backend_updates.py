@@ -127,6 +127,9 @@ class BackendUpdateTests(TestCase):
     def test_rollout_checks_binary_and_runtime_commits_separately(self):
         service = self.service()
         self.node()
+        # This test exercises an installed VPN runtime, not an agent-only host.
+        self.db.connection.execute("UPDATE backend_nodes SET protocols_json=? WHERE key='lv1'", ('["awg"]',))
+        self.db.connection.commit()
         service.driver.inspect_node_services.return_value = {'agent_commit': 'a' * 40, 'runtime_commit': 'b' * 40}
         with patch('config.APP_COMMIT', 'a' * 40):
             value = service.rollout_overview(self.actor)
@@ -137,6 +140,20 @@ class BackendUpdateTests(TestCase):
             value = service.rollout_overview(self.actor)
         self.assertEqual(value['nodes'][0]['agent_status'], 'unknown')
         self.assertNotIn('secret', str(value))
+
+    def test_agent_only_does_not_adopt_or_offer_updates_for_an_unrelated_runtime(self):
+        service = self.service()
+        self.node()  # Legacy revision=1 with no VPN protocols is still agent-only.
+        service.driver.inspect_node_services.return_value = {'agent_commit': 'a' * 40, 'runtime_commit': 'b' * 40}
+        with patch('config.APP_COMMIT', 'a' * 40):
+            value = service.rollout_overview(self.actor)
+            self.assertEqual(value['nodes'][0]['runtime_status'], 'not_applicable')
+            self.assertFalse(value['runtimes_required'])
+            with self.assertRaises(AccessDenied) as rejected:
+                service.queue(self.actor, str(uuid4()), 'runtimes')
+        self.assertEqual(rejected.exception.code, 'update_not_required')
+        with self.db.connect() as conn:
+            self.assertIsNone(conn.execute("SELECT 1 FROM backend_node_jobs WHERE node_key='lv1'").fetchone())
 
     def test_display_cache_expires_and_authoritative_reads_bypass_it(self):
         service = self.service()
@@ -183,6 +200,9 @@ class BackendUpdateTests(TestCase):
     def test_runtime_batch_reuses_native_durable_job(self):
         service = self.service()
         self.node()
+        # This test exercises an installed VPN runtime, not an agent-only host.
+        self.db.connection.execute("UPDATE backend_nodes SET protocols_json=? WHERE key='lv1'", ('["awg"]',))
+        self.db.connection.commit()
         service.driver.inspect_node_services.return_value = {'agent_commit': 'a' * 40, 'runtime_commit': 'b' * 40}
         with patch('config.APP_COMMIT', 'a' * 40):
             job = service.queue(self.actor, str(uuid4()), 'runtimes')

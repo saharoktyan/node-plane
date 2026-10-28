@@ -146,6 +146,7 @@ class AlertPreferencesInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
     enabled: StrictBool | None = None
     interval_minutes: Literal[3,5,10] | None = None
+    repeat_minutes: StrictInt | None = None
     notify_resolved: StrictBool | None = None
 
 
@@ -459,6 +460,7 @@ class AdminNodeOutput(BaseModel):
     policy_eligible: bool = False
     setup_attempted: bool = True
     agent_installed: bool = False
+    settings_apply_pending: bool = False
     protocols: list[str]
     xray_transports: list[str]
     desired_revision: int

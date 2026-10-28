@@ -19,6 +19,15 @@ def same_commit(actual, desired):
             and desired != 'unknown' and (actual.startswith(desired) or desired.startswith(actual)))
 
 
+def has_vpn_runtime(conn, node_key):
+    from .nodes import NodeService, applied_protocols
+    node = conn.execute(NodeService._select() + ' WHERE n.key=?', (node_key,)).fetchone()
+    if node is None:
+        return False
+    protocols = applied_protocols(node)
+    return bool(protocols) if protocols is not None else bool(node['applied_revision'] and json.loads(node['protocols_json']))
+
+
 class UpdateService:
     def __init__(self, db, driver=None, updater=None, runner=None, observation_cache=None):
         self.db, self.driver = db, driver
@@ -107,6 +116,7 @@ class UpdateService:
                 FROM backend_nodes n LEFT JOIN backend_node_connections c ON c.node_key=n.key
                 WHERE NOT EXISTS (SELECT 1 FROM backend_node_drains d WHERE d.node_key=n.key)
                 ORDER BY n.region,n.title,n.key''').fetchall()
+            nodes = [dict(n, vpn_runtime_installed=has_vpn_runtime(conn, n['key'])) for n in nodes]
             latest = conn.execute("SELECT id FROM backend_update_jobs WHERE kind IN ('agents', 'runtimes') ORDER BY created_at DESC LIMIT 1").fetchone()
         signature = (APP_COMMIT, tuple(tuple(dict(n).items()) for n in nodes))
         cached = self.observation_cache.get('rollout') if use_cache else None
@@ -139,6 +149,8 @@ class UpdateService:
                         runtime_commit=facts.get('runtime_commit'), runtime_version=facts.get('runtime_version'))
                 except Exception:
                     item.update(agent_status='unknown', runtime_status='unknown')
+                if not node['vpn_runtime_installed']:
+                    item['runtime_status'] = 'not_applicable'
                 items.append(item)
             if use_cache:
                 self.observation_cache['rollout'] = {'signature': signature, 'time': time.monotonic(),
@@ -200,7 +212,8 @@ class UpdateService:
                         JOIN backend_node_connections c ON c.node_key=n.key
                         WHERE NOT EXISTS (SELECT 1 FROM backend_node_drains d WHERE d.node_key=n.key)
                         ORDER BY n.region,n.title,n.key''').fetchall()
-                items = [{**dict(n), 'expected_commit': selected['commit'], 'phase': 'agent'} for n in nodes]
+                    items = [{**dict(n), 'expected_commit': selected['commit'], 'phase': 'agent',
+                              'vpn_runtime_installed': has_vpn_runtime(conn, n['key'])} for n in nodes]
         else:
             if not self.updater.is_driver_agents_setup_supported():
                 raise AccessDenied('update_unsupported', 409)
@@ -460,7 +473,7 @@ class UpdateService:
                         lambda: self.driver.inspect_node_services(item['node_key']), field,
                         item_intent['expected_commit'])
                     if verified:
-                        if job['kind'] == 'stack' and agent_phase and item_intent.get('applied_revision', 0):
+                        if job['kind'] == 'stack' and agent_phase and item_intent.get('vpn_runtime_installed', bool(item_intent.get('applied_revision', 0))):
                             item_intent['phase'] = 'runtime'
                             with self.db.transaction() as conn:
                                 conn.execute("UPDATE backend_update_items SET status='awaiting_executor',child_id=NULL,intent_json=?,error_code=NULL WHERE job_id=? AND node_key=?",
@@ -665,7 +678,7 @@ class UpdateService:
                                 json.loads(item['intent_json'])['expected_commit'])
                             if not verified:
                                 status = 'blocked'
-                        if job['kind'] == 'stack' and agent_phase and status == 'succeeded' and intent.get('applied_revision', 0):
+                        if job['kind'] == 'stack' and agent_phase and status == 'succeeded' and intent.get('vpn_runtime_installed', bool(intent.get('applied_revision', 0))):
                             intent['phase'] = 'runtime'
                             with self.db.transaction() as conn:
                                 conn.execute("UPDATE backend_update_items SET status='awaiting_executor',child_id=NULL,intent_json=? WHERE job_id=? AND node_key=?",

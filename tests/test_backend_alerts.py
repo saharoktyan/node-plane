@@ -2,6 +2,7 @@
 
 import json
 import unittest
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from uuid import uuid4
@@ -38,6 +39,40 @@ class RpcFailure(grpc.RpcError):
 
 
 class AlertTests(unittest.TestCase):
+    def test_agent_only_host_alert_is_visible_and_delivered_without_vpn_enablement(self):
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_nodes SET protocols_json='[]',applied_revision=0,enabled=0 WHERE key='test'")
+            conn.execute("INSERT INTO backend_agent_rollouts(id,node_key,actor_account_id,command_key,intent_json,status) VALUES (?,'test',?,?,'{}','succeeded')",
+                         (str(uuid4()), self.admin.id, str(uuid4())))
+        self.driver.inspect_node_services.return_value = {**HEALTHY, 'host_metrics': {**HEALTHY['host_metrics'], 'disk_free_percent': 3}}
+        self.scan()
+        active = self.service.overview(self.actor)['active']
+        self.assertEqual([item['kind'] for item in active], ['disk_low'])
+        delivery = self.service.claim(self.transport, str(uuid4()))
+        self.assertIsNotNone(delivery)
+        self.assertEqual(delivery['event']['kind'], 'disk_low')
+        self.driver.host_metrics = Mock(return_value={'node_key': 'test',
+            'host_metrics': {**HEALTHY['host_metrics'], 'cpu_used_percent': 99}})
+        self.assertTrue(self.service.scheduled(cpu_only=True))
+        self.assertEqual({item['kind'] for item in self.service.overview(self.actor)['active']}, {'disk_low', 'cpu_high'})
+        self.assertEqual(self.driver.inspect_node_services.call_count, 1)
+
+    def test_agent_only_connection_outage_is_monitored_but_agent_upgrade_is_not_an_outage(self):
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_nodes SET protocols_json='[]',applied_revision=0,enabled=0 WHERE key='test'")
+            conn.execute("INSERT INTO backend_agent_rollouts(id,node_key,actor_account_id,command_key,intent_json,status) VALUES (?,'test',?,?,'{}','succeeded')",
+                         (str(uuid4()), self.admin.id, str(uuid4())))
+            upgrade = str(uuid4())
+            conn.execute("INSERT INTO backend_agent_rollouts(id,node_key,actor_account_id,command_key,intent_json,status) VALUES (?,'test',?,?,'{}','running')",
+                         (upgrade, self.admin.id, str(uuid4())))
+        self.driver.inspect_node_services.side_effect = RpcFailure()
+        self.scan()
+        self.driver.inspect_node_services.assert_not_called()
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_agent_rollouts SET status='succeeded' WHERE id=?", (upgrade,))
+        self.scan()
+        self.assertEqual([item['kind'] for item in self.service.overview(self.actor)['active']], ['node_unreachable'])
+
     def setUp(self):
         fixture.BackendHTTPTests.setUp(self)
         # Persistent settings modules initialize their database at import time.
@@ -65,7 +100,11 @@ class AlertTests(unittest.TestCase):
             "DELETE FROM backend_system_settings WHERE key='alert_last_scan'"
         )
         self.db.connection.commit()
-        return self.service.scheduled()
+        self.scan_time = getattr(self, 'scan_time', datetime(2026, 1, 1, tzinfo=timezone.utc)) + timedelta(seconds=30)
+        with patch('backend.alerts.datetime') as clock:
+            clock.fromisoformat = datetime.fromisoformat
+            clock.now.return_value = self.scan_time
+            return self.service.scheduled()
 
     def events(self):
         return self.db.connection.execute(
@@ -125,6 +164,7 @@ class AlertTests(unittest.TestCase):
         other = Actor(self.actor.principal, SimpleNamespace(id='another-admin', role='admin', status='approved'))
         self.assertEqual(self.service.overview(other)['unacknowledged_count'], 1)
         self.driver.inspect_node_services.return_value = dict(HEALTHY)
+        self.scan()
         self.scan()
         self.driver.inspect_node_services.return_value = {**HEALTHY, 'xray_running':False}
         self.scan()
@@ -203,6 +243,7 @@ class AlertTests(unittest.TestCase):
         self.driver.inspect_node_services.side_effect = None
         self.driver.inspect_node_services.return_value = dict(HEALTHY)
         self.scan()
+        self.scan()
         self.assertEqual(self.service.overview(self.actor)["active_count"], 0)
 
     def test_driver_failure_does_not_fabricate_node_outages(self):
@@ -214,7 +255,8 @@ class AlertTests(unittest.TestCase):
         self.assertNotIn("private", json.dumps(value))
         self.driver.inspect_node_services.assert_not_called()
 
-    def test_installation_pending_settings_and_maintenance_are_excluded(self):
+    def test_vpn_pending_or_disabled_keeps_host_checks_but_uninstalled_and_maintenance_are_excluded(self):
+        self.driver.inspect_node_services.return_value.update(awg_running=False, xray_running=False)
         for sql in (
             "UPDATE backend_nodes SET applied_revision=0",
             "UPDATE backend_nodes SET applied_revision=1,desired_revision=2",
@@ -223,6 +265,8 @@ class AlertTests(unittest.TestCase):
             self.db.connection.execute(sql)
             self.db.connection.commit()
             self.scan()
+        self.assertEqual(self.driver.inspect_node_services.call_count, 2)
+        self.assertEqual(self.service.overview(self.actor)['active_count'], 0)
         self.db.connection.execute("UPDATE backend_nodes SET enabled=1")
         self.db.connection.execute(
             "INSERT INTO backend_node_drains VALUES ('test',?,'[]','now')",
@@ -230,7 +274,7 @@ class AlertTests(unittest.TestCase):
         )
         self.db.connection.commit()
         self.scan()
-        self.driver.inspect_node_services.assert_not_called()
+        self.assertEqual(self.driver.inspect_node_services.call_count, 2)
 
     def test_alert_interval_choices_and_legacy_fifteen_minute_policy(self):
         for minutes in (3,5,10):
@@ -263,14 +307,14 @@ class AlertTests(unittest.TestCase):
             self.assertFalse(self.service.scheduled(cpu_only=True))
             clock.now.return_value = start + timedelta(seconds=30)
             self.assertTrue(self.service.scheduled(cpu_only=True))
-            self.assertFalse(self.service.scheduled())
+            self.assertTrue(self.service.scheduled())
         self.assertEqual([(e['kind'],e['resolved']) for e in self.events()],[('cpu_high',0)])
 
     def test_cpu_severity_changes_unknown_samples_and_recovery_use_current_measurements(self):
         from datetime import datetime, timedelta, timezone
         start = datetime.now(timezone.utc)
         self.driver.host_metrics = Mock()
-        samples = [86,96,94,89,82,None,79]
+        samples = [86,96,94,89,82,None,79,79]
         with patch('backend.alerts.datetime') as clock:
             clock.fromisoformat = datetime.fromisoformat
             for index,value in enumerate(samples):
@@ -280,9 +324,9 @@ class AlertTests(unittest.TestCase):
                 if value is None:
                     self.assertEqual(self.service.overview(self.actor)['active_count'],1)
         events = self.db.connection.execute("SELECT resolved,payload_json FROM backend_alert_events WHERE kind='cpu_high' ORDER BY created_at").fetchall()
-        self.assertEqual([e['resolved'] for e in events],[0,0,0,1])
+        self.assertEqual([e['resolved'] for e in events],[0,0,1])
         payloads = [json.loads(e['payload_json']) for e in events]
-        self.assertEqual([p.get('severity') for p in payloads[:3]],['warning','critical','warning'])
+        self.assertEqual([p.get('severity') for p in payloads[:2]],['warning','critical'])
         self.assertEqual(payloads[-1]['value'],79)
         self.assertEqual(self.service.overview(self.actor)['active_count'],0)
 
@@ -297,6 +341,7 @@ class AlertTests(unittest.TestCase):
         self.driver.inspect_node_services.return_value = {**HEALTHY,'host_metrics':{**HEALTHY['host_metrics'],'disk_free_percent':3}}
         self.scan()
         self.driver.inspect_node_services.return_value = {**HEALTHY,'host_metrics':{**HEALTHY['host_metrics'],'disk_free_percent':18}}
+        self.scan()
         self.scan()
         row = self.db.connection.execute("SELECT payload_json FROM backend_alert_events WHERE kind='disk_low' AND resolved=1").fetchone()
         self.assertEqual(json.loads(row['payload_json'])['value'],18)
@@ -323,6 +368,7 @@ class AlertTests(unittest.TestCase):
         }
         self.scan()
         self.driver.inspect_node_services.return_value = dict(HEALTHY)
+        self.scan()
         self.scan()
         self.assertEqual(len(self.events()), 1)
         self.assertEqual(self.service.overview(self.actor)["active_count"], 0)

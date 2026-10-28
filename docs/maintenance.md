@@ -63,4 +63,6 @@ Open **Reset & removal** in Node Plane Settings or the bot's cleanup settings. R
 
 After removal, Workstation disables controller actions. Use a new-installation action if you want to install again under the same local connection profile.
 
-CPU monitoring samples every 5 seconds and checks a rolling 1-minute average every 30 seconds, independently of the selected 3/5/10-minute full service-check interval. CPU warning starts at 85%, critical at 95%, and recovery requires less than 80%. Missing, incomplete or stale samples stay unknown. Notifications report changes and current recovery measurements, with a Close button that deletes only the message; alert Inbox and Dismiss behavior are unchanged.
+Monitoring uses a fixed cadence, independently of notification preferences. CPU is sampled every 5 seconds and evaluated as a rolling 1-minute average; resource and service checks run every 30 seconds. CPU warning starts at 85% and critical at 95%. Separate recovery thresholds and confirmation checks prevent brief fluctuations from repeatedly closing and reopening an alert. Missing, incomplete or stale measurements stay unknown.
+
+**Reminders** controls repeat notifications for a continuing problem: **Off / 30m / 1h / 3h**, with **1h** as the default. Off keeps the initial alert, escalation to critical and confirmed recovery notifications; it disables only reminders. A recovery notification includes the current measurement. Close deletes only the notification message; alert Inbox and Dismiss behavior are unchanged.

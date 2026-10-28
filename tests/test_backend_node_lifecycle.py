@@ -18,7 +18,13 @@ class BackendNodeLifecycleTests(unittest.TestCase):
     setUp = test_backend_operations.BackendOperationTests.setUp
     headers_for = test_backend_operations.BackendOperationTests.headers_for
     create = test_backend_operations.BackendOperationTests.create
-    prepare = test_backend_operations.BackendOperationTests.prepare
+    def prepare(self, *args, **kwargs):
+        profile = test_backend_operations.BackendOperationTests.prepare(self, *args, **kwargs)
+        # These lifecycle cases operate on a provisioned VPN node. A zero
+        # applied revision represents an unprovisioned/agent-only host instead.
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_nodes SET applied_revision=desired_revision WHERE key='node'")
+        return profile
     grants = test_backend_operations.BackendOperationTests.grants
 
     def actor(self):

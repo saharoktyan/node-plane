@@ -132,6 +132,11 @@ pub(in crate::tui) fn draw_node_editor(
             if editor.source["agent_installed"]
                 .as_bool()
                 .unwrap_or(editor.source["applied_revision"].as_u64().unwrap_or(0) > 0)
+                && (!editor.protocols.is_empty()
+                    || editor.source["protocols"]
+                        .as_array()
+                        .is_some_and(|p| !p.is_empty())
+                    || editor.source["settings_apply_pending"] == true)
             {
                 "Save and apply these changes?"
             } else {
@@ -853,8 +858,8 @@ pub(in crate::tui) fn node_card_actions(
     }
     if !busy {
         actions.push(("Settings", Control::NodesEdit));
-        if node.installed_agent() && node.desired_revision > node.applied_revision {
-            actions.push(("Apply changes", Control::NodesApply));
+        if node.pending_settings() {
+            actions.push(("Apply VPN settings", Control::NodesApply));
         }
     }
     if node.installed_agent() {

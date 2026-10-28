@@ -1,4 +1,5 @@
-//! Rolling host CPU counters. Guest time is already included in user/nice.
+//! Lightweight host resources and rolling CPU counters.
+//! Guest time is already included in user/nice.
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
@@ -7,6 +8,68 @@ use serde_json::{Value, json};
 pub const SAMPLE_SECONDS: u64 = 5;
 const WINDOW_SECONDS: u64 = 60;
 const MAX_GAP_SECONDS: u64 = 15;
+
+/// Lightweight host readings, independent of Docker and runtime scripts.
+pub fn resources() -> Value {
+    parse_resources(
+        std::fs::read_to_string("/proc/meminfo").ok().as_deref(),
+        std::fs::read_to_string("/proc/loadavg").ok().as_deref(),
+        std::fs::read_to_string("/proc/stat").ok().as_deref(),
+    )
+}
+
+fn parse_resources(memory: Option<&str>, load: Option<&str>, stat: Option<&str>) -> Value {
+    let mut result = json!({});
+    if let Some(raw) = memory {
+        let field = |name: &str| -> Option<u64> {
+            let line = raw.lines().find(|line| line.starts_with(name))?;
+            let mut fields = line.split_whitespace();
+            fields.next()?;
+            let value: u64 = fields.next()?.parse().ok()?;
+            (fields.next()? == "kB").then_some(value)
+        };
+        if let (Some(total), Some(available)) = (field("MemTotal:"), field("MemAvailable:"))
+            && total > 0
+            && available <= total
+            && let (Some(total_bytes), Some(available_bytes)) =
+                (total.checked_mul(1024), available.checked_mul(1024))
+        {
+            result["ram_used_percent"] =
+                json!((1000.0 * (total - available) as f64 / total as f64).round() / 10.0);
+            result["ram_total_bytes"] = json!(total_bytes);
+            result["ram_available_bytes"] = json!(available_bytes);
+        }
+    }
+    if let Some(raw) = load {
+        for (key, value) in ["load1", "load5", "load15"]
+            .into_iter()
+            .zip(raw.split_whitespace())
+        {
+            if let Ok(value) = value.parse::<f64>()
+                && value.is_finite()
+                && value >= 0.0
+            {
+                result[key] = json!(value);
+            }
+        }
+    }
+    if let Some(raw) = stat {
+        let cpus = raw
+            .lines()
+            .filter(|line| {
+                line.split_whitespace().next().is_some_and(|label| {
+                    label.strip_prefix("cpu").is_some_and(|suffix| {
+                        !suffix.is_empty() && suffix.bytes().all(|c| c.is_ascii_digit())
+                    })
+                })
+            })
+            .count();
+        if cpus > 0 {
+            result["cpus"] = json!(cpus);
+        }
+    }
+    result
+}
 
 #[derive(Default)]
 pub struct CpuSampler {
@@ -90,6 +153,25 @@ impl CpuSampler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn host_resources_use_available_memory_and_online_cpu_count() {
+        let value = parse_resources(
+            Some("MemTotal: 1000 kB\nMemAvailable: 100 kB\n"),
+            Some("4.2 3.1 2.0 1/99 12"),
+            Some("cpu 1 2 3 4\ncpu0 1 2\ncpu1 1 2\nintr 12\n"),
+        );
+        assert_eq!(value["ram_used_percent"], 90.0);
+        assert_eq!(value["ram_total_bytes"], 1024000);
+        assert_eq!(value["cpus"], 2);
+        assert_eq!(value["load1"], 4.2);
+        assert_eq!(parse_resources(None, None, None), json!({}));
+        let invalid = parse_resources(
+            Some("MemTotal: 100 kB\nMemAvailable: 101 kB"),
+            Some("NaN -1 nope"),
+            Some("cpu 1 2 3 4\n"),
+        );
+        assert_eq!(invalid, json!({}));
+    }
     #[test]
     fn aggregate_excludes_guest_double_counting_and_uses_a_full_recent_window() {
         assert_eq!(

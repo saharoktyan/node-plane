@@ -4751,6 +4751,39 @@ fn backup_and_alert_choices_are_hidden_until_enabled_and_submit_exact_values() {
         Control::ControllerAlertInterval(_) | Control::ControllerAlertToggle("notify_resolved")
     )));
     app.controller.alerts.as_mut().unwrap()["enabled"] = true.into();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    let caption: String = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect();
+    for label in ["Reminders:", "Off", "30m", "1h", "3h"] {
+        assert!(caption.contains(label), "missing reminder label {label}");
+    }
+    let reminder_areas: Vec<_> = [0, 30, 60, 180]
+        .iter()
+        .map(|n| {
+            app.hits
+                .iter()
+                .find(|hit| hit.control == Control::ControllerAlertInterval(*n))
+                .unwrap()
+                .area
+        })
+        .collect();
+    assert!(
+        reminder_areas
+            .iter()
+            .all(|area| area.y == reminder_areas[0].y)
+    );
+    for minutes in [0, 30, 60, 180] {
+        app.nodes_requested = None;
+        app.activate(Control::ControllerAlertInterval(minutes));
+        assert!(
+            matches!(&app.nodes_requested,Some(crate::nodes::Command::Controller(_,crate::controller::Command::AlertPreferences(v))) if v["repeat_minutes"]==minutes)
+        );
+    }
     for minutes in [3, 5, 10] {
         app.nodes_requested = None;
         app.activate(Control::ControllerAlertInterval(minutes));
@@ -4761,6 +4794,10 @@ fn backup_and_alert_choices_are_hidden_until_enabled_and_submit_exact_values() {
     app.nodes_requested = None;
     app.activate(Control::ControllerAlertInterval(15));
     assert!(app.nodes_requested.is_none());
+    assert_eq!(
+        crate::tui::choice_row_label(Control::ControllerAlertInterval(0)),
+        Some("Reminders:")
+    );
     assert_eq!(format_backup_size(2486), "2.4 KiB");
 }
 
@@ -6211,7 +6248,10 @@ fn installed_agent_only_keeps_maintenance_when_unreachable_and_can_drop_all_prot
     );
     assert!(!actions.iter().any(|(_, control)| matches!(
         control,
-        Control::NodesSetup | Control::NodeTemporary | Control::NodesRemove(_)
+        Control::NodesSetup
+            | Control::NodeTemporary
+            | Control::NodesRemove(_)
+            | Control::NodesApply
     )));
     let mut editor = node_settings_editor();
     editor.source["xray_transports"] = serde_json::json!(["tcp"]);

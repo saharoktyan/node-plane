@@ -297,9 +297,13 @@ fn rollout_needs_update(rollout: &serde_json::Value) -> Result<bool> {
         .as_array()
         .context("Backend did not report node versions")?;
     let known = rollout["driver_status"] == "current"
-        && nodes
-            .iter()
-            .all(|node| node["agent_status"] == "current" && node["runtime_status"] == "current");
+        && nodes.iter().all(|node| {
+            node["agent_status"] == "current"
+                && matches!(
+                    node["runtime_status"].as_str(),
+                    Some("current" | "not_applicable")
+                )
+        });
     ensure!(
         known,
         "The controller is up to date, but agent/runtime versions could not be verified. Check node connectivity in the bot; no update was submitted."
@@ -1088,6 +1092,8 @@ mod tests {
         let mut nodes = current.clone();
         nodes["nodes"] =
             serde_json::json!([{"agent_status": "current", "runtime_status": "current"}]);
+        assert!(!super::rollout_needs_update(&nodes).unwrap());
+        nodes["nodes"][0]["runtime_status"] = "not_applicable".into();
         assert!(!super::rollout_needs_update(&nodes).unwrap());
         nodes["nodes"][0]["agent_status"] = "unknown".into();
         assert!(super::rollout_needs_update(&nodes).is_err());

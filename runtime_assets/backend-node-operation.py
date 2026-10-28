@@ -239,8 +239,11 @@ def managed_ports():
 
 
 def run(action, intent, lock_fd):
+    if action in {'cleanup_runtime', 'bootstrap', 'reinstall_clean', 'reinstall_keep',
+                  'sync_env', 'sync_xray', 'sync_runtime', 'regenerate_entropy'}:
+        intents.verify_node_runtime_owner(intent)
     if action == 'cleanup_runtime':
-        remove_protocol_runtime(lock_fd)
+        remove_protocol_runtime(lock_fd, intent['protocols'])
         return {'cleaned': True}
     if action == 'check_ports':
         statuses = []
@@ -279,7 +282,7 @@ def run(action, intent, lock_fd):
         if any(not facts[p + '_config_valid'] for p in intent['protocols']):
             raise ValueError('reusable protocol config is missing')
     if action == 'reinstall_clean':
-        remove_protocol_runtime(lock_fd)
+        remove_protocol_runtime(lock_fd, intent['protocols'])
     # Bootstrap/reinstall/repair share the same settings verifier. Existing
     # identities are preserved unless clean reinstall explicitly removed them.
     settings_intent = {'kind': 'node_settings', **intent}

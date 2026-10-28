@@ -104,6 +104,9 @@ class AgentNodeOperationTests(unittest.TestCase):
         policy.start()
         self.addCleanup(policy.stop)
         self.path = Path(self.temp.name) / 'journal.sqlite3'
+        owner = patch.object(MODULE.intents, 'verify_node_runtime_owner')
+        self.owner_check = owner.start()
+        self.addCleanup(owner.stop)
         self.intent = {'node_key': 'n1', 'command_id': 'job1', 'revision': 2,
             'protocols': ['awg'], 'settings': {'public_host': 'node.example', 'awg_port': 51820}}
 
@@ -120,6 +123,13 @@ class AgentNodeOperationTests(unittest.TestCase):
                 self.assertEqual(MODULE.run(action, self.intent, 17), {'applied': True})
                 settings.assert_called_once_with({'kind': 'node_settings', **self.intent}, 17)
                 self.assertEqual(cleanup.call_count, int(action == 'reinstall_clean'))
+                if action == 'reinstall_clean':
+                    cleanup.assert_called_once_with(17, ['awg'])
+
+    def test_runtime_cleanup_is_scoped_to_the_nodes_vpn_protocols(self):
+        with patch.object(MODULE, 'remove_protocol_runtime') as cleanup:
+            self.assertEqual(MODULE.run('cleanup_runtime', self.intent, 17), {'cleaned': True})
+        cleanup.assert_called_once_with(17, ['awg'])
 
     def test_protocol_progress_survives_failure_without_replaying_command(self):
         from uuid import uuid4

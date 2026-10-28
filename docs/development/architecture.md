@@ -43,7 +43,7 @@ Root access remains a privileged trust boundary. Audit attributes actions but ca
 
 The controller installation manifest identifies owned directories, services and local database resources. Node removal captures configured runtime, agent, TLS and journal paths against a host identity. Full retirement requires independent verification of the captured resources.
 
-Delete managed containers by verified identity and mounts. Preserve shared host packages, Docker, unrelated containers/images, firewall rules and unrelated SSH keys. Registry-only retirement records unverified host state.
+Delete managed containers by verified identity and mounts. Preserve shared host packages, Docker, unrelated containers/images, firewall rules and unrelated SSH keys. Registry-only retirement records unverified host state. An agent-only registration does not acquire ownership of pre-existing VPN runtime. Full removal stops before remote cleanup if that runtime is present or its absence cannot be confirmed; it does not silently adopt or delete it.
 
 ## Persistence and compatibility
 
@@ -53,4 +53,13 @@ Configuration backups are snapshots of supported controller configuration; they 
 
 The controller installation UUID binds agent journals to their owner. Onboarding under another installation archives the previous journals after stopping the agent. Archival does not remove protocol access; reconcile existing runtime before granting new access.
 
-Future service support is described in [Vaultwarden expansion](../design/service-expansion.md).
+## Node and service boundaries (pre-1.0)
+
+Pre-1.0 boundaries separate four distinct concerns without a generalized service database schema migration:
+
+- **Base node**: Registry entity (`backend_nodes`) representing host identity, region, metadata, and transport connection target (`local` or `ssh`). A base node exists independently of whether an agent is present or runtime services are configured.
+- **Installed agent**: Host-local agent binary and systemd service. Installation evidence (`agent_installed`) is derived from durable records (such as completed agent rollout or applied revisions), never from live reachability.
+- **Connectivity**: Ephemeral reachability over driver mTLS. Transport failures or timeouts are transient observations that never clear installed agent status or alter durable records.
+- **VPN / Runtime services**: Containerized protocol runtimes (AmneziaWG, Xray). Runtime apply and removal intents target only VPN services. `settings_apply_pending` uses the desired protocols and confirmed applied runtime receipts; an agent-only node does not need an empty apply. Metadata/SSH edits save registry state without deploying VPN, and removing VPN does not uninstall the agent. The existing desired/applied revision columns remain compatibility counters shared by these records until the post-1.0 migration.
+
+API admission, worker coordination and client presentation enforce these boundaries while retaining the existing schema. Host resource/connectivity alerts continue independently of VPN enablement; VPN health checks and runtime updates require applicable VPN services. Legacy diagnostic wire fields remain for compatibility and are not proof that a service is configured. Full generalization into dedicated `node_services` tables and independent per-service lifecycles is planned after 1.0.0 (see [Roadmap](../roadmap.md) and [Vaultwarden expansion](../design/service-expansion.md)).

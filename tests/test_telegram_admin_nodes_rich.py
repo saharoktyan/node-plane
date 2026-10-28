@@ -9,6 +9,33 @@ from telegram_client.i18n import tr
 
 
 class AdminNodeRichTests(IsolatedAsyncioTestCase):
+    async def test_agent_only_technical_menu_has_host_diagnostics_without_vpn_actions(self):
+        self.node.update(protocols=[], applied_revision=0, agent_installed=True)
+        self.query.data = 'node_tools:msk1'
+        with patch.object(tools, 'render', new_callable=AsyncMock) as draw:
+            await tools.tools_cb(self.query, self.bot, self.backend, self.state)
+        callbacks = self.callbacks(draw)
+        self.assertIn('node_view:diagnostics:msk1', callbacks)
+        self.assertFalse(any(c.startswith('node_action:') for c in callbacks))
+        self.assertNotIn('node_view:runtime:msk1', callbacks)
+        self.assertNotIn('node_view:repair:msk1', callbacks)
+        self.assertNotIn('node_view:ports:msk1', callbacks)
+        self.query.data = 'node_view:runtime:msk1'
+        with patch.object(nodes, 'show_admin_node', new_callable=AsyncMock) as show:
+            await tools.view_cb(self.query, self.bot, self.backend, self.state)
+        show.assert_awaited_once()
+        self.backend.node_services.assert_not_awaited()
+
+    async def test_legacy_diagnostics_do_not_show_missing_vpn_as_an_agent_only_failure(self):
+        self.node.update(protocols=[], applied_revision=0, agent_installed=True)
+        self.backend.node_diagnostics = AsyncMock(return_value={
+            'docker': 'missing', 'runtime_root': 'missing', 'xray_config': 'missing', 'awg_config': 'missing'})
+        self.query.data = 'node_diagnostics:msk1'
+        with patch.object(nodes, 'render', new_callable=AsyncMock) as draw:
+            await nodes.node_diagnostics_cb(self.query, self.bot, self.backend, self.state)
+        self.assertEqual(draw.call_args.args[2].sections[0].lines,
+                         (tr('en', 'nodes.diagnostics.agent_only'),))
+
     async def test_installed_agent_only_card_keeps_probe_and_management_without_setup(self):
         self.node.update(protocols=[], xray_transports=[], applied_revision=0, agent_installed=True)
         with patch.object(nodes, 'render', new_callable=AsyncMock) as draw:
@@ -17,6 +44,8 @@ class AdminNodeRichTests(IsolatedAsyncioTestCase):
             self.assertIn('node_manage:msk1', callbacks)
             self.assertTrue(any(c.startswith('probe_node:') for c in callbacks), callbacks)
             self.assertNotIn('bootstrap_menu:msk1', callbacks)
+            self.assertFalse(any(c.startswith('apply_node:') for c in callbacks))
+            self.assertEqual(await nodes.draft_controls(self.node, self.state, 'en'), [])
             self.query.data = 'node_manage:msk1'
             await nodes.node_manage_cb(self.query, self.bot, self.backend, self.state)
             self.assertNotIn('bootstrap_menu:msk1', self.callbacks(draw))

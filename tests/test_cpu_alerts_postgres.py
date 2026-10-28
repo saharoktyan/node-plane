@@ -76,6 +76,8 @@ class CpuMonitoringPostgresTests(TestCase):
                 self.driver.host_metrics.return_value = cpu(20)
                 clock.now.return_value = start+timedelta(seconds=30)
                 self.assertTrue(self.alerts.scheduled(cpu_only=True))
+                clock.now.return_value = start+timedelta(seconds=60)
+                self.assertTrue(self.alerts.scheduled(cpu_only=True))
             finally:
                 release.set()
             self.assertTrue(full.result(5))
@@ -110,3 +112,52 @@ class CpuMonitoringPostgresTests(TestCase):
             release.set()
             thread.join(5)
         self.assertFalse(thread.is_alive())
+
+    def test_parallel_due_reminder_commits_only_once(self):
+        self.alerts.preferences(self.actor, {'repeat_minutes': 30})
+        start = datetime.now(timezone.utc)
+        barrier = threading.Barrier(2)
+        def inspect(key):
+            barrier.wait(5)
+            return cpu(96)
+        with patch('backend.alerts.datetime') as clock:
+            clock.fromisoformat = datetime.fromisoformat
+            clock.now.return_value = start
+            self.assertTrue(self.alerts.scheduled(cpu_only=True))
+            clock.now.return_value = start + timedelta(minutes=30)
+            self.driver.inspect_node_services.side_effect = inspect
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                jobs = [pool.submit(self.alerts.scheduled) for _ in range(2)]
+                self.assertEqual(sorted(job.result(10) for job in jobs), [False, True])
+        with self.db.connect() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) AS n FROM backend_alert_events WHERE kind='cpu_high'").fetchone()['n'], 2)
+
+    def test_older_fast_scan_cannot_recreate_la_or_ram_after_newer_full_recovery(self):
+        entered, release = threading.Event(), threading.Event()
+        high = {'host_metrics': {'ram_used_percent': 95, 'load1': 5, 'cpus': 2}}
+        healthy = {'host_metrics': {'ram_used_percent': 40, 'load1': 0.1, 'cpus': 2}}
+        self.driver.host_metrics.return_value = high
+        start = datetime.now(timezone.utc)
+        def inspect(key):
+            entered.set()
+            release.wait(5)
+            return high
+        with patch('backend.alerts.datetime') as clock, ThreadPoolExecutor(max_workers=1) as pool:
+            clock.fromisoformat = datetime.fromisoformat
+            clock.now.return_value = start - timedelta(seconds=30)
+            self.assertTrue(self.alerts.scheduled(cpu_only=True))
+            self.driver.host_metrics.side_effect = inspect
+            clock.now.return_value = start
+            old = pool.submit(self.alerts.scheduled, cpu_only=True)
+            try:
+                self.assertTrue(entered.wait(3))
+                self.driver.inspect_node_services.return_value = healthy
+                for seconds in (30, 60):
+                    clock.now.return_value = start + timedelta(seconds=seconds)
+                    self.assertTrue(self.alerts.scheduled())
+            finally:
+                release.set()
+            self.assertTrue(old.result(5))
+        self.assertEqual(self.alerts.overview(self.actor)['active_count'], 0)
+        with self.db.connect() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) AS n FROM backend_alert_events WHERE resolved=1").fetchone()['n'], 2)

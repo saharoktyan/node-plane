@@ -1521,9 +1521,6 @@ impl AgentState {
         if !preserve_config {
             self.runtime_cleanup_directories()?;
         }
-        let xray_image = self.node_env_value("XRAY_DOCKER_IMAGE", "ghcr.io/xtls/xray-core:26.3.27");
-        let awg_image =
-            self.node_env_value("AWG_DOCKER_IMAGE", "node-plane-amnezia-awg:3.1.20260828");
 
         if !self.docker_available()
             && Command::new("docker")
@@ -1551,11 +1548,8 @@ impl AgentState {
                     "managed containers still present",
                 ));
             }
-            // Images are a host-wide cache, possibly shared by other services.
-            // Docker refuses removal while any container uses them; never force
-            // removal or delete unrelated historical tags by name alone.
-            self.docker_best_effort(&["rmi", &xray_image]);
-            self.docker_best_effort(&["rmi", &awg_image]);
+            // Images belong to the host-wide Docker cache, not this node's
+            // runtime lifecycle. Keep them even when no container uses them.
         }
 
         let mut leftovers = Vec::new();
@@ -1768,6 +1762,43 @@ fi
     }
 }
 
+// New commands carry an explicit protocol plan. Legacy array requests retain
+// their exact journal fingerprints for read-only recovery. Older agents reject
+// the new object before invoking runtime mutations instead of inferring cleanup.
+fn backend_settings_intent(
+    req: &agent::v1::ApplyBackendNodeSettingsRequest,
+) -> Result<Value, Status> {
+    let parsed: Value = serde_json::from_str(&req.protocols_json)
+        .map_err(|_| Status::invalid_argument("invalid protocols"))?;
+    let (protocols, plan) = if parsed.is_array() {
+        (parsed, None)
+    } else if let Some(object) = parsed.as_object() {
+        if object.len() != 2
+            || !object.contains_key("protocols")
+            || !object.contains_key("protocol_plan")
+        {
+            return Err(Status::invalid_argument("invalid protocol plan"));
+        }
+        (
+            object["protocols"].clone(),
+            Some(object["protocol_plan"].clone()),
+        )
+    } else {
+        return Err(Status::invalid_argument("invalid protocol plan"));
+    };
+    let mut intent = serde_json::json!({
+        "kind": "node_settings", "node_key": req.node_key,
+        "command_id": req.command_id, "revision": req.desired_revision,
+        "protocols": protocols,
+        "settings": serde_json::from_str::<Value>(&req.settings_json)
+            .map_err(|_| Status::invalid_argument("invalid settings"))?,
+    });
+    if let Some(plan) = plan {
+        intent["protocol_plan"] = plan;
+    }
+    Ok(intent)
+}
+
 #[tonic::async_trait]
 impl NodeAgentService for NodeAgentApi {
     async fn backend_node_action(
@@ -1779,9 +1810,16 @@ impl NodeAgentService for NodeAgentApi {
             return Err(Status::failed_precondition("agent node identity mismatch"));
         }
         if req.action == "host_metrics" {
+            let mut metrics = host_metrics::resources();
+            if let (Some(resources), Some(cpu)) = (
+                metrics.as_object_mut(),
+                self.state.cpu_metrics().as_object(),
+            ) {
+                resources.extend(cpu.iter().map(|(key, value)| (key.clone(), value.clone())));
+            }
             return Ok(Response::new(RuntimeCommandResponse {
-                summary: "host CPU observation".into(),
-                payload_json: serde_json::json!({"node_key": self.state.config.node_key, "host_metrics": self.state.cpu_metrics()}).to_string(),
+                summary: "host resource observation".into(),
+                payload_json: serde_json::json!({"node_key": self.state.config.node_key, "host_metrics": metrics}).to_string(),
             }));
         }
         if req.action == "operation_progress" {
@@ -2078,14 +2116,7 @@ impl NodeAgentService for NodeAgentApi {
                 "node identity or revision mismatch",
             ));
         }
-        let intent = serde_json::json!({
-            "kind": "node_settings", "node_key": req.node_key,
-            "command_id": req.command_id, "revision": req.desired_revision,
-            "protocols": serde_json::from_str::<Value>(&req.protocols_json)
-                .map_err(|_| Status::invalid_argument("invalid protocols"))?,
-            "settings": serde_json::from_str::<Value>(&req.settings_json)
-                .map_err(|_| Status::invalid_argument("invalid settings"))?,
-        });
+        let intent = backend_settings_intent(&req)?;
         let output = self
             .state
             .run_runtime_command(
@@ -2117,14 +2148,7 @@ impl NodeAgentService for NodeAgentApi {
                 "node identity or revision mismatch",
             ));
         }
-        let intent = serde_json::json!({
-            "kind": "node_settings", "node_key": req.node_key,
-            "command_id": req.command_id, "revision": req.desired_revision,
-            "protocols": serde_json::from_str::<Value>(&req.protocols_json)
-                .map_err(|_| Status::invalid_argument("invalid protocols"))?,
-            "settings": serde_json::from_str::<Value>(&req.settings_json)
-                .map_err(|_| Status::invalid_argument("invalid settings"))?,
-        });
+        let intent = backend_settings_intent(&req)?;
         let output = self
             .state
             .run_runtime_command(
@@ -2154,14 +2178,7 @@ impl NodeAgentService for NodeAgentApi {
                 "node identity or revision mismatch",
             ));
         }
-        let intent = serde_json::json!({
-            "kind": "node_settings", "node_key": req.node_key,
-            "command_id": req.command_id, "revision": req.desired_revision,
-            "protocols": serde_json::from_str::<Value>(&req.protocols_json)
-                .map_err(|_| Status::invalid_argument("invalid protocols"))?,
-            "settings": serde_json::from_str::<Value>(&req.settings_json)
-                .map_err(|_| Status::invalid_argument("invalid settings"))?,
-        });
+        let intent = backend_settings_intent(&req)?;
         let output = self
             .state
             .run_runtime_command(
@@ -2556,6 +2573,32 @@ fn diagnostic_ports(xray: &str, awg: &str) -> Vec<PortCheckSpec> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn settings_plan_is_explicit_and_legacy_recovery_keeps_its_shape() {
+        use super::{agent, backend_settings_intent};
+        let mut request = agent::v1::ApplyBackendNodeSettingsRequest {
+            command_id: "command".into(),
+            node_key: "de1".into(),
+            desired_revision: 1,
+            protocols_json: "[\"awg\"]".into(),
+            settings_json: "{}".into(),
+        };
+        let legacy = backend_settings_intent(&request).unwrap();
+        assert_eq!(legacy["protocols"], serde_json::json!(["awg"]));
+        assert!(legacy.get("protocol_plan").is_none());
+        request.protocols_json = serde_json::json!({"protocols": [],
+            "protocol_plan": {"remove_protocols": ["awg"]}})
+        .to_string();
+        let planned = backend_settings_intent(&request).unwrap();
+        assert_eq!(planned["protocols"], serde_json::json!([]));
+        assert_eq!(
+            planned["protocol_plan"]["remove_protocols"],
+            serde_json::json!(["awg"])
+        );
+        request.protocols_json = "{\"protocols\":[]}".into();
+        assert!(backend_settings_intent(&request).is_err());
+    }
+
     #[tokio::test]
     async fn host_metric_rpc_is_bound_to_node_and_does_not_need_runtime_files() {
         use super::{NodeAgentApi, NodeAgentService, agent};

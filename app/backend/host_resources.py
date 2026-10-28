@@ -13,6 +13,14 @@ MAX_AGE_SECONDS = 15
 CPU_WARNING = 85
 CPU_CRITICAL = 95
 CPU_RECOVERED = 80
+LOAD_TRIGGER = 2.0
+LOAD_RECOVERED = 1.5
+RAM_TRIGGER = 90
+RAM_RECOVERED = 85
+DISK_TRIGGER = 10
+DISK_RECOVERED = 12
+REPEAT_CHOICES = (0, 30, 60, 180)
+DEFAULT_REPEAT_MINUTES = 60
 
 
 def cpu_metrics(metrics):
@@ -80,9 +88,9 @@ def monitor(db, driver, stop):
                 try:
                     AlertService(db, driver, stop=stop).scheduled(cpu_only=True)
                 except Exception as exc:
-                    logging.getLogger(__name__).warning('CPU alert check temporarily unavailable: type=%s', type(exc).__name__)
+                    logging.getLogger(__name__).warning('Host resource alert check temporarily unavailable: type=%s', type(exc).__name__)
                 stop.wait(SAMPLE_SECONDS)
-    scanner = threading.Thread(target=scan, name='cpu-alert-check', daemon=True)
+    scanner = threading.Thread(target=scan, name='host-alert-check', daemon=True)
     scanner.start()
     try:
         with worker_connections():

@@ -259,6 +259,9 @@ class RecoveryFollowupTests(unittest.TestCase):
     def test_real_queued_agents_failure_then_recovery_then_next_operation(self):
         service = self.service()
         self.node()
+        # The second half deliberately updates an installed VPN runtime.
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_nodes SET protocols_json=? WHERE key='lv1'", ('["awg"]',))
         service.driver.inspect_node_services.return_value = {'agent_commit': 'old' * 10, 'runtime_commit': 'a' * 40}
 
         with patch('config.APP_COMMIT', 'a' * 40):

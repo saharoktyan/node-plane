@@ -22,6 +22,11 @@ _SETTINGS = frozenset({'public_host', 'xray_host', 'xray_sni', 'xray_tcp_port',
                        'xray_fingerprint', 'awg_interface', 'awg_i1_preset', 'awg_port_mode', 'awg_parameters', 'ipv6_outbound'})
 _PORTS = frozenset({'xray_tcp_port', 'xray_xhttp_port', 'awg_port'})
 _SSH_TARGET = re.compile(r'(?:[A-Za-z_][A-Za-z0-9._-]*@)?(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:]+\])\Z')
+AGENT_INSTALLED_SQL = """(n.applied_revision>0 OR EXISTS (
+    SELECT 1 FROM backend_agent_rollouts a WHERE a.node_key=n.key AND a.status='succeeded')
+    OR EXISTS (SELECT 1 FROM backend_node_settings_tasks s WHERE s.node_key=n.key AND s.status='succeeded')
+    OR EXISTS (SELECT 1 FROM backend_node_jobs j WHERE j.node_key=n.key AND j.status='succeeded'
+        AND j.action IN ('bootstrap','reinstall_keep','reinstall_clean','cleanup_runtime')))"""
 
 
 def protocol_defaults(settings, protocols):
@@ -146,11 +151,29 @@ def agent_installed(node):
     return bool(node['agent_installed'] if 'agent_installed' in node.keys() else node['applied_revision'] > 0)
 
 
+def applied_protocols(node):
+    """Only successful node-owned settings/install receipts authorize removal."""
+    if node['applied_revision'] == 0:
+        return []
+    raw = node['last_runtime_intent_json'] if 'last_runtime_intent_json' in node.keys() else None
+    if raw:
+        value = json.loads(raw).get('protocols')
+        if isinstance(value, list) and all(item in {'awg', 'xray'} for item in value):
+            return sorted(set(value))
+    return None
+
+
+def settings_apply_pending(node):
+    if not agent_installed(node) or node['desired_revision'] <= node['applied_revision']:
+        return False
+    return bool(json.loads(node['protocols_json']) or applied_protocols(node))
+
+
 def require_runtime(node):
     """Reject runtime tools on a registry-only entry before creating any job.
 
-    A temporarily unreachable installed node still has an applied revision;
-    connectivity is deliberately not used as an installation-state predicate.
+    Agent installation evidence is independent of VPN revisions and current
+    connectivity, including an installed agent that never hosted VPN services.
     Setup and registry removal have their own independent admission paths.
     """
     if not agent_installed(node):
@@ -194,6 +217,7 @@ class NodeService:
                 'policy_eligible': bool(row['policy_eligible']),
                 'setup_attempted': bool(row['setup_attempted']),
                 'agent_installed': bool(row['agent_installed']),
+                'settings_apply_pending': settings_apply_pending(row),
                 'protocols': json.loads(row['protocols_json']),
                 'xray_transports': json.loads(row['xray_transports_json']),
                 'desired_revision': row['desired_revision'], 'applied_revision': row['applied_revision'],
@@ -202,10 +226,15 @@ class NodeService:
 
     @staticmethod
     def _select():
-        return '''SELECT n.*, c.transport, c.ssh_target, m.notes, r.region_id,
-            CASE WHEN n.applied_revision>0 OR EXISTS (
-                SELECT 1 FROM backend_agent_rollouts a WHERE a.node_key=n.key AND a.status='succeeded'
-            ) THEN 1 ELSE 0 END AS agent_installed,
+        return f'''SELECT n.*, c.transport, c.ssh_target, m.notes, r.region_id,
+            (SELECT history.intent_json FROM (
+                SELECT s.node_key,s.revision,s.intent_json FROM backend_node_settings_tasks s WHERE s.status='succeeded'
+                UNION ALL
+                SELECT j.node_key,j.revision,j.intent_json FROM backend_node_jobs j
+                    WHERE j.status='succeeded' AND j.action IN ('bootstrap','reinstall_keep','reinstall_clean','sync_env','sync_xray')
+            ) history WHERE history.node_key=n.key AND history.revision<=n.applied_revision
+                ORDER BY history.revision DESC LIMIT 1) AS last_runtime_intent_json,
+            CASE WHEN {AGENT_INSTALLED_SQL} THEN 1 ELSE 0 END AS agent_installed,
             CASE WHEN n.applied_revision>0
                 OR EXISTS (SELECT 1 FROM backend_agent_rollouts a WHERE a.node_key=n.key)
                 OR EXISTS (SELECT 1 FROM backend_node_jobs j WHERE j.node_key=n.key)
@@ -438,7 +467,9 @@ class NodeService:
                     if any(item['protocol'] not in next_values['protocols'] for item in temporary):
                         raise AccessDenied('node_protocol_in_use', 409)
                 runtime_changed = any(next_values[field] != previous_values[field]
-                    for field in ('protocols', 'xray_transports', 'settings', 'transport', 'ssh_target'))
+                    for field in ('protocols', 'xray_transports', 'settings'))
+                if not previous_values['protocols'] and not next_values['protocols']:
+                    runtime_changed = False
                 conn.execute('''UPDATE backend_nodes SET title = ?, region = ?, flag = ?,
                     protocols_json = ?, xray_transports_json = ?, settings_json = ?,
                     applied_revision = CASE WHEN ? = 1 AND applied_revision=desired_revision

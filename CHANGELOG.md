@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 1.0.0-beta.5 - 2026-10-28
+
+- Separate base-node and SSH edits from VPN settings application. Keep installed-agent evidence independent of VPN revisions, hide spurious Apply actions on agent-only nodes and skip absent VPN runtimes during updates.
+- Remove protocols only through an explicit managed removal plan; verify the runtime node identity before mutation and preserve shared Docker images. Refuse full agent-only removal when unrelated or unconfirmed VPN runtime is present, instead of deleting it.
+- Recover obsolete empty agent-only settings tasks through the existing fenced recovery flow without replaying protocol setup. Require applied VPN services for VPN-only maintenance actions and resolve pending settings before destructive cleanup.
+- Monitor host resources on installed agent-only nodes. Add lightweight native RAM and load-average readings alongside rolling CPU metrics; use fixed monitoring checks independently of notification preferences.
+- Add persistent alert reminders with Off / 30m / 1h / 3h choices (default 1h). Keep initial alerts, one critical escalation per unresolved CPU incident and confirmed recovery independent of reminders; use recovery hysteresis and consecutive healthy checks to prevent CPU/load/RAM/disk notification churn. Serialize overlapping checks to avoid duplicate reminders and stale results reopening recovered alerts.
+- Clarify VPN-specific operation stages and document the node/service boundary; the full generalized service lifecycle remains planned after 1.0.
+
 ## 1.0.0-beta.4 - 2026-10-28
 
 - Track agent installation separately from VPN settings revisions. Keep Probe, Telegram Management and Workstation Maintenance available on installed agent-only nodes, including verified full removal; report connection failures during live diagnostics.

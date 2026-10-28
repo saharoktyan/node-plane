@@ -42,7 +42,7 @@ class GrpcIntentDriver:
         return json.loads(response.result_json)
 
     def host_metrics(self, node_key):
-        """Cheap read of the agent's rolling CPU sample; never synchronize runtime files."""
+        """Cheap host metrics read; never synchronize runtime files or inspect Docker."""
         from driver.v1 import runtime_service_pb2
         import json
         response = self.runtime.BackendNodeAction(runtime_service_pb2.BackendNodeActionRequest(
@@ -158,9 +158,12 @@ class GrpcIntentDriver:
     def node_settings_request(intent):
         from driver.v1 import runtime_service_pb2
         import json
+        protocols = intent['protocols']
+        if 'protocol_plan' in intent:
+            protocols = {'protocols': protocols, 'protocol_plan': intent['protocol_plan']}
         return runtime_service_pb2.ApplyBackendNodeSettingsRequest(
             node_key=intent['node_key'], desired_revision=intent['revision'],
-            protocols_json=json.dumps(intent['protocols'], sort_keys=True, separators=(',', ':')),
+            protocols_json=json.dumps(protocols, sort_keys=True, separators=(',', ':')),
             settings_json=json.dumps(intent['settings'], sort_keys=True, separators=(',', ':')))
 
     def apply_node_settings(self, task_id, intent):

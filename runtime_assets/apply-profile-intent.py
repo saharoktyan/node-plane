@@ -585,7 +585,8 @@ def awg_profile_module():
 
 
 def validate_node_settings(intent):
-    if not isinstance(intent, dict) or set(intent) != {'kind', 'node_key', 'command_id', 'revision', 'protocols', 'settings'}:
+    fields = {'kind', 'node_key', 'command_id', 'revision', 'protocols', 'settings'}
+    if not isinstance(intent, dict) or set(intent) not in (fields, fields | {'protocol_plan'}):
         raise ValueError('invalid node settings intent')
     if intent['kind'] != 'node_settings' or not isinstance(intent['node_key'], str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,63}', intent['node_key']):
         raise ValueError('invalid node key')
@@ -597,6 +598,15 @@ def validate_node_settings(intent):
     if (not isinstance(protocols, list) or len(protocols) > 2
             or len(set(protocols)) != len(protocols) or set(protocols) - {'awg', 'xray'}):
         raise ValueError('invalid protocols')
+    if 'protocol_plan' in intent:
+        plan = intent['protocol_plan']
+        if not isinstance(plan, dict) or set(plan) != {'remove_protocols'}:
+            raise ValueError('invalid protocol plan')
+        removed = plan['remove_protocols']
+        if (not isinstance(removed, list) or any(not isinstance(p, str) for p in removed)
+                or len(set(removed)) != len(removed) or set(removed) - {'awg', 'xray'}
+                or set(removed) & set(protocols)):
+            raise ValueError('invalid protocol removal')
     settings = intent['settings']
     fields = {'public_host', 'xray_host', 'xray_sni', 'xray_tcp_port', 'xray_xhttp_port',
               'xray_xhttp_path', 'awg_public_host', 'awg_port',
@@ -777,8 +787,9 @@ def resolve_node_settings(intent, path, inspector):
 
 def verify_node_settings_config(intent, xray_path, awg_path):
     settings = intent['settings']
+    removed = intent.get('protocol_plan', {}).get('remove_protocols', [])
     for protocol, path in (('xray', xray_path), ('awg', awg_path)):
-        if protocol not in intent['protocols'] and path and Path(path).exists():
+        if protocol in removed and path and Path(path).exists():
             raise ValueError('removed protocol config is still present')
     if 'xray' in intent['protocols']:
         data = json.loads(Path(xray_path).read_text())
@@ -851,6 +862,11 @@ def verify_node_settings_environment(intent, env_path):
 
 
 def inspect_node_settings_for_repair(intent, *, env_path=Path('/etc/node-plane/node.env')):
+    if not intent['protocols'] and not intent.get('protocol_plan', {}).get('remove_protocols'):
+        # This obsolete empty command has no authorized runtime target. The
+        # journal resolver still fences its exact identity after agent restart;
+        # do not inspect or change another installation to retire it.
+        return {'config_matches': False, 'containers_running': False}
     paths = subprocess.run(['bash', '-c', 'source "$1"; printf "%s\n%s\n%s\n%s\n" "${XRAY_CONFIG:-/opt/node-plane-runtime/xray/config.json}" "${AWG_CONFIG:-/opt/node-plane-runtime/amnezia-awg/data/wg0.conf}" "${XRAY_CONTAINER_NAME:-xray}" "${AWG_CONTAINER_NAME:-amnezia-awg}"',
                             'node-settings-paths', str(env_path)], check=True, capture_output=True,
                            text=True, timeout=30).stdout.splitlines()
@@ -860,7 +876,7 @@ def inspect_node_settings_for_repair(intent, *, env_path=Path('/etc/node-plane/n
     try:
         verify_node_settings_environment(intent, env_path)
         verify_node_settings_config(intent, paths[0], paths[1])
-        removed = sorted({'xray', 'awg'} - set(intent['protocols']))
+        removed = intent.get('protocol_plan', {}).get('remove_protocols', [])
         if removed and shutil.which('docker'):
             cleanup = settings_cleanup_module(Path(__file__).parent)
             removed_absent = not cleanup.owned_protocol_containers(*paths, protocols=removed)
@@ -930,7 +946,7 @@ def settings_cleanup_module(root):
 
 
 def remove_unselected_protocols(intent, lock_fd, root):
-    removed = sorted({'xray', 'awg'} - set(intent['protocols']))
+    removed = intent.get('protocol_plan', {}).get('remove_protocols', [])
     if not removed or not shutil.which('docker'):
         return
     cleanup = settings_cleanup_module(root)
@@ -941,14 +957,25 @@ def remove_unselected_protocols(intent, lock_fd, root):
         raise ValueError('removed protocol containers are still present')
 
 
+def verify_node_runtime_owner(intent, env_path=Path('/etc/node-plane/node.env')):
+    owner = subprocess.run(['bash', '-e', '-c', 'source "$1"; printf "%s" "${SERVER_KEY:-}"',
+                            'settings-runtime-owner', str(env_path)],
+                           check=True, capture_output=True, text=True, timeout=30).stdout
+    if owner != intent['node_key']:
+        raise ValueError('protocol runtime ownership is not confirmed for this node')
+
+
 def run_node_settings(intent, lock_fd, *, env_path=Path('/etc/node-plane/node.env'), root=Path(__file__).parent):
     """Apply to an already bootstrapped node; no implicit install or key reset."""
     installation_step('protocol_settings')
     settings = intent['settings']
+    if not intent['protocols'] and not intent.get('protocol_plan', {}).get('remove_protocols'):
+        raise ValueError('no VPN settings or authorized protocol removal requested')
     env_path = Path(env_path)
     root = Path(root)
     if not env_path.is_file() or not (root / 'apply-node-settings.sh').is_file():
         raise ValueError('node runtime is not bootstrapped')
+    verify_node_runtime_owner(intent, env_path)
     paths = subprocess.run(['bash', '-c', 'source "$1"; printf "%s\n%s\n%s\n%s\n" "${XRAY_CONFIG:-/opt/node-plane-runtime/xray/config.json}" "${AWG_CONFIG:-/opt/node-plane-runtime/amnezia-awg/data/wg0.conf}" "${XRAY_CONTAINER_NAME:-xray}" "${AWG_CONTAINER_NAME:-amnezia-awg}"',
                             'node-settings-paths', str(env_path)], check=True, capture_output=True, text=True).stdout.splitlines()
     if len(paths) != 4:

@@ -23,7 +23,7 @@ STAGES = {
     'runtime_sync': 'Preparing runtime files',
     'docker_install': 'Installing Docker',
     'docker_verify': 'Verifying Docker',
-    'protocol_settings': 'Preparing protocol settings',
+    'protocol_settings': 'Checking VPN prerequisites',
     'protocol_cleanup': 'Removing unselected VPN protocols',
     'awg_port': 'Selecting AWG port',
     'xray_init': 'Preparing Xray',

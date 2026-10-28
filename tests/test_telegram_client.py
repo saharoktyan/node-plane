@@ -737,7 +737,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         self.assertEqual(bot.send_rich_message.await_count,1)
         self.assertEqual(backend.announcement_ack.call_args.args[2],'unknown')
 
-    async def test_alert_policy_selected_interval_and_back_navigation(self):
+    async def test_alert_policy_selected_reminder_and_back_navigation(self):
         from telegram_client.routers import admin_alerts
         backend=SimpleNamespace(alerts_overview=AsyncMock(return_value={
             'enabled':True,'notify_resolved':True,'interval_minutes':10,'active_count':0,'active':[],
@@ -748,7 +748,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             await admin_alerts.alerts_cb(self.query,self.bot,backend,self.state)
         screen, rows=draw.call_args.args[2:4]
         intervals = screen.sections[1].rows[0]
-        self.assertEqual([i.text for i in intervals],['3 min','5 min','10 min'])
+        self.assertEqual([i.text for i in intervals],['Off','30m','1h','3h'])
         self.assertEqual(intervals[2].style, 'primary')
         self.assertIsNone(intervals[0].style)
         self.assertTrue(rows[-1][0].callback_data.startswith('admin_settings'))
@@ -1473,7 +1473,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
     async def test_node_diagnostics_displays_agent_status_without_paths(self):
         self.query.data = 'node_diagnostics:lv1'
         backend = SimpleNamespace(
-            request=AsyncMock(return_value={'applied_revision': 1}),
+            request=AsyncMock(return_value={'applied_revision': 1, 'protocols': ['awg', 'xray']}),
             node_diagnostics=AsyncMock(return_value={
                 'node_key': 'lv1', 'docker': 'ok', 'runtime_root': 'ok',
                 'xray_config': 'ok', 'awg_config': 'missing',

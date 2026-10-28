@@ -215,9 +215,10 @@ pub(in crate::tui) fn alert_controls(state: &crate::controller::Browser) -> Vec<
     let mut controls = vec![Control::ControllerAlertToggle("enabled")];
     if state.alerts.as_ref().is_some_and(|v| v["enabled"] == true) {
         controls.extend([
-            Control::ControllerAlertInterval(3),
-            Control::ControllerAlertInterval(5),
-            Control::ControllerAlertInterval(10),
+            Control::ControllerAlertInterval(0),
+            Control::ControllerAlertInterval(30),
+            Control::ControllerAlertInterval(60),
+            Control::ControllerAlertInterval(180),
             Control::ControllerAlertToggle("notify_resolved"),
         ]);
     }
@@ -799,7 +800,13 @@ pub(in crate::tui) fn draw_controller(
                         if value[key] == true { "On" } else { "Off" }
                     ),
                 },
-                Control::ControllerAlertInterval(minutes) => format!("{minutes} min"),
+                Control::ControllerAlertInterval(minutes) => match minutes {
+                    0 => "Off".into(),
+                    30 => "30m".into(),
+                    60 => "1h".into(),
+                    180 => "3h".into(),
+                    _ => format!("{minutes} min"),
+                },
                 Control::ControllerAlertDismiss(index) => format!(
                     "Dismiss · {}",
                     value["active"][index]["title"].as_str().unwrap_or("Server")
@@ -1936,9 +1943,10 @@ pub(in crate::tui) fn backup_preferences_controls(value: &serde_json::Value) -> 
 }
 pub(in crate::tui) fn choice_row_label(control: Control) -> Option<&'static str> {
     match control {
-        Control::ControllerUpdateInterval(_)
-        | Control::ControllerBackupInterval(_)
-        | Control::ControllerAlertInterval(_) => Some("Interval:"),
+        Control::ControllerUpdateInterval(_) | Control::ControllerBackupInterval(_) => {
+            Some("Interval:")
+        }
+        Control::ControllerAlertInterval(_) => Some("Reminders:"),
         Control::ControllerBackupKeep(_) => Some("Keep:"),
         _ => None,
     }
@@ -1970,10 +1978,13 @@ pub(in crate::tui) fn choice_selected(
         Control::ControllerBackupAuto => {
             state.backups.as_ref().is_some_and(|v| v["enabled"] == true)
         }
-        Control::ControllerAlertInterval(n) => state
-            .alerts
-            .as_ref()
-            .is_some_and(|v| v["interval_minutes"] == n),
+        Control::ControllerAlertInterval(n) => state.alerts.as_ref().is_some_and(|v| {
+            if let Some(r) = v.get("repeat_minutes").and_then(|r| r.as_u64()) {
+                r as u32 == n
+            } else {
+                n == 60
+            }
+        }),
         Control::ControllerAlertToggle("enabled") => {
             state.alerts.as_ref().is_some_and(|v| v["enabled"] == true)
         }

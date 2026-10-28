@@ -150,10 +150,15 @@ class NodeSettingsService:
                 raise AccessDenied('node_operation_pending', 409)
             if node['applied_revision'] >= revision:
                 raise AccessDenied('settings_already_applied', 409)
+            from .nodes import NodeService, applied_protocols, require_runtime, settings_apply_pending
+            observed = conn.execute(NodeService._select() + ' WHERE n.key=?', (node_key,)).fetchone()
+            if not json.loads(node['protocols_json']):
+                require_runtime(observed)
+            if not settings_apply_pending(observed) and not json.loads(node['protocols_json']):
+                raise AccessDenied('settings_already_applied', 409)
             intent = _snapshot(node)
-            if not intent['protocols']:
-                from .nodes import NodeService, require_runtime
-                require_runtime(conn.execute(NodeService._select() + ' WHERE n.key=?', (node_key,)).fetchone())
+            previous_protocols = applied_protocols(observed)
+            intent['protocol_plan'] = {'remove_protocols': sorted(set(previous_protocols or []) - set(intent['protocols']))}
             if conn.execute('''SELECT 1 FROM backend_node_settings_tasks WHERE node_key = ?
                 AND status IN ('awaiting_executor', 'running', 'blocked')''', (node_key,)).fetchone():
                 raise AccessDenied('node_settings_operation_pending', 409)
@@ -205,7 +210,7 @@ class NodeSettingsExecutor:
                 raise AccessDenied('permission_denied')
             current = conn.execute('SELECT * FROM backend_node_settings_tasks WHERE id = ? AND status = ?',
                                    (task_id, 'blocked')).fetchone()
-            node = conn.execute('''UPDATE backend_nodes SET enabled = 0 WHERE key = ?
+            node = conn.execute('''UPDATE backend_nodes SET enabled = enabled WHERE key = ?
                 RETURNING *''', (row['node_key'],)).fetchone()
             if current is None or node is None:
                 raise AccessDenied('repair_conflict', 409)
@@ -218,10 +223,22 @@ class NodeSettingsExecutor:
             if conn.execute('''SELECT 1 FROM backend_operation_tasks WHERE node_key = ?
                 AND status IN ('running', 'blocked')''', (row['node_key'],)).fetchone():
                 raise AccessDenied('profile_operation_uncertain', 409)
+            from .nodes import NodeService, applied_protocols
+            observed = conn.execute(NodeService._select() + ' WHERE n.key=?', (row['node_key'],)).fetchone()
+            if (not intent['protocols'] and not intent.get('protocol_plan', {}).get('remove_protocols')
+                    and not json.loads(node['protocols_json']) and applied_protocols(observed) == []):
+                conn.execute("UPDATE backend_node_settings_tasks SET status='superseded',result_json=? WHERE id=?",
+                    (json.dumps({'repair_observation': observation, 'settings_not_required': True}), task_id))
+                return {'task_id': task_id, 'revision': node['desired_revision'],
+                        'observation': observation, 'settings_not_required': True}
             revision = max(node['desired_revision'], intent['revision']) + 1
-            conn.execute('UPDATE backend_nodes SET desired_revision = ? WHERE key = ?',
+            conn.execute('UPDATE backend_nodes SET enabled=0,desired_revision = ? WHERE key = ?',
                          (revision, row['node_key']))
             fresh = _snapshot(dict(node, desired_revision=revision))
+            previous_protocols = applied_protocols(observed)
+            if not fresh['protocols'] and previous_protocols is None:
+                raise AccessDenied('node_settings_incomplete', 409)
+            fresh['protocol_plan'] = {'remove_protocols': sorted(set(previous_protocols or []) - set(fresh['protocols']))}
             next_id = str(uuid4())
             conn.execute("UPDATE backend_node_settings_tasks SET status = 'superseded', result_json = ? WHERE id = ?",
                          (json.dumps({'repair_observation': observation}, sort_keys=True), task_id))
@@ -278,9 +295,19 @@ class NodeSettingsExecutor:
                 from .nodes import NodeService
                 node = conn.execute(NodeService._select() + ' WHERE n.key = ?', (candidate['node_key'],)).fetchone()
                 initialized = conn.execute("SELECT 1 FROM backend_node_settings_tasks WHERE node_key=? AND status='succeeded' LIMIT 1", (candidate['node_key'],)).fetchone() is not None
+                initialized = initialized or conn.execute("""SELECT 1 FROM backend_node_jobs WHERE node_key=? AND status='succeeded'
+                    AND action IN ('bootstrap','reinstall_keep','reinstall_clean','cleanup_runtime') LIMIT 1""", (candidate['node_key'],)).fetchone() is not None
             if node is None or node['desired_revision'] != candidate['revision']:
                 with self.db.transaction() as conn:
                     conn.execute("UPDATE backend_node_settings_tasks SET status = 'superseded' WHERE id = ? AND status = 'awaiting_executor'", (candidate['id'],))
+                return True
+            queued_intent = json.loads(candidate['intent_json'])
+            if not queued_intent['protocols'] and not queued_intent.get('protocol_plan', {}).get('remove_protocols'):
+                # Never dispatch an old empty agent-only request after upgrade.
+                # It has not crossed the durable mutation boundary yet.
+                with self.db.transaction() as conn:
+                    conn.execute("UPDATE backend_node_settings_tasks SET status='superseded',result_json=? WHERE id=? AND status='awaiting_executor'",
+                        (json.dumps({'settings_not_required': True}), candidate['id']))
                 return True
             try:
                 observation = self.driver.inspect_node(candidate['node_key'])

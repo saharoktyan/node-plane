@@ -255,22 +255,29 @@ impl App {
                 None
             }
             Control::ControllerAlertInterval(minutes) => {
-                if matches!(minutes, 3 | 5 | 10)
-                    && self
-                        .controller
-                        .alerts
-                        .as_ref()
-                        .is_some_and(|v| v["enabled"] == true)
+                if self
+                    .controller
+                    .alerts
+                    .as_ref()
+                    .is_some_and(|v| v["enabled"] == true)
                 {
-                    self.controller_command(crate::controller::Command::AlertPreferences(
-                        serde_json::json!({"interval_minutes":minutes}),
-                    ));
+                    if matches!(minutes, 0 | 30 | 60 | 180) {
+                        self.controller_command(crate::controller::Command::AlertPreferences(
+                            serde_json::json!({"repeat_minutes": minutes}),
+                        ));
+                    } else if matches!(minutes, 3 | 5 | 10) {
+                        self.controller_command(crate::controller::Command::AlertPreferences(
+                            serde_json::json!({"interval_minutes": minutes}),
+                        ));
+                    }
                 }
                 None
             }
             Control::ControllerAlertToggle(key) => {
                 if let Some(value) = &self.controller.alerts {
-                    let patch = if key == "interval_minutes" {
+                    let patch = if key == "repeat_minutes" {
+                        serde_json::json!({"repeat_minutes": match value["repeat_minutes"].as_u64() { Some(0) => 30, Some(30) => 60, Some(60) => 180, _ => 0 }})
+                    } else if key == "interval_minutes" {
                         serde_json::json!({"interval_minutes":match value["interval_minutes"].as_u64() { Some(3) => 5, Some(5) => 10, _ => 3 }})
                     } else {
                         serde_json::json!({key:value[key] != true})
