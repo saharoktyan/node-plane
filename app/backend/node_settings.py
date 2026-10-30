@@ -159,6 +159,11 @@ class NodeSettingsService:
             intent = _snapshot(node)
             previous_protocols = applied_protocols(observed)
             intent['protocol_plan'] = {'remove_protocols': sorted(set(previous_protocols or []) - set(intent['protocols']))}
+            from .force_recovery import forced_profile_targets
+            removed = intent['protocol_plan']['remove_protocols']
+            if removed and forced_profile_targets(conn, node_key, removed):
+                from .protocol_removal import revoke_removed_protocols
+                revoke_removed_protocols(conn, actor, node_key, removed)
             if conn.execute('''SELECT 1 FROM backend_node_settings_tasks WHERE node_key = ?
                 AND status IN ('awaiting_executor', 'running', 'blocked')''', (node_key,)).fetchone():
                 raise AccessDenied('node_settings_operation_pending', 409)
@@ -269,7 +274,10 @@ class NodeSettingsExecutor:
              intent['revision'], intent['revision'], row['node_key']))
         from types import SimpleNamespace
         from .grant_policies import reconcile
-        reconcile(conn, SimpleNamespace(account=SimpleNamespace(id=row['actor_account_id'])))
+        actor = SimpleNamespace(account=SimpleNamespace(id=row['actor_account_id']))
+        reconcile(conn, actor)
+        from .force_recovery import resume_forced_profile_targets
+        resume_forced_profile_targets(conn, actor, row['node_key'])
         return True
 
     def reconcile_completed(self):
@@ -289,6 +297,9 @@ class NodeSettingsExecutor:
 
     def run_one(self):
         with self.db.connect() as conn:
+            from .maintenance_gate import core_upgrade
+            if core_upgrade(conn):
+                return False
             rows = conn.execute('''SELECT * FROM backend_node_settings_tasks
                 WHERE status = 'awaiting_executor'
                 ORDER BY id''').fetchall()
@@ -346,6 +357,9 @@ class NodeSettingsExecutor:
                 # queued; the settings command was not started.
                 continue
             with self.db.transaction() as conn:
+                conn.execute('UPDATE backend_account_guard SET revision=revision+1 WHERE id=1')
+                if core_upgrade(conn):
+                    continue
                 current = conn.execute("SELECT * FROM backend_node_settings_tasks WHERE id = ? AND status = 'awaiting_executor'", (candidate['id'],)).fetchone()
                 current_node = conn.execute('SELECT desired_revision FROM backend_nodes WHERE key = ?', (candidate['node_key'],)).fetchone()
                 draining = conn.execute('SELECT 1 FROM backend_node_drains WHERE node_key = ?', (candidate['node_key'],)).fetchone()

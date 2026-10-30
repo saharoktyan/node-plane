@@ -41,6 +41,7 @@ pub(in crate::tui) fn recovery_controls(page: &serde_json::Value) -> Vec<(String
                 "abort" if item["kind"] == "cleanup" => "Cancel cleanup",
                 "recheck" => "Check result",
                 "resolve" if item["kind"] == "bootstrap" => "Resume setup",
+                "force" => "Force cancel",
                 "resolve" if item["kind"] == "settings" => "Reapply settings",
                 "resolve" if item["kind"] == "profile" => "Restore profile access",
                 "resolve" if item["kind"] == "temporary" => "Cancel unused configuration",

@@ -47,6 +47,12 @@ from .backups import BackupService
 from config import APP_VERSION, SSH_KEY
 
 
+class ForceRecoveryInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    confirm_operation_id: Annotated[StrictStr, Field(min_length=36, max_length=36)] | None = None
+    acknowledge_unknown_outcome: StrictBool = False
+
+
 class ResolveInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
     telegram_user_id: Annotated[StrictInt, Field(gt=0, lt=2**63)]
@@ -2104,14 +2110,14 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
             return FleetDiagnostics(db, GrpcIntentDriver(channel, timeout=10)).observe(current, offset, node_key=node_key)
 
     @app.post('/api/v1/system/recovery/{kind}/{identity}/{action}')
-    def recover_operation(kind: str, identity: str, action: str, current=Depends(actor)):
+    def recover_operation(kind: str, identity: str, action: str, body: ForceRecoveryInput | None = None, current=Depends(actor)):
         from .recovery import act
         with maintenance_lock(current):
             if node_driver is not None:
-                return act(db, current, node_driver, kind, str(identity), action)
+                return act(db, current, node_driver, kind, str(identity), action, confirmation=body.model_dump() if body else None)
             from .driver_transport import GrpcIntentDriver, local_channel
             with local_channel('127.0.0.1:50051') as channel:
-                return act(db, current, GrpcIntentDriver(channel, timeout=10), kind, str(identity), action)
+                return act(db, current, GrpcIntentDriver(channel, timeout=10), kind, str(identity), action, confirmation=body.model_dump() if body else None)
 
     @app.get('/api/v1/system/recovery', response_model=RecoveryOverviewOutput)
     def recovery_overview(offset: int = Query(default=0, ge=0, le=1000000),

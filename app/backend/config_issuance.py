@@ -236,6 +236,10 @@ class ConfigIssuanceService:
 
     def run_one(self, issuance_id=None):
         with self.db.transaction() as conn:
+            conn.execute('UPDATE backend_account_guard SET revision=revision+1 WHERE id=1')
+            from .maintenance_gate import core_upgrade
+            if core_upgrade(conn):
+                return False
             row = conn.execute("SELECT * FROM backend_config_issuances WHERE status = 'awaiting_executor'" +
                 (" AND id = ?" if issuance_id else " ORDER BY id LIMIT 1"),
                 (issuance_id,) if issuance_id else ()).fetchone()

@@ -18,6 +18,31 @@ Use stable idempotency keys where required. Preserve command identities through 
 
 Poll the operation/read model for the result. Recovery endpoints observe or explicitly resolve the original operation. A blocked result must remain visible until evidence or an authorized decision resolves it.
 
+### Forced operation recovery
+
+The recovery endpoint `POST /api/v1/system/recovery/{kind}/{identity}/{action}` supports the explicit `action = force` for unblocking stuck operations when standard recovery cannot resolve or recheck them.
+
+- **Scope and supported kinds:** Available strictly for blocked `settings`, `profile`, `node`, and `bootstrap` (with a blocked `child_kind == 'node-jobs'` child). Other kinds (`update`, `backup`, `removal`, `temporary`, `agent`, `cleanup`) reject force actions with HTTP 403 (`permission_denied`). An unsupported bootstrap child returns HTTP 409 (`force_operation_unsupported`).
+- **Required permissions:** The caller must be an approved administrator verified afresh against the database (`backend_accounts.role == 'admin'`, `status == 'approved'`, serialized via `backend_account_guard`). Principal scopes must include `maintenance.manage`, `nodes.manage`, `nodes.execute`, and additionally `profiles.manage` when `kind == 'profile'`.
+- **Request payload (`ForceRecoveryInput`):**
+  - `confirm_operation_id` (string, UUID): must exactly match the URL path parameter `identity`. Mismatches return HTTP 422 (`force_confirmation_required`).
+  - `acknowledge_unknown_outcome` (boolean): must be explicitly `true`. If absent or false, returns HTTP 422 (`force_confirmation_required`).
+- **Execution semantics:**
+  - Validates that the operation is `blocked`, no concurrent operation on the node is running on the controller (HTTP 409 `maintenance_busy`), and the node is not draining (HTTP 409 `node_already_draining`).
+  - Stages a 300-second private filesystem capability for the Driver and invokes `driver.force_recovery(spec, 'prepare')`.
+  - The Agent writes an atomic ticket and permanent `command-{UUID}.fence` under `/etc/node-plane/force-recovery/` and initiates a managed systemd control group restart.
+  - The controller polls `driver.force_recovery(spec, 'retire')`, tolerating transient transport disconnects while requiring a restarted Agent instance and unlocked journal `flock`.
+  - Upon retirement receipt (`forced: true, outcome_unknown: true`), the task status transitions to `superseded` with `result_json` recording `{"error_code": "operator_force_cancelled", "forced": true, "outcome_unknown": true, "ticket_id": ...}`. Recovery audit logs the event as `force_cancelled`. For profile tasks, unclaimed settings tasks removing that protocol on the same node are also superseded with `operator_force_cancelled_dependency`, so an explicit new Apply can reschedule required revocations.
+  - **No automatic requeue:** Force cancellation never automatically schedules retry work. It advances the desired revision on the node or profile. Subsequent explicit operations (`apply` on node settings, `reconcile_access` on node operations) generate fresh commands with new UUIDs.
+  - **Caveats:** Cancellation does not roll back or undo runtime mutations; access changes applied before agent stalls remain effective. Force recovery requires an online, reachable agent running compatible binaries (unreachable or outdated agents return HTTP 409 `force_agent_unavailable` or `force_agent_upgrade_required`). Universal recovery is not promised.
+
+### Update admission and claim gating
+
+Controller updates interact with background worker queues according to update scope:
+
+- **Core-only updates (`version`):** Admitted even when background node queues (`node_jobs`, `agent_rollouts`, `config_issuances`, settings tasks, and profile operations) contain `awaiting_executor` or `blocked` tasks. Active claims (`running` status) still deny admission with HTTP 409 (`maintenance_busy`). Upon admission, `backend_controller_update_gate` is set. Worker processes (`NodeOperations`, `AgentRolloutService`, `ConfigIssuanceService`, `NodeSettingsExecutor`, and `IntentExecutor`) check `core_upgrade` inside their transaction serialized by `backend_account_guard` and return `False` directly in `run_one()`, pausing dispatch while preserving queues intact without remote calls.
+- **Stack updates (`stack`):** Admission policy remains strict; any task with status `awaiting_executor` or `running` denies admission with HTTP 409 (`maintenance_busy`).
+
 ## Error handling
 
 Read the structured error code and response body. Authentication failure, insufficient permission, invalid input, revision conflict and uncertain execution require different responses. Preserve an operation ID for support; omit tokens and credential payloads from logs.

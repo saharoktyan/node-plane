@@ -294,6 +294,17 @@ impl AgentState {
         }
     }
 
+    fn check_force_dispatch_fence(&self, command_id: &str) -> Result<(), Status> {
+        if valid_force_identity(command_id)
+            && Path::new("/etc/node-plane/force-recovery")
+                .join(format!("command-{command_id}.fence"))
+                .exists()
+        {
+            return Err(Status::failed_precondition("force_command_cancelled"));
+        }
+        Ok(())
+    }
+
     fn cpu_metrics(&self) -> Value {
         self.cpu
             .lock()
@@ -1714,7 +1725,7 @@ systemctl disable node-plane-agent.service
 systemctl stop node-plane-agent.service
 rm -f /etc/node-plane/profile-intents.sqlite3 /etc/node-plane/profile-intents.sqlite3.lock /etc/node-plane/profile-intents.sqlite3.disabled /etc/node-plane/profile-intents.sqlite3-journal /etc/node-plane/profile-intents.sqlite3-wal /etc/node-plane/profile-intents.sqlite3-shm
 rm -f /etc/systemd/system/node-plane-agent.service "$1" "$2" "$3" "$4" "$5"
-rm -rf "$6" "$7" /etc/node-plane/operation-progress
+rm -rf "$6" "$7" /etc/node-plane/operation-progress /etc/node-plane/force-recovery
 rmdir /etc/node-plane/tls /etc/node-plane 2>/dev/null || true
 systemctl daemon-reload
 systemctl reset-failed node-plane-lease-expiry.service node-plane-lease-expiry.timer node-plane-leased-awg.service node-plane-leased-xray.service node-plane-agent.service 2>/dev/null || true
@@ -1769,6 +1780,17 @@ fi
 // New commands carry an explicit protocol plan. Legacy array requests retain
 // their exact journal fingerprints for read-only recovery. Older agents reject
 // the new object before invoking runtime mutations instead of inferring cleanup.
+fn valid_force_identity(value: &str) -> bool {
+    value.len() == 36
+        && value.bytes().enumerate().all(|(i, c)| {
+            if matches!(i, 8 | 13 | 18 | 23) {
+                c == b'-'
+            } else {
+                c.is_ascii_digit() || (b'a'..=b'f').contains(&c)
+            }
+        })
+}
+
 fn backend_settings_intent(
     req: &agent::v1::ApplyBackendNodeSettingsRequest,
 ) -> Result<Value, Status> {
@@ -1805,11 +1827,144 @@ fn backend_settings_intent(
 
 #[tonic::async_trait]
 impl NodeAgentService for NodeAgentApi {
+    async fn force_recovery(
+        &self,
+        request: Request<agent::v1::ForceRecoveryRequest>,
+    ) -> Result<Response<RuntimeCommandResponse>, Status> {
+        let req = request.into_inner();
+        if req.node_key != self.state.config.node_key {
+            return Err(Status::failed_precondition("agent node identity mismatch"));
+        }
+        if !matches!(req.phase.as_str(), "prepare" | "retire")
+            || !matches!(req.operation_kind.as_str(), "settings" | "profile" | "node")
+            || !valid_force_identity(&req.ticket_id)
+            || !valid_force_identity(&req.command_id)
+            || req.intent_json.len() > 65536
+        {
+            return Err(Status::invalid_argument("invalid force recovery request"));
+        }
+        let intent: Value = serde_json::from_str(&req.intent_json)
+            .map_err(|_| Status::invalid_argument("invalid force recovery request"))?;
+        let spec = serde_json::json!({
+            "node_key": req.node_key, "ticket_id": req.ticket_id,
+            "command_id": req.command_id, "kind": req.operation_kind, "intent": intent,
+        });
+        let mut child = Command::new("python3")
+            .args([
+                "-c",
+                include_str!("../../../runtime_assets/force-recovery.py"),
+                &req.phase,
+            ])
+            .env("NODE_PLANE_AGENT_INSTANCE_ID", &self.state.instance_id)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|_| Status::failed_precondition("force_helper_unavailable"))?;
+        child
+            .stdin
+            .take()
+            .ok_or_else(|| Status::failed_precondition("force_helper_unavailable"))?
+            .write_all(spec.to_string().as_bytes())
+            .map_err(|_| Status::failed_precondition("force_helper_unavailable"))?;
+        let output = child
+            .wait_with_output()
+            .map_err(|_| Status::failed_precondition("force_helper_unavailable"))?;
+        if !output.status.success() {
+            let reason = String::from_utf8_lossy(&output.stderr);
+            let reason = reason.trim();
+            let safe = reason.starts_with("force_")
+                && reason.len() <= 100
+                && reason.bytes().all(|c| c.is_ascii_lowercase() || c == b'_');
+            return Err(Status::failed_precondition(if safe {
+                reason
+            } else {
+                "force_recovery_failed"
+            }));
+        }
+        let value: Value = serde_json::from_slice(&output.stdout)
+            .map_err(|_| Status::internal("invalid force recovery receipt"))?;
+        if req.phase == "prepare" && value["restart_required"] == true {
+            // The normal service stop kills its entire cgroup, including child
+            // mutation scripts. The journal flock independently verifies this
+            // at retirement; a restarted listener alone is not sufficient.
+            let property = |name: &str| -> Option<String> {
+                let output = Command::new("timeout")
+                    .args([
+                        "5s",
+                        "systemctl",
+                        "show",
+                        "node-plane-agent.service",
+                        "--value",
+                        "-p",
+                        name,
+                    ])
+                    .output()
+                    .ok()?;
+                output
+                    .status
+                    .success()
+                    .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
+            };
+            if property("MainPID") != Some(std::process::id().to_string())
+                || property("KillMode").as_deref() != Some("control-group")
+            {
+                return Err(Status::failed_precondition(
+                    "force_managed_restart_unavailable",
+                ));
+            }
+            let unit = format!("node-plane-force-recovery-{}", req.ticket_id);
+            let restart = Command::new("timeout")
+                .args([
+                    "5s",
+                    "systemd-run",
+                    "--quiet",
+                    "--collect",
+                    "--unit",
+                    &unit,
+                    "--on-active=1s",
+                    "/bin/systemctl",
+                    "restart",
+                    "node-plane-agent.service",
+                ])
+                .output()
+                .map_err(|_| Status::failed_precondition("force_restart_unavailable"))?;
+            if !restart.status.success() {
+                let scheduled = Command::new("timeout")
+                    .args([
+                        "5s",
+                        "systemctl",
+                        "is-active",
+                        "--quiet",
+                        &format!("{unit}.timer"),
+                    ])
+                    .status()
+                    .is_ok_and(|status| status.success());
+                if !scheduled {
+                    return Err(Status::failed_precondition("force_restart_unavailable"));
+                }
+            }
+        }
+        Ok(Response::new(RuntimeCommandResponse {
+            summary: "explicit force recovery receipt".into(),
+            payload_json: value.to_string(),
+        }))
+    }
+
     async fn backend_node_action(
         &self,
         request: Request<agent::v1::BackendNodeActionRequest>,
     ) -> Result<Response<RuntimeCommandResponse>, Status> {
         let req = request.into_inner();
+        if !req.recover
+            && !req.action.starts_with("resolve_")
+            && !matches!(
+                req.action.as_str(),
+                "inspect" | "host_metrics" | "traffic" | "operation_progress"
+            )
+        {
+            self.state.check_force_dispatch_fence(&req.command_id)?;
+        }
         if req.node_key != self.state.config.node_key {
             return Err(Status::failed_precondition("agent node identity mismatch"));
         }
@@ -1962,6 +2117,7 @@ impl NodeAgentService for NodeAgentApi {
         request: Request<agent::v1::ApplyProfileIntentRequest>,
     ) -> Result<Response<RuntimeCommandResponse>, Status> {
         let req = request.into_inner();
+        self.state.check_force_dispatch_fence(&req.command_id)?;
         let intent = serde_json::json!({
             "command_id": req.command_id, "protocol": req.protocol_kind,
             "runtime_name": req.profile_name, "revision": req.desired_revision,
@@ -2115,6 +2271,7 @@ impl NodeAgentService for NodeAgentApi {
         request: Request<ApplyBackendNodeSettingsRequest>,
     ) -> Result<Response<RuntimeCommandResponse>, Status> {
         let req = request.into_inner();
+        self.state.check_force_dispatch_fence(&req.command_id)?;
         if req.node_key != self.state.config.node_key || req.desired_revision == 0 {
             return Err(Status::failed_precondition(
                 "node identity or revision mismatch",

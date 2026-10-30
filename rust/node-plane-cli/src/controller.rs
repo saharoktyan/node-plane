@@ -220,7 +220,14 @@ impl Command {
             Self::RecoveryAction(kind, id, action, _, _) => (
                 Method::POST,
                 crate::workstation::recovery_path(kind, id, action)?,
-                None,
+                if action == "force" {
+                    Some(json!({
+                        "confirm_operation_id": id,
+                        "acknowledge_unknown_outcome": true,
+                    }))
+                } else {
+                    None
+                },
                 None,
             ),
             Self::RecoveryHistory(offset) => (
@@ -1130,5 +1137,30 @@ mod tests {
                 .join(format!("controller-removal-{}.json", installation.id))
                 .exists()
         );
+    }
+    #[test]
+    fn recovery_action_force_contract_requires_confirmation_body_for_allowed_kinds_only() {
+        let id = Uuid::new_v4().to_string();
+        for kind in ["settings", "profile", "node", "bootstrap"] {
+            let cmd = Command::RecoveryAction(kind.into(), id.clone(), "force".into(), 0, None);
+            let (method, path, body, _) = cmd.request().unwrap();
+            assert_eq!(method, Method::POST);
+            assert_eq!(path, format!("/api/v1/system/recovery/{kind}/{id}/force"));
+            assert_eq!(
+                body,
+                Some(json!({
+                    "confirm_operation_id": id,
+                    "acknowledge_unknown_outcome": true,
+                }))
+            );
+        }
+        for kind in ["settings", "profile", "node", "bootstrap"] {
+            let cmd = Command::RecoveryAction(kind.into(), id.clone(), "resolve".into(), 0, None);
+            let (method, _, body, _) = cmd.request().unwrap();
+            assert_eq!(method, Method::POST);
+            assert_eq!(body, None);
+        }
+        let bad = Command::RecoveryAction("agent".into(), id.clone(), "force".into(), 0, None);
+        assert!(bad.request().is_err());
     }
 }

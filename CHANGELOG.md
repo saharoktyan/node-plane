@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 1.0.0-beta.10 - 2026-10-30
+
+- Provide explicit confirmed Force cancel for blocked node settings, profile, and node jobs and bootstrap node-job children, with managed agent restart, permanent exact-command fences, preserved unknown outcome and history, and explicit retry only.
+- Cancel stranded dependent protocol removal and require new Apply revocations before cleanup.
+- Core-only updates permit queued or blocked node work and pause claims while running claims still deny; ordinary settings recovery is no longer blocked by queued profile tasks.
+- Force cancellation requires matching controller Driver and agents.
+
 ## 1.0.0-beta.9 - 2026-10-30
 
 - Restore runtime scripts and AWG container build assets before applying node settings, allowing VPN protocols to be installed again after removal. Preserve the installed node environment, generated protocol configurations, private keys, and existing operation recovery fences.

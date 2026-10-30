@@ -1133,6 +1133,7 @@ async fn execute_inner(
                         let (method, path, body, key) = command.request()?;
                         let note = match backend::request(session, &credential, method, &path, body, key).await {
                             Ok(result) if result.pointer("/observation/agent_setup_retryable").and_then(Value::as_bool) == Some(true) => format!("Previous node is retired. Resume setup for operation {id}."),
+                            Ok(result) if result["outcome"] == "force_cancelled" => format!("Operation {id} force-cancelled ({}). Outcome unconfirmed; check service state if needed.", result["status"].as_str().unwrap_or("superseded")),
                             Ok(result) => format!("Operation {id}: {}", result["status"].as_str().unwrap_or("result unconfirmed")),
                             Err(error) => format!("Recovery was not confirmed: {error}. Refresh this operation before trying again."),
                         };
@@ -1468,7 +1469,15 @@ async fn execute_inner(
                     // The backend validates currently allowed actions under the worker lock.
                     ensure!(item["actions"].as_array().is_some_and(|actions| actions.iter().any(|v| v == &action)), "Recovery action unavailable");
                     let path = crate::workstation::recovery_path(kind, &identity.to_string(), &action)?;
-                    backend::request(session, &credential, Method::POST, &path, None, None).await?;
+                    let body = if action == "force" {
+                        Some(json!({
+                            "confirm_operation_id": identity.to_string(),
+                            "acknowledge_unknown_outcome": true,
+                        }))
+                    } else {
+                        None
+                    };
+                    backend::request(session, &credential, Method::POST, &path, body, None).await?;
                     let (facts, inventory) = diagnostic_snapshot(session, &credential, &key, 0).await?;
                     let _ = tx.send(Event::Nodes(Update::Diagnostics(key, facts, inventory)));
                 }

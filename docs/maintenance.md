@@ -14,6 +14,8 @@ Review an update and start it. Progress shows component steps. **Update results*
 
 A controller update can restart the bot. Reopen Updates if progress is interrupted. A confirmed rollback ends with `rolled_back` and releases the update lock; fix the cause and start a new update. If the outcome is uncertain, use Operations before attempting another update.
 
+A core-only controller update can run while node tasks are queued or blocked. Their dispatch pauses until the update finishes; running tasks still prevent an update. Whole-stack updates require the node queues to be clear.
+
 For a direct server check:
 
 ```sh
@@ -48,6 +50,12 @@ Open recovery from either interface:
 - Telegram administrator menu: **System settings → Maintenance → Diagnostics & recovery**.
 
 Select the affected operation, read its reason and choose an offered action: check its result, continue saved work or cancel safely. Available actions depend on the operation and its execution state; cancellation preserves changes already completed. Checking a result observes the saved operation without repeating installation. If rollback is confirmed, the update lock is released and a new update can be started. Missing or conflicting evidence keeps the operation blocked: do not delete journals or resend an uncertain mutation to clear its status.
+
+**Force cancel** provides an explicit administrator decision when ordinary recovery cannot confirm a blocked node settings, profile access or node job operation. It also covers bootstrap operations blocked on a node job. Other operation types retain their usual recovery actions. Read and confirm the warning for the selected operation.
+
+The agent restarts, stops the old execution and permanently prevents that command from running again. Cancellation completes only after a new agent instance confirms the old mutation lock is free. The operation remains in history with an unknown outcome; its journals are preserved. A reachable, compatible agent managed by systemd is required.
+
+Cancellation does not undo changes already applied, including access changes. It does not automatically retry the work. After checking the node, use **Apply** for settings or **Reconcile access** to create a fresh operation. An unstarted protocol-removal task waiting for a cancelled access revocation is also stopped; the next Apply schedules a new revocation before cleanup.
 
 If an agent setup stops at **Archiving previous installation journals** after removing a node and adding the same VPS under a new key, check that operation's result in Operations. The controller checks the agent's old identity over SSH and verifies that its old key was permanently removed from this controller. When confirmed, Continue/Resume becomes available for the same operation. Its old journals are archived before rebinding; an agent belonging to another active node remains protected.
 

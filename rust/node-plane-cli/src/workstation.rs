@@ -537,7 +537,15 @@ pub async fn recover_operations(
                     let explanation = recovery_explanation(&kind, action)?;
                     if !events::confirm(tx, "Recover this operation?", format!("{kind}: {id}\nStatus: {status}\nNode: {node}\n\n{explanation}"))? { continue; }
                     stage(tx, &format!("Recovering {kind} operation {id} using its saved evidence"));
-                    match backend::request(session, &credential, Method::POST, &path, None, None).await {
+                    let body = if action == "force" {
+                        Some(json!({
+                            "confirm_operation_id": id,
+                            "acknowledge_unknown_outcome": true,
+                        }))
+                    } else {
+                        None
+                    };
+                    match backend::request(session, &credential, Method::POST, &path, body, None).await {
                         Ok(result) => {
                             if kind == "update" && result["kind"] == "stack" {
                                 let snapshot = UpdateSnapshot::parse(&result, Uuid::parse_str(&id)?)?;
@@ -549,6 +557,8 @@ pub async fn recover_operations(
                                 lines.push("  Previous node is retired. Resume setup for this operation.".into());
                             } else if result["status"] == "blocked" {
                                 lines.push("  The outcome is still unconfirmed; the block remains.".into());
+                            } else if result["outcome"] == "force_cancelled" {
+                                lines.push("  Forced cancellation recorded; outcome is unconfirmed. Check service state if needed.".into());
                             }
                             if let Some(id) = result["replacement_id"].as_str() { lines.push(format!("  Recovery queued: {id}")); }
                         },
@@ -586,6 +596,9 @@ pub(crate) fn recovery_path(kind: &str, id: &str, action: &str) -> Result<String
     }
     let id = Uuid::parse_str(id).context("Invalid recovery operation identity")?;
     match (kind, action) {
+        ("settings" | "profile" | "node" | "bootstrap", "force") => {
+            Ok(format!("/api/v1/system/recovery/{kind}/{id}/force"))
+        }
         ("update", "cancel" | "recheck" | "resume") => {
             Ok(format!("/api/v1/system/updates/jobs/{id}/{action}"))
         }
@@ -605,6 +618,12 @@ pub(crate) fn recovery_explanation(kind: &str, action: &str) -> Result<&'static 
     // Validate the pair before showing an explanation or sending a request.
     recovery_path(kind, "00000000-0000-0000-0000-000000000000", action)?;
     Ok(match (kind, action) {
+        ("profile", "force") => {
+            "The node agent restarts to stop previous execution. This access operation is cancelled with an unknown outcome. Its access change may already have taken effect. Apply node settings or run Reconcile access to synchronize again. Server VPN services remain installed."
+        }
+        ("settings" | "node" | "bootstrap", "force") => {
+            "The node agent restarts to stop previous execution. The exact selected operation is cancelled with an unknown outcome. Existing VPN containers and configurations are not deliberately removed. New actions become possible, and actual service state may need checking."
+        }
         ("cleanup", "retry") => {
             "Continue the saved cleanup plan. Unknown shutdown outcomes cannot be replayed."
         }
@@ -1181,6 +1200,26 @@ mod tests {
         assert!(super::recovery_explanation("cleanup", "abort").is_ok());
         assert!(super::recovery_explanation("issuance", "cancel").is_ok());
         assert!(super::recovery_explanation("issuance", "retry").is_err());
+
+        for kind in ["settings", "profile", "node", "bootstrap"] {
+            assert_eq!(
+                super::recovery_path(kind, &id, "force").unwrap(),
+                format!("/api/v1/system/recovery/{kind}/{id}/force")
+            );
+            assert!(super::recovery_explanation(kind, "force").is_ok());
+        }
+        for kind in [
+            "agent",
+            "temporary",
+            "cleanup",
+            "issuance",
+            "backup",
+            "update",
+            "removal",
+        ] {
+            assert!(super::recovery_path(kind, &id, "force").is_err());
+            assert!(super::recovery_explanation(kind, "force").is_err());
+        }
     }
 
     use super::*;

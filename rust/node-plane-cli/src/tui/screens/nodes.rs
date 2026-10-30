@@ -340,6 +340,11 @@ pub(in crate::tui) fn draw_node_diagnostics(
     let mut actions = Vec::new();
     if let Some((item, action)) = &app.nodes.recovery_confirm {
         let explanation = match action.as_str() {
+            "force" => crate::workstation::recovery_explanation(
+                item["kind"].as_str().unwrap_or(""),
+                "force",
+            )
+            .unwrap_or("Force cancel this exact operation with an unknown outcome?"),
             "resolve" => "Recover this operation using confirmed server evidence?",
             "resume" => {
                 "Continue the saved installation step without replaying an unknown command?"
@@ -351,9 +356,10 @@ pub(in crate::tui) fn draw_node_diagnostics(
         };
         frame.render_widget(
             Paragraph::new(format!(
-                "{} · {}\n{}\n\n{explanation}",
+                "{} · {}\nOperation: {}\n{}\n\n{explanation}",
                 item["kind"].as_str().unwrap_or("Operation"),
                 item["status"].as_str().unwrap_or(""),
+                item["id"].as_str().unwrap_or(""),
                 item["error_code"].as_str().unwrap_or("")
             ))
             .wrap(Wrap { trim: false }),
@@ -405,6 +411,7 @@ pub(in crate::tui) fn draw_node_diagnostics(
             for (action, label) in [
                 ("resume", "Continue saved step"),
                 ("cancel", "Cancel setup"),
+                ("force", "Force cancel"),
             ] {
                 if item["actions"]
                     .as_array()

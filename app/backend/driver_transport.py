@@ -178,6 +178,19 @@ class GrpcIntentDriver:
             raise ValueError('node settings were not applied')
         return operation.result_json
 
+    def force_recovery(self, spec, phase):
+        from driver.v1 import runtime_service_pb2
+        import json
+        intent_json = json.dumps(spec['intent'], sort_keys=True)
+        if phase == 'prepare':
+            from .force_approval import publish
+            publish(spec, intent_json)
+        response = self.runtime.ForceRecovery(runtime_service_pb2.ForceRecoveryRequest(
+            node_key=spec['node_key'], ticket_id=spec['ticket_id'], command_id=spec['command_id'],
+            operation_kind=spec['kind'], intent_json=intent_json,
+            phase=phase), timeout=min(self.timeout, 8))
+        return json.loads(response.result_json)
+
     def recover_node_settings(self, task_id, intent):
         response = self.runtime.RecoverBackendNodeSettings(self.node_settings_request(intent),
             metadata=(('x-node-plane-command-id', task_id),), timeout=self.timeout)

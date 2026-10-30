@@ -365,3 +365,88 @@ tls_client_ca_path = "/test/ca.crt"
             with self.assertRaises(grpc.RpcError): stub.ApplyProfileIntent(self.request,timeout=2)
         self.assertEqual(self.count(),'0')
         self.stub.GetRuntimeFacts(self.empty(),timeout=2)
+
+    def test_mtls_force_recovery_prepare_fences_mutation_and_retire_requires_restarted_agent_and_unlocked_flock(self):
+        import json
+        cmd_id = self.request.command_id
+        ticket_id = str(uuid4())
+        intent = {
+            'command_id': cmd_id,
+            'protocol': self.request.protocol_kind,
+            'runtime_name': self.request.profile_name,
+            'revision': self.request.desired_revision,
+            'action': self.request.action,
+            'uuid': self.request.uuid,
+            'short_id': self.request.short_id,
+        }
+        intent_json = json.dumps(intent, sort_keys=True, separators=(',', ':'))
+
+        # 1. Prepare over mTLS in container lacking managed systemd:
+        # expects force_managed_restart_unavailable AFTER ticket and fence are written
+        req_prep = self.pb.ForceRecoveryRequest(
+            node_key='fault-node',
+            ticket_id=ticket_id,
+            command_id=cmd_id,
+            operation_kind='profile',
+            intent_json=intent_json,
+            phase='prepare',
+        )
+        with self.assertRaises(grpc.RpcError) as prep_err:
+            self.stub.ForceRecovery(req_prep, timeout=5)
+        self.assertEqual(prep_err.exception.code(), grpc.StatusCode.FAILED_PRECONDITION)
+        self.assertEqual(prep_err.exception.details(), 'force_managed_restart_unavailable')
+
+        # Assert ticket and durable dispatch fence exist in container
+        self.assertEqual(docker('exec', self.name, 'test', '-e', f'/etc/node-plane/force-recovery/{ticket_id}.json').returncode, 0)
+        self.assertEqual(docker('exec', self.name, 'test', '-e', f'/etc/node-plane/force-recovery/command-{cmd_id}.fence').returncode, 0)
+
+        # 2. Assert original late typed apply gets force_command_cancelled
+        with self.assertRaises(grpc.RpcError) as apply_err:
+            self.stub.ApplyProfileIntent(self.request, timeout=5)
+        self.assertEqual(apply_err.exception.code(), grpc.StatusCode.FAILED_PRECONDITION)
+        self.assertEqual(apply_err.exception.details(), 'force_command_cancelled')
+        self.assertEqual(self.count(), '0')
+
+        # 3. If an orphan holds the original journal flock, retire must reject even after listener restart
+        req_retire = self.pb.ForceRecoveryRequest(
+            node_key='fault-node',
+            ticket_id=ticket_id,
+            command_id=cmd_id,
+            operation_kind='profile',
+            intent_json=intent_json,
+            phase='retire',
+        )
+        # Lock journal file from an orphan container process
+        docker('exec', '-d', self.name, 'sh', '-c',
+               'echo $$ > /test/orphan.pid; exec python3 -c "import fcntl, time; f = open(\'/etc/node-plane/profile-intents.sqlite3.lock\', \'a\'); fcntl.flock(f, fcntl.LOCK_EX); time.sleep(60)"')
+        time.sleep(0.1)
+
+        # Kill old agent and restart listener with new instance
+        docker('exec', self.name, 'sh', '-c', 'kill -9 "$(cat /test/agent.pid)" || true')
+        self.start_agent()
+
+        # Retire fails because orphan holds journal flock
+        with self.assertRaises(grpc.RpcError) as flock_err:
+            self.stub.ForceRecovery(req_retire, timeout=5)
+        self.assertEqual(flock_err.exception.code(), grpc.StatusCode.FAILED_PRECONDITION)
+        self.assertEqual(flock_err.exception.details(), 'force_execution_still_running')
+
+        # Kill orphan process holding the lock in container
+        docker('exec', self.name, 'sh', '-c', 'kill -9 "$(cat /test/orphan.pid)" || true')
+        time.sleep(0.1)
+
+        # 4. Now retire with fresh instance succeeds
+        retire_resp = self.stub.ForceRecovery(req_retire, timeout=5)
+        receipt = json.loads(retire_resp.payload_json)
+        self.assertEqual(receipt['ticket_id'], ticket_id)
+        self.assertEqual(receipt['command_id'], cmd_id)
+        self.assertTrue(receipt['forced'])
+        self.assertTrue(receipt['outcome_unknown'])
+
+        # 5. Old mutation stays fenced, preserved config sentinel/counter
+        with self.assertRaises(grpc.RpcError) as fenced_err:
+            self.stub.ApplyProfileIntent(self.request, timeout=5)
+        self.assertEqual(fenced_err.exception.code(), grpc.StatusCode.FAILED_PRECONDITION)
+        self.assertEqual(fenced_err.exception.details(), 'force_command_cancelled')
+        self.assertEqual(self.count(), '0')
+        self.assertEqual(self.journal_status(), 'superseded')

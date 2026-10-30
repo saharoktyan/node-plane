@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+mod force_approval;
 use std::env;
 use std::fs;
 use std::net::SocketAddr;
@@ -649,6 +650,47 @@ impl ProvisioningService for ProvisioningApi {
 
 #[tonic::async_trait]
 impl RuntimeService for RuntimeApi {
+    async fn force_recovery(
+        &self,
+        request: Request<driver::v1::ForceRecoveryRequest>,
+    ) -> Result<Response<BackendNodeSettingsResult>, Status> {
+        let req = request.into_inner();
+        if !matches!(req.phase.as_str(), "prepare" | "retire")
+            || !matches!(req.operation_kind.as_str(), "settings" | "profile" | "node")
+            || uuid::Uuid::parse_str(&req.ticket_id).is_err()
+            || uuid::Uuid::parse_str(&req.command_id).is_err()
+            || req.intent_json.len() > 65536
+        {
+            return Err(Status::invalid_argument("invalid force recovery request"));
+        }
+        let shared = std::env::var("NODE_PLANE_SHARED_DIR").map_err(|_| {
+            Status::permission_denied("force recovery approval store is not configured")
+        })?;
+        force_approval::verify(Path::new(&shared), &req, chrono::Utc::now().timestamp())?;
+        let target = self
+            .ctx
+            .agent_target(&req.node_key)
+            .ok_or_else(|| Status::failed_precondition("no node-agent target configured"))?;
+        let transport = agent_transport::AgentTransport::new(target);
+        let facts = transport.get_runtime_facts().await?;
+        if facts.node_key != req.node_key {
+            return Err(Status::failed_precondition("agent node identity mismatch"));
+        }
+        let response = transport
+            .force_recovery(agent::v1::ForceRecoveryRequest {
+                node_key: req.node_key,
+                ticket_id: req.ticket_id,
+                command_id: req.command_id,
+                operation_kind: req.operation_kind,
+                intent_json: req.intent_json,
+                phase: req.phase,
+            })
+            .await?;
+        Ok(Response::new(BackendNodeSettingsResult {
+            result_json: response.payload_json,
+        }))
+    }
+
     async fn backend_node_action(
         &self,
         request: Request<driver::v1::BackendNodeActionRequest>,

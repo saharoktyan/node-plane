@@ -192,7 +192,7 @@ class NodeRecoveryTests(TestCase):
         task = NodeSettingsService(self.db).queue(self.actor, 'n1', revision=1, command_key=str(uuid4()))
         self.db.connection.execute("UPDATE backend_node_settings_tasks SET status='blocked'")
         item = overview(self.db, self.actor)['items'][0]
-        self.assertEqual((item['kind'], item['actions']), ('settings', ['recheck','resolve']))
+        self.assertEqual((item['kind'], item['actions']), ('settings', ['recheck','resolve','force']))
         driver = SimpleNamespace(resolve_node_settings=Mock(return_value={'config_matches':False,'containers_running':True}))
         result = act(self.db, self.actor, driver, 'settings', task['id'], 'resolve')
         self.assertEqual(result['status'], 'superseded')
@@ -200,6 +200,26 @@ class NodeRecoveryTests(TestCase):
         fresh = self.db.connection.execute('SELECT * FROM backend_node_settings_tasks WHERE id=?', (result['replacement_id'],)).fetchone()
         self.assertEqual((fresh['status'], fresh['revision']), ('awaiting_executor',2))
         driver.resolve_node_settings.assert_called_once()
+
+    def test_settings_recovery_advertised_actions_negative_scopes_and_draining(self):
+        from backend.recovery import overview
+        from backend.node_settings import NodeSettingsService
+        from backend.authorization import Actor, Principal, PrincipalKind, ADMIN_PERMISSIONS
+        self.db.connection.execute("UPDATE backend_nodes SET applied_revision=0 WHERE key='n1'")
+        NodeSettingsService(self.db).queue(self.actor, 'n1', revision=1, command_key=str(uuid4()))
+        self.db.connection.execute("UPDATE backend_node_settings_tasks SET status='blocked'")
+        # Missing nodes.execute scope: force omitted
+        actor_no_execute = Actor(Principal('admin', PrincipalKind.ACCOUNT, frozenset(ADMIN_PERMISSIONS - {'nodes.execute'}), self.actor.account.id), self.actor.account)
+        item = overview(self.db, actor_no_execute)['items'][0]
+        self.assertEqual(item['actions'], ['recheck', 'resolve'])
+        # Missing nodes.manage: no settings actions at all
+        actor_no_nodes = Actor(Principal('admin', PrincipalKind.ACCOUNT, frozenset(ADMIN_PERMISSIONS - {'nodes.manage'}), self.actor.account.id), self.actor.account)
+        item_no_nodes = overview(self.db, actor_no_nodes)['items'][0]
+        self.assertEqual(item_no_nodes['actions'], [])
+        # Draining node: force omitted
+        self.db.connection.execute("INSERT INTO backend_node_drains VALUES ('n1', ?, '[]', 'now')", (self.actor.account.id,))
+        item_draining = overview(self.db, self.actor)['items'][0]
+        self.assertEqual(item_draining['actions'], ['recheck', 'resolve'])
 
     def test_agent_recheck_requires_bound_identity_and_current_build(self):
         from backend.recovery import act
@@ -254,7 +274,7 @@ class ProfileRecoveryTests(TestCase):
         task = self.db.connection.execute('SELECT id FROM backend_operation_tasks WHERE operation_id=?', (first['operation_id'],)).fetchone()['id']
         actor = Actor(Principal('repair',PrincipalKind.ACCOUNT,ADMIN_PERMISSIONS,self.admin.id),self.admin)
         item = overview(self.db,actor)['items'][0]
-        self.assertEqual((item['subject_id'],item['actions']), (profile,['recheck','resolve']))
+        self.assertEqual((item['subject_id'],item['actions']), (profile,['recheck','resolve','force']))
         driver.resolve = Mock(return_value={'disk_present':False,'live_present':False,'identity_matches':False,'config_available':False})
         restore = str(uuid4())
         self.db.connection.execute("INSERT INTO backend_backup_jobs VALUES (?,?,?,'restore',NULL,NULL,'blocked','revoking',NULL,'now')", (restore,self.admin.id,str(uuid4())))
@@ -268,6 +288,23 @@ class ProfileRecoveryTests(TestCase):
         driver.resolve.assert_called_once()
         self.assertEqual(len(driver.calls),1)  # recovery did not replay the original mutation
         self.assertEqual(history(self.db,actor)['items'][0]['operation_id'],task)
+
+    def test_profile_recovery_advertised_actions_negative_scopes(self):
+        from backend.authorization import Actor, Principal, PrincipalKind, ADMIN_PERMISSIONS
+        from backend.executor import IntentExecutor
+        from tests.test_backend_executor import FakeDriver
+        profile = self.prepare(with_device=True)
+        self.grants(profile, 1, [{'node_key': 'node', 'protocol': 'awg'}]).json()
+        driver = FakeDriver(failure=True)
+        IntentExecutor(self.db, driver).run_one()
+        # Missing profiles.manage: resolve requires profiles.manage, force also requires profiles.manage
+        actor_no_profiles = Actor(Principal('repair', PrincipalKind.ACCOUNT, frozenset(ADMIN_PERMISSIONS - {'profiles.manage'}), self.admin.id), self.admin)
+        item = overview(self.db, actor_no_profiles)['items'][0]
+        self.assertEqual(item['actions'], [])
+        # Has profiles.manage + nodes.manage + maintenance.manage but missing nodes.execute: resolve is present, force is omitted
+        actor_no_exec = Actor(Principal('repair', PrincipalKind.ACCOUNT, frozenset(ADMIN_PERMISSIONS - {'nodes.execute'}), self.admin.id), self.admin)
+        item_no_exec = overview(self.db, actor_no_exec)['items'][0]
+        self.assertEqual(item_no_exec['actions'], ['recheck', 'resolve'])
 
 
 class ParentRecoveryTests(TestCase):

@@ -170,6 +170,9 @@ class NodeOperations:
                     previous = OperationRepository.targets(conn, profile['id'])
                     conn.execute('UPDATE backend_profiles SET desired_revision = desired_revision + 1 WHERE id = ?', (profile['id'],))
                     OperationRepository.record(conn, actor, profile['id'], previous)
+            if row['action'] == 'reconcile_access':
+                from .force_recovery import resume_forced_profile_targets
+                resume_forced_profile_targets(conn, actor, row['node_key'])
             if row['action'] in INVALIDATE:
                 conn.execute("UPDATE backend_config_issuances SET status = 'superseded', result_json = NULL WHERE node_key = ? AND status = 'succeeded'",
                              (row['node_key'],))
@@ -185,6 +188,10 @@ class NodeOperations:
 
     def run_one(self):
         with self.db.transaction() as conn:
+            conn.execute('UPDATE backend_account_guard SET revision=revision+1 WHERE id=1')
+            from .maintenance_gate import core_upgrade
+            if core_upgrade(conn):
+                return False
             row = conn.execute("SELECT * FROM backend_node_jobs WHERE status = 'awaiting_executor' ORDER BY id LIMIT 1").fetchone()
             if row is None:
                 return False

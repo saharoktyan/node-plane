@@ -35,6 +35,11 @@ class RuntimeServiceStub(object):
         Args:
             channel: A grpc.Channel.
         """
+        self.ForceRecovery = channel.unary_unary(
+                '/nodeplane.driver.v1.RuntimeService/ForceRecovery',
+                request_serializer=driver_dot_v1_dot_runtime__service__pb2.ForceRecoveryRequest.SerializeToString,
+                response_deserializer=driver_dot_v1_dot_runtime__service__pb2.BackendNodeSettingsResult.FromString,
+                _registered_method=True)
         self.BackendNodeAction = channel.unary_unary(
                 '/nodeplane.driver.v1.RuntimeService/BackendNodeAction',
                 request_serializer=driver_dot_v1_dot_runtime__service__pb2.BackendNodeActionRequest.SerializeToString,
@@ -79,6 +84,13 @@ class RuntimeServiceStub(object):
 
 class RuntimeServiceServicer(object):
     """Missing associated documentation comment in .proto file."""
+
+    def ForceRecovery(self, request, context):
+        """Explicit operator cancellation, bound to a durable restart ticket.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
 
     def BackendNodeAction(self, request, context):
         """Missing associated documentation comment in .proto file."""
@@ -133,6 +145,11 @@ class RuntimeServiceServicer(object):
 
 def add_RuntimeServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
+            'ForceRecovery': grpc.unary_unary_rpc_method_handler(
+                    servicer.ForceRecovery,
+                    request_deserializer=driver_dot_v1_dot_runtime__service__pb2.ForceRecoveryRequest.FromString,
+                    response_serializer=driver_dot_v1_dot_runtime__service__pb2.BackendNodeSettingsResult.SerializeToString,
+            ),
             'BackendNodeAction': grpc.unary_unary_rpc_method_handler(
                     servicer.BackendNodeAction,
                     request_deserializer=driver_dot_v1_dot_runtime__service__pb2.BackendNodeActionRequest.FromString,
@@ -183,6 +200,33 @@ def add_RuntimeServiceServicer_to_server(servicer, server):
  # This class is part of an EXPERIMENTAL API.
 class RuntimeService(object):
     """Missing associated documentation comment in .proto file."""
+
+    @staticmethod
+    def ForceRecovery(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/nodeplane.driver.v1.RuntimeService/ForceRecovery',
+            driver_dot_v1_dot_runtime__service__pb2.ForceRecoveryRequest.SerializeToString,
+            driver_dot_v1_dot_runtime__service__pb2.BackendNodeSettingsResult.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
 
     @staticmethod
     def BackendNodeAction(request,

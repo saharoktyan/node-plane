@@ -284,3 +284,171 @@ class RecoveryScreenTests(IsolatedAsyncioTestCase):
         with patch.object(recovery, 'show', new_callable=AsyncMock):
             await recovery.recovery_action(self.query, action_cleanup.model_copy(update={'confirm': 1}), self.bot, backend, self.state)
         backend.request.assert_awaited_once_with('POST', f'/api/v1/system/cleanup/jobs/{cleanup_id}/retry', telegram_user_id=self.query.from_user.id)
+
+    def test_force_recovery_routes_and_labels_for_allowed_kinds_only(self):
+        identity = str(uuid4())
+        for kind in ('settings', 'profile', 'node', 'bootstrap'):
+            self.assertEqual(
+                recovery.action_path(kind, identity, 'force'),
+                f'/api/v1/system/recovery/{kind}/{identity}/force',
+            )
+            self.assertEqual(recovery.action_label('en', kind, 'force'), 'Force cancel')
+            self.assertEqual(recovery.action_label('ru', kind, 'force'), 'Принудительная отмена')
+
+        for kind in ('agent', 'temporary', 'cleanup', 'issuance', 'backup', 'update', 'removal', 'unknown'):
+            with self.assertRaises(ValueError):
+                recovery.action_path(kind, identity, 'force')
+
+        for bad_id in ('not-a-uuid', '../escape', ''):
+            with self.assertRaises(ValueError):
+                recovery.action_path('node', bad_id, 'force')
+
+    async def test_force_recovery_requires_confirmation_with_danger_style_and_explains_outcome(self):
+        identity = str(uuid4())
+        page = {
+            'items': [{
+                'id': identity,
+                'kind': 'node',
+                'node_key': 'lv1',
+                'status': 'blocked',
+                'actions': ['force'],
+                'error_code': 'operation_timeout',
+                'next_step': 'worker',
+            }],
+            'total': 1,
+            'offset': 0,
+            'page_size': 10,
+            'maintenance_active': False,
+        }
+        backend = SimpleNamespace(request=AsyncMock(return_value=page))
+
+        # 1. Action button in list is danger-styled and has concise text
+        for locale, label in (('en', 'Force cancel'), ('ru', 'Принудительная отмена')):
+            self.state_data['locale'] = locale
+            with patch.object(recovery, 'render', new_callable=AsyncMock) as render:
+                await recovery.show(self.query, self.bot, backend, self.state)
+            btn = render.call_args.args[2].sections[0].rows[0][0]
+            self.assertEqual(btn.text, label)
+            self.assertEqual(btn.style, 'danger')
+
+        # 2. Clicking action with confirm=0 renders confirmation dialog: back left, confirm right (danger)
+        action = recovery.RecoveryAction(kind='node', id=identity, action='force', confirm=0)
+        for locale in ('en', 'ru'):
+            self.state_data['locale'] = locale
+            backend.request.reset_mock()
+            with patch.object(recovery, 'render', new_callable=AsyncMock) as render:
+                await recovery.recovery_action(self.query, action, self.bot, backend, self.state)
+            backend.request.assert_not_called()
+            screen, rows = render.call_args.args[2:4]
+            self.assertTrue(screen.rich(rows).blocks)
+            self.assertEqual(len(rows[0]), 2)
+            self.assertEqual(rows[0][0].callback_data, recovery.RecoveryPage().pack())
+            self.assertEqual(rows[0][1].style, 'danger')
+            self.assertEqual(rows[0][1].text, recovery.action_label(locale, 'node', 'force'))
+
+            # Verify confirmation text content
+            plain = screen.plain()
+            self.assertIn(identity, plain)
+            if locale == 'en':
+                self.assertIn('agent restarts', plain)
+                self.assertIn('unknown outcome', plain)
+                self.assertIn('not deliberately removed', plain)
+                self.assertIn('service state', plain)
+            else:
+                self.assertIn('перезапускается', plain)
+                self.assertIn('неизвестным исходом', plain)
+                self.assertIn('намеренно не удаляются', plain)
+                self.assertIn('состояние сервисов', plain)
+
+    async def test_force_recovery_confirmed_sends_required_json_body_and_handles_superseded_outcome(self):
+        for kind in ('settings', 'profile', 'node', 'bootstrap'):
+            identity = str(uuid4())
+            action = recovery.RecoveryAction(kind=kind, id=identity, action='force', confirm=1)
+            backend = SimpleNamespace(request=AsyncMock(return_value={
+                'id': identity,
+                'kind': kind,
+                'status': 'superseded',
+                'outcome': 'force_cancelled',
+            }))
+
+            for locale in ('en', 'ru'):
+                self.state_data['locale'] = locale
+                backend.request.reset_mock()
+                with patch.object(recovery, 'show', new_callable=AsyncMock) as show:
+                    await recovery.recovery_action(self.query, action, self.bot, backend, self.state)
+
+                backend.request.assert_awaited_once_with(
+                    'POST',
+                    f'/api/v1/system/recovery/{kind}/{identity}/force',
+                    telegram_user_id=self.query.from_user.id,
+                    body={'confirm_operation_id': identity, 'acknowledge_unknown_outcome': True},
+                    timeout_seconds=60,
+                )
+                note = show.call_args.kwargs['note']
+                if locale == 'en':
+                    self.assertIn('force-cancelled', note)
+                    self.assertIn('unconfirmed', note)
+                else:
+                    self.assertIn('принудительно отменена', note)
+                    self.assertIn('не подтверждён', note)
+
+    async def test_force_refusal_explains_the_required_recovery_step(self):
+        cases = (
+            ('force_agent_upgrade_required', 'Driver', 'Driver'),
+            ('force_agent_unavailable', 'restore connectivity', 'восстановите связь'),
+            ('force_execution_still_running', 'journal lock', 'блокировку журнала'),
+        )
+        identity = str(uuid4())
+        action = recovery.RecoveryAction(kind='node', id=identity, action='force', confirm=1)
+        for code, english, russian in cases:
+            for locale, expected in (('en', english), ('ru', russian)):
+                with self.subTest(code=code, locale=locale):
+                    self.state_data['locale'] = locale
+                    backend = SimpleNamespace(request=AsyncMock(side_effect=recovery.BackendError(code, 409)))
+                    with patch.object(recovery, 'show', new_callable=AsyncMock) as show:
+                        await recovery.recovery_action(self.query, action, self.bot, backend, self.state)
+                    self.assertIn(expected, show.call_args.kwargs['note'])
+
+    async def test_force_recovery_history_and_audit_outcome_labels(self):
+        history_item = {
+            'created_at': '2026-10-30T10:00:00Z',
+            'kind': 'node',
+            'node_key': 'lv1',
+            'action': 'force',
+            'outcome': 'force_cancelled',
+            'actor_id': str(uuid4()),
+            'operation_id': str(uuid4()),
+        }
+        backend_history = SimpleNamespace(request=AsyncMock(return_value={
+            'items': [history_item],
+            'offset': 0,
+            'total': 1,
+            'page_size': 10,
+        }))
+
+        for locale, (outcome_text, action_text) in (
+            ('en', ('Force cancelled', 'Force cancel')),
+            ('ru', ('Принудительно отменено', 'Принудительная отмена')),
+        ):
+            self.state_data['locale'] = locale
+            with patch.object(recovery, 'render', new_callable=AsyncMock) as draw:
+                await recovery.recovery_history(
+                    self.query,
+                    recovery.RecoveryHistory(offset=0),
+                    self.bot,
+                    backend_history,
+                    self.state,
+                )
+            screen = draw.call_args.args[2]
+            btn_text = screen.sections[0].inline_rows[0][0].text
+            self.assertIn(outcome_text, btn_text)
+            self.assertIn(action_text, btn_text)
+
+        audit_item = {
+            'occurred_at': '2026-10-30T10:00:00Z',
+            'account_label': '@admin',
+            'action': f'/api/v1/system/recovery/node/{uuid4()}/force',
+            'outcome': 'force_cancelled',
+        }
+        self.assertEqual(recovery.audit_result('en', audit_item), 'Force cancelled')
+        self.assertEqual(recovery.audit_result('ru', audit_item), 'Принудительно отменено')

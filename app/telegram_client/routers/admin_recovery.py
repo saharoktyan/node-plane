@@ -50,6 +50,10 @@ def action_path(kind, identity, action):
             raise ValueError('invalid node identity')
         return f'/api/v1/system/recovery/removal/{identity}/resume'
     identity = str(UUID(identity))
+    if action == 'force':
+        if kind in {'settings', 'profile', 'node', 'bootstrap'}:
+            return f'/api/v1/system/recovery/{kind}/{identity}/force'
+        raise ValueError('unsupported recovery action')
     if kind == 'cleanup' and action in {'retry', 'abort'}:
         return f'/api/v1/system/cleanup/jobs/{identity}/{action}'
     if kind == 'issuance' and action == 'cancel':
@@ -97,10 +101,14 @@ async def show(query, bot, backend, state, offset=0, note=''):
             token = next((token for token, node in previous_tokens.items() if node == identity), None) or uuid4().hex[:12]
             action_tokens[token] = identity
             identity = token
+        normal = [action for action in item['actions'] if action != 'force']
         rows = [tuple(InlineKeyboardButton(text=action_label(locale, item['kind'], action),
                     callback_data=RecoveryAction(kind=item['kind'], id=identity, action=action).pack(),
                     style='danger' if action in {'cancel', 'abort'} else 'primary')
-                for action in item['actions'])] if item['actions'] else []
+                for action in normal)] if normal else []
+        if 'force' in item['actions']:
+            rows.append((InlineKeyboardButton(text=action_label(locale, item['kind'], 'force'),
+                callback_data=RecoveryAction(kind=item['kind'], id=identity, action='force').pack(), style='danger'),))
         code = item.get('error_code', '')
         reason = tr(locale, 'recovery.cause.' + code)
         if reason == 'recovery.cause.' + code:
@@ -165,16 +173,26 @@ async def recovery_action(query: CallbackQuery, callback_data: RecoveryAction, b
                  InlineKeyboardButton(text=action_label(locale, callback_data.kind, callback_data.action),
                     callback_data=RecoveryAction(kind=callback_data.kind, id=callback_data.id,
                         action=callback_data.action, confirm=1).pack(),
-                    style='danger' if callback_data.action in {'cancel', 'abort'} else 'primary')]]
+                    style='danger' if callback_data.action in {'cancel', 'abort', 'force'} else 'primary')]]
+        explain_key = 'recovery.explain.' + callback_data.kind + '.' + callback_data.action
+        explain = tr(locale, explain_key)
+        if explain == explain_key:
+            explain = tr(locale, 'recovery.explain.' + callback_data.action)
         await render(bot, query.message.chat.id, Screen(tr(locale, 'recovery.confirm'),
-            (tr(locale, 'recovery.explain.' + callback_data.kind + '.' + callback_data.action) if callback_data.kind in {'settings', 'profile', 'agent', 'bootstrap', 'backup', 'removal', 'temporary', 'issuance', 'cleanup'} else tr(locale, 'recovery.explain.' + callback_data.action), identity),
+            (explain, identity),
             embedded_buttons=True, navigation=True), rows, state, query.message.message_id)
         return
     try:
-        result = await backend.request('POST', path, telegram_user_id=query.from_user.id)
+        kwargs = {'telegram_user_id': query.from_user.id}
+        if callback_data.action == 'force':
+            kwargs['body'] = {'confirm_operation_id': identity, 'acknowledge_unknown_outcome': True}
+            kwargs['timeout_seconds'] = 60
+        result = await backend.request('POST', path, **kwargs)
         note = tr(locale, 'recovery.result_status', status=tr(locale, 'recovery.status.' + result.get('status', 'unknown')))
         if result.get('status') == 'blocked':
             note = tr(locale, 'recovery.still_blocked')
+        if result.get('outcome') == 'force_cancelled':
+            note = tr(locale, 'recovery.result_force_cancelled', status=tr(locale, 'recovery.status.' + result.get('status', 'unknown')))
         if (result.get('observation') or {}).get('agent_setup_retryable') is True:
             note = tr(locale, 'recovery.agent_setup_retryable')
         if result.get('replacement_id'):

@@ -84,6 +84,14 @@ impl AgentTransport {
             .into_inner())
     }
 
+    pub async fn force_recovery(
+        &self,
+        request: crate::agent::v1::ForceRecoveryRequest,
+    ) -> Result<RuntimeCommandResponse, tonic::Status> {
+        let mut client = self.client().await.map_err(connection_status)?;
+        Ok(client.force_recovery(request).await?.into_inner())
+    }
+
     pub async fn recover_backend_node_settings(
         &self,
         request: ApplyBackendNodeSettingsRequest,

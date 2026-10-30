@@ -3383,3 +3383,58 @@ CATALOG['en']['node_tools.cleanup_scope_unconfirmed'] = 'VPN runtime is present 
 CATALOG['ru']['node_tools.cleanup_scope_unconfirmed'] = 'На сервере обнаружен VPN-runtime или его отсутствие не удалось проверить, но эта нода не имеет подтверждённой установки VPN. Полное удаление остановлено. Проверьте принадлежность runtime перед повтором.'
 CATALOG['en']['node_tools.settings_pending'] = 'Apply or recover pending VPN settings before cleanup.'
 CATALOG['ru']['node_tools.settings_pending'] = 'Перед очисткой примените настройки VPN или восстановите незавершённую операцию.'
+
+CATALOG['en'].update({
+    'recovery.action.force': 'Force cancel',
+    'recovery.explain.force': 'The node agent restarts to stop previous execution. The exact selected operation is cancelled with an unknown outcome. Existing VPN containers and configurations are not deliberately removed. New actions become possible, and actual service state may need checking.',
+    'recovery.explain.settings.force': 'The node agent restarts to stop previous execution. The exact selected operation is cancelled with an unknown outcome. Existing VPN containers and configurations are not deliberately removed. New actions become possible, and actual service state may need checking.',
+    'recovery.explain.profile.force': 'The node agent restarts to stop previous execution. The exact selected operation is cancelled with an unknown outcome. Existing VPN containers and configurations are not deliberately removed. New actions become possible, and actual service state may need checking.',
+    'recovery.explain.node.force': 'The node agent restarts to stop previous execution. The exact selected operation is cancelled with an unknown outcome. Existing VPN containers and configurations are not deliberately removed. New actions become possible, and actual service state may need checking.',
+    'recovery.explain.bootstrap.force': 'The node agent restarts to stop previous execution. The exact selected operation is cancelled with an unknown outcome. Existing VPN containers and configurations are not deliberately removed. New actions become possible, and actual service state may need checking.',
+    'recovery.outcome.force_cancelled': 'Force cancelled',
+    'audit.outcome.force_cancelled': 'Force cancelled',
+    'recovery.result_force_cancelled': 'Operation force-cancelled. Its previous outcome is unconfirmed.',
+})
+CATALOG['ru'].update({
+    'recovery.action.force': 'Принудительная отмена',
+    'recovery.explain.force': 'Агент ноды перезапускается для остановки предыдущего выполнения. Выбранная операция отменяется с неизвестным исходом. Существующие VPN-контейнеры и конфигурации намеренно не удаляются. Новые действия станут возможны, но фактическое состояние сервисов может потребовать проверки.',
+    'recovery.explain.settings.force': 'Агент ноды перезапускается для остановки предыдущего выполнения. Выбранная операция отменяется с неизвестным исходом. Существующие VPN-контейнеры и конфигурации намеренно не удаляются. Новые действия станут возможны, но фактическое состояние сервисов может потребовать проверки.',
+    'recovery.explain.profile.force': 'Агент ноды перезапускается для остановки предыдущего выполнения. Выбранная операция отменяется с неизвестным исходом. Существующие VPN-контейнеры и конфигурации намеренно не удаляются. Новые действия станут возможны, но фактическое состояние сервисов может потребовать проверки.',
+    'recovery.explain.node.force': 'Агент ноды перезапускается для остановки предыдущего выполнения. Выбранная операция отменяется с неизвестным исходом. Существующие VPN-контейнеры и конфигурации намеренно не удаляются. Новые действия станут возможны, но фактическое состояние сервисов может потребовать проверки.',
+    'recovery.explain.bootstrap.force': 'Агент ноды перезапускается для остановки предыдущего выполнения. Выбранная операция отменяется с неизвестным исходом. Существующие VPN-контейнеры и конфигурации намеренно не удаляются. Новые действия станут возможны, но фактическое состояние сервисов может потребовать проверки.',
+    'recovery.outcome.force_cancelled': 'Принудительно отменено',
+    'audit.outcome.force_cancelled': 'Принудительно отменено',
+    'recovery.result_force_cancelled': 'Операция принудительно отменена. Её исход не подтверждён.',
+})
+
+CATALOG['en'].update({
+    'recovery.cause.force_confirmation_required': 'Confirm the exact operation and acknowledge its unknown outcome.',
+    'recovery.cause.force_agent_upgrade_required': 'Update the controller Driver and node agent before using forced cancellation.',
+    'recovery.cause.force_agent_unavailable': 'The agent is unavailable. Forced cancellation has not been confirmed; restore connectivity and retry.',
+    'recovery.cause.force_restart_required': 'The agent restart has not completed. Refresh and retry forced cancellation.',
+    'recovery.cause.force_execution_still_running': 'A previous executor still holds the node journal lock. Cancellation has not been confirmed.',
+    'recovery.cause.force_managed_restart_unavailable': 'Automatic restart requires the managed agent service with control-group process cleanup.',
+    'recovery.cause.force_restart_unavailable': 'The agent restart could not be scheduled. Check the agent service and retry.',
+    'recovery.cause.force_command_conflict': 'The saved command does not match this operation. Refresh and verify the selected node.',
+    'recovery.cause.force_ticket_conflict': 'The saved cancellation request belongs to a different command. Refresh this operation.',
+    'recovery.cause.force_agent_removal_pending': 'Finish or recover node removal before cancelling other operations.',
+    'recovery.cause.force_command_already_terminal': 'The agent already recorded a terminal result. Refresh and check the original result.',
+    'recovery.cause.force_recovery_unconfirmed': 'Forced cancellation was not confirmed. The operation remains blocked; refresh before retrying.',
+})
+CATALOG['ru'].update({
+    'recovery.cause.force_confirmation_required': 'Подтвердите точную операцию и согласие с неизвестным исходом.',
+    'recovery.cause.force_agent_upgrade_required': 'Перед принудительной отменой обновите Driver контроллера и агент ноды.',
+    'recovery.cause.force_agent_unavailable': 'Агент недоступен. Принудительная отмена не подтверждена; восстановите связь и повторите.',
+    'recovery.cause.force_restart_required': 'Перезапуск агента ещё не завершён. Обновите экран и повторите принудительную отмену.',
+    'recovery.cause.force_execution_still_running': 'Предыдущий исполнитель ещё держит блокировку журнала. Отмена не подтверждена.',
+    'recovery.cause.force_managed_restart_unavailable': 'Для автоматического перезапуска нужен штатный сервис агента с остановкой всей группы процессов.',
+    'recovery.cause.force_restart_unavailable': 'Не удалось запланировать перезапуск агента. Проверьте сервис и повторите.',
+    'recovery.cause.force_command_conflict': 'Сохранённая команда не совпадает с операцией. Обновите экран и проверьте выбранную ноду.',
+    'recovery.cause.force_ticket_conflict': 'Сохранённый запрос отмены относится к другой команде. Обновите экран операции.',
+    'recovery.cause.force_agent_removal_pending': 'Завершите или восстановите удаление ноды перед отменой других операций.',
+    'recovery.cause.force_command_already_terminal': 'Агент уже записал конечный результат. Обновите экран и проверьте исходный результат.',
+    'recovery.cause.force_recovery_unconfirmed': 'Принудительная отмена не подтверждена. Операция остаётся заблокированной; обновите экран перед повтором.',
+})
+
+CATALOG['en']['recovery.explain.profile.force'] = 'The node agent restarts to stop previous execution. This access operation is cancelled with an unknown outcome. Its access change may already have taken effect. Apply node settings or run Reconcile access to synchronize again. Server VPN services remain installed.'
+CATALOG['ru']['recovery.explain.profile.force'] = 'Агент ноды перезапускается для остановки предыдущего выполнения. Операция изменения доступа отменяется с неизвестным исходом. Доступ уже мог измениться. Для новой синхронизации примените настройки ноды или запустите Reconcile access. VPN-сервисы останутся установленными.'

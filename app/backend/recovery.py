@@ -145,7 +145,7 @@ def _item(conn, row, actor, gate, other):
                 actions = ['resume']
         elif kind in {'node', 'settings'} and 'nodes.manage' in actor.principal.scopes:
             actions = ['recheck', 'resolve']
-            if kind == 'settings' and any(conn.execute(f"SELECT 1 FROM {table} WHERE node_key=? AND status IN ('awaiting_executor','running','blocked') LIMIT 1", (row['node_key'],)).fetchone() for table in ('backend_node_jobs','backend_agent_rollouts','backend_node_bootstraps','backend_operation_tasks')):
+            if kind == 'settings' and any(conn.execute(f"SELECT 1 FROM {table} WHERE node_key=? AND status IN {states} LIMIT 1", (row['node_key'],)).fetchone() for table, states in [('backend_node_jobs', "('awaiting_executor','running','blocked')"), ('backend_agent_rollouts', "('awaiting_executor','running','blocked')"), ('backend_node_bootstraps', "('awaiting_executor','running','blocked')"), ('backend_operation_tasks', "('running','blocked')")]):
                 actions.remove('resolve')
         elif kind == 'profile' and 'profiles.manage' in actor.principal.scopes:
             actions = ['recheck', 'resolve']
@@ -165,6 +165,11 @@ def _item(conn, row, actor, gate, other):
                     task = conn.execute('SELECT * FROM backend_agent_rollouts WHERE id=?', (related_id,)).fetchone()
                     if task and AgentRolloutService(_ConnectionDB(conn)).preflight_failed(task):
                         actions.append('cancel')
+    if status == 'blocked' and not gate and not other:
+        from .force_recovery import permitted
+        if kind in {'settings', 'profile', 'node', 'bootstrap'} and permitted(actor, kind) and not conn.execute('SELECT 1 FROM backend_node_drains WHERE node_key=?', (row['node_key'],)).fetchone():
+            if kind != 'bootstrap' or related_kind == 'node-jobs':
+                actions.append('force')
     hint = ('maintenance' if (gate or other) and kind != 'update' else
             'bootstrap_child' if related_id and kind == 'bootstrap' else
             'child' if related_id else
@@ -222,7 +227,10 @@ def overview(db, actor, offset=0, node_key=None, *, group_by_node=False):
             'node_title':node['title'] if node else node_key or 'Controller'}
 
 
-def act(db, actor, driver, kind, identity, action):
+def act(db, actor, driver, kind, identity, action, *, confirmation=None):
+    if action == 'force':
+        from .force_recovery import cancel
+        return cancel(db, actor, driver, kind, identity, confirmation)
     """Caller holds worker flock. Only the named command can change."""
     require_permission(actor, 'maintenance.manage')
     if kind not in {'node', 'settings', 'profile', 'agent', 'bootstrap', 'removal', 'backup', 'temporary', 'issuance'} or action not in {'recheck', 'resolve', 'resume', 'cancel'}:

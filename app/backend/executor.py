@@ -70,7 +70,8 @@ class IntentExecutor:
                 queued += 1
         return queued
 
-    def refresh_operation(self, conn, operation_id):
+    @staticmethod
+    def refresh_operation(conn, operation_id):
         states = {r['status'] for r in conn.execute('SELECT status FROM backend_operation_tasks WHERE operation_id = ?', (operation_id,)).fetchall()}
         status = ('blocked' if 'blocked' in states else 'running' if 'running' in states else
                   'awaiting_executor' if 'awaiting_executor' in states else
@@ -190,6 +191,10 @@ class IntentExecutor:
 
     def run_one(self):
         with self.db.transaction() as conn:
+            conn.execute('UPDATE backend_account_guard SET revision=revision+1 WHERE id=1')
+            from .maintenance_gate import core_upgrade
+            if core_upgrade(conn):
+                return False
             # Preserve profile revision order on each node, including revocation.
             # Any uncertain result blocks later work, even for another profile.
             # Pending protocol cleanup must first let its revocations run. Old
@@ -298,6 +303,13 @@ class Worker:
                     self.node_jobs, self.node_executor, self.executor,
                     self.temporary_executor, self.config_executor)
         while not stop.is_set():
+            from .maintenance_gate import core_upgrade
+            with self.executor.db.connect() as conn:
+                core_only = core_upgrade(conn)
+            if core_only:
+                if not self.update_executor.run_one():
+                    break
+                continue
             if not any(service.run_one() for service in services):
                 break
 

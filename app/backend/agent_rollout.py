@@ -268,6 +268,10 @@ class AgentRolloutService:
 
     def run_one(self):
         with self.db.transaction() as conn:
+            conn.execute('UPDATE backend_account_guard SET revision=revision+1 WHERE id=1')
+            from .maintenance_gate import core_upgrade
+            if core_upgrade(conn):
+                return False
             row = conn.execute('''SELECT * FROM backend_agent_rollouts
                 WHERE status = 'awaiting_executor' ORDER BY id LIMIT 1''').fetchone()
             if row is None:

@@ -5,6 +5,8 @@ package nodeplane.agent.v1;
 import "agent/v1/types.proto";
 
 service NodeAgentService {
+  // Explicit operator cancellation, bound to a durable restart ticket.
+  rpc ForceRecovery(ForceRecoveryRequest) returns (RuntimeCommandResponse);
   rpc BackendNodeAction(BackendNodeActionRequest) returns (RuntimeCommandResponse);
   rpc ResolveProfileIntent(ApplyProfileIntentRequest) returns (ProfileInspection);
   rpc RecoverProfileIntent(ApplyProfileIntentRequest) returns (RuntimeCommandResponse);
@@ -242,4 +244,13 @@ message AddAwgUserRequest {
 
 message DeleteProfileRequest {
   string profile_name = 1;
+}
+
+message ForceRecoveryRequest {
+  string node_key = 1;
+  string ticket_id = 2;
+  string command_id = 3;
+  string operation_kind = 4;
+  string intent_json = 5;
+  string phase = 6;
 }

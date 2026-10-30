@@ -5,6 +5,8 @@ package nodeplane.driver.v1;
 import "driver/v1/types.proto";
 
 service RuntimeService {
+  // Explicit operator cancellation, bound to a durable restart ticket.
+  rpc ForceRecovery(ForceRecoveryRequest) returns (BackendNodeSettingsResult);
   rpc BackendNodeAction(BackendNodeActionRequest) returns (BackendNodeSettingsResult);
   // Explicit backend-owned path; does not access legacy server/profile tables.
   rpc DecommissionNode(DecommissionNodeRequest) returns (DecommissionNodeResponse);
@@ -69,4 +71,13 @@ message RefreshAwgConfigRequest {
 message RefreshAwgConfigResponse {
   string wg_conf = 1;
   string vpn_key = 2;
+}
+
+message ForceRecoveryRequest {
+  string node_key = 1;
+  string ticket_id = 2;
+  string command_id = 3;
+  string operation_kind = 4;
+  string intent_json = 5;
+  string phase = 6;
 }

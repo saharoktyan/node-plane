@@ -17,3 +17,9 @@ def admit(conn, *, allow_restore=False):
     if not allow_restore and conn.execute("""SELECT id FROM backend_backup_jobs
         WHERE action='restore' AND status IN ('awaiting_executor','running') AND COALESCE(phase,'') != 'reconnecting' LIMIT 1""").fetchone():
         raise AccessDenied('restore_in_progress', 409)
+
+
+def core_upgrade(conn):
+    """A core-only upgrade pauses all previously queued node dispatch."""
+    return conn.execute("""SELECT 1 FROM backend_controller_update_gate g
+        JOIN backend_update_jobs j ON j.id=g.job_id WHERE j.kind='version' LIMIT 1""").fetchone() is not None

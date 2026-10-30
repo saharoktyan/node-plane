@@ -241,13 +241,19 @@ class UpdateService:
                 return self.get(actor, prior['id'])
             if conn.execute("SELECT 1 FROM backend_update_jobs WHERE status IN ('awaiting_executor','running')").fetchone():
                 raise AccessDenied('update_pending', 409)
-            if conn.execute("SELECT 1 FROM backend_node_bootstraps WHERE status IN ('awaiting_executor','running','blocked')").fetchone():
+            # Core-only upgrades must remain available to repair blocked nodes.
+            # Queued work has not been claimed; the durable update gate prevents
+            # its dispatch until the upgrade finishes. Never cross a live claim.
+            if kind != 'version' and conn.execute("SELECT 1 FROM backend_node_bootstraps WHERE status IN ('awaiting_executor','running','blocked')").fetchone():
                 raise AccessDenied('maintenance_busy', 409)
             if kind in {'version', 'stack'}:
+                states = "('running')" if kind == 'version' else "('awaiting_executor','running')"
                 for table in ('backend_node_bootstraps', 'backend_agent_rollouts', 'backend_node_jobs', 'backend_node_settings_tasks',
                               'backend_operation_tasks', 'backend_config_issuances'):
-                    if conn.execute(f"SELECT 1 FROM {table} WHERE status IN ('awaiting_executor','running')").fetchone():
+                    if conn.execute(f"SELECT 1 FROM {table} WHERE status IN {states}").fetchone():
                         raise AccessDenied('maintenance_busy', 409)
+                if kind == 'version' and conn.execute("SELECT 1 FROM backend_temporary_configs WHERE status IN ('issuing','revoking')").fetchone():
+                    raise AccessDenied('maintenance_busy', 409)
             conn.execute('INSERT INTO backend_update_jobs VALUES (?,?,?,?,?,?,?,?)',
                 (job_id, actor.account.id, key, kind, encoded, 'awaiting_executor',
                  json.dumps(plan) if plan else None, datetime.now(timezone.utc).isoformat()))

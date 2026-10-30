@@ -1546,6 +1546,81 @@ fn node_recovery_card_can_select_resume_and_cancel_with_confirmation() {
 }
 
 #[test]
+fn node_recovery_card_can_select_force_cancel_with_confirmation_and_back_cancels() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Nodes;
+    app.nodes.card = Some(browser_node("lv1", "Europe"));
+    let identity = uuid::Uuid::new_v4().to_string();
+    app.event(Event::Nodes(crate::nodes::Update::Diagnostics(
+        "lv1".into(),
+        serde_json::json!({"error_code": "node_agent_unavailable"}),
+        serde_json::json!({
+            "items": [{
+                "id": identity,
+                "node_key": "lv1",
+                "kind": "settings",
+                "status": "blocked",
+                "actions": ["recheck", "resolve", "force"]
+            }],
+            "total": 1,
+            "offset": 0,
+            "page_size": 10
+        }),
+    )));
+    app.nodes_requested = None;
+    app.activate(Control::NodesDiagnosticItem(0));
+
+    // Verify actual "Force cancel" action is visible when backend advertises it
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    let text: String = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|c| c.symbol())
+        .collect();
+    assert!(text.contains("Force cancel"));
+    assert!(
+        app.hits
+            .iter()
+            .any(|hit| hit.control == Control::NodesRecovery(0, "force"))
+    );
+
+    // Selection opens confirmation dialog with force explanation
+    app.activate(Control::NodesRecovery(0, "force"));
+    assert!(app.nodes.recovery_confirm.is_some());
+    assert!(app.nodes_requested.is_none());
+
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    let confirm_text: String = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|c| c.symbol())
+        .collect();
+    assert!(confirm_text.contains("cancelled with an unknown outcome"));
+    assert!(confirm_text.contains("Confirm"));
+    assert!(confirm_text.contains("Back"));
+
+    // Back cancels confirmation and preserves diagnostic item without command dispatch
+    app.activate(Control::NodesBack);
+    assert!(app.nodes.recovery_confirm.is_none());
+    assert!(app.nodes_requested.is_none());
+    assert!(app.nodes.diagnostic_item.is_some());
+
+    // Selecting force again and activating Confirm queues exact bound command
+    app.activate(Control::NodesRecovery(0, "force"));
+    assert!(app.nodes.recovery_confirm.is_some());
+    app.activate(Control::NodesRecoveryConfirm);
+    assert!(
+        matches!(app.nodes_requested.take(), Some(crate::nodes::Command::Recover(key, item, action)) if key == "lv1" && item["id"] == identity && action == "force")
+    );
+    assert!(app.nodes.recovery_confirm.is_none());
+}
+
+#[test]
 fn uninstalled_node_card_exposes_only_settings_setup_and_registry_removal() {
     let mut node = browser_node("lv1", "Europe");
     node.applied_revision = 0;
