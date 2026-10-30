@@ -192,11 +192,23 @@ class IntentExecutor:
         with self.db.transaction() as conn:
             # Preserve profile revision order on each node, including revocation.
             # Any uncertain result blocks later work, even for another profile.
+            # Pending protocol cleanup must first let its revocations run. Old
+            # ensures for removed services are retired below without dispatch;
+            # queued work for retained services stays behind the settings fence.
             row = conn.execute("""SELECT t.*, o.profile_id, o.desired_revision
                 FROM backend_operation_tasks t JOIN backend_operations o ON o.id = t.operation_id
                 WHERE t.status = 'awaiting_executor'
+                  AND (t.action='delete' OR NOT EXISTS (SELECT 1 FROM backend_nodes waiting
+                      WHERE waiting.key=t.node_key AND waiting.applied_revision>0
+                      AND waiting.applied_revision != waiting.desired_revision
+                      AND ((t.protocol='awg' AND waiting.protocols_json LIKE '%"awg"%')
+                          OR (t.protocol='xray' AND waiting.protocols_json LIKE '%"xray"%'))))
                   AND NOT EXISTS (SELECT 1 FROM backend_node_settings_tasks ns
-                      WHERE ns.node_key = t.node_key AND ns.status IN ('awaiting_executor', 'running', 'blocked'))
+                      WHERE ns.node_key = t.node_key AND (ns.status IN ('running', 'blocked')
+                          OR (ns.status='awaiting_executor' AND NOT EXISTS (
+                              SELECT 1 FROM backend_nodes pending WHERE pending.key=t.node_key
+                              AND ((t.protocol='awg' AND pending.protocols_json NOT LIKE '%"awg"%')
+                                  OR (t.protocol='xray' AND pending.protocols_json NOT LIKE '%"xray"%'))))))
                   AND NOT EXISTS (SELECT 1 FROM backend_node_jobs nj
                       WHERE nj.node_key = t.node_key AND nj.status IN ('awaiting_executor', 'running', 'blocked'))
                   AND NOT EXISTS (SELECT 1 FROM backend_operation_tasks b
@@ -205,14 +217,19 @@ class IntentExecutor:
                       JOIN backend_operations eo ON eo.id = earlier.operation_id
                       WHERE earlier.node_key = t.node_key AND eo.profile_id = o.profile_id
                         AND eo.desired_revision < o.desired_revision
-                        AND earlier.status NOT IN ('succeeded', 'superseded'))
+                        AND earlier.status NOT IN ('succeeded', 'superseded')
+                        AND NOT (t.action='delete' AND earlier.protocol != t.protocol AND earlier.status='awaiting_executor'
+                            AND EXISTS (SELECT 1 FROM backend_nodes pending WHERE pending.key=t.node_key
+                                AND ((t.protocol='awg' AND pending.protocols_json NOT LIKE '%"awg"%')
+                                    OR (t.protocol='xray' AND pending.protocols_json NOT LIKE '%"xray"%')))))
                 ORDER BY o.created_at, o.id, t.id LIMIT 1""").fetchone()
             if row is None:
                 return False
-            node = conn.execute('SELECT enabled FROM backend_nodes WHERE key = ?', (row['node_key'],)).fetchone()
+            node = conn.execute('SELECT enabled,protocols_json FROM backend_nodes WHERE key = ?', (row['node_key'],)).fetchone()
             device = conn.execute('SELECT status FROM backend_devices WHERE id=?', (row['device_id'],)).fetchone() if row['device_id'] else None
             device_inactive = bool(row['device_id']) and (device is None or device['status'] != 'active')
-            if row['action'] == 'ensure' and (node is None or not node['enabled'] or device_inactive):
+            if row['action'] == 'ensure' and (node is None or not node['enabled'] or device_inactive
+                    or row['protocol'] not in json.loads(node['protocols_json'])):
                 # A drain may leave earlier ensures queued. Retire them before
                 # sending any remote mutation, then let the delete revision run.
                 conn.execute("UPDATE backend_operation_tasks SET status = 'superseded' WHERE id = ?", (row['id'],))

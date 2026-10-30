@@ -214,9 +214,12 @@ class BackendNodeTests(unittest.TestCase):
         self.db.connection.execute('INSERT INTO backend_grants(profile_id, node_key, protocol) VALUES (?, ?, ?)',
                                    (profile_id, 'lv1', 'awg'))
         response = self.edit(1, {'protocols': ['xray']})
-        self.assertEqual(response.json()['error']['code'], 'node_protocol_in_use')
-        self.assertEqual(self.client.get('/api/v1/nodes/lv1', headers=self.admin_headers()).json()['protocols'], ['awg', 'xray'])
-        self.assertEqual(self.edit(1, {'settings': {'awg_port': None}}).status_code, 422)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.client.get('/api/v1/nodes/lv1', headers=self.admin_headers()).json()['protocols'], ['xray'])
+        with self.db.connect() as conn:
+            self.assertIsNone(conn.execute('SELECT 1 FROM backend_grants WHERE profile_id=? AND node_key=? AND protocol=?',
+                                           (profile_id, 'lv1', 'awg')).fetchone())
+        self.assertEqual(self.edit(2, {'settings': {'awg_port': None}}).status_code, 422)
         self.assertEqual(self.client.patch('/api/v1/nodes/lv1', headers=self.admin_headers(**{
             'Idempotency-Key': str(uuid4())}), json={'title': 'No revision'}).status_code, 428)
 

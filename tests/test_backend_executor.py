@@ -311,3 +311,53 @@ class BackendExecutorTests(unittest.TestCase):
         self.assertTrue(worker.run_one())
         self.assertEqual(worker.driver.calls[-1][1]['action'], 'delete')
         self.assertEqual(worker.queue_expired_profiles(), 0)
+
+    def test_removed_protocol_revokes_before_settings_without_running_retained_ensures(self):
+        from uuid import uuid4
+        profile = self.prepare(with_device=True)
+        self.grants(profile, 1, [{'node_key': 'node', 'protocol': 'awg'}, {'node_key': 'node', 'protocol': 'xray'}])
+        self.grants(profile, 2, [{'node_key': 'node', 'protocol': 'xray'}])
+        task = str(uuid4())
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_nodes SET protocols_json='[\"xray\"]',desired_revision=2,applied_revision=1 WHERE key='node'")
+            conn.execute("INSERT INTO backend_node_settings_tasks(id,node_key,actor_account_id,command_key,revision,intent_json,status) VALUES (?,'node',?,?,2,?,'awaiting_executor')",
+                         (task, self.admin.id, str(uuid4()), json.dumps({'protocols': ['xray'], 'protocol_plan': {'remove_protocols': ['awg']}})))
+        driver = FakeDriver()
+        worker = IntentExecutor(self.db, driver)
+        for state in ('running', 'blocked'):
+            with self.db.transaction() as conn:
+                conn.execute('UPDATE backend_node_settings_tasks SET status=? WHERE id=?', (state, task))
+            self.assertFalse(worker.run_one(), 'uncertain settings keep the mutation fence')
+            self.assertEqual(driver.calls, [])
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_node_settings_tasks SET status='awaiting_executor' WHERE id=?", (task,))
+            conn.execute("UPDATE backend_operation_tasks SET status='blocked' WHERE protocol='xray'")
+        self.assertFalse(worker.run_one(), 'unknown retained-service operations are not bypassed')
+        self.assertEqual(driver.calls, [])
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_operation_tasks SET status='awaiting_executor' WHERE protocol='xray'")
+        self.assertTrue(worker.run_one(), 'retire the queued AWG ensure without RPC')
+        self.assertEqual(driver.calls, [])
+        self.assertTrue(worker.run_one(), 'AWG delete must not wait for retained VLESS ensure')
+        self.assertEqual([(v['protocol'], v['action']) for _, v in driver.calls], [('awg', 'delete')])
+        self.assertFalse(worker.run_one(), 'retained ensures wait until settings finish')
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_node_settings_tasks SET status='succeeded' WHERE id=?", (task,))
+            conn.execute("UPDATE backend_nodes SET applied_revision=desired_revision WHERE key='node'")
+        while worker.run_one():
+            pass
+        self.assertTrue(any(v['protocol']=='xray' and v['action']=='ensure' for _,v in driver.calls))
+
+    def test_ensure_waits_for_saved_service_revision_before_apply_is_queued(self):
+        profile = self.prepare(with_device=True)
+        self.grants(profile, 1, [{'node_key': 'node', 'protocol': 'awg'}])
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_nodes SET applied_revision=1,desired_revision=2 WHERE key='node'")
+        driver = FakeDriver()
+        worker = IntentExecutor(self.db, driver)
+        self.assertFalse(worker.run_one())
+        self.assertEqual(driver.calls, [])
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_nodes SET applied_revision=2 WHERE key='node'")
+        self.assertTrue(worker.run_one())
+        self.assertEqual(driver.calls[-1][1]['action'], 'ensure')

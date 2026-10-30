@@ -103,6 +103,8 @@ class BackendConfigIssuanceTests(unittest.TestCase):
                 VALUES (?, ?, ?, 1, ?, ?, 1, 1, ?)''',
                 ('n1', 'Latvia #1', 'EU', json.dumps([protocol]),
                  json.dumps(['tcp', 'xhttp'] if protocol == 'xray' else []), json.dumps(settings)))
+            from backend.grant_policies import assign_region
+            assign_region(conn, 'n1', 'EU')
             conn.execute('INSERT INTO backend_grants(profile_id, node_key, protocol) VALUES (?, ?, ?)',
                          (profile_id, 'n1', protocol))
             actor = Actor(Principal('test', PrincipalKind.ACCOUNT,

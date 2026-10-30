@@ -446,3 +446,62 @@ class BackendNodeSettingsTests(unittest.TestCase):
         self.assertEqual(result['mode'], 'registry_only')
         self.assertEqual(self.db.connection.execute('SELECT status FROM backend_node_settings_tasks WHERE id = ?',
             (task_id,)).fetchone()['status'], 'superseded')
+
+    def test_protocol_removal_settings_gated_by_confirmed_revocations(self):
+        from backend.profiles import ProfileRepository
+        from backend.grant_policies import materialize
+        ProfileRepository(self.db).ensure_account_profile(self.admin.id)
+        self.assertEqual(self.create().status_code, 201)
+        task_id = self.queue().json()['id']
+
+        class InitialDriver:
+            def inspect_node(self, node_key):
+                return {'health_state': 'running', 'xray_config_present': True, 'awg_config_present': True}
+
+            def apply_node_settings(self, command_id, intent):
+                return json.dumps({'node_key': 'n1', 'revision': 1, 'settings_sha256': _digest(intent)})
+
+        worker = NodeSettingsExecutor(self.db, InitialDriver())
+        self.assertTrue(worker.run_one())
+
+        with self.db.transaction() as conn:
+            admin_profile = conn.execute("SELECT id FROM backend_profiles WHERE owner_account_id=?", (self.admin.id,)).fetchone()['id']
+            materialize(conn, admin_profile)
+
+        # Edit node to remove xray
+        response = self.client.patch('/api/v1/nodes/n1', headers=self.admin_headers(**{
+            'Idempotency-Key': str(uuid4()), 'If-Match': '"1"'}), json={'protocols': ['awg']})
+        self.assertEqual(response.status_code, 200, response.text)
+
+        # Queue apply settings for revision 2
+        queued2 = self.queue(revision=2).json()
+        task2_id = queued2['id']
+
+        dispatched = []
+
+        class RemovalDriver:
+            def inspect_node(self, node_key):
+                return {'health_state': 'running', 'awg_config_present': True}
+
+            def apply_node_settings(self, command_id, intent):
+                dispatched.append(command_id)
+                return json.dumps({'node_key': 'n1', 'revision': 2, 'settings_sha256': _digest(intent)})
+
+        removal_worker = NodeSettingsExecutor(self.db, RemovalDriver())
+
+        # Operation delete task for xray is awaiting_executor, so removal settings MUST NOT dispatch
+        self.assertFalse(removal_worker.run_one())
+        self.assertEqual(dispatched, [])
+        with self.db.connect() as conn:
+            self.assertEqual(conn.execute('SELECT status FROM backend_node_settings_tasks WHERE id=?', (task2_id,)).fetchone()['status'], 'awaiting_executor')
+
+        # Mark delete task succeeded
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_operation_tasks SET status='succeeded' WHERE node_key='n1' AND protocol='xray'")
+
+        # Now revocations confirmed: settings removal dispatches
+        self.assertTrue(removal_worker.run_one())
+        self.assertEqual(dispatched, [task2_id])
+        with self.db.connect() as conn:
+            self.assertEqual(conn.execute('SELECT status FROM backend_node_settings_tasks WHERE id=?', (task2_id,)).fetchone()['status'], 'succeeded')
+            self.assertEqual(conn.execute('SELECT applied_revision FROM backend_nodes WHERE key=?', ('n1',)).fetchone()['applied_revision'], 2)

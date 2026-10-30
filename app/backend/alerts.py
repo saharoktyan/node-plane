@@ -2,6 +2,7 @@
 
 import json
 import math
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
@@ -35,6 +36,7 @@ DEFAULT_POLICY = {
 }
 RESOURCE_TYPES = {"disk_low", "ram_high", "load_high", "cpu_high"}
 FAST_KINDS = {"cpu_high", "ram_high", "load_high"}
+FAST_OBSERVED = FAST_KINDS | {"node_unreachable"}
 MONITORABLE_NODE_SQL = AGENT_INSTALLED_SQL + """
     AND NOT EXISTS (SELECT 1 FROM backend_node_drains d WHERE d.node_key=n.key)
     AND NOT EXISTS (SELECT 1 FROM backend_node_cleanup c WHERE c.node_key=n.key)
@@ -114,6 +116,8 @@ class AlertService:
         )
         conn.execute("DELETE FROM backend_alert_events WHERE node_key=?", (node_key,))
         conn.execute("DELETE FROM backend_alert_state WHERE node_key=?", (node_key,))
+        conn.execute("DELETE FROM backend_system_settings WHERE key=?", ('alert_unreachable_candidate.' + node_key,))
+        conn.execute("DELETE FROM backend_system_settings WHERE key=?", ('alert_agent_reachable_at.' + node_key,))
 
     def preferences(self, actor, changes):
         require_permission(actor, "settings.manage")
@@ -137,6 +141,7 @@ class AlertService:
                 (json.dumps(policy),),
             )
             if not policy["enabled"]:
+                conn.execute("DELETE FROM backend_system_settings WHERE key LIKE 'alert_unreachable_candidate.%'")
                 conn.execute(
                     """UPDATE backend_alert_deliveries SET status='skipped' WHERE status='queued'
                     AND event_id IN (SELECT id FROM backend_alert_events WHERE kind!='update_available')"""
@@ -295,7 +300,7 @@ class AlertService:
             failures, known = self.classify(observation, [])
             return (
                 {kind: value for kind, value in failures.items() if kind in FAST_KINDS},
-                known & (FAST_KINDS | {'cpu_below_recovery'}),
+                known & (FAST_OBSERVED | {'cpu_below_recovery'}),
                 {kind: value for kind, value in self.measurements(observation).items() if kind in FAST_KINDS}
             )
         except Exception:
@@ -307,15 +312,31 @@ class AlertService:
             observation = self.driver.inspect_node_services(node['key'])
             failures, known = self.classify(observation, monitored_protocols(node))
             return failures, known, self.measurements(observation)
-        except grpc.RpcError as exc:
-            if exc.code() in {
-                grpc.StatusCode.UNAVAILABLE,
-                grpc.StatusCode.DEADLINE_EXCEEDED,
-                grpc.StatusCode.FAILED_PRECONDITION,
-            }:
-                return {"node_unreachable": {}}, {"node_unreachable"}, {}
-            return {}, set(), {}
-        except Exception:  # noqa: BLE001 -- malformed observations stay unknown
+        except Exception as inspection_error:
+            inspection_status = (inspection_error.code().name if isinstance(inspection_error, grpc.RpcError)
+                                 else type(inspection_error).__name__)
+            # Runtime scripts and Docker inspections are not a reachability
+            # probe. An authenticated metrics reply proves the agent is alive,
+            # even before CPU warmup or without installed VPN runtime scripts.
+            try:
+                observation = self.driver.host_metrics(node['key'])
+                failures, known = self.classify(observation, [])
+                if monitored_protocols(node):
+                    logging.getLogger(__name__).warning(
+                        'Service inspection unavailable while agent responds: node=%s status=%s',
+                        node['key'], inspection_status)
+                return failures, known, self.measurements(observation)
+            except grpc.RpcError as probe_error:
+                code = probe_error.code()
+                logging.getLogger(__name__).warning(
+                    'Agent probe failed: node=%s inspection=%s probe=%s',
+                    node['key'], inspection_status, code.name)
+                if code in {grpc.StatusCode.UNAVAILABLE, grpc.StatusCode.DEADLINE_EXCEEDED}:
+                    return {'node_unreachable': {}}, {'node_unreachable'}, {}
+            except Exception as probe_error:
+                logging.getLogger(__name__).warning(
+                    'Agent observation unavailable: node=%s inspection=%s probe=%s',
+                    node['key'], inspection_status, type(probe_error).__name__)
             return {}, set(), {}
 
     @staticmethod
@@ -466,6 +487,40 @@ class AlertService:
                             if k == 'cpu_high':
                                 known.discard('cpu_below_recovery')
 
+                # Scan completion alone is not proof of reachability: a newer
+                # fast scan can itself have failed. Retain only actual replies.
+                reachable_key = 'alert_agent_reachable_at.' + node['key']
+                reachable = conn.execute('SELECT value FROM backend_system_settings WHERE key=?', (reachable_key,)).fetchone()
+                reachable_at = datetime.fromisoformat(json.loads(reachable['value'])) if reachable else None
+                prior_outage = previous.get('node_unreachable')
+                if (reachable_at and (reachable_at > timestamp or (reachable_at == timestamp and 'node_unreachable' in failures))) or (prior_outage and prior_outage['last_seen_at'] > timestamp.isoformat()):
+                    ignored.add('node_unreachable')
+                    failures.pop('node_unreachable', None)
+                    known.discard('node_unreachable')
+                elif 'node_unreachable' in known and 'node_unreachable' not in failures:
+                    conn.execute('INSERT INTO backend_system_settings VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+                        (reachable_key, json.dumps(timestamp.isoformat())))
+
+                if 'node_unreachable' not in ignored and (not cpu_only or 'node_unreachable' in known):
+                    # A short network interruption is not yet an incident. Two
+                    # failed authenticated probes >=30s apart confirm outage.
+                    candidate_key = 'alert_unreachable_candidate.' + node['key']
+                    candidate_row = conn.execute('SELECT value FROM backend_system_settings WHERE key=?', (candidate_key,)).fetchone()
+                    candidate = json.loads(candidate_row['value']) if candidate_row else None
+                    if 'node_unreachable' in failures:
+                        continuous = bool(candidate and timedelta(0) <= timestamp - datetime.fromisoformat(candidate['last_at']) <= timedelta(seconds=CHECK_SECONDS * 3))
+                        if not continuous:
+                            candidate = {'since': timestamp.isoformat()}
+                        confirmed = timestamp - datetime.fromisoformat(candidate['since']) >= timedelta(seconds=CHECK_SECONDS)
+                        candidate['last_at'] = timestamp.isoformat()
+                        conn.execute('INSERT INTO backend_system_settings VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+                            (candidate_key, json.dumps(candidate)))
+                        if not confirmed:
+                            failures.pop('node_unreachable')
+                            known.discard('node_unreachable')
+                    else:
+                        conn.execute('DELETE FROM backend_system_settings WHERE key=?', (candidate_key,))
+
                 for kind, payload in list(failures.items()):
                     prev_row = previous.get(kind)
                     prev_payload = json.loads(prev_row["payload_json"]) if prev_row else {}
@@ -522,7 +577,7 @@ class AlertService:
                         ),
                     )
                 for kind, row in previous.items():
-                    if kind in ignored or (cpu_only and kind not in FAST_KINDS):
+                    if kind in ignored or (cpu_only and kind not in FAST_OBSERVED):
                         continue
                     if kind in failures:
                         continue

@@ -119,6 +119,7 @@ pub(in crate::tui) fn draw_node_editor(
                     ),
                     Style::default().fg(Color::Red),
                 ));
+                lines.push(Line::from("Access and temporary configurations will be revoked automatically before removal."));
             }
         }
         let affected = preview["affected_profiles"].as_u64().unwrap_or(0);

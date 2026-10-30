@@ -147,3 +147,75 @@ class NotificationPolicyTests(unittest.TestCase):
         self.observe(1830)
         self.observe(1860)
         self.assertEqual([e['resolved'] for e in self.events()], [0, 1])
+
+    def test_failed_runtime_inspection_with_live_metrics_never_declares_agent_down(self):
+        import grpc
+        class Failure(grpc.RpcError):
+            def code(self):
+                return grpc.StatusCode.DEADLINE_EXCEEDED
+        self.driver.inspect_node_services.side_effect = Failure()
+        for seconds in (0, 30, 60, 1800):
+            self.observe(seconds, load1=5)
+        self.assertNotIn('node_unreachable', {e['kind'] for e in self.events()})
+        self.assertIn('load_high', {e['kind'] for e in self.events()})
+        self.driver.inspect_node_services.side_effect = None
+
+    def test_unreachable_requires_two_failed_probes_and_transient_loss_is_silent(self):
+        from unittest.mock import Mock
+        from tests.test_backend_alerts import RpcFailure
+        self.driver.inspect_node_services.side_effect = RpcFailure()
+        self.driver.host_metrics = Mock(side_effect=RpcFailure())
+        start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        def scan(seconds):
+            with patch('backend.alerts.datetime') as clock:
+                clock.fromisoformat = datetime.fromisoformat
+                clock.now.return_value = start + timedelta(seconds=seconds)
+                return self.service.scheduled()
+        scan(0)
+        self.assertEqual(self.events(), [])
+        self.driver.host_metrics.side_effect = None
+        self.driver.host_metrics.return_value = {'host_metrics': {}}
+        scan(30)
+        self.assertEqual(self.events(), [])
+        self.driver.host_metrics.side_effect = RpcFailure()
+        scan(60)
+        self.assertEqual(self.events(), [])
+        scan(90)
+        self.assertEqual([e['kind'] for e in self.events()], ['node_unreachable'])
+        self.driver.host_metrics.side_effect = None
+        scan(120)
+        scan(150)
+        self.assertEqual([e['resolved'] for e in self.events()], [0, 1])
+
+    def test_failed_precondition_is_not_proof_of_network_unavailability(self):
+        import grpc
+        from unittest.mock import Mock
+        class Failure(grpc.RpcError):
+            def code(self):
+                return grpc.StatusCode.FAILED_PRECONDITION
+        self.driver.inspect_node_services.side_effect = Failure()
+        self.driver.host_metrics = Mock(side_effect=Failure())
+        for seconds in (0, 30, 60):
+            with patch('backend.alerts.datetime') as clock:
+                clock.fromisoformat = datetime.fromisoformat
+                clock.now.return_value = datetime(2026, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=seconds)
+                self.service.scheduled()
+        self.assertEqual(self.events(), [])
+
+    def test_fast_authenticated_reply_resolves_outage_without_full_inspection(self):
+        from tests.test_backend_alerts import RpcFailure
+        from unittest.mock import Mock
+        self.driver.inspect_node_services.side_effect = RpcFailure()
+        self.driver.host_metrics = Mock(side_effect=RpcFailure())
+        start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        with patch('backend.alerts.datetime') as clock:
+            clock.fromisoformat = datetime.fromisoformat
+            for seconds in (0, 30):
+                clock.now.return_value = start + timedelta(seconds=seconds)
+                self.service.scheduled()
+        self.assertEqual([e['resolved'] for e in self.events()], [0])
+        full_checks = self.driver.inspect_node_services.call_count
+        self.observe(60, fast=True)
+        self.observe(90, fast=True)
+        self.assertEqual([e['resolved'] for e in self.events()], [0, 1])
+        self.assertEqual(self.driver.inspect_node_services.call_count, full_checks)

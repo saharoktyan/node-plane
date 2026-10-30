@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 1.0.0-beta.8 - 2026-10-30
+
+- Automatically revoke profile access, including administrator grants and temporary configurations, before removing VPN protocols. Wait for confirmed deletions and preserve node-wide recovery fences and access to remaining services.
+- Let revocations drain before queued settings cleanup, retain temporary configuration revisions across protocol-only removal, and restore administrator access after adding the first VPN service to an agent-only node.
+- Verify failed service inspections with lightweight authenticated metrics before reporting an unavailable agent. Confirm sustained connectivity failures, recover through fast checks, prevent delayed failures from reopening resolved incidents, and log sanitized probe statuses.
+
 ## 1.0.0-beta.7 - 2026-10-28
 
 - Recover obsolete empty settings operations on agent-only nodes even when no VPN runtime helper or journal was ever deployed. Use the agent's embedded recovery helper and durably fence the exact retired command before clearing its blocked backend task; do not inspect or modify unrelated VPN runtime.

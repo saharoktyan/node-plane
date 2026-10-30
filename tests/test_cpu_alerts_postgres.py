@@ -161,3 +161,69 @@ class CpuMonitoringPostgresTests(TestCase):
         self.assertEqual(self.alerts.overview(self.actor)['active_count'], 0)
         with self.db.connect() as conn:
             self.assertEqual(conn.execute("SELECT COUNT(*) AS n FROM backend_alert_events WHERE resolved=1").fetchone()['n'], 2)
+
+    def test_late_failed_inspection_does_not_reopen_outage_after_fast_recovery(self):
+        import grpc
+        class Offline(grpc.RpcError):
+            def code(self): return grpc.StatusCode.UNAVAILABLE
+        entered, release = threading.Event(), threading.Event()
+        slow_thread = [None]
+        def slow_inspection(key):
+            slow_thread[0] = threading.get_ident()
+            entered.set()
+            release.wait(5)
+            raise Offline()
+        self.driver.inspect_node_services.side_effect = Offline()
+        self.driver.host_metrics.side_effect = Offline()
+        start = datetime.now(timezone.utc)
+        with patch('backend.alerts.datetime') as clock, ThreadPoolExecutor(max_workers=1) as pool:
+            clock.fromisoformat = datetime.fromisoformat
+            for seconds in (0, 30):
+                clock.now.return_value = start + timedelta(seconds=seconds)
+                self.alerts.scheduled()
+            self.driver.inspect_node_services.side_effect = slow_inspection
+            def metrics(key):
+                if threading.get_ident() == slow_thread[0]: raise Offline()
+                return cpu(20)
+            self.driver.host_metrics.side_effect = metrics
+            clock.now.return_value = start + timedelta(seconds=60)
+            old = pool.submit(self.alerts.scheduled)
+            try:
+                self.assertTrue(entered.wait(3))
+                for seconds in (90, 120):
+                    clock.now.return_value = start + timedelta(seconds=seconds)
+                    self.assertTrue(self.alerts.scheduled(cpu_only=True))
+            finally:
+                release.set()
+            self.assertTrue(old.result(5))
+        self.assertEqual(self.alerts.overview(self.actor)['active_count'], 0)
+        with self.db.connect() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) AS n FROM backend_alert_events WHERE kind='node_unreachable'").fetchone()['n'], 2)
+
+    def test_newer_unknown_fast_scan_cannot_hide_confirmed_network_failure(self):
+        import grpc
+        class Offline(grpc.RpcError):
+            def code(self): return grpc.StatusCode.UNAVAILABLE
+        entered, release = threading.Event(), threading.Event()
+        def slow_inspection(key):
+            entered.set()
+            release.wait(5)
+            raise Offline()
+        self.driver.inspect_node_services.side_effect = Offline()
+        self.driver.host_metrics.side_effect = Offline()
+        start = datetime.now(timezone.utc)
+        with patch('backend.alerts.datetime') as clock, ThreadPoolExecutor(max_workers=1) as pool:
+            clock.fromisoformat = datetime.fromisoformat
+            clock.now.return_value = start
+            self.alerts.scheduled()
+            self.driver.inspect_node_services.side_effect = slow_inspection
+            clock.now.return_value = start + timedelta(seconds=30)
+            old = pool.submit(self.alerts.scheduled)
+            try:
+                self.assertTrue(entered.wait(3))
+                clock.now.return_value = start + timedelta(seconds=60)
+                self.assertTrue(self.alerts.scheduled(cpu_only=True))
+            finally:
+                release.set()
+            self.assertTrue(old.result(5))
+        self.assertEqual([r['kind'] for r in self.alerts.overview(self.actor)['active']], ['node_unreachable'])

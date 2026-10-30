@@ -66,10 +66,12 @@ class AlertTests(unittest.TestCase):
             conn.execute("INSERT INTO backend_agent_rollouts(id,node_key,actor_account_id,command_key,intent_json,status) VALUES (?,'test',?,?,'{}','running')",
                          (upgrade, self.admin.id, str(uuid4())))
         self.driver.inspect_node_services.side_effect = RpcFailure()
+        self.driver.host_metrics.side_effect = RpcFailure()
         self.scan()
         self.driver.inspect_node_services.assert_not_called()
         with self.db.transaction() as conn:
             conn.execute("UPDATE backend_agent_rollouts SET status='succeeded' WHERE id=?", (upgrade,))
+        self.scan()
         self.scan()
         self.assertEqual([item['kind'] for item in self.service.overview(self.actor)['active']], ['node_unreachable'])
 
@@ -87,6 +89,7 @@ class AlertTests(unittest.TestCase):
         self.driver = SimpleNamespace(
             binary_info=Mock(return_value={"version": "test"}),
             inspect_node_services=Mock(return_value=dict(HEALTHY)),
+            host_metrics=Mock(return_value=dict(HEALTHY)),
         )
         self.service = AlertService(self.db, self.driver)
         self.db.connection.execute(
@@ -235,12 +238,15 @@ class AlertTests(unittest.TestCase):
         }
         self.scan()
         self.driver.inspect_node_services.side_effect = RpcFailure()
+        self.driver.host_metrics.side_effect = RpcFailure()
+        self.scan()
         self.scan()
         self.assertEqual(
             {r["kind"] for r in self.service.overview(self.actor)["active"]},
             {"disk_low", "node_unreachable"},
         )
         self.driver.inspect_node_services.side_effect = None
+        self.driver.host_metrics.side_effect = None
         self.driver.inspect_node_services.return_value = dict(HEALTHY)
         self.scan()
         self.scan()

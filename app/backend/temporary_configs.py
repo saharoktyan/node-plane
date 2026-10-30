@@ -245,7 +245,18 @@ class TemporaryConfigService:
             conn.execute('UPDATE backend_account_guard SET revision=revision+1 WHERE id=1')
             if active(conn) or conn.execute("SELECT 1 FROM backend_backup_jobs WHERE action='restore' AND status IN ('awaiting_executor','running')").fetchone():
                 return False
-            row = conn.execute("SELECT * FROM backend_temporary_configs WHERE status IN ('queued','revoking') ORDER BY created_at,id LIMIT 1").fetchone()
+            # Keep undispatched leases for retained protocols queued while
+            # settings are pending. Revocations must run before protocol cleanup.
+            row = conn.execute("""SELECT c.* FROM backend_temporary_configs c
+                WHERE c.status IN ('queued','revoking') AND (c.status='revoking' OR NOT EXISTS (
+                    SELECT 1 FROM backend_node_settings_tasks ns WHERE ns.node_key=c.node_key
+                    AND ns.status IN ('awaiting_executor','running','blocked')))
+                AND (c.status='revoking' OR NOT EXISTS (
+                    SELECT 1 FROM backend_nodes n WHERE n.key=c.node_key
+                    AND n.desired_revision=c.node_revision AND n.applied_revision != n.desired_revision
+                    AND ((c.protocol='awg' AND n.protocols_json LIKE '%"awg"%')
+                        OR (c.protocol='xray' AND n.protocols_json LIKE '%"xray"%'))))
+                ORDER BY c.created_at,c.id LIMIT 1""").fetchone()
             if row is None:
                 return False
             if row['status']=='queued':

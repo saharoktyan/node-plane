@@ -362,6 +362,7 @@ class NodeService:
         with self.db.transaction() as conn:
             from .maintenance_gate import admit
             admit(conn)
+            conn.execute('UPDATE backend_account_guard SET revision=revision+1 WHERE id=1')
             current_actor = conn.execute('''UPDATE backend_accounts SET role = role WHERE id = ?
                 RETURNING role, status''', (actor.account.id,)).fetchone()
             if current_actor is None or current_actor['role'] != 'admin' or current_actor['status'] != 'approved':
@@ -454,18 +455,16 @@ class NodeService:
                     raise AccessDenied('invalid_input', 422)
                 if 'protocols' in values and 'xray_transports' not in values and 'xray' in values['protocols'] and not next_values['xray_transports']:
                     next_values['xray_transports'] = ['tcp', 'xhttp']
+                if 'protocols' in values and 'xray_transports' not in values and 'xray' not in values['protocols']:
+                    next_values['xray_transports'] = []
                 if (next_values['transport'] == 'ssh') != bool(next_values['ssh_target']):
                     raise AccessDenied('invalid_input', 422)
                 if 'xray' not in next_values['protocols'] and next_values['xray_transports']:
                     raise AccessDenied('invalid_input', 422)
-                if 'protocols' in values:
-                    active_grants = conn.execute('''SELECT DISTINCT protocol FROM backend_grants
-                        WHERE node_key = ?''', (node_key,)).fetchall()
-                    if any(grant['protocol'] not in next_values['protocols'] for grant in active_grants):
-                        raise AccessDenied('node_protocol_in_use', 409)
-                    temporary = conn.execute("SELECT protocol FROM backend_temporary_configs WHERE node_key=? AND status NOT IN ('expired','revoked','cancelled')", (node_key,)).fetchall()
-                    if any(item['protocol'] not in next_values['protocols'] for item in temporary):
-                        raise AccessDenied('node_protocol_in_use', 409)
+                previous_protocols = json.loads(connection['protocols_json'])
+                removed_protocols = sorted(set(previous_protocols) - set(next_values['protocols']))
+                added_protocols = sorted(set(next_values['protocols']) - set(previous_protocols))
+
                 runtime_changed = any(next_values[field] != previous_values[field]
                     for field in ('protocols', 'xray_transports', 'settings'))
                 if not previous_values['protocols'] and not next_values['protocols']:
@@ -479,9 +478,21 @@ class NodeService:
                     (next_values['title'], next_values['region'], next_values['flag'],
                      json.dumps(next_values['protocols']), json.dumps(next_values['xray_transports']),
                      json.dumps(next_values['settings'], sort_keys=True), int(not runtime_changed), node_key, revision))
+                if removed_protocols:
+                    from .protocol_removal import revoke_removed_protocols
+                    revoke_removed_protocols(conn, actor, node_key, removed_protocols)
                 if not runtime_changed:
                     conn.execute('UPDATE backend_temporary_configs SET node_revision=? '
                         'WHERE node_key=? AND node_revision=?', (revision + 1, node_key, revision))
+                elif (removed_protocols and not added_protocols
+                        and next_values['settings'] == previous_values['settings']
+                        and ('xray' not in next_values['protocols']
+                             or next_values['xray_transports'] == previous_values['xray_transports'])):
+                    # Removing another service does not invalidate retained leases.
+                    for protocol in next_values['protocols']:
+                        conn.execute('UPDATE backend_temporary_configs SET node_revision=? '
+                            'WHERE node_key=? AND node_revision=? AND protocol=?',
+                            (revision + 1, node_key, revision, protocol))
                 conn.execute("UPDATE backend_node_settings_tasks SET status = 'superseded' WHERE node_key = ? AND status = 'awaiting_executor'", (node_key,))
                 if 'transport' in values or 'ssh_target' in values:
                     if next_values['transport'] is None:
@@ -494,6 +505,8 @@ class NodeService:
             from .grant_policies import assign_region, reconcile
             if action == 'create' or 'region' in values:
                 assign_region(conn, node_key, values['region'])
+                reconcile(conn, actor)
+            elif action == 'edit' and added_protocols:
                 reconcile(conn, actor)
             row = conn.execute(self._select() + ' WHERE n.key = ?', (node_key,)).fetchone()
             if 'notes' in values:

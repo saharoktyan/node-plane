@@ -220,6 +220,8 @@ class NodeSettingsExecutor:
                 AND id != ? AND status IN ('awaiting_executor', 'running', 'blocked')''',
                             (row['node_key'], task_id)).fetchone():
                 raise AccessDenied('node_settings_operation_pending', 409)
+            # The agent journal is node-wide: unknown work on any protocol
+            # must be resolved before settings can be replaced.
             if conn.execute('''SELECT 1 FROM backend_operation_tasks WHERE node_key = ?
                 AND status IN ('running', 'blocked')''', (row['node_key'],)).fetchone():
                 raise AccessDenied('profile_operation_uncertain', 409)
@@ -255,6 +257,7 @@ class NodeSettingsExecutor:
         if not _valid_result(intent, result):
             conn.execute("UPDATE backend_node_settings_tasks SET status = 'blocked',result_json=? WHERE id = ?", (result, row['id']))
             return False
+        conn.execute('UPDATE backend_account_guard SET revision=revision+1 WHERE id=1')
         conn.execute("UPDATE backend_node_settings_tasks SET status = 'succeeded', result_json = ? WHERE id = ?",
                      (result, row['id']))
         persist_selected_port(conn, row['node_key'], row['revision'], intent, json.loads(result))
@@ -264,6 +267,9 @@ class NodeSettingsExecutor:
             AND NOT EXISTS (SELECT 1 FROM backend_node_drains WHERE node_key = ?)''',
             (intent['revision'], intent['revision'], row['node_key'],
              intent['revision'], intent['revision'], row['node_key']))
+        from types import SimpleNamespace
+        from .grant_policies import reconcile
+        reconcile(conn, SimpleNamespace(account=SimpleNamespace(id=row['actor_account_id'])))
         return True
 
     def reconcile_completed(self):
@@ -284,10 +290,7 @@ class NodeSettingsExecutor:
     def run_one(self):
         with self.db.connect() as conn:
             rows = conn.execute('''SELECT * FROM backend_node_settings_tasks
-                WHERE status = 'awaiting_executor' AND NOT EXISTS (
-                    SELECT 1 FROM backend_operation_tasks p
-                    WHERE p.node_key = backend_node_settings_tasks.node_key
-                      AND p.status IN ('running', 'blocked'))
+                WHERE status = 'awaiting_executor'
                 ORDER BY id''').fetchall()
         row = None
         for candidate in rows:
@@ -302,7 +305,17 @@ class NodeSettingsExecutor:
                     conn.execute("UPDATE backend_node_settings_tasks SET status = 'superseded' WHERE id = ? AND status = 'awaiting_executor'", (candidate['id'],))
                 return True
             queued_intent = json.loads(candidate['intent_json'])
-            if not queued_intent['protocols'] and not queued_intent.get('protocol_plan', {}).get('remove_protocols'):
+            remove_protocols = queued_intent.get('protocol_plan', {}).get('remove_protocols', [])
+            with self.db.connect() as conn:
+                if remove_protocols:
+                    from .protocol_removal import is_revocation_confirmed
+                    if not is_revocation_confirmed(conn, candidate['node_key'], remove_protocols):
+                        continue
+                if conn.execute('''SELECT 1 FROM backend_operation_tasks p
+                    WHERE p.node_key = ? AND p.status IN ('running', 'blocked')''',
+                    (candidate['node_key'],)).fetchone():
+                    continue
+            if not queued_intent['protocols'] and not remove_protocols:
                 # Never dispatch an old empty agent-only request after upgrade.
                 # It has not crossed the durable mutation boundary yet.
                 with self.db.transaction() as conn:
@@ -341,6 +354,14 @@ class NodeSettingsExecutor:
                 if current_node is None or current_node['desired_revision'] != candidate['revision'] or draining:
                     conn.execute("UPDATE backend_node_settings_tasks SET status = 'superseded' WHERE id = ?", (candidate['id'],))
                     return True
+                if remove_protocols:
+                    from .protocol_removal import is_revocation_confirmed
+                    if not is_revocation_confirmed(conn, candidate['node_key'], remove_protocols):
+                        continue
+                if conn.execute('''SELECT 1 FROM backend_operation_tasks p
+                    WHERE p.node_key = ? AND p.status IN ('running', 'blocked')''',
+                    (candidate['node_key'],)).fetchone():
+                    continue
                 claimed = conn.execute("UPDATE backend_node_settings_tasks SET status = 'running' WHERE id = ? AND status = 'awaiting_executor' RETURNING id", (candidate['id'],)).fetchone()
                 if claimed is None:
                     continue

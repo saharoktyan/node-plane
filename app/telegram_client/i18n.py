@@ -3367,12 +3367,12 @@ def field_hint(locale, field):
     return tr(locale, key if key in CATALOG['en'] else 'nodes.settings.send_value')
 
 CATALOG['en'].update({
-    'nodes.protocols.remove_confirm': 'Remove {protocols} and their server configurations? The agent will remain installed. Revoke existing profile access before applying.',
+    'nodes.protocols.remove_confirm': 'Remove {protocols} and their server configurations? Access to these protocols, including temporary configurations, will be revoked automatically before removal. The agent will remain installed.',
     'nodes.protocols.remove_title': 'Remove VPN protocols?',
     'installation_progress.protocol_cleanup': 'Removing unselected VPN protocols',
 })
 CATALOG['ru'].update({
-    'nodes.protocols.remove_confirm': 'Удалить {protocols} и их серверные конфигурации? Агент останется установленным. Перед применением отзовите выданный доступ к этим протоколам.',
+    'nodes.protocols.remove_confirm': 'Удалить {protocols} и их серверные конфигурации? Доступ к этим протоколам, включая временные конфигурации, будет автоматически отозван перед удалением. Агент останется установленным.',
     'nodes.protocols.remove_title': 'Удалить VPN-протоколы?',
     'installation_progress.protocol_cleanup': 'Удаление отключённых VPN-протоколов',
 })

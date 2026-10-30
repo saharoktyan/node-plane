@@ -73,11 +73,13 @@ class OperationRepository:
         return {(r['node_key'], r['protocol']) for r in [*grants, *tasks]}
 
     @staticmethod
-    def record(conn, actor, profile_id, previous_targets):
+    def record(conn, actor, profile_id, previous_targets, scoped_targets=None):
         profile = conn.execute('SELECT * FROM backend_profiles WHERE id = ?', (profile_id,)).fetchone()
         grants = conn.execute('SELECT node_key, protocol FROM backend_grants WHERE profile_id = ?', (profile_id,)).fetchall()
         current_targets = {(r['node_key'], r['protocol']) for r in grants}
         targets = previous_targets | current_targets
+        if scoped_targets is not None:
+            targets = targets & scoped_targets
         now = datetime.now(timezone.utc)
         active = not profile['frozen'] and (profile['expires_at'] is None or datetime.fromisoformat(profile['expires_at']) > now)
         conn.execute("""INSERT INTO backend_profile_identities(profile_id, xray_uuid, xray_short_id)

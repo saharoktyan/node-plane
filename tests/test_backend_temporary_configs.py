@@ -46,6 +46,38 @@ class TemporaryConfigTests(unittest.TestCase):
     def create(self, protocol='xray', duration=86400, key=None):
         return self.service.create(self.actor,'n1',protocol,'tcp' if protocol=='xray' else 'vpn',duration,key or str(uuid4()))
 
+    def test_pending_settings_hold_new_leases_but_allow_revocation(self):
+        self.prepare()
+        active = self.create()
+        self.service.run_one()
+        queued = self.create()
+        self.service.revoke(self.actor, active['id'])
+        identity = str(uuid4())
+        with self.db.transaction() as conn:
+            conn.execute("INSERT INTO backend_node_settings_tasks(id,node_key,actor_account_id,command_key,revision,intent_json,status) VALUES (?,'n1',?,?,1,'{}','awaiting_executor')",
+                         (identity, self.admin.id, str(uuid4())))
+        self.assertTrue(self.service.run_one(), 'revocation goes before settings cleanup')
+        self.assertEqual(self.service.get(self.actor, active['id'])['status'], 'revoked')
+        self.assertEqual(self.service.get(self.actor, queued['id'])['status'], 'queued')
+        self.assertFalse(self.service.run_one(), 'retained queued lease is held, not cancelled')
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_node_settings_tasks SET status='succeeded' WHERE id=?", (identity,))
+        self.assertTrue(self.service.run_one())
+        self.assertEqual(self.service.get(self.actor, queued['id'])['status'], 'active')
+
+    def test_retained_lease_waits_between_saving_protocol_change_and_apply(self):
+        self.prepare()
+        queued = self.create()
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_nodes SET desired_revision=desired_revision+1 WHERE key='n1'")
+            conn.execute("UPDATE backend_temporary_configs SET node_revision=node_revision+1 WHERE id=?", (queued['id'],))
+        self.assertFalse(self.service.run_one())
+        self.assertEqual(self.service.get(self.actor, queued['id'])['status'], 'queued')
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_nodes SET applied_revision=desired_revision WHERE key='n1'")
+        self.assertTrue(self.service.run_one())
+        self.assertEqual(self.service.get(self.actor, queued['id'])['status'], 'active')
+
     def test_get_after_previous_revocation_repeatedly_checks_enforcement_without_reissuing(self):
         self.prepare()
         old = self.create()
