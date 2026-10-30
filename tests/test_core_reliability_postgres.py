@@ -45,18 +45,22 @@ class JournalDriver:
 class HookDatabase:
     backend_name = 'postgres'
 
-    def __init__(self, db, hook):
-        self.db, self.hook = db, hook
+    def __init__(self, db, hook=None, before=None):
+        self.db, self.hook, self.before = db, hook, before
 
     @contextmanager
     def transaction(self):
         with self.db.transaction() as conn:
             hook = self.hook
+            before = self.before
 
             class Connection:
                 def execute(self, sql, params=None):
+                    if before:
+                        before(sql)
                     result = conn.execute(sql, params)
-                    hook(sql)
+                    if hook:
+                        hook(sql)
                     return result
 
             yield Connection()
@@ -123,18 +127,28 @@ class CoreReliabilityPostgresTests(unittest.TestCase):
     def test_two_executor_claims_dispatch_same_task_once(self):
         profile = self.create_target()
         self.grant(profile)
-        selected = threading.Barrier(2)
+        guard_locked = threading.Event()
+        second_arrived = threading.Event()
 
-        def hook(sql):
-            if 'WHERE t.status' in sql and 'ORDER BY o.created_at' in sql:
-                selected.wait(timeout=5)
+        def first_hook(sql):
+            if 'backend_account_guard' in sql and not guard_locked.is_set():
+                guard_locked.set()
+                self.assertTrue(second_arrived.wait(timeout=5))
+
+        def second_before(sql):
+            if 'backend_account_guard' in sql and not second_arrived.is_set():
+                self.assertTrue(guard_locked.wait(timeout=5))
+                second_arrived.set()
 
         driver = JournalDriver()
-        hooked = HookDatabase(self.db, hook)
-        a, b = self.race(lambda: IntentExecutor(hooked, driver).run_one(),
-                         lambda: IntentExecutor(hooked, driver).run_one())
+        first_db = HookDatabase(self.db, hook=first_hook)
+        second_db = HookDatabase(self.db, before=second_before)
+        a, b = self.race(lambda: IntentExecutor(first_db, driver).run_one(),
+                         lambda: IntentExecutor(second_db, driver).run_one())
         self.assertEqual(sorted((a, b)), [False, True])
         self.assertEqual(len(driver.calls), 1)
+        with self.db.connect() as conn:
+            self.assertEqual(conn.execute('SELECT status FROM backend_operation_tasks').fetchone()['status'], 'succeeded')
 
     def test_inflight_task_blocks_other_profile_on_same_node(self):
         profile = self.create_target()

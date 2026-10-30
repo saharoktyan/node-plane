@@ -162,7 +162,7 @@ class MigrationsPostgresTests(unittest.TestCase):
             conn.execute("INSERT INTO backend_nodes(key,title,region,protocols_json) VALUES ('n1','Node','EU','[]')")
             conn.execute("INSERT INTO backend_node_jobs VALUES (?,'n1',?,?,'sync_runtime',1,?,'blocked',NULL)",
                 (identity,admin.id,str(uuid4()),'{"node_key":"n1","revision":1}'))
-        self.assertEqual(overview(self.db,actor)['items'][0]['actions'],['recheck','resolve'])
+        self.assertEqual(overview(self.db,actor)['items'][0]['actions'],['recheck','resolve','force'])
         driver=SimpleNamespace(node_action=lambda *args,**kwargs: {'node_key':'n1','action':'sync_runtime','revision':1,'result':{'synced':True}})
         result=act(self.db,actor,driver,'node',identity,'recheck')
         self.assertEqual(result['status'],'succeeded')

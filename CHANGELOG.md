@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 1.0.0-beta.11 - 2026-10-30
+
+- Update PostgreSQL recovery assertions for Force cancel and coordinate competing executor tests before the serialized claim section. Preserve the production lock and exactly-once dispatch checks; no runtime behavior changes.
+
 ## 1.0.0-beta.10 - 2026-10-30
 
 - Provide explicit confirmed Force cancel for blocked node settings, profile, and node jobs and bootstrap node-job children, with managed agent restart, permanent exact-command fences, preserved unknown outcome and history, and explicit retry only.
