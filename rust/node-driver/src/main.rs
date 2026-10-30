@@ -338,6 +338,15 @@ impl DriverContext {
         });
         Ok(files)
     }
+
+    fn runtime_settings_bundle(&self, node_key: &str) -> Result<Vec<RuntimeFileSpec>, Status> {
+        let mut files = self.runtime_file_bundle(node_key)?;
+        // Protocol cleanup removes its build directory. Restore executable
+        // assets before reinstalling, while retaining the installed environment
+        // and every generated protocol identity/configuration.
+        files.retain(|file| file.path != "/etc/node-plane/node.env");
+        Ok(files)
+    }
 }
 
 fn runtime_release_identity(version: Option<String>, commit: Option<String>) -> (String, String) {
@@ -850,6 +859,9 @@ impl RuntimeService for RuntimeApi {
             if facts.node_key != req.node_key {
                 return Err(Status::failed_precondition("agent node identity mismatch"));
             }
+            transport
+                .sync_runtime_files(self.ctx.runtime_settings_bundle(&req.node_key)?)
+                .await?;
             let response = transport
                 .apply_backend_node_settings(agent::v1::ApplyBackendNodeSettingsRequest {
                     command_id,

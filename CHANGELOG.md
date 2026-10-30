@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 1.0.0-beta.9 - 2026-10-30
+
+- Restore runtime scripts and AWG container build assets before applying node settings, allowing VPN protocols to be installed again after removal. Preserve the installed node environment, generated protocol configurations, private keys, and existing operation recovery fences.
+
 ## 1.0.0-beta.8 - 2026-10-30
 
 - Automatically revoke profile access, including administrator grants and temporary configurations, before removing VPN protocols. Wait for confirmed deletions and preserve node-wide recovery fences and access to remaining services.

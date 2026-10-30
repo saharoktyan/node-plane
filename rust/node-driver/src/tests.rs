@@ -77,6 +77,149 @@ fn runtime_assets_use_active_app_root_when_configured() {
 }
 
 #[test]
+fn runtime_settings_bundle_restores_awg_build_assets_preserving_live_config_and_sentinel() {
+    let ctx = context();
+    let file_bundle = ctx.runtime_file_bundle("test-node").unwrap();
+    let settings_bundle = ctx.runtime_settings_bundle("test-node").unwrap();
+
+    // 1. Same as runtime_file_bundle but strictly excludes /etc/node-plane/node.env
+    assert!(
+        file_bundle
+            .iter()
+            .any(|f| f.path == "/etc/node-plane/node.env")
+    );
+    assert!(
+        !settings_bundle
+            .iter()
+            .any(|f| f.path == "/etc/node-plane/node.env")
+    );
+    assert_eq!(settings_bundle.len() + 1, file_bundle.len());
+
+    for file in &settings_bundle {
+        let original = file_bundle
+            .iter()
+            .find(|f| f.path == file.path)
+            .expect("settings bundle entry must match runtime file bundle");
+        assert_eq!(file.content, original.content);
+        assert_eq!(file.mode, original.mode);
+
+        // Excludes live env/config/client private keys
+        assert_ne!(file.path, "/etc/node-plane/node.env");
+        assert!(!file.path.ends_with("/wg0.conf"));
+        assert!(!file.path.ends_with("/config.json"));
+        assert!(!file.path.contains("client_"));
+        assert!(!file.path.starts_with("/opt/amnezia/"));
+    }
+
+    // 2. Includes correct nonempty Dockerfile and start.sh with expected executable modes
+    let dockerfile = settings_bundle
+        .iter()
+        .find(|f| f.path == "/opt/node-plane-runtime/amnezia-awg/Dockerfile")
+        .expect("amnezia-awg Dockerfile must be present in settings bundle");
+    assert!(!dockerfile.content.trim().is_empty());
+    assert_eq!(dockerfile.mode, "0644");
+    assert!(dockerfile.content.contains("FROM "));
+
+    let start_sh = settings_bundle
+        .iter()
+        .find(|f| f.path == "/opt/node-plane-runtime/amnezia-awg/start.sh")
+        .expect("amnezia-awg start.sh must be present in settings bundle");
+    assert!(!start_sh.content.trim().is_empty());
+    assert_eq!(start_sh.mode, "0755");
+    assert!(start_sh.content.starts_with("#!/bin/sh"));
+
+    // 3. Demonstrate materializing bundle into temp removed AWG root restores build assets
+    // while existing data/wg0.conf sentinel remains unchanged, and repeat materialization preserves it.
+    let temp_dir =
+        std::env::temp_dir().join(format!("node-plane-awg-reinstall-{}", uuid::Uuid::new_v4()));
+    let runtime_root = temp_dir.join("opt/node-plane-runtime");
+    let awg_root = runtime_root.join("amnezia-awg");
+    let sentinel_dir = awg_root.join("data");
+    fs::create_dir_all(&sentinel_dir).unwrap();
+
+    let sentinel_path = sentinel_dir.join("wg0.conf");
+    let sentinel_content =
+        "[Interface]\nAddress = 10.8.1.1/24\nPrivateKey = SENTINEL_PREEXISTING_KEY\n";
+    fs::write(&sentinel_path, sentinel_content).unwrap();
+
+    // Verify build assets are missing prior to reinstall (simulating prior cleanup)
+    let dockerfile_path = awg_root.join("Dockerfile");
+    let start_sh_path = awg_root.join("start.sh");
+    assert!(!dockerfile_path.exists());
+    assert!(!start_sh_path.exists());
+    assert_eq!(
+        fs::read_to_string(&sentinel_path).unwrap(),
+        sentinel_content
+    );
+
+    let materialize = |bundle: &[RuntimeFileSpec]| {
+        for file in bundle {
+            if let Some(rel) = file.path.strip_prefix("/opt/node-plane-runtime/") {
+                let target = runtime_root.join(rel);
+                if let Some(parent) = target.parent() {
+                    fs::create_dir_all(parent).unwrap();
+                }
+                fs::write(&target, &file.content).unwrap();
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let mode = u32::from_str_radix(&file.mode, 8).unwrap();
+                    fs::set_permissions(&target, fs::Permissions::from_mode(mode)).unwrap();
+                }
+            }
+        }
+    };
+
+    // First materialization restores build assets
+    materialize(&settings_bundle);
+    assert!(dockerfile_path.exists());
+    assert_eq!(
+        fs::read_to_string(&dockerfile_path).unwrap(),
+        dockerfile.content
+    );
+    assert!(start_sh_path.exists());
+    assert_eq!(
+        fs::read_to_string(&start_sh_path).unwrap(),
+        start_sh.content
+    );
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            fs::metadata(&start_sh_path).unwrap().permissions().mode() & 0o777,
+            0o755
+        );
+        assert_eq!(
+            fs::metadata(&dockerfile_path).unwrap().permissions().mode() & 0o777,
+            0o644
+        );
+    }
+    // Sentinel remains completely unchanged
+    assert_eq!(
+        fs::read_to_string(&sentinel_path).unwrap(),
+        sentinel_content
+    );
+
+    // Repeat materialization preserves restored assets and sentinel
+    materialize(&settings_bundle);
+    assert_eq!(
+        fs::read_to_string(&dockerfile_path).unwrap(),
+        dockerfile.content
+    );
+    assert_eq!(
+        fs::read_to_string(&start_sh_path).unwrap(),
+        start_sh.content
+    );
+    assert_eq!(
+        fs::read_to_string(&sentinel_path).unwrap(),
+        sentinel_content
+    );
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
 fn local_agent_config_recovers_missing_target_without_routing_remote_agents_locally() {
     let local = "node_key = \"msk1\"\nlisten_addr = \"127.0.0.1:50061\"\n";
     assert_eq!(
