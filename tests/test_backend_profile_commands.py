@@ -4,6 +4,7 @@ from uuid import uuid4
 import json
 import unittest
 
+from backend.authorization import PrincipalKind
 from tests import test_backend_http
 
 
@@ -65,6 +66,22 @@ class BackendProfileCommandTests(unittest.TestCase):
         result = self.client.patch(path, headers=self.headers_for(1), json={'expires_at': '2027-01-01T02:00:00+02:00'})
         self.assertEqual(result.status_code, 200, result.text)
         self.assertEqual(result.json()['profile']['expires_at'], '2027-01-01T00:00:00+00:00')
+
+    def test_profile_creation_with_grants_requires_grants_permission(self):
+        from backend.workstation_cli import SCOPES
+        limited = frozenset(SCOPES - {'grants.manage'})
+        _, token = self.credentials.issue(PrincipalKind.ACCOUNT, limited, account_id=self.admin.id)
+        headers = {'Authorization': 'Bearer ' + token,
+                   'X-Node-Plane-Telegram-User-ID': '101',
+                   'Idempotency-Key': str(uuid4())}
+        self.db.connection.execute(
+            'INSERT INTO backend_nodes(key, title, region, protocols_json) VALUES (?, ?, ?, ?)',
+            ('node', 'Node', 'test', '["awg"]'))
+        response = self.client.post('/api/v1/profiles', headers=headers,
+                                    json={'display_name': 'With grant',
+                                          'grants': [{'node_key': 'node', 'protocol': 'awg'}]})
+        self.assertEqual(response.status_code, 403, response.text)
+        self.assertEqual(self.db.connection.execute('SELECT COUNT(*) FROM backend_profiles').fetchone()[0], 0)
 
     def test_member_cannot_mutate_even_with_scopes(self):
         self.identities.resolve_telegram(102)

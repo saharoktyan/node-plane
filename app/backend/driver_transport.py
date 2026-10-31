@@ -6,6 +6,35 @@ class AgentNotConfigured(RuntimeError):
     """The driver has no live agent target for this node."""
 
 
+class LocalDriverTokenMissing(RuntimeError):
+    """The local Driver endpoint requires a shared authentication token."""
+
+
+class _LocalTokenInterceptor(grpc.UnaryUnaryClientInterceptor, grpc.UnaryStreamClientInterceptor,
+                             grpc.StreamUnaryClientInterceptor, grpc.StreamStreamClientInterceptor):
+    """Attach the shared local Driver token to every call on the channel."""
+
+    def __init__(self, token):
+        self.token = token
+
+    def _with_token(self, client_call_details):
+        metadata = list(client_call_details.metadata or ())
+        metadata.append(('x-node-plane-local-token', self.token))
+        return client_call_details._replace(metadata=metadata)
+
+    def intercept_unary_unary(self, continuation, client_call_details, request):
+        return continuation(self._with_token(client_call_details), request)
+
+    def intercept_unary_stream(self, continuation, client_call_details, request):
+        return continuation(self._with_token(client_call_details), request)
+
+    def intercept_stream_unary(self, continuation, client_call_details, request_iterator):
+        return continuation(self._with_token(client_call_details), request_iterator)
+
+    def intercept_stream_stream(self, continuation, client_call_details, request_iterator):
+        return continuation(self._with_token(client_call_details), request_iterator)
+
+
 class GrpcIntentDriver:
     def traffic_snapshot(self, intent):
         """Read counters through the agent; no legacy DB or runtime sync."""
@@ -276,4 +305,9 @@ def local_channel(address):
     # The deployment must keep driver loopback-only, as with the current bot.
     if address not in {'127.0.0.1:50051', 'localhost:50051', '[::1]:50051'}:
         raise ValueError('backend worker requires a loopback driver endpoint')
-    return grpc.insecure_channel(address)
+    import os
+    token = os.environ.get('NODE_PLANE_DRIVER_LOCAL_TOKEN', '').strip()
+    if not token:
+        raise LocalDriverTokenMissing('local Driver authentication is not configured')
+    return grpc.intercept_channel(
+        grpc.insecure_channel(address), _LocalTokenInterceptor(token))

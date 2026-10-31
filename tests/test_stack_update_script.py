@@ -224,3 +224,8 @@ rm -rf -- "$STACK_SNAPSHOT"
             self.assertIn("'" + identity + "'", claim)
         self.assertIn("payload.get('status') != 'ready'", claim)
         self.assertIn("fcntl.flock(lock.fileno(), fcntl.LOCK_EX)", claim)
+        self.assertIn("payload['status'] = os.environ['NODE_PLANE_HANDOFF_STATUS']", source)
+        self.assertIn("mark_target_handoff \"$TARGET_HANDOFF\" started", source)
+        self.assertIn("mark_target_handoff \"$TARGET_HANDOFF\" succeeded", source)
+        self.assertIn("mark_target_handoff \"$TARGET_HANDOFF\" failed", source)
+        self.assertIn("CONTROLLER_STAGE_OWNED=0", main)

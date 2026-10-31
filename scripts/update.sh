@@ -34,6 +34,7 @@ SIMPLE_BOT_SERVICE="node-plane-telegram.service"
 STACK_JOB=""
 TARGET_HANDOFF="${NODE_PLANE_UPDATE_HANDOFF:-}"
 UPDATE_PHASE="${NODE_PLANE_UPDATE_PHASE:-acquire}"
+TARGET_HANDOFF_ACTIVE=0
 CORE_ARMED=0
 STACK_COMPONENT="backend"
 
@@ -43,6 +44,10 @@ set_step() {
 
 on_error() {
   local exit_code="$1"
+  if [[ "${TARGET_HANDOFF_ACTIVE:-0}" == 1 && -n "${TARGET_HANDOFF:-}" ]] && type mark_target_handoff >/dev/null 2>&1; then
+    mark_target_handoff "$TARGET_HANDOFF" failed || true
+    TARGET_HANDOFF_ACTIVE=0
+  fi
   echo >&2
   echo "Update failed during step: ${CURRENT_STEP}" >&2
   echo "Failing command: ${BASH_COMMAND}" >&2
@@ -69,7 +74,7 @@ on_error() {
 }
 
 trap 'on_error $?' ERR
-trap cleanup_controller_archive EXIT
+trap 'update_exit $?' EXIT
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -611,6 +616,52 @@ PY
   IFS=$'\t' read -r TARGET_BRANCH HEALTH_TIMEOUT SKIP_RESTART SKIP_DEPS STACK_JOB TARGET_REF CONTROLLER_COMMIT <<< "$claimed"
 }
 
+mark_target_handoff() {
+  local handoff="$1" status="$2"
+  NODE_PLANE_HANDOFF="$handoff" NODE_PLANE_HANDOFF_STATUS="$status" python3 - <<'PY'
+import fcntl, json, os, pathlib, tempfile, time
+path = pathlib.Path(os.environ['NODE_PLANE_HANDOFF'])
+with path.with_name(path.name + '.lock').open('a+') as lock:
+    fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+    with path.open() as stream:
+        payload = json.load(stream)
+    if payload.get('status') not in {'claimed', 'started'}:
+        raise SystemExit('Update handoff is not active.')
+    payload['status'] = os.environ['NODE_PLANE_HANDOFF_STATUS']
+    payload[os.environ['NODE_PLANE_HANDOFF_STATUS'] + '_at'] = time.time()
+    temporary = pathlib.Path(tempfile.mkstemp(dir=path.parent, prefix='.handoff-')[1])
+    try:
+        temporary.chmod(0o600)
+        with temporary.open('w') as stream:
+            json.dump(payload, stream, sort_keys=True)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+PY
+}
+
+update_exit() {
+  local exit_code="$1"
+  if [[ "$TARGET_HANDOFF_ACTIVE" == 1 && -n "$TARGET_HANDOFF" ]]; then
+    if [[ "$exit_code" == 0 ]]; then
+      mark_target_handoff "$TARGET_HANDOFF" succeeded || true
+    else
+      mark_target_handoff "$TARGET_HANDOFF" failed || true
+    fi
+    TARGET_HANDOFF_ACTIVE=0
+  fi
+  cleanup_controller_archive
+  return "$exit_code"
+}
+
 handoff_to_target() {
   local handoff
   mapfile -t _target_paths < <(simple_paths)
@@ -855,6 +906,8 @@ main() {
     CONTROLLER_COMMIT="$(tr -d '\r\n' < BUILD_COMMIT)"
     CONTROLLER_REF="$TARGET_REF"
     CONTROLLER_STAGE_OWNED=0
+    TARGET_HANDOFF_ACTIVE=1
+    mark_target_handoff "$TARGET_HANDOFF" started
     echo "Claimed target updater handoff."
   else
     fetch_code

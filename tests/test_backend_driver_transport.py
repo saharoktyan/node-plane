@@ -181,3 +181,18 @@ class BackendDriverTransportTests(unittest.TestCase):
         from backend.driver_transport import local_channel
         with self.assertRaises(ValueError):
             local_channel('remote.example:50051')
+
+    def test_local_channel_requires_token_and_injects_it(self):
+        import os
+        from unittest.mock import patch
+        from backend.driver_transport import LocalDriverTokenMissing, _LocalTokenInterceptor, local_channel
+        with patch.dict(os.environ, {}, clear=True), self.assertRaises(LocalDriverTokenMissing):
+            local_channel('127.0.0.1:50051')
+        with patch.dict(os.environ, {'NODE_PLANE_DRIVER_LOCAL_TOKEN': 'test-token'}):
+            channel = local_channel('127.0.0.1:50051')
+            self.addCleanup(channel.close)
+        from collections import namedtuple
+        Details = namedtuple('Details', 'metadata')
+        details = Details((('existing', 'value'),))
+        updated = _LocalTokenInterceptor('test-token')._with_token(details)
+        self.assertEqual(updated.metadata, [('existing', 'value'), ('x-node-plane-local-token', 'test-token')])

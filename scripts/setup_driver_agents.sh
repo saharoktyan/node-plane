@@ -276,6 +276,35 @@ set_env_value_if_changed() {
   return 0
 }
 
+generate_local_driver_token() {
+  if has_cmd openssl; then
+    openssl rand -hex 32
+  else
+    od -An -N32 -tx1 /dev/urandom | tr -d ' \n'
+  fi
+}
+
+ensure_local_driver_token() {
+  local token
+  token="$(read_env_value NODE_PLANE_DRIVER_LOCAL_TOKEN "$ENV_FILE")"
+  if [[ -n "$token" ]]; then
+    export NODE_PLANE_DRIVER_LOCAL_TOKEN="$token"
+    return 0
+  fi
+  if [[ $DRY_RUN -eq 1 ]]; then
+    return 0
+  fi
+  token="$(generate_local_driver_token)"
+  [[ "$token" =~ ^[0-9a-f]{64}$ ]] || {
+    echo "Failed to generate local Driver authentication token." >&2
+    return 1
+  }
+  set_env_value "$ENV_FILE" NODE_PLANE_DRIVER_LOCAL_TOKEN "$token"
+  chmod 0600 "$ENV_FILE"
+  export NODE_PLANE_DRIVER_LOCAL_TOKEN="$token"
+  ENV_CHANGED=1
+}
+
 sha256_of_file() {
   local path="$1"
   sha256sum "$path" | awk '{print $1}'
@@ -594,6 +623,10 @@ if [[ -z "${SSH_KEY:-}" ]]; then
   fi
 fi
 export SSH_KEY
+
+if [[ $SKIP_DRIVER -eq 0 && $CHECK_AGENT_OWNER -eq 0 ]]; then
+  ensure_local_driver_token
+fi
 
 APP_ROOT="$(cd "$APP_ROOT" && pwd)"
 

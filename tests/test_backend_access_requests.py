@@ -44,15 +44,14 @@ class BackendAccessRequestTests(unittest.TestCase):
         self.assertEqual(account['id'], 'telegram:102')
         key=str(uuid4())
         response=self.client.post('/api/v1/accounts',headers={**self.member_headers(101),'Idempotency-Key':key},json={'identity':'@KNOWN_USER'})
-        self.assertEqual(response.status_code,201,response.text)
-        self.assertEqual(response.json()['account']['telegram_user_id'],102)
-        self.assertEqual(response.json()['account']['username'],'known_user')
+        self.assertEqual(response.status_code,422,response.text)
+        self.assertEqual(response.json()['error']['code'],'telegram_id_required')
         response=self.client.post('/api/v1/accounts',headers={**self.member_headers(101),'Idempotency-Key':str(uuid4())},json={'identity':'@unknown_user'})
         self.assertEqual(response.status_code,422)
         self.assertEqual(response.json()['error']['code'],'telegram_id_required')
         self.register(104)
         self.assertEqual(self.client.post('/api/v1/accounts',headers={**self.member_headers(104),'Idempotency-Key':str(uuid4())},json={'identity':'987654'}).status_code,401)
-        self.assertEqual(self.client.post('/api/v1/accounts',headers={**self.member_headers(102),'Idempotency-Key':str(uuid4())},json={'identity':'987654'}).status_code,403)
+        self.assertEqual(self.client.post('/api/v1/accounts',headers={**self.member_headers(102),'Idempotency-Key':str(uuid4())},json={'identity':'987654'}).status_code,401)
 
     def test_only_the_owner_can_rename_an_administrator_profile(self):
         from backend.profiles import ProfileRepository

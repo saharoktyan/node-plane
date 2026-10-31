@@ -47,6 +47,13 @@ from .backups import BackupService
 from config import APP_VERSION, SSH_KEY
 
 
+MAX_REQUEST_BODY_BYTES = 2 * 1024 * 1024
+
+
+class RequestBodyTooLarge(Exception):
+    pass
+
+
 class ForceRecoveryInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
     confirm_operation_id: Annotated[StrictStr, Field(min_length=36, max_length=36)] | None = None
@@ -930,6 +937,30 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
         started = perf_counter()
         handler_ms = 0.0
         request.state.request_id = str(uuid4())
+        content_length = request.headers.get('content-length')
+        if content_length is not None:
+            try:
+                if int(content_length) > MAX_REQUEST_BODY_BYTES:
+                    response = error(request, 'request_body_too_large', 413)
+                    response.headers['X-Request-ID'] = request.state.request_id
+                    response.headers['Cache-Control'] = 'no-store'
+                    return response
+            except ValueError:
+                response = error(request, 'invalid_input', 400)
+                response.headers['X-Request-ID'] = request.state.request_id
+                response.headers['Cache-Control'] = 'no-store'
+                return response
+        received = 0
+        original_receive = request._receive
+        async def limited_receive():
+            nonlocal received
+            message = await original_receive()
+            if message['type'] == 'http.request':
+                received += len(message.get('body', b''))
+                if received > MAX_REQUEST_BODY_BYTES:
+                    raise RequestBodyTooLarge()
+            return message
+        request._receive = limited_receive
         audit_context = None
         audit_action = None
         audit_command = None
@@ -977,6 +1008,8 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
                         response = await call_next(request)
                     finally:
                         handler_ms = (perf_counter() - handler_started) * 1000
+        except RequestBodyTooLarge:
+            response = error(request, 'request_body_too_large', 413)
         except Exception as exc:
             # Do not serialize DB exceptions, request bodies or credentials.
             import logging

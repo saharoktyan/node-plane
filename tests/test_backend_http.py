@@ -21,7 +21,13 @@ from fastapi.testclient import TestClient
 
 
 class BackendHTTPTests(unittest.TestCase):
-    def test_opt_in_timings_correlate_requests_and_do_not_log_inputs(self):
+    def test_request_body_limit_rejects_before_authentication(self):
+        from backend.http_api import MAX_REQUEST_BODY_BYTES
+        response = self.client.post('/api/v1/profiles',
+            headers={'Content-Length': str(MAX_REQUEST_BODY_BYTES + 1)}, content=b'{}')
+        self.assertEqual(response.status_code, 413, response.text)
+        self.assertEqual(response.json()['error']['code'], 'request_body_too_large')
+
         import os
         from unittest.mock import patch
         headers = {**self.headers, 'X-Node-Plane-Telegram-User-ID': '101'}

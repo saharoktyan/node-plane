@@ -108,7 +108,10 @@ class ProfileCommands:
                         raise AccessDenied('invalid_input', 422)
                     from .grant_policies import validate
                     policy = validate(conn, policy)
-                grants = self.validate_grants(conn, values.get('grants', []))
+                requested_grants = values.get('grants', [])
+                if requested_grants:
+                    require_permission(actor, 'grants.manage')
+                grants = self.validate_grants(conn, requested_grants)
                 expires_at = self.expiry(conn, owner, values.get('expires_at'))
                 profile_id = str(uuid4())
                 conn.execute('''INSERT INTO backend_profiles

@@ -124,11 +124,7 @@ class AccountService:
             from .identity_repository import SQLIdentityRepository
             identities = SQLIdentityRepository(local)
             if identity.startswith('@'):
-                matches = conn.execute("""SELECT subject FROM backend_telegram_identity_details
-                    WHERE LOWER(username)=?""", (identity[1:].lower(),)).fetchall()
-                if len(matches) != 1:
-                    raise AccessDenied('telegram_id_required', 422)
-                user_id = int(matches[0]['subject'])
+                raise AccessDenied('telegram_id_required', 422)
             else:
                 user_id = int(identity)
             from .authorization import validate_telegram_id
