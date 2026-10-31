@@ -1073,7 +1073,7 @@ def run_node_settings(intent, lock_fd, *, env_path=Path('/etc/node-plane/node.en
             subprocess.run([str(root / 'init-xray.sh'), str(xray_path), settings['public_host'],
                             settings['xray_sni'], str(settings['xray_tcp_port']),
                             str(settings['xray_xhttp_port']), settings['xray_xhttp_path'],
-                            'xtls-rprx-vision', 'ghcr.io/xtls/xray-core:26.3.27'],
+                            'xtls-rprx-vision', 'ghcr.io/xtls/xray-core:26.10.29@sha256:c9443f3ee297f6481bc245269d61720c6f989195ee9b58fa90fdd99f03c21044'],
                            check=True, capture_output=True, text=True, pass_fds=(lock_fd,))
         json.loads(xray_path.read_text())
     if 'awg' in intent['protocols']:

@@ -22,7 +22,7 @@ from backend.installation_maintenance import InstallationMaintenance, UNITS
 
 ASSETS = Path(__file__).resolve().parents[1] / 'runtime_assets'
 sys.path.insert(0, str(ASSETS))
-XRAY_IMAGE = 'ghcr.io/xtls/xray-core:26.3.27'
+XRAY_IMAGE = 'ghcr.io/xtls/xray-core:26.10.29@sha256:c9443f3ee297f6481bc245269d61720c6f989195ee9b58fa90fdd99f03c21044'
 AWG_IMAGE = 'amneziavpn/amneziawg-go:3.1.20260828@sha256:cbafc02b8373a83f428272db6d8001b37bc02e6211cbd8c0cb4e2e3759b12b72'
 
 
@@ -45,6 +45,13 @@ def docker(*args, input=None, check=True):
 
 @unittest.skipUnless(os.environ.get('NODE_PLANE_TEST_DOCKER') == '1', 'requires disposable Docker runtime fixtures')
 class DockerRuntimeTests(unittest.TestCase):
+    def test_xray_image_reference_is_version_and_digest_pinned(self):
+        self.assertRegex(XRAY_IMAGE, r'ghcr\.io/xtls/xray-core:26\.10\.29@sha256:[0-9a-f]{64}')
+        root = Path(__file__).resolve().parents[1]
+        for path in (root / 'runtime_assets').glob('*.sh'):
+            if 'xray' in path.name:
+                self.assertIn(XRAY_IMAGE, path.read_text())
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix='node-plane-runtime-test-')
         self.addCleanup(self.temp.cleanup)
@@ -373,6 +380,8 @@ echo manifest > /var/lib/node-plane-agent/journal-archives/previous-controller-t
 echo fixture > /etc/systemd/system/node-plane-agent.service
 echo preserve > /etc/systemd/system/controller-test.service
 echo unrelated > /var/lib/node-plane-agent-unrelated
+echo preserve > /test/attacker-controlled
+ln -s /test/attacker-controlled /root/.ssh/authorized_keys.node-plane-tmp
 echo 0123456789abcdef0123456789abcdef > /etc/machine-id
 cat > /usr/local/bin/systemctl <<'SYSTEMCTL'
 #!/bin/sh
@@ -405,6 +414,12 @@ chmod +x /usr/local/bin/systemctl
             '/var/lib/node-plane-agent', '/var/log/node-plane-agent', '/root/.ssh/authorized_keys', self.bot_key]
         return container, uninstall, args
 
+    def test_uninstall_shell_uses_unique_authorized_keys_temporary_file(self):
+        _, script, _ = self.uninstall_fixture()
+        self.assertIn('mktemp \"${file}.node-plane-tmp.XXXXXX\"', script)
+        self.assertIn('mv -f -- \"$temporary\" \"$file\"', script)
+        self.assertNotIn('\"$file.node-plane-tmp\"', script)
+
     def test_actual_uninstall_shell_removes_credentials_journals_and_binary_preserving_unrelated_resources(self):
         container, script, args = self.uninstall_fixture()
         docker('exec', container, 'sh', '-c', script, 'node-plane-uninstall', *args)
@@ -413,6 +428,8 @@ chmod +x /usr/local/bin/systemctl
         self.assertIn(verifier.SUCCESS, result.stdout)
         for path in ('/root/.ssh/authorized_keys', '/home/test/.ssh/authorized_keys'):
             self.assertEqual(docker('exec', container, 'cat', path).stdout.strip(), self.other_key)
+        self.assertEqual(docker('exec', container, 'cat', '/test/attacker-controlled').stdout.strip(), 'preserve')
+        self.assertEqual(docker('exec', container, 'readlink', '/root/.ssh/authorized_keys.node-plane-tmp').stdout.strip(), '/test/attacker-controlled')
         docker('exec', container, 'sh', '-c', 'kill -0 "$(cat /test/controller.pid)"')
         for path in ('/etc/systemd/system/controller-test.service', '/var/lib/node-plane-agent-unrelated'):
             docker('exec', container, 'test', '-f', path)

@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Shared archive staging; never changes the active release or runtime secrets.
-CONTROLLER_STAGE_DIR=""
-CONTROLLER_REF=""
-CONTROLLER_VERSION=""
-CONTROLLER_COMMIT=""
+CONTROLLER_STAGE_DIR="${NODE_PLANE_CONTROLLER_STAGE_DIR:-}"
+CONTROLLER_STAGE_OWNED=0
+CONTROLLER_REF="${NODE_PLANE_CONTROLLER_REF:-}"
+CONTROLLER_VERSION="${NODE_PLANE_CONTROLLER_VERSION:-}"
+CONTROLLER_COMMIT="${NODE_PLANE_CONTROLLER_COMMIT:-}"
 
 prepare_controller_archive() {
   local branch="$1" ref="${2:-}" reuse="${3:-0}" temporary packaged_version=""
@@ -24,13 +25,14 @@ prepare_controller_archive() {
     fi
   fi
   CONTROLLER_STAGE_DIR="${temporary}/release"
+  CONTROLLER_STAGE_OWNED=1
   CONTROLLER_VERSION="$(tr -d '\r\n' < "${CONTROLLER_STAGE_DIR}/VERSION")"
   CONTROLLER_COMMIT="$(tr -d '\r\n' < "${CONTROLLER_STAGE_DIR}/BUILD_COMMIT")"
   CONTROLLER_REF="v${CONTROLLER_VERSION}"
 }
 
 cleanup_controller_archive() {
-  if [[ -n "$CONTROLLER_STAGE_DIR" ]]; then
+  if [[ "$CONTROLLER_STAGE_OWNED" == 1 && -n "$CONTROLLER_STAGE_DIR" ]]; then
     rm -rf "$(dirname "$CONTROLLER_STAGE_DIR")"
   fi
 }

@@ -1,6 +1,8 @@
 # Planned Vaultwarden support
 
-Vaultwarden is the first planned additional service. This document describes design work; Node Plane does not currently provide a Vaultwarden lifecycle adapter.
+Vaultwarden is a planned future managed service. Node Plane does not currently provide a Vaultwarden lifecycle adapter.
+
+Vaultwarden follows the bounded Agent/service refactor, current VPN capability improvements, and managed Grafana/Loki support (see [Roadmap](../roadmap.md#after-100)). Before implementation, review the additional non-VPN service lifecycle and account/profile model requirements; a public plugin framework is not a prerequisite. Its relative priority alongside the Workstation client SDK remains undecided. Design exploration may continue earlier.
 
 ## Scope
 

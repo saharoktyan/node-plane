@@ -32,6 +32,8 @@ CURRENT_STEP="startup"
 PYTHON_BIN=""
 SIMPLE_BOT_SERVICE="node-plane-telegram.service"
 STACK_JOB=""
+TARGET_HANDOFF="${NODE_PLANE_UPDATE_HANDOFF:-}"
+UPDATE_PHASE="${NODE_PLANE_UPDATE_PHASE:-acquire}"
 CORE_ARMED=0
 STACK_COMPONENT="backend"
 
@@ -127,10 +129,23 @@ while [[ $# -gt 0 ]]; do
       HEALTH_TIMEOUT="${1#*=}"
       shift
       ;;
+    --handoff)
+      TARGET_HANDOFF="${2:-}"
+      shift 2
+      ;;
+    --handoff=*)
+      TARGET_HANDOFF="${1#*=}"
+      shift
+      ;;
+    --target-phase)
+      UPDATE_PHASE="target"
+      shift
+      ;;
     -h|--help)
       cat <<'EOF'
 Usage:
   scripts/update.sh [--mode auto|simple] [--branch main|dev] [--to <ref>] [--skip-pull] [--skip-deps] [--skip-restart] [--health-timeout 30]
+  scripts/update.sh --target-phase --handoff <path>
 
 Modes:
   auto      Detect update mode from local environment
@@ -479,6 +494,144 @@ rollback_simple() {
   exit 1
 }
 
+prepare_target_handoff() {
+  local base_dir shared_dir handoff
+  mapfile -t _handoff_paths < <(simple_paths)
+  base_dir="${_handoff_paths[0]}"
+  shared_dir="${_handoff_paths[2]}"
+  if [[ -z "${CONTROLLER_STAGE_DIR:-}" || ! -d "$CONTROLLER_STAGE_DIR" ]]; then
+    echo "Verified target release staging is unavailable." >&2
+    return 1
+  fi
+  handoff="${shared_dir}/data/update-handoffs"
+  mkdir -p "$handoff"
+  if [[ -n "$STACK_JOB" ]]; then
+    handoff="${handoff}/${STACK_JOB}.json"
+  else
+    handoff="${handoff}/controller-$(python3 -c 'import uuid; print(uuid.uuid4())').json"
+  fi
+  local temporary
+  temporary="$(mktemp "${handoff}.XXXXXX")"
+  chmod 600 "$temporary"
+  HANDOFF_PATH="$handoff" HANDOFF_STAGE="$CONTROLLER_STAGE_DIR" \
+  HANDOFF_REF="$TARGET_REF" HANDOFF_COMMIT="$CONTROLLER_COMMIT" \
+  HANDOFF_MODE="$MODE" HANDOFF_BRANCH="${TARGET_BRANCH:-}" \
+  HANDOFF_BASE="$base_dir" HANDOFF_APP="${_handoff_paths[1]}" HANDOFF_SHARED="$shared_dir" \
+  HANDOFF_JOB="${STACK_JOB:-}" HANDOFF_HEALTH_TIMEOUT="$HEALTH_TIMEOUT" \
+  HANDOFF_SKIP_RESTART="$SKIP_RESTART" HANDOFF_SKIP_DEPS="$SKIP_DEPS" \
+  python3 - "$temporary" <<'PY'
+import json, os, pathlib, sys, tempfile, time
+path = pathlib.Path(sys.argv[1])
+payload = {
+    'protocol_version': 1,
+    'status': 'ready',
+    'stage': os.environ['HANDOFF_STAGE'],
+    'ref': os.environ['HANDOFF_REF'],
+    'commit': os.environ['HANDOFF_COMMIT'],
+    'mode': os.environ['HANDOFF_MODE'],
+    'branch': os.environ['HANDOFF_BRANCH'],
+    'base': os.environ['HANDOFF_BASE'],
+    'app': os.environ['HANDOFF_APP'],
+    'shared': os.environ['HANDOFF_SHARED'],
+    'stack_job': os.environ['HANDOFF_JOB'],
+    'health_timeout': os.environ['HANDOFF_HEALTH_TIMEOUT'],
+    'skip_restart': os.environ['HANDOFF_SKIP_RESTART'],
+    'skip_deps': os.environ['HANDOFF_SKIP_DEPS'],
+    'created_at': time.time(),
+}
+with path.open('w') as stream:
+    json.dump(payload, stream, sort_keys=True)
+    stream.flush()
+    os.fsync(stream.fileno())
+os.replace(path, os.environ['HANDOFF_PATH'])
+directory = os.open(pathlib.Path(os.environ['HANDOFF_PATH']).parent, os.O_RDONLY | os.O_DIRECTORY)
+try:
+    os.fsync(directory)
+finally:
+    os.close(directory)
+PY
+  printf '%s\n' "$handoff"
+}
+
+claim_target_handoff() {
+  local handoff="$1" claimed
+  claimed="$(NODE_PLANE_HANDOFF="$handoff" NODE_PLANE_EXPECTED_STAGE="$REPO_ROOT" \
+  NODE_PLANE_EXPECTED_REF="$TARGET_REF" NODE_PLANE_EXPECTED_COMMIT="$(tr -d '\r\n' < BUILD_COMMIT)" \
+  NODE_PLANE_EXPECTED_BASE="${NODE_PLANE_BASE_DIR:-$(read_env_value NODE_PLANE_BASE_DIR)}" \
+  NODE_PLANE_EXPECTED_SHARED="${NODE_PLANE_SHARED_DIR:-$(read_env_value NODE_PLANE_SHARED_DIR)}" \
+  NODE_PLANE_EXPECTED_MODE="$MODE" NODE_PLANE_EXPECTED_JOB="${STACK_JOB:-}" \
+  NODE_PLANE_EXPECTED_TIMEOUT="$HEALTH_TIMEOUT" NODE_PLANE_EXPECTED_SKIP_RESTART="$SKIP_RESTART" \
+  NODE_PLANE_EXPECTED_SKIP_DEPS="$SKIP_DEPS" python3 - <<'PY'
+import fcntl, json, os, pathlib, tempfile, time
+path = pathlib.Path(os.environ['NODE_PLANE_HANDOFF'])
+with path.with_name(path.name + '.lock').open('a+') as lock:
+    fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+    with path.open() as stream:
+        payload = json.load(stream)
+    if payload.get('protocol_version') != 1 or payload.get('status') != 'ready':
+        raise SystemExit('Update handoff is missing, consumed, or already claimed.')
+    checks = {
+        'stage': os.path.realpath(os.environ['NODE_PLANE_EXPECTED_STAGE']),
+        'ref': os.environ['NODE_PLANE_EXPECTED_REF'],
+        'commit': os.environ['NODE_PLANE_EXPECTED_COMMIT'],
+        'base': os.path.realpath(os.environ['NODE_PLANE_EXPECTED_BASE']),
+        'shared': os.path.realpath(os.environ['NODE_PLANE_EXPECTED_SHARED']),
+        'mode': os.environ['NODE_PLANE_EXPECTED_MODE'],
+        'stack_job': os.environ['NODE_PLANE_EXPECTED_JOB'],
+        'health_timeout': os.environ['NODE_PLANE_EXPECTED_TIMEOUT'],
+        'skip_restart': os.environ['NODE_PLANE_EXPECTED_SKIP_RESTART'],
+        'skip_deps': os.environ['NODE_PLANE_EXPECTED_SKIP_DEPS'],
+    }
+    for key, expected in checks.items():
+        actual = os.path.realpath(payload[key]) if key in {'stage', 'base', 'shared'} else payload.get(key)
+        if actual != expected:
+            raise SystemExit('Update handoff identity mismatch: ' + key)
+    payload['status'] = 'claimed'
+    payload['claimed_at'] = time.time()
+    temporary = pathlib.Path(tempfile.mkstemp(dir=path.parent, prefix='.handoff-')[1])
+    try:
+        temporary.chmod(0o600)
+        with temporary.open('w') as stream:
+            json.dump(payload, stream, sort_keys=True)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+    print('\t'.join(str(payload[key]) for key in
+        ('branch', 'health_timeout', 'skip_restart', 'skip_deps', 'stack_job', 'ref', 'commit')))
+PY
+)"
+  IFS=$'\t' read -r TARGET_BRANCH HEALTH_TIMEOUT SKIP_RESTART SKIP_DEPS STACK_JOB TARGET_REF CONTROLLER_COMMIT <<< "$claimed"
+}
+
+handoff_to_target() {
+  local handoff
+  mapfile -t _target_paths < <(simple_paths)
+  handoff="$(prepare_target_handoff)"
+  echo "Handing update to target updater: ${CONTROLLER_VERSION} (${CONTROLLER_COMMIT})"
+  local -a command=("${CONTROLLER_STAGE_DIR}/scripts/update.sh" --mode simple --from-source --skip-pull
+                    --target-phase --handoff "$handoff" --to "$TARGET_REF")
+  if [[ -n "$TARGET_BRANCH" ]]; then command+=(--branch "$TARGET_BRANCH"); fi
+  if [[ -n "$STACK_JOB" ]]; then command+=(--stack-job "$STACK_JOB"); fi
+  if [[ "$SKIP_RESTART" == 1 ]]; then command+=(--skip-restart); fi
+  if [[ "$SKIP_DEPS" == 1 ]]; then command+=(--skip-deps); fi
+  command+=(--health-timeout "$HEALTH_TIMEOUT")
+  NODE_PLANE_SOURCE_DIR="$CONTROLLER_STAGE_DIR" \
+  NODE_PLANE_UPDATE_PHASE=target \
+  NODE_PLANE_UPDATE_HANDOFF="$handoff" \
+  NODE_PLANE_APP_DIR="$(read_env_value NODE_PLANE_APP_DIR)" \
+  NODE_PLANE_SHARED_DIR="$(read_env_value NODE_PLANE_SHARED_DIR)" \
+  NODE_PLANE_BASE_DIR="$(read_env_value NODE_PLANE_BASE_DIR)" \
+  exec "${command[@]}"
+}
+
 update_simple() {
   need_cmd sudo
   if [[ $SKIP_DEPS -eq 1 ]]; then
@@ -687,8 +840,29 @@ main() {
   esac
   echo "Detected update mode: ${MODE}"
   echo "Current checkout version: $(print_version)"
-  fetch_code
-  echo "Source checkout version: $(print_version)"
+  if [[ "$UPDATE_PHASE" == target ]]; then
+    if [[ -z "$TARGET_HANDOFF" ]]; then
+      echo "Target updater requires an explicit handoff." >&2
+      exit 1
+    fi
+    claim_target_handoff "$TARGET_HANDOFF"
+    if [[ -n "$STACK_JOB" ]]; then
+      mapfile -t _initial_paths < <(simple_paths)
+      STACK_PROGRESS_FILE="${_initial_paths[2]}/data/updates/${STACK_JOB}.json"
+    fi
+    CONTROLLER_STAGE_DIR="$REPO_ROOT"
+    CONTROLLER_VERSION="$(tr -d '\r\n' < VERSION)"
+    CONTROLLER_COMMIT="$(tr -d '\r\n' < BUILD_COMMIT)"
+    CONTROLLER_REF="$TARGET_REF"
+    CONTROLLER_STAGE_OWNED=0
+    echo "Claimed target updater handoff."
+  else
+    fetch_code
+    echo "Source checkout version: $(print_version)"
+    if [[ "$FROM_SOURCE" == 0 ]]; then
+      handoff_to_target
+    fi
+  fi
 
   update_simple
   echo "Backend nodes use their own agent rollout; refresh changed nodes from the Telegram Updates screen."

@@ -27,7 +27,7 @@ docker_cmd() {
 }
 
 DOCKER_DIR="${XRAY_DOCKER_DIR:-/opt/node-plane-runtime/xray}"
-IMAGE="${XRAY_DOCKER_IMAGE:-ghcr.io/xtls/xray-core:26.3.27}"
+IMAGE="${XRAY_DOCKER_IMAGE:-ghcr.io/xtls/xray-core:26.10.29@sha256:c9443f3ee297f6481bc245269d61720c6f989195ee9b58fa90fdd99f03c21044}"
 CONTAINER="${XRAY_CONTAINER_NAME:-xray}"
 CONFIG="${XRAY_CONFIG:-/opt/node-plane-runtime/xray/config.json}"
 

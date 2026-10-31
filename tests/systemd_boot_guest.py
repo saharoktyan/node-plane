@@ -46,7 +46,7 @@ def setup():
         'routing':{'rules':[{'type':'field','inboundTag':['api'],'outboundTag':'api'}]}}
     ROOT.joinpath('xray/config.json').write_text(json.dumps(config))
     run('docker','run','-d','--name','xray','--restart','unless-stopped','--user','0:0','--network','host',
-        '-v',str(ROOT/'xray')+':/etc/xray:ro','ghcr.io/xtls/xray-core:26.3.27','run','-c','/etc/xray/config.json')
+        '-v',str(ROOT/'xray')+':/etc/xray:ro','ghcr.io/xtls/xray-core:26.10.29@sha256:c9443f3ee297f6481bc245269d61720c6f989195ee9b58fa90fdd99f03c21044','run','-c','/etc/xray/config.json')
     run('bash',str(ROOT/'init-awg.sh'))
     run('modprobe','tun')
     run('docker','run','-d','--name','amnezia-awg','--restart','unless-stopped','--cap-add','NET_ADMIN',

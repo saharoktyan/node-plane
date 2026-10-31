@@ -50,14 +50,11 @@ scripts/*.service
 .DS_Store
 Thumbs.db
 kitty-info
-TMP_*.md
-/RELEASE_CHECKLIST.md
-/DRIVER_MIGRATION_REMAINING.md
-/CORE_PRO_PLAN.md
-CODE_REVIEW.md
-/TESTER_FEEDBACK_2026-10-09.md
-/TEST_CHECKLIST_LOCAL.md
-/TEST_CHECKLIST_VPS.md
+
+# Local-only audits, checklists, feedback and verification evidence
+!/.local/
+/.local/*
+!/.local/.gitkeep
 
 # Local staging for release dependency caches
 .release-rust-cache/

@@ -209,3 +209,18 @@ rm -rf -- "$STACK_SNAPSHOT"
         self.assertIn("GrpcIntentDriver(channel).binary_info()", source)
         self.assertIn('/health/ready', source)
         self.assertIn('node-plane-backend-worker.timer', source)
+
+    def test_release_update_hands_off_before_target_mutations(self):
+        source = (ROOT / 'scripts/update.sh').read_text()
+        main = source[source.index('main() {'):]
+        self.assertLess(main.index('fetch_code'), main.index('handoff_to_target'))
+        self.assertLess(main.index('handoff_to_target'), main.index('update_simple'))
+        handoff = source[source.index('handoff_to_target() {'):source.index('update_simple() {')]
+        self.assertIn('exec "${command[@]}"', handoff)
+        self.assertIn('--stack-job "$STACK_JOB"', handoff)
+        self.assertIn('--target-phase --handoff "$handoff"', handoff)
+        claim = source[source.index('claim_target_handoff() {'):source.index('handoff_to_target() {')]
+        for identity in ('commit', 'ref', 'base', 'shared', 'stack_job', 'health_timeout'):
+            self.assertIn("'" + identity + "'", claim)
+        self.assertIn("payload.get('status') != 'ready'", claim)
+        self.assertIn("fcntl.flock(lock.fileno(), fcntl.LOCK_EX)", claim)

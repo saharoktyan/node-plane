@@ -1732,8 +1732,19 @@ systemctl reset-failed node-plane-lease-expiry.service node-plane-lease-expiry.t
 if [ -n "$9" ]; then
     for file in "$8" /root/.ssh/authorized_keys /home/*/.ssh/authorized_keys; do
         [ -f "$file" ] || continue
-        grep -Fvx -- "$9" "$file" > "$file.node-plane-tmp" || [ "$?" -eq 1 ]
-        mv "$file.node-plane-tmp" "$file"
+        [ -L "$file" ] && continue
+        temporary="$(mktemp "${file}.node-plane-tmp.XXXXXX")"
+        if grep -Fvx -- "$9" "$file" > "$temporary"; then
+            :
+        else
+            status="$?"
+            if [ "$status" -ne 1 ]; then
+                rm -f -- "$temporary"
+                exit "$status"
+            fi
+        fi
+        chmod 600 "$temporary"
+        mv -f -- "$temporary" "$file"
         chmod 600 "$file"
     done
 fi
@@ -2395,7 +2406,7 @@ impl NodeAgentService for NodeAgentApi {
             .node_env_value("XRAY_CONFIG", "/opt/node-plane-runtime/xray/config.json");
         let image = self
             .state
-            .node_env_value("XRAY_DOCKER_IMAGE", "ghcr.io/xtls/xray-core:26.3.27");
+            .node_env_value("XRAY_DOCKER_IMAGE", "ghcr.io/xtls/xray-core:26.10.29@sha256:c9443f3ee297f6481bc245269d61720c6f989195ee9b58fa90fdd99f03c21044");
         let output = Command::new(script)
             .args([
                 config,

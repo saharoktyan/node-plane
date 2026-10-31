@@ -278,7 +278,7 @@ impl DriverContext {
             self.shell_env_assignment("XRAY_CONFIG", "/opt/node-plane-runtime/xray/config.json"),
             self.shell_env_assignment("XRAY_CONTAINER_NAME", "xray"),
             self.shell_env_assignment("XRAY_DOCKER_DIR", "/opt/node-plane-runtime/xray"),
-            self.shell_env_assignment("XRAY_DOCKER_IMAGE", "ghcr.io/xtls/xray-core:26.3.27"),
+            self.shell_env_assignment("XRAY_DOCKER_IMAGE", "ghcr.io/xtls/xray-core:26.10.29@sha256:c9443f3ee297f6481bc245269d61720c6f989195ee9b58fa90fdd99f03c21044"),
             self.shell_env_assignment("XRAY_INBOUND_TCP_TAG", "reality-tcp"),
             self.shell_env_assignment("XRAY_INBOUND_XHTTP_TAG", "reality-xhttp"),
             self.shell_env_assignment("AWG_CONTAINER_NAME", "amnezia-awg"),

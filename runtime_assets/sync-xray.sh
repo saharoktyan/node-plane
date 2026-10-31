@@ -4,7 +4,7 @@ set -euo pipefail
 CONFIG_PATH="${1:-/opt/node-plane-runtime/xray/config.json}"
 PUBLIC_HOST="${2:-}"
 FLOW="${3:-xtls-rprx-vision}"
-IMAGE="${4:-ghcr.io/xtls/xray-core:26.3.27}"
+IMAGE="${4:-ghcr.io/xtls/xray-core:26.10.29@sha256:c9443f3ee297f6481bc245269d61720c6f989195ee9b58fa90fdd99f03c21044}"
 
 if [[ -z "$PUBLIC_HOST" ]]; then
   echo "PUBLIC_HOST is required" >&2
