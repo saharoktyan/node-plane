@@ -2,7 +2,7 @@ name: Workstation checks
 
 on:
   push:
-    branches: [dev, main]
+    branches: [dev, beta, main]
   pull_request:
   workflow_dispatch:
   workflow_call:
@@ -63,6 +63,9 @@ jobs:
           brew install coreutils flock
           echo "$(brew --prefix coreutils)/libexec/gnubin" >> "$GITHUB_PATH"
           echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
       - name: Tests
         # Filesystem lock and SSH fixtures share temporary state within some
         # runners. Serial execution keeps the suite deterministic on every OS.

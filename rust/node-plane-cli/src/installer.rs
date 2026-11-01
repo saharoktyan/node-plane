@@ -328,11 +328,7 @@ NODE_PLANE_CHANNEL
     crate::backend::authenticate(session, session_id, &request.workflow.account, tx)
         .await
         .with_context(|| {
-            let launcher = if crate::config::workstation_channel() == "dev" {
-                "node-plane-dev"
-            } else {
-                "node-plane"
-            };
+            let launcher = crate::config::workstation_launcher();
             format!(
                 "Node Plane is installed and verified. Workstation access registration is incomplete.\nOpen an interactive terminal and run:\n{launcher} --no-tui --state-dir {} diagnose {} --user {} --port {}\nRegistration requires administrator confirmation; the controller does not need to be installed again.",
                 shell_quote(&request.state_dir.to_string_lossy()),
@@ -451,6 +447,14 @@ fn bundle(request: &Request) -> Result<zeroize::Zeroizing<Vec<u8>>> {
         contents.as_bytes(),
         0o600,
     )?;
+    let policy = normalize_shell(include_bytes!("../../../app/services/release_versions.py"))?;
+    append(
+        &mut tar,
+        "source/app/services/release_versions.py",
+        policy.as_bytes(),
+        0o600,
+    )?;
+    append(&mut tar, "source/app/services/__init__.py", b"", 0o600)?;
     append(
         &mut tar,
         "installer.env",
@@ -773,10 +777,32 @@ mod tests {
                 path
             })
             .collect();
-        assert_eq!(paths.len(), 2);
+        assert_eq!(paths.len(), 4);
         assert!(paths.contains(&"installer.env".to_owned()));
         assert!(paths.contains(&"source/scripts/controller_release.py".to_owned()));
+        assert!(paths.contains(&"source/app/services/release_versions.py".to_owned()));
         assert!(paths.iter().all(|p| !p.contains("id_ed25519")));
+        // Exercise the exact uploaded bootstrap without the rest of the repo:
+        // its Python policy dependency must travel with the embedded reader.
+        let temporary = tempfile::tempdir().unwrap();
+        tar::Archive::new(&bytes[..])
+            .unpack(temporary.path())
+            .unwrap();
+        let python = if cfg!(windows) { "python" } else { "python3" };
+        let result = std::process::Command::new(python)
+            .arg(
+                temporary
+                    .path()
+                    .join("source/scripts/controller_release.py"),
+            )
+            .arg("--help")
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
     }
     #[test]
     fn verification_and_recovery_use_the_persistent_worker() {

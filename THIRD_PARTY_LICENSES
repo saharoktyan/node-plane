@@ -8264,11 +8264,11 @@ Third-Party Crate Dependency Index & Graph Component Mapping
   Components: node-plane-cli
   Source: registry+https://github.com/rust-lang/crates.io-index
   Source package: https://crates.io/crates/rustls-platform-verifier/0.7.1
-- rustls-webpki@0.103.15
+- rustls-webpki@0.103.16
   Declared SPDX: ISC
   Components: node-plane-agent, node-plane-cli, node-plane-driver
   Source: registry+https://github.com/rust-lang/crates.io-index
-  Source package: https://crates.io/crates/rustls-webpki/0.103.15
+  Source package: https://crates.io/crates/rustls-webpki/0.103.16
 - rustls@0.23.45
   Declared SPDX: Apache-2.0 OR ISC OR MIT
   Components: node-plane-agent, node-plane-cli, node-plane-driver
@@ -8819,11 +8819,11 @@ Third-Party Crate Dependency Index & Graph Component Mapping
   Components: node-plane-cli
   Source: registry+https://github.com/rust-lang/crates.io-index
   Source package: https://crates.io/crates/wayland-sys/0.31.11
-- webpki-roots@1.0.9
+- webpki-roots@1.0.10
   Declared SPDX: CDLA-Permissive-2.0
   Components: node-plane-cli
   Source: registry+https://github.com/rust-lang/crates.io-index
-  Source package: https://crates.io/crates/webpki-roots/1.0.9
+  Source package: https://crates.io/crates/webpki-roots/1.0.10
 - widestring@1.2.1
   Declared SPDX: MIT OR Apache-2.0
   Components: node-plane-cli
@@ -24091,7 +24091,7 @@ Used by:
 --------------------------------------------------------------------------------
 License Notice (SHA-256: 5b698ca13897be3afdb7174256fa1574f8c6892b8bea1a66dd6469d3fe27885a)
 Used by:
-  - rustls-webpki@0.103.15 [Components: node-plane-agent, node-plane-cli, node-plane-driver] [SPDX: ISC]
+  - rustls-webpki@0.103.16 [Components: node-plane-agent, node-plane-cli, node-plane-driver] [SPDX: ISC]
 --------------------------------------------------------------------------------
 
 Except as otherwise noted, this project is licensed under the following
@@ -26002,7 +26002,7 @@ The above is the version of the MIT "Expat" License used by X.org:
 --------------------------------------------------------------------------------
 License Notice (SHA-256: e271993808fec50ab29350b39539cdec611a9103f827e0aa26d61da70e2d33f8)
 Used by:
-  - webpki-roots@1.0.9 [Components: node-plane-cli] [SPDX: CDLA-Permissive-2.0]
+  - webpki-roots@1.0.10 [Components: node-plane-cli] [SPDX: CDLA-Permissive-2.0]
 --------------------------------------------------------------------------------
 
 # Community Data License Agreement - Permissive - Version 2.0

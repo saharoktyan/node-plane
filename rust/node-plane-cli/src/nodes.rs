@@ -959,14 +959,7 @@ async fn observe_controller_removal(
 pub(crate) fn controller_branch(updates: &Value) -> Result<&str> {
     updates["current_version"]
         .as_str()
-        .and_then(|version| semver::Version::parse(version.trim_start_matches('v')).ok())
-        .map(|version| {
-            if version.pre.is_empty() {
-                "main"
-            } else {
-                "dev"
-            }
-        })
+        .and_then(|version| crate::config::version_branch(version.trim_start_matches('v')).ok())
         .or_else(|| updates["branch"].as_str())
         .context("Controller did not report its channel")
 }
@@ -977,7 +970,7 @@ pub(crate) fn validate_controller_channel(
     expected: &str,
 ) -> Result<()> {
     ensure!(
-        matches!(installed, "main" | "dev"),
+        matches!(installed, "main" | "beta" | "dev"),
         "Controller reported an unsupported channel."
     );
     let migration_view = matches!(

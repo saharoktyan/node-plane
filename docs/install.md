@@ -48,7 +48,7 @@ Keep the environment file private. Do not paste its contents into logs or suppor
 | `POSTGRES_DSN` | External PostgreSQL connection; empty selects local provisioning |
 | `NODE_PLANE_BASE_DIR` | Installation root; default `/opt/node-plane` |
 | `NODE_PLANE_SHARED_DIR` | Persistent shared state; default `/opt/node-plane/shared` |
-| `NODE_PLANE_UPDATE_BRANCH` | Release branch: `dev` or `main` |
+| `NODE_PLANE_UPDATE_BRANCH` | Release branch: `dev`, `beta` or `main`; empty uses the release channel |
 | `SSH_KEY` | Controller's private SSH key for remote nodes |
 
 The full template is [`.env.example`](../.env.example). Installer-generated values live in the shared environment. Changing connection settings does not move an existing database or installation directory.

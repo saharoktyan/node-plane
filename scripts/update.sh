@@ -74,7 +74,7 @@ on_error() {
 }
 
 trap 'on_error $?' ERR
-trap 'update_exit $?' EXIT
+trap 'exit_code=$?; if type update_exit >/dev/null 2>&1; then update_exit "$exit_code"; fi' EXIT
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -149,7 +149,7 @@ while [[ $# -gt 0 ]]; do
     -h|--help)
       cat <<'EOF'
 Usage:
-  scripts/update.sh [--mode auto|simple] [--branch main|dev] [--to <ref>] [--skip-pull] [--skip-deps] [--skip-restart] [--health-timeout 30]
+  scripts/update.sh [--mode auto|simple] [--branch main|beta|dev] [--to <ref>] [--skip-pull] [--skip-deps] [--skip-restart] [--health-timeout 30]
   scripts/update.sh --target-phase --handoff <path>
 
 Modes:
@@ -353,8 +353,12 @@ sync_shared_env() {
 fetch_code() {
   if [[ "$FROM_SOURCE" == 0 ]]; then
     local archive_branch="${TARGET_BRANCH:-$(read_env_value NODE_PLANE_UPDATE_BRANCH)}"
+    if [[ -z "$archive_branch" ]]; then
+      archive_branch="$(tr -d '\r\n' < "$REPO_ROOT/RELEASE_CHANNEL")"
+      [[ "$archive_branch" != stable ]] || archive_branch=main
+    fi
     set_step "download and verify controller archive"
-    prepare_controller_archive "${archive_branch:-main}" "$TARGET_REF"
+    prepare_controller_archive "$archive_branch" "$TARGET_REF"
     TARGET_REF="$CONTROLLER_REF"
     return
   fi
@@ -369,15 +373,21 @@ fetch_code() {
 }
 
 resolve_target_ref() {
-  if [[ -n "$TARGET_REF" ]]; then
+  if [[ -n "${CONTROLLER_STAGE_DIR:-}" ]]; then
     echo "$TARGET_REF"
     return 0
   fi
-  if [[ -n "$TARGET_BRANCH" ]]; then
-    echo "origin/${TARGET_BRANCH}"
-    return 0
+  local branch="${TARGET_BRANCH:-$(read_env_value NODE_PLANE_UPDATE_BRANCH)}" ref="$TARGET_REF"
+  if [[ -z "$branch" ]]; then
+    branch="$(tr -d '\r\n' < "$REPO_ROOT/RELEASE_CHANNEL")"
+    [[ "$branch" != stable ]] || branch=main
   fi
-  echo "HEAD"
+  if [[ -z "$ref" ]]; then
+    ref="$(python3 "${SCRIPT_DIR}/controller_release.py" source-refs --root "$REPO_ROOT" --branch "$branch" | head -n 1)"
+    [[ -n "$ref" ]] || { echo 'No release tag found in the selected channel.' >&2; return 1; }
+  fi
+  python3 "${SCRIPT_DIR}/controller_release.py" validate-source --root "$REPO_ROOT" --branch "$branch" --ref "$ref" || return 1
+  echo "$ref"
 }
 
 simple_paths() {
@@ -559,12 +569,13 @@ PY
 }
 
 claim_target_handoff() {
-  local handoff="$1" claimed
-  claimed="$(NODE_PLANE_HANDOFF="$handoff" NODE_PLANE_EXPECTED_STAGE="$REPO_ROOT" \
+  local handoff="$1"
+  NODE_PLANE_HANDOFF="$handoff" NODE_PLANE_EXPECTED_STAGE="$REPO_ROOT" \
   NODE_PLANE_EXPECTED_REF="$TARGET_REF" NODE_PLANE_EXPECTED_COMMIT="$(tr -d '\r\n' < BUILD_COMMIT)" \
   NODE_PLANE_EXPECTED_BASE="${NODE_PLANE_BASE_DIR:-$(read_env_value NODE_PLANE_BASE_DIR)}" \
   NODE_PLANE_EXPECTED_SHARED="${NODE_PLANE_SHARED_DIR:-$(read_env_value NODE_PLANE_SHARED_DIR)}" \
-  NODE_PLANE_EXPECTED_MODE="$MODE" NODE_PLANE_EXPECTED_JOB="${STACK_JOB:-}" \
+  NODE_PLANE_EXPECTED_MODE="$MODE" NODE_PLANE_EXPECTED_BRANCH="${TARGET_BRANCH:-}" \
+  NODE_PLANE_EXPECTED_JOB="${STACK_JOB:-}" \
   NODE_PLANE_EXPECTED_TIMEOUT="$HEALTH_TIMEOUT" NODE_PLANE_EXPECTED_SKIP_RESTART="$SKIP_RESTART" \
   NODE_PLANE_EXPECTED_SKIP_DEPS="$SKIP_DEPS" python3 - <<'PY'
 import fcntl, json, os, pathlib, tempfile, time
@@ -582,6 +593,7 @@ with path.with_name(path.name + '.lock').open('a+') as lock:
         'base': os.path.realpath(os.environ['NODE_PLANE_EXPECTED_BASE']),
         'shared': os.path.realpath(os.environ['NODE_PLANE_EXPECTED_SHARED']),
         'mode': os.environ['NODE_PLANE_EXPECTED_MODE'],
+        'branch': os.environ['NODE_PLANE_EXPECTED_BRANCH'],
         'stack_job': os.environ['NODE_PLANE_EXPECTED_JOB'],
         'health_timeout': os.environ['NODE_PLANE_EXPECTED_TIMEOUT'],
         'skip_restart': os.environ['NODE_PLANE_EXPECTED_SKIP_RESTART'],
@@ -609,11 +621,9 @@ with path.with_name(path.name + '.lock').open('a+') as lock:
     finally:
         if temporary.exists():
             temporary.unlink()
-    print('\t'.join(str(payload[key]) for key in
-        ('branch', 'health_timeout', 'skip_restart', 'skip_deps', 'stack_job', 'ref', 'commit')))
 PY
-)"
-  IFS=$'\t' read -r TARGET_BRANCH HEALTH_TIMEOUT SKIP_RESTART SKIP_DEPS STACK_JOB TARGET_REF CONTROLLER_COMMIT <<< "$claimed"
+  # Identity was checked against the caller's values. Keep them unchanged:
+  # shell IFS whitespace collapses empty fields (e.g. a missing stack job).
 }
 
 mark_target_handoff() {

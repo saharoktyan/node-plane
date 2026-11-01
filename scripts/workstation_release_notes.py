@@ -2,13 +2,17 @@
 import argparse
 from pathlib import Path
 import re
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'app'))
+from services.release_versions import release_channel
 
 
 def render_notes(body, tag):
     if not re.fullmatch(r'v\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.\d+)?', tag):
         raise ValueError('Invalid release tag')
-    channel = 'dev' if re.search(r'-(?:alpha|beta|rc)\.\d+$', tag) else 'stable'
-    name = 'Node Plane (Dev)' if channel == 'dev' else 'Node Plane'
+    channel = release_channel(tag)
+    name = {'dev': 'Node Plane (Dev)', 'beta': 'Node Plane (Beta)', 'stable': 'Node Plane'}[channel]
     base = f'https://github.com/saharoktyan/node-plane/releases/download/{tag}'
     install = f'''## Install {name}
 

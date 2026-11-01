@@ -231,7 +231,7 @@ async def show_overview(query, bot, backend, state, page=0, opened=False):
         component_actions.append((button(tr(lang, 'update_tools.result'), f"update_job:{latest['id']}"),))
     if component_actions:
         sections.append(Section(tr(lang, 'updates.rich.component_actions'), rows=tuple(component_actions)))
-    lines = (('dev' if overview.get('branch') == 'dev' else 'stable') + ' · ' +
+    lines = ((overview.get('branch') if overview.get('branch') in {'dev', 'beta'} else 'stable') + ' · ' +
              (overview.get('current_version') or '—'),)
     if latest and latest['status'] in {'partial', 'rolled_back', 'blocked'}:
         lines += (state_label(lang, latest['status']),)

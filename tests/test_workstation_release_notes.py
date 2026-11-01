@@ -18,8 +18,8 @@ class WorkstationReleaseNotesTests(unittest.TestCase):
                 'curl https://example.test/node-plane-cli-installer.sh | sh\n'
                 '## Download node-plane-cli 1.0.0-alpha.1\nKeep download links.\n')
         for tag, channel, launcher in [('v1.0.0-alpha.1', 'dev', 'Node Plane (Dev)'),
-                                       ('v1.0.0-beta.2', 'dev', 'Node Plane (Dev)'),
-                                       ('v1.0.0-rc.10', 'dev', 'Node Plane (Dev)'),
+                                       ('v1.0.0-beta.2', 'beta', 'Node Plane (Beta)'),
+                                       ('v1.0.0-rc.10', 'beta', 'Node Plane (Beta)'),
                                        ('v1.0.0', 'stable', 'Node Plane')]:
             with self.subTest(channel=channel):
                 result = notes.render_notes(body, tag)

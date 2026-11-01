@@ -1,26 +1,22 @@
-# Planned Vaultwarden support
+# Non-VPN service evaluation example
 
-Vaultwarden is a planned future managed service. Node Plane does not currently provide a Vaultwarden lifecycle adapter.
+This document is an exploratory design example for evaluating a possible managed service. Node Plane does not currently provide a Vaultwarden lifecycle adapter, and this document does not commit the project to implementing Vaultwarden. The public [roadmap](../roadmap.md) treats Vaultwarden and Grafana/Loki as possible examples while selecting one non-VPN service for an architecture exercise.
 
-Vaultwarden follows the bounded Agent/service refactor, current VPN capability improvements, and managed Grafana/Loki support (see [Roadmap](../roadmap.md#after-100)). Before implementation, review the additional non-VPN service lifecycle and account/profile model requirements; a public plugin framework is not a prerequisite. Its relative priority alongside the Workstation client SDK remains undecided. Design exploration may continue earlier.
+## Scope to evaluate
 
-## Scope
+A managed service candidate would need deployment, configuration, health checks, updates, backups, restore and owned-resource removal on a selected node. It should reuse Node Plane's authorization, durable operations and audit without turning service access into a VPN protocol grant.
 
-Manage a curated Vaultwarden instance on a selected node: creation, configuration, health checks, updates, backups, restore and removal. Reuse Node Plane's account identity, authorization, durable operations and audit.
+A candidate service has its own enrollment and data model. Its user credentials, data and service secrets must remain separate from VPN profiles and controller infrastructure credentials.
 
-Vaultwarden is a service with its own enrollment and data model. Do not represent its access as a VPN protocol grant or store its user credentials in VPN profiles.
+## Evaluation stages
 
-## Design stages
-
-1. Define instance configuration: hostname, TLS/reverse-proxy boundary, persistent data paths and secret handling.
-2. Define invitation/enrollment, administrator actions, access revocation and the relationship to a Node Plane account.
-3. Implement an agent adapter with validated inputs, resource ownership, durable command identity and health observations.
-4. Add backend endpoints and worker operations for deployment and enrollment.
-5. Add equivalent administrator flows in Workstation and Telegram.
-6. Implement backup/restore and version compatibility before enabling updates/removal.
+1. Define instance configuration, persistent data paths and secret handling.
+2. Define invitation, enrollment, administrator actions, revocation and the relationship to a Node Plane account.
+3. Implement a validated Agent adapter with resource ownership, durable command identity and health observations.
+4. Add backend and Worker operations for deployment, enrollment, update and removal.
+5. Add administrator flows in Workstation and Telegram only if the service model warrants them.
+6. Implement backup/restore and version compatibility before enabling updates or removal.
 
 ## Acceptance
 
-A disposable instance must pass deployment, invitation, interrupted-operation recovery, restart, update, backup restore and complete owned-resource removal. Document which actions revoke login/session access and which preserve user data. Keep Vaultwarden secrets out of logs and general audit records.
-
-Select concrete container versions and proxy/TLS integration during implementation. A working deployment alone is not sufficient to declare support.
+A disposable candidate instance must pass deployment, invitation, interrupted-operation recovery, restart, update, backup restore and complete owned-resource removal. Document which actions revoke login/session access and which preserve user data. Keep service secrets out of logs and general audit records.

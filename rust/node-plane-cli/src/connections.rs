@@ -91,8 +91,8 @@ impl Installation {
             "Enter a valid SSH username."
         );
         ensure!(
-            matches!(self.branch.as_str(), "" | "main" | "dev"),
-            "Update channel must be main or dev, or blank to use the installed channel."
+            matches!(self.branch.as_str(), "" | "main" | "beta" | "dev"),
+            "Update channel must be main, beta or dev, or blank to use the installed channel."
         );
         ensure!(
             self.admin_ids.is_empty()
@@ -280,8 +280,8 @@ impl Connections {
     /// Copy only connection metadata. Keys and operation journals stay in their own installation.
     pub fn copy_installation(profile: &Installation, target: &Path, branch: &str) -> Result<()> {
         ensure!(
-            matches!(branch, "main" | "dev"),
-            "Target channel must be main or dev."
+            matches!(branch, "main" | "beta" | "dev"),
+            "Target channel must be main, beta or dev."
         );
         let mut profile = profile.clone();
         profile.branch = branch.into();

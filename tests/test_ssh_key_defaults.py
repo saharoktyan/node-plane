@@ -49,7 +49,7 @@ class SshKeyDefaultTests(unittest.TestCase):
     def test_setup_persists_only_missing_default_and_dry_run_does_not_write(self):
         source = (ROOT / 'scripts' / 'setup_driver_agents.sh').read_text()
         start = source.index('# Use the same controller identity as config.SSH_KEY')
-        end = source.index('\nAPP_ROOT=', start)
+        end = source.index('\nexport SSH_KEY', start) + len('\nexport SSH_KEY')
         block = source[start:end]
         for value, dry_run, writes in [('', 0, 'write'), ('', 1, ''), ('/custom/key', 0, '')]:
             with self.subTest(value=value, dry_run=dry_run):

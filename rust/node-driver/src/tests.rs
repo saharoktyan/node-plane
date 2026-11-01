@@ -26,12 +26,16 @@ fn local_driver_authentication_requires_exact_token_metadata() {
     assert_eq!(missing.code(), tonic::Code::Unauthenticated);
 
     let mut wrong = Request::new(());
-    wrong.metadata_mut().insert("x-node-plane-local-token", "wrong".parse().unwrap());
+    wrong
+        .metadata_mut()
+        .insert("x-node-plane-local-token", "wrong".parse().unwrap());
     let wrong = authorize_local_with_expected(wrong, "shared-token").unwrap_err();
     assert_eq!(wrong.code(), tonic::Code::Unauthenticated);
 
     let mut correct = Request::new(());
-    correct.metadata_mut().insert("x-node-plane-local-token", "shared-token".parse().unwrap());
+    correct
+        .metadata_mut()
+        .insert("x-node-plane-local-token", "shared-token".parse().unwrap());
     assert!(authorize_local_with_expected(correct, "shared-token").is_ok());
 }
 

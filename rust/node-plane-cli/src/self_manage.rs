@@ -3,7 +3,9 @@ use clap::Subcommand;
 use reqwest::blocking::Client;
 use serde::Deserialize;
 use std::{
+    collections::HashMap,
     fs,
+    io::Read,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -32,6 +34,8 @@ pub struct Release {
     assets: Vec<Asset>,
     #[serde(skip)]
     pub dist_managed: bool,
+    #[serde(skip)]
+    channel_verified: bool,
 }
 
 #[derive(Clone, Deserialize)]
@@ -82,25 +86,93 @@ fn newer(tag: &str, current: &str) -> bool {
 }
 
 pub fn discover() -> Result<Option<Release>> {
-    let releases: Vec<Release> = client()?
-        .get(format!("{REPO}/releases?per_page=100"))
-        .send()?
-        .error_for_status()?
-        .json()?;
+    let client = client()?;
+    let mut releases = Vec::new();
+    for page in 1..=20 {
+        let items: Vec<Release> = client
+            .get(format!("{REPO}/releases?per_page=100&page={page}"))
+            .send()?
+            .error_for_status()?
+            .json()?;
+        let count = items.len();
+        releases.extend(items);
+        if count < 100 {
+            break;
+        }
+    }
+    for release in &mut releases {
+        if !eligible(release, env!("CARGO_PKG_VERSION"))
+            || !release
+                .assets
+                .iter()
+                .any(|a| a.name == "RELEASE_METADATA.txt")
+        {
+            continue;
+        }
+        let response = client.get(format!("https://github.com/saharoktyan/node-plane/releases/download/{}/RELEASE_METADATA.txt", release.tag_name))
+            .send()?.error_for_status()?;
+        let mut metadata = String::new();
+        response.take(4097).read_to_string(&mut metadata)?;
+        release.channel_verified = valid_metadata(
+            &metadata,
+            &release.tag_name,
+            crate::config::default_branch(),
+        );
+    }
     Ok(select_release(releases, env!("CARGO_PKG_VERSION")))
 }
 
+fn valid_metadata(metadata: &str, tag: &str, branch: &str) -> bool {
+    if metadata.len() > 4096 {
+        return false;
+    }
+    let mut fields = HashMap::new();
+    for line in metadata.lines() {
+        let Some((key, value)) = line.split_once('=') else {
+            return false;
+        };
+        if key.is_empty() || fields.insert(key, value).is_some() {
+            return false;
+        }
+    }
+    let channel = if branch == "main" { "stable" } else { branch };
+    fields.get("format") == Some(&"2")
+        && fields.get("channel") == Some(&channel)
+        && fields.get("tag") == Some(&tag)
+        && fields.get("version") == Some(&tag.strip_prefix('v').unwrap_or(""))
+        && fields.get("commit").is_some_and(|s| {
+            s.len() == 40
+                && s.bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        })
+        && tag.starts_with('v')
+        && tag
+            .strip_prefix('v')
+            .and_then(|v| crate::config::version_branch(v).ok())
+            == Some(branch)
+}
+
+fn eligible(release: &Release, current: &str) -> bool {
+    let Ok(branch) = crate::config::version_branch(current) else {
+        return false;
+    };
+    !release.draft
+        && release.prerelease == (branch != "main")
+        && release.tag_name.starts_with('v')
+        && release
+            .tag_name
+            .strip_prefix('v')
+            .and_then(|v| crate::config::version_branch(v).ok())
+            == Some(branch)
+        && newer(&release.tag_name, current)
+        && has_platform_artifacts(release)
+}
+
 fn select_release(releases: Vec<Release>, current: &str) -> Option<Release> {
-    let development = current.contains('-');
     releases
         .into_iter()
         .filter_map(|mut release| {
-            if release.draft
-                || release.prerelease != development
-                || release.tag_name.contains('-') != development
-                || !newer(&release.tag_name, current)
-                || !has_platform_artifacts(&release)
-            {
+            if !release.channel_verified || !eligible(&release, current) {
                 return None;
             }
             release.dist_managed = true;
@@ -198,11 +270,7 @@ fn uninstall_dist() -> Result<()> {
     }
     #[cfg(not(windows))]
     {
-        let launcher = if crate::config::workstation_channel() == "dev" {
-            "node-plane-dev"
-        } else {
-            "node-plane"
-        };
+        let launcher = crate::config::workstation_launcher();
         for alias in [
             parent.join(launcher),
             home()?.join(".local/bin").join(launcher),
@@ -215,13 +283,11 @@ fn uninstall_dist() -> Result<()> {
     }
     #[cfg(windows)]
     {
-        let launcher = parent.join(if crate::config::workstation_channel() == "dev" {
-            "node-plane-dev.cmd"
-        } else {
-            "node-plane.cmd"
-        });
-        if launcher.is_file() {
-            fs::remove_file(launcher)?;
+        let name = format!("{}.cmd", crate::config::workstation_launcher());
+        for launcher in [parent.join(&name), parent.join("launchers").join(&name)] {
+            if launcher.is_file() {
+                fs::remove_file(launcher)?;
+            }
         }
     }
 
@@ -261,6 +327,8 @@ fn remove_start_menu_shortcut(appdata: &Path, channel: Option<&str>) -> Result<(
         |channel| {
             if channel == "dev" {
                 "Node Plane (Dev).lnk".into()
+            } else if channel == "beta" {
+                "Node Plane (Beta).lnk".into()
             } else {
                 "Node Plane.lnk".into()
             }
@@ -301,6 +369,10 @@ fn installation_lock(home: &Path) -> Result<fs::File> {
 }
 
 pub fn update(release: &Release) -> Result<String> {
+    ensure!(
+        release.channel_verified && eligible(release, env!("CARGO_PKG_VERSION")),
+        "Release is outside this Workstation's verified update channel"
+    );
     let _lock = installation_lock(&home()?)?;
     let mut updater = dist_updater().context(
         "The cargo-dist install receipt is missing; reinstall Workstation with its release installer.",
@@ -403,6 +475,28 @@ mod tests {
     }
 
     #[test]
+    fn metadata_requires_exact_channel_and_rejects_legacy_and_duplicate_fields() {
+        let tag = "v0.5.0-beta.2";
+        let metadata = format!(
+            "format=2\nchannel=beta\ntag={tag}\nversion=0.5.0-beta.2\ncommit={}\n",
+            "a".repeat(40)
+        );
+        assert!(valid_metadata(&metadata, tag, "beta"));
+        assert!(!valid_metadata(&metadata, tag, "dev"));
+        assert!(!valid_metadata(&metadata, "v0.5.0-beta.3", "beta"));
+        assert!(!valid_metadata(
+            &(metadata.clone() + "channel=beta\n"),
+            tag,
+            "beta"
+        ));
+        assert!(!valid_metadata(
+            "tag=v1.0.0-beta.11\ncommit=ce88545\n",
+            "v1.0.0-beta.11",
+            "beta"
+        ));
+    }
+
+    #[test]
     fn discovery_requires_complete_modern_artifacts_for_this_platform() {
         let mut release: Release = serde_json::from_value(serde_json::json!({
             "tag_name": "v0.4.3-alpha.99", "draft": false, "prerelease": true,
@@ -441,6 +535,7 @@ mod tests {
             .into_iter()
             .map(|name| Asset { name })
             .collect();
+            release.channel_verified = true;
             release
         }
         let candidates = vec![
@@ -450,7 +545,7 @@ mod tests {
             complete("v1.0.0", false),
         ];
         assert_eq!(
-            select_release(candidates, "1.0.0-alpha.20")
+            select_release(candidates, "1.0.0-beta.11")
                 .unwrap()
                 .tag_name,
             "v1.0.0-rc.10"
@@ -468,13 +563,28 @@ mod tests {
         );
         assert!(select_release(vec![complete("v1.0.0", false)], "1.0.0-alpha.3").is_none());
         assert!(select_release(vec![complete("v2.0.0-alpha.1", true)], "1.0.0").is_none());
+        let mut old = complete("v1.0.0-beta.11", true);
+        old.channel_verified = false;
+        assert_eq!(
+            select_release(
+                vec![
+                    old,
+                    complete("v0.5.0-beta.2", true),
+                    complete("v0.5.0-alpha.99", true)
+                ],
+                "0.5.0-beta.1"
+            )
+            .unwrap()
+            .tag_name,
+            "v0.5.0-beta.2"
+        );
     }
     #[test]
     fn channel_shortcut_uninstall_preserves_the_other_channel() {
         let root = tempfile::tempdir().unwrap();
         let programs = root.path().join("Microsoft/Windows/Start Menu/Programs");
         fs::create_dir_all(&programs).unwrap();
-        for channel in ["dev", "stable"] {
+        for channel in ["dev", "beta", "stable"] {
             fs::write(
                 programs.join(format!("Node Plane Workstation ({channel}).lnk")),
                 "fixture",

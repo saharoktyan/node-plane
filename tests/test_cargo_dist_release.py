@@ -30,6 +30,14 @@ class CargoDistReleaseTests(unittest.TestCase):
             (root / 'runtime_assets/entry.sh').write_text('#!/bin/sh\nexit 0\n')
             shutil.copyfile(ROOT / 'scripts/controller_release.py', root / 'scripts/controller_release.py')
             shutil.copyfile(ROOT / 'scripts/build_release_stack.sh', root / 'scripts/build_release_stack.sh')
+            shutil.copyfile(ROOT / 'scripts/validate_release.py', root / 'scripts/validate_release.py')
+            (root / 'app/services').mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(ROOT / 'app/services/release_versions.py', root / 'app/services/release_versions.py')
+            (root / 'RELEASE_CHANNEL').write_text('dev\n')
+            (root / 'pyproject.toml').write_text('[project]\nversion = "0.4.3-alpha.59"\n')
+            cargo = root / 'rust/node-plane-cli/Cargo.toml'
+            cargo.parent.mkdir(parents=True, exist_ok=True)
+            cargo.write_text('[package]\nversion = "0.4.3-alpha.59"\n')
             for name in ('install_workstation.sh', 'install_workstation.ps1'):
                 shutil.copyfile(ROOT / 'scripts' / name, root / 'scripts' / name)
             (root / '.env').write_text('must not be packaged\n')
@@ -116,6 +124,14 @@ class CargoDistReleaseTests(unittest.TestCase):
             (root / 'runtime_assets/entry.sh').write_text('#!/bin/sh\nexit 0\n')
             shutil.copyfile(ROOT / 'scripts/controller_release.py', root / 'scripts/controller_release.py')
             shutil.copyfile(ROOT / 'scripts/build_release_stack.sh', root / 'scripts/build_release_stack.sh')
+            shutil.copyfile(ROOT / 'scripts/validate_release.py', root / 'scripts/validate_release.py')
+            (root / 'app/services').mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(ROOT / 'app/services/release_versions.py', root / 'app/services/release_versions.py')
+            (root / 'RELEASE_CHANNEL').write_text('dev\n')
+            (root / 'pyproject.toml').write_text('[project]\nversion = "0.4.3-alpha.59"\n')
+            cargo = root / 'rust/node-plane-cli/Cargo.toml'
+            cargo.parent.mkdir(parents=True, exist_ok=True)
+            cargo.write_text('[package]\nversion = "0.4.3-alpha.59"\n')
             for name in ('install_workstation.sh', 'install_workstation.ps1'):
                 shutil.copyfile(ROOT / 'scripts' / name, root / 'scripts' / name)
             subprocess.run(['git', 'init', '-q', str(root)], check=True, capture_output=True)

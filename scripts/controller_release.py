@@ -14,6 +14,9 @@ import tarfile
 import tempfile
 import urllib.request
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'app'))
+from services.release_versions import CHANNEL_BRANCHES, branch_channel, release_channel, parse_release_metadata
+
 ASSET = 'node-plane-controller.tar.gz'
 MANIFEST = 'CONTROLLER_PACKAGE.json'
 SCRIPTS = {
@@ -24,14 +27,14 @@ SCRIPTS = {
     'uv_runtime.sh', 'release_retention.py', 'run_node_driver.sh', 'run_node_agent.sh',
     'lib/agent_ssh.sh', 'lib/install_progress.sh', 'lib/stack_update.sh', 'lib/controller_archive.sh',
     'lib/archive_agent_journals.py', 'lib/install_credentials.sh',
+    'verify_server_artifacts.py',
 }
 LEGAL_FILES = {'LICENSE', 'THIRD_PARTY_LICENSES'}
 PYTHON_PROJECT_FILES = {'pyproject.toml', 'uv.lock'}
-ROOT_FILES = {'VERSION', '.env.example', 'requirements.txt',
-              'requirements-backend.txt', 'requirements-telegram.txt'} | PYTHON_PROJECT_FILES | LEGAL_FILES
-REQUIRED = (ROOT_FILES - PYTHON_PROJECT_FILES - {'THIRD_PARTY_LICENSES'}) | {'app/backend/http_api.py', 'app/backend/executor.py',
-                        'app/telegram_client/main.py', 'runtime_assets/manifest.json'} | {'scripts/' + s for s in SCRIPTS}
-BUILD_REQUIRED = REQUIRED | PYTHON_PROJECT_FILES | LEGAL_FILES
+ROOT_FILES = {'VERSION', 'RELEASE_CHANNEL', '.env.example'} | PYTHON_PROJECT_FILES | LEGAL_FILES
+REQUIRED = (ROOT_FILES - {'THIRD_PARTY_LICENSES'}) | {'app/backend/http_api.py', 'app/backend/executor.py',
+                        'app/telegram_client/main.py', 'app/services/release_versions.py', 'runtime_assets/manifest.json'} | {'scripts/' + s for s in SCRIPTS}
+BUILD_REQUIRED = REQUIRED | LEGAL_FILES
 TAG = re.compile(r'^v?(\d+)\.(\d+)\.(\d+)(?:-(alpha|beta|rc)\.(\d+))?$')
 COMMIT = re.compile(r'^[0-9a-f]{40}$')
 LIMIT = 64 * 1024 * 1024
@@ -81,6 +84,9 @@ def build(root, output, ref, commit):
     version = (root / 'VERSION').read_text().strip()
     if version != ref.removeprefix('v'):
         raise ValueError('Controller VERSION does not match release tag')
+    channel = (root / 'RELEASE_CHANNEL').read_text().strip()
+    if release_channel(ref) != channel:
+        raise ValueError('Controller RELEASE_CHANNEL does not match release tag')
     payload = {}
     for name in files:
         path = root / name
@@ -92,7 +98,7 @@ def build(root, output, ref, commit):
     payload['BUILD_COMMIT'] = (commit + '\n').encode()
     verify_runtime_assets(payload)
     manifest = {'format': 1, 'ref': ref, 'version': version, 'commit': commit,
-                'python_dependencies': 'uv',
+                'python_dependencies': 'uv', 'channel': channel,
                 'files': {name: hashlib.sha256(value).hexdigest() for name, value in payload.items()}}
     payload[MANIFEST] = (json.dumps(manifest, sort_keys=True) + '\n').encode()
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -129,11 +135,9 @@ def verify(archive_path, ref=None, commit=None):
     if commit and manifest['commit'] != commit:
         raise ValueError('Controller archive commit does not match requested release')
     files = manifest.get('files', {})
-    # Readers must accept previously published runtime layouts too. The helper
-    # became mandatory in alpha.52; its absence in older packages is intentional.
+    # Dependency files are mandatory; compatibility below concerns only older
+    # operational library layouts within a locked Python project.
     required = set(REQUIRED)
-    if manifest.get('python_dependencies') == 'uv':
-        required |= PYTHON_PROJECT_FILES
     parsed = TAG.fullmatch(manifest['ref'])
     version = tuple(int(parsed[index]) for index in (1, 2, 3)) + (int(parsed[5] or 0),)
     legacy_alpha = parsed[4] == 'alpha'
@@ -156,6 +160,9 @@ def verify(archive_path, ref=None, commit=None):
     if (contents['VERSION'].decode().strip() != manifest['version'] or
         contents['BUILD_COMMIT'].decode().strip() != manifest['commit']):
         raise ValueError('Controller package build identity is inconsistent')
+    if (contents['RELEASE_CHANNEL'].decode().strip() != manifest.get('channel')
+            or release_channel(manifest['ref']) != manifest.get('channel')):
+        raise ValueError('Controller package channel is inconsistent')
     return manifest, contents
 
 
@@ -226,7 +233,44 @@ def sort_key(ref):
     return (int(major), int(minor), int(patch), rank, int(number or 0))
 
 
+def validate_source(root, branch, ref):
+    channel = branch_channel(branch)
+    head_ref = ref in {'HEAD', 'origin/dev'} or COMMIT.fullmatch(ref)
+    if not head_ref and release_channel(ref) != channel:
+        raise ValueError('Source tag does not match the selected channel')
+    def git(*args):
+        return subprocess.check_output(['git', '-C', str(root), *args], stderr=subprocess.PIPE,
+                                       timeout=30, text=True).strip()
+    version = git('show', ref + ':VERSION')
+    if git('show', ref + ':RELEASE_CHANNEL') != channel or release_channel('v' + version) != channel:
+        raise ValueError('Source ref does not belong to the selected channel')
+    if head_ref:
+        if branch != 'dev' or git('rev-parse', ref + '^{commit}') != git('rev-parse', 'origin/dev^{commit}'):
+            raise ValueError('Only dev permits an explicit current branch head')
+    elif release_channel(ref) != channel or ref.removeprefix('v') != version:
+        raise ValueError('Source tag does not match its VERSION and channel')
+    subprocess.run(['git', '-C', str(root), 'merge-base', '--is-ancestor', ref,
+                    'origin/' + branch], check=True, capture_output=True, timeout=30)
+
+
+def source_refs(root, branch):
+    branch_channel(branch)
+    refs = subprocess.check_output(['git', '-C', str(root), 'tag', '--merged', 'origin/' + branch],
+                                   timeout=30, text=True).splitlines()
+    valid = []
+    for ref in refs:
+        try:
+            if release_channel(ref) != branch_channel(branch):
+                continue
+            validate_source(root, branch, ref)
+        except (ValueError, subprocess.SubprocessError):
+            continue
+        valid.append(ref)
+    return sorted(valid, key=sort_key, reverse=True)
+
+
 def catalog(branch):
+    channel = branch_channel(branch)
     repo = repository()
     refs = subprocess.check_output(['git', 'ls-remote', 'https://github.com/' + repo + '.git',
                                     'refs/tags/*'], timeout=60, stderr=subprocess.PIPE).decode()
@@ -247,13 +291,22 @@ def catalog(branch):
         for release in releases:
             tag = release.get('tag_name', '')
             match = TAG.fullmatch(tag)
-            if not match or release.get('draft') or (branch == 'main' and match[4] is not None):
+            if not match or release.get('draft'):
                 continue
-            if branch == 'dev' and match[4] is None:
+            try:
+                if release_channel(tag) != channel:
+                    continue
+            except ValueError:
                 continue
             assets = {a['name'] for a in release.get('assets', [])}
-            if {ASSET, 'SHA256SUMS.txt'} <= assets and COMMIT.fullmatch(commits.get(tag, '')):
-                items.append({'ref': tag, 'version': tag.removeprefix('v'), 'commit': commits[tag]})
+            if not {ASSET, 'SHA256SUMS.txt', 'RELEASE_METADATA.txt'} <= assets or not COMMIT.fullmatch(commits.get(tag, '')):
+                continue
+            metadata = fetch(f'https://github.com/{repo}/releases/download/{tag}/RELEASE_METADATA.txt', 4096)
+            try:
+                parse_release_metadata(metadata, tag=tag, channel=channel, commit=commits[tag])
+            except (ValueError, UnicodeError):
+                continue
+            items.append({'ref': tag, 'version': tag.removeprefix('v'), 'commit': commits[tag]})
         if len(releases) < 100:
             break
     return sorted(items, key=lambda i: sort_key(i['ref']), reverse=True)
@@ -308,25 +361,30 @@ def check(branch, installed, listing):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='command', required=True)
-    for name in ('build', 'verify', 'extract', 'download', 'check', 'copy', 'sort-refs'):
+    for name in ('build', 'verify', 'extract', 'download', 'check', 'copy', 'sort-refs', 'source-refs', 'validate-source'):
         cmd = sub.add_parser(name)
         if name in {'build', 'verify', 'extract'}:
             cmd.add_argument('--archive', type=Path, required=True)
             cmd.add_argument('--commit')
-        if name in {'build', 'copy'}:
+        if name in {'build', 'copy', 'source-refs', 'validate-source'}:
             cmd.add_argument('--root', type=Path, required=True)
         if name in {'extract', 'download', 'copy'}:
             cmd.add_argument('--destination', type=Path, required=True)
-        if name in {'build', 'verify', 'extract', 'download'}:
+        if name in {'build', 'verify', 'extract', 'download', 'validate-source'}:
             cmd.add_argument('--ref', default='')
-        if name in {'download', 'check'}:
-            cmd.add_argument('--branch', choices=('main', 'dev'), required=True)
+        if name in {'download', 'check', 'source-refs', 'validate-source'}:
+            cmd.add_argument('--branch', choices=('main', 'dev', 'beta'), required=True)
         if name == 'check':
             cmd.add_argument('--installed', type=Path, required=True)
             cmd.add_argument('--list', action='store_true')
     args = parser.parse_args()
     try:
-        if args.command == 'sort-refs':
+        if args.command == 'source-refs':
+            for ref in source_refs(args.root, args.branch):
+                print(ref)
+        elif args.command == 'validate-source':
+            validate_source(args.root, args.branch, args.ref)
+        elif args.command == 'sort-refs':
             refs = {line.strip() for line in sys.stdin if TAG.fullmatch(line.strip())}
             for ref in sorted(refs, key=sort_key, reverse=True):
                 print(ref)

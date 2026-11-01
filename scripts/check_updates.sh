@@ -5,7 +5,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 SOURCE_DIR="${NODE_PLANE_SOURCE_DIR:-$REPO_ROOT}"
 INSTALLED_APP_DIR="${NODE_PLANE_APP_DIR:-${NODE_PLANE_BASE_DIR:-$REPO_ROOT}}"
-DEFAULT_BRANCH="${NODE_PLANE_UPDATE_BRANCH:-main}"
+DEFAULT_BRANCH="${NODE_PLANE_UPDATE_BRANCH:-$(tr -d '\r\n' < "$REPO_ROOT/RELEASE_CHANNEL")}"
+[[ "$DEFAULT_BRANCH" != stable ]] || DEFAULT_BRANCH=main
 BRANCH=""
 LIST_MODE=0
 PREFER="${NODE_PLANE_UPDATES_PREFER:-}"
@@ -70,25 +71,8 @@ emit_error() {
   exit 1
 }
 
-stable_tag_regex='^v?[0-9]+\.[0-9]+\.[0-9]+$'
-prerelease_tag_regex='^v?[0-9]+\.[0-9]+\.[0-9]+-(alpha|beta|rc)\.[0-9]+$'
-
 latest_tag_for_branch() {
-  local branch="$1"
-  local regex
-  if [[ "$branch" == "main" ]]; then
-    regex="$stable_tag_regex"
-  else
-    regex="$prerelease_tag_regex"
-  fi
-  while IFS= read -r tag; do
-    [[ -z "$tag" ]] && continue
-    if [[ "$tag" =~ $regex ]]; then
-      echo "$tag"
-      return 0
-    fi
-  done < <(git tag --merged "origin/${branch}" | python3 "${SCRIPT_DIR}/controller_release.py" sort-refs)
-  return 1
+  python3 "${SCRIPT_DIR}/controller_release.py" source-refs --root "$SOURCE_DIR" --branch "$1" | head -n 1
 }
 
 # Archive installations use published release metadata; no Git checkout is needed.
@@ -121,6 +105,9 @@ if [[ -z "$BRANCH" ]]; then
   fi
 fi
 
+case "$BRANCH" in main|beta|dev) ;; *) emit_error "Unsupported update branch" ;; esac
+[[ "$PREFER" != head || "$BRANCH" == dev ]] || emit_error "Only dev supports branch head updates"
+
 if ! git fetch --quiet --tags origin; then
   emit_error "git fetch failed"
 fi
@@ -133,9 +120,11 @@ BRANCH_HEAD_COMMIT="$(git rev-parse "${BRANCH_REF}")"
 
 LATEST_TAG="$(latest_tag_for_branch "$BRANCH" || true)"
 if [[ "$BRANCH" == "dev" && "$PREFER" == "head" ]]; then
+  python3 "${SCRIPT_DIR}/controller_release.py" validate-source --root "$SOURCE_DIR" --branch dev --ref "$BRANCH_REF" || emit_error "Invalid dev head"
   UPSTREAM_REF="$BRANCH_REF"
 else
-  UPSTREAM_REF="${LATEST_TAG:-$BRANCH_REF}"
+  [[ -n "$LATEST_TAG" ]] || emit_error "No release tags in this channel"
+  UPSTREAM_REF="$LATEST_TAG"
 fi
 
 LOCAL_COMMIT="$(read_installed_commit)"
@@ -163,17 +152,10 @@ if [[ $LIST_MODE -eq 1 ]]; then
   if [[ "$BRANCH" == "dev" ]]; then
     echo "version_item: HEAD|${BRANCH_REF}|head|${BRANCH_HEAD_COMMIT}"
   fi
-  if [[ "$BRANCH" == "main" ]]; then
-    tag_regex="$stable_tag_regex"
-  else
-    tag_regex="$prerelease_tag_regex"
-  fi
   while IFS= read -r tag; do
     [[ -z "$tag" ]] && continue
-    if [[ "$tag" =~ $tag_regex ]]; then
-      echo "version_item: ${tag#v}|${tag}|tag|$(git rev-parse "${tag}^{commit}")"
-    fi
-  done < <(git tag --merged "${BRANCH_REF}" | python3 "${SCRIPT_DIR}/controller_release.py" sort-refs)
+    echo "version_item: ${tag#v}|${tag}|tag|$(git rev-parse "${tag}^{commit}")"
+  done < <(python3 "${SCRIPT_DIR}/controller_release.py" source-refs --root "$SOURCE_DIR" --branch "$BRANCH")
   exit 0
 fi
 

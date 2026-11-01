@@ -86,9 +86,23 @@ class WorkerPostgresTests(unittest.TestCase):
         with self.db.transaction() as conn:
             conn.execute('DROP TABLE backend_node_jobs')
         migrate(self.db)
-        env = {**os.environ, 'POSTGRES_DSN': self.db.dsn, 'PYTHONPATH': 'app'}
         with tempfile.TemporaryDirectory() as directory:
             lock = str(Path(directory) / 'worker.lock')
+            base_dir = Path(directory) / 'base'
+            app_dir = Path(directory) / 'app'
+            shared_dir = Path(directory) / 'shared'
+            base_dir.mkdir(exist_ok=True)
+            app_dir.mkdir(exist_ok=True)
+            shared_dir.mkdir(exist_ok=True)
+            env = {
+                **os.environ,
+                'POSTGRES_DSN': self.db.dsn,
+                'PYTHONPATH': 'app',
+                'NODE_PLANE_DRIVER_LOCAL_TOKEN': 'fixture-synthetic-local-driver-token',
+                'NODE_PLANE_BASE_DIR': str(base_dir),
+                'NODE_PLANE_APP_DIR': str(app_dir),
+                'NODE_PLANE_SHARED_DIR': str(shared_dir),
+            }
             command = [sys.executable, '-m', 'backend.executor', '--lock-file', lock, '--daemon']
             for _ in range(2):
                 worker = subprocess.Popen(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)

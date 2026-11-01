@@ -13,6 +13,8 @@ if [[ "${1:-}" == --from-ci && "${CI:-}" == true ]]; then
     cp "$ROOT_DIR/dist/server-input/$name" "$OUT_DIR/$name"
   done
   (cd "$OUT_DIR" && sha256sum --check SHA256SUMS.txt)
+  python3 scripts/validate_release.py --tag "$GITHUB_REF_NAME" --commit "$GITHUB_SHA" \
+    --verify-metadata "$OUT_DIR/RELEASE_METADATA.txt"
   python3 scripts/controller_release.py verify --archive "$OUT_DIR/node-plane-controller.tar.gz" \
     --ref "$GITHUB_REF_NAME" --commit "$GITHUB_SHA"
   exit 0
@@ -38,7 +40,7 @@ if [[ -z "$TAG" ]]; then
   TAG="v$VERSION"
 fi
 COMMIT="${GITHUB_SHA:-$(git rev-parse HEAD)}"
-SHORT_COMMIT="${COMMIT:0:12}"
+python3 scripts/validate_release.py --tag "$TAG" --commit "$COMMIT"
 [[ "$TAG" == "v$(tr -d '\r\n' < VERSION)" ]] || {
   echo "Release tag must match VERSION." >&2
   exit 1
@@ -79,18 +81,13 @@ python3 scripts/controller_release.py build --root "$ROOT_DIR" \
   --archive "$OUT_DIR/$CONTROLLER_NAME" --ref "$TAG" --commit "$COMMIT"
 cp scripts/install_workstation.sh "$OUT_DIR/node-plane-workstation-installer.sh"
 cp scripts/install_workstation.ps1 "$OUT_DIR/node-plane-workstation-installer.ps1"
+python3 scripts/validate_release.py --tag "$TAG" --commit "$COMMIT" \
+  --metadata "$OUT_DIR/RELEASE_METADATA.txt"
 
 (
   cd "$OUT_DIR"
   sha256sum "$CONTROLLER_NAME" "$DRIVER_NAME.tar.gz" "$AGENT_NAME.tar.gz" \
-    node-plane-workstation-installer.sh node-plane-workstation-installer.ps1 > SHA256SUMS.txt
+    node-plane-workstation-installer.sh node-plane-workstation-installer.ps1 RELEASE_METADATA.txt > SHA256SUMS.txt
 )
-
-cat > "$OUT_DIR/RELEASE_METADATA.txt" <<EOF
-tag=$TAG
-version=${TAG#v}
-commit=$SHORT_COMMIT
-built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-EOF
 
 echo "Prepared Node Plane controller, driver and agent release artifacts in $OUT_DIR"

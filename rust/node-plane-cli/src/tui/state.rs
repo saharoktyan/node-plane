@@ -279,7 +279,7 @@ pub(super) enum Control {
     SelfUpdate,
     Installation(usize),
     UseInstallation,
-    TransferInstallation,
+    TransferInstallation(&'static str),
     EditInstallation,
     NewInstallation,
     EditField(usize),

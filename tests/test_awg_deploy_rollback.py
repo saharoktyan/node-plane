@@ -1,10 +1,12 @@
-import os
 import pathlib
-import shlex
-import subprocess
 import tempfile
 import unittest
 
+from tests.test_container_deploy_ownership import (
+    FakeDocker,
+    prepare_deployment_env,
+    execute_deploy,
+)
 
 ASSETS = pathlib.Path(__file__).resolve().parents[1] / "runtime_assets"
 
@@ -13,64 +15,58 @@ class AwgDeployRollbackTests(unittest.TestCase):
     def test_failed_new_container_restores_old_config_and_container(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
-            config = root / "wg0.conf"
-            image_dir = root / "image"
-            image_dir.mkdir()
-            node_env = root / "node.env"
-            node_env.write_text(
-                f"AWG_DOCKER_DIR={shlex.quote(str(image_dir))}\n"
-                f"AWG_CONFIG={shlex.quote(str(config))}\n"
-                "AWG_CONTAINER_NAME=amnezia-awg\n"
-                "IPV6_OUTBOUND=off\n",
-                encoding="utf-8",
+            fake_docker = FakeDocker(root)
+            dep = prepare_deployment_env(root, "awg", fake_docker)
+
+            # Preserve the original regression's migration from an older config.
+            new_fields = ("HeaderProtectionKey =", "ContentPaddingAddition =",
+                          "RandomTrailers =", "DisableCookies =", "RekeyAfterTime =",
+                          "RekeyTimeout =", "RejectAfterTime =", "KeepaliveTimeout =",
+                          "MaxHandshakeAttempts =")
+            original_config = '\n'.join(line for line in dep["config_file"].read_text().splitlines()
+                                        if not line.startswith(new_fields)) + '\n'
+            dep["config_file"].write_text(original_config)
+
+            old_labels = {
+                "org.node-plane.managed": "1",
+                "org.node-plane.installation": dep["installation_id"],
+                "org.node-plane.node": dep["server_key"],
+                "org.node-plane.service": "awg",
+            }
+            old_id = fake_docker.add_container(
+                dep["container_name"],
+                dep["mount_source"],
+                dep["mount_dest"],
+                rw=True,
+                labels=old_labels,
             )
-            profile = subprocess.check_output(
-                ["python3", str(ASSETS / "awg_profile.py"), "init", str(config)], text=True
-            )
-            old_lines = [line for line in profile.splitlines() if not line.startswith((
-                "HeaderProtectionKey =", "ContentPaddingAddition =", "RandomTrailers =", "DisableCookies =",
-                "RekeyAfterTime =", "RekeyTimeout =", "RejectAfterTime =", "KeepaliveTimeout =", "MaxHandshakeAttempts ="
-            ))]
-            original = "[Interface]\nPrivateKey = oldserver\nAddress = 10.8.1.1/24\nListenPort = 51820\n" + "\n".join(old_lines) + "\n"
-            config.write_text(original, encoding="utf-8")
-            config.chmod(0o600)
-            fake_bin = root / "bin"
-            fake_bin.mkdir()
-            docker_log = root / "docker.log"
-            docker = fake_bin / "docker"
-            docker.write_text(
-                "#!/bin/sh\n"
-                f"echo \"$*\" >> {shlex.quote(str(docker_log))}\n"
-                "case \"$1\" in\n"
-                "  info|build|rename|stop|start|rm) exit 0 ;;\n"
-                "  ps) echo amnezia-awg; exit 0 ;;\n"
-                "  run) case \"$2\" in --rm) exit 0 ;; -d) exit 1 ;; esac ;;\n"
-                "esac\n"
-                "exit 0\n",
-                encoding="utf-8",
-            )
-            docker.chmod(0o755)
-            script = root / "deploy-awg.sh"
-            script.write_text(
-                (ASSETS / "deploy-awg.sh").read_text(encoding="utf-8")
-                .replace("source /etc/node-plane/node.env", f"source {shlex.quote(str(node_env))}")
-                .replace("if [[ ! -c /dev/net/tun ]]; then", "if false; then")
-                # A host unit must not make this fake deployment invoke real runtime files.
-                .replace("if [[ -f /etc/systemd/system/node-plane-leased-awg.service ]]; then", "if false; then")
-                .replace("/opt/node-plane-runtime/awg_profile.py", str(ASSETS / "awg_profile.py"))
-                .replace("/opt/node-plane-runtime/awg_ipv6.py", str(ASSETS / "awg_ipv6.py")),
-                encoding="utf-8",
-            )
-            env = os.environ.copy()
-            env["PATH"] = f"{fake_bin}:{env['PATH']}"
-            result = subprocess.run(["bash", str(script)], env=env, capture_output=True, text=True)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertEqual(config.read_text(encoding="utf-8"), original)
-            self.assertTrue(docker_log.exists(), result.stderr)
-            calls = docker_log.read_text(encoding="utf-8")
-            self.assertIn("rename amnezia-awg amnezia-awg-previous-", calls)
-            self.assertIn("rename amnezia-awg-previous-", calls)
-            self.assertIn("start amnezia-awg", calls)
+
+            # Trigger failure on new container startup
+            fake_docker.set_fail_run_status("exited")
+
+            res = execute_deploy(dep, timeout=15)
+            self.assertNotEqual(res.returncode, 0)
+            self.assertEqual(dep["config_file"].read_text(encoding="utf-8"), original_config)
+            self.assertIn("previous config and container restored", res.stderr)
+
+            # Check that docker calls log exists and logged immutable ID mutations
+            self.assertTrue(fake_docker.log_file.exists(), res.stderr)
+            calls = fake_docker.log_file.read_text(encoding="utf-8")
+            self.assertIn(f"rename {old_id} {dep['container_name']}-previous-", calls)
+            self.assertIn(f"rename {old_id} {dep['container_name']}", calls)
+            self.assertIn(f"start {old_id}", calls)
+
+            # Validate mutation records
+            mutations = fake_docker.get_mutations()
+            self.assertTrue(len(mutations) > 0)
+            for m in mutations:
+                self.assertTrue(m["valid_id"], f"Mutation target was not 64-hex ID: {m}")
+
+            # Verify container restored to original state in fake docker
+            c = fake_docker.get_container(old_id)
+            self.assertIsNotNone(c)
+            self.assertEqual(c["Name"], "/" + dep["container_name"])
+            self.assertEqual(c["State"]["Status"], "running")
 
 
 if __name__ == "__main__":

@@ -335,6 +335,8 @@ class ParentRecoveryTests(TestCase):
     def test_pending_restore_can_be_cancelled_via_http_without_bypassing_other_gate(self):
         from unittest.mock import patch
         import tempfile
+        from fastapi.testclient import TestClient
+        from backend.http_api import create_app
         self.service()
         identity = str(uuid4())
         self.db.connection.execute("INSERT INTO backend_backup_jobs VALUES (?,?,?,'restore',NULL,NULL,'awaiting_executor',NULL,NULL,'now')", (identity,self.admin.id,str(uuid4())))
@@ -342,13 +344,13 @@ class ParentRecoveryTests(TestCase):
         page = self.client.get('/api/v1/system/recovery',headers=headers).json()
         self.assertTrue(page['maintenance_active'])
         self.assertEqual(page['items'][0]['actions'], ['cancel'])
-        with tempfile.TemporaryDirectory() as root, patch.dict('os.environ', {'NODE_PLANE_SHARED_DIR':root}):
+        with tempfile.TemporaryDirectory() as root, patch.dict('os.environ', {'NODE_PLANE_SHARED_DIR':root}), TestClient(create_app(self.db, node_driver=self.driver)) as client:
             from pathlib import Path
             (Path(root)/'data').mkdir()
-            response = self.client.post(f'/api/v1/system/recovery/backup/{identity}/cancel',headers=headers)
+            response = client.post(f'/api/v1/system/recovery/backup/{identity}/cancel',headers=headers)
             self.assertEqual(response.status_code,200,response.text)
             self.assertEqual(response.json()['status'],'cancelled')
-            self.assertEqual(self.client.post(f'/api/v1/system/recovery/backup/{identity}/resume',headers=headers).status_code,409)
+            self.assertEqual(client.post(f'/api/v1/system/recovery/backup/{identity}/resume',headers=headers).status_code,409)
 
     def test_restore_reconnect_checkpoint_is_preserved_and_missing_evidence_has_no_resume(self):
         from backend.recovery import act

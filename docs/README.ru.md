@@ -28,4 +28,3 @@
 - [Releases](development/releases.md)
 
 - [Roadmap](roadmap.md)
-- [Planned Vaultwarden support](design/service-expansion.md)

@@ -11,23 +11,25 @@ uv sync --locked --python 3.12
 uv run --locked python scripts/run_ci_tests.py unit
 ```
 
-Use uv 0.12.23, the same version as CI and the controller installer. `pyproject.toml` declares the common dependencies and the `backend`, `telegram` and `dev` groups; `uv.lock` pins the full dependency graph for Python 3.11/3.12. A normal `uv sync` includes all three groups. Deployment explicitly selects only `backend` and `telegram`, and creates a separate `.venv` for each release.
+Use uv 0.13.6, the same version as CI and the controller installer. `pyproject.toml` declares the common dependencies and the `backend`, `telegram` and `dev` groups; `uv.lock` pins the full dependency graph for Python 3.11/3.12. A normal `uv sync` includes all three groups. Deployment explicitly selects only `backend` and `telegram`, and creates a separate `.venv` for each release.
+
+The [dependency and TLS trust policy](dependency-policy.md) defines reviewed security floors and which external trust stores remain host responsibilities. Run `python scripts/check_tls_dependencies.py` after changing dependency locks or installer/CI tool pins.
 
 To change dependencies, edit `pyproject.toml`, then run:
 
 ```sh
 uv lock --python 3.12
-uv run --locked python scripts/export_python_requirements.py
-uv run --locked python scripts/export_python_requirements.py --check
+uv sync --locked --python 3.12
+uv run --locked python scripts/check_tls_dependencies.py
 ```
 
-Commit the manifest, lockfile and generated exports together. The `requirements*.txt` files are compatibility exports for already published installers; do not edit them by hand. Install/update and CI use `uv sync --locked`, which rejects a stale lockfile instead of selecting new versions during deployment. Source files still run through `PYTHONPATH=app`; this project is not installed as a Python package.
+Commit the manifest and lockfile together. Install/update, health checks and controller archives require both files. Install/update and CI use `uv sync --locked`, which rejects a stale lockfile instead of selecting new versions during deployment. Source files still run through `PYTHONPATH=app`; this project is not installed as a Python package.
 
 Select narrower test modules while developing. PostgreSQL integration requires a disposable DSN and a separate process; see [Database](database.md).
 
 ## Continuous integration
 
-Every pull request and push to `dev`/`main` runs the server/Python and Workstation workflows. Tag releases call the same workflows and require both to succeed before packaging and publication.
+Every pull request and push to `dev`/`beta`/`main` runs the server/Python and Workstation workflows. Tag releases call the same workflows and require both to succeed before packaging and publication.
 
 - Python unit/contract tests run on Python 3.11 and 3.12, with all runtime/development dependencies and uv installed.
 - All `test_*_postgres.py` modules run separately on both Python versions against a disposable PostgreSQL 16 service. They cover migrations, races, recovery, delivery, workers and process interruption. Unit tests' database doubles never share that process.

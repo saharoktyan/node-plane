@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import subprocess
+from pathlib import Path
+from services.release_versions import CHANNEL_BRANCHES
 
 
 def _candidate_shared_root() -> str:
@@ -58,7 +60,10 @@ APP_ROOT = _env_str("NODE_PLANE_APP_DIR", INSTALL_ROOT)
 SHARED_ROOT = _env_str("NODE_PLANE_SHARED_DIR", APP_ROOT)
 SOURCE_ROOT = _env_str("NODE_PLANE_SOURCE_DIR", APP_ROOT)
 INSTALL_MODE = _env_str("NODE_PLANE_INSTALL_MODE", "")
-UPDATE_BRANCH = _env_str("NODE_PLANE_UPDATE_BRANCH", "main").lower()
+_source_channel = (Path(__file__).resolve().parents[1] / 'RELEASE_CHANNEL').read_text().strip()
+UPDATE_BRANCH = (_env_str("NODE_PLANE_UPDATE_BRANCH") or CHANNEL_BRANCHES[_source_channel]).lower()
+if UPDATE_BRANCH not in CHANNEL_BRANCHES.values():
+    raise ValueError('NODE_PLANE_UPDATE_BRANCH must be main, beta or dev')
 
 # BASE_DIR is kept as an app-root alias for compatibility with the current codebase.
 BASE_DIR = APP_ROOT

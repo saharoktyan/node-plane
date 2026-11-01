@@ -1,3 +1,4 @@
+import hashlib
 import io
 import json
 import os
@@ -93,6 +94,7 @@ def get_db():
     def install_fake_release_curl(fake_bin, root=None):
         driver_archive = None
         agent_archive = None
+        sums_file = None
         if root is not None:
             driver_archive = root / "driver.tar.gz"
             agent_archive = root / "agent.tar.gz"
@@ -104,6 +106,14 @@ def get_db():
                         info.mode = 0o755
                         info.size = len(payload)
                         output.addfile(info, io.BytesIO(payload))
+            sums_file = root / "SHA256SUMS.txt"
+            driver_sha = hashlib.sha256(driver_archive.read_bytes()).hexdigest()
+            agent_sha = hashlib.sha256(agent_archive.read_bytes()).hexdigest()
+            sums_file.write_text(
+                f"{driver_sha}  node-plane-driver-linux-amd64.tar.gz\n"
+                f"{agent_sha}  node-plane-agent-linux-amd64.tar.gz\n",
+                encoding="utf-8",
+            )
         curl = fake_bin / "curl"
         curl.write_text(f"""#!/bin/sh
 out=''
@@ -121,6 +131,14 @@ case "$*" in
     fi
     if [ -n "$out" ]; then
       case "$*" in
+        *SHA256SUMS.txt*)
+          if [ -f "{sums_file or ''}" ]; then
+            cp "{sums_file}" "$out"
+          else
+            exit 1
+          fi
+          exit 0
+          ;;
         *driver*)
           if [ -f "{driver_archive or ''}" ]; then
             cp "{driver_archive}" "$out"
@@ -212,7 +230,7 @@ def get_db():
             result = subprocess.run([str(SETUP_SCRIPT), '--dry-run', '--bin-source', 'auto',
                 '--backend-node-key', 'lv1', '--backend-ssh-target', 'root@203.0.113.10',
                 '--backend-agent-host', 'vpn.example.test'], env=environment, text=True,
-                capture_output=True, check=False)
+                capture_output=True, check=False, timeout=15)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn('Dry-run SSH check passed for lv1', result.stdout)
             self.assertIn('lv1=vpn.example.test:50061', result.stdout)
@@ -223,7 +241,7 @@ def get_db():
             self.assertEqual((shared_root / '.env').read_text(encoding='utf-8'), 'BOT_TOKEN=test\n')
             local = subprocess.run([str(SETUP_SCRIPT), '--dry-run', '--bin-source', 'auto',
                 '--backend-node-key', 'lv1', '--backend-local'], env=environment, text=True,
-                capture_output=True, check=False)
+                capture_output=True, check=False, timeout=15)
             self.assertEqual(local.returncode, 0, local.stderr)
             self.assertIn('lv1=127.0.0.1:50061', local.stdout)
 
@@ -251,10 +269,19 @@ def get_db():
                     info.mode = 0o755
                     info.size = len(payload)
                     output.addfile(info, io.BytesIO(payload))
+            sums_file = root / "SHA256SUMS.txt"
+            driver_sha = hashlib.sha256((root / "driver.tar.gz").read_bytes()).hexdigest()
+            agent_sha = hashlib.sha256((root / "agent.tar.gz").read_bytes()).hexdigest()
+            sums_file.write_text(
+                f"{driver_sha}  node-plane-driver-linux-amd64.tar.gz\n"
+                f"{agent_sha}  node-plane-agent-linux-amd64.tar.gz\n",
+                encoding="utf-8",
+            )
             metadata = root / "release.json"
             metadata.write_text(json.dumps({"assets": [
-                {"name": f"node-plane-{name}-linux-amd64.tar.gz", "state": "uploaded", "url": f"https://api.github.com/repos/example/node-plane/releases/assets/{asset_id}"}
-                for name, asset_id in (("driver", 101), ("agent", 102))
+                {"name": "SHA256SUMS.txt", "state": "uploaded", "url": "https://api.github.com/repos/example/node-plane/releases/assets/100"},
+                {"name": "node-plane-driver-linux-amd64.tar.gz", "state": "uploaded", "url": "https://api.github.com/repos/example/node-plane/releases/assets/101"},
+                {"name": "node-plane-agent-linux-amd64.tar.gz", "state": "uploaded", "url": "https://api.github.com/repos/example/node-plane/releases/assets/102"},
             ]}), encoding="utf-8")
             for command in ("ssh", "scp", "sudo"):
                 path = fake_bin / command
@@ -275,6 +302,7 @@ done
 case "$url" in
   */releases/download/*) exit 22;;
   */releases/tags/*) cp "$METADATA" "$out";;
+  */releases/assets/100) cp "$SUMS_FILE" "$out";;
   */releases/assets/101) cp "$DRIVER_ARCHIVE" "$out";;
   */releases/assets/102) cp "$AGENT_ARCHIVE" "$out";;
   *) exit 1;;
@@ -289,12 +317,14 @@ esac
                 PATH=f"{fake_bin}:{environment['PATH']}",
                 CURL_LOG=str(curl_log),
                 METADATA=str(metadata),
+                SUMS_FILE=str(sums_file),
                 DRIVER_ARCHIVE=str(root / "driver.tar.gz"),
                 AGENT_ARCHIVE=str(root / "agent.tar.gz"),
             )
             result = subprocess.run(
                 [str(SETUP_SCRIPT), "--skip-driver", "--skip-agents", "--bin-source", "release"],
                 env=environment, text=True, capture_output=True, check=False,
+                timeout=15,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("trying GitHub API", result.stdout)
@@ -332,6 +362,7 @@ esac
                 text=True,
                 capture_output=True,
                 check=False,
+                timeout=15,
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("RELEASE_BINARY_UNAVAILABLE", result.stderr)
@@ -371,6 +402,7 @@ esac
                 text=True,
                 capture_output=True,
                 check=False,
+                timeout=15,
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("RELEASE_BINARY_UNAVAILABLE", result.stderr)
@@ -400,6 +432,7 @@ esac
                 text=True,
                 capture_output=True,
                 check=False,
+                timeout=15,
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("Build mode is disabled", result.stderr)
@@ -436,6 +469,7 @@ esac
                 text=True,
                 capture_output=True,
                 check=False,
+                timeout=15,
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("fake HTTP 404", result.stderr)
@@ -481,6 +515,7 @@ esac
                 text=True,
                 capture_output=True,
                 check=False,
+                timeout=15,
             )
 
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -514,7 +549,7 @@ esac
             )
             result = subprocess.run(
                 [str(SETUP_SCRIPT), "--dry-run", "--bin-source", "auto", "--node-key", "home"],
-                env=environment, text=True, capture_output=True, check=False,
+                env=environment, text=True, capture_output=True, check=False, timeout=15,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("Dry-run local agent check passed for home", result.stdout)
@@ -549,7 +584,7 @@ esac
             )
             result = subprocess.run(
                 [str(SETUP_SCRIPT), "--dry-run", "--bin-source", "auto", "--node-key", "lv1"],
-                env=environment, text=True, capture_output=True, check=False,
+                env=environment, text=True, capture_output=True, check=False, timeout=15,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn(

@@ -177,12 +177,8 @@ check_repo_basics() {
   local check_root="$REPO_ROOT"
   [[ ! -d "$APP_DIR" ]] || check_root="$APP_DIR"
   check_file_exists "${check_root}/app/telegram_client/main.py" "Telegram client entrypoint"
-  if [[ -f "${check_root}/pyproject.toml" || -f "${check_root}/uv.lock" ]]; then
-    check_file_exists "${check_root}/pyproject.toml" "Python project manifest"
-    check_file_exists "${check_root}/uv.lock" "Python dependency lock"
-  else
-    check_file_exists "${check_root}/requirements.txt" "Legacy Python requirements"
-  fi
+  check_file_exists "${check_root}/pyproject.toml" "Python project manifest"
+  check_file_exists "${check_root}/uv.lock" "Python dependency lock"
   check_file_exists "${check_root}/.env.example" "Environment template"
   if [[ -r "$ENV_FILE" ]]; then
     ok "Environment file is readable: $ENV_FILE"

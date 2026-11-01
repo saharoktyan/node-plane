@@ -2,15 +2,21 @@
 $ErrorActionPreference = 'Stop'
 $downloads = New-Object 'System.Collections.Generic.List[string]'
 function Invoke-WebRequest {
-    param($Uri, $Headers, $OutFile, [switch]$UseBasicParsing)
+    param($Uri, $Headers, $OutFile, $TimeoutSec, [switch]$UseBasicParsing)
     if ($OutFile) {
         $downloads.Add($Uri)
         Set-Content -LiteralPath $OutFile -Value '# mock installer'
         return
     }
-    return [pscustomobject]@{ Content = '[{"tag_name":"v0.4.3-rc.1","draft":false,"prerelease":true,"assets":[{"name":"node-plane-cli-installer.ps1"}]},{"tag_name":"v0.4.3-alpha.67","draft":false,"prerelease":true,"assets":[]},{"tag_name":"v0.4.3-alpha.66","draft":false,"prerelease":true,"assets":[{"name":"node-plane-cli-installer.ps1"}]},{"tag_name":"v0.4.3","draft":false,"prerelease":false,"assets":[{"name":"node-plane-cli-installer.ps1"}]}]' }
+    if ($Uri -like '*/RELEASE_METADATA.txt') {
+        $tag = ($Uri -split '/')[-2]
+        $channel = if ($tag -match '-alpha\.') { 'dev' } elseif ($tag -match '-(beta|rc)\.') { 'beta' } else { 'stable' }
+        return [pscustomobject]@{ Content = "format=2`nchannel=$channel`ntag=$tag`nversion=$($tag.Substring(1))`ncommit=$('a' * 40)`n" }
+    }
+    return [pscustomobject]@{ Content = '[{"tag_name":"v0.4.3-rc.1","draft":false,"prerelease":true,"assets":[{"name":"node-plane-cli-installer.ps1"},{"name":"RELEASE_METADATA.txt"}]},{"tag_name":"v0.4.3-alpha.67","draft":false,"prerelease":true,"assets":[]},{"tag_name":"v0.4.3-alpha.66","draft":false,"prerelease":true,"assets":[{"name":"node-plane-cli-installer.ps1"},{"name":"RELEASE_METADATA.txt"}]},{"tag_name":"v0.4.3","draft":false,"prerelease":false,"assets":[{"name":"node-plane-cli-installer.ps1"},{"name":"RELEASE_METADATA.txt"}]}]' }
 }
 function powershell.exe {
+    if ($env:NODE_PLANE_CLI_NO_MODIFY_PATH -ne '1') { throw 'Private binary directory would be exposed on PATH.' }
     New-Item -ItemType Directory -Path $env:NODE_PLANE_CLI_INSTALL_DIR -Force | Out-Null
     Set-Content -LiteralPath (Join-Path $env:NODE_PLANE_CLI_INSTALL_DIR 'node-plane.exe') -Value 'mock executable'
     Set-Content -LiteralPath (Join-Path $env:NODE_PLANE_CLI_INSTALL_DIR 'receipt-path') -Value $env:XDG_CONFIG_HOME
@@ -30,7 +36,10 @@ $oldAppData = $env:APPDATA
 $oldUserProfile = $env:USERPROFILE
 $oldInstallDir = $env:CARGO_DIST_INSTALL_DIR
 $oldForceInstallDir = $env:CARGO_DIST_FORCE_INSTALL_DIR
+$oldModifyPath = $env:NODE_PLANE_CLI_NO_MODIFY_PATH
 try {
+    # Do not change the developer/CI user's registry PATH during this fixture.
+    $env:NODE_PLANE_CLI_NO_MODIFY_PATH = '1'
     $env:APPDATA = Join-Path $testRoot 'Roaming'
     $env:LOCALAPPDATA = Join-Path $testRoot 'Local'
     $env:XDG_CONFIG_HOME = ''
@@ -48,7 +57,7 @@ try {
     & $installer -Channel dev
     $devDir = Join-Path $env:USERPROFILE '.local\share\node-plane-workstation\dev'
     $executable = Join-Path $devDir 'node-plane.exe'
-    if ($downloads[$downloads.Count - 1] -notlike '*/v0.4.3-rc.1/node-plane-cli-installer.ps1') {
+    if ($downloads[$downloads.Count - 1] -notlike '*/v0.4.3-alpha.66/node-plane-cli-installer.ps1') {
         throw "Wrong development release: $($downloads[$downloads.Count - 1])"
     }
     $linkPath = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Node Plane (Dev).lnk'
@@ -58,7 +67,7 @@ try {
         throw 'Shortcut does not launch Workstation through Windows Terminal.'
     }
     $testTerminal = $null
-    & $installer -Channel dev -Tag 'v0.4.3-beta.1'
+    & $installer -Channel beta -Tag 'v0.4.3-beta.1'
     if ($downloads[$downloads.Count - 1] -notlike '*/v0.4.3-beta.1/node-plane-cli-installer.ps1') {
         throw "Wrong explicit prerelease: $($downloads[$downloads.Count - 1])"
     }
@@ -68,6 +77,10 @@ try {
     $mismatchFailed = $false
     try { & $installer -Channel dev -Tag 'v0.4.3' } catch { $mismatchFailed = $true }
     if (-not $mismatchFailed) { throw 'Dev channel accepted a stable tag.' }
+    if (-not (Test-Path -LiteralPath (Join-Path $env:USERPROFILE '.local\share\node-plane-workstation\beta\node-plane-beta.cmd'))) { throw 'Beta launcher missing.' }
+    $mismatchFailed = $false
+    try { & $installer -Channel dev -Tag 'v0.4.3-beta.1' } catch { $mismatchFailed = $true }
+    if (-not $mismatchFailed) { throw 'Dev channel accepted a beta tag.' }
     & $installer -Channel stable
     $stableDir = Join-Path $env:USERPROFILE '.local\share\node-plane-workstation\stable'
     $executable = Join-Path $stableDir 'node-plane.exe'
@@ -75,6 +88,12 @@ try {
     if ((Get-Content -LiteralPath (Join-Path $devDir 'receipt-path')) -eq (Get-Content -LiteralPath (Join-Path $stableDir 'receipt-path'))) { throw 'Channels share their receipt directory.' }
     if (-not (Test-Path -LiteralPath (Join-Path $devDir 'node-plane-dev.cmd'))) { throw 'Dev launcher missing.' }
     if (-not (Test-Path -LiteralPath (Join-Path $stableDir 'node-plane.cmd'))) { throw 'Stable launcher missing.' }
+    foreach ($channel in @('dev', 'beta', 'stable')) {
+        $prefix = Join-Path $env:USERPROFILE ".local\share\node-plane-workstation\$channel"
+        $launchers = @(Get-ChildItem -LiteralPath (Join-Path $prefix 'launchers'))
+        $name = if ($channel -eq 'stable') { 'node-plane.cmd' } else { "node-plane-$channel.cmd" }
+        if ($launchers.Count -ne 1 -or $launchers[0].Name -ne $name) { throw 'Launcher PATH directory mixes channels.' }
+    }
     if ($downloads[$downloads.Count - 1] -notlike '*/v0.4.3/node-plane-cli-installer.ps1') {
         throw "Wrong stable release: $($downloads[$downloads.Count - 1])"
     }
@@ -89,7 +108,7 @@ try {
     & $installer -Channel stable
     # Reinstalling keeps one shortcut per channel.
     $links = @(Get-ChildItem -LiteralPath (Split-Path $linkPath) -Filter '*.lnk')
-    if ($links.Count -ne 2) { throw 'Duplicate shortcuts created.' }
+    if ($links.Count -ne 3) { throw 'Duplicate shortcuts created.' }
 } finally {
     $env:XDG_CONFIG_HOME = $oldConfig
     $env:LOCALAPPDATA = $oldLocalAppData
@@ -98,5 +117,6 @@ try {
     $env:USERPROFILE = $oldUserProfile
     $env:CARGO_DIST_INSTALL_DIR = $oldInstallDir
     $env:CARGO_DIST_FORCE_INSTALL_DIR = $oldForceInstallDir
+    $env:NODE_PLANE_CLI_NO_MODIFY_PATH = $oldModifyPath
     Remove-Item -LiteralPath $testRoot -Recurse -Force -ErrorAction SilentlyContinue
 }

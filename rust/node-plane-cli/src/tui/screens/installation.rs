@@ -13,7 +13,7 @@ pub(in crate::tui) fn draw_form(frame: &mut Frame, app: &App, area: Rect, hits: 
         "Controller hostname / IP",
         "SSH port",
         "SSH user",
-        "Update channel (main / dev)",
+        "Update channel (main / beta / dev)",
         "Release tag (blank = latest)",
         "Telegram administrator ID(s)",
         "BotFather token (hidden)",

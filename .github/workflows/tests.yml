@@ -2,7 +2,7 @@ name: Server and Python checks
 
 on:
   push:
-    branches: [dev, main]
+    branches: [dev, beta, main]
   pull_request:
   workflow_dispatch:
   workflow_call:
@@ -32,10 +32,10 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Install dependencies
         run: |
-          python -m pip install uv==0.12.23
+          python -m pip install uv==0.13.6
           uv sync --locked --python "${{ matrix.python }}"
-      - name: Check committed dependency exports
-        run: uv run --locked python scripts/export_python_requirements.py --check
+      - name: Check TLS dependency policy
+        run: python scripts/check_tls_dependencies.py
       - name: Shell syntax
         run: |
           uv run --locked python - <<'PY'
@@ -77,7 +77,7 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Install dependencies
         run: |
-          python -m pip install uv==0.12.23
+          python -m pip install uv==0.13.6
           uv sync --locked --python "${{ matrix.python }}"
       - name: Full PostgreSQL integration and process-fault suite
         env:
@@ -129,7 +129,7 @@ jobs:
           python-version: '3.12'
       - name: Install dependencies
         run: |
-          python -m pip install uv==0.12.23
+          python -m pip install uv==0.13.6
           uv sync --locked --python 3.12
           sudo apt-get update
           sudo apt-get install -y protobuf-compiler

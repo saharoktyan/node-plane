@@ -280,7 +280,7 @@ class UpdatePreferencesInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
     auto_check_enabled: bool | None = Field(default=None, strict=True)
     auto_check_interval_minutes: Literal[60, 360, 1440] | None = None
-    branch: Literal['main', 'dev'] | None = None
+    branch: Literal['main', 'dev', 'beta'] | None = None
     dev_track: Literal['tag', 'head'] | None = None
 
 
@@ -350,7 +350,7 @@ class UpdateRunInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
     kind: Literal['version', 'stack', 'agents', 'runtimes']
     target_ref: StrictStr | None = None
-    branch: Literal['main', 'dev'] | None = None
+    branch: Literal['main', 'dev', 'beta'] | None = None
 
 
 class BackupPreferencesInput(BaseModel):

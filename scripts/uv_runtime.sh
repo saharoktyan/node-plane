@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Separate release environments, with immutable package files shared through uv.
-NODE_PLANE_UV_VERSION=0.12.23
+NODE_PLANE_UV_VERSION=0.13.6
 
 ensure_controller_host_tools() {
   local item command package ssh_package=openssh-client
@@ -88,36 +88,17 @@ PY
 
 install_release_dependencies() {
   local release_dir="$1" shared_dir="$2"
-  ensure_uv_runtime "$shared_dir" || return 1
-  if [[ -f "${release_dir}/pyproject.toml" || -f "${release_dir}/uv.lock" ]]; then
-    if [[ ! -f "${release_dir}/pyproject.toml" || ! -f "${release_dir}/uv.lock" ]]; then
-      echo "Incomplete locked Python environment: pyproject.toml and uv.lock are both required." >&2
-      return 1
-    fi
-    # Sync exactly the controller runtime, never dev tools or a local package.
-    # An out-of-date lock must fail before the active release is switched.
-    UV_NO_CONFIG=1 UV_PYTHON_DOWNLOADS=never UV_CACHE_DIR="$UV_CACHE_DIR" \
-      UV_PROJECT_ENVIRONMENT="${release_dir}/.venv" \
-      "$UV_BIN" sync --project "$release_dir" --python "$PYTHON_BIN" --locked \
-        --no-default-groups --group backend --group telegram --no-install-project \
-        --link-mode hardlink --compile-bytecode || return 1
-    return 0
-  fi
-  # Published releases before the uv project migration remain installable and
-  # selectable for rollback. New releases always take the locked branch above.
-  if [[ ! -f "${release_dir}/requirements.txt" ]]; then
-    echo "Python dependency manifest is missing." >&2
+  if [[ ! -f "${release_dir}/pyproject.toml" || ! -f "${release_dir}/uv.lock" ]]; then
+    echo "Incomplete locked Python environment: pyproject.toml and uv.lock are both required." >&2
     return 1
   fi
-  if [[ ! -x "${release_dir}/.venv/bin/python" ]]; then
-    UV_NO_CONFIG=1 UV_PYTHON_DOWNLOADS=never "$UV_BIN" venv \
-      --python "$PYTHON_BIN" "${release_dir}/.venv" || return 1
-  fi
+  ensure_uv_runtime "$shared_dir" || return 1
+  # Sync exactly the controller runtime; fail on stale locks before switching.
   UV_NO_CONFIG=1 UV_PYTHON_DOWNLOADS=never UV_CACHE_DIR="$UV_CACHE_DIR" \
-    "$UV_BIN" pip install --python "${release_dir}/.venv/bin/python" \
-      --link-mode hardlink --compile-bytecode -r "${release_dir}/requirements.txt" || return 1
-  UV_NO_CONFIG=1 "$UV_BIN" pip uninstall --python "${release_dir}/.venv/bin/python" \
-    python-telegram-bot || return 1
+    UV_PROJECT_ENVIRONMENT="${release_dir}/.venv" \
+    "$UV_BIN" sync --project "$release_dir" --python "$PYTHON_BIN" --locked \
+      --no-default-groups --group backend --group telegram --no-install-project \
+      --link-mode hardlink --compile-bytecode || return 1
 }
 
 retain_successful_releases() {

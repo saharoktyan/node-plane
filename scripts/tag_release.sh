@@ -125,6 +125,7 @@ if [[ "$VERSION" != "$EXPECTED_VERSION" ]]; then
   echo "VERSION mismatch: VERSION=$VERSION, tag expects $EXPECTED_VERSION" >&2
   exit 1
 fi
+python3 scripts/validate_release.py --tag "$TAG" --commit "$(git rev-parse HEAD)" --check-local-branch
 
 if ! git diff --quiet || ! git diff --cached --quiet; then
   echo "Working tree is not clean. Commit or stash changes before tagging." >&2
@@ -169,7 +170,7 @@ python3 -m compileall -q app/telegram_client
 run_preflight_checks() {
   set_step "python tests"
   need_cmd uv
-  uv run --locked python scripts/export_python_requirements.py --check
+  uv run --locked python scripts/check_tls_dependencies.py
   uv run --locked python scripts/run_ci_tests.py unit
   set_step "cargo test node-driver"
   (cd rust/node-driver && cargo test --locked)
@@ -189,8 +190,6 @@ build_release_artifacts() {
   need_cmd readelf
   local out_dir="$1"
   local tag="$2"
-  local short_sha
-  short_sha="$(git rev-parse --short HEAD)"
 
   local release_dir="${out_dir}/${tag}"
   local tmp_dir
@@ -240,18 +239,13 @@ build_release_artifacts() {
   set_step "package controller runtime"
   python3 scripts/controller_release.py build --root "$ROOT_DIR" \
     --archive "${release_dir}/${controller_name}" --ref "$tag" --commit "$(git rev-parse HEAD)"
+  python3 scripts/validate_release.py --tag "$tag" --commit "$(git rev-parse HEAD)" \
+    --metadata "${release_dir}/RELEASE_METADATA.txt"
 
   (
     cd "$release_dir"
-    sha256sum "${driver_name}.tar.gz" "${agent_name}.tar.gz" "$controller_name" > "$checksums_file"
+    sha256sum "${driver_name}.tar.gz" "${agent_name}.tar.gz" "$controller_name" RELEASE_METADATA.txt > "$checksums_file"
   )
-
-  cat > "${release_dir}/RELEASE_METADATA.txt" <<EOF
-tag=${tag}
-version=${VERSION}
-commit=${short_sha}
-built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-EOF
 
   rm -rf "$tmp_dir"
   echo "Artifacts prepared in: ${release_dir}"
@@ -310,6 +304,8 @@ publish_github_release() {
   rm -rf "$verify_dir"
   python3 scripts/controller_release.py verify --archive "${release_dir}/node-plane-controller.tar.gz" \
     --ref "$tag" --commit "$(git rev-parse "${tag}^{commit}")"
+  python3 scripts/validate_release.py --tag "$tag" --commit "$(git rev-parse "${tag}^{commit}")" \
+    --verify-metadata "${release_dir}/RELEASE_METADATA.txt"
   (cd "$release_dir" && sha256sum -c SHA256SUMS.txt)
 
   if ! gh release view "$tag" >/dev/null 2>&1; then

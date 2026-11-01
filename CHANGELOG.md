@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.5.0-beta.1
+
+- Start the public-beta version line with isolated `dev`, `beta` and `stable`
+  update channels. Beta Workstation uses `node-plane-beta` and separate local state.
+- Require release channel metadata to exclude historical experimental releases
+  from current update catalogs. Driver and Agent remain tied to the selected
+  controller release.
+- Include the pre-beta security fixes and controller/agent updater handoff fixes.
 ## 1.0.0-beta.11 - 2026-10-30
 
 - Update PostgreSQL recovery assertions for Force cancel and coordinate competing executor tests before the serialized claim section. Preserve the production lock and exactly-once dispatch checks; no runtime behavior changes.

@@ -1,6 +1,44 @@
 """Pure release version comparison without runtime or database initialization."""
 import re
 
+CHANNEL_BRANCHES = {"dev": "dev", "beta": "beta", "stable": "main"}
+_RELEASE_TAG_RE = re.compile(r"^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-(alpha|beta|rc)\.(0|[1-9][0-9]*))?$")
+
+
+def release_channel(tag: str) -> str:
+    """Return the release lane; arbitrary refs and legacy/ tags are invalid."""
+    match = _RELEASE_TAG_RE.fullmatch(tag)
+    if not match:
+        raise ValueError("Invalid release tag")
+    stage = match[4]
+    return "dev" if stage == "alpha" else "beta" if stage in {"beta", "rc"} else "stable"
+
+
+def branch_channel(branch: str) -> str:
+    for channel, candidate in CHANNEL_BRANCHES.items():
+        if branch == candidate:
+            return channel
+    raise ValueError("Update branch must be dev, beta or main")
+
+
+def parse_release_metadata(data: bytes, *, tag: str, channel: str, commit: str | None = None) -> dict[str, str]:
+    """Require explicit membership, excluding releases predating channel isolation."""
+    if len(data) > 4096:
+        raise ValueError("Release metadata exceeds size limit")
+    fields = {}
+    for line in data.decode("utf-8").splitlines():
+        key, separator, value = line.partition("=")
+        if not separator or not key or key in fields:
+            raise ValueError("Malformed or duplicate release metadata field")
+        fields[key] = value
+    if (fields.get("format") != "2" or fields.get("tag") != tag
+            or fields.get("version") != tag.removeprefix("v")
+            or fields.get("channel") != channel or release_channel(tag) != channel
+            or not re.fullmatch(r"[0-9a-f]{40}", fields.get("commit", ""))
+            or (commit is not None and fields["commit"] != commit)):
+        raise ValueError("Release metadata does not match channel, tag or commit")
+    return fields
+
 _SEMVER_RE = re.compile(r"^(?P<major>0|[1-9]\d*)\.(?P<minor>0|[1-9]\d*)\.(?P<patch>0|[1-9]\d*)(?:-(?P<pre>[0-9A-Za-z.-]+))?$")
 
 

@@ -84,6 +84,10 @@ if [[ ! -s "$CFG" ]]; then
   echo "AWG config is missing or empty: $CFG" >&2
   exit 1
 fi
+source "$(dirname "${BASH_SOURCE[0]}")/deploy-container-guard.sh"
+container_guard_init awg "$CONTAINER" "$DOCKER_DIR/data" /opt/amnezia/awg
+trap 'rm -rf -- "$NP_GUARD_DIR"' EXIT
+OLD_ID="$(container_guard_existing)"
 BUILD_LOG="$(mktemp)"
 if ! docker_cmd build --no-cache -t "$IMAGE" "$DOCKER_DIR" >"$BUILD_LOG" 2>&1; then
   echo "AWG image build failed." >&2
@@ -94,10 +98,10 @@ fi
 echo "AWG image built: $IMAGE"
 rm -f "$BUILD_LOG"
 
-if ! docker_cmd run --rm --entrypoint /bin/sh "$IMAGE" -n /opt/amnezia/start.sh >/tmp/awg-syntax.out 2>/tmp/awg-syntax.err; then
+if ! docker_cmd run --rm --entrypoint /bin/sh "$IMAGE" -n /opt/amnezia/start.sh >"${NP_GUARD_DIR}/syntax.out" 2>"${NP_GUARD_DIR}/syntax.err"; then
   echo "AWG image syntax check failed." >&2
-  cat /tmp/awg-syntax.out >&2 || true
-  cat /tmp/awg-syntax.err >&2 || true
+  cat "${NP_GUARD_DIR}/syntax.out" >&2 || true
+  cat "${NP_GUARD_DIR}/syntax.err" >&2 || true
   exit 1
 fi
 
@@ -114,15 +118,17 @@ restore_previous() {
   set +e
   cp -p "$CFG_BACKUP" "$CFG"
   if [[ "$NEW_CONTAINER_ATTEMPTED" == 1 ]]; then
-    docker_cmd rm -f "$CONTAINER" >/dev/null 2>&1
+    container_guard_remove_new || return 1
   fi
   restored=0
   if [[ "$OLD_CONTAINER_RENAMED" == 1 ]]; then
-    if docker_cmd rename "$OLD_CONTAINER" "$CONTAINER" >/dev/null 2>&1; then
+    container_guard_validate "$OLD_ID" "$OLD_CONTAINER" >/dev/null || return 1
+    if docker_cmd rename "$OLD_ID" "$CONTAINER" >/dev/null 2>&1; then
       if [[ -f /etc/systemd/system/node-plane-leased-awg.service ]]; then
         python3 /opt/node-plane-runtime/apply-profile-intent.py prepare-leased-runtime awg >/dev/null || return 1
       fi
-      docker_cmd start "$CONTAINER" >/dev/null 2>&1 && restored=1
+      container_guard_validate "$OLD_ID" "$CONTAINER" >/dev/null || return 1
+      docker_cmd start "$OLD_ID" >/dev/null 2>&1 && restored=1
     fi
   fi
   rm -f "$CFG_BACKUP"
@@ -132,17 +138,19 @@ restore_previous() {
     echo "AWG deployment failed; previous config restored, but the container needs attention" >&2
   fi
 }
-trap restore_previous EXIT
+trap 'restore_previous; rm -rf -- "$NP_GUARD_DIR"' EXIT
 
 python3 /opt/node-plane-runtime/awg_profile.py migrate "$CFG" "${AWG_I1_PRESET:-quic}"
 python3 /opt/node-plane-runtime/awg_profile.py validate "$CFG"
 python3 /opt/node-plane-runtime/awg_ipv6.py migrate "$CFG"
 
-if docker_cmd ps -a --format '{{.Names}}' | grep -q "^${CONTAINER}$"; then
+if [[ -n "$OLD_ID" ]]; then
   OLD_CONTAINER="${CONTAINER}-previous-$$"
-  docker_cmd rename "$CONTAINER" "$OLD_CONTAINER" >/dev/null
+  container_guard_validate "$OLD_ID" "$CONTAINER" >/dev/null
+  docker_cmd rename "$OLD_ID" "$OLD_CONTAINER" >/dev/null
   OLD_CONTAINER_RENAMED=1
-  docker_cmd stop "$OLD_CONTAINER" >/dev/null
+  container_guard_validate "$OLD_ID" "$OLD_CONTAINER" >/dev/null
+  docker_cmd stop "$OLD_ID" >/dev/null
 fi
 
 NEW_CONTAINER_ATTEMPTED=1
@@ -151,6 +159,8 @@ if [[ -f /etc/systemd/system/node-plane-leased-awg.service ]]; then
 fi
 docker_cmd run -d \
   --name "$CONTAINER" \
+  --cidfile "$NP_CIDFILE" \
+  "${NP_CONTAINER_LABELS[@]}" \
   --restart no \
   --cap-add NET_ADMIN \
   --device /dev/net/tun:/dev/net/tun \
@@ -167,14 +177,19 @@ docker_cmd run -d \
   "$IMAGE" >/dev/null
 
 sleep 3
-STATE="$(docker_cmd inspect -f '{{.State.Status}}' "$CONTAINER" 2>/dev/null || echo unknown)"
+NEW_ID="$(container_guard_new)"
+if [[ -z "$NEW_ID" ]]; then
+  echo 'New AWG container identity was not recorded; recovery required' >&2
+  exit 1
+fi
+STATE="$(docker_cmd inspect -f '{{.State.Status}}' "$NEW_ID" 2>/dev/null || echo unknown)"
 if [[ "$STATE" != "running" ]]; then
   echo "AWG container failed to start." >&2
   echo "state: $STATE" >&2
-  docker_cmd inspect -f 'exit_code={{.State.ExitCode}} error={{.State.Error}} oom_killed={{.State.OOMKilled}} started_at={{.State.StartedAt}} finished_at={{.State.FinishedAt}}' "$CONTAINER" >&2 || true
+  docker_cmd inspect -f 'exit_code={{.State.ExitCode}} error={{.State.Error}} oom_killed={{.State.OOMKilled}} started_at={{.State.StartedAt}} finished_at={{.State.FinishedAt}}' "$NEW_ID" >&2 || true
   echo "host_arch: $(uname -m 2>/dev/null || echo unknown)" >&2
   docker_cmd image inspect "$IMAGE" -f 'image_os={{.Os}} image_arch={{.Architecture}}' >&2 || true
-  docker_cmd logs "$CONTAINER" >&2 || true
+  docker_cmd logs "$NEW_ID" >&2 || true
   echo "manual_run_output:" >&2
   docker_cmd run --rm \
     --entrypoint /bin/sh \
@@ -204,12 +219,15 @@ fi
 if [[ -f /etc/systemd/system/node-plane-leased-awg.service ]]; then
   python3 /opt/node-plane-runtime/apply-profile-intent.py leased-deploy awg >/dev/null
 else
-  docker_cmd update --restart unless-stopped "$CONTAINER" >/dev/null
+  container_guard_validate "$NEW_ID" "$CONTAINER" "$NP_DEPLOYMENT" >/dev/null
+  docker_cmd update --restart unless-stopped "$NEW_ID" >/dev/null
 fi
 ROLLBACK_NEEDED=0
 trap - EXIT
+rm -rf -- "$NP_GUARD_DIR"
 rm -f "$CFG_BACKUP"
 if [[ -n "$OLD_CONTAINER" ]]; then
-  docker_cmd rm -f "$OLD_CONTAINER" >/dev/null
+  container_guard_validate "$OLD_ID" "$OLD_CONTAINER" >/dev/null
+  docker_cmd rm -f "$OLD_ID" >/dev/null
 fi
 echo "AWG container deployed: $CONTAINER"

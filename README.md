@@ -4,7 +4,7 @@
 
 **Node Plane is an open-source control plane for self-hosted VPN infrastructure.** It helps people who run their own Linux VPS install and manage VLESS/Xray REALITY and AmneziaWG on one or several servers. Administrators use a local terminal application (Workstation) and a Telegram bot; VPN configurations are delivered to users through Telegram.
 
-**Early public beta:** I'm looking for users who can install Node Plane on a disposable VPS and try it in real-world conditions. Published prereleases currently use the `dev` channel as a temporary distribution channel; a separate public `beta` channel is [planned](docs/roadmap.md#public-beta-preparation). The commands below use the current development channel.
+**Early public beta:** I am looking for users who can install Node Plane on a test VPS and try it in real conditions. Public `0.x` versions use the separate `beta` channel; experimental alpha builds stay in `dev`. The stable 1.0 feature cut will follow beta feedback.
 
 ## Why Node Plane
 
@@ -12,27 +12,19 @@ Start with a Linux VPS and SSH access. Workstation installs the controller from 
 
 - **One setup workflow:** connect, install Node Plane, then follow Quick Start to deploy the selected VPN protocols.
 - **Administration from your computer and phone:** manage servers, user access, updates, backups and diagnostics through Workstation or Telegram.
-- **No public web admin panel required:** Workstation connects through SSH; node agents use mTLS. This reduces the interfaces you need to expose, but does not guarantee security or prevent IP blocking.
-- **Designed for personal and small-group VPNs:** create profiles, grant server/protocol access, issue configurations and manage expiry or revocation.
+- **No public web admin port required:** Workstation connects through SSH; node agents use mTLS. This reduces the interfaces you need to expose, but does not guarantee security or prevent IP blocking.
+- **Access that fits small groups:** create profiles, approve access requests, grant server/protocol access, issue temporary configurations and manage expiry or revocation.
+- **Telegram delivery:** users can receive configuration files, links and QR codes through a localized bot.
 
 Node Plane is aimed at people who want to run their own VPN with less manual server administration, especially when they need to manage more than one server or share access with other people. Its current tradeoffs are fewer protocol-management features than established panels, no browser administrator interface, and configuration delivery to users primarily through Telegram.
 
 ## Beta testing
 
-I've tested the core installation and administration workflows myself. With this public beta, I want to learn how Node Plane behaves on different VPS providers, operating systems, networks and client devices, and which improvements would be most valuable to you.
+I've tested the core installation and administration workflows myself. For the public beta, the minimum request is simple: install Node Plane on a test VPS and report what worked or failed. I want to learn how it behaves across VPS providers, operating systems, networks and client devices, and which improvements should come next.
 
-Useful beta scenarios include:
+If you want to go further, try the Workstation and Telegram workflows, local and remote nodes, protocol changes, access approval, expiry, freezing, revocation, updates, backups and recovery. For every report, include the OS, VPS provider, protocol, VPN client and exact reproduction steps when something fails or feels confusing. Please also say which missing features matter most to you and what would make you keep using Node Plane or stop. Redact tokens, private keys, VPN configurations and other credentials. The [GitHub Issues](https://github.com/saharoktyan/node-plane/issues) page is the preferred feedback channel.
 
-- installing on a fresh Debian or Ubuntu VPS;
-- using Workstation on Linux, macOS or Windows;
-- deploying VLESS/REALITY and AmneziaWG on local and remote nodes;
-- importing configurations on your usual VPN clients and networks;
-- inviting another user, granting access and retrieving a configuration through Telegram;
-- changing protocol and access settings, testing expiry, freezing and revocation;
-- updating the Workstation and controller installation, then checking that users and settings remain available;
-- testing backups, diagnostics and recovery after service or node restarts.
-
-Please report what was confusing or failed, which OS, VPS provider, protocol and VPN client you used, and the exact reproduction steps. Please also share which planned improvements matter most to you, what would make you keep using Node Plane, and what might make you stop. Redact tokens, private keys, VPN configurations and other credentials. The [GitHub Issues](https://github.com/saharoktyan/node-plane/issues) page is the preferred feedback channel; feature ideas and usability feedback are welcome too.
+As an informal usability check, two people with no Linux experience started with two empty VPSs and, in about 20 minutes, completed the full installation path and ended up with two VPN servers on each VPS, with VLESS TCP, VLESS XHTTP and AmneziaWG configured. This is one anecdotal observation, not a benchmark or a guarantee for every environment.
 
 ## Quick start
 
@@ -45,16 +37,18 @@ Run this **on your own computer**.
 **Linux / macOS**
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/saharoktyan/node-plane/dev/scripts/install_workstation.sh | bash -s -- --channel dev
+curl -fsSL https://raw.githubusercontent.com/saharoktyan/node-plane/beta/scripts/install_workstation.sh | bash -s -- --channel beta
 ```
+
+This command downloads a shell bootstrap from GitHub and executes it immediately. The script is short and open for inspection; if you want to review it first, download it and run the local copy instead. The bootstrap discovers a release and downloads the Workstation installer from GitHub Releases over HTTPS. Check the release and installer behavior against the published project files before running it; the command itself is not a substitute for reviewing the source.
 
 **Windows — PowerShell**
 
 ```powershell
-& ([scriptblock]::Create((irm 'https://raw.githubusercontent.com/saharoktyan/node-plane/dev/scripts/install_workstation.ps1'))) -Channel dev
+& ([scriptblock]::Create((irm 'https://raw.githubusercontent.com/saharoktyan/node-plane/beta/scripts/install_workstation.ps1'))) -Channel beta
 ```
 
-Open a new terminal and run `node-plane-dev`. On Windows you can also open **Node Plane (Dev)** from Start. Allow a terminal of at least 70 columns × 30 rows. [Build from source](docs/workstation.md#build-from-source).
+Open a new terminal and run `node-plane-beta`. On Windows you can also open **Node Plane (Beta)** from Start. Allow a terminal of at least 70 columns × 30 rows. [Build from source](docs/workstation.md#build-from-source).
 
 ### Get connected
 
@@ -74,6 +68,8 @@ Your installation Telegram ID receives administrator access automatically. To sh
 - Traffic statistics, host observations, notifications and alerts.
 - Installation updates, configuration backups/restore and operation diagnostics/recovery.
 
+VLESS configurations are delivered as URIs or QR codes, and AmneziaWG configurations as `.conf` files. Use a VPN client that supports the relevant format; a VLESS URI configures the proxy connection, while full-device routing requires a client with TUN/VPN mode. I have tested VLESS with v2rayA on Linux, v2rayN on Windows, NekoBox on Android (TCP transport only) and v2box on iOS. I have also tested AmneziaWG with AmneziaVPN on Linux, Windows, Android and iOS. These are maintainer test results, not a compatibility guarantee for every version or device.
+
 Traffic statistics are available; traffic quotas and connection-count enforcement are not implemented yet. Revoking VLESS access blocks new connections, while established sessions may remain until disconnect.
 
 ## Compared with 3x-ui and Remnawave
@@ -82,9 +78,12 @@ This compares documented standard workflows, not every third-party integration o
 
 | Area | Node Plane today | 3x-ui | Remnawave |
 | --- | --- | --- | --- |
-| Initial installation | Workstation deploys over SSH from your computer | Server installer/Docker; unattended and cloud-init options | Panel, reverse proxy and Node setup |
+| Initial installation | Workstation deploys over SSH from your computer; no manual VPS-console commands required | Server installer/Docker; unattended and cloud-init options | Panel, reverse proxy and Node setup |
+| Public web administration port | Not required for the standard workflow | Web administration is part of the documented workflow; it can be restricted, for example with localhost binding and SSH tunneling | Browser-based Panel/Node administration |
 | Administration | Workstation TUI and Telegram bot | Web panel and Telegram bot | Web panel; Telegram notifications and ecosystem bots |
-| Multiple servers | Controller with node agents | Master manages other panel instances over API | Panel with Remnawave Nodes |
+| Multiple servers | One controller manages local and remote node agents | Master manages other panel instances over API | Panel with Remnawave Nodes |
+| Profiles and access approval | Profiles, grants, access requests, approval, expiry, freezing, revocation and temporary configurations | User and client management through the panel and documented integrations | User management, traffic/access controls and ecosystem integrations |
+| Configuration delivery | Telegram files, links and QR codes; localized bot flows | Panel and documented bot/integration workflows | Panel and ecosystem integrations |
 | Protocol scope | VLESS REALITY TCP/XHTTP and AmneziaWG | Broader protocol selection, including AmneziaWG | Xray-based proxy management |
 | Configuration subscriptions | Planned | Available | Available |
 | User/client traffic quotas | Planned | Available | Available |
@@ -92,20 +91,16 @@ This compares documented standard workflows, not every third-party integration o
 
 Sources: [3x-ui features](https://docs.sanaei.dev/docs/), [installation](https://docs.sanaei.dev/docs/guide/installation/), [multi-node](https://docs.sanaei.dev/docs/operations/multi-node/); Remnawave [setup](https://docs.rw/overview/quick-start/), [users and limits](https://docs.rw/learn-en/users/), [Telegram integrations](https://docs.rw/awesome-remnawave/).
 
-Choose Node Plane for its workstation-led setup and integrated administration workflow. If you need subscriptions, traffic quotas or a browser panel today, the alternatives already provide those capabilities. A web panel can also be kept private: for example, 3x-ui documents [localhost binding and SSH tunneling](https://docs.sanaei.dev/docs/guide/update-uninstall/).
+Node Plane's strengths are the workstation-led installation, no required public admin port, approval-based access model, temporary configurations and Telegram delivery. The alternatives offer broader protocol or subscription/quota capabilities today and browser-based administration. Choose based on which workflow fits your environment; a web panel can also be kept private, as 3x-ui documents with [localhost binding and SSH tunneling](https://docs.sanaei.dev/docs/guide/update-uninstall/).
 
 ## Planned VPN improvements — not implemented
 
-These are development priorities for the beta period, not a guarantee that every item ships before stable 1.0. See the [roadmap](docs/roadmap.md#2-existing-xray-and-amneziawg-capabilities).
+These are development priorities for the beta period, not a guarantee that every item ships before stable 1.0. See the [roadmap](docs/roadmap.md#near-term-development-priorities).
 
-- **Xray/AWG subscriptions:** renewable configuration delivery, with actual import/refresh tested in declared clients.
-- **Monthly traffic quotas per account/VPN profile:** accounting scope, reset periods and enforcement still need implementation.
-- **Concurrent connection limits per account/profile:** define and test protocol-specific session/activity semantics; this is separate from configured device counts or IP counts.
-- **Speed limits per profile on each node:** separate upload/download ceilings shared by all of that profile's devices and flows on the node; protocol-specific enforcement still needs validation and implementation.
-- **Basic server chains:** configure entry, optional intermediate servers and exit through Workstation/Telegram.
-- **Active VLESS-session revocation:** evaluate termination without affecting other users or shared listeners.
-
-Per-IP byte quotas, global cross-node speed budgets and bandwidth-sharing policies remain separate design decisions. Chain self-healing is deferred pending demand. Grafana/Loki, Vaultwarden, a client SDK, custom roles and service modules are longer-term topics, not current features.
+- Renewable subscriptions for easier configuration refresh.
+- Traffic quotas and connection limits.
+- Per-profile speed limits.
+- Basic server chains and stronger active-session revocation.
 
 ## Requirements and documentation
 

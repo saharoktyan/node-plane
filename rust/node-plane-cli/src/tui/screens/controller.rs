@@ -1288,13 +1288,13 @@ pub(in crate::tui) fn draw_controller(
             if value["branch"] == "main" {
                 "stable"
             } else {
-                "dev"
+                value["branch"].as_str().unwrap_or("—")
             },
             value["current_version"].as_str().unwrap_or("—"),
             if value["branch"] == "main" {
                 "stable"
             } else {
-                "dev"
+                value["branch"].as_str().unwrap_or("—")
             },
             value["remote_version"].as_str().unwrap_or("—"),
             value["last_checked_at"].as_str().unwrap_or("—"),

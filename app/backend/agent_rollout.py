@@ -248,7 +248,11 @@ class AgentRolloutService:
                 with self.db.transaction() as conn:
                     conn.execute('''INSERT INTO backend_agent_rollout_archives VALUES (?, ?)
                         ON CONFLICT(task_id, path) DO NOTHING''', (row['id'], parts[2]))
-        if re.search(r'(?m)^(?:RELEASE_BINARY_UNAVAILABLE: )?(?:Driver|Agent) release asset [^\r\n]+ is missing or inaccessible\.', output):
+        if (re.search(r'(?m)^(?:RELEASE_BINARY_UNAVAILABLE: )?(?:Driver|Agent) release asset [^\r\n]+ is missing or inaccessible\.', output)
+                or re.search(r'(?m)^RELEASE_BINARY_UNAVAILABLE: (?:'
+                             r'(?:Driver|Agent) release artifact verification failed for [^\r\n]+\.|'
+                             r'Failed to parse (?:driver|agent) checksum for [^\r\n]+ from SHA256SUMS\.txt|'
+                             r'Release checksum asset SHA256SUMS\.txt for [^\r\n]+ is missing or inaccessible\.)', output)):
             self._failure_code = 'release_binary_unavailable'
         elif 'RUST_INSTALL_REQUIRED:' in output:
             self._failure_code = 'rust_required'

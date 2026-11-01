@@ -44,20 +44,43 @@ on:
   push:
     tags:
       - '**[0-9]+.[0-9]+.[0-9]+*'
+      - '!legacy/**'
 
 jobs:
+  validate-release:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Validate release channel, versions and source branch
+        if: github.event_name == 'push'
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_COMMIT: ${{ github.sha }}
+        run: python3 scripts/validate_release.py --tag "$RELEASE_TAG" --commit "$RELEASE_COMMIT" --check-branch
+
   server-tests:
+    needs: validate-release
     uses: ./.github/workflows/tests.yml
     permissions:
       contents: read
 
   workstation-tests:
+    needs: validate-release
     uses: ./.github/workflows/workstation.yml
     permissions:
       contents: read
 
   # Run 'dist plan' (or host) to determine what tasks we need to do
   plan:
+    needs: validate-release
     runs-on: "ubuntu-22.04"
     outputs:
       val: ${{ steps.plan.outputs.manifest }}

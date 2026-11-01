@@ -1342,7 +1342,7 @@ mod tests {
                                     )
                                     .unwrap()
                                 } else {
-                                    serde_json::json!({"branch":"dev","update_available":false,"update_supported":true})
+                                    serde_json::json!({"branch":crate::config::default_branch(),"update_available":false,"update_supported":true})
                                 },
                             )
                         } else if path == "/api/v1/system/updates/rollout" {
@@ -1638,7 +1638,7 @@ mod tests {
                 user: "test".into(),
                 state_dir: state.into(),
                 tag: String::new(),
-                branch: "dev".into(),
+                branch: crate::config::default_branch().into(),
                 admin_ids: String::new(),
                 bot_token: Zeroizing::new(String::new()),
                 workflow: crate::config::WorkflowOptions::default(),
@@ -1816,13 +1816,18 @@ mod tests {
         async fn selecting_new_target_first_observes_old_update_without_replaying_it() {
             use crate::events::{Answer, Event, Prompt};
             use crate::operation_store::{Intent, UpdateRecord};
+            let version_tag = |number| match crate::config::default_branch() {
+                "dev" => format!("v0.5.0-alpha.{number}"),
+                "beta" => format!("v0.5.0-beta.{number}"),
+                _ => format!("v0.5.{number}"),
+            };
             for status in ["rolled_back", "running", "blocked"] {
                 let server = MockServer::start().await;
                 let state = tempfile::tempdir().unwrap();
                 prepare_nodes_fixture(&server, state.path());
                 let mut request = nodes_request(&server, state.path());
                 request.action = crate::config::Action::Update;
-                request.tag = "v1.0.0-alpha.11".into();
+                request.tag = version_tag(2);
                 let local_id = uuid::Uuid::new_v4();
                 let job_id = uuid::Uuid::new_v4();
                 request.workflow.operation = Some(local_id);
@@ -1835,15 +1840,15 @@ mod tests {
                     account_id: "00000000-0000-4000-8000-000000000001".into(),
                     intent: Intent {
                         kind: "stack".into(),
-                        target_ref: "v1.0.0-alpha.10".into(),
-                        branch: "dev".into(),
+                        target_ref: version_tag(1),
+                        branch: crate::config::default_branch().into(),
                     },
                     dispatch_started: true,
                     job_id: Some(job_id),
                     complete: false,
                 };
                 record.save(state.path()).unwrap();
-                fs::write(server.home.join("stack-job"), serde_json::json!({"id":job_id,"kind":"stack","status":status,"branch":"dev","items":[],"result":{"phase":"core","error_code":"core_update_failed","rollback_status":"succeeded"}}).to_string()).unwrap();
+                fs::write(server.home.join("stack-job"), serde_json::json!({"id":job_id,"kind":"stack","status":status,"branch":crate::config::default_branch(),"items":[],"result":{"phase":"core","error_code":"core_update_failed","rollback_status":"succeeded"}}).to_string()).unwrap();
                 let mut worker = crate::nodes::Worker::new().unwrap();
                 let (tx, rx) = std::sync::mpsc::channel();
                 worker.workflow(request, tx).unwrap();
@@ -1949,10 +1954,15 @@ mod tests {
             assert!(result.is_ok(), "{result:?}");
             let requests_path = server.home.join("api-requests");
             fs::write(&requests_path, "").unwrap();
-            // Update preference already matches NPW, but the running release is stable.
+            // The saved preference matches NPW, but the running release is in another channel.
+            let (other_version, other_branch) = if crate::config::default_branch() == "main" {
+                ("0.5.0-alpha.3", "dev")
+            } else {
+                ("1.0.0", "main")
+            };
             fs::write(
                 server.home.join("controller-updates"),
-                r#"{"current_version":"1.0.0","branch":"dev"}"#,
+                serde_json::json!({"current_version":other_version,"branch":crate::config::default_branch()}).to_string(),
             )
             .unwrap();
             let (result, _) = nodes_command(
@@ -1961,7 +1971,11 @@ mod tests {
                 crate::nodes::Command::List,
             )
             .await;
-            assert!(result.unwrap_err().contains("Controller channel is main"));
+            assert!(
+                result
+                    .unwrap_err()
+                    .contains(&format!("Controller channel is {other_branch}"))
+            );
             let requests = fs::read_to_string(&requests_path).unwrap();
             assert!(!requests.contains("GET /api/v1/nodes"));
             let (result, _) = nodes_command(
@@ -1973,7 +1987,7 @@ mod tests {
             assert!(result.is_ok(), "{result:?}");
             fs::write(
                 server.home.join("controller-updates"),
-                r#"{"current_version":"1.0.0-alpha.3","branch":"dev"}"#,
+                serde_json::json!({"current_version":env!("CARGO_PKG_VERSION"),"branch":crate::config::default_branch()}).to_string(),
             )
             .unwrap();
             let (result, _) = nodes_command(

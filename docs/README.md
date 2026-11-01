@@ -26,4 +26,3 @@ Start with the [project README](../README.md). The guides below describe everyda
 - [Releases](development/releases.md)
 
 - [Roadmap](roadmap.md)
-- [Planned Vaultwarden support](design/service-expansion.md)

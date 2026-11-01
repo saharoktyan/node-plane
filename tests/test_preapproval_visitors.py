@@ -323,7 +323,7 @@ class PreapprovalVisitorTests(unittest.TestCase):
         self.assertIn(req_id, [item['id'] for item in pending_before])
 
         prov_key = str(uuid4())
-        prov = self.provision('@charlie', key=prov_key)
+        prov = self.provision(207, key=prov_key)
         self.assertEqual(prov.status_code, 201, prov.text)
         prov_data = prov.json()
         self.assertTrue(prov_data['created'])
@@ -340,12 +340,12 @@ class PreapprovalVisitorTests(unittest.TestCase):
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM backend_access_requests WHERE telegram_subject='207'").fetchone()[0], 1)
 
         # Replay returns identical result
-        prov_replay = self.provision('@charlie', key=prov_key)
+        prov_replay = self.provision(207, key=prov_key)
         self.assertEqual(prov_replay.status_code, 201)
         self.assertEqual(prov_replay.json(), prov_data)
 
         # New key returns created False without duplicates
-        prov_repeat = self.provision('@charlie')
+        prov_repeat = self.provision(207)
         self.assertEqual(prov_repeat.status_code, 201)
         self.assertFalse(prov_repeat.json()['created'])
         self.assertEqual(prov_repeat.json()['account']['id'], account_id)

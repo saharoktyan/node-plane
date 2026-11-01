@@ -352,7 +352,7 @@ async fn discover(
         "The requested branch differs from the installed channel. Change the channel in the bot first."
     );
     ensure!(
-        matches!(branch, "main" | "dev"),
+        matches!(branch, "main" | "beta" | "dev"),
         "Unsupported installed update channel."
     );
     let target = if request.tag.is_empty() {

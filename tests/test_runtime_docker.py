@@ -48,8 +48,11 @@ class DockerRuntimeTests(unittest.TestCase):
     def test_xray_image_reference_is_version_and_digest_pinned(self):
         self.assertRegex(XRAY_IMAGE, r'ghcr\.io/xtls/xray-core:26\.10\.29@sha256:[0-9a-f]{64}')
         root = Path(__file__).resolve().parents[1]
-        for path in (root / 'runtime_assets').glob('*.sh'):
-            if 'xray' in path.name:
+        # Check the runtime entry points that select an image.
+        for name in ('deploy-xray.sh', 'init-xray.sh', 'sync-xray.sh',
+                     'node.env.example', 'apply-profile-intent.py'):
+            with self.subTest(path=name):
+                path = root / 'runtime_assets' / name
                 self.assertIn(XRAY_IMAGE, path.read_text())
 
     def setUp(self):

@@ -48,7 +48,7 @@ chmod 600 /root/node-plane.env
 | `POSTGRES_DSN` | Подключение внешней PostgreSQL; пустое значение выбирает локальную |
 | `NODE_PLANE_BASE_DIR` | Корень установки; по умолчанию `/opt/node-plane` |
 | `NODE_PLANE_SHARED_DIR` | Постоянные данные; по умолчанию `/opt/node-plane/shared` |
-| `NODE_PLANE_UPDATE_BRANCH` | Ветка релизов: `dev` или `main` |
+| `NODE_PLANE_UPDATE_BRANCH` | Ветка релизов: `dev`, `beta` или `main`; пустое значение выбирает канал сборки |
 | `SSH_KEY` | Приватный SSH-ключ контроллера для удалённых нод |
 
 Полный шаблон: [`.env.example`](../.env.example). Созданные установщиком значения хранятся в общем окружении. Изменение настроек подключения не переносит существующую БД или каталог установки.

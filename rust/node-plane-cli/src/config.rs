@@ -6,46 +6,70 @@ use std::{
 use zeroize::Zeroizing;
 
 pub fn default_branch() -> &'static str {
-    if env!("CARGO_PKG_VERSION").contains('-') {
-        "dev"
-    } else {
-        "main"
+    version_branch(env!("CARGO_PKG_VERSION"))
+        .expect("Build version must identify a release channel")
+}
+
+pub fn version_branch(value: &str) -> Result<&'static str> {
+    let version = semver::Version::parse(value)?;
+    if version.pre.is_empty() && version.build.is_empty() {
+        return Ok("main");
+    }
+    let (stage, number) = version.pre.as_str().split_once('.').unwrap_or_default();
+    ensure!(
+        !number.is_empty()
+            && number.bytes().all(|b| b.is_ascii_digit())
+            && version.build.is_empty(),
+        "Unsupported release version"
+    );
+    match stage {
+        "alpha" => Ok("dev"),
+        "beta" | "rc" => Ok("beta"),
+        _ => anyhow::bail!("Unsupported release stage"),
     }
 }
 
 pub fn workstation_channel() -> &'static str {
-    if default_branch() == "dev" {
-        "dev"
-    } else {
-        "stable"
+    match default_branch() {
+        "main" => "stable",
+        branch => branch,
+    }
+}
+
+pub fn workstation_launcher() -> &'static str {
+    match workstation_channel() {
+        "dev" => "node-plane-dev",
+        "beta" => "node-plane-beta",
+        _ => "node-plane",
     }
 }
 
 pub fn default_state_dir(channel: &str) -> Result<PathBuf> {
     ensure!(
-        matches!(channel, "dev" | "stable"),
-        "Workstation channel must be dev or stable."
+        matches!(channel, "dev" | "beta" | "stable"),
+        "Workstation channel must be dev, beta or stable."
     );
     let root = dirs::data_local_dir().ok_or_else(|| {
         anyhow::anyhow!("Cannot locate your private application data directory. Use --state-dir.")
     })?;
     // Stable and development workstations keep separate private catalogs.
-    Ok(root.join(if channel == "dev" {
-        "node-plane-dev"
-    } else {
-        "node-plane"
+    Ok(root.join(match channel {
+        "dev" => "node-plane-dev",
+        "beta" => "node-plane-beta",
+        _ => "node-plane",
     }))
 }
 
 pub fn validate_install_channel(version: &str, branch: &str, tag: &str) -> Result<()> {
-    let expected = if version.contains('-') { "dev" } else { "main" };
+    let expected = version_branch(version)?;
     ensure!(
         branch == expected,
         "This Workstation build manages the {expected} controller channel. Transfer the profile to the matching Workstation to change channels."
     );
     if !tag.is_empty() {
         ensure!(
-            tag.contains('-') == version.contains('-'),
+            tag.starts_with('v')
+                && version_branch(tag.strip_prefix('v').unwrap_or(""))? == expected,
             "The release tag must match this Workstation's channel."
         );
     }
@@ -64,7 +88,16 @@ mod channel_tests {
         assert!(validate_install_channel("1.0.0-alpha.1", "main", "v1.0.0").is_err());
         for stage in ["alpha", "beta", "rc"] {
             let version = format!("1.0.0-{stage}.2");
-            assert!(validate_install_channel(&version, "dev", &format!("v{version}")).is_ok());
+            let branch = if stage == "alpha" { "dev" } else { "beta" };
+            assert!(validate_install_channel(&version, branch, &format!("v{version}")).is_ok());
+            assert!(
+                validate_install_channel(
+                    &version,
+                    if branch == "dev" { "beta" } else { "dev" },
+                    &format!("v{version}")
+                )
+                .is_err()
+            );
             assert!(validate_install_channel("1.0.0", "main", &format!("v{version}")).is_err());
         }
     }
@@ -153,9 +186,9 @@ impl Request {
             "Enter a valid SSH username."
         );
         ensure!(
-            matches!(self.branch.as_str(), "main" | "dev")
+            matches!(self.branch.as_str(), "main" | "beta" | "dev")
                 || (self.action != Action::Install && self.branch.is_empty()),
-            "Release branch must be main or dev."
+            "Release branch must be main, beta or dev."
         );
         if !self.tag.is_empty() {
             ensure!(

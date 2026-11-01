@@ -64,6 +64,8 @@ DRIVER_ASSET_NAME="${NODE_PLANE_DRIVER_ASSET_NAME:-node-plane-driver-linux-amd64
 AGENT_ASSET_NAME="${NODE_PLANE_AGENT_ASSET_NAME:-node-plane-agent-linux-amd64.tar.gz}"
 DRIVER_BIN_URL="${NODE_PLANE_DRIVER_BIN_URL:-}"
 AGENT_BIN_URL="${NODE_PLANE_AGENT_BIN_URL:-}"
+DRIVER_SHA256="${NODE_PLANE_DRIVER_SHA256:-}"
+AGENT_SHA256="${NODE_PLANE_AGENT_SHA256:-}"
 CURRENT_STEP="startup"
 DRIVER_BIN_CHANGED=0
 DRIVER_UNIT_CHANGED=0
@@ -313,35 +315,46 @@ sha256_of_file() {
 download_to_file() {
   local url="$1"
   local out="$2"
+  local max_bytes="${3:-}"
+  if [[ "$url" != https://* ]]; then
+    echo "Insecure download URL (HTTPS required)" >&2
+    return 1
+  fi
   if has_cmd curl; then
-    if curl -fsSL "$url" -o "$out"; then
+    local -a curl_opts=("-fsSL" "--proto" "=https" "--proto-redir" "=https" "--connect-timeout" "15" "--max-time" "120")
+    if [[ -n "$max_bytes" ]]; then
+      curl_opts+=("--max-filesize" "$max_bytes")
+    fi
+    if curl "${curl_opts[@]}" "$url" -o "$out"; then
+      if [[ -n "$max_bytes" && -f "$out" ]]; then
+        local file_size
+        file_size="$(wc -c < "$out")"
+        if (( file_size > max_bytes )); then
+          echo "Downloaded file exceeds maximum size limit ($max_bytes bytes)" >&2
+          rm -f "$out"
+          return 1
+        fi
+      fi
       return 0
     fi
     rm -f "$out"
     return 1
   fi
-  if has_cmd wget; then
-    if wget -qO "$out" "$url"; then
-      return 0
-    fi
-    rm -f "$out"
-    return 1
-  fi
-  echo "Neither curl nor wget is available for downloading binaries." >&2
+  echo "curl is required for HTTPS-only release downloads." >&2
   return 1
 }
 
 check_url_access() {
   local url="$1"
+  if [[ "$url" != https://* ]]; then
+    echo "Insecure check URL (HTTPS required)" >&2
+    return 1
+  fi
   if has_cmd curl; then
-    curl -fsSLI "$url" >/dev/null
+    curl -fsSLI --proto '=https' --proto-redir '=https' --connect-timeout 15 --max-time 30 "$url" >/dev/null
     return $?
   fi
-  if has_cmd wget; then
-    wget -q --spider "$url"
-    return $?
-  fi
-  echo "Neither curl nor wget is available for URL checks." >&2
+  echo "curl is required for HTTPS-only release checks." >&2
   return 1
 }
 
@@ -349,7 +362,7 @@ release_asset_api_url() {
   local asset_name="$1"
   local metadata="${WORK_DIR}/release.metadata.json"
   if [[ ! -s "$metadata" ]]; then
-    download_to_file "https://api.github.com/repos/${GITHUB_REPO}/releases/tags/$(detect_release_ref)" "$metadata" || return 1
+    download_to_file "https://api.github.com/repos/${GITHUB_REPO}/releases/tags/$(detect_release_ref)" "$metadata" "1048576" || return 1
   fi
   "$PYTHON_BIN" - "$metadata" "$asset_name" <<'PY'
 import json
@@ -367,17 +380,34 @@ PY
 }
 
 download_release_asset() {
-  local asset_name="$1" direct_url="$2" out="$3" custom_url="$4" api_url
-  if download_to_file "$direct_url" "$out"; then
+  local asset_name="$1" direct_url="$2" out="$3" custom_url="$4" max_bytes="${5:-}" api_url
+  if download_to_file "$direct_url" "$out" "$max_bytes"; then
     return 0
   fi
   [[ -z "$custom_url" ]] || return 1
   api_url="$(release_asset_api_url "$asset_name")" || return 1
   echo "Direct download unavailable; trying GitHub API for ${asset_name}."
+  if [[ "$api_url" != https://* ]]; then
+    echo "Insecure API asset URL (HTTPS required)" >&2
+    rm -f "$out"
+    return 1
+  fi
   if has_cmd curl; then
-    curl -fsSL -H 'Accept: application/octet-stream' "$api_url" -o "$out" && return 0
-  elif has_cmd wget; then
-    wget -qO "$out" --header='Accept: application/octet-stream' "$api_url" && return 0
+    local -a curl_opts=("-fsSL" "--proto" "=https" "--proto-redir" "=https" "--connect-timeout" "15" "--max-time" "120" "-H" "Accept: application/octet-stream")
+    if [[ -n "$max_bytes" ]]; then
+      curl_opts+=("--max-filesize" "$max_bytes")
+    fi
+    if curl "${curl_opts[@]}" "$api_url" -o "$out"; then
+      if [[ -n "$max_bytes" && -f "$out" ]]; then
+        local file_size
+        file_size="$(wc -c < "$out")"
+        if (( file_size > max_bytes )); then
+          rm -f "$out"
+          return 1
+        fi
+      fi
+      return 0
+    fi
   fi
   rm -f "$out"
   return 1
@@ -537,6 +567,8 @@ Key env overrides:
   NODE_PLANE_AGENT_ASSET_NAME       agent asset filename
   NODE_PLANE_DRIVER_BIN_URL         explicit driver binary URL
   NODE_PLANE_AGENT_BIN_URL          explicit agent binary URL
+  NODE_PLANE_DRIVER_SHA256          explicit driver binary archive SHA-256 digest
+  NODE_PLANE_AGENT_SHA256           explicit agent binary archive SHA-256 digest
 EOF
       exit 0
       ;;
@@ -602,6 +634,51 @@ fi
 need_cmd python3
 need_cmd sudo
 
+validate_security_configuration() {
+  if [[ -z "$DRIVER_SHA256" && -n "${NODE_PLANE_DRIVER_SHA256:-}" ]]; then
+    DRIVER_SHA256="$NODE_PLANE_DRIVER_SHA256"
+  fi
+  if [[ -z "$AGENT_SHA256" && -n "${NODE_PLANE_AGENT_SHA256:-}" ]]; then
+    AGENT_SHA256="$NODE_PLANE_AGENT_SHA256"
+  fi
+  if [[ -n "$DRIVER_BIN_URL" ]]; then
+    if [[ "$DRIVER_BIN_URL" != https://* ]]; then
+      echo "Insecure driver binary URL (HTTPS required)" >&2
+      exit 1
+    fi
+    if [[ -z "$DRIVER_SHA256" ]]; then
+      echo "Explicit custom driver URL requires matching explicit NODE_PLANE_DRIVER_SHA256 override." >&2
+      exit 1
+    fi
+    if [[ ! "$DRIVER_SHA256" =~ ^[0-9a-fA-F]{64}$ ]]; then
+      echo "Invalid NODE_PLANE_DRIVER_SHA256: must be 64 hexadecimal characters." >&2
+      exit 1
+    fi
+  fi
+  if [[ -n "$AGENT_BIN_URL" ]]; then
+    if [[ "$AGENT_BIN_URL" != https://* ]]; then
+      echo "Insecure agent binary URL (HTTPS required)" >&2
+      exit 1
+    fi
+    if [[ -z "$AGENT_SHA256" ]]; then
+      echo "Explicit custom agent URL requires matching explicit NODE_PLANE_AGENT_SHA256 override." >&2
+      exit 1
+    fi
+    if [[ ! "$AGENT_SHA256" =~ ^[0-9a-fA-F]{64}$ ]]; then
+      echo "Invalid NODE_PLANE_AGENT_SHA256: must be 64 hexadecimal characters." >&2
+      exit 1
+    fi
+  fi
+  if [[ -n "$DRIVER_SHA256" && ! "$DRIVER_SHA256" =~ ^[0-9a-fA-F]{64}$ ]]; then
+    echo "Invalid NODE_PLANE_DRIVER_SHA256: must be 64 hexadecimal characters." >&2
+    exit 1
+  fi
+  if [[ -n "$AGENT_SHA256" && ! "$AGENT_SHA256" =~ ^[0-9a-fA-F]{64}$ ]]; then
+    echo "Invalid NODE_PLANE_AGENT_SHA256: must be 64 hexadecimal characters." >&2
+    exit 1
+  fi
+}
+
 if [[ -f "$ENV_FILE" ]]; then
   set -a
   # shellcheck disable=SC1090
@@ -612,6 +689,7 @@ if [[ -f "$ENV_FILE" ]]; then
   fi
   ensure_bin_source_mode
 fi
+validate_security_configuration
 
 # Use the same controller identity as config.SSH_KEY and the backend key endpoint.
 # Older installations can have no SSH_KEY entry, or an empty one. Persist only
@@ -651,44 +729,88 @@ agent_bin_path=""
 download_release_binaries() {
   local driver_url="${DRIVER_BIN_URL:-$(asset_url "$DRIVER_ASSET_NAME")}"
   local agent_url="${AGENT_BIN_URL:-$(asset_url "$AGENT_ASSET_NAME")}"
-  local driver_out="${WORK_DIR}/node-plane-driver"
-  local agent_out="${WORK_DIR}/node-plane-agent"
-  local driver_archive="${WORK_DIR}/driver.asset"
-  local agent_archive="${WORK_DIR}/agent.asset"
+  local driver_archive="${WORK_DIR}/driver.asset.tar.gz"
+  local agent_archive="${WORK_DIR}/agent.asset.tar.gz"
+  local max_archive_size=268435456 # 256 MiB
+  local max_sums_size=1048576     # 1 MiB
 
   set_step "download driver binary"
-  if ! download_release_asset "$DRIVER_ASSET_NAME" "$driver_url" "$driver_archive" "$DRIVER_BIN_URL"; then
+  if ! download_release_asset "$DRIVER_ASSET_NAME" "$driver_url" "$driver_archive" "$DRIVER_BIN_URL" "$max_archive_size"; then
     echo "RELEASE_BINARY_UNAVAILABLE: Driver release asset ${DRIVER_ASSET_NAME} for $(detect_release_ref) is missing or inaccessible. Publish both release assets or configure authenticated binary URLs." >&2
     return 1
   fi
-  if tar -tzf "$driver_archive" >/dev/null 2>&1; then
-    tar -xzf "$driver_archive" -C "$WORK_DIR" || return 1
-    if [[ -x "${WORK_DIR}/node-plane-driver-linux-amd64" ]]; then
-      mv "${WORK_DIR}/node-plane-driver-linux-amd64" "$driver_out"
-    elif [[ ! -x "$driver_out" ]]; then
-      return 1
-    fi
-  else
-    mv "$driver_archive" "$driver_out"
-  fi
-  chmod +x "$driver_out" || return 1
 
   set_step "download agent binary"
-  if ! download_release_asset "$AGENT_ASSET_NAME" "$agent_url" "$agent_archive" "$AGENT_BIN_URL"; then
+  if ! download_release_asset "$AGENT_ASSET_NAME" "$agent_url" "$agent_archive" "$AGENT_BIN_URL" "$max_archive_size"; then
     echo "RELEASE_BINARY_UNAVAILABLE: Agent release asset ${AGENT_ASSET_NAME} for $(detect_release_ref) is missing or inaccessible. Publish both release assets or configure authenticated binary URLs." >&2
     return 1
   fi
-  if tar -tzf "$agent_archive" >/dev/null 2>&1; then
-    tar -xzf "$agent_archive" -C "$WORK_DIR" || return 1
-    if [[ -x "${WORK_DIR}/node-plane-agent-linux-amd64" ]]; then
-      mv "${WORK_DIR}/node-plane-agent-linux-amd64" "$agent_out"
-    elif [[ ! -x "$agent_out" ]]; then
+
+  local driver_checksum="$DRIVER_SHA256"
+  local agent_checksum="$AGENT_SHA256"
+  local sums_file="${WORK_DIR}/SHA256SUMS.txt"
+
+  if [[ -z "$driver_checksum" || -z "$agent_checksum" ]]; then
+    set_step "download release checksums"
+    local sums_url="$(asset_url "SHA256SUMS.txt")"
+    if ! download_release_asset "SHA256SUMS.txt" "$sums_url" "$sums_file" "" "$max_sums_size"; then
+      echo "RELEASE_BINARY_UNAVAILABLE: Release checksum asset SHA256SUMS.txt for $(detect_release_ref) is missing or inaccessible. Publish release checksums or configure authenticated binary URLs." >&2
       return 1
     fi
-  else
-    mv "$agent_archive" "$agent_out"
   fi
-  chmod +x "$agent_out" || return 1
+
+  if [[ -z "$driver_checksum" ]]; then
+    driver_checksum="$("$PYTHON_BIN" "${SCRIPT_DIR}/verify_server_artifacts.py" parse-checksum --sums-file "$sums_file" --asset-name "$DRIVER_ASSET_NAME")" || {
+      echo "RELEASE_BINARY_UNAVAILABLE: Failed to parse driver checksum for ${DRIVER_ASSET_NAME} from SHA256SUMS.txt" >&2
+      return 1
+    }
+  fi
+
+  if [[ -z "$agent_checksum" ]]; then
+    agent_checksum="$("$PYTHON_BIN" "${SCRIPT_DIR}/verify_server_artifacts.py" parse-checksum --sums-file "$sums_file" --asset-name "$AGENT_ASSET_NAME")" || {
+      echo "RELEASE_BINARY_UNAVAILABLE: Failed to parse agent checksum for ${AGENT_ASSET_NAME} from SHA256SUMS.txt" >&2
+      return 1
+    }
+  fi
+
+  local driver_stage="${WORK_DIR}/stage-driver"
+  local agent_stage="${WORK_DIR}/stage-agent"
+  mkdir -m 0700 -p "$driver_stage" "$agent_stage"
+
+  local driver_out="${driver_stage}/node-plane-driver"
+  local agent_out="${agent_stage}/node-plane-agent"
+
+  set_step "verify both server archives before extraction"
+  if ! "$PYTHON_BIN" "${SCRIPT_DIR}/verify_server_artifacts.py" verify-archive \
+      --component driver --archive "$driver_archive" --expected-sha256 "$driver_checksum"; then
+    echo "RELEASE_BINARY_UNAVAILABLE: Driver release artifact verification failed for ${DRIVER_ASSET_NAME}." >&2
+    return 1
+  fi
+  if ! "$PYTHON_BIN" "${SCRIPT_DIR}/verify_server_artifacts.py" verify-archive \
+      --component agent --archive "$agent_archive" --expected-sha256 "$agent_checksum"; then
+    echo "RELEASE_BINARY_UNAVAILABLE: Agent release artifact verification failed for ${AGENT_ASSET_NAME}." >&2
+    return 1
+  fi
+
+  set_step "verify and unpack driver binary"
+  if ! "$PYTHON_BIN" "${SCRIPT_DIR}/verify_server_artifacts.py" verify-and-extract \
+      --component driver \
+      --archive "$driver_archive" \
+      --expected-sha256 "$driver_checksum" \
+      --output "$driver_out"; then
+    echo "RELEASE_BINARY_UNAVAILABLE: Driver release artifact verification failed for ${DRIVER_ASSET_NAME}." >&2
+    return 1
+  fi
+
+  set_step "verify and unpack agent binary"
+  if ! "$PYTHON_BIN" "${SCRIPT_DIR}/verify_server_artifacts.py" verify-and-extract \
+      --component agent \
+      --archive "$agent_archive" \
+      --expected-sha256 "$agent_checksum" \
+      --output "$agent_out"; then
+    echo "RELEASE_BINARY_UNAVAILABLE: Agent release artifact verification failed for ${AGENT_ASSET_NAME}." >&2
+    return 1
+  fi
 
   driver_bin_path="$driver_out"
   agent_bin_path="$agent_out"
@@ -725,6 +847,13 @@ resolve_binaries_dry_run() {
       if ! check_release_asset_access "$AGENT_ASSET_NAME" "$agent_url" "$AGENT_BIN_URL"; then
         echo "RELEASE_BINARY_UNAVAILABLE: Agent release asset ${AGENT_ASSET_NAME} for $(detect_release_ref) is missing or inaccessible." >&2
         return 1
+      fi
+      if [[ -z "$DRIVER_BIN_URL" || -z "$AGENT_BIN_URL" ]]; then
+        local sums_url="$(asset_url "SHA256SUMS.txt")"
+        if ! check_release_asset_access "SHA256SUMS.txt" "$sums_url" ""; then
+          echo "RELEASE_BINARY_UNAVAILABLE: Release checksum asset SHA256SUMS.txt for $(detect_release_ref) is missing or inaccessible." >&2
+          return 1
+        fi
       fi
       echo "Dry-run: release binary URLs are reachable."
       ;;

@@ -36,19 +36,30 @@ class ControllerReleaseTests(unittest.TestCase):
         shutil.copytree(ROOT / 'runtime_assets', self.source / 'runtime_assets', dirs_exist_ok=True)
         for name in ('rust/node-agent/main.rs', 'docs/plan.md', 'tests/example.py',
                      'scripts/tag_release.sh', '.env', 'app/__pycache__/cached.pyc',
-                     'app/backend/README.md'):
+                     'app/backend/README.md', 'requirements.txt', 'requirements-backend.txt',
+                     'requirements-telegram.txt', 'requirements-dev.txt'):
             path = self.source / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text('EXCLUDED')
-        subprocess.run(['git', 'init', '-q', str(self.source)], check=True)
-        subprocess.run(['git', '-C', str(self.source), 'add', '-f', '.'], check=True)
+        subprocess.run(['git', 'init', '-q', str(self.source)], check=True, timeout=30)
+        subprocess.run(['git', '-C', str(self.source), 'add', '-f', '.'], check=True, timeout=30)
         self.archive = self.root / release.ASSET
         release.build(self.source, self.archive, self.tag, self.commit)
+
+    def catalog_fetch(self, entries):
+        def fetch(url, limit=release.LIMIT):
+            if url.endswith('/RELEASE_METADATA.txt'):
+                tag = url.split('/')[-2]
+                return (f'format=2\nchannel={release.release_channel(tag)}\ntag={tag}\n'
+                        f'version={tag[1:]}\ncommit={self.commit}\n').encode()
+            return json.dumps(entries).encode()
+        return fetch
 
     def test_package_has_only_runtime_files_and_full_build_identity(self):
         manifest, contents = release.verify(self.archive, self.tag, self.commit)
         self.assertTrue(release.REQUIRED.issubset(contents))
         self.assertTrue(release.LEGAL_FILES.issubset(contents))
+        self.assertTrue(release.PYTHON_PROJECT_FILES.issubset(contents))
         self.assertEqual(contents['LICENSE'], (ROOT / 'LICENSE').read_bytes())
         self.assertEqual(contents['THIRD_PARTY_LICENSES'], (self.source / 'THIRD_PARTY_LICENSES').read_bytes())
         self.assertEqual(manifest['commit'], self.commit)
@@ -58,6 +69,7 @@ class ControllerReleaseTests(unittest.TestCase):
         for name in contents:
             self.assertNotIn('__pycache__', name)
             self.assertFalse(name.startswith(('rust/', 'tests/', 'docs/')))
+            self.assertFalse(name.startswith('requirements') and name.endswith('.txt'))
         destination = self.root / 'release'
         release.extract(self.archive, destination, self.tag, self.commit)
         self.assertTrue((destination / 'app/telegram_client/main.py').is_file())
@@ -65,31 +77,40 @@ class ControllerReleaseTests(unittest.TestCase):
         self.assertTrue((destination / 'THIRD_PARTY_LICENSES').is_file())
         self.assertEqual((destination / 'scripts/update.sh').stat().st_mode & 0o777, 0o755)
         result = subprocess.run(['python3', '-m', 'compileall', '-q', str(destination / 'app')],
-                                capture_output=True, text=True)
+                                capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-    def test_dependency_layout_keeps_legacy_archives_readable_and_checks_new_pair(self):
-        manifest, contents = release.verify(self.archive)
-        self.assertEqual(manifest['python_dependencies'], 'uv')
-        self.assertTrue(release.PYTHON_PROJECT_FILES.issubset(contents))
-        for name in release.PYTHON_PROJECT_FILES:
-            contents.pop(name)
-            manifest['files'].pop(name)
-        def archive(name):
-            target = self.root / name
-            contents[release.MANIFEST] = json.dumps(manifest).encode()
-            with tarfile.open(target, 'w:gz') as output:
-                for key, value in contents.items():
-                    info = tarfile.TarInfo(key)
-                    info.size = len(value)
-                    output.addfile(info, io.BytesIO(value))
-            return target
-        with self.assertRaisesRegex(ValueError, 'incomplete'):
-            release.verify(archive('incomplete-project.tar.gz'))
-        manifest.pop('python_dependencies')
-        legacy, files = release.verify(archive('legacy.tar.gz'))
-        self.assertNotIn('python_dependencies', legacy)
-        self.assertTrue({'requirements.txt','requirements-backend.txt','requirements-telegram.txt'}.issubset(files))
+    def test_dependency_layout_requires_project_and_lock_without_manifest_hint(self):
+        base_manifest, base_contents = release.verify(self.archive)
+        self.assertEqual(base_manifest.get('python_dependencies'), 'uv')
+        self.assertTrue(release.PYTHON_PROJECT_FILES.issubset(base_contents))
+        missing_cases = [
+            ('missing-pyproject', {'pyproject.toml'}),
+            ('missing-lock', {'uv.lock'}),
+            ('both-missing', {'pyproject.toml', 'uv.lock'}),
+        ]
+        for case_name, to_remove in missing_cases:
+            for drop_python_deps in (False, True):
+                with self.subTest(case=case_name, drop_python_deps=drop_python_deps):
+                    contents = dict(base_contents)
+                    manifest = json.loads(json.dumps(base_manifest))
+                    if drop_python_deps:
+                        manifest.pop('python_dependencies', None)
+                    for name in to_remove:
+                        contents.pop(name, None)
+                        manifest['files'].pop(name, None)
+                    for fname, fbytes in contents.items():
+                        if fname != release.MANIFEST:
+                            self.assertEqual(manifest['files'][fname], hashlib.sha256(fbytes).hexdigest())
+                    contents[release.MANIFEST] = json.dumps(manifest).encode()
+                    target = self.root / f'{case_name}-{"no-deps" if drop_python_deps else "with-deps"}.tar.gz'
+                    with tarfile.open(target, 'w:gz') as output:
+                        for key, value in sorted(contents.items()):
+                            info = tarfile.TarInfo(key)
+                            info.size = len(value)
+                            output.addfile(info, io.BytesIO(value))
+                    with self.assertRaisesRegex(ValueError, 'incomplete'):
+                        release.verify(target)
 
     def test_packaged_installer_can_source_its_libraries(self):
         destination = self.root / 'installer'
@@ -100,7 +121,7 @@ class ControllerReleaseTests(unittest.TestCase):
         startup = script.split('FROM_SOURCE=0', 1)[0]
         probe = destination / 'scripts/startup-probe.sh'
         probe.write_text(startup + '\nvalid_telegram_bot_token 123456:abcdefghijklmnopqrst\nvalid_telegram_admin_ids 123456\n')
-        result = subprocess.run(['bash', str(probe)], capture_output=True, text=True)
+        result = subprocess.run(['bash', str(probe)], capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_reusing_package_does_not_copy_venv_secrets_or_untracked_files(self):
@@ -128,7 +149,7 @@ class ControllerReleaseTests(unittest.TestCase):
             self.assertEqual((self.root / 'runtime-copy' / name).read_bytes(),
                              (ROOT / name).read_bytes())
         (self.source / 'runtime_assets/awg_ports.py').unlink()
-        subprocess.run(['git', '-C', str(self.source), 'add', '-u'], check=True)
+        subprocess.run(['git', '-C', str(self.source), 'add', '-u'], check=True, timeout=30)
         with self.assertRaisesRegex(ValueError, 'Missing runtime asset: awg_ports.py'):
             release.build(self.source, self.root / 'incomplete.tar.gz', self.tag, self.commit)
 
@@ -233,7 +254,7 @@ on_error() { printf failed > "$RECEIPT"; }
 trap 'on_error $?' ERR
 ''' + function + '\nmain() { fetch_code; }\nmain\n'
         result = subprocess.run(['bash', '-c', script], env={**os.environ, 'RECEIPT': str(receipt)},
-                                capture_output=True, text=True)
+                                capture_output=True, text=True, timeout=30)
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(receipt.read_text(), 'failed')
 
@@ -249,7 +270,9 @@ trap 'on_error $?' ERR
         manifest['files'].pop('scripts/lib/install_credentials.sh')
         contents.pop('THIRD_PARTY_LICENSES')
         manifest['files'].pop('THIRD_PARTY_LICENSES')
-        manifest.update(ref='v0.4.3-alpha.51', version='0.4.3-alpha.51')
+        manifest.update(ref='v0.4.3-alpha.51', version='0.4.3-alpha.51', channel='dev')
+        contents['RELEASE_CHANNEL'] = b'dev\n'
+        manifest['files']['RELEASE_CHANNEL'] = hashlib.sha256(contents['RELEASE_CHANNEL']).hexdigest()
         contents['VERSION'] = b'0.4.3-alpha.51\n'
         manifest['files']['VERSION'] = hashlib.sha256(contents['VERSION']).hexdigest()
         contents[release.MANIFEST] = json.dumps(manifest).encode()
@@ -309,13 +332,13 @@ trap 'on_error $?' ERR
         self.assertFalse((self.root / 'wrong-commit').exists())
 
     def test_release_catalog_ignores_missing_assets_and_peels_annotated_tags(self):
-        branch = 'dev' if '-' in self.tag else 'main'
-        entries = [{'tag_name': self.tag, 'assets': [{'name': release.ASSET}, {'name': 'SHA256SUMS.txt'}]},
+        branch = release.CHANNEL_BRANCHES[release.release_channel(self.tag)]
+        entries = [{'tag_name': self.tag, 'assets': [{'name': release.ASSET}, {'name': 'SHA256SUMS.txt'}, {'name': 'RELEASE_METADATA.txt'}]},
                    {'tag_name': 'v0.0.1-alpha.1', 'assets': []},
-                   {'tag_name': 'v9.9.9', 'assets': [{'name': release.ASSET}, {'name': 'SHA256SUMS.txt'}]}]
+                   {'tag_name': 'v9.9.9', 'assets': [{'name': release.ASSET}, {'name': 'SHA256SUMS.txt'}, {'name': 'RELEASE_METADATA.txt'}]}]
         refs = f"{'b' * 40}\trefs/tags/{self.tag}\n{self.commit}\trefs/tags/{self.tag}^{{}}\n"
         with patch.object(release.subprocess, 'check_output', return_value=refs.encode()), \
-             patch.object(release, 'fetch', return_value=json.dumps(entries).encode()):
+             patch.object(release, 'fetch', side_effect=self.catalog_fetch(entries)):
             items = release.catalog(branch)
         self.assertEqual(items, [{'ref': self.tag, 'version': self.tag[1:], 'commit': self.commit}])
         installed = self.root / 'installed'
@@ -338,26 +361,26 @@ trap 'on_error $?' ERR
             destination = self.root / script_name
             env = {**os.environ, 'CONTROLLER_STAGE_DIR': str(installed), 'DESTINATION': str(destination)}
             result = subprocess.run(['bash', '-c', 'set -euo pipefail\n' + function + '\nexport_release_tree "$DESTINATION" fake-ref'],
-                                    env=env, capture_output=True, text=True)
+                                    env=env, capture_output=True, text=True, timeout=30)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual((destination / 'BUILD_COMMIT').read_text().strip(), self.commit)
             self.assertEqual(active.resolve(), installed)
 
     def test_build_refuses_missing_or_empty_legal_file(self):
-        subprocess.run(['git', '-C', str(self.source), 'rm', '-f', '-q', 'THIRD_PARTY_LICENSES'], check=True, capture_output=True)
+        subprocess.run(['git', '-C', str(self.source), 'rm', '-f', '-q', 'THIRD_PARTY_LICENSES'], check=True, capture_output=True, timeout=30)
         with self.assertRaisesRegex(ValueError, 'Missing controller runtime files.*THIRD_PARTY_LICENSES'):
             release.build(self.source, self.root / 'missing.tar.gz', self.tag, self.commit)
         (self.source / 'THIRD_PARTY_LICENSES').write_text('')
-        subprocess.run(['git', '-C', str(self.source), 'add', 'THIRD_PARTY_LICENSES'], check=True, capture_output=True)
+        subprocess.run(['git', '-C', str(self.source), 'add', 'THIRD_PARTY_LICENSES'], check=True, capture_output=True, timeout=30)
         with self.assertRaisesRegex(ValueError, 'Legal file must not be empty: THIRD_PARTY_LICENSES'):
             release.build(self.source, self.root / 'empty.tar.gz', self.tag, self.commit)
         (self.source / 'THIRD_PARTY_LICENSES').write_text('fixture\n')
         (self.source / 'LICENSE').write_text('')
-        subprocess.run(['git', '-C', str(self.source), 'add', 'LICENSE', 'THIRD_PARTY_LICENSES'], check=True, capture_output=True)
+        subprocess.run(['git', '-C', str(self.source), 'add', 'LICENSE', 'THIRD_PARTY_LICENSES'], check=True, capture_output=True, timeout=30)
         with self.assertRaisesRegex(ValueError, 'Legal file must not be empty: LICENSE'):
             release.build(self.source, self.root / 'empty-license.tar.gz', self.tag, self.commit)
         shutil.copyfile(ROOT / 'LICENSE', self.source / 'LICENSE')
-        subprocess.run(['git', '-C', str(self.source), 'add', 'LICENSE'], check=True, capture_output=True)
+        subprocess.run(['git', '-C', str(self.source), 'add', 'LICENSE'], check=True, capture_output=True, timeout=30)
 
     def test_legacy_archives_without_third_party_licenses_remain_verifiable_without_illegal_weaken(self):
         manifest, contents = release.verify(self.archive)
@@ -402,11 +425,29 @@ trap 'on_error $?' ERR
     def test_catalog_orders_all_prerelease_stages_numerically_and_separates_stable(self):
         tags = ['v1.0.0-beta.2', 'v1.0.0-alpha.90', 'v1.0.0-rc.2',
                 'v1.0.0-beta.12', 'v1.0.0-rc.10', 'v1.0.0']
-        entries = [{'tag_name': tag, 'assets': [{'name': release.ASSET}, {'name': 'SHA256SUMS.txt'}]}
+        entries = [{'tag_name': tag, 'assets': [{'name': release.ASSET}, {'name': 'SHA256SUMS.txt'}, {'name': 'RELEASE_METADATA.txt'}]}
                    for tag in tags]
         refs = ''.join(f"{self.commit}\trefs/tags/{tag}\n" for tag in tags)
         with patch.object(release.subprocess, 'check_output', return_value=refs.encode()), \
-             patch.object(release, 'fetch', return_value=json.dumps(entries).encode()):
+             patch.object(release, 'fetch', side_effect=self.catalog_fetch(entries)):
             self.assertEqual([item['ref'] for item in release.catalog('dev')],
-                ['v1.0.0-rc.10', 'v1.0.0-rc.2', 'v1.0.0-beta.12', 'v1.0.0-beta.2', 'v1.0.0-alpha.90'])
+                ['v1.0.0-alpha.90'])
+            self.assertEqual([item['ref'] for item in release.catalog('beta')],
+                ['v1.0.0-rc.10', 'v1.0.0-rc.2', 'v1.0.0-beta.12', 'v1.0.0-beta.2'])
             self.assertEqual([item['ref'] for item in release.catalog('main')], ['v1.0.0'])
+
+    def test_legacy_beta_is_excluded_even_when_its_version_is_higher(self):
+        tags = ['v1.0.0-beta.11', 'v0.5.0-beta.1', 'v0.5.0-alpha.30']
+        entries = [{'tag_name': tag, 'assets': [{'name': release.ASSET},
+                    {'name': 'SHA256SUMS.txt'}, {'name': 'RELEASE_METADATA.txt'}]} for tag in tags]
+        refs = ''.join(f'{self.commit}\trefs/tags/{tag}\n' for tag in tags)
+        modern_fetch = self.catalog_fetch(entries)
+        def fetch(url, limit=release.LIMIT):
+            if '/v1.0.0-beta.11/' in url:
+                return b'tag=v1.0.0-beta.11\nversion=1.0.0-beta.11\ncommit=ce88545\n'
+            return modern_fetch(url, limit)
+        with patch.object(release.subprocess, 'check_output', return_value=refs.encode()), \
+             patch.object(release, 'fetch', side_effect=fetch):
+            self.assertEqual([item['ref'] for item in release.catalog('beta')], ['v0.5.0-beta.1'])
+            with self.assertRaisesRegex(ValueError, 'No published controller archive'):
+                release.download('beta', 'v1.0.0-beta.11', self.root / 'legacy')

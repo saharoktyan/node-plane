@@ -80,7 +80,7 @@ Open **Node Plane Settings → Reset & removal**, choose whether to uninstall no
 
 ## Appearance and local files
 
-Workstation stores its connection preferences, SSH material, logs and themes in the OS local data directory under `node-plane-dev` for dev and `node-plane` for stable, or the directory supplied by `--state-dir`. Keep this directory private.
+Workstation stores its connection preferences, SSH material, logs and themes in the OS local data directory under `node-plane-dev` for dev, `node-plane-beta` for beta and `node-plane` for stable, or the directory supplied by `--state-dir`. Keep this directory private.
 
 Operation records are stored in `operations/`, and operation logs in `logs/`. Older journals in the data directory are migrated automatically; conflicting copies are retained for inspection.
 
@@ -97,13 +97,15 @@ The optional `section_border` field sets decorative section borders separately f
 
 ## Channels
 
-Node Plane (Dev) installs and manages dev controllers; Node Plane manages main controllers. The form channel is fixed by the build. Management checks the installed controller version: changing the update preference alone does not unlock access. Installation detection and diagnostics without recovery remain available.
+Node Plane (Dev) manages dev controllers, Node Plane (Beta) manages beta controllers, and Node Plane manages main controllers. The form channel is fixed by the build. Management checks the installed controller version: changing the update preference alone does not unlock access. Installation detection and diagnostics without recovery remain available.
 
-Installers use separate `$HOME/.local/share/node-plane-workstation/dev` and `stable` directories, updater receipts and launch commands. Dev uses the local data directory `node-plane-dev`; stable uses `node-plane`. Each NPW only updates within its own channel.
+Installers use separate `$HOME/.local/share/node-plane-workstation/{dev,beta,stable}` directories, updater receipts and launch commands. Local data directories are `node-plane-dev`, `node-plane-beta` and `node-plane`. Each NPW only updates within its own channel.
+
+On Linux/macOS, PATH exposes the named commands in `$HOME/.local/bin`; on Windows it exposes each channel's `launchers` directory. Private binary directories stay off PATH so beta/dev cannot replace the stable command. Set `NODE_PLANE_CLI_NO_MODIFY_PATH=1` to retain your existing shell/PATH configuration; the launchers are still created.
 
 To transition:
 
-1. In the source NPW open **Settings → Profiles**, select the profile and choose **Copy to Node Plane** or **Copy to Node Plane (Dev)**.
+1. In the source NPW open **Settings → Profiles**, select the profile and choose **Copy to Stable**, **Copy to Beta** or **Copy to Dev**.
 2. Open or restart the target NPW. Connection metadata and the selected account are copied; the original profile stays. SSH keys, host fingerprints and operation journals are not copied: verify the server fingerprint and provide SSH access again if needed.
 3. In **Node Plane Updates**, confirm switching the controller to this NPW's channel, select a release and update the installation. Until the runtime is updated, only the transition is available; ordinary management is blocked.
 
@@ -123,7 +125,7 @@ node-plane-dev
 node-plane-dev
 ```
 
-Omit the tag option to select the latest published development release (`alpha.N`, `beta.N` or `rc.N`). A Git tag by itself contains source; a prebuilt installation also requires the release's installer and platform archive. The bootstrap does not compile missing binaries automatically.
+Omit the tag option to select the latest published development release (`alpha.N` only; `--channel beta` selects `beta.N`/`rc.N`). A Git tag by itself contains source; a prebuilt installation also requires the release's installer and platform archive. The bootstrap does not compile missing binaries automatically.
 
 ### Build from source
 

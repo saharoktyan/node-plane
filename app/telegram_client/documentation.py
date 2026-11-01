@@ -23,7 +23,8 @@ def title(locale):
 
 def section(locale):
     from config import APP_SEMVER
-    branch = 'dev' if '-' in APP_SEMVER else 'main'
+    from services.release_versions import CHANNEL_BRANCHES, release_channel
+    branch = CHANNEL_BRANCHES[release_channel('v' + APP_SEMVER)]
     suffix = '.ru' if locale == 'ru' else ''
     return Section('', inline_rows=tuple((InlineKeyboardButton(
         text=ru if locale == 'ru' else en,

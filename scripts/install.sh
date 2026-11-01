@@ -111,7 +111,7 @@ while [[ $# -gt 0 ]]; do
     -h|--help)
       cat <<'EOF'
 Usage:
-  scripts/install.sh [--mode simple] [--branch main|dev] [--ref <git-ref>] [--non-interactive] [--install-systemd] [--force] [--env-file <path>] [--progress-json]
+  scripts/install.sh [--mode simple] [--branch main|beta|dev] [--ref <git-ref>] [--non-interactive] [--install-systemd] [--force] [--env-file <path>] [--progress-json]
 
 Modes:
   simple    Host install via venv + systemd. Supports same-host runtime deployment.
@@ -246,11 +246,14 @@ normalize_update_branch() {
   local branch="${1:-}"
   branch="$(printf '%s' "$branch" | tr '[:upper:]' '[:lower:]')"
   case "$branch" in
-    main|dev)
+    main|beta|dev)
       echo "$branch"
       ;;
     "")
-      echo "main"
+      local channel
+      channel="$(tr -d '\r\n' < "$REPO_ROOT/RELEASE_CHANNEL")"
+      [[ "$channel" != stable ]] || channel=main
+      case "$channel" in main|beta|dev) echo "$channel" ;; *) return 1 ;; esac
       ;;
     *)
       echo "Unsupported update branch: $branch" >&2
@@ -318,19 +321,9 @@ current_semver() {
 latest_release_tag_for_branch() {
   local branch="$1"
   if [[ -n "${CONTROLLER_REF:-}" ]]; then echo "$CONTROLLER_REF"; return; fi
-  local regex
-  case "$branch" in
-    main) regex='^v?[0-9]+\.[0-9]+\.[0-9]+$' ;;
-    dev) regex='^v?[0-9]+\.[0-9]+\.[0-9]+-(alpha|beta|rc)\.[0-9]+$' ;;
-    *) echo "Unsupported update branch: $branch" >&2; exit 1 ;;
-  esac
-  while IFS= read -r tag; do
-    [[ -z "$tag" ]] && continue
-    if [[ "$tag" =~ $regex ]]; then
-      echo "$tag"
-      return 0
-    fi
-  done < <(git tag --merged "origin/${branch}" | python3 "${SCRIPT_DIR}/controller_release.py" sort-refs)
+  local tag
+  tag="$(python3 "${SCRIPT_DIR}/controller_release.py" source-refs --root "$REPO_ROOT" --branch "$branch" | head -n 1)"
+  if [[ -n "$tag" ]]; then echo "$tag"; return; fi
   echo "No release tag found for branch '${branch}'." >&2
   exit 1
 }
@@ -352,10 +345,7 @@ validate_install_ref() {
     echo "Unknown install ref: ${ref}" >&2
     exit 1
   fi
-  if ! git merge-base --is-ancestor "${ref}^{commit}" "origin/${branch}" >/dev/null 2>&1; then
-    echo "Install ref '${ref}' is not reachable from origin/${branch}." >&2
-    exit 1
-  fi
+  python3 "${SCRIPT_DIR}/controller_release.py" validate-source --root "$REPO_ROOT" --branch "$branch" --ref "$ref" || return 1
   echo "$ref"
 }
 
@@ -607,7 +597,7 @@ configure_env() {
   fi
 
   if [[ $NON_INTERACTIVE -eq 0 ]]; then
-    update_branch="$(prompt_value "Enter default update branch (main or dev)" "$update_branch")"
+    update_branch="$(prompt_value "Enter default update branch (main, beta or dev)" "$update_branch")"
     update_branch="$(normalize_update_branch "$update_branch")"
   fi
   echo "Selecting controller release..."

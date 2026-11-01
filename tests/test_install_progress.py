@@ -25,6 +25,9 @@ class InstallProgressTests(unittest.TestCase):
         self.config = self.root / 'private-install.env'
         self.log = self.root / 'host-actions.log'
         (self.scripts / 'lib').mkdir(parents=True)
+        (self.source / 'app/services').mkdir(parents=True)
+        shutil.copyfile(ROOT / 'app/services/release_versions.py', self.source / 'app/services/release_versions.py')
+        (self.source / 'RELEASE_CHANNEL').write_text('dev\n')
         self.binaries.mkdir()
         for relative in ('install.sh', 'lib/install_progress.sh', 'lib/install_credentials.sh', 'lib/controller_archive.sh', 'controller_release.py', 'uv_runtime.sh', 'release_retention.py'):
             shutil.copyfile(ROOT / 'scripts' / relative, self.scripts / relative)
@@ -45,13 +48,14 @@ auto_provision_simple_postgres() {
   fi
 }
 ''')
-        for relative in ('app/backend/admin_cli.py', 'app/telegram_client/main.py', 'requirements.txt'):
+        for relative in ('app/backend/admin_cli.py', 'app/telegram_client/main.py'):
             path = self.release / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             path.touch()
         for name in ('pyproject.toml', 'uv.lock'):
             shutil.copyfile(ROOT / name, self.release / name)
         (self.release / 'VERSION').write_text('0.4.3-alpha.99\n')
+        (self.release / 'RELEASE_CHANNEL').write_text('dev\n')
         for name, label in (
             ('install_backend_systemd.sh', 'backend-services'),
             ('install_telegram_client_systemd.sh', 'telegram-service'),
@@ -81,13 +85,16 @@ if [[ "$1" == venv ]]; then "$FAKE_PYTHON" -m venv "${@: -1}"; fi
 if [[ "$1" == sync ]]; then "$FAKE_PYTHON" -m venv "$UV_PROJECT_ENVIRONMENT"; fi
 ''')
         self.executable(self.binaries / 'git', '''#!/bin/bash
+if [[ "$1" == -C ]]; then shift 2; fi
 case "$1" in
   fetch) printf 'fetch\\n' >> "$COMMAND_LOG" ;;
   rev-parse)
     if [[ "$2" == --is-inside-work-tree ]]; then printf 'true\\n'
     else printf 'abc1234\\n'; fi ;;
   tag) printf 'v0.4.3-alpha.99\\n' ;;
-  show) printf '0.4.3-alpha.99\\n' ;;
+  show)
+    if [[ "$2" == *:RELEASE_CHANNEL ]]; then printf 'dev\\n';
+    else printf '0.4.3-alpha.99\\n'; fi ;;
   merge-base) exit 0 ;;
   archive) tar -cf - -C "$FAKE_RELEASE" . ;;
   *) exit 91 ;;
@@ -141,8 +148,8 @@ esac
             path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / name, path)
         shutil.copytree(self.release, self.source, dirs_exist_ok=True)
-        subprocess.run(['git', 'init', '-q', str(self.source)], check=True)
-        subprocess.run(['git', '-C', str(self.source), 'add', '-f', '.'], check=True)
+        subprocess.run(['git', 'init', '-q', str(self.source)], check=True, timeout=30)
+        subprocess.run(['git', '-C', str(self.source), 'add', '-f', '.'], check=True, timeout=30)
         archive = self.root / release.ASSET
         release.build(self.source, archive, 'v0.4.3-alpha.99', 'a' * 40)
         archive_source = self.root / 'controller'

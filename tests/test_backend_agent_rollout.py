@@ -287,6 +287,10 @@ class BackendAgentRolloutTests(TestCase):
         for stderr in (
             'RELEASE_BINARY_UNAVAILABLE: Driver release asset node-plane-driver-linux-amd64.tar.gz for v0.4.1 is missing or inaccessible.',
             'Agent release asset node-plane-agent-linux-amd64.tar.gz for v0.4.1 is missing or inaccessible. Publish both release assets or configure authenticated binary URLs.',
+            'RELEASE_BINARY_UNAVAILABLE: Driver release artifact verification failed for node-plane-driver-linux-amd64.tar.gz.',
+            'RELEASE_BINARY_UNAVAILABLE: Agent release artifact verification failed for node-plane-agent-linux-amd64.tar.gz.',
+            'RELEASE_BINARY_UNAVAILABLE: Failed to parse driver checksum for node-plane-driver-linux-amd64.tar.gz from SHA256SUMS.txt',
+            'RELEASE_BINARY_UNAVAILABLE: Release checksum asset SHA256SUMS.txt for v0.4.1 is missing or inaccessible.',
         ):
             with patch.dict(os.environ, {'NODE_PLANE_APP_DIR': '/opt/node-plane/current'}), \
                     patch('backend.agent_rollout.subprocess.run', return_value=SimpleNamespace(
@@ -513,7 +517,8 @@ class BackendAgentRolloutTests(TestCase):
             public_key = Path(directory, 'bot.pub')
             public_key.write_text('ssh-ed25519 ' + 'A' * 40)
             with patch.dict(os.environ, {'NODE_PLANE_SHARED_DIR': directory,
-                                          'NODE_PLANE_BOT_PUBLIC_KEY_FILE': str(public_key)}):
+                                          'NODE_PLANE_BOT_PUBLIC_KEY_FILE': str(public_key),
+                                          'NODE_PLANE_DRIVER_LOCAL_TOKEN': 'test-driver-local-token'}):
                 self.assertEqual(self.client.post(base + '/drain',
                     headers=headers).json()['error']['code'],
                     'verification_target_required')

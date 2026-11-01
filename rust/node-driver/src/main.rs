@@ -1137,7 +1137,10 @@ impl OperationService for OperationApi {
     }
 }
 
-fn authorize_local_with_expected(request: Request<()>, expected: &str) -> Result<Request<()>, Status> {
+fn authorize_local_with_expected(
+    request: Request<()>,
+    expected: &str,
+) -> Result<Request<()>, Status> {
     let supplied = request
         .metadata()
         .get("x-node-plane-local-token")
@@ -1154,7 +1157,9 @@ fn authorize_local(request: Request<()>) -> Result<Request<()>, Status> {
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
-        .ok_or_else(|| Status::failed_precondition("local Driver authentication is not configured"))?;
+        .ok_or_else(|| {
+            Status::failed_precondition("local Driver authentication is not configured")
+        })?;
     authorize_local_with_expected(request, &expected)
 }
 
@@ -1173,10 +1178,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("node-plane-driver listening on {}", addr);
 
     Server::builder()
-        .add_service(NodeServiceServer::with_interceptor(node_api, authorize_local))
-        .add_service(ProvisioningServiceServer::with_interceptor(provisioning_api, authorize_local))
-        .add_service(RuntimeServiceServer::with_interceptor(runtime_api, authorize_local))
-        .add_service(OperationServiceServer::with_interceptor(operation_api, authorize_local))
+        .add_service(NodeServiceServer::with_interceptor(
+            node_api,
+            authorize_local,
+        ))
+        .add_service(ProvisioningServiceServer::with_interceptor(
+            provisioning_api,
+            authorize_local,
+        ))
+        .add_service(RuntimeServiceServer::with_interceptor(
+            runtime_api,
+            authorize_local,
+        ))
+        .add_service(OperationServiceServer::with_interceptor(
+            operation_api,
+            authorize_local,
+        ))
         .serve(addr)
         .await?;
 

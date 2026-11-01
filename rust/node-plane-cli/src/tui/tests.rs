@@ -596,10 +596,15 @@ fn saved_profile_actions_include_channel_copy_without_overlapping_back() {
         Control::UseInstallation,
         Control::EditInstallation,
         Control::NewInstallation,
-        Control::TransferInstallation,
+        Control::TransferInstallation("stable"),
+        Control::TransferInstallation("beta"),
+        Control::TransferInstallation("dev"),
         Control::DeleteInstallation,
     ]
-    .map(rect);
+    .into_iter()
+    .filter(|control| !matches!(control, Control::TransferInstallation(channel) if *channel == crate::config::workstation_channel()))
+    .map(rect)
+    .collect::<Vec<_>>();
     for (i, area) in areas.iter().enumerate() {
         assert!(area.width > 0 && area.height > 0);
         for other in &areas[i + 1..] {
@@ -1314,7 +1319,12 @@ fn workflow_confirmation_explains_the_selected_action_without_installation_boile
 fn update_branch_change_requires_confirmation_and_can_be_cancelled() {
     let mut app = test_profile_app();
     app.screen = Screen::Controller;
-    app.controller.updates = Some(serde_json::json!({"branch":"main"}));
+    let installed = if crate::config::default_branch() == "main" {
+        "dev"
+    } else {
+        "main"
+    };
+    app.controller.updates = Some(serde_json::json!({"branch":installed}));
 
     app.activate(Control::ControllerUpdateBranch);
     assert!(app.controller.branch_confirmation);
@@ -1332,7 +1342,7 @@ fn update_branch_change_requires_confirmation_and_can_be_cancelled() {
     assert!(matches!(
         app.nodes_requested.take(),
         Some(crate::nodes::Command::Controller(_, crate::controller::Command::UpdatePreferences(value)))
-            if value["branch"] == "dev"
+            if value["branch"] == crate::config::default_branch()
     ));
 }
 
@@ -3763,13 +3773,16 @@ fn session_information_is_read_only_and_distinguishes_local_identity() {
     assert!(matches!(app.screen, Screen::Settings));
 }
 #[test]
-fn new_profile_defaults_to_dev_and_disabled_actions_are_dimmed() {
+fn new_profile_defaults_to_build_channel_and_disabled_actions_are_dimmed() {
     let dir = tempfile::tempdir().unwrap();
     let mut app = test_profile_app();
     app.state_dir = dir.path().into();
     app.form.fields[3] = "main".into();
     app.begin_edit(true);
-    assert_eq!(app.editor.as_ref().unwrap().1[4], "dev");
+    assert_eq!(
+        app.editor.as_ref().unwrap().1[4],
+        crate::config::default_branch()
+    );
     app.screen = Screen::Form;
     let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
     terminal
@@ -3789,7 +3802,10 @@ fn new_profile_defaults_to_dev_and_disabled_actions_are_dimmed() {
             .any(|hit| matches!(hit.control, Control::Action(_)))
     );
     app.begin_edit(true);
-    assert_eq!(app.editor.as_ref().unwrap().1[4], "dev");
+    assert_eq!(
+        app.editor.as_ref().unwrap().1[4],
+        crate::config::default_branch()
+    );
 }
 #[test]
 fn quick_switcher_wraps_profiles_and_new_selection_survives_restart() {
@@ -4200,11 +4216,11 @@ fn profile_actions_use_spatial_navigation_without_wrapping_rows() {
         assert!(app.move_spatial(KeyCode::Down));
         assert_eq!(app.settings_selected, 5); // Copy, below Use.
         assert!(app.move_spatial(KeyCode::Down));
-        assert_eq!(app.settings_selected, 7); // Pinned Back, below actions.
+        assert_eq!(app.settings_selected, 8); // Pinned Back, below actions.
         assert!(app.move_spatial(KeyCode::Right));
-        assert_eq!(app.settings_selected, 7); // No jump to another row.
+        assert_eq!(app.settings_selected, 8); // No jump to another row.
         assert!(app.move_spatial(KeyCode::Up));
-        assert_eq!(app.settings_selected, 6); // Delete, above Back.
+        assert_eq!(app.settings_selected, 7); // Delete, above Back.
         assert!(matches!(
             app.screen,
             Screen::SettingsPage(SettingsPage::Profiles)
@@ -5955,40 +5971,38 @@ fn quick_start_reuses_selected_profile_before_installation_and_creates_only_if_m
 
 #[test]
 fn profile_transfer_requires_confirmation_and_does_not_modify_the_source() {
-    let mut app = test_profile_app();
-    let source = tempfile::tempdir().unwrap();
-    let target = tempfile::tempdir().unwrap();
-    app.state_dir = source.path().into();
-    app.connections.save(&app.state_dir).unwrap();
-    let before = std::fs::read(source.path().join("installations.json")).unwrap();
-    app.activate(Control::TransferInstallation);
-    assert!(app.prompt.is_some());
-    app.profile_copy.as_mut().unwrap().1 = target.path().into();
-    app.prompt_key(KeyCode::Char('n').into());
-    app.finish_profile_copy();
-    assert!(!target.path().join("installations.json").exists());
-    app.activate(Control::TransferInstallation);
-    app.profile_copy.as_mut().unwrap().1 = target.path().into();
-    app.prompt_key(KeyCode::Char('y').into());
-    app.finish_profile_copy();
-    let destination = Connections::load(target.path()).unwrap();
-    assert_eq!(destination.installations.len(), 1);
-    assert_eq!(
-        destination.installations[0].id,
-        app.connections.installations[0].id
-    );
-    assert_eq!(
-        destination.installations[0].branch,
-        if crate::config::default_branch() == "dev" {
-            "main"
-        } else {
-            "dev"
+    for (channel, branch) in [("stable", "main"), ("beta", "beta"), ("dev", "dev")] {
+        if channel == crate::config::workstation_channel() {
+            continue;
         }
-    );
-    assert_eq!(
-        std::fs::read(source.path().join("installations.json")).unwrap(),
-        before
-    );
+        let mut app = test_profile_app();
+        let source = tempfile::tempdir().unwrap();
+        let target = tempfile::tempdir().unwrap();
+        app.state_dir = source.path().into();
+        app.connections.save(&app.state_dir).unwrap();
+        let before = std::fs::read(source.path().join("installations.json")).unwrap();
+        app.activate(Control::TransferInstallation(channel));
+        assert!(app.prompt.is_some());
+        app.profile_copy.as_mut().unwrap().1 = target.path().into();
+        app.prompt_key(KeyCode::Char('n').into());
+        app.finish_profile_copy();
+        assert!(!target.path().join("installations.json").exists());
+        app.activate(Control::TransferInstallation(channel));
+        app.profile_copy.as_mut().unwrap().1 = target.path().into();
+        app.prompt_key(KeyCode::Char('y').into());
+        app.finish_profile_copy();
+        let destination = Connections::load(target.path()).unwrap();
+        assert_eq!(destination.installations.len(), 1);
+        assert_eq!(
+            destination.installations[0].id,
+            app.connections.installations[0].id
+        );
+        assert_eq!(destination.installations[0].branch, branch);
+        assert_eq!(
+            std::fs::read(source.path().join("installations.json")).unwrap(),
+            before
+        );
+    }
 }
 
 #[test]

@@ -66,7 +66,7 @@ impl UpdateRecord {
             value.version == 1
                 && Uuid::parse_str(&value.account_id).is_ok()
                 && value.intent.kind == "stack"
-                && matches!(value.intent.branch.as_str(), "main" | "dev"),
+                && matches!(value.intent.branch.as_str(), "main" | "beta" | "dev"),
             "Saved update record is unsupported."
         );
         ensure!(

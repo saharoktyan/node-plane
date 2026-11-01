@@ -450,7 +450,7 @@ async def show_update_branches(query: CallbackQuery, bot: Bot,
     rows = [[InlineKeyboardButton(text=branch,
         callback_data=UpdateActionCallback(action=f'branch_{branch}').pack(),
         style='primary' if selected == branch else None)]
-        for branch in ('main', 'dev')]
+        for branch in ('main', 'beta', 'dev')]
     if selected == 'dev':
         rows.append([InlineKeyboardButton(text=track,
             callback_data=UpdateActionCallback(action=f'track_{track}').pack(),
@@ -505,7 +505,7 @@ async def update_action_cb(query: CallbackQuery, callback_data: UpdateActionCall
             await show_auto_check(query, bot, backend, state)
         elif action == 'branch_menu':
             await show_update_branches(query, bot, backend, state)
-        elif action in {'branch_main', 'branch_dev'}:
+        elif action in {'branch_main', 'branch_beta', 'branch_dev'}:
             branch = action.removeprefix('branch_')
             overview = await backend.updates_overview(query.from_user.id)
             if overview.get('branch') == branch:

@@ -154,18 +154,14 @@ impl App {
                 self.settings_selected = index + 1;
                 None
             }
-            Control::TransferInstallation => {
-                if let Some(profile) = self
+            Control::TransferInstallation(channel) => {
+                if let Some(mut profile) = self
                     .connections
                     .installations
                     .get(self.settings_profile)
                     .cloned()
                 {
-                    let channel = if crate::config::workstation_channel() == "dev" {
-                        "stable"
-                    } else {
-                        "dev"
-                    };
+                    profile.branch = if channel == "stable" { "main" } else { channel }.into();
                     match crate::config::default_state_dir(channel) {
                         Ok(target) => {
                             if target == self.state_dir {
@@ -270,12 +266,11 @@ impl App {
         };
         match answer.try_recv() {
             Ok(Answer::Confirm(true)) => {
-                let branch = if crate::config::default_branch() == "dev" {
-                    "main"
-                } else {
-                    "dev"
-                };
-                self.error = match Connections::copy_installation(&profile, &target, branch) {
+                self.error = match Connections::copy_installation(
+                    &profile,
+                    &target,
+                    &profile.branch,
+                ) {
                     Ok(()) => format!(
                         "Profile copied to {}. Open the matching NPW and switch the controller channel in Node Plane Updates.",
                         target.display()
@@ -297,11 +292,18 @@ impl App {
                 Control::UseInstallation,
                 Control::EditInstallation,
                 Control::NewInstallation,
-                Control::TransferInstallation,
                 Control::DeleteInstallation,
             ]);
         } else {
             controls.push(Control::NewInstallation);
+        }
+        if !self.connections.installations.is_empty() {
+            for channel in ["stable", "beta", "dev"] {
+                if channel != crate::config::workstation_channel() {
+                    let position = controls.len() - 1;
+                    controls.insert(position, Control::TransferInstallation(channel));
+                }
+            }
         }
         controls.push(Control::Settings);
         controls

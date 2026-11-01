@@ -89,11 +89,11 @@ def set_updates_check_interval_minutes(minutes: int) -> int:
 
 def get_updates_branch() -> str:
     value = _meta_get(_UPDATES_BRANCH_KEY, UPDATE_BRANCH or "main").strip().lower()
-    return value if value in {"main", "dev"} else "main"
+    return value if value in {"main", "dev", "beta"} else "main"
 
 def set_updates_branch(branch: str) -> str:
     normalized = str(branch or "").strip().lower()
-    if normalized not in {"main", "dev"}:
+    if normalized not in {"main", "dev", "beta"}:
         raise ValueError("Unsupported updates branch")
     if normalized != get_updates_branch():
         _clear_update_check()
@@ -165,7 +165,7 @@ def get_update_state() -> dict[str, str]:
             ','.join('?' for _ in keys) + ')', tuple(keys)).fetchall()
     values = {row['key']: str(row['value']).strip() for row in rows if row['value'] is not None}
     state = {field: values.get(key, default) for field, (key, default) in fields.items()}
-    state['branch'] = state['branch'].lower() if state['branch'].lower() in {'main', 'dev'} else 'main'
+    state['branch'] = state['branch'].lower() if state['branch'].lower() in {'main', 'dev', 'beta'} else 'main'
     state['dev_track'] = state['dev_track'].lower() if state['dev_track'].lower() in {'tag', 'head'} else 'tag'
     return state
 
