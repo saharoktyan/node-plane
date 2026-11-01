@@ -244,6 +244,9 @@ jobs:
         with:
           persist-credentials: false
           submodules: recursive
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
       - name: Install Rust
         run: rustup update "1.90.0" --no-self-update && rustup default "1.90.0"
       - name: Install cached dist
@@ -306,6 +309,9 @@ jobs:
         with:
           persist-credentials: false
           submodules: recursive
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
       - name: Install Rust
         run: rustup update "1.90.0" --no-self-update && rustup default "1.90.0"
       - name: Install cached dist

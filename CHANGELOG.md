@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.5.0-alpha.2
+
+- Use Python 3.12 in server/global release packaging and publication jobs so
+  release identity validation can load the standard-library TOML parser.
+
 ## 0.5.0-alpha.1
 
 - Prepare the isolated dev channel for installation testing before public beta.
