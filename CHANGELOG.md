@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.5.0-alpha.5
+
+- Ship authenticated Driver build verification in controller updates with macOS 15
+  CI and release runners after the alpha.4 workflow hit the macOS 14 brownout.
+
 ## 0.5.0-alpha.4
 
 - Authenticate the updater's Driver build verification using the shared local
