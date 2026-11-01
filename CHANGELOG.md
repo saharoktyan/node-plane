@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.5.0-beta.2
+
+- Show the selected version’s changes in Telegram update notices, with a link
+  to the full release instead of installer commands and download tables.
+- Improve Workstation profile copying: clearer destination labels, spacing,
+  white selection arrows and a full-width Cancel button.
+
 ## 0.5.0-beta.1
 
 - First beta-channel release, based on the tested 0.5.0-alpha.5 feature set.

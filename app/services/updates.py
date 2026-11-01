@@ -235,8 +235,21 @@ def get_release_changelog(ref: str) -> str:
         release = json.loads(raw)
         if not isinstance(release, dict) or release.get('tag_name') != ref or release.get('draft'):
             return ''
+        from services.release_changelog import release_changes, version_changes
         body = release.get('body')
-        return body.strip()[:1800] if isinstance(body, str) else ''
+        notes = release_changes(body) if isinstance(body, str) else ''
+        if not notes:
+            # Older cargo-dist releases may contain only install/download text.
+            # Read the changelog at the selected tag, never the installed copy.
+            request = urllib.request.Request(
+                f'https://raw.githubusercontent.com/{repo}/{ref}/CHANGELOG.md',
+                headers={'User-Agent': 'node-plane-controller'})
+            with urllib.request.urlopen(request, timeout=10) as response:
+                raw = response.read(1024 * 1024 + 1)
+            if len(raw) > 1024 * 1024:
+                return ''
+            notes = version_changes(raw.decode('utf-8'), ref)
+        return notes[:65536]
     except (OSError, ValueError):
         return ''
 
