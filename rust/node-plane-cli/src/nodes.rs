@@ -387,6 +387,12 @@ pub enum Update {
     Card(Node),
     Observation(Node),
     Operation(Operation),
+    ControllerVersion {
+        host: String,
+        port: u16,
+        user: String,
+        version: String,
+    },
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Row {
@@ -973,29 +979,21 @@ pub(crate) fn validate_controller_channel(
         matches!(installed, "main" | "beta" | "dev"),
         "Controller reported an unsupported channel."
     );
-    let migration_view = matches!(
-        command,
-        Command::Controller(
-            _,
-            crate::controller::Command::Updates
-                | crate::controller::Command::UpdateResult(_)
-                | crate::controller::Command::UpdateVersions(_)
-                | crate::controller::Command::UpdateCheck
-        )
-    );
-    let migration_request = matches!(command, Command::Controller(_, crate::controller::Command::UpdatePreferences(value))
-        if value.as_object().is_some_and(|v| v.len() == 1) && value["branch"] == expected);
-    ensure!(
-        installed == expected || migration_view || migration_request,
-        "Controller channel is {installed}; this NPW manages {expected}. Open Node Plane Updates and switch the controller to this NPW channel, or use the matching NPW."
-    );
-    if let Command::Controller(_, crate::controller::Command::UpdatePreferences(value)) = command
-        && let Some(branch) = value["branch"].as_str()
-    {
-        ensure!(
-            branch == expected,
-            "Transfer the profile to the matching NPW before switching controller channels."
-        );
+    if let Command::Controller(_, crate::controller::Command::UpdatePreferences(value)) = command {
+        if let Some(branch) = value["branch"].as_str() {
+            ensure!(
+                branch == expected,
+                "Transfer the profile to the matching NPW before switching controller channels."
+            );
+        }
+        if installed != expected {
+            let migration_request =
+                value.as_object().is_some_and(|v| v.len() == 1) && value["branch"] == expected;
+            ensure!(
+                migration_request,
+                "Controller channel is {installed}; this NPW manages {expected}. Open Node Plane Updates and switch the controller to this NPW channel, or use the matching NPW."
+            );
+        }
     }
     Ok(())
 }
@@ -1051,17 +1049,20 @@ async fn execute_inner(
         };
         let result = async {
             let updates = backend::request(session, &credential, Method::GET, "/api/v1/system/updates", None, None).await?;
+            if let Some(version) = updates["current_version"].as_str() {
+                let _ = tx.send(Event::Nodes(Update::ControllerVersion {
+                    host: request.host.clone(),
+                    port: request.port,
+                    user: request.user.clone(),
+                    version: version.to_string(),
+                }));
+            }
             if let Command::Controller(profile, _) = &command {
                 let _ = tx.send(Event::Nodes(Update::Controller(*profile,
                     crate::controller::Command::Presence, json!({"current_version":updates["current_version"]}))));
             }
             let installed_branch = controller_branch(&updates)?;
-            if let Err(error) = validate_controller_channel(&command, installed_branch, crate::config::default_branch()) {
-                if let Command::Controller(profile, _) = &command {
-                    let _ = tx.send(Event::Nodes(Update::Controller(*profile, crate::controller::Command::Updates, updates.clone())));
-                }
-                return Err(error);
-            }
+            validate_controller_channel(&command, installed_branch, crate::config::default_branch())?;
             if fresh_authorization && !request.host.contains(':') {
                 // Publish the selected installation address for Telegram’s local-node shorthand.
                 // Older controllers may not expose this optional metadata endpoint yet.
@@ -1852,9 +1853,9 @@ mod channel_policy_tests {
         assert!(controller_branch(&json!({})).is_err());
     }
     #[test]
-    fn mismatched_controller_only_allows_transition_to_this_workstations_channel() {
+    fn mismatched_controller_allows_management_but_restricts_update_channel_changes() {
         for (installed, expected) in [("main", "dev"), ("dev", "main")] {
-            assert!(validate_controller_channel(&Command::List, installed, expected).is_err());
+            assert!(validate_controller_channel(&Command::List, installed, expected).is_ok());
             assert!(validate_controller_channel(&Command::List, expected, expected).is_ok());
             assert!(
                 validate_controller_channel(

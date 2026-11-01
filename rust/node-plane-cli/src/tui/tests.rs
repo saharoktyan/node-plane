@@ -8705,3 +8705,470 @@ fn custom_expiry_accepts_typed_iso_date_with_hyphens() {
         Some("2030-12-31")
     );
 }
+
+#[test]
+fn version_mismatch_direction_and_archived_migration_evaluation() {
+    let npw = "0.5.0-alpha.2";
+    // Equal versions (with or without 'v' and build metadata) produce None
+    assert_eq!(evaluate_version_mismatch("0.5.0-alpha.2", npw), None);
+    assert_eq!(evaluate_version_mismatch("v0.5.0-alpha.2", npw), None);
+    assert_eq!(
+        evaluate_version_mismatch("v0.5.0-alpha.2 · abcdef", npw),
+        None
+    );
+    assert_eq!(
+        evaluate_version_mismatch("0.5.0-alpha.2+build.10", npw),
+        None
+    );
+
+    // Missing / unknown / invalid versions produce None
+    assert_eq!(evaluate_version_mismatch("", npw), None);
+    assert_eq!(evaluate_version_mismatch("unknown", npw), None);
+    assert_eq!(evaluate_version_mismatch("invalid-ver", npw), None);
+
+    // Controller older -> Controller update
+    assert_eq!(
+        evaluate_version_mismatch("0.4.0", npw),
+        Some(MismatchTarget::Controller)
+    );
+    assert_eq!(
+        evaluate_version_mismatch("0.5.0-alpha.1", npw),
+        Some(MismatchTarget::Controller)
+    );
+    assert_eq!(
+        evaluate_version_mismatch("0.3.9", npw),
+        Some(MismatchTarget::Controller)
+    );
+
+    // Controller newer -> Workstation update
+    assert_eq!(
+        evaluate_version_mismatch("99.0.0", npw),
+        Some(MismatchTarget::Workstation)
+    );
+    assert_eq!(
+        evaluate_version_mismatch("0.5.0-alpha.3", npw),
+        Some(MismatchTarget::Workstation)
+    );
+    assert_eq!(
+        evaluate_version_mismatch("1.0.0", npw),
+        Some(MismatchTarget::Workstation)
+    );
+
+    // SPECIAL known migration: archived controller 1.0.0-alpha.N / beta.N vs NPW 0.x
+    // is OLD relative to current NPW0.x; recommend CONTROLLER update!
+    assert_eq!(
+        evaluate_version_mismatch("1.0.0-alpha.1", npw),
+        Some(MismatchTarget::Controller)
+    );
+    assert_eq!(
+        evaluate_version_mismatch("1.0.0-alpha.9", npw),
+        Some(MismatchTarget::Controller)
+    );
+    assert_eq!(
+        evaluate_version_mismatch("1.0.0-beta.1", npw),
+        Some(MismatchTarget::Controller)
+    );
+    assert_eq!(
+        evaluate_version_mismatch("1.0.0-beta.2", npw),
+        Some(MismatchTarget::Controller)
+    );
+    assert!(is_archived_migration("1.0.0-alpha.1", npw));
+    assert!(is_archived_migration("1.0.0-beta.2", npw));
+    assert!(!is_archived_migration("1.0.0", npw));
+    assert!(!is_archived_migration("0.4.0", npw));
+    assert!(!is_archived_migration("1.0.0-alphabet.1", npw));
+    assert!(!is_archived_migration("1.0.0-beta", npw));
+    assert!(!is_archived_migration("1.0.0-rc.1", npw));
+}
+
+#[test]
+fn version_mismatch_modal_presentation_queuing_and_existing_prompts() {
+    let mut app = test_profile_app();
+    let profile = app.form.saved.as_ref().unwrap().id;
+    app.installed_profile = Some(profile);
+    app.controller.profile = Some(profile);
+    app.ssh_state = crate::nodes::ConnectionState::Connected;
+    app.screen = Screen::Idle;
+
+    // Equal version -> no modal
+    app.controller_version = Some((profile, env!("CARGO_PKG_VERSION").into()));
+    app.poll_version_mismatch(false);
+    assert!(app.prompt.is_none());
+
+    // Unknown version -> no modal
+    app.controller_version = Some((profile, "unknown".into()));
+    app.poll_version_mismatch(false);
+    assert!(app.prompt.is_none());
+
+    // Missing version -> no modal
+    app.controller_version = None;
+    app.poll_version_mismatch(false);
+    assert!(app.prompt.is_none());
+
+    // Older controller -> modal queued
+    app.controller_version = Some((profile, "0.4.0".into()));
+    app.poll_version_mismatch(false);
+    assert!(app.prompt.is_some());
+    if let Some((Prompt::ConfirmAction { title, description }, _)) = &app.prompt {
+        assert_eq!(title, "Version mismatch");
+        assert!(description.contains("0.4.0"));
+        assert!(description.contains(env!("CARGO_PKG_VERSION")));
+        assert!(description.contains("outdated"));
+        assert!(description.contains("Continuing with different versions can cause errors"));
+        assert!(description.contains("Dismissal lasts only until NPW restarts"));
+    } else {
+        panic!("Expected ConfirmAction prompt");
+    }
+
+    // Existing prompt is NOT overwritten
+    let (tx, _) = mpsc::channel();
+    app.prompt = Some((
+        Prompt::Password {
+            user: "root".into(),
+            host: "10.0.0.1".into(),
+        },
+        tx,
+    ));
+    app.poll_version_mismatch(false);
+    assert!(app.version_mismatch_receiver.is_none());
+    assert!(matches!(app.prompt, Some((Prompt::Password { .. }, _))));
+}
+
+#[test]
+fn version_mismatch_archived_migration_and_channel_warning_text() {
+    let mut app = test_profile_app();
+    let profile = app.form.saved.as_ref().unwrap().id;
+    app.installed_profile = Some(profile);
+    app.controller.profile = Some(profile);
+    app.ssh_state = crate::nodes::ConnectionState::Connected;
+    app.screen = Screen::Idle;
+
+    // Archived 1.0.0-alpha.1
+    app.controller_version = Some((profile, "1.0.0-alpha.1".into()));
+    app.poll_version_mismatch(false);
+    assert!(app.prompt.is_some());
+    if let Some((Prompt::ConfirmAction { title, description }, _)) = &app.prompt {
+        assert_eq!(title, "Version mismatch");
+        assert!(description.contains("archived release line (1.0 alpha/beta)"));
+        assert!(description.contains("Update the controller or perform a fresh installation"));
+    } else {
+        panic!("Expected ConfirmAction prompt");
+    }
+}
+
+#[test]
+fn version_mismatch_dismiss_keyboard_mouse_and_red_rendering() {
+    let mut app = test_profile_app();
+    let profile = app.form.saved.as_ref().unwrap().id;
+    app.installed_profile = Some(profile);
+    app.controller.profile = Some(profile);
+    app.ssh_state = crate::nodes::ConnectionState::Connected;
+    app.screen = Screen::Idle;
+    app.controller_version = Some((profile, "0.4.0".into()));
+
+    app.poll_version_mismatch(false);
+    assert!(app.prompt.is_some());
+    assert!(app.trust); // Default focus is Update
+
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 35)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+
+    let update_hit = app
+        .hits
+        .iter()
+        .find(|h| h.control == Control::Prompt(true))
+        .expect("Update button hit area");
+    assert!(matches!(update_hit.control, Control::Prompt(true)));
+    let dismiss_hit = app
+        .hits
+        .iter()
+        .find(|h| h.control == Control::Prompt(false))
+        .expect("Dismiss button hit area");
+
+    let buffer = terminal.backend().buffer();
+    // Dismiss button should have RED text even when unselected
+    let d_rect = dismiss_hit.area;
+    assert!(
+        (d_rect.x + 1..d_rect.right() - 1).any(|x| {
+            buffer[(x, d_rect.y + 1)].fg == Color::Red
+                && !buffer[(x, d_rect.y + 1)].symbol().trim().is_empty()
+        }),
+        "Dismiss button must have red text when unselected"
+    );
+
+    // Tab toggles focus to Dismiss
+    app.prompt_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    assert!(!app.trust);
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    let buffer2 = terminal.backend().buffer();
+    assert!(
+        (d_rect.x + 1..d_rect.right() - 1).any(|x| {
+            buffer2[(x, d_rect.y + 1)].fg == Color::Red
+                && !buffer2[(x, d_rect.y + 1)].symbol().trim().is_empty()
+        }),
+        "Dismiss button must have red text when selected"
+    );
+
+    // Escape dismisses
+    app.prompt_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    app.poll_version_mismatch(false);
+    assert!(app.version_mismatch_dismissed);
+    assert!(app.prompt.is_none());
+
+    // Mouse dismissal test on fresh app
+    let mut app2 = test_profile_app();
+    let p2 = app2.form.saved.as_ref().unwrap().id;
+    app2.installed_profile = Some(p2);
+    app2.controller.profile = Some(p2);
+    app2.ssh_state = crate::nodes::ConnectionState::Connected;
+    app2.screen = Screen::Idle;
+    app2.controller_version = Some((p2, "0.4.0".into()));
+    app2.poll_version_mismatch(false);
+    assert!(app2.prompt.is_some());
+
+    let key = app2.activate(Control::Prompt(false)).unwrap();
+    app2.prompt_key(key);
+    app2.poll_version_mismatch(false);
+    assert!(app2.version_mismatch_dismissed);
+    assert!(app2.prompt.is_none());
+}
+
+#[test]
+fn version_mismatch_dismiss_persists_across_profiles_and_reconnect_fresh_app_warns() {
+    let mut app = test_profile_app();
+    let profile = app.form.saved.as_ref().unwrap().id;
+    app.installed_profile = Some(profile);
+    app.controller.profile = Some(profile);
+    app.ssh_state = crate::nodes::ConnectionState::Connected;
+    app.screen = Screen::Idle;
+    app.controller_version = Some((profile, "0.4.0".into()));
+
+    // Trigger modal and dismiss
+    app.poll_version_mismatch(false);
+    assert!(app.prompt.is_some());
+    app.prompt_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    app.poll_version_mismatch(false);
+    assert!(app.version_mismatch_dismissed);
+    assert!(app.prompt.is_none());
+
+    // Re-polling does NOT prompt
+    app.poll_version_mismatch(false);
+    assert!(app.prompt.is_none());
+
+    // Reconnecting does NOT prompt
+    app.ssh_state = crate::nodes::ConnectionState::Closed;
+    app.ssh_state = crate::nodes::ConnectionState::Connected;
+    app.poll_version_mismatch(false);
+    assert!(app.prompt.is_none());
+
+    // Switching profile does NOT prompt (dismissal survives profile switch in same App)
+    let profile2 = saved_installation("controller2.example");
+    app.connections.installations.push(profile2.clone());
+    app.form.use_installation(&profile2);
+    app.controller_version = Some((profile2.id, "0.4.0".into()));
+    app.poll_version_mismatch(false);
+    assert!(app.prompt.is_none());
+    assert!(app.version_mismatch_dismissed);
+
+    // Fresh App::new DOES warn again
+    let mut fresh_app = test_profile_app();
+    let p_fresh = fresh_app.form.saved.as_ref().unwrap().id;
+    fresh_app.installed_profile = Some(p_fresh);
+    fresh_app.controller.profile = Some(p_fresh);
+    fresh_app.ssh_state = crate::nodes::ConnectionState::Connected;
+    fresh_app.screen = Screen::Idle;
+    fresh_app.controller_version = Some((p_fresh, "0.4.0".into()));
+    assert!(!fresh_app.version_mismatch_dismissed);
+    fresh_app.poll_version_mismatch(false);
+    assert!(fresh_app.prompt.is_some());
+}
+
+#[test]
+fn version_mismatch_update_routes_correctly_and_does_not_recurse() {
+    // 1. Controller outdated -> ControllerUpdates navigation
+    let mut app = test_profile_app();
+    let profile = app.form.saved.as_ref().unwrap().id;
+    app.installed_profile = Some(profile);
+    app.controller.profile = Some(profile);
+    app.ssh_state = crate::nodes::ConnectionState::Connected;
+    app.screen = Screen::Idle;
+    app.controller_version = Some((profile, "0.4.0".into()));
+
+    app.poll_version_mismatch(false);
+    assert!(app.prompt.is_some());
+
+    let key = app.activate(Control::Prompt(true)).unwrap();
+    app.prompt_key(key);
+    app.poll_version_mismatch(false);
+    assert!(app.prompt.is_none());
+    assert!(!app.version_mismatch_dismissed); // Not dismissed!
+    assert!(app.version_mismatch_deferred); // Deferred to prevent recursion
+    assert!(matches!(app.screen, Screen::Controller));
+
+    // Next poll does NOT recurse
+    app.poll_version_mismatch(false);
+    assert!(app.prompt.is_none());
+
+    // 2. NPW outdated -> SettingsPage(Updates)
+    let mut app2 = test_profile_app();
+    let p2 = app2.form.saved.as_ref().unwrap().id;
+    app2.installed_profile = Some(p2);
+    app2.controller.profile = Some(p2);
+    app2.ssh_state = crate::nodes::ConnectionState::Connected;
+    app2.screen = Screen::Idle;
+    app2.controller_version = Some((p2, "99.0.0".into()));
+
+    app2.poll_version_mismatch(false);
+    assert!(app2.prompt.is_some());
+
+    let key = app2.activate(Control::Prompt(true)).unwrap();
+    app2.prompt_key(key);
+    app2.poll_version_mismatch(false);
+    assert!(app2.prompt.is_none());
+    assert!(!app2.version_mismatch_dismissed);
+    assert!(app2.version_mismatch_deferred);
+    assert!(matches!(
+        app2.screen,
+        Screen::SettingsPage(SettingsPage::Updates)
+    ));
+    assert!(app2.self_check_requested);
+
+    // Next poll does NOT recurse
+    app2.poll_version_mismatch(false);
+    assert!(app2.prompt.is_none());
+}
+
+#[test]
+fn version_mismatch_stale_profile_event_and_pending_answer_ignored() {
+    let mut app = test_profile_app();
+    let profile = app.form.saved.as_ref().unwrap().id;
+    app.installed_profile = Some(profile);
+    let other_profile = uuid::Uuid::new_v4();
+
+    // Event with different host/port does not update current profile's version
+    app.event(Event::Nodes(crate::nodes::Update::ControllerVersion {
+        host: "other-host.example".into(),
+        port: 22,
+        user: "root".into(),
+        version: "0.4.0".into(),
+    }));
+    assert!(app.controller_version.is_none());
+
+    // Event with matching host/port/user updates version
+    let host = app.form.saved.as_ref().unwrap().host.clone();
+    let port = app.form.saved.as_ref().unwrap().port;
+    let user = app.form.saved.as_ref().unwrap().user.clone();
+    app.event(Event::Nodes(crate::nodes::Update::ControllerVersion {
+        host,
+        port,
+        user,
+        version: "0.4.0".into(),
+    }));
+    assert_eq!(app.controller_version, Some((profile, "0.4.0".into())));
+
+    // Queue modal
+    app.screen = Screen::Idle;
+    app.poll_version_mismatch(false);
+    assert!(app.prompt.is_some());
+
+    // Switch profile while answer is pending
+    let profile2 = saved_installation("controller2.example");
+    app.connections.installations.push(profile2.clone());
+    app.form.use_installation(&profile2);
+
+    // Send answer from old channel
+    if let Some(ctx) = app.version_mismatch_context.as_mut() {
+        ctx.profile_id = other_profile; // Simulate stale context
+    }
+    // Polling will detect context profile mismatch and discard it cleanly
+    app.poll_version_mismatch(false);
+    assert!(!app.version_mismatch_dismissed);
+    assert!(app.prompt.is_none());
+    assert!(app.version_mismatch_receiver.is_none());
+    assert!(app.version_mismatch_context.is_none());
+}
+
+#[test]
+fn no_forced_updates_mutation_and_removal_navigable_after_dismissal() {
+    let mut app = test_profile_app();
+    let profile = app.form.saved.as_ref().unwrap().id;
+    app.installed_profile = Some(profile);
+    app.controller.profile = Some(profile);
+    app.ssh_state = crate::nodes::ConnectionState::Connected;
+    app.screen = Screen::Idle;
+    app.controller_version = Some((profile, "0.4.0".into()));
+
+    // Trigger modal and dismiss
+    app.poll_version_mismatch(false);
+    assert!(app.prompt.is_some());
+    app.prompt_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    app.poll_version_mismatch(false);
+    assert!(app.version_mismatch_dismissed);
+    assert!(app.prompt.is_none());
+
+    // Updates state is NOT mutated or forced
+    assert!(app.controller.updates.is_none());
+    assert!(!matches!(
+        app.screen,
+        Screen::SettingsPage(SettingsPage::Updates)
+    ));
+
+    // Removal flow is navigable and accessible after dismissal
+    app.open_controller();
+    app.activate(Control::ControllerSection(ControllerSection::Removal));
+    assert!(matches!(
+        app.controller_section,
+        Some(ControllerSection::Removal)
+    ));
+
+    let controls = app.controller_controls();
+    assert!(
+        controls
+            .iter()
+            .any(|c| matches!(c, Control::ControllerPlan(true)))
+    );
+    app.nodes_requested = None;
+    app.activate(Control::ControllerPlan(true));
+    assert!(matches!(&app.nodes_requested,
+        Some(crate::nodes::Command::Controller(_, crate::controller::Command::Plan { action, .. }))
+        if action == "remove"));
+    assert!(app.controller.updates.is_none());
+    app.poll_version_mismatch(false);
+    assert!(app.prompt.is_none());
+}
+
+#[test]
+fn version_mismatch_full_warning_is_visible_with_legacy_channel_details() {
+    let mut app = test_profile_app();
+    let profile = app.form.saved.as_ref().unwrap().id;
+    app.installed_profile = Some(profile);
+    app.controller.profile = Some(profile);
+    app.ssh_state = crate::nodes::ConnectionState::Connected;
+    app.screen = Screen::Idle;
+    app.controller_version = Some((profile, "1.0.0-beta.11".into()));
+    app.poll_version_mismatch(false);
+    assert!(
+        matches!(&app.prompt, Some((Prompt::ConfirmAction { title, .. }, _)) if title == "Version mismatch")
+    );
+    for (width, height) in [(70, 30), (80, 30), (100, 35)] {
+        let mut terminal =
+            Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
+        terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+        let text: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(
+            text.contains("unsupported") && text.contains("actions."),
+            "warning clipped at {width}x{height}: {text}"
+        );
+        assert!(
+            text.contains("restarts."),
+            "dismiss lifetime clipped at {width}x{height}: {text}"
+        );
+        assert!(text.contains("Dismiss"));
+    }
+}

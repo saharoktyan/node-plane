@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Show a dismissible version compatibility warning in Workstation instead of
+  forcing controller Updates or blocking ordinary management and removal.
+
 ## 0.5.0-alpha.2
 
 - Use Python 3.12 in server/global release packaging and publication jobs so

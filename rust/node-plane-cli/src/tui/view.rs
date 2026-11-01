@@ -569,10 +569,16 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
     if let Some((prompt, _)) = &app.prompt {
         // Modal hit targets replace background controls, including outside clicks.
         hits.clear();
+        let is_version_mismatch = matches!(
+            prompt,
+            Prompt::ConfirmAction { title, .. } if title == "Version mismatch"
+        );
         let popup = centered(
             area,
             78,
-            if matches!(prompt, Prompt::ConfirmAction { .. }) {
+            if is_version_mismatch {
+                20
+            } else if matches!(prompt, Prompt::ConfirmAction { .. }) {
                 12
             } else {
                 20
@@ -674,7 +680,19 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
         } else {
             frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: false }), sections[0]);
         }
-        if !matches!(prompt, Prompt::Select { .. }) {
+        if is_version_mismatch {
+            let cells = dialog_button_areas(sections[1], &["Update", "Dismiss"], 1);
+            draw_button_color(frame, cells[0], "Update", app.trust, Color::Cyan);
+            hits.push(Hit {
+                area: cells[0],
+                control: Control::Prompt(true),
+            });
+            draw_button_color(frame, cells[1], "Dismiss", !app.trust, Color::Red);
+            hits.push(Hit {
+                area: cells[1],
+                control: Control::Prompt(false),
+            });
+        } else if !matches!(prompt, Prompt::Select { .. }) {
             let label = match prompt {
                 Prompt::HostKey { .. } => "Trust host",
                 Prompt::Password { .. } => "Connect",

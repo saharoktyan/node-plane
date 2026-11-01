@@ -16,7 +16,11 @@ impl App {
                 if self.ignore_nodes_updates {
                     return;
                 }
-                if !matches!(&update, crate::nodes::Update::Controller(..)) {
+                if !matches!(
+                    &update,
+                    crate::nodes::Update::Controller(..)
+                        | crate::nodes::Update::ControllerVersion { .. }
+                ) {
                     self.remember_installed();
                 }
                 match update {
@@ -419,6 +423,28 @@ impl App {
                                 .is_some_and(|node| node.key == operation.node_key)
                         {
                             self.nodes.operation = Some(operation)
+                        }
+                    }
+                    crate::nodes::Update::ControllerVersion {
+                        host,
+                        port,
+                        user,
+                        version,
+                    } => {
+                        if self
+                            .controller_request_context
+                            .is_some_and(|context| context.read && !context.is_current(self))
+                        {
+                            return;
+                        }
+                        if let Some(saved) = &self.form.saved
+                            && (saved.installed || self.installed_profile == Some(saved.id))
+                            && saved.host == host
+                            && saved.port == port
+                            && saved.user == user
+                            && let Some(cleaned) = clean_version_str(&version)
+                        {
+                            self.controller_version = Some((saved.id, cleaned));
                         }
                     }
                 }

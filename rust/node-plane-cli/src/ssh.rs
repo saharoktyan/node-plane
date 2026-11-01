@@ -1940,7 +1940,7 @@ mod tests {
             worker.shutdown().unwrap();
         }
         #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-        async fn cached_controller_session_blocks_management_until_runtime_matches_channel() {
+        async fn cached_controller_session_allows_management_across_runtime_channels() {
             let server = MockServer::start().await;
             let state = tempfile::tempdir().unwrap();
             prepare_nodes_fixture(&server, state.path());
@@ -1971,13 +1971,22 @@ mod tests {
                 crate::nodes::Command::List,
             )
             .await;
-            assert!(
-                result
-                    .unwrap_err()
-                    .contains(&format!("Controller channel is {other_branch}"))
-            );
+            assert!(result.is_ok(), "{result:?}");
             let requests = fs::read_to_string(&requests_path).unwrap();
-            assert!(!requests.contains("GET /api/v1/nodes"));
+            assert!(requests.contains("GET /api/v1/nodes"));
+            let (pref_result, _) = nodes_command(
+                &worker,
+                nodes_request(&server, state.path()),
+                crate::nodes::Command::Controller(
+                    None,
+                    crate::controller::Command::UpdatePreferences(serde_json::json!({
+                        "branch": other_branch,
+                        "auto_check_enabled": true
+                    })),
+                ),
+            )
+            .await;
+            assert!(pref_result.is_err());
             let (result, _) = nodes_command(
                 &worker,
                 nodes_request(&server, state.path()),
