@@ -316,13 +316,13 @@ class TemporaryConfigService:
     def artifact(self, actor, config_id):
         from contextlib import nullcontext
         from .config_issuance import ConfigIssuanceService
-        with (nullcontext(self.driver) if self.driver is not None else ConfigIssuanceService(self.db)._driver()) as driver:
-            try:
+        try:
+            with (nullcontext(self.driver) if self.driver is not None else ConfigIssuanceService(self.db)._driver()) as driver:
                 return self._artifact(actor,config_id,driver)
-            except AccessDenied:
-                raise
-            except Exception:
-                raise AccessDenied('config_unavailable',503) from None
+        except AccessDenied:
+            raise
+        except Exception:
+            raise AccessDenied('config_unavailable',503) from None
 
     def _artifact(self, actor, config_id, driver):
         with self.db.connect() as conn:

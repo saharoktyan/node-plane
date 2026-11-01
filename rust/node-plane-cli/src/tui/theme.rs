@@ -6,6 +6,9 @@ use serde::{Deserialize, Serialize};
 use std::{fs, io::Write, path::Path};
 
 pub(super) const SECTION_BORDER: Color = Color::Indexed(253);
+// Semantic value accent is distinct from the transient focus accent until
+// the final theme pass, so pointer cleanup cannot erase On/Off state colours.
+pub(super) const TOGGLE_VALUE: Color = Color::Indexed(252);
 const PACKAGED: [(&str, &str); 6] = [
     ("auto.json", include_str!("themes/auto.json")),
     ("peach.json", include_str!("themes/peach.json")),
@@ -188,7 +191,7 @@ pub(super) fn apply(frame: &mut Frame, saved_accent: &str, selected: Option<&The
         if cell.fg == SECTION_BORDER {
             cell.fg = border;
         }
-        if cell.fg == Color::Cyan {
+        if cell.fg == Color::Cyan || cell.fg == TOGGLE_VALUE {
             cell.fg = accent;
         }
         if cell.bg == Color::Cyan {

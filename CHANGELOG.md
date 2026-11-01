@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.5.0-alpha.3
+
+- Keep Telegram progress screens refreshing after rendering failures and unrelated
+  service updates, including controller cleanup with nodes.
+
+- Keep On/Off values in the chosen theme accent independently of focus, and
+  highlight toggle labels on hover, including monitoring and policy settings.
+
+- Initialize local Driver authentication before starting the backend API and
+  worker on fresh installations; report unavailable temporary config transport
+  without an internal server error.
+
 - Show a dismissible version compatibility warning in Workstation instead of
   forcing controller Updates or blocking ordinary management and removal.
 

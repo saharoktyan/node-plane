@@ -26,6 +26,46 @@ if [[ -z "$render_dir" ]]; then
     echo "Run as root to install backend systemd units" >&2
     exit 1
   fi
+  # Both services must inherit credentials on their FIRST start. Driver setup
+  # runs afterwards and cannot update an already-running API's environment.
+  python3 - "${shared_dir}/.env" <<'PYDRIVERTOKEN'
+import os
+from pathlib import Path
+import secrets
+import shlex
+import tempfile
+import sys
+
+path = Path(sys.argv[1]).resolve(strict=True)
+text = path.read_text()
+key = 'NODE_PLANE_DRIVER_LOCAL_TOKEN='
+entries = [line[len(key):] for line in text.splitlines() if line.startswith(key)]
+try:
+    words = shlex.split(entries[-1], comments=True) if entries else []
+except ValueError:
+    raise SystemExit('Invalid local Driver credential entry') from None
+if len(words) > 1:
+    raise SystemExit('Invalid local Driver credential entry')
+if words and words[0].strip():
+    raise SystemExit(0)  # Preserve the existing shared credential byte-for-byte.
+metadata = path.stat()
+content = ''.join(line for line in text.splitlines(keepends=True) if not line.startswith(key))
+if content and not content.endswith('\n'):
+    content += '\n'
+content += key + secrets.token_hex(32) + '\n'
+fd, temporary = tempfile.mkstemp(prefix='.driver-auth-', dir=path.parent)
+try:
+    with os.fdopen(fd, 'w') as output:
+        os.fchmod(output.fileno(), 0o600)
+        os.fchown(output.fileno(), metadata.st_uid, metadata.st_gid)
+        output.write(content)
+        output.flush()
+        os.fsync(output.fileno())
+    os.replace(temporary, path)
+finally:
+    if os.path.exists(temporary):
+        os.unlink(temporary)
+PYDRIVERTOKEN
   render_dir="$(mktemp -d)"
   trap 'rm -rf "$render_dir"' EXIT
 fi

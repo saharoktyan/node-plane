@@ -1,6 +1,12 @@
 //! Screen composition, header, dialogs and focus decoration.
 use super::*;
 
+fn has_toggle_value(frame: &mut Frame, area: Rect) -> bool {
+    (area.y..area.bottom()).any(|y| {
+        (area.x..area.right()).any(|x| frame.buffer_mut()[(x, y)].fg == theme::TOGGLE_VALUE)
+    })
+}
+
 pub(super) fn disabled_channel(app: &App, control: Control) -> bool {
     match control {
         Control::EditField(4) => true,
@@ -767,6 +773,7 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
             if hovered_hit.is_some_and(|hovered| hovered.area == hit.area) {
                 continue;
             }
+            let toggle = has_toggle_value(frame, rect);
             let chosen = choice_selected(&app.controller, hit.control)
                 || matches!(hit.control,Control::AccessGrantMode(future) if app.access.editor.as_ref().is_some_and(|e|e.future_view==future))
                 || matches!(hit.control,Control::NodesEditTab(tab) if app.nodes.editor.as_ref().is_some_and(|e|e.tab==tab));
@@ -778,12 +785,12 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
                         "┌" | "┐" | "└" | "┘" | "╭" | "╮" | "╰" | "╯" | "─" | "│"
                     ) {
                         cell.fg = Color::White;
-                    } else if !chosen
+                    } else if (!chosen || toggle)
                         && y > rect.y
                         && y + 1 < rect.bottom()
                         && cell.fg == Color::Cyan
                     {
-                        cell.fg = Color::Gray;
+                        cell.fg = if toggle { Color::White } else { Color::Gray };
                         cell.modifier.remove(Modifier::BOLD);
                     }
                 }
@@ -857,6 +864,7 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
         let red = (rect.y..rect.bottom())
             .any(|y| (rect.x..rect.right()).any(|x| frame.buffer_mut()[(x, y)].fg == Color::Red));
         let color = if red { Color::Red } else { Color::Cyan };
+        let toggle = has_toggle_value(frame, rect);
         for y in rect.y..rect.bottom() {
             for x in rect.x..rect.right() {
                 if frame.buffer_mut()[(x, y)].fg == SECTION_BORDER
@@ -867,6 +875,11 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
                 }
                 if x == rect.x || x + 1 == rect.right() || y == rect.y || y + 1 == rect.bottom() {
                     frame.buffer_mut()[(x, y)].fg = color;
+                } else if toggle {
+                    let cell = &mut frame.buffer_mut()[(x, y)];
+                    if cell.fg != theme::TOGGLE_VALUE && !cell.symbol().trim().is_empty() {
+                        cell.fg = color;
+                    }
                 }
             }
         }

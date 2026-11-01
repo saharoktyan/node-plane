@@ -1,6 +1,7 @@
 import json
 from datetime import datetime, timedelta, timezone
 import unittest
+from unittest.mock import patch
 from uuid import uuid4
 
 from backend.authorization import Actor, Principal, PrincipalKind, ADMIN_PERMISSIONS, AccessDenied
@@ -331,3 +332,75 @@ class TemporaryConfigTests(unittest.TestCase):
         result = self.service.get(self.actor,config['id'])
         self.assertEqual(result['status'],'revoked')
         self.assertEqual(result['expires_at'],expiry)
+
+    def test_temporary_artifact_http_local_driver_token_missing_returns_503_unavailable(self):
+        self.prepare()
+        config = self.create()
+        self.service.run_one()
+        active = self.service.get(self.actor, config['id'])
+        self.assertEqual(active['status'], 'active')
+        original_expires_at = active['expires_at']
+        original_calls = list(self.driver.calls)
+
+        headers = {**self.headers, 'X-Node-Plane-Telegram-User-ID': '101'}
+        from backend.http_api import create_app
+        from backend.driver_transport import LocalDriverTokenMissing
+        from fastapi.testclient import TestClient
+
+        prod_app = create_app(self.db)  # Production path: node_driver is None
+        secret_leak = 'SECRET_TOKEN_LEAK_LOCAL_AUTH_123'
+        with TestClient(prod_app) as client:
+            with patch('backend.driver_transport.local_channel',
+                       side_effect=LocalDriverTokenMissing(f'local Driver authentication is not configured: {secret_leak}')):
+                response = client.get(f"/api/v1/system/temporary-configs/{config['id']}/artifact", headers=headers)
+
+            self.assertEqual(response.status_code, 503)
+            self.assertEqual(response.json()['error']['code'], 'config_unavailable')
+            self.assertNotIn('Traceback', response.text)
+            self.assertNotIn('LocalDriverTokenMissing', response.text)
+            self.assertNotIn(secret_leak, response.text)
+
+            # Assert no temporary mutation/reissue occurred
+            current = self.service.get(self.actor, config['id'])
+            self.assertEqual(current['status'], 'active')
+            self.assertEqual(current['expires_at'], original_expires_at)
+            row = self.db.connection.execute(
+                "SELECT * FROM backend_temporary_configs WHERE id = ?", (config['id'],)
+            ).fetchone()
+            self.assertEqual(row['status'], 'active')
+            self.assertEqual(row['expires_at'], original_expires_at)
+            # Ensure no calls were made to driver (it failed at local_channel acquisition)
+            self.assertEqual(self.driver.calls, original_calls)
+
+    def test_temporary_artifact_direct_service_missing_token_preserves_access_denied(self):
+        self.prepare()
+        config = self.create()
+        self.service.run_one()
+
+        from backend.driver_transport import LocalDriverTokenMissing
+
+        unconnected_service = TemporaryConfigService(self.db, driver=None)
+        secret_token = 'RAW_SECRET_TOKEN_VALUE_456'
+        with patch('backend.driver_transport.local_channel',
+                   side_effect=LocalDriverTokenMissing(f'local Driver token missing: {secret_token}')):
+            with self.assertRaises(AccessDenied) as ctx:
+                unconnected_service.artifact(self.actor, config['id'])
+            self.assertEqual(ctx.exception.code, 'config_unavailable')
+            self.assertEqual(ctx.exception.status, 503)
+            self.assertNotIn(secret_token, str(ctx.exception))
+
+        # Preserve existing AccessDenied statuses (not swallowed or transformed to 503):
+        # 1. Nonexistent config raises 404 resource_not_found
+        with self.assertRaises(AccessDenied) as ctx_missing:
+            self.service.artifact(self.actor, str(uuid4()))
+        self.assertEqual(ctx_missing.exception.code, 'resource_not_found')
+        self.assertEqual(ctx_missing.exception.status, 404)
+
+        # 2. Expired config raises 410 config_expired
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_temporary_configs SET expires_at=? WHERE id=?",
+                         ((datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat(), config['id']))
+        with self.assertRaises(AccessDenied) as ctx_expired:
+            self.service.artifact(self.actor, config['id'])
+        self.assertEqual(ctx_expired.exception.code, 'config_expired')
+        self.assertEqual(ctx_expired.exception.status, 410)

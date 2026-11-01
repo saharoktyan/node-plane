@@ -48,7 +48,7 @@ def schedule_refresh(state, refresh, *, interval=3):
         delay = interval
         while True:
             await asyncio.sleep(delay)
-            delay = interval or 3
+            delay = max(delay, interval or 3)
             try:
                 await refresh()
                 return
@@ -64,8 +64,11 @@ def schedule_refresh(state, refresh, *, interval=3):
                 logging.getLogger(__name__).warning('Panel refresh connection unavailable; retrying')
             except Exception as exc:
                 # Never include request objects or exception messages with secrets.
-                logging.getLogger(__name__).warning('Panel refresh failed: type=%s', type(exc).__name__)
-                return
+                logging.getLogger(__name__).warning('Panel refresh failed: type=%s; retrying', type(exc).__name__)
+                # Observers only read status. A single rendering failure must
+                # not leave every progress panel permanently frozen. Back off
+                # for persistent failures; navigation still cancels this task.
+                delay = min(max(delay * 2, interval or 3), 30)
     task = asyncio.create_task(observe())
     _REFRESH_TASKS[key] = task
     def finished(completed):
@@ -347,7 +350,9 @@ class NotificationStateMiddleware(BaseMiddleware):
                     await isolated.update_data(locale=locale)
                 data['state'] = isolated
                 data['raw_state'] = await isolated.get_state()
-        if data.get('state') is not None:
+        # Service updates (for example chat membership changes) do not leave
+        # the open panel and must not silently stop its progress observer.
+        if data.get('state') is not None and (query is not None or message is not None):
             cancel_refresh(data['state'])
         return await handler(event, data)
 

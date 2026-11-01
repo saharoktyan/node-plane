@@ -9172,3 +9172,249 @@ fn version_mismatch_full_warning_is_visible_with_legacy_channel_details() {
         assert!(text.contains("Dismiss"));
     }
 }
+
+#[test]
+fn controller_boolean_values_keep_accent_and_labels_follow_focus() {
+    struct ToggleCase {
+        name: &'static str,
+        control: Control,
+        prefix: &'static str,
+        setup: fn(&mut App, bool),
+    }
+
+    fn assert_toggle_rendered(
+        terminal: &Terminal<ratatui::backend::TestBackend>,
+        area: Rect,
+        expected_prefix: &str,
+        expected_value: &str,
+        expected_value_color: Color,
+        expected_label_color: Color,
+        case_name: &str,
+    ) {
+        let buffer = terminal.backend().buffer();
+        let inner = Block::bordered().inner(area);
+        let line: String = (inner.x..inner.right())
+            .map(|x| buffer[(x, inner.y)].symbol())
+            .collect();
+        let full_label = format!("{expected_prefix}{expected_value}");
+        let start_idx = line
+            .find(&full_label)
+            .unwrap_or_else(|| panic!("expected {full_label:?} in line {line:?} for {case_name}"));
+
+        let prefix_len = expected_prefix.len();
+        for i in 0..prefix_len {
+            let x = inner.x + start_idx as u16 + i as u16;
+            let cell = &buffer[(x, inner.y)];
+            if cell.symbol() != " " {
+                assert_eq!(
+                    cell.fg,
+                    expected_label_color,
+                    "label char {:?} at x={x} has wrong focus colour for {case_name}",
+                    cell.symbol()
+                );
+            }
+        }
+
+        for (i, expected_char) in expected_value.chars().enumerate() {
+            let x = inner.x + start_idx as u16 + (prefix_len + i) as u16;
+            let cell = &buffer[(x, inner.y)];
+            assert_eq!(
+                cell.symbol(),
+                expected_char.to_string(),
+                "unexpected value char at x={x} for {case_name}"
+            );
+            assert_eq!(
+                cell.fg,
+                expected_value_color,
+                "value char {:?} at x={x} should have color {:?} for {case_name}",
+                cell.symbol(),
+                expected_value_color
+            );
+        }
+    }
+
+    let cases = [
+        ToggleCase {
+            name: "Notify when resolved",
+            control: Control::ControllerAlertToggle("notify_resolved"),
+            prefix: "Notify when resolved: ",
+            setup: |app, on| {
+                app.screen = Screen::Controller;
+                app.controller.alerts = Some(serde_json::json!({
+                    "enabled": true,
+                    "notify_resolved": on,
+                    "active": []
+                }));
+            },
+        },
+        ToggleCase {
+            name: "Traffic collection",
+            control: Control::ControllerPolicyToggle("traffic"),
+            prefix: "Traffic collection: ",
+            setup: |app, on| {
+                app.screen = Screen::Controller;
+                app.controller_section = Some(ControllerSection::Policies);
+                app.requests_settings = false;
+                app.controller.policies = Some(serde_json::json!({
+                    "traffic": { "enabled": on },
+                    "requests": { "enabled": false, "notify_requests": false }
+                }));
+            },
+        },
+        ToggleCase {
+            name: "Access requests",
+            control: Control::ControllerPolicyToggle("requests"),
+            prefix: "Access requests: ",
+            setup: |app, on| {
+                app.screen = Screen::Controller;
+                app.requests_settings = true;
+                app.controller.policies = Some(serde_json::json!({
+                    "traffic": { "enabled": false },
+                    "requests": { "enabled": on, "notify_requests": false }
+                }));
+            },
+        },
+        ToggleCase {
+            name: "Request notifications",
+            control: Control::ControllerPolicyToggle("notifications"),
+            prefix: "Request notifications: ",
+            setup: |app, on| {
+                app.screen = Screen::Controller;
+                app.requests_settings = true;
+                app.controller.policies = Some(serde_json::json!({
+                    "traffic": { "enabled": false },
+                    "requests": { "enabled": true, "notify_requests": on }
+                }));
+            },
+        },
+        ToggleCase {
+            name: "IPv6 outbound",
+            control: Control::ControllerDefaultsToggle("ipv6_outbound"),
+            prefix: "IPv6 outbound: ",
+            setup: |app, on| {
+                app.screen = Screen::Controller;
+                app.controller.defaults = Some(serde_json::json!({
+                    "protocols": ["awg"],
+                    "settings": {
+                        "ipv6_outbound": if on { "on" } else { "off" }
+                    }
+                }));
+            },
+        },
+        ToggleCase {
+            name: "Alerts baseline",
+            control: Control::ControllerAlertToggle("enabled"),
+            prefix: "Alerts: ",
+            setup: |app, on| {
+                app.screen = Screen::Controller;
+                app.controller.alerts = Some(serde_json::json!({
+                    "enabled": on,
+                    "notify_resolved": false,
+                    "active": []
+                }));
+            },
+        },
+        ToggleCase {
+            name: "Auto-check baseline",
+            control: Control::ControllerUpdateAuto,
+            prefix: "Auto-check: ",
+            setup: |app, on| {
+                app.screen = Screen::Controller;
+                app.form.select_action(Action::Update);
+                app.controller.updates = Some(serde_json::json!({
+                    "auto_check_enabled": on,
+                    "auto_check_interval_minutes": 360
+                }));
+            },
+        },
+        ToggleCase {
+            name: "Auto backups baseline",
+            control: Control::ControllerBackupAuto,
+            prefix: "Auto backups: ",
+            setup: |app, on| {
+                app.screen = Screen::Controller;
+                app.controller.backups = Some(serde_json::json!({
+                    "enabled": on,
+                    "interval_hours": 24,
+                    "keep_count": 5
+                }));
+            },
+        },
+    ];
+
+    let accent_hex = "#12ab34";
+    let accent = accent_color(accent_hex);
+    for case in &cases {
+        for on in [true, false] {
+            let mut app = test_profile_app();
+            app.connections.accent = accent_hex.into();
+            (case.setup)(&mut app, on);
+            app.controller_sidebar = false;
+            app.controller.selected = app
+                .controller_controls()
+                .iter()
+                .position(|control| *control == case.control)
+                .unwrap();
+            let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+            terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+            let area = app
+                .hits
+                .iter()
+                .find(|hit| hit.control == case.control)
+                .unwrap()
+                .area;
+            let other = app
+                .hits
+                .iter()
+                .find(|hit| {
+                    hit.control != case.control
+                        && matches!(
+                            terminal.backend().buffer()[(hit.area.x, hit.area.y)].symbol(),
+                            "┌" | "╭"
+                        )
+                })
+                .map(|hit| (hit.control, hit.area))
+                .unwrap();
+            // Keyboard focus, pointer away, pointer on this toggle, pointer on another control.
+            for mode in 0..4 {
+                app.pointer_active = mode != 0;
+                app.hovered = match mode {
+                    2 => Some(case.control),
+                    3 => Some(other.0),
+                    _ => None,
+                };
+                app.pointer_position = match mode {
+                    0 => None,
+                    2 => Some((area.x + 1, area.y + 1).into()),
+                    3 => Some((other.1.x + 1, other.1.y + 1).into()),
+                    _ => Some((0, 0).into()),
+                };
+                terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+                let focused = mode == 0 || mode == 2;
+                assert_toggle_rendered(
+                    &terminal,
+                    area,
+                    case.prefix,
+                    if on { "On" } else { "Off" },
+                    accent,
+                    if focused { accent } else { Color::White },
+                    case.name,
+                );
+                assert_eq!(
+                    terminal.backend().buffer()[(area.x, area.y)].fg,
+                    if focused { accent } else { Color::White },
+                    "toggle outline for {} mode={mode} on={on}",
+                    case.name
+                );
+                if mode == 3 {
+                    assert_eq!(
+                        terminal.backend().buffer()[(other.1.x, other.1.y)].fg,
+                        accent,
+                        "hovered outline should follow pointer for {}",
+                        case.name
+                    );
+                }
+            }
+        }
+    }
+}
