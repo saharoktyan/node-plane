@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.5.0-beta.1
+
+- First beta-channel release, based on the tested 0.5.0-alpha.5 feature set.
+- Includes controller and local/SSH node setup, Xray and AmneziaWG management,
+  authenticated updates and verified rollback.
+
 ## 0.5.0-alpha.5
 
 - Ship authenticated Driver build verification in controller updates with macOS 15
