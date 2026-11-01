@@ -396,7 +396,7 @@ wheels = [
 
 [[package]]
 name = "node-plane-controller"
-version = "0.5.0a3"
+version = "0.5.0a4"
 source = { virtual = "." }
 default-groups = ["backend", "dev", "telegram"]
 dependencies = [

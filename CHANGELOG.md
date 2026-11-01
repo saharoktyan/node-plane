@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.5.0-alpha.4
+
+- Authenticate the updater's Driver build verification using the shared local
+  credential instead of failing a healthy controller update with UNAUTHENTICATED.
+
 ## 0.5.0-alpha.3
 
 - Keep Telegram progress screens refreshing after rendering failures and unrelated
