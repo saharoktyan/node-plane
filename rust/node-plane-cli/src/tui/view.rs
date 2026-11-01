@@ -575,6 +575,7 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
     if let Some((prompt, _)) = &app.prompt {
         // Modal hit targets replace background controls, including outside clicks.
         hits.clear();
+        let is_profile_copy = matches!(app.profile_copy, Some(ProfileCopyState::Selecting { .. }));
         let is_version_mismatch = matches!(
             prompt,
             Prompt::ConfirmAction { title, .. } if title == "Version mismatch"
@@ -609,11 +610,22 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
             ),
         };
         if let Prompt::SelectAdministrator { choices } | Prompt::Select { choices, .. } = prompt {
+            let paragraph = Paragraph::new(text).wrap(Wrap { trim: false });
+            let description_height = if is_profile_copy {
+                (paragraph.line_count(sections[0].width) as u16 + 1)
+                    .min(sections[0].height.saturating_sub(choices.len() as u16))
+            } else {
+                3
+            };
             let body =
-                Layout::vertical([Constraint::Length(3), Constraint::Min(0)]).split(sections[0]);
-            frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: false }), body[0]);
+                Layout::vertical([Constraint::Length(description_height), Constraint::Min(0)])
+                    .split(sections[0]);
+            frame.render_widget(paragraph, body[0]);
             let capacity = usize::from(body[1].height).max(1);
-            let start = app.administrator_selected.saturating_sub(capacity - 1);
+            let start = app
+                .administrator_selected
+                .min(choices.len().saturating_sub(1))
+                .saturating_sub(capacity - 1);
             for (row, (index, (_, label))) in choices
                 .iter()
                 .enumerate()
@@ -696,6 +708,17 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
             draw_button_color(frame, cells[1], "Dismiss", !app.trust, Color::Red);
             hits.push(Hit {
                 area: cells[1],
+                control: Control::Prompt(false),
+            });
+        } else if is_profile_copy {
+            draw_button(
+                frame,
+                sections[1],
+                "Cancel",
+                matches!(prompt, Prompt::Select { choices, .. } if app.administrator_selected == choices.len()),
+            );
+            hits.push(Hit {
+                area: sections[1],
                 control: Control::Prompt(false),
             });
         } else if !matches!(prompt, Prompt::Select { .. }) {
@@ -868,8 +891,10 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
         for y in rect.y..rect.bottom() {
             for x in rect.x..rect.right() {
                 if frame.buffer_mut()[(x, y)].fg == SECTION_BORDER
-                    || matches!(hit.control, Control::TemporaryChoice(_))
-                        && frame.buffer_mut()[(x, y)].symbol() == "→"
+                    || matches!(
+                        hit.control,
+                        Control::TemporaryChoice(_) | Control::Administrator(_)
+                    ) && frame.buffer_mut()[(x, y)].symbol() == "→"
                 {
                     continue;
                 }

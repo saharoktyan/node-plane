@@ -20,7 +20,9 @@ def alert_screen(delivery):
             (tr(locale, 'updates.notice.version', value=payload['version']),
              tr(locale, 'updates.notice.branch', value=payload['branch'])),
             sections=(Section(tr(locale, 'updates.notice.changelog'),
-                lines=lines, formatted_blocks=blocks, collapsed=True),) if blocks else (),
+                lines=lines, formatted_blocks=blocks, collapsed=True),) if blocks else
+                (Section(tr(locale, 'updates.notice.changelog'),
+                    lines=(tr(locale, 'updates.notice.no_changelog'),)),),
             embedded_buttons=True)
     lines = [
         tr(locale, "alerts.node", title=event["payload"]["node_title"]),

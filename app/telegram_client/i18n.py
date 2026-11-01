@@ -2666,6 +2666,7 @@ CATALOG['en'].update({
     'updates.notice.version': 'Version: {value}',
     'updates.notice.branch': 'Branch: {value}',
     'updates.notice.changelog': 'Changelog',
+    'updates.notice.no_changelog': 'No release notes are available for this version.',
 })
 CATALOG['ru'].update({
     'updates.auto_title': 'Автопроверка',
@@ -2677,6 +2678,7 @@ CATALOG['ru'].update({
     'updates.notice.version': 'Версия: {value}',
     'updates.notice.branch': 'Ветка: {value}',
     'updates.notice.changelog': 'Изменения',
+    'updates.notice.no_changelog': 'Для этой версии нет описания изменений.',
     'updates.auto_on': 'Автопроверка', 'updates.auto_off': 'Автопроверка',
 })
 

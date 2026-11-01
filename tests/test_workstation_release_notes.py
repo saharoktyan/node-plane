@@ -35,3 +35,13 @@ class WorkstationReleaseNotesTests(unittest.TestCase):
         for tag in ('', '../dev', 'v1.0.0; sh', 'v1.0.0\n', 'v1.0.0-beta', 'v1.0.0-rc', 'v1.0.0-preview.1'):
             with self.subTest(tag=tag), self.assertRaises(ValueError):
                 notes.render_notes('Changelog', tag)
+
+    def test_target_changelog_is_added_without_other_version_notes(self):
+        from services.release_changelog import release_changes, version_changes
+        changelog = '# Changelog\n## Unreleased\n- Future\n## 0.5.0-alpha.6\n- Useful change\n## 0.5.0-alpha.5\n- Previous'
+        rendered = notes.render_notes('## Download\nassets only', 'v0.5.0-alpha.6', changelog)
+        self.assertEqual(release_changes(rendered), '- Useful change')
+        self.assertNotIn('Future', rendered)
+        self.assertNotIn('Previous', rendered)
+        self.assertEqual(version_changes(changelog, 'v0.5.0-alpha.60'), '')
+        self.assertEqual(version_changes('## [1.0.0] - 2026-11-01\n- Released', 'v1.0.0'), '- Released')

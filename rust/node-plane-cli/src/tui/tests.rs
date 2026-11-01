@@ -6112,6 +6112,52 @@ fn profile_transfer_rendered_modal_lists_both_other_channels_and_statuses() {
     assert!(text.contains(crate::config::channel_label(installed_channel)));
     assert!(text.contains(crate::config::channel_label(absent_channel)));
 
+    assert!(!text.contains("Stable (main)"));
+    let first = app
+        .hits
+        .iter()
+        .find(|h| h.control == Control::Administrator(0))
+        .unwrap()
+        .area;
+    let cancel = app
+        .hits
+        .iter()
+        .find(|h| h.control == Control::Prompt(false))
+        .unwrap()
+        .area;
+    assert_eq!(cancel.width, first.width);
+    assert!(cancel.y > first.y + 1);
+    let buffer = terminal.backend().buffer();
+    assert!((first.x..first.right()).all(|x| buffer[(x, first.y - 1)].symbol().trim().is_empty()));
+    app.pointer_active = true;
+    app.pointer_position = Some(ratatui::layout::Position::new(first.x, first.y));
+    terminal
+        .draw(|frame| app.hits = draw_content(frame, &app))
+        .unwrap();
+    assert_eq!(
+        terminal.backend().buffer()[(first.x, first.y)].fg,
+        Color::White
+    );
+    app.pointer_active = false;
+
+    let mut small = Terminal::new(ratatui::backend::TestBackend::new(70, 30)).unwrap();
+    small
+        .draw(|frame| app.hits = draw_content(frame, &app))
+        .unwrap();
+    let first_small = app
+        .hits
+        .iter()
+        .find(|h| h.control == Control::Administrator(0))
+        .unwrap()
+        .area;
+    assert!((first_small.x..first_small.right()).all(|x| {
+        small.backend().buffer()[(x, first_small.y - 1)]
+            .symbol()
+            .trim()
+            .is_empty()
+    }));
+    assert!(app.hits.iter().any(|h| h.control == Control::Prompt(false)));
+
     // Verify keyboard navigation
     assert_eq!(app.administrator_selected, 0);
     app.prompt_key(KeyCode::Down.into());
@@ -9416,5 +9462,30 @@ fn controller_boolean_values_keep_accent_and_labels_follow_focus() {
                 }
             }
         }
+    }
+}
+
+#[test]
+fn profile_transfer_cancel_button_and_keyboard_do_not_copy() {
+    for mouse in [false, true] {
+        let mut app = test_profile_app();
+        let source = private_tempdir();
+        app.state_dir = source.path().into();
+        app.connections.save(&app.state_dir).unwrap();
+        let before = std::fs::read_dir(source.path()).unwrap().count();
+        app.activate(Control::TransferInstallation);
+        if mouse {
+            let key = app.activate(Control::Prompt(false)).unwrap();
+            app.prompt_key(key);
+        } else {
+            app.prompt_key(KeyCode::Down.into());
+            app.prompt_key(KeyCode::Tab.into());
+            assert_eq!(app.administrator_selected, 2);
+            app.prompt_key(KeyCode::Enter.into());
+        }
+        app.finish_profile_copy();
+        assert!(app.prompt.is_none());
+        assert!(app.profile_copy.is_none());
+        assert_eq!(std::fs::read_dir(source.path()).unwrap().count(), before);
     }
 }

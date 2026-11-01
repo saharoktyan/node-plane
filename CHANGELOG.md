@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.5.0-alpha.6
+
+- Show target-version changes in Telegram update notices instead of installer and
+  download tables; publish the matching changelog section in release notes.
+- Clarify Workstation profile-copy destinations, keep selection arrows white,
+  and add a full-width Cancel button.
+
 ## 0.5.0-alpha.5
 
 - Ship authenticated Driver build verification in controller updates with macOS 15
