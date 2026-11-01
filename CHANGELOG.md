@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.5.0-alpha.1
+
+- Prepare the isolated dev channel for installation testing before public beta.
+- Choose the destination Workstation channel when copying a saved profile;
+  report missing installations and retain confirmation before copying.
+- Include the pre-beta security fixes, explicit release channel validation,
+  and controller/agent updater handoff fixes.
+
 ## 0.5.0-beta.1
 
 - Start the public-beta version line with isolated `dev`, `beta` and `stable`

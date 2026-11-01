@@ -279,7 +279,7 @@ pub(super) enum Control {
     SelfUpdate,
     Installation(usize),
     UseInstallation,
-    TransferInstallation(&'static str),
+    TransferInstallation,
     EditInstallation,
     NewInstallation,
     EditField(usize),
@@ -600,6 +600,30 @@ impl ControllerRequestContext {
     }
 }
 
+#[derive(Clone, Debug)]
+pub(super) struct ChannelDestination {
+    pub(super) channel: &'static str,
+    pub(super) label: &'static str,
+    pub(super) branch: &'static str,
+    pub(super) state_dir: std::result::Result<std::path::PathBuf, String>,
+    pub(super) status: crate::self_manage::ChannelStatus,
+}
+
+pub(super) enum ProfileCopyState {
+    Selecting {
+        source_profile: Installation,
+        destinations: Vec<ChannelDestination>,
+        receiver: mpsc::Receiver<Answer>,
+    },
+    Confirming {
+        source_profile: Installation,
+        target_dir: std::path::PathBuf,
+        target_branch: String,
+        target_channel: String,
+        receiver: mpsc::Receiver<Answer>,
+    },
+}
+
 pub(super) struct App {
     pub(super) manual_awg_original: Option<String>,
     pub(super) text_input: std::cell::RefCell<super::text_input::TextInput>,
@@ -685,7 +709,8 @@ pub(super) struct App {
     pub(super) theme_wizard: Option<theme_wizard::ThemeWizard>,
     pub(super) themes: Vec<theme::Theme>,
     pub(super) editor: Option<(Option<uuid::Uuid>, Vec<String>, usize)>,
-    pub(super) profile_copy: Option<(Installation, std::path::PathBuf, mpsc::Receiver<Answer>)>,
+    pub(super) profile_copy: Option<ProfileCopyState>,
+    pub(super) install_roots: Option<crate::self_manage::InstallationRoots>,
     pub(super) exit: bool,
     pub(super) exit_confirm: bool,
     pub(super) discard: Option<Control>,

@@ -37,21 +37,55 @@ pub fn workstation_channel() -> &'static str {
 }
 
 pub fn workstation_launcher() -> &'static str {
-    match workstation_channel() {
+    channel_launcher(workstation_channel())
+}
+
+pub fn channel_launcher(channel: &str) -> &'static str {
+    match channel {
         "dev" => "node-plane-dev",
         "beta" => "node-plane-beta",
         _ => "node-plane",
     }
 }
 
+pub fn channel_branch(channel: &str) -> &'static str {
+    match channel {
+        "stable" => "main",
+        "beta" => "beta",
+        "dev" => "dev",
+        _ => "main",
+    }
+}
+
+pub fn channel_label(channel: &str) -> &'static str {
+    match channel {
+        "stable" => "Stable (main)",
+        "beta" => "Beta",
+        "dev" => "Dev",
+        _ => "Workstation",
+    }
+}
+
 pub fn default_state_dir(channel: &str) -> Result<PathBuf> {
+    default_state_dir_with_root(channel, None)
+}
+
+pub fn default_state_dir_with_root(
+    channel: &str,
+    data_root: Option<&std::path::Path>,
+) -> Result<PathBuf> {
     ensure!(
         matches!(channel, "dev" | "beta" | "stable"),
         "Workstation channel must be dev, beta or stable."
     );
-    let root = dirs::data_local_dir().ok_or_else(|| {
-        anyhow::anyhow!("Cannot locate your private application data directory. Use --state-dir.")
-    })?;
+    let root = match data_root {
+        Some(path) => path.to_path_buf(),
+        None => dirs::data_local_dir().ok_or_else(|| {
+            anyhow::anyhow!(
+                "Cannot locate your private application data directory. Use --state-dir."
+            )
+        })?,
+    };
     // Stable and development workstations keep separate private catalogs.
     Ok(root.join(match channel {
         "dev" => "node-plane-dev",
