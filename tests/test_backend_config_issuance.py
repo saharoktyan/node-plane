@@ -225,3 +225,11 @@ class BackendConfigIssuanceTests(unittest.TestCase):
             denied = client.get(f'/api/v1/config-issuances/{queued.json()["id"]}/artifact',
                 headers=headers)
             self.assertEqual(denied.status_code, 403)
+
+
+class ServerLabelTests(unittest.TestCase):
+    def test_flag_leads_the_server_name_when_set(self):
+        from backend.config_issuance import server_label
+        self.assertEqual(server_label({'title': 'Germany', 'flag': '🇩🇪'}), '🇩🇪 Germany')
+        self.assertEqual(server_label({'title': 'Germany', 'flag': '  '}), 'Germany')
+        self.assertEqual(server_label({'title': 'Germany'}), 'Germany')

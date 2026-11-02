@@ -1161,10 +1161,12 @@ async fn execute_inner(
                     if matches!(&command, crate::controller::Command::BackupPreferences(_) | crate::controller::Command::BackupDelete(_, _)) {
                         value = backend::request(session, &credential, Method::GET, "/api/v1/system/backups", None, None).await?;
                     }
-                    if matches!(&command,crate::controller::Command::Policies | crate::controller::Command::PolicySave(_, _)) {
+                    if matches!(&command,crate::controller::Command::Policies | crate::controller::Command::PolicySave(_, _) | crate::controller::Command::VpnPolicySave(_, _)) {
                         let traffic = backend::request(session,&credential,Method::GET,"/api/v1/system/traffic",None,None).await?;
                         let requests = backend::request(session,&credential,Method::GET,"/api/v1/system/access-requests",None,None).await?;
-                        value = json!({"traffic":traffic,"requests":requests});
+                        // Older controllers have no VPN policy API; their other policies stay usable.
+                        let vpn = backend::request(session,&credential,Method::GET,"/api/v1/vpn-policies/installation",None,None).await.unwrap_or(Value::Null);
+                        value = json!({"traffic":traffic,"requests":requests,"vpn":vpn});
                     }
                     if matches!(&command,crate::controller::Command::AlertPreferences(_) | crate::controller::Command::AlertDismiss(_)) { value = backend::request(session,&credential,Method::GET,"/api/v1/system/alerts",None,None).await?; }
                     let _ = tx.send(Event::Nodes(Update::Controller(profile, command, value)));

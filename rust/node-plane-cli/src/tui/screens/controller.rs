@@ -125,6 +125,7 @@ pub(in crate::tui) fn audit_title(item: &serde_json::Value) -> String {
         "system/backups/preferences" => "Change automatic backup settings".into(),
         "system/backups/jobs" => "Run backup operation".into(),
         "system/traffic/preferences" => "Change traffic collection settings".into(),
+        "vpn-policies/installation" => "Change VPN policies".into(),
         "system/bot-title" => "Change bot name".into(),
         "announcements" => "Send announcement".into(),
         "announcements/preview" => "Preview announcement".into(),

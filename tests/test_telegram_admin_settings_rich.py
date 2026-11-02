@@ -18,16 +18,16 @@ class AdminSettingsRichTests(IsolatedAsyncioTestCase):
             with patch.object(settings, 'render', new_callable=AsyncMock) as draw:
                 await settings.admin_settings_cb(self.query, self.bot, SimpleNamespace(), self.state)
             screen, rows = draw.call_args.args[2:4]
-            self.assertEqual(len(screen.sections), 5)
-            self.assertTrue(screen.sections[3].collapsed)
-            self.assertEqual(screen.sections[4].inline_rows[0][0].callback_data, "admin_documentation")
+            self.assertEqual(len(screen.sections), 6)
+            self.assertTrue(screen.sections[4].collapsed)
+            self.assertEqual(screen.sections[5].inline_rows[0][0].callback_data, "admin_documentation")
             recovery_rows = [row for section in screen.sections for row in section.rows
                 if any(b.callback_data == settings.RecoveryPage().pack() for b in row)]
             self.assertEqual([len(row) for row in recovery_rows], [1])
             from telegram_client.routers.admin_recovery import RecoveryDiagnostics
             self.assertNotIn(RecoveryDiagnostics().pack(), [b.callback_data for row in screen.fallback_rows(rows) for b in row])
             callbacks = [b.callback_data for row in screen.fallback_rows(rows) for b in row]
-            for value in ('bot_title_settings', 'alerts', 'traffic', 'system_cleanup', 'admin_menu'):
+            for value in ('bot_title_settings', 'alerts', 'traffic', 'bittorrent', 'system_cleanup', 'admin_menu'):
                 self.assertIn(value, callbacks)
             self.assertNotIn('backups', callbacks)
             self.assertNotIn('updates', callbacks)
@@ -114,6 +114,33 @@ class AdminSettingsRichTests(IsolatedAsyncioTestCase):
             self.assertTrue(screen.sections[0].lines[0].startswith('SHA256:'))
             self.assertEqual(screen.plain_entities()[0].type, 'code')
             screen.rich(rows)
+
+    async def test_bittorrent_policy_highlights_effective_value_and_stores_default_as_no_override(self):
+        def policy(value, revision):
+            return {'keys': [{'key': 'xray.bittorrent', 'value': value, 'revision': revision,
+                              'default': 'allow', 'effective': value or 'allow'}]}
+        backend = SimpleNamespace(installation_vpn_policies=AsyncMock(return_value=policy(None, 0)),
+                                  update_installation_vpn_policy=AsyncMock(return_value=policy('block', 1)))
+        for data, expected_call, highlighted in (
+                ('bittorrent', None, 'bittorrent:allow'),
+                ('bittorrent:allow', None, 'bittorrent:allow'),
+                ('bittorrent:block', ('xray.bittorrent', 'block', 0), 'bittorrent:block')):
+            self.query.data = data
+            backend.update_installation_vpn_policy.reset_mock()
+            with patch.object(settings, 'render', new_callable=AsyncMock) as draw:
+                await settings.bittorrent_settings_cb(self.query, self.bot, backend, self.state)
+            if expected_call:
+                self.assertEqual(backend.update_installation_vpn_policy.await_args.args[1:], expected_call)
+            else:
+                backend.update_installation_vpn_policy.assert_not_awaited()
+            choices = draw.call_args.args[2].sections[0].rows[0]
+            self.assertEqual([b.callback_data for b in choices if b.style == 'primary'], [highlighted])
+        backend.installation_vpn_policies.return_value = policy('block', 1)
+        backend.update_installation_vpn_policy.return_value = policy(None, 0)
+        self.query.data = 'bittorrent:allow'
+        with patch.object(settings, 'render', new_callable=AsyncMock):
+            await settings.bittorrent_settings_cb(self.query, self.bot, backend, self.state)
+        self.assertEqual(backend.update_installation_vpn_policy.await_args.args[1:], ('xray.bittorrent', None, 1))
 
     async def test_unavailable_traffic_policy_keeps_back_and_does_not_show_choices(self):
         self.query.data = 'traffic'

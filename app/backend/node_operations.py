@@ -98,7 +98,7 @@ class NodeOperations:
                 raise AccessDenied('awg_manual_parameters_active', 409)
             snapshot = ({'node_key': node_key, 'revision': node['desired_revision'],
                          'protocols': json.loads(node['protocols_json']), 'settings': json.loads(node['settings_json'])}
-                        if action in {'install_docker', 'sync_runtime', 'cleanup_runtime'} else _snapshot(node))
+                        if action in {'install_docker', 'sync_runtime', 'cleanup_runtime'} else _snapshot(node, conn))
             job_id = str(uuid4())
             if action in INVALIDATE:
                 snapshot['revision'] += 1

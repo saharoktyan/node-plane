@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Block VLESS client access to loopback, private and reserved destinations
+  with an explicit node routing rule, applied with node settings.
+- Add an installation-wide BitTorrent over VLESS setting (allow by default)
+  in Telegram and Workstation; changing it marks VLESS nodes for settings apply.
+- Start client-visible configuration names with the server flag.
 - Add a Telegram setting for service notifications from System: with sound,
   silent or off. Turned-off notifications are not sent but stay in the Inbox.
   Administrators also receive service notifications for their own profiles.

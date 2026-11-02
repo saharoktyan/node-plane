@@ -143,5 +143,61 @@ class VpnPolicyTests(unittest.TestCase):
         self.assertTrue(backups.detail(self.actor, backup_id)['compatible'])
 
 
+    def test_bittorrent_policy_marks_xray_nodes_and_reaches_settings_intents(self):
+        from backend.node_settings import NodeSettingsService
+        from backend.nodes import NodeService
+        NodeService(self.db).command(self.actor, action='create', command_key=str(uuid4()), values={
+            'key': 'awg1', 'title': 'AWG', 'region': 'EU', 'transport': 'ssh', 'protocols': ['awg'],
+            'ssh_target': 'root@awg.example', 'settings': {'public_host': 'awg.example', 'awg_port': 51820}})
+        def revisions():
+            return {row['key']: row['desired_revision'] for row in
+                    self.db.connection.execute('SELECT key,desired_revision FROM backend_nodes').fetchall()}
+        before = revisions()
+        with self.assertRaises(AccessDenied):
+            self.put('profile', self.profile, self.change('block', key='xray.bittorrent'))
+        self.put('installation', None, self.change('block', key='xray.bittorrent'))
+        after = revisions()
+        self.assertEqual(after['n1'], before['n1'] + 1)
+        self.assertEqual(after['awg1'], before['awg1'])
+        task = NodeSettingsService(self.db).queue(self.actor, 'n1', revision=after['n1'], command_key=str(uuid4()))
+        intent = json.loads(self.db.connection.execute('SELECT intent_json FROM backend_node_settings_tasks WHERE id=?',
+                                                       (task['id'],)).fetchone()['intent_json'])
+        self.assertEqual(intent['settings']['xray_bittorrent'], 'block')
+        # The default is omitted, so older agents keep accepting ordinary settings.
+        self.put('installation', None, self.change('allow', revision=1, key='xray.bittorrent'))
+        with self.db.connect() as conn:
+            self.assertEqual(vpn_policies.runtime_settings(conn, 'n1', ['awg', 'xray']), {})
+            self.assertEqual(vpn_policies.runtime_settings(conn, 'awg1', ['awg']), {})
+
+
+class VpnPolicyHttpTests(unittest.TestCase):
+    def setUp(self):
+        from tests import test_backend_http as http_fixture
+        http_fixture.BackendHTTPTests.setUp(self)
+        self.admin_headers = {**self.headers, 'X-Node-Plane-Telegram-User-ID': '101'}
+
+    def test_installation_policies_are_listed_and_changed_with_idempotency_keys(self):
+        response = self.client.get('/api/v1/vpn-policies/installation', headers=self.admin_headers)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIn({'key': 'xray.bittorrent', 'value': None, 'revision': 0, 'default': 'allow',
+                       'effective': 'allow'}, response.json()['keys'])
+        body = {'changes': [{'key': 'xray.bittorrent', 'value': 'block', 'revision': 0}]}
+        key = str(uuid4())
+        for _ in range(2):
+            response = self.client.patch('/api/v1/vpn-policies/installation', json=body,
+                                         headers={**self.admin_headers, 'Idempotency-Key': key})
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()['keys'][0]['effective'], 'block')
+        for invalid in ({'changes': []}, {'changes': [{'key': 'xray.bittorrent', 'value': 'maybe', 'revision': 1}]},
+                        {'changes': [{'key': 'xray.bittorrent', 'value': 'allow', 'revision': True}]}):
+            self.assertEqual(self.client.patch('/api/v1/vpn-policies/installation', json=invalid,
+                headers={**self.admin_headers, 'Idempotency-Key': str(uuid4())}).status_code, 422)
+        self.assertEqual(self.client.patch('/api/v1/vpn-policies/installation', json=body,
+            headers=self.admin_headers).status_code, 422)
+        from tests import test_backend_http as http_fixture
+        http_fixture.BackendHTTPTests.provision(self, 102)
+        member = {**self.headers, 'X-Node-Plane-Telegram-User-ID': '102'}
+        self.assertEqual(self.client.get('/api/v1/vpn-policies/installation', headers=member).status_code, 403)
+
 if __name__ == '__main__':
     unittest.main()

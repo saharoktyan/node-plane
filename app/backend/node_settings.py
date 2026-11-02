@@ -59,7 +59,8 @@ def persist_selected_port(conn, node_key, revision, intent, result):
             (json.dumps(effective['settings'], sort_keys=True), node_key, revision))
 
 
-def _snapshot(node):
+def _snapshot(node, conn=None):
+    """Validated settings intent; with a connection, resolved VPN policies are included."""
     protocols = json.loads(node['protocols_json'])
     settings = protocol_defaults(json.loads(node['settings_json']), protocols)
     if (protocols and 'public_host' not in settings) or ('xray' in protocols and not {
@@ -81,6 +82,9 @@ def _snapshot(node):
     if 'xray' in protocols and (settings['xray_tcp_port'] == settings['xray_xhttp_port']
                                 or not settings['xray_xhttp_path'].startswith('/')):
         raise AccessDenied('invalid_input', 422)
+    if conn is not None:
+        from .vpn_policies import runtime_settings
+        settings = {**settings, **runtime_settings(conn, node['key'], protocols)}
     return {'node_key': node['key'], 'revision': node['desired_revision'],
             'protocols': protocols, 'settings': settings}
 
@@ -156,7 +160,7 @@ class NodeSettingsService:
                 require_runtime(observed)
             if not settings_apply_pending(observed) and not json.loads(node['protocols_json']):
                 raise AccessDenied('settings_already_applied', 409)
-            intent = _snapshot(node)
+            intent = _snapshot(node, conn)
             previous_protocols = applied_protocols(observed)
             intent['protocol_plan'] = {'remove_protocols': sorted(set(previous_protocols or []) - set(intent['protocols']))}
             from .force_recovery import forced_profile_targets
@@ -241,7 +245,7 @@ class NodeSettingsExecutor:
             revision = max(node['desired_revision'], intent['revision']) + 1
             conn.execute('UPDATE backend_nodes SET enabled=0,desired_revision = ? WHERE key = ?',
                          (revision, row['node_key']))
-            fresh = _snapshot(dict(node, desired_revision=revision))
+            fresh = _snapshot(dict(node, desired_revision=revision), conn)
             previous_protocols = applied_protocols(observed)
             if not fresh['protocols'] and previous_protocols is None:
                 raise AccessDenied('node_settings_incomplete', 409)

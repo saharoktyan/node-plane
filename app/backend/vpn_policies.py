@@ -31,6 +31,9 @@ class PolicyKey:
     validate: Callable[[Any], Any]
     default: Any = None
     protocols: frozenset = frozenset(PROTOCOLS)
+    # Node runtime settings: a change marks affected nodes for settings apply,
+    # and node settings intents carry the resolved value as `setting`.
+    setting: str | None = None
 
 
 REGISTRY: dict[str, PolicyKey] = {}
@@ -60,6 +63,28 @@ def choice(*values):
 
 
 mode = choice(*MODES)
+
+register(PolicyKey('xray.bittorrent', frozenset({'installation'}), frozenset({'global'}),
+                   choice('allow', 'block'), default='allow', protocols=frozenset({'xray'}),
+                   setting='xray_bittorrent'))
+
+
+def runtime_settings(conn, node_key, protocols):
+    """Resolved non-default node runtime values for a node settings intent."""
+    values = {}
+    for spec in REGISTRY.values():
+        for protocol in sorted(spec.protocols & set(protocols)) if spec.setting else ():
+            value = effective(conn, node_key=node_key, protocol=protocol, keys=[spec.name])[spec.name]
+            if value != spec.default:
+                values[spec.setting] = value
+    return values
+
+
+def _mark_nodes(conn, spec, node_key):
+    # A changed runtime value needs the ordinary per-node settings apply.
+    for node in conn.execute('SELECT key,protocols_json FROM backend_nodes').fetchall():
+        if (node_key is None or node['key'] == node_key) and spec.protocols & set(json.loads(node['protocols_json'])):
+            conn.execute('UPDATE backend_nodes SET desired_revision=desired_revision+1 WHERE key=?', (node['key'],))
 
 
 def create_schema(conn):
@@ -163,6 +188,21 @@ class VpnPolicies:
         if found is None:
             raise AccessDenied('resource_not_found', 404)
 
+    @staticmethod
+    def _keys(conn, subject_kind, subject_id):
+        # Each key the subject may set globally, with its own value and the
+        # effective value it currently resolves to.
+        own = {row['key']: row for row in _rows(conn, subject_kind, subject_id)
+               if row['node_key'] is None and row['protocol'] is None}
+        target = {'profile_id': subject_id} if subject_kind == 'profile' else (
+            {'device_id': subject_id} if subject_kind == 'device' else {})
+        names = sorted(name for name, spec in REGISTRY.items()
+                       if subject_kind in spec.subjects and 'global' in spec.scopes)
+        resolved = effective(conn, keys=names, **target) if names else {}
+        return [{'key': name, 'value': json.loads(own[name]['value_json']) if name in own else None,
+                 'revision': own[name]['revision'] if name in own else 0,
+                 'default': REGISTRY[name].default, 'effective': resolved[name]} for name in names]
+
     def get(self, actor, subject_kind, subject_id=None):
         self._authorize(actor, subject_kind)
         with self.db.connect() as conn:
@@ -173,6 +213,7 @@ class VpnPolicies:
                     'SELECT 1 FROM backend_devices WHERE id=?', (subject_id,)).fetchone():
                 raise AccessDenied('resource_not_found', 404)
             return {'subject_kind': subject_kind, 'subject_id': subject_id,
+                    'keys': self._keys(conn, subject_kind, subject_id),
                     'values': [public(row) for row in _rows(conn, subject_kind, subject_id)
                                if row['key'] in REGISTRY]}
 
@@ -185,6 +226,8 @@ class VpnPolicies:
         node_key, protocol = change.get('node_key'), change.get('protocol')
         revision = change['revision']
         if spec is None or subject_kind not in spec.subjects or type(revision) is not int or revision < 0:
+            raise AccessDenied('invalid_input', 422)
+        if spec.setting and subject_kind != 'installation':
             raise AccessDenied('invalid_input', 422)
         if node_key is not None and not isinstance(node_key, str):
             raise AccessDenied('invalid_input', 422)
@@ -239,6 +282,9 @@ class VpnPolicies:
                      node_key or '', protocol or '', name)).fetchone()
                 if (row['revision'] if row else 0) != revision:
                     raise AccessDenied('revision_conflict', 412)
+                spec = REGISTRY[name]
+                if spec.setting:
+                    _mark_nodes(conn, spec, node_key)
                 if value is None:
                     if row:
                         conn.execute('DELETE FROM backend_vpn_policies WHERE id=?', (row['id'],))
@@ -251,6 +297,7 @@ class VpnPolicies:
                         (str(uuid4()), subject_kind, columns['profile_id'], columns['device_id'],
                          node_key, protocol, name, json.dumps(value, sort_keys=True), 1, timestamp))
             result = {'subject_kind': subject_kind, 'subject_id': subject_id,
+                      'keys': self._keys(conn, subject_kind, subject_id),
                       'values': [public(row) for row in _rows(conn, subject_kind, subject_id)
                                  if row['key'] in REGISTRY]}
             conn.execute('''UPDATE backend_vpn_policy_commands SET result_json=?

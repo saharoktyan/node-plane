@@ -16,6 +16,15 @@ SPEC.loader.exec_module(MODULE)
 REMOVE_UNSELECTED = MODULE.remove_unselected_protocols
 
 
+def routed(data):
+    """A protocol config fixture after apply-node-settings added the routing policy."""
+    return {**data, 'outbounds': data.get('outbounds', []) + [{'protocol': 'blackhole', 'tag': 'node-plane-blocked'}],
+            'routing': {'rules': [{'type': 'field', 'inboundTag': ['api'], 'outboundTag': 'api'},
+                                  {'type': 'field', 'ruleTag': 'node-plane-private', 'ip': ['127.0.0.0/8'],
+                                   'inboundTag': ['reality-tcp', 'reality-xhttp'],
+                                   'outboundTag': 'node-plane-blocked'}]}}
+
+
 class AgentNodeSettingsIntentTests(unittest.TestCase):
     def test_settings_command_publishes_progress_without_changing_its_identity(self):
         from uuid import uuid4
@@ -327,15 +336,26 @@ class AgentNodeSettingsIntentTests(unittest.TestCase):
         intent = self.intent()
         xray = Path(self.temp.name) / 'xray.json'
         awg = Path(self.temp.name) / 'wg0.conf'
-        data = {'outbounds': [{'protocol': 'freedom', 'tag': 'direct'}], 'inbounds': [
+        data = routed({'outbounds': [{'protocol': 'freedom', 'tag': 'direct'}], 'inbounds': [
             {'tag': 'reality-tcp', 'port': 443, 'streamSettings': {
                 'realitySettings': {'serverNames': ['www.cloudflare.com'], 'dest': 'www.cloudflare.com:443'}}},
             {'tag': 'reality-xhttp', 'port': 8443, 'streamSettings': {
                 'realitySettings': {'serverNames': ['www.cloudflare.com'], 'dest': 'www.cloudflare.com:443'},
-                'xhttpSettings': {'path': '/assets'}}}]}
+                'xhttpSettings': {'path': '/assets'}}}]})
         xray.write_text(json.dumps(data))
         awg.write_text('[Interface]\nListenPort = 51820\n')
         MODULE.verify_node_settings_config(intent, xray, awg)
+        # The routing policy is part of the verified Xray settings.
+        for broken in ({**data, 'routing': {'rules': []}},
+                       {**data, 'routing': {'rules': data['routing']['rules'][::-1]}},
+                       {**data, 'outbounds': data['outbounds'][:1]}):
+            xray.write_text(json.dumps(broken))
+            with self.assertRaises(ValueError):
+                MODULE.verify_node_settings_config(intent, xray, awg)
+        blocked = dict(intent, settings=dict(intent['settings'], xray_bittorrent='block'))
+        xray.write_text(json.dumps(data))
+        with self.assertRaises(ValueError):
+            MODULE.verify_node_settings_config(blocked, xray, awg)
         data['inbounds'][0]['port'] = 444
         xray.write_text(json.dumps(data))
         with self.assertRaises(ValueError):
@@ -356,7 +376,7 @@ class AgentNodeSettingsIntentTests(unittest.TestCase):
         env.write_text(f'SERVER_KEY=n1\nXRAY_CONFIG={xray}\nAWG_CONFIG={awg}\nXRAY_CONTAINER_NAME=xray\nAWG_CONTAINER_NAME=awg\n')
         (scripts / 'init-xray.sh').write_text('''#!/bin/sh
 cat > "$1" <<'EOF'
-{"inbounds":[{"tag":"reality-tcp","port":443,"streamSettings":{"realitySettings":{"serverNames":["www.cloudflare.com"],"dest":"www.cloudflare.com:443"}}},{"tag":"reality-xhttp","port":8443,"streamSettings":{"realitySettings":{"serverNames":["www.cloudflare.com"],"dest":"www.cloudflare.com:443"},"xhttpSettings":{"path":"/assets"}}}]}
+{"inbounds":[{"tag":"reality-tcp","port":443,"streamSettings":{"realitySettings":{"serverNames":["www.cloudflare.com"],"dest":"www.cloudflare.com:443"}}},{"tag":"reality-xhttp","port":8443,"streamSettings":{"realitySettings":{"serverNames":["www.cloudflare.com"],"dest":"www.cloudflare.com:443"},"xhttpSettings":{"path":"/assets"}}}],"outbounds":[{"protocol":"blackhole","tag":"node-plane-blocked"}],"routing":{"rules":[{"ruleTag":"node-plane-private","inboundTag":["reality-tcp","reality-xhttp"],"outboundTag":"node-plane-blocked"}]}}
 EOF
 ''')
         (scripts / 'init-awg.sh').write_text(f'''#!/bin/sh
@@ -403,12 +423,12 @@ printf '[Interface]\\nListenPort = 51820\\n' > '{awg}'
             with self.subTest(protocols=protocols):
                 env.write_text(f'SERVER_KEY=n1\nXRAY_CONFIG={xray}\nAWG_CONFIG={awg}\nXRAY_CONTAINER_NAME=xray\nAWG_CONTAINER_NAME=awg\n')
                 awg.write_text('[Interface]\nListenPort = 51999\n')
-                xray.write_text(json.dumps({'inbounds': [
+                xray.write_text(json.dumps(routed({'inbounds': [
                     {'tag': 'reality-tcp', 'port': 4443, 'streamSettings': {
                         'realitySettings': {'serverNames': ['www.cloudflare.com'], 'dest': 'www.cloudflare.com:443'}}},
                     {'tag': 'reality-xhttp', 'port': 9443, 'streamSettings': {
                         'realitySettings': {'serverNames': ['www.cloudflare.com'], 'dest': 'www.cloudflare.com:443'},
-                        'xhttpSettings': {'path': '/assets'}}}]}))
+                        'xhttpSettings': {'path': '/assets'}}}]})))
                 intent = self.intent()
                 intent['protocols'] = protocols
                 intent['settings'].update(awg_port=51999, xray_tcp_port=4443, xray_xhttp_port=9443)
@@ -431,7 +451,7 @@ printf '[Interface]\\nListenPort = 51820\\n' > '{awg}'
             awg_i1_preset='dns', xray_fingerprint='firefox')
         env = Path(self.temp.name) / 'node.env'
         values = {'SERVER_KEY': 'n1', 'AWG_SERVER_IP': 'awg.example', 'AWG_SERVER_PORT': '51820',
-                  'AWG_IFACE': 'vpn0', 'AWG_I1_PRESET': 'dns', 'XRAY_FP': 'firefox'}
+                  'AWG_IFACE': 'vpn0', 'AWG_I1_PRESET': 'dns', 'XRAY_FP': 'firefox', 'XRAY_BITTORRENT': 'allow'}
         def write(settings):
             env.write_text(''.join(f'{key}={value}\n' for key, value in settings.items()))
         write(values)
@@ -524,7 +544,18 @@ printf '[Interface]\\nListenPort = 51820\\n' > '{awg}'
         MODULE.verify_node_settings_config(intent, xray, new_awg)
         direct = next(item for item in updated['outbounds'] if item['tag'] == 'direct')
         self.assertEqual(direct['settings']['domainStrategy'], 'ForceIPv4')
-        self.assertEqual(updated['routing']['rules'][0]['ip'], ['::/0'])
+        self.assertEqual([rule['ip'] for rule in updated['routing']['rules']
+                          if rule.get('outboundTag') == 'node-plane-ipv6-disabled'], [['::/0']])
+        self.assertNotIn('sniffing', updated['inbounds'][0])
+        intent['settings']['xray_bittorrent'] = 'block'
+        with patch.object(MODULE.subprocess, 'run', side_effect=run):
+            MODULE.run_node_settings(intent, 0, env_path=env, root=root)
+        blocked = json.loads(xray.read_text())
+        self.assertEqual([rule.get('ruleTag') for rule in blocked['routing']['rules']][:2],
+                         ['node-plane-private', 'node-plane-bittorrent'])
+        self.assertTrue(all(inbound['sniffing']['routeOnly'] for inbound in blocked['inbounds']))
+        self.assertIn('XRAY_BITTORRENT=block', env.read_text())
+        del intent['settings']['xray_bittorrent']
         intent['settings']['ipv6_outbound'] = 'on'
         with patch.object(MODULE.subprocess, 'run', side_effect=run):
             MODULE.run_node_settings(intent, 0, env_path=env, root=root)

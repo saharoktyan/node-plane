@@ -3068,6 +3068,52 @@ fn policies_root_has_traffic_and_requests_settings_are_separate() {
 }
 
 #[test]
+fn bittorrent_policy_toggle_appears_with_vpn_policies_and_stores_default_as_no_value() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Controller;
+    app.activate(Control::ControllerSection(ControllerSection::Policies));
+    app.nodes_requested.take();
+    // Older controllers return no VPN policy document; the toggle is hidden.
+    app.controller.apply(
+        crate::controller::Command::Policies,
+        serde_json::json!({"traffic":{"enabled":false},"requests":{"enabled":true},"vpn":null}),
+    );
+    assert!(
+        !app.controller_controls()
+            .contains(&Control::ControllerPolicyToggle("bittorrent"))
+    );
+    let policy = |value: serde_json::Value, revision: u64| {
+        serde_json::json!({"traffic":{"enabled":false},"requests":{"enabled":true},
+        "vpn":{"keys":[{"key":"xray.bittorrent","value":value.clone(),"revision":revision,"default":"allow",
+            "effective":if value.is_null() {serde_json::json!("allow")} else {value}}]}})
+    };
+    app.controller.apply(
+        crate::controller::Command::Policies,
+        policy(serde_json::Value::Null, 0),
+    );
+    assert!(
+        app.controller_controls()
+            .contains(&Control::ControllerPolicyToggle("bittorrent"))
+    );
+    app.activate(Control::ControllerPolicyToggle("bittorrent"));
+    assert!(
+        matches!(app.nodes_requested.take(), Some(crate::nodes::Command::Controller(_,
+        crate::controller::Command::VpnPolicySave(value, _))) if value["changes"][0]["value"] == "block"
+            && value["changes"][0]["revision"] == 0)
+    );
+    app.controller.apply(
+        crate::controller::Command::Policies,
+        policy(serde_json::json!("block"), 1),
+    );
+    app.activate(Control::ControllerPolicyToggle("bittorrent"));
+    assert!(
+        matches!(app.nodes_requested.take(), Some(crate::nodes::Command::Controller(_,
+        crate::controller::Command::VpnPolicySave(value, _))) if value["changes"][0]["value"].is_null()
+            && value["changes"][0]["revision"] == 1)
+    );
+}
+
+#[test]
 fn open_sidebar_label_keeps_accent_after_wheel_scroll() {
     let mut app = test_profile_app();
     app.activate(Control::Action(Action::Install));

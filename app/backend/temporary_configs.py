@@ -348,7 +348,8 @@ class TemporaryConfigService:
             # datetime equality permits equivalent UTC encodings, but never a renewed lease.
             if datetime.fromisoformat(receipt['expires_at']) != datetime.fromisoformat(row['expires_at']):
                 raise AccessDenied('config_stale',409)
-        label = ('AWG' if row['protocol'] == 'awg' else 'VLESS · ' + row['transport'].upper()) + ' · ' + node['title'] + ' · Temp'
+        from .config_issuance import server_label
+        label = server_label(node) + ' · ' + ('AWG' if row['protocol'] == 'awg' else 'VLESS · ' + row['transport'].upper()) + ' · Temp'
         safe_title = re.sub(r'[^\w .()#-]+', '', node['title']).strip(' .')[:64] or row['node_key']
         if row['protocol']=='awg':
             config = driver.refresh_awg_config(row['node_key'],receipt['wg_conf'],label)

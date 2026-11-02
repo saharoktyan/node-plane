@@ -91,6 +91,8 @@ async def admin_settings_cb(query: CallbackQuery, bot: Bot,
         Section(tr(locale, 'settings.rich.access'), rows=(tuple(rows[0]),
             (InlineKeyboardButton(text=tr(locale, 'temporary.title'),callback_data='temporary:list:0'),))),
         Section(tr(locale, 'settings.rich.monitoring'), rows=(tuple(rows[1]),)),
+        Section(tr(locale, 'settings.rich.vpn'), rows=((InlineKeyboardButton(
+            text=tr(locale, 'bittorrent.title'), callback_data='bittorrent'),),)),
         Section(tr(locale, 'settings.rich.maintenance'), rows=(tuple(rows[2]),
             (InlineKeyboardButton(text=tr(locale, 'recovery.title'), callback_data=RecoveryPage().pack()),),
             (InlineKeyboardButton(text=tr(locale, 'defaults.title'), callback_data='idefault:open'),))),
@@ -537,6 +539,33 @@ async def update_action_cb(query: CallbackQuery, callback_data: UpdateActionCall
             [[InlineKeyboardButton(text=tr(locale, 'back'),
                 callback_data=UpdatesCallback().pack())]],
             state, query.message.message_id)
+
+
+@router.callback_query(F.data.in_({'bittorrent', 'bittorrent:allow', 'bittorrent:block'}))
+async def bittorrent_settings_cb(query: CallbackQuery, bot: Bot,
+                                 backend: BackendClient, state: FSMContext) -> None:
+    await query.answer()
+    locale = await _locale(state)
+    rows = [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data=AdminSettingsCallback().pack())]]
+    sections = ()
+    lines = ()
+    try:
+        policy = await backend.installation_vpn_policies(query.from_user.id)
+        current = next(item for item in policy['keys'] if item['key'] == 'xray.bittorrent')
+        if query.data != 'bittorrent':
+            value = query.data.split(':', 1)[1]
+            if value != current['effective']:
+                # The default is stored as no value, so returning to it keeps no override.
+                policy = await backend.update_installation_vpn_policy(query.from_user.id, 'xray.bittorrent',
+                    None if value == current['default'] else value, current['revision'])
+                current = next(item for item in policy['keys'] if item['key'] == 'xray.bittorrent')
+        choices = tuple(InlineKeyboardButton(text=tr(locale, 'bittorrent.' + value), callback_data='bittorrent:' + value,
+                        style='primary' if current['effective'] == value else None) for value in ('allow', 'block'))
+        sections = (Section(tr(locale, 'bittorrent.policy'), lines=(tr(locale, 'bittorrent.hint'),), rows=(choices,)),)
+    except BackendError as exc:
+        lines = (_friendly_error(locale, exc),)
+    await render(bot, query.message.chat.id, Screen(tr(locale, 'bittorrent.title'), lines,
+        sections=sections, embedded_buttons=True, navigation=True), rows, state, query.message.message_id)
 
 
 @router.callback_query(F.data.in_({'traffic', 'traffic:on', 'traffic:off'}))

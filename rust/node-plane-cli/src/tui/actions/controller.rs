@@ -421,6 +421,32 @@ impl App {
                 self.controller_command(crate::controller::Command::Policies);
                 None
             }
+            Control::ControllerPolicyToggle("bittorrent") => {
+                if let Some(policy) = self
+                    .controller
+                    .policies
+                    .as_ref()
+                    .and_then(bittorrent_policy)
+                {
+                    let next = if policy["effective"] == "block" {
+                        "allow"
+                    } else {
+                        "block"
+                    };
+                    // The default is stored as no value rather than an explicit override.
+                    let value = if policy["default"] == next {
+                        serde_json::Value::Null
+                    } else {
+                        serde_json::json!(next)
+                    };
+                    self.controller_command(crate::controller::Command::VpnPolicySave(
+                        serde_json::json!({"changes":[{"key":"xray.bittorrent","value":value,
+                            "revision":policy["revision"]}]}),
+                        uuid::Uuid::new_v4(),
+                    ));
+                }
+                None
+            }
             Control::ControllerPolicyToggle(choice) => {
                 if let Some(value) = &self.controller.policies {
                     let (kind, patch) = match choice {
@@ -1697,6 +1723,19 @@ impl App {
                         ),
                         Control::ControllerPolicyToggle("traffic"),
                     ));
+                    if let Some(policy) = bittorrent_policy(value) {
+                        items.push((
+                            format!(
+                                "BitTorrent over VLESS: {}",
+                                if policy["effective"] == "block" {
+                                    "Blocked"
+                                } else {
+                                    "Allowed"
+                                }
+                            ),
+                            Control::ControllerPolicyToggle("bittorrent"),
+                        ));
+                    }
                 } else {
                     items.push((
                         "Please wait".into(),
@@ -1774,4 +1813,11 @@ impl App {
             ("Cancel removal".into(), Control::ControllerAbort),
         ]
     }
+}
+
+fn bittorrent_policy(policies: &serde_json::Value) -> Option<&serde_json::Value> {
+    policies["vpn"]["keys"]
+        .as_array()?
+        .iter()
+        .find(|item| item["key"] == "xray.bittorrent")
 }

@@ -25,6 +25,12 @@ def _profile_resource(row):
         datetime.fromisoformat(row['expires_at']) if row['expires_at'] else None)
 
 
+
+def server_label(node):
+    """Client-visible server name; a leading flag makes the server easy to find."""
+    flag = (node['flag'] if 'flag' in node.keys() else '').strip()
+    return f"{flag} {node['title']}" if flag else node['title']
+
 class ConfigIssuanceService:
     def __init__(self, db, driver=None):
         self.db, self.driver = db, driver
@@ -215,7 +221,7 @@ class ConfigIssuanceService:
         if protocol == 'awg':
             stored = json.loads(latest['result_json'])['wg_conf']
             refreshed = driver.refresh_awg_config(node_key, stored,
-                f'{node["title"]} · AWG' + (f' · {identity["device_name"]}' if identity.get("device_name") else ""))
+                f'{server_label(node)} · AWG' + (f' · {identity["device_name"]}' if identity.get("device_name") else ""))
             settings = json.loads(node['settings_json'])
             expected_endpoint = settings.get('awg_public_host', settings['public_host'])
             expected_port = settings.get('awg_port', 51820)
@@ -309,7 +315,7 @@ class ConfigIssuanceService:
                           or row['node_key'])
             safe_device = re.sub(r'[^\w .()#-]+','',identity['device_name']).strip(' .')[:64] or 'Device'
             return {'filename': f'{safe_title} · AWG · {safe_device}.{extension}',
-                    'display_name': f'{node["title"]} · AWG' + (f' · {identity["device_name"]}' if identity.get("device_name") else ""),
+                    'display_name': f'{server_label(node)} · AWG' + (f' · {identity["device_name"]}' if identity.get("device_name") else ""),
                     'media_type': 'text/plain',
                     'content': refreshed['vpn_key'] if extension == 'vpn' else refreshed['wg_conf'],
                     'files': [{'filename': f'{safe_title} · AWG · {safe_device}.{ext}',
@@ -325,7 +331,7 @@ class ConfigIssuanceService:
         else:
             params += (f'&type=xhttp&path={quote(metadata["xhttp_path"], safe="")}&mode=auto'
                        '&extra=%7B%22xmux%22%3A%7B%22maxConcurrency%22%3A%2216-32%22%7D%7D')
-        display_name = f'{node["title"]} · VLESS · {row["transport"].upper()}'
+        display_name = f'{server_label(node)} · VLESS · {row["transport"].upper()}'
         label = quote(display_name, safe='')
         uri = f'vless://{identity["xray_uuid"]}@{host}:{port}?{params}#{label}'
         safe_title = (re.sub(r'[^\w .()#-]+', '', node['title']).strip(' .')[:64]

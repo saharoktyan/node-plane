@@ -54,6 +54,7 @@ pub enum Command {
     TelegramAdmin(bool, u64, Uuid),
     SshKey,
     PolicySave(&'static str, Value),
+    VpnPolicySave(Value, Uuid),
     DefaultsSave(Value, u64),
     Backups,
     BackupCatalog(usize),
@@ -288,6 +289,12 @@ impl Command {
                     None,
                 )
             }
+            Self::VpnPolicySave(value, key) => (
+                Method::PATCH,
+                "/api/v1/vpn-policies/installation".into(),
+                Some(value.clone()),
+                Some(*key),
+            ),
             Self::Defaults => (
                 Method::GET,
                 "/api/v1/system/installation-defaults".into(),
@@ -435,6 +442,7 @@ impl Browser {
             Command::AlertPreferences(_)
                 | Command::AlertDismiss(_)
                 | Command::PolicySave(_, _)
+                | Command::VpnPolicySave(_, _)
                 | Command::BackupPreferences(_)
                 | Command::UpdateCheck
                 | Command::UpdatePreferences(_)
@@ -538,7 +546,7 @@ impl Browser {
                 self.alerts = Some(value);
                 self.selected = 0;
             }
-            Command::Policies | Command::PolicySave(_, _) => {
+            Command::Policies | Command::PolicySave(_, _) | Command::VpnPolicySave(_, _) => {
                 self.policies = Some(value);
                 self.defaults_input = None;
                 self.selected = 0;

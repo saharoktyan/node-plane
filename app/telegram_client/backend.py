@@ -476,6 +476,13 @@ class BackendClient:
             raise ValueError('unsupported cleanup action')
         return await self.request('POST', f'/api/v1/system/cleanup/jobs/{job_id}/{action}', telegram_user_id=telegram_user_id, body=notification)
 
+    async def installation_vpn_policies(self, telegram_user_id):
+        return await self.request('GET', '/api/v1/vpn-policies/installation', telegram_user_id=telegram_user_id)
+
+    async def update_installation_vpn_policy(self, telegram_user_id, key, value, revision):
+        return await self.request('PATCH', '/api/v1/vpn-policies/installation', telegram_user_id=telegram_user_id,
+                                  body={'changes': [{'key': key, 'value': value, 'revision': revision}]}, command=True)
+
     async def update_traffic_policy(self, telegram_user_id, enabled):
         return await self.request('PATCH', '/api/v1/system/traffic/preferences',
                                   telegram_user_id=telegram_user_id, body={'enabled': enabled})

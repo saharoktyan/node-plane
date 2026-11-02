@@ -15,7 +15,7 @@ if [[ "$APPLY_XRAY" == true ]]; then
   [[ -f "$XRAY_CONFIG_PATH" ]] || { echo "Xray config missing: $XRAY_CONFIG_PATH" >&2; exit 1; }
   XRAY_BACKUP="$(mktemp "$(dirname "$XRAY_CONFIG_PATH")/.xray-config-backup-XXXXXX")"
   cp -p "$XRAY_CONFIG_PATH" "$XRAY_BACKUP"
-  XRAY_CONFIG_ENV="$XRAY_CONFIG_PATH" XRAY_SNI_ENV="$XRAY_SNI_VALUE" XRAY_TCP_ENV="$XRAY_TCP_VALUE" XRAY_XHTTP_ENV="$XRAY_XHTTP_VALUE" XRAY_PATH_ENV="$XRAY_PATH_VALUE" IPV6_OUTBOUND_ENV="${IPV6_OUTBOUND:-on}" python3 - <<'PY'
+  XRAY_CONFIG_ENV="$XRAY_CONFIG_PATH" XRAY_SNI_ENV="$XRAY_SNI_VALUE" XRAY_TCP_ENV="$XRAY_TCP_VALUE" XRAY_XHTTP_ENV="$XRAY_XHTTP_VALUE" XRAY_PATH_ENV="$XRAY_PATH_VALUE" IPV6_OUTBOUND_ENV="${IPV6_OUTBOUND:-on}" XRAY_BITTORRENT_ENV="${XRAY_BITTORRENT:-allow}" python3 - <<'PY'
 import json
 import os
 import tempfile
@@ -44,6 +44,33 @@ rules[:] = [item for item in rules if item.get('outboundTag') != block_tag]
 if not enabled:
     outbounds.append({'protocol': 'blackhole', 'tag': block_tag})
     rules.insert(0, {'type': 'field', 'ip': ['::/0'], 'outboundTag': block_tag})
+# Client traffic never reaches host-local or private networks, independent of
+# the Freedom outbound's built-in policy. The api rule must stay first.
+client_inbounds = ['reality-tcp', 'reality-xhttp']
+blocked_tag = 'node-plane-blocked'
+policy_rules = {'node-plane-private', 'node-plane-bittorrent'}
+rules[:] = [item for item in rules if item.get('ruleTag') not in policy_rules]
+if not any(item.get('tag') == blocked_tag for item in outbounds):
+    outbounds.append({'protocol': 'blackhole', 'tag': blocked_tag})
+api = [item for item in rules if item.get('inboundTag') == ['api']]
+others = [item for item in rules if item.get('inboundTag') != ['api']]
+policy = [{'type': 'field', 'ruleTag': 'node-plane-private', 'inboundTag': client_inbounds,
+           'ip': ['0.0.0.0/8', '10.0.0.0/8', '100.64.0.0/10', '127.0.0.0/8', '169.254.0.0/16',
+                  '172.16.0.0/12', '192.0.0.0/24', '192.168.0.0/16', '198.18.0.0/15',
+                  '224.0.0.0/4', '240.0.0.0/4', '::/128', '::1/128',
+                  'fc00::/7', 'fe80::/10', 'ff00::/8'],
+           'outboundTag': blocked_tag}]
+block_bittorrent = os.environ['XRAY_BITTORRENT_ENV'] == 'block'
+if block_bittorrent:
+    policy.append({'type': 'field', 'ruleTag': 'node-plane-bittorrent', 'inboundTag': client_inbounds,
+                   'protocol': ['bittorrent'], 'outboundTag': blocked_tag})
+rules[:] = api + policy + others
+for tag in client_inbounds:
+    if block_bittorrent:
+        # routeOnly keeps the requested destination; sniffing only feeds routing.
+        inbounds[tag]['sniffing'] = {'enabled': True, 'destOverride': ['http', 'tls', 'quic'], 'routeOnly': True}
+    else:
+        inbounds[tag].pop('sniffing', None)
 with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=path.parent, delete=False) as tmp:
     json.dump(data, tmp, ensure_ascii=False, indent=2)
     tmp.write('\n')

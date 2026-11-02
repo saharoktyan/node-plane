@@ -182,11 +182,11 @@ class TemporaryConfigTests(unittest.TestCase):
                 from urllib.parse import unquote, urlsplit
                 if protocol == 'xray':
                     self.assertEqual(artifact['files'][0]['filename'], 'Latvia #1 · VLESS · TCP · Temp.txt')
-                    self.assertEqual(unquote(urlsplit(artifact['content']).fragment), 'VLESS · TCP · Latvia #1 · Temp')
+                    self.assertEqual(unquote(urlsplit(artifact['content']).fragment), 'Latvia #1 · VLESS · TCP · Temp')
                 else:
                     self.assertEqual([f['filename'] for f in artifact['files']],
                                      ['Latvia #1 · AWG · Temp.vpn', 'Latvia #1 · AWG · Temp.conf'])
-                    self.assertIn('AWG · Latvia #1 · Temp', self.awg_refresh_labels)
+                    self.assertIn('Latvia #1 · AWG · Temp', self.awg_refresh_labels)
                 self.assertTrue(BackupService.busy(self.db.connection))
                 self.assertEqual(self.service.get(self.actor,config['id'])['expires_at'],expiry)
                 self.assertEqual(self.service.revoke(self.actor,config['id'])['status'],'revoking')
@@ -249,6 +249,10 @@ class TemporaryConfigTests(unittest.TestCase):
         self.assertEqual(after['status'], 'active')
         refreshed = self.service.artifact(self.actor, config['id'])
         self.assertEqual(refreshed['content'].split('#')[0], original['content'].split('#')[0])
+        # The edited flag leads the client-visible name; files keep a portable name.
+        from urllib.parse import unquote
+        self.assertTrue(unquote(refreshed['content'].split('#')[1]).startswith('🇱🇻 New server name · '))
+        self.assertNotIn('🇱🇻', refreshed['files'][0]['filename'])
         self.assertEqual(sum(action == 'temporary_ensure' and not recover
             for _, action, recover in self.driver.calls), 1)
 

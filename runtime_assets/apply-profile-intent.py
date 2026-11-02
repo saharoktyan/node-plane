@@ -610,7 +610,8 @@ def validate_node_settings(intent):
     settings = intent['settings']
     fields = {'public_host', 'xray_host', 'xray_sni', 'xray_tcp_port', 'xray_xhttp_port',
               'xray_xhttp_path', 'awg_public_host', 'awg_port',
-              'xray_fingerprint', 'awg_interface', 'awg_i1_preset', 'awg_port_mode', 'awg_parameters', 'ipv6_outbound'}
+              'xray_fingerprint', 'awg_interface', 'awg_i1_preset', 'awg_port_mode', 'awg_parameters', 'ipv6_outbound',
+              'xray_bittorrent'}
     if not isinstance(settings, dict) or set(settings) - fields:
         raise ValueError('invalid settings')
     required = {'public_host'} if protocols else set()
@@ -651,6 +652,8 @@ def validate_node_settings(intent):
             raise ValueError('invalid AWG preset')
         if field == 'ipv6_outbound' and value not in {'on', 'off'}:
             raise ValueError('invalid IPv6 outbound policy')
+        if field == 'xray_bittorrent' and value not in {'allow', 'block'}:
+            raise ValueError('invalid BitTorrent policy')
         if field == 'awg_port_mode' and value not in {'auto', 'manual'}:
             raise ValueError('invalid AWG port mode')
         if field == 'xray_fingerprint' and value not in {'chrome', 'firefox', 'safari', 'ios', 'android', 'edge', 'random', 'randomized'}:
@@ -840,6 +843,7 @@ def verify_node_settings_config(intent, xray_path, awg_path):
                 if rule.get('outboundTag') == 'node-plane-ipv6-disabled']
             if (enabled and blocks) or (not enabled and (len(blocks) != 1 or blocks[0].get('ip') != ['::/0'])):
                 raise ValueError('Xray IPv6 block verification failed')
+        verify_xray_routing_policy(data, settings.get('xray_bittorrent', 'allow') == 'block')
     if 'awg' in intent['protocols']:
         awg_config = Path(awg_path).read_text()
         if not re.search(r'(?m)^ListenPort\s*=\s*' + str(settings['awg_port']) + r'\s*$', awg_config):
@@ -863,6 +867,35 @@ def verify_node_settings_config(intent, xray_path, awg_path):
                 raise ValueError('AWG preset verification failed')
 
 
+XRAY_CLIENT_INBOUNDS = ['reality-tcp', 'reality-xhttp']
+XRAY_BLOCKED_TAG = 'node-plane-blocked'
+XRAY_PRIVATE_RULE = 'node-plane-private'
+XRAY_BITTORRENT_RULE = 'node-plane-bittorrent'
+
+
+def verify_xray_routing_policy(data, block_bittorrent):
+    """Client inbounds never reach private destinations; BitTorrent follows policy."""
+    rules = data.get('routing', {}).get('rules', [])
+    tags = [rule.get('ruleTag') for rule in rules]
+    if tags.count(XRAY_PRIVATE_RULE) != 1 or tags.count(XRAY_BITTORRENT_RULE) != int(block_bittorrent):
+        raise ValueError('Xray routing policy verification failed')
+    # The local API route must precede blocks of loopback destinations.
+    api = next((index for index, rule in enumerate(rules) if rule.get('inboundTag') == ['api']), None)
+    if api is not None and api > tags.index(XRAY_PRIVATE_RULE):
+        raise ValueError('Xray API route verification failed')
+    private = rules[tags.index(XRAY_PRIVATE_RULE)]
+    if private.get('inboundTag') != XRAY_CLIENT_INBOUNDS or private.get('outboundTag') != XRAY_BLOCKED_TAG:
+        raise ValueError('Xray private destination block verification failed')
+    if not any(item.get('tag') == XRAY_BLOCKED_TAG and item.get('protocol') == 'blackhole'
+               for item in data.get('outbounds', [])):
+        raise ValueError('Xray block outbound verification failed')
+    inbounds = {item.get('tag'): item for item in data.get('inbounds', [])}
+    for tag in XRAY_CLIENT_INBOUNDS:
+        sniffing = inbounds[tag].get('sniffing') or {}
+        if block_bittorrent and not (sniffing.get('enabled') and sniffing.get('routeOnly')):
+            raise ValueError('Xray sniffing verification failed')
+
+
 def verify_node_settings_environment(intent, env_path):
     """The endpoint and client options live in node.env, outside protocol configs."""
     settings = intent['settings']
@@ -875,6 +908,7 @@ def verify_node_settings_environment(intent, env_path):
             AWG_I1_PRESET=settings.get('awg_i1_preset', 'quic'))
     if 'xray' in intent['protocols']:
         expected['XRAY_FP'] = settings.get('xray_fingerprint', 'chrome')
+        expected['XRAY_BITTORRENT'] = settings.get('xray_bittorrent', 'allow')
     script = 'source "$1"; ' + '; '.join(f'printf "%s\\n" "${{{key}:-}}"' for key in expected)
     if 'awg' in intent['protocols']:
         script += '; printf "%s\\n" "${AWG_PARAMETERS_FILE:-}"'
@@ -1031,6 +1065,7 @@ def run_node_settings(intent, lock_fd, *, env_path=Path('/etc/node-plane/node.en
         'AWG_I1_PRESET': settings.get('awg_i1_preset', 'quic'),
         'XRAY_FP': settings.get('xray_fingerprint', 'chrome'),
         'IPV6_OUTBOUND': settings.get('ipv6_outbound', 'on'),
+        'XRAY_BITTORRENT': settings.get('xray_bittorrent', 'allow'),
     }
     parameters_path = env_path.with_name('awg-parameters.json')
     with tempfile.NamedTemporaryFile(mode='w', dir=env_path.parent, delete=False) as staged:

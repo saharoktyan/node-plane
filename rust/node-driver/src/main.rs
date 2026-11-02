@@ -295,6 +295,7 @@ impl DriverContext {
             self.shell_env_assignment("AWG_MTU", "1280"),
             self.shell_env_assignment("AWG_ALLOWED_IPS", "0.0.0.0/0,::/0"),
             self.shell_env_assignment("IPV6_OUTBOUND", "on"),
+            self.shell_env_assignment("XRAY_BITTORRENT", "allow"),
             self.shell_env_assignment("AWG_KEEPALIVE", "25"),
             self.shell_env_assignment("AWG_I1_PRESET", "quic"),
             self.shell_env_assignment("AWG_SERVER_IP", ""),

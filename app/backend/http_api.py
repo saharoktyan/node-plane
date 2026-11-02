@@ -123,6 +123,20 @@ class AccountPreferencesInput(BaseModel):
     service_notifications: Literal['on', 'silent', 'off'] | None = None
 
 
+class VpnPolicyChangeInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    key: StrictStr
+    value: object = None
+    revision: StrictInt
+    node_key: StrictStr | None = None
+    protocol: Literal['awg', 'xray'] | None = None
+
+
+class VpnPolicyInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    changes: list[VpnPolicyChangeInput] = Field(min_length=1, max_length=50)
+
+
 class TrafficPolicyInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     enabled: StrictBool
@@ -1239,6 +1253,17 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     @app.post('/api/v1/me/notifications/{delivery_id}/dismiss')
     def dismiss_my_notification(delivery_id: UUID, current=Depends(actor)):
         return announcements.dismiss_inbox_item(current, str(delivery_id))
+
+    @app.get('/api/v1/vpn-policies/installation')
+    def installation_vpn_policies(current=Depends(actor)):
+        from .vpn_policies import VpnPolicies
+        return VpnPolicies(db).get(current, 'installation')
+
+    @app.patch('/api/v1/vpn-policies/installation')
+    def update_installation_vpn_policies(body: VpnPolicyInput, request: Request, current=Depends(actor)):
+        from .vpn_policies import VpnPolicies
+        return VpnPolicies(db).set(current, header(request, 'Idempotency-Key'), 'installation', None,
+                                   [change.model_dump() for change in body.changes])
 
     @app.get('/api/v1/system/traffic')
     def traffic_policy(current=Depends(actor)):

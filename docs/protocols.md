@@ -24,6 +24,12 @@ Use a valid hostname for SNI, without a scheme, path or port. Client links inclu
 
 Revoking a VLESS identity blocks new connections. Existing connections may continue until they disconnect.
 
+### Destination policy
+
+VLESS clients cannot reach loopback, private, link-local, carrier-grade NAT, multicast or reserved addresses through the node. The node rule complements Xray's own outbound protection and keeps the node's local services, including the Xray API, out of client reach. Literal addresses are matched by the rule; Xray's outbound protection also rejects names that resolve to these ranges. The rule is added when node settings are applied.
+
+**BitTorrent over VLESS** is an installation-wide setting: Telegram → Settings → VPN → BitTorrent, or Workstation → Node Plane Settings → Policies. It defaults to **Allow**. **Block** enables traffic sniffing for routing only (destinations are not rewritten) and rejects detected BitTorrent connections. Changing it marks every VLESS node as having pending settings; apply each node's settings for the change to take effect. Encrypted or obfuscated BitTorrent traffic is not always detected. The setting does not affect AmneziaWG.
+
 ## AmneziaWG
 
 **Manual profile:** Telegram → node → AWG → Manual parameters, or Workstation → node editor → Manual AWG parameters. Paste a complete `parameter = value` block with Jc/Jmin/Jmax, S1–S4, H1–H4, I1–I5, HeaderProtectionKey, RandomTrailers and DisableCookies. ContentPaddingAddition and the five timing fields are optional; omit them to use engine defaults. Current parameters are available in the editor on reachable nodes. Do not include server or peer identity keys. The backend and agent validate the full combination; changes preserve identities and require fresh client configurations. Type `auto` to return to generation. Entropy regeneration is unavailable while a manual profile is active.
