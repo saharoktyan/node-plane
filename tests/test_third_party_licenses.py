@@ -128,6 +128,52 @@ class TestThirdPartyLicenses(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Explicit legal file escapes package directory"):
             gen.scan_packaged_legal_files(pkg_dir, explicit_license_file="../../outside.txt")
 
+    def vendored_tree(self) -> Path:
+        tree = self.root / "proto" / "vendor" / "lib"
+        (tree / "app").mkdir(parents=True)
+        (tree / "LICENSE").write_text("Mozilla Public License Version 2.0\n", encoding="utf-8")
+        (tree / "README.md").write_text("Vendored copy\n", encoding="utf-8")
+        (tree / "app" / "a.proto").write_text("syntax = 'proto3';\n", encoding="utf-8")
+        (tree / "b.proto").write_text("syntax = 'proto3';\n", encoding="utf-8")
+        return tree
+
+    def vendored_manifest(self, **changes: object) -> Path:
+        entry = {"name": "Lib protobuf", "version": "v1", "spdx": "MPL-2.0",
+                 "source": "https://example.com/lib", "path": "proto/vendor/lib",
+                 "license": "LICENSE", "components": ["node-plane-agent"], **changes}
+        path = self.root / "vendored.json"
+        path.write_text(json.dumps([entry]), encoding="utf-8")
+        return path
+
+    def test_vendored_sources_list_every_file_and_carry_their_license(self) -> None:
+        """Vendored files are listed individually and their license text is included."""
+        self.vendored_tree()
+        vendored = gen.load_vendored_manifest(self.vendored_manifest(), self.root)
+        self.assertEqual(vendored[0]["files"], ["app/a.proto", "b.proto"])
+        texts = {"h": {"text": vendored[0]["text"], "crates": {gen.vendored_key(vendored[0])}}}
+        rendered = gen.render_third_party_licenses({}, texts, None, vendored)
+        self.assertIn("Vendored Third-Party Source Files", rendered)
+        self.assertIn("  Repository path: proto/vendor/lib\n  Files:\n    app/a.proto\n    b.proto\n", rendered)
+        self.assertIn("  - Lib protobuf v1 [Components: node-plane-agent] [SPDX: MPL-2.0]", rendered)
+        self.assertIn("Mozilla Public License Version 2.0", rendered)
+        self.assertNotIn(str(self.root), rendered)
+        # Without vendored sources the document keeps its previous shape.
+        self.assertNotIn("Vendored", gen.render_third_party_licenses({}, {}, None))
+
+    def test_vendored_paths_must_stay_in_the_repository_and_have_a_license(self) -> None:
+        """Escaping paths and missing licenses refuse."""
+        self.vendored_tree()
+        with self.assertRaisesRegex(ValueError, "directory in the repository"):
+            gen.load_vendored_manifest(self.vendored_manifest(path="../outside"), self.root)
+        with self.assertRaisesRegex(FileNotFoundError, "license file missing"):
+            gen.load_vendored_manifest(self.vendored_manifest(license="../../../LICENSE"), self.root)
+        with self.assertRaisesRegex(FileNotFoundError, "license file missing"):
+            gen.load_vendored_manifest(self.vendored_manifest(license="COPYING"), self.root)
+        manifest = self.vendored_manifest()
+        manifest.write_text(json.dumps([{"name": "x"}]), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "missing"):
+            gen.load_vendored_manifest(manifest, self.root)
+
     @patch.object(gen, "generate_licenses", return_value="EXPECTED THIRD PARTY LICENSES\n")
     def test_cli_check_crlf_and_stale_file_refuses(self, _mock_gen: unittest.mock.MagicMock) -> None:
         """CLI --check CRLF compares correctly and stale file refuses."""

@@ -16,4 +16,5 @@ declares the fields it needs (`id`, `flow`, `encryption`) by hand with the same
 field numbers.
 
 To update: copy the same files from the new tag, keep this list and the commit
-above in sync, and run the Xray API tests in `tests/test_runtime_docker.py`.
+above in sync (also in `licenses/vendored/manifest.json`), regenerate
+`THIRD_PARTY_LICENSES` and run the Xray API tests in `tests/test_runtime_docker.py`.

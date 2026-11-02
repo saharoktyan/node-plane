@@ -1,0 +1,11 @@
+[
+  {
+    "name": "Xray-core protobuf definitions",
+    "version": "v26.10.21 (1b1647cd9ddf0abc34b981d4611fc03bcac1ca74)",
+    "spdx": "MPL-2.0",
+    "source": "https://github.com/XTLS/Xray-core",
+    "path": "proto/vendor/xray",
+    "license": "LICENSE",
+    "components": ["node-plane-agent"]
+  }
+]

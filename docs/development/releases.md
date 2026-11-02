@@ -47,15 +47,15 @@ The supported Python dependency layout is `pyproject.toml` plus `uv.lock`. Older
 
 Release archives package legal notices alongside the binaries and controller runtime. The root `LICENSE` covers Node Plane itself, while `THIRD_PARTY_LICENSES` contains third-party notices generated from locked Rust crate graphs using `cargo-about` (primary tool version 0.9.2). All pre-releases and stable releases carry these notices. These notices apply to the compiled Rust binaries and repository distribution; they do not cover Python packages or host system libraries downloaded and installed separately by the runtime environment.
 
-Refresh notices whenever Rust dependencies or supported targets change:
+Refresh notices whenever Rust dependencies, supported targets or vendored third-party sources change:
 
 ```sh
-cargo install cargo-about --version 0.9.2 --locked
+cargo install cargo-about --version 0.9.2 --locked --features cli
 python3 scripts/generate_third_party_licenses.py
 python3 scripts/generate_third_party_licenses.py --check
 ```
 
-Commit the generated root file with the dependency changes. `--offline` skips Cargo downloads when dependencies are cached. Generation preserves bundled notices and verified upstream supplements in `licenses/upstream/`; a missing license requires a reviewed supplement rather than a placeholder. Standard-library notices in `licenses/` must follow the pinned Rust version. Release CI checks freshness before publication.
+Commit the generated root file with the dependency changes. `--offline` skips Cargo downloads when dependencies are cached. Generation preserves bundled notices and verified upstream supplements in `licenses/upstream/`; a missing license requires a reviewed supplement rather than a placeholder. Third-party source files copied into the repository (such as `proto/vendor/xray`) are declared in `licenses/vendored/manifest.json`; the document lists each of their files and their license text, so adding a file there requires regeneration. Standard-library notices in `licenses/` must follow the pinned Rust version. Release CI checks freshness before publication.
 
 For the first stable release, use the [1.0.0 acceptance checklist](release-1.0.0-acceptance.md). Automated results and manual acceptance are recorded separately.
 

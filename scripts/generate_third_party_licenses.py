@@ -5,7 +5,8 @@ Collects third-party license information across Node Plane's Rust manifests usin
 cargo-about 0.9.2, preserves packaged legal files and native notices, incorporates
 verified upstream supplement files, deduplicates identical license texts by SHA-256,
 and maintains full crate-to-component graph mappings without leaking local paths or
-timestamps.
+timestamps. Third-party source files vendored into the repository (not crates) are
+listed from licenses/vendored/manifest.json with their license texts.
 """
 
 from __future__ import annotations
@@ -203,6 +204,60 @@ def load_upstream_manifest(manifest_path: Path) -> dict[str, list[dict[str, str]
     return by_crate
 
 
+def load_vendored_manifest(manifest_path: Path, root_dir: Path) -> list[dict]:
+    """Load third-party source trees vendored into the repository.
+
+    Each entry names a repository directory and its license file. Every other
+    file in that directory is listed, so adding a vendored file changes the
+    generated document and fails --check until it is regenerated.
+    """
+    if not manifest_path.is_file():
+        return []
+    root_dir = root_dir.resolve()
+    with open(manifest_path, "r", encoding="utf-8") as f:
+        raw = json.load(f)
+    if not isinstance(raw, list):
+        raise ValueError(f"Vendored manifest at {manifest_path} must be a JSON list")
+
+    entries: list[dict] = []
+    names: set[str] = set()
+    for item in raw:
+        missing = {"name", "version", "spdx", "source", "path", "license", "components"} - set(item)
+        if missing:
+            raise ValueError(f"Vendored entry missing {', '.join(sorted(missing))}")
+        if item["name"] in names:
+            raise ValueError(f"Duplicate vendored entry: {item['name']}")
+        names.add(item["name"])
+        directory = (root_dir / item["path"]).resolve()
+        if not directory.is_relative_to(root_dir) or not directory.is_dir():
+            raise ValueError(f"Vendored path for {item['name']} must be a directory in the repository")
+        license_path = (directory / item["license"]).resolve()
+        if not license_path.is_relative_to(directory) or not license_path.is_file():
+            raise FileNotFoundError(f"Vendored license file missing for {item['name']}")
+        files = sorted(
+            path.relative_to(directory).as_posix()
+            for path in directory.rglob("*")
+            if path.is_file() and path != license_path and path.name != "README.md"
+        )
+        if not files:
+            raise ValueError(f"Vendored entry {item['name']} has no files")
+        entries.append({
+            "name": item["name"],
+            "version": item["version"],
+            "spdx": item["spdx"],
+            "source": item["source"],
+            "path": Path(item["path"]).as_posix(),
+            "components": sorted(item["components"]),
+            "files": files,
+            "text": normalize_text(license_path.read_bytes().decode("utf-8")),
+        })
+    return entries
+
+
+def vendored_key(entry: dict) -> str:
+    return f"{entry['name']} {entry['version']}"
+
+
 def collect_licenses(
     manifest_outputs: Sequence[tuple[str, dict]],
     upstream_supplements: dict[str, list[dict[str, str]]],
@@ -297,6 +352,7 @@ def render_third_party_licenses(
     crates_info: dict[str, dict],
     texts_by_hash: dict[str, dict],
     stdlib_text: str | None = None,
+    vendored: Sequence[dict] = (),
 ) -> str:
     """Format THIRD_PARTY_LICENSES content deterministically."""
     lines: list[str] = [
@@ -315,6 +371,12 @@ def render_third_party_licenses(
         "separately by the runtime environment.",
         "",
     ]
+    if vendored:
+        lines[-1:-1] = [
+            "",
+            "Third-party source files vendored into the repository are listed under",
+            "\"Vendored Third-Party Source Files\" with their licenses.",
+        ]
 
     if stdlib_text and stdlib_text.strip():
         lines.extend([
@@ -346,6 +408,29 @@ def render_third_party_licenses(
         ])
     lines.append("")
 
+    if vendored:
+        lines.extend([
+            "=" * 80,
+            "Vendored Third-Party Source Files",
+            "=" * 80,
+            "",
+            "These files are unmodified upstream copies kept in this repository. Their",
+            "Source Code Form is available at the repository path and upstream source below.",
+            "",
+        ])
+        for entry in vendored:
+            lines.extend([
+                f"- {vendored_key(entry)}",
+                f"  Declared SPDX: {entry['spdx']}",
+                f"  Components: {', '.join(entry['components'])}",
+                f"  Source: {entry['source']}",
+                f"  Repository path: {entry['path']}",
+                "  Files:",
+                *(f"    {name}" for name in entry["files"]),
+            ])
+        lines.append("")
+
+    vendored_by_key = {vendored_key(entry): entry for entry in vendored}
     lines.extend([
         "=" * 80,
         "Third-Party License Notices & Verbatim Texts",
@@ -367,7 +452,7 @@ def render_third_party_licenses(
             "Used by:",
         ])
         for ckey in using_crates:
-            cinfo = crates_info.get(ckey)
+            cinfo = crates_info.get(ckey) or vendored_by_key.get(ckey)
             if cinfo:
                 comp_str = ", ".join(sorted(cinfo["components"]))
                 lines.append(f"  - {ckey} [Components: {comp_str}] [SPDX: {cinfo['spdx']}]")
@@ -395,6 +480,7 @@ def generate_licenses(
     cargo_about_bin: str,
     cargo_bin: str,
     offline: bool = False,
+    vendored_manifest: Path | None = None,
 ) -> str:
     """Generate the full third-party licenses document from manifests."""
     check_cargo_about_version(cargo_about_bin)
@@ -419,12 +505,16 @@ def generate_licenses(
     supplements = load_upstream_manifest(upstream_manifest.resolve())
 
     crates_info, texts_by_hash = collect_licenses(manifest_outputs, supplements)
+    vendored = load_vendored_manifest(vendored_manifest, root_dir) if vendored_manifest else []
+    for entry in vendored:
+        sha256 = hashlib.sha256(entry["text"].encode("utf-8")).hexdigest()
+        texts_by_hash.setdefault(sha256, {"text": entry["text"], "crates": set()})["crates"].add(vendored_key(entry))
 
     stdlib_text = None
     if stdlib_license and stdlib_license.is_file():
         stdlib_text = normalize_text(stdlib_license.read_text(encoding="utf-8"))
 
-    return render_third_party_licenses(crates_info, texts_by_hash, stdlib_text)
+    return render_third_party_licenses(crates_info, texts_by_hash, stdlib_text, vendored)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -471,6 +561,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Path to upstream supplement manifest (default: <root>/licenses/upstream/manifest.json)",
     )
     parser.add_argument(
+        "--vendored-manifest",
+        type=Path,
+        default=None,
+        help="Path to vendored source manifest (default: <root>/licenses/vendored/manifest.json)",
+    )
+    parser.add_argument(
         "--stdlib-license",
         type=Path,
         default=None,
@@ -483,6 +579,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     about_toml = args.about_toml or (root_dir / "about.toml")
     upstream_manifest = args.upstream_manifest or (root_dir / "licenses/upstream/manifest.json")
     stdlib_license = args.stdlib_license or (root_dir / "licenses/rust-stdlib-1.90.0.txt")
+    vendored_manifest = args.vendored_manifest or (root_dir / "licenses/vendored/manifest.json")
     output_path = args.output or (root_dir / "THIRD_PARTY_LICENSES")
 
     manifest_specs = [
@@ -520,6 +617,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             cargo_about_bin=args.cargo_about,
             cargo_bin=args.cargo,
             offline=args.offline,
+            vendored_manifest=vendored_manifest,
         )
     except Exception as exc:
         print(f"Error generating third-party licenses: {exc}", file=sys.stderr)
