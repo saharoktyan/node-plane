@@ -301,9 +301,7 @@ pub(in crate::tui) fn draw_profiles(frame: &mut Frame, app: &App, area: Rect, hi
             ("Use", Control::UseInstallation),
             ("Edit", Control::EditInstallation),
             ("New", Control::NewInstallation),
-            ("Copy to Stable", Control::TransferInstallation("stable")),
-            ("Copy to Beta", Control::TransferInstallation("beta")),
-            ("Copy to Dev", Control::TransferInstallation("dev")),
+            ("Copy to another Workstation", Control::TransferInstallation),
             ("Delete", Control::DeleteInstallation),
             ("Back", Control::Settings),
         ]
@@ -313,9 +311,6 @@ pub(in crate::tui) fn draw_profiles(frame: &mut Frame, app: &App, area: Rect, hi
             ("Back", Control::Settings),
         ]
     };
-    let actions: Vec<_> = actions.into_iter().filter(|(_, control)| {
-        !matches!(control, Control::TransferInstallation(channel) if *channel == crate::config::workstation_channel())
-    }).collect();
     let buttons = action_areas(
         frame.area(),
         sections[1],

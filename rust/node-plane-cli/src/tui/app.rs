@@ -89,6 +89,7 @@ impl App {
             themes: theme::defaults(),
             editor: None,
             profile_copy: None,
+            install_roots: None,
             exit: false,
             exit_confirm: false,
             discard: None,

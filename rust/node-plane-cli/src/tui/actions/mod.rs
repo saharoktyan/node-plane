@@ -494,7 +494,7 @@ impl App {
             | Control::SelfUpdate
             | Control::CheckWorkstationUpdates
             | Control::Installation(..)
-            | Control::TransferInstallation(_)
+            | Control::TransferInstallation
             | Control::UseInstallation
             | Control::EditInstallation
             | Control::NewInstallation

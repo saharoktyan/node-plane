@@ -154,37 +154,14 @@ impl App {
                 self.settings_selected = index + 1;
                 None
             }
-            Control::TransferInstallation(channel) => {
-                if let Some(mut profile) = self
+            Control::TransferInstallation => {
+                if let Some(source_profile) = self
                     .connections
                     .installations
                     .get(self.settings_profile)
                     .cloned()
                 {
-                    profile.branch = if channel == "stable" { "main" } else { channel }.into();
-                    match crate::config::default_state_dir(channel) {
-                        Ok(target) => {
-                            if target == self.state_dir {
-                                self.error = "The destination is this installation's state directory. Use distinct state directories.".into();
-                                return None;
-                            }
-                            let (reply, answer) = mpsc::channel();
-                            self.prompt = Some((
-                                Prompt::ConfirmAction {
-                                    title: format!("Copy profile to {channel} NPW?"),
-                                    description: format!(
-                                        "{} → {}\n\nConnection address, administrator identity and profile name are copied. The source is kept. SSH keys and operation journals are not copied. Open or restart {channel} NPW, confirm its SSH access, then use Node Plane Updates to switch the controller to that channel before managing it.",
-                                        profile.name,
-                                        target.display()
-                                    ),
-                                },
-                                reply,
-                            ));
-                            self.trust = false;
-                            self.profile_copy = Some((profile, target, answer));
-                        }
-                        Err(error) => self.error = error.to_string(),
-                    }
+                    self.start_profile_transfer(source_profile);
                 }
                 None
             }
@@ -260,26 +237,179 @@ impl App {
         self.screen = Screen::Settings;
         self.error.clear();
     }
+    pub(in crate::tui) fn start_profile_transfer(&mut self, source_profile: Installation) {
+        let current_channel = crate::config::workstation_channel();
+        let other_channels = ["stable", "beta", "dev"]
+            .into_iter()
+            .filter(|&c| c != current_channel);
+        let mut destinations = Vec::new();
+        let mut choices = Vec::new();
+        let data_root = self.install_roots.as_ref().and_then(|r| r.data.as_deref());
+
+        for channel in other_channels {
+            let label = crate::config::channel_label(channel);
+            let branch = crate::config::channel_branch(channel);
+            let state_dir = crate::config::default_state_dir_with_root(channel, data_root)
+                .map_err(|e| e.to_string());
+            let status = crate::self_manage::detect_channel_installation(
+                channel,
+                self.install_roots.as_ref(),
+            );
+
+            let state_path_str = match &state_dir {
+                Ok(path) => path.display().to_string(),
+                Err(err) => format!("(error: {err})"),
+            };
+            let choice_label = format!("{label} · {} · {state_path_str}", status.label());
+            choices.push((channel.to_string(), choice_label));
+            destinations.push(ChannelDestination {
+                channel,
+                label,
+                branch,
+                state_dir,
+                status,
+            });
+        }
+
+        let (reply, answer) = mpsc::channel();
+        self.prompt = Some((
+            Prompt::Select {
+                title: "Copy to another Workstation".into(),
+                description: "Select destination Workstation channel. Absent channels must be installed before copying.\nInstall instructions: github.com/saharoktyan/node-plane → Workstation\n↑/↓: navigate · Enter: choose · Esc: cancel".into(),
+                choices,
+            },
+            reply,
+        ));
+        self.trust = false;
+        self.administrator_selected = 0;
+        self.profile_copy = Some(ProfileCopyState::Selecting {
+            source_profile,
+            destinations,
+            receiver: answer,
+        });
+    }
+
     pub(in crate::tui) fn finish_profile_copy(&mut self) {
-        let Some((profile, target, answer)) = self.profile_copy.take() else {
+        let Some(state) = self.profile_copy.take() else {
             return;
         };
-        match answer.try_recv() {
-            Ok(Answer::Confirm(true)) => {
-                self.error = match Connections::copy_installation(
-                    &profile,
-                    &target,
-                    &profile.branch,
-                ) {
-                    Ok(()) => format!(
-                        "Profile copied to {}. Open the matching NPW and switch the controller channel in Node Plane Updates.",
-                        target.display()
-                    ),
-                    Err(error) => error.to_string(),
-                };
-            }
-            Err(mpsc::TryRecvError::Empty) => self.profile_copy = Some((profile, target, answer)),
-            _ => {}
+        match state {
+            ProfileCopyState::Selecting {
+                source_profile,
+                destinations,
+                receiver,
+            } => match receiver.try_recv() {
+                Ok(Answer::Selection(index)) => {
+                    if let Some(dest) = destinations.get(index) {
+                        match &dest.status {
+                            crate::self_manage::ChannelStatus::Found(_) => match &dest.state_dir {
+                                Ok(target) => {
+                                    if *target == self.state_dir {
+                                        self.error = "The destination is this installation's state directory. Use distinct state directories.".into();
+                                        return;
+                                    }
+                                    let (reply, answer) = mpsc::channel();
+                                    self.prompt = Some((
+                                        Prompt::ConfirmAction {
+                                            title: format!("Copy profile to {} NPW?", dest.channel),
+                                            description: format!(
+                                                "{} → {}\n\nConnection address, administrator identity and profile name are copied. The source is kept. SSH keys and operation journals are not copied. Open or restart {} NPW, confirm its SSH access, then use Node Plane Updates to switch the controller to that channel before managing it.",
+                                                source_profile.name,
+                                                target.display(),
+                                                dest.channel
+                                            ),
+                                        },
+                                        reply,
+                                    ));
+                                    self.trust = false;
+                                    self.profile_copy = Some(ProfileCopyState::Confirming {
+                                        source_profile,
+                                        target_dir: target.clone(),
+                                        target_branch: dest.branch.into(),
+                                        target_channel: dest.channel.into(),
+                                        receiver: answer,
+                                    });
+                                }
+                                Err(err) => {
+                                    self.error = format!(
+                                        "Cannot locate state directory for {} channel: {err}",
+                                        dest.label
+                                    );
+                                }
+                            },
+                            crate::self_manage::ChannelStatus::NotInstalled => {
+                                self.error = format!(
+                                    "{} Workstation is not installed. Install the {} channel first using install_workstation.sh / .ps1; then run {}. Instructions: https://github.com/saharoktyan/node-plane/blob/beta/docs/workstation.md",
+                                    dest.label,
+                                    dest.channel,
+                                    crate::config::channel_launcher(dest.channel)
+                                );
+                            }
+                            crate::self_manage::ChannelStatus::Error(err) => {
+                                self.error = format!(
+                                    "{} Workstation installation error: {err}. Install it with: bash scripts/install_workstation.sh --channel {}",
+                                    dest.label, dest.channel
+                                );
+                            }
+                        }
+                    }
+                }
+                Ok(Answer::Cancel) => {}
+                Err(mpsc::TryRecvError::Empty) => {
+                    self.profile_copy = Some(ProfileCopyState::Selecting {
+                        source_profile,
+                        destinations,
+                        receiver,
+                    });
+                }
+                _ => {}
+            },
+            ProfileCopyState::Confirming {
+                source_profile,
+                target_dir,
+                target_branch,
+                target_channel,
+                receiver,
+            } => match receiver.try_recv() {
+                Ok(Answer::Confirm(true)) => {
+                    if !crate::self_manage::detect_channel_installation(
+                        &target_channel,
+                        self.install_roots.as_ref(),
+                    )
+                    .is_found()
+                    {
+                        self.error = format!(
+                            "{} Workstation is no longer available. Install it before copying the profile.",
+                            crate::config::channel_label(&target_channel)
+                        );
+                        return;
+                    }
+                    let mut profile = source_profile;
+                    profile.branch = target_branch.clone();
+                    self.error = match Connections::copy_installation(
+                        &profile,
+                        &target_dir,
+                        &target_branch,
+                    ) {
+                        Ok(()) => format!(
+                            "Profile copied to {}. Open the matching NPW and switch the controller channel in Node Plane Updates.",
+                            target_dir.display()
+                        ),
+                        Err(error) => error.to_string(),
+                    };
+                }
+                Ok(Answer::Confirm(false) | Answer::Cancel) => {}
+                Err(mpsc::TryRecvError::Empty) => {
+                    self.profile_copy = Some(ProfileCopyState::Confirming {
+                        source_profile,
+                        target_dir,
+                        target_branch,
+                        target_channel,
+                        receiver,
+                    });
+                }
+                _ => {}
+            },
         }
     }
 
@@ -292,18 +422,11 @@ impl App {
                 Control::UseInstallation,
                 Control::EditInstallation,
                 Control::NewInstallation,
+                Control::TransferInstallation,
                 Control::DeleteInstallation,
             ]);
         } else {
             controls.push(Control::NewInstallation);
-        }
-        if !self.connections.installations.is_empty() {
-            for channel in ["stable", "beta", "dev"] {
-                if channel != crate::config::workstation_channel() {
-                    let position = controls.len() - 1;
-                    controls.insert(position, Control::TransferInstallation(channel));
-                }
-            }
         }
         controls.push(Control::Settings);
         controls

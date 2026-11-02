@@ -222,6 +222,152 @@ pub fn prepare_channel_receipt_environment() -> Result<()> {
     Ok(())
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ChannelStatus {
+    Found(PathBuf),
+    NotInstalled,
+    Error(String),
+}
+
+impl ChannelStatus {
+    #[allow(dead_code)]
+    pub fn is_found(&self) -> bool {
+        matches!(self, Self::Found(_))
+    }
+
+    pub fn label(&self) -> String {
+        match self {
+            Self::Found(_) => "Found".into(),
+            Self::NotInstalled => "Not installed".into(),
+            Self::Error(err) => format!("Error: {err}"),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct InstallationRoots {
+    pub home: Option<PathBuf>,
+    pub config: Option<PathBuf>,
+    pub data: Option<PathBuf>,
+}
+
+pub fn detect_channel_installation(
+    channel: &str,
+    roots: Option<&InstallationRoots>,
+) -> ChannelStatus {
+    let home = roots.and_then(|r| r.home.clone()).or_else(dirs::home_dir);
+    let config = roots.and_then(|r| r.config.clone()).or_else(|| {
+        std::env::var_os("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .or_else(|| {
+                if cfg!(windows) {
+                    std::env::var_os("LOCALAPPDATA").map(PathBuf::from)
+                } else {
+                    home.as_ref().map(|p| p.join(".config"))
+                }
+            })
+    });
+    // Installers use HOME/.local/share on every platform, independently of
+    // the platform's application-data directory used for saved profiles.
+    let install_root = home.as_ref().map(|p| p.join(".local/share"));
+    let injected_data = roots.and_then(|r| r.data.as_ref());
+
+    let exe_name = if cfg!(windows) {
+        "node-plane.exe"
+    } else {
+        "node-plane"
+    };
+    let launcher_name = crate::config::channel_launcher(channel);
+
+    // Startup scopes XDG_CONFIG_HOME to this channel for cargo-dist. Recover
+    // the shared root before looking up a sibling channel's receipt.
+    if let Some(config_dir) = config {
+        let config_dir = if config_dir.parent().and_then(Path::file_name)
+            == Some(std::ffi::OsStr::new("node-plane-workstation"))
+            && matches!(
+                config_dir.file_name().and_then(|s| s.to_str()),
+                Some("stable" | "beta" | "dev")
+            ) {
+            config_dir
+                .parent()
+                .and_then(Path::parent)
+                .unwrap()
+                .to_path_buf()
+        } else {
+            config_dir
+        };
+        let receipt_path = config_dir
+            .join("node-plane-workstation")
+            .join(channel)
+            .join(DIST_APP)
+            .join(format!("{DIST_APP}-receipt.json"));
+        match fs::read(&receipt_path) {
+            Ok(bytes) => {
+                let value: serde_json::Value = match serde_json::from_slice(&bytes) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        return ChannelStatus::Error(format!(
+                            "Cannot read install receipt: {error}"
+                        ));
+                    }
+                };
+                let Some(prefix) = value["install_prefix"].as_str() else {
+                    return ChannelStatus::Error("Install receipt has no installation path".into());
+                };
+                let candidate = PathBuf::from(prefix).join(exe_name);
+                if installed_executable(&candidate) {
+                    return ChannelStatus::Found(candidate);
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return ChannelStatus::Error(format!("Cannot read install receipt: {error}"));
+            }
+        }
+    }
+
+    for root in install_root.as_ref().into_iter().chain(injected_data) {
+        let candidate = root
+            .join("node-plane-workstation")
+            .join(channel)
+            .join(exe_name);
+        if installed_executable(&candidate) {
+            return ChannelStatus::Found(candidate);
+        }
+    }
+    // Named Unix launchers also identify custom/source installations. Broken
+    // symlinks and files without executable permissions do not count.
+    #[cfg(unix)]
+    if let Some(home_dir) = home {
+        let candidate = home_dir.join(".local/bin").join(launcher_name);
+        if installed_executable(&candidate) {
+            return ChannelStatus::Found(candidate);
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = launcher_name;
+
+    ChannelStatus::NotInstalled
+}
+
+fn installed_executable(path: &Path) -> bool {
+    let Ok(metadata) = fs::metadata(path) else {
+        return false;
+    };
+    if !metadata.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        metadata.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
+}
+
 fn dist_updater() -> Option<axoupdater::AxoUpdater> {
     let mut updater = axoupdater::AxoUpdater::new_for(DIST_APP);
     updater.load_receipt().ok()?;

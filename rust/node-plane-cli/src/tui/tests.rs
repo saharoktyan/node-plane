@@ -596,15 +596,10 @@ fn saved_profile_actions_include_channel_copy_without_overlapping_back() {
         Control::UseInstallation,
         Control::EditInstallation,
         Control::NewInstallation,
-        Control::TransferInstallation("stable"),
-        Control::TransferInstallation("beta"),
-        Control::TransferInstallation("dev"),
+        Control::TransferInstallation,
         Control::DeleteInstallation,
     ]
-    .into_iter()
-    .filter(|control| !matches!(control, Control::TransferInstallation(channel) if *channel == crate::config::workstation_channel()))
-    .map(rect)
-    .collect::<Vec<_>>();
+    .map(rect);
     for (i, area) in areas.iter().enumerate() {
         assert!(area.width > 0 && area.height > 0);
         for other in &areas[i + 1..] {
@@ -4216,11 +4211,11 @@ fn profile_actions_use_spatial_navigation_without_wrapping_rows() {
         assert!(app.move_spatial(KeyCode::Down));
         assert_eq!(app.settings_selected, 5); // Copy, below Use.
         assert!(app.move_spatial(KeyCode::Down));
-        assert_eq!(app.settings_selected, 8); // Pinned Back, below actions.
+        assert_eq!(app.settings_selected, 7); // Pinned Back, below actions.
         assert!(app.move_spatial(KeyCode::Right));
-        assert_eq!(app.settings_selected, 8); // No jump to another row.
+        assert_eq!(app.settings_selected, 7); // No jump to another row.
         assert!(app.move_spatial(KeyCode::Up));
-        assert_eq!(app.settings_selected, 7); // Delete, above Back.
+        assert_eq!(app.settings_selected, 6); // Delete, above Back.
         assert!(matches!(
             app.screen,
             Screen::SettingsPage(SettingsPage::Profiles)
@@ -5969,40 +5964,618 @@ fn quick_start_reuses_selected_profile_before_installation_and_creates_only_if_m
     assert!(app.editor.as_ref().unwrap().0.is_none());
 }
 
+fn private_tempdir() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(dir.path()).unwrap().permissions();
+        perms.set_mode(0o700);
+        std::fs::set_permissions(dir.path(), perms).unwrap();
+    }
+    dir
+}
+
+fn create_test_roots() -> (tempfile::TempDir, crate::self_manage::InstallationRoots) {
+    let base = private_tempdir();
+    let home = base.path().join("home");
+    let config = base.path().join("config");
+    let data = base.path().join("data");
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::create_dir_all(&config).unwrap();
+    std::fs::create_dir_all(&data).unwrap();
+    let roots = crate::self_manage::InstallationRoots {
+        home: Some(home),
+        config: Some(config),
+        data: Some(data),
+    };
+    (base, roots)
+}
+
+fn simulate_installed_workstation(
+    roots: &crate::self_manage::InstallationRoots,
+    channel: &str,
+) -> std::path::PathBuf {
+    let data_dir = roots.data.as_ref().unwrap();
+    let channel_dir = data_dir.join("node-plane-workstation").join(channel);
+    std::fs::create_dir_all(&channel_dir).unwrap();
+    let exe = channel_dir.join(if cfg!(windows) {
+        "node-plane.exe"
+    } else {
+        "node-plane"
+    });
+    std::fs::write(&exe, "#!/bin/sh\nexit 0\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&exe).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&exe, perms).unwrap();
+    }
+    exe
+}
+
 #[test]
-fn profile_transfer_requires_confirmation_and_does_not_modify_the_source() {
-    for (channel, branch) in [("stable", "main"), ("beta", "beta"), ("dev", "dev")] {
-        if channel == crate::config::workstation_channel() {
+fn profile_transfer_rendered_modal_lists_both_other_channels_and_statuses() {
+    let mut app = test_profile_app();
+    let source_dir = private_tempdir();
+    app.state_dir = source_dir.path().into();
+    app.connections.save(&app.state_dir).unwrap();
+
+    let (_temp_root, roots) = create_test_roots();
+    let current_channel = crate::config::workstation_channel();
+    let other_channels: Vec<_> = ["stable", "beta", "dev"]
+        .into_iter()
+        .filter(|&c| c != current_channel)
+        .collect();
+    assert_eq!(other_channels.len(), 2);
+
+    let installed_channel = other_channels[0];
+    let absent_channel = other_channels[1];
+    simulate_installed_workstation(&roots, installed_channel);
+    app.install_roots = Some(roots);
+
+    app.activate(Control::TransferInstallation);
+    assert!(app.prompt.is_some());
+    let Some((
+        Prompt::Select {
+            title,
+            description,
+            choices,
+        },
+        _,
+    )) = &app.prompt
+    else {
+        panic!("Expected Prompt::Select modal");
+    };
+    assert_eq!(title, "Copy to another Workstation");
+    assert!(description.contains("Absent") || description.contains("absent"));
+    assert!(description.contains("Install instructions"));
+    assert_eq!(choices.len(), 2);
+
+    // Verify current channel is excluded and both other channels are present
+    assert!(!choices.iter().any(|(c, _)| c == current_channel));
+    assert!(choices.iter().any(|(c, _)| c == installed_channel));
+    assert!(choices.iter().any(|(c, _)| c == absent_channel));
+
+    // Verify labels, found/not installed status, and target state paths
+    let installed_choice = choices
+        .iter()
+        .find(|(c, _)| c == installed_channel)
+        .unwrap();
+    assert!(
+        installed_choice
+            .1
+            .contains(crate::config::channel_label(installed_channel))
+    );
+    assert!(installed_choice.1.contains("Found"));
+    let target_installed_dir = crate::config::default_state_dir_with_root(
+        installed_channel,
+        app.install_roots.as_ref().unwrap().data.as_deref(),
+    )
+    .unwrap();
+    assert!(
+        installed_choice
+            .1
+            .contains(&target_installed_dir.display().to_string())
+    );
+
+    let absent_choice = choices.iter().find(|(c, _)| c == absent_channel).unwrap();
+    assert!(
+        absent_choice
+            .1
+            .contains(crate::config::channel_label(absent_channel))
+    );
+    assert!(absent_choice.1.contains("Not installed"));
+    let target_absent_dir = crate::config::default_state_dir_with_root(
+        absent_channel,
+        app.install_roots.as_ref().unwrap().data.as_deref(),
+    )
+    .unwrap();
+    assert!(
+        absent_choice
+            .1
+            .contains(&target_absent_dir.display().to_string())
+    );
+
+    // Verify rendered modal in TUI terminal backend
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    let text: String = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|c| c.symbol())
+        .collect();
+    assert!(text.contains("Copy to another Workstation"));
+    assert!(text.contains(crate::config::channel_label(installed_channel)));
+    assert!(text.contains(crate::config::channel_label(absent_channel)));
+
+    // Verify keyboard navigation
+    assert_eq!(app.administrator_selected, 0);
+    app.prompt_key(KeyCode::Down.into());
+    assert_eq!(app.administrator_selected, 1);
+    app.prompt_key(KeyCode::Up.into());
+    assert_eq!(app.administrator_selected, 0);
+
+    // Verify hit testing for mouse clicking choices
+    assert!(
+        app.hits
+            .iter()
+            .any(|h| h.control == Control::Administrator(0))
+    );
+    assert!(
+        app.hits
+            .iter()
+            .any(|h| h.control == Control::Administrator(1))
+    );
+}
+
+#[test]
+fn profile_transfer_missing_installation_produces_actionable_message_and_no_writes() {
+    let mut app = test_profile_app();
+    let source_dir = private_tempdir();
+    app.state_dir = source_dir.path().into();
+    app.connections.save(&app.state_dir).unwrap();
+    let source_before = std::fs::read(source_dir.path().join("installations.json")).unwrap();
+
+    let (_temp_root, roots) = create_test_roots();
+    let current_channel = crate::config::workstation_channel();
+    let absent_channel = ["stable", "beta", "dev"]
+        .into_iter()
+        .find(|&c| c != current_channel)
+        .unwrap();
+    // Do NOT simulate installation of absent channel
+    app.install_roots = Some(roots);
+    let target_dir = crate::config::default_state_dir_with_root(
+        absent_channel,
+        app.install_roots.as_ref().unwrap().data.as_deref(),
+    )
+    .unwrap();
+    assert!(!target_dir.exists());
+
+    app.activate(Control::TransferInstallation);
+    assert!(app.prompt.is_some());
+
+    // Find index of absent channel
+    let absent_index = match &app.prompt.as_ref().unwrap().0 {
+        Prompt::Select { choices, .. } => choices
+            .iter()
+            .position(|(c, _)| c == absent_channel)
+            .unwrap(),
+        _ => panic!("Expected Prompt::Select"),
+    };
+
+    // Select the absent channel
+    app.administrator_selected = absent_index;
+    app.prompt_key(KeyCode::Enter.into());
+    app.finish_profile_copy();
+
+    // Verify actionable message
+    assert!(app.error.contains("not installed"));
+    assert!(app.error.contains("install_workstation"));
+    assert!(app.error.contains(absent_channel));
+
+    // Verify missing destinations MUST NOT copy or create state
+    assert!(!target_dir.exists());
+    assert!(!target_dir.join("installations.json").exists());
+
+    // Verify source unchanged
+    assert_eq!(
+        std::fs::read(source_dir.path().join("installations.json")).unwrap(),
+        source_before
+    );
+
+    // Verify state machine cleared
+    assert!(app.prompt.is_none());
+    assert!(app.profile_copy.is_none());
+}
+
+#[test]
+fn profile_transfer_cancel_selector_does_not_write() {
+    let mut app = test_profile_app();
+    let source_dir = private_tempdir();
+    app.state_dir = source_dir.path().into();
+    app.connections.save(&app.state_dir).unwrap();
+    let source_before = std::fs::read(source_dir.path().join("installations.json")).unwrap();
+
+    let (_temp_root, roots) = create_test_roots();
+    app.install_roots = Some(roots);
+
+    app.activate(Control::TransferInstallation);
+    assert!(app.prompt.is_some());
+
+    // Cancel via Esc
+    app.prompt_key(KeyCode::Esc.into());
+    app.finish_profile_copy();
+
+    assert!(app.prompt.is_none());
+    assert!(app.profile_copy.is_none());
+    assert_eq!(
+        std::fs::read(source_dir.path().join("installations.json")).unwrap(),
+        source_before
+    );
+}
+
+#[test]
+fn profile_transfer_confirmation_cancel_does_not_write() {
+    let mut app = test_profile_app();
+    let source_dir = private_tempdir();
+    app.state_dir = source_dir.path().into();
+    app.connections.save(&app.state_dir).unwrap();
+    let source_before = std::fs::read(source_dir.path().join("installations.json")).unwrap();
+
+    let (_temp_root, roots) = create_test_roots();
+    let current_channel = crate::config::workstation_channel();
+    let target_channel = ["stable", "beta", "dev"]
+        .into_iter()
+        .find(|&c| c != current_channel)
+        .unwrap();
+    simulate_installed_workstation(&roots, target_channel);
+    app.install_roots = Some(roots);
+
+    let target_dir = crate::config::default_state_dir_with_root(
+        target_channel,
+        app.install_roots.as_ref().unwrap().data.as_deref(),
+    )
+    .unwrap();
+    assert!(!target_dir.join("installations.json").exists());
+
+    app.activate(Control::TransferInstallation);
+    let target_index = match &app.prompt.as_ref().unwrap().0 {
+        Prompt::Select { choices, .. } => choices
+            .iter()
+            .position(|(c, _)| c == target_channel)
+            .unwrap(),
+        _ => panic!("Expected Prompt::Select"),
+    };
+
+    // Select installed channel -> advances to Prompt::ConfirmAction
+    app.administrator_selected = target_index;
+    app.prompt_key(KeyCode::Enter.into());
+    app.finish_profile_copy();
+
+    assert!(matches!(
+        app.prompt,
+        Some((Prompt::ConfirmAction { .. }, _))
+    ));
+
+    // Cancel confirmation with 'n'
+    app.prompt_key(KeyCode::Char('n').into());
+    app.finish_profile_copy();
+
+    assert!(app.prompt.is_none());
+    assert!(app.profile_copy.is_none());
+    assert!(!target_dir.join("installations.json").exists());
+    assert_eq!(
+        std::fs::read(source_dir.path().join("installations.json")).unwrap(),
+        source_before
+    );
+}
+
+#[test]
+fn profile_transfer_successful_safe_copy_remaps_branch_and_preserves_destination_and_source() {
+    for (target_channel, target_branch) in [("stable", "main"), ("beta", "beta"), ("dev", "dev")] {
+        if target_channel == crate::config::workstation_channel() {
             continue;
         }
         let mut app = test_profile_app();
-        let source = tempfile::tempdir().unwrap();
-        let target = tempfile::tempdir().unwrap();
-        app.state_dir = source.path().into();
+        let source_dir = private_tempdir();
+        app.state_dir = source_dir.path().into();
         app.connections.save(&app.state_dir).unwrap();
-        let before = std::fs::read(source.path().join("installations.json")).unwrap();
-        app.activate(Control::TransferInstallation(channel));
-        assert!(app.prompt.is_some());
-        app.profile_copy.as_mut().unwrap().1 = target.path().into();
-        app.prompt_key(KeyCode::Char('n').into());
+
+        // Create keys and journals in source to verify they are NEVER copied
+        std::fs::write(source_dir.path().join("id_ed25519"), "secret private key").unwrap();
+        std::fs::write(source_dir.path().join("update-operation.json"), "journal").unwrap();
+        let source_before = std::fs::read(source_dir.path().join("installations.json")).unwrap();
+
+        let (_temp_root, roots) = create_test_roots();
+        simulate_installed_workstation(&roots, target_channel);
+        app.install_roots = Some(roots);
+
+        let target_dir = crate::config::default_state_dir_with_root(
+            target_channel,
+            app.install_roots.as_ref().unwrap().data.as_deref(),
+        )
+        .unwrap();
+        std::fs::create_dir_all(&target_dir).unwrap();
+
+        // Pre-populate target with an existing profile to verify destination profiles are preserved
+        let mut prior_dest = Connections::default();
+        let mut existing_profile = saved_installation("existing.target.example");
+        existing_profile.name = "Pre-existing profile".into();
+        prior_dest.installations.push(existing_profile.clone());
+        prior_dest.save(&target_dir).unwrap();
+
+        app.activate(Control::TransferInstallation);
+        let target_index = match &app.prompt.as_ref().unwrap().0 {
+            Prompt::Select { choices, .. } => choices
+                .iter()
+                .position(|(c, _)| c == target_channel)
+                .unwrap(),
+            _ => panic!("Expected Prompt::Select"),
+        };
+
+        // Select installed channel
+        app.administrator_selected = target_index;
+        app.prompt_key(KeyCode::Enter.into());
         app.finish_profile_copy();
-        assert!(!target.path().join("installations.json").exists());
-        app.activate(Control::TransferInstallation(channel));
-        app.profile_copy.as_mut().unwrap().1 = target.path().into();
+
+        // Confirm copy
+        assert!(matches!(
+            app.prompt,
+            Some((Prompt::ConfirmAction { .. }, _))
+        ));
         app.prompt_key(KeyCode::Char('y').into());
         app.finish_profile_copy();
-        let destination = Connections::load(target.path()).unwrap();
-        assert_eq!(destination.installations.len(), 1);
-        assert_eq!(
-            destination.installations[0].id,
-            app.connections.installations[0].id
+
+        // Check target destination contents
+        let destination = Connections::load(&target_dir).unwrap();
+        assert_eq!(destination.installations.len(), 2);
+
+        // Prior destination profile preserved
+        assert!(
+            destination
+                .installations
+                .iter()
+                .any(|p| p.id == existing_profile.id)
         );
-        assert_eq!(destination.installations[0].branch, branch);
+
+        // Copied profile has source ID and remapped branch
+        let copied = destination
+            .installations
+            .iter()
+            .find(|p| p.id == app.connections.installations[0].id)
+            .unwrap();
+        assert_eq!(copied.name, app.connections.installations[0].name);
+        assert_eq!(copied.host, app.connections.installations[0].host);
+        assert_eq!(copied.branch, target_branch);
+
+        // Keys and journals NOT copied
+        assert!(!target_dir.join("id_ed25519").exists());
+        assert!(!target_dir.join("update-operation.json").exists());
+
+        // Source completely unchanged
         assert_eq!(
-            std::fs::read(source.path().join("installations.json")).unwrap(),
-            before
+            std::fs::read(source_dir.path().join("installations.json")).unwrap(),
+            source_before
         );
+        assert_eq!(
+            std::fs::read_to_string(source_dir.path().join("id_ed25519")).unwrap(),
+            "secret private key"
+        );
+
+        // Actionable success message
+        assert!(app.error.contains("Profile copied to"));
     }
+}
+
+#[test]
+fn profile_transfer_preserves_source_profile_chosen_when_selector_opened() {
+    let mut app = test_profile_app();
+    let source_dir = private_tempdir();
+    app.state_dir = source_dir.path().into();
+
+    let mut second = saved_installation("second.example");
+    second.name = "Second Profile".into();
+    app.connections.installations.push(second.clone());
+    app.connections.save(&app.state_dir).unwrap();
+
+    let (_temp_root, roots) = create_test_roots();
+    let current_channel = crate::config::workstation_channel();
+    let target_channel = ["stable", "beta", "dev"]
+        .into_iter()
+        .find(|&c| c != current_channel)
+        .unwrap();
+    simulate_installed_workstation(&roots, target_channel);
+    app.install_roots = Some(roots);
+
+    let target_dir = crate::config::default_state_dir_with_root(
+        target_channel,
+        app.install_roots.as_ref().unwrap().data.as_deref(),
+    )
+    .unwrap();
+
+    // Open selector with profile 0 chosen
+    app.settings_profile = 0;
+    let expected_id = app.connections.installations[0].id;
+    app.activate(Control::TransferInstallation);
+
+    // Later changed selection while selector was open
+    app.settings_profile = 1;
+
+    let target_index = match &app.prompt.as_ref().unwrap().0 {
+        Prompt::Select { choices, .. } => choices
+            .iter()
+            .position(|(c, _)| c == target_channel)
+            .unwrap(),
+        _ => panic!("Expected Prompt::Select"),
+    };
+    app.administrator_selected = target_index;
+    app.prompt_key(KeyCode::Enter.into());
+    app.finish_profile_copy();
+
+    app.prompt_key(KeyCode::Char('y').into());
+    app.finish_profile_copy();
+
+    // Destination must receive profile 0 (the one chosen when selector opened), NOT profile 1
+    let destination = Connections::load(&target_dir).unwrap();
+    assert_eq!(destination.installations.len(), 1);
+    assert_eq!(destination.installations[0].id, expected_id);
+    assert_ne!(destination.installations[0].id, second.id);
+}
+
+#[test]
+fn profile_transfer_same_state_dir_guard_blocks_copy() {
+    let (_temp_root, roots) = create_test_roots();
+    let current_channel = crate::config::workstation_channel();
+    let target_channel = ["stable", "beta", "dev"]
+        .into_iter()
+        .find(|&c| c != current_channel)
+        .unwrap();
+    simulate_installed_workstation(&roots, target_channel);
+
+    let same_dir =
+        crate::config::default_state_dir_with_root(target_channel, roots.data.as_deref()).unwrap();
+    std::fs::create_dir_all(&same_dir).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&same_dir).unwrap().permissions();
+        perms.set_mode(0o700);
+        std::fs::set_permissions(&same_dir, perms).unwrap();
+    }
+    let mut app = test_profile_app();
+    app.state_dir = same_dir.clone();
+    app.connections = Connections::load(&same_dir).unwrap_or_default();
+    let mut profile = saved_installation("test.example");
+    profile.name = "Test Profile".into();
+    app.connections.installations.push(profile);
+    app.connections.save(&same_dir).unwrap();
+    app.install_roots = Some(roots);
+
+    app.activate(Control::TransferInstallation);
+    let target_index = match &app.prompt.as_ref().unwrap().0 {
+        Prompt::Select { choices, .. } => choices
+            .iter()
+            .position(|(c, _)| c == target_channel)
+            .unwrap(),
+        _ => panic!("Expected Prompt::Select"),
+    };
+
+    app.administrator_selected = target_index;
+    app.prompt_key(KeyCode::Enter.into());
+    app.finish_profile_copy();
+
+    assert!(
+        app.error
+            .contains("The destination is this installation's state directory")
+    );
+    assert!(app.profile_copy.is_none());
+}
+
+#[test]
+fn channel_installation_detection_checks_receipt_launcher_and_surviving_state() {
+    let (_temp_root, roots) = create_test_roots();
+    let data_dir = roots.data.as_ref().unwrap();
+    let config_dir = roots.config.as_ref().unwrap();
+    let home_dir = roots.home.as_ref().unwrap();
+
+    // 1. Absent channel
+    let status = crate::self_manage::detect_channel_installation("dev", Some(&roots));
+    assert_eq!(status, crate::self_manage::ChannelStatus::NotInstalled);
+
+    // 2. Surviving old state directory survives uninstall - must NOT count as installed!
+    let old_state = data_dir.join("node-plane-dev");
+    std::fs::create_dir_all(&old_state).unwrap();
+    std::fs::write(old_state.join("installations.json"), "{}").unwrap();
+    let status_with_old_state =
+        crate::self_manage::detect_channel_installation("dev", Some(&roots));
+    assert_eq!(
+        status_with_old_state,
+        crate::self_manage::ChannelStatus::NotInstalled
+    );
+
+    // 3. Receipt-based installation
+    let install_dir = data_dir.join("custom-dist").join("dev");
+    std::fs::create_dir_all(&install_dir).unwrap();
+    let exe = install_dir.join(if cfg!(windows) {
+        "node-plane.exe"
+    } else {
+        "node-plane"
+    });
+    std::fs::write(&exe, "binary").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    let receipt_dir = config_dir
+        .join("node-plane-workstation")
+        .join("dev")
+        .join("node-plane-cli");
+    std::fs::create_dir_all(&receipt_dir).unwrap();
+    let receipt_json = serde_json::json!({
+        "install_prefix": install_dir.to_str().unwrap()
+    });
+    std::fs::write(
+        receipt_dir.join("node-plane-cli-receipt.json"),
+        receipt_json.to_string(),
+    )
+    .unwrap();
+
+    let status_receipt = crate::self_manage::detect_channel_installation("dev", Some(&roots));
+    assert!(status_receipt.is_found());
+    // Startup rewrites XDG_CONFIG_HOME into the current channel's receipt
+    // namespace; sibling receipts still resolve, including custom prefixes.
+    let scoped_roots = crate::self_manage::InstallationRoots {
+        config: Some(config_dir.join("node-plane-workstation").join("beta")),
+        ..roots.clone()
+    };
+    assert!(crate::self_manage::detect_channel_installation("dev", Some(&scoped_roots)).is_found());
+    std::fs::remove_file(&exe).unwrap();
+    assert_eq!(
+        crate::self_manage::detect_channel_installation("dev", Some(&scoped_roots)),
+        crate::self_manage::ChannelStatus::NotInstalled
+    );
+
+    // The install prefix is under HOME even when saved data lives elsewhere.
+    let standard = home_dir.join(".local/share/node-plane-workstation/stable");
+    std::fs::create_dir_all(&standard).unwrap();
+    let standard_exe = standard.join(if cfg!(windows) {
+        "node-plane.exe"
+    } else {
+        "node-plane"
+    });
+    std::fs::write(&standard_exe, "binary").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            crate::self_manage::detect_channel_installation("stable", Some(&roots)),
+            crate::self_manage::ChannelStatus::NotInstalled
+        );
+        std::fs::set_permissions(&standard_exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    assert!(crate::self_manage::detect_channel_installation("stable", Some(&roots)).is_found());
+
+    // 4. Launcher symlink in home/.local/bin
+    let local_bin = home_dir.join(".local/bin");
+    std::fs::create_dir_all(&local_bin).unwrap();
+    let launcher = local_bin.join(crate::config::channel_launcher("beta"));
+    std::fs::write(&launcher, "binary").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&launcher, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let status_launcher = crate::self_manage::detect_channel_installation("beta", Some(&roots));
+    #[cfg(unix)]
+    assert!(status_launcher.is_found());
+    #[cfg(not(unix))]
+    assert!(!status_launcher.is_found());
 }
 
 #[test]
