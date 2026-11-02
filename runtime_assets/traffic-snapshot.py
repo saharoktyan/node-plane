@@ -6,7 +6,9 @@ the agent. A container restart during the read makes the observation unknown.
 """
 
 import base64
+import functools
 import hashlib
+import importlib.util
 import json
 import re
 import subprocess
@@ -20,6 +22,16 @@ def command(args):
     return subprocess.run(
         args, check=True, capture_output=True, text=True, timeout=4
     ).stdout.strip()
+
+
+@functools.lru_cache(maxsize=1)
+def xray_api():
+    # The Xray API transport (agent or `docker exec`) lives in one helper.
+    path = Path(__file__).with_name("xray-user-api.py")
+    spec = importlib.util.spec_from_file_location("xray_user_api", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def environment():
@@ -83,6 +95,29 @@ def fields(text):
     }
 
 
+def container_statsquery(container, name):
+    # Agents before `xray-api` leave helpers on the Xray CLI in the container.
+    for binary in ("xray", "/usr/local/bin/xray", "/usr/bin/xray"):
+        try:
+            return command(
+                [
+                    "docker",
+                    "exec",
+                    container,
+                    binary,
+                    "api",
+                    "statsquery",
+                    "--server=127.0.0.1:10085",
+                    "-timeout=2",
+                    "-reset=false",
+                    "-pattern=user>>>" + name + ">>>",
+                ]
+            )
+        except subprocess.CalledProcessError:
+            continue
+    raise ValueError("Xray statistics unavailable")
+
+
 def xray(env, name, identity):
     cfg = json.loads(Path(env["XRAY_CONFIG"]).read_text())
     if not isinstance(cfg.get("stats"), dict) or "StatsService" not in cfg.get(
@@ -110,29 +145,14 @@ def xray(env, name, identity):
             for key in ("statsUserUplink", "statsUserDownlink")
         ):
             raise ValueError("Xray user statistics unavailable")
-    raw = None
-    for binary in ("xray", "/usr/local/bin/xray", "/usr/bin/xray"):
+    api = xray_api()
+    if api.agent():
         try:
-            raw = command(
-                [
-                    "docker",
-                    "exec",
-                    env["XRAY_CONTAINER_NAME"],
-                    binary,
-                    "api",
-                    "statsquery",
-                    "--server=127.0.0.1:10085",
-                    "-timeout=2",
-                    "-reset=false",
-                    "-pattern=user>>>" + name + ">>>",
-                ]
-            )
-            break
-        except subprocess.CalledProcessError:
-            continue
-    if raw is None:
-        raise ValueError("Xray statistics unavailable")
-    payload = json.loads(raw)
+            payload = api.agent_api("query-stats", "--pattern=user>>>" + name + ">>>")
+        except RuntimeError as error:
+            raise ValueError("Xray statistics unavailable") from error
+    else:
+        payload = json.loads(container_statsquery(env["XRAY_CONTAINER_NAME"], name))
     if not isinstance(payload, dict) or set(payload) - {"stat"}:
         raise ValueError("invalid Xray statistics response")
     statistics = payload.get("stat", [])

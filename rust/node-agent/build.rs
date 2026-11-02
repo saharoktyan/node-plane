@@ -14,6 +14,23 @@ fn main() {
             &["../../proto"],
         )
         .expect("failed to compile node-agent protobufs");
+
+    // Vendored Xray API: client only, see proto/vendor/xray/README.md.
+    let xray = [
+        "app/proxyman/command/command.proto",
+        "app/router/command/command.proto",
+        "app/router/config.proto",
+        "app/stats/command/command.proto",
+    ];
+    println!("cargo:rerun-if-changed=../../proto/vendor/xray");
+    tonic_build::configure()
+        .build_server(false)
+        .build_client(true)
+        .compile_protos(
+            &xray.map(|path| format!("../../proto/vendor/xray/{path}")),
+            &["../../proto/vendor/xray"],
+        )
+        .expect("failed to compile vendored Xray protobufs");
 }
 
 fn binary_metadata() {

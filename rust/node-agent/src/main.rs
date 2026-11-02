@@ -42,6 +42,10 @@ fn print_startup(config: &AgentConfig) {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(code) = protocols::xray::api::cli::run(&args).await {
+        std::process::exit(code);
+    }
     let config = AgentConfig::load();
     let state = AgentState::new(config.clone());
     let api = NodeAgentApi {

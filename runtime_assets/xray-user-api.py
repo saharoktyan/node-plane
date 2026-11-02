@@ -2,6 +2,7 @@
 """Keep Xray's on-disk VLESS users and live HandlerService users in sync."""
 
 import fcntl
+import functools
 import json
 import os
 from pathlib import Path
@@ -13,6 +14,48 @@ import uuid as uuid_module
 
 
 API = "127.0.0.1:10085"
+AGENT = "/usr/local/bin/node-plane-agent"
+
+
+def api_address():
+    # Tests point helpers at a published API port; nodes use the default.
+    return os.environ.get("NODE_PLANE_XRAY_API") or API
+
+
+def agent():
+    """The node agent binary when it serves `xray-api`, otherwise None.
+
+    Agents from this release talk to the Xray gRPC API directly; older agents
+    leave helpers on `docker exec <container> xray api`. Drop the fallback once
+    no supported agent predates `xray-api` (VPN plan, section 10, item 5).
+    """
+    return _probe(os.environ.get("NODE_PLANE_AGENT_BIN") or AGENT)
+
+
+@functools.lru_cache(maxsize=None)
+def _probe(path):
+    if not os.access(path, os.X_OK):
+        return None
+    # An older agent ignores the arguments and starts its server. A missing
+    # config and an unparsable listen address make it exit before binding.
+    env = {**os.environ, "NODE_AGENT_CONFIG_PATH": "/nonexistent/node-plane-agent-probe.toml",
+           "NODE_AGENT_LISTEN_ADDR": "probe"}
+    try:
+        result = subprocess.run([path, "xray-api", "capabilities"], env=env,
+                                capture_output=True, text=True, timeout=5)
+        if result.returncode == 0 and json.loads(result.stdout).get("xray_api", 0) >= 1:
+            return path
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        pass
+    return None
+
+
+def agent_api(*args):
+    result = subprocess.run([agent(), "xray-api", f"--server={api_address()}", *args],
+                            capture_output=True, text=True, timeout=15)
+    if result.returncode:
+        raise RuntimeError((result.stderr or result.stdout or "agent Xray API failed").strip())
+    return json.loads(result.stdout)
 
 
 def docker(*args):
@@ -41,8 +84,10 @@ def xray_api(container, *args):
 def users(container, tag):
     # Query the full list: a missing -email result is not represented reliably
     # across Xray versions.
-    raw = xray_api(container, "inbounduser", f"-tag={tag}")
-    response = json.loads(raw)
+    if agent():
+        response = agent_api("inbound-users", f"--tag={tag}")
+    else:
+        response = json.loads(xray_api(container, "inbounduser", f"-tag={tag}"))
     return {
         user["email"]: {
             "id": (user.get("account") or {}).get("id"),
@@ -100,6 +145,10 @@ def one_user_config(inbound, client):
 
 
 def add_live(container, inbound, client, config_dir):
+    if agent():
+        agent_api("add-user", f"--tag={inbound['tag']}", f"--email={client['email']}",
+                  f"--uuid={client['id']}", f"--flow={client.get('flow', '')}")
+        return
     with tempfile.NamedTemporaryFile(
         mode="w", encoding="utf-8", prefix=".xray-user-", suffix=".json", dir=config_dir
     ) as stream:
@@ -112,6 +161,9 @@ def add_live(container, inbound, client, config_dir):
 
 
 def remove_live(container, tag, name):
+    if agent():
+        agent_api("remove-user", f"--tag={tag}", f"--email={name}")
+        return
     output = xray_api(container, "rmu", f"-tag={tag}", name)
     check_result(output, "Removed")
 

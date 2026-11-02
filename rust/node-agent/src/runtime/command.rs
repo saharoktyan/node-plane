@@ -48,6 +48,11 @@ impl AgentState {
         };
         let output = command
             .env("NODE_PLANE_AGENT_INSTANCE_ID", &self.instance_id)
+            // Helpers reach the Xray API through this exact binary.
+            .env(
+                "NODE_PLANE_AGENT_BIN",
+                std::env::current_exe().unwrap_or_default(),
+            )
             .args(args)
             .output()
             .map_err(|err| Status::internal(format!("failed to execute {script_name}: {err}")))?;

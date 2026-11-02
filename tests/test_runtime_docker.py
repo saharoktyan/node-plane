@@ -1,7 +1,8 @@
 """Opt-in real runtime checks; only uniquely named disposable containers.
 
 Requires cached production images and NODE_PLANE_TEST_DOCKER=1. No image builds,
-host network, published VPN ports or production node paths are used.
+host network, published VPN ports or production node paths are used. The agent
+Xray API test publishes only the Xray API port, on host loopback.
 """
 import base64
 import importlib.util
@@ -23,6 +24,7 @@ from backend.installation_maintenance import InstallationMaintenance, UNITS
 ASSETS = Path(__file__).resolve().parents[1] / 'runtime_assets'
 sys.path.insert(0, str(ASSETS))
 XRAY_IMAGE = 'ghcr.io/xtls/xray-core:26.10.29@sha256:c9443f3ee297f6481bc245269d61720c6f989195ee9b58fa90fdd99f03c21044'
+AGENT_BINARY = Path(__file__).resolve().parents[1] / 'rust/node-agent/target/debug/node-plane-agent'
 AWG_IMAGE = 'amneziavpn/amneziawg-go:3.1.20260828@sha256:cbafc02b8373a83f428272db6d8001b37bc02e6211cbd8c0cb4e2e3759b12b72'
 
 
@@ -60,6 +62,11 @@ class DockerRuntimeTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.prefix = 'np-test-' + uuid4().hex[:12]
+        # Xray fixtures have no network; helpers use the container CLI unless a
+        # test opts into the agent transport.
+        absent = patch.dict(os.environ, {'NODE_PLANE_AGENT_BIN': str(self.root / 'no-agent')})
+        absent.start()
+        self.addCleanup(absent.stop)
 
     def container(self, suffix, image, *args, command=('sh', '-c', 'sleep 86400')):
         name = self.prefix + '-' + suffix
@@ -162,6 +169,79 @@ class DockerRuntimeTests(unittest.TestCase):
         self.wait_users(container)
         for tag in ('reality-tcp', 'reality-xhttp'):
             self.assertNotIn('alice', XRAY.users(container, tag))
+
+    @unittest.skipUnless(AGENT_BINARY.is_file(), 'requires a built node agent')
+    def test_agent_xray_api_adds_rotates_and_revokes_users_on_real_runtime(self):
+        directory = self.root / 'xray'
+        directory.mkdir()
+        path = directory / 'config.json'
+        config = {
+            'log': {'loglevel': 'warning'},
+            'stats': {},
+            'policy': {'levels': {'0': {'statsUserUplink': True, 'statsUserDownlink': True,
+                                        'statsUserOnline': True}}},
+            'api': {'tag': 'api', 'services': ['HandlerService', 'StatsService', 'RoutingService']},
+            'inbounds': [
+                {'tag': tag, 'port': port, 'protocol': 'vless',
+                 'settings': {'decryption': 'none', 'clients': []},
+                 'streamSettings': {'network': network}}
+                for tag, port, network in [('reality-tcp', 443, 'tcp'), ('reality-xhttp', 8443, 'xhttp')]
+            ] + [{'tag': 'api', 'listen': '0.0.0.0', 'port': 10085,
+                  'protocol': 'dokodemo-door', 'settings': {'address': '127.0.0.1'}}],
+            'outbounds': [{'protocol': 'freedom', 'tag': 'direct'},
+                          {'protocol': 'blackhole', 'tag': 'node-plane-blocked'}],
+            'routing': {'rules': [{'type': 'field', 'inboundTag': ['api'], 'outboundTag': 'api'}]},
+        }
+        path.write_text(json.dumps(config))
+        path.chmod(0o644)
+        container = self.container('xray-api', XRAY_IMAGE, '--user', '0:0', '-p', '127.0.0.1::10085',
+            '-v', f'{directory}:/etc/xray:ro', command=('xray', 'run', '-c', '/etc/xray/config.json'))
+        port = docker('port', container, '10085/tcp').stdout.split()[0].rsplit(':', 1)[1]
+        agent = patch.dict(os.environ, {'NODE_PLANE_AGENT_BIN': str(AGENT_BINARY),
+                                        'NODE_PLANE_XRAY_API': f'127.0.0.1:{port}'})
+        agent.start()
+        self.addCleanup(agent.stop)
+        self.assertEqual(XRAY.agent(), str(AGENT_BINARY))
+
+        def cli_users(tag):
+            # Independent view through the Xray CLI inside the container.
+            raw = docker('exec', container, 'xray', 'api', 'inbounduser',
+                         '--server=127.0.0.1:10085', f'-tag={tag}').stdout
+            return {user['email']: user['account'] for user in json.loads(raw or '{}').get('users', [])}
+
+        deadline = time.monotonic() + 10
+        while True:
+            try:
+                XRAY.users(container, 'reality-tcp')
+                break
+            except RuntimeError:
+                if time.monotonic() >= deadline:
+                    self.fail(docker('logs', container).stdout)
+                time.sleep(0.1)
+        first, second = str(uuid4()), str(uuid4())
+        with patch.object(XRAY, 'xray_api', side_effect=AssertionError('container CLI used')):
+            self.sync(path, container, 'add', first)
+            self.assertEqual(cli_users('reality-tcp')['alice']['id'], first)
+            self.assertEqual(cli_users('reality-tcp')['alice']['flow'], 'xtls-rprx-vision')
+            self.assertNotIn('flow', cli_users('reality-xhttp')['alice'])
+            self.sync(path, container, 'add', second)
+            self.assertEqual(cli_users('reality-xhttp')['alice']['id'], second)
+            self.sync(path, container, 'delete')
+        self.assertEqual(cli_users('reality-tcp'), {})
+        self.assertEqual(cli_users('reality-xhttp'), {})
+
+        run = lambda *args: subprocess.run([str(AGENT_BINARY), 'xray-api', f'--server=127.0.0.1:{port}', *args],
+                                           capture_output=True, text=True, timeout=15)
+        added = run('add-rule', '--rule-tag=np-evict-test', '--outbound=node-plane-blocked',
+                    '--user=alice', '--source=[2001:db8::7]/64')
+        self.assertEqual(added.returncode, 0, added.stderr)
+        listed = docker('exec', container, 'xray', 'api', 'lsrules', '--server=127.0.0.1:10085').stdout
+        self.assertEqual([rule.get('ruleTag') for rule in json.loads(listed)['rules']], [None, 'np-evict-test'])
+        self.assertEqual(run('add-rule', '--rule-tag=np-evict-test', '--outbound=node-plane-blocked',
+                             '--user=alice').returncode, 4)
+        for _ in range(2):
+            self.assertEqual(run('remove-rule', '--rule-tag=np-evict-test').returncode, 0)
+        self.assertEqual(json.loads(run('uptime').stdout)['uptime'] >= 0, True)
 
     def test_xray_partial_api_add_and_delete_have_durable_repairable_state(self):
         path, container = self.xray()

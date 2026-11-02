@@ -1,4 +1,5 @@
 //! Xray (VLESS) on this node.
+pub(crate) mod api;
 pub(crate) mod runtime;
 pub(crate) mod users;
 

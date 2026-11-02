@@ -6,6 +6,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from tests import test_agent_node_operations as operations
@@ -55,6 +56,44 @@ class AgentTrafficTests(unittest.TestCase):
             ],
         }
         Path(self.env["XRAY_CONFIG"]).write_text(json.dumps(self.config))
+        # Without an agent that serves `xray-api`, the container CLI is used.
+        no_agent = patch.object(
+            MODULE, "xray_api", return_value=SimpleNamespace(agent=lambda: None)
+        )
+        no_agent.start()
+        self.addCleanup(no_agent.stop)
+
+    def test_xray_agent_transport_reads_counters_without_docker(self):
+        calls = []
+
+        def agent_api(*args):
+            calls.append(args)
+            return {
+                "stat": [
+                    {"name": "user>>>alice>>>traffic>>>uplink", "value": 7},
+                    {"name": "user>>>alice>>>traffic>>>downlink", "value": 9},
+                ]
+            }
+
+        api = SimpleNamespace(agent=lambda: "/agent", agent_api=agent_api)
+        with (
+            patch.object(MODULE, "xray_api", return_value=api),
+            patch.object(MODULE, "command", side_effect=AssertionError("docker used")),
+        ):
+            self.assertEqual(
+                MODULE.xray(self.env, "alice", self.uuid), {"uplink": 7, "downlink": 9}
+            )
+        self.assertEqual(calls, [("query-stats", "--pattern=user>>>alice>>>")])
+
+        def unavailable(*args):
+            raise RuntimeError("Xray API unavailable")
+
+        api = SimpleNamespace(agent=lambda: "/agent", agent_api=unavailable)
+        with (
+            patch.object(MODULE, "xray_api", return_value=api),
+            self.assertRaises(ValueError),
+        ):
+            MODULE.xray(self.env, "alice", self.uuid)
 
     def test_xray_filtered_nonresetting_query_and_decimal_int64_response(self):
         raw = json.dumps(
