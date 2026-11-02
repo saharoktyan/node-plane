@@ -6,6 +6,9 @@ mod api;
 mod config;
 mod fencing;
 mod host;
+// Used by enforcement modules once they are wired (VPN plan, item 7).
+#[allow(dead_code)]
+mod journal;
 mod lifecycle;
 mod profiles;
 mod protocols;
