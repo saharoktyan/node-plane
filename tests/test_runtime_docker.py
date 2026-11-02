@@ -409,8 +409,8 @@ chmod +x /usr/local/bin/systemctl
         for path in ('/root/.ssh/authorized_keys', '/home/test/.ssh/authorized_keys'):
             docker('exec', '-i', container, 'sh', '-c', 'cat > "$1"', 'fixture', path,
                 input=self.bot_key + '\n' + self.other_key + '\n')
-        source = (ASSETS.parent / 'rust/node-agent/src/main.rs').read_text()
-        function = source[source.index('    fn schedule_uninstall('):]
+        source = (ASSETS.parent / 'rust/node-agent/src/lifecycle/uninstall.rs').read_text()
+        function = source[source.index('    pub(crate) fn schedule_uninstall('):]
         uninstall = re.search(r'let script = r#"(.*?)"#;', function, re.S).group(1)
         args = ['/usr/local/bin/node-plane-agent', '/etc/node-plane/agent.toml',
             '/etc/node-plane/tls/server.crt', '/etc/node-plane/tls/server.key', '/etc/node-plane/tls/ca.crt',
