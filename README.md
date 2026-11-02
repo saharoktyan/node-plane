@@ -98,9 +98,10 @@ Node Plane's strengths are the workstation-led installation, no required public 
 These are development priorities for the beta period, not a guarantee that every item ships before stable 1.0. See the [roadmap](docs/roadmap.md#near-term-development-priorities).
 
 - Renewable subscriptions for easier configuration refresh.
-- Traffic quotas and connection limits.
+- Traffic quotas.
+- VLESS devices, device limits and simultaneous-connection limits per VLESS device configuration.
 - Per-profile speed limits.
-- Basic server chains and stronger active-session revocation.
+- Stronger active-session revocation and a manual server-chain builder.
 
 ## Requirements and documentation
 

@@ -18,9 +18,11 @@ The public beta is for learning how Node Plane behaves in independent environmen
 Make the most important everyday VPN workflows easier and more complete:
 
 - renewable configuration subscriptions for supported clients;
-- traffic quotas and connection limits;
+- traffic quotas;
+- devices and device limits for VLESS and AmneziaWG, and a limit on simultaneous connections per VLESS device configuration;
 - per-profile speed limits;
-- basic server chains and stronger active-session revocation.
+- stronger active-session revocation;
+- a manual server-chain builder.
 
 The exact protocol behavior, supported clients and release scope will be defined and tested before each feature is presented as available.
 
