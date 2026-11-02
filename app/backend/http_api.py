@@ -1144,6 +1144,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
                 conn.execute('SELECT profile_id FROM backend_traffic_usage LIMIT 1').fetchone()
                 conn.execute('SELECT device_id,protocol FROM backend_traffic_peers LIMIT 1').fetchone()
                 conn.execute('SELECT node_key FROM backend_node_traffic LIMIT 1').fetchone()
+                conn.execute('SELECT node_key,revision FROM backend_node_admission LIMIT 1').fetchone()
                 conn.execute('SELECT id FROM backend_system_cleanup_jobs LIMIT 1').fetchone()
                 conn.execute('SELECT actor_account_id FROM backend_account_commands LIMIT 1').fetchone()
                 conn.execute('SELECT id FROM backend_account_guard LIMIT 1').fetchone()

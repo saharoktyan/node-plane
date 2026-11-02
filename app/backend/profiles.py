@@ -147,6 +147,8 @@ class ProfileRepository:
         SystemSettingsService(self.db).initialize_schema()
         from .traffic import TrafficService
         TrafficService(self.db).initialize_schema()
+        from .connection_limits import ConnectionLimits
+        ConnectionLimits(self.db).initialize_schema()
         from .system_cleanup import SystemCleanupService
         SystemCleanupService(self.db).initialize_schema()
 

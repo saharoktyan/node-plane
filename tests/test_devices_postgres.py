@@ -39,6 +39,35 @@ class DevicesPostgresTests(unittest.TestCase):
             tasks = conn.execute("SELECT device_id FROM backend_operation_tasks WHERE protocol='awg'").fetchall()
         self.assertEqual([task['device_id'] for task in tasks], [created['device']['id']])
 
+    def test_connection_limit_snapshot_resolves_vless_clients_on_postgres(self):
+        from backend.connection_limits import ConnectionLimits
+        profile_id = ProfileRepository(self.db).create_profile(runtime_name='alice', display_name='Alice')
+        with self.db.transaction() as conn:
+            conn.execute("""INSERT INTO backend_nodes(key,title,region,protocols_json,enabled,applied_revision)
+                VALUES ('node','Node','Europe','["xray"]',1,1)""")
+            conn.execute("INSERT INTO backend_grants VALUES (?,'node','xray')", (profile_id,))
+            conn.execute("""INSERT INTO backend_vpn_policies(id,subject_kind,key,value_json,updated_at)
+                VALUES ('mode','installation','connections.mode','"enforce"','now')""")
+        device = DeviceCommands(self.db).execute(self.actor, str(uuid4()), action='create',
+            profile_id=profile_id, revision=1, display_name='Phone')['device']
+
+        class Driver:
+            calls = []
+
+            def apply_admission_policy(self, node_key, revision, clients):
+                self.calls.append((node_key, revision, clients))
+                return revision
+
+        driver = Driver()
+        ConnectionLimits(self.db, driver).sync()
+        with self.db.connect() as conn:
+            email = conn.execute('SELECT runtime_name FROM backend_device_credentials WHERE device_id=?',
+                                 (device['id'],)).fetchone()['runtime_name']
+            status = conn.execute("SELECT status FROM backend_node_admission WHERE node_key='node'").fetchone()['status']
+        self.assertEqual(driver.calls, [('node', 1, [{'email': email, 'mode': 'enforce', 'max_sources': 1,
+                                                      'window_seconds': 120, 'cooldown_seconds': 300}])])
+        self.assertEqual(status, 'current')
+
     def test_concurrent_custom_devices_share_parent_revision_fence(self):
         profile_id = ProfileRepository(self.db).create_profile(runtime_name='alice', display_name='Alice')
         start = threading.Barrier(2)

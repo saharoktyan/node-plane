@@ -358,6 +358,12 @@ class Worker:
         except Exception:
             import logging
             logging.getLogger(__name__).warning('Traffic collection requires attention')
+        from .connection_limits import ConnectionLimits
+        try:
+            ConnectionLimits(self.executor.db, GrpcIntentDriver(self.channel, timeout=10)).scheduled()
+        except Exception:
+            import logging
+            logging.getLogger(__name__).warning('Connection limit delivery requires attention')
 
 
 def run_daemon(worker, lock_fd, stop, wait, clock=None):

@@ -68,6 +68,16 @@ mode = choice(*MODES)
 # created; existing devices above a lowered limit stay (plan, section 4.3).
 register(PolicyKey('devices.max', frozenset({'installation', 'profile'}), frozenset({'global'}),
                    integer(1, 1000)))
+# Concurrent VLESS sources per device on each node (plan, section 5). The
+# controller resolves them per client and node; the agent enforces them.
+register(PolicyKey('connections.mode', frozenset({'installation', 'profile', 'device'}),
+                   frozenset({'global', 'node'}), mode, default='off', protocols=frozenset({'xray'})))
+register(PolicyKey('connections.max_sources', frozenset({'installation', 'profile', 'device'}),
+                   frozenset({'global', 'node'}), integer(1, 100), default=1, protocols=frozenset({'xray'})))
+register(PolicyKey('connections.window_seconds', frozenset({'installation'}), frozenset({'global'}),
+                   integer(30, 3600), default=120, protocols=frozenset({'xray'})))
+register(PolicyKey('connections.cooldown_seconds', frozenset({'installation'}), frozenset({'global'}),
+                   integer(0, 86400), default=300, protocols=frozenset({'xray'})))
 register(PolicyKey('xray.bittorrent', frozenset({'installation'}), frozenset({'global'}),
                    choice('allow', 'block'), default='allow', protocols=frozenset({'xray'}),
                    setting='xray_bittorrent'))
