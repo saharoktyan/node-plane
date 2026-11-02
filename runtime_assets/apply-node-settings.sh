@@ -65,6 +65,13 @@ if block_bittorrent:
     policy.append({'type': 'field', 'ruleTag': 'node-plane-bittorrent', 'inboundTag': client_inbounds,
                    'protocol': ['bittorrent'], 'outboundTag': blocked_tag})
 rules[:] = api + policy + others
+# The agent limits concurrent VLESS sources: it reads online IPs per client
+# and adds {user, source} block rules at runtime (VPN plan, section 5).
+services = data.setdefault('api', {'tag': 'api'}).setdefault('services', [])
+for service in ('StatsService', 'HandlerService', 'RoutingService'):
+    if service not in services:
+        services.append(service)
+data.setdefault('policy', {}).setdefault('levels', {}).setdefault('0', {})['statsUserOnline'] = True
 for tag in client_inbounds:
     if block_bittorrent:
         # routeOnly keeps the requested destination; sniffing only feeds routing.

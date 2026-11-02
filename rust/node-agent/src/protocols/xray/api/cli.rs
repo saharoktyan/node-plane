@@ -253,6 +253,17 @@ async fn execute(args: &[String]) -> Result<String, Failure> {
                 .collect();
             json!({"rules": rules})
         }
+        "admission-step" => {
+            // One pass of the agent's source limit over its own journals, for
+            // diagnosis on a node; the running agent does the same every 5 s.
+            let state_dir = options.take("state-dir")?;
+            options.finish()?;
+            let events = crate::protocols::xray::admission::Service::open(&state_dir)
+                .tick(&server)
+                .await
+                .map_err(|err| Failure::Api(XrayApiError::Unavailable(err)))?;
+            json!({"events": events})
+        }
         other => return Err(Failure::Usage(format!("unknown command: {other}"))),
     };
     Ok(output.to_string())

@@ -80,11 +80,12 @@ config = {
         "levels": {
             "0": {
                 "statsUserUplink": True,
-                "statsUserDownlink": True
+                "statsUserDownlink": True,
+                "statsUserOnline": True
             }
         }
     },
-    "api": {"tag": "api", "services": ["StatsService", "HandlerService"]},
+    "api": {"tag": "api", "services": ["StatsService", "HandlerService", "RoutingService"]},
     "inbounds": [
         {
             "tag": "api",

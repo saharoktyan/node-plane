@@ -71,7 +71,8 @@ pub(crate) struct State {
     xray_uptime: Option<u32>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub(crate) enum Event {
     Evicted { email: String, source: String },
     WouldEvict { email: String, source: String },
@@ -350,7 +351,7 @@ impl Service {
     }
 
     /// One enforcement pass. Without limits and blocks it does not touch Xray.
-    async fn tick(&self, address: &str) -> Result<Vec<Event>, String> {
+    pub(crate) async fn tick(&self, address: &str) -> Result<Vec<Event>, String> {
         let policies = self.snapshot().clients;
         let mut state: State = self.state_journal.load().map_err(|err| err.to_string())?;
         if policies.is_empty() && state.clients.is_empty() {
