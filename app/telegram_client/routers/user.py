@@ -1102,6 +1102,11 @@ async def user_action_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
             if current.get('status') == 'approved':
                 await backend.set_announcement_silent(user_id, action.args[0] == 'true')
             await show_member_settings(chat_id, user_id, message_id, bot, backend, state)
+        elif action.name == 'service_notifications':
+            current = await backend.me(user_id)
+            if current.get('status') == 'approved' and action.args[0] in ('on', 'silent', 'off'):
+                await backend.set_service_notifications(user_id, action.args[0])
+            await show_member_settings(chat_id, user_id, message_id, bot, backend, state)
         elif action.name == 'notification_inbox':
             await show_notification_inbox(chat_id, user_id, message_id, bot, backend, state)
         elif action.name == 'notification_page':
@@ -1317,6 +1322,12 @@ async def show_member_settings(chat_id: int, user_id: int, message_id: int,
                 .model_copy(update={'style': 'primary' if not silent else None}),
             button(user_id, tr(locale, 'ui.disable_sound'), 'announcement_silent', 'true')
                 .model_copy(update={'style': 'primary' if silent else None}),),)))
+        service = current.get('service_notifications', 'on')
+        sections.append(Section(tr(locale, 'ui.service_notifications'),
+            lines=(tr(locale, 'ui.service_notifications_hint'),), rows=(tuple(
+                button(user_id, tr(locale, 'ui.service.' + mode), 'service_notifications', mode)
+                    .model_copy(update={'style': 'primary' if service == mode else None})
+                for mode in ('on', 'silent', 'off')),)))
     await render(bot, chat_id, Screen(tr(locale, 'settings.title'),
         sections=tuple(sections), embedded_buttons=True, navigation=True),
         [[button(user_id, tr(locale, 'back'), 'home')]], state, message_id)

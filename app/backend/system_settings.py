@@ -32,8 +32,12 @@ class SystemSettingsService:
             enabled = conn.execute(
                 "SELECT value FROM backend_system_settings WHERE key='traffic_enabled'"
             ).fetchone()
+        from .service_notifications import mode
+        with self.db.connect() as conn:
+            service = mode(conn, actor.account.id)
         return {
             "announcement_silent": bool(json.loads(row["value"])) if row else False,
+            "service_notifications": service,
             "traffic_available": json.loads(enabled["value"]) is True
             if enabled
             else False,
@@ -98,17 +102,23 @@ class SystemSettingsService:
             conn.execute('''UPDATE backend_traffic_peers SET epoch=NULL,identity=NULL,
                 last_uplink=NULL,last_downlink=NULL,status='paused' ''')
 
-    def update_member_preferences(self, actor, silent):
+    def update_member_preferences(self, actor, silent=None, *, service_notifications=None):
         require_permission(actor, "account.self.preferences.write")
-        if type(silent) is not bool:
+        from .service_notifications import MODES, set_mode
+        if (silent is None and service_notifications is None
+                or silent is not None and type(silent) is not bool
+                or service_notifications is not None and service_notifications not in MODES):
             raise AccessDenied("invalid_input", 422)
         with self.db.transaction() as conn:
             from .maintenance_gate import admit
             admit(conn)
-            conn.execute(
-                "INSERT INTO backend_system_settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-                ("announcement_silent:" + actor.account.id, json.dumps(silent)),
-            )
+            if silent is not None:
+                conn.execute(
+                    "INSERT INTO backend_system_settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                    ("announcement_silent:" + actor.account.id, json.dumps(silent)),
+                )
+            if service_notifications is not None:
+                set_mode(conn, actor.account.id, service_notifications)
 
     def bot_title(self, actor):
         require_permission(actor, "account.self.read")

@@ -137,6 +137,26 @@ class MigrationsPostgresTests(unittest.TestCase):
             conn.execute("DELETE FROM backend_nodes WHERE key='n1'")
             self.assertEqual([r['id'] for r in conn.execute('SELECT id FROM backend_vpn_policies').fetchall()], ['a'])
 
+    def test_service_notifications_upgrade_backfills_dedup_keys_for_previous_reader(self):
+        migrate(self.db, revisions=REVISIONS[:15])
+        with self.db.transaction() as conn:
+            conn.execute("INSERT INTO backend_announcements VALUES ('old','system:access-expiry','old','Expired','2026-10-15')")
+            conn.execute("""INSERT INTO backend_system_notifications(announcement_id,kind,profile_id,expires_at,service_title)
+                VALUES ('old','access_expired','p1','2026-10-15T00:00:00+00:00','VPN')""")
+        self.assertEqual(migrate(self.db, revisions=REVISIONS[:16])['applied'], [16])
+        self.assertTrue(check_schema(self.db, revisions=REVISIONS[:15])['ready'])
+        with self.db.transaction() as conn:
+            row = conn.execute("SELECT dedup_key,payload_json FROM backend_system_notifications WHERE announcement_id='old'").fetchone()
+            self.assertEqual((row['dedup_key'], row['payload_json']), ('access_expired:p1:2026-10-15T00:00:00+00:00', '{}'))
+            conn.execute("INSERT INTO backend_announcements VALUES ('new','system:access-expiry','new','Event','2026-10-16')")
+            # New kinds need no deadline; the previous reader's insert shape remains valid.
+            conn.execute("""INSERT INTO backend_system_notifications(announcement_id,kind,profile_id,service_title,dedup_key)
+                VALUES ('new','quota_warning','p1','VPN','quota:p1:1')""")
+        with self.assertRaises(Exception), self.db.transaction() as conn:
+            conn.execute("INSERT INTO backend_announcements VALUES ('dup','system:access-expiry','dup','Event','2026-10-16')")
+            conn.execute("""INSERT INTO backend_system_notifications(announcement_id,kind,profile_id,service_title,dedup_key)
+                VALUES ('dup','quota_warning','p1','VPN','quota:p1:1')""")
+
     def test_concurrent_expiry_admits_one_notification_and_rechecks_renewal(self):
         from datetime import timedelta
         from backend.announcements import AnnouncementService

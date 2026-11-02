@@ -1123,7 +1123,29 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         sound = sections[1].rows[0][0]
         self.assertEqual(sound.text, 'Enable')
         self.assertEqual(user.actions[sound.callback_data[2:]].args, ('false',))
-        self.assertEqual(len(sections), 2)
+        self.assertEqual(len(sections), 3)
+        self.assertEqual(sections[2].title, 'Service notifications')
+
+    async def test_service_notification_choices_highlight_saved_mode_and_update_backend(self):
+        for mode in ('on', 'silent', 'off'):
+            backend = SimpleNamespace(me=AsyncMock(return_value={
+                'status': 'approved', 'locale': 'en', 'service_notifications': mode}))
+            with patch.object(user, 'render', new_callable=AsyncMock) as draw:
+                await user.show_member_settings(123, 123, 77, self.bot, backend, self.state)
+            service = draw.call_args.args[2].sections[2]
+            self.assertEqual([b.text for b in service.rows[0]], ['With sound', 'Silent', 'Off'])
+            self.assertEqual([user.actions[b.callback_data[2:]].args for b in service.rows[0]],
+                             [('on',), ('silent',), ('off',)])
+            self.assertEqual([b.style for b in service.rows[0]],
+                             ['primary' if choice == mode else None for choice in ('on', 'silent', 'off')])
+        for status, mode, expected in (('approved', 'off', True), ('pending', 'off', False),
+                                       ('approved', 'loud', False)):
+            self.query.data = user.button(123, 'Off', 'service_notifications', mode).callback_data
+            backend = SimpleNamespace(me=AsyncMock(return_value={'status': status, 'locale': 'en'}),
+                                      set_service_notifications=AsyncMock())
+            with patch.object(user, 'render', new_callable=AsyncMock):
+                await user.user_action_cb(self.query, self.bot, backend, self.state)
+            self.assertEqual(backend.set_service_notifications.await_count, int(expected))
 
     async def test_language_and_sound_choices_highlight_only_the_saved_value(self):
         for locale in ('ru', 'en'):

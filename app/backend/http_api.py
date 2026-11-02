@@ -79,6 +79,7 @@ class AccountOutput(BaseModel):
 class MeOutput(AccountOutput):
     onboarding_completed: bool = False
     announcement_silent: bool = False
+    service_notifications: Literal['on', 'silent', 'off'] = 'on'
     traffic_available: bool = False
     permissions: list[str]
     language_code: str | None = None
@@ -119,6 +120,7 @@ class AccountPreferencesInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
     locale: Literal['ru', 'en'] | None = None
     announcement_silent: StrictBool | None = None
+    service_notifications: Literal['on', 'silent', 'off'] | None = None
 
 
 class TrafficPolicyInput(BaseModel):
@@ -1188,7 +1190,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
         if not body.model_fields_set or any(value is None for value in body.model_dump(exclude_unset=True).values()):
             raise AccessDenied('invalid_input', 422)
         if isinstance(current, TelegramVisitor):
-            if body.announcement_silent is not None:
+            if body.announcement_silent is not None or body.service_notifications is not None:
                 raise AccessDenied("permission_denied")
             if body.locale is None:
                 raise AccessDenied("invalid_input", 422)
@@ -1197,8 +1199,9 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
         require_permission(current, 'account.self.preferences.write')
         if body.locale is not None:
             identities.set_telegram_locale_for_account(current.account.id, body.locale)
-        if body.announcement_silent is not None:
-            system_settings.update_member_preferences(current, body.announcement_silent)
+        if body.announcement_silent is not None or body.service_notifications is not None:
+            system_settings.update_member_preferences(current, body.announcement_silent,
+                service_notifications=body.service_notifications)
         permissions = []
         for permission in sorted(SELF_PERMISSIONS | APPROVED_PERMISSIONS | ADMIN_PERMISSIONS):
             try:

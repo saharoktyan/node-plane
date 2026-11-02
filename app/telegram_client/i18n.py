@@ -167,6 +167,9 @@ CATALOG = {
         'ui.config_help': 'Как подключиться',
         'ui.notifications': 'Звук объявлений',
         'ui.enable_sound': 'Включить', 'ui.disable_sound': 'Выключить',
+        'ui.service_notifications': 'Сервисные уведомления',
+        'ui.service_notifications_hint': 'Сообщения от System, например об истечении доступа. Выключенные уведомления не присылаются, но остаются во входящих.',
+        'ui.service.on': 'Со звуком', 'ui.service.silent': 'Без звука', 'ui.service.off': 'Выключить',
         'ui.traffic': 'Статистика трафика',
 
         'home.title': 'Node Plane', 'home.choose': 'Выберите действие.',
@@ -913,6 +916,9 @@ CATALOG = {
         'ui.config_help': 'How to connect',
         'ui.notifications': 'Announcement sound',
         'ui.enable_sound': 'Enable', 'ui.disable_sound': 'Disable',
+        'ui.service_notifications': 'Service notifications',
+        'ui.service_notifications_hint': 'Messages from System, such as access expiry. Notifications that are turned off are not sent but stay in the Inbox.',
+        'ui.service.on': 'With sound', 'ui.service.silent': 'Silent', 'ui.service.off': 'Off',
         'ui.traffic': 'Traffic statistics',
 
         'home.title': 'Node Plane', 'home.choose': 'Choose an action.',

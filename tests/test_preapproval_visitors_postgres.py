@@ -60,7 +60,7 @@ class PreapprovalVisitorsPostgresTests(unittest.TestCase):
             conn.execute("INSERT INTO backend_telegram_identity_details(subject, username, updated_at) VALUES ('1001', 'user1001', '2026-10-25')")
             conn.execute("INSERT INTO backend_access_requests(id, account_id, status, create_key, created_at) VALUES ('req-1', 'acc-existing', 'approved', 'key-1', '2026-10-25')")
             conn.execute("INSERT INTO backend_announcements VALUES ('ann-1', 'acc-existing', 'key-ann', 'Hello', '2026-10-25')")
-            conn.execute("INSERT INTO backend_system_notifications VALUES ('ann-1', 'access_expired', 'prof-1', '2026-10-25', 'Title')")
+            conn.execute("INSERT INTO backend_system_notifications(announcement_id,kind,profile_id,expires_at,service_title) VALUES ('ann-1', 'access_expired', 'prof-1', '2026-10-25', 'Title')")
 
         result = migrate(self.db, revisions=REVISIONS[:14])
         self.assertEqual(result['applied'], [14])

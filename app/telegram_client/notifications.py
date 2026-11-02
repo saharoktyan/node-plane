@@ -4,8 +4,12 @@ from datetime import datetime
 from .i18n import tr
 
 
+def is_service(item):
+    return item.get('notification_kind', 'announcement') != 'announcement'
+
+
 def notification_label(item, locale):
-    if item.get('notification_kind') == 'access_expired':
+    if is_service(item):
         sender = 'System'
     elif item.get('sender_username'):
         sender = '@' + item['sender_username'].lstrip('@')
@@ -17,10 +21,12 @@ def notification_label(item, locale):
 
 
 def notification_content(item, locale):
-    if item.get('notification_kind') == 'access_expired':
-        return (tr(locale, 'notification.access_expired.title'), (
+    if is_service(item):
+        kind = item['notification_kind']
+        values = {**(item.get('payload') or {}), 'service': item['service_title']}
+        return (tr(locale, f'notification.{kind}.title'), (
             tr(locale, 'notification.from', sender='System'),
-            tr(locale, 'notification.access_expired.body', service=item['service_title']),
+            tr(locale, f'notification.{kind}.body', **values),
         ))
     sender = item.get('sender_username')
     return (tr(locale, 'announce.notification'),

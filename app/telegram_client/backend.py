@@ -146,6 +146,10 @@ class BackendClient:
         return await self.request('PATCH','/api/v1/me/preferences',telegram_user_id=telegram_user_id,
                                   body={'announcement_silent':silent})
 
+    async def set_service_notifications(self, telegram_user_id, mode):
+        return await self.request('PATCH','/api/v1/me/preferences',telegram_user_id=telegram_user_id,
+                                  body={'service_notifications':mode})
+
     async def announcement_preview(self, user_id, text):
         return await self.request('POST','/api/v1/announcements/preview',telegram_user_id=user_id,body={'text':text})
 

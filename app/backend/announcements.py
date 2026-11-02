@@ -18,7 +18,10 @@ RECIPIENT_PROFILE = """EXISTS (SELECT 1 FROM backend_profiles p
         (SELECT 1 FROM backend_profile_deletions d WHERE d.profile_id = p.id))"""
 
 
-SYSTEM_ACTOR = "system:access-expiry"
+from .service_notifications import SYSTEM_ACTOR
+
+# Delivery states visible in the Inbox; `inbox_only` was muted by the recipient.
+INBOX_STATUSES = "('sent','inbox_only')"
 
 
 class AnnouncementService:
@@ -40,42 +43,46 @@ class AnnouncementService:
             upgrade(conn)
             from app.db.migration_revisions.r0012_system_notifications import upgrade as system_notifications
             system_notifications(conn)
+            if getattr(self.db, 'backend_name', '') == 'postgres':
+                from app.db.migration_revisions.r0016_service_notifications import upgrade as service_notifications
+                service_notifications(conn)
+            elif not any(column['name'] == 'dedup_key' for column in
+                         conn.execute('PRAGMA table_info(backend_system_notifications)').fetchall()):
+                # Unit databases cannot drop NOT NULL in place; rebuild the empty test table.
+                conn.execute('DROP TABLE backend_system_notifications')
+                conn.execute("""CREATE TABLE backend_system_notifications (
+                    announcement_id TEXT PRIMARY KEY REFERENCES backend_announcements(id) ON DELETE CASCADE,
+                    kind TEXT NOT NULL, profile_id TEXT NOT NULL, expires_at TEXT,
+                    service_title TEXT NOT NULL, dedup_key TEXT UNIQUE, device_id TEXT,
+                    payload_json TEXT NOT NULL DEFAULT '{}',
+                    UNIQUE(kind,profile_id,expires_at))""")
 
     @staticmethod
     def queue_expired_access(conn, timestamp):
         """One notification per deadline, admitted with the expiry transaction."""
-        rows = conn.execute("""SELECT p.id,p.expires_at,a.id AS account_id
-            FROM backend_profiles p JOIN backend_accounts a ON a.id=p.owner_account_id
-            WHERE a.status='approved' AND a.role<>'admin'
+        from .service_notifications import queue
+        rows = conn.execute("""SELECT p.id,p.expires_at FROM backend_profiles p
+            JOIN backend_accounts a ON a.id=p.owner_account_id
+            WHERE a.status='approved'
             AND EXISTS (SELECT 1 FROM backend_external_identities i WHERE i.account_id=a.id AND i.provider='telegram')
             AND p.expires_at IS NOT NULL AND p.expires_at<=?
             AND NOT EXISTS (SELECT 1 FROM backend_profile_deletions d WHERE d.profile_id=p.id)
             AND NOT EXISTS (SELECT 1 FROM backend_system_notifications s
                 WHERE s.kind='access_expired' AND s.profile_id=p.id AND s.expires_at=p.expires_at)
             ORDER BY p.expires_at,p.id LIMIT 100""", (timestamp.isoformat(),)).fetchall()
-        setting = conn.execute("SELECT value FROM backend_system_settings WHERE key='bot_menu_title'").fetchone()
-        title = setting['value'].strip() if setting and setting['value'].strip() else 'Node Plane'
         for row in rows:
             if datetime.fromisoformat(row['expires_at']) > timestamp:
                 continue
-            identity = str(uuid5(NAMESPACE_URL, f"node-plane:access-expired:{row['id']}:{row['expires_at']}"))
-            conn.execute("""INSERT INTO backend_announcements(id,actor_id,command_key,text,created_at)
-                VALUES (?,?,?,?,?)""", (identity,SYSTEM_ACTOR,identity,
-                f'Your access to {title} has expired.',timestamp.isoformat()))
-            conn.execute("""INSERT INTO backend_system_notifications
-                (announcement_id,kind,profile_id,expires_at,service_title) VALUES (?,?,?,?,?)""",
-                (identity,'access_expired',row['id'],row['expires_at'],title))
-            for recipient in conn.execute("SELECT subject FROM backend_external_identities WHERE account_id=? AND provider='telegram'", (row['account_id'],)).fetchall():
-                conn.execute("""INSERT INTO backend_announcement_deliveries
-                    (id,announcement_id,account_id,telegram_subject,status) VALUES (?,?,?,?,'queued')""",
-                    (str(uuid4()),identity,row['account_id'],recipient['subject']))
+            queue(conn, kind='access_expired', profile_id=row['id'], expires_at=row['expires_at'],
+                  dedup_key=f"access_expired:{row['id']}:{row['expires_at']}", timestamp=timestamp)
 
     @staticmethod
     def notification_metadata(conn, announcement_id):
-        system = conn.execute('SELECT kind,service_title FROM backend_system_notifications WHERE announcement_id=?',
+        system = conn.execute('SELECT kind,service_title,payload_json FROM backend_system_notifications WHERE announcement_id=?',
                               (announcement_id,)).fetchone()
         if system:
             return {'notification_kind':system['kind'], 'service_title':system['service_title'],
+                    'payload':json.loads(system['payload_json'] or '{}'),
                     'sender_name':'System', 'sender_username':None}
         return {'notification_kind':'announcement',
                 'sender_username':AnnouncementService.sender_username(conn, announcement_id)}
@@ -184,6 +191,7 @@ class AnnouncementService:
                     "failed",
                     "unknown",
                     "skipped",
+                    "inbox_only",
                 )
             }
             for row in conn.execute(
@@ -220,19 +228,19 @@ class AnnouncementService:
         require_permission(actor, "account.self.read")
         limit = max(1, min(int(limit), 50))
         with self.db.connect() as conn:
-            total = conn.execute("""SELECT COUNT(*) AS count
+            total = conn.execute(f"""SELECT COUNT(*) AS count
                 FROM backend_announcement_deliveries d
-                WHERE d.account_id=? AND d.status='sent'
+                WHERE d.account_id=? AND d.status IN {INBOX_STATUSES}
                 AND NOT EXISTS (SELECT 1 FROM backend_announcement_user_state x
                     WHERE x.delivery_id=d.id AND x.account_id=d.account_id AND x.dismissed_at IS NOT NULL)""",
                 (actor.account.id,)).fetchone()["count"]
             offset = min(max(0, int(offset)), max(0, total - 1))
             offset = offset // limit * limit
-            rows = conn.execute("""SELECT d.id,a.id AS announcement_id,a.text,a.created_at,s.viewed_at
+            rows = conn.execute(f"""SELECT d.id,a.id AS announcement_id,a.text,a.created_at,s.viewed_at
                 FROM backend_announcement_deliveries d
                 JOIN backend_announcements a ON a.id=d.announcement_id
                 LEFT JOIN backend_announcement_user_state s ON s.delivery_id=d.id AND s.account_id=d.account_id
-                WHERE d.account_id=? AND d.status='sent'
+                WHERE d.account_id=? AND d.status IN {INBOX_STATUSES}
                 AND (s.dismissed_at IS NULL)
                 ORDER BY a.created_at DESC,a.id DESC LIMIT ? OFFSET ?""",
                 (actor.account.id, limit, offset)).fetchall()
@@ -244,10 +252,10 @@ class AnnouncementService:
         require_permission(actor, "account.self.read")
         viewed_at = datetime.now(timezone.utc).isoformat()
         with self.db.transaction() as conn:
-            row = conn.execute("""SELECT d.id,a.id AS announcement_id,a.text,a.created_at
+            row = conn.execute(f"""SELECT d.id,a.id AS announcement_id,a.text,a.created_at
                 FROM backend_announcement_deliveries d
                 JOIN backend_announcements a ON a.id=d.announcement_id
-                WHERE d.id=? AND d.account_id=? AND d.status='sent'
+                WHERE d.id=? AND d.account_id=? AND d.status IN {INBOX_STATUSES}
                 AND NOT EXISTS (SELECT 1 FROM backend_announcement_user_state x
                     WHERE x.delivery_id=d.id AND x.account_id=d.account_id AND x.dismissed_at IS NOT NULL)""",
                 (delivery_id, actor.account.id)).fetchone()
@@ -266,8 +274,8 @@ class AnnouncementService:
         require_permission(actor, "account.self.read")
         timestamp = datetime.now(timezone.utc).isoformat()
         with self.db.transaction() as conn:
-            row = conn.execute("""SELECT id FROM backend_announcement_deliveries
-                WHERE id=? AND account_id=? AND status='sent'""",
+            row = conn.execute(f"""SELECT id FROM backend_announcement_deliveries
+                WHERE id=? AND account_id=? AND status IN {INBOX_STATUSES}""",
                 (delivery_id, actor.account.id)).fetchone()
             if row is None:
                 raise AccessDenied("resource_not_found", 404)
@@ -292,17 +300,8 @@ class AnnouncementService:
         system = conn.execute('SELECT * FROM backend_system_notifications WHERE announcement_id=?',
                               (row['announcement_id'],)).fetchone()
         if system:
-            if system['kind'] != 'access_expired':
-                return None
-            current = conn.execute("""SELECT p.expires_at FROM backend_profiles p
-                JOIN backend_accounts a ON a.id=p.owner_account_id
-                JOIN backend_external_identities i ON i.account_id=a.id AND i.provider='telegram'
-                WHERE p.id=? AND a.id=? AND a.status='approved' AND a.role<>'admin'
-                AND i.subject=? AND NOT EXISTS
-                    (SELECT 1 FROM backend_profile_deletions d WHERE d.profile_id=p.id)""",
-                (system['profile_id'],row['account_id'],row['telegram_subject'])).fetchone()
-            return bool(current and current['expires_at'] == system['expires_at']
-                        and datetime.fromisoformat(current['expires_at']) <= datetime.now(timezone.utc))
+            from .service_notifications import current
+            return current(conn, system, row)
         return conn.execute(
             f"""SELECT 1 FROM backend_accounts a
             JOIN backend_external_identities i ON i.account_id=a.id AND i.provider='telegram'
@@ -361,6 +360,12 @@ class AnnouncementService:
                         (row["id"],),
                     )
                     continue
+                if self._service_mode(conn, row) == 'off':
+                    conn.execute(
+                        "UPDATE backend_announcement_deliveries SET status='inbox_only' WHERE id=?",
+                        (row["id"],),
+                    )
+                    continue
                 conn.execute(
                     "UPDATE backend_announcement_deliveries SET status='claimed',claim_id=?,adapter_id=?,claimed_until=? WHERE id=?",
                     (
@@ -374,6 +379,15 @@ class AnnouncementService:
         return None
 
     @staticmethod
+    def _service_mode(conn, row):
+        """Recipient's service notification mode, or None for administrator announcements."""
+        if not conn.execute('SELECT 1 FROM backend_system_notifications WHERE announcement_id=?',
+                            (row['announcement_id'],)).fetchone():
+            return None
+        from .service_notifications import mode
+        return mode(conn, row['account_id'])
+
+    @staticmethod
     def _delivery(conn, row):
         text = conn.execute(
             "SELECT text FROM backend_announcements WHERE id=?",
@@ -383,6 +397,7 @@ class AnnouncementService:
             "SELECT value FROM backend_system_settings WHERE key=?",
             ("announcement_silent:" + row["account_id"],),
         ).fetchone()
+        service = AnnouncementService._service_mode(conn, row)
         details = conn.execute(
             "SELECT locale,language_code FROM backend_telegram_identity_details WHERE subject=?",
             (row["telegram_subject"],),
@@ -394,7 +409,8 @@ class AnnouncementService:
             "locale": (details["locale"] or details["language_code"])
             if details
             else None,
-            "silent": bool(json.loads(silent["value"])) if silent else False,
+            "silent": (service == 'silent') if service else
+                (bool(json.loads(silent["value"])) if silent else False),
             **AnnouncementService.notification_metadata(conn,row["announcement_id"]),
         }
 

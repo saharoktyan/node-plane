@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add a Telegram setting for service notifications from System: with sound,
+  silent or off. Turned-off notifications are not sent but stay in the Inbox.
+  Administrators also receive service notifications for their own profiles.
 - Choose the destination Workstation channel when copying a saved profile;
   report missing installations and retain confirmation before copying.
 
