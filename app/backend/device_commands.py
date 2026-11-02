@@ -33,11 +33,11 @@ class DeviceCommands:
             key=str(UUID(key))
         except (ValueError,TypeError,AttributeError):
             raise AccessDenied('invalid_idempotency_key',422) from None
-        if action not in {'create','rename','delete'}:
+        if action not in {'create','rename','delete','rotate'}:
             raise AccessDenied('invalid_input',422)
         if action != 'create' and not device_id:
             raise AccessDenied('invalid_input',422)
-        name,name_key = device_name(display_name) if action!='delete' else (None,None)
+        name,name_key = device_name(display_name) if action in {'create','rename'} else (None,None)
         fingerprint=hashlib.sha256(json.dumps(dict(action=action,profile_id=profile_id,
             device_id=device_id,revision=revision,display_name=display_name),sort_keys=True).encode()).hexdigest()
         identity=(actor.principal.id,actor.account.id,key)
@@ -99,8 +99,16 @@ class DeviceCommands:
                     runtime_name='d_'+uuid4().hex
                 conn.execute('''INSERT INTO backend_devices(id,profile_id,display_name,runtime_name,status,created_at)
                     VALUES (?,?,?,?,'active',?)''',(device_id,profile_id,name,runtime_name,datetime.now(timezone.utc).isoformat()))
+                from .device_credentials import ensure_xray
+                ensure_xray(conn,conn.execute('SELECT * FROM backend_devices WHERE id=?',(device_id,)).fetchone())
             elif action=='rename':
                 conn.execute('UPDATE backend_devices SET display_name=?,revision=revision+1 WHERE id=?',(name,device_id))
+            elif action=='rotate':
+                # A new Xray UUID; links issued for the old one stop working.
+                # AWG keys are generated on the node and are not rotated here.
+                from .device_credentials import rotate_xray
+                rotate_xray(conn,device)
+                conn.execute('UPDATE backend_devices SET revision=revision+1 WHERE id=?',(device_id,))
             else:
                 conn.execute("UPDATE backend_devices SET status='deleting',revision=revision+1 WHERE id=?",(device_id,))
             if action!='rename':

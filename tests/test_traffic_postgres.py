@@ -36,6 +36,8 @@ class TrafficPostgresTests(unittest.TestCase):
             conn.execute('CREATE TABLE backend_nodes (key TEXT PRIMARY KEY)')
             conn.execute('CREATE TABLE backend_profiles (id TEXT PRIMARY KEY, owner_account_id TEXT)')
             DeviceRepository.create_schema(conn)
+            from backend.device_credentials import create_schema
+            create_schema(conn)
             conn.execute('CREATE TABLE backend_system_settings (key TEXT PRIMARY KEY, value TEXT)')
             conn.execute("INSERT INTO backend_accounts VALUES ('admin')")
             conn.execute("INSERT INTO backend_nodes VALUES ('node')")

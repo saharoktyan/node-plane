@@ -89,8 +89,9 @@ class BackendConfigIssuanceTests(unittest.TestCase):
     def setup_ready_profile(self, protocol='xray'):
         profile_id = ProfileRepository(self.db).create_profile(runtime_name='alice',
             display_name='Alice', owner_account_id=self.admin.id)
-        if protocol == 'awg':
+        if True:
             # Keep coverage of configurations issued for an existing legacy peer.
+            # VLESS also has one client per device.
             from backend.devices import DeviceRepository
             with self.db.transaction() as conn:
                 DeviceRepository.ensure_default(conn, conn.execute('SELECT * FROM backend_profiles WHERE id=?', (profile_id,)).fetchone())
@@ -161,14 +162,14 @@ class BackendConfigIssuanceTests(unittest.TestCase):
             artifact = client.get(f'/api/v1/config-issuances/{task_id}/artifact', headers=headers)
             self.assertEqual(artifact.status_code, 200, artifact.text)
             self.assertEqual(artifact.json()['filename'],
-                             'Latvia #1 · VLESS · XHTTP.txt')
+                             'Latvia #1 · VLESS · XHTTP · Device 1.txt')
             self.assertIn('pbk=' + 'a' * 43, artifact.json()['content'])
             self.assertIn('type=xhttp', artifact.json()['content'])
             self.assertIn('Latvia%20%231', artifact.json()['content'])
             from urllib.parse import unquote, urlsplit
             self.assertEqual(unquote(urlsplit(artifact.json()['content']).fragment),
-                             'Latvia #1 · VLESS · XHTTP')
-            self.assertEqual(artifact.json()['display_name'], 'Latvia #1 · VLESS · XHTTP')
+                             'Latvia #1 · VLESS · XHTTP · Device 1')
+            self.assertEqual(artifact.json()['display_name'], 'Latvia #1 · VLESS · XHTTP · Device 1')
             self.assertEqual(artifact.headers['Cache-Control'], 'no-store')
             self.db.connection.execute('UPDATE backend_nodes SET desired_revision = 2 WHERE key = ?', ('n1',))
             stale = client.get(f'/api/v1/config-issuances/{task_id}/artifact', headers=headers)
@@ -188,10 +189,10 @@ class BackendConfigIssuanceTests(unittest.TestCase):
             task_id = queued.json()['id']
             artifact = client.get(f'/api/v1/config-issuances/{task_id}/artifact', headers=headers)
             self.assertEqual(artifact.status_code, 200, artifact.text)
-            self.assertEqual(artifact.json()['filename'], 'Latvia #1 · VLESS · TCP.txt')
-            self.assertEqual(artifact.json()['display_name'], 'Latvia #1 · VLESS · TCP')
+            self.assertEqual(artifact.json()['filename'], 'Latvia #1 · VLESS · TCP · Device 1.txt')
+            self.assertEqual(artifact.json()['display_name'], 'Latvia #1 · VLESS · TCP · Device 1')
             from urllib.parse import unquote, urlsplit
-            self.assertEqual(unquote(urlsplit(artifact.json()['content']).fragment), 'Latvia #1 · VLESS · TCP')
+            self.assertEqual(unquote(urlsplit(artifact.json()['content']).fragment), 'Latvia #1 · VLESS · TCP · Device 1')
             self.assertIn('type=tcp', artifact.json()['content'])
             self.assertIn('flow=xtls-rprx-vision', artifact.json()['content'])
             self.db.connection.execute('DELETE FROM backend_grants WHERE profile_id = ?', (profile_id,))

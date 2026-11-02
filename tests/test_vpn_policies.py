@@ -134,6 +134,7 @@ class VpnPolicyTests(unittest.TestCase):
         path = backups._path(backup_id)
         payload = json.loads(path.read_bytes())
         del payload['tables']['backend_vpn_policies']
+        del payload['tables']['backend_device_credentials']
         payload['format'] = 'node-plane-backend-v3'
         payload['checksum'] = hashlib.sha256(encoded(payload['tables'])).hexdigest()
         path.write_bytes(encoded(payload))

@@ -157,6 +157,43 @@ class MigrationsPostgresTests(unittest.TestCase):
             conn.execute("""INSERT INTO backend_system_notifications(announcement_id,kind,profile_id,service_title,dedup_key)
                 VALUES ('dup','quota_warning','p1','VPN','quota:p1:1')""")
 
+    def test_device_credentials_upgrade_hands_the_profile_client_to_a_device(self):
+        migrate(self.db, revisions=REVISIONS[:16])
+        with self.db.transaction() as conn:
+            conn.execute("INSERT INTO backend_accounts(id,status,role) VALUES ('admin','approved','admin')")
+            conn.execute("INSERT INTO backend_nodes(key,title,region,protocols_json) VALUES ('n1','Node','EU','[\"xray\",\"awg\"]')")
+            for profile, runtime in (('p1', 'alice'), ('p2', 'bob'), ('p3', 'carol')):
+                conn.execute("INSERT INTO backend_profiles(id,runtime_name,display_name,created_at) VALUES (?,?,?,'2026-01-01')",
+                             (profile, runtime, runtime))
+                conn.execute("INSERT INTO backend_grants VALUES (?,'n1','xray')", (profile,))
+                conn.execute("INSERT INTO backend_profile_identities VALUES (?,?,'0123456789abcdef')", (profile, 'uuid-' + profile))
+                conn.execute("INSERT INTO backend_operations VALUES (?,?,'admin',1,'succeeded','2026-01-01')", ('op-' + profile, profile))
+                conn.execute('''INSERT INTO backend_operation_tasks(id,operation_id,node_key,protocol,action,status,intent_json)
+                    VALUES (?,?,'n1','xray','ensure','succeeded','{}')''', ('t-' + profile, 'op-' + profile))
+            # p1 uses AWG on its default device; p2 deleted its only device; p3 never had one.
+            conn.execute("INSERT INTO backend_devices VALUES ('d1','p1','Phone','alice','active',1,'2026-01-01')")
+            conn.execute("INSERT INTO backend_devices VALUES ('d2','p2','Device 1','bob','retired',3,'2026-01-01')")
+            conn.execute('''INSERT INTO backend_traffic_usage(profile_id,account_id,node_key,protocol,uplink_bytes,downlink_bytes,
+                epoch,identity,last_uplink,last_downlink,status) VALUES ('p1','admin','n1','xray',5,6,'e','uuid-p1',5,6,'current')''')
+            conn.execute('''INSERT INTO backend_traffic_peers(profile_id,node_key,device_id,status) VALUES ('p1','n1','d1','current')''')
+        self.assertEqual(migrate(self.db, revisions=REVISIONS[:17])['applied'], [17])
+        # Older controllers would issue profile-wide clients again.
+        with self.assertRaises(MigrationError):
+            check_schema(self.db, revisions=REVISIONS[:16])
+        with self.db.connect() as conn:
+            rows = {r['profile_id']: dict(r) for r in conn.execute('SELECT * FROM backend_device_credentials').fetchall()}
+            self.assertEqual({p: (r['runtime_name'], r['credential_json']) for p, r in rows.items()},
+                {'p1': ('alice', '{"uuid": "uuid-p1"}'), 'p2': ('bob', '{"uuid": "uuid-p2"}'),
+                 'p3': ('carol', '{"uuid": "uuid-p3"}')})
+            self.assertEqual(rows['p1']['device_id'], 'd1')
+            for profile in ('p2', 'p3'):
+                device = conn.execute('SELECT * FROM backend_devices WHERE id=?', (rows[profile]['device_id'],)).fetchone()
+                self.assertEqual((device['profile_id'], device['status'], device['display_name']), (profile, 'active', 'Device 1'))
+            tasks = {r['id']: r['device_id'] for r in conn.execute('SELECT id,device_id FROM backend_operation_tasks').fetchall()}
+            self.assertEqual(tasks, {'t-' + p: rows[p]['device_id'] for p in rows})
+            peers = {(r['protocol'], r['device_id']): r['last_uplink'] for r in conn.execute('SELECT * FROM backend_traffic_peers').fetchall()}
+            self.assertEqual(peers, {('awg', 'd1'): None, ('xray', 'd1'): 5})
+
     def test_concurrent_expiry_admits_one_notification_and_rechecks_renewal(self):
         from datetime import timedelta
         from backend.announcements import AnnouncementService
@@ -240,6 +277,9 @@ class MigrationsPostgresTests(unittest.TestCase):
         with self.db.transaction() as conn:
             conn.execute("INSERT INTO backend_nodes(key,title,region,protocols_json) VALUES ('lv1','Latvia #1','Europe','[\"awg\"]')")
             conn.execute("INSERT INTO backend_grants VALUES (?,'lv1','awg')",(profile,))
+            # Current code records operations; r0017 later finds the table in place.
+            from backend.device_credentials import create_schema
+            create_schema(conn)
             actor = Actor(Principal('migration',PrincipalKind.SERVICE,ADMIN_PERMISSIONS),admin)
             OperationRepository.record(conn,actor,profile,set())
             conn.execute('''INSERT INTO backend_traffic_usage
@@ -275,6 +315,11 @@ class MigrationsPostgresTests(unittest.TestCase):
                     AccessRequestService,AccountService,NodeService,NodeSettingsService,
                     ConfigIssuanceService,AgentRolloutService):
             cls(self.db).initialize_schema()
+        with self.db.transaction() as conn:
+            # The previous deployment keyed traffic peers without a protocol (before r0017).
+            conn.execute('ALTER TABLE backend_traffic_peers DROP CONSTRAINT backend_traffic_peers_pkey')
+            conn.execute('ALTER TABLE backend_traffic_peers DROP COLUMN protocol')
+            conn.execute('ALTER TABLE backend_traffic_peers ADD PRIMARY KEY (profile_id,node_key,device_id)')
         account = SQLIdentityRepository(self.db).create_account()
         profile = ProfileRepository(self.db).create_profile(runtime_name='existing',display_name='Existing',owner_account_id=account.id)
         with self.db.transaction() as conn:
@@ -301,6 +346,9 @@ class MigrationsPostgresTests(unittest.TestCase):
             DeviceRepository.ensure_default(conn, ProfileRepository(self.db).get(profile))
             conn.execute("INSERT INTO backend_nodes(key,title,region,protocols_json) VALUES ('node','Node','Europe','[\"awg\"]')")
             conn.execute("INSERT INTO backend_grants VALUES (?,'node','awg')",(profile,))
+            # Current code records operations; r0017 later finds the table in place.
+            from backend.device_credentials import create_schema
+            create_schema(conn)
             OperationRepository.record(conn,Actor(Principal('local',PrincipalKind.SERVICE,ADMIN_PERMISSIONS),admin),profile,set())
             task = dict(conn.execute('SELECT * FROM backend_operation_tasks LIMIT 1').fetchone())
             conn.execute('DELETE FROM backend_schema_revisions')

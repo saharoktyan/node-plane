@@ -127,6 +127,8 @@ class ProfileRepository:
             conn.execute('CREATE INDEX IF NOT EXISTS idx_backend_profile_owner ON backend_profiles(owner_account_id, id)')
             from .devices import DeviceRepository
             DeviceRepository.create_schema(conn)
+            from .device_credentials import create_schema as create_device_credential_schema
+            create_device_credential_schema(conn)
             from .grant_policies import create_schema
             create_schema(conn)
             from .vpn_policies import create_schema as create_vpn_policy_schema

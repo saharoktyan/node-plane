@@ -44,7 +44,7 @@ class BackendOperationTests(unittest.TestCase):
         self.assertEqual(self.operation(edited)['tasks'][0]['action'], 'delete')
 
     def test_freeze_expiry_and_unfreeze_intents(self):
-        profile = self.prepare()
+        profile = self.prepare(with_device=True)
         self.db.connection.execute('UPDATE backend_profiles SET owner_account_id = NULL WHERE id = ?', (profile,))
         self.grants(profile, 1, [{'node_key': 'node', 'protocol': 'xray'}])
         for revision, values, action in [(2, {'frozen': True}, 'delete'),

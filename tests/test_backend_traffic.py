@@ -13,6 +13,7 @@ from backend.authorization import (
     Principal,
     PrincipalKind,
 )
+from backend.devices import DeviceRepository
 from backend.operations import OperationRepository
 from backend.profiles import ProfileRepository
 from backend.system_settings import SystemSettingsService
@@ -431,6 +432,7 @@ class TrafficTests(unittest.TestCase):
         )
         with self.db.transaction() as conn:
             conn.execute("INSERT INTO backend_grants VALUES (?,'n1','xray')", (other,))
+            DeviceRepository.ensure_default(conn, conn.execute('SELECT * FROM backend_profiles WHERE id=?', (other,)).fetchone())
             OperationRepository.record(conn, self.actor, other, set())
             conn.execute("UPDATE backend_operation_tasks SET status='succeeded'")
         with patch("backend.traffic.BATCH_SIZE", 1):

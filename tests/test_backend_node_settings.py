@@ -449,7 +449,7 @@ class BackendNodeSettingsTests(unittest.TestCase):
 
     def test_protocol_removal_settings_gated_by_confirmed_revocations(self):
         from backend.profiles import ProfileRepository
-        from backend.grant_policies import materialize
+        from tests.test_protocol_removal import materialize
         ProfileRepository(self.db).ensure_account_profile(self.admin.id)
         self.assertEqual(self.create().status_code, 201)
         task_id = self.queue().json()['id']

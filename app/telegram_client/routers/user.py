@@ -696,10 +696,12 @@ async def _render_issuance(chat_id: int, user_id: int, message_id: int,
         return
     profile_id, node_key = result['profile_id'], result['node_key']
     locale = normalize_locale((await state.get_data()).get('locale'))
-    device_back = result['protocol'] == 'awg' and result.get('device_id')
-    rows = [[button(user_id, tr(locale, 'back'),
-                    'device_picker_back' if device_back else ('node' if result['protocol'] == 'awg' else 'protocol'),
-                    profile_id, node_key, *((('xray',) if result['protocol'] != 'awg' else ())) )]]
+    device_back = bool(result.get('device_id'))
+    from .user_devices import target_args
+    target = target_args((result['protocol'], 'vpn' if result['protocol'] == 'awg' else result['transport']))
+    rows = [[button(user_id, tr(locale, 'back'), 'device_picker_back', profile_id, node_key, *target)
+             if device_back else button(user_id, tr(locale, 'back'), 'node' if result['protocol'] == 'awg' else 'protocol',
+                                        profile_id, node_key, *((('xray',) if result['protocol'] != 'awg' else ())))]]
     if result['status'] == 'succeeded':
         artifact = await backend.artifact(user_id, issuance_id)
         if (await state.get_data()).get('issuance_poll_token') != view_token:
@@ -1064,7 +1066,10 @@ async def user_action_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
         elif action.name == 'protocol':
             await show_protocol(chat_id, user_id, message_id, *action.args, bot, backend, state)
         elif action.name == 'issue':
-            await issue(chat_id, user_id, message_id, *action.args, bot, backend, state)
+            # VLESS clients belong to devices: choose one, or name the first.
+            from .user_devices import show_picker
+            await show_picker(chat_id, user_id, message_id, *action.args[:2], bot, backend, state,
+                              target=tuple(action.args[2:4]))
         elif action.name == 'issuance':
             await show_issuance(chat_id, user_id, message_id, action.args[0], bot, backend, state)
         elif action.name == 'issuance_plain':

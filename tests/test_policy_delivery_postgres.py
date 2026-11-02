@@ -59,6 +59,8 @@ class TrafficPolicyPostgresTests(unittest.TestCase):
                 (key,title,region,protocols_json,xray_transports_json,applied_revision)
                 VALUES ('node','Test node','Europe','["xray"]','["tcp","xhttp"]',1)""")
             conn.execute("INSERT INTO backend_grants VALUES (?,'node','xray')", (self.profile,))
+            from backend.devices import DeviceRepository
+            DeviceRepository.ensure_default(conn, conn.execute('SELECT * FROM backend_profiles WHERE id=?', (self.profile,)).fetchone())
             OperationRepository.record(conn, self.actor, self.profile, set())
             conn.execute("UPDATE backend_operation_tasks SET status='succeeded'")
             conn.execute("UPDATE backend_operations SET status='succeeded'")

@@ -248,7 +248,7 @@ class BackendBackupsTests(unittest.TestCase):
         self.db.connection.execute("UPDATE backend_devices SET display_name='Phone',status='retired',revision=3")
         backup_id, _ = self.snapshot()
         payload = self.service._load(backup_id)
-        self.assertEqual(payload['format'], 'node-plane-backend-v4')
+        self.assertEqual(payload['format'], 'node-plane-backend-v5')
         saved = payload['tables']['backend_devices']['rows'][0]
         self.assertEqual(saved['profile_id'], profile_id)
         self.assertEqual(saved['runtime_name'], 'existing_awg')
@@ -264,6 +264,7 @@ class BackendBackupsTests(unittest.TestCase):
         for table in TABLE_COLUMNS:
             del payload['tables'][table]
         del payload['tables']['backend_vpn_policies']
+        del payload['tables']['backend_device_credentials']
         payload['format'] = 'node-plane-backend-v2'
         payload['checksum'] = hashlib.sha256(encoded(payload['tables'])).hexdigest()
         path.write_bytes(encoded(payload))
@@ -272,6 +273,29 @@ class BackendBackupsTests(unittest.TestCase):
         self.assertEqual(len(converted['tables']['backend_node_regions']['rows']), 1)
         self.assertEqual(converted['tables']['backend_grant_policies']['rows'], [])
         self.assertEqual(converted['tables']['backend_devices'], payload['tables']['backend_devices'])
+        self.assertTrue(self.service.detail(self.actor, backup_id)['compatible'])
+
+    def test_v4_snapshot_hands_the_profile_vless_client_to_a_device(self):
+        profile_id = ProfileRepository(self.db).create_profile(runtime_name='alice', display_name='Alice')
+        with self.db.transaction() as conn:
+            conn.execute("INSERT INTO backend_nodes(key,title,region,protocols_json) VALUES ('n1','Node','Europe','[\"xray\"]')")
+            conn.execute("INSERT INTO backend_grants(profile_id,node_key,protocol) VALUES (?,'n1','xray')", (profile_id,))
+            conn.execute("INSERT INTO backend_profile_identities VALUES (?,'11111111-1111-4111-8111-111111111111','0123456789abcdef')",
+                         (profile_id,))
+        backup_id, _ = self.snapshot()
+        path = self.service._path(backup_id)
+        payload = json.loads(path.read_bytes())
+        del payload['tables']['backend_device_credentials']
+        payload['format'] = 'node-plane-backend-v4'
+        payload['checksum'] = hashlib.sha256(encoded(payload['tables'])).hexdigest()
+        path.write_bytes(encoded(payload))
+        converted = self.service._load(backup_id)
+        self.assertEqual(converted['checksum'], payload['checksum'])
+        device = converted['tables']['backend_devices']['rows'][0]
+        credential = converted['tables']['backend_device_credentials']['rows'][0]
+        self.assertEqual((device['runtime_name'], device['status']), ('alice', 'active'))
+        self.assertEqual((credential['device_id'], credential['runtime_name'], json.loads(credential['credential_json'])),
+                         (device['id'], 'alice', {'uuid': '11111111-1111-4111-8111-111111111111'}))
         self.assertTrue(self.service.detail(self.actor, backup_id)['compatible'])
 
     def test_legacy_snapshot_conversion_keeps_original_checksum_and_peer(self):
@@ -285,6 +309,7 @@ class BackendBackupsTests(unittest.TestCase):
         for table in TABLE_COLUMNS:
             del payload['tables'][table]
         del payload['tables']['backend_vpn_policies']
+        del payload['tables']['backend_device_credentials']
         payload['checksum'] = hashlib.sha256(encoded(payload['tables'])).hexdigest()
         path.write_bytes(encoded(payload))
         converted = self.service._load(backup_id)
@@ -469,6 +494,8 @@ class BackendBackupsTests(unittest.TestCase):
         self.db.connection.execute(
             "INSERT INTO backend_grants VALUES (?, 'test','xray')", (profile,)
         )
+        with self.db.transaction() as conn:
+            DeviceRepository.ensure_default(conn, conn.execute('SELECT * FROM backend_profiles WHERE id=?', (profile,)).fetchone())
         self.db.connection.commit()
         backup_id, checksum = self.snapshot()
         job = self.service.queue(

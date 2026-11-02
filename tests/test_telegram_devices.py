@@ -246,3 +246,59 @@ class TelegramDeviceTests(IsolatedAsyncioTestCase):
         ru = {key for key in CATALOG['ru'] if key.startswith('devices.')}
         self.assertEqual(en, ru)
         self.assertGreater(len(en), 15)
+
+
+class TelegramVlessDeviceTests(IsolatedAsyncioTestCase):
+    setUp = TelegramDeviceTests.setUp
+    backend = TelegramDeviceTests.backend
+
+    async def test_vless_picker_carries_transport_and_returns_to_transport_choice(self):
+        backend = self.backend([{'id': 'b', 'display_name': 'Laptop', 'status': 'active'},
+            {'id': 'a', 'display_name': 'Phone', 'status': 'active'}])
+        with patch.object(user_devices, 'render', new_callable=AsyncMock) as draw, \
+             patch.object(user, 'issue', new_callable=AsyncMock) as issue:
+            await user_devices.show_picker(123, 123, 77, 'profile', 'node', self.bot, backend, self.state,
+                                           target=('xray', 'tcp'))
+            issue.assert_not_awaited()
+            actions = [user.actions[b.callback_data[2:]] for row in draw.call_args.args[3] for b in row]
+            pick = next(a for a in actions if a.name == 'device_pick')
+            self.assertEqual(pick.args, ('profile', 'node', 'b', 'xray', 'tcp'))
+            create = next(a for a in actions if a.name == 'device_create')
+            self.assertEqual(create.args, ('profile', 'node', 'xray', 'tcp'))
+            self.assertEqual((actions[-1].name, actions[-1].args), ('protocol', ('profile', 'node', 'xray')))
+            await user_devices.handle_action(pick, self.query, self.bot, backend, self.state)
+        self.assertEqual(issue.call_args.args[3:7], ('profile', 'node', 'xray', 'tcp'))
+        self.assertEqual(issue.call_args.kwargs['device_id'], 'b')
+
+    async def test_first_vless_device_is_named_then_issued(self):
+        backend = SimpleNamespace(request=AsyncMock(side_effect=[
+            {'items': []}, {'desired_revision': 4}, {'device': {'id': 'new', 'display_name': 'Phone'}}]))
+        with patch.object(user_devices, 'render', new_callable=AsyncMock) as draw:
+            await user_devices.show_picker(123, 123, 77, 'profile', 'node', self.bot, backend, self.state,
+                                           target=('xray', 'xhttp'))
+        back = user.actions[draw.call_args.args[3][0][0].callback_data[2:]]
+        self.assertEqual((back.name, back.args), ('protocol', ('profile', 'node', 'xray')))
+        message = SimpleNamespace(text='Phone', delete=AsyncMock(),
+            from_user=SimpleNamespace(id=123), chat=SimpleNamespace(id=123, type='private'))
+        with patch.object(user, 'issue', new_callable=AsyncMock) as issue:
+            await user_devices.name_message(message, self.bot, backend, self.state)
+        self.assertEqual(issue.call_args.args[3:7], ('profile', 'node', 'xray', 'xhttp'))
+        self.assertEqual(issue.call_args.kwargs['device_id'], 'new')
+
+    async def test_key_rotation_requires_confirmation_and_replays_safely(self):
+        backend = self.backend([{'id': 'phone', 'display_name': 'Phone', 'status': 'active', 'revision': 5}])
+        with patch.object(user_devices, 'render', new_callable=AsyncMock) as draw:
+            await user_devices.show_card(123, 123, 77, 'profile', 'phone', self.bot, backend, self.state)
+            actions = [user.actions[b.callback_data[2:]] for row in draw.call_args.args[3] for b in row]
+            rotate = next(a for a in actions if a.name == 'device_rotate')
+            await user_devices.handle_action(rotate, self.query, self.bot, backend, self.state)
+        self.assertIn('VLESS', draw.call_args.args[2].lines[0])
+        confirm = user.actions[draw.call_args.args[3][0][0].callback_data[2:]]
+        self.assertEqual((confirm.name, confirm.args[2]), ('device_rotate_confirm', '5'))
+        backend.request.reset_mock()
+        with patch.object(user_devices, 'show_card', new_callable=AsyncMock) as card:
+            await user_devices.handle_action(confirm, self.query, self.bot, backend, self.state)
+        self.assertEqual(backend.request.call_args.args[:2], ('POST', '/api/v1/profiles/profile/devices/phone/rotate'))
+        self.assertEqual((backend.request.call_args.kwargs['revision'], backend.request.call_args.kwargs['command_key']),
+                         (5, confirm.args[3]))
+        card.assert_awaited_once()

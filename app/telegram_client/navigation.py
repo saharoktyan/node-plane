@@ -49,6 +49,9 @@ def parent_path(callback, locale, data):
                     member(data.get('_navigation_nodes', {}).get(key, key), 'node', profile, key))
             if name == 'node':
                 return (*path[:-1], Breadcrumb(path[-1].label, callback))
+            if name in {'device_picker', 'device_picker_back'} and len(args) >= 4 and args[2] == 'xray':
+                return (*path, member(tr(locale, 'transport.title'), 'protocol', profile, key, 'xray'),
+                        member(tr(locale, 'devices.title'), 'device_picker', profile, key, *args[2:4]))
             if name in {'device_picker', 'device_picker_back'}:
                 return (*path, member(tr(locale, 'protocol.awg'), 'protocol', profile, key, 'awg'),
                         member(tr(locale, 'devices.title'), 'device_picker', profile, key))

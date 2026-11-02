@@ -1125,6 +1125,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
                 conn.execute('SELECT account_id FROM backend_identity_commands LIMIT 1').fetchone()
                 conn.execute('SELECT id FROM backend_profiles LIMIT 1').fetchone()
                 conn.execute('SELECT id FROM backend_devices LIMIT 1').fetchone()
+                conn.execute('SELECT device_id,runtime_name FROM backend_device_credentials LIMIT 1').fetchone()
                 conn.execute('SELECT key FROM backend_nodes LIMIT 1').fetchone()
                 conn.execute('SELECT profile_id FROM backend_grants LIMIT 1').fetchone()
                 conn.execute('SELECT command_key FROM backend_profile_commands LIMIT 1').fetchone()
@@ -1141,7 +1142,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
                 conn.execute('SELECT subject,revision FROM backend_telegram_menu_refresh LIMIT 1').fetchone()
                 conn.execute('SELECT key FROM backend_system_settings LIMIT 1').fetchone()
                 conn.execute('SELECT profile_id FROM backend_traffic_usage LIMIT 1').fetchone()
-                conn.execute('SELECT device_id FROM backend_traffic_peers LIMIT 1').fetchone()
+                conn.execute('SELECT device_id,protocol FROM backend_traffic_peers LIMIT 1').fetchone()
                 conn.execute('SELECT node_key FROM backend_node_traffic LIMIT 1').fetchone()
                 conn.execute('SELECT id FROM backend_system_cleanup_jobs LIMIT 1').fetchone()
                 conn.execute('SELECT actor_account_id FROM backend_account_commands LIMIT 1').fetchone()
@@ -1586,6 +1587,16 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
                       current=Depends(actor)):
         result = device_commands.execute(current, header(request, 'Idempotency-Key'),
             action='delete', profile_id=str(profile_id), device_id=str(device_id),
+            revision=revision_header(request))
+        response.headers['ETag'] = '"' + str(result['device']['revision']) + '"'
+        return result
+
+    @app.post('/api/v1/profiles/{profile_id}/devices/{device_id}/rotate', response_model=DeviceCommandOutput, status_code=202)
+    def rotate_device(profile_id: UUID, device_id: UUID, request: Request,
+                      response: Response, command_key: Annotated[str, Header(alias='Idempotency-Key')],
+                      current=Depends(actor)):
+        result = device_commands.execute(current, header(request, 'Idempotency-Key'),
+            action='rotate', profile_id=str(profile_id), device_id=str(device_id),
             revision=revision_header(request))
         response.headers['ETag'] = '"' + str(result['device']['revision']) + '"'
         return result

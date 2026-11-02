@@ -260,6 +260,8 @@ class BackendDevicePeerTests(unittest.TestCase):
         at = (datetime.now(timezone.utc)-timedelta(minutes=1)).isoformat()
         pub = base64.b64encode(hashlib.sha256(b'alice').digest()).decode()
         # Force the additional device to sort before the adopted default.
+        # Its Xray client is recreated by the next operation.
+        self.db.connection.execute('DELETE FROM backend_device_credentials WHERE device_id=?',(self.extra_id,))
         self.db.connection.execute("UPDATE backend_devices SET id='00000000-0000-4000-8000-000000000001' WHERE id=?",(self.extra_id,))
         self.db.connection.execute("UPDATE backend_operation_tasks SET device_id='00000000-0000-4000-8000-000000000001' WHERE device_id=?",(self.extra_id,))
         self.db.connection.execute('''INSERT INTO backend_traffic_usage

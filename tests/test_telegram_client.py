@@ -1091,7 +1091,10 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
     async def test_config_node_uses_full_protocol_buttons_and_single_transport_skips_choice(self):
         nodes = [{'key':'lv1','title':'Latvia #1','region':'Europe','flag':'🇱🇻',
                   'protocols':[{'kind':'awg'}, {'kind':'xray','transports':['tcp']}]}]
-        backend = SimpleNamespace(profile_nodes=AsyncMock(return_value={'items':nodes}))
+        # One device: the picker issues for it without asking.
+        devices = {'items':[{'id':'phone','display_name':'Phone','status':'active'}], 'device_limit':None}
+        backend = SimpleNamespace(profile_nodes=AsyncMock(return_value={'items':nodes}),
+                                  request=AsyncMock(return_value=devices))
         for locale in ('en','ru'):
             self.state_data['locale'] = locale
             with patch.object(user,'render',new_callable=AsyncMock) as draw:
@@ -1108,6 +1111,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
                 with patch.object(user,'issue',new_callable=AsyncMock) as issue:
                     await user.user_action_cb(self.query,self.bot,backend,self.state)
                     self.assertEqual(issue.call_args.args[3:7], ('p1','lv1','xray','tcp'))
+                    self.assertEqual(issue.call_args.kwargs['device_id'], 'phone')
                     issue.reset_mock()
                     # Back opens protocol buttons without sending a configuration again.
                     await user.show_protocol(123,123,77,'p1','lv1','xray',self.bot,backend,self.state)

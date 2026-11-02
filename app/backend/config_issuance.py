@@ -92,14 +92,12 @@ class ConfigIssuanceService:
             AND status IN ('awaiting_executor', 'running', 'blocked')''', (node_key,)).fetchone():
             raise AccessDenied('node_settings_pending', 409)
         from .devices import DeviceRepository
-        device = DeviceRepository.select_active(conn,profile_id,device_id) if protocol=='awg' else None
-        if protocol != 'awg' and device_id:
-            raise AccessDenied('config_not_supported',422)
+        device = DeviceRepository.select_active(conn,profile_id,device_id)
         latest = conn.execute('''SELECT t.action, t.status, t.result_json, o.desired_revision FROM backend_operation_tasks t
             JOIN backend_operations o ON o.id = t.operation_id
             WHERE o.profile_id = ? AND t.node_key = ? AND t.protocol = ? AND t.device_id = ?
             ORDER BY o.desired_revision DESC, o.created_at DESC LIMIT 1''',
-            (profile_id, node_key, protocol,device['id'] if device else '')).fetchone()
+            (profile_id, node_key, protocol,device['id'])).fetchone()
         if latest is None or latest['desired_revision'] != profile['desired_revision'] or (
                 latest['action'], latest['status']) != ('ensure', 'succeeded'):
             raise AccessDenied('profile_not_synced', 409)
@@ -108,9 +106,14 @@ class ConfigIssuanceService:
         if identity is None:
             raise AccessDenied('profile_not_synced', 409)
         identity = dict(identity)
-        if device:
-            identity.update(device_id=device['id'],device_revision=device['revision'],
-                device_name=device['display_name'],runtime_name=device['runtime_name'])
+        identity.update(device_id=device['id'],device_revision=device['revision'],
+            device_name=device['display_name'],runtime_name=device['runtime_name'])
+        if protocol == 'xray':
+            from .device_credentials import xray
+            client = xray(conn, device['id'])
+            if client is None:
+                raise AccessDenied('profile_not_synced', 409)
+            identity.update(xray_uuid=client['uuid'],runtime_name=client['runtime_name'])
         if protocol == 'awg':
             try:
                 if not json.loads(latest['result_json'])['wg_conf'].startswith('[Interface]'):
@@ -140,10 +143,8 @@ class ConfigIssuanceService:
             require_profile(current_actor, _profile_resource(profile), action='issue_config',
                 administrative=profile['owner_account_id'] != actor.account.id, grant_active=grant is not None)
             from .devices import DeviceRepository
-            device = DeviceRepository.select_active(conn,profile_id,device_id) if protocol=='awg' else None
-            if protocol!='awg' and device_id:
-                raise AccessDenied('config_not_supported',422)
-            selected_device_id = device['id'] if device else ''
+            device = DeviceRepository.select_active(conn,profile_id,device_id)
+            selected_device_id = device['id']
             previous = conn.execute('''SELECT * FROM backend_config_issuances
                 WHERE actor_account_id = ? AND command_key = ?''', (actor.account.id, key)).fetchone()
             if previous is not None:
@@ -160,7 +161,7 @@ class ConfigIssuanceService:
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'awaiting_executor', ?, ?,?,?)''',
                 (issuance_id, actor.account.id, key, profile_id, node_key, protocol, transport,
                  profile['desired_revision'], node['desired_revision'], now.isoformat(),
-                 (now + timedelta(minutes=15)).isoformat(),selected_device_id,device['revision'] if device else 0))
+                 (now + timedelta(minutes=15)).isoformat(),selected_device_id,device['revision']))
             row = conn.execute('SELECT * FROM backend_config_issuances WHERE id = ?', (issuance_id,)).fetchone()
             return self.public(row)
 
@@ -175,11 +176,10 @@ class ConfigIssuanceService:
             AND protocol = ?''', (row['profile_id'], row['node_key'], row['protocol'])).fetchone()
         require_profile(actor, _profile_resource(profile), action='read_config',
             administrative=profile['owner_account_id'] != actor.account.id, grant_active=grant is not None)
-        if row['protocol']=='awg':
-            from .devices import DeviceRepository
-            device = DeviceRepository.select_active(conn,row['profile_id'],row['device_id'])
-            if device['revision'] != row['device_revision']:
-                raise AccessDenied('config_stale',409)
+        from .devices import DeviceRepository
+        device = DeviceRepository.select_active(conn,row['profile_id'],row['device_id'] or None)
+        if device['revision'] != row['device_revision']:
+            raise AccessDenied('config_stale',409)
         return row
 
     @staticmethod
@@ -331,10 +331,11 @@ class ConfigIssuanceService:
         else:
             params += (f'&type=xhttp&path={quote(metadata["xhttp_path"], safe="")}&mode=auto'
                        '&extra=%7B%22xmux%22%3A%7B%22maxConcurrency%22%3A%2216-32%22%7D%7D')
-        display_name = f'{server_label(node)} · VLESS · {row["transport"].upper()}'
+        display_name = f'{server_label(node)} · VLESS · {row["transport"].upper()} · {identity["device_name"]}'
         label = quote(display_name, safe='')
         uri = f'vless://{identity["xray_uuid"]}@{host}:{port}?{params}#{label}'
         safe_title = (re.sub(r'[^\w .()#-]+', '', node['title']).strip(' .')[:64]
                       or row['node_key'])
-        return {'filename': f'{safe_title} · VLESS · {row["transport"].upper()}.txt',
+        safe_device = re.sub(r'[^\w .()#-]+','',identity['device_name']).strip(' .')[:64] or 'Device'
+        return {'filename': f'{safe_title} · VLESS · {row["transport"].upper()} · {safe_device}.txt',
                 'media_type': 'text/uri-list', 'content': uri, 'display_name': display_name}

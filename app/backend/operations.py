@@ -52,6 +52,9 @@ class OperationRepository:
             conn.execute('CREATE INDEX IF NOT EXISTS backend_operations_profile ON backend_operations(profile_id, desired_revision)')
             from .devices import DeviceRepository
             DeviceRepository.adopt_existing(conn)
+            from . import device_credentials
+            device_credentials.create_schema(conn)
+            device_credentials.adopt_existing(conn)
             # Only metadata changes: existing command IDs and immutable intent
             # payloads still match the driver/agent journals during recovery.
             conn.execute('''UPDATE backend_operation_tasks SET device_id=(
@@ -85,10 +88,18 @@ class OperationRepository:
         conn.execute("""INSERT INTO backend_profile_identities(profile_id, xray_uuid, xray_short_id)
             VALUES (?, ?, ?) ON CONFLICT(profile_id) DO NOTHING""", (profile_id, str(uuid4()), secrets.token_hex(8)))
         identity = conn.execute('SELECT xray_uuid, xray_short_id FROM backend_profile_identities WHERE profile_id = ?', (profile_id,)).fetchone()
+        from . import device_credentials
+        # Each active device is its own Xray client; deleted devices keep
+        # theirs until the revocation below reaches every node.
+        for device in conn.execute("SELECT * FROM backend_devices WHERE profile_id=? AND status='active'", (profile_id,)).fetchall():
+            device_credentials.ensure_xray(conn, device)
+        xray_peers = device_credentials.xray_peers(conn, profile_id)
         operation_id = str(uuid4())
         actionable_targets = []
         for node_key, protocol in sorted(targets):
             if protocol == 'awg' and not conn.execute('SELECT 1 FROM backend_devices WHERE profile_id=?', (profile_id,)).fetchone():
+                continue
+            if protocol == 'xray' and not xray_peers:
                 continue
             conn.execute('UPDATE backend_nodes SET enabled = enabled WHERE key = ?', (node_key,))
             # Once cleanup starts, the agent has a durable mutation fence.
@@ -104,14 +115,14 @@ class OperationRepository:
             node = conn.execute('SELECT enabled FROM backend_nodes WHERE key = ?', (node_key,)).fetchone()
             action = 'ensure' if active and node is not None and node['enabled'] and (node_key, protocol) in current_targets else 'delete'
             peers = (conn.execute('SELECT * FROM backend_devices WHERE profile_id=? ORDER BY id', (profile_id,)).fetchall()
-                     if protocol == 'awg' else [{'id': '', 'runtime_name': profile['runtime_name'], 'status': 'active'}])
+                     if protocol == 'awg' else xray_peers)
             for peer in peers:
                 peer_action = action if peer['status'] == 'active' else 'delete'
                 intent = {'version': 1, 'profile_id': profile_id, 'runtime_name': peer['runtime_name'],
                           'desired_revision': profile['desired_revision'], 'node_key': node_key,
                           'protocol': protocol, 'action': peer_action, 'expires_at': profile['expires_at']}
                 if protocol == 'xray' and peer_action == 'ensure':
-                    intent['xray'] = {'uuid': identity['xray_uuid'], 'short_id': identity['xray_short_id']}
+                    intent['xray'] = {'uuid': peer['uuid'], 'short_id': identity['xray_short_id']}
                 conn.execute('''INSERT INTO backend_operation_tasks
                     (id,operation_id,node_key,protocol,device_id,action,status,intent_json)
                     VALUES (?,?,?,?,?,?,?,?)''', (str(uuid4()),operation_id,node_key,protocol,peer['id'],

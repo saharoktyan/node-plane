@@ -1,4 +1,4 @@
-"""Named AWG devices; identity and authorization belong to the backend."""
+"""Named devices for AWG and VLESS; identity and authorization belong to the backend."""
 from uuid import uuid4
 
 from aiogram import F, Router
@@ -13,6 +13,13 @@ from . import user
 from .common import render, schedule_refresh
 
 router = Router()
+
+AWG = ('awg', 'vpn')
+
+
+def target_args(target):
+    """Callback arguments naming the configuration a picker issues; AWG is implied."""
+    return () if tuple(target) == AWG else tuple(target)
 
 
 class DeviceName(StatesGroup):
@@ -89,8 +96,9 @@ async def show_card(chat_id, user_id, message_id, profile_id, device_id, bot, ba
     rows = []
     if item['status'] == 'active':
         rows.append([user.button(user_id, tr(locale, 'devices.rename'), 'device_rename', profile_id, device_id),
-            user.button(user_id, tr(locale, 'devices.delete'), 'device_delete', profile_id, device_id)
-                .model_copy(update={'style': 'danger'})])
+            user.button(user_id, tr(locale, 'devices.rotate'), 'device_rotate', profile_id, device_id)])
+        rows.append([user.button(user_id, tr(locale, 'devices.delete'), 'device_delete', profile_id, device_id)
+            .model_copy(update={'style': 'danger'})])
     elif item['status'] == 'deleting':
         rows.append([user.button(user_id, tr(locale, 'devices.refresh'), 'device_card', profile_id, device_id)])
     rows.append([user.button(user_id, tr(locale, 'back'), 'device_list', profile_id)])
@@ -101,44 +109,61 @@ async def show_card(chat_id, user_id, message_id, profile_id, device_id, bot, ba
         schedule_refresh(state, lambda: show_card(chat_id, user_id, message_id, profile_id, device_id, bot, backend, state))
 
 
-async def show_picker(chat_id, user_id, message_id, profile_id, node_key, bot, backend, state, *, force=False, page=0, returning=False):
+async def show_picker(chat_id, user_id, message_id, profile_id, node_key, bot, backend, state, *, force=False, page=0,
+                      returning=False, target=AWG):
     locale = await locale_for(state)
+    extra = target_args(target)
     items, limit = await listing(backend, user_id, profile_id)
     items = [d for d in items if d['status'] == 'active']
     items.sort(key=lambda d: (d['display_name'].casefold(), d['id']))
     for item in items:
         await remember_label(state, 'devices', item['id'], item['display_name'])
     if len(items) <= 1 and returning:
-        await user.show_node(chat_id, user_id, message_id, profile_id, node_key, bot, backend, state)
+        await back_from_picker(chat_id, user_id, message_id, profile_id, node_key, bot, backend, state, target)
         return
     if not items:
         await prompt_name(chat_id, user_id, message_id, profile_id, None, bot, backend, state,
-                          node_key=node_key, first_device=True)
+                          node_key=node_key, first_device=True, target=target)
         return
     if len(items) == 1 and not force:
         await select_device(chat_id, user_id, message_id, profile_id, node_key,
-            items[0]['id'], bot, backend, state)
+            items[0]['id'], bot, backend, state, target=target)
         return
     pages = max(1, (len(items) + 9) // 10)
     page = max(0, min(page, pages - 1))
-    rows = [[user.button(user_id, d['display_name'], 'device_pick', profile_id, node_key, d['id'])]
+    rows = [[user.button(user_id, d['display_name'], 'device_pick', profile_id, node_key, d['id'], *extra)]
         for d in items[page * 10:(page + 1) * 10]]
-    rows.extend(user.server_pagination(user_id, locale, page, pages, 'device_picker_page', profile_id, node_key))
+    rows.extend(user.server_pagination(user_id, locale, page, pages, 'device_picker_page', profile_id, node_key, *extra))
     limit_lines, can_add = limit_state(locale, items, limit)
     if can_add:
-        rows.append([user.button(user_id, tr(locale, 'devices.add'), 'device_create', profile_id, node_key)
+        rows.append([user.button(user_id, tr(locale, 'devices.add'), 'device_create', profile_id, node_key, *extra)
             .model_copy(update={'style': 'primary'})])
-    rows.append([user.button(user_id, tr(locale, 'back'), 'node', profile_id, node_key)])
-    picker = user.button(user_id, tr(locale, 'devices.title'), 'device_picker', profile_id, node_key)
+    rows.append([back_button(user_id, locale, profile_id, node_key, target)])
+    picker = user.button(user_id, tr(locale, 'devices.title'), 'device_picker', profile_id, node_key, *extra)
     path = parent_path(picker.callback_data, locale, await state.get_data())
     await render(bot, chat_id, Screen(tr(locale, 'devices.title'), breadcrumbs=path[:-1],
         lines=((tr(locale, 'devices.empty'),) if not items else ()) + limit_lines, embedded_buttons=True,
         navigation=True), rows, state, message_id)
 
 
-async def select_device(chat_id, user_id, message_id, profile_id, node_key, device_id, bot, backend, state):
+def back_button(user_id, locale, profile_id, node_key, target):
+    """Back from the picker: to the server for AWG, to the transport choice for VLESS."""
+    if tuple(target) == AWG:
+        return user.button(user_id, tr(locale, 'back'), 'node', profile_id, node_key)
+    return user.button(user_id, tr(locale, 'back'), 'protocol', profile_id, node_key, target[0])
+
+
+async def back_from_picker(chat_id, user_id, message_id, profile_id, node_key, bot, backend, state, target):
+    if tuple(target) == AWG:
+        await user.show_node(chat_id, user_id, message_id, profile_id, node_key, bot, backend, state)
+    else:
+        await user.show_protocol(chat_id, user_id, message_id, profile_id, node_key, target[0], bot, backend, state)
+
+
+async def select_device(chat_id, user_id, message_id, profile_id, node_key, device_id, bot, backend, state, *, target=AWG):
+    extra = target_args(target)
     try:
-        await user.issue(chat_id, user_id, message_id, profile_id, node_key, 'awg', 'vpn',
+        await user.issue(chat_id, user_id, message_id, profile_id, node_key, *target,
             bot, backend, state, device_id=device_id)
     except BackendError as error:
         if error.code != 'profile_not_synced':
@@ -146,11 +171,12 @@ async def select_device(chat_id, user_id, message_id, profile_id, node_key, devi
         locale = await locale_for(state)
         await render(bot, chat_id, Screen(tr(locale, 'devices.preparing'),
             (tr(locale, 'devices.preparing_text'),), embedded_buttons=True, navigation=True),
-            [[user.button(user_id, tr(locale, 'devices.refresh'), 'device_pick', profile_id, node_key, device_id)],
-             [user.button(user_id, tr(locale, 'back'), 'device_picker_back', profile_id, node_key)]], state, message_id)
+            [[user.button(user_id, tr(locale, 'devices.refresh'), 'device_pick', profile_id, node_key, device_id, *extra)],
+             [user.button(user_id, tr(locale, 'back'), 'device_picker_back', profile_id, node_key, *extra)]], state, message_id)
 
 
-async def prompt_name(chat_id, user_id, message_id, profile_id, device_id, bot, backend, state, *, node_key=None, first_device=False):
+async def prompt_name(chat_id, user_id, message_id, profile_id, device_id, bot, backend, state, *, node_key=None,
+                      first_device=False, target=AWG):
     if device_id:
         item = await get_device(backend, user_id, profile_id, device_id)
         revision = item['revision']
@@ -161,12 +187,12 @@ async def prompt_name(chat_id, user_id, message_id, profile_id, device_id, bot, 
         revision = profile['desired_revision']
     await state.update_data(device_name_draft={'profile_id': profile_id, 'device_id': device_id,
         'revision': revision, 'owner': user_id, 'message_id': message_id, 'node_key': node_key,
-        'first_device': first_device})
+        'first_device': first_device, 'target': list(target)})
     await state.set_state(DeviceName.waiting)
     locale = await locale_for(state)
-    back = user.button(user_id, tr(locale, 'back'), 'node', profile_id, node_key) if first_device else user.button(
+    back = back_button(user_id, locale, profile_id, node_key, target) if first_device else user.button(
         user_id, tr(locale, 'back'), 'device_card' if device_id else ('device_picker' if node_key else 'device_list'),
-        profile_id, *((device_id,) if device_id else ((node_key,) if node_key else ())))
+        profile_id, *((device_id,) if device_id else ((node_key, *target_args(target)) if node_key else ())))
     await render(bot, chat_id, Screen(tr(locale, 'devices.first' if first_device else 'devices.rename' if device_id else 'devices.add'),
         (*((tr(locale, 'devices.first_hint'),) if first_device else ()), tr(locale, 'devices.name_prompt')),
         embedded_buttons=True, navigation=True), [[back]], state, message_id)
@@ -210,13 +236,14 @@ async def name_message(message, bot, backend, state):
     await state.set_state(None)
     await state.update_data(device_name_draft=None)
     if draft.get('node_key'):
+        target = tuple(draft.get('target') or AWG)
         if draft.get('first_device'):
             await remember_label(state, 'devices', result['device']['id'], result['device']['display_name'])
             await select_device(message.chat.id, message.from_user.id, draft['message_id'], profile_id,
-                draft['node_key'], result['device']['id'], bot, backend, state)
+                draft['node_key'], result['device']['id'], bot, backend, state, target=target)
             return
         await show_picker(message.chat.id, message.from_user.id, draft['message_id'], profile_id,
-            draft['node_key'], bot, backend, state)
+            draft['node_key'], bot, backend, state, target=target)
         return
     await show_card(message.chat.id, message.from_user.id, draft['message_id'], profile_id,
         result['device']['id'], bot, backend, state)
@@ -235,13 +262,34 @@ async def handle_action(action, query, bot, backend, state):
     elif action.name in {'device_create', 'device_rename'}:
         await prompt_name(chat_id, owner, message_id, args[0],
             args[1] if action.name == 'device_rename' else None, bot, backend, state,
-            node_key=args[1] if action.name == 'device_create' and len(args) > 1 else None)
-    elif action.name in {'device_picker', 'device_picker_page', 'device_picker_back'}:
+            node_key=args[1] if action.name == 'device_create' and len(args) > 1 else None,
+            target=tuple(args[2:4]) if action.name == 'device_create' and len(args) > 2 else AWG)
+    elif action.name in {'device_picker', 'device_picker_back'}:
         await show_picker(chat_id, owner, message_id, args[0], args[1], bot, backend, state,
-            force=True, page=int(args[2]) if action.name == 'device_picker_page' else 0,
-            returning=action.name == 'device_picker_back')
+            force=True, returning=action.name == 'device_picker_back', target=tuple(args[2:4]) or AWG)
+    elif action.name == 'device_picker_page':
+        await show_picker(chat_id, owner, message_id, args[0], args[1], bot, backend, state,
+            force=True, page=int(args[-1]), target=tuple(args[2:-1]) or AWG)
     elif action.name == 'device_pick':
-        await select_device(chat_id, owner, message_id, *args, bot, backend, state)
+        await select_device(chat_id, owner, message_id, *args[:3], bot, backend, state,
+            target=tuple(args[3:5]) or AWG)
+    elif action.name == 'device_rotate':
+        item = await get_device(backend, owner, args[0], args[1])
+        if item['status'] != 'active':
+            raise BackendError('device_unavailable', 409)
+        key = str(uuid4())
+        locale = await locale_for(state)
+        await render(bot, chat_id, Screen(tr(locale, 'devices.rotate_title', name=item['display_name']),
+            (tr(locale, 'devices.rotate_warning'),), embedded_buttons=True, navigation=True),
+            [[user.button(owner, tr(locale, 'devices.rotate'), 'device_rotate_confirm', *args,
+                str(item['revision']), key).model_copy(update={'style': 'danger'})],
+             [user.button(owner, tr(locale, 'back'), 'device_card', *args)]], state, message_id)
+    elif action.name == 'device_rotate_confirm':
+        # The key and revision come from the confirmation screen; a replay
+        # returns the recorded result instead of rotating again.
+        await backend.request('POST', f'/api/v1/profiles/{args[0]}/devices/{args[1]}/rotate',
+            telegram_user_id=owner, command=True, command_key=args[3], revision=int(args[2]))
+        await show_card(chat_id, owner, message_id, args[0], args[1], bot, backend, state)
     elif action.name == 'device_delete':
         item = await get_device(backend, owner, args[0], args[1])
         if item['status'] != 'active':

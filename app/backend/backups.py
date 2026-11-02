@@ -34,6 +34,7 @@ TABLES = (
     "backend_profiles",
     "backend_devices",
     "backend_profile_identities",
+    "backend_device_credentials",
     "backend_grants",
     "backend_grant_policies",
     "backend_vpn_policies",
@@ -211,10 +212,13 @@ class BackupService:
             legacy = payload['format'] == 'node-plane-backend-v1'
             from .grant_policies import TABLE_COLUMNS, canonical_region
             old_policy = payload['format'] in ('node-plane-backend-v1', 'node-plane-backend-v2')
-            old_vpn_policy = payload['format'] != 'node-plane-backend-v4'
+            old_vpn_policy = payload['format'] not in ('node-plane-backend-v4', 'node-plane-backend-v5')
+            old_credentials = payload['format'] != 'node-plane-backend-v5'
             expected_tables = (set(TABLES) - (set(TABLE_COLUMNS) if old_policy else set())
-                - ({'backend_devices'} if legacy else set()) - ({'backend_vpn_policies'} if old_vpn_policy else set()))
-            if payload['format'] not in ('node-plane-backend-v1', 'node-plane-backend-v2', 'node-plane-backend-v3', 'node-plane-backend-v4') or set(payload['tables']) != expected_tables:
+                - ({'backend_devices'} if legacy else set()) - ({'backend_vpn_policies'} if old_vpn_policy else set())
+                - ({'backend_device_credentials'} if old_credentials else set()))
+            if payload['format'] not in ('node-plane-backend-v1', 'node-plane-backend-v2', 'node-plane-backend-v3',
+                                         'node-plane-backend-v4', 'node-plane-backend-v5') or set(payload['tables']) != expected_tables:
                 raise ValueError()
             if (
                 hashlib.sha256(encoded(payload["tables"])).hexdigest()
@@ -258,6 +262,20 @@ class BackupService:
             if old_vpn_policy:
                 from .vpn_policies import TABLE_COLUMNS as VPN_POLICY_COLUMNS
                 payload['tables']['backend_vpn_policies'] = {'columns': list(VPN_POLICY_COLUMNS), 'rows': []}
+            if old_credentials:
+                # Before device credentials, a profile with an Xray grant had
+                # one profile-wide client. Hand it to a device as r0017 does.
+                from . import device_credentials
+                tables = payload['tables']
+                xray = {row['profile_id'] for row in tables['backend_grants']['rows'] if row['protocol'] == 'xray'}
+                devices, credentials = device_credentials.adopt(
+                    tables['backend_profiles']['rows'], tables['backend_devices']['rows'],
+                    tables['backend_profile_identities']['rows'], tables['backend_grants']['rows'], [],
+                    {row['profile_id'] for row in tables['backend_profile_identities']['rows']} & xray,
+                    payload['created_at'])
+                tables['backend_devices']['rows'].extend(devices)
+                tables['backend_device_credentials'] = {'columns': list(device_credentials.TABLE_COLUMNS),
+                                                        'rows': credentials}
             return payload
         except (ValueError, KeyError, TypeError, RecursionError):
             raise AccessDenied("backup_invalid", 409) from None
@@ -547,7 +565,8 @@ class BackupService:
                     rows = [r for r in rows if r['account_id'] not in deleted_accounts]
                 if table == "backend_access_requests":
                     rows = [{**r,'decided_by':None} if r.get('decided_by') in deleted_accounts else r for r in rows]
-                elif table in {"backend_devices", "backend_profile_identities", "backend_grants", "backend_grant_policies"}:
+                elif table in {"backend_devices", "backend_profile_identities", "backend_device_credentials",
+                               "backend_grants", "backend_grant_policies"}:
                     rows = [r for r in rows if r['profile_id'] not in deleted_profiles]
                 elif table == "backend_vpn_policies":
                     deleted_devices = {d['id'] for d in conn.execute('SELECT id,profile_id FROM backend_devices').fetchall()
@@ -573,7 +592,7 @@ class BackupService:
                 pass
         backup_id = snapshot_id or str(uuid4())
         payload = {
-            "format": "node-plane-backend-v4",
+            "format": "node-plane-backend-v5",
             "created_at": now(),
             "trigger": trigger,
             "app_version": APP_VERSION,

@@ -9,12 +9,19 @@ from backend.authorization import (
     AccessDenied, Account, Actor, ADMIN_PERMISSIONS, Principal, PrincipalKind
 )
 from backend.executor import IntentExecutor
-from backend.grant_policies import raw_read, store, materialize
+from backend.grant_policies import raw_read, store, materialize as _materialize
 from backend.node_settings import NodeSettingsExecutor, _digest
 from backend.operations import OperationRepository
 from backend.profiles import ProfileRepository
 from backend.temporary_configs import TemporaryConfigService
 from tests import test_backend_http
+
+
+def materialize(conn, profile_id, *args, **kwargs):
+    # VLESS clients belong to devices; give these profiles their first device.
+    from backend.devices import DeviceRepository
+    DeviceRepository.ensure_default(conn, conn.execute('SELECT * FROM backend_profiles WHERE id=?', (profile_id,)).fetchone())
+    return _materialize(conn, profile_id, *args, **kwargs)
 
 
 class FakeUnifiedDriver:
@@ -698,6 +705,10 @@ class ProtocolRemovalRevocationTests(unittest.TestCase):
                 'exclusions': [],
             })
             materialize(conn, member_profile)
+            # The administrator also uses VLESS from one device.
+            from backend.devices import DeviceRepository
+            DeviceRepository.ensure_default(conn, conn.execute(
+                "SELECT * FROM backend_profiles WHERE owner_account_id=?", (self.admin.id,)).fetchone())
 
         # Confirm grants exist for both admin and member
         with self.db.connect() as conn:

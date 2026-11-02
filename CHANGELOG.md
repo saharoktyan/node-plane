@@ -10,6 +10,13 @@
 - Add a Telegram setting for service notifications from System: with sound,
   silent or off. Turned-off notifications are not sent but stay in the Inbox.
   Administrators also receive service notifications for their own profiles.
+- Limit active devices per profile with the `devices.max` VPN policy, set for the
+  installation and per profile in Telegram and for the installation in Workstation.
+- Give each device its own VLESS client (UUID) next to its AWG peer, with
+  per-device traffic. Deleting a device revokes only its clients; Telegram can
+  reissue a device's VLESS key. Existing VLESS links keep working: the profile
+  client moves to the default device unchanged. Database revision 17 cannot be
+  read by older controllers.
 - Choose the destination Workstation channel when copying a saved profile;
   report missing installations and retain confirmation before copying.
 

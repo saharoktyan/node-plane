@@ -201,6 +201,7 @@ class DevicesPostgresTests(unittest.TestCase):
         for table in TABLE_COLUMNS:
             del payload['tables'][table]
         del payload['tables']['backend_vpn_policies']
+        del payload['tables']['backend_device_credentials']
         payload['format'] = 'node-plane-backend-v1'
         payload['checksum'] = hashlib.sha256(encoded(payload['tables'])).hexdigest()
         path.write_bytes(encoded(payload))

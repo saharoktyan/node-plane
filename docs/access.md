@@ -28,9 +28,13 @@ In Telegram, **Server access** lists one button per server, with selected protoc
 
 ## Devices and configurations
 
-AWG devices have distinct identities and peer configurations. Create a separate device for each simultaneous client. Two clients sharing one AWG identity can interfere with each other's connection.
+A device is shared by both protocols: it has its own AWG peer and its own VLESS client (a separate UUID). Create a separate device for each simultaneous client. Two clients sharing one identity can interfere with each other's connection, and per-device identities give per-device traffic.
 
-The user chooses an allowed server and protocol in Telegram. With one AWG device, the bot opens it directly; with several devices, it offers a choice. Remove a device to revoke its peer. Device removal does not delete the account.
+The user chooses an allowed server and protocol in Telegram. With one device, the bot opens it directly; with several devices, it offers a choice. Remove a device to revoke its AWG peer and VLESS client. Device removal does not delete the account. **Reissue key** gives the device a new VLESS UUID: its old VLESS links stop working and AWG configurations do not change.
+
+The `devices.max` VPN policy limits the number of active devices per profile. Set it for the installation and override it per profile. Reaching the limit only blocks new devices; existing devices keep working.
+
+Profiles created before VLESS devices keep their link: on upgrade the profile's VLESS client moves to its default device with the same UUID, so no client needs to be reconfigured.
 
 ## Roles, blocking and freezing
 
