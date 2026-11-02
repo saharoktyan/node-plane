@@ -36,6 +36,7 @@ TABLES = (
     "backend_profile_identities",
     "backend_grants",
     "backend_grant_policies",
+    "backend_vpn_policies",
     "backend_access_requests",
 )
 CLEAR = (
@@ -210,8 +211,10 @@ class BackupService:
             legacy = payload['format'] == 'node-plane-backend-v1'
             from .grant_policies import TABLE_COLUMNS, canonical_region
             old_policy = payload['format'] in ('node-plane-backend-v1', 'node-plane-backend-v2')
-            expected_tables = set(TABLES) - (set(TABLE_COLUMNS) if old_policy else set()) - ({'backend_devices'} if legacy else set())
-            if payload['format'] not in ('node-plane-backend-v1', 'node-plane-backend-v2', 'node-plane-backend-v3') or set(payload['tables']) != expected_tables:
+            old_vpn_policy = payload['format'] != 'node-plane-backend-v4'
+            expected_tables = (set(TABLES) - (set(TABLE_COLUMNS) if old_policy else set())
+                - ({'backend_devices'} if legacy else set()) - ({'backend_vpn_policies'} if old_vpn_policy else set()))
+            if payload['format'] not in ('node-plane-backend-v1', 'node-plane-backend-v2', 'node-plane-backend-v3', 'node-plane-backend-v4') or set(payload['tables']) != expected_tables:
                 raise ValueError()
             if (
                 hashlib.sha256(encoded(payload["tables"])).hexdigest()
@@ -252,6 +255,9 @@ class BackupService:
                         'backend_grant_policies': []}
                 for table, columns in TABLE_COLUMNS.items():
                     payload['tables'][table] = {'columns': columns, 'rows': rows[table]}
+            if old_vpn_policy:
+                from .vpn_policies import TABLE_COLUMNS as VPN_POLICY_COLUMNS
+                payload['tables']['backend_vpn_policies'] = {'columns': list(VPN_POLICY_COLUMNS), 'rows': []}
             return payload
         except (ValueError, KeyError, TypeError, RecursionError):
             raise AccessDenied("backup_invalid", 409) from None
@@ -543,6 +549,10 @@ class BackupService:
                     rows = [{**r,'decided_by':None} if r.get('decided_by') in deleted_accounts else r for r in rows]
                 elif table in {"backend_devices", "backend_profile_identities", "backend_grants", "backend_grant_policies"}:
                     rows = [r for r in rows if r['profile_id'] not in deleted_profiles]
+                elif table == "backend_vpn_policies":
+                    deleted_devices = {d['id'] for d in conn.execute('SELECT id,profile_id FROM backend_devices').fetchall()
+                                       if d['profile_id'] in deleted_profiles}
+                    rows = [r for r in rows if r['profile_id'] not in deleted_profiles and r['device_id'] not in deleted_devices]
                 if table == "backend_system_settings":
                     rows = [r for r in rows if r["key"] not in {
                         "backup_last_scheduled", "traffic_last_scan", "traffic_cursor",
@@ -563,7 +573,7 @@ class BackupService:
                 pass
         backup_id = snapshot_id or str(uuid4())
         payload = {
-            "format": "node-plane-backend-v3",
+            "format": "node-plane-backend-v4",
             "created_at": now(),
             "trigger": trigger,
             "app_version": APP_VERSION,

@@ -248,7 +248,7 @@ class BackendBackupsTests(unittest.TestCase):
         self.db.connection.execute("UPDATE backend_devices SET display_name='Phone',status='retired',revision=3")
         backup_id, _ = self.snapshot()
         payload = self.service._load(backup_id)
-        self.assertEqual(payload['format'], 'node-plane-backend-v3')
+        self.assertEqual(payload['format'], 'node-plane-backend-v4')
         saved = payload['tables']['backend_devices']['rows'][0]
         self.assertEqual(saved['profile_id'], profile_id)
         self.assertEqual(saved['runtime_name'], 'existing_awg')
@@ -263,6 +263,7 @@ class BackendBackupsTests(unittest.TestCase):
         from backend.grant_policies import TABLE_COLUMNS
         for table in TABLE_COLUMNS:
             del payload['tables'][table]
+        del payload['tables']['backend_vpn_policies']
         payload['format'] = 'node-plane-backend-v2'
         payload['checksum'] = hashlib.sha256(encoded(payload['tables'])).hexdigest()
         path.write_bytes(encoded(payload))
@@ -283,6 +284,7 @@ class BackendBackupsTests(unittest.TestCase):
         from backend.grant_policies import TABLE_COLUMNS
         for table in TABLE_COLUMNS:
             del payload['tables'][table]
+        del payload['tables']['backend_vpn_policies']
         payload['checksum'] = hashlib.sha256(encoded(payload['tables'])).hexdigest()
         path.write_bytes(encoded(payload))
         converted = self.service._load(backup_id)

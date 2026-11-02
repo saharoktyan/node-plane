@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
 
-from .migration_revisions import r0001_baseline, r0002_node_traffic, r0003_temporary_configs, r0004_node_bootstrap, r0005_recovery_audit, r0006_announcement_inbox, r0007_account_menu_refresh, r0008_access_decision_delivery, r0009_backup_labels, r0010_audit_descriptions, r0011_account_deletions, r0012_system_notifications, r0013_agent_rollout_cancellation, r0014_preapproval_visitors
+from .migration_revisions import r0001_baseline, r0002_node_traffic, r0003_temporary_configs, r0004_node_bootstrap, r0005_recovery_audit, r0006_announcement_inbox, r0007_account_menu_refresh, r0008_access_decision_delivery, r0009_backup_labels, r0010_audit_descriptions, r0011_account_deletions, r0012_system_notifications, r0013_agent_rollout_cancellation, r0014_preapproval_visitors, r0015_vpn_policies
 
 LOCK_KEY = 0x4E504C414E454442  # NPLANEDB; shared by every controller/schema.
 LEDGER_DDL = '''CREATE TABLE IF NOT EXISTS backend_schema_revisions (
@@ -44,6 +44,7 @@ REVISIONS = (
     Revision(12, 'system_notifications', r0012_system_notifications, 11),
     Revision(13, 'agent_rollout_cancellation', r0013_agent_rollout_cancellation, 11),
     Revision(14, 'preapproval_visitors', r0014_preapproval_visitors, 14),
+    Revision(15, 'vpn_policies', r0015_vpn_policies, 14),
 )
 
 

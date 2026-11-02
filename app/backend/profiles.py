@@ -129,6 +129,8 @@ class ProfileRepository:
             DeviceRepository.create_schema(conn)
             from .grant_policies import create_schema
             create_schema(conn)
+            from .vpn_policies import create_schema as create_vpn_policy_schema
+            create_vpn_policy_schema(conn)
             from db.migration_revisions.r0011_account_deletions import create_schema
             create_schema(conn)
             # Repair accounts left approved by older profile-deletion commands.

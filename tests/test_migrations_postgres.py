@@ -113,6 +113,30 @@ class MigrationsPostgresTests(unittest.TestCase):
         with self.assertRaisesRegex(MigrationError, 'database_reader_incompatible'):
             check_schema(self.db, revisions=REVISIONS[:12])
 
+    def test_vpn_policies_upgrade_is_additive_unique_and_owned_by_subjects(self):
+        migrate(self.db, revisions=REVISIONS[:14])
+        self.assertEqual(migrate(self.db, revisions=REVISIONS[:15])['applied'], [15])
+        # The additive table keeps the previous application compatible.
+        self.assertTrue(check_schema(self.db, revisions=REVISIONS[:14])['ready'])
+        insert = """INSERT INTO backend_vpn_policies
+            (id,subject_kind,profile_id,device_id,node_key,protocol,key,value_json,revision,updated_at)
+            VALUES (?,?,?,?,?,?,?,?,1,'2026-11-02')"""
+        with self.db.transaction() as conn:
+            conn.execute("INSERT INTO backend_nodes(key,title,region,protocols_json) VALUES ('n1','Node','EU','[]')")
+            conn.execute("INSERT INTO backend_profiles(id,runtime_name,display_name) VALUES ('p1','p_1','Alice')")
+            conn.execute(insert, ('a', 'installation', None, None, None, None, 'limit', '1'))
+            conn.execute(insert, ('b', 'installation', None, None, 'n1', 'xray', 'limit', '2'))
+            conn.execute(insert, ('c', 'profile', 'p1', None, 'n1', None, 'limit', '3'))
+        for row in (('d', 'installation', None, None, None, None, 'limit', '4'),
+                    ('e', 'profile', None, None, None, None, 'limit', '5'),
+                    ('f', 'installation', None, None, None, 'xray', 'limit', '6')):
+            with self.subTest(row=row[0]), self.assertRaises(Exception), self.db.transaction() as conn:
+                conn.execute(insert, row)
+        with self.db.transaction() as conn:
+            conn.execute("DELETE FROM backend_profiles WHERE id='p1'")
+            conn.execute("DELETE FROM backend_nodes WHERE key='n1'")
+            self.assertEqual([r['id'] for r in conn.execute('SELECT id FROM backend_vpn_policies').fetchall()], ['a'])
+
     def test_concurrent_expiry_admits_one_notification_and_rechecks_renewal(self):
         from datetime import timedelta
         from backend.announcements import AnnouncementService
