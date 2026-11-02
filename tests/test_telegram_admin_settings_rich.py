@@ -27,7 +27,7 @@ class AdminSettingsRichTests(IsolatedAsyncioTestCase):
             from telegram_client.routers.admin_recovery import RecoveryDiagnostics
             self.assertNotIn(RecoveryDiagnostics().pack(), [b.callback_data for row in screen.fallback_rows(rows) for b in row])
             callbacks = [b.callback_data for row in screen.fallback_rows(rows) for b in row]
-            for value in ('bot_title_settings', 'alerts', 'traffic', 'bittorrent', 'system_cleanup', 'admin_menu'):
+            for value in ('bot_title_settings', 'alerts', 'traffic', 'bittorrent', 'devlimit', 'system_cleanup', 'admin_menu'):
                 self.assertIn(value, callbacks)
             self.assertNotIn('backups', callbacks)
             self.assertNotIn('updates', callbacks)
@@ -141,6 +141,40 @@ class AdminSettingsRichTests(IsolatedAsyncioTestCase):
         with patch.object(settings, 'render', new_callable=AsyncMock):
             await settings.bittorrent_settings_cb(self.query, self.bot, backend, self.state)
         self.assertEqual(backend.update_installation_vpn_policy.await_args.args[1:], ('xray.bittorrent', None, 1))
+
+    async def test_device_limit_offers_presets_and_none_removes_the_installation_value(self):
+        def policy(value, revision):
+            return {'keys': [{'key': 'devices.max', 'value': value, 'revision': revision,
+                              'default': None, 'effective': value}]}
+        backend = SimpleNamespace(installation_vpn_policies=AsyncMock(return_value=policy(None, 0)),
+                                  update_installation_vpn_policy=AsyncMock(return_value=policy(3, 1)))
+        for data, expected_call, highlighted in (
+                ('devlimit', None, 'devlimit:none'),
+                ('devlimit:none', None, 'devlimit:none'),
+                ('devlimit:7', None, 'devlimit:none'),
+                ('devlimit:3', ('devices.max', 3, 0), 'devlimit:3')):
+            self.query.data = data
+            backend.update_installation_vpn_policy.reset_mock()
+            with patch.object(settings, 'render', new_callable=AsyncMock) as draw:
+                await settings.device_limit_settings_cb(self.query, self.bot, backend, self.state)
+            if expected_call:
+                self.assertEqual(backend.update_installation_vpn_policy.await_args.args[1:], expected_call)
+            else:
+                backend.update_installation_vpn_policy.assert_not_awaited()
+            choices = [b for row in draw.call_args.args[2].sections[0].rows for b in row]
+            self.assertEqual([b.callback_data for b in choices if b.style == 'primary'], [highlighted])
+        backend.installation_vpn_policies.return_value = policy(3, 1)
+        backend.update_installation_vpn_policy.return_value = policy(None, 0)
+        self.query.data = 'devlimit:none'
+        with patch.object(settings, 'render', new_callable=AsyncMock):
+            await settings.device_limit_settings_cb(self.query, self.bot, backend, self.state)
+        self.assertEqual(backend.update_installation_vpn_policy.await_args.args[1:], ('devices.max', None, 1))
+        # A value set elsewhere stays visible even without a matching preset.
+        backend.installation_vpn_policies.return_value = policy(7, 2)
+        self.query.data = 'devlimit'
+        with patch.object(settings, 'render', new_callable=AsyncMock) as draw:
+            await settings.device_limit_settings_cb(self.query, self.bot, backend, self.state)
+        self.assertIn(settings.tr('en', 'devlimit.current', value=7), draw.call_args.args[2].sections[0].lines)
 
     async def test_unavailable_traffic_policy_keeps_back_and_does_not_show_choices(self):
         self.query.data = 'traffic'

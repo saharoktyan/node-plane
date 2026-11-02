@@ -205,6 +205,8 @@ class DeviceOutput(BaseModel):
 
 class DeviceList(BaseModel):
     items: list[DeviceOutput]
+    # Effective `devices.max`; None means no limit.
+    device_limit: int | None = None
 
 
 class DeviceNameInput(BaseModel):
@@ -1263,6 +1265,18 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     def update_installation_vpn_policies(body: VpnPolicyInput, request: Request, current=Depends(actor)):
         from .vpn_policies import VpnPolicies
         return VpnPolicies(db).set(current, header(request, 'Idempotency-Key'), 'installation', None,
+                                   [change.model_dump() for change in body.changes])
+
+    @app.get('/api/v1/profiles/{profile_id}/vpn-policies')
+    def profile_vpn_policies(profile_id: UUID, current=Depends(actor)):
+        from .vpn_policies import VpnPolicies
+        return VpnPolicies(db).get(current, 'profile', str(profile_id))
+
+    @app.patch('/api/v1/profiles/{profile_id}/vpn-policies')
+    def update_profile_vpn_policies(profile_id: UUID, body: VpnPolicyInput, request: Request,
+                                    current=Depends(actor)):
+        from .vpn_policies import VpnPolicies
+        return VpnPolicies(db).set(current, header(request, 'Idempotency-Key'), 'profile', str(profile_id),
                                    [change.model_dump() for change in body.changes])
 
     @app.get('/api/v1/system/traffic')

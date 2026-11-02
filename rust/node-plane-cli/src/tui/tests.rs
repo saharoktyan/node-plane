@@ -3114,6 +3114,42 @@ fn bittorrent_policy_toggle_appears_with_vpn_policies_and_stores_default_as_no_v
 }
 
 #[test]
+fn device_limit_toggle_cycles_presets_and_stores_no_limit_as_no_value() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Controller;
+    app.activate(Control::ControllerSection(ControllerSection::Policies));
+    app.nodes_requested.take();
+    let policy = |value: serde_json::Value, revision: u64| {
+        serde_json::json!({"traffic":{"enabled":false},"requests":{"enabled":true},
+        "vpn":{"keys":[{"key":"devices.max","value":value.clone(),"revision":revision,"default":null,
+            "effective":value}]}})
+    };
+    for (current, next) in [
+        (serde_json::Value::Null, serde_json::json!(1)),
+        (serde_json::json!(3), serde_json::json!(5)),
+        (serde_json::json!(7), serde_json::json!(10)),
+        (serde_json::json!(10), serde_json::Value::Null),
+    ] {
+        app.controller.apply(
+            crate::controller::Command::Policies,
+            policy(current.clone(), 2),
+        );
+        assert!(
+            app.controller_controls()
+                .contains(&Control::ControllerPolicyToggle("devices"))
+        );
+        app.activate(Control::ControllerPolicyToggle("devices"));
+        let requested = app.nodes_requested.take();
+        assert!(
+            matches!(&requested, Some(crate::nodes::Command::Controller(_,
+            crate::controller::Command::VpnPolicySave(value, _))) if value["changes"][0]["key"] == "devices.max"
+                && value["changes"][0]["value"] == next && value["changes"][0]["revision"] == 2),
+            "{current} -> {next}"
+        );
+    }
+}
+
+#[test]
 fn open_sidebar_label_keeps_accent_after_wheel_scroll() {
     let mut app = test_profile_app();
     app.activate(Control::Action(Action::Install));

@@ -92,7 +92,8 @@ async def admin_settings_cb(query: CallbackQuery, bot: Bot,
             (InlineKeyboardButton(text=tr(locale, 'temporary.title'),callback_data='temporary:list:0'),))),
         Section(tr(locale, 'settings.rich.monitoring'), rows=(tuple(rows[1]),)),
         Section(tr(locale, 'settings.rich.vpn'), rows=((InlineKeyboardButton(
-            text=tr(locale, 'bittorrent.title'), callback_data='bittorrent'),),)),
+            text=tr(locale, 'bittorrent.title'), callback_data='bittorrent'), InlineKeyboardButton(
+            text=tr(locale, 'devlimit.title'), callback_data='devlimit')),)),
         Section(tr(locale, 'settings.rich.maintenance'), rows=(tuple(rows[2]),
             (InlineKeyboardButton(text=tr(locale, 'recovery.title'), callback_data=RecoveryPage().pack()),),
             (InlineKeyboardButton(text=tr(locale, 'defaults.title'), callback_data='idefault:open'),))),
@@ -565,6 +566,56 @@ async def bittorrent_settings_cb(query: CallbackQuery, bot: Bot,
     except BackendError as exc:
         lines = (_friendly_error(locale, exc),)
     await render(bot, query.message.chat.id, Screen(tr(locale, 'bittorrent.title'), lines,
+        sections=sections, embedded_buttons=True, navigation=True), rows, state, query.message.message_id)
+
+
+DEVICE_LIMIT_CHOICES = (None, 1, 2, 3, 5, 10)
+
+
+def device_limit_label(locale, value):
+    return tr(locale, 'devlimit.none') if value is None else str(value)
+
+
+def device_limit_choices(locale, prefix, effective):
+    return tuple(InlineKeyboardButton(text=device_limit_label(locale, value),
+        callback_data=f'{prefix}:{"none" if value is None else value}',
+        style='primary' if effective == value else None) for value in DEVICE_LIMIT_CHOICES)
+
+
+def parse_device_limit(data):
+    """The chosen limit from `<prefix>:<none|n>`; anything else is no choice."""
+    raw = data.rsplit(':', 1)[1]
+    if raw == 'none':
+        return True, None
+    value = int(raw) if raw.isdigit() else 0
+    return value in DEVICE_LIMIT_CHOICES, value
+
+
+@router.callback_query(F.data.startswith('devlimit'))
+async def device_limit_settings_cb(query: CallbackQuery, bot: Bot,
+                                   backend: BackendClient, state: FSMContext) -> None:
+    await query.answer()
+    locale = await _locale(state)
+    rows = [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data=AdminSettingsCallback().pack())]]
+    sections = ()
+    lines = ()
+    try:
+        policy = await backend.installation_vpn_policies(query.from_user.id)
+        current = next(item for item in policy['keys'] if item['key'] == 'devices.max')
+        if query.data != 'devlimit':
+            valid, value = parse_device_limit(query.data)
+            if valid and value != current['effective']:
+                policy = await backend.update_installation_vpn_policy(query.from_user.id, 'devices.max',
+                    value, current['revision'])
+                current = next(item for item in policy['keys'] if item['key'] == 'devices.max')
+        hint = (tr(locale, 'devlimit.hint'),)
+        if current['effective'] not in DEVICE_LIMIT_CHOICES:
+            hint += (tr(locale, 'devlimit.current', value=current['effective']),)
+        choices = device_limit_choices(locale, 'devlimit', current['effective'])
+        sections = (Section(tr(locale, 'devlimit.policy'), lines=hint, rows=(choices[:3], choices[3:])),)
+    except BackendError as exc:
+        lines = (_friendly_error(locale, exc),)
+    await render(bot, query.message.chat.id, Screen(tr(locale, 'devlimit.title'), lines,
         sections=sections, embedded_buttons=True, navigation=True), rows, state, query.message.message_id)
 
 

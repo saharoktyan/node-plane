@@ -161,6 +161,37 @@ class TelegramDeviceTests(IsolatedAsyncioTestCase):
         self.assertIsNone(await self.state.get_state())
         self.assertEqual(card.call_args.args[3:5], ('profile', 'new'))
 
+    async def test_device_limit_counts_active_devices_and_hides_creation_when_reached(self):
+        items = [{'id': 'a', 'display_name': 'Phone', 'status': 'active'},
+                 {'id': 'b', 'display_name': 'Old', 'status': 'deleting'}]
+        backend = SimpleNamespace(request=AsyncMock(return_value={'items': items, 'device_limit': 2}))
+        with patch.object(user_devices, 'render', new_callable=AsyncMock) as draw:
+            await user_devices.show_list(123, 123, 77, 'profile', self.bot, backend, self.state)
+            actions = [user.actions[b.callback_data[2:]].name for row in draw.call_args.args[3] for b in row]
+            self.assertIn('device_create', actions)
+            self.assertIn(user.tr('en', 'devices.count', count=1, limit=2), draw.call_args.args[2].lines)
+            items[1]['status'] = 'active'
+            await user_devices.show_list(123, 123, 77, 'profile', self.bot, backend, self.state)
+            actions = [user.actions[b.callback_data[2:]].name for row in draw.call_args.args[3] for b in row]
+            self.assertNotIn('device_create', actions)
+            self.assertIn(user.tr('en', 'devices.limit_reached', limit=2), draw.call_args.args[2].lines)
+            await user_devices.show_picker(123, 123, 77, 'profile', 'node', self.bot, backend, self.state, force=True)
+            actions = [user.actions[b.callback_data[2:]].name for row in draw.call_args.args[3] for b in row]
+            self.assertNotIn('device_create', actions)
+            self.assertIn('device_pick', actions)
+
+    async def test_refused_device_limit_ends_the_name_prompt(self):
+        backend = SimpleNamespace(request=AsyncMock(side_effect=BackendError('device_limit_reached', 409)))
+        self.state_data['device_name_draft'] = {'profile_id': 'profile', 'device_id': None,
+            'revision': 4, 'owner': 123, 'message_id': 77}
+        await self.state.set_state(user_devices.DeviceName.waiting)
+        message = SimpleNamespace(text='Tablet', delete=AsyncMock(),
+            from_user=SimpleNamespace(id=123), chat=SimpleNamespace(id=123, type='private'))
+        with patch.object(user_devices, 'render', new_callable=AsyncMock) as draw:
+            await user_devices.name_message(message, self.bot, backend, self.state)
+        self.assertIsNone(await self.state.get_state())
+        self.assertEqual(draw.call_args.args[2].lines, (user.tr('en', 'devices.limit_refused'),))
+
     async def test_creation_from_config_picker_returns_to_the_same_server(self):
         backend = SimpleNamespace(request=AsyncMock(side_effect=[
             {'desired_revision': 7}, {'device': {'id': 'new'}}]))

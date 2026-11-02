@@ -89,6 +89,9 @@ CATALOG = {
         'devices.name_prompt': 'Отправьте уникальное имя устройства (1–64 символа).',
         'devices.name_conflict': 'Устройство с таким именем уже существует. Выберите другое имя.',
         'devices.name_invalid': 'Недопустимое имя устройства.',
+        'devices.count': 'Устройств: {count} из {limit}.',
+        'devices.limit_reached': 'Достигнут лимит устройств ({limit}). Удалите устройство или попросите администратора увеличить лимит.',
+        'devices.limit_refused': 'Достигнут лимит устройств. Удалите устройство или попросите администратора увеличить лимит.',
         'devices.changed': 'Профиль или устройство изменились. Вернитесь назад и начните заново.',
         'devices.delete_title': 'Удалить {name}?',
         'devices.delete_warning': 'Конфиги AmneziaWG этого устройства перестанут работать.',
@@ -838,6 +841,9 @@ CATALOG = {
         'devices.name_prompt': 'Send a unique device name (1–64 characters).',
         'devices.name_conflict': 'A device with this name already exists. Choose another name.',
         'devices.name_invalid': 'Invalid device name.',
+        'devices.count': 'Devices: {count} of {limit}.',
+        'devices.limit_reached': 'Device limit reached ({limit}). Delete a device or ask an administrator to raise the limit.',
+        'devices.limit_refused': 'Device limit reached. Delete a device or ask an administrator to raise the limit.',
         'devices.changed': 'The profile or device changed. Go back and start again.',
         'devices.delete_title': 'Delete {name}?',
         'devices.delete_warning': 'This device’s AmneziaWG configurations will stop working.',
@@ -3450,3 +3456,18 @@ CATALOG['ru'].update({
 
 CATALOG['en']['recovery.explain.profile.force'] = 'The node agent restarts to stop previous execution. This access operation is cancelled with an unknown outcome. Its access change may already have taken effect. Apply node settings or run Reconcile access to synchronize again. Server VPN services remain installed.'
 CATALOG['ru']['recovery.explain.profile.force'] = 'Агент ноды перезапускается для остановки предыдущего выполнения. Операция изменения доступа отменяется с неизвестным исходом. Доступ уже мог измениться. Для новой синхронизации примените настройки ноды или запустите Reconcile access. VPN-сервисы останутся установленными.'
+
+CATALOG['en'].update({
+    'devlimit.title': 'Device limit', 'devlimit.policy': 'Devices per profile', 'devlimit.none': 'No limit',
+    'devlimit.hint': 'How many devices one profile can add, shared by VLESS and AmneziaWG. Devices above a lowered limit stay; only adding new ones is refused.',
+    'devlimit.profile_hint': 'Overrides the installation limit for this profile. Devices above a lowered limit stay; only adding new ones is refused.',
+    'devlimit.inherit': 'As installation ({value})',
+    'devlimit.current': 'Current limit: {value}.',
+})
+CATALOG['ru'].update({
+    'devlimit.title': 'Лимит устройств', 'devlimit.policy': 'Устройств на профиль', 'devlimit.none': 'Без лимита',
+    'devlimit.hint': 'Сколько устройств можно добавить в один профиль. Лимит общий для VLESS и AmneziaWG. Если лимит уменьшить, лишние устройства останутся: запрещается только добавление новых.',
+    'devlimit.profile_hint': 'Заменяет лимит установки для этого профиля. Если лимит уменьшить, лишние устройства останутся: запрещается только добавление новых.',
+    'devlimit.inherit': 'Как в установке ({value})',
+    'devlimit.current': 'Текущий лимит: {value}.',
+})

@@ -64,6 +64,10 @@ def choice(*values):
 
 mode = choice(*MODES)
 
+# Devices of a profile, shared by every protocol. Checked when a device is
+# created; existing devices above a lowered limit stay (plan, section 4.3).
+register(PolicyKey('devices.max', frozenset({'installation', 'profile'}), frozenset({'global'}),
+                   integer(1, 1000)))
 register(PolicyKey('xray.bittorrent', frozenset({'installation'}), frozenset({'global'}),
                    choice('allow', 'block'), default='allow', protocols=frozenset({'xray'}),
                    setting='xray_bittorrent'))

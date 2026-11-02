@@ -19,6 +19,11 @@ def device_name(value):
     return display,unicodedata.normalize('NFKC',display).casefold()
 
 
+def device_limit(conn,profile_id):
+    from .vpn_policies import effective
+    return effective(conn,profile_id=profile_id,keys=['devices.max'])['devices.max']
+
+
 class DeviceCommands:
     def __init__(self,db):
         self.db=db
@@ -70,6 +75,12 @@ class DeviceCommands:
                     raise AccessDenied('profile_frozen')
                 if profile['expires_at'] and datetime.fromisoformat(profile['expires_at'])<=datetime.now(timezone.utc):
                     raise AccessDenied('profile_expired')
+                # The profile row lock above serializes concurrent creations.
+                limit=device_limit(conn,profile_id)
+                active=conn.execute("SELECT COUNT(*) AS n FROM backend_devices WHERE profile_id=? AND status='active'",
+                    (profile_id,)).fetchone()['n']
+                if limit is not None and active>=limit:
+                    raise AccessDenied('device_limit_reached',409)
                 expected=profile['desired_revision']
             else:
                 device=DeviceRepository.select_active(conn,profile_id,device_id)

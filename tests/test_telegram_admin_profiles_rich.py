@@ -251,6 +251,39 @@ class ProfileRichTests(IsolatedAsyncioTestCase):
         self.assertEqual(rows[-1][0].callback_data, 'admin_profile:p1')
         self.assertIsNone(self.data['draft_grants'])
 
+    async def test_profile_device_limit_overrides_or_inherits_the_installation_value(self):
+        own = {'key': 'devices.max', 'value': None, 'revision': 0, 'default': None, 'effective': 2}
+        def request(method, path, **kwargs):
+            if path.endswith('/vpn-policies'):
+                if method == 'PATCH':
+                    change = kwargs['body']['changes'][0]
+                    own.update(value=change['value'], revision=own['revision'] + 1,
+                               effective=change['value'] if change['value'] is not None else 2)
+                return {'keys': [dict(own)]}
+            return self.profile
+        self.backend.request = AsyncMock(side_effect=request)
+        self.backend.installation_vpn_policies = AsyncMock(return_value={'keys': [
+            {'key': 'devices.max', 'value': 2, 'revision': 1, 'default': None, 'effective': 2}]})
+        with patch.object(profiles, 'render', new_callable=AsyncMock) as draw:
+            await profiles.show_profile_edit_menu(123, 123, 77, 'p1', self.bot, self.backend, self.state)
+            screen, rows = draw.call_args.args[2:4]
+            section = next(item for item in screen.sections if item.title == 'Device limit')
+            self.assertEqual(section.lines, (profiles.tr('en', 'devlimit.inherit', value='2'),))
+            self.assertIn('pdevlimit:p1', [b.callback_data for row in screen.fallback_rows(rows) for b in row])
+            for data, value in (('pdevlimit:p1', None), ('pdevlimit:p1:5', 5), ('pdevlimit:p1:9', 5),
+                                ('pdevlimit:p1:inherit', None)):
+                query = SimpleNamespace(data=data, answer=AsyncMock(), from_user=SimpleNamespace(id=123),
+                                        message=SimpleNamespace(chat=SimpleNamespace(id=123), message_id=77))
+                await profiles.profile_device_limit_cb(query, self.bot, self.backend, self.state)
+                self.assertEqual(own['value'], value, data)
+                buttons = [b for row in draw.call_args.args[2].sections[0].rows for b in row]
+                self.assertEqual([b.callback_data for b in buttons if b.style == 'primary'],
+                                 ['pdevlimit:p1:inherit' if value is None else f'pdevlimit:p1:{value}'])
+        patches = [call.kwargs['body']['changes'][0] for call in self.backend.request.await_args_list
+                   if call.args[0] == 'PATCH']
+        self.assertEqual(patches, [{'key': 'devices.max', 'value': 5, 'revision': 0},
+                                   {'key': 'devices.max', 'value': None, 'revision': 1}])
+
     async def test_repeating_node_cursor_is_rejected(self):
         self.backend.admin_nodes.return_value = {'items': [], 'next_cursor': 'same'}
         with self.assertRaises(BackendError):

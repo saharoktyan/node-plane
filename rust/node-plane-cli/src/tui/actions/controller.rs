@@ -447,6 +447,22 @@ impl App {
                 }
                 None
             }
+            Control::ControllerPolicyToggle("devices") => {
+                if let Some(policy) = self
+                    .controller
+                    .policies
+                    .as_ref()
+                    .and_then(|value| vpn_policy(value, "devices.max"))
+                {
+                    self.controller_command(crate::controller::Command::VpnPolicySave(
+                        serde_json::json!({"changes":[{"key":"devices.max",
+                            "value":next_device_limit(&policy["effective"]),
+                            "revision":policy["revision"]}]}),
+                        uuid::Uuid::new_v4(),
+                    ));
+                }
+                None
+            }
             Control::ControllerPolicyToggle(choice) => {
                 if let Some(value) = &self.controller.policies {
                     let (kind, patch) = match choice {
@@ -1736,6 +1752,17 @@ impl App {
                             Control::ControllerPolicyToggle("bittorrent"),
                         ));
                     }
+                    if let Some(policy) = vpn_policy(value, "devices.max") {
+                        items.push((
+                            format!(
+                                "Devices per profile: {}",
+                                policy["effective"]
+                                    .as_u64()
+                                    .map_or_else(|| "No limit".to_string(), |n| n.to_string())
+                            ),
+                            Control::ControllerPolicyToggle("devices"),
+                        ));
+                    }
                 } else {
                     items.push((
                         "Please wait".into(),
@@ -1816,8 +1843,30 @@ impl App {
 }
 
 fn bittorrent_policy(policies: &serde_json::Value) -> Option<&serde_json::Value> {
+    vpn_policy(policies, "xray.bittorrent")
+}
+
+fn vpn_policy<'a>(policies: &'a serde_json::Value, key: &str) -> Option<&'a serde_json::Value> {
     policies["vpn"]["keys"]
         .as_array()?
         .iter()
-        .find(|item| item["key"] == "xray.bittorrent")
+        .find(|item| item["key"] == key)
+}
+
+/// Presets for `devices.max`, the same as in the Telegram bot.
+const DEVICE_LIMITS: [Option<u64>; 6] = [None, Some(1), Some(2), Some(3), Some(5), Some(10)];
+
+/// The next preset after the effective limit; a value set elsewhere moves to
+/// the next larger preset. No limit is stored as no value.
+fn next_device_limit(effective: &serde_json::Value) -> serde_json::Value {
+    let current = effective.as_u64();
+    let next = match current {
+        None => DEVICE_LIMITS[1],
+        Some(value) => DEVICE_LIMITS
+            .iter()
+            .copied()
+            .flatten()
+            .find(|preset| *preset > value),
+    };
+    next.map_or(serde_json::Value::Null, |value| serde_json::json!(value))
 }

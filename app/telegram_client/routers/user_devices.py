@@ -24,8 +24,22 @@ async def locale_for(state):
 
 
 async def devices(backend, user_id, profile_id):
-    return (await backend.request('GET', f'/api/v1/profiles/{profile_id}/devices',
-        telegram_user_id=user_id))['items']
+    return (await listing(backend, user_id, profile_id))[0]
+
+
+async def listing(backend, user_id, profile_id):
+    page = await backend.request('GET', f'/api/v1/profiles/{profile_id}/devices', telegram_user_id=user_id)
+    return page['items'], page.get('device_limit')
+
+
+def limit_state(locale, items, limit):
+    """Lines describing the device limit, and whether another device fits."""
+    if limit is None:
+        return (), True
+    active = sum(item['status'] == 'active' for item in items)
+    if active >= limit:
+        return (tr(locale, 'devices.limit_reached', limit=limit),), False
+    return (tr(locale, 'devices.count', count=active, limit=limit),), True
 
 
 async def show_profiles(chat_id, user_id, message_id, bot, backend, state):
@@ -43,19 +57,22 @@ async def show_profiles(chat_id, user_id, message_id, bot, backend, state):
 
 async def show_list(chat_id, user_id, message_id, profile_id, bot, backend, state, page=0):
     locale = await locale_for(state)
-    items = [d for d in await devices(backend, user_id, profile_id) if d['status'] != 'retired']
+    items, limit = await listing(backend, user_id, profile_id)
+    items = [d for d in items if d['status'] != 'retired']
     items.sort(key=lambda d: (d['display_name'].casefold(), d['id']))
+    limit_lines, can_add = limit_state(locale, items, limit)
     pages = max(1, (len(items) + 9) // 10)
     page = max(0, min(page, pages - 1))
     rows = [[user.button(user_id, d['display_name'] +
         (' · ' + tr(locale, 'devices.deleting') if d['status'] == 'deleting' else ''),
         'device_card', profile_id, d['id'])] for d in items[page * 10:(page + 1) * 10]]
     rows.extend(user.server_pagination(user_id, locale, page, pages, 'device_page', profile_id))
-    rows.append([user.button(user_id, tr(locale, 'devices.add'), 'device_create', profile_id)
-        .model_copy(update={'style': 'primary'})])
+    if can_add:
+        rows.append([user.button(user_id, tr(locale, 'devices.add'), 'device_create', profile_id)
+            .model_copy(update={'style': 'primary'})])
     rows.append([user.button(user_id, tr(locale, 'back'), 'home')])
     await render(bot, chat_id, Screen(tr(locale, 'devices.title'),
-        (tr(locale, 'devices.description'),) if items else (tr(locale, 'devices.empty'),),
+        ((tr(locale, 'devices.description'),) if items else (tr(locale, 'devices.empty'),)) + limit_lines,
         embedded_buttons=True, navigation=True), rows, state, message_id)
 
 
@@ -86,7 +103,8 @@ async def show_card(chat_id, user_id, message_id, profile_id, device_id, bot, ba
 
 async def show_picker(chat_id, user_id, message_id, profile_id, node_key, bot, backend, state, *, force=False, page=0, returning=False):
     locale = await locale_for(state)
-    items = [d for d in await devices(backend, user_id, profile_id) if d['status'] == 'active']
+    items, limit = await listing(backend, user_id, profile_id)
+    items = [d for d in items if d['status'] == 'active']
     items.sort(key=lambda d: (d['display_name'].casefold(), d['id']))
     for item in items:
         await remember_label(state, 'devices', item['id'], item['display_name'])
@@ -106,13 +124,15 @@ async def show_picker(chat_id, user_id, message_id, profile_id, node_key, bot, b
     rows = [[user.button(user_id, d['display_name'], 'device_pick', profile_id, node_key, d['id'])]
         for d in items[page * 10:(page + 1) * 10]]
     rows.extend(user.server_pagination(user_id, locale, page, pages, 'device_picker_page', profile_id, node_key))
-    rows.append([user.button(user_id, tr(locale, 'devices.add'), 'device_create', profile_id, node_key)
-        .model_copy(update={'style': 'primary'})])
+    limit_lines, can_add = limit_state(locale, items, limit)
+    if can_add:
+        rows.append([user.button(user_id, tr(locale, 'devices.add'), 'device_create', profile_id, node_key)
+            .model_copy(update={'style': 'primary'})])
     rows.append([user.button(user_id, tr(locale, 'back'), 'node', profile_id, node_key)])
     picker = user.button(user_id, tr(locale, 'devices.title'), 'device_picker', profile_id, node_key)
     path = parent_path(picker.callback_data, locale, await state.get_data())
     await render(bot, chat_id, Screen(tr(locale, 'devices.title'), breadcrumbs=path[:-1],
-        lines=(tr(locale, 'devices.empty'),) if not items else (), embedded_buttons=True,
+        lines=((tr(locale, 'devices.empty'),) if not items else ()) + limit_lines, embedded_buttons=True,
         navigation=True), rows, state, message_id)
 
 
@@ -175,13 +195,16 @@ async def name_message(message, bot, backend, state):
     except BackendError as error:
         locale = await locale_for(state)
         key = {'device_name_conflict': 'devices.name_conflict', 'invalid_device_name': 'devices.name_invalid',
-            'revision_conflict': 'devices.changed'}.get(error.code, 'action.error.retry')
+            'revision_conflict': 'devices.changed', 'device_limit_reached': 'devices.limit_refused'
+            }.get(error.code, 'action.error.retry')
+        # Another name cannot fix a reached limit, so stop asking for one.
+        prompt = () if error.code == 'device_limit_reached' else (tr(locale, 'devices.name_prompt'),)
         await render(bot, message.chat.id, Screen(tr(locale, 'devices.add' if not device_id else 'devices.rename'),
-            (tr(locale, key), tr(locale, 'devices.name_prompt')), embedded_buttons=True, navigation=True),
+            (tr(locale, key), *prompt), embedded_buttons=True, navigation=True),
             [[user.button(message.from_user.id, tr(locale, 'back'), 'node' if draft.get('node_key') else 'device_list',
                 profile_id, *((draft['node_key'],) if draft.get('node_key') else ()))]],
             state, draft['message_id'])
-        if error.code == 'revision_conflict' or error.status in {401, 403, 404}:
+        if error.code in {'revision_conflict', 'device_limit_reached'} or error.status in {401, 403, 404}:
             await state.set_state(None)
         return
     await state.set_state(None)

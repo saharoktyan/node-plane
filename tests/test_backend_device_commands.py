@@ -30,6 +30,65 @@ class BackendDeviceCommandTests(unittest.TestCase):
         return self.client.post(f'/api/v1/profiles/{profile}/devices',
             headers=self.headers_for(revision, key), json={'display_name': name})
 
+    def limit(self, scope, value, revision=0, profile=None):
+        path = (f'/api/v1/profiles/{profile}/vpn-policies' if scope == 'profile'
+                else '/api/v1/vpn-policies/installation')
+        return self.client.patch(path, headers=self.headers_for(),
+            json={'changes': [{'key': 'devices.max', 'value': value, 'revision': revision}]})
+
+    def test_device_limit_blocks_only_new_devices_and_names_the_reason(self):
+        from backend.vpn_policies import VpnPolicies
+        VpnPolicies(self.db).initialize_schema()
+        profile = self.prepare()
+        self.assertEqual(self.limit('installation', 2).status_code, 200)
+        self.assertEqual(self.add(profile, 'Phone', 1).status_code, 201)
+        self.assertEqual(self.add(profile, 'Laptop', 2).status_code, 201)
+        refused = self.add(profile, 'Tablet', 3)
+        self.assertEqual(refused.status_code, 409, refused.text)
+        self.assertEqual(refused.json()['error']['code'], 'device_limit_reached')
+        self.assertEqual(self.db.connection.execute('SELECT COUNT(*) FROM backend_devices').fetchone()[0], 2)
+        listed = self.client.get(f'/api/v1/profiles/{profile}/devices', headers=self.headers_for())
+        self.assertEqual(listed.json()['device_limit'], 2)
+        # A profile value overrides the installation value.
+        self.assertEqual(self.limit('profile', 3, profile=profile).status_code, 200)
+        self.assertEqual(self.add(profile, 'Tablet', 3).status_code, 201)
+        # Lowering the limit keeps existing devices; only creation is refused.
+        policy = self.client.get(f'/api/v1/profiles/{profile}/vpn-policies', headers=self.headers_for()).json()
+        own = next(item for item in policy['keys'] if item['key'] == 'devices.max')
+        self.assertEqual((own['value'], own['effective']), (3, 3))
+        self.assertEqual(self.limit('profile', 1, revision=own['revision'], profile=profile).status_code, 200)
+        self.assertEqual(len(DeviceRepository(self.db).list_for_profile(profile)), 3)
+        self.assertEqual(self.add(profile, 'Watch', 4).json()['error']['code'], 'device_limit_reached')
+
+    def test_deleted_device_frees_its_place_and_no_limit_is_the_default(self):
+        from backend.vpn_policies import VpnPolicies
+        VpnPolicies(self.db).initialize_schema()
+        profile = self.prepare()
+        listed = self.client.get(f'/api/v1/profiles/{profile}/devices', headers=self.headers_for())
+        self.assertIsNone(listed.json()['device_limit'])
+        self.assertEqual(self.limit('profile', 1, profile=profile).status_code, 200)
+        device = self.add(profile, 'Phone', 1).json()['device']
+        self.assertEqual(self.add(profile, 'Laptop', 2).status_code, 409)
+        deleted = self.client.delete(f'/api/v1/profiles/{profile}/devices/{device["id"]}',
+                                     headers=self.headers_for(device['revision']))
+        self.assertEqual(deleted.status_code, 202, deleted.text)
+        self.assertEqual(self.add(profile, 'Laptop', 3).status_code, 201)
+
+    def test_profile_policies_need_profile_management(self):
+        from backend.vpn_policies import VpnPolicies
+        from tests import test_backend_http as http_fixture
+        VpnPolicies(self.db).initialize_schema()
+        profile = self.prepare()
+        http_fixture.BackendHTTPTests.provision(self, 102)
+        member = {**self.headers, 'X-Node-Plane-Telegram-User-ID': '102', 'Idempotency-Key': str(uuid4())}
+        self.assertEqual(self.client.get(f'/api/v1/profiles/{profile}/vpn-policies', headers=member).status_code, 403)
+        self.assertEqual(self.client.patch(f'/api/v1/profiles/{profile}/vpn-policies', headers=member,
+            json={'changes': [{'key': 'devices.max', 'value': 5, 'revision': 0}]}).status_code, 403)
+        for value in (0, 1001, 'many', True):
+            self.assertEqual(self.limit('profile', value, profile=profile).status_code, 422, value)
+        self.assertEqual(self.client.get(f'/api/v1/profiles/{uuid4()}/vpn-policies',
+                                         headers=self.headers_for()).status_code, 404)
+
     def test_custom_name_identity_and_idempotent_creation(self):
         profile = self.prepare()
         key = str(uuid4())

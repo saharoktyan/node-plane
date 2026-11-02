@@ -187,7 +187,8 @@ class VpnPolicyHttpTests(unittest.TestCase):
             response = self.client.patch('/api/v1/vpn-policies/installation', json=body,
                                          headers={**self.admin_headers, 'Idempotency-Key': key})
             self.assertEqual(response.status_code, 200, response.text)
-            self.assertEqual(response.json()['keys'][0]['effective'], 'block')
+            current = next(item for item in response.json()['keys'] if item['key'] == 'xray.bittorrent')
+            self.assertEqual(current['effective'], 'block')
         for invalid in ({'changes': []}, {'changes': [{'key': 'xray.bittorrent', 'value': 'maybe', 'revision': 1}]},
                         {'changes': [{'key': 'xray.bittorrent', 'value': 'allow', 'revision': True}]}):
             self.assertEqual(self.client.patch('/api/v1/vpn-policies/installation', json=invalid,

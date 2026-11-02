@@ -1103,11 +1103,73 @@ async def show_profile_edit_menu(chat_id: int, user_id: int, message_id: int,
             () if owner_admin else ((InlineKeyboardButton(text=tr(locale, 'profile.layout.change_expiry'),
                 callback_data=f'prof_expiry:{profile_id}'),),)),
         *((Section(tr(locale, 'profile.admin.status_title'),
-            rows=(_status_buttons(profile, locale),)),) if not owner_admin else ()))
+            rows=(_status_buttons(profile, locale),)),) if not owner_admin else ()),
+        *_device_limit_section(locale, profile_id, await _device_limit_policy(backend, user_id, profile_id)))
     await render(bot, chat_id, Screen(tr(locale, 'profile.layout.edit'), sections=sections,
         embedded_buttons=True, navigation=True),
         [[InlineKeyboardButton(text=tr(locale, 'back'),
             callback_data=AdminProfileCallback(profile_id=profile_id).pack())]], state, message_id)
+
+
+async def _device_limit_policy(backend, user_id, profile_id):
+    try:
+        policy = await backend.request('GET', f'/api/v1/profiles/{profile_id}/vpn-policies',
+                                       telegram_user_id=user_id)
+    except BackendError:
+        return None
+    return next((item for item in policy.get('keys', ()) if item['key'] == 'devices.max'), None)
+
+
+def _device_limit_text(locale, current):
+    from .admin_settings import device_limit_label
+    if current['value'] is None:
+        return tr(locale, 'devlimit.inherit', value=device_limit_label(locale, current['effective']))
+    return device_limit_label(locale, current['value'])
+
+
+def _device_limit_section(locale, profile_id, current):
+    if current is None:
+        return ()
+    return (Section(tr(locale, 'devlimit.title'), (_device_limit_text(locale, current),),
+        ((InlineKeyboardButton(text=tr(locale, 'devlimit.policy'), callback_data=f'pdevlimit:{profile_id}'),),)),)
+
+
+@router.callback_query(F.data.startswith('pdevlimit:'))
+async def profile_device_limit_cb(query: CallbackQuery, bot: Bot,
+                                  backend: BackendClient, state: FSMContext) -> None:
+    from .admin_settings import DEVICE_LIMIT_CHOICES, device_limit_choices, device_limit_label, parse_device_limit
+    await query.answer()
+    locale = await _locale(state)
+    profile_id, _, choice = query.data.removeprefix('pdevlimit:').partition(':')
+    rows = [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data=f'admin_profile_edit:{profile_id}')]]
+    lines, sections = (), ()
+    try:
+        current = await _device_limit_policy(backend, query.from_user.id, profile_id)
+        if current is None:
+            raise BackendError('backend_unavailable', 503)
+        # The profile's own value; inheriting the installation stores none.
+        valid, value = (True, None) if choice == 'inherit' else parse_device_limit(query.data) if choice else (False, None)
+        if valid and value != current['value']:
+            policy = await backend.request('PATCH', f'/api/v1/profiles/{profile_id}/vpn-policies',
+                telegram_user_id=query.from_user.id, command=True,
+                body={'changes': [{'key': 'devices.max', 'value': value, 'revision': current['revision']}]})
+            current = next(item for item in policy['keys'] if item['key'] == 'devices.max')
+        presets = [b for b in device_limit_choices(locale, f'pdevlimit:{profile_id}', current['value'])
+                   if not b.callback_data.endswith(':none')]
+        installation = next(item for item in (await backend.installation_vpn_policies(query.from_user.id))['keys']
+                            if item['key'] == 'devices.max')
+        inherit = InlineKeyboardButton(text=tr(locale, 'devlimit.inherit',
+                value=device_limit_label(locale, installation['effective'])),
+            callback_data=f'pdevlimit:{profile_id}:inherit', style='primary' if current['value'] is None else None)
+        hint = (tr(locale, 'devlimit.profile_hint'),)
+        if current['value'] is not None and current['value'] not in DEVICE_LIMIT_CHOICES:
+            hint += (tr(locale, 'devlimit.current', value=current['value']),)
+        sections = (Section(tr(locale, 'devlimit.policy'), lines=hint,
+            rows=((inherit,), tuple(presets[:3]), tuple(presets[3:]))),)
+    except BackendError as exc:
+        lines = (_profile_error(locale, exc),)
+    await render(bot, query.message.chat.id, Screen(tr(locale, 'devlimit.title'), lines, sections=sections,
+        embedded_buttons=True, navigation=True), rows, state, query.message.message_id)
 
 
 @router.callback_query(F.data.startswith('prof_del:'))
